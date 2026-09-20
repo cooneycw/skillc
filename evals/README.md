@@ -1,35 +1,16 @@
-# Evals
+# Evaluation work
 
-Static analysis answers whether a skill is well-formed. It cannot answer the
-question that actually matters: **does this skill change what the agent does?**
+The current roadmap is [PLAN.md](../PLAN.md), with the
+[facility specification](../docs/specs/evaluation-facility/spec.md),
+[interface contracts](../docs/specs/evaluation-facility/interfaces.md) and
+[evaluation protocol](../docs/specs/evaluation-facility/protocol.md).
 
-That needs a behavioural eval - define an environment, run an agent through a
-task in it, and judge the result. The decisive form is the ablation: run the same
-task with the skill loaded and without it. If the two runs score the same, the
-skill is doing nothing, however well-formed it is.
+No behavioral runner is implemented here yet. The former example plugin command
+and YAML were unverified research, not an executable contract. Backend selection
+now requires a conformance investigation, starting with the pinned Coder Eval
+research. This directory does not promise compatibility with a particular CLI.
 
-Claude Code ships the runner (`claude plugin eval --ablation with-without`), and
-the case format is a directory per case:
-
-```yaml
-# evals/<case>/case.yaml
-name: rotate-credential-no-trigger
-mustfail: true          # this prompt must NOT fire the skill
-runs: 3
-max_turns: 4
-prompt: |
-  Summarise what we changed in this file today.
-graders:
-  - tool_used:
-      tool: Skill
-      input_match: rotate-credential
-      negate: true
-    with_only: true
-```
-
-`mustfail` is the redcase idea at the eval layer: a case whose whole job is to go
-red if the skill over-fires. Every skill wants both arms - a prompt that must
-trigger it, and a prompt that must not. A trigger eval with only the positive arm
-cannot tell a well-aimed description from one that fires on everything.
-
-Not yet populated. The static rules had to prove themselves first.
+Static validity, skill invocation and successful delivery are distinct measurements.
+Matched with/without comparisons test benefit on the selected tasks. Equal results
+on a small sample do not prove a skill has no value. Every authoritative grader
+needs known-good/bad controls, and the evaluator must detect its own broken checks.

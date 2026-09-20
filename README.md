@@ -7,32 +7,45 @@ depended on, and it rots. What it does not get is a build step: there is nothing
 between writing a `SKILL.md` and shipping it that can refuse. `skillc` is that
 missing stage.
 
+The next proposed capability is an independent evaluation facility for collections
+of scaffolding skills, with **goal-based tasks at progressively harder levels**.
+Accessible projects become test subjects through supported adapters. Claude
+Power Pack (CPP) will be the first subject, supplied as a pinned external input
+and exercised in disposable environments. The facility belongs in skillc.
+
+**Status:** the static checker exists. The task levels, Docker facility and
+behavioral comparisons below are a documentation-only proposal, not implemented
+features. See the [specification](docs/specs/evaluation-facility/spec.md),
+[architecture decision](docs/decisions/0002-independent-goal-driven-evaluation.md) and
+[PLAN.md](PLAN.md) for the design and delivery sequence.
+
 ```bash
-skillc check ./skills     # refuse to build skills the spec rejects
 skillc selftest           # prove every rule can still report the other verdict
+skillc check ./skills     # check a collection after validating the rules
 skillc rules              # what it checks, and at what severity
 ```
 
-Zero runtime dependencies. Python 3.11+.
+The existing static checker has zero runtime dependencies and requires Python
+3.11+. The proposed evaluation facility will have separate execution requirements.
 
 ---
 
 ## The problem, concretely
 
-Run it against a real 18-skill collection, written by someone careful, in a
+The September 15, 2026 assessment ran it against a real 18-skill collection in a
 repository with a CI pipeline, a lint gate, a type checker and a test suite:
 
 ```
 skillc: 18 skill(s) checked, 36 error(s), 37 warning(s)
 ```
 
-Every single `name` violated the Agent Skills specification. Every `description`
-stated a capability rather than a triggering condition, so the model had nothing
-to decide *when* to fire on. And every skill carried its trigger vocabulary in a
-`trigger:` frontmatter key that no harness loads - the words were written, and
-inert.
+The checker rejected the collection's names and flagged its description style
+and `trigger:` fields. Those findings motivated further investigation; they do
+not establish what every client loads or whether the skills improve outcomes.
 
-None of this was sloppiness. It was invisible, because nothing was looking.
+This is a historical motivating example, not a measurement of current CPP.
+Static findings alone do not establish what a particular agent will load or how
+its behavior will change; those questions motivate the evaluation plan.
 
 ## The founding constraint
 
@@ -83,13 +96,15 @@ warn   body-budget      SKILL.md body stays inside the line budget
 warn   ref-depth        references stay one level deep
 ```
 
-`error` means the specification rejects it. `warn` means it will load and quietly
-underperform. `--strict` makes warnings fail too.
+`error` means the checker rejects it under its format rules. `warn` flags a
+heuristic concern; it does not prove poorer agent performance. `--strict` makes
+warnings fail too. The [project assessment](docs/README.md) records known
+implementation and evidence limits.
 
-The pair worth understanding is `trigger-shape` and `unknown-field`. The
-`description` is the only always-loaded pointer a skill has, and its wording is
-what decides whether a model-invoked skill fires at all. A skill whose trigger
-words live anywhere else is carrying them somewhere nothing reads:
+The pair worth understanding is `trigger-shape` and `unknown-field`. Descriptions
+commonly guide skill selection, but loading and invocation depend on the client.
+The example below illustrates the checker's writing heuristic; it is not proof
+that a client ignores every other instruction source.
 
 ```yaml
 # what the model sees:        a capability statement it cannot act on
@@ -139,18 +154,61 @@ See [ADR 0001](docs/decisions/0001-every-check-ships-a-redcase.md) for the bound
 this applies to rules, whose verdicts are consumed by a decision that will not
 independently re-derive the fact. It does not extend to every internal helper.
 
-## What's next
+## Proposed evaluation levels
 
-Static analysis answers whether a skill is *well-formed*. It cannot answer the
-question that actually decides whether a skill was worth writing: **does it change
-what the agent does?**
+The organizing idea is a difficulty ladder. Higher levels require more capable
+work, not merely more files or a longer prompt. Every level checks the delivered
+result and preserves relevant protections from earlier levels.
 
-That needs a behavioural eval, and specifically an ablation - the same task run
-with the skill loaded and without it. If the two score the same, the skill is
-doing nothing, however clean its frontmatter. Claude Code ships the runner
-(`claude plugin eval --ablation with-without`); the gap is that almost nobody
-publishes cases. See [`evals/README.md`](evals/README.md) for the shape and the
-`mustfail` idea, which is the redcase at the eval layer.
+| Level | Capability | Example challenge |
+|---|---|---|
+| 1 - Basic execution | Complete one clear, bounded task | Fix a small defect and pass independent acceptance tests |
+| 2 - Constraint handling | Satisfy several requirements without breaking a stated boundary | Fix the defect without changing the public interface or adding a dependency |
+| 3 - Integration | Make connected parts work together | Change a helper and its caller, then prove the installed path works |
+| 4 - Workflow judgment | Carry a task from intent to an honest completion decision | Preserve the approved plan, review new files, and report unmet acceptance accurately |
+| 5 - Resilient coordination | Preserve correctness when work is interrupted or shared | Resume after interruption, handle unavailable tools, or reconcile two workers' changes |
+| 6 - Adaptive delivery | Solve unfamiliar work with incomplete information | Diagnose a new repository, challenge a flawed proposed approach, and deliver within constraints |
+
+These are proposed difficulty bands. Pilot results must establish whether tasks
+actually become harder; the labels alone cannot establish that.
+
+Before any agent trial, readiness checks establish that the environment,
+installation and grader work. Those checks are prerequisites, not an agent skill
+level. An unavailable environment is not a failed reasoning test, and an empty
+run is not a pass.
+
+Experiments will compare a selected collection with a prior revision, another
+collection or a minimal baseline under matched conditions. CPP is the first
+intended subject. Known-bad artifacts or deliberately degraded variants must demonstrate that the grader can detect the
+failure it claims to detect. Equal results mean **no benefit demonstrated on
+those tasks**, not proof that the skill has no value.
+
+Progress will be reported as a profile: qualified levels, success by scenario,
+honesty of completion claims, human interventions, time and cost. A hard task
+passed once does not erase failures on easier tasks or establish a reliable level.
+
+## Proposed first milestone
+
+Repair the documented static-checker trust gaps, then use the existing CPP
+small-fix pilot to prove an independent grader and known-good/bad controls.
+Define [interface contracts](docs/specs/evaluation-facility/interfaces.md) before
+qualifying a replaceable execution backend. Then implement one disposable Docker trial
+against a pinned CPP snapshot and retain all evidence. Prove the same interfaces
+with a second small collection before claiming generic support. Expand to Level 2
+after the first experiment is reproducible and its grader discriminates.
+
+The [implementation plan](PLAN.md) sequences delivery against the specification;
+the [review agenda](docs/specs/evaluation-facility/review.md) identifies open choices. No
+runtime, paid model trial, CPP change or upstream CI integration is introduced
+by this planning update.
+
+See the [project assessment and research](docs/README.md) for the proposed role
+of skillc in a focused CPP harness, verified implementation gaps, and a suggested
+first behavioral milestone.
+
+The [eval entrypoint](evals/README.md) links to the current contracts. Earlier
+runner commands and example schemas were unverified research and have been
+retired from the active instructions.
 
 ## Prior art
 
