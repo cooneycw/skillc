@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Adopting Instruments and the Counter-Model</title>
+<style>
+:root{
+  --bg:#fbfaf9;--surface:#fff;--surface-2:#f0eeeb;--ink:#17191b;--ink-2:#474b50;
+  --ink-3:#787d84;--rule:#dfdcd7;--accent:#2f5d50;--accent-soft:#e8f0ed;
+  --green:#24664b;--green-soft:#e8f2ed;--amber:#8a6516;--amber-soft:#f9f1de;
+  --red:#93302f;--red-soft:#f9eae9;--violet:#4d3f78;--violet-soft:#efecf7;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+  --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#121413;--surface:#1a1d1c;--surface-2:#232726;--ink:#e9ebea;--ink-2:#b5bab8;
+  --ink-3:#868c8a;--rule:#2d3231;--accent:#7fbfaa;--accent-soft:#16241f;
+  --green:#7ac4a0;--green-soft:#16241d;--amber:#dbb464;--amber-soft:#272014;
+  --red:#e28c8a;--red-soft:#2a1a1a;--violet:#a99cdd;--violet-soft:#201c2e;}}
+*{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16.5px;line-height:1.62;-webkit-font-smoothing:antialiased}
+.wrap{max-width:880px;margin:0 auto;padding:0 24px 120px}
+header.mast{border-bottom:2px solid var(--ink);margin-bottom:40px;padding:58px 0 26px}
+.kicker{font-family:var(--mono);font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin:0 0 16px}
+h1{font-family:var(--serif);font-size:clamp(30px,5.2vw,46px);line-height:1.1;margin:0 0 16px;letter-spacing:-.02em;font-weight:600}
+.stand{font-size:19px;line-height:1.55;color:var(--ink-2);margin:0 0 24px;max-width:62ch}
+.meta{font-family:var(--mono);font-size:12px;color:var(--ink-3);line-height:1.9}.meta b{color:var(--ink-2);font-weight:600}
+h2{font-family:var(--serif);font-size:28px;line-height:1.2;margin:60px 0 6px;font-weight:600;letter-spacing:-.012em;scroll-margin-top:20px}
+h2 .num{font-family:var(--mono);font-size:12px;color:var(--accent);display:block;letter-spacing:.14em;margin-bottom:8px;font-weight:400}
+h3{font-size:19px;margin:34px 0 8px;font-weight:650;letter-spacing:-.005em}
+h4{font-size:15px;margin:24px 0 6px;font-weight:650;color:var(--ink-2)}
+p{margin:0 0 16px}a{color:var(--accent);text-decoration:none;border-bottom:1px solid color-mix(in srgb,var(--accent) 32%,transparent)}
+a:hover{border-bottom-color:var(--accent)}
+ul,ol{margin:0 0 16px;padding-left:22px}li{margin-bottom:9px}li>ul,li>ol{margin-top:9px}
+code{font-family:var(--mono);font-size:.86em;background:var(--surface-2);padding:1.5px 5px;border-radius:4px;border:1px solid var(--rule)}
+.lede{font-size:17.5px;color:var(--ink-2)}
+nav.toc{background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:22px 26px}
+nav.toc h2{font-size:12px;font-family:var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);margin:0 0 12px;font-weight:500}
+nav.toc ol{list-style:none;padding:0;margin:0;column-count:2;column-gap:34px}
+@media(max-width:620px){nav.toc ol{column-count:1}}
+nav.toc li{margin-bottom:7px;font-size:14.5px;break-inside:avoid}
+nav.toc a{border:0;color:var(--ink-2)}nav.toc a:hover{color:var(--accent)}
+nav.toc .n{font-family:var(--mono);font-size:11px;color:var(--ink-3);margin-right:8px}
+.box{border-radius:10px;padding:20px 24px;margin:26px 0;border:1px solid var(--rule);background:var(--surface)}
+.box .label{font-family:var(--mono);font-size:11px;letter-spacing:.13em;text-transform:uppercase;font-weight:600;margin-bottom:10px;display:block}
+.box p:last-child,.box ul:last-child,.box ol:last-child{margin-bottom:0}
+.box.v{background:var(--green-soft);border-color:color-mix(in srgb,var(--green) 30%,transparent)}.box.v .label{color:var(--green)}
+.box.c{background:var(--amber-soft);border-color:color-mix(in srgb,var(--amber) 34%,transparent)}.box.c .label{color:var(--amber)}
+.box.r{background:var(--red-soft);border-color:color-mix(in srgb,var(--red) 30%,transparent)}.box.r .label{color:var(--red)}
+.box.i{background:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 30%,transparent)}.box.i .label{color:var(--accent)}
+.box.x{background:var(--violet-soft);border-color:color-mix(in srgb,var(--violet) 30%,transparent)}.box.x .label{color:var(--violet)}
+blockquote{margin:22px 0;padding:4px 0 4px 22px;border-left:3px solid var(--accent);font-family:var(--serif);font-size:18px;line-height:1.5;color:var(--ink-2)}
+blockquote p{margin-bottom:10px}
+blockquote cite{display:block;font-family:var(--sans);font-size:13px;font-style:normal;color:var(--ink-3);margin-top:8px}
+.tw{overflow-x:auto;margin:26px 0;border:1px solid var(--rule);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:14.5px;min-width:580px}
+th{text-align:left;padding:12px 15px;font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);border-bottom:1px solid var(--rule);font-weight:600;background:var(--surface-2);vertical-align:bottom}
+td{padding:12px 15px;border-bottom:1px solid var(--rule);vertical-align:top;line-height:1.5}
+tr:last-child td{border-bottom:0}
+.pill{display:inline-block;font-family:var(--mono);font-size:10.5px;padding:2px 8px;border-radius:20px;letter-spacing:.04em;font-weight:600;white-space:nowrap}
+.pill.y{background:var(--green-soft);color:var(--green)}.pill.m{background:var(--amber-soft);color:var(--amber)}
+.pill.n{background:var(--red-soft);color:var(--red)}.pill.i{background:var(--accent-soft);color:var(--accent)}
+.stage{border:1px solid var(--rule);border-radius:10px;background:var(--surface);margin:18px 0;padding:18px 22px;border-left:4px solid var(--accent)}
+.stage .sn{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);font-weight:600;margin-bottom:6px}
+.stage h3{margin:0 0 8px;font-size:17.5px}.stage p:last-child{margin-bottom:0}
+.stage.blocked{border-left-color:var(--ink-3)}.stage.blocked .sn{color:var(--ink-3)}
+.bignum{display:flex;flex-wrap:wrap;gap:14px;margin:26px 0}
+.bignum div{flex:1 1 150px;background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:16px 18px}
+.bignum .k{font-family:var(--serif);font-size:30px;font-weight:600;line-height:1;letter-spacing:-.02em}
+.bignum .l{font-size:12.5px;color:var(--ink-3);margin-top:6px;line-height:1.4}
+footer{margin-top:70px;padding-top:24px;border-top:1px solid var(--rule);font-size:13px;color:var(--ink-3)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="mast">
+  <p class="kicker">Adoption Plan · CPP · CxPP · Kyle</p>
+  <h1>Keep the spec. Name the instrument. Make the counter-model routine.</h1>
+  <p class="stand">Vocabulary, ADRs, and a dependency-ordered wave for carrying the September 2026 harness findings into all three repositories - written against what each one actually contains today.</p>
+  <p class="meta">
+    <b>Date</b> 14 September 2026<br>
+    <b>Basis</b> CPP main @ <code>docs/research/</code> (PRs #930, #931) · CxPP PR #239 · Kyle <code>core/session_backends.py</code>, <code>docs/adr/</code><br>
+    <b>New issues proposed</b> 3 CPP · 2 CxPP · 2 Kyle - plus two comments on existing issues rather than duplicates
+  </p>
+</header>
+
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol>
+    <li><span class="n">01</span><a href="#vocab">Vocabulary: spec, instrument, harness</a></li>
+    <li><span class="n">02</span><a href="#adr">ADR records</a></li>
+    <li><span class="n">03</span><a href="#wave">The wave</a></li>
+    <li><span class="n">04</span><a href="#kyle">Kyle, specifically</a></li>
+    <li><span class="n">05</span><a href="#issues">What was filed</a></li>
+    <li><span class="n">06</span><a href="#wrong">Where I could be wrong</a></li>
+  </ol>
+</nav>
+
+<!-- 1 -->
+<h2 id="vocab"><span class="num">Section 01</span>Vocabulary: spec, instrument, harness</h2>
+
+<div class="box v">
+  <span class="label">Recommendation</span>
+  <p><strong>Keep "spec." Do not rename it to "harness."</strong> Adopt "harness" for the <em>system</em>, which is currently unnamed. And promote <strong>"instrument"</strong> - the word that is actually missing - from a line in your global directive to a first-class term in both repos' documentation.</p>
+</div>
+
+<p>The instinct to rename is worth taking seriously and then declining, for three reasons.</p>
+
+<p><strong>It is a category error.</strong> A spec names an <em>artifact</em>; a harness names a <em>system</em>. In Böckeler's split, a spec is one feedforward control sitting inside the harness alongside skills, context files and constitutions - and the harness also contains the feedback controls a spec has nothing to do with: linters, tests, CI, sandboxes, gates. Rename spec to harness and you have no word left for the document.</p>
+
+<p><strong>It has no red case.</strong> A repo-wide rename cannot report the other verdict. There is no input that makes it say "this was a mistake." By your own Negative Control directive that is a change you are not entitled to make at scale, and the discipline should apply to its own adoption first.</p>
+
+<p><strong>The missing word is not "harness."</strong> Your directive already contains the term that does the work - <em>instrument</em>: "anything whose output is read as evidence." It appears nowhere in either repo's documentation vocabulary. It is the noun the negative-control rule attaches to, the noun <a href="https://github.com/cooneycw/claude-power-pack/issues/924">#924</a> needs in order to scope itself, and the noun that makes the bounding rule statable.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th style="width:16%">Term</th><th style="width:38%">Names</th><th style="width:46%">Action</th></tr></thead>
+<tbody>
+<tr><td><strong>spec</strong></td><td>the durable statement of intent for a piece of work</td><td><span class="pill y">keep</span> unchanged - <code>/spec:*</code>, <code>.specify/</code>, the tiering in <code>spec/help.md</code> all stay</td></tr>
+<tr><td><strong>instrument</strong></td><td>anything whose output is read as evidence - a gate, a check, a probe, a preflight, a report, a monitor, a test</td><td><span class="pill i">promote</span> from directive prose to a defined term in <code>docs/agents/</code>, with the bounding rule attached</td></tr>
+<tr><td><strong>harness</strong></td><td>the system of controls around the model: context, tools, permissions, sandboxes, gates, feedback loops</td><td><span class="pill i">adopt</span> for the system only - never as a synonym for spec or for any single artifact</td></tr>
+<tr><td><strong>counter-model</strong></td><td>the model that did not implement the change under review</td><td><span class="pill i">adopt</span> - stated as a property, not a tool name, so a Qwen or Gemma lane inherits it without an edit</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box c">
+  <span class="label">The one thing to watch</span>
+  <p>"Harness" is already load-bearing in CPP for something else: <code>lib/cpp_memory/harness.py</code> and <code>scripts/install-memory-harness.sh</code> use it to mean <em>which agent CLI is running</em> (the friction ledger's harness tag, #557/#562). That is a narrower and older meaning than the systems sense. Introducing the broad sense without noting the collision would produce exactly the ambiguity this section exists to prevent. The definition entry should say so explicitly.</p>
+</div>
+
+<!-- 2 -->
+<h2 id="adr"><span class="num">Section 02</span>ADR records</h2>
+
+<h3>No existing ADR needs revision</h3>
+
+<p>I read the titles and scope of all six CPP ADRs against the findings. None is contradicted:</p>
+
+<div class="tw">
+<table>
+<thead><tr><th style="width:46%">CPP ADR</th><th style="width:22%">Touches instruments?</th><th style="width:32%">Disposition</th></tr></thead>
+<tbody>
+<tr><td>0001 plugin marketplace packaging</td><td>no</td><td><span class="pill y">unchanged</span> (already superseded by 0005)</td></tr>
+<tr><td>0002 sandbox prompt-elimination threat model</td><td>no</td><td><span class="pill y">unchanged</span></td></tr>
+<tr><td>0003 worktree base location</td><td>no</td><td><span class="pill y">unchanged</span></td></tr>
+<tr><td>0004 main-branch protection posture</td><td>no</td><td><span class="pill y">unchanged</span></td></tr>
+<tr><td>0005 retire plugin marketplace distribution</td><td>no</td><td><span class="pill y">unchanged</span></td></tr>
+<tr><td>0006 worktree teardown ownership</td><td>indirectly - the sweep's five conditions are an instrument</td><td><span class="pill m">no revision</span>; it becomes a consumer of 0008, not a contradiction of it</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Proposing revisions to five ADRs that nothing has invalidated would be exactly the governance-layer inflation your own issue-quality assessment warned against. <strong>Two additions, zero revisions.</strong></p>
+
+<h3>Two new CPP ADRs, each produced by an issue rather than tracked as its own</h3>
+
+<div class="stage">
+  <div class="sn">ADR 0007</div>
+  <h3>The counter-model is the model that did not implement</h3>
+  <p>Records: the reviewing model must not be the implementing model; the stage is default and tier-bound rather than a separate opt-in command; the accept/reject ratio is recorded because the primary model judging the adversary is the failure mode; and the stage does not ship without its own red case. Produced by <a href="https://github.com/cooneycw/claude-power-pack/issues/934">CPP #934</a>. Supersedes nothing; <em>related to</em> the <code>/flow:auto_codex</code> design it retires.</p>
+</div>
+
+<div class="stage">
+  <div class="sn">ADR 0008</div>
+  <h3>What an instrument is, and when it needs a negative control</h3>
+  <p>Records the bounding rule: <em>an instrument needs a committed negative control when its verdict is consumed by a decision that will not independently re-derive the fact.</em> With the carve-out that makes it affordable - a unit test whose failure the surrounding suite would catch is not individually load-bearing - and the escalation that makes it strict: a check whose green is read by a different session or a different repo always needs one. Produced by <a href="https://github.com/cooneycw/claude-power-pack/issues/932">CPP #932</a>.</p>
+</div>
+
+<div class="box i">
+  <span class="label">Why the ADRs are not their own issues</span>
+  <p>An ADR is an artifact of a decision, not a unit of work. Your issue-quality assessment measured the cost of the alternative directly: <em>"18 tracker entries for six shared outcomes."</em> Each ADR here is an acceptance item on the issue that makes the decision, so the tracker carries five work items across CPP rather than five plus five documents.</p>
+</div>
+
+<h3>The three repos keep three different conventions - leave them</h3>
+
+<p>CPP uses <code>docs/decisions/NNNN-*.md</code>. Kyle uses <code>docs/adr/NNNN-*.md</code> with a README. CxPP has <strong>neither</strong>. Unifying the paths is another rename with no red case; the only real gap is CxPP having nowhere to record a decision at all.</p>
+
+<p>So: create <code>docs/decisions/</code> in CxPP to match its upstream, seed it with the two ADRs marked as <em>adopted from claude-power-pack</em>, and stop there. That is a place to write decisions down, not an ADR practice with process attached.</p>
+
+<!-- 3 -->
+<h2 id="wave"><span class="num">Section 03</span>The wave</h2>
+
+<p class="lede">Five stages. The ordering is not preference - each stage's evidence depends on the one before it, and two of the dependencies are hard.</p>
+
+<div class="stage">
+  <div class="sn">Stage 1 · CPP · blocking</div>
+  <h3>Define the instrument and bound the rule</h3>
+  <p><a href="https://github.com/cooneycw/claude-power-pack/issues/932">CPP #932</a>. Produces ADR 0008 and a narrowing edit to the Negative Control directive. <strong>Hard dependency:</strong> #924's machinery cannot scope itself without this. Today its scope is "gates," undefined, with seven consumers that are the seven that happened to fail recently - a list that narrows rather than a rule that generalises.</p>
+</div>
+
+<div class="stage">
+  <div class="sn">Stage 2 · CPP</div>
+  <h3>Land #924's machinery against the gate that certifies the others</h3>
+  <p><a href="https://github.com/cooneycw/claude-power-pack/issues/933">CPP #933</a> plus a comment re-pointing #924's first consumer. <code>make negative-fixture-check</code> prints <code>ok - every constructed absence asserts its precondition</code> while its own docstring says it detects only statically-visible <code>PATH</code> replacement. An absence built by <code>chmod</code>, by a nonzero stub, or by a monkeypatched import is invisible and reports the same green. It is the instrument currently certifying that your other instruments are honest, and it overstates its scope.</p>
+</div>
+
+<div class="stage">
+  <div class="sn">Stage 3 · CPP</div>
+  <h3>Make the counter-model routine, and give it a red case</h3>
+  <p><a href="https://github.com/cooneycw/claude-power-pack/issues/934">CPP #934</a>. Produces ADR 0007. Promotes the Codex stage from <code>/flow:auto_codex</code> into <code>/flow:auto</code> bound to tier, retires the separate command, adds the stage's own negative control, and records the accept/reject ratio. <strong>Evidence:</strong> 0 of the last 200 merged CPP PRs carry the Codex review marker, against a positive control of 199/200 for a marker known to be present.</p>
+</div>
+
+<div class="stage blocked">
+  <div class="sn">Stage 4 · CxPP · after 1 and 3</div>
+  <h3>Adopt the definition; make the reciprocal routine</h3>
+  <p><a href="https://github.com/cooneycw/codex-power-pack/issues/240">CxPP #240</a> and <a href="https://github.com/cooneycw/codex-power-pack/issues/241">#241</a>. CxPP already ships <code>claude-code-review</code> with the ownership boundary drawn correctly - <em>"Claude advises; Codex retains ownership of edits, tests, and lifecycle decisions"</em> - but its trigger is escalation-on-stuck, and <code>grep</code> finds no reference to it in <code>flow-auto</code>.</p>
+  <p><strong>Constraint already recorded in CxPP #228:</strong> <code>claude-code-review</code> is <em>native</em> to CxPP, so no CPP edit reaches it. The reciprocal half must be built there, not generated. That is the one piece of this wave that cannot flow through the source bridge.</p>
+</div>
+
+<div class="stage blocked">
+  <div class="sn">Stage 5 · Kyle · after 1</div>
+  <h3>Carry the methodology across the container boundary</h3>
+  <p><a href="https://github.com/cooneycw/kyle/issues/1209">Kyle #1209</a> and <a href="https://github.com/cooneycw/kyle/issues/1210">#1210</a>, plus a comment on <a href="https://github.com/cooneycw/kyle/issues/1176">#1176</a>. See <a href="#kyle">Section 04</a> - the finding here is larger than skill retention.</p>
+</div>
+
+<!-- 4 -->
+<h2 id="kyle"><span class="num">Section 04</span>Kyle, specifically</h2>
+
+<p>You asked whether Kyle inherits only a subset of CPP's skills, and if so whether the new methodologies are in the retained set. I read <code>core/session_backends.py</code>. The answer has three parts and the third one is the important one.</p>
+
+<div class="bignum">
+  <div><div class="k">all</div><div class="l">CPP command namespaces reach containers - no subset</div></div>
+  <div><div class="k">yes</div><div class="l">codex runs inside a container (#1001, closed)</div></div>
+  <div><div class="k">no</div><div class="l">the governing directive reaches a container (#1176, open)</div></div>
+</div>
+
+<h3>1 · Commands are not subsetted; skills are</h3>
+<p><code>_host_dir_entry_mounts(f"{home}/commands", …)</code> is called with no <code>exclude</code>, so every entry in <code>~/.claude/commands</code> is mounted per-entry with each symlink resolved by realpath - the design that exists because a directory bind-mount would deliver 52 dangling links into a different repository. <strong>The whole CPP slash-command surface reaches a container.</strong> Only <code>skills</code> takes an <code>exclude_skills</code> tuple. So a counter-model stage living in <code>/flow:auto</code> arrives in containers automatically; nothing needs to be added to a retained list.</p>
+
+<h3>2 · The counter-model can run there - my prior assumption was wrong</h3>
+<p>I had recorded that Kyle containers are Claude-only workers with codex and qwen host-side. That is <strong>superseded</strong>. Kyle #1001 (closed) mounts the delegation CLIs: the <code>codex</code> binary at <code>/usr/local/bin/codex</code> - a static-pie musl ELF with zero library dependencies, measured running unmodified in <code>kyle-session:latest</code> - and codex credentials as a <em>directory</em> mount at <code>/run/kyle/codex</code>, deliberately not a file, because of the inode pin and codex's 240-hour token cadence. The code notes that #808's "not provided, deliberately" described the orchestrator case and never described <code>implementation_driver=codex</code>; Kyle ADR 0004 supersedes it.</p>
+
+<div class="box r">
+  <span class="label">3 · The governing directive does not cross the boundary</span>
+  <p>Kyle <a href="https://github.com/cooneycw/kyle/issues/1176">#1176</a>, open: <code>~/.claude/CLAUDE.md</code> is <strong>not mounted</strong> into session containers. Containers mount exactly two paths from <code>~/.claude</code> - <code>projects/</code> and <code>settings.json</code>. <code>CLAUDE.md</code> sits one level above the mounted subdirectory, so nothing carries it. Container is now the <em>default</em> placement.</p>
+  <p>The issue was filed about the Nit Store rule. The Negative Control directive lives in the same file and has the same problem - and it is the directive this entire wave depends on. <strong>Every containerised session has been building instruments under a rule it could not read.</strong></p>
+  <p>This is why "put the methodology in the retained skills" is not sufficient as a strategy: the commands arrive, the codex binary arrives, and the rule that says what to do with them does not. I filed a comment on #1176 rather than a duplicate issue, because the mount fix is the same fix - what changed is that its priority is no longer about one disposition mechanism.</p>
+</div>
+
+<h3>What Kyle gets as issues</h3>
+<p>Two, deliberately few against a 112-issue backlog. One applies the bounding rule to Kyle's own instruments - the fleet checks, health probes and run-snapshot paths that already produce this defect class (#1019, #845, #1086, #1178 are all the same shape). The other asks for the thing that currently has no evidence either way: <strong>a test proving a containerised session can actually complete a counter-model review</strong>, now that the binary and credentials are mounted but nothing has exercised the path.</p>
+
+<!-- 5 -->
+<h2 id="issues"><span class="num">Section 05</span>What was filed</h2>
+
+<p>Seven issues and two comments. The count is deliberate: your issue-quality assessment measured that parent trackers and per-repo mirrors inflate the apparent defect burden, and recommended adopting the proportional contracts already delivered rather than adding a layer. There is no parent tracker for this wave - the ordering lives in this document and in each issue's stated dependency.</p>
+
+<div class="tw">
+<table>
+<thead><tr><th style="width:8%">Issue</th><th style="width:12%">Repo</th><th style="width:52%">Issue</th><th style="width:28%">Depends on</th></tr></thead>
+<tbody>
+<tr><td><a href="https://github.com/cooneycw/claude-power-pack/issues/932"><strong>932</strong></a></td><td>CPP</td><td>Define "instrument" and bound the negative-control rule → ADR 0008</td><td>-</td></tr>
+<tr><td><a href="https://github.com/cooneycw/claude-power-pack/issues/933"><strong>933</strong></a></td><td>CPP</td><td><code>negative-fixture-check</code> reports a scope it cannot detect</td><td>932 (definition), 924 (helper)</td></tr>
+<tr><td><a href="https://github.com/cooneycw/claude-power-pack/issues/934"><strong>934</strong></a></td><td>CPP</td><td>Counter-model: default, tier-bound, with its own red case → ADR 0007</td><td>932</td></tr>
+<tr><td><a href="https://github.com/cooneycw/codex-power-pack/issues/240"><strong>240</strong></a></td><td>CxPP</td><td>Adopt the instrument definition; create <code>docs/decisions/</code></td><td>CPP 932</td></tr>
+<tr><td><a href="https://github.com/cooneycw/codex-power-pack/issues/241"><strong>241</strong></a></td><td>CxPP</td><td>Promote <code>claude-code-review</code> to a routine reciprocal stage</td><td>CPP 934, CxPP #228</td></tr>
+<tr><td><a href="https://github.com/cooneycw/kyle/issues/1209"><strong>1209</strong></a></td><td>Kyle</td><td>Apply the bound to Kyle's own instruments</td><td>CPP 932, CPP 924</td></tr>
+<tr><td><a href="https://github.com/cooneycw/kyle/issues/1210"><strong>1210</strong></a></td><td>Kyle</td><td>Prove a containerised session can run a counter-model review</td><td>CPP 934, Kyle #1001 (done)</td></tr>
+<tr><td>-</td><td>CPP</td><td><em><a href="https://github.com/cooneycw/claude-power-pack/issues/924#issuecomment-5663076012">comment on #924</a></em> - re-point the first consumer at the fixture gate</td><td>-</td></tr>
+<tr><td>-</td><td>Kyle</td><td><em><a href="https://github.com/cooneycw/kyle/issues/1176#issuecomment-5663083654">comment on #1176</a></em> - Negative Control is now load-bearing too</td><td>-</td></tr>
+</tbody>
+</table>
+</div>
+
+<!-- 6 -->
+<h2 id="wrong"><span class="num">Section 06</span>Where I could be wrong</h2>
+
+<ul>
+  <li><strong>The bounding rule is still untested.</strong> I have not enumerated the instruments it captures in any of the three repos. If the real count is hundreds rather than tens, "affordable" was wrong and the rule needs another narrowing. Issue A's first acceptance item is the enumeration, precisely so the rule meets its denominator before anything is built on it.</li>
+  <li><strong>I did not read all six CPP ADRs in full</strong> - I read 0006 closely and the others by title and scope. "No existing ADR needs revision" is a judgement from that, not from a line-by-line reading. ADR 0002's threat model is the one most likely to have an instrument claim buried in it.</li>
+  <li><strong>The CxPP reciprocal may be harder than Stage 4 implies.</strong> #228 records that <code>claude-code-review</code> is native and no CPP edit reaches it, but I did not read its script or verify that a routine (rather than escalation) invocation is even supported by the Agent SDK path it uses. If the SDK call assumes a blocker argument, promoting it is a rewrite rather than a trigger change.</li>
+  <li><strong>Kyle's container evidence is read from source, not from a running container.</strong> The mount list is what <code>DOCKER_TOOL_MOUNTS</code> declares - the recipe, not a built artifact. Kyle's own <code>tests/container_surface.py</code> makes exactly this distinction and notes that #836 made the recipe reach a running image. I did not exec into a container to confirm <code>/usr/local/bin/codex</code> is present in the image you are actually running.</li>
+  <li><strong>Seven issues may be too few rather than too many.</strong> I optimised against the inflation your assessment measured. If the counter-model promotion turns out to need separate work for the tier binding, the ratio instrument and the red case, issue C is three issues wearing one number - which is the failure mode in the opposite direction, and the one that hides scope rather than inflating it.</li>
+</ul>
+
+<footer>
+  <p>Prepared 14 September 2026. Companions: <em>spec-driven-development-2026.html</em> (research basis), <em>harness-strategy-recommendation-2026-09-14.html</em> (the strategy this implements), <em>issue-quality-assessment-2026-09-14.html</em> (the constraint on issue count). All three now in <code>docs/research/</code> in both CPP (merged) and CxPP (PR #239).</p>
+</footer>
+
+</div>
+</body>
+</html>

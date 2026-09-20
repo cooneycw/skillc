@@ -1,0 +1,793 @@
+<title>Skills Are The New Code</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=Newsreader:ital,opsz,wght@0,6..72,300..600;1,6..72,300..500&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+  :root {
+    --ground:      #EFF2F1;
+    --surface:     #FFFFFF;
+    --surface-2:   #F6F8F7;
+    --ink:         #12201E;
+    --ink-2:       #4A5C58;
+    --ink-3:       #7B8B87;
+    --rule:        #D4DCD9;
+    --rule-soft:   #E4EAE8;
+    --accent:      #0F6E68;
+    --accent-soft: #DCEBE9;
+    --signal:      #B96C15;
+    --signal-soft: #F3E4D1;
+    --good:        #2F7D51;
+    --warn:        #9C6603;
+    --bad:         #A82F2A;
+    --good-soft:   #DFEFE5;
+    --warn-soft:   #F6E9CC;
+    --bad-soft:    #F6DEDC;
+    --shadow:      0 1px 2px rgba(18,32,30,.05), 0 8px 24px -16px rgba(18,32,30,.22);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #0D1514;
+      --surface:     #15211F;
+      --surface-2:   #1A2624;
+      --ink:         #E3ECEA;
+      --ink-2:       #9FB2AE;
+      --ink-3:       #6E827F;
+      --rule:        #273936;
+      --rule-soft:   #1E2D2B;
+      --accent:      #4FC9BF;
+      --accent-soft: #13322F;
+      --signal:      #E2A253;
+      --signal-soft: #33261650;
+      --good:        #63C287;
+      --warn:        #DDA93E;
+      --bad:         #E4746D;
+      --good-soft:   #14301F;
+      --warn-soft:   #322611;
+      --bad-soft:    #331A18;
+      --shadow:      0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:      #0D1514;
+    --surface:     #15211F;
+    --surface-2:   #1A2624;
+    --ink:         #E3ECEA;
+    --ink-2:       #9FB2AE;
+    --ink-3:       #6E827F;
+    --rule:        #273936;
+    --rule-soft:   #1E2D2B;
+    --accent:      #4FC9BF;
+    --accent-soft: #13322F;
+    --signal:      #E2A253;
+    --signal-soft: #33261650;
+    --good:        #63C287;
+    --warn:        #DDA93E;
+    --bad:         #E4746D;
+    --good-soft:   #14301F;
+    --warn-soft:   #322611;
+    --bad-soft:    #331A18;
+    --shadow:      0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.7);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Newsreader", Georgia, "Times New Roman", serif;
+    font-size: 17px;
+    line-height: 1.62;
+    font-optical-sizing: auto;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: clamp(28px, 5vw, 64px) clamp(18px, 4vw, 40px) 96px;
+    display: flex;
+    flex-direction: column;
+    gap: 56px;
+  }
+
+  .prose { max-width: 68ch; display: flex; flex-direction: column; gap: 14px; }
+
+  h1, h2, h3, h4, .eyebrow, .mono, th, .chip, .meter-label, .score {
+    font-family: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  }
+
+  h1 {
+    font-size: clamp(2.5rem, 6.2vw, 4.1rem);
+    font-variation-settings: "wdth" 112, "wght" 780;
+    line-height: .95;
+    letter-spacing: -.022em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  h2 {
+    font-size: clamp(1.32rem, 2.5vw, 1.68rem);
+    font-variation-settings: "wdth" 104, "wght" 700;
+    letter-spacing: -.012em;
+    line-height: 1.15;
+    margin: 0;
+    text-wrap: balance;
+  }
+  h3 {
+    font-size: 1.04rem;
+    font-variation-settings: "wdth" 100, "wght" 660;
+    letter-spacing: -.005em;
+    margin: 0;
+  }
+  p { margin: 0; }
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+
+  .eyebrow {
+    font-size: .705rem;
+    font-variation-settings: "wdth" 88, "wght" 640;
+    letter-spacing: .15em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .mono, code, .num {
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+  code {
+    font-size: .845em;
+    background: var(--surface-2);
+    border: 1px solid var(--rule-soft);
+    border-radius: 3px;
+    padding: .08em .34em;
+    color: var(--ink);
+  }
+
+  /* ---------- masthead ---------- */
+  .masthead { display: flex; flex-direction: column; gap: 20px; }
+  .masthead .rule-top {
+    height: 3px;
+    background: linear-gradient(90deg, var(--accent) 0 22%, var(--signal) 22% 34%, var(--rule) 34%);
+  }
+  .thesis {
+    font-size: clamp(1.1rem, 2.1vw, 1.32rem);
+    line-height: 1.45;
+    color: var(--ink-2);
+    max-width: 62ch;
+    text-wrap: pretty;
+  }
+  .byline {
+    display: flex; flex-wrap: wrap; gap: 8px 22px;
+    font-size: .74rem; color: var(--ink-3);
+    font-family: "JetBrains Mono", monospace;
+  }
+
+  /* ---------- verdict ---------- */
+  .verdict {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 4px solid var(--signal);
+    border-radius: 3px;
+    padding: clamp(20px, 3vw, 30px);
+    display: flex; flex-direction: column; gap: 14px;
+    box-shadow: var(--shadow);
+  }
+  .verdict p { max-width: 74ch; }
+  .verdict strong { font-weight: 600; color: var(--ink); }
+
+  /* ---------- panel / meters ---------- */
+  .panel-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+    gap: 18px;
+  }
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 22px 22px 24px;
+    display: flex; flex-direction: column; gap: 16px;
+  }
+  .panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .panel-head .score {
+    font-size: 1.62rem;
+    font-variation-settings: "wdth" 96, "wght" 760;
+    letter-spacing: -.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  .panel-head .score .of { color: var(--ink-3); font-size: .78rem; font-variation-settings: "wdth" 88, "wght" 500; }
+  .meters { display: flex; flex-direction: column; gap: 11px; }
+  .meter { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center; }
+  .meter-label {
+    font-size: .765rem;
+    font-variation-settings: "wdth" 92, "wght" 570;
+    color: var(--ink-2);
+    letter-spacing: .005em;
+  }
+  .meter .num { font-size: .74rem; color: var(--ink-3); }
+  .track {
+    grid-column: 1 / -1;
+    height: 6px;
+    background: var(--rule-soft);
+    border-radius: 1px;
+    overflow: hidden;
+    display: flex;
+  }
+  .fill { height: 100%; background: var(--signal); }
+  .fill.is-zero { background: var(--bad); width: 3px !important; }
+  .fill.is-strong { background: var(--accent); }
+
+  /* ---------- rubric cards ---------- */
+  .rubrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 18px; }
+  .rubric {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 24px;
+    display: flex; flex-direction: column; gap: 16px;
+  }
+  .rubric ol, .rubric ul { margin: 0; padding-left: 0; list-style: none; display: flex; flex-direction: column; gap: 11px; }
+  .rubric li { display: grid; grid-template-columns: 26px 1fr; gap: 10px; font-size: .93rem; line-height: 1.5; }
+  .rubric li .k {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .7rem; font-weight: 700;
+    color: var(--accent);
+    padding-top: .28em;
+  }
+  .rubric li .t strong { font-weight: 600; }
+  .rubric .src { font-size: .76rem; color: var(--ink-3); border-top: 1px solid var(--rule-soft); padding-top: 12px; }
+
+  /* ---------- tables ---------- */
+  .scroller { overflow-x: auto; border: 1px solid var(--rule); border-radius: 3px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: .85rem; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+  thead th {
+    font-size: .69rem;
+    font-variation-settings: "wdth" 88, "wght" 660;
+    letter-spacing: .085em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--rule);
+    white-space: nowrap;
+    position: sticky; top: 0;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr.is-subject td { background: var(--accent-soft); }
+  td.n, th.n { text-align: right; font-family: "JetBrains Mono", monospace; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.name { font-family: "JetBrains Mono", monospace; font-size: .78rem; white-space: nowrap; }
+
+  .chip {
+    display: inline-block;
+    font-size: .655rem;
+    font-variation-settings: "wdth" 88, "wght" 660;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 2px;
+    white-space: nowrap;
+  }
+  .chip.good { background: var(--good-soft); color: var(--good); }
+  .chip.warn { background: var(--warn-soft); color: var(--warn); }
+  .chip.bad  { background: var(--bad-soft);  color: var(--bad); }
+  .chip.flat { background: var(--surface-2); color: var(--ink-3); border: 1px solid var(--rule); }
+
+  /* ---------- readings (CPP scorecard) ---------- */
+  .readings { display: flex; flex-direction: column; gap: 0; border: 1px solid var(--rule); border-radius: 3px; background: var(--surface); overflow: hidden; }
+  .reading {
+    display: grid;
+    grid-template-columns: 172px 62px 1fr;
+    gap: 6px 20px;
+    padding: 18px 22px;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+  .reading:last-child { border-bottom: none; }
+  .reading > .axis { display: flex; flex-direction: column; gap: 5px; }
+  .reading .axis h3 { font-size: .95rem; }
+  .reading .axis .tag { font-size: .66rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); font-family: "Archivo", sans-serif; font-variation-settings: "wdth" 88, "wght" 600; }
+  .reading > .val { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+  .reading .val .sc {
+    font-family: "Archivo", sans-serif;
+    font-variation-settings: "wdth" 96, "wght" 760;
+    font-size: 1.5rem;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .reading .val .sc.z { color: var(--bad); }
+  .reading .val .sc.hi { color: var(--accent); }
+  .reading .body { display: flex; flex-direction: column; gap: 9px; font-size: .92rem; }
+  .reading .body .ev {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .71rem;
+    line-height: 1.6;
+    color: var(--ink-2);
+    background: var(--surface-2);
+    border-left: 2px solid var(--rule);
+    padding: 8px 11px;
+    border-radius: 0 2px 2px 0;
+    overflow-x: auto;
+  }
+  .reading .body .move { font-size: .87rem; color: var(--ink-2); }
+  .reading .body .move b { font-family: "Archivo", sans-serif; font-variation-settings: "wdth" 90, "wght" 640; font-size: .68rem; letter-spacing: .09em; text-transform: uppercase; color: var(--signal); }
+  @media (max-width: 720px) {
+    .reading { grid-template-columns: 1fr auto; }
+    .reading .body { grid-column: 1 / -1; }
+  }
+
+  /* ---------- moves ---------- */
+  .moves { display: flex; flex-direction: column; gap: 12px; counter-reset: mv; }
+  .move-card {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 18px 22px;
+    display: grid;
+    grid-template-columns: 34px 1fr;
+    gap: 6px 16px;
+    align-items: start;
+  }
+  .move-card::before {
+    counter-increment: mv;
+    content: counter(mv, decimal-leading-zero);
+    font-family: "JetBrains Mono", monospace;
+    font-size: .78rem; font-weight: 700;
+    color: var(--signal);
+    padding-top: .18em;
+  }
+  .move-card .mh { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: baseline; }
+  .move-card p { grid-column: 2; font-size: .92rem; color: var(--ink-2); max-width: 74ch; }
+  .move-card p code { font-size: .8em; }
+
+  /* ---------- method ---------- */
+  details.method {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 0;
+  }
+  details.method summary {
+    cursor: pointer;
+    padding: 18px 22px;
+    font-family: "Archivo", sans-serif;
+    font-variation-settings: "wdth" 96, "wght" 660;
+    font-size: 1rem;
+    list-style: none;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  }
+  details.method summary::-webkit-details-marker { display: none; }
+  details.method summary::after { content: "＋"; color: var(--ink-3); font-size: .9rem; }
+  details.method[open] summary::after { content: "－"; }
+  details.method .inner { padding: 0 22px 22px; display: flex; flex-direction: column; gap: 14px; font-size: .9rem; max-width: 76ch; }
+  pre {
+    margin: 0;
+    font-family: "JetBrains Mono", monospace;
+    font-size: .705rem;
+    line-height: 1.65;
+    background: var(--surface-2);
+    border: 1px solid var(--rule-soft);
+    border-radius: 2px;
+    padding: 13px 15px;
+    overflow-x: auto;
+    color: var(--ink-2);
+  }
+
+  .sources { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px 26px; font-size: .82rem; }
+  .sources div { display: flex; flex-direction: column; gap: 2px; padding-bottom: 8px; border-bottom: 1px solid var(--rule-soft); }
+  .sources .who { font-family: "Archivo", sans-serif; font-variation-settings: "wdth" 92, "wght" 620; font-size: .78rem; }
+  .sources .what { color: var(--ink-3); font-size: .76rem; }
+
+  footer { font-size: .76rem; color: var(--ink-3); border-top: 1px solid var(--rule); padding-top: 18px; max-width: 74ch; }
+
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+
+<div class="wrap">
+
+  <!-- ================= MASTHEAD ================= -->
+  <header class="masthead">
+    <div class="rule-top"></div>
+    <div class="prose">
+      <div class="eyebrow">Calibration report · claude-power-pack v7.5.0 · 15 Sep 2026</div>
+      <h1>Skills Are The New Code</h1>
+      <p class="thesis">Guy Podjarny says a skill is a unit of software and needs software's five disciplines. Matt Pocock says a skill is a document and gives four levers that decide whether it fires and holds. Measured against both, claude-power-pack scores <span class="mono">23/45</span> &mdash; and the shortfall is concentrated in exactly one place.</p>
+    </div>
+    <div class="byline">
+      <span>SUBJECT · claude-power-pack @ 7.5.0</span>
+      <span>SURFACE · 18 skills · 95 commands · 23,120 lines</span>
+      <span>COMPARANDS · 4</span>
+    </div>
+  </header>
+
+  <!-- ================= VERDICT ================= -->
+  <section class="verdict">
+    <div class="eyebrow" style="color:var(--signal)">The finding</div>
+    <p><strong>The gap is narrow and deep, not broad.</strong> CPP scores at or above every comparand on observability and supply-chain provenance, and holds its Python and shell instruments to a bar none of them attempt. It scores <strong>zero</strong> on the one discipline Podjarny puts at the centre of the keynote: there is not a single behavioural test of the 23,120 lines of command markdown that <em>is</em> the product. Every gate CPP owns points at the scaffolding; none points at the artifact.</p>
+    <p><strong>Nothing on the market replaces it.</strong> Of the four serious comparands, the two that beat CPP on skill craft cover 2 of its 7 goals; the two that beat it on discipline cover none &mdash; they are graders and rails, not toolkits. There is no package to buy. There are three rails to adopt.</p>
+    <p><strong>The cheapest fix is already installed.</strong> <code>claude plugin eval</code> shipped in the CLI on this machine, with a with/without ablation arm &mdash; the same measurement Tessl launched as a product. Closing the largest gap on this page starts with a directory named <code>evals/</code>.</p>
+  </section>
+
+  <!-- ================= SCORE PANELS ================= -->
+  <section style="display:flex;flex-direction:column;gap:20px">
+    <div class="prose">
+      <h2>Two rubrics, scored separately</h2>
+      <p style="color:var(--ink-2);font-size:.95rem">They measure different objects. Podjarny grades the <em>lifecycle around</em> a skill; Pocock grades the <em>document itself</em>. A repo can pass one and fail the other, and CPP nearly does.</p>
+    </div>
+
+    <div class="panel-grid">
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="eyebrow">Podjarny · five disciplines</div>
+            <h3 style="margin-top:4px">Lifecycle rigour</h3>
+          </div>
+          <div class="score">12<span class="of">/25</span></div>
+        </div>
+        <div class="meters">
+          <div class="meter"><span class="meter-label">Static analysis</span><span class="num">3</span><div class="track"><div class="fill" style="width:60%"></div></div></div>
+          <div class="meter"><span class="meter-label">Evals</span><span class="num">0</span><div class="track"><div class="fill is-zero" style="width:0%"></div></div></div>
+          <div class="meter"><span class="meter-label">Security testing</span><span class="num">3</span><div class="track"><div class="fill" style="width:60%"></div></div></div>
+          <div class="meter"><span class="meter-label">Dependency management</span><span class="num">2</span><div class="track"><div class="fill" style="width:40%"></div></div></div>
+          <div class="meter"><span class="meter-label">Observability</span><span class="num">4</span><div class="track"><div class="fill is-strong" style="width:80%"></div></div></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="eyebrow">Pocock · the four-point sweep</div>
+            <h3 style="margin-top:4px">Document craft</h3>
+          </div>
+          <div class="score">11<span class="of">/20</span></div>
+        </div>
+        <div class="meters">
+          <div class="meter"><span class="meter-label">1 · Trigger</span><span class="num">2</span><div class="track"><div class="fill" style="width:40%"></div></div></div>
+          <div class="meter"><span class="meter-label">2 · Structure</span><span class="num">2</span><div class="track"><div class="fill" style="width:40%"></div></div></div>
+          <div class="meter"><span class="meter-label">3 · Steering</span><span class="num">4</span><div class="track"><div class="fill is-strong" style="width:80%"></div></div></div>
+          <div class="meter"><span class="meter-label">4 · Pruning</span><span class="num">3</span><div class="track"><div class="fill" style="width:60%"></div></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= THE RUBRICS ================= -->
+  <section style="display:flex;flex-direction:column;gap:20px">
+    <div class="prose">
+      <h2>What each of them actually asked for</h2>
+    </div>
+    <div class="rubrics">
+
+      <div class="rubric">
+        <div>
+          <div class="eyebrow">Keynote · AI Native DevCon London, 1 June 2026</div>
+          <h3 style="margin-top:6px">Guy Podjarny &mdash; the five disciplines</h3>
+        </div>
+        <p style="font-size:.92rem;color:var(--ink-2)">The argument is not that skills should be tidy. It is that skills are <em>code</em>, inherit code's failure modes, and therefore need code's machinery. Skills rot; an unmaintained skill becomes harmful, not merely stale.</p>
+        <ul>
+          <li><span class="k">SA</span><span class="t"><strong>Static analysis.</strong> Linting, then security analysis, then agentic review of the skill text.</span></li>
+          <li><span class="k">EV</span><span class="t"><strong>Evals.</strong> Define an environment, run an agent through a task in it, judge the result. Three tiers: skill (unit), project (integration), comprehensive (end-to-end).</span></li>
+          <li><span class="k">ST</span><span class="t"><strong>Security testing.</strong> Three risk classes: <em>malicious</em>, <em>negligence</em> (urges an action, sets no boundary), <em>vulnerable</em> (guidance that exposes secrets).</span></li>
+          <li><span class="k">DM</span><span class="t"><strong>Dependency management.</strong> Registry, versioning, install/update, supply-chain visibility, quality gates, cross-agent compatibility.</span></li>
+          <li><span class="k">OB</span><span class="t"><strong>Observability.</strong> Monitor agents, mine traces for new skills, extract eval scenarios from real runs.</span></li>
+        </ul>
+        <p style="font-size:.88rem;color:var(--ink-2);border-left:2px solid var(--signal);padding-left:12px">His failure story is a shared skills repo at a large unicorn: <em>"There are seven over here. Which one should I choose? There's no indication of which one is good."</em> Nobody trusted the repo; everybody went back to writing their own.</p>
+        <div class="src">Verified against the talk's own companion skill &mdash; <span class="mono">AINativeDev/aidevcon-2026-ldn/talk-podjarny-skills-are-the-new-code</span> (outline, quotes, transcript).</div>
+      </div>
+
+      <div class="rubric">
+        <div>
+          <div class="eyebrow">Building Great Agent Skills: The Missing Manual</div>
+          <h3 style="margin-top:6px">Matt Pocock &mdash; the four-point sweep</h3>
+        </div>
+        <p style="font-size:.92rem;color:var(--ink-2)">Run in order over a finished skill. The organising idea is the <em>two loads</em>: context load falls on the model's window every turn; cognitive load falls on the human who must remember the skill exists. Every choice spends one of them.</p>
+        <ol>
+          <li><span class="k">01</span><span class="t"><strong>Trigger.</strong> Model-invoked (a description, permanently loaded, agent can fire it) or user-invoked (<code>disable-model-invocation</code>, zero context load, you are the index). The pointer's <em>wording</em> decides whether it fires.</span></li>
+          <li><span class="k">02</span><span class="t"><strong>Structure.</strong> Split into steps and reference. Inline what every branch needs; push behind a pointer what only some branches reach. <em>Sprawl</em> &mdash; simply too long &mdash; is the failure mode.</span></li>
+          <li><span class="k">03</span><span class="t"><strong>Steering.</strong> Leading words that recruit the model's priors (<em>tight</em>, <em>red</em>, <em>deep module</em>). Completion criteria that are checkable and exhaustive. Prompt the positive: negation makes the banned behaviour <em>more</em> available.</span></li>
+          <li><span class="k">04</span><span class="t"><strong>Pruning.</strong> Single source of truth; no caching what the environment already answers; hunt <em>no-ops</em> (lines the model already obeys) and <em>sediment</em> (stale layers nobody dares remove).</span></li>
+        </ol>
+        <div class="src">Verified against <span class="mono">mattpocock/skills → skills/productivity/writing-for-agents/{SKILL.md, SKILL-MECHANICS.md}</span>, the maintained form of the checklist.</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ================= MEASUREMENTS ================= -->
+  <section style="display:flex;flex-direction:column;gap:18px">
+    <div class="prose">
+      <h2>Measured, not estimated</h2>
+      <p style="color:var(--ink-2);font-size:.95rem">One extractor, run over every surface. Line counts are body lines after frontmatter. <span class="mono">trig%</span> is the share of descriptions carrying a triggering condition rather than a capability statement &mdash; Pocock's lever 01, and the single strongest predictor of whether a model-invoked skill fires at all.</p>
+    </div>
+    <div class="scroller">
+      <table>
+        <thead>
+          <tr>
+            <th>Surface</th>
+            <th class="n">n</th>
+            <th class="n">median</th>
+            <th class="n">p90</th>
+            <th class="n">max</th>
+            <th class="n">&gt;500 ln</th>
+            <th class="n">frontmatter</th>
+            <th class="n">trig%</th>
+            <th class="n">median desc</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="is-subject">
+            <td class="name">CPP .claude/skills</td>
+            <td class="n">18</td><td class="n">30</td><td class="n">113</td><td class="n">382</td><td class="n">0</td><td class="n">100%</td><td class="n" style="color:var(--bad)">0%</td><td class="n">67</td>
+          </tr>
+          <tr class="is-subject">
+            <td class="name">CPP .claude/commands</td>
+            <td class="n">95</td><td class="n">138</td><td class="n">439</td><td class="n" style="color:var(--bad)">2003</td><td class="n" style="color:var(--bad)">10</td><td class="n">73%</td><td class="n" style="color:var(--bad)">0%</td><td class="n">44</td>
+          </tr>
+          <tr class="is-subject">
+            <td class="name">CPP codex/skills</td>
+            <td class="n">75</td><td class="n">19</td><td class="n">86</td><td class="n">109</td><td class="n">0</td><td class="n">100%</td><td class="n">0%</td><td class="n">70</td>
+          </tr>
+          <tr>
+            <td class="name">mattpocock/skills</td>
+            <td class="n">37</td><td class="n">71</td><td class="n">112</td><td class="n">135</td><td class="n">0</td><td class="n">100%</td><td class="n">41%</td><td class="n">136</td>
+          </tr>
+          <tr>
+            <td class="name">obra/superpowers</td>
+            <td class="n">14</td><td class="n">185</td><td class="n">317</td><td class="n">676</td><td class="n">2</td><td class="n">100%</td><td class="n" style="color:var(--good)">93%</td><td class="n">105</td>
+          </tr>
+          <tr>
+            <td class="name">anthropics/skills</td>
+            <td class="n">20</td><td class="n">127</td><td class="n">400</td><td class="n">565</td><td class="n">1</td><td class="n">100%</td><td class="n">55%</td><td class="n">282</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size:.84rem;color:var(--ink-3);max-width:74ch">The <span class="mono">0%</span> is not an extraction artifact. The same extractor returns <span class="mono">true</span> on a control skill written to carry a trigger, and CPP's trigger words genuinely exist &mdash; they sit in a non-spec <code>trigger:</code> frontmatter key that no agent reads.</p>
+  </section>
+
+  <!-- ================= CPP SCORECARD ================= -->
+  <section style="display:flex;flex-direction:column;gap:18px">
+    <div class="prose">
+      <h2>Nine readings on claude-power-pack</h2>
+    </div>
+
+    <div class="readings">
+
+      <div class="reading">
+        <div class="axis"><span class="tag">Podjarny</span><h3>Static analysis</h3></div>
+        <div class="val"><span class="sc">3</span><span class="chip warn">ungated</span></div>
+        <div class="body">
+          <p><code>scripts/skills-check.py</code> is better than anything the comparands ship: it validates frontmatter structure, markdown links, a 200-character description ceiling, and a four-class provenance taxonomy (<span class="mono">vendored / adapted / inspired / cpp-authored</span>) with upstream author, source URL, licence and revision. Then it never runs. It is absent from <code>make verify</code> and from <code>.woodpecker.yml</code>. And the rule it most needs is the one it does not have: <strong>18 of 18</strong> skill <code>name:</code> values violate the Agent Skills specification.</p>
+          <div class="ev">$ make -n verify | grep -c skills-check.py → 0<br>$ make -n verify | grep -c check-negative-fixture → 1   (extractor works)<br><br>name: 'Code Quality'                      dir: code-quality<br>name: 'Python Packaging (PEP 621 &amp; PEP 723)'  dir: python-packaging<br>spec: 1-64 chars, [a-z0-9-] only, must match parent directory</div>
+          <p class="move"><b>To move it</b> Wire <code>skills-check</code> into <code>verify</code> and CI, add name-spec + description-shape + body-line rules, and register its known-bad case in <code>controls/</code> &mdash; it is a gate that lets work through and currently has no committed negative control.</p>
+        </div>
+      </div>
+
+      <div class="reading">
+        <div class="axis"><span class="tag">Podjarny</span><h3>Evals</h3></div>
+        <div class="val"><span class="sc z">0</span><span class="chip bad">no instrument</span></div>
+        <div class="body">
+          <p>No eval case exists anywhere in the repository. The product is 23,120 lines of command markdown that instructs an agent, and not one line of it has ever been run against a graded scenario. CPP's test suite, its negative-control registry, its binary-guard contract and its detector contracts all point at the Python and shell <em>underneath</em> the commands. The commands themselves are ungraded.</p>
+          <p style="font-size:.9rem">This is the gap the repo's own directives should find intolerable: an instrument that cannot fail is not evidence, and a surface with no instrument at all is the limiting case.</p>
+          <div class="ev">$ grep -rniE "eval.?(scenario|harness|suite)|skill.?eval" scripts/ Makefile tests/<br>(no matches)<br><br>$ claude plugin eval --help     # already installed, CLI 2.1.266<br>  --ablation with-without   run a no-plugin baseline arm, report score delta<br>  --judge-model, --max-cost-usd, --case &lt;glob&gt;, --json</div>
+          <p class="move"><b>To move it</b> The rail is already on the machine. Eight <code>case.yaml</code> files over <code>/flow:auto</code>, <code>/flow:finish</code>, <code>/flow:wave</code>, <code>/cpp:init</code> and the four <code>*:auto</code> delegations, run under <code>--ablation with-without</code>, take this from 0 to 3 and give the command surface its first negative control.</p>
+        </div>
+      </div>
+
+      <div class="reading">
+        <div class="axis"><span class="tag">Podjarny</span><h3>Security testing</h3></div>
+        <div class="val"><span class="sc">3</span><span class="chip warn">partial</span></div>
+        <div class="body">
+          <p>Strong on the supply-chain half: provenance classes on every skill, gitleaks secret-scan in CI, <code>classify-tool-risk.py</code>, an output-masking PostToolUse hook, and <code>allowed-tools</code> declared on 54 of 95 commands. Absent on the half Podjarny spends most of the section on &mdash; the skill text as attack surface. Nothing scans CPP's own instructions for the <em>negligence</em> pattern (an urged action with no boundary set) or the <em>vulnerable</em> pattern (guidance that routes a secret somewhere visible), and the command corpus has never been red-teamed.</p>
+          <p class="move"><b>To move it</b> A negligence-pattern rule in <code>skills-check</code> is cheap and mechanical: flag an imperative touching a destructive verb with no adjacent boundary clause. Red-teaming is the nascent half &mdash; he offers no prescription either.</p>
+        </div>
+      </div>
+
+      <div class="reading">
+        <div class="axis"><span class="tag">Podjarny</span><h3>Dependency management</h3></div>
+        <div class="val"><span class="sc">2</span><span class="chip warn">retreated</span></div>
+        <div class="body">
+          <p>Skills carry no version. Distribution is <code>git clone</code> plus symlinks. CPP had a marketplace and retired it &mdash; and ADR 0005 names the structural cause in its own words: <em>"CPP's marketplace plugin entries carried no <code>version</code> field&hellip; <code>/plugin update</code> compares version stamps, not the content behind them."</em> The diagnosis is exactly Podjarny's discipline failing. The remedy chosen was to leave the package-management rail rather than add the field.</p>
+          <p style="font-size:.9rem">Credit where it is due, and it is substantial: <code>codex/skills/</code> generates 75 cross-agent mirrors from the canonical command documents, drift-gated by <code>codex-skills-check</code> in CI. That is the <em>"npm doesn't care if you're on Windows"</em> goal, actually shipped &mdash; and no comparand has it.</p>
+          <div class="ev">docs/decisions/0005-retire-plugin-marketplace-distribution.md<br>  Status: Accepted · 2026-08-11 · Supersedes ADR 0001<br>  "24 of 98 command files stale and flow/wave.md absent"</div>
+          <p class="move"><b>To move it</b> Worth a revisit, not a reversal. The failure was an unversioned stamp, and the CLI has moved considerably since August &mdash; <code>plugin eval</code> and <code>plugin details</code> both target <code>plugin@marketplace</code> ids. Re-entering the rail is what makes those tools addressable.</p>
+        </div>
+      </div>
+
+      <div class="reading">
+        <div class="axis"><span class="tag">Podjarny</span><h3>Observability</h3></div>
+        <div class="val"><span class="sc hi">4</span><span class="chip good">best in set</span></div>
+        <div class="body">
+          <p>CPP wins this outright. <code>.claude/friction.jsonl</code> is a live friction ledger; <code>hook-permission-census.sh</code> observes permission requests; <code>hook-pending-retro.sh</code> enforces the retro; <code>/self-improvement:retro</code> and <code>:memory</code> close the codify loop into a shared <code>cpp_memory</code> store. None of the four comparands has anything comparable.</p>
+          <p style="font-size:.9rem">The missing fifth point is Podjarny's third use for it: mining real traces into eval scenarios. That one is blocked purely by there being no evals to mine into &mdash; the richest input in the repo feeding the emptiest discipline.</p>
+        </div>
+      </div>
+
+      <div class="reading">
+        <div class="axis"><span class="tag">Pocock 01</span><h3>Trigger</h3></div>
+        <div class="val"><span class="sc">2</span><span class="chip bad">misplaced</span></div>
+        <div class="body">
+          <p>Every one of the 18 skills has good trigger words. They are in the wrong field. <code>trigger:</code> is not part of the Agent Skills spec, so those words are never loaded; what the model sees is <code>description:</code>, and all 18 are capability statements &mdash; <em>"Code review patterns, testing, and quality best practices"</em> &mdash; describing what the skill <em>is</em> rather than when to reach for it. That is Pocock's central lever, pointed at nothing.</p>
+          <p style="font-size:.9rem">The credit is real and should not be lost: the 95 commands are correctly user-invoked and cost zero context load, and each family ships a <code>:help</code> router. That is precisely the router-skill pattern, built here before he named it.</p>
+          <div class="ev">--- .claude/skills/secrets/SKILL.md ---<br>description: Secure credential access with tiered providers…   ← model sees this<br>trigger: secrets, credentials, database password, api key…    ← model never sees this</div>
+          <p class="move"><b>To move it</b> Fold each <code>trigger:</code> list into its <code>description:</code> as a "Use when&hellip;" clause, and fix the 18 names in the same pass. One afternoon; takes this axis from 2 to 5.</p>
+        </div>
+      </div>
+
+      <div class="reading">
+        <div class="axis"><span class="tag">Pocock 02</span><h3>Structure</h3></div>
+        <div class="val"><span class="sc">2</span><span class="chip warn">sprawl</span></div>
+        <div class="body">
+          <p>The skills are right: thin routers that read one file out of <code>docs/skills/</code>, median 30 lines. The commands are where the sprawl is &mdash; median 138, p90 439, ten over the 500-line bar, and <code>cpp/init.md</code> at 2,003 lines carrying every branch inline. Being user-invoked means that cost lands per invocation rather than per turn, which is genuinely cheaper, but Pocock's point about sprawl is about attention, not tokens: it thins across the excess regardless of when it loads. 26 of 95 carry no frontmatter at all.</p>
+          <div class="ev">2003  .claude/commands/cpp/init.md<br>1580  .claude/commands/cpp/update.md<br>1423  .claude/commands/flow/auto.md<br>1204  .claude/commands/flow/register.md</div>
+          <p class="move"><b>To move it</b> Branch-split the top four. <code>cpp/init.md</code> is a sequence of independent host-artifact installers &mdash; each one is a branch only some runs reach, which is the textbook disclosure test.</p>
+        </div>
+      </div>
+
+      <div class="reading">
+        <div class="axis"><span class="tag">Pocock 03</span><h3>Steering</h3></div>
+        <div class="val"><span class="sc hi">4</span><span class="chip good">strong</span></div>
+        <div class="body">
+          <p>CPP uses the lever better than any comparand and arrived at it independently. <em>Instrument</em>, <em>negative control</em>, <em>blind</em>, <em>fail-open</em>, <em>counter-model</em>, <em>detector contract</em> are leading words in exactly his sense &mdash; compact, repeated as tokens, defined once in <code>docs/agents/glossary.md</code>, anchoring a whole region of behaviour. The completion criteria in <code>flow-finish-gate.sh</code> and the ADR 0008 bound are checkable and exhaustive, which is his highest bar.</p>
+          <p style="font-size:.9rem">The one deduction is negation density. <code>CLAUDE.md</code> steers heavily by prohibition &mdash; <em>never output</em>, <em>never wrap</em>, <em>never substitute</em> &mdash; which he argues drags the forbidden behaviour into context. He permits it for hard guardrails, and most of CPP's are; the fix where it applies is to pair each with its positive target.</p>
+        </div>
+      </div>
+
+      <div class="reading">
+        <div class="axis"><span class="tag">Pocock 04</span><h3>Pruning</h3></div>
+        <div class="val"><span class="sc">3</span><span class="chip warn">sediment</span></div>
+        <div class="body">
+          <p>The discipline exists and is enforced where it was aimed: <code>claude-md-budget-check</code> holds the always-loaded file to a budget, <code>knowledge-graduation-check.py</code> graduates completed specs out, and <em>"keep one inventory item per line"</em> is the single-source-of-truth rule stated outright. It was aimed at <code>CLAUDE.md</code> and not at the command corpus, which is where the sediment settled &mdash; 23,120 lines, a 2,003-line worst case, and a 109 KB changelog.</p>
+          <p class="move"><b>To move it</b> Extend the budget check from <code>CLAUDE.md</code> to <code>.claude/commands/**</code> with a per-file line ceiling. The rule is already written; only its input population is too narrow.</p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ================= CANDIDATES ================= -->
+  <section style="display:flex;flex-direction:column;gap:18px">
+    <div class="prose">
+      <h2>Is there something to buy instead?</h2>
+      <p style="color:var(--ink-2);font-size:.95rem">Two questions, and they have to be answered together: does the candidate clear the Podjarny and Pocock bar, and does it do what CPP is for? Everything that clears the bar fails the second question.</p>
+    </div>
+
+    <div class="scroller">
+      <table>
+        <thead>
+          <tr>
+            <th>Candidate</th>
+            <th class="n">Podjarny /25</th>
+            <th class="n">Pocock /20</th>
+            <th class="n">Total /45</th>
+            <th class="n">CPP goals /7</th>
+            <th>What it actually is</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="name">tessl registry + lint/review/task-evals</td>
+            <td class="n" style="color:var(--good)">24</td>
+            <td class="n">n/a</td>
+            <td class="n">&mdash;</td>
+            <td class="n" style="color:var(--bad)">0</td>
+            <td>The grader, not the toolkit. Quality score, malicious/negligence/vulnerable scanning, with/without task evals. Complements CPP; substitutes for nothing in it.</td>
+          </tr>
+          <tr>
+            <td class="name">anthropics/skills</td>
+            <td class="n">16</td><td class="n">14</td><td class="n">30</td>
+            <td class="n" style="color:var(--bad)">0</td>
+            <td>The reference implementation for craft. <code>skill-creator</code> ships <code>run_eval.py</code> and an eval viewer &mdash; worth reading as the eval template. Document skills otherwise; no workflow layer.</td>
+          </tr>
+          <tr>
+            <td class="name">mattpocock/skills</td>
+            <td class="n">9</td>
+            <td class="n" style="color:var(--good)">20</td>
+            <td class="n">29</td>
+            <td class="n">2</td>
+            <td>Best-in-world skill craft and the only comparand with real semver, changesets and a cross-agent manifest. Covers the spec&rarr;tickets&rarr;implement&rarr;TDD lane. No CI/CD, secrets, security scanning or orchestration.</td>
+          </tr>
+          <tr>
+            <td class="name">claude code native (2.1.266)</td>
+            <td class="n">15</td><td class="n">n/a</td><td class="n">&mdash;</td>
+            <td class="n" style="color:var(--bad)">0</td>
+            <td>The rails, already installed. <code>plugin eval</code> with ablation, <code>plugin details</code> token projection, marketplaces, <code>/skill-doctor</code>. Supplies three of CPP's five weakest disciplines for free.</td>
+          </tr>
+          <tr>
+            <td class="name">obra/superpowers</td>
+            <td class="n">10</td><td class="n">14</td><td class="n">24</td>
+            <td class="n">2</td>
+            <td>Closest in ambition: worktrees, parallel-agent dispatch, TDD, verification-before-completion. Thinner than CPP on every ops dimension and 93% trigger-shaped where CPP is 0%.</td>
+          </tr>
+          <tr class="is-subject">
+            <td class="name">claude-power-pack 7.5.0</td>
+            <td class="n">12</td><td class="n">11</td><td class="n">23</td>
+            <td class="n" style="color:var(--good)">7</td>
+            <td>The only artifact in the set that covers all seven goals. It is alone in its scope &mdash; which is both why it exists and why nothing external has ever validated its surface.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="prose" style="max-width:74ch">
+      <p style="font-size:.95rem;color:var(--ink-2)">The seven goals scored: issue-driven lifecycle with worktrees and gates; multi-agent wave orchestration; CI/CD generation and deploy verification; secrets management; security scanning; multi-model review; project scaffolding. <strong style="color:var(--ink)">No candidate exceeds two.</strong> The honest reading of the market is that the craft leaders built narrow, sharp tools and the discipline leader built a grading service &mdash; and CPP built the wide thing nobody else attempted, then graded everything about it except the thing itself.</p>
+    </div>
+  </section>
+
+  <!-- ================= MOVES ================= -->
+  <section style="display:flex;flex-direction:column;gap:18px">
+    <div class="prose">
+      <h2>What actually closes it</h2>
+      <p style="color:var(--ink-2);font-size:.95rem">Ordered by points recovered per unit of effort. The first three are a week and take the score from 23 to roughly 33.</p>
+    </div>
+    <div class="moves">
+
+      <div class="move-card">
+        <div class="mh"><h3>Give the command surface an instrument</h3><span class="chip flat">evals 0 → 3</span><span class="chip good">rail installed</span></div>
+        <p>Create <code>evals/</code> with <code>case.yaml</code> scenarios for the eight load-bearing commands. Run <code>claude plugin eval --ablation with-without</code> so each case reports the delta against a no-plugin arm &mdash; that delta <em>is</em> the negative control the command surface has never had, and it is the same measurement Tessl sells as Task Evals.</p>
+      </div>
+
+      <div class="move-card">
+        <div class="mh"><h3>Move the triggers into the field the model reads</h3><span class="chip flat">trigger 2 → 5</span><span class="chip flat">one afternoon</span></div>
+        <p>Fold each <code>trigger:</code> list into <code>description:</code> as a "Use when&hellip;" clause, and fix all 18 <code>name:</code> values to the spec's <code>[a-z0-9-]</code> matching their parent directory. This is the highest-leverage edit on the page: the words already exist and are simply unreadable where they sit.</p>
+      </div>
+
+      <div class="move-card">
+        <div class="mh"><h3>Gate the checker you already wrote</h3><span class="chip flat">static 3 → 4</span></div>
+        <p>Add <code>skills-check</code> to <code>verify</code> and to <code>.woodpecker.yml</code>, extend it with name-spec, description-shape and a body-line ceiling, and register its known-bad case in <code>controls/</code>. It is a gate that lets work through, so by ADR 0008's own bound it needs a committed negative control &mdash; and today it has neither the control nor a run.</p>
+      </div>
+
+      <div class="move-card">
+        <div class="mh"><h3>Version the skills; revisit the rail</h3><span class="chip flat">deps 2 → 4</span></div>
+        <p>Add <code>metadata.version</code> per skill. ADR 0005's structural cause was a missing version field, not the marketplace model, and the CLI has moved since August &mdash; both <code>plugin eval</code> and <code>plugin details</code> address a <code>plugin@marketplace</code> id. Re-entering the rail is what makes CPP measurable by the tools that now exist.</p>
+      </div>
+
+      <div class="move-card">
+        <div class="mh"><h3>Branch-split the four largest commands</h3><span class="chip flat">structure 2 → 4</span></div>
+        <p><code>cpp/init.md</code>, <code>cpp/update.md</code>, <code>flow/auto.md</code>, <code>flow/register.md</code> &mdash; 6,210 lines between them. Each is a set of branches only some runs reach, which is exactly the test for pushing material behind a context pointer.</p>
+      </div>
+
+      <div class="move-card">
+        <div class="mh"><h3>Mine the friction ledger into eval scenarios</h3><span class="chip flat">observability 4 → 5</span><span class="chip flat">needs 01 first</span></div>
+        <p>Podjarny's third use for observability, and CPP is the only project in this comparison that already has the input. <code>friction.jsonl</code> plus the permission census is a stream of real failures with no graded destination; once <code>evals/</code> exists, the retro loop can write cases into it.</p>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ================= METHOD ================= -->
+  <details class="method">
+    <summary>Method, and what would have made this report wrong</summary>
+    <div class="inner">
+      <p>Every number above comes from one extractor run over all six surfaces. Before it was trusted, it was run against a committed pair: a skill written to pass and a skill written to fail. It reported the opposite verdict on each, so a zero from it is a measurement rather than a silence.</p>
+      <pre>bad-skill    fm=False  desc_len=   0  trigger=False  body_lines= 902  refs=0
+good-skill   fm=True   desc_len=  76  trigger=True   body_lines=   2  refs=1</pre>
+      <p>The two absence claims were controlled separately, because a broken extractor's zeros look exactly like real ones:</p>
+      <pre># claim: skills-check is unreachable from verify
+$ make -n verify | grep -c skills-check.py        → 0
+$ make -n verify | grep -c check-negative-fixture → 1   # extractor is live
+
+# claim: 18/18 names violate the spec
+$ check('code-quality',  dir='code-quality') → True
+$ check('Code Quality',  dir='code-quality') → False    # rule can say yes</pre>
+      <p>The Podjarny framework was not taken from conference write-ups. It was read from the talk's own companion skill in the AI Native Dev repository, which ships the outline, the verbatim quote set and the full transcript &mdash; so the five disciplines and the three risk classes are his words, not a summariser's. The Pocock checklist was read from the maintained <code>writing-for-agents</code> skill rather than the video, since the video's four headings have since been superseded by a longer written form.</p>
+      <p>Scores are judgement applied to measurement, on a 0&ndash;5 scale per axis. They are defensible, not objective; the measurements underneath them are reproducible and are what should be argued with.</p>
+    </div>
+  </details>
+
+  <!-- ================= SOURCES ================= -->
+  <section style="display:flex;flex-direction:column;gap:14px">
+    <div class="eyebrow">Primary sources</div>
+    <div class="sources">
+      <div><span class="who">Guy Podjarny, Tessl</span><span class="what">"Skills are the new Code" &mdash; AI Native DevCon London, 1 June 2026. Read via AINativeDev/aidevcon-2026-ldn (outline, quotes, transcript).</span></div>
+      <div><span class="who">Matt Pocock</span><span class="what">"Building Great Agent Skills: The Missing Manual" + mattpocock/skills → writing-for-agents/SKILL.md and SKILL-MECHANICS.md.</span></div>
+      <div><span class="who">Agent Skills specification</span><span class="what">agentskills.io/specification &mdash; name and description field constraints, progressive-disclosure tiers, 500-line body guidance.</span></div>
+      <div><span class="who">Tessl</span><span class="what">State of the AI Coding Stack, DevCon London 2026; Task Evals launch (with/without outcome comparison).</span></div>
+      <div><span class="who">Claude Code 2.1.266</span><span class="what">claude plugin eval / details / init &mdash; ablation arms, token projection, scaffolding.</span></div>
+      <div><span class="who">claude-power-pack 7.5.0</span><span class="what">Working tree at /home/cooneycw/Projects/claude-power-pack, 15 Sep 2026. ADR 0005, ADR 0008, skills-check.py, Makefile, .woodpecker.yml.</span></div>
+    </div>
+  </section>
+
+  <footer>
+    One caveat worth stating plainly: the Podjarny score is a measure of lifecycle machinery, and lifecycle machinery is what Tessl sells. The five disciplines are a fair frame &mdash; they are genuinely the ones code has &mdash; but a single-owner repository is not the unicorn with seven untrusted skills in a shared folder, and it should not buy the governance layer that story argues for. The evals gap is real on its own terms and would be real if he had never given the talk. The registry gap mostly is not.
+  </footer>
+
+</div>
