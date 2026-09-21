@@ -13,6 +13,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import records
 from .spec import (
     BODY_LINE_BUDGET,
     COMPATIBILITY_MAX,
@@ -146,6 +147,54 @@ RULES: tuple[Rule, ...] = (
 )
 
 RULES_BY_ID = {rule.id: rule for rule in RULES}
+
+
+@dataclass(frozen=True)
+class RecordRule:
+    """A rule whose subject is an evaluation record rather than a SKILL.md.
+
+    It is a SEPARATE type so `Rule.check` is not loosened to a union for the sake
+    of one new family - but it is NOT a separate machinery. `selftest` keeps one
+    coverage check, one counter and one exit code over `ALL_RULES`, and dispatches
+    only where the subject is loaded. Splitting the guarantee that "a check with no
+    control is UNPROVEN" across two arms is how one arm later goes unenforced.
+    """
+
+    id: str
+    severity: str
+    summary: str
+    check: Callable[[records.Record], Iterator[str]]
+
+
+RECORD_RULES: tuple[RecordRule, ...] = (
+    RecordRule("record-envelope", ERROR, "record declares a version this build can read",
+               records.record_envelope),
+    RecordRule("attempt-binding", ERROR, "record cites the attempt it belongs to",
+               records.attempt_binding),
+    RecordRule("artifact-digest", ERROR, "every captured artifact carries its identity",
+               records.artifact_digest),
+    RecordRule("criterion-vocabulary", ERROR, "criteria use the specified outcomes",
+               records.criterion_vocabulary),
+    RecordRule("derived-status", ERROR, "status follows from the criteria, not from a claim",
+               records.derived_status),
+)
+
+#: ONE registry. `selftest` iterates this; the coverage check, the totals and the
+#: exit code never learn which family a rule came from.
+ALL_RULES: tuple[Rule | RecordRule, ...] = RULES + RECORD_RULES
+
+
+def run_record(record: records.Record, only: str | None = None) -> list[Finding]:
+    """Apply every record rule (or one) to a single record."""
+    findings: list[Finding] = []
+    for rule in RECORD_RULES:
+        if only and rule.id != only:
+            continue
+        findings.extend(
+            Finding(rule.id, rule.severity, record.path, detail)
+            for detail in rule.check(record)
+        )
+    return findings
 
 
 def run(skill: Skill, only: str | None = None) -> list[Finding]:
