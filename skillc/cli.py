@@ -16,7 +16,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import checks
+from . import checks, records
 from .checks import ERROR, Finding
 from .spec import discover
 
@@ -58,6 +58,39 @@ def cmd_check(args: argparse.Namespace) -> int:
     return 1 if errors else 0
 
 
+def cmd_check_records(args: argparse.Namespace) -> int:
+    """Refuse evaluation records the contract rejects.
+
+    What a green here means, and it is deliberately narrower than it looks:
+    the records are WELL FORMED AND INTERNALLY CONSISTENT. It does not mean the
+    result is true. Every run says so, including the passing ones, because a line
+    that only appears on failure is a line nobody reads before quoting the green.
+    """
+    root = Path(args.path).resolve()
+    if not root.exists():
+        print(f"skillc: no such path: {root}", file=sys.stderr)
+        return 2
+
+    found = records.discover(root)
+    if not found:
+        # An empty population must not render as a clean one (AGENTS.md).
+        print(f"skillc: no record found under {root} - nothing was checked")
+        return 2
+
+    findings: list[Finding] = []
+    for record in found:
+        findings.extend(checks.run_record(record, only=args.rule))
+
+    base = root if root.is_dir() else root.parent
+    for finding in findings:
+        print(finding.render(base))
+
+    errors = sum(1 for f in findings if f.severity == ERROR)
+    print(f"\nskillc: {len(found)} record(s) checked, {errors} error(s)")
+    print(f"skillc: examined {records.WHAT_WAS_EXAMINED}")
+    return 1 if errors else 0
+
+
 def cmd_selftest(args: argparse.Namespace) -> int:
     """Each rule must fire on its committed bad case and stay silent on its good one."""
     root = _controls_root(args.controls)
@@ -65,19 +98,29 @@ def cmd_selftest(args: argparse.Namespace) -> int:
         print(f"skillc: controls directory absent: {root}", file=sys.stderr)
         return 2
 
-    width = max(len(rule.id) for rule in checks.RULES)
+    width = max(len(rule.id) for rule in checks.ALL_RULES)
     failures = 0
     unproven = 0
 
-    for rule in checks.RULES:
+    # ONE loop over ONE registry. The coverage check below is subject-agnostic - it
+    # asks whether a control directory exists, keyed on rule.id - and so are the
+    # counters and the exit code. Only the subject-LOADING step below knows which
+    # family a rule belongs to. Giving record rules their own loop would give the
+    # repository's central guarantee two places to be enforced, and one of them
+    # would eventually stop being.
+    for rule in checks.ALL_RULES:
         bad_dir, good_dir = root / rule.id / "bad", root / rule.id / "good"
         if not bad_dir.is_dir() or not good_dir.is_dir():
             print(f"UNPROVEN {rule.id:{width}}  no committed control - this rule is not evidence")
             unproven += 1
             continue
 
-        bad = [f for s in discover(bad_dir) for f in checks.run(s, only=rule.id)]
-        good = [f for s in discover(good_dir) for f in checks.run(s, only=rule.id)]
+        if isinstance(rule, checks.RecordRule):
+            bad = [f for r in records.discover(bad_dir) for f in checks.run_record(r, only=rule.id)]
+            good = [f for r in records.discover(good_dir) for f in checks.run_record(r, only=rule.id)]
+        else:
+            bad = [f for s in discover(bad_dir) for f in checks.run(s, only=rule.id)]
+            good = [f for s in discover(good_dir) for f in checks.run(s, only=rule.id)]
 
         if not bad:
             print(f"BLIND    {rule.id:{width}}  silent on its known-bad input")
@@ -88,7 +131,7 @@ def cmd_selftest(args: argparse.Namespace) -> int:
         else:
             print(f"ok       {rule.id:{width}}  red on bad ({len(bad)}), green on good")
 
-    total = len(checks.RULES)
+    total = len(checks.ALL_RULES)
     print(f"\nskillc selftest: {total - failures - unproven}/{total} rule(s) discriminate", end="")
     if unproven:
         print(f", {unproven} unproven", end="")
@@ -97,8 +140,8 @@ def cmd_selftest(args: argparse.Namespace) -> int:
 
 
 def cmd_rules(args: argparse.Namespace) -> int:
-    width = max(len(rule.id) for rule in checks.RULES)
-    for rule in checks.RULES:
+    width = max(len(rule.id) for rule in checks.ALL_RULES)
+    for rule in checks.ALL_RULES:
         print(f"{rule.severity:5}  {rule.id:{width}}  {rule.summary}")
     return 0
 
@@ -119,6 +162,13 @@ def main(argv: list[str] | None = None) -> int:
     p_self = sub.add_parser("selftest", help="prove every rule can report the other verdict")
     p_self.add_argument("--controls", help="controls directory (default: the shipped one)")
     p_self.set_defaults(func=cmd_selftest)
+
+    p_records = sub.add_parser(
+        "check-records", help="refuse evaluation records the contract rejects"
+    )
+    p_records.add_argument("path", help="file or directory of records")
+    p_records.add_argument("--rule", help="run a single rule")
+    p_records.set_defaults(func=cmd_check_records)
 
     p_rules = sub.add_parser("rules", help="list the rules")
     p_rules.set_defaults(func=cmd_rules)
