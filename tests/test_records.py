@@ -57,9 +57,23 @@ def test_each_bad_case_fires_ITS_OWN_rule_and_NOTHING_ELSE(rule: object) -> None
 
     THE ONE PLACE ATTRIBUTION COULD ACTUALLY FAIL is `checks.run`, which returns a
     `frontmatter` Finding and RETURNS EARLY, before the `only` filter, when a
-    SKILL.md does not parse. So a bad case that is merely unparseable would make
-    ANY rule report red on its own input without that rule having anything to say.
-    No current bad case is unparseable - measured - and this case pins that.
+    SKILL.md does not parse. So a bad case that is merely unparseable makes ANY
+    rule report red on its own input without that rule having anything to say.
+    Demonstrated: with one bad case replaced by a file carrying no frontmatter,
+    `run(skill, only="name-spec")` returns a finding whose rule is `frontmatter`,
+    and `skillc selftest` prints `ok name-spec  red on bad (1)` and `11/11 rule(s)
+    discriminate` - a green over a rule that contributed nothing.
+
+    WHY THIS GUARDS THE PAIRING INSTEAD OF REORDERING `run`, because someone will
+    otherwise "simplify" it by moving the filter above the early return: that early
+    `frontmatter` finding is CORRECT for `run`'s other caller. `skillc check`
+    genuinely wants to hear that a file will not parse, and wants to hear it before
+    any rule opinion. Narrowing `run`'s contract to fix one caller's misuse would
+    change behaviour for a caller that wants exactly what it currently gets.
+    Guarding the misuse keeps the blast radius at this one call site.
+
+    No current bad case is unparseable - measured across all eleven - and this
+    case is what keeps that true.
     """
     bad_dir = CONTROLS / rule.id / "bad"
     assert bad_dir.is_dir(), f"{rule.id} ships no bad case"
