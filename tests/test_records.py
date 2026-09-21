@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from skillc import checks, cli, records
+from skillc.spec import discover
 
 CONTROLS = Path(__file__).resolve().parent.parent / "controls"
 
@@ -41,18 +42,46 @@ def test_every_record_rule_discriminates(rule: checks.RecordRule) -> None:
     assert not good, f"{rule.id} fired on its known-good input: {good[0].detail}"
 
 
-@pytest.mark.parametrize("rule", checks.RECORD_RULES, ids=lambda r: r.id)
-def test_each_bad_case_fires_ITS_OWN_rule_and_no_other(rule: checks.RecordRule) -> None:
-    """`selftest` asks "red on bad" - it does not ask WHICH rule went red.
+@pytest.mark.parametrize("rule", checks.ALL_RULES, ids=lambda r: r.id)
+def test_each_bad_case_fires_ITS_OWN_rule_and_NOTHING_ELSE(rule: object) -> None:
+    """Every rule in the repository, not only the record family.
 
-    A bad case that trips a neighbour satisfies the pairing while proving nothing
-    about the rule it was written for, and the two are indistinguishable in a
-    green selftest.
+    WHAT SELFTEST ALREADY DOES, stated precisely because it is easy to overstate:
+    it passes `only=rule.id`, so a neighbour's findings are FILTERED OUT and a
+    neighbour firing cannot satisfy the pairing. Attribution is already enforced.
+
+    WHAT IT DOES NOT DO, and what this adds: it never asks whether the bad case
+    ALSO trips other rules. A bad case that trips three rules still proves its own,
+    but it is not minimal, and a later edit that fixes the incidental defect can
+    silently change what the case is testing.
+
+    THE ONE PLACE ATTRIBUTION COULD ACTUALLY FAIL is `checks.run`, which returns a
+    `frontmatter` Finding and RETURNS EARLY, before the `only` filter, when a
+    SKILL.md does not parse. So a bad case that is merely unparseable would make
+    ANY rule report red on its own input without that rule having anything to say.
+    No current bad case is unparseable - measured - and this case pins that.
     """
     bad_dir = CONTROLS / rule.id / "bad"
-    fired = sorted({f.rule for r in records.discover(bad_dir) for f in checks.run_record(r)})
+    assert bad_dir.is_dir(), f"{rule.id} ships no bad case"
+
+    if isinstance(rule, checks.RecordRule):
+        found = records.discover(bad_dir)
+        own = [f for r in found for f in checks.run_record(r, only=rule.id)]
+        every = [f for r in found for f in checks.run_record(r)]
+    else:
+        found = discover(bad_dir)
+        own = [f for sk in found for f in checks.run(sk, only=rule.id)]
+        every = [f for sk in found for f in checks.run(sk)]
+
+    assert own, f"{rule.id} is silent on its own known-bad input"
+    assert not any(f.rule == "frontmatter" for f in own), (
+        f"{rule.id}'s bad case does not parse, so the frontmatter early return - not "
+        f"the rule - is what makes selftest see red. The rule is unproven."
+    )
+    fired = sorted({f.rule for f in every})
     assert fired == [rule.id], (
-        f"{rule.id}'s bad case fires {fired} - it does not discriminate for its own reason"
+        f"{rule.id}'s bad case also trips {sorted(set(fired) - {rule.id})}; it is not "
+        f"minimal, so a later fix to the incidental defect would change what it tests"
     )
 
 
