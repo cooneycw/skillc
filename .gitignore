@@ -8,3 +8,12 @@ dist/
 build/
 *.egg-info/
 evals/results/
+
+# Secrets. Nothing here is tracked; this keeps it that way (#23).
+.env
+.env.*
+*.pem
+*.key
+*.p12
+secrets.*
+.claude/security.yml
