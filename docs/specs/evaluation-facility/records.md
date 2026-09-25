@@ -86,11 +86,11 @@ compute - and could not refuse the forgery it exists to refuse.
 ## Rules and their controls
 
 Each rule below ships a committed pair under `controls/<rule-id>/{bad,good}/`, per
-ADR 0001. `skillc selftest` reports `BLIND`, `NOISY` or `UNPROVEN` and fails the run.
+ADR 0001. `skillc selftest` reports `BLIND`, `NOISY`, `EMPTY`, `UNPARSED` or `UNPROVEN` and fails the run.
 
 | Rule | Refuses |
 |---|---|
-| `record-envelope` | an unreadable record, a missing or non-integer version, a version newer than this build, an unknown kind |
+| `record-envelope` | an unreadable record, a missing or non-integer version, a version newer than this build, an unknown kind. It is the record family's parser control: its known-bad input includes an unreadable record (`bad/unreadable.json`) |
 | `attempt-binding` | a record citing no attempt |
 | `artifact-digest` | an artifact entry missing `path`, `type`, `size` or `digest`; an empty manifest |
 | `criterion-vocabulary` | an outcome outside `SATISFIED` / `VIOLATED` / `UNKNOWN` |

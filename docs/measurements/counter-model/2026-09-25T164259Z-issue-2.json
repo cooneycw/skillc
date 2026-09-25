@@ -1,0 +1,20 @@
+{
+  "branch": "issue-2-prevent-false-certification-in-selftest-and-unknow",
+  "counts": {
+    "accepted": 1,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "0634323bb29898a357a803ee3bc45824d652d89f",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "2",
+  "passes": 2,
+  "recorded_at": "2026-09-25T16:42:59Z",
+  "red_cases": {
+    "already_covered": 11,
+    "proposed": 12
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "schema": 1,
+  "status": "ran"
+}

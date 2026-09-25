@@ -57,10 +57,24 @@ class Finding:
 
 @dataclass(frozen=True)
 class Rule:
+    """A rule whose subject is one SKILL.md.
+
+    `parser` is the explicit expectation for the one kind of rule allowed to be
+    proven by input that does not parse. A semantic rule (`parser=False`) must be
+    proven on subjects that DO parse, or a parse failure could stand in for it;
+    a parser rule must be proven on at least one subject that does NOT.
+    """
+
     id: str
     severity: str
     summary: str
     check: Callable[[Skill], Iterator[str]]
+    parser: bool = False
+
+
+def _frontmatter(skill: Skill) -> Iterator[str]:
+    if skill.parse_error is not None:
+        yield skill.parse_error
 
 
 def _name_spec(skill: Skill) -> Iterator[str]:
@@ -144,7 +158,12 @@ RULES: tuple[Rule, ...] = (
     Rule("unknown-field", WARN, "no content parked in a field nothing loads", _unknown_field),
     Rule("body-budget", WARN, "SKILL.md body stays inside the line budget", _body_budget),
     Rule("ref-depth", WARN, "references stay one level deep", _ref_depth),
+    Rule("frontmatter", ERROR, "frontmatter is present and parses", _frontmatter, parser=True),
 )
+
+#: The parser rule. `run` applies ONLY this rule to a SKILL.md that did not parse,
+#: whichever rule was asked for - no other rule has anything to read.
+PARSER_RULE = "frontmatter"
 
 RULES_BY_ID = {rule.id: rule for rule in RULES}
 
@@ -164,11 +183,12 @@ class RecordRule:
     severity: str
     summary: str
     check: Callable[[records.Record], Iterator[str]]
+    parser: bool = False
 
 
 RECORD_RULES: tuple[RecordRule, ...] = (
     RecordRule("record-envelope", ERROR, "record declares a version this build can read",
-               records.record_envelope),
+               records.record_envelope, parser=True),
     RecordRule("attempt-binding", ERROR, "record cites the attempt it belongs to",
                records.attempt_binding),
     RecordRule("artifact-digest", ERROR, "every captured artifact carries its identity",
@@ -184,8 +204,20 @@ RECORD_RULES: tuple[RecordRule, ...] = (
 ALL_RULES: tuple[Rule | RecordRule, ...] = RULES + RECORD_RULES
 
 
+def require_known(only: str | None, family: tuple[Rule, ...] | tuple[RecordRule, ...]) -> None:
+    """An unknown selector is a caller error, never a request to check nothing.
+
+    Filtering by an id that matches no rule used to return zero findings, which
+    reads exactly like a clean run.
+    """
+    if only is not None and all(rule.id != only for rule in family):
+        known = ", ".join(rule.id for rule in family)
+        raise ValueError(f"unknown rule {only!r}; known rules: {known}")
+
+
 def run_record(record: records.Record, only: str | None = None) -> list[Finding]:
     """Apply every record rule (or one) to a single record."""
+    require_known(only, RECORD_RULES)
     findings: list[Finding] = []
     for rule in RECORD_RULES:
         if only and rule.id != only:
@@ -198,13 +230,20 @@ def run_record(record: records.Record, only: str | None = None) -> list[Finding]
 
 
 def run(skill: Skill, only: str | None = None) -> list[Finding]:
-    """Apply every rule (or one) to a single skill."""
+    """Apply every rule (or one) to a single skill.
+
+    A SKILL.md that does not parse gets the parser rule's finding and nothing
+    else, WHICHEVER rule was selected: `skillc check --rule name-spec` must still
+    hear that the file is unreadable. That is also why a finding's `rule` - not
+    its presence - is what `selftest` credits (tests/test_records.py).
+    """
+    require_known(only, RULES)
     if skill.parse_error is not None:
-        return [Finding("frontmatter", ERROR, skill.path, skill.parse_error)]
+        selected = [rule for rule in RULES if rule.id == PARSER_RULE]
+    else:
+        selected = [rule for rule in RULES if not only or rule.id == only]
     findings: list[Finding] = []
-    for rule in RULES:
-        if only and rule.id != only:
-            continue
+    for rule in selected:
         findings.extend(
             Finding(rule.id, rule.severity, skill.path, detail) for detail in rule.check(skill)
         )

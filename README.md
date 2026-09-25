@@ -59,23 +59,33 @@ known-bad and known-good pair:
 
 ```
 $ skillc selftest
-ok       name-spec        red on bad (2), green on good
-ok       required-fields  red on bad (1), green on good
-ok       trigger-shape    red on bad (1), green on good
-ok       unknown-field    red on bad (1), green on good
-ok       body-budget      red on bad (1), green on good
-ok       ref-depth        red on bad (1), green on good
+ok       name-spec             red on bad (2), green on good (1)
+ok       required-fields       red on bad (1), green on good (1)
+ok       trigger-shape         red on bad (1), green on good (1)
+ok       unknown-field         red on bad (1), green on good (1)
+ok       body-budget           red on bad (1), green on good (1)
+ok       ref-depth             red on bad (1), green on good (1)
+ok       frontmatter           red on bad (1), green on good (1)
+ok       record-envelope       red on bad (2), green on good (1)
+...
 
-skillc selftest: 6/6 rule(s) discriminate
+skillc selftest: 12/12 rule(s) discriminate
 ```
 
-Three verdicts fail the run:
+Five verdicts fail the run:
 
 | verdict | meaning |
 |---|---|
-| `BLIND` | the rule stayed silent on its own known-bad input |
+| `BLIND` | the rule stayed silent on a known-bad input |
 | `NOISY` | the rule fired on its known-good input |
+| `EMPTY` | a control directory holds no input, so that side proves nothing |
+| `UNPARSED` | a control input does not parse, so the parser - not the rule - decided it |
 | `UNPROVEN` | no committed control exists, so nothing has shown the rule can fail |
+
+Only findings the rule under test raised count as red. Two rules are parser
+controls (`frontmatter`, `record-envelope`): their known-bad input must include
+one that does not parse. Every other rule must be shown red and green on input
+that does.
 
 `UNPROVEN` is the one that matters. A rule with no control is not treated as
 passing, because absence of a control is not evidence of correctness.
@@ -94,7 +104,12 @@ warn   trigger-shape    description says when to fire, not just what it does
 warn   unknown-field    no content parked in a field nothing loads
 warn   body-budget      SKILL.md body stays inside the line budget
 warn   ref-depth        references stay one level deep
+error  frontmatter      frontmatter is present and parses
 ```
+
+(`skillc rules` also lists the evaluation-record rules checked by
+`skillc check-records`.) An unknown `--rule` is refused with exit 2 before
+anything is scanned; a selector that matched nothing used to read as a clean run.
 
 `error` means the checker rejects it under its format rules. `warn` flags a
 heuristic concern; it does not prove poorer agent performance. `--strict` makes

@@ -57,14 +57,14 @@ def test_each_bad_case_fires_ITS_OWN_rule_and_NOTHING_ELSE(
     but it is not minimal, and a later edit that fixes the incidental defect can
     silently change what the case is testing.
 
-    THE ONE PLACE ATTRIBUTION COULD ACTUALLY FAIL is `checks.run`, which returns a
-    `frontmatter` Finding and RETURNS EARLY, before the `only` filter, when a
-    SKILL.md does not parse. So a bad case that is merely unparseable makes ANY
-    rule report red on its own input without that rule having anything to say.
-    Demonstrated: with one bad case replaced by a file carrying no frontmatter,
-    `run(skill, only="name-spec")` returns a finding whose rule is `frontmatter`,
-    and `skillc selftest` prints `ok name-spec  red on bad (1)` and `11/11 rule(s)
-    discriminate` - a green over a rule that contributed nothing.
+    THE ONE PLACE ATTRIBUTION COULD FAIL is `checks.run`, which answers a SKILL.md
+    that does not parse with the `frontmatter` finding alone, whichever rule was
+    selected. Before #2, selftest counted any finding, so an unparseable bad case
+    made ANY rule red on its own input: with `name-spec` blinded and its bad case
+    replaced by a file carrying no frontmatter, selftest printed `ok name-spec` and
+    `11/11 rule(s) discriminate` - a green over a rule that contributed nothing.
+    Selftest now refuses that itself (UNPARSED) and credits only findings whose
+    `rule` is the rule under test; this case keeps the SHIPPED controls minimal.
 
     WHY THIS GUARDS THE PAIRING INSTEAD OF REORDERING `run`, because someone will
     otherwise "simplify" it by moving the filter above the early return: that early
@@ -74,8 +74,8 @@ def test_each_bad_case_fires_ITS_OWN_rule_and_NOTHING_ELSE(
     change behaviour for a caller that wants exactly what it currently gets.
     Guarding the misuse keeps the blast radius at this one call site.
 
-    No current bad case is unparseable - measured across all eleven - and this
-    case is what keeps that true.
+    No semantic rule's bad case is unparseable, and this case keeps that true. The
+    parser rules (`frontmatter`, `record-envelope`) are exempt by declaration.
     """
     bad_dir = CONTROLS / rule.id / "bad"
     assert bad_dir.is_dir(), f"{rule.id} ships no bad case"
@@ -90,7 +90,9 @@ def test_each_bad_case_fires_ITS_OWN_rule_and_NOTHING_ELSE(
         every = [f for sk in skills for f in checks.run(sk)]
 
     assert own, f"{rule.id} is silent on its own known-bad input"
-    assert not any(f.rule == "frontmatter" for f in own), (
+    # A parser rule is proven BY input that does not parse; that is its explicit
+    # expectation, and selftest checks it (UNPARSED). Every other rule must not be.
+    assert rule.parser or not any(f.rule == "frontmatter" for f in own), (
         f"{rule.id}'s bad case does not parse, so the frontmatter early return - not "
         f"the rule - is what makes selftest see red. The rule is unproven."
     )

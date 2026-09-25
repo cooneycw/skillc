@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import checks, records
@@ -27,7 +28,23 @@ def _controls_root(explicit: str | None) -> Path:
     return Path(__file__).resolve().parent.parent / "controls"
 
 
+def _unknown_rule(only: str | None, family: tuple[checks.Rule, ...] | tuple[checks.RecordRule, ...]) -> bool:
+    """Refuse an unknown --rule BEFORE scanning.
+
+    A selector that matches no rule checks nothing, and nothing found reads
+    exactly like a clean run.
+    """
+    try:
+        checks.require_known(only, family)
+    except ValueError as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return True
+    return False
+
+
 def cmd_check(args: argparse.Namespace) -> int:
+    if _unknown_rule(args.rule, checks.RULES):
+        return 2
     root = Path(args.path).resolve()
     if not root.exists():
         print(f"skillc: no such path: {root}", file=sys.stderr)
@@ -66,6 +83,8 @@ def cmd_check_records(args: argparse.Namespace) -> int:
     result is true. Every run says so, including the passing ones, because a line
     that only appears on failure is a line nobody reads before quoting the green.
     """
+    if _unknown_rule(args.rule, checks.RECORD_RULES):
+        return 2
     root = Path(args.path).resolve()
     if not root.exists():
         print(f"skillc: no such path: {root}", file=sys.stderr)
@@ -91,6 +110,71 @@ def cmd_check_records(args: argparse.Namespace) -> int:
     return 1 if errors else 0
 
 
+@dataclass(frozen=True)
+class _Subject:
+    """One control input, and what the rule under test said about it."""
+
+    path: Path
+    parse_error: str | None
+    own: int  # findings ATTRIBUTED to the rule under test; a neighbour's never count
+
+    @property
+    def shown(self) -> str:
+        return f"{self.path.parent.name}/{self.path.name}"
+
+
+def _population(rule: checks.Rule | checks.RecordRule, where: Path) -> list[_Subject]:
+    # The ONLY family-aware step. Everything after it is subject-agnostic.
+    if isinstance(rule, checks.RecordRule):
+        return [
+            _Subject(r.path, r.parse_error,
+                     sum(f.rule == rule.id for f in checks.run_record(r, only=rule.id)))
+            for r in records.discover(where)
+        ]
+    return [
+        _Subject(s.path, s.parse_error,
+                 sum(f.rule == rule.id for f in checks.run(s, only=rule.id)))
+        for s in discover(where)
+    ]
+
+
+def _refusal(
+    rule: checks.Rule | checks.RecordRule, bad: list[_Subject], good: list[_Subject]
+) -> tuple[str, str] | None:
+    """Why this rule's control does not prove it, or None when it does.
+
+    Each refusal closes a way a control could certify a rule it never exercised:
+    an empty population proves nothing on that side; a semantic rule shown red on
+    input that does not parse was shown red by the PARSER; and a finding counts
+    only when the rule under test is the one that raised it.
+    """
+    for side, population in (("bad", bad), ("good", good)):
+        if not population:
+            return "EMPTY", f"no subject in its known-{side} control - that side proves nothing"
+
+    unparsed_good = [s for s in good if s.parse_error is not None]
+    if unparsed_good:
+        s = unparsed_good[0]
+        return "UNPARSED", f"known-good input does not parse ({s.shown}: {s.parse_error})"
+    unparsed_bad = [s for s in bad if s.parse_error is not None]
+    if not rule.parser and unparsed_bad:
+        s = unparsed_bad[0]
+        return "UNPARSED", (
+            f"known-bad input does not parse ({s.shown}); a parse failure cannot "
+            f"prove a semantic rule"
+        )
+    if rule.parser and not unparsed_bad:
+        return "UNPARSED", "parser rule has no unparseable known-bad input"
+
+    silent = [s for s in bad if not s.own]
+    if silent:
+        return "BLIND", f"silent on {len(silent)} of {len(bad)} known-bad input(s)"
+    noisy = [s for s in good if s.own]
+    if noisy:
+        return "NOISY", f"fired on its known-good input: {noisy[0].shown}"
+    return None
+
+
 def cmd_selftest(args: argparse.Namespace) -> int:
     """Each rule must fire on its committed bad case and stay silent on its good one."""
     root = _controls_root(args.controls)
@@ -104,7 +188,7 @@ def cmd_selftest(args: argparse.Namespace) -> int:
 
     # ONE loop over ONE registry. The coverage check below is subject-agnostic - it
     # asks whether a control directory exists, keyed on rule.id - and so are the
-    # counters and the exit code. Only the subject-LOADING step below knows which
+    # counters, the refusals and the exit code. Only `_population` knows which
     # family a rule belongs to. Giving record rules their own loop would give the
     # repository's central guarantee two places to be enforced, and one of them
     # would eventually stop being.
@@ -115,21 +199,17 @@ def cmd_selftest(args: argparse.Namespace) -> int:
             unproven += 1
             continue
 
-        if isinstance(rule, checks.RecordRule):
-            bad = [f for r in records.discover(bad_dir) for f in checks.run_record(r, only=rule.id)]
-            good = [f for r in records.discover(good_dir) for f in checks.run_record(r, only=rule.id)]
-        else:
-            bad = [f for s in discover(bad_dir) for f in checks.run(s, only=rule.id)]
-            good = [f for s in discover(good_dir) for f in checks.run(s, only=rule.id)]
-
-        if not bad:
-            print(f"BLIND    {rule.id:{width}}  silent on its known-bad input")
-            failures += 1
-        elif good:
-            print(f"NOISY    {rule.id:{width}}  fired on its known-good input: {good[0].detail}")
+        bad, good = _population(rule, bad_dir), _population(rule, good_dir)
+        refusal = _refusal(rule, bad, good)
+        if refusal:
+            verdict, detail = refusal
+            print(f"{verdict:8} {rule.id:{width}}  {detail}")
             failures += 1
         else:
-            print(f"ok       {rule.id:{width}}  red on bad ({len(bad)}), green on good")
+            print(
+                f"ok       {rule.id:{width}}  red on bad ({sum(s.own for s in bad)}), "
+                f"green on good ({len(good)})"
+            )
 
     total = len(checks.ALL_RULES)
     print(f"\nskillc selftest: {total - failures - unproven}/{total} rule(s) discriminate", end="")
