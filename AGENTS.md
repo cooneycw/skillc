@@ -30,3 +30,8 @@ specification rejects, and it proves its own rules can fail before reporting the
 ```bash
 uv run skillc selftest && uv run pytest && uv run ruff check . && uv run mypy skillc
 ```
+
+Woodpecker runs the same four checks on every pull request and push to `main`
+(`.woodpecker/ci.yml`), plus `ci/negative-control.sh`, which removes one rule's
+control and requires `selftest` to refuse. A green gate is only evidence while
+that step can still go red.
