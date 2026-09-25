@@ -24,6 +24,14 @@ CPP is the first intended subject, not a runtime dependency of the evaluator.
 Another accessible project should be selectable through a supported subject
 adapter without adding project-specific branches to the runner or grader.
 
+In follow-up deliveries after the minimum execution path (#10), evidence should
+help maintainers and consuming agents decide when a skill applies, what benefit
+and overhead it has demonstrated, and whether to retain, revise or remove it.
+Conclusions remain bounded by tested configurations and populations; removal is
+a maintainer decision. [PLAN.md](../../../PLAN.md#supplemental-decision-traceability)
+assigns the deliveries and later prerequisites. This phase adds no requirement
+to EF-01 through EF-11 or to the initial milestone acceptance, which are unchanged.
+
 ## 2. Status and document ownership
 
 The owner has authorized planning, a documentation PR/merge and issue scaffolding.
@@ -142,6 +150,15 @@ Only the scaffolding treatment being studied differs.
 ## 6. Progressive difficulty
 
 Levels classify demands on the agent, not testing techniques or environment types.
+
+Measurement dimensions - applicability, selection, outcome, interventions,
+resource use and recovery - are distinct from difficulty levels. In the follow-up
+phase described in section 1, bounded exploratory studies may investigate these
+dimensions at applicable task demands without waiting for the full ladder or
+formal qualification. They do not establish level qualification or replace the
+ordered task-family deliveries. [Protocol section 7](protocol.md#7-aggregation-and-progression)
+governs qualification; EF-09, all other EF acceptance and the initial milestone
+acceptance remain unchanged.
 
 | Level | Capability | Illustrative task | Main evidence |
 |---|---|---|---|

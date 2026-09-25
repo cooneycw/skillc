@@ -152,6 +152,33 @@ standards; do not silently change them after observing a subject's score. Levels
 classify task demands, not unit/integration/end-to-end testing layers. Qualification
 cannot average away mandatory easier-task failures. Maps primarily to EF-09.
 
+## Supplemental decision traceability
+
+The [September 25 review](docs/specs/evaluation-facility/review.md#september-25-supplemental-review)
+records dispositions for [#22](https://github.com/cooneycw/skillc/issues/22).
+Acceptance status below means whether follow-up scope is accepted, not whether
+its completion evidence exists. Implementation status is separate. Filing an issue
+delivers no capability.
+
+These follow-ups sit after their listed prerequisites. They add no blocker to
+#2 through #12 and do not change the issue order or gates above. Selection, cost
+and recovery are measurement dimensions; exploratory work does not require formal
+qualification under #15 or substitute for it. The original #14 gate remains #13.
+
+| Intended decision | Delivery issue | Dependencies or revisit trigger | Completion evidence | Acceptance status | Implementation status |
+|---|---|---|---|---|---|
+| Use an applicable skill or complete the task without unnecessary invocation? | [#26](https://github.com/cooneycw/skillc/issues/26) | #7 and #10 | Bounded native-selection probe with intended-use, near-miss and overlap cases; separate selection/outcome observations, accounted overhead and interpretation limits | Accepted bounded follow-up | Drafted; experiment not run |
+| Retain the full pack, revise it or use a chosen subset? | None yet; review after [#12](https://github.com/cooneycw/skillc/issues/12) | #12 evidence and an informative, deliberately chosen subset | A future bounded comparison would inform this decision; no delivery is accepted yet | Deferred to stated trigger | Not started |
+| Can a reader interpret applicability, benefit and overhead cheaply? | None yet; review after [#12](https://github.com/cooneycw/skillc/issues/12) | #12 report plus a named reader's unmet need | A future derived summary would trace every claim to evidence; no card format is accepted yet | Deferred to stated trigger | Not started |
+| Can an author act on findings and trust the packaged checker? | [#27](https://github.com/cooneycw/skillc/issues/27) | #2, #3 and #10 | One local findings consumer, repair example and clean packaged installation/selftest, including absent-control refusal | Accepted bounded follow-up | Drafted; tooling not delivered |
+| Does the subject preserve task and authority boundaries during conflict or failure? | [#14](https://github.com/cooneycw/skillc/issues/14), refinement | #13, unchanged; reuse #9 grading via the existing chain | Separate controlled fixture cases for instruction conflict and recovery, observed actions/state and explicit missing evidence | Accepted bounded follow-up | Refinement drafted; cases not delivered |
+| Can an observed failure be replayed, and when is its evidence historical? | [#28](https://github.com/cooneycw/skillc/issues/28) | #8 and first useful evidence from [#26](https://github.com/cooneycw/skillc/issues/26) or #12 | One sanitized development regression and an identity-change example preserving original evidence and held-out separation | Accepted bounded follow-up | Drafted; regression not delivered |
+
+Issue drafts own the bounded delivery details. Live budgets are set in each
+experiment's own delivery. Closing #22 completes review and scaffolding only;
+null, negative or inconclusive observations can complete a properly accounted
+experiment while leaving the product decision unresolved.
+
 ## Completion and limits
 
 The first useful facility satisfies EF-01 through EF-08, EF-10 and EF-11 for its

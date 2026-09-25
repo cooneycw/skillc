@@ -34,12 +34,62 @@ and a live-run budget must be explicit; document presence is not their evidence.
 3. Can the subject forge success, replace tests or contaminate another attempt?
 4. Can missing skills, empty populations, crashes or lost evidence look successful?
 5. Is installation native and observed, or only asserted by a setup process?
-6. Is a null result accepted, or does the task change until the preferred subject wins?
-7. Does the level reflect observed task demands, and are revisions versioned?
+6. What decision does this output inform, and is a null result accepted without changing the task until the preferred subject wins?
+7. Does the level reflect observed task demands, are revisions versioned, and what evidence supports the interpretation and where does it stop?
 8. Can candidate code alter the verifier's result channel while it is being graded?
 9. Which costs/events are unobserved, especially across nested workers or external tools?
-10. Would the first milestone remain useful without a dashboard, scheduler or extra model?
+10. Did the change introduce a requirement, is its scope and phase explicit, and would the first milestone remain useful without a dashboard, scheduler or extra model?
 
 Review the concrete implementation and retained control evidence against these
 questions. Further wayfinder/grilling discussion should resolve a named decision
 or counterexample rather than turn into an additional generic planning phase.
+
+## September 25 supplemental review
+
+Reviewed for [#22](https://github.com/cooneycw/skillc/issues/22) against this working
+tree, the September 25 issue snapshots and the governing documents. This is
+scaffolding, not implementation acceptance. The follow-up issues filed from it
+deliver no capability by existing; the existing issues retain their gates.
+
+Existing coverage and changed assumptions affect the proposed mechanisms:
+
+- [Subject acquisition](spec.md#subject-acquisition) and
+  [installation contracts](interfaces.md#installation-and-execution-lifecycle)
+  already distinguish discovery, availability, invocation and outcome. Selection
+  experiments need cases and observations, not a second definition of success.
+- [Protocol comparison arms](protocol.md#2-comparison-arms),
+  [accounting](protocol.md#7-aggregation-and-progression) and
+  [evidence identities](protocol.md#6-minimum-evidence-record) already cover
+  ablation, overhead and revision binding. Cards and pruning are uses of that
+  evidence, not new evidence authorities or automatic removal policies.
+- The [September 15 assessment](../../reviews/2026-09-15-skills-as-code-harness.md#proposed-first-milestone)
+  required demonstrated improvement and preferred an installed plugin runner.
+  Those are historical recommendations: the current
+  [completion boundary](spec.md#9-evidence-limits-and-completion) accepts null
+  results, and [ADR 0002](../../decisions/0002-independent-goal-driven-evaluation.md#decision)
+  makes backend adoption conditional. Neither old proposal adds an acceptance gate.
+- The September 20 planning baseline predates executable
+  [record validation](records.md#boundary). Two record forms now exist, but the
+  ledger, installation receipts and evidence authentication remain open. The
+  baseline's historical six-rule/12-test counts are not current completion evidence.
+- [#9](https://github.com/cooneycw/skillc/issues/9) protects the evaluator;
+  [#14](https://github.com/cooneycw/skillc/issues/14) measures the subject's behavior.
+  A subject resisting hostile instructions does not prove grader isolation, or
+  conversely. [Independent exploration](protocol.md#7-aggregation-and-progression)
+  is already permitted; no change to qualification or dependency order is needed.
+
+| Recommendation | Disposition | Rationale and owner |
+|---|---|---|
+| Skill selection and non-selection evaluations | accepted bounded follow-up | [#26](https://github.com/cooneycw/skillc/issues/26), after [#7](https://github.com/cooneycw/skillc/issues/7) and [#10](https://github.com/cooneycw/skillc/issues/10): one intended-use request, one near miss and one overlapping-skill choice in a pinned native installation. Measure selection separately from independently graded outcomes; successful non-invocation can be valid. Adapt the proposal to allow unknown invocation and declared manual-only skills, rather than impose a universal trigger score. |
+| Pruning and interaction measurements | deferred with a revisit trigger | Revisit after [#12](https://github.com/cooneycw/skillc/issues/12) yields accounted outcomes and overhead, and a maintainer can name a subset and a decision it could change. The small canary may have ceiling effects; another arm without an informative contrast need not help. Use [protocol arms](protocol.md#2-comparison-arms) for baseline/full/one chosen subset if warranted. That contrast cannot isolate all interactions. Reject exhaustive subset search and automatic removal; no experiment owner is assigned before this trigger. |
+| Compact evidence cards | deferred with a revisit trigger | Revisit after [#12](https://github.com/cooneycw/skillc/issues/12) produces an authoritative report and a named reader identifies a recurring interpretation or retrieval problem. [Minimum evidence](protocol.md#6-minimum-evidence-record) and [report semantics](interfaces.md#reporting-semantics) already own the facts. Start with one derived readable summary if needed; JSON needs a concrete consumer. Reject a parallel evidence database, recommender or global rating. |
+| Author feedback and installation verification | accepted bounded follow-up | [#27](https://github.com/cooneycw/skillc/issues/27), after [#2](https://github.com/cooneycw/skillc/issues/2), [#3](https://github.com/cooneycw/skillc/issues/3) and [#10](https://github.com/cooneycw/skillc/issues/10): exercise one local author consumer of existing findings, concise repair guidance and the packaged checker's clean installation/selftest. Keep this distinct from subject installation. Missing required references/helpers are already [#7](https://github.com/cooneycw/skillc/issues/7)'s declared dependency closure; reject a general Markdown-link heuristic as readiness proof. No new rule catalog or CI expansion is required here. |
+| Subject-side trust and recovery cases | accepted bounded follow-up | Refine [#14](https://github.com/cooneycw/skillc/issues/14), retaining its [#13](https://github.com/cooneycw/skillc/issues/13) dependency: bound conflicting instructions/hostile references and tool loss/partial failure as separate fixture-service cases. Reuse [#9](https://github.com/cooneycw/skillc/issues/9)'s protected grading, without treating evaluator controls as subject success. Exploratory observations do not require [#15](https://github.com/cooneycw/skillc/issues/15)'s qualification delivery or establish a level claim. |
+| Failure-to-regression and evidence refresh | accepted bounded follow-up | [#28](https://github.com/cooneycw/skillc/issues/28), after [#8](https://github.com/cooneycw/skillc/issues/8) and the first useful [#26](https://github.com/cooneycw/skillc/issues/26) or [#12](https://github.com/cooneycw/skillc/issues/12) evidence: sanitize one observed failure into a development regression, and compare its evidence identities with one changed configuration. Reuse [protocol lineage](protocol.md#6-minimum-evidence-record); changed skill/helper/client inputs make the old evidence historical for the new configuration, not false for the old one. Reject automatic reruns and contamination of held-out comparisons. |
+
+The accepted outcomes use the phased amendments in
+[spec sections 1 and 6](spec.md#1-objective). EF-01 through EF-11 and initial
+milestone acceptance are unchanged. The
+[traceability table](../../../PLAN.md#supplemental-decision-traceability) separates
+accepted scope from delivered evidence; deferred work is not completed work.
+No protocol change or new interface schema is needed for these dispositions.
