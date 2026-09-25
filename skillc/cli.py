@@ -12,6 +12,7 @@ someone relying on it.
 
 from __future__ import annotations
 
+import os  # DELIBERATE RED - reverted next commit
 import argparse
 import sys
 from pathlib import Path

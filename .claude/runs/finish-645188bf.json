@@ -1,0 +1,125 @@
+{
+  "run_id": "finish-645188bf",
+  "plan_name": "finish",
+  "step_records": [
+    {
+      "step_id": "lint",
+      "status": "success",
+      "exit_code": 0,
+      "output": "All checks passed!\n",
+      "error": null,
+      "started_at": "2026-09-25T09:22:27-0400",
+      "finished_at": "2026-09-25T09:22:27-0400",
+      "attempt": 1,
+      "max_attempts": 1,
+      "tests": null,
+      "coverage": {
+        "state": "unknown",
+        "units": null,
+        "unit_name": "unit",
+        "tool": "unknown",
+        "scope": "stage",
+        "component": "",
+        "evidence": "",
+        "invocations": 0,
+        "empty_invocations": 0,
+        "streams": [
+          "stdout",
+          "stderr"
+        ]
+      },
+      "subsumed_by": null,
+      "not_run_reason": null
+    },
+    {
+      "step_id": "test",
+      "status": "success",
+      "exit_code": 0,
+      "output": "============================= test session starts ==============================\nplatform linux -- Python 3.11.16, pytest-9.1.1, pluggy-1.6.0\nrootdir: /home/cooneycw/Projects/skillc-issue-18-add-woodpecker-ci-for-the-static-gate-with-a-negat\nconfigfile: pyproject.toml\ntestpaths: tests\ncollected 51 items\n\ntests/test_checks.py ............                                        [ 23%]\ntests/test_negative_control.py .....                                     [ 33%]\ntests/test_records.py ..................................                 [100%]\n\n============================== 51 passed in 0.85s ==============================\n",
+      "error": null,
+      "started_at": "2026-09-25T09:22:27-0400",
+      "finished_at": "2026-09-25T09:22:29-0400",
+      "attempt": 1,
+      "max_attempts": 1,
+      "tests": {
+        "passed": 51,
+        "failed": 0,
+        "skipped": 0,
+        "errors": 0,
+        "executed": 51,
+        "framework": "pytest",
+        "invocations": 1,
+        "empty_invocations": 0,
+        "summary_streams": [
+          "stdout"
+        ]
+      },
+      "coverage": null,
+      "subsumed_by": null,
+      "not_run_reason": null
+    },
+    {
+      "step_id": "typecheck",
+      "status": "failed",
+      "exit_code": 1,
+      "output": "tests/test_records.py:78: error: \"object\" has no attribute \"id\"  [attr-defined]\ntests/test_records.py:79: error: \"object\" has no attribute \"id\"  [attr-defined]\ntests/test_records.py:86: error: Incompatible types in assignment (expression has type \"list[Skill]\", variable has type \"list[Record]\")  [assignment]\ntests/test_records.py:87: error: Argument 1 to \"run\" has incompatible type \"Record\"; expected \"Skill\"  [arg-type]\ntests/test_records.py:87: error: \"object\" has no attribute \"id\"  [attr-defined]\ntests/test_records.py:88: error: Argument 1 to \"run\" has incompatible type \"Record\"; expected \"Skill\"  [arg-type]\ntests/test_records.py:90: error: \"object\" has no attribute \"id\"  [attr-defined]\ntests/test_records.py:92: error: \"object\" has no attribute \"id\"  [attr-defined]\ntests/test_records.py:96: error: \"object\" has no attribute \"id\"  [attr-defined]\ntests/test_records.py:97: error: \"object\" has no attribute \"id\"  [attr-defined]\nFound 10 errors in 1 file (checked 8 source files)\n",
+      "error": "",
+      "started_at": "2026-09-25T09:22:29-0400",
+      "finished_at": "2026-09-25T09:22:31-0400",
+      "attempt": 1,
+      "max_attempts": 1,
+      "tests": null,
+      "coverage": {
+        "state": "covered",
+        "units": 8,
+        "unit_name": "source file",
+        "tool": "mypy",
+        "scope": "stage",
+        "component": "",
+        "evidence": "Found 10 errors in 1 file (checked 8 source files)",
+        "invocations": 1,
+        "empty_invocations": 0,
+        "streams": [
+          "stdout"
+        ]
+      },
+      "subsumed_by": null,
+      "not_run_reason": null
+    },
+    {
+      "step_id": "security_scan",
+      "status": "pending",
+      "exit_code": 0,
+      "output": "",
+      "error": null,
+      "started_at": null,
+      "finished_at": null,
+      "attempt": 0,
+      "max_attempts": 1,
+      "tests": null,
+      "coverage": null,
+      "subsumed_by": null,
+      "not_run_reason": null
+    },
+    {
+      "step_id": "verify",
+      "status": "pending",
+      "exit_code": 0,
+      "output": "",
+      "error": null,
+      "started_at": null,
+      "finished_at": null,
+      "attempt": 0,
+      "max_attempts": 1,
+      "tests": null,
+      "coverage": null,
+      "subsumed_by": null,
+      "not_run_reason": null
+    }
+  ],
+  "current_index": 2,
+  "started_at": "2026-09-25T09:22:26-0400",
+  "finished_at": null,
+  "status": "failed",
+  "tree_signature": "9a1d3f0b3071e4161889771ad4491e90502e64c3"
+}
