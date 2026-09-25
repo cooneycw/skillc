@@ -15,6 +15,9 @@ specification rejects, and it proves its own rules can fail before reporting the
 - **Stdlib only in `skillc/`.** It has to run in a slim CI image with no network.
   Test and lint dependencies are fine.
 - Use single dashes, never Unicode em or en dashes, in code and docs.
+- Locate active work and gates through [PLAN.md](PLAN.md).
+  Requirements apply within their declared scope and delivery phase;
+  recommendations in research do not become acceptance by appearing there.
 
 ## Layout
 
