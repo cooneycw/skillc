@@ -22,7 +22,7 @@ steps:
       - uv run --no-sync skillc selftest
       - uv run --no-sync pytest
       - uv run --no-sync ruff check .
-      - uv run --no-sync mypy skillc
+      - uv run --no-sync mypy
     environment:
       # Parallel steps share one workspace; a shared .venv races.
       UV_PROJECT_ENVIRONMENT: /tmp/skillc-venv
@@ -36,5 +36,17 @@ steps:
       - pip install uv
       - uv sync --locked
       - uv run --no-sync bash ci/negative-control.sh
+    environment:
+      UV_PROJECT_ENVIRONMENT: /tmp/skillc-venv
+
+  # The gate's mypy green is only evidence while tests/ is in its scope (#19).
+  # This plants a type error in a test module and requires mypy to report it.
+  - name: typecheck-control
+    image: python:3.12-slim
+    depends_on: []
+    commands:
+      - pip install uv
+      - uv sync --locked --extra dev
+      - uv run --no-sync bash ci/typecheck-control.sh
     environment:
       UV_PROJECT_ENVIRONMENT: /tmp/skillc-venv
