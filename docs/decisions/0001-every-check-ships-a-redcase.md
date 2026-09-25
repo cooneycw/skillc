@@ -25,6 +25,13 @@ other verdict.
   `NOISY`; both fail the run.
 - A rule with no committed control reports `UNPROVEN` and fails. Absence of a
   control is never read as a pass.
+- A control side with no input reports `EMPTY` and fails: a rule silent on
+  nothing has not been shown silent on a good input (#2).
+- Only findings raised BY the rule under test count as red. A semantic rule's
+  control inputs must parse, or `UNPARSED` fails the run - otherwise a parse
+  failure stands in for the rule. A parser rule (`frontmatter`,
+  `record-envelope`) has the explicit opposite expectation: its known-bad input
+  must include one that does not parse (#2).
 - The pairing is also a test (`tests/test_checks.py`), so a rule cannot go blind
   between releases without the suite noticing.
 - `skillc selftest` is itself under a negative control: a test blinds a rule on
