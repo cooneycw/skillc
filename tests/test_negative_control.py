@@ -49,9 +49,12 @@ MUTATED: dict[str, tuple[str, int, str]] = {
     ),
     "selector-unnamed": ("check", 2, 'echo "error" >&2; exit 2'),
     "selector-scans-first": (
-        "check", 2,
-        'echo "skillc: 1 skill(s) checked, 0 error(s), 0 warning(s)"; '
-        'echo "skillc: unknown rule \'$4\'" >&2; exit 2',
+        "check",
+        2,
+        (
+            'echo "skillc: 1 skill(s) checked, 0 error(s), 0 warning(s)"; '
+            'echo "skillc: unknown rule \'$4\'" >&2; exit 2'
+        ),
     ),
 }
 
