@@ -1,0 +1,20 @@
+{
+  "branch": "issue-19-type-errors-in-tests-test-records-py-mypy-fails-my",
+  "counts": {
+    "accepted": 1,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "5d8ae74b84ab5511d234d82effa89c869b0668c6",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "19",
+  "passes": 2,
+  "recorded_at": "2026-09-25T14:13:05Z",
+  "red_cases": {
+    "already_covered": 3,
+    "proposed": 6
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "schema": 1,
+  "status": "ran"
+}
