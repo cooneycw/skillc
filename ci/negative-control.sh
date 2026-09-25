@@ -96,7 +96,9 @@ cat "$scratch/sel.out" "$scratch/sel.err"
 [[ $code -eq 2 ]] || fail "check --rule $bogus exited $code; expected 2"
 grep -q "unknown rule '$bogus'" "$scratch/sel.err" \
     || fail "check --rule $bogus did not name the unknown rule on stderr"
+# A summary line is the shell-visible proxy for a completed scan; that discovery
+# never RAN is asserted in tests/test_checks.py, which can patch it.
 ! grep -q "checked" "$scratch/sel.out" \
-    || fail "check --rule $bogus scanned before refusing"
+    || fail "check --rule $bogus printed a scan summary before refusing"
 
 echo "negative-control: ok - check refused unknown selector '$bogus' (exit 2)"

@@ -221,15 +221,40 @@ UNKNOWN_SELECTORS = [
 
 @pytest.mark.parametrize(("command", "target", "selector"), UNKNOWN_SELECTORS)
 def test_an_unknown_selector_is_refused_before_scanning(
-    command: str, target: Path, selector: str, capsys: pytest.CaptureFixture[str]
+    command: str,
+    target: Path,
+    selector: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`--rule typo` used to check no rules and exit 0 on a clean-looking summary."""
+    """`--rule typo` used to check no rules and exit 0 on a clean-looking summary.
+
+    "Before scanning" is asserted on discovery itself, not on the absence of a
+    printed summary: a refusal placed after `discover` would print none either.
+    """
+
+    def scanned(*_args: object) -> list[object]:
+        raise AssertionError("it scanned before refusing")
+
+    monkeypatch.setattr(cli, "discover", scanned)
+    monkeypatch.setattr(records, "discover", scanned)
     rc = cli.main([command, str(target), "--rule", selector])
     out, err = capsys.readouterr()
     assert rc == 2
     assert f"unknown rule {selector!r}" in err
     assert "known rules:" in err
-    assert "checked" not in out, "it scanned before refusing"
+    assert "checked" not in out
+
+
+def test_a_known_selector_does_scan(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The control for the case above: its discovery tripwire can fire."""
+
+    def scanned(*_args: object) -> list[object]:
+        raise AssertionError("scanned")
+
+    monkeypatch.setattr(cli, "discover", scanned)
+    with pytest.raises(AssertionError, match="scanned"):
+        cli.main(["check", str(SKILLS_CLEAN), "--rule", "name-spec"])
 
 
 def test_run_refuses_an_unknown_selector(tmp_path: Path) -> None:
