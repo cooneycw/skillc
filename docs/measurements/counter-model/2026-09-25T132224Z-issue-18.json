@@ -1,0 +1,20 @@
+{
+  "branch": "issue-18-add-woodpecker-ci-for-the-static-gate-with-a-negat",
+  "counts": {
+    "accepted": 2,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "3bdcefdb15ca1cc867a66cf06c84d28b44c51898",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "18",
+  "passes": 2,
+  "recorded_at": "2026-09-25T13:22:24Z",
+  "red_cases": {
+    "already_covered": 2,
+    "proposed": 11
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "schema": 1,
+  "status": "ran"
+}
