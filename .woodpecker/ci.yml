@@ -1,0 +1,39 @@
+# Feature branches run pull_request only; push runs on main only, so one
+# change does not queue two identical pipelines.
+when:
+  - event: push
+    branch: main
+  - event: pull_request
+
+# The dedicated CI VM (agent 93). Unpinned, a pipeline can land on a
+# deploy-labelled agent that has no business running it.
+labels:
+  host: kyleci
+
+steps:
+  # The four checks AGENTS.md names as the verify gate.
+  - name: gate
+    image: python:3.12-slim
+    depends_on: []
+    commands:
+      - pip install uv
+      - uv sync --frozen --extra dev
+      - uv run skillc selftest
+      - uv run pytest
+      - uv run ruff check .
+      - uv run mypy skillc
+    environment:
+      # Parallel steps share one workspace; a shared .venv races.
+      UV_PROJECT_ENVIRONMENT: /tmp/skillc-venv
+
+  # The gate above trusts selftest's green. This proves selftest can still
+  # report the other verdict; see the script header.
+  - name: negative-control
+    image: python:3.12-slim
+    depends_on: []
+    commands:
+      - pip install uv
+      - uv sync --frozen
+      - uv run bash ci/negative-control.sh
+    environment:
+      UV_PROJECT_ENVIRONMENT: /tmp/skillc-venv
