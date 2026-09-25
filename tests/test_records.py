@@ -43,7 +43,9 @@ def test_every_record_rule_discriminates(rule: checks.RecordRule) -> None:
 
 
 @pytest.mark.parametrize("rule", checks.ALL_RULES, ids=lambda r: r.id)
-def test_each_bad_case_fires_ITS_OWN_rule_and_NOTHING_ELSE(rule: object) -> None:
+def test_each_bad_case_fires_ITS_OWN_rule_and_NOTHING_ELSE(
+    rule: checks.Rule | checks.RecordRule,
+) -> None:
     """Every rule in the repository, not only the record family.
 
     WHAT SELFTEST ALREADY DOES, stated precisely because it is easy to overstate:
@@ -79,13 +81,13 @@ def test_each_bad_case_fires_ITS_OWN_rule_and_NOTHING_ELSE(rule: object) -> None
     assert bad_dir.is_dir(), f"{rule.id} ships no bad case"
 
     if isinstance(rule, checks.RecordRule):
-        found = records.discover(bad_dir)
-        own = [f for r in found for f in checks.run_record(r, only=rule.id)]
-        every = [f for r in found for f in checks.run_record(r)]
+        recs = records.discover(bad_dir)
+        own = [f for r in recs for f in checks.run_record(r, only=rule.id)]
+        every = [f for r in recs for f in checks.run_record(r)]
     else:
-        found = discover(bad_dir)
-        own = [f for sk in found for f in checks.run(sk, only=rule.id)]
-        every = [f for sk in found for f in checks.run(sk)]
+        skills = discover(bad_dir)
+        own = [f for sk in skills for f in checks.run(sk, only=rule.id)]
+        every = [f for sk in skills for f in checks.run(sk)]
 
     assert own, f"{rule.id} is silent on its own known-bad input"
     assert not any(f.rule == "frontmatter" for f in own), (

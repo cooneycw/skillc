@@ -27,3 +27,8 @@ target-version = "py311"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.mypy]
+# The typecheck scope, declared once. CI, AGENTS.md and ci/typecheck-control.sh
+# all run bare `mypy`, so narrowing this list is what the control catches (#19).
+files = ["skillc", "tests"]
