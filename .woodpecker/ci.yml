@@ -17,11 +17,12 @@ steps:
     depends_on: []
     commands:
       - pip install uv
-      - uv sync --frozen --extra dev
-      - uv run skillc selftest
-      - uv run pytest
-      - uv run ruff check .
-      - uv run mypy skillc
+      # --locked refuses a stale uv.lock; --no-sync stops each run re-locking.
+      - uv sync --locked --extra dev
+      - uv run --no-sync skillc selftest
+      - uv run --no-sync pytest
+      - uv run --no-sync ruff check .
+      - uv run --no-sync mypy skillc
     environment:
       # Parallel steps share one workspace; a shared .venv races.
       UV_PROJECT_ENVIRONMENT: /tmp/skillc-venv
@@ -33,7 +34,7 @@ steps:
     depends_on: []
     commands:
       - pip install uv
-      - uv sync --frozen
-      - uv run bash ci/negative-control.sh
+      - uv sync --locked
+      - uv run --no-sync bash ci/negative-control.sh
     environment:
       UV_PROJECT_ENVIRONMENT: /tmp/skillc-venv
