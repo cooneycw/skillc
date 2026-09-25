@@ -53,10 +53,32 @@ def test_the_declared_scope_passes(tmp_path: Path) -> None:
 def test_a_scope_that_drops_tests_turns_the_step_red(tmp_path: Path) -> None:
     result = run_in_copy(tmp_path, scope='files = ["skillc"]')
     assert result.returncode == 1, f"narrowed scope passed\n{result.stdout}"
-    assert "is tests/ out of scope?" in result.stderr
+    assert "mypy exited 0 with an error planted" in result.stderr, result.stderr
+
+
+def stub(tmp_path: Path, on_red_run: str) -> str:
+    """A mypy whose FIRST call (the baseline) is real, so each case reaches the
+    verdict it names instead of tripping the baseline guard."""
+    path, count = tmp_path / "mypy-stub", tmp_path / "mypy-calls"
+    path.write_text(
+        "#!/usr/bin/env bash\n"
+        f'echo x >> "{count}"\n'
+        f'if [ "$(wc -l < "{count}")" -eq 1 ]; then exec {REAL} "$@"; fi\n'
+        f"{on_red_run}\n"
+    )
+    path.chmod(0o755)
+    return str(path)
 
 
 def test_a_blind_mypy_turns_the_step_red(tmp_path: Path) -> None:
-    result = run_in_copy(tmp_path, mypy="bash -c 'echo Success: no issues found; exit 0'")
+    mypy = stub(tmp_path, 'echo "Success: no issues found"; exit 0')
+    result = run_in_copy(tmp_path, mypy=mypy)
     assert result.returncode == 1, f"blind mypy passed\n{result.stdout}"
-    assert "typecheck-control: FAIL" in result.stderr
+    assert "mypy exited 0 with an error planted" in result.stderr, result.stderr
+
+
+def test_a_red_that_names_another_file_turns_the_step_red(tmp_path: Path) -> None:
+    mypy = stub(tmp_path, 'echo "skillc/cli.py:1: error: unrelated  [misc]"; exit 1')
+    result = run_in_copy(tmp_path, mypy=mypy)
+    assert result.returncode == 1, f"misattributed red passed\n{result.stdout}"
+    assert "mypy exited 1 without reporting tests/" in result.stderr, result.stderr
