@@ -249,7 +249,8 @@ attempt at the first of those five, built so that it can be trusted.
 
 The rules about descriptions, triggers, progressive disclosure and pruning draw
 on Matt Pocock's [writing-for-agents](https://github.com/mattpocock/skills), which
-is the best written account of what makes an agent-facing document work.
+is the best written account of what makes an agent-facing document work. Pinned
+provenance: [`docs/research/mattpocock-skills-lessons.md`](docs/research/mattpocock-skills-lessons.md).
 
 Field constraints come from the [Agent Skills
 specification](https://agentskills.io/specification).

@@ -11,6 +11,11 @@
   provenance, adopted and declined ideas from
   [jameskomo/config-drift-checker](https://github.com/jameskomo/config-drift-checker) at
   `0aca62b` (FSL-1.1-Apache-2.0), with their skillc owners. Static reading only.
+- [mattpocock/skills lessons and concept map, September 26, 2026](mattpocock-skills-lessons.md):
+  provenance and adopted concepts from
+  [mattpocock/skills](https://github.com/mattpocock/skills) at `c55ee46` (MIT),
+  plus the static scan baseline at that commit and which warnings are skillc
+  false positives. Static reading and one `skillc check` execution.
 
 ## Provenance and limits
 
