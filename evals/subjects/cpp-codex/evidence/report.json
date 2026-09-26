@@ -1,5 +1,5 @@
 {
- "started": "2026-09-26T14:03:58Z",
+ "started": "2026-09-26T14:12:50Z",
  "adapter": {
   "name": "skillc-codex-skills",
   "version": "1"
@@ -1419,11 +1419,13 @@
  "source_immutability": {
   "before": {
    "head": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b",
-   "status": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   "status": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "dirty_contents": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
   },
   "after": {
    "head": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b",
-   "status": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   "status": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "dirty_contents": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
   }
  },
  "cleanup": {
@@ -1444,7 +1446,7 @@
    "AGENTS.md": "sha256:4a2e547a8fc8ffb6066c2a7337d007c5519ffb76e719ebb8b118e7c0e2cf3a65"
   }
  },
- "finished": "2026-09-26T14:03:59Z",
+ "finished": "2026-09-26T14:12:50Z",
  "readiness": {
   "discovery_canary": "SATISFIED",
   "baseline_absence": "SATISFIED",

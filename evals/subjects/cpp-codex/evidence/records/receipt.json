@@ -23,7 +23,7 @@
  "layers": [
   {
    "name": "client input, normalized (treatment arm)",
-   "digest": "sha256:acb0af91f81cd0f47ec4ff7fe8cb99756b56d0167eb532f65f358a20b3e33cce"
+   "digest": "sha256:01c634b444f71aa1a632b701a5db41ab29a027b79c1941bceaa91106e8dc069f"
   },
   {
    "name": "CODEX_HOME/config.toml",

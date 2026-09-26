@@ -51,17 +51,22 @@ writes a report and **no receipt**:
 
 - an unpinned or unresolvable revision; a skills root absent at it
 - an empty surface ("empty discovery"), or a selected name not in it
-- a symlink anywhere in the surface (copying would need an immutable target and
-  a closure this adapter does not record)
+- a symlink anywhere in the surface, or in the path from a snapshot down to its
+  skills root (copying would follow it to wherever it points)
 - unsupported layouts: a `SKILL.md` at the skills root, or a skill nested below
   a directory that is not one
 - a `SKILL.md` that does not parse, or declares no name the client could list
 - two skills with one name; two directories that collide case-insensitively, or
   one named like the client's own `.system` directory
-- a required reference that is missing: a relative Markdown link in the entry
-  point, or a path captured by a declared `required_references` pattern
-- a checksum-manifest mismatch, a listed file missing, or an empty manifest
+- a required reference that is missing, or that points outside the skill: a
+  relative Markdown link in the entry point, or a path captured by a declared
+  `required_references` pattern. Equivalent spellings (`./scripts/x`) are
+  normalized first
+- a checksum-manifest mismatch, a listed file missing or outside the skill, or an
+  empty manifest
 - a client that alters an installed file
+- an operational failure - an unreadable file, a missing workspace fixture - which
+  is recorded as a refusal with its cleanup, never raised past the report
 
 A **mention** of a path is not a requirement. Text that merely looks like a file
 reference is a static finding in the report, and static findings never establish
@@ -76,10 +81,10 @@ each guard was removed in turn to confirm its test goes red.
 
 | Fact | SATISFIED when | VIOLATED when | UNKNOWN when |
 |---|---|---|---|
-| `discovery_canary` | every selected skill is listed from the file this run installed | an installed skill is not listed | the client is absent, fails, times out, answers in an unparseable shape, or is not the pinned version |
-| `baseline_absence` | the baseline lists no treatment skill and nothing outside the client's own `.system`, AND the control arm lists its planted skill | the baseline lists a treatment or foreign skill | the control's planted skill was NOT listed - absence then proves nothing - or a client answer is unusable |
-| `ordinary_parity` | the arms' skill listings match outside the treatment, and the rest of the client input is identical after replacing each arm's own path | either differs | a client answer is unusable |
-| `source_unchanged` | the source fingerprint (HEAD and `git status`, or the snapshot's digest) is identical before and after | it changed | - |
+| `discovery_canary` | every selected skill is listed from the file this run installed | an installed skill is not listed | the client is absent or cannot start, fails, times out, answers in an unparseable shape (including any listing row it does not recognize), or is not the pinned version |
+| `baseline_absence` | the baseline lists nothing from outside the client's own `.system` directory, AND the control arm lists its planted skill | the baseline lists any skill from elsewhere - a treatment skill, or a differently named one leaking from another root | the control's planted skill was NOT listed - absence then proves nothing - or a client answer is unusable |
+| `ordinary_parity` | outside the treatment, the arms list the same skills with the same descriptions, and all other client input - including text around and inside the listing block - is identical after replacing each arm's own path | any of it differs | a client answer is unusable |
+| `source_unchanged` | the source fingerprint (HEAD, `git status`, and the CONTENTS of every dirty or untracked path; or the snapshot's digest) is identical before and after | it changed | git could not report the source state |
 | `host_unchanged` | the host client's skills tree, `config.toml` and `AGENTS.md` are identical before and after | they changed | - |
 
 `skillc materialize` exits 0 only when all five are SATISFIED. A receipt is still
