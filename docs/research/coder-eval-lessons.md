@@ -18,7 +18,8 @@ lost when the dependency question closed.
 
 **Everything below is static inspection.** No Coder Eval code was executed and no
 attack was attempted. "Does X" means "the pinned source is written to do X", not
-"X was observed". Paths are relative to `src/coder_eval/` at `d960de1`.
+"X was observed". Paths are relative to `src/coder_eval/` at `d960de1`, except
+where a citation says repository-root.
 
 Borrowing an idea listed here is allowed and expected. Name this document (or the
 upstream file) in the design note that introduces it; do not copy source.
@@ -33,7 +34,7 @@ delegated.
 | skillc contract | What Coder Eval does (pinned source) | What skillc builds | Owner |
 |---|---|---|---|
 | Installation receipt | Claude adapter passes `plugins` and `setting_sources` to the SDK (`agents/claude_code_agent.py:1185-1208`); Codex adapter symlinks discovered `SKILL.md` dirs into `.agents/skills`, warning rather than failing on zero skills (`agents/codex_agent.py:1090-1180`). No receipt: no content digests, dependency closure or discovery canary | Native materialization, receipt with resolved paths and digests, discovery canary, baseline absence proof; refuse an empty surface | [#7](https://github.com/cooneycw/skillc/issues/7) |
-| Trial ledger | Run/variant/replicate layout on disk and a strict dispatch context (`models/container_context.py`, `extra="forbid"`, strict bool/int). No controller-held expected inventory or per-attempt nonce | Controller-issued attempt IDs, expected population, reruns as new IDs, lifecycle and cleanup observations | [#8](https://github.com/cooneycw/skillc/issues/8) |
+| Trial ledger | Run/variant/replicate layout on disk and a strict dispatch context (`models/container_context.py`, `extra="forbid"`, strict bool/int). A per-attempt nonce exists only to match LiteLLM cost-log rows to one attempt (`orchestrator.py:412-416`, `litellm_cost.py:111-116`); nothing binds result evidence to a controller-issued attempt identity, and there is no expected inventory | Controller-issued attempt IDs, expected population, reruns as new IDs, lifecycle and cleanup observations | [#8](https://github.com/cooneycw/skillc/issues/8) |
 | Artifact and observation bundle | Results written by the in-container orchestrator to a writable bind mount (`isolation/docker_runner.py:1303-1306`); events framed on container stdout with a sentinel (`streaming/wire.py:39`); collector ignores nested-thread events (`streaming/collector.py`) | Controller-owned capture after the subject stops: path/type/size/digest manifest, raw events with declared coverage, capture failures explicit | [#8](https://github.com/cooneycw/skillc/issues/8) |
 | Verified result | Grading runs inside the same container as the agent; host reads `task.json` and checks the echoed contract for equality (`isolation/docker_runner.py:843-913`). Detached regrade exists (`orchestration/regrade.py`) | Separate verifier on a disposable copy with trusted grader inputs; status derived by `skillc.records.derive_status`, never copied | [#9](https://github.com/cooneycw/skillc/issues/9) |
 | Lifecycle: stop and clean up | Best-effort container kill on cancellation (`isolation/docker_runner.py:798`); synthetic ERROR record when `task.json` is missing (`isolation/docker_runner.py:967`) | Confirmed termination, cleanup of owned resources only, repeated-cleanup safety | [#10](https://github.com/cooneycw/skillc/issues/10) |
@@ -70,7 +71,8 @@ delegated.
    attempt a record, whatever happened to it.
 8. **Pin the agent binary.** The Dockerfile pins the Claude Code CLI version
    because the binary drives results as much as the model does
-   (`docker/Dockerfile`, `CLAUDE_CODE_VERSION`). #12's manifest should record it.
+   (repository-root `docker/Dockerfile:33-37`, `CLAUDE_CODE_VERSION`). #12's
+   manifest should record it.
 
 ## Pitfalls to avoid
 
