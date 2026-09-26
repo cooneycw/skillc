@@ -94,6 +94,8 @@ class FakeProbeBackend:
     force_confirm_stopped: Confirmation | None = None
     force_confirm_absent: Confirmation | None = None
     export_fails: bool = False
+    destroy_raises: bool = False
+    confirm_absent_raises: bool = False
     prepared: list[_Handle] = field(default_factory=list)
 
     def describe(self) -> BackendDescription:
@@ -171,10 +173,14 @@ class FakeProbeBackend:
 
     def destroy(self, handle: object) -> None:
         assert isinstance(handle, _Handle)
+        if self.destroy_raises:
+            raise RuntimeError("fake probe backend forced destroy() failure")
         handle.destroyed = True
         shutil.rmtree(handle.root, ignore_errors=True)
 
     def confirm_absent(self, handle: object) -> Confirmation:
+        if self.confirm_absent_raises:
+            raise RuntimeError("fake probe backend forced confirm_absent() failure")
         return self.force_confirm_absent or Confirmation.CONFIRMED
 
 
@@ -308,6 +314,37 @@ def test_an_unconfirmed_teardown_quarantines_the_next_grading_run(tmp_path: Path
     (tmp_path / "backend").mkdir()
     files = [("src/slugify.py", REFERENCE.read_bytes(), False)]
     verify.grade_files(GRADER, files, tmp_path / "grading", backend=backend)
+
+    clean_backend = FakeProbeBackend(base=tmp_path / "backend2")
+    (tmp_path / "backend2").mkdir()
+    with pytest.raises(verify.Refused, match="quarantined"):
+        verify.grade_files(GRADER, files, tmp_path / "grading2", backend=clean_backend)
+
+
+def test_a_destroy_exception_still_quarantines_and_propagates(tmp_path: Path) -> None:
+    """codex review: teardown itself must not be able to skip quarantine. The
+    ORIGINAL exception still propagates - a raised destroy() is a real
+    infrastructure failure this grading run legitimately fails on - but every
+    LATER grading run must refuse until an operator clears it, since nothing
+    established the candidate-controlled process/resources are gone."""
+    backend = FakeProbeBackend(base=tmp_path / "backend", destroy_raises=True)
+    (tmp_path / "backend").mkdir()
+    files = [("src/slugify.py", REFERENCE.read_bytes(), False)]
+    with pytest.raises(RuntimeError, match="destroy"):
+        verify.grade_files(GRADER, files, tmp_path / "grading", backend=backend)
+
+    clean_backend = FakeProbeBackend(base=tmp_path / "backend2")
+    (tmp_path / "backend2").mkdir()
+    with pytest.raises(verify.Refused, match="quarantined"):
+        verify.grade_files(GRADER, files, tmp_path / "grading2", backend=clean_backend)
+
+
+def test_a_confirm_absent_exception_still_quarantines_and_propagates(tmp_path: Path) -> None:
+    backend = FakeProbeBackend(base=tmp_path / "backend", confirm_absent_raises=True)
+    (tmp_path / "backend").mkdir()
+    files = [("src/slugify.py", REFERENCE.read_bytes(), False)]
+    with pytest.raises(RuntimeError, match="confirm_absent"):
+        verify.grade_files(GRADER, files, tmp_path / "grading", backend=backend)
 
     clean_backend = FakeProbeBackend(base=tmp_path / "backend2")
     (tmp_path / "backend2").mkdir()

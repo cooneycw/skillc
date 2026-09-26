@@ -675,17 +675,39 @@ def _probe_via_backend(
                         "timed_out": containment["timed_out"],
                     }
     finally:
-        backend.destroy(handle)
-        teardown_confirmation = backend.confirm_absent(handle)
-        containment["teardown"] = teardown_confirmation.value
-        if teardown_confirmation is not Confirmation.CONFIRMED:
-            # Execute() ran (this finally only executes after prepare()
-            # returned a handle) and the backend cannot confirm its resources
-            # are actually gone - a container or namespace that outlives
-            # destroy() could still hold something candidate-controlled.
-            _set_quarantine(
-                f"backend teardown was not confirmed absent ({teardown_confirmation.value})"
-            )
+        # TEARDOWN ITSELF MUST NOT BE ABLE TO SKIP QUARANTINE (codex review):
+        # the first version let an exception from destroy() or
+        # confirm_absent() propagate before either the teardown record or a
+        # quarantine was ever written - execute() may have started a
+        # candidate-controlled process, and an unexpected backend exception
+        # here answers NOTHING about whether it is gone. Both calls are made,
+        # both raise-paths are caught, and quarantine is set whenever
+        # anything short of a confirmed absence resulted - a raised
+        # exception included - before the ORIGINAL exception (if any) is
+        # re-raised. Nothing here reads as a clean teardown that wasn't.
+        destroy_error: BaseException | None = None
+        try:
+            backend.destroy(handle)
+        except Exception as exc:  # noqa: BLE001 - deliberately broad: any teardown failure is a containment question, not a specific one to filter for
+            destroy_error = exc
+        try:
+            teardown_confirmation = backend.confirm_absent(handle)
+        except Exception as exc:  # deliberately broad: see above
+            containment["teardown"] = "unknown"
+            containment["teardown_error"] = str(exc)
+            _set_quarantine(f"backend confirm_absent() raised during teardown: {exc}")
+            if destroy_error is None:
+                raise
+        else:
+            containment["teardown"] = teardown_confirmation.value
+            if teardown_confirmation is not Confirmation.CONFIRMED:
+                _set_quarantine(
+                    f"backend teardown was not confirmed absent ({teardown_confirmation.value})"
+                )
+        if destroy_error is not None:
+            containment["destroy_error"] = str(destroy_error)
+            _set_quarantine(f"backend destroy() raised during teardown: {destroy_error}")
+            raise destroy_error
 
     return envelope, containment
 
