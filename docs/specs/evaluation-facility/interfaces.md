@@ -193,6 +193,10 @@ Regrading fixed output and rerunning an agent are different operations. Stochast
 judges may disagree on replay; preserve configuration and disagreements rather
 than promise deterministic results.
 
+**Each case above is restated, per backend, with a demonstrated/owed status
+and a concrete citation, in [the support matrix](support-matrix.md) (#80)** -
+never left as an unaddressed claim in this table alone.
+
 ## External runtimes
 
 skillc depends on no external evaluation runtime
