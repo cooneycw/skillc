@@ -705,13 +705,34 @@ def test_cli_exit_follows_readiness_and_never_overwrites_evidence(
 SUBJECT_WORDS = ("power-pack", "cpp", "sha256sums", ".claude/scripts", "codex/skills",
                  "claude_plugin_root", "reference.md", "mattpocock")
 
-#: The core modules a project-name branch must never reach: the adapter
-#: (materialize), the controller/runner (trial), the verifier (verify), the
-#: execution backend seam (backend, #65), and the lifecycle driver that ties
-#: them together (lifecycle, #10 PR1b). Evals fixtures, tests and the subject
-#: declarations themselves are excluded on purpose - a subject.json naming its
-#: own subject is the mechanism, not a defect.
-CORE_MODULES = ("materialize.py", "trial.py", "verify.py", "backend.py", "lifecycle.py")
+#: A module named here is excused from the "no project-name branch" guard,
+#: with a stated reason - never silently. Empty today: every `skillc/*.py`
+#: module (#11's full re-check, 2026-09-26, orchestrator review of PR #94)
+#: is already clean of any `SUBJECT_WORDS` literal. An entry is justified
+#: only for a module whose actual job is to hold a subject-facing DEFAULT
+#: (a bare command's fallback subject, say) - and even then, prefer reading
+#: that default from a declared `evals/subjects/*/subject.json` over a
+#: literal, so the exemption is never needed at all. `w1` was mailed a
+#: heads-up (#81's `demo.py` is imminent and will be scanned the moment it
+#: lands) precisely so this stays empty rather than growing by surprise.
+GENERICITY_EXEMPT: dict[str, str] = {}
+
+
+def _core_modules() -> list[str]:
+    """Every `skillc/*.py` module, minus `GENERICITY_EXEMPT` - an OPEN set,
+    not a closed allowlist (#11, orchestrator review of PR #94: the
+    previous `CORE_MODULES` tuple left every module added after it was
+    written unguarded by default, with no one having to forget to add the
+    next one for that gap to exist). A new module under `skillc/` is
+    covered by this guard the moment it exists.
+    """
+    return sorted(
+        p.name for p in (REPO / "skillc").glob("*.py")
+        if p.name not in GENERICITY_EXEMPT
+    )
+
+
+CORE_MODULES = _core_modules()
 
 
 def _subject_literals(source: str) -> list[str]:
@@ -755,6 +776,28 @@ def test_the_subject_guard_sees_a_planted_mattpocock_branch() -> None:
     source = (REPO / "skillc" / "materialize.py").read_text(encoding="utf-8")
     planted = source + '\nif locator == "mattpocock": pass\n'
     assert _subject_literals(planted) == ["mattpocock"]
+
+
+def _stale_exempt_names(exempt: dict[str, str]) -> list[str]:
+    return [name for name in exempt if not (REPO / "skillc" / name).is_file()]
+
+
+def test_genericity_exempt_names_only_real_files() -> None:
+    """Orchestrator review of PR #94: an exemption naming a module that no
+    longer exists (renamed, deleted) would silently stop meaning anything -
+    checked here so `GENERICITY_EXEMPT` can't go stale unnoticed. Passes
+    vacuously while the dict is empty, which is the correct state, not a
+    gap: the negative control below is what proves this check can fail."""
+    assert _stale_exempt_names(GENERICITY_EXEMPT) == []
+
+
+def test_the_exempt_staleness_check_catches_a_stale_name() -> None:
+    """The negative control for the test above (ADR 0001): a `GENERICITY_EXEMPT`
+    naming a file that does not exist must be caught, not merely trusted to
+    be caught because the real dict happens to be empty today."""
+    assert _stale_exempt_names({"does_not_exist.py": "planted for this test"}) == [
+        "does_not_exist.py"
+    ]
 
 
 # ----------------------------------------------------------- the real client

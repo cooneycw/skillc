@@ -35,7 +35,22 @@ collection) closes.
   can never be silently overwritten back to `"running"` by a write that
   started earlier but finished later. Evidence: a 100-run stress loop of
   the flaky test found 4 failures on the pre-fix fixture and 0 after.
-
+- **The no-project-name-branch genericity guard is now an open set, not a
+  closed allowlist** (Refs #11): `tests/test_materialize.py`'s
+  `CORE_MODULES` was a hand-maintained tuple that predated the Docker
+  backend and everything built on it, so a real module could land - and
+  five did (`docker_backend.py`, `reap.py`, `trial_bootstrap.py`,
+  `cost_estimate.py`, `exposure.py`, plus `judge.py` from a sixth,
+  concurrent PR) - with no test noticing it was unguarded. The guard now
+  scans every `skillc/*.py` file by discovery (`sorted(Path("skillc")
+  .glob("*.py"))`) minus a `GENERICITY_EXEMPT` dict requiring a stated
+  reason per entry - empty today, since every current module is already
+  clean. A committed test refuses a stale exemption naming a file that no
+  longer exists, with its own negative control. Verified by hand: dropped a
+  brand-new module containing a planted subject literal into `skillc/`
+  outside any list, confirmed the guard caught it unprompted, then removed
+  it and confirmed clean again - proving the OPEN-set claim, not just the
+  AST scan's own logic (already proven).
 - **The failure-path matrix and trustworthy cleanup** (#79, Refs #10):
   [`docs/specs/evaluation-facility/failure-matrix.md`](docs/specs/evaluation-facility/failure-matrix.md)
   states all ten of #10's addendum failure paths through the real driver
