@@ -16,6 +16,13 @@ collection) closes.
 
 ### Added
 
+- **`skillc.verify` grades a probe through an `ExecutionBackend`, with a
+  deterministic grading tier and a provenance stamp** (Refs #10): `grade()`/
+  `grade_files()` accept an optional backend for stage 1 (the untrusted
+  probe) - `None` keeps today's bare-subprocess path unchanged; stage 2 (the
+  trusted judge) never changes either way. Adds `skillc/provenance.py`
+  (`skillc_version`, source commit and dirty state, stamped from the
+  package's own version - see `#73` above).
 - **Self-maintaining version and README instruments** (#73): `skillc.__version__`
   reads `pyproject.toml`'s `version` through the package's own installed
   metadata instead of a second literal; `skillc --version`; this changelog and
