@@ -1,14 +1,14 @@
 """The one prepared command for #10's live demonstration: `skillc trial-demo
 --docker`.
 
-Runs on the SAME MACHINE skillc is checked out on. There is no dedicated
-evaluation VM (operator correction, issue #10 discussion, superseding an
-earlier "clean machine" framing) - the operator's own machine carries other
-workloads, which is exactly why the isolation properties matter MORE, not
-less: the neutral trial identity, the allowlisted env, no host mounts beyond
-the per-trial root, a private empty `~/.claude`/`~/.codex`, and no docker
-socket in the trial (see `docker_backend.py`'s own module docstring for each
-of these).
+Runs on the SAME MACHINE skillc is checked out on - there is no separate,
+dedicated machine set aside for this (operator correction, issue #10
+discussion, superseding an earlier "clean machine" framing). The operator's
+own machine carries other workloads, which is exactly why the isolation
+properties matter MORE, not less: the neutral trial identity, the allowlisted
+env, no host mounts beyond the per-trial root, a private empty
+`~/.claude`/`~/.codex`, and no docker socket in the trial (see
+`docker_backend.py`'s own module docstring for each of these).
 
 WHAT THIS PROVES, AND WHAT IT DOES NOT. This command uses a small, fully
 deterministic in-line Python subject - not a real agent CLI - so it proves
@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import sys
 import tempfile
+from collections.abc import Sequence
 from pathlib import Path
 
 from . import docker_backend, leak, lifecycle, provenance, trial
@@ -129,11 +130,19 @@ def _paste_back_block(
     return "\n".join(lines)
 
 
-def run(control: bool = False, base: Path | None = None) -> int:
+def run(
+    control: bool = False, base: Path | None = None,
+    docker_bin: Sequence[str] = ("docker",), image: str = DEMO_IMAGE,
+) -> int:
     """Runs the demo (or, with `control=True`, its own committed negative
     control). Returns the process exit code: 0 success, 1 an unexpected
-    failure, 2 the daemon is unavailable (never a host fallback)."""
-    docker_bin = ("docker",)
+    failure, 2 the daemon is unavailable (never a host fallback).
+
+    `docker_bin` and `image` default to the real `docker` CLI and a public
+    image; tests substitute a fake CLI (no daemon is available in this
+    package's own test environment) - see interfaces.md's "Liveness" note
+    and issue #10 comment 5848577772, lesson E17, for what a fake CLI can and
+    cannot prove."""
     version = docker_backend.probe_daemon(docker_bin)
     if version is None:
         print("skillc trial-demo: docker daemon unreachable.\n", file=sys.stderr)
@@ -161,7 +170,9 @@ def run(control: bool = False, base: Path | None = None) -> int:
         [(_trial, attempt)] = list(experiment.attempts())
         attempt_id = str(attempt["attempt_id"])
 
-        backend = docker_backend.DockerBackend(image=DEMO_IMAGE, base_dir=workdir / "backend")
+        backend = docker_backend.DockerBackend(
+            image=image, base_dir=workdir / "backend", docker_bin=docker_bin,
+        )
         script = SUBJECT_SCRIPT_REPLY_ONLY if control else SUBJECT_SCRIPT_WORK
         try:
             record = lifecycle.run_through_backend(

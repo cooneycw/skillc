@@ -20,7 +20,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import checks, leak, materialize, records
+from . import checks, demo, leak, materialize, records
 from .checks import ERROR, Finding
 from .spec import DEFAULT_TARGET, TARGETS, Manifest, ManifestError, Skill, discover
 
@@ -671,6 +671,21 @@ def cmd_leak_check(args: argparse.Namespace) -> int:
     return 1 if result.findings else 0
 
 
+def cmd_trial_demo(args: argparse.Namespace) -> int:
+    """The one prepared command for #10's live demonstration (see
+    skillc/demo.py). Runs on this machine - there is no dedicated evaluation
+    VM. `--control` runs the committed negative control instead: it must
+    report the OTHER verdict (a refusal, never a capture), proving this
+    instrument can fail before its ordinary green is read as evidence."""
+    if not args.docker:
+        print(
+            "skillc trial-demo: --docker is required (there is no other backend yet)",
+            file=sys.stderr,
+        )
+        return 2
+    return demo.run(control=args.control)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="skillc",
@@ -743,6 +758,20 @@ def main(argv: list[str] | None = None) -> int:
              "for a directory that exists to contain seeded fake leaks on purpose",
     )
     p_leak.set_defaults(func=cmd_leak_check)
+
+    p_demo = sub.add_parser(
+        "trial-demo",
+        help="the one prepared command for #10's live Docker trial lifecycle demonstration",
+    )
+    p_demo.add_argument(
+        "--docker", action="store_true",
+        help="required (there is no other backend yet) - drives the trial through a real Docker daemon",
+    )
+    p_demo.add_argument(
+        "--control", action="store_true",
+        help="run the committed negative control instead: must report a refusal, never a capture",
+    )
+    p_demo.set_defaults(func=cmd_trial_demo)
 
     args = parser.parse_args(argv)
     return int(args.func(args))
