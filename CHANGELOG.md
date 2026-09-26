@@ -16,6 +16,21 @@ collection) closes.
 
 ### Added
 
+- **Conformance through the real adapter, a no-Docker proof, and a published
+  support matrix** (#80, Refs #10): interfaces.md's "Conformance cases
+  required before trusting a backend" table, restated with a
+  demonstrated-here / demonstrated-elsewhere / owed-to-live-run status and a
+  concrete citation for every row (`tests/test_docker_conformance.py`'s
+  `CONFORMANCE_CASES`, republished in
+  [`docs/specs/evaluation-facility/support-matrix.md`](docs/specs/evaluation-facility/support-matrix.md)).
+  The backend-owned cases run through the REAL `DockerBackend`, not an
+  isolated helper - against the fake `docker` CLI, CI's own Docker-shaped
+  green. `tests/test_no_docker_required.py` proves `skillc check`/`selftest`
+  need no Docker at all: a committed redcase
+  (`imports_docker_backend_at_load.py`) proves the "no static command
+  imports the Docker backend at load" check itself can report the other
+  verdict, and a positive control proves a Docker-stripped PATH actually
+  makes `docker` unreachable before trusting the green run that follows.
 - **The Docker backend's implementation** (Refs #77, Refs #10, on top of the
   interface above): real bodies for `prepare`/`install`/`execute`/
   `confirm_stopped`/`export`/`destroy`/`confirm_absent`, all through the
