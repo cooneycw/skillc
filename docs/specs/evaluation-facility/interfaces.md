@@ -36,7 +36,10 @@ are explicit validation failures, never verified success.
 7. Capture artifacts and observations into controller-owned storage.
 8. Verify in a fresh environment using a disposable copy and trusted grader inputs.
 9. Retain evidence and cleanup diagnostics; clean only owned resources, including
-   after partial setup, cancellation and repeated cleanup requests.
+   after partial setup, cancellation and repeated cleanup requests. **Every way
+   an attempt can end, which disposition each earns, and the test proving it,
+   is [the failure-path matrix](failure-matrix.md) (#79)** - state it there
+   rather than leaving "the matrix" implicit.
 
 Discovery, availability, invocation and task success are four different facts.
 If a client cannot expose invocation, report unknown. Do not silently substitute

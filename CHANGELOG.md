@@ -16,6 +16,29 @@ collection) closes.
 
 ### Added
 
+- **The failure-path matrix and trustworthy cleanup** (#79, Refs #10):
+  [`docs/specs/evaluation-facility/failure-matrix.md`](docs/specs/evaluation-facility/failure-matrix.md)
+  states all ten of #10's addendum failure paths through the real driver
+  (`lifecycle.run_through_backend`), each with a citation to the test that
+  proves it. Writing the table found and closed a real gap: `destroy()` or
+  `confirm_absent()` itself RAISING (not merely returning `NOT_CONFIRMED`/
+  `UNKNOWN`) used to propagate out of the driver before `trial.finalize()`
+  ever ran, leaving the attempt with no lifecycle record at all - both calls
+  are now individually caught, folding into `backend_teardown="unknown"`
+  plus a new `backend_teardown_error` string, confirmed to reproduce on the
+  pre-fix code before the fix. New `skillc/reap.py`: label-scoped container
+  reaping (`docker ps --filter label=...` only, never a name match - a
+  foreign look-alike is structurally unreachable to it), where an unreachable
+  daemon reaps nothing and reports every requested attempt `left-running`
+  (UNKNOWN never reaps); resource snapshots that flag BOTH an unexpected
+  leak of an owned container and an unexpected disappearance of a foreign
+  one; and declared-host-path digests before/after, with the limitation
+  (regular files only, nothing outside the declared list) stated in both the
+  doc and a passing test. The fake `docker` CLI
+  (`tests/fixtures/docker-backend/fake_docker.py`) gained `ps` and label
+  capture on `run` to make this provable without a daemon; the real daemon
+  boundary remains owed to the operator's live run (#10), as it does
+  throughout this codebase's Docker-backend work.
 - **Conformance through the real adapter, a no-Docker proof, and a published
   support matrix** (#80, Refs #10): interfaces.md's "Conformance cases
   required before trusting a backend" table, restated with a

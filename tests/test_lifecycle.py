@@ -63,6 +63,8 @@ class FakeBackend:
         force_confirm_stopped: Confirmation | None = None,
         force_confirm_absent: Confirmation | None = None,
         supports_canary: bool = True,
+        destroy_raises: bool = False,
+        confirm_absent_raises: bool = False,
     ) -> None:
         self._base = base
         self._unavailable = unavailable
@@ -70,6 +72,8 @@ class FakeBackend:
         self._export_fails = export_fails
         self._export_fails_once = export_fails_once
         self._raise_in_execute = raise_in_execute
+        self._destroy_raises = destroy_raises
+        self._confirm_absent_raises = confirm_absent_raises
         self._force_confirm_stopped = force_confirm_stopped
         self._force_confirm_absent = force_confirm_absent
         self._supports_canary = supports_canary
@@ -186,11 +190,15 @@ class FakeBackend:
 
     def destroy(self, handle: object) -> None:
         assert isinstance(handle, _Handle)
+        if self._destroy_raises:
+            raise RuntimeError("fake backend destroy() crashed unexpectedly")
         shutil.rmtree(handle.root, ignore_errors=True)
         self.destroyed.add(handle.attempt_id)
 
     def confirm_absent(self, handle: object) -> Confirmation:
         assert isinstance(handle, _Handle)
+        if self._confirm_absent_raises:
+            raise RuntimeError("fake backend confirm_absent() crashed unexpectedly")
         if self._force_confirm_absent is not None:
             return self._force_confirm_absent
         return Confirmation.NOT_CONFIRMED if handle.root.exists() else Confirmation.CONFIRMED
@@ -411,6 +419,51 @@ def test_teardown_not_confirmed_is_recorded_never_as_clean(store: Path, base: Pa
         backend, experiment, attempt_id, _argv("work"), {"skill": "x"}, Limits(timeout=5), base,
     )
     assert record["backend_teardown"] == "not-confirmed"
+
+
+def test_a_destroy_exception_still_finalizes_the_attempt(store: Path, base: Path) -> None:
+    """Teardown failure (#79): before this fix, `destroy()` raising propagated
+    straight out of `run_through_backend` - `trial.finalize()` never ran, and
+    the attempt was left with NO lifecycle record at all. Confirmed to
+    reproduce on the pre-fix code before this test was written."""
+    experiment, attempt_id = _planned(store)
+    backend = FakeBackend(base, destroy_raises=True)
+    record = lifecycle.run_through_backend(
+        backend, experiment, attempt_id, _argv("work"), {"skill": "x"}, Limits(timeout=5), base,
+    )
+    assert record["disposition"] == "captured"
+    # destroy() raised before it could remove the handle's root, so the
+    # still-independent confirm_absent() call correctly reports NOT_CONFIRMED
+    # (the resource really is still there) rather than a guessed CONFIRMED -
+    # confirm_absent() is never skipped just because destroy() itself raised.
+    assert record["backend_teardown"] == "not-confirmed"
+    assert "crashed unexpectedly" in str(record["backend_teardown_error"])
+
+
+def test_a_confirm_absent_exception_still_finalizes_the_attempt(store: Path, base: Path) -> None:
+    experiment, attempt_id = _planned(store)
+    backend = FakeBackend(base, confirm_absent_raises=True)
+    record = lifecycle.run_through_backend(
+        backend, experiment, attempt_id, _argv("work"), {"skill": "x"}, Limits(timeout=5), base,
+    )
+    assert record["disposition"] == "captured"
+    assert record["backend_teardown"] == "unknown"
+    assert "crashed unexpectedly" in str(record["backend_teardown_error"])
+    # destroy() itself still ran and was not skipped by confirm_absent()'s own raise.
+    assert attempt_id in backend.destroyed
+
+
+def test_teardown_success_reports_no_error(store: Path, base: Path) -> None:
+    """The new `backend_teardown_error` field is `None` on the ordinary path,
+    not merely absent - a consumer checking it need not guess between
+    "no error" and "field doesn't exist"."""
+    experiment, attempt_id = _planned(store)
+    backend = FakeBackend(base)
+    record = lifecycle.run_through_backend(
+        backend, experiment, attempt_id, _argv("work"), {"skill": "x"}, Limits(timeout=5), base,
+    )
+    assert record["backend_teardown"] == "confirmed"
+    assert record["backend_teardown_error"] is None
 
 
 def test_launch_failed_is_unavailable(store: Path, base: Path) -> None:

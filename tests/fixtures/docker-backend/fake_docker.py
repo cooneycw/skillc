@@ -104,6 +104,15 @@ not a docker clone:
         Prints a fixed version and exits 0, unless a `.down` sentinel exists
         in the state dir, in which case it exits 1 with nothing printed - an
         unreachable daemon.
+    ps -a [--filter label=KEY=VALUE ...] --format {{.Names}}
+        Prints one matching container's name per line, ANDing every
+        `--filter label=` given (#79). A container's labels are exactly what
+        `run`'s own `--label KEY=VALUE` flags recorded for it, so a container
+        started with no `--label` (or a different one) never matches a
+        filter naming `skillc.managed` - a foreign look-alike is excluded
+        structurally, not by convention. Reuses the SAME `.down` sentinel as
+        `version`: an unreachable daemon cannot list anything either, and a
+        caller must read that failure as UNKNOWN, never as an empty result.
 """
 
 from __future__ import annotations
@@ -124,7 +133,7 @@ WORK_CONTAINER_PATH = "/work"
 
 _FLAGS_WITH_VALUE = (
     "--network", "--user", "--hostname", "--memory", "--memory-swap",
-    "--pids-limit", "--cpus", "--shm-size", "-w", "--label", "--storage-opt",
+    "--pids-limit", "--cpus", "--shm-size", "-w", "--storage-opt",
     "--signal",
 )
 
@@ -145,10 +154,47 @@ def _stuck(state_dir: Path, name: str) -> bool:
     return (state_dir / f".stuck-{name}").exists()
 
 
+def _write_state(
+    state_dir: Path, name: str, status: str, image: str, env: dict[str, str], labels: dict[str, str],
+) -> None:
+    _state_file(state_dir, name).write_text(
+        json.dumps({"status": status, "image": image, "env": env, "labels": labels})
+    )
+
+
 def cmd_version(state_dir: Path, _rest: list[str]) -> int:
     if (state_dir / ".down").exists():
         return 1
     print("26.0.0-fake")
+    return 0
+
+
+def cmd_ps(state_dir: Path, rest: list[str]) -> int:
+    """`-a` and `--format` are accepted and ignored (this fake always shows
+    every container and always prints one name per line); every repeated
+    `--filter label=KEY=VALUE` narrows the result, ANDed together (#79).
+    `.down` (an unreachable daemon) is handled by `main()` before any
+    subcommand handler runs - not re-checked here."""
+    wanted: dict[str, str] = {}
+    i = 0
+    while i < len(rest):
+        arg = rest[i]
+        if arg == "--filter" and i + 1 < len(rest):
+            raw = rest[i + 1]
+            if raw.startswith("label="):
+                k, _, v = raw[len("label="):].partition("=")
+                wanted[k] = v
+            i += 2
+        else:
+            i += 1  # -a, --format {{.Names}}, or anything else: accepted, unused
+    if not state_dir.is_dir():
+        return 0
+    for path in sorted(state_dir.glob("*.json")):
+        name = path.stem
+        data = json.loads(path.read_text(encoding="utf-8"))
+        labels = data.get("labels", {})
+        if all(labels.get(k) == v for k, v in wanted.items()):
+            print(name)
     return 0
 
 
@@ -379,6 +425,7 @@ def cmd_run(state_dir: Path, rest: list[str]) -> int:
     name = ""
     detached = False
     env: dict[str, str] = {}
+    labels: dict[str, str] = {}
     i = 0
     while i < len(rest):
         arg = rest[i]
@@ -392,6 +439,10 @@ def cmd_run(state_dir: Path, rest: list[str]) -> int:
         elif arg == "-e":
             k, _, v = rest[i + 1].partition("=")
             env[k] = v
+            i += 2
+        elif arg == "--label":
+            k, _, v = rest[i + 1].partition("=")
+            labels[k] = v
             i += 2
         elif arg in _FLAGS_WITH_VALUE:
             i += 2  # consume and ignore the value; not needed for the simulation
@@ -416,13 +467,13 @@ def cmd_run(state_dir: Path, rest: list[str]) -> int:
             # the state file/fsroot are left behind as a real orphan would
             # be, so a test can prove DockerBackend.prepare() cleans it up
             # itself before raising, per backend.py's own stated contract.
-            _state_file(state_dir, name).write_text(json.dumps({"status": "created", "image": image, "env": env}))
+            _write_state(state_dir, name, "created", image, env, labels)
             print("Error response from daemon: OCI runtime create failed (fault injection)", file=sys.stderr)
             return 1
-        _state_file(state_dir, name).write_text(json.dumps({"status": "running", "image": image, "env": env}))
+        _write_state(state_dir, name, "running", image, env, labels)
         return 0
 
-    _state_file(state_dir, name).write_text(json.dumps({"status": "running", "image": image, "env": env}))
+    _write_state(state_dir, name, "running", image, env, labels)
     try:
         proc = subprocess.run(argv, cwd=_in_container(state_dir, name, WORK_CONTAINER_PATH), env=env, check=False)
     except OSError as exc:
@@ -432,7 +483,7 @@ def cmd_run(state_dir: Path, rest: list[str]) -> int:
     # whose process exited - a SIGKILL of THIS fake never reaches here, which
     # is the scenario DockerBackend's own destroy() exists to close.
     if _stuck(state_dir, name):
-        _state_file(state_dir, name).write_text(json.dumps({"status": "exited", "image": image, "env": env}))
+        _write_state(state_dir, name, "exited", image, env, labels)
         return proc.returncode
     path = _state_file(state_dir, name)
     if path.is_file():
@@ -443,7 +494,7 @@ def cmd_run(state_dir: Path, rest: list[str]) -> int:
 
 SUBCOMMANDS = {
     "run": cmd_run, "inspect": cmd_inspect, "rm": cmd_rm, "version": cmd_version,
-    "kill": cmd_kill, "exec": cmd_exec, "cp": cmd_cp,
+    "kill": cmd_kill, "exec": cmd_exec, "cp": cmd_cp, "ps": cmd_ps,
 }
 
 
