@@ -691,7 +691,12 @@ def verdict_tiers(record: Record) -> Iterator[str]:
         not isinstance(enabled, list) or not all(_nonempty_str(t) for t in enabled)
     ):
         yield "verification.tiers_enabled is present but is not a list of non-empty tier names"
-    enabled_set = set(enabled) if isinstance(enabled, list) else set()
+    # Built from validated entries only (codex review): a stray non-string or
+    # unhashable element (a nested list, a dict) must not raise here just
+    # because it was already flagged above - `set()` on an unhashable value,
+    # and `sorted()` on a mixed-type set below, would abort validation with a
+    # traceback instead of a diagnostic, which is worse than reporting nothing.
+    enabled_set = {t for t in enabled if _nonempty_str(t)} if isinstance(enabled, list) else set()
     verdicts = verification.get("verdicts")
     if verdicts is None:
         return
