@@ -170,6 +170,79 @@ These two streams are the initial set, not a census. Cost/token observation and
 nested-worker coverage are named in interfaces.md and join this list when a producer
 can report them (#8, #12).
 
+### `skill-invocations`: an optional declared observation (#39)
+
+spec.md keeps four observations distinct: files discovered, skill
+installed/available, skill actually invoked, and task outcome. `installed`
+already has a home (`installation-receipt`); `skill-invocations` gives
+"actually invoked" one, so it never has to be re-derived from raw events
+outside any rule - the state before this: "available but never invoked" was
+recoverable only by someone reading raw client events by hand, and nothing
+could refuse a silence standing in for "not invoked".
+
+The idea is [config-drift-checker](../../research/config-drift-checker-lessons.md)'s
+(#38, per [ADR 0003](../../decisions/0003-no-external-evaluation-runtime.md)): a
+per-skill chip that reads "never invoked this run" only when transcript evidence
+exists, and "invocation unknown" otherwise
+([`tools/eval-report.mjs` L36-38, L252](https://github.com/jameskomo/config-drift-checker/blob/0aca62bf43fcc6c9e873b507dcb6f2a4455f2de1/config-drift-checker/tools/eval-report.mjs#L36-L38)).
+
+**Version decision.** `skill-invocations` is an **optional** declared stream in
+v2, not a v3 bump and not added to `REQUIRED_OBSERVATIONS`. The alternative the
+issue posed - v3, with v2 refused - was rejected: it would refuse every v2
+manifest written before this stream existed, which is disproportionate for a
+"bounded follow-up; not a gate for #10" (#39's own phase note), and unlike
+`attempt-lifecycle` (#8, a new *kind*, added without invalidating anything) this
+change touches an *existing* kind's required-observation set, where joining
+`REQUIRED_OBSERVATIONS` unconditionally would be exactly the invalidation a
+version bump exists to signal - just without signalling it.
+
+**Shape**, when declared: an `observations` entry with `stream:
+"skill-invocations"`, its own `origin` and `coverage` from the same vocabulary
+above (applying to the whole stream: within one attempt, the observability route
+is a property of the client, not of which skill is asked about), and a `skills`
+list of `{path, count}` rows, one per installed skill it reports on. `count` is
+a non-negative integer or the literal string `"UNKNOWN"`.
+
+- If `coverage` is not `complete`, every row's `count` must be `"UNKNOWN"`,
+  never a number, including `0` - the same silence-is-not-absence rule this
+  document already states for a whole stream, applied per skill.
+- If `coverage` is `complete`, every row's `count` must be a real non-negative
+  integer; `"UNKNOWN"` under complete coverage is dishonest, not cautious.
+- Each `path` must be one the attempt's own `installation-receipt` actually
+  installed. `observation_coverage` (a record rule) checks the stream's own
+  shape; only `ledger_binding` (a bundle rule) has the receipt to check a path
+  against, exactly as it already does for a stale receipt or an altered
+  artifact.
+
+**Left to #26, deliberately.** The issue's own acceptance list includes "the
+stream is required by the chosen version but absent" as a refused case. #39
+does not implement that: making the stream required is supposed to be gated by
+"an attempt whose case declares selection as an observation" (the issue's own
+words), and a *case* is not yet a record kind or a validated field anywhere in
+this schema - it is #26's and #12's territory. Inventing a stand-in field now
+(for example a boolean on the trial ledger) would very likely disagree with
+whatever #26 designs once cases are actually specified, and would spend #26's
+design decision inside a bounded follow-up that is explicitly "not a gate" for
+anything downstream. So today `skill-invocations` is optional unconditionally;
+#26 adds the rule that makes it required when a case says so.
+
+**The client route is a fact each adapter declares, not one skillc infers.**
+Claude Code exposes invocation as a `Skill` tool call, so its adapter can
+declare `origin: observed`. How Codex reveals that a skill was used is
+unestablished - #39 does not resolve this, because resolving it needs a live
+run against a real Codex session, which is #7/#10 territory, not this bounded
+follow-up. Until an adapter can name a real route, it declares `coverage:
+unsupported` with every count `"UNKNOWN"`. **Do not substitute a file-read
+heuristic** (did a skill's directory appear in a prompt, was a file under it
+opened) for a real invocation signal. This project's own reading of
+config-drift-checker already names the trap
+([config-drift-checker-lessons.md](../../research/config-drift-checker-lessons.md),
+"Traps the reading showed"): its "invoked by substring" match on any `Skill`
+tool input containing the skill's directory or name, lowercased, lets a short
+name such as `run` match unrelated input. A heuristic that _looks_ like
+observation is worse than an honest `unsupported`, because its false positives
+are silent.
+
 ## `attempt-lifecycle`
 
 Produced by the controller ([capture.md](capture.md)), one per planned attempt: what
@@ -261,7 +334,10 @@ says so on every run.
 - if a result, names the trial's planned grader `id` and `revision`. A regrade may
   carry a new revision, but not a different grader;
 - if a result, cites only digests its attempt's manifest captured. Otherwise it
-  graded an **altered** or substituted artifact.
+  graded an **altered** or substituted artifact;
+- if a manifest declares a `skill-invocations` observation (#39), every `skills`
+  row's `path` is one the attempt's own installation receipt actually installed.
+  Otherwise it names a skill this attempt never had.
 
 **`unique-ids`.** interfaces.md makes "duplicate/conflicting IDs" an explicit
 validation failure:
@@ -334,12 +410,12 @@ bundle cases as well, including against every record rule.
 | `installation-receipt` | record | empty install; no readiness; subject without digest |
 | `trial-ledger` | record | no trials; a trial with no attempts; missing grader identity; malformed attempt ID |
 | `artifact-digest` | record | an artifact without a digest; an empty manifest |
-| `observation-coverage` | record | a silent required stream; an unknown origin; no `capture_failures` |
+| `observation-coverage` | record | a silent required stream; an unknown origin; no `capture_failures`; a `skill-invocations` count that is not `UNKNOWN` under incomplete coverage, or not a real integer under complete coverage (#39) |
 | `criterion-vocabulary` | record | an outcome outside the vocabulary; a non-boolean `mandatory` (`"true"` would drop a violation out of the derivation) |
 | `result-evidence` | record | SATISFIED without evidence; UNKNOWN without `missing`; no graded digests; no grader; a run state without reason |
 | `derived-status` | record | a status copied rather than derived |
 | `attempt-lifecycle` | record | an unknown stop reason or disposition; a non-result without a reason; captured before a confirmed stop; no cleanup |
-| `ledger-binding` | bundle | cross-trial receipt; stale receipt; attempt the ledger never issued; altered artifact; unplanned grader |
+| `ledger-binding` | bundle | cross-trial receipt; stale receipt; attempt the ledger never issued; altered artifact; unplanned grader; a `skill-invocations` path the attempt's receipt never installed (#39) |
 | `unique-ids` | bundle | duplicate attempt ID; conflicting receipts; duplicate result ID |
 | `attempt-accounting` | bundle | planned attempt with no lifecycle; captured with no result; graded without receipt; graded without manifest; captured but declared NOT_RUN; graded but not captured; manifest but not captured |
 | `lineage` | bundle | retry reusing its own ID; regrade whose original was erased; regrade of different bytes |

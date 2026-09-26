@@ -643,3 +643,77 @@ def test_check_records_refuses_the_string_mandatory_repro(tmp_path: Path) -> Non
     shutil.copy(REPRO_37, tmp_path / "record.json")
     rc = cli.cmd_check_records(argparse.Namespace(path=str(tmp_path), rule=None))
     assert rc == 1, "a VIOLATED criterion flagged \"mandatory\": \"true\" derived a clean PASS"
+
+
+# --------------------------------------------------------------- skill invocations (#39)
+
+def _with_skill_invocations(**entry: object) -> records.Record:
+    observations = [*GOOD_MANIFEST["observations"], {"stream": "skill-invocations", **entry}]  # type: ignore[misc]
+    return _record(**{**GOOD_MANIFEST, "observations": observations})
+
+
+def test_a_numeric_count_under_incomplete_coverage_is_refused() -> None:
+    """Silence is not \"not invoked\": the same rule `observation_coverage` already
+    enforces for a whole stream (#39's addition), applied per skill."""
+    rec = _with_skill_invocations(
+        origin="client-reported", coverage="partial",
+        skills=[{"path": ".codex/skills/slug/SKILL.md", "count": 0}],
+    )
+    findings = list(records.observation_coverage(rec))
+    assert findings and "UNKNOWN" in findings[0]
+
+
+def test_UNKNOWN_is_accepted_under_incomplete_coverage() -> None:
+    rec = _with_skill_invocations(
+        origin="client-reported", coverage="unsupported",
+        skills=[{"path": ".codex/skills/slug/SKILL.md", "count": "UNKNOWN"}],
+    )
+    assert list(records.observation_coverage(rec)) == []
+
+
+def test_UNKNOWN_is_refused_under_complete_coverage() -> None:
+    """Complete coverage means everything was seen; \"unknown\" is no longer an
+    honest answer once it was."""
+    rec = _with_skill_invocations(
+        origin="observed", coverage="complete",
+        skills=[{"path": ".codex/skills/slug/SKILL.md", "count": "UNKNOWN"}],
+    )
+    findings = list(records.observation_coverage(rec))
+    assert findings and "non-negative integer" in findings[0]
+
+
+def test_zero_is_a_legitimate_count_under_complete_coverage() -> None:
+    rec = _with_skill_invocations(
+        origin="observed", coverage="complete",
+        skills=[{"path": ".codex/skills/slug/SKILL.md", "count": 0}],
+    )
+    assert list(records.observation_coverage(rec)) == []
+
+
+def test_an_invoked_skill_not_in_the_receipts_installed_list_is_refused(tmp_path: Path) -> None:
+    """`observation_coverage` only checks the stream's own shape; the cross-check
+    against what the attempt actually installed needs the receipt, which only a
+    bundle rule (`ledger_binding`) can read."""
+    manifest = {**GOOD_MANIFEST, "observations": [
+        *GOOD_MANIFEST["observations"],  # type: ignore[misc]
+        {
+            "stream": "skill-invocations", "origin": "observed", "coverage": "complete",
+            "skills": [{"path": ".codex/skills/never-installed/SKILL.md", "count": 1}],
+        },
+    ]}
+    bundle = _write_bundle(tmp_path, GOOD_LEDGER, GOOD_RECEIPT, manifest)
+    findings = list(records.ledger_binding(bundle))
+    assert findings and "never-installed" in findings[0]
+
+
+def test_an_invoked_skill_the_receipt_installed_is_accepted(tmp_path: Path) -> None:
+    installed_path = GOOD_RECEIPT["installed"][0]["path"]  # type: ignore[index]
+    manifest = {**GOOD_MANIFEST, "observations": [
+        *GOOD_MANIFEST["observations"],  # type: ignore[misc]
+        {
+            "stream": "skill-invocations", "origin": "observed", "coverage": "complete",
+            "skills": [{"path": installed_path, "count": 1}],
+        },
+    ]}
+    bundle = _write_bundle(tmp_path, GOOD_LEDGER, GOOD_RECEIPT, manifest)
+    assert list(records.ledger_binding(bundle)) == []
