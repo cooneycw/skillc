@@ -16,6 +16,17 @@ collection) closes.
 
 ### Added
 
+- **The Docker backend's interface** (Refs #77, sub-issue of #10):
+  `skillc.docker_backend.DockerBackend`'s constructor/config, `describe()`'s
+  claims, the composed `docker run` argv (`compose_run_argv`, a committed
+  control surface - no socket mount, no bare `-e NAME`, matched
+  `--memory`/`--memory-swap`, a literal `--` before the image, per-trial
+  ownership labels, an opt-in disk bound), and the handle shape. The
+  candidate user is a fixed, host-independent uid:gid (`10001:10001`), never
+  the host caller's own - the container's own `id`, file ownership and
+  transcripts would otherwise carry a piece of the host's real identity.
+  Every lifecycle method beyond `describe()` raises `NotImplementedError`
+  pending #77's own follow-up implementation PR.
 - **`skillc.verify` grades a probe through an `ExecutionBackend`, with a
   deterministic grading tier and a provenance stamp** (Refs #10): `grade()`/
   `grade_files()` accept an optional backend for stage 1 (the untrusted
