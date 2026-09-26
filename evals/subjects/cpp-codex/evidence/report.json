@@ -1,0 +1,1462 @@
+{
+ "started": "2026-09-26T14:03:58Z",
+ "adapter": {
+  "name": "skillc-codex-skills",
+  "version": "1"
+ },
+ "subject": {
+  "subject_schema": 1,
+  "locator": "github.com/cooneycw/claude-power-pack",
+  "revision": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b",
+  "surface": "codex-skills",
+  "skills_root": "codex/skills",
+  "select": "all",
+  "checksum_manifest": "scripts/SHA256SUMS",
+  "external_references": [
+   {
+    "pattern": "~/\\.claude/scripts/[A-Za-z0-9._-]+",
+    "meaning": "host helper installed by the subject's own repair step; not materialized"
+   },
+   {
+    "pattern": "\\$\\{?CLAUDE_PLUGIN_ROOT\\}?/[A-Za-z0-9._/-]+",
+    "meaning": "plugin-bundled helper path of another client; not materialized"
+   }
+  ],
+  "required_references": [
+   {
+    "pattern": "Read `([^`]+)` in this skill directory",
+    "meaning": "the subject's generated entry points defer to a bundled full procedure"
+   }
+  ],
+  "client": {
+   "name": "codex",
+   "version": "0.157.1"
+  }
+ },
+ "observations": {
+  "installed": "273 file(s) in 74 skill(s)",
+  "available": "SATISFIED",
+  "invoked": "NOT_OBSERVED",
+  "task_outcome": "NOT_APPLICABLE"
+ },
+ "source": {
+  "kind": "git",
+  "revision": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b",
+  "digest": "sha256:ceba20f15452dff932a5837495ede1b7ea2c48696545e07f7ea9d9476e5b0b52"
+ },
+ "inventory": {
+  "skills": [
+   {
+    "directory": "browser-help",
+    "name": "browser-help",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "browser-session",
+    "name": "browser-session",
+    "files": 4,
+    "checksums": "verified",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "cicd-check",
+    "name": "cicd-check",
+    "files": 2,
+    "checksums": "absent",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "cicd-container",
+    "name": "cicd-container",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "cicd-health",
+    "name": "cicd-health",
+    "files": 2,
+    "checksums": "absent",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "cicd-help",
+    "name": "cicd-help",
+    "files": 2,
+    "checksums": "absent",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "cicd-infra-discover",
+    "name": "cicd-infra-discover",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "cicd-infra-init",
+    "name": "cicd-infra-init",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "cicd-infra-pipeline",
+    "name": "cicd-infra-pipeline",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "cicd-init",
+    "name": "cicd-init",
+    "files": 2,
+    "checksums": "absent",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "cicd-pipeline",
+    "name": "cicd-pipeline",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "cicd-smoke",
+    "name": "cicd-smoke",
+    "files": 2,
+    "checksums": "absent",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "cicd-verify",
+    "name": "cicd-verify",
+    "files": 2,
+    "checksums": "absent",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "cicd-woodpecker",
+    "name": "cicd-woodpecker",
+    "files": 2,
+    "checksums": "absent",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "claude-md-help",
+    "name": "claude-md-help",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "claude-md-lint",
+    "name": "claude-md-lint",
+    "files": 2,
+    "checksums": "absent",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "cpp-dockers",
+    "name": "cpp-dockers",
+    "files": 2,
+    "checksums": "absent",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "cpp-happy-check",
+    "name": "cpp-happy-check",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "cpp-help",
+    "name": "cpp-help",
+    "files": 2,
+    "checksums": "absent",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "cpp-load-best-practices",
+    "name": "cpp-load-best-practices",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "cpp-load-mcp-docs",
+    "name": "cpp-load-mcp-docs",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "documentation-c4",
+    "name": "documentation-c4",
+    "files": 4,
+    "checksums": "verified",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "documentation-help",
+    "name": "documentation-help",
+    "files": 3,
+    "checksums": "verified",
+    "required_refs": []
+   },
+   {
+    "directory": "documentation-pptx",
+    "name": "documentation-pptx",
+    "files": 4,
+    "checksums": "verified",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "evaluate-help",
+    "name": "evaluate-help",
+    "files": 4,
+    "checksums": "verified",
+    "required_refs": []
+   },
+   {
+    "directory": "evaluate-issue",
+    "name": "evaluate-issue",
+    "files": 7,
+    "checksums": "verified",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "flow-auto",
+    "name": "flow-auto",
+    "files": 34,
+    "checksums": "verified",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "flow-check",
+    "name": "flow-check",
+    "files": 7,
+    "checksums": "verified",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "flow-cleanup",
+    "name": "flow-cleanup",
+    "files": 7,
+    "checksums": "verified",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "flow-deploy",
+    "name": "flow-deploy",
+    "files": 2,
+    "checksums": "absent",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "flow-doctor",
+    "name": "flow-doctor",
+    "files": 7,
+    "checksums": "verified",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "flow-eli5",
+    "name": "flow-eli5",
+    "files": 8,
+    "checksums": "verified",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "flow-finish",
+    "name": "flow-finish",
+    "files": 18,
+    "checksums": "verified",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "flow-help",
+    "name": "flow-help",
+    "files": 2,
+    "checksums": "absent",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "flow-merge",
+    "name": "flow-merge",
+    "files": 14,
+    "checksums": "verified",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "flow-register",
+    "name": "flow-register",
+    "files": 9,
+    "checksums": "verified",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "flow-repair",
+    "name": "flow-repair",
+    "files": 7,
+    "checksums": "verified",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "flow-start",
+    "name": "flow-start",
+    "files": 9,
+    "checksums": "verified",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "flow-status",
+    "name": "flow-status",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "flow-sync",
+    "name": "flow-sync",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "flow-wave",
+    "name": "flow-wave",
+    "files": 18,
+    "checksums": "verified",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "github-help",
+    "name": "github-help",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "github-issue-close",
+    "name": "github-issue-close",
+    "files": 2,
+    "checksums": "absent",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "github-issue-create",
+    "name": "github-issue-create",
+    "files": 4,
+    "checksums": "absent",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "github-issue-list",
+    "name": "github-issue-list",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "github-issue-update",
+    "name": "github-issue-update",
+    "files": 2,
+    "checksums": "absent",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "github-issue-view",
+    "name": "github-issue-view",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "project-help",
+    "name": "project-help",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "project-init",
+    "name": "project-init",
+    "files": 7,
+    "checksums": "verified",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "project-lite",
+    "name": "project-lite",
+    "files": 2,
+    "checksums": "absent",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "project-next",
+    "name": "project-next",
+    "files": 12,
+    "checksums": "verified",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "qa-help",
+    "name": "qa-help",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "qa-test",
+    "name": "qa-test",
+    "files": 2,
+    "checksums": "absent",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "second-opinion-help",
+    "name": "second-opinion-help",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "second-opinion-models",
+    "name": "second-opinion-models",
+    "files": 2,
+    "checksums": "absent",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "second-opinion-start",
+    "name": "second-opinion-start",
+    "files": 2,
+    "checksums": "absent",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "secrets-delete",
+    "name": "secrets-delete",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "secrets-get",
+    "name": "secrets-get",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "secrets-help",
+    "name": "secrets-help",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "secrets-list",
+    "name": "secrets-list",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "secrets-rotate",
+    "name": "secrets-rotate",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "secrets-run",
+    "name": "secrets-run",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "secrets-set",
+    "name": "secrets-set",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "secrets-ui",
+    "name": "secrets-ui",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "secrets-validate",
+    "name": "secrets-validate",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "security-deep",
+    "name": "security-deep",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "security-explain",
+    "name": "security-explain",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "security-help",
+    "name": "security-help",
+    "files": 4,
+    "checksums": "verified",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "security-permissions",
+    "name": "security-permissions",
+    "files": 6,
+    "checksums": "verified",
+    "required_refs": []
+   },
+   {
+    "directory": "security-quick",
+    "name": "security-quick",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "security-scan",
+    "name": "security-scan",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "self-improvement-deployment",
+    "name": "self-improvement-deployment",
+    "files": 2,
+    "checksums": "absent",
+    "required_refs": [
+     "reference.md"
+    ]
+   },
+   {
+    "directory": "self-improvement-help",
+    "name": "self-improvement-help",
+    "files": 1,
+    "checksums": "absent",
+    "required_refs": []
+   },
+   {
+    "directory": "self-improvement-retro",
+    "name": "self-improvement-retro",
+    "files": 6,
+    "checksums": "verified",
+    "required_refs": [
+     "reference.md"
+    ]
+   }
+  ],
+  "not_installed_entries": [
+   "README.md"
+  ]
+ },
+ "static_findings": {
+  "note": "static observations only; they never establish or refute readiness",
+  "unresolved_mentions": [
+   "browser-help: SKILL.md mentions .claude/playwright-pool.json, not in this skill (static; not readiness)",
+   "browser-help: SKILL.md mentions .claude/playwright-sessions.json, not in this skill (static; not readiness)",
+   "browser-help: SKILL.md mentions docs/reviews/2026-07-03-playwright-spike-419.md, not in this skill (static; not readiness)",
+   "browser-help: SKILL.md mentions docs/skills/browser-session-wrapper.md, not in this skill (static; not readiness)",
+   "browser-help: SKILL.md mentions playwright-desk-1..N, not in this skill (static; not readiness)",
+   "browser-help: SKILL.md mentions templates/playwright-pool.example.json, not in this skill (static; not readiness)",
+   "browser-session: SKILL.md mentions AGENTS.md, not in this skill (static; not readiness)",
+   "browser-session: SKILL.md mentions CLAUDE.md, not in this skill (static; not readiness)",
+   "browser-session: reference.md mentions .claude/playwright-pool.json, not in this skill (static; not readiness)",
+   "browser-session: reference.md mentions .claude/playwright-sessions.json, not in this skill (static; not readiness)",
+   "browser-session: reference.md mentions docs/reviews/2026-07-03-playwright-spike-419.md, not in this skill (static; not readiness)",
+   "cicd-check: SKILL.md mentions AGENTS.md, not in this skill (static; not readiness)",
+   "cicd-check: SKILL.md mentions CLAUDE.md, not in this skill (static; not readiness)",
+   "cicd-check: reference.md mentions .PHONY, not in this skill (static; not readiness)",
+   "cicd-check: reference.md mentions .claude/cicd.yml, not in this skill (static; not readiness)",
+   "cicd-container: SKILL.md mentions .dockerignore, not in this skill (static; not readiness)",
+   "cicd-container: SKILL.md mentions docker-compose.yml, not in this skill (static; not readiness)",
+   "cicd-health: SKILL.md mentions AGENTS.md, not in this skill (static; not readiness)",
+   "cicd-health: SKILL.md mentions CLAUDE.md, not in this skill (static; not readiness)",
+   "cicd-health: reference.md mentions .claude/cicd.yml, not in this skill (static; not readiness)",
+   "cicd-help: SKILL.md mentions AGENTS.md, not in this skill (static; not readiness)",
+   "cicd-help: SKILL.md mentions CLAUDE.md, not in this skill (static; not readiness)",
+   "cicd-help: reference.md mentions .claude/cicd.yml, not in this skill (static; not readiness)",
+   "cicd-help: reference.md mentions .woodpecker.yml, not in this skill (static; not readiness)",
+   "cicd-help: reference.md mentions docs/skills/woodpecker-ci.md, not in this skill (static; not readiness)",
+   "cicd-help: reference.md mentions go.mk, not in this skill (static; not readiness)",
+   "cicd-help: reference.md mentions multi.mk, not in this skill (static; not readiness)",
+   "cicd-help: reference.md mentions node-npm.mk, not in this skill (static; not readiness)",
+   "cicd-help: reference.md mentions node-yarn.mk, not in this skill (static; not readiness)",
+   "cicd-help: reference.md mentions python-pip.mk, not in this skill (static; not readiness)",
+   "cicd-help: reference.md mentions python-uv.mk, not in this skill (static; not readiness)",
+   "cicd-help: reference.md mentions rust.mk, not in this skill (static; not readiness)",
+   "cicd-help: reference.md mentions templates/cicd.yml.example, not in this skill (static; not readiness)",
+   "cicd-infra-discover: SKILL.md mentions .claude/cicd.yml, not in this skill (static; not readiness)",
+   "cicd-infra-discover: SKILL.md mentions AGENTS.md, not in this skill (static; not readiness)",
+   "cicd-infra-discover: SKILL.md mentions CLAUDE.md, not in this skill (static; not readiness)",
+   "cicd-infra-init: SKILL.md mentions .claude/cicd.yml, not in this skill (static; not readiness)",
+   "cicd-infra-init: SKILL.md mentions AGENTS.md, not in this skill (static; not readiness)",
+   "cicd-infra-init: SKILL.md mentions CLAUDE.md, not in this skill (static; not readiness)",
+   "cicd-infra-pipeline: SKILL.md mentions .claude/cicd.yml, not in this skill (static; not readiness)",
+   "cicd-infra-pipeline: SKILL.md mentions .github/workflows/infra-app.yml, not in this skill (static; not readiness)",
+   "cicd-infra-pipeline: SKILL.md mentions .github/workflows/infra-foundation.yml, not in this skill (static; not readiness)",
+   "cicd-infra-pipeline: SKILL.md mentions .github/workflows/infra-platform.yml, not in this skill (static; not readiness)",
+   "cicd-infra-pipeline: SKILL.md mentions AGENTS.md, not in this skill (static; not readiness)",
+   "cicd-infra-pipeline: SKILL.md mentions CLAUDE.md, not in this skill (static; not readiness)",
+   "cicd-init: SKILL.md mentions AGENTS.md, not in this skill (static; not readiness)",
+   "cicd-init: SKILL.md mentions CLAUDE.md, not in this skill (static; not readiness)",
+   "cicd-init: reference.md mentions .claude/cicd.yml, not in this skill (static; not readiness)",
+   "cicd-init: reference.md mentions templates/cicd.yml.example, not in this skill (static; not readiness)",
+   "cicd-init: reference.md mentions templates/makefiles/go.mk, not in this skill (static; not readiness)",
+   "cicd-init: reference.md mentions templates/makefiles/multi.mk, not in this skill (static; not readiness)",
+   "cicd-init: reference.md mentions templates/makefiles/node-npm.mk, not in this skill (static; not readiness)",
+   "cicd-init: reference.md mentions templates/makefiles/node-yarn.mk, not in this skill (static; not readiness)",
+   "cicd-init: reference.md mentions templates/makefiles/python-pip.mk, not in this skill (static; not readiness)",
+   "cicd-init: reference.md mentions templates/makefiles/python-uv.mk, not in this skill (static; not readiness)",
+   "cicd-init: reference.md mentions templates/makefiles/rust.mk, not in this skill (static; not readiness)",
+   "cicd-pipeline: SKILL.md mentions .claude/cicd.yml, not in this skill (static; not readiness)",
+   "cicd-pipeline: SKILL.md mentions .claude/cicd_tasks.yml, not in this skill (static; not readiness)",
+   "cicd-pipeline: SKILL.md mentions .github/workflows/ci.yml, not in this skill (static; not readiness)",
+   "cicd-pipeline: SKILL.md mentions .woodpecker.yml, not in this skill (static; not readiness)",
+   "cicd-pipeline: SKILL.md mentions docs/skills/woodpecker-ci.md, not in this skill (static; not readiness)",
+   "cicd-smoke: SKILL.md mentions AGENTS.md, not in this skill (static; not readiness)",
+   "cicd-smoke: SKILL.md mentions CLAUDE.md, not in this skill (static; not readiness)",
+   "cicd-smoke: reference.md mentions .claude/cicd.yml, not in this skill (static; not readiness)",
+   "cicd-smoke: reference.md mentions health.smoke_tests, not in this skill (static; not readiness)",
+   "cicd-verify: SKILL.md mentions AGENTS.md, not in this skill (static; not readiness)",
+   "cicd-verify: SKILL.md mentions CLAUDE.md, not in this skill (static; not readiness)",
+   "cicd-verify: reference.md mentions .claude/cicd.yml, not in this skill (static; not readiness)",
+   "cicd-verify: reference.md mentions .claude/deploy-baseline.json, not in this skill (static; not readiness)",
+   "cicd-verify: reference.md mentions deploy_verification.enabled, not in this skill (static; not readiness)",
+   "cicd-verify: reference.md mentions health.deploy_verification, not in this skill (static; not readiness)",
+   "cicd-verify: reference.md mentions health.deploy_verification.enabled, not in this skill (static; not readiness)",
+   "cicd-verify: reference.md mentions health.endpoints, not in this skill (static; not readiness)",
+   "cicd-verify: reference.md mentions health.processes, not in this skill (static; not readiness)",
+   "cicd-verify: reference.md mentions health.smoke_tests, not in this skill (static; not readiness)",
+   "cicd-verify: reference.md mentions lib.cicd, not in this skill (static; not readiness)",
+   "cicd-woodpecker: reference.md mentions .claude/cicd.yml, not in this skill (static; not readiness)",
+   "cicd-woodpecker: reference.md mentions .gitignore, not in this skill (static; not readiness)",
+   "cicd-woodpecker: reference.md mentions .woodpecker.yml, not in this skill (static; not readiness)",
+   "cicd-woodpecker: reference.md mentions docs/skills/woodpecker-ci.md, not in this skill (static; not readiness)",
+   "cicd-woodpecker: reference.md mentions templates/woodpecker/README.md, not in this skill (static; not readiness)",
+   "cicd-woodpecker: reference.md mentions woodpecker/agent.env, not in this skill (static; not readiness)",
+   "cicd-woodpecker: reference.md mentions woodpecker/docker.env, not in this skill (static; not readiness)",
+   "claude-md-help: SKILL.md mentions AGENTS.md, not in this skill (static; not readiness)",
+   "claude-md-help: SKILL.md mentions CLAUDE.md, not in this skill (static; not readiness)",
+   "claude-md-lint: SKILL.md mentions AGENTS.md, not in this skill (static; not readiness)",
+   "claude-md-lint: SKILL.md mentions CLAUDE.md, not in this skill (static; not readiness)",
+   "claude-md-lint: reference.md mentions knowledge-lifecycle.md, not in this skill (static; not readiness)",
+   "cpp-dockers: reference.md mentions .mcp.json, not in this skill (static; not readiness)",
+   "cpp-dockers: reference.md mentions com.docker.compose.project, not in this skill (static; not readiness)",
+   "cpp-help: SKILL.md mentions AGENTS.md, not in this skill (static; not readiness)",
+   "cpp-help: SKILL.md mentions CLAUDE.md, not in this skill (static; not readiness)",
+   "cpp-help: reference.md mentions .mcp.json, not in this skill (static; not readiness)",
+   "cpp-help: reference.md mentions CLAUDE.md, not in this skill (static; not readiness)",
+   "cpp-help: reference.md mentions ISSUE_DRIVEN_DEVELOPMENT.md, not in this skill (static; not readiness)",
+   "cpp-help: reference.md mentions docs/reference/CLAUDE_CODE_BEST_PRACTICES_FULL.md, not in this skill (static; not readiness)",
+   "cpp-load-best-practices: SKILL.md mentions AGENTS.md, not in this skill (static; not readiness)",
+   "cpp-load-best-practices: SKILL.md mentions CLAUDE.md, not in this skill (static; not readiness)",
+   "cpp-load-best-practices: SKILL.md mentions docs/reference/CLAUDE_CODE_BEST_PRACTICES_FULL.md, not in this skill (static; not readiness)",
+   "cpp-load-mcp-docs: SKILL.md mentions .mcp.json, not in this skill (static; not readiness)",
+   "cpp-load-mcp-docs: SKILL.md mentions README.md, not in this skill (static; not readiness)",
+   "documentation-c4: SKILL.md mentions AGENTS.md, not in this skill (static; not readiness)",
+   "documentation-c4: SKILL.md mentions CLAUDE.md, not in this skill (static; not readiness)",
+   "documentation-c4: reference.md mentions .mmd, not in this skill (static; not readiness)",
+   "documentation-c4: reference.md mentions c4-manifest.json, not in this skill (static; not readiness)",
+   "documentation-c4: reference.md mentions c4-model.json, not in this skill (static; not readiness)",
+   "documentation-c4: reference.md mentions docker-compose.yml, not in this skill (static; not readiness)",
+   "documentation-c4: reference.md mentions docs/architecture/c4-model.json, not in this skill (static; not readiness)",
+   "documentation-c4: reference.md mentions index.md, not in this skill (static; not readiness)",
+   "documentation-c4: reference.md mentions package.json, not in this skill (static; not readiness)",
+   "documentation-c4: reference.md mentions pyproject.toml, not in this skill (static; not readiness)",
+   "documentation-help: SKILL.md mentions .mmd, not in this skill (static; not readiness)",
+   "documentation-help: SKILL.md mentions c4-manifest.json, not in this skill (static; not readiness)",
+   "documentation-help: SKILL.md mentions docs/architecture/c4-model.json, not in this skill (static; not readiness)",
+   "documentation-help: SKILL.md mentions index.md, not in this skill (static; not readiness)",
+   "documentation-pptx: reference.md mentions .mmd, not in this skill (static; not readiness)",
+   "documentation-pptx: reference.md mentions .pptx, not in this skill (static; not readiness)",
+   "documentation-pptx: reference.md mentions index.md, not in this skill (static; not readiness)",
+   "evaluate-help: SKILL.md mentions ./scripts/speckit-tasks-to-issues.sh, not in this skill (static; not readiness)",
+   "evaluate-help: SKILL.md mentions .mcp.json, not in this skill (static; not readiness)",
+   "evaluate-help: SKILL.md mentions tasks.md, not in this skill (static; not readiness)",
+   "evaluate-issue: SKILL.md mentions ../../../docs/..., not in this skill (static; not readiness)",
+   "evaluate-issue: docs/agents/issue-contract.md mentions .claude/commands/evaluate/issue.md, not in this skill (static; not readiness)",
+   "evaluate-issue: docs/agents/issue-contract.md mentions .claude/commands/github/issue-create.md, not in this skill (static; not readiness)",
+   "evaluate-issue: docs/agents/issue-contract.md mentions .claude/commands/spec/help.md, not in this skill (static; not readiness)",
+   "evaluate-issue: docs/agents/issue-contract.md mentions .claude/skills/spec-driven-dev/SKILL.md, not in this skill (static; not readiness)",
+   "evaluate-issue: docs/agents/issue-contract.md mentions .specify/memory/constitution.md, not in this skill (static; not readiness)",
+   "evaluate-issue: docs/agents/issue-contract.md mentions .specify/specs/tenant-isolation/spec.md, not in this skill (static; not readiness)",
+   "evaluate-issue: docs/agents/issue-contract.md mentions docs/skills/spec-driven-dev.md, not in this skill (static; not readiness)",
+   "evaluate-issue: docs/agents/issue-contract.md mentions knowledge-lifecycle.md, not in this skill (static; not readiness)",
+   "evaluate-issue: docs/agents/issue-contract.md mentions tests/test_issue_contract_routing.py, not in this skill (static; not readiness)",
+   "evaluate-issue: docs/agents/knowledge-lifecycle.md mentions .specify/graduation-ledger.json, not in this skill (static; not readiness)",
+   "evaluate-issue: docs/agents/knowledge-lifecycle.md mentions CONTEXT.md, not in this skill (static; not readiness)",
+   "evaluate-issue: docs/agents/knowledge-lifecycle.md mentions scripts/codex-skill-sync.py, not in this skill (static; not readiness)",
+   "evaluate-issue: docs/agents/knowledge-lifecycle.md mentions scripts/knowledge-graduation-check.py, not in this skill (static; not readiness)",
+   "flow-auto: SKILL.md mentions ../../../docs/..., not in this skill (static; not readiness)",
+   "flow-auto: SKILL.md mentions AGENTS.md, not in this skill (static; not readiness)",
+   "flow-auto: SKILL.md mentions CLAUDE.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/closing-report-contract.md mentions ../../.claude/commands/flow/eli5.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/closing-report-contract.md mentions .claude/commands/codex/auto.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/closing-report-contract.md mentions .claude/commands/flow/auto.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/closing-report-contract.md mentions .claude/commands/flow/finish.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/closing-report-contract.md mentions .claude/commands/flow/merge.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/closing-report-contract.md mentions .claude/commands/gemma/auto.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/closing-report-contract.md mentions .claude/commands/qwen/auto.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/closing-report-contract.md mentions auto.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/closing-report-contract.md mentions detector-contracts.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/closing-report-contract.md mentions finish.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/closing-report-contract.md mentions flow/eli5.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/closing-report-contract.md mentions merge.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/closing-report-contract.md mentions tests/test_closing_report_contract.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/detector-contracts.md mentions README.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/detector-contracts.md mentions check-claude-md-budget.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/detector-contracts.md mentions check-claude-md-links.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/detector-contracts.md mentions check-test-binary-guards.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/detector-contracts.md mentions control.json, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/detector-contracts.md mentions flow-finish-gate.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/detector-contracts.md mentions scripts/delegated-run-check.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/detector-contracts.md mentions scripts/hook-mask-output.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/detector-contracts.md mentions tests/test_detector_contracts.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/flow-plan-record.md mentions .git, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/flow-plan-record.md mentions .gitignore, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/flow-plan-record.md mentions check-claude-md-behavior.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/flow-plan-record.md mentions claude-md/lint.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/flow-plan-record.md mentions code_review.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/flow-plan-record.md mentions docs/flow-runs/issue-N.json, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/flow-plan-record.md mentions docs/flow-runs/issue-N.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/flow-plan-record.md mentions flow-live-driver-guard.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/flow-plan-record.md mentions flow/finish.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/flow-plan-record.md mentions issue-42., not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/flow-plan-record.md mentions issue-42.notes.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/flow-plan-record.md mentions project/init.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/flow-plan-record.md mentions tests/test_flow_issue_snapshot.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/flow-plan-record.md mentions tests/test_flow_plan_compliance.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/flow-plan-record.md mentions tests/test_flow_plan_record.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/issue-contract.md mentions .claude/commands/evaluate/issue.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/issue-contract.md mentions .claude/commands/github/issue-create.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/issue-contract.md mentions .claude/commands/spec/help.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/issue-contract.md mentions .claude/skills/spec-driven-dev/SKILL.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/issue-contract.md mentions .specify/memory/constitution.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/issue-contract.md mentions .specify/specs/tenant-isolation/spec.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/issue-contract.md mentions docs/skills/spec-driven-dev.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/issue-contract.md mentions knowledge-lifecycle.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/issue-contract.md mentions scripts/speckit-tasks-to-issues.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/issue-contract.md mentions tests/test_issue_contract_routing.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/knowledge-lifecycle.md mentions .specify/graduation-ledger.json, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/knowledge-lifecycle.md mentions CONTEXT.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/agents/knowledge-lifecycle.md mentions scripts/knowledge-graduation-check.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0007-counter-model-review.md mentions 0008-instrument-negative-control-bound.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0007-counter-model-review.md mentions 0009-oscillation-control.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0007-counter-model-review.md mentions scripts/flow-driver-retirement-check.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0007-counter-model-review.md mentions spec/help.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions ../agents/detector-contracts.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions ../agents/glossary.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions ../research/battery-mutation-re-examination-2026-09-20.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions .ci-bin, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions .ci-bin/, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions .claude/commands/flow/eli5.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions .claude/verify-coverage.json, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions .config, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions .gitignore, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions .gitleaks.toml, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions .md, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions .shellcheckrc, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions .specify/specs/codex-consolidation/ledger.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions .woodpecker.yml, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions CLAUDE.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions bandit-audit.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions bash-prep.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions bootstrap-check.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions c4-mermaid.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions check-behavioral-eval.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions check-ci-coverage.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions check-claude-md-behavior.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions check-claude-md-budget.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions check-claude-md-links.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions check-co-authored-by-trailer.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions check-consolidation-ledger.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions check-control-ci-deps.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions check-cpp-host-writes.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions check-ignored-additions.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions check-negative-controls.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions check-negative-fixture-preconditions.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions check-oscillation.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions check-test-binary-guards.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions check-unicode-dashes.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions check-version-consistency.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions checkout-readers.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions ci-stage-git.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions ci-stage-jq.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions ci-stage-make.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions cicd.yml, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions classify-tool-risk.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions cli.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions codex-skill-resync.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions commands-mirror-sync.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions constructed-inbox-without-indicator.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions control.json, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions counter-model-receipt.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions counter-model-reviewer-attribution.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions counter-model-uniformity-check.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions cpp-commands-link.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions cpp-host-write.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions delegated-run-check.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions deletion-accounting.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions delivery-pilots.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions dependency-audit.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions docs/project-next-contract.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions docs/research/class-enumeration-2026-09-15.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions docs/research/harness-strategy-recommendation-2026-09-14.html, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions docs/scripts.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions docs/slate-lanes.json, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions docs/slate-lanes.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions drift-detect.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions eli5-core-drift.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions eli5-vendor.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions flow-ci-status.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions flow-driver-capability.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions flow-driver-retirement-check.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions flow-finish-gate.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions flow-helpers-install.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions flow-live-driver-guard.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions flow-plan-record.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions flow-pr-watch.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions flow-stale-check.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions flow-start-resolve.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions flow-vantage.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions flow-wave-lexicon.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions flow-wave-mailbox.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions flow-wave-plan.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions flow-wave-registry.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions flow-wave-residuals.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions flow-worktree-claim.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions flow-worktree-sweep.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions flow/auto.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions friction-log.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions gate-lib.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions gh-pr-merge.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions hook-mask-output.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions hook-pending-retro.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions hook-permission-census.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions host-surface-check.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions host-surface-observe.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions importlib.metadata, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions install-drift.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions install-memory-harness.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions instrument-census-check.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions knowledge-graduation-check.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions lane-serveability-check.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions lib.cicd, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions lib.creds, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions lib.security, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions lib/cicd/__init__.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions lib/cicd/makefile_declaration.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions lib/security/config.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions lib/security/modules/pip_audit.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions maintain-loop-indicator.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions mcp-drift.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions measurement-shape-scan.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions memories-db-setup.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions metrics._totals.skipped_tests, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions mutation-probe.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions npm-global-upgrade.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions playwright-desk.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions project-init.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions project-next.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions prompt-context.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions pyproject.toml, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions pytest-parallel-differential.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions pytest-workers.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions register.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions requirements.txt, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions run-delivery-pilots.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions sandbox-phase1-trial.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions scripts-inventory-check.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions scripts/check-negative-controls.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions scripts/instrument-census-check.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions scripts/mutation-probe.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions secret-scan-check.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions secrets-mask.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions setup-woodpecker-cli.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions shellcheck-gate.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions skills-check.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions slate-reconcile.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions speckit-tasks-to-issues.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions stash-worktree-guard.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions step3-record-guard.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions tests/test_flow_issue_snapshot.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions tests/test_flow_plan_compliance.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions tests/test_flow_plan_record.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions tests/test_negative_controls.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions tests/test_pip_audit.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions tests/test_pytest_worker_cap.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions tests/test_stash_worktree_guard.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions toolchain-provenance.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions tools-version-check.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions undeclared-import-audit.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions uv.lock, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions verify-coverage-check.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0008-instrument-negative-control-bound.md mentions worktree-remove.sh, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0009-oscillation-control.md mentions 0008-instrument-negative-control-bound.md, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0009-oscillation-control.md mentions scripts/check-oscillation.py, not in this skill (static; not readiness)",
+   "flow-auto: docs/decisions/0009-oscillation-control.md mentions tests/test_oscillation_control.py, not in this skill (static; not readiness)",
+   "flow-auto: reference.md mentions ...-issue-971-..., not in this skill (static; not readiness)",
+   "flow-auto: reference.md mentions .claude/cicd.yml, not in this skill (static; not readiness)",
+   "flow-auto: reference.md mentions .claude/commands/flow/eli5.md, not in this skill (static; not readiness)",
+   "flow-auto: reference.md mentions .claude/friction.jsonl, not in this skill (static; not readiness)",
+   "flow-auto: reference.md mentions .commit, not in this skill (static; not readiness)",
+   "flow-auto: reference.md mentions .gitignore, not in this skill (static; not readiness)",
+   "flow-auto: reference.md mentions codex/gpt-5.5, not in this skill (static; not readiness)",
+   "flow-auto: reference.md mentions docs/agents/shared-stash-stack.md, not in this skill (static; not readiness)",
+   "flow-auto: reference.md mentions docs/flow-runs/issue-42.as-read.md, not in this skill (static; not readiness)",
+   "flow-auto: reference.md mentions docs/measurements/counter-model-reviewer-attribution.md, not in this skill (static; not readiness)",
+   "flow-auto: reference.md mentions finish.md, not in this skill (static; not readiness)",
+   "flow-auto: reference.md mentions flow-start-resolve.sh, not in this skill (static; not readiness)",
+   "flow-auto: reference.md mentions flow/finish.md, not in this skill (static; not readiness)",
+   "flow-auto: reference.md mentions gh-pr-merge.sh, not in this skill (static; not readiness)",
+   "flow-auto: reference.md mentions gpt-5.5, not in this skill (static; not readiness)",
+   "flow-auto: reference.md mentions health.deploy_verification.enabled, not in this skill (static; not readiness)",
+   "flow-auto: reference.md mentions issue-980-..., not in this skill (static; not readiness)",
+   "flow-auto: reference.md mentions templates/claude-settings-permissions.json, not in this skill (static; not readiness)",
+   "flow-auto: reference.md mentions worktree-remove.sh, not in this skill (static; not readiness)",
+   "flow-check: reference.md mentions .claude/security.yml, not in this skill (static; not readiness)",
+   "flow-check: reference.md mentions .gitignore, not in this skill (static; not readiness)",
+   "flow-check: reference.md mentions lib.cicd, not in this skill (static; not readiness)",
+   "flow-cleanup: SKILL.md mentions ../../../docs/..., not in this skill (static; not readiness)",
+   "flow-cleanup: docs/decisions/0006-worktree-teardown-ownership.md mentions flow-helpers-install.sh, not in this skill (static; not readiness)",
+   "flow-cleanup: docs/decisions/0006-worktree-teardown-ownership.md mentions scripts/classify-tool-risk.py, not in this skill (static; not readiness)",
+   "flow-cleanup: docs/decisions/0006-worktree-teardown-ownership.md mentions templates/claude-settings-permissions.json, not in this skill (static; not readiness)",
+   "flow-cleanup: docs/decisions/0006-worktree-teardown-ownership.md mentions worktree-remove.sh, not in this skill (static; not readiness)",
+   "flow-deploy: SKILL.md mentions AGENTS.md, not in this skill (static; not readiness)",
+   "flow-deploy: SKILL.md mentions CLAUDE.md, not in this skill (static; not readiness)",
+   "flow-deploy: reference.md mentions .claude/cicd.yml, not in this skill (static; not readiness)",
+   "flow-deploy: reference.md mentions .claude/deploy-baseline.json, not in this skill (static; not readiness)",
+   "flow-deploy: reference.md mentions .claude/deploy.log, not in this skill (static; not readiness)",
+   "flow-deploy: reference.md mentions .claude/deploy.yaml, not in this skill (static; not readiness)",
+   "flow-deploy: reference.md mentions health.deploy_verification.enabled, not in this skill (static; not readiness)",
+   "flow-doctor: SKILL.md mentions AGENTS.md, not in this skill (static; not readiness)",
+   "flow-doctor: SKILL.md mentions CLAUDE.md, not in this skill (static; not readiness)",
+   "flow-doctor: reference.md mentions .claude/cicd.yml, not in this skill (static; not readiness)",
+   "flow-doctor: reference.md mentions .claude/hooks.json, not in this skill (static; not readiness)",
+   "flow-doctor: reference.md mentions .mcp.json, not in this skill (static; not readiness)",
+   "flow-doctor: reference.md mentions django-uv.mk, not in this skill (static; not readiness)",
+   "flow-doctor: reference.md mentions health.endpoints, not in this skill (static; not readiness)",
+   "flow-doctor: reference.md mentions health.smoke_tests, not in this skill (static; not readiness)",
+   "flow-doctor: reference.md mentions python-uv.mk, not in this skill (static; not readiness)",
+   "flow-doctor: reference.md mentions templates/claude-settings-permissions.json, not in this skill (static; not readiness)",
+   "flow-doctor: reference.md mentions templates/claude-settings-permissions.md, not in this skill (static; not readiness)",
+   "flow-eli5: SKILL.md mentions ../../../docs/..., not in this skill (static; not readiness)",
+   "flow-eli5: docs/agents/closing-report-contract.md mentions ../../.claude/commands/flow/eli5.md, not in this skill (static; not readiness)",
+   "flow-eli5: docs/agents/closing-report-contract.md mentions .claude/commands/codex/auto.md, not in this skill (static; not readiness)",
+   "flow-eli5: docs/agents/closing-report-contract.md mentions .claude/commands/flow/auto.md, not in this skill (static; not readiness)",
+   "flow-eli5: docs/agents/closing-report-contract.md mentions .claude/commands/flow/finish.md, not in this skill (static; not readiness)",
+   "flow-eli5: docs/agents/closing-report-contract.md mentions .claude/commands/flow/merge.md, not in this skill (static; not readiness)",
+   "flow-eli5: docs/agents/closing-report-contract.md mentions .claude/commands/gemma/auto.md, not in this skill (static; not readiness)",
+   "flow-eli5: docs/agents/closing-report-contract.md mentions .claude/commands/qwen/auto.md, not in this skill (static; not readiness)",
+   "flow-eli5: docs/agents/closing-report-contract.md mentions auto.md, not in this skill (static; not readiness)",
+   "flow-eli5: docs/agents/closing-report-contract.md mentions detector-contracts.md, not in this skill (static; not readiness)",
+   "flow-eli5: docs/agents/closing-report-contract.md mentions finish.md, not in this skill (static; not readiness)",
+   "flow-eli5: docs/agents/closing-report-contract.md mentions flow/eli5.md, not in this skill (static; not readiness)",
+   "flow-eli5: docs/agents/closing-report-contract.md mentions merge.md, not in this skill (static; not readiness)",
+   "flow-eli5: docs/agents/closing-report-contract.md mentions tests/test_closing_report_contract.py, not in this skill (static; not readiness)",
+   "flow-eli5: docs/agents/detector-contracts.md mentions README.md, not in this skill (static; not readiness)",
+   "flow-eli5: docs/agents/detector-contracts.md mentions check-claude-md-budget.py, not in this skill (static; not readiness)",
+   "flow-eli5: docs/agents/detector-contracts.md mentions check-claude-md-links.py, not in this skill (static; not readiness)",
+   "flow-eli5: docs/agents/detector-contracts.md mentions check-test-binary-guards.py, not in this skill (static; not readiness)",
+   "flow-eli5: docs/agents/detector-contracts.md mentions control.json, not in this skill (static; not readiness)",
+   "flow-eli5: docs/agents/detector-contracts.md mentions docs/decisions/0008-instrument-negative-control-bound.md, not in this skill (static; not readiness)",
+   "flow-eli5: docs/agents/detector-contracts.md mentions flow-finish-gate.sh, not in this skill (static; not readiness)",
+   "flow-eli5: docs/agents/detector-contracts.md mentions scripts/delegated-run-check.sh, not in this skill (static; not readiness)",
+   "flow-eli5: docs/agents/detector-contracts.md mentions scripts/flow-driver-capability.sh, not in this skill (static; not readiness)",
+   "flow-eli5: docs/agents/detector-contracts.md mentions scripts/hook-mask-output.sh, not in this skill (static; not readiness)",
+   "flow-eli5: docs/agents/detector-contracts.md mentions tests/test_detector_contracts.py, not in this skill (static; not readiness)",
+   "flow-eli5: reference.md mentions auto.md, not in this skill (static; not readiness)",
+   "flow-eli5: reference.md mentions tests/test_eli5_gate_not_bypassable.py, not in this skill (static; not readiness)",
+   "flow-finish: SKILL.md mentions ../../../docs/..., not in this skill (static; not readiness)",
+   "flow-finish: SKILL.md mentions AGENTS.md, not in this skill (static; not readiness)",
+   "flow-finish: SKILL.md mentions CLAUDE.md, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/closing-report-contract.md mentions ../../.claude/commands/flow/eli5.md, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/closing-report-contract.md mentions .claude/commands/codex/auto.md, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/closing-report-contract.md mentions .claude/commands/flow/auto.md, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/closing-report-contract.md mentions .claude/commands/flow/finish.md, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/closing-report-contract.md mentions .claude/commands/flow/merge.md, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/closing-report-contract.md mentions .claude/commands/gemma/auto.md, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/closing-report-contract.md mentions .claude/commands/qwen/auto.md, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/closing-report-contract.md mentions auto.md, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/closing-report-contract.md mentions detector-contracts.md, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/closing-report-contract.md mentions finish.md, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/closing-report-contract.md mentions flow/eli5.md, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/closing-report-contract.md mentions merge.md, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/closing-report-contract.md mentions tests/test_closing_report_contract.py, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/detector-contracts.md mentions README.md, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/detector-contracts.md mentions check-claude-md-budget.py, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/detector-contracts.md mentions check-claude-md-links.py, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/detector-contracts.md mentions check-test-binary-guards.py, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/detector-contracts.md mentions control.json, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/detector-contracts.md mentions docs/decisions/0008-instrument-negative-control-bound.md, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/detector-contracts.md mentions flow-finish-gate.sh, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/detector-contracts.md mentions scripts/delegated-run-check.sh, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/detector-contracts.md mentions scripts/flow-driver-capability.sh, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/detector-contracts.md mentions scripts/hook-mask-output.sh, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/detector-contracts.md mentions tests/test_detector_contracts.py, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/issue-contract.md mentions .claude/commands/evaluate/issue.md, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/issue-contract.md mentions .claude/commands/github/issue-create.md, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/issue-contract.md mentions .claude/commands/spec/help.md, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/issue-contract.md mentions .claude/skills/spec-driven-dev/SKILL.md, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/issue-contract.md mentions .specify/memory/constitution.md, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/issue-contract.md mentions .specify/specs/tenant-isolation/spec.md, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/issue-contract.md mentions docs/skills/spec-driven-dev.md, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/issue-contract.md mentions knowledge-lifecycle.md, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/issue-contract.md mentions scripts/speckit-tasks-to-issues.sh, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/issue-contract.md mentions tests/test_issue_contract_routing.py, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/knowledge-lifecycle.md mentions .specify/graduation-ledger.json, not in this skill (static; not readiness)",
+   "flow-finish: docs/agents/knowledge-lifecycle.md mentions CONTEXT.md, not in this skill (static; not readiness)",
+   "flow-finish: reference.md mentions .claude/security.yml, not in this skill (static; not readiness)",
+   "flow-finish: reference.md mentions .gitignore, not in this skill (static; not readiness)",
+   "flow-finish: reference.md mentions gh-pr-merge.sh, not in this skill (static; not readiness)",
+   "flow-help: reference.md mentions .claude/security.yml, not in this skill (static; not readiness)",
+   "flow-help: reference.md mentions flow-start-resolve.sh, not in this skill (static; not readiness)",
+   "flow-help: reference.md mentions gh-pr-merge.sh, not in this skill (static; not readiness)",
+   "flow-merge: SKILL.md mentions ../../../docs/..., not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/closing-report-contract.md mentions ../../.claude/commands/flow/eli5.md, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/closing-report-contract.md mentions .claude/commands/codex/auto.md, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/closing-report-contract.md mentions .claude/commands/flow/auto.md, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/closing-report-contract.md mentions .claude/commands/flow/finish.md, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/closing-report-contract.md mentions .claude/commands/flow/merge.md, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/closing-report-contract.md mentions .claude/commands/gemma/auto.md, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/closing-report-contract.md mentions .claude/commands/qwen/auto.md, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/closing-report-contract.md mentions auto.md, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/closing-report-contract.md mentions detector-contracts.md, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/closing-report-contract.md mentions finish.md, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/closing-report-contract.md mentions flow/eli5.md, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/closing-report-contract.md mentions merge.md, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/closing-report-contract.md mentions tests/test_closing_report_contract.py, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/detector-contracts.md mentions README.md, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/detector-contracts.md mentions check-claude-md-budget.py, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/detector-contracts.md mentions check-claude-md-links.py, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/detector-contracts.md mentions check-test-binary-guards.py, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/detector-contracts.md mentions control.json, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/detector-contracts.md mentions docs/decisions/0008-instrument-negative-control-bound.md, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/detector-contracts.md mentions flow-finish-gate.sh, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/detector-contracts.md mentions scripts/delegated-run-check.sh, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/detector-contracts.md mentions scripts/flow-driver-capability.sh, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/detector-contracts.md mentions scripts/hook-mask-output.sh, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/detector-contracts.md mentions tests/test_detector_contracts.py, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/issue-contract.md mentions .claude/commands/evaluate/issue.md, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/issue-contract.md mentions .claude/commands/github/issue-create.md, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/issue-contract.md mentions .claude/commands/spec/help.md, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/issue-contract.md mentions .claude/skills/spec-driven-dev/SKILL.md, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/issue-contract.md mentions .specify/memory/constitution.md, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/issue-contract.md mentions .specify/specs/tenant-isolation/spec.md, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/issue-contract.md mentions docs/skills/spec-driven-dev.md, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/issue-contract.md mentions knowledge-lifecycle.md, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/issue-contract.md mentions scripts/speckit-context.py, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/issue-contract.md mentions scripts/speckit-tasks-to-issues.sh, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/issue-contract.md mentions tests/test_issue_contract_routing.py, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/knowledge-lifecycle.md mentions .specify/graduation-ledger.json, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/knowledge-lifecycle.md mentions CONTEXT.md, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/knowledge-lifecycle.md mentions scripts/codex-skill-sync.py, not in this skill (static; not readiness)",
+   "flow-merge: docs/agents/knowledge-lifecycle.md mentions scripts/knowledge-graduation-check.py, not in this skill (static; not readiness)",
+   "flow-merge: reference.md mentions .claude/friction.jsonl, not in this skill (static; not readiness)",
+   "flow-merge: reference.md mentions gh-pr-merge.sh, not in this skill (static; not readiness)",
+   "flow-merge: reference.md mentions worktree-remove.sh, not in this skill (static; not readiness)",
+   "flow-register: reference.md mentions .json, not in this skill (static; not readiness)",
+   "flow-register: reference.md mentions ManagedSession.credential_state, not in this skill (static; not readiness)",
+   "flow-register: reference.md mentions flow-helpers-install.sh, not in this skill (static; not readiness)",
+   "flow-register: reference.md mentions flow-wave-registry.sh, not in this skill (static; not readiness)",
+   "flow-register: reference.md mentions register.md, not in this skill (static; not readiness)",
+   "flow-register: reference.md mentions src/a.py, not in this skill (static; not readiness)",
+   "flow-register: reference.md mentions wave.md, not in this skill (static; not readiness)",
+   "flow-repair: reference.md mentions gh-pr-merge.sh, not in this skill (static; not readiness)",
+   "flow-repair: reference.md mentions scripts/..., not in this skill (static; not readiness)",
+   "flow-repair: reference.md mentions templates/claude-settings-permissions.json, not in this skill (static; not readiness)",
+   "flow-repair: reference.md mentions templates/claude-settings-permissions.md, not in this skill (static; not readiness)",
+   "flow-wave: SKILL.md mentions ../../../docs/..., not in this skill (static; not readiness)",
+   "flow-wave: docs/decisions/0006-worktree-teardown-ownership.md mentions flow-helpers-install.sh, not in this skill (static; not readiness)",
+   "flow-wave: docs/decisions/0006-worktree-teardown-ownership.md mentions scripts/classify-tool-risk.py, not in this skill (static; not readiness)",
+   "flow-wave: docs/decisions/0006-worktree-teardown-ownership.md mentions templates/claude-settings-permissions.json, not in this skill (static; not readiness)",
+   "flow-wave: docs/decisions/0006-worktree-teardown-ownership.md mentions worktree-remove.sh, not in this skill (static; not readiness)",
+   "flow-wave: reference.md mentions cli.py, not in this skill (static; not readiness)",
+   "flow-wave: reference.md mentions flow-driver-capability.sh, not in this skill (static; not readiness)",
+   "flow-wave: reference.md mentions flow-pr-watch.sh, not in this skill (static; not readiness)",
+   "flow-wave: reference.md mentions register.md, not in this skill (static; not readiness)",
+   "flow-wave: reference.md mentions tasks.md, not in this skill (static; not readiness)",
+   "flow-wave: reference.md mentions verdicts.json, not in this skill (static; not readiness)",
+   "github-issue-create: SKILL.md mentions ../../../docs/..., not in this skill (static; not readiness)",
+   "github-issue-create: SKILL.md mentions AGENTS.md, not in this skill (static; not readiness)",
+   "github-issue-create: SKILL.md mentions CLAUDE.md, not in this skill (static; not readiness)",
+   "github-issue-create: docs/agents/issue-contract.md mentions .claude/commands/evaluate/issue.md, not in this skill (static; not readiness)",
+   "github-issue-create: docs/agents/issue-contract.md mentions .claude/commands/github/issue-create.md, not in this skill (static; not readiness)",
+   "github-issue-create: docs/agents/issue-contract.md mentions .claude/commands/spec/help.md, not in this skill (static; not readiness)",
+   "github-issue-create: docs/agents/issue-contract.md mentions .claude/skills/spec-driven-dev/SKILL.md, not in this skill (static; not readiness)",
+   "github-issue-create: docs/agents/issue-contract.md mentions .specify/memory/constitution.md, not in this skill (static; not readiness)",
+   "github-issue-create: docs/agents/issue-contract.md mentions .specify/specs/tenant-isolation/spec.md, not in this skill (static; not readiness)",
+   "github-issue-create: docs/agents/issue-contract.md mentions docs/skills/spec-driven-dev.md, not in this skill (static; not readiness)",
+   "github-issue-create: docs/agents/issue-contract.md mentions knowledge-lifecycle.md, not in this skill (static; not readiness)",
+   "github-issue-create: docs/agents/issue-contract.md mentions scripts/speckit-context.py, not in this skill (static; not readiness)",
+   "github-issue-create: docs/agents/issue-contract.md mentions scripts/speckit-tasks-to-issues.sh, not in this skill (static; not readiness)",
+   "github-issue-create: docs/agents/issue-contract.md mentions tests/test_issue_contract_routing.py, not in this skill (static; not readiness)",
+   "github-issue-create: docs/agents/knowledge-lifecycle.md mentions .specify/graduation-ledger.json, not in this skill (static; not readiness)",
+   "github-issue-create: docs/agents/knowledge-lifecycle.md mentions CONTEXT.md, not in this skill (static; not readiness)",
+   "github-issue-create: docs/agents/knowledge-lifecycle.md mentions scripts/codex-skill-sync.py, not in this skill (static; not readiness)",
+   "github-issue-create: docs/agents/knowledge-lifecycle.md mentions scripts/knowledge-graduation-check.py, not in this skill (static; not readiness)",
+   "project-help: SKILL.md mentions .specify/, not in this skill (static; not readiness)",
+   "project-help: SKILL.md mentions AGENTS.md, not in this skill (static; not readiness)",
+   "project-help: SKILL.md mentions CLAUDE.md, not in this skill (static; not readiness)",
+   "project-init: SKILL.md mentions ../../../docs/..., not in this skill (static; not readiness)",
+   "project-init: SKILL.md mentions AGENTS.md, not in this skill (static; not readiness)",
+   "project-init: SKILL.md mentions CLAUDE.md, not in this skill (static; not readiness)",
+   "project-init: docs/agents/knowledge-lifecycle.md mentions .specify/graduation-ledger.json, not in this skill (static; not readiness)",
+   "project-init: docs/agents/knowledge-lifecycle.md mentions CONTEXT.md, not in this skill (static; not readiness)",
+   "project-init: docs/agents/knowledge-lifecycle.md mentions scripts/codex-skill-sync.py, not in this skill (static; not readiness)",
+   "project-init: docs/agents/knowledge-lifecycle.md mentions scripts/knowledge-graduation-check.py, not in this skill (static; not readiness)",
+   "project-init: reference.md mentions ./scripts/speckit-tasks-to-issues.sh, not in this skill (static; not readiness)",
+   "project-init: reference.md mentions .claude/cicd.yml, not in this skill (static; not readiness)",
+   "project-init: reference.md mentions .claude/project-init-checkpoint.json, not in this skill (static; not readiness)",
+   "project-init: reference.md mentions .git/, not in this skill (static; not readiness)",
+   "project-init: reference.md mentions .specify/, not in this skill (static; not readiness)",
+   "project-init: reference.md mentions Cargo.toml, not in this skill (static; not readiness)",
+   "project-init: reference.md mentions cmd/main.go, not in this skill (static; not readiness)",
+   "project-init: reference.md mentions go.mod, not in this skill (static; not readiness)",
+   "project-init: reference.md mentions package.json, not in this skill (static; not readiness)",
+   "project-init: reference.md mentions pyproject.toml, not in this skill (static; not readiness)",
+   "project-init: reference.md mentions spec.md, not in this skill (static; not readiness)",
+   "project-init: reference.md mentions src/index.ts, not in this skill (static; not readiness)",
+   "project-init: reference.md mentions src/main.rs, not in this skill (static; not readiness)",
+   "project-init: reference.md mentions tests/conftest.py, not in this skill (static; not readiness)",
+   "project-lite: SKILL.md mentions AGENTS.md, not in this skill (static; not readiness)",
+   "project-lite: SKILL.md mentions CLAUDE.md, not in this skill (static; not readiness)",
+   "project-lite: reference.md mentions CLAUDE.md, not in this skill (static; not readiness)",
+   "project-lite: reference.md mentions README.md, not in this skill (static; not readiness)",
+   "project-next: reference.md mentions .claude/wayfinder-map.json, not in this skill (static; not readiness)",
+   "project-next: reference.md mentions .git, not in this skill (static; not readiness)",
+   "project-next: reference.md mentions .project-next.json, not in this skill (static; not readiness)",
+   "project-next: reference.md mentions .specify/graduation-ledger.json, not in this skill (static; not readiness)",
+   "project-next: reference.md mentions docs/project-next-contract.md, not in this skill (static; not readiness)",
+   "project-next: reference.md mentions spec.md, not in this skill (static; not readiness)",
+   "qa-help: SKILL.md mentions .claude/, not in this skill (static; not readiness)",
+   "qa-help: SKILL.md mentions .claude/qa.yml, not in this skill (static; not readiness)",
+   "qa-help: SKILL.md mentions project.repository, not in this skill (static; not readiness)",
+   "qa-help: SKILL.md mentions project.url, not in this skill (static; not readiness)",
+   "qa-help: SKILL.md mentions qa.yml, not in this skill (static; not readiness)",
+   "qa-test: reference.md mentions .claude/qa.yml, not in this skill (static; not readiness)",
+   "qa-test: reference.md mentions project.repository, not in this skill (static; not readiness)",
+   "qa-test: reference.md mentions project.url, not in this skill (static; not readiness)",
+   "second-opinion-help: SKILL.md mentions .mcp.json, not in this skill (static; not readiness)",
+   "second-opinion-help: SKILL.md mentions gemini-2.5-pro, not in this skill (static; not readiness)",
+   "second-opinion-help: SKILL.md mentions gpt-5.2, not in this skill (static; not readiness)",
+   "second-opinion-models: reference.md mentions gemini-2.5-pro, not in this skill (static; not readiness)",
+   "second-opinion-models: reference.md mentions gpt-5.2, not in this skill (static; not readiness)",
+   "second-opinion-start: reference.md mentions .c, not in this skill (static; not readiness)",
+   "second-opinion-start: reference.md mentions .cpp, not in this skill (static; not readiness)",
+   "second-opinion-start: reference.md mentions .cs, not in this skill (static; not readiness)",
+   "second-opinion-start: reference.md mentions .go, not in this skill (static; not readiness)",
+   "second-opinion-start: reference.md mentions .h, not in this skill (static; not readiness)",
+   "second-opinion-start: reference.md mentions .java, not in this skill (static; not readiness)",
+   "second-opinion-start: reference.md mentions .js, not in this skill (static; not readiness)",
+   "second-opinion-start: reference.md mentions .json, not in this skill (static; not readiness)",
+   "second-opinion-start: reference.md mentions .kt, not in this skill (static; not readiness)",
+   "second-opinion-start: reference.md mentions .md, not in this skill (static; not readiness)",
+   "second-opinion-start: reference.md mentions .py, not in this skill (static; not readiness)",
+   "second-opinion-start: reference.md mentions .rb, not in this skill (static; not readiness)",
+   "second-opinion-start: reference.md mentions .rs, not in this skill (static; not readiness)",
+   "second-opinion-start: reference.md mentions .sh, not in this skill (static; not readiness)",
+   "second-opinion-start: reference.md mentions .sql, not in this skill (static; not readiness)",
+   "second-opinion-start: reference.md mentions .swift, not in this skill (static; not readiness)",
+   "second-opinion-start: reference.md mentions .toml, not in this skill (static; not readiness)",
+   "second-opinion-start: reference.md mentions .ts, not in this skill (static; not readiness)",
+   "second-opinion-start: reference.md mentions .tsx, not in this skill (static; not readiness)",
+   "second-opinion-start: reference.md mentions .yaml, not in this skill (static; not readiness)",
+   "second-opinion-start: reference.md mentions .yml, not in this skill (static; not readiness)",
+   "second-opinion-start: reference.md mentions gemini-2.5-pro, not in this skill (static; not readiness)",
+   "second-opinion-start: reference.md mentions gpt-5.2, not in this skill (static; not readiness)",
+   "secrets-ui: SKILL.md mentions 127.0.0.1, not in this skill (static; not readiness)",
+   "security-help: reference.md mentions .claude/security.yml, not in this skill (static; not readiness)",
+   "security-permissions: SKILL.md mentions .claude/settings.json, not in this skill (static; not readiness)",
+   "security-permissions: SKILL.md mentions .env, not in this skill (static; not readiness)",
+   "security-permissions: SKILL.md mentions permissions.ask, not in this skill (static; not readiness)",
+   "security-permissions: SKILL.md mentions permissions.deny, not in this skill (static; not readiness)",
+   "security-permissions: SKILL.md mentions settings.local.json, not in this skill (static; not readiness)",
+   "security-quick: SKILL.md mentions .env, not in this skill (static; not readiness)",
+   "security-quick: SKILL.md mentions .gitignore, not in this skill (static; not readiness)",
+   "security-scan: SKILL.md mentions .env, not in this skill (static; not readiness)",
+   "security-scan: SKILL.md mentions .gitignore, not in this skill (static; not readiness)",
+   "self-improvement-deployment: reference.md mentions .PHONY, not in this skill (static; not readiness)",
+   "self-improvement-deployment: reference.md mentions .claude/deploy.log, not in this skill (static; not readiness)",
+   "self-improvement-help: SKILL.md mentions AGENTS.md, not in this skill (static; not readiness)",
+   "self-improvement-help: SKILL.md mentions CLAUDE.md, not in this skill (static; not readiness)",
+   "self-improvement-retro: SKILL.md mentions AGENTS.md, not in this skill (static; not readiness)",
+   "self-improvement-retro: SKILL.md mentions CLAUDE.md, not in this skill (static; not readiness)",
+   "self-improvement-retro: reference.md mentions .claude/friction.jsonl, not in this skill (static; not readiness)",
+   "self-improvement-retro: reference.md mentions .claude/learnings.md, not in this skill (static; not readiness)",
+   "self-improvement-retro: reference.md mentions .claude/settings.json, not in this skill (static; not readiness)",
+   "self-improvement-retro: reference.md mentions .env, not in this skill (static; not readiness)",
+   "self-improvement-retro: reference.md mentions issue_candidate.repo, not in this skill (static; not readiness)",
+   "self-improvement-retro: reference.md mentions issue_candidate.should_file, not in this skill (static; not readiness)",
+   "self-improvement-retro: reference.md mentions permissions.allow, not in this skill (static; not readiness)",
+   "self-improvement-retro: reference.md mentions permissions.ask, not in this skill (static; not readiness)",
+   "self-improvement-retro: reference.md mentions permissions.deny, not in this skill (static; not readiness)",
+   "self-improvement-retro: reference.md mentions templates/claude-settings-permissions.json, not in this skill (static; not readiness)",
+   "self-improvement-retro: reference.md mentions templates/learnings.md.example, not in this skill (static; not readiness)",
+   "self-improvement-retro: reference.md mentions tests/test_hook_permission_census.py, not in this skill (static; not readiness)"
+  ]
+ },
+ "client": {
+  "name": "codex",
+  "declared": "0.157.1",
+  "observed": "0.157.1",
+  "argv": [
+   "codex"
+  ]
+ },
+ "canary": {
+  "treatment": {
+   "status": "ok",
+   "detail": "",
+   "listed": [
+    "browser-help <HOME>/.codex/skills/browser-help/SKILL.md",
+    "browser-session <HOME>/.codex/skills/browser-session/SKILL.md",
+    "cicd-check <HOME>/.codex/skills/cicd-check/SKILL.md",
+    "cicd-container <HOME>/.codex/skills/cicd-container/SKILL.md",
+    "cicd-health <HOME>/.codex/skills/cicd-health/SKILL.md",
+    "cicd-help <HOME>/.codex/skills/cicd-help/SKILL.md",
+    "cicd-infra-discover <HOME>/.codex/skills/cicd-infra-discover/SKILL.md",
+    "cicd-infra-init <HOME>/.codex/skills/cicd-infra-init/SKILL.md",
+    "cicd-infra-pipeline <HOME>/.codex/skills/cicd-infra-pipeline/SKILL.md",
+    "cicd-init <HOME>/.codex/skills/cicd-init/SKILL.md",
+    "cicd-pipeline <HOME>/.codex/skills/cicd-pipeline/SKILL.md",
+    "cicd-smoke <HOME>/.codex/skills/cicd-smoke/SKILL.md",
+    "cicd-verify <HOME>/.codex/skills/cicd-verify/SKILL.md",
+    "cicd-woodpecker <HOME>/.codex/skills/cicd-woodpecker/SKILL.md",
+    "claude-md-help <HOME>/.codex/skills/claude-md-help/SKILL.md",
+    "claude-md-lint <HOME>/.codex/skills/claude-md-lint/SKILL.md",
+    "cpp-dockers <HOME>/.codex/skills/cpp-dockers/SKILL.md",
+    "cpp-happy-check <HOME>/.codex/skills/cpp-happy-check/SKILL.md",
+    "cpp-help <HOME>/.codex/skills/cpp-help/SKILL.md",
+    "cpp-load-best-practices <HOME>/.codex/skills/cpp-load-best-practices/SKILL.md",
+    "cpp-load-mcp-docs <HOME>/.codex/skills/cpp-load-mcp-docs/SKILL.md",
+    "documentation-c4 <HOME>/.codex/skills/documentation-c4/SKILL.md",
+    "documentation-help <HOME>/.codex/skills/documentation-help/SKILL.md",
+    "documentation-pptx <HOME>/.codex/skills/documentation-pptx/SKILL.md",
+    "evaluate-help <HOME>/.codex/skills/evaluate-help/SKILL.md",
+    "evaluate-issue <HOME>/.codex/skills/evaluate-issue/SKILL.md",
+    "flow-auto <HOME>/.codex/skills/flow-auto/SKILL.md",
+    "flow-check <HOME>/.codex/skills/flow-check/SKILL.md",
+    "flow-cleanup <HOME>/.codex/skills/flow-cleanup/SKILL.md",
+    "flow-deploy <HOME>/.codex/skills/flow-deploy/SKILL.md",
+    "flow-doctor <HOME>/.codex/skills/flow-doctor/SKILL.md",
+    "flow-eli5 <HOME>/.codex/skills/flow-eli5/SKILL.md",
+    "flow-finish <HOME>/.codex/skills/flow-finish/SKILL.md",
+    "flow-help <HOME>/.codex/skills/flow-help/SKILL.md",
+    "flow-merge <HOME>/.codex/skills/flow-merge/SKILL.md",
+    "flow-register <HOME>/.codex/skills/flow-register/SKILL.md",
+    "flow-repair <HOME>/.codex/skills/flow-repair/SKILL.md",
+    "flow-start <HOME>/.codex/skills/flow-start/SKILL.md",
+    "flow-status <HOME>/.codex/skills/flow-status/SKILL.md",
+    "flow-sync <HOME>/.codex/skills/flow-sync/SKILL.md",
+    "flow-wave <HOME>/.codex/skills/flow-wave/SKILL.md",
+    "github-help <HOME>/.codex/skills/github-help/SKILL.md",
+    "github-issue-close <HOME>/.codex/skills/github-issue-close/SKILL.md",
+    "github-issue-create <HOME>/.codex/skills/github-issue-create/SKILL.md",
+    "github-issue-list <HOME>/.codex/skills/github-issue-list/SKILL.md",
+    "github-issue-update <HOME>/.codex/skills/github-issue-update/SKILL.md",
+    "github-issue-view <HOME>/.codex/skills/github-issue-view/SKILL.md",
+    "imagegen <HOME>/.codex/skills/.system/imagegen/SKILL.md",
+    "openai-docs <HOME>/.codex/skills/.system/openai-docs/SKILL.md",
+    "plugin-creator <HOME>/.codex/skills/.system/plugin-creator/SKILL.md",
+    "project-help <HOME>/.codex/skills/project-help/SKILL.md",
+    "project-init <HOME>/.codex/skills/project-init/SKILL.md",
+    "project-lite <HOME>/.codex/skills/project-lite/SKILL.md",
+    "project-next <HOME>/.codex/skills/project-next/SKILL.md",
+    "qa-help <HOME>/.codex/skills/qa-help/SKILL.md",
+    "qa-test <HOME>/.codex/skills/qa-test/SKILL.md",
+    "second-opinion-help <HOME>/.codex/skills/second-opinion-help/SKILL.md",
+    "second-opinion-models <HOME>/.codex/skills/second-opinion-models/SKILL.md",
+    "second-opinion-start <HOME>/.codex/skills/second-opinion-start/SKILL.md",
+    "secrets-delete <HOME>/.codex/skills/secrets-delete/SKILL.md",
+    "secrets-get <HOME>/.codex/skills/secrets-get/SKILL.md",
+    "secrets-help <HOME>/.codex/skills/secrets-help/SKILL.md",
+    "secrets-list <HOME>/.codex/skills/secrets-list/SKILL.md",
+    "secrets-rotate <HOME>/.codex/skills/secrets-rotate/SKILL.md",
+    "secrets-run <HOME>/.codex/skills/secrets-run/SKILL.md",
+    "secrets-set <HOME>/.codex/skills/secrets-set/SKILL.md",
+    "secrets-ui <HOME>/.codex/skills/secrets-ui/SKILL.md",
+    "secrets-validate <HOME>/.codex/skills/secrets-validate/SKILL.md",
+    "security-deep <HOME>/.codex/skills/security-deep/SKILL.md",
+    "security-explain <HOME>/.codex/skills/security-explain/SKILL.md",
+    "security-help <HOME>/.codex/skills/security-help/SKILL.md",
+    "security-permissions <HOME>/.codex/skills/security-permissions/SKILL.md",
+    "security-quick <HOME>/.codex/skills/security-quick/SKILL.md",
+    "security-scan <HOME>/.codex/skills/security-scan/SKILL.md",
+    "self-improvement-deployment <HOME>/.codex/skills/self-improvement-deployment/SKILL.md",
+    "self-improvement-help <HOME>/.codex/skills/self-improvement-help/SKILL.md",
+    "self-improvement-retro <HOME>/.codex/skills/self-improvement-retro/SKILL.md",
+    "skill-creator <HOME>/.codex/skills/.system/skill-creator/SKILL.md",
+    "skill-installer <HOME>/.codex/skills/.system/skill-installer/SKILL.md"
+   ]
+  },
+  "baseline": {
+   "status": "ok",
+   "detail": "",
+   "listed": [
+    "imagegen <HOME>/.codex/skills/.system/imagegen/SKILL.md",
+    "openai-docs <HOME>/.codex/skills/.system/openai-docs/SKILL.md",
+    "plugin-creator <HOME>/.codex/skills/.system/plugin-creator/SKILL.md",
+    "skill-creator <HOME>/.codex/skills/.system/skill-creator/SKILL.md",
+    "skill-installer <HOME>/.codex/skills/.system/skill-installer/SKILL.md"
+   ]
+  },
+  "control": {
+   "status": "ok",
+   "detail": "",
+   "listed": [
+    "browser-help <HOME>/.codex/skills/browser-help/SKILL.md",
+    "imagegen <HOME>/.codex/skills/.system/imagegen/SKILL.md",
+    "openai-docs <HOME>/.codex/skills/.system/openai-docs/SKILL.md",
+    "plugin-creator <HOME>/.codex/skills/.system/plugin-creator/SKILL.md",
+    "skill-creator <HOME>/.codex/skills/.system/skill-creator/SKILL.md",
+    "skill-installer <HOME>/.codex/skills/.system/skill-installer/SKILL.md"
+   ]
+  }
+ },
+ "control": {
+  "planted": "browser-help",
+  "listed": true
+ },
+ "source_immutability": {
+  "before": {
+   "head": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b",
+   "status": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "after": {
+   "head": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b",
+   "status": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+ },
+ "cleanup": {
+  "status": "removed",
+  "errors": []
+ },
+ "host_immutability": {
+  "before": {
+   "path": "~/.codex",
+   "skills": "sha256:a9be066be297bcd15f1ca9953e49430662cf0da63d35acf9e04efe7403bca490",
+   "config.toml": "sha256:e77057d8afcbb88d00559204476ef1e668ba6f36657b2487bddb232f8894e589",
+   "AGENTS.md": "sha256:4a2e547a8fc8ffb6066c2a7337d007c5519ffb76e719ebb8b118e7c0e2cf3a65"
+  },
+  "after": {
+   "path": "~/.codex",
+   "skills": "sha256:a9be066be297bcd15f1ca9953e49430662cf0da63d35acf9e04efe7403bca490",
+   "config.toml": "sha256:e77057d8afcbb88d00559204476ef1e668ba6f36657b2487bddb232f8894e589",
+   "AGENTS.md": "sha256:4a2e547a8fc8ffb6066c2a7337d007c5519ffb76e719ebb8b118e7c0e2cf3a65"
+  }
+ },
+ "finished": "2026-09-26T14:03:59Z",
+ "readiness": {
+  "discovery_canary": "SATISFIED",
+  "baseline_absence": "SATISFIED",
+  "ordinary_parity": "SATISFIED",
+  "source_unchanged": "SATISFIED",
+  "host_unchanged": "SATISFIED",
+  "reasons": {
+   "discovery_canary": "all 74 installed skill(s) listed",
+   "baseline_absence": "no treatment skill listed in the baseline; the planted control was listed",
+   "ordinary_parity": "identical client input apart from the treatment",
+   "source_unchanged": "source fingerprint identical before and after",
+   "host_unchanged": "host client state identical before and after"
+  }
+ }
+}

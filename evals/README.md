@@ -11,6 +11,12 @@ The current roadmap is [PLAN.md](../PLAN.md), with the
 |---|---|---|
 | [slug small-fix](level1/slug-small-fix/README.md) | 1 - Basic execution | Grader certified by `qualify.py` against a fixture, reference, alternatives, wrong outputs and broken-grader controls (#5); no model trial run |
 
+## Subjects
+
+| Subject | Surface | Status |
+|---|---|---|
+| [CPP native Codex skills](subjects/cpp-codex/SUBJECT.md) | 74 `codex/skills/` directories at a pinned revision | Materialized by `skillc materialize` with every readiness fact SATISFIED through codex-cli 0.157.1 (#7); invocation and task outcome not observed |
+
 No behavioral runner is implemented here yet. The former example plugin command
 and YAML were unverified research, not an executable contract. skillc depends on
 no external evaluation runtime ([ADR 0003](../docs/decisions/0003-no-external-evaluation-runtime.md));

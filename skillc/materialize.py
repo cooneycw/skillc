@@ -526,7 +526,8 @@ def fingerprint_host(host_codex: Path) -> dict[str, object]:
     client writes those continuously, and a fingerprint that moves for reasons
     unrelated to this run detects nothing.
     """
-    state: dict[str, object] = {"path": str(host_codex)}
+    shown = str(host_codex).replace(str(Path.home()), "~", 1)
+    state: dict[str, object] = {"path": shown}
     skills = host_codex / "skills"
     if skills.is_dir():
         h = hashlib.sha256()

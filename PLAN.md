@@ -117,7 +117,10 @@ runner, capture and verifier. The [lessons document](docs/research/coder-eval-le
 keeps what the static reading of Coder Eval taught, without claiming any run.
 
 [#7](https://github.com/cooneycw/skillc/issues/7), [#8](https://github.com/cooneycw/skillc/issues/8) and [#9](https://github.com/cooneycw/skillc/issues/9) deliver native receipts,
-complete trial accounting, protected capture and independent verdicts.
+complete trial accounting, protected capture and independent verdicts. #7's
+generic adapter is `skillc materialize` ([materialization](docs/specs/evaluation-facility/materialization.md));
+its first evidence is the [CPP Codex subject](evals/subjects/cpp-codex/SUBJECT.md)
+at a pinned revision, observed through the real client on one host.
 [#10](https://github.com/cooneycw/skillc/issues/10) demonstrates their join with a deterministic client before
 paid agent execution. Replay forged/stale success and broken-grader controls
 through the actual integration, including candidate attempts to forge verifier output.
