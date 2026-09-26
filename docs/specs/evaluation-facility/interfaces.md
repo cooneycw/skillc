@@ -44,6 +44,71 @@ pasted instructions when native installation fails. Prompt treatments are valid
 separate experiments and must be labelled accordingly. Symlink staging requires
 immutable accessible targets, collision checks and a recorded dependency closure.
 
+## Execution backend
+
+This document has always required a "selected execution backend" without
+defining one. `skillc/backend.py` (#10) does: an `ExecutionBackend` is the
+stdlib `Protocol` that owns steps 3 through 7's process side and step 9's
+teardown - it prepares a workspace/home inside its own isolation, starts a
+skill's installation and the agent under test inside that isolation, and can
+be asked, independently of what it reported while running, whether its work
+actually stopped and whether nothing of it remains.
+
+| Step above | Backend method | Note |
+|---|---|---|
+| 1 | `describe()` | Identity, isolation claims, and - required, not optional - what it does NOT establish |
+| 2 | *(controller: `trial.plan`)* | Not a backend concern |
+| 3 | `prepare(attempt_id)` | Returns an opaque handle; raises `BackendUnavailable` rather than a handle it cannot back |
+| 4 | `install(handle, surface)` | The skill starts inside the isolation, never staged on the host and copied in |
+| 5 | `execute(handle, argv, limits, cancel)` | The agent under test starts inside the isolation |
+| 6 | `confirm_stopped(handle)` | Queried FROM the backend - never inferred from `execute()`'s own exit or timeout. Returns a `Confirmation` (`CONFIRMED` / `NOT_CONFIRMED` / `UNKNOWN`), never a bare bool - a backend that cannot observe returns `UNKNOWN`, never a guess, and `UNKNOWN` is never treated as a confirmed stop |
+| 7 | `export(handle, dest)` | Copies out; the CONTROLLER re-hashes and freezes on its own side (`trial.capture`), so a backend cannot forge what was frozen |
+| 8 | *(a separate backend instance, same seam)* | See below |
+| 9 | `destroy(handle)` + `confirm_absent(handle)` | Both idempotent; `confirm_absent` returns the same three-way `Confirmation` and never trusts `destroy()`'s own return, for the same reason `confirm_stopped` never trusts `execute()`'s |
+
+**Step 8 is not a special case.** `skillc/verify.py`'s probe (#9) is planned to
+run through its own instance of this same seam (#10's PR2), so the isolation a
+backend provides for an agent under test and the isolation it provides for
+untrusted candidate code during grading are the same property, established
+once. That join is PR2's delivery, not this section's.
+
+**An unavailable backend is a refusal, never a reason to run on the host.** A
+caller that cannot `prepare()` declares the attempt through
+`trial.finalize(experiment, attempt_id, disposition="unavailable", reason=...)`
+- already-existing controller machinery, unchanged by this seam - and never
+constructs a host `subprocess` argv as a fallback. No method on the Protocol
+has a documented failure mode of "try the host instead."
+
+**A raising `prepare()` owns its own cleanup.** It returns no handle on that
+path, and `destroy()`/`confirm_absent()` both require one - a caller has no
+other way to reach whatever a failed `prepare()` already allocated. A backend
+that creates a container or workspace before it can confirm the isolation is
+usable must tear that down itself before raising `BackendUnavailable` or any
+other exception, never leave it for a handle nobody received.
+
+**skillc will ship its own Docker-backed implementation** (a later #10 PR - it
+does not exist at this commit), and that backend will be a complete,
+standalone answer to #10: skillc depends on no other system to demonstrate
+the full lifecycle. The seam exists so ANOTHER backend - a different
+isolation technology, or one supplied by a larger system this skillc instance
+happens to run inside - can implement the same contract later. Nothing in
+`skillc/backend.py`, or anywhere else in this package, imports, calls, names
+or assumes such a system; a backend is exactly the Protocol's methods and
+`describe()`'s claims, never more.
+
+**Neutral identity is a backend obligation** (operator rule: skillc is
+public, so no hostnames, usernames, uids, home paths, IPs or internal URLs in
+anything committed, reported or graded). Every backend must present a fixed,
+non-host identity inside its isolation - a fixed unprivileged user/uid (e.g.
+`candidate`), a fixed hostname-style value, fixed logical paths (e.g.
+`/work`, `/home/candidate`) - and report only those logical values from
+`describe()`, from `install()`/`execute()`'s return values, and from
+`str(handle)`. A per-attempt name (a container name or equivalent) derives
+from the attempt ID alone. The controller does the same on its own side: a
+host-side location (the evidence store, an export destination) is recorded
+relative or logical in anything that could be committed or pasted into a
+public issue, never as an absolute host path.
+
 ## Reporting semantics
 
 Candidate code, final prose and optional structured claims are submissions. They
