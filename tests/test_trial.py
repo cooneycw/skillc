@@ -563,9 +563,15 @@ def test_a_result_for_an_uncaptured_attempt_is_refused(store: Path) -> None:
 def test_a_result_is_never_overwritten(store: Path, base: Path) -> None:
     experiment, attempt_id, digests = _captured(store, base)
     t.add_result(experiment, _result(experiment, attempt_id, digests))
-    with pytest.raises(t.Refused, match="never overwrites"):
+    stored = (experiment.root / f"result-res-{attempt_id}.json").read_bytes()
+    # Admission refuses the conflicting verdict first; the write-once layer below
+    # it refuses the same name even when nothing else would.
+    with pytest.raises(t.Refused, match="conflicting verdict"):
         t.add_result(experiment, _result(experiment, attempt_id, digests, status="FAIL", criteria=[
             {"id": "c1", "mandatory": True, "outcome": "VIOLATED", "evidence": ["x"]}]))
+    with pytest.raises(t.Refused, match="never overwrites"):
+        t._write_new(experiment.root / f"result-res-{attempt_id}.json", b"{}")
+    assert (experiment.root / f"result-res-{attempt_id}.json").read_bytes() == stored
 
 
 def test_a_regrade_links_to_its_retained_original(store: Path, base: Path) -> None:
@@ -634,3 +640,106 @@ def test_an_uncleaned_workspace_is_reported_not_hidden(store: Path, base: Path) 
     t.capture(experiment, attempt_id, workspace)
     lifecycle = t.finalize(experiment, attempt_id)
     assert lifecycle["cleanup"] == {"status": "partial", "failures": ["the workspace was never cleaned up"]}
+
+
+# ------------------------------------------------------------ counter-model review fixes
+
+
+def test_capture_is_bound_to_the_attempts_own_workspace(store: Path, base: Path) -> None:
+    """Attempt A may not freeze attempt B's workspace - possibly still running -
+    under A's identity."""
+    experiment = t.plan(_spec(attempts=2), store)
+    first, second = [str(a["attempt_id"]) for _t, a in experiment.attempts()]
+    _ws_a, _stop = _run(experiment, first, base, "work")
+    ws_b, _stop = _run(experiment, second, base, "work")
+    with pytest.raises(t.Refused, match="own workspace"):
+        t.capture(experiment, first, ws_b)
+    assert _capture(experiment, first)["attempt_id"] == first
+
+
+def test_capture_is_refused_once_the_attempt_is_finalized(store: Path, base: Path) -> None:
+    experiment = t.plan(_spec(), store)
+    attempt_id = _only(experiment)
+    _run(experiment, attempt_id, base, "work")
+    assert t.finalize(experiment, attempt_id)["disposition"] == "inconclusive"
+    with pytest.raises(t.Refused, match="already finalized"):
+        t.capture(experiment, attempt_id)
+
+
+def test_an_interrupted_controller_still_stops_the_subject(store: Path, base: Path) -> None:
+    experiment = t.plan(_spec(), store)
+    attempt_id = _only(experiment)
+    started = time.monotonic()
+
+    def interrupt() -> bool:
+        if time.monotonic() - started > 0.5:
+            raise KeyboardInterrupt
+        return False
+
+    with pytest.raises(KeyboardInterrupt):
+        _run(experiment, attempt_id, base, "hang", cancel=interrupt)
+    [pid] = [e["pid"] for e in experiment.events(attempt_id) if e["event"] == "started"]
+    assert not _alive(int(str(pid)))
+    names = [e["event"] for e in experiment.events(attempt_id)]
+    assert names[-2:] == ["stopped", "stop-confirmed"]
+
+
+def test_an_interrupted_ledger_commit_is_completed_not_refused(store: Path) -> None:
+    """History is written before the ledger, so a crash between the two leaves a
+    recorded revision to complete - not a legitimate ledger that reads as tampered."""
+    experiment = t.plan(_spec(), store)
+    extended = json.loads(json.dumps(experiment.ledger))
+    extended["trials"][0]["attempts"].append({"attempt_id": "a-222222222222", "retry_of": _only(experiment)})
+    digest = t._put_object(experiment.root, t._dump(extended))
+    t._append(experiment.root / t.HISTORY, {"digest": digest, "at": "crash"})
+    reopened = t.Experiment.open(experiment.root)
+    assert len([a for _t, a in reopened.attempts()]) == 2
+
+
+def test_frozen_artifacts_refuses_an_empty_manifest(store: Path, base: Path) -> None:
+    experiment, attempt_id, _digests = _captured(store, base)
+    path = experiment.root / f"manifest-{attempt_id}.json"
+    manifest = json.loads(path.read_bytes())
+    os.chmod(path, 0o600)
+    path.write_text(json.dumps({**manifest, "artifacts": []}))
+    with pytest.raises(t.Refused, match="not valid"):
+        t.frozen_artifacts(experiment, attempt_id)
+
+
+def test_a_stream_over_its_bound_is_partial(store: Path, base: Path) -> None:
+    experiment = t.plan(_spec(), store)
+    attempt_id = _only(experiment)
+    _run(experiment, attempt_id, base, "hostile")
+    manifest = _capture(experiment, attempt_id, limits=t.Limits(max_stream_bytes=4))
+    [stdout] = [o for o in manifest["observations"] if o["stream"] == "client-events"]
+    assert stdout["coverage"] == "partial" and stdout["size"] == 4
+    assert any("truncated to 4" in f for f in manifest["capture_failures"])
+
+
+def test_a_stale_receipt_is_refused_at_admission(store: Path) -> None:
+    experiment = t.plan(_spec(), store)
+    attempt_id = _only(experiment)
+    stale = {**RECEIPT, "attempt_id": attempt_id, "trial_id": experiment.trial_of(attempt_id)["trial_id"],
+             "client": {"name": "fake", "version": "1"}, "subject": {**RECEIPT["subject"], "digest": "sha256:old"}}
+    with pytest.raises(t.Refused, match="stale receipt"):
+        t.add_receipt(experiment, stale)
+
+
+def test_a_result_under_an_unplanned_grader_is_refused_at_admission(store: Path, base: Path) -> None:
+    experiment, attempt_id, digests = _captured(store, base)
+    with pytest.raises(t.Refused, match="contradicts"):
+        t.add_result(experiment, _result(experiment, attempt_id, digests, grader={"id": "other", "revision": "g1"}))
+
+
+def test_a_regrade_of_other_bytes_is_refused_at_admission(store: Path, base: Path) -> None:
+    experiment = t.plan(_spec(), store)
+    attempt_id = _only(experiment)
+    _run(experiment, attempt_id, base, "work")
+    manifest = _capture(experiment, attempt_id)
+    t.cleanup_workspace(experiment, attempt_id)
+    t.finalize(experiment, attempt_id)
+    both = [str(a["digest"]) for a in manifest["artifacts"]]
+    t.add_result(experiment, _result(experiment, attempt_id, both))
+    with pytest.raises(t.Refused, match="different bytes"):
+        t.add_result(experiment, _result(experiment, attempt_id, both[:1], result_id="res-2",
+                                         regrade_of=f"res-{attempt_id}"))

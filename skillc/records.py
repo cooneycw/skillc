@@ -791,8 +791,9 @@ def attempt_accounting(bundle: Bundle) -> Iterator[str]:
         a result - a captured attempt with no result is grading still owed;
       - `not-run` and `unavailable` need no result, and any result they have
         declares the matching run state;
-      - no attempt the controller did not capture carries a GRADED result, and no
-        captured attempt carries a declared non-run: the two accounts disagree.
+      - no attempt the controller did not capture carries a manifest or a GRADED
+        result, and no captured attempt carries a declared non-run: the accounts
+        disagree.
 
     An attempt that was graded (a result declaring no run state) also has its
     installation receipt and artifact manifest: a verdict over an install nobody
@@ -843,6 +844,11 @@ def attempt_accounting(bundle: Bundle) -> Iterator[str]:
                             f"declares {r.data.get('run_state')}; the accounts disagree"
                         )
             elif isinstance(disposition, str):
+                if attempt_id in manifests:
+                    yield (
+                        f"attempt {attempt_id!r} is {disposition}, but a manifest captured its "
+                        f"output; the accounts disagree"
+                    )
                 if graded:
                     yield (
                         f"attempt {attempt_id!r} is {disposition}, but {graded[0].path.name} "

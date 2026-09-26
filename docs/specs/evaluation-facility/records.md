@@ -278,8 +278,9 @@ The controller's account is the lifecycle record (#8):
   grading is still owed;
 - a `not-run` or `unavailable` attempt needs no result. A result it does have
   declares the matching run state (`NOT_RUN`, `UNAVAILABLE`);
-- an attempt the controller did not capture carries no graded result, and a
-  captured one carries no declared non-run: the two accounts would disagree;
+- an attempt the controller did not capture carries no manifest and no graded
+  result, and a captured one carries no declared non-run: the accounts would
+  disagree;
 - an attempt that was graded (its result declares no run state) also has its
   installation receipt and artifact manifest.
 
@@ -338,7 +339,7 @@ bundle cases as well, including against every record rule.
 | `attempt-lifecycle` | record | an unknown stop reason or disposition; a non-result without a reason; captured before a confirmed stop; no cleanup |
 | `ledger-binding` | bundle | cross-trial receipt; stale receipt; attempt the ledger never issued; altered artifact; unplanned grader |
 | `unique-ids` | bundle | duplicate attempt ID; conflicting receipts; duplicate result ID |
-| `attempt-accounting` | bundle | planned attempt with no lifecycle; captured with no result; graded without receipt; graded without manifest; captured but declared NOT_RUN; graded but not captured |
+| `attempt-accounting` | bundle | planned attempt with no lifecycle; captured with no result; graded without receipt; graded without manifest; captured but declared NOT_RUN; graded but not captured; manifest but not captured |
 | `lineage` | bundle | retry reusing its own ID; regrade whose original was erased; regrade of different bytes |
 
 Record and bundle rules live in the **same registry and the same selftest loop** as

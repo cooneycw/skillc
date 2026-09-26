@@ -299,15 +299,26 @@ class Experiment:
         """
         root = root.resolve()
         path = root / LEDGER
-        if path.is_symlink() or not path.is_file():
-            raise Refused(f"{root} holds no ledger")
-        data = path.read_bytes()
+        history_path = root / HISTORY
         history = [
             json.loads(line)["digest"]
-            for line in (root / HISTORY).read_text(encoding="utf-8").splitlines() if line
-        ]
-        if not history or history[-1] != sha256_bytes(data):
-            raise Refused("the ledger differs from its last recorded revision; it changed outside the controller")
+            for line in history_path.read_text(encoding="utf-8").splitlines() if line
+        ] if history_path.is_file() else []
+        if not history:
+            raise Refused(f"{root} holds no ledger history")
+        if path.is_symlink():
+            raise Refused(f"{root} ledger is a link")
+        current = sha256_bytes(path.read_bytes()) if path.is_file() else None
+        if current != history[-1]:
+            # An interrupted commit: the newest revision is recorded but not in
+            # place. Complete it ONLY when the file on disk is exactly the previous
+            # recorded revision (or, for the first, absent); anything else is a
+            # ledger nobody's history vouches for.
+            prior = history[-2] if len(history) > 1 else None
+            if current != prior:
+                raise Refused("the ledger differs from its last recorded revision; it changed outside the controller")
+            _replace(path, _read_object(root, history[-1]))
+        data = path.read_bytes()
         previous: dict[str, object] | None = None
         for digest in history:
             blob = _read_object(root, digest)
@@ -481,13 +492,17 @@ def _new_attempt_id() -> str:
 
 
 def _commit_ledger(root: Path, ledger: dict[str, object], first: bool = False) -> None:
+    """Object, then history, then the ledger file. A crash after the history entry
+    leaves a revision that is recorded and verifiable but not yet in place, which
+    `Experiment.open` completes; the reverse order would leave a legitimate ledger
+    that no history vouches for, indistinguishable from tampering."""
     data = _dump(ledger)
     digest = _put_object(root, data)
+    _append(root / HISTORY, {"digest": digest, "at": _now()})
     if first:
         _write_new(root / LEDGER, data)
     else:
         _replace(root / LEDGER, data)
-    _append(root / HISTORY, {"digest": digest, "at": _now()})
 
 
 def retry(experiment: Experiment, attempt_id: str) -> str:
@@ -627,18 +642,35 @@ def run_attempt(
             experiment.record(attempt_id, "stopped", **stop)
             experiment.record(attempt_id, "stop-confirmed")
             return stop
-        experiment.record(attempt_id, "started", pid=proc.pid)
         pgid = proc.pid
-        deadline = time.monotonic() + timeout
-        reason = "exited"
-        while proc.poll() is None:
-            if time.monotonic() >= deadline:
-                reason = "timeout"
-                break
-            if cancel is not None and cancel():
-                reason = "operator-cancelled"
-                break
-            time.sleep(0.02)
+        try:
+            experiment.record(attempt_id, "started", pid=proc.pid)
+            deadline = time.monotonic() + timeout
+            reason = "exited"
+            while proc.poll() is None:
+                if time.monotonic() >= deadline:
+                    reason = "timeout"
+                    break
+                if cancel is not None and cancel():
+                    reason = "operator-cancelled"
+                    break
+                time.sleep(0.02)
+        except BaseException:
+            # Whatever interrupted the controller - Ctrl-C, a raising cancel(), a
+            # failed journal write - the subject must not outlive control. Stop and
+            # reap the group, record what can be recorded, then re-raise.
+            halted = _stop_group(proc, grace)
+            try:
+                proc.wait(timeout=grace)
+            except subprocess.TimeoutExpired:
+                halted = False
+            try:
+                experiment.record(attempt_id, "stopped", reason="operator-cancelled",
+                                  confirmed=halted, exit_code=proc.returncode)
+                experiment.record(attempt_id, "stop-confirmed" if halted else "stop-unconfirmed")
+            except OSError:
+                pass
+            raise
         if reason != "exited":
             experiment.record(attempt_id, "stop-requested", reason=reason)
         confirmed = _stop_group(proc, grace) if (reason != "exited" or _group_alive(pgid)) else True
@@ -758,11 +790,13 @@ def _export(experiment: Experiment, output: Path, include: tuple[str, ...], limi
 
 def _stream(experiment: Experiment, attempt_id: str, path: Path, stream: str, origin: str,
             limits: Limits, failures: list[str]) -> dict[str, object]:
-    data = path.read_bytes()
+    total = path.stat().st_size
+    with open(path, "rb") as handle:
+        data = handle.read(limits.max_stream_bytes)
     coverage = "complete"
-    if len(data) > limits.max_stream_bytes:
-        failures.append(f"{stream}: {len(data)} bytes, truncated to {limits.max_stream_bytes}")
-        data, coverage = data[: limits.max_stream_bytes], "partial"
+    if total > limits.max_stream_bytes:
+        failures.append(f"{stream}: {total} bytes, truncated to {limits.max_stream_bytes}")
+        coverage = "partial"
     return {
         "stream": stream, "origin": origin, "coverage": coverage, "attempt_id": attempt_id,
         "ref": f"{OBJECTS}/{sha256_bytes(data).removeprefix('sha256:')}",
@@ -825,7 +859,7 @@ def _import(experiment: Experiment, attempt_id: str, item: Import, failures: lis
 def capture(
     experiment: Experiment,
     attempt_id: str,
-    output: Path,
+    output: Path | None = None,
     include: tuple[str, ...] = ("*",),
     imports: tuple[Import, ...] = (),
     limits: Limits | None = None,
@@ -851,11 +885,22 @@ def capture(
         raise Refused(f"attempt {attempt_id!r} never ran ({stop.get('reason')}); there is nothing to capture")
     if "captured" in names or "capture-failed" in names:
         raise Refused(f"attempt {attempt_id!r} was already captured; a capture is frozen once")
-    output = Path(output)
+    if (experiment.root / _lifecycle_name(attempt_id)).exists():
+        raise Refused(f"attempt {attempt_id!r} is already finalized; its account is closed to capture")
+    # The output is bound to THIS attempt: only its own allocated workspace, or a
+    # directory inside it, may be captured under its identity. Another attempt's
+    # workspace - possibly still running - would otherwise be frozen as this one's.
+    owned = [e for e in events if e.get("event") == "workspace"]
+    if not owned:
+        raise Refused(f"attempt {attempt_id!r} was given no workspace; the controller captures only what it allocated")
+    workspace = Path(str(owned[-1]["path"])) / "work"
+    output = workspace if output is None else Path(output)
     if output.is_symlink() or not output.is_dir():
         experiment.record(attempt_id, "capture-failed", reason=f"output root {output} is not a directory")
         raise Refused(f"output root {output} is not a directory (or is a link)")
-    if _overlap(output, experiment.root):
+    if not output.resolve().is_relative_to(workspace.resolve()):
+        raise Refused(f"output root {output} is not inside attempt {attempt_id!r}'s own workspace")
+    if _overlap(output, experiment.root.parent):
         raise Refused("the output root overlaps the evidence store")
 
     limits = limits or Limits()
@@ -920,8 +965,11 @@ def frozen_artifacts(experiment: Experiment, attempt_id: str) -> list[dict[str, 
             f"manifest-{attempt_id}.json names attempt {manifest.get('attempt_id')!r} under "
             f"{manifest.get('trial_id')!r}; a stale or mismatched manifest"
         )
+    problems = [f.detail for f in checks.run_record(records.Record(path, manifest))]
+    if problems:
+        raise Refused(f"manifest-{attempt_id}.json is not valid: {problems[0]}")
     frozen = []
-    for artifact in manifest.get("artifacts") or []:
+    for artifact in manifest["artifacts"]:
         digest = str(artifact.get("digest"))
         data = _read_object(experiment.root, digest)
         if len(data) != artifact.get("size"):
@@ -1102,5 +1150,16 @@ def _add(experiment: Experiment, record: dict[str, object], kind: str, filename:
     problems = [f.detail for f in checks.run_record(records.Record(path, record))]
     if problems:
         raise Refused(f"{kind} is not valid: {problems[0]}")
+    # Consistency with what is already stored. Only the contradictions the
+    # CANDIDATE introduces count: an experiment still in progress is incomplete
+    # (attempts owed a result), and that is not this record's doing.
+    existing = records.bundle_at(experiment.root)
+    before = list(existing.records) if existing is not None else []
+    after = records.Bundle(experiment.root, [*before, records.Record(path, record)])
+    rules = (records.ledger_binding, records.unique_ids, records.lineage)
+    old = {d for rule in rules for d in rule(records.Bundle(experiment.root, before))}
+    new = [d for rule in rules for d in rule(after) if d not in old]
+    if new:
+        raise Refused(f"{kind} contradicts the stored evidence: {new[0]}")
     _write_new(path, _dump(record))
     return path
