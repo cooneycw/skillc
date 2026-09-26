@@ -717,3 +717,25 @@ def test_a_fifo_in_place_of_the_ownership_marker_does_not_hang_cleanup(store: Pa
     # Not removed - the marker no longer proves ownership - but recorded, not hung.
     assert verification["containment"]["cleanup"] == "refused-not-owned"
     assert result["status"] == "PASS"
+
+
+def test_grading_inside_the_evidence_store_is_refused(store: Path, base: Path) -> None:
+    experiment, attempt_id = _captured(store, base, REFERENCE)
+    with pytest.raises(t.Refused, match="inside the evidence store"):
+        verify.grade(experiment, attempt_id, GRADER, store / "grading")
+
+
+@pytest.mark.parametrize(("body", "category"), [
+    ("import time\ntime.sleep(30)\n", "timeout"),
+    ("print('not json')\n", "unparseable"),
+    ("print('[]')\n", "unparseable"),
+])
+def test_a_judge_that_hangs_or_prints_no_object_is_INCONCLUSIVE(tmp_path: Path, grading: Path,
+                                                                 body: str, category: str) -> None:
+    def edit(root: Path) -> None:
+        data = json.loads((root / "grader.json").read_text())
+        data["judge"]["timeout"] = 1
+        (root / "grader.json").write_text(json.dumps(data))
+        (root / "grade_slug.py").write_text(body)
+    graded = verify.grade_directory(_task_copy(tmp_path, edit), TASK / "wrong" / "no-collapse", grading)
+    assert (graded.status, graded.category) == ("INCONCLUSIVE", category)
