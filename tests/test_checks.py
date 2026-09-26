@@ -107,7 +107,7 @@ def _blind(monkeypatch: pytest.MonkeyPatch, rule_id: str) -> None:
         for r in checks.RULES
     )
     monkeypatch.setattr(checks, "RULES", rules)
-    monkeypatch.setattr(checks, "ALL_RULES", rules + checks.RECORD_RULES)
+    monkeypatch.setattr(checks, "ALL_RULES", rules + checks.RECORD_RULES + checks.BUNDLE_RULES)
 
 
 def test_a_healthy_selftest_still_passes(capsys: pytest.CaptureFixture[str]) -> None:

@@ -41,6 +41,8 @@ remaining choices to issues. This plan owns order and delivery gates.
 - Own four contracts in skillc: installation receipt, controller trial ledger,
   immutable artifact/observation capture, and independently verified results.
   A valid JSON record, hash or echoed config alone does not authenticate success.
+  Their version-2 record forms and validators are in
+  [records.md](docs/specs/evaluation-facility/records.md) (#4); runtime producers are #8 and #9.
 - Defer model/version, precise spending limits and repeats until the pilot manifest.
   Defer qualification thresholds until actual observations support calibration.
 

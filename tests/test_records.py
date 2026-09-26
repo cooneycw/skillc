@@ -30,21 +30,54 @@ def _record(**fields: object) -> records.Record:
     return records.Record(path=Path("in-memory.json"), data=dict(fields))
 
 
+def _control(path: str) -> dict[str, object]:
+    data = json.loads((CONTROLS / path).read_text(encoding="utf-8"))
+    assert isinstance(data, dict)
+    return data
+
+
+#: The committed known-good records, so a test starts from what the controls prove.
+GOOD_RESULT = _control("result-evidence/good/record.json")
+GOOD_RECEIPT = _control("installation-receipt/good/receipt.json")
+GOOD_LEDGER = _control("trial-ledger/good/ledger.json")
+GOOD_MANIFEST = _control("artifact-digest/good/record.json")
+
+
 # --------------------------------------------------------------- the pairing
 
-@pytest.mark.parametrize("rule", checks.RECORD_RULES, ids=lambda r: r.id)
-def test_every_record_rule_discriminates(rule: checks.RecordRule) -> None:
+def _findings(rule: checks.RecordRule | checks.BundleRule, where: Path) -> list[checks.Finding]:
+    if isinstance(rule, checks.BundleRule):
+        return [f for b in records.discover_bundles(where) for f in checks.run_bundle(b, only=rule.id)]
+    return [f for r in records.discover(where) for f in checks.run_record(r, only=rule.id)]
+
+
+@pytest.mark.parametrize("rule", checks.RECORD_RULES + checks.BUNDLE_RULES, ids=lambda r: r.id)
+def test_every_record_rule_discriminates(rule: checks.RecordRule | checks.BundleRule) -> None:
     bad_dir, good_dir = CONTROLS / rule.id / "bad", CONTROLS / rule.id / "good"
     assert bad_dir.is_dir() and good_dir.is_dir(), f"{rule.id} ships no committed control"
-    bad = [f for r in records.discover(bad_dir) for f in checks.run_record(r, only=rule.id)]
-    good = [f for r in records.discover(good_dir) for f in checks.run_record(r, only=rule.id)]
+    bad, good = _findings(rule, bad_dir), _findings(rule, good_dir)
     assert bad, f"{rule.id} is silent on its known-bad input"
     assert not good, f"{rule.id} fired on its known-good input: {good[0].detail}"
 
 
+@pytest.mark.parametrize("rule", checks.BUNDLE_RULES, ids=lambda r: r.id)
+def test_EVERY_bundle_bad_case_fires_its_rule(rule: checks.BundleRule) -> None:
+    """Per case, not in aggregate: one red bundle must not carry a silent sibling.
+
+    Selftest already refuses a silent case (BLIND counts per subject); this pins
+    that every bad directory under a bundle rule really is a bundle, so a case
+    whose ledger was deleted cannot drop out of the population unnoticed.
+    """
+    cases = sorted(p for p in (CONTROLS / rule.id / "bad").iterdir() if p.is_dir())
+    bundles = records.discover_bundles(CONTROLS / rule.id / "bad")
+    assert len(bundles) == len(cases), "a bad case is not a bundle, so it tests nothing"
+    for bundle in bundles:
+        assert checks.run_bundle(bundle, only=rule.id), f"{rule.id} silent on {bundle.path.name}"
+
+
 @pytest.mark.parametrize("rule", checks.ALL_RULES, ids=lambda r: r.id)
 def test_each_bad_case_fires_ITS_OWN_rule_and_NOTHING_ELSE(
-    rule: checks.Rule | checks.RecordRule,
+    rule: checks.Rule | checks.RecordRule | checks.BundleRule,
 ) -> None:
     """Every rule in the repository, not only the record family.
 
@@ -80,7 +113,14 @@ def test_each_bad_case_fires_ITS_OWN_rule_and_NOTHING_ELSE(
     bad_dir = CONTROLS / rule.id / "bad"
     assert bad_dir.is_dir(), f"{rule.id} ships no bad case"
 
-    if isinstance(rule, checks.RecordRule):
+    if isinstance(rule, checks.BundleRule):
+        # A bundle case must be clean under every RECORD rule too: a bad bundle
+        # whose receipt is also malformed tests two things at once.
+        bundles = records.discover_bundles(bad_dir)
+        own = [f for b in bundles for f in checks.run_bundle(b, only=rule.id)]
+        every = [f for b in bundles for f in checks.run_bundle(b)]
+        every += [f for r in records.discover(bad_dir) for f in checks.run_record(r)]
+    elif isinstance(rule, checks.RecordRule):
         recs = records.discover(bad_dir)
         own = [f for r in recs for f in checks.run_record(r, only=rule.id)]
         every = [f for r in recs for f in checks.run_record(r)]
@@ -208,13 +248,12 @@ def test_a_structurally_perfect_record_with_a_copied_verdict_is_refused() -> Non
     which is exactly what a subject-authored success flag looks like once it has
     been copied into an evaluator record.
     """
-    forged = _record(
-        version=1, kind=records.VERIFIED_RESULT, attempt_id="att-1", status="PASS",
-        criteria=[{"id": "a", "mandatory": True, "outcome": "VIOLATED"}],
-    )
-    assert list(records.record_envelope(forged)) == []
-    assert list(records.attempt_binding(forged)) == []
-    assert list(records.criterion_vocabulary(forged)) == []
+    forged = _record(**{**GOOD_RESULT, "status": "PASS", "criteria": [
+        {"id": "a", "mandatory": True, "outcome": "VIOLATED", "evidence": ["log:a"]}]})
+    for structural in (records.record_envelope, records.producer_authority,
+                       records.attempt_binding, records.criterion_vocabulary,
+                       records.result_evidence):
+        assert list(structural(forged)) == [], structural.__name__
     findings = list(records.derived_status(forged))
     assert findings, "a copied verdict passed every structural rule and was not refused"
     assert "does not follow" in findings[0]
@@ -290,3 +329,162 @@ def test_a_json_document_that_is_not_an_object_is_refused(tmp_path: Path) -> Non
     bad.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
     rec = records.load(bad)
     assert rec.parse_error is not None
+
+
+# --------------------------------------------------------------- bundle machinery
+
+def test_an_uncontrolled_bundle_rule_is_UNPROVEN(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The bundle arm is covered by the same coverage guarantee, not beside it."""
+    uncontrolled = checks.BundleRule(
+        "temp-uncontrolled-bundle", checks.ERROR, "no control pair", records.lineage
+    )
+    monkeypatch.setattr(checks, "BUNDLE_RULES", checks.BUNDLE_RULES + (uncontrolled,))
+    monkeypatch.setattr(
+        checks, "ALL_RULES", checks.RULES + checks.RECORD_RULES + checks.BUNDLE_RULES
+    )
+
+    rc = cli.cmd_selftest(argparse.Namespace(controls=str(CONTROLS)))
+
+    assert rc == 1, "a bundle rule with no committed control did not fail the run"
+
+
+def test_selftest_reports_a_blinded_bundle_rule(monkeypatch: pytest.MonkeyPatch) -> None:
+    blinded = checks.BundleRule("lineage", checks.ERROR, "blinded", lambda _b: iter(()))
+    monkeypatch.setattr(
+        checks,
+        "BUNDLE_RULES",
+        tuple(blinded if r.id == "lineage" else r for r in checks.BUNDLE_RULES),
+    )
+
+    rc = cli.cmd_selftest(argparse.Namespace(controls=str(CONTROLS)))
+
+    assert rc == 1, "selftest passed a bundle rule that reports nothing on its known-bad input"
+
+
+def _write_bundle(where: Path, *docs: dict[str, object]) -> records.Bundle:
+    where.mkdir(parents=True, exist_ok=True)
+    for index, doc in enumerate(docs):
+        (where / f"r{index}.json").write_text(json.dumps(doc), encoding="utf-8")
+    [bundle] = records.discover_bundles(where)
+    return bundle
+
+
+def test_a_bundle_with_two_ledgers_is_refused(tmp_path: Path) -> None:
+    bundle = _write_bundle(tmp_path, GOOD_LEDGER, GOOD_LEDGER, GOOD_RECEIPT)
+    assert any("2 trial ledgers" in d for d in records.ledger_binding(bundle))
+
+
+def test_a_retry_may_not_link_to_another_trials_attempt(tmp_path: Path) -> None:
+    trial = dict(GOOD_LEDGER["trials"][0])  # type: ignore[index]
+    other = {**trial, "trial_id": "t-2", "attempts": [{"attempt_id": "att-2", "retry_of": "att-1"}]}
+    ledger = {**GOOD_LEDGER, "trials": [trial, other]}
+    bundle = _write_bundle(tmp_path, ledger)
+    assert any("does not plan" in d for d in records.lineage(bundle))
+
+
+def test_a_regrade_of_another_attempts_result_is_refused(tmp_path: Path) -> None:
+    regrade = {**GOOD_RESULT, "result_id": "res-2", "regrade_of": "res-1", "attempt_id": "att-2"}
+    bundle = _write_bundle(tmp_path, GOOD_LEDGER, GOOD_RESULT, regrade)
+    assert any("its original graded" in d for d in records.lineage(bundle))
+
+
+def test_a_regrade_may_carry_a_new_grader_revision_but_not_a_new_grader(tmp_path: Path) -> None:
+    """protocol.md: regrading uses a "new grader revision"; a different grader is
+    not a regrade of this trial at all."""
+    revised = {**GOOD_RESULT, "result_id": "res-2", "regrade_of": "res-1",
+               "grader": {"id": "slug-grader", "revision": "g9"}}
+    ok = _write_bundle(tmp_path / "ok", GOOD_LEDGER, GOOD_RECEIPT, GOOD_MANIFEST, GOOD_RESULT, revised)
+    assert list(records.ledger_binding(ok)) == []
+    swapped = {**revised, "grader": {"id": "other", "revision": "g9"}}
+    bad = _write_bundle(tmp_path / "bad", GOOD_LEDGER, GOOD_RECEIPT, GOOD_MANIFEST, GOOD_RESULT, swapped)
+    assert list(records.ledger_binding(bad))
+
+
+def test_a_directory_without_a_ledger_is_not_a_bundle(tmp_path: Path) -> None:
+    (tmp_path / "r.json").write_text(json.dumps(GOOD_RESULT), encoding="utf-8")
+    assert records.discover_bundles(tmp_path) == []
+
+
+# --------------------------------------------------------------- version handling
+
+@pytest.mark.parametrize("version", [True, 0, -1, 1, 3, "2", 2.0])
+def test_only_a_supported_integer_version_is_read(version: object) -> None:
+    """An exact set, not a ceiling. `true` is an int to Python and read as 1 before
+    this; 0 and negatives were accepted because only NEWER versions were refused."""
+    assert list(records.record_envelope(_record(**{**GOOD_RESULT, "version": version})))
+
+
+def test_the_supported_version_is_read() -> None:
+    assert list(records.record_envelope(_record(**GOOD_RESULT))) == []
+
+
+def test_a_v1_record_is_refused_with_its_reason() -> None:
+    [finding] = list(records.record_envelope(_record(**{**GOOD_RESULT, "version": 1})))
+    assert "predates producer authority" in finding
+
+
+# --------------------------------------------------------------- identifiers
+
+@pytest.mark.parametrize("attempt_id", ["", " ", "att 1", "../att-1", "att/1", "-att", "a" * 129, 7])
+def test_a_malformed_attempt_id_is_refused(attempt_id: object) -> None:
+    rec = _record(**{**GOOD_RESULT, "attempt_id": attempt_id})
+    assert list(records.attempt_binding(rec)), f"accepted attempt_id {attempt_id!r}"
+
+
+def test_the_ledger_is_not_itself_bound_to_an_attempt() -> None:
+    """It ISSUES attempt IDs; demanding one of it would be a category error."""
+    assert list(records.attempt_binding(_record(**GOOD_LEDGER))) == []
+
+
+# --------------------------------------------------------------- established failures
+
+def test_an_established_violation_stays_FAIL_in_a_bundle_with_unknowns(tmp_path: Path) -> None:
+    """The mandatory-failure precedence survives the new evidence rules: a result
+    with a VIOLATED and an UNKNOWN criterion is a consistent FAIL, not refused."""
+    result = {**GOOD_RESULT, "status": "FAIL", "criteria": [
+        {"id": "a", "mandatory": True, "outcome": "VIOLATED", "evidence": ["log:a"]},
+        {"id": "b", "mandatory": True, "outcome": "UNKNOWN", "missing": "trace lost"},
+    ]}
+    bundle = _write_bundle(tmp_path, GOOD_LEDGER, GOOD_RECEIPT, GOOD_MANIFEST, result)
+    assert checks.run_bundle(bundle) == []
+    assert [f for r in bundle.records for f in checks.run_record(r)] == []
+
+
+# --------------------------------------------------------------- the command, bundles
+
+def test_check_records_refuses_a_bundle_rule_with_no_bundle_to_read(tmp_path: Path) -> None:
+    (tmp_path / "r.json").write_text(json.dumps(GOOD_RESULT), encoding="utf-8")
+    rc = cli.cmd_check_records(argparse.Namespace(path=str(tmp_path), rule="lineage"))
+    assert rc == 2, "a bundle rule with nothing to read reported success"
+
+
+def test_check_records_runs_a_selected_bundle_rule_on_a_bundle() -> None:
+    """Negative control for the refusal above: with a bundle present it runs."""
+    bad = CONTROLS / "lineage" / "bad"
+    assert cli.cmd_check_records(argparse.Namespace(path=str(bad), rule="lineage")) == 1
+
+
+def test_check_records_says_when_records_were_bound_to_no_ledger(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    cli.cmd_check_records(
+        argparse.Namespace(path=str(CONTROLS / "derived-status" / "good"), rule=None)
+    )
+    assert "NOT against any ledger" in capsys.readouterr().out
+
+
+def test_check_records_does_not_claim_loose_records_in_a_bundled_run(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    cli.cmd_check_records(
+        argparse.Namespace(path=str(CONTROLS / "lineage" / "good"), rule=None)
+    )
+    out = capsys.readouterr().out
+    assert "in 2 bundle(s)" in out and "NOT against any ledger" not in out
+
+
+def test_check_records_refuses_an_unknown_rule() -> None:
+    rc = cli.cmd_check_records(
+        argparse.Namespace(path=str(CONTROLS / "lineage" / "good"), rule="no-such-rule")
+    )
+    assert rc == 2

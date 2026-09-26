@@ -242,22 +242,71 @@ class RecordRule:
 RECORD_RULES: tuple[RecordRule, ...] = (
     RecordRule("record-envelope", ERROR, "record declares a version this build can read",
                records.record_envelope, parser=True),
-    RecordRule("attempt-binding", ERROR, "record cites the attempt it belongs to",
+    RecordRule("producer-authority", ERROR, "record declares the one producer allowed for its kind",
+               records.producer_authority),
+    RecordRule("attempt-binding", ERROR, "record cites a well-formed attempt and trial",
                records.attempt_binding),
+    RecordRule("installation-receipt", ERROR, "receipt records what was installed and whether it was ready",
+               records.installation_receipt),
+    RecordRule("trial-ledger", ERROR, "ledger plans a non-empty population under full identities",
+               records.trial_ledger),
     RecordRule("artifact-digest", ERROR, "every captured artifact carries its identity",
                records.artifact_digest),
+    RecordRule("observation-coverage", ERROR, "every required stream declares its origin and coverage",
+               records.observation_coverage),
     RecordRule("criterion-vocabulary", ERROR, "criteria use the specified outcomes",
                records.criterion_vocabulary),
+    RecordRule("result-evidence", ERROR, "result names its grader, what it graded and each criterion's evidence",
+               records.result_evidence),
     RecordRule("derived-status", ERROR, "status follows from the criteria, not from a claim",
                records.derived_status),
 )
 
+
+@dataclass(frozen=True)
+class BundleRule:
+    """A rule whose subject is a BUNDLE: a ledger and the records bound to it.
+
+    Some facts exist only between records - that a receipt belongs to the attempt
+    the ledger planned, that no planned attempt went missing. Like `RecordRule` it
+    is a separate TYPE and not a separate machinery: it sits in `ALL_RULES`, and
+    `selftest` differs for it only where the subject is loaded.
+    """
+
+    id: str
+    severity: str
+    summary: str
+    check: Callable[[records.Bundle], Iterator[str]]
+    parser: bool = False
+
+
+BUNDLE_RULES: tuple[BundleRule, ...] = (
+    BundleRule("ledger-binding", ERROR, "records bind to an attempt the ledger planned, under its identities",
+               records.ledger_binding),
+    BundleRule("unique-ids", ERROR, "no identifier is duplicated or claimed by conflicting records",
+               records.unique_ids),
+    BundleRule("attempt-accounting", ERROR, "every planned attempt is accounted for with its evidence",
+               records.attempt_accounting),
+    BundleRule("lineage", ERROR, "retries and regrades link to originals that are retained",
+               records.lineage),
+)
+
+
+
+def evidence_rules() -> tuple[RecordRule | BundleRule, ...]:
+    """Every rule `check-records` can run, either family - resolved at CALL time,
+    so a registry patched in a test is the registry the selector is checked against."""
+    return RECORD_RULES + BUNDLE_RULES
+
 #: ONE registry. `selftest` iterates this; the coverage check, the totals and the
 #: exit code never learn which family a rule came from.
-ALL_RULES: tuple[Rule | RecordRule, ...] = RULES + RECORD_RULES
+ALL_RULES: tuple[Rule | RecordRule | BundleRule, ...] = RULES + RECORD_RULES + BUNDLE_RULES
 
 
-def require_known(only: str | None, family: tuple[Rule, ...] | tuple[RecordRule, ...]) -> None:
+def require_known(
+    only: str | None,
+    family: tuple[Rule, ...] | tuple[RecordRule, ...] | tuple[RecordRule | BundleRule, ...],
+) -> None:
     """An unknown selector is a caller error, never a request to check nothing.
 
     Filtering by an id that matches no rule used to return zero findings, which
@@ -269,8 +318,12 @@ def require_known(only: str | None, family: tuple[Rule, ...] | tuple[RecordRule,
 
 
 def run_record(record: records.Record, only: str | None = None) -> list[Finding]:
-    """Apply every record rule (or one) to a single record."""
-    require_known(only, RECORD_RULES)
+    """Apply every record rule (or one) to a single record.
+
+    `only` may name a bundle rule; that selects no record rule, which is correct
+    and not a silent no-op - `check-records` runs the bundle rule on bundles.
+    """
+    require_known(only, evidence_rules())
     findings: list[Finding] = []
     for rule in RECORD_RULES:
         if only and rule.id != only:
@@ -278,6 +331,20 @@ def run_record(record: records.Record, only: str | None = None) -> list[Finding]
         findings.extend(
             Finding(rule.id, rule.severity, record.path, detail)
             for detail in rule.check(record)
+        )
+    return findings
+
+
+def run_bundle(bundle: records.Bundle, only: str | None = None) -> list[Finding]:
+    """Apply every bundle rule (or one) to a single bundle."""
+    require_known(only, evidence_rules())
+    findings: list[Finding] = []
+    for rule in BUNDLE_RULES:
+        if only and rule.id != only:
+            continue
+        findings.extend(
+            Finding(rule.id, rule.severity, bundle.path, detail)
+            for detail in rule.check(bundle)
         )
     return findings
 
