@@ -116,6 +116,7 @@ warn   unknown-field      every field is defined by the portable specification  
 warn   claude-code-field  every field is one Claude Code documents  [target: claude-code]
 warn   body-budget        SKILL.md body stays inside the line budget
 warn   ref-depth          references stay one level deep
+error  invocation-consistency  Claude Code's disable-model-invocation and Codex's agents/openai.yaml agree  [target: claude-code]
 error  frontmatter        frontmatter is present and parses
 ```
 
@@ -131,6 +132,17 @@ under every target but reads the active one: it stays silent under `claude-code`
 on a `disable-model-invocation: true` skill, whose description the model never
 reads to decide anything, and still fires under `portable`, where another client
 may auto-select on it regardless (see [frontmatter.md](docs/frontmatter.md#trigger-shape-and-user-invoked-skills)).
+
+`invocation-consistency` compares two per-client invocation declarations: Claude
+Code's `disable-model-invocation` (`SKILL.md` frontmatter) and Codex's
+`policy.allow_implicit_invocation` (`agents/openai.yaml`, read from
+[mattpocock/skills](https://github.com/mattpocock/skills)'s own convention on
+2026-09-26, at [`c55ee46`](https://github.com/mattpocock/skills/tree/c55ee46073ed923f86ce59a5eb3b6d895095d1b7) -
+not a Codex specification, since that file is an upstream convention). It fires
+only when a skill carries `agents/openai.yaml` and the two disagree on whether
+the model may invoke it without being asked; silent when the file is absent.
+Scoped to `--target claude-code`, like `claude-code-field`: the portable
+specification has no invocation control for the comparison to be about.
 
 (`skillc rules` also lists the evaluation-record rules checked by
 `skillc check-records`: per-record rules for the installation receipt, trial

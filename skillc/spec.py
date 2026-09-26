@@ -435,6 +435,14 @@ class _Parser:
             i += 1
 
 
+def _parse_mapping_document(lines: list[str], first_lineno: int) -> dict[str, object]:
+    parser = _Parser(lines, first_lineno=first_lineno)
+    root, end = parser.mapping(0, 0)
+    if end < len(parser.lines):  # pragma: no cover - mapping(…, 0) consumes all
+        raise _invalid(parser.no(end), "unexpected content")
+    return root
+
+
 def parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
     """Parse the YAML subset skill frontmatter is checked in.
 
@@ -447,11 +455,18 @@ def parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
     match = FRONTMATTER_RE.match(text)
     if not match:
         raise FrontmatterError("no YAML frontmatter block")
-    parser = _Parser(match.group(1).split("\n"), first_lineno=2)
-    root, end = parser.mapping(0, 0)
-    if end < len(parser.lines):  # pragma: no cover - mapping(…, 0) consumes all
-        raise _invalid(parser.no(end), "unexpected content")
+    root = _parse_mapping_document(match.group(1).split("\n"), first_lineno=2)
     return root, text[match.end():]
+
+
+def parse_yaml_document(text: str) -> dict[str, object]:
+    """Parse a standalone top-level YAML mapping in the SAME documented subset as
+    skill frontmatter (docs/frontmatter.md) - for an auxiliary per-skill YAML file
+    that is not wrapped in a `---` frontmatter block (`agents/openai.yaml`, #50).
+    Raises `FrontmatterError` under the same rules `parse_frontmatter` does; the
+    only difference is that this document has no delimiters to find first.
+    """
+    return _parse_mapping_document(text.split("\n"), first_lineno=1)
 
 
 @dataclass
