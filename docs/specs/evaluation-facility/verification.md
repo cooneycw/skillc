@@ -407,18 +407,22 @@ So the shape is a collection keyed by tier name, not one value:
 
 - **`verification.tiers_enabled`** is the list of tier names this result
   actually requested, e.g. `["deterministic"]` today. A tier absent from this
-  list was never asked for; a tier present in it but missing from `verdicts`
-  is a *different* fact - it was requested and came back unavailable. The two
-  must never be confused.
-- **`verification.verdicts`** is an object keyed by tier name, one entry per
-  tier that actually produced a verdict. Each entry carries its own `status`
-  (one of the closed `PROTOCOL_STATUSES`), its own `criteria`, and a `backend`
-  identity where one applies (`describe()`'s claim, or `None` for the
-  bare-subprocess path); tiers 2/3 add a `judge` sub-record (model + version)
-  beside those. **An entry for a tier not in `tiers_enabled` is refused**
-  (`check-records`' `verdict-tiers` rule) - the shape this PR's #69 sign-off
-  specifically asked for, so a verdict can never appear to have run without
-  being declared.
+  list was never asked for.
+- **`verification.verdicts`** is an object keyed by tier name, with **exactly
+  one entry per enabled tier - never more, never fewer.** Each entry carries
+  its own `status` (one of the closed `PROTOCOL_STATUSES`), its own
+  `criteria`, and a `backend` identity where one applies (`describe()`'s
+  claim, or `None` for the bare-subprocess path); tiers 2/3 add a `judge`
+  sub-record (model + version) beside those. `check-records`' `verdict-tiers`
+  rule checks BOTH directions (orchestrator review of PR #88, ffae7eb, after
+  the first cut checked only one): **an entry for a tier not in
+  `tiers_enabled` is refused**, and **an enabled tier with no entry at all is
+  equally refused** - the same silent drop #69 forbids ("one judge
+  unavailable gives that tier `unavailable` while the others still report"),
+  just facing the other way. An unavailable judge therefore still writes its
+  own entry, `status: "UNAVAILABLE"`, and that entry MUST state why
+  (`reason`) - a bare absence is never read as "unavailable", and neither is
+  an `UNAVAILABLE` status with no stated reason.
 - **`verification.disagreement`** is reserved for the per-criterion
   same-model-vs-independent comparison tiers 2/3 make possible. Today it is
   always `{"available": false, "reason": "fewer than two judge tiers"}`:

@@ -1,0 +1,49 @@
+{
+ "version": 2,
+ "kind": "verified-result",
+ "producer": "assembler",
+ "attempt_id": "att-1",
+ "trial_id": "t-1",
+ "result_id": "res-1",
+ "grader": {
+  "id": "slug-grader",
+  "revision": "g1"
+ },
+ "graded_digests": [
+  "sha256:aa"
+ ],
+ "criteria": [
+  {
+   "id": "c1",
+   "mandatory": true,
+   "outcome": "SATISFIED",
+   "evidence": [
+    "grader-log:c1"
+   ]
+  }
+ ],
+ "status": "PASS",
+ "verification": {
+  "tiers_enabled": ["deterministic", "llm-judge"],
+  "verdicts": {
+   "deterministic": {
+    "status": "PASS",
+    "criteria": [
+     {
+      "id": "c1",
+      "mandatory": true,
+      "outcome": "SATISFIED",
+      "evidence": ["grader-log:c1"]
+     }
+    ],
+    "backend": null
+   },
+   "llm-judge": {
+    "status": "UNAVAILABLE",
+    "criteria": [],
+    "reason": "judge model unreachable"
+   }
+  },
+  "disagreement": {"available": false, "reason": "fewer than two judge tiers"}
+ }
+}

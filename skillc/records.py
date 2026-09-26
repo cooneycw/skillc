@@ -669,15 +669,20 @@ def derived_status(record: Record) -> Iterator[str]:
 
 
 def verdict_tiers(record: Record) -> Iterator[str]:
-    """Every per-tier verdict names a tier this result actually enabled (#69).
+    """Every enabled tier has a verdict, and every verdict names an enabled tier (#69).
 
     The owner ruling behind this (#69, relayed to a keyed collection rather than
     a single `grading_tier` field): a trial graded by more than one tier carries
-    ALL of their verdicts side by side, never averaged or overridden, and a
-    verdict must be traceable to a tier this result declares it ran - a stray
-    entry for a tier that was never requested is indistinguishable from one
-    that silently ran without being recorded as enabled, which is exactly the
-    silent-fallback #69 forbids. `verification` itself is optional here: a
+    ALL of their verdicts side by side, never averaged or overridden, and "one
+    judge unavailable gives that tier `unavailable` while the others still
+    report" - never a silent drop. Both directions of that consistency are
+    checked, not just one (orchestrator review of PR #88, ffae7eb): a stray
+    verdict for a tier never requested is indistinguishable from one that
+    silently ran unrequested, and an enabled tier with NO verdict entry is
+    indistinguishable from one that ran and was simply never written down -
+    the exact silent-drop #69 forbids, just facing the other way. An
+    UNAVAILABLE verdict must say why, for the same reason a declared run state
+    must (`result_evidence`, above). `verification` itself is optional here: a
     record with none of this structure is not this rule's concern (other rules
     own whether `verification` must exist at all).
     """
@@ -697,13 +702,26 @@ def verdict_tiers(record: Record) -> Iterator[str]:
     # and `sorted()` on a mixed-type set below, would abort validation with a
     # traceback instead of a diagnostic, which is worse than reporting nothing.
     enabled_set = {t for t in enabled if _nonempty_str(t)} if isinstance(enabled, list) else set()
+
     verdicts = verification.get("verdicts")
-    if verdicts is None:
-        return
-    if not isinstance(verdicts, dict):
+    if verdicts is not None and not isinstance(verdicts, dict):
         yield "verification.verdicts is present but is not an object keyed by tier name"
-        return
-    for tier, entry in verdicts.items():
+        verdicts = None
+    verdict_map = verdicts if isinstance(verdicts, dict) else {}
+
+    # The converse direction: an enabled tier missing from `verdicts` entirely
+    # (including `verdicts` absent altogether while a tier is enabled) is the
+    # silent drop this rule exists to catch, not merely the mirror image of
+    # the forward check below.
+    for tier in sorted(enabled_set):
+        if tier not in verdict_map:
+            yield (
+                f"tier {tier!r} is in tiers_enabled but verification.verdicts has no entry "
+                f"for it; an unavailable tier still needs its own UNAVAILABLE entry, never "
+                f"a silent absence"
+            )
+
+    for tier, entry in verdict_map.items():
         if tier not in enabled_set:
             yield (
                 f"verification.verdicts has an entry for tier {tier!r}, which is not in "
@@ -714,11 +732,14 @@ def verdict_tiers(record: Record) -> Iterator[str]:
         if not isinstance(entry, dict):
             yield f"verdict for tier {tier!r} is not an object"
             continue
-        if entry.get("status") not in PROTOCOL_STATUSES:
+        status = entry.get("status")
+        if status not in PROTOCOL_STATUSES:
             yield (
-                f"verdict for tier {tier!r} reports status {entry.get('status')!r}, "
+                f"verdict for tier {tier!r} reports status {status!r}, "
                 f"not one of {list(PROTOCOL_STATUSES)}"
             )
+        elif status == "UNAVAILABLE" and not _nonempty_str(entry.get("reason")):
+            yield f"verdict for tier {tier!r} is UNAVAILABLE without stating why"
         if not isinstance(entry.get("criteria"), list):
             yield f"verdict for tier {tier!r} carries no criteria list"
     disagreement = verification.get("disagreement")

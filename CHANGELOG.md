@@ -41,9 +41,13 @@ collection) closes.
   `{"available": false, "reason": "fewer than two judge tiers"}` until a
   second tier exists to compare against. The top-level `status`/`criteria`
   are unchanged and, stated explicitly now, come from the deterministic tier
-  alone. `check-records`' new `verdict-tiers` rule refuses a verdict entry
-  for a tier absent from `tiers_enabled`. Not a new envelope version: nothing
-  outside this build's own tests ever produced or read the field it replaces.
+  alone. `check-records`' new `verdict-tiers` rule checks BOTH directions
+  (orchestrator review found the first cut checked only one): a verdict
+  entry for a tier absent from `tiers_enabled` is refused, and so is an
+  enabled tier with no entry at all - an unavailable judge writes its own
+  `UNAVAILABLE` entry with a stated reason, never a silent absence. Not a
+  new envelope version: nothing outside this build's own tests ever
+  produced or read the field it replaces.
 - **The Docker backend's implementation** (Refs #77, Refs #10, on top of the
   interface above): real bodies for `prepare`/`install`/`execute`/
   `confirm_stopped`/`export`/`destroy`/`confirm_absent`, all through the
