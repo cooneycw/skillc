@@ -274,17 +274,25 @@ def _invocation_consistency(skill: Skill, target: str) -> Iterator[str]:
         yield f"agents/openai.yaml {exc}"
         return
 
-    policy = doc.get("policy")
-    if policy is not None and not isinstance(policy, dict):
-        yield f"agents/openai.yaml policy is {_kind(policy)}, not a mapping - cannot compare"
-        return
-    allow_implicit = policy.get("allow_implicit_invocation") if isinstance(policy, dict) else None
-    if allow_implicit is not None and not isinstance(allow_implicit, bool):
-        yield (
-            f"agents/openai.yaml policy.allow_implicit_invocation is {_kind(allow_implicit)}, "
-            f"not a boolean - cannot compare"
-        )
-        return
+    # `in` on purpose, not `.get(...) is not None`: an ABSENT key defaults (below),
+    # but a key present with an explicit `null` is a value of the wrong type, same
+    # as any other wrong type, and `.get` cannot tell the two apart.
+    policy: dict[str, object] = {}
+    if "policy" in doc:
+        found = doc["policy"]
+        if not isinstance(found, dict):
+            yield f"agents/openai.yaml policy is {_kind(found)}, not a mapping - cannot compare"
+            return
+        policy = found
+    allow_implicit: object = None
+    if "allow_implicit_invocation" in policy:
+        allow_implicit = policy["allow_implicit_invocation"]
+        if not isinstance(allow_implicit, bool):
+            yield (
+                f"agents/openai.yaml policy.allow_implicit_invocation is {_kind(allow_implicit)}, "
+                f"not a boolean - cannot compare"
+            )
+            return
 
     # Absence defaults to "the model may invoke it" on BOTH sides - the same
     # default `disable-model-invocation` already has in Claude Code.

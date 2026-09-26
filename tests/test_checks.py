@@ -770,6 +770,45 @@ def test_invocation_consistency_reports_a_non_boolean_allow_implicit_invocation(
     assert findings and "not a boolean" in findings[0].detail
 
 
+def test_invocation_consistency_reports_an_explicit_null_policy(tmp_path: Path) -> None:
+    """Codex cross-model review: an explicit `null` is a present value of the
+    wrong type, exactly like any other wrong type - `.get(...) is not None`
+    cannot tell "absent" and "present but null" apart, and conflating them
+    either silently read null as agreement or produced a misleading disagreement
+    diagnostic depending on Claude's own declared state. Confirmed both were
+    real on the pre-fix code before writing this test."""
+    skill = _skill_with_openai_yaml(
+        tmp_path, "x",
+        "name: x\ndescription: Use when x.\ndisable-model-invocation: true\n",
+        "policy: null\n",
+    )
+    findings = checks.run(skill, only="invocation-consistency", target="claude-code")
+    assert findings and "not a mapping" in findings[0].detail
+
+
+def test_invocation_consistency_reports_an_explicit_null_allow_implicit_invocation(
+    tmp_path: Path,
+) -> None:
+    skill = _skill_with_openai_yaml(
+        tmp_path, "x",
+        "name: x\ndescription: Use when x.\ndisable-model-invocation: true\n",
+        "policy:\n  allow_implicit_invocation: null\n",
+    )
+    findings = checks.run(skill, only="invocation-consistency", target="claude-code")
+    assert findings and "not a boolean" in findings[0].detail
+
+
+def test_invocation_consistency_reports_an_unreadable_openai_yaml(tmp_path: Path) -> None:
+    """The other guard Codex named as a red case: invalid UTF-8, not just a
+    parse failure on otherwise-decodable text."""
+    skill = _skill_with_openai_yaml(
+        tmp_path, "x", "name: x\ndescription: Use when x.\ndisable-model-invocation: true\n", ""
+    )
+    (skill.path.parent / "agents" / "openai.yaml").write_bytes(b"policy:\n  allow_implicit_invocation: \xff\xfe")
+    findings = checks.run(skill, only="invocation-consistency", target="claude-code")
+    assert findings and "unreadable" in findings[0].detail
+
+
 def test_invocation_consistency_is_scoped_to_claude_code(tmp_path: Path) -> None:
     """The claim - do these two client-specific declarations agree - has no
     portable-specification stake, exactly like `claude-code-field`."""
