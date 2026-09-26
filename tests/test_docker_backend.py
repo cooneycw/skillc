@@ -52,6 +52,29 @@ def _sentinel(docker_state: Path, name: str) -> None:
     (docker_state / name).touch()
 
 
+# ------------------------------------------------------------------ _docker_env
+
+
+def test_docker_env_forwards_the_declared_connection_vars_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`_docker_env()` is an ALLOWLIST, never a passthrough of the whole
+    ambient environment: only `PATH` and the named `DOCKER_CONNECTION_VARS`
+    may reach a docker invocation this backend makes. Named by cross-model
+    review as an untested distinction - a real ambient variable that is not
+    on the allowlist must never leak through, whatever else is set."""
+    monkeypatch.setenv("DOCKER_HOST", "unix:///tmp/test-daemon.sock")
+    monkeypatch.setenv("UNDECLARED_SECRET", "sentinel")
+    env = d._docker_env()
+    assert env.get("DOCKER_HOST") == "unix:///tmp/test-daemon.sock"
+    assert "UNDECLARED_SECRET" not in env
+    assert "PATH" in env
+
+
+def test_docker_env_omits_a_connection_var_that_is_not_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DOCKER_CONTEXT", raising=False)
+    env = d._docker_env()
+    assert "DOCKER_CONTEXT" not in env
+
+
 # --------------------------------------------------------------------- describe
 
 
@@ -91,6 +114,38 @@ def test_describe_reports_unreachable_when_the_daemon_is_down(base: Path, docker
     _sentinel(docker_state, ".down")
     description = _backend(base, docker_state).describe()
     assert description.version == "unreachable"
+
+
+def test_describe_names_root_honestly_instead_of_a_false_non_root_claim(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression for a bug found by cross-model review: `_container_user()`
+    mirrors the host caller's own uid/gid, so a caller running as root
+    (uid 0, common in a containerized CI runner) previously produced the
+    claim "non-root user 0:0" - false, since 0 IS root. Fails on the pre-fix
+    code, which asserts "non-root" unconditionally."""
+    monkeypatch.setattr(d.os, "getuid", lambda: 0)
+    monkeypatch.setattr(d.os, "getgid", lambda: 0)
+    description = _backend(base, docker_state).describe()
+    assert any("root" in claim.lower() for claim in description.isolation)
+    assert not any("non-root" in claim for claim in description.isolation)
+
+
+def test_describe_never_publishes_the_real_host_uid_or_gid(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression for a bug found by cross-model review: `describe()` used to
+    embed the literal `_container_user()` value in its public claims, which
+    publishes a piece of the host's real numeric identity through a channel
+    this module's own contract says never carries one (interfaces.md
+    "Execution backend": describe() reports only logical values). Fails on
+    the pre-fix code, which prints the exact uid:gid pair."""
+    monkeypatch.setattr(d.os, "getuid", lambda: 4242)
+    monkeypatch.setattr(d.os, "getgid", lambda: 4343)
+    description = _backend(base, docker_state).describe()
+    text = " ".join(description.isolation)
+    assert "4242" not in text
+    assert "4343" not in text
 
 
 def test_every_lifecycle_method_is_stubbed_pending_the_implementation_pr(
@@ -153,6 +208,25 @@ def test_composed_argv_never_mounts_the_docker_socket_or_widens_privilege() -> N
     assert "--privileged" not in argv
     assert "--cap-add" not in argv
     assert "--pid" not in argv  # never --pid=host
+
+
+def test_composed_argv_places_image_after_an_end_of_options_marker() -> None:
+    """Regression for a bug found by cross-model review: `image` was appended
+    as a bare positional with nothing marking where options end. Docker's
+    flag parser keeps scanning for recognized flags throughout the argument
+    list rather than stopping at the first positional, so an `image` value
+    that itself looks like a flag - `--privileged`, say - was not guaranteed
+    to be consumed as the IMAGE rather than reinterpreted as an option,
+    contradicting the closed-argv guarantee the test above checks. `--` is
+    Docker's own end-of-options marker; this fails on the pre-fix code,
+    which places `image` with nothing before it to end option parsing."""
+    argv = _compose(image="--privileged")
+    assert "--" in argv
+    dash_dash = argv.index("--")
+    assert argv[dash_dash + 1] == "--privileged"
+    # the flag-shaped image value must appear only AFTER the "--" boundary,
+    # never anywhere in the option region ahead of it
+    assert "--privileged" not in argv[:dash_dash]
 
 
 def test_composed_argv_carries_neutral_identity() -> None:

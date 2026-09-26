@@ -85,6 +85,25 @@ def _container_user() -> str:
     return f"{os.getuid()}:{os.getgid()}"
 
 
+def _user_isolation_claim() -> str:
+    """A `describe()` isolation claim about the container's user - honest
+    about root, and never the real numeric uid/gid (two bugs found by
+    cross-model review). `_container_user()` mirrors the HOST caller's own
+    uid/gid, so:
+
+    - a host caller running as root (uid 0, common in a containerized CI
+      runner) would otherwise be reported as "non-root user 0:0" - false,
+      since 0 IS root - so that case is named honestly instead.
+    - printing the real uid/gid at all, even for a non-root caller, publishes
+      a piece of the host's numeric identity through a channel this module's
+      own contract (interfaces.md "Execution backend") says never carries a
+      host value - `describe()`'s claims are meant to be logical, matching
+      every other entry in this same tuple."""
+    if os.getuid() == 0:
+        return "WARNING: host caller is UID 0 (root) - container user-id isolation does not apply"
+    return "container user matches the host caller's own uid:gid (needed for bind-mount access), not a fixed placeholder"
+
+
 #: A neutral HOSTNAME and logical paths - never the host's own (interfaces.md
 #: "Execution backend"). The container's UID is real (see `_container_user`);
 #: neutrality here means no host machine identity, not a fake numeric owner.
@@ -211,7 +230,17 @@ def compose_run_argv(
     backing filesystem; on any other host Docker refuses the flag outright.
     `None` (the default) omits it entirely rather than pass a flag most hosts
     reject, and `describe()`'s `unobserved` says so - a caller that needs a
-    guaranteed disk bound must not assume this flag alone provides one."""
+    guaranteed disk bound must not assume this flag alone provides one.
+
+    A literal `--` always separates the options above from `image` and
+    `subject_argv` (found by cross-model review): without it, an `image`
+    value that itself looks like a flag - `"--privileged"`, say - is not
+    guaranteed to be consumed as the positional IMAGE argument by Docker's
+    flag parser, which keeps scanning for recognized flags throughout the
+    argument list rather than stopping at the first positional. `--` is
+    Docker's own documented end-of-options marker, so this closes that gap
+    without depending on Docker's flag-parsing behavior in the general
+    case."""
     argv = [
         *docker_bin, "run", "--rm", "-i", "--name", name,
         "--label", f"{OWNER_LABEL_KEY}={OWNER_LABEL_VALUE}",
@@ -233,7 +262,7 @@ def compose_run_argv(
         "-w", CONTAINER_WORKSPACE,
         "-e", f"HOME={CONTAINER_HOME}",
         *_env_args(env),
-        image, *subject_argv,
+        "--", image, *subject_argv,
     ]
     return argv
 
@@ -282,7 +311,7 @@ class DockerBackend:
             isolation=(
                 "container (pid/mount/network namespaces)",
                 f"network={self.network} by default",
-                f"non-root user {_container_user()}",
+                _user_isolation_claim(),
                 "resource limits enforced: memory, memory-swap (equal), pids, cpus, shm-size",
                 (f"disk: --storage-opt size={self.disk_limit}" if self.disk_limit is not None
                  else "disk: no per-container bound set (disk_limit is None)"),
