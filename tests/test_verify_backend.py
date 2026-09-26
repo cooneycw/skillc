@@ -234,10 +234,18 @@ def test_grade_records_the_deterministic_tier_and_the_backend_identity(
     result = verify.grade(experiment, attempt_id, GRADER, tmp_path / "grading2", backend=backend)
     verification = result["verification"]
     assert isinstance(verification, dict)
-    assert verification["grading_tier"] == "deterministic"
-    probe_backend = verification["probe_backend"]
+    assert verification["tiers_enabled"] == ["deterministic"]
+    verdicts = verification["verdicts"]
+    assert isinstance(verdicts, dict)
+    assert set(verdicts) == {"deterministic"}
+    deterministic = verdicts["deterministic"]
+    assert deterministic["status"] == result["status"]
+    assert deterministic["criteria"] == result["criteria"]
+    probe_backend = deterministic["backend"]
     assert isinstance(probe_backend, dict)
     assert probe_backend["name"] == "fake-probe-backend"
+    disagreement = verification["disagreement"]
+    assert disagreement == {"available": False, "reason": "fewer than two judge tiers"}
     prov = verification["provenance"]
     assert isinstance(prov, dict)
     assert prov["skillc_version"]

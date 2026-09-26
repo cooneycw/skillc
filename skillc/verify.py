@@ -89,12 +89,19 @@ Refused = trial.Refused
 
 #: The only grading tier this build implements: deterministic outcome checks,
 #: no model call. #69 (owner-ratified target: deterministic / llm-judge /
-#: independent-llm-judge) adds the other two; this field lets a reader of a
-#: verified-result see which tier produced it without guessing from whether a
-#: `judge` sub-record happens to be present. Never "Level" - skillc already
-#: uses that word for TASK difficulty (evals/level1, #13-#15), so reusing it
-#: for grading tiers would read as a claim about the task ladder instead.
+#: independent-llm-judge) adds the other two, each keyed by its own tier name
+#: in `verification.verdicts` (below) - this constant is that key, never
+#: "Level": skillc already uses that word for TASK difficulty (evals/level1,
+#: #13-#15), so reusing it for grading tiers would read as a claim about the
+#: task ladder instead.
 GRADING_TIER = "deterministic"
+
+#: The reserved `verification.disagreement` reason while fewer than two judge
+#: tiers exist (#69 owner ruling): a per-criterion same-model-vs-independent
+#: disagreement record needs two independently-graded verdicts to compare, and
+#: today there is exactly one tier, ever. Reused verbatim so the reason string
+#: cannot drift between the writer here and any reader that matches on it.
+DISAGREEMENT_UNAVAILABLE_REASON = "fewer than two judge tiers"
 
 GRADER_FILE = "grader.json"
 _GRADER_KEYS = {"id", "revision", "criteria", "probe", "judge"}
@@ -951,12 +958,25 @@ def grade(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base
     is NOT a refusal: that result is stored, INCONCLUSIVE, with its reason.
 
     `backend` is forwarded to `grade_files` (see there). Every result records
-    `verification.grading_tier` (today, always `GRADING_TIER` -
-    "deterministic": #69's llm-judge tiers do not exist yet) and
-    `verification.probe_backend` (the backend's own `describe()` identity when
-    one graded this attempt's probe, else `None` for the bare-subprocess
-    path) - so a reader never has to infer which boundary applied from the
-    shape of `containment` alone.
+    `verification.tiers_enabled` (today, always `[GRADING_TIER]` - #69's
+    llm-judge tiers do not exist yet, so nothing else is ever requested) and
+    `verification.verdicts`, a collection keyed by tier name: today exactly
+    `{GRADING_TIER: {...}}`, each entry carrying its own `status`, `criteria`
+    and `backend` (the backend's own `describe()` identity when one graded
+    this attempt's probe, else `None` for the bare-subprocess path) - so a
+    reader never has to infer which boundary applied from the shape of
+    `containment` alone, and a future tier's verdict never overwrites or
+    averages with this one. The top-level `status`/`criteria` are unchanged
+    and, today, are exactly the deterministic tier's own - stated here because
+    #69 requires it never be read as a blend once other tiers exist.
+    `verification.disagreement` is reserved and unavailable
+    (`DISAGREEMENT_UNAVAILABLE_REASON`) until a second tier exists to compare
+    against; this build never fabricates one.
+
+    This is a reshape of the single `verification.grading_tier` field #76
+    shipped, not a new envelope version: nothing outside this build's own
+    tests has ever produced or read that field on a real trial (#69's msg
+    1368), so there is no consumer for record-envelope versioning to protect.
     """
     planned = experiment.trial_of(attempt_id)
     pin = planned.get("grader")
@@ -1001,6 +1021,7 @@ def grade(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base
     trial.frozen_artifacts(experiment, attempt_id)
 
     criteria = [*graded.criteria, _readiness(receipt_name, receipt)]
+    status = _status(criteria)
     result: dict[str, object] = {
         "version": 2,
         "kind": records.VERIFIED_RESULT,
@@ -1011,13 +1032,23 @@ def grade(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base
         "grader": {"id": grader.id, "revision": grader.revision, "digest": pin["digest"]},
         "graded_digests": sorted({str(a["digest"]) for a in frozen}),
         "criteria": criteria,
-        "status": _status(criteria),
+        # `status` is the deterministic tier's own status, literally the same
+        # value stored at verification.verdicts.deterministic.status below -
+        # never a blend, and #69 requires this stay true once other tiers exist.
+        "status": status,
         "verification": {
             "category": graded.category, "detail": graded.detail,
             "containment": graded.containment, "ptrace_scope": _ptrace_scope(),
-            "grading_tier": GRADING_TIER,
-            "probe_backend": graded.containment.get("backend"),
             "provenance": provenance.stamp().as_dict(),
+            "tiers_enabled": [GRADING_TIER],
+            "verdicts": {
+                GRADING_TIER: {
+                    "status": status,
+                    "criteria": criteria,
+                    "backend": graded.containment.get("backend"),
+                },
+            },
+            "disagreement": {"available": False, "reason": DISAGREEMENT_UNAVAILABLE_REASON},
         },
     }
     if regrade_of is not None:

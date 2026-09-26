@@ -261,6 +261,107 @@ def test_a_structurally_perfect_record_with_a_copied_verdict_is_refused() -> Non
     assert "does not follow" in findings[0]
 
 
+# --------------------------------------------------------------- verdict tiers (#69)
+
+def test_a_verdict_for_a_tier_not_enabled_is_refused() -> None:
+    rec = _record(**{**GOOD_RESULT, "verification": {
+        "tiers_enabled": ["deterministic"],
+        "verdicts": {
+            "deterministic": {"status": "PASS", "criteria": []},
+            "llm-judge": {"status": "PASS", "criteria": []},
+        },
+    }})
+    findings = list(records.verdict_tiers(rec))
+    assert findings, "a verdict for a never-enabled tier passed unrefused"
+    assert "llm-judge" in findings[0] and "tiers_enabled" in findings[0]
+
+
+def test_a_verdict_for_an_enabled_tier_is_accepted() -> None:
+    rec = _record(**{**GOOD_RESULT, "verification": {
+        "tiers_enabled": ["deterministic"],
+        "verdicts": {"deterministic": {"status": "PASS", "criteria": []}},
+        "disagreement": {"available": False, "reason": "fewer than two judge tiers"},
+    }})
+    assert list(records.verdict_tiers(rec)) == []
+
+
+def test_a_record_with_no_verification_object_is_not_this_rules_concern() -> None:
+    """`verification` itself is optional here; other rules own its presence."""
+    assert list(records.verdict_tiers(_record(**GOOD_RESULT))) == []
+
+
+def test_an_enabled_tier_with_no_verdict_entry_is_refused() -> None:
+    """The converse of `test_a_verdict_for_a_tier_not_enabled_is_refused`
+    (orchestrator review of PR #88, ffae7eb): a tier enabled but never given
+    its own entry is the same silent drop facing the other way - "one judge
+    unavailable gives that tier `unavailable` while the others still report",
+    never a tier that just isn't mentioned.
+    """
+    rec = _record(**{**GOOD_RESULT, "verification": {
+        "tiers_enabled": ["deterministic", "llm-judge"],
+        "verdicts": {"deterministic": {"status": "PASS", "criteria": []}},
+    }})
+    findings = list(records.verdict_tiers(rec))
+    assert findings, "an enabled tier with no verdict entry passed unrefused"
+    assert "llm-judge" in findings[0] and "no entry" in findings[0]
+
+
+def test_tiers_enabled_with_no_verdicts_object_at_all_is_refused() -> None:
+    """The same gap when `verdicts` is absent entirely, not merely missing one key."""
+    rec = _record(**{**GOOD_RESULT, "verification": {"tiers_enabled": ["deterministic"]}})
+    findings = list(records.verdict_tiers(rec))
+    assert findings, "tiers_enabled with no verdicts object at all passed unrefused"
+
+
+def test_an_unavailable_verdict_without_a_reason_is_refused() -> None:
+    rec = _record(**{**GOOD_RESULT, "verification": {
+        "tiers_enabled": ["deterministic", "llm-judge"],
+        "verdicts": {
+            "deterministic": {"status": "PASS", "criteria": []},
+            "llm-judge": {"status": "UNAVAILABLE", "criteria": []},
+        },
+    }})
+    findings = list(records.verdict_tiers(rec))
+    assert findings, "an UNAVAILABLE verdict with no reason passed unrefused"
+    assert "llm-judge" in findings[0] and "UNAVAILABLE" in findings[0]
+
+
+def test_an_unavailable_verdict_with_a_reason_is_accepted() -> None:
+    rec = _record(**{**GOOD_RESULT, "verification": {
+        "tiers_enabled": ["deterministic", "llm-judge"],
+        "verdicts": {
+            "deterministic": {"status": "PASS", "criteria": []},
+            "llm-judge": {"status": "UNAVAILABLE", "criteria": [], "reason": "judge model unreachable"},
+        },
+        "disagreement": {"available": False, "reason": "fewer than two judge tiers"},
+    }})
+    assert list(records.verdict_tiers(rec)) == []
+
+
+def test_a_malformed_tiers_enabled_is_reported_not_crashed() -> None:
+    """Regression (codex review): a nested list inside `tiers_enabled` used to
+    raise `TypeError: unhashable type: 'list'` from `set(enabled)`, and a mixed
+    list of strings and non-strings could then crash `sorted()` on the mismatch
+    message - aborting validation with a traceback instead of a diagnostic.
+    Confirmed to raise on the pre-fix code before this test was written; both
+    shapes must now yield ordinary findings instead.
+    """
+    nested = _record(**{**GOOD_RESULT, "verification": {
+        "tiers_enabled": ["deterministic", ["nested"]],
+        "verdicts": {"deterministic": {"status": "PASS", "criteria": []}},
+    }})
+    findings = list(records.verdict_tiers(nested))
+    assert any("tiers_enabled" in f for f in findings)
+
+    mixed = _record(**{**GOOD_RESULT, "verification": {
+        "tiers_enabled": ["deterministic", 1],
+        "verdicts": {"deterministic": {"status": "PASS", "criteria": []},
+                     "llm-judge": {"status": "PASS", "criteria": []}},
+    }})
+    findings = list(records.verdict_tiers(mixed))
+    assert any("llm-judge" in f for f in findings)
+
+
 # --------------------------------------------------------------- the command
 
 def test_check_records_refuses_a_forged_verdict() -> None:

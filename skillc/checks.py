@@ -371,6 +371,8 @@ RECORD_RULES: tuple[RecordRule, ...] = (
                records.result_evidence),
     RecordRule("derived-status", ERROR, "status follows from the criteria, not from a claim",
                records.derived_status),
+    RecordRule("verdict-tiers", ERROR, "a per-tier verdict names a tier this result actually enabled",
+               records.verdict_tiers),
     RecordRule("attempt-lifecycle", ERROR, "controller accounts for how an attempt ended and why",
                records.attempt_lifecycle),
 )
