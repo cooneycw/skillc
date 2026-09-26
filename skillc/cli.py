@@ -311,6 +311,10 @@ def cmd_materialize(args: argparse.Namespace) -> int:
         return 2
     client = materialize.find_client(args.client)
     try:
+        # Evidence written into the source or a host client home would change it
+        # AFTER the immutability facts were taken, and nothing would say so.
+        origin = Path(args.repo or args.snapshot).resolve()
+        materialize.refuse_protected(out, materialize.forbidden_roots(origin), "write evidence")
         result = materialize.materialize(
             subject,
             attempt_id=args.attempt_id,

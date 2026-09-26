@@ -217,6 +217,48 @@ def test_an_unknown_listing_row_is_UNKNOWN_not_an_empty_listing(tmp_path: Path) 
     assert "unparseable skill row" in readiness["reasons"]["baseline_absence"]
 
 
+@pytest.mark.parametrize("mode", ["second-block", "star-row"])
+def test_a_listing_the_parser_cannot_fully_read_is_UNKNOWN(tmp_path: Path, mode: str) -> None:
+    """A leaked skill in a shape the parser skipped would otherwise pass absence."""
+    facts = _facts(_run(tmp_path, _fake(tmp_path, mode)))
+    assert facts["baseline_absence"] == m.UNKNOWN
+    assert facts["discovery_canary"] == m.UNKNOWN
+
+
+def test_an_effective_CODEX_HOME_is_fingerprinted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Changing the client home actually in use must not read as an unchanged host."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    custom = _host(tmp_path)
+    monkeypatch.setenv("CODEX_HOME", str(custom))
+    assert custom.resolve() in m.host_homes()
+    assert custom.resolve() in m.forbidden_roots(None)
+    client = _fake(tmp_path, "write-host", path=str(custom / "config.toml"))
+    result = m.materialize(_subject(), attempt_id="a", trial_id="t", base=tmp_path / "base",
+                           snapshot=_snapshot(tmp_path), client=client)
+    assert _facts(result)["host_unchanged"] == m.VIOLATED
+
+
+def test_an_unreadable_host_after_the_run_is_UNKNOWN_and_still_reported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = m.fingerprint_host
+    calls = {"n": 0}
+
+    def flaky(home: Path) -> dict[str, object]:
+        calls["n"] += 1
+        if calls["n"] > 1:
+            raise PermissionError("unreadable now")
+        return real(home)
+
+    monkeypatch.setattr(m, "fingerprint_host", flaky)
+    result = _run(tmp_path, _fake(tmp_path))
+    assert _facts(result)["host_unchanged"] == m.UNKNOWN
+    assert result.report["cleanup"] == {"status": "removed", "errors": []}
+    assert not result.ready
+
+
 def test_a_missing_client_executable_is_UNKNOWN_not_a_crash(tmp_path: Path) -> None:
     assert m.find_client(str(tmp_path / "no-such-codex")) is None
     result = _run(tmp_path, [str(tmp_path / "no-such-codex")])
@@ -421,6 +463,14 @@ def test_an_unknown_selected_skill_is_refused(tmp_path: Path) -> None:
     assert "not in the surface" in _refused(tmp_path, _snapshot(tmp_path), subject)
 
 
+def test_a_broken_unselected_neighbour_does_not_block_the_selection(tmp_path: Path) -> None:
+    snap = _snapshot(tmp_path)
+    (snap / "skills" / "greet" / "scripts" / "hello.sh").write_text("echo changed\n")
+    (snap / "skills" / "greet" / "reference.md").unlink()
+    result = _run(tmp_path, _fake(tmp_path), subject=_subject(select=["tidy"]), snapshot=snap)
+    assert result.ready, result.report.get("refused")
+
+
 def test_a_selection_installs_only_what_it_names(tmp_path: Path) -> None:
     result = _run(tmp_path, _fake(tmp_path), subject=_subject(select=["tidy"]))
     assert result.ready
@@ -501,6 +551,42 @@ def test_a_second_edit_to_an_already_dirty_source_file_is_VIOLATED(tmp_path: Pat
 
 
 @needs_git
+def test_a_retargeted_dirty_symlink_is_VIOLATED(tmp_path: Path) -> None:
+    repo, sha = _git_repo(tmp_path)
+    (tmp_path / "a.txt").write_text("a\n")
+    (tmp_path / "b.txt").write_text("b\n")
+    link = repo / "untracked-link"
+    link.symlink_to(tmp_path / "a.txt")
+    client = _fake(tmp_path, "relink", path=str(link), target=str(tmp_path / "b.txt"))
+    result = m.materialize(_subject(revision=sha), attempt_id="a", trial_id="t",
+                           base=tmp_path / "base", repo=repo, client=client,
+                           host_codex=_host(tmp_path))
+    assert _facts(result)["source_unchanged"] == m.VIOLATED
+
+
+@needs_git
+@pytest.mark.parametrize("layout", ["dot", "dot-slash"])
+def test_equivalent_skills_root_spellings_acquire_from_git(tmp_path: Path, layout: str) -> None:
+    if layout == "dot":
+        repo = tmp_path / "repo"
+        shutil.copytree(FIXTURE / "collection" / "skills", repo)
+        (repo / "README.md").unlink()
+        for args in (["init", "-q"], ["add", "-A"],
+                     ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "x"]):
+            subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+        sha = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], check=True,
+                             capture_output=True, text=True).stdout.strip()
+        subject = _subject(revision=sha, skills_root=".")
+    else:
+        repo, sha = _git_repo(tmp_path)
+        subject = _subject(revision=sha, skills_root="./skills")
+    result = m.materialize(subject, attempt_id="a", trial_id="t", base=tmp_path / "base",
+                           repo=repo, client=_fake(tmp_path), host_codex=_host(tmp_path))
+    assert result.ready, result.report.get("refused")
+    assert len(_installed(result.receipt)) == 5
+
+
+@needs_git
 def test_an_unresolvable_revision_is_refused(tmp_path: Path) -> None:
     repo, _ = _git_repo(tmp_path)
     result = m.materialize(_subject(revision="1" * 40), attempt_id="a", trial_id="t",
@@ -559,6 +645,20 @@ def _cli(tmp_path: Path, client: list[str], out: Path) -> int:
         "--out", str(out), "--attempt-id", "att-1", "--trial-id", "t-1",
         "--client", script, "--base", str(tmp_path / "base"),
     ])
+
+
+def test_cli_refuses_to_write_evidence_into_the_source(tmp_path: Path) -> None:
+    snap = _snapshot(tmp_path)
+    alias = tmp_path / "alias"
+    alias.symlink_to(snap)
+    for out in (snap / "evidence", alias / "evidence"):
+        code = cli.main([
+            "materialize", str(FIXTURE / "subject.json"), "--snapshot", str(snap),
+            "--out", str(out), "--attempt-id", "a", "--trial-id", "t",
+            "--base", str(tmp_path / "base"),
+        ])
+        assert code == 2
+        assert not (snap / "evidence").exists()
 
 
 def test_cli_exit_follows_readiness_and_never_overwrites_evidence(

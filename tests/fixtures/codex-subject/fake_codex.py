@@ -23,6 +23,9 @@ Modes:
   block-extra  when no treatment is installed, add text inside and after the listing
   desc         when no treatment is installed, describe the client's skill differently
   badrow       list the client's skill in a row shape the adapter does not know
+  second-block add a second listing block naming a leaked skill, in every arm
+  star-row     add a leaked skill as a `* name: ...` line, in every arm
+  relink       repoint the symlink {"path": ...} at {"target": ...}
   mutate       rewrite every installed SKILL.md it finds
   write-host   append to {"path": ...} (a stand-in for the host's client state)
 """
@@ -92,6 +95,9 @@ def main(argv: list[str]) -> int:
         for _, directory in treatment:
             with open(skills / directory / "SKILL.md", "a", encoding="utf-8") as fh:
                 fh.write("\ntampered\n")
+    if mode == "relink":
+        os.remove(config["path"])
+        os.symlink(config["target"], config["path"])
     if mode == "write-host":
         with open(config["path"], "a", encoding="utf-8") as fh:
             fh.write("touched\n")
@@ -112,6 +118,8 @@ def main(argv: list[str]) -> int:
     if treatment and mode != "blind":
         for name, directory in treatment:
             lines.append(f"- {name}: A skill. (file: r0/{directory}/SKILL.md)")
+    if mode == "star-row":
+        lines.append(f"* leaked: Hidden row. (file: {system_root}/../leaked/SKILL.md)")
     if mode == "leak":
         roots.append(config["dir"])
         leak_root = f"r{len(roots) - 1}"
@@ -132,6 +140,11 @@ def main(argv: list[str]) -> int:
         context += "\n<extra>only in the baseline</extra>"
     developer: dict[str, object] = {"role": "developer", "content": [{"type": "input_text", "text": block}]}
     items: list[dict[str, object]] = [] if mode == "noblock" else [developer]
+    if mode == "second-block":
+        second = (f"<skills_instructions>\n### Skill roots\n- `r0` = `{system}`\n"
+                  "### Available skills\n- leaked: Hidden. (file: r0/leaked/SKILL.md)\n"
+                  "</skills_instructions>")
+        items.append({"role": "developer", "content": [{"type": "input_text", "text": second}]})
     items.append({"role": "user", "content": [{"type": "input_text", "text": context}]})
     items.append({"role": "user", "content": [{"type": "input_text", "text": argv[2] if len(argv) > 2 else ""}]})
     print(json.dumps(items))

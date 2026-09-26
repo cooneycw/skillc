@@ -152,7 +152,7 @@ class Subject:
             raise Refused(f"unsupported client {client!r}: this adapter supports only {CLIENT!r}")
         if not isinstance(client.get("version"), str) or not client["version"]:
             raise Refused("subject declaration pins no client version")
-        root = str(data["skills_root"])
+        root = posixpath.normpath(str(data["skills_root"]))
         if _escapes(root):
             raise Refused(f"skills_root {root!r} escapes the subject")
         select = data.get("select", "all")
@@ -275,10 +275,12 @@ def acquire_git(subject: Subject, repo: Path, staging: Path) -> Source:
     sha = resolved.stdout.decode().strip()
     if resolved.returncode != 0 or sha != subject.revision:
         raise Refused(f"revision {subject.revision} does not resolve in {repo}")
-    probe = _git(repo, "cat-file", "-e", f"{sha}:{subject.skills_root}")
+    whole = subject.skills_root == "."
+    probe = _git(repo, "cat-file", "-e", f"{sha}^{{tree}}" if whole else f"{sha}:{subject.skills_root}")
     if probe.returncode != 0:
         raise Refused(f"skills root {subject.skills_root!r} is absent at {sha}")
-    archive = _git(repo, "archive", "--format=tar", sha, "--", subject.skills_root)
+    paths = () if whole else ("--", subject.skills_root)
+    archive = _git(repo, "archive", "--format=tar", sha, *paths)
     if archive.returncode != 0:
         raise Refused(f"git archive failed: {archive.stderr.decode(errors='replace').strip()}")
     target = staging / "surface"
@@ -289,7 +291,7 @@ def acquire_git(subject: Subject, repo: Path, staging: Path) -> Source:
 
 def _extract(tar_bytes: bytes, prefix: str, target: Path) -> None:
     """Write regular files only. Links are refused, never followed or recreated."""
-    base = prefix.rstrip("/") + "/"
+    base = "" if prefix == "." else prefix.rstrip("/") + "/"
     with tarfile.open(fileobj=io.BytesIO(tar_bytes)) as tar:
         for member in tar.getmembers():
             if member.issym() or member.islnk():
@@ -395,14 +397,20 @@ def _verify_checksums(skill_dir: Path, manifest_rel: str) -> str:
 
 
 def inventory(subject: Subject, source: Source) -> list[SkillEntry]:
-    """Every skill directory in the surface, with its closure, or a named refusal."""
+    """The selected skills with their closures, or a named refusal.
+
+    Names are read for EVERY skill, because selection is by name and a name that
+    cannot be read might be the selected one. The closure - references, checksums,
+    install targets - is validated for the SELECTED skills only: a defect in a
+    neighbour that is not installed says nothing about this treatment.
+    """
     root = source.surface_dir
     if (root / "SKILL.md").exists():
         raise Refused(
             "unsupported layout: a SKILL.md at the skills root itself; this adapter "
             "reads a directory whose children are skill directories"
         )
-    entries: list[SkillEntry] = []
+    found: list[tuple[Path, str, str]] = []  # directory, name, body
     for child in sorted(p for p in root.iterdir() if p.is_dir()):
         skill_md = child / "SKILL.md"
         if not skill_md.is_file():
@@ -413,83 +421,85 @@ def inventory(subject: Subject, source: Source) -> list[SkillEntry]:
                     f"below a directory with no SKILL.md"
                 )
             continue  # not a skill; reported by the caller as a non-skill entry
-        text = skill_md.read_text(encoding="utf-8")
         try:
-            frontmatter, body = parse_frontmatter(text)
+            frontmatter, body = parse_frontmatter(skill_md.read_text(encoding="utf-8"))
         except FrontmatterError as exc:
             raise Refused(f"{child.name}/SKILL.md: frontmatter does not parse: {exc}") from exc
         name = frontmatter.get("name")
         if not isinstance(name, str) or not name:
             raise Refused(f"{child.name}/SKILL.md declares no name; the client cannot list it")
-        files = [
-            {
-                "path": f.relative_to(child).as_posix(),
-                "size": f.stat().st_size,
-                "digest": sha256_file(f),
-            }
-            for f in tree_files(child)
-        ]
-        present = {str(f["path"]) for f in files}
-        # Required: what the ENTRY POINT explicitly points at - a relative Markdown
-        # link, or a phrase the subject DECLARED as its "read this file" convention.
-        # A missing one is a broken install. Anything merely resembling a path is
-        # a static finding below: a heuristic here would refuse sound skills that
-        # mention files of the repository they document.
-        declared = {m for p in subject.required for m in re.findall(p.pattern, body)}
-        escaping = sorted(r for r in _links(body) | declared if _escapes(r))
-        if escaping:
-            raise Refused(f"{child.name}: SKILL.md requires {escaping}, outside the skill")
-        required = sorted({posixpath.normpath(r) for r in _links(body) | declared})
-        missing = [r for r in required if r not in present]
-        if missing:
-            raise Refused(f"{child.name}: SKILL.md references missing file(s) {missing}")
-        # Everything else is a static finding. It is recorded and never counts as
-        # readiness in either direction; only the client's listing does.
-        findings = []
-        external: list[dict[str, str]] = []
-        for f in tree_files(child):
-            if f.suffix != ".md":
-                continue
-            content = f.read_text(encoding="utf-8", errors="replace")
-            for pattern in subject.external:
-                for hit in sorted(set(pattern.finditer(content))):
-                    external.append({
-                        "reference": hit,
-                        "in": f.relative_to(child).as_posix(),
-                        "status": "external-not-materialized",
-                        "meaning": pattern.meaning,
-                    })
-            for ref in sorted(_refs(content)):
-                if ref not in present and ref not in required:
-                    findings.append(f"{f.relative_to(child).as_posix()} mentions {ref}, "
-                                    f"not in this skill (static; not readiness)")
-        checks = (
-            _verify_checksums(child, subject.checksum_manifest)
-            if subject.checksum_manifest else "not-declared"
-        )
-        entries.append(SkillEntry(child.name, name, files, required, findings, external, checks))
+        found.append((child, name, body))
 
     names: dict[str, str] = {}
-    folded: dict[str, str] = {}
-    for entry in entries:
-        if entry.name in names:
+    for child, name, _ in found:
+        if name in names:
             raise Refused(
-                f"name collision: {names[entry.name]} and {entry.directory} both declare "
-                f"{entry.name!r}"
+                f"name collision: {names[name]} and {child.name} both declare {name!r}"
             )
-        names[entry.name] = entry.directory
-        low = entry.directory.lower()
-        if low in folded or low == CLIENT_SYSTEM_DIR:
-            raise Refused(f"target collision: {entry.directory!r} and {folded.get(low, low)!r}")
-        folded[low] = entry.directory
+        names[name] = child.name
     if subject.select is not None:
         unknown = sorted(set(subject.select) - set(names))
         if unknown:
             raise Refused(f"selected skill(s) not in the surface: {unknown}")
-        entries = [e for e in entries if e.name in subject.select]
-    if not entries:
+        found = [f for f in found if f[1] in subject.select]
+    if not found:
         raise Refused("empty discovery: the surface holds no skill to install")
-    return entries
+
+    # Install targets: only the selected directories reach the client's home.
+    folded: dict[str, str] = {}
+    for child, _, _ in found:
+        low = child.name.lower()
+        if low in folded or low == CLIENT_SYSTEM_DIR:
+            raise Refused(f"target collision: {child.name!r} and {folded.get(low, low)!r}")
+        folded[low] = child.name
+    return [_closure(subject, child, name, body) for child, name, body in found]
+
+
+def _closure(subject: Subject, child: Path, name: str, body: str) -> SkillEntry:
+    files = [
+        {"path": f.relative_to(child).as_posix(), "size": f.stat().st_size,
+         "digest": sha256_file(f)}
+        for f in tree_files(child)
+    ]
+    present = {str(f["path"]) for f in files}
+    # Required: what the ENTRY POINT explicitly points at - a relative Markdown
+    # link, or a phrase the subject DECLARED as its "read this file" convention.
+    # A missing one is a broken install. Anything merely resembling a path is
+    # a static finding below: a heuristic here would refuse sound skills that
+    # mention files of the repository they document.
+    declared = {m for p in subject.required for m in re.findall(p.pattern, body)}
+    escaping = sorted(r for r in _links(body) | declared if _escapes(r))
+    if escaping:
+        raise Refused(f"{child.name}: SKILL.md requires {escaping}, outside the skill")
+    required = sorted({posixpath.normpath(r) for r in _links(body) | declared})
+    missing = [r for r in required if r not in present]
+    if missing:
+        raise Refused(f"{child.name}: SKILL.md references missing file(s) {missing}")
+    # Everything else is a static finding. It is recorded and never counts as
+    # readiness in either direction; only the client's listing does.
+    findings = []
+    external: list[dict[str, str]] = []
+    for f in tree_files(child):
+        if f.suffix != ".md":
+            continue
+        content = f.read_text(encoding="utf-8", errors="replace")
+        for pattern in subject.external:
+            for hit in sorted(set(pattern.finditer(content))):
+                external.append({
+                    "reference": hit,
+                    "in": f.relative_to(child).as_posix(),
+                    "status": "external-not-materialized",
+                    "meaning": pattern.meaning,
+                })
+        for ref in sorted(_refs(content)):
+            if ref not in present and ref not in required:
+                findings.append(f"{f.relative_to(child).as_posix()} mentions {ref}, "
+                                f"not in this skill (static; not readiness)")
+    checks = (
+        _verify_checksums(child, subject.checksum_manifest)
+        if subject.checksum_manifest else "not-declared"
+    )
+    return SkillEntry(child.name, name, files, required, findings, external, checks)
 
 
 # ------------------------------------------------------------ owned roots
@@ -499,18 +509,23 @@ def forbidden_roots(source: Path | None) -> list[Path]:
     """Places a disposable root must never sit inside: the host's client and the source."""
     home = Path.home()
     roots = [home / ".codex", home / ".agents", home / ".claude"]
-    if os.environ.get("CODEX_HOME"):
-        roots.append(Path(os.environ["CODEX_HOME"]))
+    roots.extend(host_homes())
     if source is not None:
         roots.append(source)
     return [r.resolve() for r in roots]
 
 
+def refuse_protected(path: Path, forbidden: list[Path], what: str) -> None:
+    """Refuse a write destination inside the source or a host client home."""
+    resolved = path.resolve()  # follows symlinks, so an alias cannot slip past
+    for bad in forbidden:
+        if resolved == bad or resolved.is_relative_to(bad):
+            raise Refused(f"refusing to {what} inside {bad}: that is not trial-owned")
+
+
 def create_root(base: Path, forbidden: list[Path]) -> tuple[Path, str]:
     base = base.resolve()
-    for bad in forbidden:
-        if base == bad or base.is_relative_to(bad):
-            raise Refused(f"refusing to materialize inside {bad}: that is not trial-owned")
+    refuse_protected(base, forbidden, "materialize")
     base.mkdir(parents=True, exist_ok=True)
     root = Path(tempfile.mkdtemp(prefix="skillc-materialize-", dir=base))
     nonce = secrets.token_hex(16)
@@ -543,6 +558,33 @@ def cleanup(root: Path, nonce: str) -> dict[str, object]:
 # ------------------------------------------------------------ fingerprints
 
 
+def host_homes() -> list[Path]:
+    """Every host client home in effect: the default one and any $CODEX_HOME."""
+    homes = [Path.home() / ".codex"]
+    if os.environ.get("CODEX_HOME"):
+        homes.append(Path(os.environ["CODEX_HOME"]))
+    unique: list[Path] = []
+    for home in homes:
+        if home.resolve() not in unique:
+            unique.append(home.resolve())
+    return unique
+
+
+def _shown(path: Path) -> str:
+    return str(path).replace(str(Path.home()), "~", 1)
+
+
+def fingerprint_hosts(homes: list[Path]) -> dict[str, object]:
+    """Fingerprint each home. An unreadable one is recorded, never raised."""
+    state: dict[str, object] = {}
+    for home in homes:
+        try:
+            state[_shown(home)] = fingerprint_host(home)
+        except OSError as exc:
+            state[_shown(home)] = {"error": repr(exc)}
+    return state
+
+
 def fingerprint_host(host_codex: Path) -> dict[str, object]:
     """The host client's install-relevant state: its skills tree and config files.
 
@@ -550,8 +592,7 @@ def fingerprint_host(host_codex: Path) -> dict[str, object]:
     client writes those continuously, and a fingerprint that moves for reasons
     unrelated to this run detects nothing.
     """
-    shown = str(host_codex).replace(str(Path.home()), "~", 1)
-    state: dict[str, object] = {"path": shown}
+    state: dict[str, object] = {}
     skills = host_codex / "skills"
     if skills.is_dir():
         h = hashlib.sha256()
@@ -591,7 +632,12 @@ def fingerprint_source(source: Source, subject: Subject) -> dict[str, object]:
             index += 1  # the rename's origin path follows as its own record
         rel = entry[3:].decode(errors="surrogateescape")
         path = source.origin / rel
-        digest = sha256_file(path) if path.is_file() and not path.is_symlink() else "absent"
+        if path.is_symlink():
+            digest = "link:" + os.readlink(path)  # never followed; its target text is the state
+        elif path.is_file():
+            digest = sha256_file(path)
+        else:
+            digest = "absent"
         contents.update(f"{rel}\0{digest}\n".encode(errors="surrogateescape"))
     return {
         "head": head.stdout.decode().strip(),
@@ -675,6 +721,10 @@ def parse_listing(stdout: str, arm_dir: Path) -> Listing:
                 return Listing("unparseable", "client output content is not an object")
             text = str(content.get("text", ""))
             open_at = text.find("<skills_instructions>")
+            if open_at >= 0 and (seen_block or text.count("<skills_instructions>") > 1):
+                # A second block would be read as ordinary text, and whatever it
+                # lists would never reach the absence check.
+                return Listing("unparseable", "more than one skills listing")
             if open_at >= 0:
                 close_at = text.find("</skills_instructions>", open_at)
                 if close_at < 0:
@@ -702,6 +752,11 @@ def _parse_block(block: str, rows: list[tuple[str, str, str]]) -> tuple[list[str
             section = line
             kept.append(line)
             continue
+        if section in ("### Skill roots", "### Available skills") and line.strip() \
+                and not line.startswith("- "):
+            # Inside a listing section every line is a row. Anything else would be
+            # kept as ordinary text, and a skill written that way would be invisible.
+            return kept, f"unrecognized line in {section[4:]}: {line[:120]}"
         if section == "### Skill roots" and line.startswith("- "):
             root = _ROOT_LINE_RE.match(line)
             if not root:
@@ -934,7 +989,7 @@ def materialize(
     snapshot: Path | None = None,
     client: list[str] | None = None,
     workspace_fixture: Path | None = None,
-    host_codex: Path | None = None,
+    host_codex: Path | list[Path] | None = None,
     keep: bool = False,
     timeout: float = 120,
 ) -> Result:
@@ -948,7 +1003,12 @@ def materialize(
     origin = (repo or snapshot)
     assert origin is not None
     origin = origin.resolve()
-    host_codex = (host_codex or Path.home() / ".codex").resolve()
+    if host_codex is None:
+        hosts = host_homes()
+    elif isinstance(host_codex, Path):
+        hosts = [host_codex.resolve()]
+    else:
+        hosts = [h.resolve() for h in host_codex]
     observations: dict[str, object] = {
         "installed": "NOT_OBSERVED", "available": UNKNOWN,
         "invoked": "NOT_OBSERVED", "task_outcome": "NOT_APPLICABLE",
@@ -959,8 +1019,8 @@ def materialize(
         "subject": {k: v for k, v in subject.raw.items() if k != "notes"},
         "observations": observations,
     }
-    host_before = fingerprint_host(host_codex)
-    root, nonce = create_root(base, [*forbidden_roots(origin), host_codex])
+    host_before = fingerprint_hosts(hosts)
+    root, nonce = create_root(base, [*forbidden_roots(origin), *hosts])
     receipt: dict[str, object] | None = None
     facts: dict[str, str] = {}
     reasons: dict[str, str] = {}
@@ -1076,14 +1136,21 @@ def materialize(
         receipt = None
     finally:
         report["cleanup"] = {"status": "kept", "errors": []} if keep else cleanup(root, nonce)
-        host_after = fingerprint_host(host_codex)
+        host_after = fingerprint_hosts(hosts)
         report["host_immutability"] = {"before": host_before, "after": host_after}
         report["finished"] = _now()
     # Set after the finally, so it covers everything the run did, cleanup included.
-    facts["host_unchanged"] = SATISFIED if host_before == host_after else VIOLATED
-    reasons["host_unchanged"] = ("host client state identical before and after"
-                                 if host_before == host_after
-                                 else "the host client state changed during the run")
+    unreadable = [h for h, v in {**host_before, **host_after}.items()
+                  if isinstance(v, dict) and "error" in v]
+    if unreadable:
+        facts["host_unchanged"] = UNKNOWN
+        reasons["host_unchanged"] = f"host client state unreadable: {sorted(set(unreadable))}"
+    elif host_before == host_after:
+        facts["host_unchanged"] = SATISFIED
+        reasons["host_unchanged"] = "host client state identical before and after"
+    else:
+        facts["host_unchanged"] = VIOLATED
+        reasons["host_unchanged"] = "the host client state changed during the run"
     report["readiness"] = {**facts, "reasons": reasons}
     text = json.dumps(report)
     if not keep:
