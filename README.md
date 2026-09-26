@@ -51,6 +51,7 @@ skillc check ./skills         # check a collection after validating the rules
 skillc selftest                # prove every rule can still report the other verdict
 skillc check-records <path>    # refuse evaluation records the contract rejects
 skillc materialize <subject>   # install a declared skill surface and prove what a client lists
+skillc exposure <surface>      # measure what actually reaches the model, per client, no model call
 skillc rules                   # what it checks, and at what severity
 skillc leak-check <path>       # refuse a tree or bundle carrying a machine identity
 ```
