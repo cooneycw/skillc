@@ -183,22 +183,39 @@ def _body_budget(skill: Skill) -> Iterator[str]:
 
 
 def _ref_depth(skill: Skill) -> Iterator[str]:
+    """A second-hop target only counts if it is a NEW file: not SKILL.md itself,
+    and not something SKILL.md already links directly. A back-link to the entry
+    point, or a sibling already linked from SKILL.md, is not a deeper chain -
+    the agent reaches it either way. Every distinct chain is reported, sorted
+    by (first-hop, second-hop) for deterministic output, not just the first.
+    """
     base = skill.path.parent
-    for target in MD_LINK_RE.findall(skill.body):
+    skill_path = skill.path.resolve()
+    first_hop_targets = MD_LINK_RE.findall(skill.body)
+    first_hop_paths = {
+        resolved for t in first_hop_targets if (resolved := (base / t).resolve()).is_file()
+    }
+    chains: set[tuple[str, str]] = set()
+    for target in first_hop_targets:
         first = (base / target).resolve()
-        if not first.is_file():
+        if first not in first_hop_paths:
             continue
         try:
             nested = MD_LINK_RE.findall(first.read_text(encoding="utf-8"))
         except (OSError, UnicodeError):
             continue
         for second in nested:
-            if (first.parent / second).resolve().is_file():
-                yield (
-                    f"{target} links on to {second}: references must stay one level "
-                    f"deep or the agent reads only part of the chain"
-                )
-                return
+            resolved_second = (first.parent / second).resolve()
+            if not resolved_second.is_file():
+                continue
+            if resolved_second == skill_path or resolved_second in first_hop_paths:
+                continue
+            chains.add((target, second))
+    for target, second in sorted(chains):
+        yield (
+            f"{target} links on to {second}: references must stay one level "
+            f"deep or the agent reads only part of the chain"
+        )
 
 
 RULES: tuple[Rule, ...] = (

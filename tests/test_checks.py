@@ -35,6 +35,33 @@ def test_every_rule_discriminates(rule: checks.Rule) -> None:
     assert not good, f"{rule.id} is noisy: fired on its known-good input ({good})"
 
 
+def test_ref_depth_reports_every_distinct_chain_in_deterministic_order() -> None:
+    """A skill with two independent deep chains must report both, sorted by
+    (first-hop, second-hop) - not just the first one found (issue #52)."""
+    path = CONTROLS / "ref-depth" / "bad" / "two-deep-chains" / "SKILL.md"
+    findings = checks.run(Skill.load(path), only="ref-depth")
+    assert [f.detail for f in findings] == [
+        ("A.md links on to X.md: references must stay one level deep or the "
+         "agent reads only part of the chain"),
+        ("B.md links on to Y.md: references must stay one level deep or the "
+         "agent reads only part of the chain"),
+    ]
+
+
+def test_ref_depth_ignores_a_back_link_to_skill_md() -> None:
+    """A second-hop link that resolves to SKILL.md itself is not a deeper
+    chain - it is the entry point (issue #52)."""
+    path = CONTROLS / "ref-depth" / "good" / "back-link-skill" / "SKILL.md"
+    assert checks.run(Skill.load(path), only="ref-depth") == []
+
+
+def test_ref_depth_ignores_a_sibling_already_linked_from_skill_md() -> None:
+    """A second-hop link that lands on a file SKILL.md already links directly
+    is not a deeper chain - the agent reaches it either way (issue #52)."""
+    path = CONTROLS / "ref-depth" / "good" / "linked-sibling" / "SKILL.md"
+    assert checks.run(Skill.load(path), only="ref-depth") == []
+
+
 def test_selftest_reports_a_blinded_rule(monkeypatch: pytest.MonkeyPatch) -> None:
     blinded = checks.Rule("name-spec", checks.ERROR, "blinded", lambda _s: iter(()))
     monkeypatch.setattr(
