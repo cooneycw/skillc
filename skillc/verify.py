@@ -528,11 +528,30 @@ def _probe(grader: GraderDef, loaded: dict[str, bytes], work: Path) -> tuple[dic
 PROBE_WORKDIR = "/work"
 
 
+#: A portable command name, not a host filesystem path (codex review found
+#: the earlier version used `sys.executable` - the VERIFIER's own interpreter
+#: path, e.g. under this host's `.venv`, which a real backend's isolation has
+#: no reason to contain). Matches how agent CLI binaries are already referenced
+#: by bare name rather than a host path; a probe-serving backend's image is
+#: expected to carry a `python3` on `PATH`, exactly as an agent image is
+#: expected to carry `codex`/`claude`.
+PROBE_INTERPRETER = "python3"
+
+#: Surface key naming which placed candidate paths need the executable bit
+#: (codex review: the bytes-only surface convention otherwise drops it
+#: silently). A backend that does not yet honour this key installs every file
+#: without +x - stated as a real, current limitation for a candidate that
+#: must be exec'd directly rather than imported; today's shipped graders only
+#: import candidate code, so this does not block them.
+SURFACE_EXECUTABLE_KEY = "__executable__"
+
+
 def _probe_surface(grader: GraderDef, loaded: dict[str, bytes],
                     files: list[tuple[str, bytes, bool]]) -> dict[str, object]:
     """The grader-shaped surface for a probe-style `install()`: flat
     `{relative path: bytes}` entries, one per file the backend must place
-    under `PROBE_WORKDIR`. NOT #7's skill-materialization vocabulary -
+    under `PROBE_WORKDIR`, plus `SURFACE_EXECUTABLE_KEY` naming which of them
+    need +x. NOT #7's skill-materialization vocabulary -
     `ExecutionBackend.install()`'s `surface` has no Protocol-fixed key set, so
     probe callers use their own, agreed directly with the Docker backend's
     author rather than guessed: any declared entry whose value is `bytes` is
@@ -540,8 +559,13 @@ def _probe_surface(grader: GraderDef, loaded: dict[str, bytes],
     the probe's stdin at `execute()`, matching the bare-subprocess path
     exactly, so an existing probe.py needs no rewrite to run either way."""
     surface: dict[str, object] = {grader.probe.name: loaded["probe"]}
-    for rel, data, _executable in files:
-        surface[f"candidate/{rel}"] = data
+    executable: list[str] = []
+    for rel, data, is_executable in files:
+        path = f"candidate/{rel}"
+        surface[path] = data
+        if is_executable:
+            executable.append(path)
+    surface[SURFACE_EXECUTABLE_KEY] = executable
     return surface
 
 
@@ -567,6 +591,15 @@ def _probe_via_backend(
     `BackendUnavailable`, from either `prepare()` or `install()`, is a
     refusal - `confirmed` stays False and nothing falls back to the bare
     subprocess path silently.
+
+    QUARANTINE APPLIES HERE TOO (codex review): a probe that actually started
+    (past `install()`) and was not confirmed stopped, or whose backend could
+    not confirm its resources gone after `destroy()`, leaves this verifier in
+    exactly the state the bare-subprocess path's fallback sweep exists to
+    guard against - a surviving candidate-controlled process or resource that
+    could reach the NEXT grading run. `prepare()`/`install()` failing before
+    anything started is not quarantined (nothing to survive); everything
+    after is.
 
     THE OBSERVATIONS CONVENTION. `ExecutionBackend.execute()` has no field for
     a launched process's own stdout - `lifecycle.py`'s `_ensure_spool_files`
@@ -604,7 +637,7 @@ def _probe_via_backend(
             containment["reason"] = f"backend unavailable at install(): {exc}"
         else:
             argv = [
-                sys.executable, "-I", "-S", "-B",
+                PROBE_INTERPRETER, "-I", "-S", "-B",
                 f"{PROBE_WORKDIR}/{grader.probe.name}", f"{PROBE_WORKDIR}/candidate",
             ]
             result = backend.execute(
@@ -623,6 +656,11 @@ def _probe_via_backend(
                 containment["reason"] = (
                     f"the backend could not confirm the probe stopped ({stop_confirmation.value})"
                 )
+                # A probe that actually started (past install()) and was not
+                # confirmed stopped may still have a candidate-controlled
+                # process alive - the same reason the bare-subprocess path's
+                # unswept-descendant case quarantines (codex review).
+                _set_quarantine(f"backend probe containment was lost ({containment['reason']})")
             else:
                 exported = work / "exported"
                 exported.mkdir(mode=0o700, exist_ok=True)
@@ -638,7 +676,16 @@ def _probe_via_backend(
                     }
     finally:
         backend.destroy(handle)
-        containment["teardown"] = backend.confirm_absent(handle).value
+        teardown_confirmation = backend.confirm_absent(handle)
+        containment["teardown"] = teardown_confirmation.value
+        if teardown_confirmation is not Confirmation.CONFIRMED:
+            # Execute() ran (this finally only executes after prepare()
+            # returned a handle) and the backend cannot confirm its resources
+            # are actually gone - a container or namespace that outlives
+            # destroy() could still hold something candidate-controlled.
+            _set_quarantine(
+                f"backend teardown was not confirmed absent ({teardown_confirmation.value})"
+            )
 
     return envelope, containment
 
@@ -948,7 +995,7 @@ def grade(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base
             "containment": graded.containment, "ptrace_scope": _ptrace_scope(),
             "grading_tier": GRADING_TIER,
             "probe_backend": graded.containment.get("backend"),
-            "provenance": provenance.stamp(),
+            "provenance": provenance.stamp().as_dict(),
         },
     }
     if regrade_of is not None:

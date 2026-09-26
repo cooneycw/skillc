@@ -123,6 +123,13 @@ class FakeProbeBackend:
             target = handle.root.joinpath(*rel.split("/"))
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
+        # Demonstrates verify.SURFACE_EXECUTABLE_KEY end to end (codex review:
+        # the bytes-only convention otherwise drops the executable bit).
+        executable = surface.get(verify.SURFACE_EXECUTABLE_KEY)
+        if isinstance(executable, list):
+            for rel in executable:
+                assert isinstance(rel, str)
+                handle.root.joinpath(*rel.split("/")).chmod(0o700)
         return {}
 
     def execute(
@@ -280,3 +287,45 @@ def test_teardown_runs_even_when_the_probe_is_not_confirmed(tmp_path: Path) -> N
     files = [("src/slugify.py", REFERENCE.read_bytes(), False)]
     verify.grade_files(GRADER, files, tmp_path / "grading", backend=backend)
     assert all(h.destroyed for h in backend.prepared)
+
+
+def test_an_unconfirmed_stop_quarantines_the_next_grading_run(tmp_path: Path) -> None:
+    """codex review: a lost backend containment must quarantine, exactly as
+    the bare-subprocess path's unswept-descendant case already does."""
+    backend = FakeProbeBackend(base=tmp_path / "backend", force_confirm_stopped=Confirmation.UNKNOWN)
+    (tmp_path / "backend").mkdir()
+    files = [("src/slugify.py", REFERENCE.read_bytes(), False)]
+    verify.grade_files(GRADER, files, tmp_path / "grading", backend=backend)
+
+    clean_backend = FakeProbeBackend(base=tmp_path / "backend2")
+    (tmp_path / "backend2").mkdir()
+    with pytest.raises(verify.Refused, match="quarantined"):
+        verify.grade_files(GRADER, files, tmp_path / "grading2", backend=clean_backend)
+
+
+def test_an_unconfirmed_teardown_quarantines_the_next_grading_run(tmp_path: Path) -> None:
+    backend = FakeProbeBackend(base=tmp_path / "backend", force_confirm_absent=Confirmation.NOT_CONFIRMED)
+    (tmp_path / "backend").mkdir()
+    files = [("src/slugify.py", REFERENCE.read_bytes(), False)]
+    verify.grade_files(GRADER, files, tmp_path / "grading", backend=backend)
+
+    clean_backend = FakeProbeBackend(base=tmp_path / "backend2")
+    (tmp_path / "backend2").mkdir()
+    with pytest.raises(verify.Refused, match="quarantined"):
+        verify.grade_files(GRADER, files, tmp_path / "grading2", backend=clean_backend)
+
+
+def test_the_probe_surface_names_which_candidate_paths_need_the_executable_bit() -> None:
+    files = [("src/slugify.py", b"data", False), ("bin/run.sh", b"#!/bin/sh\n", True)]
+    surface = verify._probe_surface(GRADER, GRADER.read(), files)
+    assert surface[verify.SURFACE_EXECUTABLE_KEY] == ["candidate/bin/run.sh"]
+    assert surface["candidate/src/slugify.py"] == b"data"
+    assert surface["candidate/bin/run.sh"] == b"#!/bin/sh\n"
+
+
+def test_the_probe_argv_uses_a_portable_interpreter_name_not_a_host_path() -> None:
+    """codex review: `sys.executable` is the VERIFIER's own interpreter path
+    (e.g. under this host's .venv), which a real backend's isolation has no
+    reason to contain."""
+    assert verify.PROBE_INTERPRETER == "python3"
+    assert "/" not in verify.PROBE_INTERPRETER
