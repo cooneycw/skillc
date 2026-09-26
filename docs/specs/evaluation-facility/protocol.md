@@ -175,7 +175,9 @@ repeated attempts as trials. That informs the measurement approach here; it does
 not establish that our proposed tasks or thresholds are valid.
 [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents)
 
-Harbor separates task instructions, environments and verification, and documents
+Harbor ([harbor-framework/harbor](https://github.com/harbor-framework/harbor),
+Apache-2.0; [provenance](../../research/README.md#harbor)) separates task
+instructions, environments and verification, and documents
 an opt-in separate verifier environment. It is a design reference only: skillc
 takes no runtime dependency on it ([ADR 0003](../../decisions/0003-no-external-evaluation-runtime.md)).
 [Task overview](https://docs.harborframework.com/core-concepts/tasks/overview),
