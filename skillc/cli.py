@@ -14,12 +14,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import checks, materialize, records
+from . import checks, leak, materialize, records
 from .checks import ERROR, Finding
 from .spec import DEFAULT_TARGET, TARGETS, Manifest, ManifestError, Skill, discover
 
@@ -617,6 +618,59 @@ def cmd_rules(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_leak_check(args: argparse.Namespace) -> int:
+    """Refuse a tree or a produced bundle that carries a machine identity (#63).
+
+    Three refusal codes, none of them a clean scan:
+    - `2`: the path does not exist, OR a `--denylist`/`$SKILLC_LEAK_DENYLIST`
+      was configured but does not resolve to a file - a caller error either
+      way, never silently read as "no deny-list". Cross-model review: a
+      configured-but-missing path used to fall back to zero hostname coverage
+      with the SAME message as never configuring one at all, so a typo'd
+      `--denylist` path disabled hostname detection without saying so.
+    - `3`: the path exists but NOTHING was scanned (every file undecodable, or
+      no files at all) - an unscannable target is UNKNOWN, never clean. A scan
+      that never opened a file cannot have "found nothing"; it looked at
+      nothing (kyle #10 container-lessons, item 59).
+    - `1`: a leak was found.
+    """
+    root = Path(args.path).resolve()
+    if not root.exists():
+        print(f"skillc: path does not exist: {root}", file=sys.stderr)
+        return 2
+
+    configured = args.denylist or os.environ.get(leak.DENYLIST_ENV)
+    if configured and not Path(configured).is_file():
+        print(f"skillc: configured deny-list not found: {configured}", file=sys.stderr)
+        return 2
+    denylist = leak.load_denylist(args.denylist)
+    result = leak.scan_path(root, denylist, exclude=frozenset(args.exclude))
+    for finding in result.findings:
+        print(finding.render(root))
+
+    if configured:
+        plural = "y" if len(denylist) == 1 else "ies"
+        print(f"skillc: hostname deny-list: {len(denylist)} entr{plural} from {configured}")
+    else:
+        print(
+            f"skillc: no hostname deny-list configured (--denylist or "
+            f"${leak.DENYLIST_ENV}); a hostname not on a list is a class this "
+            f"run cannot see",
+            file=sys.stderr,
+        )
+    print(
+        f"skillc: {result.scanned} file(s) scanned, {result.skipped} skipped "
+        f"(undecodable), {len(result.findings)} leak(s) found"
+    )
+    if result.scanned == 0:
+        print(
+            "skillc: nothing was scanned - an unscannable target is UNKNOWN, not clean",
+            file=sys.stderr,
+        )
+        return 3
+    return 1 if result.findings else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="skillc",
@@ -675,6 +729,20 @@ def main(argv: list[str] | None = None) -> int:
 
     p_rules = sub.add_parser("rules", help="list the rules")
     p_rules.set_defaults(func=cmd_rules)
+
+    p_leak = sub.add_parser(
+        "leak-check", help="refuse a tree or bundle that carries a machine identity"
+    )
+    p_leak.add_argument("path", nargs="?", default=".", help="file, tree, or produced bundle")
+    p_leak.add_argument(
+        "--denylist", help=f"hostname deny-list file (default: ${leak.DENYLIST_ENV})"
+    )
+    p_leak.add_argument(
+        "--exclude", action="append", default=[],
+        help="path prefix, relative to PATH, to skip entirely (repeatable) - "
+             "for a directory that exists to contain seeded fake leaks on purpose",
+    )
+    p_leak.set_defaults(func=cmd_leak_check)
 
     args = parser.parse_args(argv)
     return int(args.func(args))

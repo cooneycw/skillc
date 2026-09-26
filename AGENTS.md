@@ -86,3 +86,12 @@ issue #63) and carries its own committed negative control
 Not wired into Woodpecker - the build+venv round trip is slower than the four
 gates above, and #27's own scope excludes CI expansion - so run it by hand:
 `bash ci/clean-install-check.sh`. Details: [docs/findings.md](docs/findings.md).
+
+`leak-check` refuses a tree or a produced bundle that carries a machine
+identity - a home-directory path, a `uid=`/`gid=` number, a private (RFC 1918)
+IPv4 address, or a hostname from a locally-configured deny-list (issue #63,
+never committed with real names). `skillc leak-check .` runs in CI over the
+checked-out tree, and `ci/leak-check-control.sh` proves it against the seeded
+fixture in `controls/leak-check/bad/`. What it cannot see is stated in
+`skillc/leak.py`'s module docstring - absence of a finding is not proof of
+absence.

@@ -31,7 +31,7 @@ Source-file references in the handoff are relative to
 `src/coder_eval/` unless otherwise stated. Machine-local snapshot and earlier
 handoff paths are historical provenance, not repository dependencies.
 
-Original file: `/home/cooneycw/Projects/reports/coder-eval-skillc-contract-handoff-2026-09-20.md`.
+Original file: `<operator-home>/Projects/reports/coder-eval-skillc-contract-handoff-2026-09-20.md`.
 Original SHA256: `1a9a287f44ae25f4fde81911017d408e9f7ddc36445424f9abffe53ab04b2ca2`.
 
 The archived copy normalizes Unicode em and en dashes to ASCII hyphens to follow

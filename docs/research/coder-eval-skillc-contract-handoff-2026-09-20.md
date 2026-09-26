@@ -6,9 +6,9 @@ For peer thread `01a0b96d-ef27-70c2-84c0-5335c43d99bc`, in the owner-authorized 
 
 - Repository: https://github.com/UiPath/coder_eval/
 - Inspected revision: `d960de1c433a1b050d2509f04d94a60e3cabaaf0`; package version `0.12.4`, requires Python 3.13+.
-- Durable bare source snapshot: `/home/cooneycw/Projects/research/coder-eval-scan-2026-09-20/source.git`.
-- Initial broader handoff: `/home/cooneycw/Projects/reports/coder-eval-cpp-handoff-2026-09-20.md`.
-- Read any cited source without executing it: `git --git-dir=/home/cooneycw/Projects/research/coder-eval-scan-2026-09-20/source.git show HEAD:src/coder_eval/models/results.py`.
+- Durable bare source snapshot: `<operator-home>/Projects/research/coder-eval-scan-2026-09-20/source.git`.
+- Initial broader handoff: `<operator-home>/Projects/reports/coder-eval-cpp-handoff-2026-09-20.md`.
+- Read any cited source without executing it: `git --git-dir=<operator-home>/Projects/research/coder-eval-scan-2026-09-20/source.git show HEAD:src/coder_eval/models/results.py`.
 - Source references below use this exact revision. “Code-verified” means static inspection of implementation, not a successful runtime trial. “Inference” and “proposed” are explicitly separated. This is a focused inspection, not a complete security audit.
 
 ## 1. Installed skills and adapter contracts
