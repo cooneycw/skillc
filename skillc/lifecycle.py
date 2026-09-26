@@ -251,6 +251,19 @@ def run_through_backend(
     `confirm_absent()`, however the body ends - including for a genuinely
     unexpected exception, which still propagates to the caller AFTER
     teardown, never silently swallowed.
+
+    TEARDOWN'S OWN EXCEPTIONS ARE ALSO NEVER ALLOWED TO SKIP ACCOUNTING (#79).
+    `destroy()` or `confirm_absent()` raising - not merely returning
+    `NOT_CONFIRMED`/`UNKNOWN` - used to propagate straight out of this
+    function, so `trial.finalize()`/`trial.cleanup_workspace()` below never
+    ran and the attempt was left with no lifecycle record at all, whatever
+    the subject itself did. Both calls are now individually caught; a raise
+    from either is folded into `backend_teardown="unknown"` (never a guessed
+    `confirmed`) plus a `backend_teardown_error` string in the returned
+    record, and `trial.finalize()` still runs. A resource this leaves behind
+    is exactly what `skillc/reap.py`'s label-scoped sweep exists to find
+    later - this driver's own per-attempt teardown and that independent sweep
+    are two layers, not one.
     """
     _refuse_real_agent(argv)
 
@@ -258,7 +271,10 @@ def run_through_backend(
         handle = backend.prepare(attempt_id)
     except BackendUnavailable as exc:
         record = trial.finalize(experiment, attempt_id, disposition="unavailable", reason=str(exc))
-        return {**record, "backend_teardown": None, "readiness": None, "signal": None, "liveness_method": None}
+        return {
+            **record, "backend_teardown": None, "backend_teardown_error": None,
+            "readiness": None, "signal": None, "liveness_method": None,
+        }
 
     workspace = trial.allocate_workspace(experiment, attempt_id, base, forbidden or [])
     nonce = secrets.token_hex(16)
@@ -340,16 +356,42 @@ def run_through_backend(
                         except trial.Refused:
                             pass  # capture() already recorded capture-failed; nothing more here
     finally:
-        backend.destroy(handle)
-        teardown_confirmation = backend.confirm_absent(handle)
+        # TEARDOWN FAILURE IS ITS OWN FAILURE PATH (#79), never a reason to
+        # skip accounting. Before this fix, an exception from `destroy()` or
+        # `confirm_absent()` propagated straight out of this function -
+        # `trial.finalize()`/`trial.cleanup_workspace()` below never ran, and
+        # the attempt was left with NO lifecycle record at all, whatever the
+        # subject itself did. Neither call is trusted to succeed any more
+        # than its own return value already was: both are wrapped so a raise
+        # is captured as UNKNOWN (never guessed CONFIRMED, never allowed to
+        # skip the finalize below) and surfaced in the returned record - a
+        # left-behind resource this leaves for `skillc/reap.py`'s
+        # label-scoped sweep to find later, exactly as an unreachable-daemon
+        # `Confirmation.UNKNOWN` already does.
+        try:
+            backend.destroy(handle)
+        except Exception as exc:  # noqa: BLE001 - never let teardown skip accounting
+            destroy_error: str | None = str(exc)
+        else:
+            destroy_error = None
+        try:
+            teardown_confirmation = backend.confirm_absent(handle)
+        except Exception as exc:  # noqa: BLE001 - see above
+            confirm_absent_error: str | None = str(exc)
+            teardown_confirmation = Confirmation.UNKNOWN
+        else:
+            confirm_absent_error = None
 
     if unavailable_reason is not None:
         record = trial.finalize(experiment, attempt_id, disposition="unavailable", reason=unavailable_reason)
     else:
         record = trial.finalize(experiment, attempt_id)
     trial.cleanup_workspace(experiment, attempt_id)
+    teardown_errors = [e for e in (destroy_error, confirm_absent_error) if e is not None]
     return {
-        **record, "backend_teardown": teardown_confirmation.value, "readiness": readiness,
+        **record, "backend_teardown": teardown_confirmation.value,
+        "backend_teardown_error": "; ".join(teardown_errors) if teardown_errors else None,
+        "readiness": readiness,
         # trial.finalize's `stop` field is filtered to {reason, confirmed, exit_code}
         # (trial.py's own fixed tuple) - `signal` never survives that filter, even
         # though it IS written to the raw journal event. Surfaced here so a caller

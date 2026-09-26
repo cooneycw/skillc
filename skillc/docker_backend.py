@@ -51,10 +51,12 @@ bubblewrap, so a Codex subject would decline every shell command under
 UNSANDBOXED, because the container itself is the fence.
 
 OWNERSHIP (issue #77): every container this backend composes carries a fixed
-"this belongs to skillc" label plus a per-attempt label; #79's cleanup sweep
-filters on the fixed label to find every skillc-owned container without
-trusting name matching, so a foreign container sharing a similar name but
-carrying neither label is never touched.
+"this belongs to skillc" label plus a per-attempt label; `skillc/reap.py`'s
+cleanup sweep (#79) filters on the fixed label to find every skillc-owned
+container without trusting name matching, so a foreign container sharing a
+similar name but carrying neither label is never touched. See
+docs/specs/evaluation-facility/failure-matrix.md for the full failure-path
+matrix and the reaping/snapshot contract.
 
 NO SOCKET, NO ESCAPE HATCH (addendum item C12): `compose_run_argv` emits a
 FIXED, closed set of flags. There is no passthrough parameter for arbitrary

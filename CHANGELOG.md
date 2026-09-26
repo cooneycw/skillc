@@ -16,6 +16,47 @@ collection) closes.
 
 ### Added
 
+- **The failure-path matrix and trustworthy cleanup** (#79, Refs #10):
+  [`docs/specs/evaluation-facility/failure-matrix.md`](docs/specs/evaluation-facility/failure-matrix.md)
+  states all ten of #10's addendum failure paths through the real driver
+  (`lifecycle.run_through_backend`), each with a citation to the test that
+  proves it. Writing the table found and closed a real gap: `destroy()` or
+  `confirm_absent()` itself RAISING (not merely returning `NOT_CONFIRMED`/
+  `UNKNOWN`) used to propagate out of the driver before `trial.finalize()`
+  ever ran, leaving the attempt with no lifecycle record at all - both calls
+  are now individually caught, folding into `backend_teardown="unknown"`
+  plus a new `backend_teardown_error` string, confirmed to reproduce on the
+  pre-fix code before the fix. New `skillc/reap.py`: label-scoped container
+  reaping (`docker ps --filter label=...` only, never a name match - a
+  foreign look-alike is structurally unreachable to it), where an unreachable
+  daemon reaps nothing and reports every requested attempt `left-running`
+  (UNKNOWN never reaps); resource snapshots that flag BOTH an unexpected
+  leak of an owned container and an unexpected disappearance of a foreign
+  one; and declared-host-path digests before/after, with the limitation
+  (regular files only, nothing outside the declared list) stated in both the
+  doc and a passing test. The fake `docker` CLI
+  (`tests/fixtures/docker-backend/fake_docker.py`) gained `ps`, `--label`
+  capture on `run`, and a per-container id to make this provable without a
+  daemon; the real daemon boundary remains owed to the operator's live run
+  (#10), as it does throughout this codebase's Docker-backend work.
+  Cross-model review found one HIGH (`reap()` acted and confirmed by NAME,
+  which a container removed and replaced under the identical name between
+  its list/remove/re-list round trips could defeat - fixed by acting on
+  container IDs instead, unique per container instance) and five MEDIUM
+  findings: an empty attempt population silently reported
+  `daemon_reachable=True` having checked nothing (both `reap()` and
+  `snapshot_host_paths()` now refuse it); an unreadable host path collapsed
+  into the same `None` as confirmed absence (now a distinct `UNREADABLE`
+  state, reported `unresolved` rather than silently `unchanged`); and a
+  declaration added or removed between two host-path snapshots was invisible
+  because a missing dict key defaulted to the same `None` used for confirmed
+  absence (now compared against a distinct not-declared sentinel). All fixed
+  with committed regression tests confirmed red on the pre-fix code first.
+  A subsequent orchestrator review found one more: `reap()`'s outcome
+  vocabulary conflated `unknown` (the daemon could not be asked) into
+  `left-running` (the daemon confirms something is still there) - a fourth
+  outcome, `unknown`, now keeps the two distinct, with its own regression
+  test confirmed red on the pre-fix commit.
 - **Conformance through the real adapter, a no-Docker proof, and a published
   support matrix** (#80, Refs #10): interfaces.md's "Conformance cases
   required before trusting a backend" table, restated with a
