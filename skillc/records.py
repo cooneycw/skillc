@@ -82,7 +82,8 @@ OBSERVATION_COVERAGE = ("complete", "partial", "unsupported")
 REQUIRED_OBSERVATIONS = ("client-events", "process-lifecycle")
 
 #: A well-formed identifier: no whitespace, no path separators, bounded length.
-#: IDs end up in file names and log lines; `att 1/../x` must not be one.
+#: IDs end up in file names and log lines; `att 1/../x` must not be one. Always
+#: `fullmatch`: `$` alone also matches before a trailing newline.
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
 WHAT_WAS_EXAMINED = (
@@ -156,12 +157,16 @@ def discover_bundles(root: Path) -> list[Bundle]:
     """
     if not root.is_dir():
         return []
-    bundles: list[Bundle] = []
-    for directory in [root, *sorted(p for p in root.rglob("*") if p.is_dir())]:
-        found = [load(p) for p in sorted(directory.glob("*.json"))]
-        if any(r.kind == TRIAL_LEDGER for r in found):
-            bundles.append(Bundle(path=directory, records=found))
-    return bundles
+    directories = [root, *sorted(p for p in root.rglob("*") if p.is_dir())]
+    return [b for b in map(bundle_at, directories) if b is not None]
+
+
+def bundle_at(directory: Path) -> Bundle | None:
+    """The bundle `directory` holds, or None when no readable ledger is directly in it."""
+    found = [load(p) for p in sorted(directory.glob("*.json"))]
+    if any(r.kind == TRIAL_LEDGER for r in found):
+        return Bundle(path=directory, records=found)
+    return None
 
 
 def derive_status(record: Record) -> str:
@@ -222,13 +227,14 @@ def _identity(data: dict[str, object], name: str, *keys: str) -> Iterator[str]:
 def _bad_id(value: object, what: str) -> str | None:
     if not isinstance(value, str) or not value:
         return f"no {what}"
-    if not ID_RE.match(value):
+    if not ID_RE.fullmatch(value):
         return f"{what} {value!r} is malformed; expected {ID_RE.pattern}"
     return None
 
 
 def _str_list(value: object) -> list[str] | None:
-    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+    """A list of NON-BLANK strings, or None. `[""]` is a list with no reference in it."""
+    if not isinstance(value, list) or not all(_nonempty_str(v) for v in value):
         return None
     return list(value)
 
@@ -642,10 +648,16 @@ def unique_ids(bundle: Bundle) -> Iterator[str]:
     """
     for ledger in bundle.of_kind(TRIAL_LEDGER):
         trials = ledger.data.get("trials")
+        # Only string IDs are counted: a malformed one is trial-ledger's finding,
+        # and must not crash the scan before any finding is printed.
         trial_ids = Counter(
-            t.get("trial_id") for t in trials or [] if isinstance(t, dict)
+            t.get("trial_id") for t in trials or []
+            if isinstance(t, dict) and isinstance(t.get("trial_id"), str)
         ) if isinstance(trials, list) else Counter()
-        attempt_ids = Counter(a.get("attempt_id") for _t, a in _ledger_attempts(ledger))
+        attempt_ids = Counter(
+            a.get("attempt_id") for _t, a in _ledger_attempts(ledger)
+            if isinstance(a.get("attempt_id"), str)
+        )
         for name, what in ((trial_ids, "trial_id"), (attempt_ids, "attempt_id")):
             for value, count in sorted(name.items(), key=str):
                 if count > 1:
@@ -681,7 +693,13 @@ def attempt_accounting(bundle: Bundle) -> Iterator[str]:
         results.setdefault(result.attempt_id, []).append(result)
     receipts = {r.attempt_id for r in bundle.of_kind(INSTALLATION_RECEIPT)}
     manifests = {r.attempt_id for r in bundle.of_kind(ARTIFACT_MANIFEST)}
-    for _trial, attempt in _ledger_attempts(ledgers[0]):
+    planned = list(_ledger_attempts(ledgers[0]))
+    if not planned:
+        # Zero planned attempts leaves nothing to account for; reporting 0 errors
+        # would read like a population that was fully accounted.
+        yield "the ledger plans no attempts, so there is nothing to account for"
+        return
+    for _trial, attempt in planned:
         attempt_id = str(attempt.get("attempt_id"))
         own = results.get(attempt_id)
         if not own:
@@ -696,32 +714,66 @@ def attempt_accounting(bundle: Bundle) -> Iterator[str]:
                     yield f"attempt {attempt_id!r} was graded without its {what}"
 
 
+def _chain_root(start: str, links: dict[str, str]) -> tuple[str | None, list[str]]:
+    """Follow `links` from `start`. Returns (root, path), or (None, path) on a cycle."""
+    path, current = [start], start
+    while current in links:
+        current = links[current]
+        if current in path:
+            return None, path + [current]
+        path.append(current)
+    return current, path
+
+
 def lineage(bundle: Bundle) -> Iterator[str]:
     """Reruns and regrades link to their originals and erase nothing.
 
     protocol.md: "A rerun gets a new ID and links to the original. Regrading
     creates a new result linked to the unchanged original artifact ... Neither
     operation erases the earlier attempt."
+
+    Each link is checked, AND each chain: it must end at an original that is not
+    itself a retry or regrade. Two results naming each other satisfy every single
+    link while no original exists at all - and since ledger-binding lets a regrade
+    carry a new grader revision, a cycle would exempt every result in it from the
+    planned grader.
     """
     for ledger in bundle.of_kind(TRIAL_LEDGER):
-        in_trial: dict[object, set[object]] = {}
+        in_trial: dict[str, set[str]] = {}
+        retries: dict[str, str] = {}
         for trial, attempt in _ledger_attempts(ledger):
-            in_trial.setdefault(trial.get("trial_id"), set()).add(attempt.get("attempt_id"))
+            attempt_id, trial_id = attempt.get("attempt_id"), trial.get("trial_id")
+            if isinstance(attempt_id, str) and isinstance(trial_id, str):
+                in_trial.setdefault(trial_id, set()).add(attempt_id)
         for trial, attempt in _ledger_attempts(ledger):
             if "retry_of" not in attempt:
                 continue
             attempt_id, original = attempt.get("attempt_id"), attempt.get("retry_of")
-            if original == attempt_id:
+            trial_id = trial.get("trial_id")
+            planned = in_trial.get(trial_id, set()) if isinstance(trial_id, str) else set()
+            if not isinstance(attempt_id, str) or not isinstance(original, str):
+                yield f"retry {attempt_id!r} links to {original!r}, which is not an attempt ID"
+            elif original == attempt_id:
                 yield f"retry {attempt_id!r} reuses its original's ID; a rerun gets a new one"
-            elif original not in in_trial.get(trial.get("trial_id"), set()):
+            elif original not in planned:
                 yield (
                     f"retry {attempt_id!r} links to {original!r}, which this trial does "
                     f"not plan; the original is gone or belongs elsewhere"
                 )
+            else:
+                retries[attempt_id] = original
+        seen: set[str] = set()
+        for attempt_id in sorted(retries):
+            root, path = _chain_root(attempt_id, retries)
+            if root is None and not seen & set(path):
+                seen.update(path)
+                yield f"retries form a cycle ({' -> '.join(path)}); no original attempt exists"
+
     results = {
-        r.data.get("result_id"): r for r in bundle.of_kind(VERIFIED_RESULT)
+        str(r.data["result_id"]): r for r in bundle.of_kind(VERIFIED_RESULT)
         if isinstance(r.data.get("result_id"), str)
     }
+    regrades: dict[str, str] = {}
     for result in bundle.of_kind(VERIFIED_RESULT):
         if "regrade_of" not in result.data:
             continue
@@ -733,6 +785,8 @@ def lineage(bundle: Bundle) -> Iterator[str]:
                 f"a regrade never erases its original"
             )
             continue
+        if isinstance(name, str) and isinstance(original_id, str):
+            regrades[name] = original_id
         if original.attempt_id != result.attempt_id:
             yield (
                 f"regrade {name!r} is for attempt {result.attempt_id!r}, but its original "
@@ -744,4 +798,13 @@ def lineage(bundle: Bundle) -> Iterator[str]:
             yield (
                 f"regrade {name!r} graded different bytes from its original; a regrade "
                 f"reads the unchanged original artifact"
+            )
+    reported: set[str] = set()
+    for name in sorted(regrades):
+        root, path = _chain_root(name, regrades)
+        if root is None and not reported & set(path):
+            reported.update(path)
+            yield (
+                f"regrades form a cycle ({' -> '.join(path)}); no original result under "
+                f"the planned grader is retained"
             )

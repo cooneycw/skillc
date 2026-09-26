@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -425,7 +426,9 @@ def test_a_v1_record_is_refused_with_its_reason() -> None:
 
 # --------------------------------------------------------------- identifiers
 
-@pytest.mark.parametrize("attempt_id", ["", " ", "att 1", "../att-1", "att/1", "-att", "a" * 129, 7])
+@pytest.mark.parametrize(
+    "attempt_id", ["", " ", "att 1", "../att-1", "att/1", "-att", "a" * 129, 7, "att-1\n"]
+)
 def test_a_malformed_attempt_id_is_refused(attempt_id: object) -> None:
     rec = _record(**{**GOOD_RESULT, "attempt_id": attempt_id})
     assert list(records.attempt_binding(rec)), f"accepted attempt_id {attempt_id!r}"
@@ -488,3 +491,49 @@ def test_check_records_refuses_an_unknown_rule() -> None:
         argparse.Namespace(path=str(CONTROLS / "lineage" / "good"), rule="no-such-rule")
     )
     assert rc == 2
+
+
+# --------------------------------------------------------------- counter-model findings (#4)
+
+def test_selftest_refuses_a_bundle_case_whose_ledger_became_unreadable(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Discovery skips a directory with no readable ledger. Selftest must not: a
+    case that silently left the population would leave `22/22` behind."""
+    copy = tmp_path / "controls"
+    shutil.copytree(CONTROLS, copy)
+    (copy / "lineage" / "bad" / "regrade-erased-original" / "ledger.json").write_text(
+        "{not json", encoding="utf-8"
+    )
+    rc = cli.cmd_selftest(argparse.Namespace(controls=str(copy)))
+    out = capsys.readouterr().out
+    assert rc == 1, out
+    assert "UNPARSED" in out and "lineage" in out, out
+
+
+def test_a_bundle_with_non_string_ids_is_reported_not_crashed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    trial = {**GOOD_LEDGER["trials"][0], "trial_id": []}  # type: ignore[index]
+    attempts = [{"attempt_id": []}, {"attempt_id": "att-2", "retry_of": {}}]
+    ledger = {**GOOD_LEDGER, "trials": [{**trial, "attempts": attempts}]}
+    (tmp_path / "ledger.json").write_text(json.dumps(ledger), encoding="utf-8")
+    rc = cli.cmd_check_records(argparse.Namespace(path=str(tmp_path), rule=None))
+    assert rc == 1
+    assert "trial-ledger" in capsys.readouterr().out
+
+
+def test_an_empty_plan_is_not_a_fully_accounted_one(tmp_path: Path) -> None:
+    """`--rule attempt-accounting` filters trial-ledger out, so accounting itself
+    must not read zero planned attempts as zero missing ones."""
+    bundle = _write_bundle(tmp_path, {**GOOD_LEDGER, "trials": []})
+    assert list(records.attempt_accounting(bundle))
+    rc = cli.cmd_check_records(argparse.Namespace(path=str(tmp_path), rule="attempt-accounting"))
+    assert rc == 1
+
+
+def test_a_blank_evidence_reference_is_no_evidence() -> None:
+    rec = _record(**{**GOOD_RESULT, "criteria": [
+        {"id": "c1", "mandatory": True, "outcome": "SATISFIED", "evidence": [""]}]})
+    assert list(records.result_evidence(rec))
+    assert list(records.result_evidence(_record(**{**GOOD_RESULT, "graded_digests": [" "]})))

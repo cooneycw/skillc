@@ -183,11 +183,18 @@ def _population(
 ) -> list[_Subject]:
     # The ONLY family-aware step. Everything after it is subject-agnostic.
     if isinstance(rule, checks.BundleRule):
-        return [
-            _Subject(b.path, b.parse_error,
-                     sum(f.rule == rule.id for f in checks.run_bundle(b, only=rule.id)))
-            for b in records.discover_bundles(where)
-        ]
+        # Every CASE DIRECTORY is a subject, whether or not it loads as a bundle.
+        # Enumerating only what discovery found would let a case whose ledger
+        # became unreadable drop out of the population and leave a green behind.
+        subjects = []
+        for case in sorted(p for p in where.iterdir() if p.is_dir()):
+            bundle = records.bundle_at(case)
+            if bundle is None:
+                subjects.append(_Subject(case, "not a bundle: no readable trial ledger", 0))
+                continue
+            own = sum(f.rule == rule.id for f in checks.run_bundle(bundle, only=rule.id))
+            subjects.append(_Subject(case, bundle.parse_error, own))
+        return subjects
     if isinstance(rule, checks.RecordRule):
         return [
             _Subject(r.path, r.parse_error,
