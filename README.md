@@ -116,7 +116,11 @@ or `skillc` simply does not read it. `name` and `description` must be non-empty
 strings. Which fields "load" depends on the client, so the field rules are scoped:
 `--target portable` (the default, the Agent Skills specification) or
 `--target claude-code` (plus Claude Code's documented extensions, read on a stated
-date). See [docs/frontmatter.md](docs/frontmatter.md).
+date). See [docs/frontmatter.md](docs/frontmatter.md). `trigger-shape` itself runs
+under every target but reads the active one: it stays silent under `claude-code`
+on a `disable-model-invocation: true` skill, whose description the model never
+reads to decide anything, and still fires under `portable`, where another client
+may auto-select on it regardless (see [frontmatter.md](docs/frontmatter.md#trigger-shape-and-user-invoked-skills)).
 
 (`skillc rules` also lists the evaluation-record rules checked by
 `skillc check-records`: per-record rules for the installation receipt, trial

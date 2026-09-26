@@ -227,6 +227,29 @@ def test_an_inert_field_is_reported_under_every_target(tmp_path: Path) -> None:
     assert CLAUDE_CODE.verified in claude[0].detail and CLAUDE_CODE.source in claude[0].detail
 
 
+def test_trigger_shape_still_reds_a_model_invoked_skill_under_every_target() -> None:
+    """The committed bad control (#20 nit, #51): no `disable-model-invocation`,
+    so trigger-shape has nothing to suppress on it in either profile."""
+    bad = discover(CONTROLS / "trigger-shape" / "bad")
+    for target in ("portable", "claude-code"):
+        findings = [f for s in bad for f in checks.run(s, only="trigger-shape", target=target)]
+        assert findings, f"trigger-shape went blind on its own known-bad control under {target!r}"
+
+
+def test_trigger_shape_is_silent_for_a_disabled_model_invocation_skill_under_claude_code() -> None:
+    """#51: the model cannot fire a `disable-model-invocation: true` skill, so the
+    premise trigger-shape warns under does not hold for the claude-code target."""
+    user_invoked = discover(CONTROLS / "trigger-shape" / "good-claude-code")
+    claude = [f for s in user_invoked for f in checks.run(s, only="trigger-shape", target="claude-code")]
+    assert claude == [], f"trigger-shape is noisy on a user-invoked skill under claude-code: {claude}"
+
+    # Under `portable` the field is a Claude Code extension a conforming client
+    # need not honour, so the description may still drive auto-selection there -
+    # the warning must not be silently dropped (decided in docs/frontmatter.md).
+    portable = [f for s in user_invoked for f in checks.run(s, only="trigger-shape", target="portable")]
+    assert [f.rule for f in portable] == ["trigger-shape"]
+
+
 def test_the_claude_code_profile_matches_its_documentation_snapshot() -> None:
     """Pinned to the 2026-09-25 reading of the source. Changing it means re-reading it."""
     assert CLAUDE_CODE.verified == "2026-09-25"

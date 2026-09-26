@@ -117,7 +117,7 @@ def test_ref_depth_ignores_a_sibling_already_linked_from_skill_md() -> None:
 
 
 def test_selftest_reports_a_blinded_rule(monkeypatch: pytest.MonkeyPatch) -> None:
-    blinded = checks.Rule("name-spec", checks.ERROR, "blinded", lambda _s: iter(()))
+    blinded = checks.Rule("name-spec", checks.ERROR, "blinded", lambda _s, _t: iter(()))
     monkeypatch.setattr(
         checks,
         "RULES",
@@ -161,8 +161,8 @@ def test_trigger_shape_does_not_double_report_a_missing_description(tmp_path: Pa
     path.parent.mkdir()
     path.write_text("---\nname: x\ndescription: ''\n---\nbody\n", encoding="utf-8")
     skill = Skill.load(path)
-    assert not list(checks._trigger_shape(skill))
-    assert list(checks._required_fields(skill))
+    assert not list(checks._trigger_shape(skill, "portable"))
+    assert list(checks._required_fields(skill, "portable"))
 
 
 # ------------------------------------------------ false certification (#2)
@@ -184,7 +184,7 @@ def _selftest(controls: Path, capsys: pytest.CaptureFixture[str]) -> tuple[int, 
 
 def _blind(monkeypatch: pytest.MonkeyPatch, rule_id: str) -> None:
     rules = tuple(
-        dataclasses.replace(r, check=lambda _s: iter(())) if r.id == rule_id else r
+        dataclasses.replace(r, check=lambda _s, _t: iter(())) if r.id == rule_id else r
         for r in checks.RULES
     )
     monkeypatch.setattr(checks, "RULES", rules)
