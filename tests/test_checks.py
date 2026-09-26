@@ -48,6 +48,60 @@ def test_ref_depth_reports_every_distinct_chain_in_deterministic_order() -> None
     ]
 
 
+def test_ref_depth_output_order_is_independent_of_link_order(tmp_path: Path) -> None:
+    """Findings sort by (first-hop, second-hop) even when SKILL.md links the
+    second-hop-bearing files in the opposite order. The committed control
+    (two-deep-chains) links A before B, so it cannot tell a sorted result from
+    a discovery-order-preserving one that happens to match (issue #52 review:
+    /codex:code_review)."""
+    skill_dir = tmp_path / "reversed-order"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: reversed-order\n"
+        "description: Use when link order should not affect the reported order.\n"
+        "---\n"
+        "See [guide B](B.md) and [guide A](A.md).\n",
+        encoding="utf-8",
+    )
+    (skill_dir / "A.md").write_text("Extra in [the extra](X.md).\n", encoding="utf-8")
+    (skill_dir / "B.md").write_text("Extra in [the extra](Y.md).\n", encoding="utf-8")
+    (skill_dir / "X.md").write_text("Deep content.\n", encoding="utf-8")
+    (skill_dir / "Y.md").write_text("Deep content.\n", encoding="utf-8")
+
+    findings = checks.run(Skill.load(skill_dir / "SKILL.md"), only="ref-depth")
+    assert [f.detail for f in findings] == [
+        ("A.md links on to X.md: references must stay one level deep or the "
+         "agent reads only part of the chain"),
+        ("B.md links on to Y.md: references must stay one level deep or the "
+         "agent reads only part of the chain"),
+    ]
+
+
+def test_ref_depth_does_not_double_report_a_repeated_first_hop_link(tmp_path: Path) -> None:
+    """SKILL.md linking the same first-hop file twice must not double the
+    deep-chain finding (issue #52 review: /codex:code_review)."""
+    skill_dir = tmp_path / "repeated-link"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: repeated-link\n"
+        "description: Use when SKILL.md links the same file twice to test dedup.\n"
+        "---\n"
+        "See [guide A](A.md) and again [guide A](A.md).\n",
+        encoding="utf-8",
+    )
+    (skill_dir / "A.md").write_text("Extra in [the extra](X.md).\n", encoding="utf-8")
+    (skill_dir / "X.md").write_text("Deep content.\n", encoding="utf-8")
+
+    findings = checks.run(Skill.load(skill_dir / "SKILL.md"), only="ref-depth")
+    assert len(findings) == 1
+    assert findings[0].detail == (
+        "A.md links on to X.md: references must stay one level deep or the "
+        "agent reads only part of the chain"
+    )
+
+
 def test_ref_depth_ignores_a_back_link_to_skill_md() -> None:
     """A second-hop link that resolves to SKILL.md itself is not a deeper
     chain - it is the entry point (issue #52)."""
