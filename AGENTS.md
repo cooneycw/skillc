@@ -31,11 +31,15 @@ specification rejects, and it proves its own rules can fail before reporting the
 - `skillc/trial.py` - the controller: plans the expected population, runs and confirms the
   stop of each attempt, captures its output into owned storage and accounts for every
   attempt; see [capture spec](docs/specs/evaluation-facility/capture.md)
+- `skillc/verify.py` - the independent verifier and result assembler: grades a disposable
+  copy of the frozen artifacts in a contained probe, then a trusted judge, and derives
+  the result; see [verification spec](docs/specs/evaluation-facility/verification.md)
 - `skillc/cli.py` - `check`, `check-records`, `selftest`, `rules`, `materialize`
 - `controls/<rule-id>/{bad,good}/` - the committed redcases
 - `evals/` - behavioural evals; see `evals/README.md`
-- `evals/level1/<task>/` - a goal-based task: pinned fixture, public `goal.md`, grader,
-  reference/alternative/wrong candidates and a `qualify.py` gate that must refuse broken graders
+- `evals/level1/<task>/` - a goal-based task: pinned fixture, public `goal.md`, a grader
+  (`grader.json`: probe, inputs, judge), reference/alternative/wrong candidates and a
+  `qualify.py` gate that must refuse broken graders
 - `evals/subjects/<subject>/` - a declared subject (`subject.json`, `SUBJECT.md`) and the
   evidence `skillc materialize` produced for it
 - `tests/fixtures/codex-subject/` - a two-skill collection and `fake_codex.py`, a stand-in

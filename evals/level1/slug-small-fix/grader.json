@@ -1,0 +1,7 @@
+{
+ "id": "slug-small-fix",
+ "revision": "2",
+ "criteria": ["R4-interface", "reported-example", "R1", "R2", "R3"],
+ "probe": {"file": "probe.py", "inputs": "inputs.json", "timeout": 30},
+ "judge": {"file": "grade_slug.py", "timeout": 60}
+}

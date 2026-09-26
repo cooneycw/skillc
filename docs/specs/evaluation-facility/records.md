@@ -112,7 +112,9 @@ means *unknown*, and unknown is refused.
 
 Readiness is **reported**, not required to be satisfied: a receipt whose discovery
 canary failed is a valid, useful receipt. What readiness then allows the result to
-claim is the grader's and assembler's business (#9). The first producer,
+claim is the assembler's business: since #9 the verifier adds a mandatory
+`installation-ready` criterion that is UNKNOWN unless both facts are SATISFIED, so an
+unready trial cannot PASS ([verification.md](verification.md#the-result)). The first producer,
 `skillc materialize` (#7), adds `ordinary_parity`, `source_unchanged` and
 `host_unchanged` beside the two required facts; see [materialization.md](materialization.md).
 
@@ -353,14 +355,19 @@ This completes #4's contract versioning. What it deliberately does not do:
 
 - **No runtime here.** This module validates. The controller that writes the
   ledger, lifecycle and manifests is `skillc/trial.py` (#8,
-  [capture.md](capture.md)); result assembly is #9. Runtime packages
+  [capture.md](capture.md)); the verifier and result assembler is
+  `skillc/verify.py` (#9, [verification.md](verification.md)). Runtime packages
   stay outside `skillc/`, which the stdlib import walk in `tests/test_frontmatter.py`
   enforces with its own negative control.
 - **No authentication.** Digests are checked for agreement between records, never
   against the bytes they name, and `producer` is declared. Both need the trusted host.
 - **One ledger per bundle.** An experiment spread across bundles is checked bundle by
   bundle. No rule yet asks whether two bundles planned the same attempt.
-- **Readiness does not yet gate a PASS.** A PASS over a receipt whose discovery
-  canary failed is not refused here. That judgement needs the case's declared role
-  for setup (protocol.md section 3) and belongs with #9. #7 now PRODUCES readiness
-  ([materialization.md](materialization.md)); it does not gate on it.
+- **Readiness gates a PASS when grading, not here.** `check-records` still does not
+  refuse a PASS over a receipt whose discovery canary failed. The verifier (#9)
+  never writes one: its `installation-ready` criterion makes such a trial
+  INCONCLUSIVE ([verification.md](verification.md#the-result)). A case whose goal is
+  the installation itself (protocol.md section 3) is not yet declarable.
+- **The grader pin is enforced when grading, not here.** A trial ledger's `grader`
+  may carry a `digest` (#9); `ledger-binding` still binds a result by grader id and
+  revision only.

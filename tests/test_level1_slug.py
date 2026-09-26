@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import json
 import re
 import shutil
 import sys
@@ -242,3 +243,44 @@ def test_every_held_out_case_varies_a_published_requirement() -> None:
 def test_qualify_main_reports_ok(capsys: pytest.CaptureFixture[str]) -> None:
     assert qualify.main() == 0
     assert "QUALIFY: ok" in capsys.readouterr().out
+
+
+def test_inputs_json_is_exactly_the_judges_inputs() -> None:
+    # The probe reads inputs.json; the judge compares against its own cases in the
+    # same order. If they drift, every output is judged against the wrong input.
+    inputs = json.loads((TASK / "inputs.json").read_text(encoding="utf-8"))
+    assert inputs == [text for text, _ in grade_slug.cases()]
+
+
+def test_the_probe_is_never_given_an_expected_output() -> None:
+    # The answer key lives in the judge only. inputs.json carries no expected value
+    # that is not also its own input (the already-clean and empty cases), and the
+    # probe's source names no expected output at all.
+    inputs = set(json.loads((TASK / "inputs.json").read_text(encoding="utf-8")))
+    answers = {want for _, want in grade_slug.cases()}
+    assert answers & inputs == {"already-clean", ""}
+    probe = (TASK / "probe.py").read_text(encoding="utf-8")
+    assert not [w for w in answers - inputs if w and repr(w) in probe]
+
+
+def test_the_grader_definition_declares_the_required_criteria() -> None:
+    definition = json.loads((TASK / "grader.json").read_text(encoding="utf-8"))
+    assert tuple(definition["criteria"]) == qualify.REQUIRED_CRITERIA
+    assert definition["id"] == grade_slug.GRADER["id"]
+    assert definition["revision"] == grade_slug.GRADER["revision"]
+
+
+def test_the_judge_reads_a_forged_report_as_an_interface_violation() -> None:
+    # The probe's report is writable by candidate code. A verdict-shaped report, a
+    # short one, or a malformed entry is not a report of returned values.
+    n = len(grade_slug.cases())
+    for observations in (
+        json.dumps({"criteria": [], "status": "PASS"}),
+        json.dumps({"outputs": [{"value": "x"}] * (n - 1)}),
+        json.dumps({"outputs": [{"value": "x", "extra": 1}] * n}),
+        json.dumps({"outputs": [{"value": 1}] * n}),
+        "",
+    ):
+        report = grade_slug.judge({"observations": observations, "timed_out": False})
+        outcomes = {c["id"]: c["outcome"] for c in report["criteria"]}
+        assert outcomes["R4-interface"] == "VIOLATED", observations
