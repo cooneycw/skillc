@@ -38,7 +38,7 @@ The adapter names no subject. A subject is a `subject.json`:
 | `select` | `"all"`, or the skill names that make up this treatment |
 | `checksum_manifest` | optional per-skill manifest (`<sha256>  <file>` lines) to verify |
 | `required_references` | patterns, one capture group, for the entry point's "read this file" phrasing |
-| `external_references` | patterns for references the bundle makes to things it does not carry |
+| `external_references` | patterns for references the bundle makes to things it does not carry, read from every text file in each selected skill, scripts included |
 
 Unknown keys are refused: an unread key is a convention its author believes is
 honoured. `test_the_adapter_names_no_subject` fails if a subject's conventions

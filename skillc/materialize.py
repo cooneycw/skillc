@@ -480,9 +480,13 @@ def _closure(subject: Subject, child: Path, name: str, body: str) -> SkillEntry:
     findings = []
     external: list[dict[str, str]] = []
     for f in tree_files(child):
-        if f.suffix != ".md":
-            continue
-        content = f.read_text(encoding="utf-8", errors="replace")
+        raw = f.read_bytes()
+        if b"\0" in raw:
+            continue  # binary; no reference can be read out of it
+        content = raw.decode("utf-8", errors="replace")
+        # External references are read from EVERY text file: a bundled script
+        # that calls a host helper is as much a dependency as a sentence that
+        # tells the agent to. Path-like mentions stay Markdown-only below.
         for pattern in subject.external:
             for hit in sorted(set(pattern.finditer(content))):
                 external.append({
@@ -491,6 +495,8 @@ def _closure(subject: Subject, child: Path, name: str, body: str) -> SkillEntry:
                     "status": "external-not-materialized",
                     "meaning": pattern.meaning,
                 })
+        if f.suffix != ".md":
+            continue
         for ref in sorted(_refs(content)):
             if ref not in present and ref not in required:
                 findings.append(f"{f.relative_to(child).as_posix()} mentions {ref}, "

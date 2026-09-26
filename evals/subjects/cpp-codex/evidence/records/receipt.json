@@ -204,11 +204,39 @@
    "meaning": "plugin-bundled helper path of another client; not materialized"
   },
   {
+   "skill": "flow-auto",
+   "reference": "$CLAUDE_PLUGIN_ROOT/scripts",
+   "in": "scripts/flow-finish-gate.sh",
+   "status": "external-not-materialized",
+   "meaning": "plugin-bundled helper path of another client; not materialized"
+  },
+  {
+   "skill": "flow-auto",
+   "reference": "~/.claude/scripts/.",
+   "in": "scripts/hook-permission-census.sh",
+   "status": "external-not-materialized",
+   "meaning": "host helper installed by the subject's own repair step; not materialized"
+  },
+  {
+   "skill": "flow-auto",
+   "reference": "~/.claude/scripts/hook-permission-census.sh",
+   "in": "scripts/hook-permission-census.sh",
+   "status": "external-not-materialized",
+   "meaning": "host helper installed by the subject's own repair step; not materialized"
+  },
+  {
    "skill": "flow-check",
    "reference": "~/.claude/scripts/flow-finish-gate.sh",
    "in": "reference.md",
    "status": "external-not-materialized",
    "meaning": "host helper installed by the subject's own repair step; not materialized"
+  },
+  {
+   "skill": "flow-check",
+   "reference": "$CLAUDE_PLUGIN_ROOT/scripts",
+   "in": "scripts/flow-finish-gate.sh",
+   "status": "external-not-materialized",
+   "meaning": "plugin-bundled helper path of another client; not materialized"
   },
   {
    "skill": "flow-cleanup",
@@ -246,6 +274,20 @@
    "meaning": "plugin-bundled helper path of another client; not materialized"
   },
   {
+   "skill": "flow-doctor",
+   "reference": "$CLAUDE_PLUGIN_ROOT/scripts",
+   "in": "scripts/flow-helpers-install.sh",
+   "status": "external-not-materialized",
+   "meaning": "plugin-bundled helper path of another client; not materialized"
+  },
+  {
+   "skill": "flow-doctor",
+   "reference": "$CLAUDE_PLUGIN_ROOT/scripts/flow-start-resolve.sh",
+   "in": "scripts/flow-helpers-install.sh",
+   "status": "external-not-materialized",
+   "meaning": "plugin-bundled helper path of another client; not materialized"
+  },
+  {
    "skill": "flow-finish",
    "reference": "~/.claude/scripts/check-ignored-additions.sh",
    "in": "reference.md",
@@ -263,6 +305,13 @@
    "skill": "flow-finish",
    "reference": "${CLAUDE_PLUGIN_ROOT}/scripts/flow-finish-gate.sh",
    "in": "reference.md",
+   "status": "external-not-materialized",
+   "meaning": "plugin-bundled helper path of another client; not materialized"
+  },
+  {
+   "skill": "flow-finish",
+   "reference": "$CLAUDE_PLUGIN_ROOT/scripts",
+   "in": "scripts/flow-finish-gate.sh",
    "status": "external-not-materialized",
    "meaning": "plugin-bundled helper path of another client; not materialized"
   },
@@ -293,6 +342,13 @@
    "in": "reference.md",
    "status": "external-not-materialized",
    "meaning": "host helper installed by the subject's own repair step; not materialized"
+  },
+  {
+   "skill": "flow-merge",
+   "reference": "$CLAUDE_PLUGIN_ROOT/scripts",
+   "in": "scripts/flow-finish-gate.sh",
+   "status": "external-not-materialized",
+   "meaning": "plugin-bundled helper path of another client; not materialized"
   },
   {
    "skill": "flow-register",
@@ -372,6 +428,20 @@
    "meaning": "plugin-bundled helper path of another client; not materialized"
   },
   {
+   "skill": "flow-repair",
+   "reference": "$CLAUDE_PLUGIN_ROOT/scripts",
+   "in": "scripts/flow-helpers-install.sh",
+   "status": "external-not-materialized",
+   "meaning": "plugin-bundled helper path of another client; not materialized"
+  },
+  {
+   "skill": "flow-repair",
+   "reference": "$CLAUDE_PLUGIN_ROOT/scripts/flow-start-resolve.sh",
+   "in": "scripts/flow-helpers-install.sh",
+   "status": "external-not-materialized",
+   "meaning": "plugin-bundled helper path of another client; not materialized"
+  },
+  {
    "skill": "flow-start",
    "reference": "~/.claude/scripts/flow-start-resolve.sh",
    "in": "reference.md",
@@ -438,6 +508,41 @@
    "skill": "project-next",
    "reference": "~/.claude/scripts/project-next.py",
    "in": "reference.md",
+   "status": "external-not-materialized",
+   "meaning": "host helper installed by the subject's own repair step; not materialized"
+  },
+  {
+   "skill": "project-next",
+   "reference": "~/.claude/scripts/project-next.py",
+   "in": "scripts/project-next.py",
+   "status": "external-not-materialized",
+   "meaning": "host helper installed by the subject's own repair step; not materialized"
+  },
+  {
+   "skill": "security-permissions",
+   "reference": "~/.claude/scripts/.",
+   "in": "scripts/hook-permission-census.sh",
+   "status": "external-not-materialized",
+   "meaning": "host helper installed by the subject's own repair step; not materialized"
+  },
+  {
+   "skill": "security-permissions",
+   "reference": "~/.claude/scripts/hook-permission-census.sh",
+   "in": "scripts/hook-permission-census.sh",
+   "status": "external-not-materialized",
+   "meaning": "host helper installed by the subject's own repair step; not materialized"
+  },
+  {
+   "skill": "self-improvement-retro",
+   "reference": "~/.claude/scripts/.",
+   "in": "scripts/hook-permission-census.sh",
+   "status": "external-not-materialized",
+   "meaning": "host helper installed by the subject's own repair step; not materialized"
+  },
+  {
+   "skill": "self-improvement-retro",
+   "reference": "~/.claude/scripts/hook-permission-census.sh",
+   "in": "scripts/hook-permission-census.sh",
    "status": "external-not-materialized",
    "meaning": "host helper installed by the subject's own repair step; not materialized"
   }

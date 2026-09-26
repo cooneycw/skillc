@@ -40,7 +40,7 @@ treatment and needs its own `select` and its own receipt (spec.md section 3).
 |---|---|---|
 | `checksum_manifest` | `scripts/SHA256SUMS` | 22 skills bundle one; each is verified, a mismatch refuses the install |
 | `required_references` | ``Read `(...)` in this skill directory`` | 39 entry points defer to `reference.md` in these words; all 39 resolve |
-| `external_references` | `~/.claude/scripts/*`, `${CLAUDE_PLUGIN_ROOT}/*` | host or other-client helpers the bundle points at but does not carry; 57 recorded as `external-not-materialized` |
+| `external_references` | `~/.claude/scripts/*`, `${CLAUDE_PLUGIN_ROOT}/*` | host or other-client helpers the bundle points at but does not carry, read from every text file including bundled scripts; 72 recorded as `external-not-materialized` |
 
 ## Capabilities
 

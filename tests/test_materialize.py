@@ -340,6 +340,19 @@ def test_a_missing_link_target_is_refused(tmp_path: Path) -> None:
     assert "['notes.md']" in _refused(tmp_path, snap)
 
 
+def test_a_bundled_script_calling_a_host_helper_is_a_recorded_dependency(tmp_path: Path) -> None:
+    snap = _snapshot(tmp_path)
+    helper = snap / "skills" / "tidy" / "run.sh"
+    helper.write_text("#!/bin/sh\n~/.fixture/helpers/strip.sh \"$1\"\n")
+    receipt = _run(tmp_path, _fake(tmp_path), snapshot=snap).receipt
+    assert receipt is not None
+    dependencies = receipt["dependencies"]
+    assert isinstance(dependencies, list)
+    assert {"skill": "tidy", "reference": "~/.fixture/helpers/strip.sh", "in": "run.sh",
+            "status": "external-not-materialized",
+            "meaning": "host-only fixture helper"} in dependencies
+
+
 def test_a_mentioned_path_is_a_static_finding_not_a_refusal(tmp_path: Path) -> None:
     """A path merely MENTIONED is not a declared requirement; refusing it would be a guess."""
     snap = _snapshot(tmp_path)
