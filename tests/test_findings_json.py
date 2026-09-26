@@ -161,6 +161,34 @@ def test_an_empty_manifest_refuses_with_a_json_error(
     assert "declares no skills" in payload["error"]
 
 
+def test_an_unknown_rule_refuses_with_a_json_error_too(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """codex review: this refusal used to bypass --json entirely (stderr prose
+    only, empty stdout) - a consumer expecting one JSON document got none."""
+    _write_skill(tmp_path / "x", "x")
+    rc = cli.main(["check", str(tmp_path), "--rule", "no-such-rule", "--json"])
+    out, err = capsys.readouterr()
+    assert rc == 2
+    payload = json.loads(out)
+    assert "unknown rule" in payload["error"]
+    assert "unknown rule" in err  # human stderr line is unchanged, not replaced
+
+
+def test_a_rule_target_conflict_refuses_with_a_json_error_too(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_skill(tmp_path / "x", "x")
+    rc = cli.main([
+        "check", str(tmp_path), "--rule", "claude-code-field", "--target", "portable", "--json",
+    ])
+    out, err = capsys.readouterr()
+    assert rc == 2
+    payload = json.loads(out)
+    assert "checks target" in payload["error"]
+    assert "checks target" in err
+
+
 def test_strict_mode_agrees_between_human_and_json_exit_codes(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

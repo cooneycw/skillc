@@ -39,33 +39,42 @@ def _controls_root(explicit: str | None) -> Path:
     return Path(__file__).resolve().parent.parent / "controls"
 
 
-def _unknown_rule(
+def _unknown_rule_message(
     only: str | None,
     family: tuple[checks.Rule, ...] | tuple[checks.RecordRule | checks.BundleRule, ...],
-) -> bool:
-    """Refuse an unknown --rule BEFORE scanning.
+) -> str | None:
+    """The refusal message for an unknown `--rule`, or None when it is known.
 
     A selector that matches no rule checks nothing, and nothing found reads
-    exactly like a clean run.
+    exactly like a clean run. Returning the message (not printing it here) lets
+    every caller decide how to render its OWN refusal - stderr prose, a `--json`
+    document, or both - rather than fixing that decision in one shared helper.
     """
     try:
         checks.require_known(only, family)
     except ValueError as exc:
-        print(f"skillc: {exc}", file=sys.stderr)
-        return True
-    return False
+        return str(exc)
+    return None
 
 
-def _target_conflict(only: str | None, target: str | None) -> bool:
-    """`--rule X --target Y` where X belongs to another target asks two things at once."""
+def _unknown_rule(
+    only: str | None,
+    family: tuple[checks.Rule, ...] | tuple[checks.RecordRule | checks.BundleRule, ...],
+) -> bool:
+    """`check-records` has no `--json` mode; keep its plain stderr-and-refuse shape."""
+    message = _unknown_rule_message(only, family)
+    if message is not None:
+        print(f"skillc: {message}", file=sys.stderr)
+    return message is not None
+
+
+def _target_conflict_message(only: str | None, target: str | None) -> str | None:
+    """`--rule X --target Y` where X belongs to another target asks two things at
+    once. Returns the refusal message (see `_unknown_rule_message`), or None."""
     rule = checks.RULES_BY_ID.get(only or "")
     if target is None or rule is None or rule.target in (None, target):
-        return False
-    print(
-        f"skillc: rule {rule.id!r} checks target {rule.target!r}, not {target!r}",
-        file=sys.stderr,
-    )
-    return True
+        return None
+    return f"rule {rule.id!r} checks target {rule.target!r}, not {target!r}"
 
 
 def _json_refusal(as_json: bool, message: str) -> None:
@@ -78,10 +87,16 @@ def _json_refusal(as_json: bool, message: str) -> None:
 
 def cmd_check(args: argparse.Namespace) -> int:
     as_json = bool(getattr(args, "json", False))
-    if _unknown_rule(args.rule, checks.RULES):
+    message = _unknown_rule_message(args.rule, checks.RULES)
+    if message is not None:
+        print(f"skillc: {message}", file=sys.stderr)
+        _json_refusal(as_json, message)
         return 2
     target = getattr(args, "target", None)
-    if _target_conflict(args.rule, target):
+    message = _target_conflict_message(args.rule, target)
+    if message is not None:
+        print(f"skillc: {message}", file=sys.stderr)
+        _json_refusal(as_json, message)
         return 2
     selected = checks.RULES_BY_ID.get(args.rule or "")
     # A named scoped rule speaks for ITS target, whatever the default is.

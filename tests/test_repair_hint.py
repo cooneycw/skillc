@@ -11,6 +11,7 @@ between two processes, not a Python API.
 from __future__ import annotations
 
 import importlib.util
+import os
 import shutil
 import subprocess
 import sys
@@ -80,19 +81,43 @@ def test_a_known_good_fixture_reports_no_findings() -> None:
     assert "no findings - nothing to diagnose" in result.stdout
 
 
-def test_an_unmapped_rule_still_prints_a_pointer_rather_than_silence() -> None:
-    """The guidance table is deliberately small and will not name every rule.
-    A finding it cannot map must still be visible, not swallowed."""
+def test_an_unmapped_rule_still_prints_a_pointer_rather_than_silence(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The guidance table is deliberately small and will not name every rule. A
+    finding it cannot map must still be visible, not swallowed. This calls the
+    script's own `_report`, not a reimplementation of the lookup - codex review
+    caught that a test which recreates `GUIDANCE.get(...)` inline stays green
+    even if `main`'s real fallback is deleted or broken."""
     repair_hint = _load_repair_hint()
     guidance = repair_hint.GUIDANCE  # type: ignore[attr-defined]
     assert "not-a-real-rule" not in guidance
-    hint = guidance.get("not-a-real-rule", "see `skillc rules` for what this rule checks")
-    assert hint == "see `skillc rules` for what this rule checks"
+
+    finding = {"rule": "not-a-real-rule", "severity": "warn", "path": "x/SKILL.md", "detail": "d"}
+    rc = repair_hint._report([finding])  # type: ignore[attr-defined]
+
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "diagnosed [warn] not-a-real-rule" in out
+    assert "see `skillc rules`" in out
 
 
 def test_a_bad_path_is_refused_not_crashed(tmp_path: Path) -> None:
     result = _run(str(tmp_path / "does-not-exist"))
     assert result.returncode == 2
+    assert "repair-hint:" in result.stderr
+
+
+def test_a_missing_skillc_executable_is_refused_not_crashed(tmp_path: Path) -> None:
+    """codex review: a `skillc` not on PATH raised an uncaught FileNotFoundError
+    and exited 1 with a traceback, contradicting the documented exit 2."""
+    env = {**os.environ, "SKILLC": str(tmp_path / "no-such-skillc")}
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), str(GOOD_FIXTURE)],
+        capture_output=True, text=True, check=False, env=env,
+    )
+    assert result.returncode == 2
+    assert "Traceback" not in result.stderr
     assert "repair-hint:" in result.stderr
 
 

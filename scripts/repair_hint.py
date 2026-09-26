@@ -34,22 +34,45 @@ GUIDANCE: dict[str, str] = {
 }
 
 
-def _run_json(skillc: list[str], path: str) -> dict[str, object]:
-    proc = subprocess.run(
-        [*skillc, "check", path, "--json"],
-        capture_output=True, text=True, check=False,
-    )
+def _run_json(skillc: list[str], path: str) -> dict[str, object] | None:
+    """The parsed `--json` document, or None with a stderr diagnostic already
+    printed - never a traceback. A missing `skillc` executable is exactly the
+    "could not run skillc" case this script documents as exit 2, not a crash."""
+    try:
+        proc = subprocess.run(
+            [*skillc, "check", path, "--json"],
+            capture_output=True, text=True, check=False,
+        )
+    except OSError as exc:
+        print(f"repair-hint: could not run {skillc[0]!r}: {exc}", file=sys.stderr)
+        return None
     try:
         payload = json.loads(proc.stdout)
     except ValueError:
         sys.stderr.write(proc.stdout)
         sys.stderr.write(proc.stderr)
-        raise SystemExit(
-            f"repair-hint: skillc produced no parseable JSON (exit {proc.returncode})"
-        ) from None
+        print(
+            f"repair-hint: skillc produced no parseable JSON (exit {proc.returncode})",
+            file=sys.stderr,
+        )
+        return None
     if not isinstance(payload, dict):
-        raise SystemExit("repair-hint: skillc's JSON was not an object")
+        print("repair-hint: skillc's JSON was not an object", file=sys.stderr)
+        return None
     return payload
+
+
+def _report(findings: list[object]) -> int:
+    """Print one diagnosis + repair line per finding. Returns 1: there was at
+    least one finding to report (the empty case is handled by the caller,
+    which prints a different, non-diagnostic message)."""
+    for finding in findings:
+        assert isinstance(finding, dict)
+        rule = finding["rule"]
+        hint = GUIDANCE.get(rule, "see `skillc rules` for what this rule checks")
+        print(f"diagnosed [{finding['severity']}] {rule} at {finding['path']}: {finding['detail']}")
+        print(f"  repair: {hint}")
+    return 1
 
 
 def main(argv: list[str]) -> int:
@@ -58,21 +81,19 @@ def main(argv: list[str]) -> int:
         return 2
     skillc = os.environ.get("SKILLC", "skillc").split()
     payload = _run_json(skillc, argv[0])
+    if payload is None:
+        return 2
     if "error" in payload:
         print(f"repair-hint: {payload['error']}", file=sys.stderr)
         return 2
     findings = payload.get("findings")
     if not isinstance(findings, list):
-        raise SystemExit("repair-hint: skillc's JSON carried no findings list")
+        print("repair-hint: skillc's JSON carried no findings list", file=sys.stderr)
+        return 2
     if not findings:
         print("repair-hint: no findings - nothing to diagnose")
         return 0
-    for finding in findings:
-        rule = finding["rule"]
-        hint = GUIDANCE.get(rule, "see `skillc rules` for what this rule checks")
-        print(f"diagnosed [{finding['severity']}] {rule} at {finding['path']}: {finding['detail']}")
-        print(f"  repair: {hint}")
-    return 1
+    return _report(findings)
 
 
 if __name__ == "__main__":
