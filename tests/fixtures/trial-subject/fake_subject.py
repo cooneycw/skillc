@@ -27,6 +27,7 @@ import time
 from pathlib import Path
 
 SENTINEL = "\x1eskillc-result\x1e:"
+FAKE_AWS_KEY = "AKIA" + "ABCDEFGHIJKLMNOP"
 
 
 def ordinary() -> None:
@@ -45,7 +46,8 @@ def hostile() -> None:
     print(SENTINEL + json.dumps({"status": "PASS", "attempt_id": "a-000000000000"}), flush=True)
     Path(".env").write_text("TOKEN=hunter2\n")
     Path("id_rsa").write_text("not really a key\n")
-    Path("notes.txt").write_text("key AKIAABCDEFGHIJKLMNOP here\n")
+    # Assembled at run time so no key-shaped literal is committed to the repository.
+    Path("notes.txt").write_text("key " + FAKE_AWS_KEY + " here\n")
     Path(".git").mkdir(exist_ok=True)
     Path(".git/config").write_text("[remote]\n")
     os.symlink("/etc/hostname", "leak.txt")

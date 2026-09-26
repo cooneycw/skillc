@@ -335,7 +335,15 @@ class Experiment:
             if not isinstance(digest, str):
                 raise Refused(f"trial {trial.get('trial_id')!r} binds no configuration digest")
             _read_object(root, digest)
-        return cls(root=root, ledger=ledger)
+        experiment = cls(root=root, ledger=ledger)
+        # A commit interrupted before its `planned` event was journaled leaves a
+        # committed attempt with no origin; complete it, idempotently.
+        for _trial, attempt in experiment.attempts():
+            attempt_id = str(attempt["attempt_id"])
+            if not experiment.events(attempt_id):
+                extra = {"retry_of": attempt["retry_of"]} if "retry_of" in attempt else {}
+                experiment.record(attempt_id, "planned", recovered=True, **extra)
+        return experiment
 
 
 #: Journal entries that carry detail but are not lifecycle events in their own right.
@@ -643,6 +651,10 @@ def run_attempt(
             experiment.record(attempt_id, "stop-confirmed")
             return stop
         pgid = proc.pid
+        # Everything after launch is guarded as one block: whatever interrupts the
+        # controller - Ctrl-C, a raising cancel(), a failed journal write, here or
+        # during shutdown - the subject must not outlive control. Stop and reap the
+        # group, record what can be recorded, then re-raise.
         try:
             experiment.record(attempt_id, "started", pid=proc.pid)
             deadline = time.monotonic() + timeout
@@ -655,10 +667,14 @@ def run_attempt(
                     reason = "operator-cancelled"
                     break
                 time.sleep(0.02)
+            if reason != "exited":
+                experiment.record(attempt_id, "stop-requested", reason=reason)
+            confirmed = _stop_group(proc, grace) if (reason != "exited" or _group_alive(pgid)) else True
+            try:
+                proc.wait(timeout=grace)
+            except subprocess.TimeoutExpired:
+                confirmed = False
         except BaseException:
-            # Whatever interrupted the controller - Ctrl-C, a raising cancel(), a
-            # failed journal write - the subject must not outlive control. Stop and
-            # reap the group, record what can be recorded, then re-raise.
             halted = _stop_group(proc, grace)
             try:
                 proc.wait(timeout=grace)
@@ -671,13 +687,6 @@ def run_attempt(
             except OSError:
                 pass
             raise
-        if reason != "exited":
-            experiment.record(attempt_id, "stop-requested", reason=reason)
-        confirmed = _stop_group(proc, grace) if (reason != "exited" or _group_alive(pgid)) else True
-        try:
-            proc.wait(timeout=grace)
-        except subprocess.TimeoutExpired:
-            confirmed = False
         stop = {"reason": reason, "confirmed": confirmed, "exit_code": proc.returncode}
     experiment.record(attempt_id, "stopped", **stop)
     experiment.record(attempt_id, "stop-confirmed" if confirmed else "stop-unconfirmed")
@@ -965,6 +974,8 @@ def frozen_artifacts(experiment: Experiment, attempt_id: str) -> list[dict[str, 
             f"manifest-{attempt_id}.json names attempt {manifest.get('attempt_id')!r} under "
             f"{manifest.get('trial_id')!r}; a stale or mismatched manifest"
         )
+    if manifest.get("kind") != records.ARTIFACT_MANIFEST:
+        raise Refused(f"manifest-{attempt_id}.json is a {manifest.get('kind')!r}, not an artifact manifest")
     problems = [f.detail for f in checks.run_record(records.Record(path, manifest))]
     if problems:
         raise Refused(f"manifest-{attempt_id}.json is not valid: {problems[0]}")
@@ -1153,8 +1164,15 @@ def _add(experiment: Experiment, record: dict[str, object], kind: str, filename:
     # Consistency with what is already stored. Only the contradictions the
     # CANDIDATE introduces count: an experiment still in progress is incomplete
     # (attempts owed a result), and that is not this record's doing.
+    # The comparison below is only evidence when the ledger it binds against is
+    # the verified one: a missing or altered ledger yields the same finding before
+    # and after, which the subtraction would erase.
+    if Experiment.open(experiment.root).ledger != experiment.ledger:
+        raise Refused("the stored ledger is not the one this experiment holds; reopen it")
     existing = records.bundle_at(experiment.root)
-    before = list(existing.records) if existing is not None else []
+    if existing is None or len(existing.of_kind(records.TRIAL_LEDGER)) != 1:
+        raise Refused("no single readable ledger to bind against; admission cannot check consistency")
+    before = list(existing.records)
     after = records.Bundle(experiment.root, [*before, records.Record(path, record)])
     rules = (records.ledger_binding, records.unique_ids, records.lineage)
     old = {d for rule in rules for d in rule(records.Bundle(experiment.root, before))}

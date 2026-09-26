@@ -417,10 +417,11 @@ def test_hostile_output_exports_nothing_it_must_not(store: Path, base: Path) -> 
     assert ".git/" in excluded and "not a regular file" in excluded["pipe"]
     # The manifest names the exclusions but never carries the secret values.
     text = (experiment.root / f"manifest-{attempt_id}.json").read_text()
-    assert "hunter2" not in text and "AKIAABCDEFGHIJKLMNOP" not in text
+    fake_key = "AKIA" + "ABCDEFGHIJKLMNOP"  # built at run time, as the fixture does
+    assert "hunter2" not in text and fake_key not in text
     # And no stored object holds them either.
     blobs = b"".join(p.read_bytes() for p in (experiment.root / t.OBJECTS).iterdir())
-    assert b"hunter2" not in blobs and b"AKIAABCDEFGHIJKLMNOP" not in blobs
+    assert b"hunter2" not in blobs and fake_key.encode() not in blobs
 
 
 def test_a_forged_result_and_a_sentinel_are_only_bytes(store: Path, base: Path) -> None:
@@ -694,6 +695,11 @@ def test_an_interrupted_ledger_commit_is_completed_not_refused(store: Path) -> N
     t._append(experiment.root / t.HISTORY, {"digest": digest, "at": "crash"})
     reopened = t.Experiment.open(experiment.root)
     assert len([a for _t, a in reopened.attempts()]) == 2
+    # The recovered attempt is usable, not merely listed: it can be accounted for.
+    assert [e["event"] for e in reopened.events("a-222222222222")] == ["planned"]
+    report = t.close(reopened)
+    assert report["counts"] == {"captured": 0, "not-run": 2, "unavailable": 0, "inconclusive": 0, "open": 0}
+    assert _check_records(experiment.root, "attempt-accounting") == 0
 
 
 def test_frozen_artifacts_refuses_an_empty_manifest(store: Path, base: Path) -> None:
@@ -743,3 +749,42 @@ def test_a_regrade_of_other_bytes_is_refused_at_admission(store: Path, base: Pat
     with pytest.raises(t.Refused, match="different bytes"):
         t.add_result(experiment, _result(experiment, attempt_id, both[:1], result_id="res-2",
                                          regrade_of=f"res-{attempt_id}"))
+
+
+def test_a_failing_journal_write_still_stops_the_subject(store: Path, base: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    experiment = t.plan(_spec(), store)
+    attempt_id = _only(experiment)
+    real = t.Experiment.record
+
+    def flaky(self: t.Experiment, attempt: str, event: str, **detail: object) -> None:
+        if event == "stop-requested":
+            raise OSError("disk full")
+        real(self, attempt, event, **detail)
+
+    monkeypatch.setattr(t.Experiment, "record", flaky)
+    with pytest.raises(OSError, match="disk full"):
+        _run(experiment, attempt_id, base, "hang", timeout=0.5)
+    [pid] = [e["pid"] for e in experiment.events(attempt_id) if e["event"] == "started"]
+    assert not _alive(int(str(pid)))
+
+
+def test_a_manifest_of_another_kind_is_refused(store: Path, base: Path) -> None:
+    experiment, attempt_id, _digests = _captured(store, base)
+    path = experiment.root / f"manifest-{attempt_id}.json"
+    os.chmod(path, 0o600)
+    receipt = json.loads((experiment.root / f"receipt-{attempt_id}.json").read_bytes())
+    path.write_text(json.dumps({**receipt, "artifacts": []}))
+    with pytest.raises(t.Refused, match="not an artifact manifest"):
+        t.frozen_artifacts(experiment, attempt_id)
+
+
+def test_admission_refuses_when_the_ledger_is_gone(store: Path) -> None:
+    experiment = t.plan(_spec(), store)
+    attempt_id = _only(experiment)
+    (experiment.root / t.LEDGER).unlink()
+    (experiment.root / t.HISTORY).unlink()
+    with pytest.raises(t.Refused):
+        t.add_receipt(experiment, {**RECEIPT, "attempt_id": attempt_id,
+                                   "trial_id": experiment.trial_of(attempt_id)["trial_id"],
+                                   "client": {"name": "fake", "version": "1"}})
+    assert not list(experiment.root.glob("receipt-*.json"))

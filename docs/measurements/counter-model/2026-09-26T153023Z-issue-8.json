@@ -1,0 +1,20 @@
+{
+  "branch": "issue-8-implement-controller-owned-trial-accounting-and-ar",
+  "counts": {
+    "accepted": 11,
+    "deferred": 1,
+    "rejected": 0
+  },
+  "head": "58d06c5e8ace6152f9716a0870a478ca7caac650",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "8",
+  "passes": 2,
+  "recorded_at": "2026-09-26T15:30:23Z",
+  "red_cases": {
+    "already_covered": 15,
+    "proposed": 18
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "schema": 1,
+  "status": "ran"
+}

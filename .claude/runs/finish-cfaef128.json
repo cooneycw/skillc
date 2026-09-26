@@ -1,0 +1,138 @@
+{
+  "run_id": "finish-cfaef128",
+  "plan_name": "finish",
+  "step_records": [
+    {
+      "step_id": "lint",
+      "status": "success",
+      "exit_code": 0,
+      "output": "All checks passed!\n",
+      "error": null,
+      "started_at": "2026-09-26T11:30:25-0400",
+      "finished_at": "2026-09-26T11:30:26-0400",
+      "attempt": 1,
+      "max_attempts": 1,
+      "tests": null,
+      "coverage": {
+        "state": "unknown",
+        "units": null,
+        "unit_name": "unit",
+        "tool": "unknown",
+        "scope": "stage",
+        "component": "",
+        "evidence": "",
+        "invocations": 0,
+        "empty_invocations": 0,
+        "streams": [
+          "stdout",
+          "stderr"
+        ]
+      },
+      "subsumed_by": null,
+      "not_run_reason": null
+    },
+    {
+      "step_id": "test",
+      "status": "success",
+      "exit_code": 0,
+      "output": "============================= test session starts ==============================\nplatform linux -- Python 3.11.16, pytest-9.1.1, pluggy-1.6.0\nrootdir: /home/cooneycw/Projects/skillc-issue-8-implement-controller-owned-trial-accounting-and-ar\nconfigfile: pyproject.toml\ntestpaths: tests\ncollected 406 items\n\ntests/test_checks.py .............................                       [  7%]\ntests/test_frontmatter.py .......................ss..................... [ 18%]\n..............................................                           [ 29%]\ntests/test_level1_slug.py ............................                   [ 36%]\ntests/test_materialize.py .............................................. [ 48%]\n..............................                                           [ 55%]\ntests/test_negative_control.py ...........                               [ 58%]\ntests/test_records.py .................................................. [ 70%]\n.....................................................                    [ 83%]\ntests/test_trial.py .................................................... [ 96%]\n...........                                                              [ 99%]\ntests/test_typecheck_control.py ....                                     [100%]\n\n======================= 404 passed, 2 skipped in 36.96s ========================\n",
+      "error": null,
+      "started_at": "2026-09-26T11:30:26-0400",
+      "finished_at": "2026-09-26T11:31:03-0400",
+      "attempt": 1,
+      "max_attempts": 1,
+      "tests": {
+        "passed": 404,
+        "failed": 0,
+        "skipped": 2,
+        "errors": 0,
+        "executed": 404,
+        "framework": "pytest",
+        "invocations": 1,
+        "empty_invocations": 0,
+        "summary_streams": [
+          "stdout"
+        ]
+      },
+      "coverage": null,
+      "subsumed_by": null,
+      "not_run_reason": null
+    },
+    {
+      "step_id": "typecheck",
+      "status": "success",
+      "exit_code": 0,
+      "output": "Success: no issues found in 24 source files\n",
+      "error": null,
+      "started_at": "2026-09-26T11:31:03-0400",
+      "finished_at": "2026-09-26T11:31:09-0400",
+      "attempt": 1,
+      "max_attempts": 1,
+      "tests": null,
+      "coverage": {
+        "state": "covered",
+        "units": 24,
+        "unit_name": "source file",
+        "tool": "mypy",
+        "scope": "stage",
+        "component": "",
+        "evidence": "Success: no issues found in 24 source files",
+        "invocations": 1,
+        "empty_invocations": 0,
+        "streams": [
+          "stdout"
+        ]
+      },
+      "subsumed_by": null,
+      "not_run_reason": null
+    },
+    {
+      "step_id": "security_scan",
+      "status": "failed",
+      "exit_code": 1,
+      "output": "BLOCKED: \ud83d\udd34 CRITICAL: AWS Access Key detected at tests/test_trial.py:420 [AWS_ACCESS_KEY]\nBLOCKED: \ud83d\udd34 CRITICAL: AWS Access Key detected at tests/test_trial.py:423 [AWS_ACCESS_KEY]\nBLOCKED: \ud83d\udd34 CRITICAL: AWS Access Key detected at tests/fixtures/trial-subject/fake_subject.py:48 [AWS_ACCESS_KEY]\nSECURITY_GATE: flow_finish FAIL (blocked=3 warned=0; secrets-scanned=287 skipped-checks=0; blocks-on=CRITICAL warns-on=HIGH)\n\nSecurity gate 'flow_finish' FAILED. Fix critical issues before proceeding.\n",
+      "error": "",
+      "started_at": "2026-09-26T11:31:12-0400",
+      "finished_at": "2026-09-26T11:31:12-0400",
+      "attempt": 2,
+      "max_attempts": 1,
+      "tests": null,
+      "coverage": {
+        "state": "covered",
+        "units": 287,
+        "unit_name": "source file",
+        "tool": "security-gate",
+        "scope": "component",
+        "component": "secrets scan",
+        "evidence": "SECURITY_GATE: flow_finish FAIL (blocked=3 warned=0; secrets-scanned=287 skipped-checks=0; blocks-on=CRITICAL warns-on=HIGH)",
+        "invocations": 1,
+        "empty_invocations": 0,
+        "streams": [
+          "stdout"
+        ]
+      },
+      "subsumed_by": null,
+      "not_run_reason": null
+    },
+    {
+      "step_id": "verify",
+      "status": "pending",
+      "exit_code": 0,
+      "output": "",
+      "error": null,
+      "started_at": null,
+      "finished_at": null,
+      "attempt": 0,
+      "max_attempts": 1,
+      "tests": null,
+      "coverage": null,
+      "subsumed_by": null,
+      "not_run_reason": null
+    }
+  ],
+  "current_index": 3,
+  "started_at": "2026-09-26T11:30:25-0400",
+  "finished_at": null,
+  "status": "failed",
+  "tree_signature": "84b22910635be487577c44990852ee3d61480bef"
+}

@@ -44,7 +44,11 @@ Unknown fields are refused at every level of the plan, and so are loose types:
 Each trial's resolved configuration is stored as a canonical-JSON object, and the
 ledger binds its digest.
 
-The ledger is written once, before dispatch. A retry is the only change allowed
+The ledger is written once, before dispatch. A commit writes the object first, then
+the history entry, then the ledger file. A crash after the history entry leaves a
+recorded revision that `Experiment.open` completes, along with any missing
+`planned` journal entries. The reverse order would leave a legitimate ledger that
+no history vouches for, which would read as tampering. A retry is the only change allowed
 afterwards, and it can only **append** a linked attempt. Every revision is kept as
 an object and listed in `ledger-history.jsonl`. `Experiment.open` refuses:
 
@@ -55,8 +59,11 @@ an object and listed in `ledger-history.jsonl`. `Experiment.open` refuses:
 
 ## Lifecycle and the `attempt-lifecycle` record
 
-`run_attempt` starts the subject in its own process group, spooling stdout and
-stderr into controller storage. On the deadline, or when `cancel()` returns
+`run_attempt` starts the subject in its own process group. Everything after
+launch is guarded: if the controller is interrupted, whether by Ctrl-C, a raising
+`cancel`, or a failed journal write, it stops and reaps the group before
+re-raising. Stdout and stderr are spooled into controller storage.
+On the deadline, or when `cancel()` returns
 true, it stops the whole group: SIGTERM, then SIGKILL. After a normal exit it also
 stops any member the leader left behind, because a leader that exits while its
 child keeps writing has not stopped. The stop is **confirmed** only once no
@@ -86,8 +93,11 @@ A timeout is a **captured** failed completion, not an omitted attempt
 
 ## What capture exports
 
-Capture is refused until the stop is confirmed, and each attempt is captured only
-once. The output root is walked with `lstat` and never followed through a link.
+Capture is refused until the stop is confirmed, once the attempt is finalized, and
+a second time. It reads only the attempt's **own** allocated workspace, or a
+directory inside it: another attempt's workspace, possibly still running, is
+refused rather than frozen under this attempt's identity. The output root is
+walked with `lstat` and never followed through a link.
 Each file is opened with `O_NOFOLLOW`, copied into a content-addressed object,
 and listed with path, type, size, digest and executable bit.
 
@@ -144,7 +154,12 @@ re-checks its size, and requires the manifest to name this attempt under the
 trial the ledger planned. `add_result` calls it first. So a modified artifact, a
 digest nobody captured, or a mismatched manifest cannot become a verified result.
 
-Graded results are only accepted for a finalized `captured` attempt. Results and
+Admission re-verifies the ledger, then refuses any receipt or result that
+introduces a new `ledger-binding`, `unique-ids` or `lineage` finding. That covers a
+stale receipt, an unplanned grader, a conflicting verdict, and a regrade of other
+bytes or another attempt. Findings the experiment already had are not the
+candidate's, so an experiment that is still incomplete can accept records. Graded
+results are only accepted for a finalized `captured` attempt. Results and
 receipts are written once. A regrade must name a result already stored, which is
 retained. The result itself is #9's to produce.
 
@@ -188,6 +203,10 @@ This is the policy, chosen before any real private or model evidence exists.
 - **The secret filter is a list, not a census.** A credential in an unlisted name
   and an unrecognized shape is exported. The patterns reduce accidents. They do not
   certify that the output is clean.
+- **The spool is bounded at capture, not during execution.** Only
+  `max_stream_bytes` of each stream is read and retained as evidence. The spool
+  file itself grows as the subject writes, so disk use during a run is bounded by
+  the environment (#10), not here.
 - **POSIX only**: process groups and `O_NOFOLLOW`.
 - **Budgets are recorded, not enforced.** A trial's `budget` is stored in the
   ledger. Only the wall-clock `timeout` passed to `run_attempt` is enforced.
