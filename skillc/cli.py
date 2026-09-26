@@ -13,11 +13,13 @@ someone relying on it.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import checks, records
+from . import checks, materialize, records
 from .checks import ERROR, Finding
 from .spec import DEFAULT_TARGET, TARGETS, discover
 
@@ -289,6 +291,71 @@ def cmd_selftest(args: argparse.Namespace) -> int:
     return 1 if (failures or unproven) else 0
 
 
+def cmd_materialize(args: argparse.Namespace) -> int:
+    """Install a declared skill surface into disposable homes and prove what the client sees.
+
+    Exit 0 only when every readiness fact is SATISFIED. A receipt is still written
+    when readiness is VIOLATED or UNKNOWN - it is useful evidence - but the exit
+    code never lets an unready install read as a ready one.
+    """
+    out = Path(args.out).resolve()
+    # The receipt sits alone under records/, so `skillc check-records <out>/records`
+    # reads exactly the evaluation records and never mistakes the report for one.
+    if (out / "records").exists() or (out / "report.json").exists():
+        print(f"skillc: {out} already holds evidence; refusing to overwrite it", file=sys.stderr)
+        return 2
+    try:
+        subject = materialize.Subject.load(Path(args.subject))
+    except materialize.Refused as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+    client = materialize.find_client(args.client)
+    try:
+        result = materialize.materialize(
+            subject,
+            attempt_id=args.attempt_id,
+            trial_id=args.trial_id,
+            base=Path(args.base) if args.base else Path(tempfile.gettempdir()),
+            repo=Path(args.repo) if args.repo else None,
+            snapshot=Path(args.snapshot) if args.snapshot else None,
+            client=client,
+            workspace_fixture=Path(args.workspace) if args.workspace else None,
+            keep=args.keep,
+            timeout=args.timeout,
+        )
+    except materialize.Refused as exc:
+        # Refused before any disposable root existed: there is nothing to report on.
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "report.json").write_text(json.dumps(result.report, indent=1) + "\n", encoding="utf-8")
+    if result.receipt is not None:
+        (out / "records").mkdir()
+        (out / "records" / "receipt.json").write_text(
+            json.dumps(result.receipt, indent=1) + "\n", encoding="utf-8"
+        )
+
+    report = result.report
+    if "refused" in report:
+        print(f"skillc: REFUSED - {report['refused']}")
+        print("skillc: no receipt written; nothing was installed that could be called ready")
+    observations = report["observations"]
+    assert isinstance(observations, dict)
+    for fact in ("installed", "available", "invoked", "task_outcome"):
+        print(f"{fact:13} {observations[fact]}")
+    readiness = report.get("readiness", {})
+    assert isinstance(readiness, dict)
+    reasons = readiness.get("reasons", {})
+    for fact in materialize.READINESS_FACTS:
+        if fact in readiness:
+            print(f"{readiness[fact]:9} {fact:17} {reasons.get(fact, '')}")
+    cleanup = report.get("cleanup", {})
+    assert isinstance(cleanup, dict)
+    print(f"cleanup       {cleanup.get('status')}")
+    print(f"\nskillc: {'READY' if result.ready else 'NOT READY'} - evidence in {out}")
+    return 0 if result.ready else 1
+
+
 def cmd_rules(args: argparse.Namespace) -> int:
     width = max(len(rule.id) for rule in checks.ALL_RULES)
     for rule in checks.ALL_RULES:
@@ -326,6 +393,24 @@ def main(argv: list[str] | None = None) -> int:
     p_records.add_argument("path", help="file or directory of records")
     p_records.add_argument("--rule", help="run a single rule")
     p_records.set_defaults(func=cmd_check_records)
+
+    p_mat = sub.add_parser(
+        "materialize",
+        help="install a declared skill surface into disposable homes and prove it",
+    )
+    p_mat.add_argument("subject", help="subject declaration (subject.json)")
+    source = p_mat.add_mutually_exclusive_group(required=True)
+    source.add_argument("--repo", help="git checkout to read the pinned revision from")
+    source.add_argument("--snapshot", help="local directory holding the skills root")
+    p_mat.add_argument("--out", required=True, help="directory for receipt.json and report.json")
+    p_mat.add_argument("--attempt-id", required=True, help="attempt this receipt belongs to")
+    p_mat.add_argument("--trial-id", required=True, help="trial this receipt belongs to")
+    p_mat.add_argument("--client", help="client executable (default: codex on PATH)")
+    p_mat.add_argument("--workspace", help="fixture copied identically into every arm")
+    p_mat.add_argument("--base", help="where the disposable root is created (default: TMPDIR)")
+    p_mat.add_argument("--keep", action="store_true", help="keep the disposable root")
+    p_mat.add_argument("--timeout", type=float, default=120, help="per client call, seconds")
+    p_mat.set_defaults(func=cmd_materialize)
 
     p_rules = sub.add_parser("rules", help="list the rules")
     p_rules.set_defaults(func=cmd_rules)

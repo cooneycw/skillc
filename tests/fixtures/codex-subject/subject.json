@@ -1,0 +1,16 @@
+{
+  "subject_schema": 1,
+  "locator": "fixture:codex-subject",
+  "revision": "0000000000000000000000000000000000000000",
+  "surface": "codex-skills",
+  "skills_root": "skills",
+  "select": "all",
+  "checksum_manifest": "scripts/SHA256SUMS",
+  "required_references": [
+    {"pattern": "Read `([^`]+)` in this skill directory", "meaning": "fixture entry-point convention"}
+  ],
+  "external_references": [
+    {"pattern": "~/\\.fixture/helpers/[A-Za-z0-9._-]+", "meaning": "host-only fixture helper"}
+  ],
+  "client": {"name": "codex", "version": "9.9.9"}
+}
