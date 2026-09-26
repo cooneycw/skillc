@@ -179,6 +179,52 @@ def test_a_container_that_cannot_be_confirmed_removed_is_left_running(docker_sta
     assert report.reaped == ()
 
 
+def test_reap_refuses_an_empty_attempt_population(docker_state: Path) -> None:
+    """Codex review, MEDIUM: an empty `attempt_ids` used to report
+    `daemon_reachable=True` having checked nothing at all - refused now,
+    the same rule this codebase applies to an empty record population."""
+    with pytest.raises(ValueError, match="empty"):
+        reap.reap(_docker_bin(docker_state), [])
+
+
+def test_reap_removes_by_container_id_never_by_name(
+    docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Codex review, HIGH: `reap()` used to list, remove (`rm -f NAME`) and
+    confirm by NAME - three separate round trips to a daemon nothing
+    prevents from changing between them. A NAME can be taken by a brand-new,
+    DIFFERENT container the instant the original is removed; an ID cannot,
+    since it is unique to one container's lifetime. This asserts the actual
+    `rm` invocation targets the container's ID, not its declared name -
+    the property that makes the race impossible, not merely a scenario that
+    happens not to trigger it."""
+    _run(docker_state, "att-1-container", _owned_labels("att-1"))
+    calls: list[list[str]] = []
+    real_run = subprocess.run  # captured BEFORE patching - `subprocess` is one shared
+    # module object, so `reap.subprocess` IS `subprocess` here; referring to
+    # `subprocess.run` again inside `_spy` would resolve the PATCHED attribute
+    # and recurse forever.
+
+    def _spy(
+        argv: list[str], *, capture_output: bool = False, env: dict[str, str] | None = None,
+        check: bool = False, timeout: float | None = None, text: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(list(argv))
+        return real_run(
+            argv, capture_output=capture_output, env=env, check=check, timeout=timeout, text=text,
+        )
+
+    monkeypatch.setattr(reap.subprocess, "run", _spy)
+    report = reap.reap(_docker_bin(docker_state), ["att-1"])
+    assert report.outcome_for("att-1") == "reaped"
+
+    rm_calls = [c for c in calls if "rm" in c]
+    assert len(rm_calls) == 1
+    target = rm_calls[0][-1]
+    assert target != "att-1-container"  # never the declared name
+    assert len(target) == 12 and all(ch in "0123456789abcdef" for ch in target)  # the fake's own id shape
+
+
 # --------------------------------------------------- declared host paths
 
 def test_an_unmodified_declared_host_path_reports_no_change(tmp_path: Path) -> None:
@@ -224,3 +270,47 @@ def test_an_unrelated_undeclared_host_path_is_never_examined(tmp_path: Path) -> 
     after = reap.snapshot_host_paths([watched])
 
     assert reap.diff_host_paths(before, after).changed == ()
+
+
+def test_snapshot_host_paths_refuses_an_empty_declaration() -> None:
+    """Codex review, MEDIUM: an empty declaration used to report `changed=()`
+    indistinguishably from "checked and confirmed unchanged"."""
+    with pytest.raises(ValueError, match="empty"):
+        reap.snapshot_host_paths([])
+
+
+def test_an_unreadable_declared_path_is_unresolved_not_unchanged(tmp_path: Path) -> None:
+    """Codex review, MEDIUM: an `OSError` (permission denied) used to collapse
+    into the same `None` as confirmed absence, so an unreadable file
+    compared as "unchanged" against itself - a false claim of certainty this
+    instrument does not have. It must be `unresolved`, never `changed` (we
+    cannot confirm a difference) and never silently absent from both."""
+    watched = tmp_path / "watched.txt"
+    watched.write_text("original\n")
+    watched.chmod(0o000)
+    try:
+        before = reap.snapshot_host_paths([watched])
+        after = reap.snapshot_host_paths([watched])
+    finally:
+        watched.chmod(0o644)  # restore so pytest's own cleanup can remove tmp_path
+
+    assert before.digests[str(watched)] == reap.UNREADABLE
+    result = reap.diff_host_paths(before, after)
+    assert result.unresolved == (str(watched),)
+    assert result.changed == ()
+
+
+def test_a_declaration_added_between_snapshots_is_reported_not_ignored(tmp_path: Path) -> None:
+    """Codex review, MEDIUM: `.get(key)` used to default a key missing from
+    one snapshot's declarations to `None`, colliding with the legitimate
+    "confirmed absent" `None` and making an added/removed declaration
+    invisible even when the path itself never changed."""
+    watched = tmp_path / "watched.txt"
+    # `before` never declared this path at all (a genuinely different key
+    # set, not merely a path that happened to be absent).
+    before = reap.HostPathSnapshot(digests={})
+    after = reap.snapshot_host_paths([watched])  # declared, and confirmed absent (None)
+
+    result = reap.diff_host_paths(before, after)
+    assert result.changed == (str(watched),)
+    assert result.unresolved == ()

@@ -124,6 +124,7 @@ import signal
 import subprocess
 import sys
 import tarfile
+import uuid
 from pathlib import Path
 
 #: Must match docker_backend.CONTAINER_WORKSPACE. Kept as a separate literal
@@ -156,10 +157,33 @@ def _stuck(state_dir: Path, name: str) -> bool:
 
 def _write_state(
     state_dir: Path, name: str, status: str, image: str, env: dict[str, str], labels: dict[str, str],
+    container_id: str,
 ) -> None:
     _state_file(state_dir, name).write_text(
-        json.dumps({"status": status, "image": image, "env": env, "labels": labels})
+        json.dumps({"status": status, "image": image, "env": env, "labels": labels, "id": container_id})
     )
+
+
+def _resolve_name(state_dir: Path, ref: str) -> str | None:
+    """`ref` may be a container NAME (state files are keyed by name) or an
+    ID (`run`'s freshly generated `id`, #79) - real docker accepts either
+    for `rm`. Tries the direct name lookup first (the common case, and the
+    only one that works before any container has ever been created, when
+    `state_dir` itself may not exist yet); falls back to a linear scan by
+    `id` only if that misses."""
+    direct = _state_file(state_dir, ref)
+    if direct.is_file():
+        return ref
+    if not state_dir.is_dir():
+        return None
+    for path in state_dir.glob("*.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if data.get("id") == ref:
+            return path.stem
+    return None
 
 
 def cmd_version(state_dir: Path, _rest: list[str]) -> int:
@@ -170,12 +194,16 @@ def cmd_version(state_dir: Path, _rest: list[str]) -> int:
 
 
 def cmd_ps(state_dir: Path, rest: list[str]) -> int:
-    """`-a` and `--format` are accepted and ignored (this fake always shows
-    every container and always prints one name per line); every repeated
-    `--filter label=KEY=VALUE` narrows the result, ANDed together (#79).
-    `.down` (an unreachable daemon) is handled by `main()` before any
-    subcommand handler runs - not re-checked here."""
+    """`-a` is accepted and ignored (this fake always shows every container);
+    every repeated `--filter label=KEY=VALUE` narrows the result, ANDed
+    together (#79). `--format` decides what's printed: a template containing
+    `.ID` prints each match's `id` (see `run`'s freshly generated one,
+    below); anything else (including the default, or an explicit `.Names`)
+    prints the container's name - one per line either way. `.down` (an
+    unreachable daemon) is handled by `main()` before any subcommand handler
+    runs - not re-checked here."""
     wanted: dict[str, str] = {}
+    want_id = False
     i = 0
     while i < len(rest):
         arg = rest[i]
@@ -185,8 +213,11 @@ def cmd_ps(state_dir: Path, rest: list[str]) -> int:
                 k, _, v = raw[len("label="):].partition("=")
                 wanted[k] = v
             i += 2
+        elif arg == "--format" and i + 1 < len(rest):
+            want_id = ".ID" in rest[i + 1]
+            i += 2
         else:
-            i += 1  # -a, --format {{.Names}}, or anything else: accepted, unused
+            i += 1  # -a, or anything else: accepted, unused
     if not state_dir.is_dir():
         return 0
     for path in sorted(state_dir.glob("*.json")):
@@ -194,7 +225,7 @@ def cmd_ps(state_dir: Path, rest: list[str]) -> int:
         data = json.loads(path.read_text(encoding="utf-8"))
         labels = data.get("labels", {})
         if all(labels.get(k) == v for k, v in wanted.items()):
-            print(name)
+            print(data.get("id", name) if want_id else name)
     return 0
 
 
@@ -229,12 +260,13 @@ def cmd_image(state_dir: Path, rest: list[str]) -> int:
 
 
 def cmd_rm(state_dir: Path, rest: list[str]) -> int:
-    name = rest[-1]
+    ref = rest[-1]
+    name = _resolve_name(state_dir, ref) or ref
     path = _state_file(state_dir, name)
     if _stuck(state_dir, name):
         return 0  # lies: reports success, leaves the state file in place
     if not path.is_file():
-        print("Error: No such container: " + name, file=sys.stderr)
+        print("Error: No such container: " + ref, file=sys.stderr)
         return 1
     path.unlink()
     shutil.rmtree(_container_root(state_dir, name), ignore_errors=True)
@@ -459,6 +491,11 @@ def cmd_run(state_dir: Path, rest: list[str]) -> int:
 
     state_dir.mkdir(parents=True, exist_ok=True)
     _in_container(state_dir, name, WORK_CONTAINER_PATH).mkdir(parents=True, exist_ok=True)
+    # One fresh id per CALL to run - a new instance every time, even when a
+    # later run reuses the same --name (#79): reap.py acts and confirms by
+    # this id, never by name, so a foreign replacement under a reused name
+    # is never mistaken for the container an earlier reap() call targeted.
+    container_id = uuid.uuid4().hex[:12]
 
     if detached:
         if (state_dir / ".refuse-start").exists():
@@ -467,13 +504,13 @@ def cmd_run(state_dir: Path, rest: list[str]) -> int:
             # the state file/fsroot are left behind as a real orphan would
             # be, so a test can prove DockerBackend.prepare() cleans it up
             # itself before raising, per backend.py's own stated contract.
-            _write_state(state_dir, name, "created", image, env, labels)
+            _write_state(state_dir, name, "created", image, env, labels, container_id)
             print("Error response from daemon: OCI runtime create failed (fault injection)", file=sys.stderr)
             return 1
-        _write_state(state_dir, name, "running", image, env, labels)
+        _write_state(state_dir, name, "running", image, env, labels, container_id)
         return 0
 
-    _write_state(state_dir, name, "running", image, env, labels)
+    _write_state(state_dir, name, "running", image, env, labels, container_id)
     try:
         proc = subprocess.run(argv, cwd=_in_container(state_dir, name, WORK_CONTAINER_PATH), env=env, check=False)
     except OSError as exc:
@@ -483,7 +520,7 @@ def cmd_run(state_dir: Path, rest: list[str]) -> int:
     # whose process exited - a SIGKILL of THIS fake never reaches here, which
     # is the scenario DockerBackend's own destroy() exists to close.
     if _stuck(state_dir, name):
-        _write_state(state_dir, name, "exited", image, env, labels)
+        _write_state(state_dir, name, "exited", image, env, labels, container_id)
         return proc.returncode
     path = _state_file(state_dir, name)
     if path.is_file():

@@ -98,6 +98,25 @@ idempotent for the same reason: asking the daemon "does anything with this
 label still exist" is idempotent, and removing something already gone is
 success (`already-absent`), never an error.
 
+**Acts and confirms by container ID, never by name** (cross-model review of
+this PR, HIGH). `reap()` lists, removes, and re-lists - three separate round
+trips to a daemon nothing prevents from changing between them. A NAME can be
+taken by a brand-new, different container the instant the original is
+removed; an ID cannot, because it is unique to one container's lifetime and
+is never reused. `reap()` therefore lists container IDs, issues `docker rm
+-f <id>`, and confirms by checking that those SPECIFIC ids are gone - not
+merely that the label filter now returns nothing, which a fresh container
+that picked up the same attempt id's label in the interim would satisfy
+without ever having been touched
+(`test_reap_removes_by_container_id_never_by_name` asserts the actual `rm`
+argv targets an id, not the declared name).
+
+**Refuses an empty attempt population** (cross-model review, MEDIUM):
+`reap(docker_bin, [])` used to report `daemon_reachable=True` having checked
+nothing at all - an unexamined population is not the same fact as a
+checked-and-clean one. `reap()` now raises `ValueError`
+(`test_reap_refuses_an_empty_attempt_population`).
+
 **Committed controls** (`tests/test_reap.py`):
 
 | Control (#79's own wording) | Test |
@@ -108,9 +127,11 @@ success (`already-absent`), never an error.
 
 Supporting cases: idempotence (`test_an_already_absent_attempt_is_idempotent_not_an_error`),
 UNKNOWN-never-reaps against an unreachable daemon
-(`test_unknown_never_reaps_when_the_daemon_is_unreachable`), and a `rm -f`
-that lies about success the same way `DockerBackend.confirm_absent` already
-distrusts it (`test_a_container_that_cannot_be_confirmed_removed_is_left_running`).
+(`test_unknown_never_reaps_when_the_daemon_is_unreachable`), a `rm -f` that
+lies about success the same way `DockerBackend.confirm_absent` already
+distrusts it (`test_a_container_that_cannot_be_confirmed_removed_is_left_running`),
+and the id-vs-name race
+(`test_reap_removes_by_container_id_never_by_name`).
 
 ## Resource snapshots, both directions
 
@@ -130,12 +151,52 @@ both sets empty by construction - **never** silently read as "no change"
 (`test_diff_is_not_comparable_across_an_unreachable_snapshot`). Absence of
 evidence is not evidence of absence.
 
+**Attribution is not causation, and this document says so rather than
+implying otherwise** (cross-model review, MEDIUM). `leaked`/`foreign_vanished`
+answer "did something change on the daemon between these two reads", never
+"did THIS run cause it": a concurrent second skillc run sharing the same
+daemon can legitimately add its own container during this window (reported
+as `leaked` though nothing here leaked anything) or remove its own
+foreign-to-this-run container (reported as `foreign_vanished` though nothing
+here reached outside its scope). Neither is a false reading of the daemon's
+state - only a false claim about who caused it. Keep the snapshot window
+narrow (around one attempt's own execution, on a daemon nothing else is
+using concurrently) to keep that gap small; establishing causation under
+real concurrency needs an isolated test daemon or a controlled execution
+window, which is a separate piece of work from this comparison.
+
+Similarly, **identity here is by container NAME, not ID** (cross-model
+review, MEDIUM) - unlike `reap()` above, which acts on what it finds and
+therefore needs ID identity to be safe. A container removed and replaced by
+a different one under the identical name, entirely between two snapshots, is
+indistinguishable from one that was never touched. For a coarse leak/scope
+detector run around one attempt's own narrow window this gap is small; it
+would not be if this comparison were reused as a security boundary.
+
 ## Declared host paths unchanged
 
 `reap.snapshot_host_paths()`/`reap.diff_host_paths()` content-digest a
 DECLARED set of host paths - outside the trial root, never the workspace
 itself - before and after, and report any path whose digest differs,
 including one that appeared or disappeared.
+
+**Three states, not two** (cross-model review, MEDIUM - the pre-fix code
+collapsed all three into one). A declared path's snapshot value is a real
+sha256 digest, `None` (confirmed absent, or not a regular file), or
+`UNREADABLE` (exists as a regular file but could not be read - permission
+denied, and similar). `diff_host_paths` reports a path as `unresolved`,
+never silently `unchanged`, when either side was `UNREADABLE`
+(`test_an_unreadable_declared_path_is_unresolved_not_unchanged`) - two
+identical `UNREADABLE` sentinels are not evidence the content matched, only
+evidence this instrument could not check. A key present in only one
+snapshot's declarations (added or removed between calls) is compared against
+a distinct not-declared sentinel, never against `.get()`'s default of
+`None` - which used to make it collide with the legitimate "confirmed
+absent" value and vanish from the diff entirely
+(`test_a_declaration_added_between_snapshots_is_reported_not_ignored`). Both
+`snapshot_host_paths()` and `reap()` above refuse an empty population
+outright (`ValueError`) rather than let `changed=()` read as "checked and
+confirmed unchanged" (`test_snapshot_host_paths_refuses_an_empty_declaration`).
 
 **What this cannot see, stated rather than silently assumed away**: a
 declared path is hashed as a REGULAR FILE only - a directory, device or
@@ -147,3 +208,12 @@ outside the declared list is examined at all - proving the paths you named
 are unchanged is not the same claim as proving nothing on the host changed
 (`test_an_unrelated_undeclared_host_path_is_never_examined` states this
 limitation as a passing test, not just as prose).
+
+## Cross-model review
+
+`/codex:code_review` against `origin/main` found one HIGH (the id-vs-name
+reaping race) and five MEDIUM findings (snapshot identity, attribution, the
+empty-population gap in both `reap()` and `snapshot_host_paths()`, and the
+host-path three-state collapse), all fixed above with committed regression
+tests confirmed red on the pre-fix code before the fix, per this repo's
+negative-control discipline.

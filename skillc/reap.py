@@ -66,18 +66,18 @@ from pathlib import Path
 from .docker_backend import ATTEMPT_LABEL_KEY, DAEMON_TIMEOUT, OWNER_LABEL_KEY, OWNER_LABEL_VALUE
 
 
-def _list_names(
+def _list(
     docker_bin: Sequence[str], env: Mapping[str, str] | None, timeout: float,
-    label_filters: Sequence[tuple[str, str]],
+    label_filters: Sequence[tuple[str, str]], fmt: str,
 ) -> list[str] | None:
-    """Container names matching every `label_filters` pair (ANDed), or `None`
-    when the daemon cannot be asked at all - never an empty list standing in
-    for "unreachable"; the two are different facts everywhere else in this
-    codebase and are kept different here."""
+    """`docker ps -a --format fmt`, filtered by every `label_filters` pair
+    (ANDed), or `None` when the daemon cannot be asked at all - never an
+    empty list standing in for "unreachable"; the two are different facts
+    everywhere else in this codebase and are kept different here."""
     argv = [*docker_bin, "ps", "-a"]
     for key, value in label_filters:
         argv += ["--filter", f"label={key}={value}"]
-    argv += ["--format", "{{.Names}}"]
+    argv += ["--format", fmt]
     try:
         proc = subprocess.run(
             argv, capture_output=True, text=True, timeout=timeout, env=env, check=False,
@@ -89,11 +89,47 @@ def _list_names(
     return [line for line in proc.stdout.splitlines() if line]
 
 
+def _list_names(
+    docker_bin: Sequence[str], env: Mapping[str, str] | None, timeout: float,
+    label_filters: Sequence[tuple[str, str]],
+) -> list[str] | None:
+    return _list(docker_bin, env, timeout, label_filters, "{{.Names}}")
+
+
+def _list_ids(
+    docker_bin: Sequence[str], env: Mapping[str, str] | None, timeout: float,
+    label_filters: Sequence[tuple[str, str]],
+) -> list[str] | None:
+    """Container IDs, not names (codex review of this PR): a NAME can be
+    reused by a different, later container the instant the original one is
+    removed - real docker refuses two SIMULTANEOUS containers sharing a name,
+    but says nothing about a name being taken by a brand-new container
+    milliseconds after the old one is gone. `reap()` lists, then acts, then
+    re-lists - three separate round trips - so acting and confirming BY NAME
+    could target or "confirm absent" a container that only coincidentally
+    shares the name of the one this call actually meant. An ID is unique to
+    ONE container's lifetime and is never reused, so it is immune to that
+    race in a way a name is not."""
+    return _list(docker_bin, env, timeout, label_filters, "{{.ID}}")
+
+
 @dataclass(frozen=True)
 class Snapshot:
     """One `docker ps -a` read, partitioned by ownership. `reachable=False`
     means the daemon could not be asked at all - `owned`/`foreign` are then
-    empty by construction, never a guessed prior value."""
+    empty by construction, never a guessed prior value.
+
+    IDENTITY HERE IS BY NAME, NOT BY CONTAINER ID (codex review, stated as a
+    limitation rather than fixed here - unlike `reap()` below, which DOES
+    need ID identity because it acts on what it finds, not merely observes
+    it). A container removed and replaced by a DIFFERENT container under the
+    identical name, entirely between two snapshots, is indistinguishable
+    from one that was never touched; this partition answers "is a container
+    with this name currently reporting the ownership label", not "is this
+    the SAME container instance as last time". For a coarse leak/scope
+    detector run around one attempt's own narrow window, that gap is small;
+    it would not be if this were reused as a security boundary.
+    """
 
     reachable: bool
     owned: frozenset[str]
@@ -124,6 +160,21 @@ class SnapshotDiff:
 
 
 def diff(before: Snapshot, after: Snapshot) -> SnapshotDiff:
+    """ATTRIBUTION IS NOT CAUSATION (codex review, stated rather than solved
+    here): `leaked`/`foreign_vanished` answer "did something change on the
+    daemon between these two reads", never "did THIS run cause it". A
+    concurrent second skillc run sharing the same daemon can legitimately
+    add its own owned container during this window (reported as `leaked`
+    even though nothing here leaked anything), or independently remove its
+    own foreign-to-THIS-run container (reported as `foreign_vanished` even
+    though nothing here reached outside its scope). Neither is a false
+    POSITIVE about the daemon's state - the container really did appear or
+    vanish - only a false claim about WHO caused it. Take these snapshots as
+    close as possible around one attempt's own execution window, on a daemon
+    nothing else is using concurrently, to keep that gap small; establishing
+    causation under real concurrency needs a separate, isolated test daemon
+    or a controlled execution window, not this comparison alone.
+    """
     if not before.reachable or not after.reachable:
         return SnapshotDiff(comparable=False, leaked=frozenset(), foreign_vanished=frozenset())
     return SnapshotDiff(
@@ -179,32 +230,58 @@ def reap(
     with nothing left to remove is `already-absent`, not an error, so calling
     this twice - or calling it for an attempt that tore itself down cleanly -
     costs nothing beyond the list/inspect round trips.
+
+    ACTS AND CONFIRMS BY CONTAINER ID, NEVER BY NAME (codex review, HIGH):
+    this function lists, then removes, then re-lists - three separate round
+    trips to a daemon nothing prevents from changing between them. A NAME
+    can be taken by a brand-new, different container the instant the
+    original is removed; an ID cannot, because it is unique to one
+    container's lifetime and is never reused. Confirmation re-checks that
+    the SPECIFIC ids this call targeted are gone, not merely that the label
+    filter now returns nothing - a fresh container that picked up the same
+    attempt id's label between the two lists would otherwise be silently
+    read as "yes, reaped", when what actually happened is a new leak this
+    call never touched (which `snapshot()`/`diff()` above would separately
+    catch as `leaked`, since it is a container this call did not act on).
+
+    An EMPTY `attempt_ids` is refused (`ValueError`), never silently
+    reported as `daemon_reachable=True` with nothing outstanding - an
+    unexamined population is not the same fact as a checked-and-clean one
+    (codex review; the same rule this codebase applies to `check-records` on
+    an empty record set).
     """
+    ids = list(attempt_ids)
+    if not ids:
+        raise ValueError(
+            "reap() refuses an empty attempt_ids: nothing would be checked, and reporting "
+            "daemon_reachable=True for a call that asked the daemon nothing would read as "
+            "a clean sweep rather than as the no-op it actually was"
+        )
     outcomes: list[ReapOutcome] = []
     daemon_reachable = True
-    for attempt_id in attempt_ids:
+    for attempt_id in ids:
         label_filters = [(OWNER_LABEL_KEY, OWNER_LABEL_VALUE), (ATTEMPT_LABEL_KEY, attempt_id)]
-        names = _list_names(docker_bin, env, timeout, label_filters)
-        if names is None:
+        target_ids = _list_ids(docker_bin, env, timeout, label_filters)
+        if target_ids is None:
             daemon_reachable = False
             outcomes.append(ReapOutcome(attempt_id, "left-running"))
             continue
-        if not names:
+        if not target_ids:
             outcomes.append(ReapOutcome(attempt_id, "already-absent"))
             continue
-        for name in names:
+        for container_id in target_ids:
             try:
                 subprocess.run(
-                    [*docker_bin, "rm", "-f", name],
+                    [*docker_bin, "rm", "-f", container_id],
                     capture_output=True, env=env, check=False, timeout=timeout,
                 )
             except (OSError, subprocess.TimeoutExpired):
                 pass  # best-effort; the follow-up list below is what actually confirms it
-        still_there = _list_names(docker_bin, env, timeout, label_filters)
+        still_there = _list_ids(docker_bin, env, timeout, label_filters)
         if still_there is None:
             daemon_reachable = False
             outcomes.append(ReapOutcome(attempt_id, "left-running"))
-        elif still_there:
+        elif any(target_id in still_there for target_id in target_ids):
             outcomes.append(ReapOutcome(attempt_id, "left-running"))
         else:
             outcomes.append(ReapOutcome(attempt_id, "reaped"))
@@ -213,21 +290,45 @@ def reap(
 
 # --------------------------------------------------- declared host paths (#79)
 
+#: A sentinel for "this path exists as a regular file but could not be read"
+#: (permission denied, and similar) - distinct from `None` ("confirmed
+#: absent, or not a regular file at all") and from any real digest (a
+#: sha256 hex digest is 64 lowercase hex characters; this string is not one,
+#: so no real digest can ever collide with it) (codex review, MEDIUM: an
+#: OSError used to collapse into the same `None` as confirmed absence,
+#: so an unreadable file compared as "unchanged" against itself, or against
+#: a truly absent one, either of which is a false claim of certainty this
+#: instrument does not have).
+UNREADABLE = "<unreadable>"
+
+#: A sentinel distinct from both `None` and `UNREADABLE`, used only inside
+#: `diff_host_paths` to mean "this snapshot's dict has no entry for this key
+#: at all" - never confused with a snapshot that DID look and found the path
+#: absent (codex review, MEDIUM: `.get(key)` defaults a missing key to
+#: `None`, which collided with the legitimate "confirmed absent" `None` and
+#: made a declaration added or removed between two snapshots invisible).
+_NOT_DECLARED = object()
+
+
 @dataclass(frozen=True)
 class HostPathSnapshot:
-    """One declared host path's content digest per its own string key, or
-    `None` when it did not exist (or was not a plain regular file) at
-    snapshot time. Keyed by the exact string each `Path` was given as - the
-    same strings must be passed to both the before and after snapshot, or
-    `diff_host_paths` compares two different key sets instead of one path
-    twice."""
+    """One declared host path's content per its own string key: a sha256 hex
+    digest, `None` (confirmed absent, or not a plain regular file), or
+    `UNREADABLE` (exists as a regular file but could not be read). Keyed by
+    the exact string each `Path` was given as - the same strings must be
+    passed to both the before and after snapshot, or `diff_host_paths`
+    compares two different key sets instead of one path twice."""
 
     digests: Mapping[str, str | None]
 
 
 def snapshot_host_paths(paths: Iterable[Path]) -> HostPathSnapshot:
     """Content-digest each of `paths` - declared HOST paths outside the trial
-    root, never resolved through the trial's own workspace.
+    root, never resolved through the trial's own workspace. Refuses an empty
+    `paths` (`ValueError`): a declaration of nothing to watch would otherwise
+    report `changed=()` indistinguishably from "checked and confirmed
+    unchanged" (codex review, MEDIUM - the same "empty population is refused"
+    rule this codebase applies elsewhere).
 
     WHAT THIS CANNOT SEE (#79's own required disclosure, stated rather than
     silently assumed away): a path is hashed as a REGULAR FILE only - a
@@ -237,10 +338,20 @@ def snapshot_host_paths(paths: Iterable[Path]) -> HostPathSnapshot:
     ownership and timestamp changes that leave the bytes unchanged are
     invisible by design (this checks content, not metadata); and nothing
     outside the declared list is examined at all - this proves paths you
-    named are unchanged, not that nothing on the host changed.
+    named are unchanged, not that nothing on the host changed. A path
+    unreadable at BOTH snapshots is `UNREADABLE` both times and is reported
+    as `unresolved` by `diff_host_paths` below, never silently folded into
+    "unchanged" - this instrument has no evidence either way for it.
     """
+    given = list(paths)
+    if not given:
+        raise ValueError(
+            "snapshot_host_paths() refuses an empty declaration: nothing would be "
+            "watched, and changed=() from diff_host_paths would then read as "
+            "'confirmed unchanged' rather than as the vacuous result it actually is"
+        )
     digests: dict[str, str | None] = {}
-    for path in paths:
+    for path in given:
         key = str(path)
         try:
             if path.is_symlink() or not path.is_file():
@@ -248,19 +359,38 @@ def snapshot_host_paths(paths: Iterable[Path]) -> HostPathSnapshot:
             else:
                 digests[key] = hashlib.sha256(path.read_bytes()).hexdigest()
         except OSError:
-            digests[key] = None
+            digests[key] = UNREADABLE
     return HostPathSnapshot(digests=digests)
 
 
 @dataclass(frozen=True)
 class HostPathDiff:
+    """`changed`: a declared path whose digest differs, confirmed on both
+    sides. `unresolved`: a declared path where at least one side could not
+    be read - comparability is unknown for it, never silently treated as
+    "unchanged" (codex review, MEDIUM)."""
+
     changed: tuple[str, ...]
+    unresolved: tuple[str, ...]
 
 
 def diff_host_paths(before: HostPathSnapshot, after: HostPathSnapshot) -> HostPathDiff:
     """Every declared path whose digest differs between the two snapshots,
     including one that appeared, disappeared, or changed content - a key
-    present on only one side is itself a mismatch, never silently ignored."""
+    present in only one snapshot's declarations is itself a mismatch, never
+    silently ignored (compared against `_NOT_DECLARED`, never against a
+    `.get()` default that would collide with the legitimate `None` meaning
+    "confirmed absent"). A path unreadable on either side is reported
+    separately, under `unresolved`, never compared for equality - two
+    identical `UNREADABLE` sentinels are not evidence the content matched."""
     keys = set(before.digests) | set(after.digests)
-    changed = tuple(sorted(k for k in keys if before.digests.get(k) != after.digests.get(k)))
-    return HostPathDiff(changed=changed)
+    changed = []
+    unresolved = []
+    for key in sorted(keys):
+        b = before.digests.get(key, _NOT_DECLARED)
+        a = after.digests.get(key, _NOT_DECLARED)
+        if b == UNREADABLE or a == UNREADABLE:
+            unresolved.append(key)
+        elif b != a:
+            changed.append(key)
+    return HostPathDiff(changed=tuple(changed), unresolved=tuple(unresolved))

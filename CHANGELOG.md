@@ -35,10 +35,23 @@ collection) closes.
   one; and declared-host-path digests before/after, with the limitation
   (regular files only, nothing outside the declared list) stated in both the
   doc and a passing test. The fake `docker` CLI
-  (`tests/fixtures/docker-backend/fake_docker.py`) gained `ps` and label
-  capture on `run` to make this provable without a daemon; the real daemon
-  boundary remains owed to the operator's live run (#10), as it does
-  throughout this codebase's Docker-backend work.
+  (`tests/fixtures/docker-backend/fake_docker.py`) gained `ps`, `--label`
+  capture on `run`, and a per-container id to make this provable without a
+  daemon; the real daemon boundary remains owed to the operator's live run
+  (#10), as it does throughout this codebase's Docker-backend work.
+  Cross-model review found one HIGH (`reap()` acted and confirmed by NAME,
+  which a container removed and replaced under the identical name between
+  its list/remove/re-list round trips could defeat - fixed by acting on
+  container IDs instead, unique per container instance) and five MEDIUM
+  findings: an empty attempt population silently reported
+  `daemon_reachable=True` having checked nothing (both `reap()` and
+  `snapshot_host_paths()` now refuse it); an unreadable host path collapsed
+  into the same `None` as confirmed absence (now a distinct `UNREADABLE`
+  state, reported `unresolved` rather than silently `unchanged`); and a
+  declaration added or removed between two host-path snapshots was invisible
+  because a missing dict key defaulted to the same `None` used for confirmed
+  absence (now compared against a distinct not-declared sentinel). All fixed
+  with committed regression tests confirmed red on the pre-fix code first.
 - **Conformance through the real adapter, a no-Docker proof, and a published
   support matrix** (#80, Refs #10): interfaces.md's "Conformance cases
   required before trusting a backend" table, restated with a
