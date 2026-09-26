@@ -10,6 +10,8 @@ Documentation only; the behavioral evaluation facility is not implemented.
   independent grading, result semantics, evidence and comparisons.
 - [Interface contracts](specs/evaluation-facility/interfaces.md): installation,
   controller ledger, artifact capture and independent verification.
+- [Controller accounting and capture](specs/evaluation-facility/capture.md): what
+  `skillc/trial.py` records and exports, and the evidence storage and retention policy.
 - [Design review](specs/evaluation-facility/review.md): open decisions and questions
   to challenge before implementation.
 - [Delivery plan](../PLAN.md): staged milestones and their acceptance evidence.

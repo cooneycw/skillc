@@ -70,7 +70,7 @@ ok       frontmatter           red on bad (3), green on good (2)
 ok       record-envelope       red on bad (7), green on good (2)
 ...
 
-skillc selftest: 22/22 rule(s) discriminate
+skillc selftest: 23/23 rule(s) discriminate
 ```
 
 Five verdicts fail the run:
@@ -120,7 +120,7 @@ date). See [docs/frontmatter.md](docs/frontmatter.md).
 
 (`skillc rules` also lists the evaluation-record rules checked by
 `skillc check-records`: per-record rules for the installation receipt, trial
-ledger, artifact manifest and verified result, and bundle rules that bind a
+ledger, artifact manifest, verified result and attempt lifecycle, and bundle rules that bind a
 directory's records to its one trial ledger. A record outside any bundle is
 reported as checked alone, not against a ledger. See the
 [records spec](docs/specs/evaluation-facility/records.md).) An unknown `--rule` is refused with exit 2 before

@@ -44,7 +44,9 @@ remaining choices to issues. This plan owns order and delivery gates.
   immutable artifact/observation capture, and independently verified results.
   A valid JSON record, hash or echoed config alone does not authenticate success.
   Their version-2 record forms and validators are in
-  [records.md](docs/specs/evaluation-facility/records.md) (#4); runtime producers are #8 and #9.
+  [records.md](docs/specs/evaluation-facility/records.md) (#4). The controller that
+  produces the ledger, lifecycle and manifests is `skillc/trial.py`
+  ([capture.md](docs/specs/evaluation-facility/capture.md), #8); results are #9.
 - Defer model/version, precise spending limits and repeats until the pilot manifest.
   Defer qualification thresholds until actual observations support calibration.
 
@@ -120,7 +122,11 @@ keeps what the static reading of Coder Eval taught, without claiming any run.
 complete trial accounting, protected capture and independent verdicts. #7's
 generic adapter is `skillc materialize` ([materialization](docs/specs/evaluation-facility/materialization.md));
 its first evidence is the [CPP Codex subject](evals/subjects/cpp-codex/SUBJECT.md)
-at a pinned revision, observed through the real client on one host.
+at a pinned revision, observed through the real client on one host. #8's controller
+([capture.md](docs/specs/evaluation-facility/capture.md)) plans the population,
+confirms each stop, captures after it and accounts for every attempt against a
+deterministic fake subject. Its storage and retention policy resolves review Q5.
+Containment and the Docker lane remain #10's.
 [#10](https://github.com/cooneycw/skillc/issues/10) demonstrates their join with a deterministic client before
 paid agent execution. Replay forged/stale success and broken-grader controls
 through the actual integration, including candidate attempts to forge verifier output.

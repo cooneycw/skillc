@@ -48,11 +48,16 @@ INSTALLATION_RECEIPT = "installation-receipt"
 TRIAL_LEDGER = "trial-ledger"
 ARTIFACT_MANIFEST = "artifact-manifest"
 VERIFIED_RESULT = "verified-result"
-KINDS = (INSTALLATION_RECEIPT, TRIAL_LEDGER, ARTIFACT_MANIFEST, VERIFIED_RESULT)
+#: Additive in version 2 (#8): what happened to ONE attempt, written by the
+#: controller. The ledger is immutable once dispatched, so lifecycle, stop reason
+#: and cleanup cannot live in it; and a result cannot say "INCONCLUSIVE, nothing
+#: was captured", because a graded result must cite what it graded.
+ATTEMPT_LIFECYCLE = "attempt-lifecycle"
+KINDS = (INSTALLATION_RECEIPT, TRIAL_LEDGER, ARTIFACT_MANIFEST, VERIFIED_RESULT, ATTEMPT_LIFECYCLE)
 
 #: Records that belong to ONE attempt. The ledger is not one of them: it issues
 #: the attempt identifiers the others cite.
-ATTEMPT_BOUND = (INSTALLATION_RECEIPT, ARTIFACT_MANIFEST, VERIFIED_RESULT)
+ATTEMPT_BOUND = (INSTALLATION_RECEIPT, ARTIFACT_MANIFEST, VERIFIED_RESULT, ATTEMPT_LIFECYCLE)
 
 #: The one role allowed to produce each kind, from interfaces.md's producer column.
 #: The subject adapter writes the receipt, and the controller must have checked it.
@@ -61,6 +66,7 @@ AUTHORIZED_PRODUCER = {
     TRIAL_LEDGER: "controller",
     ARTIFACT_MANIFEST: "controller",
     VERIFIED_RESULT: "assembler",
+    ATTEMPT_LIFECYCLE: "controller",
 }
 RECEIPT_CHECKER = "controller"
 
@@ -80,6 +86,29 @@ OBSERVATION_COVERAGE = ("complete", "partial", "unsupported")
 #: these streams, even when that coverage is `unsupported`: silence about a stream
 #: must never read as a stream that saw nothing.
 REQUIRED_OBSERVATIONS = ("client-events", "process-lifecycle")
+
+#: What the controller concluded about one attempt. Only `captured` hands the
+#: attempt to grading; the other three are explicit non-results, each with a reason,
+#: and none of them may be dropped (EF-07).
+DISPOSITIONS = ("captured", "not-run", "unavailable", "inconclusive")
+#: Why the subject stopped. A `not-run` attempt is `never-started`; so may be an
+#: `unavailable` one, whose dependency failed before dispatch.
+STOP_REASONS = (
+    "exited", "timeout", "budget-exhausted", "operator-cancelled", "launch-failed",
+    "never-started", "unobserved",
+)
+#: Stop reasons after which nothing ran long enough to leave output to capture.
+NOTHING_RAN = ("launch-failed", "never-started")
+#: Lifecycle events, in the vocabulary the controller writes.
+LIFECYCLE_EVENTS = (
+    "planned", "dispatched", "started", "stop-requested", "stopped", "stop-confirmed",
+    "stop-unconfirmed", "captured", "capture-failed", "cleaned", "not-run", "unavailable",
+)
+CLEANUP_STATUSES = ("removed", "already-absent", "not-needed", "partial", "refused-not-owned")
+#: A disposition that is not `captured`, and the run state a result for it must
+#: declare when one exists. `inconclusive` has none: v2 cannot declare it, and a
+#: graded result for an attempt nobody captured is a disagreement.
+RUN_STATE_FOR = {"not-run": "NOT_RUN", "unavailable": "UNAVAILABLE"}
 
 #: A well-formed identifier: no whitespace, no path separators, bounded length.
 #: IDs end up in file names and log lines; `att 1/../x` must not be one. Always
@@ -569,6 +598,66 @@ def derived_status(record: Record) -> Iterator[str]:
         )
 
 
+def attempt_lifecycle(record: Record) -> Iterator[str]:
+    """The controller's account of one attempt: what it concluded, why it stopped,
+    whether that stop was confirmed, and what cleanup did.
+
+    `captured` is the only disposition that hands bytes to grading, so it requires
+    a CONFIRMED stop - capture before the subject stopped is capture of something
+    that could still be changing (interfaces.md lifecycle steps 6-7). Every other
+    disposition names its reason: an unexplained non-result is a dropped attempt
+    with a label on it.
+    """
+    if record.parse_error is not None or record.kind != ATTEMPT_LIFECYCLE:
+        return
+    data = record.data
+    disposition = data.get("disposition")
+    if disposition not in DISPOSITIONS:
+        yield f"disposition {disposition!r} is not one of {list(DISPOSITIONS)}"
+    elif disposition != "captured" and not _nonempty_str(data.get("reason")):
+        yield f"disposition {disposition!r} gives no reason; a non-result must say why"
+    stop = data.get("stop")
+    if not isinstance(stop, dict):
+        yield "no stop observation; how the subject stopped is unknown"
+    else:
+        reason = stop.get("reason")
+        if reason not in STOP_REASONS:
+            yield f"stop reason {reason!r} is not one of {list(STOP_REASONS)}"
+        if not isinstance(stop.get("confirmed"), bool):
+            yield "stop does not say whether it was confirmed"
+        if disposition == "captured":
+            if stop.get("confirmed") is not True:
+                yield "captured without a confirmed stop; the output could still have been changing"
+            if reason in NOTHING_RAN:
+                yield f"captured, but the stop reason {reason!r} says nothing ran"
+        if disposition == "not-run" and reason != "never-started":
+            yield f"disposition not-run with stop reason {reason!r}; a not-run attempt never started"
+        if reason == "never-started" and disposition not in ("not-run", "unavailable"):
+            yield (
+                f"disposition {disposition!r} with stop reason never-started; an attempt that "
+                f"never started is not-run, or unavailable when a dependency prevented it"
+            )
+    events = data.get("events")
+    if not isinstance(events, list) or not events:
+        yield "no lifecycle events"
+    else:
+        names = [e.get("event") if isinstance(e, dict) else None for e in events]
+        for index, (entry, name) in enumerate(zip(events, names)):
+            if name not in LIFECYCLE_EVENTS:
+                yield f"event {index} is {name!r}, not one of {list(LIFECYCLE_EVENTS)}"
+            elif not isinstance(entry, dict) or not _nonempty_str(entry.get("at")):
+                yield f"event {index} ({name}) has no time"
+        if names[0] != "planned":
+            yield "events do not start at planned; the attempt's origin is unrecorded"
+        if disposition == "captured" and "captured" not in names:
+            yield "disposition captured, but no captured event was recorded"
+    cleanup = data.get("cleanup")
+    if not isinstance(cleanup, dict) or cleanup.get("status") not in CLEANUP_STATUSES:
+        yield f"cleanup status is not one of {list(CLEANUP_STATUSES)}"
+    elif not isinstance(cleanup.get("failures"), list):
+        yield "no cleanup failures list; an empty list says none, a missing one says unknown"
+
+
 # ---------------------------------------------------------------------------
 # Bundle rules: facts that exist only BETWEEN records. Each is paired with a
 # committed control whose bad and good cases are bundle directories.
@@ -656,7 +745,7 @@ def unique_ids(bundle: Bundle) -> Iterator[str]:
     """Identifiers identify. interfaces.md makes duplicate/conflicting IDs an
     explicit validation failure, never verified success.
 
-    An attempt has at most one receipt and one manifest: a second one is a
+    An attempt has at most one receipt, one manifest and one lifecycle: a second one is a
     conflicting account of the same attempt, and nothing here can say which is
     true. Results may be several (a regrade is a new result), but each has its own
     `result_id`.
@@ -677,7 +766,7 @@ def unique_ids(bundle: Bundle) -> Iterator[str]:
             for value, count in sorted(name.items(), key=str):
                 if count > 1:
                     yield f"ledger plans {what} {value!r} {count} times"
-    for kind in (INSTALLATION_RECEIPT, ARTIFACT_MANIFEST):
+    for kind in (INSTALLATION_RECEIPT, ARTIFACT_MANIFEST, ATTEMPT_LIFECYCLE):
         per_attempt = Counter(r.attempt_id for r in bundle.of_kind(kind) if r.attempt_id)
         for attempt, count in sorted(per_attempt.items()):
             if count > 1:
@@ -704,11 +793,21 @@ def unique_ids(bundle: Bundle) -> Iterator[str]:
 def attempt_accounting(bundle: Bundle) -> Iterator[str]:
     """Every planned attempt remains accounted for (interfaces.md, EF-07).
 
-    A planned attempt with no result has silently dropped out of the population.
-    One that was graded - its result is not a declared UNAVAILABLE or NOT_RUN -
-    must also have its installation receipt and its artifact manifest: a verdict
-    over an install nobody recorded, or bytes nobody captured, is missing mandatory
-    evidence at the bundle level.
+    The controller's account of an attempt is its `attempt-lifecycle` record, so
+    every planned attempt has one: without it the attempt has silently dropped out
+    of the population. From its disposition:
+
+      - `captured` hands bytes to grading: it has its artifact manifest, and it has
+        a result - a captured attempt with no result is grading still owed;
+      - `not-run` and `unavailable` need no result, and any result they have
+        declares the matching run state;
+      - no attempt the controller did not capture carries a manifest or a GRADED
+        result, and no captured attempt carries a declared non-run: the accounts
+        disagree.
+
+    An attempt that was graded (a result declaring no run state) also has its
+    installation receipt and artifact manifest: a verdict over an install nobody
+    recorded, or bytes nobody captured, is missing mandatory evidence.
     """
     ledgers = bundle.of_kind(TRIAL_LEDGER)
     if len(ledgers) != 1:
@@ -719,6 +818,7 @@ def attempt_accounting(bundle: Bundle) -> Iterator[str]:
     results: dict[str, list[Record]] = {}
     for result in bundle.of_kind(VERIFIED_RESULT):
         results.setdefault(result.attempt_id, []).append(result)
+    lifecycles = {r.attempt_id: r for r in bundle.of_kind(ATTEMPT_LIFECYCLE)}
     receipts = {r.attempt_id for r in bundle.of_kind(INSTALLATION_RECEIPT)}
     manifests = {r.attempt_id for r in bundle.of_kind(ARTIFACT_MANIFEST)}
     planned = list(_ledger_attempts(ledgers[0]))
@@ -729,14 +829,50 @@ def attempt_accounting(bundle: Bundle) -> Iterator[str]:
         return
     for _trial, attempt in planned:
         attempt_id = str(attempt.get("attempt_id"))
-        own = results.get(attempt_id)
-        if not own:
+        own = results.get(attempt_id, [])
+        graded = [r for r in own if r.data.get("run_state") not in DECLARABLE_RUN_STATES]
+        lifecycle = lifecycles.get(attempt_id)
+        if lifecycle is None:
             yield (
-                f"planned attempt {attempt_id!r} has no result; a missing attempt is "
-                f"never dropped - NOT_RUN is how a non-start is accounted"
+                f"planned attempt {attempt_id!r} has no attempt-lifecycle record; the "
+                f"controller never accounted for it, so it has silently dropped out"
             )
-            continue
-        if any(r.data.get("run_state") not in DECLARABLE_RUN_STATES for r in own):
+        else:
+            disposition = lifecycle.data.get("disposition")
+            if disposition == "captured":
+                if attempt_id not in manifests:
+                    yield f"attempt {attempt_id!r} is captured but has no artifact manifest"
+                if not own:
+                    yield (
+                        f"attempt {attempt_id!r} is captured but has no result; grading "
+                        f"is still owed, so it is not accounted for yet"
+                    )
+                for r in own:
+                    if r.data.get("run_state") in DECLARABLE_RUN_STATES:
+                        yield (
+                            f"attempt {attempt_id!r} is captured, but {r.path.name} "
+                            f"declares {r.data.get('run_state')}; the accounts disagree"
+                        )
+            elif isinstance(disposition, str):
+                if attempt_id in manifests:
+                    yield (
+                        f"attempt {attempt_id!r} is {disposition}, but a manifest captured its "
+                        f"output; the accounts disagree"
+                    )
+                if graded:
+                    yield (
+                        f"attempt {attempt_id!r} is {disposition}, but {graded[0].path.name} "
+                        f"graded it; nothing the controller did not capture can be graded"
+                    )
+                want = RUN_STATE_FOR.get(disposition)
+                for r in own:
+                    declared = r.data.get("run_state")
+                    if declared in DECLARABLE_RUN_STATES and declared != want:
+                        yield (
+                            f"attempt {attempt_id!r} is {disposition}, but {r.path.name} "
+                            f"declares {declared}; the accounts disagree"
+                        )
+        if graded:
             for have, what in ((receipts, "installation receipt"), (manifests, "artifact manifest")):
                 if attempt_id not in have:
                     yield f"attempt {attempt_id!r} was graded without its {what}"

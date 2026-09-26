@@ -20,7 +20,7 @@ The current roadmap is [PLAN.md](../PLAN.md), with the
 No behavioral runner is implemented here yet. The former example plugin command
 and YAML were unverified research, not an executable contract. skillc depends on
 no external evaluation runtime ([ADR 0003](../docs/decisions/0003-no-external-evaluation-runtime.md));
-its own runner arrives with #8 and #10. This directory does not promise
+its controller is `skillc/trial.py` (#8) and the Docker runner arrives with #10. This directory does not promise
 compatibility with a particular CLI.
 
 Static validity, skill invocation and successful delivery are distinct measurements.

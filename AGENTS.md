@@ -24,10 +24,13 @@ specification rejects, and it proves its own rules can fail before reporting the
 - `skillc/spec.py` - the Agent Skills specification as a checkable object; its
   frontmatter subset and target profiles are documented in [docs/frontmatter.md](docs/frontmatter.md)
 - `skillc/checks.py` - the rules; each declares the control that proves it
-- `skillc/records.py` - the four evaluation-record contracts (receipt, ledger, manifest, result) and the bundle rules that bind them to a ledger; see [records spec](docs/specs/evaluation-facility/records.md)
+- `skillc/records.py` - the evaluation-record contracts (receipt, ledger, manifest, result, attempt lifecycle) and the bundle rules that bind them to a ledger; see [records spec](docs/specs/evaluation-facility/records.md)
 - `skillc/materialize.py` - installs a declared skill surface into disposable homes and
   proves what the client lists; see [materialization spec](docs/specs/evaluation-facility/materialization.md).
   Generic: subject conventions live in `subject.json`, never in this module
+- `skillc/trial.py` - the controller: plans the expected population, runs and confirms the
+  stop of each attempt, captures its output into owned storage and accounts for every
+  attempt; see [capture spec](docs/specs/evaluation-facility/capture.md)
 - `skillc/cli.py` - `check`, `check-records`, `selftest`, `rules`, `materialize`
 - `controls/<rule-id>/{bad,good}/` - the committed redcases
 - `evals/` - behavioural evals; see `evals/README.md`
@@ -37,6 +40,8 @@ specification rejects, and it proves its own rules can fail before reporting the
   evidence `skillc materialize` produced for it
 - `tests/fixtures/codex-subject/` - a two-skill collection and `fake_codex.py`, a stand-in
   client for CI, which has neither git nor Codex
+- `tests/fixtures/trial-subject/fake_subject.py` - a deterministic subject that works, crashes,
+  hangs, leaves children running or forges records, for the controller tests
 
 ## Verify
 
