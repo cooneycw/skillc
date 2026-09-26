@@ -76,6 +76,9 @@ _IDENTITIES = {
     "client": ("name", "version"),
     "image": ("digest",),
 }
+#: Identity keys a plan MAY carry. The grader's `digest` pins the grader definition
+#: the verifier must find (skillc.verify, #9): it refuses to grade without one.
+_OPTIONAL_IDENTITY = {"grader": ("digest",)}
 _LABEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,47}$")
 
 #: Directories never exported, whatever the declared scope: VCS metadata, and the
@@ -409,13 +412,15 @@ def _strict_identity(trial: dict[str, object], name: str, keys: tuple[str, ...])
     value = trial.get(name)
     if not isinstance(value, dict):
         raise Refused(f"trial {trial.get('label')!r}: no {name} identity")
-    unknown = set(value) - set(keys)
+    optional = _OPTIONAL_IDENTITY.get(name, ())
+    unknown = set(value) - set(keys) - set(optional)
     if unknown:
         raise Refused(f"trial {trial.get('label')!r}: {name} carries unknown fields {sorted(unknown)}")
-    for key in keys:
+    present = (*keys, *(k for k in optional if k in value))
+    for key in present:
         if not isinstance(value.get(key), str) or not str(value[key]).strip():
             raise Refused(f"trial {trial.get('label')!r}: {name} identity has no {key}")
-    return {k: str(value[k]) for k in keys}
+    return {k: str(value[k]) for k in present}
 
 
 def plan(spec: dict[str, object], store: Path) -> Experiment:

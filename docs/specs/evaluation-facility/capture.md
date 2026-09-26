@@ -161,7 +161,11 @@ bytes or another attempt. Findings the experiment already had are not the
 candidate's, so an experiment that is still incomplete can accept records. Graded
 results are only accepted for a finalized `captured` attempt. Results and
 receipts are written once. A regrade must name a result already stored, which is
-retained. The result itself is #9's to produce.
+retained. The result itself is produced by the verifier, `skillc/verify.py` (#9):
+it grades a disposable copy of these frozen bytes in a separate environment and
+stores its result through `add_result`; see [verification.md](verification.md).
+A trial's `grader` identity may carry a `digest`, which the verifier requires as
+its pin.
 
 ## Storage, access and retention (review.md Q5)
 
@@ -211,7 +215,8 @@ This is the policy, chosen before any real private or model evidence exists.
 - **Budgets are recorded, not enforced.** A trial's `budget` is stored in the
   ledger. Only the wall-clock `timeout` passed to `run_attempt` is enforced.
 - **Readiness does not gate dispatch.** The receipt is stored as #7 produced it.
-  Whether a failed canary prevents a PASS is still #9's judgement (records.md).
+  It gates a PASS at grading instead: the verifier's `installation-ready`
+  criterion ([verification.md](verification.md#the-result), #9).
 
 ## Credit
 

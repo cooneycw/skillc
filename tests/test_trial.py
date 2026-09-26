@@ -150,10 +150,24 @@ def test_the_resolved_configuration_is_stored_and_bound_by_digest(store: Path) -
      "unknown fields"),
     ({"experiment": "pilot", "trials": [{**_spec()["trials"][0], "grader": {"id": "g"}}]}, "no revision"),  # type: ignore[index]
     ({"experiment": "pilot", "trials": _spec()["trials"] * 2}, "twice"),  # type: ignore[operator]
+    # The grader pin (#9) is optional, but a present one must be a real value.
+    ({"experiment": "pilot", "trials": [{**_spec()["trials"][0],  # type: ignore[index]
+                                         "grader": {"id": "g", "revision": "1", "digest": ""}}]}, "no digest"),
+    ({"experiment": "pilot", "trials": [{**_spec()["trials"][0],  # type: ignore[index]
+                                         "grader": {"id": "g", "revision": "1", "digest": 7}}]}, "no digest"),
+    ({"experiment": "pilot", "trials": [{**_spec()["trials"][0],  # type: ignore[index]
+                                         "subject": {"digest": "sha256:5a", "revision": "x"}}]}, "unknown fields"),
 ])
 def test_a_loose_plan_is_refused(store: Path, spec: dict[str, object], why: str) -> None:
     with pytest.raises(t.Refused, match=why):
         t.plan(spec, store)
+
+
+def test_a_grader_pin_is_kept_in_the_ledger(store: Path) -> None:
+    pinned = {"id": "slug-grader", "revision": "g1", "digest": "sha256:9f"}
+    experiment = t.plan(_spec(grader=pinned), store)
+    [(trial, _attempt)] = list(experiment.attempts())
+    assert trial["grader"] == pinned
 
 
 def test_the_store_is_refused_inside_a_git_work_tree(tmp_path: Path) -> None:

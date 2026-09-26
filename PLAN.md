@@ -46,7 +46,9 @@ remaining choices to issues. This plan owns order and delivery gates.
   Their version-2 record forms and validators are in
   [records.md](docs/specs/evaluation-facility/records.md) (#4). The controller that
   produces the ledger, lifecycle and manifests is `skillc/trial.py`
-  ([capture.md](docs/specs/evaluation-facility/capture.md), #8); results are #9.
+  ([capture.md](docs/specs/evaluation-facility/capture.md), #8); the verifier that
+  produces results is `skillc/verify.py`
+  ([verification.md](docs/specs/evaluation-facility/verification.md), #9).
 - Defer model/version, precise spending limits and repeats until the pilot manifest.
   Defer qualification thresholds until actual observations support calibration.
 
@@ -126,6 +128,11 @@ at a pinned revision, observed through the real client on one host. #8's control
 ([capture.md](docs/specs/evaluation-facility/capture.md)) plans the population,
 confirms each stop, captures after it and accounts for every attempt against a
 deterministic fake subject. Its storage and retention policy resolves review Q5.
+#9's verifier ([verification.md](docs/specs/evaluation-facility/verification.md))
+grades a disposable copy in a contained probe, starts the trusted judge only after
+every candidate process is swept, derives the status, and refuses a result when the
+grader pin, the store or the ledger changed. Its adversarial controls run against the
+fake subject. Against same-user candidate code it detects, and does not prevent.
 Containment and the Docker lane remain #10's.
 [#10](https://github.com/cooneycw/skillc/issues/10) demonstrates their join with a deterministic client before
 paid agent execution. Replay forged/stale success and broken-grader controls

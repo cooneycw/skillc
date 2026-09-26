@@ -18,11 +18,16 @@ an expectation that contradicts the candidate's placement refuses outright.
 A grader report must carry exactly the task's required criteria, each mandatory
 and each once. A report that drops one is not a verdict on the task.
 
-Grader output becomes a status through skillc's own verified-result contract:
-the output is assembled into a version-2 `verified-result`, checked with the
-record rules, and its status is `records.derive_status`. A grader that exits
-non-zero, prints nothing, or prints something the contract rejects produced no
-verdict: that is INCONCLUSIVE, never FAIL. A crash is not a detected defect.
+Every candidate is graded through skillc's verifier (`skillc.verify.grade_directory`),
+the same staged path that grades a real attempt (#9): the probe runs the
+candidate on a disposable copy under a contained supervisor, the judge runs
+afterwards, and skillc derives the status with `records.derive_status`. So what
+is certified here is what grades. A judge that exits non-zero, prints nothing,
+or prints something the contract rejects produced no verdict: that is
+INCONCLUSIVE, never FAIL. A crash is not a detected defect.
+
+A broken-grader control replaces the JUDGE (`GraderDef.with_judge`); the probe
+and the inputs stay the task's own.
 
 `python3 qualify.py` certifies the real grader AND requires each broken grader in
 `grader-controls/` to exist, to be refused, and to produce the one status its
@@ -32,19 +37,16 @@ count as a refused one. Exit 0 only if all of that holds.
 
 from __future__ import annotations
 
-import hashlib
 import json
-import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from skillc import records
+from skillc import verify
 
 HERE = Path(__file__).resolve().parent
-GRADER_TIMEOUT_SECONDS = 60
-NONE: frozenset[str] = frozenset()
 #: The criteria every report for this task must carry, each mandatory, once.
+#: `grader.json` declares the same set; tests/test_level1_slug.py checks they agree.
 REQUIRED_CRITERIA = ("R4-interface", "reported-example", "R1", "R2", "R3")
 
 #: Each broken grader, the status it must produce on EVERY candidate, and the path
@@ -75,79 +77,16 @@ class Row:
         return self.status == self.expected and self.violated == self.expected_violated
 
 
-def _digest(candidate: Path) -> str:
-    target = candidate / "src" / "slugify.py"
-    data = target.read_bytes() if target.is_file() else b""
-    return "sha256:" + hashlib.sha256(data).hexdigest()
+def status_of(grader: Path, candidate: Path, root: Path = HERE) -> tuple[str, str, frozenset[str], str]:
+    """(status, detail, VIOLATED criterion ids, category) for one grading run.
 
-
-def _criteria_problem(criteria: object) -> str | None:
-    """Why a report's criteria are not this task's required set, or None."""
-    if not isinstance(criteria, list):
-        return "no criteria list"
-    ids = [c.get("id") for c in criteria if isinstance(c, dict)]
-    if len(ids) != len(criteria) or not all(isinstance(i, str) for i in ids):
-        return "a criterion is not an object with a string id"
-    if len(set(ids)) != len(ids):
-        return "criterion ids are not unique"
-    if set(ids) != set(REQUIRED_CRITERIA):
-        missing = sorted(set(REQUIRED_CRITERIA) - set(map(str, ids)))
-        extra = sorted(set(map(str, ids)) - set(REQUIRED_CRITERIA))
-        return f"criteria differ from the required set (missing {missing}, extra {extra})"
-    if not all(c.get("mandatory") is True for c in criteria):
-        return "a required criterion is not mandatory"
-    return None
-
-
-def status_of(grader: Path, candidate: Path) -> tuple[str, str, frozenset[str], str]:
-    """(status, detail, VIOLATED criterion ids, category) for one grader run.
-
-    The category names WHICH path produced the status, so two broken graders that
-    both yield INCONCLUSIVE - a crash and an empty report - stay distinguishable.
+    `grader` is the judge; the probe, inputs and required criteria come from the
+    task's `grader.json` under `root`. The category names WHICH path produced the
+    status, so two broken graders that both yield INCONCLUSIVE - a crash and an
+    empty report - stay distinguishable.
     """
-    try:
-        proc = subprocess.run(
-            [sys.executable, str(grader), str(candidate)],
-            capture_output=True, text=True, timeout=GRADER_TIMEOUT_SECONDS, check=False,
-        )
-    except subprocess.TimeoutExpired:
-        return "INCONCLUSIVE", f"grader did not finish within {GRADER_TIMEOUT_SECONDS}s", NONE, "timeout"
-    if proc.returncode != 0:
-        tail = proc.stderr.strip().splitlines()[-1:] or ["no stderr"]
-        return "INCONCLUSIVE", f"grader exited {proc.returncode}: {tail[0]}", NONE, "exit-nonzero"
-    if not proc.stdout.strip():
-        return "INCONCLUSIVE", "grader exited 0 and emitted no result", NONE, "no-output"
-    try:
-        out = json.loads(proc.stdout)
-    except json.JSONDecodeError as exc:
-        return "INCONCLUSIVE", f"grader output is not JSON: {exc}", NONE, "unparseable"
-    if not isinstance(out, dict):
-        return "INCONCLUSIVE", "grader output is not an object", NONE, "unparseable"
-
-    record = records.Record(path=grader, data={
-        "version": 2,
-        "kind": records.VERIFIED_RESULT,
-        "result_id": f"qualify-{candidate.name}",
-        "grader": out.get("grader"),
-        "graded_digests": [_digest(candidate)],
-        "criteria": out.get("criteria"),
-    })
-    shape = _criteria_problem(out.get("criteria"))
-    if shape:
-        return "INCONCLUSIVE", f"grader report is not a verdict on this task: {shape}", NONE, "criteria-set"
-    problems = [
-        *records.criterion_vocabulary(record),
-        *records.result_evidence(record),
-    ]
-    if problems:
-        return "INCONCLUSIVE", f"grader output breaks the result contract: {problems[0]}", NONE, "contract"
-    status = records.derive_status(record)
-    criteria = out["criteria"]
-    assert isinstance(criteria, list)
-    unmet = [c["id"] for c in criteria if c.get("outcome") != "SATISFIED"]
-    violated = frozenset(str(c["id"]) for c in criteria if c.get("outcome") == "VIOLATED")
-    return status, ("all mandatory criteria satisfied" if not unmet
-                    else "not satisfied: " + ", ".join(map(str, unmet))), violated, "verdict"
+    graded = verify.grade_directory(verify.GraderDef.load(root).with_judge(grader), candidate)
+    return graded.status, graded.detail, graded.violated, graded.category
 
 
 def _expectation(path: Path, placed: str) -> tuple[str, frozenset[str]]:
@@ -187,7 +126,7 @@ def candidates(root: Path) -> list[tuple[Path, str, frozenset[str]]]:
 def certify(grader: Path, root: Path = HERE) -> tuple[bool, list[Row]]:
     rows = []
     for path, expected, expected_violated in candidates(root):
-        status, detail, violated, category = status_of(grader, path)
+        status, detail, violated, category = status_of(grader, path, root)
         rows.append(Row(str(path.relative_to(root)), expected, status, detail,
                         expected_violated, violated, category))
     return all(r.ok for r in rows), rows

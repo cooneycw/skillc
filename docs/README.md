@@ -12,6 +12,9 @@ Documentation only; the behavioral evaluation facility is not implemented.
   controller ledger, artifact capture and independent verification.
 - [Controller accounting and capture](specs/evaluation-facility/capture.md): what
   `skillc/trial.py` records and exports, and the evidence storage and retention policy.
+- [Independent grading and result assembly](specs/evaluation-facility/verification.md):
+  how `skillc/verify.py` grades frozen output outside the subject's reach, and the
+  trust assumptions and unobserved properties it states.
 - [Design review](specs/evaluation-facility/review.md): open decisions and questions
   to challenge before implementation.
 - [Delivery plan](../PLAN.md): staged milestones and their acceptance evidence.

@@ -9,7 +9,10 @@ CPP, or any scaffold, is better.
 |---|---|
 | `goal.md` | The agent-facing request. Identical for every arm. |
 | `fixture/src/slugify.py` | Pinned starting state; see [PROVENANCE.md](PROVENANCE.md) |
-| `grade_slug.py` | The grader. Never shown to the agent. |
+| `grader.json` | The grader definition (revision 2): required criteria, probe, inputs, judge. Its digest is what a ledger pins |
+| `probe.py` | Runs the candidate on `inputs.json` and reports what `slugify` returned. The only grading code that runs candidate code |
+| `inputs.json` | The reported example and held-out inputs, without their answers |
+| `grade_slug.py` | The judge: holds the answers and emits the criteria. Never shown to the agent |
 | `reference/` | A correct outcome |
 | `alternatives/*/` | Other correct implementations; each must PASS |
 | `wrong/*/` | Plausible wrong outputs; each must FAIL |
@@ -22,6 +25,14 @@ uv run python evals/level1/slug-small-fix/qualify.py   # QUALIFY: ok, exit 0
 ```
 
 `tests/test_level1_slug.py` runs the same gate in the suite and CI.
+
+`qualify.py` grades every candidate through skillc's verifier
+(`skillc.verify.grade_directory`, #9), the same staged path that grades a real
+attempt. The probe runs on a disposable copy under a supervisor that sweeps every
+process the candidate started. The judge starts only after that sweep. skillc then
+derives the status. So the grader that is certified here is the grader that
+grades. A broken-grader control replaces the judge; the probe and inputs stay the
+task's own. See [verification.md](../../../docs/specs/evaluation-facility/verification.md).
 
 ## Public acceptance
 
@@ -48,9 +59,10 @@ this task uses the same verified-result rules as every other result.
   character loop or `findall` join all pass. The interface is checked by
   behaviour (a callable `slugify` returning `str`), not by source shape.
 - **Candidate failures versus grader failures.** A candidate that raises, hangs,
-  returns a non-string or has no `slugify` VIOLATES `R4-interface`. A grader that
-  exits non-zero or prints nothing yields INCONCLUSIVE. A crash is never read as
-  a detected defect.
+  returns a non-string or has no `slugify` VIOLATES `R4-interface`, and so does a
+  probe report that is not exactly one returned value per input (candidate code
+  can write that report). A judge that exits non-zero or prints nothing yields
+  INCONCLUSIVE. A crash is never read as a detected defect.
 
 ## What qualify.py proves, and its red cases
 
@@ -131,8 +143,9 @@ No live model call was made to build or certify this task.
 - **Non-ASCII titles.** R2 defines separators as anything other than ASCII
   `a-z0-9`, but no held-out input probes it. An `isalnum()` implementation would
   differ only there. That edge belongs to a later constraint-handling variant.
-- **Result-channel isolation.** Candidate code runs in a child process with a
-  timeout, and the expected outputs never enter it. Hostile candidate code could
-  still write a forged report on that child's output channel. Protecting the
-  verifier's result channel from candidate code is #9's conformance case, not a
-  property this task claims.
+- **Answer-key confidentiality on the host.** Since #9 the expected outputs live
+  only in the judge, which runs after every candidate process is gone. So no
+  candidate can write the verdict. The judge's file is still readable on disk by
+  same-user candidate code that searches for it, and the Docker lane (#10) is what
+  removes that. See the trust assumptions in
+  [verification.md](../../../docs/specs/evaluation-facility/verification.md#trust-assumptions).

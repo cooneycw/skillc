@@ -1,18 +1,26 @@
 #!/usr/bin/env python3
-"""Grader for the Level 1 slug small-fix task. The agent never sees this file.
+"""Judge for the Level 1 slug small-fix task. The agent never sees this file.
 
-Usage: grade_slug.py CANDIDATE_DIR, where CANDIDATE_DIR holds `src/slugify.py`.
+Grading is split in two (skillc.verify, docs/specs/evaluation-facility/verification.md):
 
-Prints one JSON object - the grader identity and one criterion per public
-requirement, each SATISFIED/VIOLATED/UNKNOWN with evidence - and exits 0. Any
-other exit, or no output, is a grader failure, not a verdict on the candidate;
-`qualify.py` reads it as INCONCLUSIVE.
+  - `probe.py` runs the candidate on the inputs in `inputs.json` and reports what
+    `slugify` returned. It never sees an expected output.
+  - this file, the JUDGE, holds the answers. skillc runs it as
+    `grade_slug.py --judge`, with the probe's report on stdin, in a fresh
+    directory, and only after every process the probe started is confirmed gone.
+    So no candidate code is alive to write on its stdout, the success channel.
 
-The candidate runs in a child process with a timeout, so a raise, a hang or a
-missing function is recorded against the candidate. The expected outputs never
-enter that process: the child only reports what `slugify` returned, and the
-comparison happens here. That keeps the answers away from candidate code; it is
-NOT isolation of the result channel from hostile code, which is #9's job.
+The judge prints one JSON object - one criterion per public requirement, each
+SATISFIED/VIOLATED/UNKNOWN with evidence - and exits 0. Any other exit, or no
+output, is a grader failure, not a verdict on the candidate: INCONCLUSIVE.
+
+The probe's report is untrusted: candidate code shares the probe's process and
+can write it. Anything that is not a well-formed report of returned values is
+read as an interface violation, never as a verdict.
+
+`grade(CANDIDATE_DIR)` composes the two for the in-suite checks of #5, and
+`grade_slug.py CANDIDATE_DIR` does the same from a shell. Neither is the
+isolated path; `qualify.py` and skillc.verify use the staged one.
 """
 
 from __future__ import annotations
@@ -22,7 +30,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-GRADER = {"id": "slug-small-fix", "revision": "1"}
+GRADER = {"id": "slug-small-fix", "revision": "2"}
 TIMEOUT_SECONDS = 10
 
 #: The one development example goal.md publishes.
@@ -54,66 +62,64 @@ HELD_OUT: tuple[tuple[str, str, str], ...] = (
 
 RULES = ("R1", "R2", "R3")
 
-# Runs in the child. Candidate prints go to stderr so they cannot mix with the
-# report, which is written to a duplicate of the original stdout.
-CHILD = r"""
-import json, os, sys
-report = os.fdopen(os.dup(1), "w")
-os.dup2(2, 1)
-sys.path.insert(0, sys.argv[1])
-inputs = json.loads(sys.stdin.read())
-try:
-    import slugify as module
-except BaseException as exc:
-    report.write(json.dumps({"import_error": f"{type(exc).__name__}: {exc}"}))
-    sys.exit(0)
-fn = getattr(module, "slugify", None)
-if not callable(fn):
-    report.write(json.dumps({"import_error": "src/slugify.py defines no callable slugify"}))
-    sys.exit(0)
-outputs = []
-for text in inputs:
-    try:
-        got = fn(text)
-    except BaseException as exc:
-        outputs.append({"raised": f"{type(exc).__name__}: {exc}"})
-        continue
-    if isinstance(got, str):
-        outputs.append({"value": got})
-    else:
-        outputs.append({"not_str": repr(got)})
-report.write(json.dumps({"outputs": outputs}))
-"""
+HERE = Path(__file__).resolve().parent
+
+#: Largest probe report the judge reads; a longer one is not a report of 15 values.
+MAX_REPORT_CHARS = 1_000_000
 
 
-def run_candidate(
-    candidate: Path, inputs: list[str], timeout: float = TIMEOUT_SECONDS,
-) -> dict[str, object]:
-    """What the candidate's slugify returned for each input, or why it could not say."""
-    src = candidate / "src"
-    if not (src / "slugify.py").is_file():
-        return {"import_error": f"{src / 'slugify.py'} does not exist"}
+def cases() -> list[tuple[str, str]]:
+    """Every (input, expected) pair, the reported example first. `inputs.json` is
+    exactly the inputs, in this order; tests/test_level1_slug.py checks that."""
+    return [REPORTED_EXAMPLE] + [(text, want) for _, text, want in HELD_OUT]
+
+
+def run_probe(candidate: Path, timeout: float = TIMEOUT_SECONDS) -> dict[str, object]:
+    """Run `probe.py` on a candidate directly, for the in-suite checks of #5.
+
+    Returns the same envelope skillc.verify hands the judge. It is NOT the isolated
+    path: no disposable copy, no subreaper, no scrubbed environment.
+    """
     try:
         proc = subprocess.run(
-            # -S: no site-packages, so R4's "standard library only" is enforced
-            # by the run itself rather than inferred from a returned string.
-            [sys.executable, "-I", "-S", "-B", "-c", CHILD, str(src)],
-            input=json.dumps(inputs), capture_output=True, text=True,
+            [sys.executable, "-I", "-S", "-B", str(HERE / "probe.py"), str(candidate)],
+            input=json.dumps([text for text, _ in cases()]), capture_output=True, text=True,
             timeout=timeout, check=False,
         )
     except subprocess.TimeoutExpired:
-        return {"import_error": f"candidate did not finish within {timeout}s"}
+        return {"observations": "", "timed_out": True}
+    return {"observations": proc.stdout, "timed_out": False}
+
+
+def _well_formed(out: object) -> bool:
+    return (isinstance(out, dict) and len(out) == 1
+            and next(iter(out)) in ("value", "raised", "not_str")
+            and isinstance(next(iter(out.values())), str))
+
+
+def read_report(envelope: dict[str, object]) -> dict[str, object]:
+    """What the candidate returned, or why there is nothing to judge.
+
+    The report is untrusted: candidate code could have written it. Anything that is
+    not exactly a list of returned values, one per input, is an interface failure.
+    """
+    if envelope.get("timed_out") is True:
+        return {"import_error": "candidate did not finish within the probe's time limit"}
+    text = envelope.get("observations")
+    if not isinstance(text, str) or not text.strip():
+        return {"import_error": "the probe produced no report"}
+    if len(text) > MAX_REPORT_CHARS:
+        return {"import_error": "the probe report is oversized"}
     try:
-        data = json.loads(proc.stdout)
+        data = json.loads(text)
     except json.JSONDecodeError:
-        data = None
-    if not isinstance(data, dict):
-        return {"import_error": f"candidate process exited {proc.returncode} without a report"}
-    outputs = data.get("outputs")
-    if "import_error" not in data and (
-        not isinstance(outputs, list) or len(outputs) != len(inputs)
-    ):
-        return {"import_error": "candidate process reported a malformed or short result"}
+        return {"import_error": "the probe report is not JSON"}
+    if isinstance(data, dict) and set(data) == {"import_error"} and isinstance(data["import_error"], str):
+        return data
+    outputs = data.get("outputs") if isinstance(data, dict) else None
+    if (not isinstance(data, dict) or set(data) != {"outputs"} or not isinstance(outputs, list)
+            or len(outputs) != len(cases()) or not all(_well_formed(o) for o in outputs)):
+        return {"import_error": "the probe report is malformed or short"}
     return data
 
 
@@ -136,9 +142,10 @@ def _criterion(cid: str, failures: list[str], passed_note: str) -> dict[str, obj
     return {"id": cid, "mandatory": True, "outcome": "SATISFIED", "evidence": [passed_note]}
 
 
-def grade(candidate: Path, timeout: float = TIMEOUT_SECONDS) -> dict[str, object]:
-    cases = [REPORTED_EXAMPLE] + [(text, want) for _, text, want in HELD_OUT]
-    data = run_candidate(candidate, [text for text, _ in cases], timeout)
+def judge(envelope: dict[str, object]) -> dict[str, object]:
+    """The criteria for one probe report. No candidate code runs here."""
+    pairs = cases()
+    data = read_report(envelope)
 
     if "import_error" in data:
         reason = str(data["import_error"])
@@ -155,13 +162,13 @@ def grade(candidate: Path, timeout: float = TIMEOUT_SECONDS) -> dict[str, object
     assert isinstance(outputs, list)
     broken = [
         f"slugify({text!r}) {out.get('raised') or 'returned non-str ' + str(out.get('not_str'))}"
-        for (text, _), out in zip(cases, outputs, strict=True)
+        for (text, _), out in zip(pairs, outputs, strict=True)
         if isinstance(out, dict) and "value" not in out
     ]
     criteria = [
         _criterion("R4-interface", broken,
                    f"imported with site-packages disabled; slugify returned a str "
-                   f"for all {len(cases)} inputs"),
+                   f"for all {len(pairs)} inputs"),
         _criterion("reported-example", _judge([REPORTED_EXAMPLE], outputs[:1]),
                    f"slugify({REPORTED_EXAMPLE[0]!r}) == {REPORTED_EXAMPLE[1]!r}"),
     ]
@@ -183,9 +190,17 @@ def grade(candidate: Path, timeout: float = TIMEOUT_SECONDS) -> dict[str, object
     return {"grader": GRADER, "criteria": criteria}
 
 
+def grade(candidate: Path, timeout: float = TIMEOUT_SECONDS) -> dict[str, object]:
+    """Probe then judge, directly. See `run_probe` for what this does not isolate."""
+    return judge(run_probe(candidate, timeout))
+
+
 def main(argv: list[str]) -> int:
+    if argv[1:] == ["--judge"]:
+        print(json.dumps(judge(json.loads(sys.stdin.read())), indent=1))
+        return 0
     if len(argv) != 2:
-        print("usage: grade_slug.py CANDIDATE_DIR", file=sys.stderr)
+        print("usage: grade_slug.py --judge < ENVELOPE | grade_slug.py CANDIDATE_DIR", file=sys.stderr)
         return 2
     print(json.dumps(grade(Path(argv[1])), indent=1))
     return 0
