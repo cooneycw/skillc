@@ -1,8 +1,11 @@
 # Documentation
 
-## Planned evaluation facility
+## Evaluation facility
 
-Documentation only; the behavioral evaluation facility is not implemented.
+The static checker, materialization, controller and verifier pieces below are
+implemented and exercised by real evidence (see the top-level
+[README](../README.md#status) for the milestone table). The full behavioral
+task levels beyond Level 1 remain documentation only.
 
 - [Specification](specs/evaluation-facility/spec.md): generic subjects, goal-based
   tasks, progressive difficulty, boundaries and acceptance requirements.
@@ -35,6 +38,12 @@ Documentation only; the behavioral evaluation facility is not implemented.
 - [ADR 0004: Evaluate the exposed knowledge surface](decisions/0004-evaluate-the-exposed-knowledge-surface.md)
   widens the subject to layered, exposed knowledge and defines the
   valid/exposed/reachable/selected/effective ladder (#55).
+- [ADR 0005: Runtime scope, judge mechanism and cost stop](decisions/0005-runtime-scope-and-cost-rulings.md)
+  records five owner rulings: skillc runs wherever it is installed with no
+  dedicated machine assumed; a managed-container backend is an optional
+  plug-in (#64); no machine identities in outputs (#63); `mcp-second-opinion`
+  as the model-judge mechanism, with all enabled grading tiers producing
+  separate verdicts (#69); and the cost stop on paid runs (#12).
 
 ## Research and prior reviews
 

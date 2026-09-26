@@ -7,18 +7,31 @@ depended on, and it rots. What it does not get is a build step: there is nothing
 between writing a `SKILL.md` and shipping it that can refuse. `skillc` is that
 missing stage.
 
-The next proposed capability is an independent evaluation facility for collections
-of scaffolding skills, with **goal-based tasks at progressively harder levels**.
-Accessible projects become test subjects through supported adapters. Claude
-Power Pack (CPP) will be the first subject, supplied as a pinned external input
-and exercised in disposable environments. The facility belongs in skillc.
+skillc also ships an independent evaluation facility for collections of
+scaffolding skills, being built incrementally toward **goal-based tasks at
+progressively harder levels**. Accessible projects become test subjects
+through supported adapters, exercised in disposable environments: Claude
+Power Pack (CPP) was the first subject (#7), and
+[mattpocock/skills](evals/subjects/mattpocock-skills/SUBJECT.md) is the
+second, proving the adapter needed no change for an independently authored
+collection with a different layout (#11).
 
-**Status:** the static checker exists. The task levels and full behavioral
-comparisons below are still a documentation-only proposal; the evaluation
-facility's static checker, materialization, controller and verifier pieces
-have landed incrementally as their own milestones (see the machine-readable
-table below, checked in CI against [`docs/milestones.json`](docs/milestones.json),
-#73). See the [specification](docs/specs/evaluation-facility/spec.md),
+**Runs wherever it is installed.** skillc assumes no dedicated machine and no
+fleet: a trial uses whatever Docker (or other backend) is already on the
+user's own machine. An external container platform may supply an optional
+backend behind the same seam - the reference backend (skillc driving Docker
+directly) is what closes #10 and remains fully functional on its own, never
+required. See [ADR 0005](docs/decisions/0005-runtime-scope-and-cost-rulings.md).
+
+<a id="status"></a>
+
+**Status:** the static checker, native materialization (`skillc materialize`),
+the trial controller, the independent verifier and the execution-backend seam
+all exist and are exercised by real evidence (see the machine-readable table
+below, checked in CI against [`docs/milestones.json`](docs/milestones.json),
+#73). The task levels beyond Level 1 and the full behavioral comparisons
+described later in this README remain a documentation-only proposal. See the
+[specification](docs/specs/evaluation-facility/spec.md),
 [architecture decision](docs/decisions/0002-independent-goal-driven-evaluation.md) and
 [PLAN.md](PLAN.md) for the design and delivery sequence.
 
@@ -43,8 +56,16 @@ skillc leak-check <path>       # refuse a tree or bundle carrying a machine iden
 ```
 <!-- commands:end -->
 
+`check` also takes `--manifest <plugin.json>` to scope a scan to a plugin
+manifest's declared skills, reporting the undeclared remainder as a count
+instead of mixing shipped and draft skills into one total (#53), and `--json`
+(below) to print one stable-schema document instead of the human report.
+
 The existing static checker has zero runtime dependencies and requires Python
-3.11+. The proposed evaluation facility will have separate execution requirements.
+3.11+. The evaluation facility's materialization, controller and verifier
+pieces need `git` and, when installed, `codex` or another supported client;
+the full behavioral-comparison proposal will have separate execution
+requirements again.
 
 ---
 
@@ -199,6 +220,21 @@ uv sync --extra dev
 uv run skillc selftest
 ```
 
+## Contributing
+
+`main` is branch-protected: the `ci/woodpecker/pr/ci` check is required and
+must be up to date with `main` before merging (strict mode), and force-push
+and branch deletion are blocked. Before opening a PR, run
+`uv run skillc selftest && uv run pytest && uv run ruff check . && uv run mypy`
+and `uv run skillc leak-check . --exclude controls/leak-check/bad --exclude
+tests/test_leak.py --exclude ci/leak-check-control.sh` (the excludes skip this
+repo's own seeded-bad fixtures, which a bare scan would otherwise report as
+findings - see CI's `leak-check` step for the authoritative list); a PR that
+changes `skillc/` also needs a new entry under `CHANGELOG.md`'s `[Unreleased]`
+section, or a `Changelog-exempt: <reason>` trailer on its last commit. See
+#73's CI steps (`changelog-check`, `readme-drift`) for what else is checked
+automatically.
+
 ## Exit codes
 
 | code | meaning |
@@ -224,6 +260,33 @@ fresh copy of them is supplied. Retains a build/install identity record and
 carries its own committed negative control. Details, schema and limits:
 [docs/findings.md](docs/findings.md).
 
+## Leak check: no machine identities
+
+skillc is public, and it produces evidence bundles, ledgers and receipts from
+real trial runs. Nothing committed, reported or graded - a file, a PR, a
+produced bundle - may carry the operator's machine identities: a
+home-directory path, a `uid=`/`gid=` number, a private (RFC 1918) IPv4
+address, or a hostname from a locally-configured deny-list. The owner's
+public email and GitHub handle are the stated exceptions. See
+[ADR 0005](docs/decisions/0005-runtime-scope-and-cost-rulings.md).
+
+```bash
+skillc leak-check .                          # scan a tree or a produced bundle
+skillc leak-check . --exclude some/fixture   # a directory that seeds fake leaks on purpose
+skillc leak-check . --denylist hosts.txt     # a local, untracked file of real hostnames to catch
+```
+
+Exit `1` on a finding, `2` on a nonexistent path or a configured deny-list
+that does not resolve, `3` when nothing could be scanned at all (an empty
+directory, or every file undecodable) - an unscannable target is UNKNOWN,
+never clean. A hostname not on the deny-list, a username anywhere other than
+a `/home/`/`/Users/` path, a public IPv4 or any IPv6 address, and a symlink
+pointing outside the scanned tree are stated limits, not silent gaps - see
+`skillc/leak.py`'s module docstring. Wired into CI over the whole repository
+tree, with its own seeded negative control (`ci/leak-check-control.sh`) and a
+committed check that the seeded values cannot collide with a realistic
+worktree or container-name path.
+
 ## Adding a rule
 
 A rule is three things: a function, a known-bad fixture, and a known-good one.
@@ -247,6 +310,35 @@ the rule is not ready - which is the cheapest possible moment to learn it.
 See [ADR 0001](docs/decisions/0001-every-check-ships-a-redcase.md) for the bound:
 this applies to rules, whose verdicts are consumed by a decision that will not
 independently re-derive the fact. It does not extend to every internal helper.
+
+## Grading tiers (proposed, #69)
+
+The verifier's deterministic grader (structural and outcome checks, no model
+call) is the floor and always runs. Two further tiers are proposed, using
+[`mcp-second-opinion`](https://github.com/cooneycw/mcp-second-opinion) - its
+own public repository, with no dependency back on a sibling platform - as the
+model-judge mechanism:
+
+1. **Deterministic** - today's grader, no model call, always runs.
+2. **Same-model judge** - the model that produced the candidate's work.
+3. **Independent judge** - a different model, cross-client by default (Codex
+   judges Claude Code's work and the reverse), via `mcp-second-opinion`.
+
+**When judges are enabled, every enabled tier grades the trial together and
+produces its own verdict** - never averaged, weighted or overridden. The
+result carries a per-criterion same-model-vs-independent disagreement record,
+so the self-grading bias becomes a measured quantity across runs instead of
+only a stated limitation. An unavailable judge makes only its own tier
+`unavailable`; the others still report. The deterministic tier keeps working
+with no judge installed, and the judge integration is never a core import -
+it speaks MCP to the server as an external process, or ships as an optional
+extra. Full rulings: [ADR 0005](docs/decisions/0005-runtime-scope-and-cost-rulings.md).
+Enabling paid judge tiers needs an authorized budget first (#12) - filing an
+issue or merging a design document never authorizes a paid model call.
+
+**Not yet delivered.** #10's grading-boundary work (`skillc/verify.py` grading
+through an `ExecutionBackend`) leaves the judge seam open but does not build
+tiers 2 and 3; that is #69's own acceptance.
 
 ## Proposed evaluation levels
 
@@ -272,24 +364,34 @@ level. An unavailable environment is not a failed reasoning test, and an empty
 run is not a pass.
 
 Experiments will compare a selected collection with a prior revision, another
-collection or a minimal baseline under matched conditions. CPP is the first
-intended subject. Known-bad artifacts or deliberately degraded variants must demonstrate that the grader can detect the
-failure it claims to detect. Equal results mean **no benefit demonstrated on
-those tasks**, not proof that the skill has no value.
+collection or a minimal baseline under matched conditions. CPP was the first
+subject (#7) and mattpocock/skills the second (#11), each with committed
+materialization evidence; no paid trial has been run against either. Known-bad
+artifacts or deliberately degraded variants must demonstrate that the grader
+can detect the failure it claims to detect. Equal results mean **no benefit
+demonstrated on those tasks**, not proof that the skill has no value.
 
 Progress will be reported as a profile: qualified levels, success by scenario,
 honesty of completion claims, human interventions, time and cost. A hard task
 passed once does not erase failures on easier tasks or establish a reliable level.
 
-## Proposed first milestone
+## First milestone: mostly delivered; the Docker backend and Level 2+ remain proposed
 
-Repair the documented static-checker trust gaps, then use the existing CPP
-small-fix pilot to prove an independent grader and known-good/bad controls.
-Define [interface contracts](docs/specs/evaluation-facility/interfaces.md) before
-qualifying a replaceable execution backend. Then implement one disposable Docker trial
-against a pinned CPP snapshot and retain all evidence. Prove the same interfaces
-with a second small collection before claiming generic support. Expand to Level 2
-after the first experiment is reproducible and its grader discriminates.
+The static-checker trust gaps are repaired (#2, #3), the CPP small-fix pilot
+proved an independent grader with known-good/bad controls (#5, #9), and the
+[interface contracts](docs/specs/evaluation-facility/interfaces.md) are
+defined. `skillc materialize` proves native installation against a real
+client for two independently structured collections (#7, #11 - the second
+needing no adapter change). The `ExecutionBackend` protocol (#10's seam), a
+lifecycle driver that exercises the full prepare/install/execute/confirm/
+export/destroy/finalize sequence, and an optional-backend grading path in
+`skillc/verify.py` all exist and are tested - **against a fake,
+host-subprocess backend**. `skillc/docker_backend.py`, the real Docker-backed
+implementation the seam was built for, **does not exist yet**; that is what
+closes #10 (see the milestone table near the top of this README). Expanding
+to Level 2 and beyond, and running a paid trial, remain proposed work: no
+model call has been made against any subject yet, and none is authorized by
+anything in this repository (#12).
 
 The [implementation plan](PLAN.md) sequences delivery against the specification;
 the [review agenda](docs/specs/evaluation-facility/review.md) identifies open choices. No
