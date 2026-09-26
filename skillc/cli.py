@@ -21,6 +21,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import __version__, checks, exposure, leak, materialize, records
+
+# `demo` is NOT imported here at module load (EF-11, #80's own no-Docker-
+# required proof: `skillc.cli` must not import `skillc.docker_backend` at
+# load time, even transitively) - `demo.py` genuinely needs Docker, by
+# definition, but `skillc check`/`selftest`/every other static command does
+# not, and must keep working with no `docker` binary anywhere on PATH.
+# `cmd_demo` below imports it lazily, inside the one function that actually
+# needs it.
 from .checks import ERROR, Finding
 from .spec import DEFAULT_TARGET, TARGETS, Manifest, ManifestError, Skill, discover
 
@@ -660,6 +668,35 @@ def cmd_exposure(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_demo(args: argparse.Namespace) -> int:
+    """The operator demo (#81, Refs #10): a real Docker trial lifecycle, end
+    to end, on the operator's OWN machine. #10 closes on THIS run, against a
+    real daemon - never on this command's own tests passing, never on CI.
+
+    `--control` inverts the verdict: it exits 0 only when every SEEDED
+    failure was actually caught, never when the run itself looked clean."""
+    from . import demo
+
+    docker_bin = tuple(args.docker_bin.split()) if args.docker_bin else ("docker",)
+    base = Path(args.base) if args.base else Path(tempfile.gettempdir())
+
+    if args.control:
+        ok = demo.run_control(image=args.image or demo.DEFAULT_IMAGE, docker_bin=docker_bin, base=base, timeout=args.timeout)
+        if ok:
+            print("skillc: --control - every seeded failure was caught")
+            return 0
+        print("skillc: --control - at least one seeded failure was NOT caught", file=sys.stderr)
+        return 1
+
+    result = demo.run_demo(image=args.image or demo.DEFAULT_IMAGE, docker_bin=docker_bin, base=base, timeout=args.timeout)
+    try:
+        demo.print_paste_back(result.paste_back)
+    except demo.PasteBackRefused as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+    return 0 if result.ok else 1
+
+
 def cmd_rules(args: argparse.Namespace) -> int:
     width = max(len(rule.id) for rule in checks.ALL_RULES)
     for rule in checks.ALL_RULES:
@@ -801,6 +838,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_exp.add_argument("--keep", action="store_true", help="keep the disposable root")
     p_exp.add_argument("--timeout", type=float, default=120, help="per client call, seconds")
     p_exp.set_defaults(func=cmd_exposure)
+
+    p_demo = sub.add_parser(
+        "demo",
+        help="the operator demo: a real Docker trial lifecycle, end to end (#10 closes on this run)",
+    )
+    p_demo.add_argument("--image", help="trial image (default: skillc.demo.DEFAULT_IMAGE)")
+    p_demo.add_argument("--docker-bin", help="docker executable (repeatable words, space-separated; default: docker)")
+    p_demo.add_argument("--base", help="where the disposable root is created (default: TMPDIR)")
+    p_demo.add_argument("--timeout", type=float, default=30, help="per-container-call timeout, seconds")
+    p_demo.add_argument(
+        "--control", action="store_true",
+        help="run the seeded negative controls instead - exits non-zero unless every one was caught",
+    )
+    p_demo.set_defaults(func=cmd_demo)
 
     p_rules = sub.add_parser("rules", help="list the rules")
     p_rules.set_defaults(func=cmd_rules)

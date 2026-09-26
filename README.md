@@ -62,6 +62,7 @@ skillc materialize <subject>   # install a declared skill surface and prove what
 skillc exposure <surface>      # measure what actually reaches the model, per client, no model call
 skillc rules                   # what it checks, and at what severity
 skillc leak-check <path>       # refuse a tree or bundle carrying a machine identity
+skillc demo                    # the operator demo: a real Docker trial lifecycle, end to end (#10 closes on this run)
 ```
 <!-- commands:end -->
 

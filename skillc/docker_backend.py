@@ -496,8 +496,8 @@ class DockerBackend:
                  "SIGTERM-then-SIGKILL escalation only bounds when the whole attempt stops, "
                  "not whether the subject itself got a chance to flush anything"),
                 ("dependency resolution inside the container - install() copies in any "
-                 "declared surface entry naming an existing host path; it does not run a "
-                 "package manager or resolve a dependency closure"),
+                 "declared surface entry naming an existing host path or carrying raw "
+                 "bytes; it does not run a package manager or resolve a dependency closure"),
                 ("baseline_absence - always reported SATISFIED without checking the "
                  "image's own contents for an undeclared skill already present, matching "
                  "the reference FakeBackend's own scope (tests/test_lifecycle.py)"),
@@ -559,16 +559,27 @@ class DockerBackend:
         return _Handle(attempt_id=attempt_id, name=name, env=env)
 
     def install(self, handle: object, surface: Mapping[str, object]) -> dict[str, object]:
-        """Step 4: copy every declared surface entry that names an existing
-        host path into the running container, plant the liveness canary
-        (`lifecycle.CANARY_NONCE_KEY`) the same way when present, and report
-        readiness evidence. Raises `BackendUnavailable` if a declared copy
-        fails - a materialization failure makes this attempt's backend
-        unusable, exactly like an unreachable daemon.
+        """Step 4: copy every declared surface entry into the running
+        container - a host path (`str`/`Path`, materialize.py's own
+        skill-installation convention) or raw `bytes` (verify.py's own
+        probe-surface convention, #76: `_probe_via_backend`'s `{relative
+        path: bytes}` shape, discovered NOT to work at all against this
+        backend until #81's demo command actually exercised the combination
+        - every file silently failed to install, since `_as_existing_path`
+        correctly returns `None` for bytes and the pre-fix loop just skipped
+        it, no error, no readiness signal) - plants the liveness canary
+        (`lifecycle.CANARY_NONCE_KEY`) the same way when present, and
+        reports readiness evidence. Raises `BackendUnavailable` if a
+        declared copy fails - a materialization failure makes this
+        attempt's backend unusable, exactly like an unreachable daemon.
+        Any OTHER value type (for example verify.py's own
+        `SURFACE_EXECUTABLE_KEY` metadata list) is silently not copied, same
+        as always - it is still counted in `declared`, just not installed.
 
-        Copied as a TAR STREAM this method builds itself (`_owned_tar`), piped
-        into `docker cp - NAME:DEST`, never a plain `docker cp HOST_PATH
-        NAME:DEST` (cross-model review, PR #85): a real `docker cp` preserves
+        Copied as a TAR STREAM this method builds itself (`_owned_tar`/
+        `_owned_tar_bytes`), piped into `docker cp - NAME:DEST`, never a
+        plain `docker cp HOST_PATH NAME:DEST` (cross-model review, PR #85):
+        a real `docker cp` preserves
         the SOURCE's own uid/gid in the copied tar, which is whatever the
         CONTROLLER's host process happens to own - not `CANDIDATE_UID`. A
         mode-0600 declared file, or a mode-0700 declared directory, would
@@ -582,10 +593,22 @@ class DockerBackend:
 
         installed = 0
         for key, value in declared.items():
-            host_path = _as_existing_path(value)
-            if host_path is None:
-                continue
-            payload = _owned_tar(host_path, key)
+            if isinstance(value, bytes):
+                # Raw in-memory content, no host file backing it - the
+                # convention `verify.py`'s own probe surface uses (#76,
+                # #81's demo command: grading through this same backend
+                # seam silently installed NOTHING before this fix, since
+                # every declared file there is bytes, never a host path -
+                # `_as_existing_path` correctly returned None for all of
+                # them, and the pre-fix loop just skipped them without
+                # error, so the probe failed with "no such file" the first
+                # time this combination was actually exercised).
+                payload = _owned_tar_bytes(key, value)
+            else:
+                host_path = _as_existing_path(value)
+                if host_path is None:
+                    continue
+                payload = _owned_tar(host_path, key)
             try:
                 copied = subprocess.run(
                     [*self.docker_bin, "cp", "-", f"{handle.name}:{CONTAINER_WORKSPACE}"],
@@ -766,10 +789,21 @@ class DockerBackend:
             proc = subprocess.Popen(
                 exec_argv, env=handle.env,
                 stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             )
         except OSError as exc:
             return ExecuteResult(reason="launch-failed", exit_code=None, error=str(exc))
+
+        stdout_chunks: list[bytes] = []
+        assert proc.stdout is not None
+        stdout_pipe = proc.stdout
+
+        def _drain_stdout() -> None:
+            while chunk := stdout_pipe.read(65536):
+                stdout_chunks.append(chunk)
+
+        stdout_thread = threading.Thread(target=_drain_stdout, daemon=True)
+        stdout_thread.start()
 
         stderr_chunks: list[bytes] = []
         assert proc.stderr is not None
@@ -818,12 +852,37 @@ class DockerBackend:
             proc.wait()
             self._kill_container(handle, "KILL")
 
+        stdout_thread.join(timeout=limits.grace + self.daemon_timeout)
         stderr_thread.join(timeout=limits.grace + self.daemon_timeout)
+        stdout = b"".join(stdout_chunks)
         stderr = b"".join(stderr_chunks)
         code = proc.returncode
         error = None
         if reason == "exited" and code not in (0, None) and stderr:
             error = stderr.decode("utf-8", errors="replace").strip() or None
+
+        # The exec'd process's stdout is written back into the container at
+        # `<workspace>/observations` (`verify.py`'s own documented
+        # convention, #76: "a probe-serving backend is expected to capture
+        # the started process's stdout to a file named `observations` at its
+        # workspace root") - discovered NOT to happen at all until #81's
+        # demo command actually exercised grading through this backend: the
+        # exec'd process's own stdout was thrown away (`DEVNULL`), so a
+        # probe that reports its verdict on stdout (skillc's own probe
+        # convention) always looked like it "produced no report", whatever
+        # it actually printed. Best-effort: a failure to write this file is
+        # not fatal to execute() itself, matching the canary plant's own
+        # best-effort discipline in install().
+        try:
+            payload = _owned_tar_bytes("observations", stdout)
+            subprocess.run(
+                [*self.docker_bin, "cp", "-", f"{handle.name}:{CONTAINER_WORKSPACE}"],
+                input=payload, capture_output=True, env=handle.env, check=False,
+                timeout=self.daemon_timeout,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
         return ExecuteResult(reason=reason, exit_code=code, error=error, signal=signal_name)
 
     def _kill_container(self, handle: _Handle, sig: str) -> None:

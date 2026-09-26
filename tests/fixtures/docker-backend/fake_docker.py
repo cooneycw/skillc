@@ -61,6 +61,13 @@ not a docker clone:
         status flip would leave a real timed-out subject running forever
         while the backend believed it had stopped. `-i` passes this fake's
         own stdin through to ARGV, exactly as a real `docker exec -i` would.
+        Any ARGV element that is `/work` or starts with `/work/` is rewritten
+        to NAME's fsroot equivalent before launching (`_remap_absolute`) -
+        `cwd=` alone resolves a RELATIVE path but does nothing for an
+        absolute one, and #81's own demo command passes absolute paths
+        (`verify.py`'s own probe invocation convention) that failed against
+        this fake before that rewrite existed, even though the file
+        genuinely existed in the simulated container filesystem.
         Exits with ARGV's own exit code, or 127 if ARGV's own binary cannot
         be found (docker's own convention for that case).
     kill [--signal SIG] NAME
@@ -359,6 +366,24 @@ def cmd_kill(state_dir: Path, rest: list[str]) -> int:
     return 0
 
 
+def _remap_absolute(state_dir: Path, name: str, value: str) -> str:
+    """A real `docker exec` resolves an absolute argv path inside the
+    container's OWN filesystem; this fake has no real chroot, only a `cwd=`
+    change for the subprocess it launches, which resolves RELATIVE paths but
+    does nothing for an absolute one. An argv element under the fixed
+    workspace prefix (`/work`, `/work/...`) is rewritten to this container's
+    fsroot equivalent - found by #81's own demo command, whose probe
+    invocation (`verify.py`'s own convention) passes an absolute path
+    (`/work/probe.py`) that failed with "No such file or directory" against
+    the pre-fix fake, even though the file genuinely existed in the
+    container's simulated filesystem - `cwd=` alone never helped it."""
+    if value == WORK_CONTAINER_PATH:
+        return str(_in_container(state_dir, name, WORK_CONTAINER_PATH))
+    if value.startswith(WORK_CONTAINER_PATH + "/"):
+        return str(_in_container(state_dir, name, WORK_CONTAINER_PATH) / value[len(WORK_CONTAINER_PATH) + 1:])
+    return value
+
+
 def cmd_exec(state_dir: Path, rest: list[str]) -> int:
     i = 0
     interactive = False
@@ -380,7 +405,7 @@ def cmd_exec(state_dir: Path, rest: list[str]) -> int:
         print("fake_docker: exec requires NAME ARGV...", file=sys.stderr)
         return 2
     name = rest[i]
-    argv = rest[i + 1:]
+    argv = [_remap_absolute(state_dir, name, a) for a in rest[i + 1:]]
     path = _state_file(state_dir, name)
     if not path.is_file():
         print("Error: No such container: " + name, file=sys.stderr)
