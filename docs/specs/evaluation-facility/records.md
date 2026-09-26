@@ -19,10 +19,12 @@ executable form** so that something can refuse a malformed instance:
 | Artifact and observation bundle | `kind: artifact-manifest` | `controller` |
 | Verified result | `kind: verified-result` | `assembler` (the controller's result assembler) |
 | Trial ledger (lifecycle, termination, cleanup) | `kind: attempt-lifecycle` | `controller` |
+| Evidence report (#12's own acceptance, not one of interfaces.md's original four) | `kind: pilot-report` | `assembler` |
 
-`attempt-lifecycle` was added to version 2 by #8. It is **additive**: no existing
-record changes meaning, and no v2 bundle existed outside the committed controls
-when it was added. The one stricter rule is `attempt-accounting`, below.
+`attempt-lifecycle` was added to version 2 by #8, and `pilot-report` by #12. Both
+are **additive**: no existing record changes meaning, and no v2 bundle existed
+outside the committed controls when either was added. The one stricter rule is
+`attempt-accounting`, below.
 
 A record that passes validation is **well formed and internally consistent**, and a
 bundle that passes is **consistent with its own ledger**. Neither is true because of
@@ -55,7 +57,7 @@ Every record is a JSON object carrying:
 | Field | Meaning |
 |---|---|
 | `version` | integer `2`. See "Versions" below. |
-| `kind` | one of the five kinds above. |
+| `kind` | one of the kinds above. |
 | `producer` | the role that produced it. Exactly one role is authorized per kind. |
 | `attempt_id`, `trial_id` | on the four attempt-bound kinds. The ledger issues them; it carries neither. |
 | `raw` | optional: `{ref, digest}` pointing at the backend's original record. |
@@ -322,6 +324,68 @@ Optional criteria never enter this computation. **No mandatory criteria yields
 `INCONCLUSIVE`, never `PASS`.** The other three statuses may not be declared as a
 run state, or the forged verdict would simply move from `status` into `run_state`.
 
+## `pilot-report`
+
+Additive in version 2 (#12). Produced by the assembler after a completed
+pilot: issue #12's own acceptance list ("Report every scheduled attempt by
+protocol disposition, per-criterion success, uncertainty, claim accuracy,
+intervention counts, time and observed cost with missing values explicit")
+had no home in the schema until this - the per-attempt records above each
+carry one attempt's own account, and nothing aggregated them into the
+evidence report a completed pilot's acceptance actually requires.
+
+| Field | Content |
+|---|---|
+| `experiment_id` | the experiment this report covers |
+| `attempts` | one entry per attempt the report covers, never empty |
+
+Each `attempts` entry:
+
+| Field | Content |
+|---|---|
+| `attempt_id`, `trial_id` | which attempt, and under which trial |
+| `disposition` | the same vocabulary `attempt-lifecycle` uses (`captured`/`not-run`/`unavailable`/`inconclusive`) |
+| `criteria` | `{id, outcome}` pairs, `outcome` from the same `SATISFIED`/`VIOLATED`/`UNKNOWN` vocabulary `verified-result` uses |
+| `uncertainty` | a non-empty string, explicit even when there is none to report (e.g. `"none"`) - silence is not the same fact as "nothing uncertain" |
+| `interventions` | a non-negative integer count |
+| `cost_usd`, `time_seconds` | each an object with EXACTLY `setup`, `agent`, `grading`, `total` - #12's own "separate setup/agent/grading cost and time" |
+
+**Missing values are explicit, never a silently absent key.** Each of
+`cost_usd`/`time_seconds`'s four keys must be present; its VALUE is either a
+non-negative number or the literal string `"UNKNOWN"` - the same spelling
+`skill-invocations` already established for the same reason (silence is not
+absence). When every one of the four is a real number, `setup + agent +
+grading` must equal `total`; an "UNKNOWN" anywhere makes the sum
+unverifiable, not wrong, so the check is skipped rather than guessed at.
+
+**Completeness against the ledger is a bundle fact, not a record one**
+(`ledger_binding`, #12's own control): a report that omits an attempt the
+ledger scheduled, or names one it never planned, is refused. `pilot_report`
+(this record's own rule) checks only each entry's shape - exactly the same
+division `observation_coverage`/`ledger_binding` already draw for
+`skill-invocations`.
+
+**What this does NOT establish (found by cross-model review, #12): the
+completeness check is ATTENDANCE only, by attempt_id, not agreement.** A
+report entry naming a scheduled `attempt_id` satisfies it whatever
+`disposition`, `trial_id` or `criteria` that entry declares - it does not
+cross-check the entry's `disposition` against the attempt's own
+`attempt-lifecycle` record, or its `trial_id` against the ledger's plan, the
+way `ledger_binding`'s per-attempt-bound-record loop already does for
+receipts and results. A pilot report could legitimately declare `captured`
+for an attempt its own lifecycle record says was `not-run`, and this rule
+would not catch it. Narrowing that gap is a further, separate control, not
+delivered here - #12's own acceptance names only "reject a report missing a
+scheduled attempt", which this rule answers exactly.
+
+**What this does not deliver.** No code here produces a report from a real
+run - that needs a live attempt loop, which does not exist yet (#10's Docker
+backend implementation lifecycle bodies exist since #85, but no controller
+drives a real experiment through them end to end). This is the SCHEMA a
+future report must satisfy, proven against synthetic fixtures
+(`controls/pilot-report/`, `controls/ledger-binding/*/pilot-report-*`), not
+a generator.
+
 ## Producers and authority
 
 `producer-authority` refuses a record whose declared producer is not the one role
@@ -431,7 +495,8 @@ bundle cases as well, including against every record rule.
 | `derived-status` | record | a status copied rather than derived |
 | `verdict-tiers` | record | a `verification.verdicts` entry for a tier absent from `verification.tiers_enabled`; an enabled tier with no entry at all; an `UNAVAILABLE` verdict with no stated reason (#69) |
 | `attempt-lifecycle` | record | an unknown stop reason or disposition; a non-result without a reason; captured before a confirmed stop; no cleanup |
-| `ledger-binding` | bundle | cross-trial receipt; stale receipt; attempt the ledger never issued; altered artifact; unplanned grader; a `skill-invocations` path the attempt's receipt never installed (#39); a trial declaring `case.observes_selection: true` whose manifest has no `skill-invocations` stream (#26/#39) |
+| `pilot-report` | record | empty attempts list; bad disposition or criterion outcome; no uncertainty; a negative intervention count; a cost/time split missing a key or whose parts do not sum to its total; a duplicate attempt ID (#12) |
+| `ledger-binding` | bundle | cross-trial receipt; stale receipt; attempt the ledger never issued; altered artifact; unplanned grader; a `skill-invocations` path the attempt's receipt never installed (#39); a trial declaring `case.observes_selection: true` whose manifest has no `skill-invocations` stream (#26/#39); a `pilot-report` that omits a scheduled attempt or names one the ledger never planned (#12) |
 | `unique-ids` | bundle | duplicate attempt ID; conflicting receipts; duplicate result ID |
 | `attempt-accounting` | bundle | planned attempt with no lifecycle; captured with no result; graded without receipt; graded without manifest; captured but declared NOT_RUN; graded but not captured; manifest but not captured |
 | `lineage` | bundle | retry reusing its own ID; regrade whose original was erased; regrade of different bytes |

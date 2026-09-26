@@ -1,0 +1,20 @@
+{
+ "version": 2,
+ "kind": "pilot-report",
+ "producer": "assembler",
+ "experiment_id": "exp-1",
+ "attempts": [
+  {
+   "attempt_id": "att-1",
+   "trial_id": "t-1",
+   "disposition": "captured",
+   "criteria": [
+    {"id": "R1", "outcome": "SATISFIED"}
+   ],
+   "uncertainty": "none",
+   "interventions": 0,
+   "cost_usd": {"setup": 0.01, "agent": 0.15, "grading": 0.02, "total": 99.0},
+   "time_seconds": {"setup": 5, "agent": 120, "grading": 10, "total": 135}
+  }
+ ]
+}

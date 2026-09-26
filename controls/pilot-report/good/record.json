@@ -1,0 +1,31 @@
+{
+ "version": 2,
+ "kind": "pilot-report",
+ "producer": "assembler",
+ "experiment_id": "exp-1",
+ "attempts": [
+  {
+   "attempt_id": "att-1",
+   "trial_id": "t-1",
+   "disposition": "captured",
+   "criteria": [
+    {"id": "R1", "outcome": "SATISFIED"},
+    {"id": "R2", "outcome": "SATISFIED"}
+   ],
+   "uncertainty": "none",
+   "interventions": 0,
+   "cost_usd": {"setup": 0.01, "agent": 0.15, "grading": 0.02, "total": 0.18},
+   "time_seconds": {"setup": 5, "agent": 120, "grading": 10, "total": 135}
+  },
+  {
+   "attempt_id": "att-2",
+   "trial_id": "t-1",
+   "disposition": "unavailable",
+   "criteria": [],
+   "uncertainty": "backend was unreachable for this attempt",
+   "interventions": 1,
+   "cost_usd": {"setup": 0.0, "agent": "UNKNOWN", "grading": "UNKNOWN", "total": "UNKNOWN"},
+   "time_seconds": {"setup": 3, "agent": "UNKNOWN", "grading": "UNKNOWN", "total": "UNKNOWN"}
+  }
+ ]
+}

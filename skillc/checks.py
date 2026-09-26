@@ -375,6 +375,8 @@ RECORD_RULES: tuple[RecordRule, ...] = (
                records.verdict_tiers),
     RecordRule("attempt-lifecycle", ERROR, "controller accounts for how an attempt ended and why",
                records.attempt_lifecycle),
+    RecordRule("pilot-report", ERROR, "report gives every attempt a disposition, criteria, uncertainty and a cost/time split",
+               records.pilot_report),
 )
 
 

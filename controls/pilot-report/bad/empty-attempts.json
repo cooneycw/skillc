@@ -1,0 +1,7 @@
+{
+ "version": 2,
+ "kind": "pilot-report",
+ "producer": "assembler",
+ "experiment_id": "exp-1",
+ "attempts": []
+}
