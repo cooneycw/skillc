@@ -5,6 +5,12 @@ The current roadmap is [PLAN.md](../PLAN.md), with the
 [interface contracts](../docs/specs/evaluation-facility/interfaces.md) and
 [evaluation protocol](../docs/specs/evaluation-facility/protocol.md).
 
+## Tasks
+
+| Task | Level | Status |
+|---|---|---|
+| [slug small-fix](level1/slug-small-fix/README.md) | 1 - Basic execution | Grader certified by `qualify.py` against a fixture, reference, alternatives, wrong outputs and broken-grader controls (#5); no model trial run |
+
 No behavioral runner is implemented here yet. The former example plugin command
 and YAML were unverified research, not an executable contract. Backend selection
 now requires a conformance investigation, starting with the pinned Coder Eval
