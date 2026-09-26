@@ -66,6 +66,16 @@ answers plausibly without touching the planted canary
 the addendum's own extended negative control: it defeats the content-diff
 fallback (new prose IS a content change) but not the nonce canary.
 
+WHICH METHOD PROVED IT, NEVER LEFT IMPLICIT. A capture that passed through
+the weaker content-diff fallback is otherwise indistinguishable, in the
+journal and in this driver's return value, from one the nonce canary proved -
+yet the `reply-only` control above exists precisely because the fallback is
+defeatable. So every attempt that reaches execution records
+`liveness_method` (`"canary"` or `"content-diff"`) on the `stopped` journal
+event and in the returned record, whether or not it goes on to capture, so a
+grader or reader can see which guarantee actually applied rather than assume
+the stronger one.
+
 STRUCTURALLY UNABLE TO LAUNCH A REAL AGENT (addendum item 51). Every call
 into a backend's `execute()` passes first through `_refuse_real_agent`, which
 raises `RealAgentBlocked` when `claude` or `codex` appears ANYWHERE in argv -
@@ -248,13 +258,14 @@ def run_through_backend(
         handle = backend.prepare(attempt_id)
     except BackendUnavailable as exc:
         record = trial.finalize(experiment, attempt_id, disposition="unavailable", reason=str(exc))
-        return {**record, "backend_teardown": None, "readiness": None, "signal": None}
+        return {**record, "backend_teardown": None, "readiness": None, "signal": None, "liveness_method": None}
 
     workspace = trial.allocate_workspace(experiment, attempt_id, base, forbidden or [])
     nonce = secrets.token_hex(16)
     readiness: dict[str, object] | None = None
     result: object = None
     unavailable_reason: str | None = None
+    liveness_method: str | None = None
 
     try:
         try:
@@ -267,6 +278,13 @@ def run_through_backend(
             unavailable_reason = str(exc)
         else:
             canary_path = readiness.get("canary_path") if isinstance(readiness, dict) else None
+            # Recorded whichever path is taken (orchestrator review, msg
+            # 1331): a capture that passed the weaker content-diff fallback
+            # is otherwise indistinguishable in the journal from one proven
+            # by the nonce canary, and the reply-only control shows the
+            # fallback alone is defeatable. A reader must be able to see
+            # which guarantee this attempt actually got.
+            liveness_method = "canary" if canary_path else "content-diff"
             try:
                 before = None if canary_path else _snapshot_via_export(backend, handle, base)
             except OSError:
@@ -289,6 +307,7 @@ def run_through_backend(
             confirmed = stop_confirmation is Confirmation.CONFIRMED
             stop: dict[str, object] = {
                 "reason": result.reason, "confirmed": confirmed, "exit_code": result.exit_code,
+                "liveness_method": liveness_method,
             }
             if result.error is not None:
                 stop["error"] = result.error
@@ -337,6 +356,12 @@ def run_through_backend(
         # is never left guessing a cause from a bare negative exit code (addendum
         # item 12: "exit 137 is SIGKILL, not OOM").
         "signal": result.signal if isinstance(result, ExecuteResult) else None,
+        # Which liveness proof this attempt used - "canary" (the nonce
+        # convention) or "content-diff" (the weaker fallback) - so a grader
+        # or reader can see when only the weaker guarantee applied. None when
+        # the attempt never reached execution at all (orchestrator review,
+        # msg 1331).
+        "liveness_method": liveness_method,
     }
 
 

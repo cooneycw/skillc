@@ -227,9 +227,20 @@ def _argv(mode: str) -> list[str]:
 
 
 def _stop(record: dict[str, object]) -> dict[str, object]:
+    """`record["stop"]` (trial.finalize's own field), filtered to
+    `{reason, confirmed, exit_code}` by trial.py's fixed tuple - fields this
+    driver adds, like `signal` or `liveness_method`, never survive it."""
     stop = record["stop"]
     assert isinstance(stop, dict)
     return stop
+
+
+def _journaled_stopped_event(experiment: t.Experiment, attempt_id: str) -> dict[str, object]:
+    """The RAW `stopped` journal event, unfiltered - where `signal` and
+    `liveness_method` actually live once written (see `_stop` above)."""
+    stopped = [e for e in experiment.events(attempt_id) if e.get("event") == "stopped"]
+    assert stopped
+    return stopped[-1]
 
 
 def test_success_is_captured_and_teardown_confirmed(store: Path, base: Path) -> None:
@@ -241,6 +252,22 @@ def test_success_is_captured_and_teardown_confirmed(store: Path, base: Path) -> 
     assert record["disposition"] == "captured"
     assert record["backend_teardown"] == "confirmed"
     assert attempt_id in backend.destroyed
+    assert record["liveness_method"] == "canary"
+    assert _journaled_stopped_event(experiment, attempt_id)["liveness_method"] == "canary"
+
+
+def test_liveness_method_is_recorded_on_the_content_diff_path_too(store: Path, base: Path) -> None:
+    """Orchestrator review (msg 1331): a capture that passed the weaker
+    content-diff fallback must not be indistinguishable, in the record, from
+    one the nonce canary proved."""
+    experiment, attempt_id = _planned(store)
+    backend = FakeBackend(base, supports_canary=False)
+    record = lifecycle.run_through_backend(
+        backend, experiment, attempt_id, _argv("work"), {"skill": "x"}, Limits(timeout=5), base,
+    )
+    assert record["disposition"] == "captured"
+    assert record["liveness_method"] == "content-diff"
+    assert _journaled_stopped_event(experiment, attempt_id)["liveness_method"] == "content-diff"
 
 
 def test_semantic_failure_still_captures_a_nonzero_exit(store: Path, base: Path) -> None:
