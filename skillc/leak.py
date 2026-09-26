@@ -59,6 +59,9 @@ ALLOWLIST: frozenset[str] = frozenset({
     # non-host identity for an execution backend (docs/specs/evaluation-
     # facility/interfaces.md, skillc/backend.py, #10/#65) - a logical
     # placeholder documented as the SAFE pattern to use, not a real one.
+    "/home/some-claude-shaped-account",  # a deliberately fake, documented
+    # placeholder in tests/test_lifecycle.py's own docstring ("the account
+    # name here is a placeholder, not this host's"), not a real identity.
 })
 
 #: `--denylist`, then this environment variable, then nothing (#63). Real host

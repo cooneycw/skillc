@@ -168,6 +168,7 @@ def test_each_class_fires_on_its_own_minimal_input(line: str, kind: str) -> None
         "~/.local/bin is on PATH",
         "edit .claude/settings.local.json before committing",
         "fixed logical paths (e.g. /work, /home/candidate)",
+        'account_flavoured_path = "/home/some-claude-shaped-account/.venv/bin/python3"',
     ],
 )
 def test_each_non_leak_stays_silent(line: str) -> None:
