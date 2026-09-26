@@ -208,6 +208,36 @@ def test_check_exposure_refuses_the_whole_run_on_a_marker_collision(
 # --------------------------------------------------------------- end to end
 
 
+def test_policy_control_same_skill_with_and_without_the_flag(tmp_path: Path) -> None:
+    """The acceptance's own policy control, literally: ONE skill, run twice
+    - once with `agents/openai.yaml`'s `policy.allow_implicit_invocation:
+    false` present, once without - must give `HIDDEN` and `EXPOSED`
+    respectively, reproducing the #11 table (not two different skills that
+    merely happen to differ, as the general happy-path test below uses)."""
+    collection = _snapshot(tmp_path)
+    openai_yaml = collection / "greet" / "agents" / "openai.yaml"
+    surface = _surface(select=["greet"])
+    client = _fake(tmp_path)
+
+    if openai_yaml.exists():
+        openai_yaml.unlink()
+    without_policy = x.check_exposure(
+        surface, base=tmp_path / "base-without", snapshot=collection, client=client,
+        client_name="codex", timeout=10,
+    )
+    assert without_policy.skills == [{"skill": "greet", "verdict": x.EXPOSED, "cause": None}]
+
+    openai_yaml.parent.mkdir(parents=True, exist_ok=True)
+    openai_yaml.write_text("policy:\n  allow_implicit_invocation: false\n", encoding="utf-8")
+    with_policy = x.check_exposure(
+        surface, base=tmp_path / "base-with", snapshot=collection, client=client,
+        client_name="codex", timeout=10,
+    )
+    assert with_policy.skills[0]["skill"] == "greet"
+    assert with_policy.skills[0]["verdict"] == x.HIDDEN
+    assert "policy" in str(with_policy.skills[0]["cause"])
+
+
 def test_check_exposure_happy_path_all_three_layers(tmp_path: Path) -> None:
     surface = _surface(
         always_loaded=[{"path": "AGENTS.md"}],
@@ -273,6 +303,23 @@ def test_check_exposure_blindness_reports_unmeasured_never_empty(tmp_path: Path)
     assert report.markers
     assert all(item["verdict"] == x.UNMEASURED for item in report.markers)
     assert report.skills
+    assert all(item["verdict"] == x.UNMEASURED for item in report.skills)
+
+
+def test_check_exposure_empty_output_reports_unmeasured_not_hidden(tmp_path: Path) -> None:
+    """Regression for a real gap this PR's own review caught: exit 0 with
+    empty stdout used to fall through to `status="ok"` with an empty
+    `raw_text`, which classified every marker HIDDEN (a real, wrong verdict)
+    rather than UNMEASURED (no render exists to judge). The acceptance
+    names this exact case: "a render that fails, or returns empty output,
+    gives UNMEASURED"."""
+    surface = _surface(always_loaded=[{"path": "AGENTS.md"}])
+    client = _fake(tmp_path, mode="empty")
+    report = x.check_exposure(
+        surface, base=tmp_path / "base", snapshot=_snapshot(tmp_path), client=client,
+        client_name="codex", timeout=10,
+    )
+    assert all(item["verdict"] == x.UNMEASURED for item in report.markers)
     assert all(item["verdict"] == x.UNMEASURED for item in report.skills)
 
 

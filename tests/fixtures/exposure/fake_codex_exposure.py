@@ -12,7 +12,9 @@ environment toggle would not reliably reach every subprocess this fixture's
 caller launches).
 
 Sidecar fields:
-  mode            "normal" (default) | "crash" | "hang"
+  mode            "normal" (default) | "crash" | "hang" | "empty" (exit 0,
+                  nothing on stdout - its own blind case, distinct from a
+                  crash)
   expose_paths    workspace-relative paths to read and wrap as a
                   `user`-role AGENTS.md-shaped message, in this order -
                   a path NOT listed here is never exposed at all, exactly
@@ -89,6 +91,10 @@ def main(argv: list[str]) -> int:
         return 3
     if mode == "hang":
         time.sleep(3600)
+    if mode == "empty":
+        # Exit 0, nothing on stdout - its own blind case, distinct from a
+        # crash: named explicitly by #55's acceptance criteria.
+        return 0
 
     codex_home = Path(os.environ["CODEX_HOME"])
     items: list[dict[str, object]] = []

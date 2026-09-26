@@ -33,10 +33,19 @@ keys, validated here, then hands the remaining keys to
    `agents/openai.yaml`'s `policy.allow_implicit_invocation: false`
    explains it (verified against codex-cli 0.157.1, 2026-09-26: a skill
    carrying that policy is absent from `debug prompt-input`'s listing
-   entirely). This is also where a "listing limit" - a manifest that
-   installs fewer skills than declared - is caught: a skill this module
-   never even attempted to install is reported `HIDDEN`, distinguishable in
-   the report from one that was installed but never rendered.
+   entirely).
+
+   NOT MODELED: a "listing limit" in the ADR's own sense - a manifest that
+   installs fewer skills than it DECLARES (25 of 38) - needs an independent
+   count of what was declared, separate from what `select`/`inventory()`
+   actually found; `materialize.Subject.from_dict` already refuses a
+   `select` naming an unknown skill before this module ever runs, so a
+   "declared but never attempted" entry cannot reach this classification
+   loop as currently wired (found while reviewing this module's own first
+   draft: the `entry is None` branch below is honest defensive code, but
+   unreachable given `select`'s existing validation, not a demonstrated
+   control). Comparing against a manifest's own independently-declared count
+   is real, scoped-out follow-up work, not claimed here.
 3. An index file with on-demand targets (`index`): the index file itself is
    checked the same way as an always-loaded file with no size limit
    (present or absent, no truncation claim); each declared `targets` entry
@@ -318,6 +327,12 @@ def render_codex(
         return Rendering("timeout", f"client did not finish within {timeout}s", "", materialize.Listing("timeout"))
     if code != 0:
         return Rendering("failed", f"client exited {code}: {err.strip()[:400]}", "", materialize.Listing("failed"))
+    if not out.strip():
+        # Exit 0 with empty output is its own blind case, named explicitly by
+        # the issue's own acceptance criteria - never let it fall through to
+        # "ok" with an empty raw_text, which would classify every marker
+        # HIDDEN (a real verdict) rather than UNMEASURED (no render to judge).
+        return Rendering("failed", "client returned empty output", "", materialize.Listing("failed"))
     listing = materialize.parse_listing(out, arm.directory)
     try:
         items = json.loads(out)
@@ -394,10 +409,22 @@ class ExposureReport:
     reason: str | None
     markers: list[dict[str, object]]
     skills: list[dict[str, object]]
+    #: The client version actually observed (`--version`), never merely the
+    #: subject's declared one - "unknown" when it could not be read (client
+    #: absent, or never invoked at all, as for `claude-code`). The
+    #: acceptance's own wording: "It records the client version and flags
+    #: in effect."
+    client_version: str = "unknown"
+    #: Config overrides in effect for this run (`-c key=value` pairs) -
+    #: empty by default; `check_exposure` has none to declare today, but the
+    #: field exists so a future caller passing them has somewhere honest to
+    #: record them, rather than silently dropping them from the evidence.
+    client_flags: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         return {
-            "kind": "exposure-report", "client": self.client, "status": self.status,
+            "kind": "exposure-report", "client": self.client, "client_version": self.client_version,
+            "client_flags": list(self.client_flags), "status": self.status,
             "reason": self.reason, "markers": self.markers, "skills": self.skills,
         }
 
@@ -445,6 +472,10 @@ def check_exposure(
 
         arm = materialize.prepare_arm(root, "exposure", None)
         materialize.install(arm, source, entries)
+        version = (
+            materialize.client_version(client, arm.home, arm.codex_home, arm.workspace)
+            if client_name == "codex" and client is not None else "unknown"
+        )
 
         markers: list[Marker] = []
         for always in surface.always_loaded:
@@ -464,7 +495,7 @@ def check_exposure(
         colliding = check_collisions(markers, ambient)
         if colliding:
             names = ", ".join(m.marker_id for m in colliding)
-            return ExposureReport(client_name, "refused", f"marker collision: {names}", [], [])
+            return ExposureReport(client_name, "refused", f"marker collision: {names}", [], [], client_version=version)
 
         selected = {e.name: e for e in entries}
         wanted = subject.select if subject.select is not None else tuple(selected)
@@ -478,7 +509,7 @@ def check_exposure(
             unmeasured_skills: list[dict[str, object]] = [
                 {"skill": name, "verdict": UNMEASURED, "cause": rendering.detail} for name in wanted
             ]
-            return ExposureReport(client_name, "ok", None, unmeasured_markers, unmeasured_skills)
+            return ExposureReport(client_name, "ok", None, unmeasured_markers, unmeasured_skills, client_version=version)
 
         marker_verdicts = [classify_marker(m, rendering.raw_text) for m in markers]
 
@@ -499,7 +530,7 @@ def check_exposure(
                 cause = _policy_hidden_cause(source.surface_dir / entry.directory)
                 skill_verdicts.append({"skill": name, "verdict": HIDDEN, "cause": cause})
 
-        return ExposureReport(client_name, "ok", None, marker_verdicts, skill_verdicts)
+        return ExposureReport(client_name, "ok", None, marker_verdicts, skill_verdicts, client_version=version)
     except Refused as exc:
         return ExposureReport(client_name, "refused", str(exc), [], [])
     finally:
