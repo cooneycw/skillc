@@ -1,0 +1,15 @@
+{
+  "_comment": "Single source of truth for the trial image's pinned CLI versions (issue #78). skillc/trial_bootstrap.py reads this file rather than carrying a second literal, mirroring the #73 rule for skillc's own version. Bump deliberately - never '@latest' - and record the date and who verified the version resolves on the registry.",
+  "claude_code": {
+    "package": "@anthropic-ai/claude-code",
+    "version": "2.1.283",
+    "pinned_on": "2026-09-26",
+    "verified": "resolved against registry.npmjs.org/@anthropic-ai/claude-code/2.1.283"
+  },
+  "codex": {
+    "package": "@openai/codex",
+    "version": "0.157.1",
+    "pinned_on": "2026-09-26",
+    "verified": "resolved against registry.npmjs.org/@openai/codex/0.157.1"
+  }
+}

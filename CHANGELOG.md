@@ -27,6 +27,29 @@ collection) closes.
   transcripts would otherwise carry a piece of the host's real identity.
   Every lifecycle method beyond `describe()` raises `NotImplementedError`
   pending #77's own follow-up implementation PR.
+- **Trial image and per-trial agent bootstrap** (#78, Refs #10):
+  `skillc/trial_bootstrap.py` composes a private per-trial home owned by a
+  fixed `candidate` (10001:10001) identity, an onboarding seed bound to
+  exactly one project and the exact CLI version about to launch, never
+  auto-answering anything outside the documented interactive gates, a
+  per-trial MCP config declared rather than inherited, a client-aware
+  invocation (`--name` only where the pinned CLI actually supports it,
+  never `--remote-control`, `GIT_TERMINAL_PROMPT=0` with no silent
+  override), and a liveness canary requiring the transcript to show both a
+  skill invocation and a tool use whose CONFIRMED output - never merely its
+  request - carries a per-attempt nonce. `docker/trial/Dockerfile` pins the
+  Claude Code and Codex CLI versions (`docker/trial/pinned-versions.json`,
+  checked against the Dockerfile by `docker/trial/check_pins.py`, which
+  derives each required pin from the manifest rather than a second
+  hand-maintained mapping), verifies `codex-code-mode-host` lands beside the
+  REAL native `codex` executable via Node's own module resolution
+  (`docker/trial/verify_codex_sidecar.js`) and that no `docker` binary is
+  reachable, and records a deliberate unsandboxed choice for Codex
+  (`BWRAP_DECISION`). A `/codex:code_review` pass found and this PR fixed
+  seven issues before push, several confirmed against the pinned CLIs'
+  actual packaging and source. Consumed by `skillc/docker_backend.py` (#77);
+  the image build itself and whether a real CLI starts un-wedged remain owed
+  to a live Docker run (see `docker/trial/README.md`).
 - **`skillc.verify` grades a probe through an `ExecutionBackend`, with a
   deterministic grading tier and a provenance stamp** (Refs #10): `grade()`/
   `grade_files()` accept an optional backend for stage 1 (the untrusted
