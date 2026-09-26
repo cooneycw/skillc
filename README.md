@@ -27,13 +27,14 @@ required. See [ADR 0005](docs/decisions/0005-runtime-scope-and-cost-rulings.md).
 
 **Status:** the static checker, native materialization (`skillc materialize`),
 the trial controller, the independent verifier, the execution-backend seam,
-its Docker-backed implementation, and the exposure check (`skillc exposure`,
-#55) all exist and are exercised by real evidence (see the machine-readable
-table below, checked in CI against [`docs/milestones.json`](docs/milestones.json),
-#73). **#10 is not closed**: every Docker-backend claim - the composed
-argv, resource limits, ownership labels, conformance cases, the failure-path
-matrix and label-scoped reaping - is proven here only against a fake
-`docker` CLI; the real daemon boundary remains owed to the operator's live
+and the exposure check (`skillc exposure`, #55) all exist and are exercised
+by real evidence (see the machine-readable table below, checked in CI
+against [`docs/milestones.json`](docs/milestones.json), #73). The
+Docker-backed implementation of that seam also exists, but **#10 is not
+closed**: every Docker-backend claim - the composed argv, resource limits,
+ownership labels, conformance cases, the failure-path matrix and
+label-scoped reaping - is proven here only against a fake `docker` CLI, not
+real evidence; the real daemon boundary remains owed to the operator's live
 run. See ["First milestone"](#first-milestone-the-docker-backend-is-built-and-tested-against-a-fake-daemon-the-live-run-and-level-2-remain-proposed)
 below for exactly what that does and does not establish. The task levels
 beyond Level 1 and the full behavioral comparisons described later in this
@@ -349,12 +350,16 @@ issue or merging a design document never authorizes a paid model call.
 every verified result carries `verification.tiers_enabled` and
 `verification.verdicts`, a collection keyed by tier name, plus a reserved
 `verification.disagreement` field (`{"available": false, "reason": "fewer
-than two judge tiers"}` until a second tier exists to compare against).
-Today exactly one tier is ever enabled - `deterministic` - so the shape is
-proven but the judges themselves are not: #10's grading-boundary work
-(`skillc/verify.py` grading through an `ExecutionBackend`) leaves the judge
-seam open, and tiers 2 and 3 are not built; that remains #69's own
-acceptance (in progress, #92).
+than two judge tiers"}` until a second tier exists to compare against). The
+judge seam itself now exists too (`skillc/judge.py`, #92): schema-constrained
+output validation, a per-tier `UNAVAILABLE` outcome when a judge cannot run,
+a pre-send machine-identity leak check (#63), and the disagreement record -
+but exercised only against a `FakeJudge`, never a real model. The
+`mcp-second-opinion` adapter that would route a real independent-judge call,
+and the cost wiring a paid judge call needs, are **not built**; no judge
+call has been made against any subject. Today exactly one tier is ever
+enabled - `deterministic` - so the shape is proven but no judge tier
+actually grades anything yet; that remains #69's own acceptance.
 
 ## Proposed evaluation levels
 
@@ -399,10 +404,14 @@ proved an independent grader with known-good/bad controls (#5, #9), and the
 defined. `skillc materialize` proves native installation against a real
 client for two independently structured collections (#7, #11 - the second
 needing no adapter change), and `skillc exposure` (#55) measures what
-actually reaches the model per client - a memory index truncated well below
-its claimed size, a policy-hidden skill, a frontmatter field one client
-ignores - with no model call, a check the static checker and materialization
-together cannot reach on their own.
+actually reaches the model per client with no model call - distinguishing
+`EXPOSED`, `TRUNCATED`, `HIDDEN` and `UNMEASURED` per declared item, a check
+the static checker and materialization together cannot reach on their own.
+Real evidence against a synthetic truncation-exercising surface already
+shows the check catching a genuine surprise, not merely a planted one: a
+declared index file predicted `EXPOSED` came back `HIDDEN`
+(`evals/subjects/exposure-synthetic/evidence/report.json`) - exactly the
+kind of author/client disagreement no file check can see.
 
 The `ExecutionBackend` protocol (#10's seam, #65), a lifecycle driver that
 exercises the full prepare/install/execute/confirm/export/destroy/finalize
@@ -430,16 +439,21 @@ table near the top of this README, which stays `open` until then.
 
 The verified-result record now carries per-tier verdicts as a keyed
 collection (#69/#88) - `verification.verdicts`, one entry per enabled
-grading tier, never averaged or overridden - but only the deterministic
-tier is built; the same-model and independent-judge tiers (#69's own target
-architecture, below) are not. The trial ledger's case format gained an
-optional `case.observes_selection` declaration and a pre-spend cost
-projection (#26/#39, #86), and a matched-pilot experiment record and
-evidence-report schema for comparing a second collection against a prior
-revision exist (#12, #89) - still no paid trial has been run against
-either. Expanding to Level 2 and beyond, and running any paid trial or judge
-tier, remain proposed work: no model call has been made against any subject
-yet, and none is authorized by anything in this repository (#12).
+grading tier, never averaged or overridden. The judge seam itself now
+exists too (#69/#92): schema-constrained judge output, a per-tier
+`UNAVAILABLE` outcome, a pre-send leak check, and the disagreement record -
+but exercised only against a `FakeJudge`; the `mcp-second-opinion` adapter
+and the cost wiring a real judge call needs are not built, and no judge
+call has been made. The trial ledger's case format gained an optional
+`case.observes_selection` declaration and a pre-spend cost projection
+(#26/#39, #86), and a matched-pilot experiment record and evidence-report
+schema exist (#12, #89) - prepared for a treatment-vs-baseline comparison
+(the whole CPP pack installed vs. an identical disposable home with nothing
+installed, on the same Level 1 task, 3 repeats across 2 arms), not yet a
+second-collection comparison - still no paid trial has been run. Expanding
+to Level 2 and beyond, and running any paid trial or judge call, remain
+proposed work: no model call has been made against any subject yet, and
+none is authorized by anything in this repository (#12).
 
 The [implementation plan](PLAN.md) sequences delivery against the specification;
 the [review agenda](docs/specs/evaluation-facility/review.md) identifies open choices. No
