@@ -38,8 +38,8 @@ qualify = _load("qualify")
 grade_slug = _load("grade_slug")
 
 
-def _outcomes(candidate: Path) -> dict[str, str]:
-    result = grade_slug.grade(candidate)
+def _outcomes(candidate: Path, timeout: float = 10) -> dict[str, str]:
+    result = grade_slug.grade(candidate, timeout)
     return {c["id"]: c["outcome"] for c in result["criteria"]}
 
 
@@ -58,13 +58,36 @@ def test_the_grader_is_certified() -> None:
     by_name = {r.candidate: r.status for r in rows}
     assert by_name["fixture"] == "FAIL"
     assert by_name["reference"] == "PASS"
-    assert len(rows) >= 2 + 2 + 5
+    assert len(rows) >= 2 + 2 + 6
 
 
-@pytest.mark.parametrize("control", qualify.CONTROLS)
-def test_every_broken_grader_is_refused(control: str) -> None:
-    certified, _ = qualify.certify(TASK / "grader-controls" / f"{control}.py")
-    assert not certified
+@pytest.mark.parametrize("control", sorted(qualify.CONTROLS))
+def test_every_broken_grader_is_refused_for_the_reason_its_name_gives(control: str) -> None:
+    held, reason, _ = qualify.control_verdict(control)
+    assert held, reason
+
+
+def _copy_task(tmp_path: Path) -> Path:
+    root = tmp_path / "task"
+    shutil.copytree(TASK, root, ignore=shutil.ignore_patterns("__pycache__"))
+    return root
+
+
+def test_a_missing_control_does_not_count_as_refused(tmp_path: Path) -> None:
+    root = _copy_task(tmp_path)
+    (root / "grader-controls" / "always_pass.py").unlink()
+    held, reason, _ = qualify.control_verdict("always_pass", root)
+    assert not held and "does not exist" in reason
+
+
+def test_a_control_that_misbehaves_does_not_count_as_refused(tmp_path: Path) -> None:
+    # A "no output" control that actually crashes is still refused by certify(),
+    # so refusal alone cannot tell it from a working control.
+    root = _copy_task(tmp_path)
+    shutil.copy2(root / "grader-controls" / "always_fail.py",
+                 root / "grader-controls" / "no_output.py")
+    held, reason, _ = qualify.control_verdict("no_output", root)
+    assert not held and "not INCONCLUSIVE throughout" in reason
 
 
 @pytest.mark.parametrize("control", ["crash", "no_output"])
@@ -86,7 +109,8 @@ def test_reported_example_only_fixes_pass_the_example_and_fail_held_out() -> Non
 def test_a_missing_function_is_a_candidate_violation_not_unknown() -> None:
     outcomes = _outcomes(TASK / "wrong" / "renamed")
     assert outcomes["R4-interface"] == "VIOLATED"
-    certified_status, _ = qualify.status_of(TASK / "grade_slug.py", TASK / "wrong" / "renamed")
+    certified_status, _, _ = qualify.status_of(
+        TASK / "grade_slug.py", TASK / "wrong" / "renamed")
     assert certified_status == "FAIL"
 
 
@@ -99,18 +123,12 @@ def test_a_raising_or_hanging_candidate_is_a_violation(tmp_path: Path) -> None:
         src = tmp_path / name / "src"
         src.mkdir(parents=True)
         (src / "slugify.py").write_text(body, encoding="utf-8")
-        if name == "hangs":
-            grade_slug.TIMEOUT_SECONDS = 2
-        try:
-            outcomes = _outcomes(tmp_path / name)
-        finally:
-            grade_slug.TIMEOUT_SECONDS = 10
+        outcomes = _outcomes(tmp_path / name, timeout=2)
         assert outcomes["R4-interface"] == "VIOLATED", name
 
 
 def test_a_mutated_reference_turns_the_gate_red(tmp_path: Path) -> None:
-    root = tmp_path / "task"
-    shutil.copytree(TASK, root, ignore=shutil.ignore_patterns("__pycache__"))
+    root = _copy_task(tmp_path)
     reference = root / "reference" / "src" / "slugify.py"
     text = reference.read_text(encoding="utf-8")
     assert text.count('.strip("-")') == 1
@@ -121,12 +139,58 @@ def test_a_mutated_reference_turns_the_gate_red(tmp_path: Path) -> None:
 
 
 def test_an_empty_candidate_population_refuses(tmp_path: Path) -> None:
-    root = tmp_path / "task"
-    shutil.copytree(TASK, root, ignore=shutil.ignore_patterns("__pycache__"))
+    root = _copy_task(tmp_path)
     shutil.rmtree(root / "wrong")
     (root / "wrong").mkdir()
     with pytest.raises(SystemExit):
         qualify.certify(root / "grade_slug.py", root)
+
+
+def test_a_deleted_wrong_source_is_not_read_as_discrimination(tmp_path: Path) -> None:
+    # Without the source it would FAIL on R4-interface, which looks like a catch.
+    root = _copy_task(tmp_path)
+    (root / "wrong" / "no-collapse" / "src" / "slugify.py").unlink()
+    with pytest.raises(SystemExit, match="no src/slugify.py"):
+        qualify.certify(root / "grade_slug.py", root)
+
+
+def test_a_fail_for_the_wrong_reason_does_not_certify(tmp_path: Path) -> None:
+    root = _copy_task(tmp_path)
+    (root / "wrong" / "no-collapse" / "expected.json").write_text(
+        '{"status": "FAIL", "violated": ["R4-interface"]}', encoding="utf-8")
+    certified, rows = qualify.certify(root / "grade_slug.py", root)
+    assert not certified
+    bad = [r for r in rows if not r.ok]
+    assert [(r.candidate, r.status) for r in bad] == [("wrong/no-collapse", "FAIL")]
+
+
+def test_a_single_defect_violates_only_its_own_rule() -> None:
+    for name, rule in [("no-lowercase", "R1"), ("no-collapse", "R2"),
+                       ("trailing-only", "R3"), ("example-only", "R3")]:
+        outcomes = _outcomes(TASK / "wrong" / name)
+        held_out_violations = {r for r in grade_slug.RULES if outcomes[r] == "VIOLATED"}
+        assert held_out_violations == {rule}, name
+
+
+def test_a_third_party_import_violates_the_stdlib_constraint() -> None:
+    import pytest as installed  # the dependency is present in this environment
+    assert installed
+    assert _outcomes(TASK / "wrong" / "third-party")["R4-interface"] == "VIOLATED"
+
+
+def test_a_rule_with_no_held_out_cases_is_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+    kept = tuple(c for c in grade_slug.HELD_OUT if c[0] != "R1")
+    monkeypatch.setattr(grade_slug, "HELD_OUT", kept)
+    outcomes = _outcomes(TASK / "reference")
+    assert outcomes["R1"] == "UNKNOWN"
+    status, _, _ = qualify.status_of(TASK / "grade_slug.py", TASK / "reference")
+    assert status == "PASS"  # the subprocess grader is unaffected by the patch
+
+
+def test_a_report_missing_a_required_criterion_is_inconclusive() -> None:
+    status, detail, _ = qualify.status_of(
+        TASK / "grader-controls" / "omits_criterion.py", TASK / "reference")
+    assert status == "INCONCLUSIVE" and "missing ['R1', 'R2']" in detail
 
 
 def test_held_out_inputs_are_not_published_in_the_goal() -> None:

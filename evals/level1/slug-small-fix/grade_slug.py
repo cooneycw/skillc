@@ -29,18 +29,22 @@ TIMEOUT_SECONDS = 10
 REPORTED_EXAMPLE = ("Hello, World!", "hello-world")
 
 #: Held-out variations. Each exercises exactly one requirement goal.md states, so
-#: none introduces a secret requirement. Non-ASCII input is deliberately absent:
-#: see README.md, "Deliberately unprobed".
+#: none introduces a secret requirement, and each is chosen so the OTHER rules hold
+#: trivially: R1 inputs have no separator run and no boundary separator, R2 and R3
+#: inputs are already lowercase, R2 inputs have no boundary separator. A candidate
+#: with one defect therefore violates exactly that rule's criterion. Non-ASCII
+#: input is deliberately absent: see README.md, "Deliberately unprobed".
 HELD_OUT: tuple[tuple[str, str, str], ...] = (
-    ("R1", "MiXeD Case", "mixed-case"),
+    ("R1", "MiXeD", "mixed"),
     ("R1", "ABC123", "abc123"),
-    ("R2", "A  B", "a-b"),
+    ("R1", "Title-Case", "title-case"),
+    ("R2", "a  b", "a-b"),
     ("R2", "one -- two", "one-two"),
     ("R2", "already-clean", "already-clean"),
     ("R2", "tabs\tand\nnewlines", "tabs-and-newlines"),
     ("R2", "x_y.z", "x-y-z"),
-    ("R3", "!Hi there", "hi-there"),
-    ("R3", "...Edge cases...", "edge-cases"),
+    ("R3", "!hi there", "hi-there"),
+    ("R3", "...edge cases...", "edge-cases"),
     ("R3", "-leading", "leading"),
     ("R3", "trailing-", "trailing"),
     ("R3", "!!!", ""),
@@ -81,19 +85,23 @@ report.write(json.dumps({"outputs": outputs}))
 """
 
 
-def run_candidate(candidate: Path, inputs: list[str]) -> dict[str, object]:
+def run_candidate(
+    candidate: Path, inputs: list[str], timeout: float = TIMEOUT_SECONDS,
+) -> dict[str, object]:
     """What the candidate's slugify returned for each input, or why it could not say."""
     src = candidate / "src"
     if not (src / "slugify.py").is_file():
         return {"import_error": f"{src / 'slugify.py'} does not exist"}
     try:
         proc = subprocess.run(
-            [sys.executable, "-I", "-B", "-c", CHILD, str(src)],
+            # -S: no site-packages, so R4's "standard library only" is enforced
+            # by the run itself rather than inferred from a returned string.
+            [sys.executable, "-I", "-S", "-B", "-c", CHILD, str(src)],
             input=json.dumps(inputs), capture_output=True, text=True,
-            timeout=TIMEOUT_SECONDS,
+            timeout=timeout, check=False,
         )
     except subprocess.TimeoutExpired:
-        return {"import_error": f"candidate did not finish within {TIMEOUT_SECONDS}s"}
+        return {"import_error": f"candidate did not finish within {timeout}s"}
     try:
         data = json.loads(proc.stdout)
     except json.JSONDecodeError:
@@ -127,9 +135,9 @@ def _criterion(cid: str, failures: list[str], passed_note: str) -> dict[str, obj
     return {"id": cid, "mandatory": True, "outcome": "SATISFIED", "evidence": [passed_note]}
 
 
-def grade(candidate: Path) -> dict[str, object]:
+def grade(candidate: Path, timeout: float = TIMEOUT_SECONDS) -> dict[str, object]:
     cases = [REPORTED_EXAMPLE] + [(text, want) for _, text, want in HELD_OUT]
-    data = run_candidate(candidate, [text for text, _ in cases])
+    data = run_candidate(candidate, [text for text, _ in cases], timeout)
 
     if "import_error" in data:
         reason = str(data["import_error"])
@@ -151,7 +159,8 @@ def grade(candidate: Path) -> dict[str, object]:
     ]
     criteria = [
         _criterion("R4-interface", broken,
-                   f"slugify returned a str for all {len(cases)} inputs"),
+                   f"imported with site-packages disabled; slugify returned a str "
+                   f"for all {len(cases)} inputs"),
         _criterion("reported-example", _judge([REPORTED_EXAMPLE], outputs[:1]),
                    f"slugify({REPORTED_EXAMPLE[0]!r}) == {REPORTED_EXAMPLE[1]!r}"),
     ]
@@ -161,6 +170,11 @@ def grade(candidate: Path) -> dict[str, object]:
             ((text, want), out)
             for (r, text, want), out in zip(HELD_OUT, held, strict=True) if r == rule
         ]
+        if not picked:
+            # An unexamined requirement is unknown, never satisfied.
+            criteria.append({"id": rule, "mandatory": True, "outcome": "UNKNOWN",
+                             "missing": f"no held-out cases exercise {rule}"})
+            continue
         criteria.append(_criterion(
             rule, _judge([c for c, _ in picked], [o for _, o in picked]),
             f"{len(picked)} held-out {rule} cases matched",

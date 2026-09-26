@@ -13,7 +13,8 @@ CPP, or any scaffold, is better.
 | `reference/` | A correct outcome |
 | `alternatives/*/` | Other correct implementations; each must PASS |
 | `wrong/*/` | Plausible wrong outputs; each must FAIL |
-| `grader-controls/` | Broken graders: always-pass, always-fail, crash, no-output |
+| `*/expected.json` | Each candidate's required status and the exact criteria it must violate |
+| `grader-controls/` | Broken graders: always-pass, always-fail, crash, no-output, omits-criterion |
 | `qualify.py` | Certification gate over all of the above |
 
 ```bash
@@ -31,9 +32,18 @@ turns those into a protocol status with skillc's own `records.derive_status`, so
 this task uses the same verified-result rules as every other result.
 
 - **Development example.** `goal.md` publishes only `"Hello, World!"`.
-- **Held-out variations.** `grade_slug.HELD_OUT` lists 13 inputs, each tagged
+- **Held-out variations.** `grade_slug.HELD_OUT` lists 14 inputs, each tagged
   with the one requirement it tests. None appears in `goal.md`, and none tests
   anything `goal.md` does not state. The test suite checks both properties.
+  Each input is chosen so the other rules hold trivially: R1 inputs have no
+  separator runs or boundary separators, and R2 and R3 inputs are already
+  lowercase. A one-defect candidate therefore violates only its own rule, and
+  `expected.json` pins that attribution. A rule with no held-out cases reports
+  UNKNOWN, not SATISFIED.
+- **Standard library only.** The candidate runs with `python -I -S`, which
+  disables site-packages. A dependency import therefore fails and violates
+  R4. `wrong/third-party` imports `pytest`, which skillc's dev environment
+  does have installed, so this check is not vacuous here.
 - **Alternatives pass.** The grader compares only returned values. A regex,
   character loop or `findall` join all pass. The interface is checked by
   behaviour (a callable `slugify` returning `str`), not by source shape.
@@ -50,11 +60,23 @@ this task uses the same verified-result rules as every other result.
 | `reference/`, `alternatives/*` | PASS | PASS |
 | `wrong/example-only` (special-cases the reported example) | FAIL | FAIL (`R3`) |
 | `wrong/trailing-only` (`rstrip("-")`, passes the reported example) | FAIL | FAIL (`R3`) |
-| `wrong/no-collapse`, `wrong/no-lowercase`, `wrong/renamed` | FAIL | FAIL |
-| `always_pass` grader | refused | refused: fixture and wrong outputs PASS |
-| `always_fail` grader | refused | refused: reference and alternatives FAIL |
-| `crash` grader | refused, INCONCLUSIVE | refused, every candidate INCONCLUSIVE |
-| `no_output` grader | refused, INCONCLUSIVE | refused, every candidate INCONCLUSIVE |
+| `wrong/no-collapse` | FAIL | FAIL (`reported-example`, `R2`) |
+| `wrong/no-lowercase` | FAIL | FAIL (`reported-example`, `R1`) |
+| `wrong/renamed`, `wrong/third-party` | FAIL | FAIL (`R4-interface`) |
+| `always_pass` grader | refused, PASS throughout | refused: fixture and wrong outputs PASS |
+| `always_fail` grader | refused, FAIL throughout | refused: reference and alternatives FAIL |
+| `crash` grader | refused, INCONCLUSIVE throughout | refused, every candidate INCONCLUSIVE |
+| `no_output` grader | refused, INCONCLUSIVE throughout | refused, every candidate INCONCLUSIVE |
+| `omits_criterion` grader (drops R1, R2) | refused, INCONCLUSIVE throughout | refused: the report lacks required criteria |
+
+The gate refuses outright in these cases:
+- a candidate is missing `src/slugify.py` or `expected.json`;
+- an expectation contradicts where the candidate is placed;
+- the candidate population is empty.
+
+A broken-grader control only counts if its file exists, it is refused, and it
+produces the status its name promises on every candidate. A missing or
+misbehaving control therefore fails `qualify.py`.
 
 `wrong/example-only` and `wrong/trailing-only` are the reported-example-only
 fixes. Both satisfy the one example the task names and fail only on held-out
