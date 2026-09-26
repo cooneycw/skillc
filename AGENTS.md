@@ -41,9 +41,15 @@ specification rejects, and it proves its own rules can fail before reporting the
 - `docker/trial/` - the pinned trial image (`Dockerfile`, `pinned-versions.json`,
   `check_pins.py`) that `skillc/trial_bootstrap.py`'s composed home/seed/invocation runs
   inside
+- `skillc/cost_estimate.py` - pre-spend cost projection and the spend gate (`authorize`):
+  ADR 0005's cost stop, made structural rather than a convention (#26)
 - `skillc/cli.py` - `check`, `check-records`, `selftest`, `rules`, `materialize`
 - `controls/<rule-id>/{bad,good}/` - the committed redcases
 - `evals/` - behavioural evals; see `evals/README.md`
+- `evals/selection-probe/` - three predeclared cases probing native skill selection
+  (#26): case identities and allowed choices published before any attempt runs,
+  planned through the real controller, and a cost-estimate run manifest computed
+  and asserted equal to the code that produces it - no live attempt has run
 - `evals/level1/<task>/` - a goal-based task: pinned fixture, public `goal.md`, a grader
   (`grader.json`: probe, inputs, judge), reference/alternative/wrong candidates and a
   `qualify.py` gate that must refuse broken graders

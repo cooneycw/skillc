@@ -17,6 +17,12 @@ The current roadmap is [PLAN.md](../PLAN.md), with the
 |---|---|---|
 | [CPP native Codex skills](subjects/cpp-codex/SUBJECT.md) | 74 `codex/skills/` directories at a pinned revision | Materialized by `skillc materialize` with every readiness fact SATISFIED through codex-cli 0.157.1 (#7); invocation and task outcome not observed |
 
+## Probes
+
+| Probe | Status |
+|---|---|
+| [Selection probe](selection-probe/README.md) | Three predeclared cases plan through the real controller and a cost estimate is committed (#26); no live attempt has run - `run-manifest.json`'s `execution` stays `"incomplete"` pending an approved budget (ADR 0005) |
+
 No behavioral runner is implemented here yet. The former example plugin command
 and YAML were unverified research, not an executable contract. skillc depends on
 no external evaluation runtime ([ADR 0003](../docs/decisions/0003-no-external-evaluation-runtime.md));

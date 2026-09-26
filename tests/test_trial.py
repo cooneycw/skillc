@@ -157,6 +157,13 @@ def test_the_resolved_configuration_is_stored_and_bound_by_digest(store: Path) -
                                          "grader": {"id": "g", "revision": "1", "digest": 7}}]}, "no digest"),
     ({"experiment": "pilot", "trials": [{**_spec()["trials"][0],  # type: ignore[index]
                                          "subject": {"digest": "sha256:5a", "revision": "x"}}]}, "unknown fields"),
+    # The case's observes_selection pin (#26) is optional, but present must be a real bool.
+    ({"experiment": "pilot", "trials": [{**_spec()["trials"][0],  # type: ignore[index]
+                                         "case": {"id": "c", "revision": "1", "observes_selection": "true"}}]},
+     "must be a boolean"),
+    ({"experiment": "pilot", "trials": [{**_spec()["trials"][0],  # type: ignore[index]
+                                         "case": {"id": "c", "revision": "1", "observes_selection": 1}}]},
+     "must be a boolean"),
 ])
 def test_a_loose_plan_is_refused(store: Path, spec: dict[str, object], why: str) -> None:
     with pytest.raises(t.Refused, match=why):
@@ -168,6 +175,22 @@ def test_a_grader_pin_is_kept_in_the_ledger(store: Path) -> None:
     experiment = t.plan(_spec(grader=pinned), store)
     [(trial, _attempt)] = list(experiment.attempts())
     assert trial["grader"] == pinned
+
+
+def test_an_observes_selection_pin_is_kept_in_the_ledger(store: Path) -> None:
+    case = {"id": "selection-probe", "revision": "c1", "observes_selection": True}
+    experiment = t.plan(_spec(case=case), store)
+    [(trial, _attempt)] = list(experiment.attempts())
+    assert trial["case"] == case
+
+
+def test_observes_selection_absent_is_not_defaulted_to_false(store: Path) -> None:
+    """Not declared and declared false are kept the same thing (#26): the
+    ledger's case identity carries no such key at all when the plan never
+    mentions it, rather than a silently-inserted `False`."""
+    experiment = t.plan(_spec(), store)
+    [(trial, _attempt)] = list(experiment.attempts())
+    assert "observes_selection" not in trial["case"]  # type: ignore[operator]
 
 
 def test_the_store_is_refused_inside_a_git_work_tree(tmp_path: Path) -> None:

@@ -1,0 +1,56 @@
+{
+  "cases_schema": 1,
+  "subject": "cpp-codex",
+  "subject_revision": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b",
+  "client": {"name": "codex", "version": "0.157.1"},
+  "base_task": {
+    "goal": "evals/level1/slug-small-fix/goal.md",
+    "grader": "evals/level1/slug-small-fix/grader.json"
+  },
+  "_comment": "Three predeclared cases (#26): every case grades the SAME already-qualified slug-small-fix task (#5) independently of selection - the cases differ only in a prompt addendum and in which CPP skill(s), if any, are genuinely applicable. Allowed choices are published here, before any attempt runs, per #26's own requirement.",
+  "cases": [
+    {
+      "id": "selection-probe-intended-use",
+      "revision": "c1",
+      "observes_selection": true,
+      "kind": "intended-use",
+      "description": "A skill is genuinely, unambiguously applicable: the prompt asks the agent to run this project's own test suite before finishing, and 'qa-test' exists to do exactly that.",
+      "prompt_addendum": "Before finishing, run this project's own test suite if one exists, using whatever tool you have for that, and report the result.",
+      "applicable_skills": ["qa-test"],
+      "allowed_choices": [
+        "invoke qa-test",
+        "run the tests directly (e.g. a shell command) without invoking qa-test - a correct result without invoking the skill can still be valid"
+      ],
+      "disallowed": "invoking a skill unrelated to running tests"
+    },
+    {
+      "id": "selection-probe-near-miss",
+      "revision": "c1",
+      "observes_selection": true,
+      "kind": "near-miss",
+      "description": "The bare slug-fix task, verbatim, with no addendum. No CPP skill is applicable to it at all - this case's own value is in what a FALSE selection would show.",
+      "prompt_addendum": "",
+      "applicable_skills": [],
+      "allowed_choices": [
+        "invoke no skill at all"
+      ],
+      "disallowed": "invoking any skill - a selection here is the false positive this case exists to detect"
+    },
+    {
+      "id": "selection-probe-overlapping-choice",
+      "revision": "c1",
+      "observes_selection": true,
+      "kind": "overlapping-choice",
+      "description": "Two skills plausibly overlap: the prompt asks the agent to check whether its change introduces a security issue, and both 'security-scan' and 'security-deep' exist to do checks of that kind, at different depths.",
+      "prompt_addendum": "Before finishing, check whether your change introduces any security issue.",
+      "applicable_skills": ["security-scan", "security-deep"],
+      "allowed_choices": [
+        "invoke security-scan",
+        "invoke security-deep",
+        "invoke both",
+        "invoke neither, if the agent's own reasoning concludes the change is too trivial to need one - a correct result without unnecessary invocation can be valid"
+      ],
+      "disallowed": "invoking a skill outside this pair that is not a security check"
+    }
+  ]
+}
