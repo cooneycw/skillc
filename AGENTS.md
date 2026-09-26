@@ -73,3 +73,16 @@ bash ci/install-hooks.sh
 It scans the commits a push would send and refuses on a finding, or when
 gitleaks is missing. It installs into `.git/hooks` beside the existing hooks;
 do not set `core.hooksPath`, which would switch those off.
+
+`ci/clean-install-check.sh` builds a wheel and installs it into a fresh, clean
+`uv venv` to prove the checker's own installation (#27): `skillc selftest`
+correctly refuses without its packaged redcases (`controls/` is fixture data
+and is not shipped), correctly certifies when a fresh copy of them is
+supplied, and `skillc check` still matches the source checkout's own verdict
+on a known-bad/known-good pair after packaging. Retains a build/install
+identity record (wheel digest, versions, source commit - logical values only,
+issue #63) and carries its own committed negative control
+(`CLEAN_INSTALL_CONTROL=neuter-installed-rule` or `=delete-scratch-controls`).
+Not wired into Woodpecker - the build+venv round trip is slower than the four
+gates above, and #27's own scope excludes CI expansion - so run it by hand:
+`bash ci/clean-install-check.sh`. Details: [docs/findings.md](docs/findings.md).

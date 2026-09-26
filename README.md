@@ -192,6 +192,20 @@ uv run skillc selftest
 The last one is deliberate. A scan that found nothing to scan must not report
 the same thing as a scan that found nothing wrong.
 
+## Machine-readable findings, and installing the packaged checker
+
+`skillc check --json` prints one stable-schema JSON document instead of the
+human report, for a script to consume without parsing terminal prose - keyed
+on the rule's stable id, never on its prose `detail`. `scripts/repair_hint.py`
+is the smallest useful consumer: it reads the JSON and prints one line of
+repair guidance per finding. `ci/clean-install-check.sh` proves the packaged
+checker, installed from a built wheel into a clean environment, still
+discriminates good from bad, refuses to run `selftest` without its own
+committed redcases (fixture data, not shipped) and correctly certifies when a
+fresh copy of them is supplied. Retains a build/install identity record and
+carries its own committed negative control. Details, schema and limits:
+[docs/findings.md](docs/findings.md).
+
 ## Adding a rule
 
 A rule is three things: a function, a known-bad fixture, and a known-good one.
