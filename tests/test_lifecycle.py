@@ -114,7 +114,7 @@ class FakeBackend:
 
     def execute(
         self, handle: object, argv: Sequence[str], limits: Limits,
-        cancel: Callable[[], bool] | None = None,
+        cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,
     ) -> ExecuteResult:
         assert isinstance(handle, _Handle)
         if self._raise_in_execute:

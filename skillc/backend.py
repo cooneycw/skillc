@@ -199,12 +199,24 @@ class ExecutionBackend(Protocol):
 
     def execute(
         self, handle: object, argv: Sequence[str], limits: Limits,
-        cancel: Callable[[], bool] | None = None,
+        cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,
     ) -> ExecuteResult:
         """Step 5: start the subject's real argv INSIDE the backend and wait,
         subject to `limits.timeout` and `cancel`. The agent under test starts
         inside the isolation - never on the host with the backend only
-        watching it."""
+        watching it.
+
+        `stdin`, when not None, is written to the started process's standard
+        input and then closed - the same delivery `subprocess.Popen.communicate`
+        gives a bare host process. Added for #10 PR2 (issue #10, mailbox
+        coordination): a grading probe's held-out inputs are delivered this
+        way today (`skillc/verify.py`'s bare-subprocess path already does,
+        via `proc.communicate`), and `lifecycle.py`'s docstring had already
+        named this exact gap as expected future work before PR2 hit it - an
+        agent's own argv/prompt delivery does not need this, which is why no
+        existing caller passes it and every existing call keeps working
+        unchanged (default `None`). A backend that cannot honour `stdin` must
+        say so through `describe()`'s `unobserved`, never silently drop it."""
         ...
 
     def confirm_stopped(self, handle: object) -> Confirmation:
