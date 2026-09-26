@@ -432,6 +432,10 @@ def artifact_digest(record: Record) -> Iterator[str]:
         for required in ("path", "type", "size", "digest"):
             if required not in entry:
                 yield f"artifact {entry.get('path', index)!r} has no {required}"
+        if "digest" in entry and not _nonempty_str(entry["digest"]):
+            # `null` is not a content identity, and must not become the string
+            # "None" that a result could then cite in agreement.
+            yield f"artifact {entry.get('path', index)!r} has digest {entry['digest']!r}"
 
 
 def observation_coverage(record: Record) -> Iterator[str]:
@@ -589,7 +593,8 @@ def ledger_binding(bundle: Bundle) -> Iterator[str]:
     for manifest in bundle.of_kind(ARTIFACT_MANIFEST):
         artifacts = manifest.data.get("artifacts")
         digests = {
-            str(a.get("digest")) for a in artifacts or [] if isinstance(a, dict)
+            a["digest"] for a in artifacts or []
+            if isinstance(a, dict) and _nonempty_str(a.get("digest"))
         } if isinstance(artifacts, list) else set()
         captured.setdefault(manifest.attempt_id, set()).update(digests)
 
@@ -667,6 +672,16 @@ def unique_ids(bundle: Bundle) -> Iterator[str]:
         for attempt, count in sorted(per_attempt.items()):
             if count > 1:
                 yield f"{count} conflicting {kind} records for attempt {attempt!r}"
+    originals = Counter(
+        r.attempt_id for r in bundle.of_kind(VERIFIED_RESULT)
+        if r.attempt_id and "regrade_of" not in r.data
+    )
+    for attempt, count in sorted(originals.items()):
+        if count > 1:
+            yield (
+                f"{count} original results for attempt {attempt!r}; a further result "
+                f"is a regrade and says so, or it is a conflicting verdict"
+            )
     result_ids = Counter(
         r.data.get("result_id") for r in bundle.of_kind(VERIFIED_RESULT)
         if isinstance(r.data.get("result_id"), str)
@@ -687,7 +702,10 @@ def attempt_accounting(bundle: Bundle) -> Iterator[str]:
     """
     ledgers = bundle.of_kind(TRIAL_LEDGER)
     if len(ledgers) != 1:
-        return  # ledger-binding reports this
+        # Not silent: under `--rule attempt-accounting` ledger-binding does not
+        # run, and an empty return would read as a fully accounted population.
+        yield f"cannot account: the bundle holds {len(ledgers)} trial ledgers, not one"
+        return
     results: dict[str, list[Record]] = {}
     for result in bundle.of_kind(VERIFIED_RESULT):
         results.setdefault(result.attempt_id, []).append(result)

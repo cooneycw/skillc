@@ -537,3 +537,18 @@ def test_a_blank_evidence_reference_is_no_evidence() -> None:
         {"id": "c1", "mandatory": True, "outcome": "SATISFIED", "evidence": [""]}]})
     assert list(records.result_evidence(rec))
     assert list(records.result_evidence(_record(**{**GOOD_RESULT, "graded_digests": [" "]})))
+
+
+def test_a_null_digest_cannot_agree_with_the_string_None(tmp_path: Path) -> None:
+    manifest = {**GOOD_MANIFEST, "artifacts": [
+        {"path": "out.txt", "type": "file", "size": 12, "digest": None}]}
+    result = {**GOOD_RESULT, "graded_digests": ["None"]}
+    bundle = _write_bundle(tmp_path, GOOD_LEDGER, GOOD_RECEIPT, manifest, result)
+    assert list(records.ledger_binding(bundle)), "coercion manufactured digest agreement"
+    assert list(records.artifact_digest(records.load(bundle.path / "r2.json")))
+
+
+def test_accounting_under_two_ledgers_says_it_could_not_run(tmp_path: Path) -> None:
+    bundle = _write_bundle(tmp_path, GOOD_LEDGER, GOOD_LEDGER)
+    rc = cli.cmd_check_records(argparse.Namespace(path=str(tmp_path), rule="attempt-accounting"))
+    assert list(records.attempt_accounting(bundle)) and rc == 1
