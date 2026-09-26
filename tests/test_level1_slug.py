@@ -87,7 +87,26 @@ def test_a_control_that_misbehaves_does_not_count_as_refused(tmp_path: Path) -> 
     shutil.copy2(root / "grader-controls" / "always_fail.py",
                  root / "grader-controls" / "no_output.py")
     held, reason, _ = qualify.control_verdict("no_output", root)
-    assert not held and "not INCONCLUSIVE throughout" in reason
+    assert not held and "not ('INCONCLUSIVE', 'no-output') throughout" in reason
+
+
+def test_controls_sharing_a_status_cannot_stand_in_for_each_other(tmp_path: Path) -> None:
+    # crash and no_output both yield INCONCLUSIVE; only the category separates them.
+    root = _copy_task(tmp_path)
+    shutil.copy2(root / "grader-controls" / "crash.py",
+                 root / "grader-controls" / "no_output.py")
+    held, _, _ = qualify.control_verdict("no_output", root)
+    assert not held
+
+
+def test_a_malformed_criterion_id_is_inconclusive_not_a_crash(tmp_path: Path) -> None:
+    grader = tmp_path / "bad_ids.py"
+    grader.write_text(
+        "import json\nprint(json.dumps({'grader': {'id': 'g', 'revision': '1'},"
+        " 'criteria': [{'id': [], 'mandatory': True, 'outcome': 'SATISFIED',"
+        " 'evidence': ['x']}]}))\n", encoding="utf-8")
+    status, _, _, category = qualify.status_of(grader, TASK / "reference")
+    assert (status, category) == ("INCONCLUSIVE", "criteria-set")
 
 
 @pytest.mark.parametrize("control", ["crash", "no_output"])
@@ -109,7 +128,7 @@ def test_reported_example_only_fixes_pass_the_example_and_fail_held_out() -> Non
 def test_a_missing_function_is_a_candidate_violation_not_unknown() -> None:
     outcomes = _outcomes(TASK / "wrong" / "renamed")
     assert outcomes["R4-interface"] == "VIOLATED"
-    certified_status, _, _ = qualify.status_of(
+    certified_status, _, _, _ = qualify.status_of(
         TASK / "grade_slug.py", TASK / "wrong" / "renamed")
     assert certified_status == "FAIL"
 
@@ -165,7 +184,7 @@ def test_a_fail_for_the_wrong_reason_does_not_certify(tmp_path: Path) -> None:
 
 
 def test_a_single_defect_violates_only_its_own_rule() -> None:
-    for name, rule in [("no-lowercase", "R1"), ("no-collapse", "R2"),
+    for name, rule in [("no-lowercase", "R1"), ("no-collapse", "R2"), ("keeps-spaces", "R2"),
                        ("trailing-only", "R3"), ("example-only", "R3")]:
         outcomes = _outcomes(TASK / "wrong" / name)
         held_out_violations = {r for r in grade_slug.RULES if outcomes[r] == "VIOLATED"}
@@ -183,12 +202,12 @@ def test_a_rule_with_no_held_out_cases_is_unknown(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(grade_slug, "HELD_OUT", kept)
     outcomes = _outcomes(TASK / "reference")
     assert outcomes["R1"] == "UNKNOWN"
-    status, _, _ = qualify.status_of(TASK / "grade_slug.py", TASK / "reference")
+    status, _, _, _ = qualify.status_of(TASK / "grade_slug.py", TASK / "reference")
     assert status == "PASS"  # the subprocess grader is unaffected by the patch
 
 
 def test_a_report_missing_a_required_criterion_is_inconclusive() -> None:
-    status, detail, _ = qualify.status_of(
+    status, detail, _, _ = qualify.status_of(
         TASK / "grader-controls" / "omits_criterion.py", TASK / "reference")
     assert status == "INCONCLUSIVE" and "missing ['R1', 'R2']" in detail
 

@@ -36,8 +36,8 @@ this task uses the same verified-result rules as every other result.
   with the one requirement it tests. None appears in `goal.md`, and none tests
   anything `goal.md` does not state. The test suite checks both properties.
   Each input is chosen so the other rules hold trivially: R1 inputs have no
-  separator runs or boundary separators, and R2 and R3 inputs are already
-  lowercase. A one-defect candidate therefore violates only its own rule, and
+  separator runs or boundary separators, R2 and R3 inputs are already
+  lowercase, and R3 inputs have no internal separator. A one-defect candidate therefore violates only its own rule, and
   `expected.json` pins that attribution. A rule with no held-out cases reports
   UNKNOWN, not SATISFIED.
 - **Standard library only.** The candidate runs with `python -I -S`, which
@@ -61,6 +61,7 @@ this task uses the same verified-result rules as every other result.
 | `wrong/example-only` (special-cases the reported example) | FAIL | FAIL (`R3`) |
 | `wrong/trailing-only` (`rstrip("-")`, passes the reported example) | FAIL | FAIL (`R3`) |
 | `wrong/no-collapse` | FAIL | FAIL (`reported-example`, `R2`) |
+| `wrong/keeps-spaces` (trims ends, keeps internal spaces) | FAIL | FAIL (`reported-example`, `R2`) |
 | `wrong/no-lowercase` | FAIL | FAIL (`reported-example`, `R1`) |
 | `wrong/renamed`, `wrong/third-party` | FAIL | FAIL (`R4-interface`) |
 | `always_pass` grader | refused, PASS throughout | refused: fixture and wrong outputs PASS |
@@ -75,8 +76,11 @@ The gate refuses outright in these cases:
 - the candidate population is empty.
 
 A broken-grader control only counts if its file exists, it is refused, and it
-produces the status its name promises on every candidate. A missing or
-misbehaving control therefore fails `qualify.py`.
+produces the status and failure path its name promises on every candidate. The
+failure path is one of: non-zero exit, empty output, or missing criteria.
+`crash` and `no_output` both give INCONCLUSIVE, so the path is what stops one
+from standing in for the other. A missing or misbehaving control therefore
+fails `qualify.py`.
 
 `wrong/example-only` and `wrong/trailing-only` are the reported-example-only
 fixes. Both satisfy the one example the task names and fail only on held-out

@@ -31,7 +31,8 @@ REPORTED_EXAMPLE = ("Hello, World!", "hello-world")
 #: Held-out variations. Each exercises exactly one requirement goal.md states, so
 #: none introduces a secret requirement, and each is chosen so the OTHER rules hold
 #: trivially: R1 inputs have no separator run and no boundary separator, R2 and R3
-#: inputs are already lowercase, R2 inputs have no boundary separator. A candidate
+#: inputs are already lowercase, R2 inputs have no boundary separator, and R3
+#: inputs have no internal separator at all. A candidate
 #: with one defect therefore violates exactly that rule's criterion. Non-ASCII
 #: input is deliberately absent: see README.md, "Deliberately unprobed".
 HELD_OUT: tuple[tuple[str, str, str], ...] = (
@@ -43,8 +44,8 @@ HELD_OUT: tuple[tuple[str, str, str], ...] = (
     ("R2", "already-clean", "already-clean"),
     ("R2", "tabs\tand\nnewlines", "tabs-and-newlines"),
     ("R2", "x_y.z", "x-y-z"),
-    ("R3", "!hi there", "hi-there"),
-    ("R3", "...edge cases...", "edge-cases"),
+    ("R3", "!hi", "hi"),
+    ("R3", "...edge...", "edge"),
     ("R3", "-leading", "leading"),
     ("R3", "trailing-", "trailing"),
     ("R3", "!!!", ""),

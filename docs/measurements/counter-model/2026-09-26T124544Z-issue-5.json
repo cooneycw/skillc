@@ -1,0 +1,20 @@
+{
+  "branch": "issue-5-establish-the-first-level-1-goal-and-prove-its-gra",
+  "counts": {
+    "accepted": 9,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "a4d7712a7c02f5caf2b53db4767a21fb0b2db31f",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "5",
+  "passes": 2,
+  "recorded_at": "2026-09-26T12:45:44Z",
+  "red_cases": {
+    "already_covered": 11,
+    "proposed": 13
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "schema": 1,
+  "status": "ran"
+}

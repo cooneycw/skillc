@@ -47,14 +47,16 @@ NONE: frozenset[str] = frozenset()
 #: The criteria every report for this task must carry, each mandatory, once.
 REQUIRED_CRITERIA = ("R4-interface", "reported-example", "R1", "R2", "R3")
 
-#: Each broken grader and the status it must produce on EVERY candidate. A crash
-#: or an empty report is no verdict: INCONCLUSIVE, never FAIL.
+#: Each broken grader, the status it must produce on EVERY candidate, and the path
+#: that must produce it. A crash or an empty report is no verdict: INCONCLUSIVE,
+#: never FAIL. The category keeps controls that share a status from standing in
+#: for one another.
 CONTROLS = {
-    "always_pass": "PASS",
-    "always_fail": "FAIL",
-    "crash": "INCONCLUSIVE",
-    "no_output": "INCONCLUSIVE",
-    "omits_criterion": "INCONCLUSIVE",
+    "always_pass": ("PASS", "verdict"),
+    "always_fail": ("FAIL", "verdict"),
+    "crash": ("INCONCLUSIVE", "exit-nonzero"),
+    "no_output": ("INCONCLUSIVE", "no-output"),
+    "omits_criterion": ("INCONCLUSIVE", "criteria-set"),
 }
 
 
@@ -66,6 +68,7 @@ class Row:
     detail: str
     expected_violated: frozenset[str] = frozenset()
     violated: frozenset[str] = frozenset()
+    category: str = "verdict"
 
     @property
     def ok(self) -> bool:
@@ -83,8 +86,10 @@ def _criteria_problem(criteria: object) -> str | None:
     if not isinstance(criteria, list):
         return "no criteria list"
     ids = [c.get("id") for c in criteria if isinstance(c, dict)]
-    if len(ids) != len(criteria) or len(set(ids)) != len(ids):
-        return "criteria are not unique objects"
+    if len(ids) != len(criteria) or not all(isinstance(i, str) for i in ids):
+        return "a criterion is not an object with a string id"
+    if len(set(ids)) != len(ids):
+        return "criterion ids are not unique"
     if set(ids) != set(REQUIRED_CRITERIA):
         missing = sorted(set(REQUIRED_CRITERIA) - set(map(str, ids)))
         extra = sorted(set(map(str, ids)) - set(REQUIRED_CRITERIA))
@@ -94,26 +99,30 @@ def _criteria_problem(criteria: object) -> str | None:
     return None
 
 
-def status_of(grader: Path, candidate: Path) -> tuple[str, str, frozenset[str]]:
-    """(protocol status, detail, VIOLATED criterion ids) for one grader run."""
+def status_of(grader: Path, candidate: Path) -> tuple[str, str, frozenset[str], str]:
+    """(status, detail, VIOLATED criterion ids, category) for one grader run.
+
+    The category names WHICH path produced the status, so two broken graders that
+    both yield INCONCLUSIVE - a crash and an empty report - stay distinguishable.
+    """
     try:
         proc = subprocess.run(
             [sys.executable, str(grader), str(candidate)],
             capture_output=True, text=True, timeout=GRADER_TIMEOUT_SECONDS, check=False,
         )
     except subprocess.TimeoutExpired:
-        return "INCONCLUSIVE", f"grader did not finish within {GRADER_TIMEOUT_SECONDS}s", NONE
+        return "INCONCLUSIVE", f"grader did not finish within {GRADER_TIMEOUT_SECONDS}s", NONE, "timeout"
     if proc.returncode != 0:
         tail = proc.stderr.strip().splitlines()[-1:] or ["no stderr"]
-        return "INCONCLUSIVE", f"grader exited {proc.returncode}: {tail[0]}", NONE
+        return "INCONCLUSIVE", f"grader exited {proc.returncode}: {tail[0]}", NONE, "exit-nonzero"
     if not proc.stdout.strip():
-        return "INCONCLUSIVE", "grader exited 0 and emitted no result", NONE
+        return "INCONCLUSIVE", "grader exited 0 and emitted no result", NONE, "no-output"
     try:
         out = json.loads(proc.stdout)
     except json.JSONDecodeError as exc:
-        return "INCONCLUSIVE", f"grader output is not JSON: {exc}", NONE
+        return "INCONCLUSIVE", f"grader output is not JSON: {exc}", NONE, "unparseable"
     if not isinstance(out, dict):
-        return "INCONCLUSIVE", "grader output is not an object", NONE
+        return "INCONCLUSIVE", "grader output is not an object", NONE, "unparseable"
 
     record = records.Record(path=grader, data={
         "version": 2,
@@ -125,20 +134,20 @@ def status_of(grader: Path, candidate: Path) -> tuple[str, str, frozenset[str]]:
     })
     shape = _criteria_problem(out.get("criteria"))
     if shape:
-        return "INCONCLUSIVE", f"grader report is not a verdict on this task: {shape}", NONE
+        return "INCONCLUSIVE", f"grader report is not a verdict on this task: {shape}", NONE, "criteria-set"
     problems = [
         *records.criterion_vocabulary(record),
         *records.result_evidence(record),
     ]
     if problems:
-        return "INCONCLUSIVE", f"grader output breaks the result contract: {problems[0]}", NONE
+        return "INCONCLUSIVE", f"grader output breaks the result contract: {problems[0]}", NONE, "contract"
     status = records.derive_status(record)
     criteria = out["criteria"]
     assert isinstance(criteria, list)
     unmet = [c["id"] for c in criteria if c.get("outcome") != "SATISFIED"]
     violated = frozenset(str(c["id"]) for c in criteria if c.get("outcome") == "VIOLATED")
     return status, ("all mandatory criteria satisfied" if not unmet
-                    else "not satisfied: " + ", ".join(map(str, unmet))), violated
+                    else "not satisfied: " + ", ".join(map(str, unmet))), violated, "verdict"
 
 
 def _expectation(path: Path, placed: str) -> tuple[str, frozenset[str]]:
@@ -178,9 +187,9 @@ def candidates(root: Path) -> list[tuple[Path, str, frozenset[str]]]:
 def certify(grader: Path, root: Path = HERE) -> tuple[bool, list[Row]]:
     rows = []
     for path, expected, expected_violated in candidates(root):
-        status, detail, violated = status_of(grader, path)
+        status, detail, violated, category = status_of(grader, path)
         rows.append(Row(str(path.relative_to(root)), expected, status, detail,
-                        expected_violated, violated))
+                        expected_violated, violated, category))
     return all(r.ok for r in rows), rows
 
 
@@ -192,10 +201,11 @@ def control_verdict(name: str, root: Path = HERE) -> tuple[bool, str, list[Row]]
     certified, rows = certify(grader, root)
     if certified:
         return False, "the gate certified it", rows
-    statuses = {r.status for r in rows}
-    if statuses != {CONTROLS[name]}:
-        return False, f"it produced {sorted(statuses)}, not {CONTROLS[name]} throughout", rows
-    return True, f"refused; {CONTROLS[name]} on every candidate", rows
+    want = CONTROLS[name]
+    seen = {(r.status, r.category) for r in rows}
+    if seen != {want}:
+        return False, f"it produced {sorted(seen)}, not {want} throughout", rows
+    return True, f"refused; {want[0]} ({want[1]}) on every candidate", rows
 
 
 def _show(title: str, certified: bool, rows: list[Row]) -> None:
