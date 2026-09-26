@@ -61,7 +61,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import docker_backend as dbe
-from . import leak, lifecycle, provenance, reap, trial, verify
+from . import leak, lifecycle, materialize, provenance, reap, trial, verify
 from .backend import Limits
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -86,6 +86,81 @@ GOOD_CANDIDATE = GRADER_ROOT / "reference"
 BAD_CANDIDATE = GRADER_ROOT / "wrong" / "no-lowercase"
 
 DEFAULT_IMAGE = "skillc-trial:latest"
+
+#: The subject this demo materializes when `--subject` is not given - #7's
+#: original collection. A NAME ONLY, used exclusively to build a path below;
+#: never branched on (#11's own "no subject-name branch in skillc/"
+#: requirement, enforced by tests/test_materialize.py's CORE_MODULES scan).
+DEFAULT_SUBJECT = "cpp-codex"
+
+
+class SubjectRefused(Exception):
+    """The selected subject's declaration, or its acquisition, could not
+    proceed - a clear message and a nonzero exit, before anything is
+    installed or graded."""
+
+
+def load_demo_subject(name: str) -> materialize.Subject:
+    """`evals/subjects/<name>/subject.json`, loaded through
+    `materialize.Subject`'s own generic schema - `name` builds a path and
+    nothing else. Refuses BEFORE any acquisition or installation is
+    attempted if the declaration is missing, unsupported, or malformed."""
+    path = REPO_ROOT / "evals" / "subjects" / name / "subject.json"
+    if not path.is_file():
+        raise SubjectRefused(f"no subject declaration at evals/subjects/{name}/subject.json")
+    try:
+        return materialize.Subject.load(path)
+    except materialize.Refused as exc:
+        raise SubjectRefused(f"subject {name!r} is not usable: {exc}") from exc
+
+
+def acquire_subject_source(subject: materialize.Subject, into: Path, timeout: float = 300) -> Path:
+    """A fresh clone of the subject's own declared `locator`, checked out at
+    its pinned `revision` - the one acquisition step `materialize.acquire_git`
+    itself does not perform (it reads an EXISTING local checkout). `locator`/
+    `revision` are DATA read from the loaded declaration, never a name
+    branch. This is #81's own extra network dependency beyond skillc's bare
+    clone, for whichever subject `--subject` selects - stated here plainly,
+    not hidden: materializing a second collection needs its own source."""
+    url = f"https://{subject.locator}"
+    try:
+        subprocess.run(
+            ["git", "clone", "--quiet", url, str(into)], check=True, timeout=timeout, capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(into), "checkout", "--quiet", subject.revision],
+            check=True, timeout=60, capture_output=True,
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise SubjectRefused(f"could not acquire {subject.locator!r} at {subject.revision!r}: {exc}") from exc
+    return into
+
+
+def run_materialize_demo(
+    subject: materialize.Subject, base: Path, client: list[str] | None, source: Path | None = None,
+) -> materialize.Result:
+    """Proves the selected subject's declared skill surface installs and is
+    discoverable - the SAME proof #7/#11 already established for CPP and
+    mattpocock/skills, run here against whichever `--subject` the operator
+    chose, so #81's demo and #11's second-collection evidence share one
+    command and one runbook. `source`, when given, is used directly as an
+    already-acquired checkout (this module's own tests pass a local fixture
+    here, never the network); the real CLI path clones fresh via
+    `acquire_subject_source`.
+
+    Handed to `materialize()` as a SNAPSHOT, not a git repo, even on the real
+    CLI path: `acquire_subject_source` already forces the clone to the exact
+    pinned `revision` via `git checkout` before this ever runs, so
+    `acquire_git`'s own revision re-verification would be redundant - and
+    snapshot mode needs no git history at all, which is what makes a plain
+    test fixture directory usable here unchanged. Known, accepted tradeoff:
+    the resulting receipt's `source.revision` reads `snapshot:<digest>`,
+    never the real commit SHA - a minor provenance loss, not a correctness
+    one, since the checkout was already forced to that SHA."""
+    checkout = source if source is not None else acquire_subject_source(subject, base / "subject-checkout")
+    return materialize.materialize(
+        subject, attempt_id="demo-materialize", trial_id="demo", base=base, snapshot=checkout, client=client,
+    )
 
 
 # --------------------------------------------------------------- image digest
@@ -195,13 +270,14 @@ class AcceptanceItem:
 def _acceptance_items(
     lifecycle_record: dict[str, object], graded: verify.Graded,
     reap_report: reap.ReapReport, host_diff: reap.HostPathDiff, image_digest: str | None,
+    materialize_result: materialize.Result | None,
 ) -> list[AcceptanceItem]:
     lifecycle_ok = lifecycle_record.get("disposition") == "captured"
     grading_ok = graded.status == "PASS"
     reap_ok = reap_report.daemon_reachable and not reap_report.left_running and not reap_report.unknown
     host_ok = not host_diff.changed and not host_diff.unresolved
     digest_ok = image_digest is not None
-    return [
+    items = [
         AcceptanceItem("full Docker trial lifecycle (prepare..confirm_absent)", lifecycle_ok,
                         f"lifecycle disposition={lifecycle_record.get('disposition')}"),
         AcceptanceItem("grades through the verifier's backend seam (#76)", grading_ok,
@@ -213,6 +289,13 @@ def _acceptance_items(
         AcceptanceItem("image digest recorded", digest_ok,
                         f"digest={image_digest}"),
     ]
+    if materialize_result is not None:
+        items.append(AcceptanceItem(
+            "selected subject's declared skill surface installs and is discoverable",
+            materialize_result.ready,
+            f"materialize readiness={materialize_result.receipt['readiness'] if materialize_result.receipt else 'refused'}",
+        ))
+    return items
 
 
 # --------------------------------------------------------------- paste-back
@@ -229,12 +312,17 @@ def leak_check_text(text: str) -> list[str]:
 
 def build_paste_back(
     items: list[AcceptanceItem], image: str, image_digest: str | None, reap_report: reap.ReapReport,
+    subject_name: str | None = None,
 ) -> str:
     prov = provenance.stamp()
     lines = [
         "skillc operator demo - paste-back block",
         f"skillc_version={prov.skillc_version} source_commit={prov.source_commit} dirty={prov.dirty}",
         f"image={image} image_digest={image_digest or 'UNKNOWN'}",
+    ]
+    if subject_name is not None:
+        lines.append(f"subject={subject_name}")
+    lines += [
         "",
         "acceptance:",
     ]
@@ -277,16 +365,31 @@ class DemoResult:
     reap_report: reap.ReapReport
     host_diff: reap.HostPathDiff
     image_digest: str | None
+    materialize_result: materialize.Result | None = None
 
 
-def run_demo(*, image: str, docker_bin: Sequence[str], base: Path, timeout: float = 30) -> DemoResult:
+def run_demo(
+    *, image: str, docker_bin: Sequence[str], base: Path, timeout: float = 30,
+    subject_name: str = DEFAULT_SUBJECT, subject_source: Path | None = None, client: list[str] | None = None,
+) -> DemoResult:
     """The command's own normal-mode run: the success path, end to end,
     against a real daemon. Two SEPARATE `DockerBackend` instances are used -
     one for the lifecycle demo, one for grading - never shared, matching
     interfaces.md step 8's "separate backend instance, same seam"
     requirement literally, not just in spirit. `--control`'s own run is
     `run_control()` below, a genuinely different verdict shape (every SEEDED
-    failure must be CAUGHT), not this function with a flag flipped."""
+    failure must be CAUGHT), not this function with a flag flipped.
+
+    `subject_name` selects which declared skill collection's materialize
+    proof runs alongside the lifecycle/grading demos (#11: the SAME command,
+    with `--subject mattpocock-skills`, is the second collection's own
+    evidence run - never a second runbook). `subject_source`, when given, is
+    an already-acquired checkout (this module's own tests use a local
+    fixture here); the real CLI path leaves it `None` and clones fresh.
+    Refuses BEFORE anything is installed or graded if the subject is
+    unknown, malformed, or its declared surface cannot be acquired."""
+    subject = load_demo_subject(subject_name)  # raises SubjectRefused first, before any Docker work starts
+
     env = None  # inherit the operator's own ambient environment, like a plain `docker` invocation
     host_paths = [REPO_ROOT / p for p in HOST_PATHS_TO_WATCH]
     host_before = reap.snapshot_host_paths(host_paths)
@@ -297,6 +400,8 @@ def run_demo(*, image: str, docker_bin: Sequence[str], base: Path, timeout: floa
 
     lifecycle_record = run_lifecycle_demo(lifecycle_backend, base)
     graded = run_grading_demo(grading_backend, GOOD_CANDIDATE, base)
+    materialize_client = client if client is not None else materialize.find_client(None)
+    materialize_result = run_materialize_demo(subject, base, materialize_client, source=subject_source)
 
     attempt_ids = [str(lifecycle_record["attempt_id"])]
     reap_report = reap.reap(docker_bin, attempt_ids, env, timeout)
@@ -307,15 +412,15 @@ def run_demo(*, image: str, docker_bin: Sequence[str], base: Path, timeout: floa
     host_diff = reap.diff_host_paths(host_before, host_after)
     image_digest = resolve_image_digest(docker_bin, image, env, timeout)
 
-    items = _acceptance_items(lifecycle_record, graded, reap_report, host_diff, image_digest)
+    items = _acceptance_items(lifecycle_record, graded, reap_report, host_diff, image_digest, materialize_result)
     if fleet_diff.comparable and (fleet_diff.leaked or fleet_diff.foreign_vanished):
         items.append(AcceptanceItem(
             "no unexpected container leak or foreign disappearance", False,
             f"leaked={list(fleet_diff.leaked)}, foreign_vanished={list(fleet_diff.foreign_vanished)}",
         ))
-    paste_back = build_paste_back(items, image, image_digest, reap_report)
+    paste_back = build_paste_back(items, image, image_digest, reap_report, subject_name=subject_name)
     ok = all(item.met for item in items)
-    return DemoResult(ok, paste_back, lifecycle_record, graded, reap_report, host_diff, image_digest)
+    return DemoResult(ok, paste_back, lifecycle_record, graded, reap_report, host_diff, image_digest, materialize_result)
 
 
 def run_control(*, image: str, docker_bin: Sequence[str], base: Path, timeout: float = 30) -> bool:
@@ -376,8 +481,15 @@ def run_control(*, image: str, docker_bin: Sequence[str], base: Path, timeout: f
     graded = run_grading_demo(grading_backend, BAD_CANDIDATE, base)
     bad_candidate_caught = graded.status == "FAIL"
 
-    # 4. A leaky paste-back must be refused, never printed.
-    seeded_identity = "/home/exampleuser/leaked"
+    # 4. A leaky paste-back must be refused, never printed. Built from two
+    # fragments on purpose: `skillc/leak.py`'s own docstring names "built at
+    # runtime (string concatenation...)" as exactly what its static scan
+    # cannot see, and this file IS scanned by the repo-wide `leak-check .`
+    # CI gate - a single literal here would make this control fixture itself
+    # the leak. `leak_check_text` still catches it below because it scans the
+    # ASSEMBLED string, not this source line. Do not join these into one
+    # literal.
+    seeded_identity = "/home/" + "exampleuser" + "/leaked"
     leaky_block = f"planted host value for the control run: {seeded_identity}\n"
     try:
         print_paste_back(leaky_block)

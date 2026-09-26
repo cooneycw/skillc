@@ -182,6 +182,47 @@ collection) closes.
   outside any list, confirmed the guard caught it unprompted, then removed
   it and confirmed clean again - proving the OPEN-set claim, not just the
   AST scan's own logic (already proven).
+- **The operator demo command** (#81, Refs #10, #10 closes only on the
+  operator's own live run of this command, never on CI green): `skillc demo`
+  drives two independent, real-Docker-backed demonstrations through the
+  merged `DockerBackend` (#77) with no paid model call - a scripted-subject
+  lifecycle proof via `lifecycle.run_through_backend`, and a real grading run
+  via `verify.grade_files(..., backend=...)` against the already-certified
+  `evals/level1/slug-small-fix` task. It snapshots the fleet and a fixed set
+  of host paths before and after, reaps its own attempt(s), and reports the
+  four distinct outcomes (`reaped`/`already-absent`/`left-running`/`unknown`)
+  rather than collapsing them. The paste-back block it prints (skillc
+  version/commit/dirty, per-item acceptance evidence, the image digest that
+  actually ran) is run through `leak-check` before printing and refuses to
+  print if it finds anything. `skillc demo --control` runs four seeded
+  negative controls instead - a reply-only subject, a container deliberately
+  left running, a known-bad grading candidate, and a leaky paste-back - and
+  exits non-zero unless every one was caught. The transcript-based real-agent
+  canary check (`trial_bootstrap.check_canary`, #78) is deliberately not
+  wired into this command: a real `Write` tool result never echoes file
+  contents, so that check cannot pass against a genuine transcript without an
+  adapter that re-reads the file back, which is real follow-up work rather
+  than something this issue's scope covers - `demo.py` uses `lifecycle.py`'s
+  own file-content-based canary instead, which does not have that gap.
+  Building this surfaced two previously-undiscovered integration bugs
+  between already-merged #76 and #77: `DockerBackend.install()` silently
+  dropped `bytes`-valued surface entries (verify.py's own probe-surface
+  convention), and `DockerBackend.execute()` discarded the exec'd subject's
+  stdout entirely instead of writing it back as `observations`
+  (verify.py's documented convention for a probe-serving backend). Both are
+  fixed, each with a regression test confirmed to fail on the pre-fix code.
+  The fake docker CLI test fixture had a third, related bug of its own - it
+  only remapped a `cwd=`-relative argv path into the simulated container
+  filesystem, not an absolute one, and `verify.py`'s own probe-invocation
+  convention always passes an absolute path - also fixed and regression
+  tested. `--subject <name>` selects `evals/subjects/<name>/subject.json` to
+  materialize alongside the lifecycle/grading proofs (default: the original
+  CPP collection) - one command, one runbook, for both CPP and a second
+  collection (#11), never two. The name only ever builds a path, never a
+  branch in code; acquisition clones the subject's own declared source fresh
+  at its pinned revision. An unknown or malformed `--subject` is refused
+  before any Docker work starts.
+
 - **The failure-path matrix and trustworthy cleanup** (#79, Refs #10):
   [`docs/specs/evaluation-facility/failure-matrix.md`](docs/specs/evaluation-facility/failure-matrix.md)
   states all ten of #10's addendum failure paths through the real driver
