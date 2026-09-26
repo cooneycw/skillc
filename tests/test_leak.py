@@ -97,6 +97,32 @@ def test_an_unconfigured_denylist_says_so_on_stderr(
     assert "no hostname deny-list configured" in capsys.readouterr().err
 
 
+def test_a_configured_but_missing_denylist_is_refused_not_silently_empty(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Cross-model review [MEDIUM]: a typo'd --denylist path used to fall back
+    to zero hostname coverage with the same message as never configuring one -
+    disabling hostname detection without saying so. Confirmed real on the
+    pre-fix code: exit 0, no warning, `example-host.internal` unreported."""
+    (tmp_path / "clean.txt").write_text("nothing here\n", encoding="utf-8")
+    rc = cli.main(["leak-check", str(tmp_path), "--denylist", str(tmp_path / "missing.txt")])
+    assert rc == 2
+    assert "configured deny-list not found" in capsys.readouterr().err
+
+
+def test_a_configured_denylist_reports_its_entry_count(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    (tree / "clean.txt").write_text("nothing here\n", encoding="utf-8")
+    deny = tmp_path / "deny.txt"
+    deny.write_text("a-host\nb-host\n", encoding="utf-8")
+    rc = cli.main(["leak-check", str(tree), "--denylist", str(deny)])
+    assert rc == 0
+    assert "hostname deny-list: 2 entries" in capsys.readouterr().out
+
+
 def test_an_explicit_denylist_silences_the_warning(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -148,16 +174,69 @@ def test_each_non_leak_stays_silent(line: str) -> None:
     assert list(leak.scan_text(line, frozenset())) == []
 
 
-def test_an_allowlisted_line_is_skipped_whole_even_with_a_real_leak_on_it() -> None:
-    """The allowlist exempts the LINE, not just the matched span - deliberate,
-    but worth pinning so a future match-level rewrite is a conscious choice."""
-    line = "~/.local/bin also mentions /home/exampleuser in passing"
-    assert list(leak.scan_text(line, frozenset())) == []
+def test_an_allowlisted_match_does_not_suppress_a_real_leak_on_the_same_line() -> None:
+    """Cross-model review [HIGH]: the allowlist used to exempt the whole LINE,
+    so a real leak sharing a line with the safe /home/candidate placeholder -
+    or with this module's own private-IP range literals - went unreported.
+    Confirmed this was real on the pre-fix code before writing this test."""
+    line = "fixed logical paths (e.g. /home/candidate, /home/exampleuser)"
+    findings = list(leak.scan_text(line, frozenset()))
+    assert [k for _, k, _ in findings] == ["home-path"]
+    assert findings[0][2] == "home-directory path for 'exampleuser': /home/exampleuser"
+
+
+def test_allowlist_matches_the_exact_value_not_a_containing_one() -> None:
+    """Cross-model review [HIGH]: a substring check on the matched value would
+    also exempt an unrelated, longer username merely containing the safe one
+    (`/home/candidate-2` is not `/home/candidate`)."""
+    findings = list(leak.scan_text("owned by /home/candidate-2", frozenset()))
+    assert [k for _, k, _ in findings] == ["home-path"]
 
 
 def test_a_binary_file_is_skipped_and_counted_not_scanned_clean(tmp_path: Path) -> None:
     (tmp_path / "clean.txt").write_text("nothing here\n", encoding="utf-8")
     (tmp_path / "binary.bin").write_bytes(b"\xff\xfe\x00\x01/home/exampleuser")
+    result = leak.scan_path(tmp_path, frozenset())
+    assert result.scanned == 1
+    assert result.skipped == 1
+    assert result.findings == []
+
+
+def test_a_symlink_outside_the_scanned_tree_is_skipped_not_followed(tmp_path: Path) -> None:
+    """Cross-model review [MEDIUM]: following an out-of-tree symlink reads host
+    state this run was never asked to look at, and the verdict could then
+    change without the reviewed tree changing at all. Confirmed real on the
+    pre-fix code: this symlink was followed and its target's leak reported."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "external.txt").write_text("/home/exampleuser\n", encoding="utf-8")
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    (tree / "clean.txt").write_text("nothing here\n", encoding="utf-8")
+    (tree / "link.txt").symlink_to(outside / "external.txt")
+
+    result = leak.scan_path(tree, frozenset())
+    assert result.findings == []
+    assert result.scanned == 1  # clean.txt only
+    assert result.skipped == 1  # the out-of-tree symlink, not opened
+
+
+def test_a_symlink_inside_the_scanned_tree_is_followed(tmp_path: Path) -> None:
+    """The exclusion is specifically for pointing OUTSIDE the tree - a symlink
+    to a sibling file within the same scan is ordinary content."""
+    (tmp_path / "real.txt").write_text("/home/exampleuser\n", encoding="utf-8")
+    (tmp_path / "link.txt").symlink_to(tmp_path / "real.txt")
+
+    result = leak.scan_path(tmp_path, frozenset())
+    assert result.skipped == 0
+    assert result.scanned == 2
+    assert len(result.findings) == 2
+
+
+def test_a_broken_symlink_is_skipped_not_an_error(tmp_path: Path) -> None:
+    (tmp_path / "clean.txt").write_text("nothing here\n", encoding="utf-8")
+    (tmp_path / "dangling.txt").symlink_to(tmp_path / "does-not-exist")
+
     result = leak.scan_path(tmp_path, frozenset())
     assert result.scanned == 1
     assert result.skipped == 1

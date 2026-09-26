@@ -622,8 +622,12 @@ def cmd_leak_check(args: argparse.Namespace) -> int:
     """Refuse a tree or a produced bundle that carries a machine identity (#63).
 
     Three refusal codes, none of them a clean scan:
-    - `2`: the path does not exist - a caller error, never shown clean, the
-      same distinction `check` draws for a tree with no SKILL.md.
+    - `2`: the path does not exist, OR a `--denylist`/`$SKILLC_LEAK_DENYLIST`
+      was configured but does not resolve to a file - a caller error either
+      way, never silently read as "no deny-list". Cross-model review: a
+      configured-but-missing path used to fall back to zero hostname coverage
+      with the SAME message as never configuring one at all, so a typo'd
+      `--denylist` path disabled hostname detection without saying so.
     - `3`: the path exists but NOTHING was scanned (every file undecodable, or
       no files at all) - an unscannable target is UNKNOWN, never clean. A scan
       that never opened a file cannot have "found nothing"; it looked at
@@ -636,12 +640,18 @@ def cmd_leak_check(args: argparse.Namespace) -> int:
         return 2
 
     configured = args.denylist or os.environ.get(leak.DENYLIST_ENV)
+    if configured and not Path(configured).is_file():
+        print(f"skillc: configured deny-list not found: {configured}", file=sys.stderr)
+        return 2
     denylist = leak.load_denylist(args.denylist)
     result = leak.scan_path(root, denylist, exclude=frozenset(args.exclude))
     for finding in result.findings:
         print(finding.render(root))
 
-    if not configured:
+    if configured:
+        plural = "y" if len(denylist) == 1 else "ies"
+        print(f"skillc: hostname deny-list: {len(denylist)} entr{plural} from {configured}")
+    else:
         print(
             f"skillc: no hostname deny-list configured (--denylist or "
             f"${leak.DENYLIST_ENV}); a hostname not on a list is a class this "

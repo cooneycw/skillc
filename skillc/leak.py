@@ -19,8 +19,9 @@ not proof of absence:
 - a public IPv4 address, a loopback or link-local one (127.0.0.0/8,
   169.254.0.0/16 - neither identifies a specific machine; see `_is_private`),
   or any IPv6 address.
-- a binary file, or one that is not valid UTF-8 - it is skipped, not scanned,
-  and `scan_path`'s `skipped` count says how many were.
+- a binary file, one that is not valid UTF-8, a symlink pointing outside the
+  scanned tree, or a FIFO/socket/device - all skipped, not scanned, and
+  `scan_path`'s `skipped` count says how many were, together.
 - an identity reconstructed from fragments split across more than one line,
   or built at runtime (string concatenation, an environment variable name).
 """
@@ -42,13 +43,16 @@ UID_GID_RE = re.compile(r"\b(?:uid|gid)=\d+")
 
 IPV4_RE = re.compile(r"\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b")
 
-#: Known-safe substrings a bare regex would otherwise flag. Reviewed by hand;
-#: extend only with a stated reason for why the match is not a real identity,
-#: never to silence a finding that IS one.
+#: Known-safe values a bare regex would otherwise flag - compared against the
+#: EXACT matched text (a whole home-directory path, a whole `uid=`/`gid=`
+#: assignment, or a bare IP), never against the containing line. Matching the
+#: line would exempt any OTHER leak sharing it, and matching by substring would
+#: exempt a longer, unrelated value merely containing an allowlisted one -
+#: both found by cross-model review (see the tests for the exact shapes).
+#: Reviewed by hand; extend only with a stated reason for why the match is not
+#: a real identity, never to silence a finding that IS one.
 ALLOWLIST: frozenset[str] = frozenset({
-    "~/.local/bin",  # a documented convenience path, not this operator's home
-    "settings.local.json",  # Claude Code's own filename convention
-    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",  # this module's OWN range
+    "10.0.0.0", "172.16.0.0", "192.168.0.0",  # this module's OWN range
     # definitions (_PRIVATE_IPV4_RANGES below) - the detector's configuration,
     # not a leaked identity. Without this, skillc/leak.py fails its own scan.
     "/home/candidate",  # the evaluation-facility's OWN canonical fixed,
@@ -128,30 +132,30 @@ def _is_private(candidate: str) -> bool:
     return any(addr in network for network in _PRIVATE_IPV4_RANGES)
 
 
-def _allowed(line: str) -> bool:
-    return any(entry in line for entry in ALLOWLIST)
-
-
 def scan_text(text: str, denylist: frozenset[str]) -> Iterator[tuple[int, str, str]]:
     """Yield (1-indexed line, kind, detail) for every leak class found.
 
-    A line containing an allowlisted substring is skipped WHOLE, not just at
-    the matched span - the allowlist is for lines that are known safe, not for
-    editing out one match while trusting the rest of an unreviewed line.
+    The allowlist is checked against each MATCH, not the line it is on - a
+    real leak sharing a line with an allowlisted value must still fire.
     """
     for lineno, line in enumerate(text.splitlines(), start=1):
-        if _allowed(line):
-            continue
         for match in HOME_PATH_RE.finditer(line):
+            if match.group(0) in ALLOWLIST:
+                continue
             yield (
                 lineno, "home-path",
                 f"home-directory path for {match.group(1)!r}: {match.group(0)}",
             )
         for match in UID_GID_RE.finditer(line):
+            if match.group(0) in ALLOWLIST:
+                continue
             yield lineno, "uid-gid", match.group(0)
         for match in IPV4_RE.finditer(line):
-            if _is_private(match.group(1)):
-                yield lineno, "private-ip", match.group(1)
+            candidate = match.group(1)
+            if candidate in ALLOWLIST:
+                continue
+            if _is_private(candidate):
+                yield lineno, "private-ip", candidate
         for name in denylist:
             if name in line:
                 yield lineno, "denylisted-hostname", name
@@ -195,14 +199,31 @@ def scan_path(
     and never contributes a finding - it is a class this run cannot see, not
     a file that was scanned and found clean. `skipped > 0` on a real bundle is
     worth reporting alongside a clean `findings == []`.
+
+    A symlink whose target resolves OUTSIDE `root` is skipped too, never
+    followed: following it would read host state this run was never asked to
+    look at, and the file's own content (and this run's verdict on it) could
+    then change without the reviewed tree changing at all. A broken symlink, a
+    FIFO, a socket or a device is skipped the same way - `Path.is_file()` is
+    false for all of them, and none is safe to open unconditionally (a FIFO
+    with no writer blocks the scan forever).
     """
     findings: list[LeakFinding] = []
     scanned = 0
     skipped = 0
+    root_resolved = root.resolve()
     for path in _files(root):
         rel = path.relative_to(root).as_posix() if root.is_dir() else path.name
         if _excluded(rel, exclude):
             continue
+        if not path.is_file():
+            skipped += 1
+            continue
+        if path.is_symlink() and root.is_dir():
+            target = path.resolve()
+            if target != root_resolved and root_resolved not in target.parents:
+                skipped += 1
+                continue
         try:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):

@@ -63,17 +63,23 @@ steps:
 
   # Machine-identity leak scan of the checked-out tree (#63): skillc is public,
   # so a home-directory path, a uid/gid, a private IP or a denylisted hostname
-  # must not be committed. Two narrow exclusions, each a single path that
-  # exists to hold seeded, obviously-fake leak examples on purpose - not a
-  # general allowlist: controls/leak-check/bad/ (the negative control's fixture)
-  # and tests/test_leak.py (this scanner's own unit-test literals).
+  # must not be committed. Three narrow exclusions, each a single path that
+  # exists to hold seeded, obviously-fake leak examples ON PURPOSE - not a
+  # general allowlist: controls/leak-check/bad/ (the negative control's
+  # fixture), tests/test_leak.py (this scanner's own unit-test literals), and
+  # ci/leak-check-control.sh (its own seeded shell commands, case 4 below).
   - name: leak-check
     image: python:3.12-slim
     depends_on: []
     commands:
       - pip install uv
       - uv sync --locked --extra dev
-      - uv run --no-sync skillc leak-check . --exclude controls/leak-check/bad --exclude tests/test_leak.py
+      # Exported once, used for the real scan AND passed to the control
+      # script below (as $SKILLC_EXCLUDE_ARGS) - one definition, so the two
+      # cannot silently drift apart (the control script's own default is a
+      # fallback for a standalone run, not the source of truth here).
+      - export SKILLC_EXCLUDE_ARGS="--exclude controls/leak-check/bad --exclude tests/test_leak.py --exclude ci/leak-check-control.sh"
+      - uv run --no-sync skillc leak-check . $SKILLC_EXCLUDE_ARGS
       - uv run --no-sync bash ci/leak-check-control.sh
     environment:
       UV_PROJECT_ENVIRONMENT: /tmp/skillc-venv
