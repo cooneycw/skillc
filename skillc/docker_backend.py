@@ -18,7 +18,13 @@ NEUTRAL IDENTITY (interfaces.md "Execution backend" section; operator rule,
 skillc is public, #63): a fixed non-root user, a fixed hostname, fixed
 logical paths (`/work`, `/home/candidate`), and a container name derived from
 the attempt ID alone. `describe()` and the handle report only those logical
-values - never a host path, uid or hostname.
+values - never a host path, uid or hostname. The user/uid is FIXED
+(`CANDIDATE_UID:CANDIDATE_GID`, see that constant's own comment) rather than
+matched to the host caller's own uid/gid - an earlier draft did the latter to
+solve a real bind-mount permission problem, and that broke this exact
+obligation: the container's own `id`, file ownership and transcripts would
+have carried the host's real uid/gid, not just `describe()`'s prose (design
+correction, orchestrator review of PR #83, 2026-09-26).
 
 RESOURCE LIMITS (addendum item C9): `--memory` and `--memory-swap` are always
 equal - leaving `--memory-swap` unset lets the effective bound silently
@@ -73,40 +79,42 @@ from .backend import (
 DAEMON_TIMEOUT = 5.0
 
 
+#: The candidate user's FIXED, host-independent uid:gid (design correction,
+#: orchestrator review of PR #83, 2026-09-26). An earlier draft of this
+#: module derived this from `os.getuid()`/`os.getgid()` - the HOST caller's
+#: own identity - to solve a real problem (a container started under a
+#: different uid cannot write its own bind-mounted directories), but that
+#: broke the neutral-identity obligation this seam itself imposes
+#: (interfaces.md "Execution backend": "a fixed unprivileged user/uid").
+#: `describe()` can hide a number from its own prose, but the CONTAINER
+#: cannot: the subject under test runs `id`, lists file ownership and writes
+#: transcripts, all of which would carry the host's real uid/gid straight
+#: into the trial's own evidence - a leak this module's docstring already
+#: claimed did not happen. `#78`'s image must create a `candidate` user at
+#: exactly this uid:gid, with `/home/candidate`, `~/.claude` and `~/.codex`
+#: already owned by it. DECIDED (not left open): the implementation PR moves
+#: data in and out via `docker cp`/a tar stream, never a bind mount matched
+#: to this uid - `compose_run_argv` composes no `-v` for the workspace or
+#: home at all (see its own docstring). A per-trial host directory chmod'd
+#: for this fixed uid was the alternative and was rejected: it is either
+#: another uid-matching problem in a different place, or a directory
+#: writable beyond what the controller's own process needs.
+CANDIDATE_UID = 10001
+CANDIDATE_GID = 10001
+
+
 def _container_user() -> str:
-    """The uid:gid the container runs as. MUST be the real host uid/gid, not a
-    fixed placeholder like "1000:1000": the implementation PR creates
-    `work_dir`/`home_dir` owned by whatever user runs this process, and a
-    container started with a DIFFERENT uid cannot read or write its own
-    bind-mounted directories - it fails at the first write, not at startup,
-    which is why a fixed constant would look fine in every test against a
-    fake CLI. `os.getuid`/`os.getgid` are POSIX-only, matching this
-    package's `subprocess`-and-Docker approach generally (AGENTS.md)."""
-    return f"{os.getuid()}:{os.getgid()}"
-
-
-def _user_isolation_claim() -> str:
-    """A `describe()` isolation claim about the container's user - honest
-    about root, and never the real numeric uid/gid (two bugs found by
-    cross-model review). `_container_user()` mirrors the HOST caller's own
-    uid/gid, so:
-
-    - a host caller running as root (uid 0, common in a containerized CI
-      runner) would otherwise be reported as "non-root user 0:0" - false,
-      since 0 IS root - so that case is named honestly instead.
-    - printing the real uid/gid at all, even for a non-root caller, publishes
-      a piece of the host's numeric identity through a channel this module's
-      own contract (interfaces.md "Execution backend") says never carries a
-      host value - `describe()`'s claims are meant to be logical, matching
-      every other entry in this same tuple."""
-    if os.getuid() == 0:
-        return "WARNING: host caller is UID 0 (root) - container user-id isolation does not apply"
-    return "container user matches the host caller's own uid:gid (needed for bind-mount access), not a fixed placeholder"
+    """The uid:gid the container's candidate user runs as - always
+    `CANDIDATE_UID:CANDIDATE_GID`, never the host caller's own uid/gid
+    (`os.getuid`/`os.getgid`). See `CANDIDATE_UID`'s own comment for why a
+    host-derived value was tried and rejected."""
+    return f"{CANDIDATE_UID}:{CANDIDATE_GID}"
 
 
 #: A neutral HOSTNAME and logical paths - never the host's own (interfaces.md
-#: "Execution backend"). The container's UID is real (see `_container_user`);
-#: neutrality here means no host machine identity, not a fake numeric owner.
+#: "Execution backend"). `CANDIDATE_USER_NAME` is the identity `#78`'s image
+#: must create at `CANDIDATE_UID:CANDIDATE_GID`.
+CANDIDATE_USER_NAME = "candidate"
 CONTAINER_HOSTNAME = "skillc-trial"
 CONTAINER_WORKSPACE = "/work"
 CONTAINER_HOME = "/home/candidate"
@@ -202,8 +210,6 @@ def compose_run_argv(
     image: str,
     name: str,
     attempt_id: str,
-    work_dir: Path,
-    home_dir: Path,
     subject_argv: Sequence[str],
     env: Mapping[str, str],
     network: str,
@@ -218,6 +224,20 @@ def compose_run_argv(
     FIXED, closed set of flags: there is no passthrough for arbitrary extra
     arguments, so nothing here can ever mount the docker socket, add
     `--privileged`, or otherwise widen the container (addendum item C12).
+
+    NO BIND MOUNT for the workspace or home (design decision, orchestrator
+    review of PR #83, 2026-09-26, choosing the "preferred" option over
+    a per-trial directory chmod'd for the fixed candidate uid): a bind mount
+    matched to `CANDIDATE_UID` would need a HOST directory the controller
+    made writable for that exact uid, which is either another uid-matching
+    problem in a different place or a directory writable beyond the
+    controller's own process - and it is unnecessary, because `docker cp` (or
+    an equivalent tar stream) moves the declared surface in and the exported
+    output out without either container or host ever needing matching
+    ownership. `-w CONTAINER_WORKSPACE` still sets the working directory -
+    Docker creates it inside the container's own writable layer if the image
+    does not already have it - and the implementation PR's `install()`/
+    `export()` are the `docker cp` callers on either side of `execute()`.
 
     `-i` is always present so a caller MAY later deliver `execute(...,
     stdin=...)` (the implementation PR) - without it, `docker run` never
@@ -257,8 +277,6 @@ def compose_run_argv(
     if disk_limit is not None:
         argv += ["--storage-opt", f"size={disk_limit}"]
     argv += [
-        "-v", f"{work_dir}:{CONTAINER_WORKSPACE}:rw",
-        "-v", f"{home_dir}:{CONTAINER_HOME}:rw",
         "-w", CONTAINER_WORKSPACE,
         "-e", f"HOME={CONTAINER_HOME}",
         *_env_args(env),
@@ -311,7 +329,7 @@ class DockerBackend:
             isolation=(
                 "container (pid/mount/network namespaces)",
                 f"network={self.network} by default",
-                _user_isolation_claim(),
+                f"fixed non-root user {_container_user()} ({CANDIDATE_USER_NAME}), independent of the host caller",
                 "resource limits enforced: memory, memory-swap (equal), pids, cpus, shm-size",
                 (f"disk: --storage-opt size={self.disk_limit}" if self.disk_limit is not None
                  else "disk: no per-container bound set (disk_limit is None)"),

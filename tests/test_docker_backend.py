@@ -116,36 +116,24 @@ def test_describe_reports_unreachable_when_the_daemon_is_down(base: Path, docker
     assert description.version == "unreachable"
 
 
-def test_describe_names_root_honestly_instead_of_a_false_non_root_claim(
+def test_describe_reports_the_fixed_candidate_user_regardless_of_the_host_caller(
     base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Regression for a bug found by cross-model review: `_container_user()`
-    mirrors the host caller's own uid/gid, so a caller running as root
-    (uid 0, common in a containerized CI runner) previously produced the
-    claim "non-root user 0:0" - false, since 0 IS root. Fails on the pre-fix
-    code, which asserts "non-root" unconditionally."""
+    """Design correction (orchestrator review of PR #83, 2026-09-26): an
+    earlier draft derived the container's user from the HOST caller's own
+    uid/gid, which the container's own `id`, file ownership and transcripts
+    would then carry straight into the trial's evidence - a leak `describe()`
+    hiding the number could not prevent, since the number was never only in
+    `describe()`'s prose. The claim must name the fixed candidate identity
+    and must not change with the host caller's uid - this fails on the
+    pre-fix code, whose claim (and the composed --user) tracked
+    `os.getuid()`/`os.getgid()` directly."""
     monkeypatch.setattr(d.os, "getuid", lambda: 0)
     monkeypatch.setattr(d.os, "getgid", lambda: 0)
     description = _backend(base, docker_state).describe()
-    assert any("root" in claim.lower() for claim in description.isolation)
-    assert not any("non-root" in claim for claim in description.isolation)
-
-
-def test_describe_never_publishes_the_real_host_uid_or_gid(
-    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Regression for a bug found by cross-model review: `describe()` used to
-    embed the literal `_container_user()` value in its public claims, which
-    publishes a piece of the host's real numeric identity through a channel
-    this module's own contract says never carries one (interfaces.md
-    "Execution backend": describe() reports only logical values). Fails on
-    the pre-fix code, which prints the exact uid:gid pair."""
-    monkeypatch.setattr(d.os, "getuid", lambda: 4242)
-    monkeypatch.setattr(d.os, "getgid", lambda: 4343)
-    description = _backend(base, docker_state).describe()
-    text = " ".join(description.isolation)
-    assert "4242" not in text
-    assert "4343" not in text
+    assert any(f"{d.CANDIDATE_UID}:{d.CANDIDATE_GID}" in claim for claim in description.isolation)
+    assert any("non-root" in claim for claim in description.isolation)
+    assert not any("0:0" in claim for claim in description.isolation)
 
 
 def test_every_lifecycle_method_is_stubbed_pending_the_implementation_pr(
@@ -182,8 +170,6 @@ def _compose(**overrides: object) -> list[str]:
         "image": "fake-image:1",
         "name": "skillc-a-000000000000",
         "attempt_id": "a-000000000000",
-        "work_dir": Path("/tmp/work"),
-        "home_dir": Path("/tmp/home"),
         "subject_argv": ["echo", "hi"],
         "env": {},
         "network": "none",
@@ -233,16 +219,36 @@ def test_composed_argv_carries_neutral_identity() -> None:
     argv = _compose()
     assert "--user" in argv and argv[argv.index("--user") + 1] == d._container_user()
     assert "--hostname" in argv and argv[argv.index("--hostname") + 1] == d.CONTAINER_HOSTNAME
-    assert f"/tmp/work:{d.CONTAINER_WORKSPACE}:rw" in argv
-    assert f"/tmp/home:{d.CONTAINER_HOME}:rw" in argv
+    assert "-w" in argv and argv[argv.index("-w") + 1] == d.CONTAINER_WORKSPACE
+    home_values = [argv[i + 1] for i, a in enumerate(argv) if a == "-e"]
+    assert f"HOME={d.CONTAINER_HOME}" in home_values
 
 
-def test_composed_argv_carries_the_real_host_uid_never_a_fixed_placeholder() -> None:
-    """Regression for a fixed-'1000:1000' shape: `container_user` must
-    reflect the real caller, not a constant, since the implementation PR's
-    bind-mounted directories are owned by whoever runs this process."""
-    argv = _compose(container_user="4242:4242")
-    assert argv[argv.index("--user") + 1] == "4242:4242"
+def test_composed_argv_never_bind_mounts_the_workspace_or_home() -> None:
+    """Design decision (orchestrator review of PR #83, 2026-09-26): no bind
+    mount for the workspace or home, ever - a mount matched to the fixed
+    candidate uid would need a host directory made writable for that exact
+    uid, which is either another uid-matching problem or over-broad write
+    access. `docker cp` moves the declared surface in and the exported
+    output out instead (the implementation PR's install()/export())."""
+    argv = _compose()
+    assert "-v" not in argv
+
+
+def test_container_user_is_fixed_and_never_tracks_the_host_callers_uid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The orchestrator's requested control (PR #83 review, 2026-09-26): the
+    composed `--user` must be the fixed candidate identity and must NEVER be
+    `os.getuid()`/`os.getgid()`, whatever the host caller's real uid is. This
+    fails on the design an earlier draft shipped, where `_container_user()`
+    returned `f"{os.getuid()}:{os.getgid()}"` directly."""
+    monkeypatch.setattr(d.os, "getuid", lambda: 777777)
+    monkeypatch.setattr(d.os, "getgid", lambda: 888888)
+    assert d._container_user() == f"{d.CANDIDATE_UID}:{d.CANDIDATE_GID}"
+    argv = _compose(container_user=d._container_user())
+    assert argv[argv.index("--user") + 1] == f"{d.CANDIDATE_UID}:{d.CANDIDATE_GID}"
+    assert "777777:888888" not in argv
 
 
 def test_composed_argv_carries_ownership_labels() -> None:
