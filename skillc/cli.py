@@ -24,6 +24,15 @@ from .checks import ERROR, Finding
 from .spec import DEFAULT_TARGET, TARGETS, Manifest, ManifestError, Skill, discover
 
 
+def _relative_to(path: Path, root: Path) -> Path:
+    """Same fallback `Finding.render` already uses: shown relative to the scanned
+    root when possible, absolute when the finding's path is not under it."""
+    try:
+        return path.relative_to(root)
+    except ValueError:
+        return path
+
+
 def _controls_root(explicit: str | None) -> Path:
     if explicit:
         return Path(explicit).resolve()
@@ -59,7 +68,16 @@ def _target_conflict(only: str | None, target: str | None) -> bool:
     return True
 
 
+def _json_refusal(as_json: bool, message: str) -> None:
+    """The refusal a consumer sees in `--json` mode: still one JSON document on
+    stdout, never prose on stderr it would have to special-case. Human mode is
+    unchanged - this is additive, not a replacement for the existing message."""
+    if as_json:
+        print(json.dumps({"schema": 1, "error": message}))
+
+
 def cmd_check(args: argparse.Namespace) -> int:
+    as_json = bool(getattr(args, "json", False))
     if _unknown_rule(args.rule, checks.RULES):
         return 2
     target = getattr(args, "target", None)
@@ -70,7 +88,9 @@ def cmd_check(args: argparse.Namespace) -> int:
     target = target or (selected.target if selected else None) or DEFAULT_TARGET
     root = Path(args.path).resolve()
     if not root.exists():
-        print(f"skillc: no such path: {root}", file=sys.stderr)
+        message = f"no such path: {root}"
+        print(f"skillc: {message}", file=sys.stderr)
+        _json_refusal(as_json, message)
         return 2
 
     manifest_arg = getattr(args, "manifest", None)
@@ -86,7 +106,11 @@ def cmd_check(args: argparse.Namespace) -> int:
         if not manifest.declared:
             # A manifest that names nothing is as empty a population as a tree
             # with no SKILL.md - see the same contract just below.
-            print(f"skillc: manifest {manifest_path} declares no skills - nothing was checked")
+            message = f"manifest {manifest_path} declares no skills - nothing was checked"
+            if as_json:
+                _json_refusal(as_json, message)
+            else:
+                print(f"skillc: {message}")
             return 2
 
         skills: list[Skill] = []
@@ -115,26 +139,27 @@ def cmd_check(args: argparse.Namespace) -> int:
         skills = discover(root)
         if not skills:
             # Silence here would be indistinguishable from a clean run. Say so.
-            print(f"skillc: no SKILL.md found under {root} - nothing was checked")
+            message = f"no SKILL.md found under {root} - nothing was checked"
+            if as_json:
+                _json_refusal(as_json, message)
+            else:
+                print(f"skillc: {message}")
             return 2
 
     for skill in skills:
         findings.extend(checks.run(skill, only=args.rule, target=target))
 
     base = root if root.is_dir() else root.parent
-    for finding in findings:
-        print(finding.render(base))
-
     errors = sum(1 for f in findings if f.severity == ERROR)
     warns = len(findings) - errors
     if scope is not None:
         declared, checked, undeclared = scope
-        print(
+        human_summary = (
             f"\nskillc: {declared} declared, {checked} checked, {undeclared} undeclared, "
             f"{errors} error(s), {warns} warning(s)"
         )
     else:
-        print(
+        human_summary = (
             f"\nskillc: {len(skills)} skill(s) checked, "
             f"{errors} error(s), {warns} warning(s)"
         )
@@ -143,14 +168,54 @@ def cmd_check(args: argparse.Namespace) -> int:
     # An unparseable skill gets only the parser finding, so it was not field-checked.
     parsed = sum(1 for s in skills if s.parse_error is None)
     if selected is not None and selected.target is None:
-        print(f"skillc: field rules NOT checked (--rule {selected.id} only)")
+        field_rules: dict[str, object] | None = None
+        human_field_line = f"skillc: field rules NOT checked (--rule {selected.id} only)"
+        json_field_reason: str | None = f"rule {selected.id!r} only"
     elif not parsed:
-        print("skillc: field rules NOT checked - no skill's frontmatter parsed")
+        field_rules = None
+        human_field_line = "skillc: field rules NOT checked - no skill's frontmatter parsed"
+        json_field_reason = "no skill's frontmatter parsed"
     else:
-        print(
+        field_rules = {"target": target, "checked": parsed, "total": len(skills)}
+        human_field_line = (
             f"skillc: field rules checked against target '{target}' "
             f"on {parsed} of {len(skills)} skill(s)"
         )
+        json_field_reason = None
+
+    if as_json:
+        # ONE document on stdout - the whole reason this branch exists. Mixing it
+        # with the human prose below would make a consumer's `json.loads` a
+        # coin-flip depending on which findings happened to fire.
+        payload: dict[str, object] = {
+            "schema": 1,
+            "skills_checked": len(skills),
+            "errors": errors,
+            "warnings": warns,
+            "findings": [
+                {
+                    "rule": f.rule,
+                    "severity": f.severity,
+                    "path": str(_relative_to(f.path, base)),
+                    "detail": f.detail,
+                }
+                for f in findings
+            ],
+            "field_rules": field_rules,
+        }
+        if scope is not None:
+            declared, checked, undeclared = scope
+            payload["manifest_scope"] = {
+                "declared": declared, "checked": checked, "undeclared": undeclared,
+            }
+        if json_field_reason is not None:
+            payload["field_rules_reason"] = json_field_reason
+        print(json.dumps(payload, indent=1))
+    else:
+        for finding in findings:
+            print(finding.render(base))
+        print(human_summary)
+        print(human_field_line)
     if args.strict and warns:
         return 1
     return 1 if errors else 0
@@ -556,6 +621,11 @@ def main(argv: list[str] | None = None) -> int:
     p_check.add_argument(
         "--manifest",
         help="scope to a plugin manifest's declared skills (e.g. .claude-plugin/plugin.json)",
+    )
+    p_check.add_argument(
+        "--json",
+        action="store_true",
+        help="one JSON document on stdout (stable rule/severity/path/detail per finding) instead of the human report",
     )
     p_check.set_defaults(func=cmd_check)
 

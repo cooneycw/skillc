@@ -73,3 +73,12 @@ bash ci/install-hooks.sh
 It scans the commits a push would send and refuses on a finding, or when
 gitleaks is missing. It installs into `.git/hooks` beside the existing hooks;
 do not set `core.hooksPath`, which would switch those off.
+
+`ci/clean-install-check.sh` builds a wheel and installs it into a fresh, clean
+`uv venv` to prove the checker's own installation (#27): `skillc selftest`
+correctly refuses without its packaged redcases (`controls/` is fixture data
+and is not shipped), and `skillc check` still discriminates a known-bad
+`SKILL.md` from a known-good one after packaging. Not wired into Woodpecker -
+the build+venv round trip is slower than the four gates above, and #27's own
+scope excludes CI expansion - so run it by hand: `bash ci/clean-install-check.sh`.
+Details: [docs/findings.md](docs/findings.md).
