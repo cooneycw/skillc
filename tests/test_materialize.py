@@ -706,11 +706,12 @@ SUBJECT_WORDS = ("power-pack", "cpp", "sha256sums", ".claude/scripts", "codex/sk
                  "claude_plugin_root", "reference.md", "mattpocock")
 
 #: The core modules a project-name branch must never reach: the adapter
-#: (materialize), the controller/runner (trial), the verifier (verify), and
-#: the execution backend seam (backend, #65). Evals fixtures, tests and the
-#: subject declarations themselves are excluded on purpose - a subject.json
-#: naming its own subject is the mechanism, not a defect.
-CORE_MODULES = ("materialize.py", "trial.py", "verify.py", "backend.py")
+#: (materialize), the controller/runner (trial), the verifier (verify), the
+#: execution backend seam (backend, #65), and the lifecycle driver that ties
+#: them together (lifecycle, #10 PR1b). Evals fixtures, tests and the subject
+#: declarations themselves are excluded on purpose - a subject.json naming its
+#: own subject is the mechanism, not a defect.
+CORE_MODULES = ("materialize.py", "trial.py", "verify.py", "backend.py", "lifecycle.py")
 
 
 def _subject_literals(source: str) -> list[str]:
