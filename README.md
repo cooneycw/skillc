@@ -26,11 +26,18 @@ required. See [ADR 0005](docs/decisions/0005-runtime-scope-and-cost-rulings.md).
 <a id="status"></a>
 
 **Status:** the static checker, native materialization (`skillc materialize`),
-the trial controller, the independent verifier and the execution-backend seam
-all exist and are exercised by real evidence (see the machine-readable table
-below, checked in CI against [`docs/milestones.json`](docs/milestones.json),
-#73). The task levels beyond Level 1 and the full behavioral comparisons
-described later in this README remain a documentation-only proposal. See the
+the trial controller, the independent verifier, the execution-backend seam,
+its Docker-backed implementation, and the exposure check (`skillc exposure`,
+#55) all exist and are exercised by real evidence (see the machine-readable
+table below, checked in CI against [`docs/milestones.json`](docs/milestones.json),
+#73). **#10 is not closed**: every Docker-backend claim - the composed
+argv, resource limits, ownership labels, conformance cases, the failure-path
+matrix and label-scoped reaping - is proven here only against a fake
+`docker` CLI; the real daemon boundary remains owed to the operator's live
+run. See ["First milestone"](#first-milestone-the-docker-backend-is-built-and-tested-against-a-fake-daemon-the-live-run-and-level-2-remain-proposed)
+below for exactly what that does and does not establish. The task levels
+beyond Level 1 and the full behavioral comparisons described later in this
+README remain a documentation-only proposal. See the
 [specification](docs/specs/evaluation-facility/spec.md),
 [architecture decision](docs/decisions/0002-independent-goal-driven-evaluation.md) and
 [PLAN.md](PLAN.md) for the design and delivery sequence.
@@ -338,9 +345,16 @@ extra. Full rulings: [ADR 0005](docs/decisions/0005-runtime-scope-and-cost-rulin
 Enabling paid judge tiers needs an authorized budget first (#12) - filing an
 issue or merging a design document never authorizes a paid model call.
 
-**Not yet delivered.** #10's grading-boundary work (`skillc/verify.py` grading
-through an `ExecutionBackend`) leaves the judge seam open but does not build
-tiers 2 and 3; that is #69's own acceptance.
+**Partially delivered.** The record contract for this now exists (#88):
+every verified result carries `verification.tiers_enabled` and
+`verification.verdicts`, a collection keyed by tier name, plus a reserved
+`verification.disagreement` field (`{"available": false, "reason": "fewer
+than two judge tiers"}` until a second tier exists to compare against).
+Today exactly one tier is ever enabled - `deterministic` - so the shape is
+proven but the judges themselves are not: #10's grading-boundary work
+(`skillc/verify.py` grading through an `ExecutionBackend`) leaves the judge
+seam open, and tiers 2 and 3 are not built; that remains #69's own
+acceptance (in progress, #92).
 
 ## Proposed evaluation levels
 
@@ -377,23 +391,55 @@ Progress will be reported as a profile: qualified levels, success by scenario,
 honesty of completion claims, human interventions, time and cost. A hard task
 passed once does not erase failures on easier tasks or establish a reliable level.
 
-## First milestone: mostly delivered; the Docker backend and Level 2+ remain proposed
+## First milestone: the Docker backend is built and tested against a fake daemon; the live run and Level 2+ remain proposed
 
 The static-checker trust gaps are repaired (#2, #3), the CPP small-fix pilot
 proved an independent grader with known-good/bad controls (#5, #9), and the
 [interface contracts](docs/specs/evaluation-facility/interfaces.md) are
 defined. `skillc materialize` proves native installation against a real
 client for two independently structured collections (#7, #11 - the second
-needing no adapter change). The `ExecutionBackend` protocol (#10's seam), a
-lifecycle driver that exercises the full prepare/install/execute/confirm/
-export/destroy/finalize sequence, and an optional-backend grading path in
-`skillc/verify.py` all exist and are tested - **against a fake,
-host-subprocess backend**. `skillc/docker_backend.py`, the real Docker-backed
-implementation the seam was built for, **does not exist yet**; that is what
-closes #10 (see the milestone table near the top of this README). Expanding
-to Level 2 and beyond, and running a paid trial, remain proposed work: no
-model call has been made against any subject yet, and none is authorized by
-anything in this repository (#12).
+needing no adapter change), and `skillc exposure` (#55) measures what
+actually reaches the model per client - a memory index truncated well below
+its claimed size, a policy-hidden skill, a frontmatter field one client
+ignores - with no model call, a check the static checker and materialization
+together cannot reach on their own.
+
+The `ExecutionBackend` protocol (#10's seam, #65), a lifecycle driver that
+exercises the full prepare/install/execute/confirm/export/destroy/finalize
+sequence with a per-attempt liveness canary (#70), and an optional-backend
+grading path in `skillc/verify.py` (#76) all exist and are tested.
+`skillc/docker_backend.py`, the real Docker-backed implementation the seam
+was built for, **now exists too** (#77's interface and implementation,
+#83/#85): composed `docker run` argv under fixed resource limits and a
+neutral non-root identity, ownership labels a cleanup sweep can find without
+trusting name matching, and a documented conformance table against
+interfaces.md's required cases (#80/#87). `skillc/reap.py` (#79/#91) adds
+label-scoped reaping, before/after resource snapshots (an unexpected leak of
+an owned container, or an unexpected disappearance of a foreign one), and
+declared-host-path checks on top of the per-attempt teardown the driver
+already does.
+
+**None of that closes #10.** Every one of those claims - the composed argv,
+the resource limits, the labels, the conformance cases, the reaping and
+snapshot behavior - is proven here only against a fake `docker` CLI
+(`tests/fixtures/docker-backend/fake_docker.py`), which proves the DRIVER's
+own sequencing and never a real daemon's containment boundary. #10 closes
+only when this same code runs against a real Docker daemon, on the
+operator's own machine, and that live run is still owed - see the milestone
+table near the top of this README, which stays `open` until then.
+
+The verified-result record now carries per-tier verdicts as a keyed
+collection (#69/#88) - `verification.verdicts`, one entry per enabled
+grading tier, never averaged or overridden - but only the deterministic
+tier is built; the same-model and independent-judge tiers (#69's own target
+architecture, below) are not. The trial ledger's case format gained an
+optional `case.observes_selection` declaration and a pre-spend cost
+projection (#26/#39, #86), and a matched-pilot experiment record and
+evidence-report schema for comparing a second collection against a prior
+revision exist (#12, #89) - still no paid trial has been run against
+either. Expanding to Level 2 and beyond, and running any paid trial or judge
+tier, remain proposed work: no model call has been made against any subject
+yet, and none is authorized by anything in this repository (#12).
 
 The [implementation plan](PLAN.md) sequences delivery against the specification;
 the [review agenda](docs/specs/evaluation-facility/review.md) identifies open choices. No
