@@ -96,6 +96,14 @@ def test_surface_refuses_a_bad_claimed_limit(limit: object) -> None:
         _surface(always_loaded=[{"path": "AGENTS.md", "claimed_limit_bytes": limit}])
 
 
+def test_surface_refuses_a_claimed_limit_too_small_for_the_inside_marker() -> None:
+    """Regression for a cross-model review finding (PR #90): a claimed limit
+    smaller than the inside marker's own minimal footprint makes "expect
+    EXPOSED" structurally impossible for any client, real or fake."""
+    with pytest.raises(m.Refused, match="at least"):
+        _surface(always_loaded=[{"path": "AGENTS.md", "claimed_limit_bytes": 10}])
+
+
 def test_surface_parses_index() -> None:
     surface = _surface(index={"path": "docs/idx.md", "targets": ["docs/a.md"]})
     assert surface.index == x.IndexFile("docs/idx.md", ("docs/a.md",))
@@ -129,9 +137,13 @@ def test_classify_marker_hidden_when_entirely_absent() -> None:
 def test_classify_marker_truncated_on_a_tail_prefix_and_names_the_cut_point() -> None:
     """The acceptance's own negative control, at the classification level:
     a marker cut mid-string must report TRUNCATED with the real cut point,
-    never a bare pass/fail against a prediction."""
-    marker = x.Marker("id", "MARK-boundary-0123456789", "layer", "note")
-    cut = len("MARK-boundary-012")
+    never a bare pass/fail against a prediction. Uses a realistically-shaped
+    marker (the real `MARKER_PREFIX`, a label, then a nonce) since the
+    truncation floor is deliberately deep into the nonce, past the shared
+    prefix (cross-model review, PR #90: a shallow floor could match the
+    shared prefix inside a DIFFERENT, fully-EXPOSED marker's own text)."""
+    marker = x.Marker("id", f"{x.MARKER_PREFIX}TEST-0123456789abcdef", "layer", "note")
+    cut = len(marker.text) - 4  # drop only the last 4 characters of the nonce
     rendered = "leading content " + marker.text[:cut]
     result = x.classify_marker(marker, rendered)
     assert result["verdict"] == x.TRUNCATED
@@ -140,19 +152,23 @@ def test_classify_marker_truncated_on_a_tail_prefix_and_names_the_cut_point() ->
 
 def test_marker_planted_just_beyond_a_limit_classifies_truncated_when_cut_mid_marker() -> None:
     """Regression-shaped proof for `_plant_always_loaded`'s own boundary
-    construction: cutting exactly through the "outside" marker's own text
+    construction: cutting NEAR THE END of the "outside" marker's own text
     (not before it, not after it) must classify TRUNCATED with the exact
     cut point - not merely HIDDEN, which a cut BEFORE the marker starts
-    would also produce and would not exercise this path."""
+    would also produce and would not exercise this path. Cuts only the last
+    few characters, not halfway: the truncation floor deliberately requires
+    most of the marker (including its nonce) to survive before accepting a
+    TRUNCATED verdict, to rule out a short accidental match (cross-model
+    review, PR #90)."""
     entry = x.AlwaysLoadedFile(path="AGENTS.md", claimed_limit_bytes=200)
     content, (inside, outside) = x._plant_always_loaded(Path("/nonexistent"), entry)
     assert inside.text in content.decode()
     outside_start = content.index(outside.text.encode())
-    half = len(outside.text) // 2
-    rendered = content[: outside_start + half].decode(errors="replace")
+    near_end = len(outside.text) - 4
+    rendered = content[: outside_start + near_end].decode(errors="replace")
     result = x.classify_marker(outside, rendered)
     assert result["verdict"] == x.TRUNCATED
-    assert result["cut_point_bytes"] == half
+    assert result["cut_point_bytes"] == near_end
 
 
 def test_marker_planted_just_inside_a_limit_is_exposed_when_cut_exactly_at_the_limit() -> None:
@@ -160,6 +176,28 @@ def test_marker_planted_just_inside_a_limit_is_exposed_when_cut_exactly_at_the_l
     content, (inside, _outside) = x._plant_always_loaded(Path("/nonexistent"), entry)
     rendered = content[:200].decode(errors="replace")
     assert x.classify_marker(inside, rendered)["verdict"] == x.EXPOSED
+
+
+def test_plant_always_loaded_preserves_the_real_file_content(tmp_path: Path) -> None:
+    """Regression for a cross-model review finding (PR #90): an earlier
+    draft discarded the real declared file entirely in the claimed-limit
+    branch, replacing it with synthetic filler - measuring a fabricated
+    stand-in's exposure, never the author's own declared content."""
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "AGENTS.md").write_text("REAL AUTHOR CONTENT MARKER\n", encoding="utf-8")
+    entry = x.AlwaysLoadedFile(path="AGENTS.md", claimed_limit_bytes=200)
+    content, _markers = x._plant_always_loaded(source_dir, entry)
+    assert b"REAL AUTHOR CONTENT MARKER" in content
+
+
+def test_plant_index_preserves_the_real_declared_index_content(tmp_path: Path) -> None:
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "memory-index.md").write_text("REAL DECLARED INDEX CONTENT\n", encoding="utf-8")
+    index = x.IndexFile(path="memory-index.md", targets=("docs/a.md",))
+    content, _markers = x._plant_index(source_dir, index)
+    assert b"REAL DECLARED INDEX CONTENT" in content
 
 
 # ------------------------------------------------------------------ collisions
@@ -175,6 +213,42 @@ def test_check_collisions_passes_when_markers_are_unique() -> None:
     marker = x.Marker("id", "SKILLC-EXPOSURE-UNIQUE-ABC123", "layer", "note")
     ambient = ["/some/unrelated/checkout/path", "an ordinary skill description"]
     assert x.check_collisions([marker], ambient) == []
+
+
+def test_check_collisions_does_not_flag_a_short_ambient_substring_of_the_marker() -> None:
+    """Regression for a cross-model review finding (PR #90): a skill merely
+    named `topic` is not a real collision risk for a target marker
+    `docs/topic-a.md` just because `topic` happens to be a substring of it -
+    rendering the short ambient string cannot somehow produce the longer
+    marker's own text. The pre-fix code checked both directions and flagged
+    this as a collision."""
+    marker = x.Marker("id", "docs/topic-a.md", "index-target", "note")
+    assert x.check_collisions([marker], ["topic"]) == []
+
+
+def test_check_exposure_refuses_when_a_target_name_collides_with_a_skill_description(
+    tmp_path: Path,
+) -> None:
+    """Regression for a cross-model review finding (PR #90): the module's
+    own docstring claimed a skill's description was part of the ambient
+    collision population, but nothing actually collected it - a hidden index
+    target whose name happened to appear in a rendered skill description
+    would have read as a false EXPOSED instead of refusing the run."""
+    collection = _snapshot(tmp_path)
+    (collection / "greet" / "SKILL.md").write_text(
+        '---\nname: greet\ndescription: "Mentions docs/topic-a.md by accident."\n---\nBody.\n',
+        encoding="utf-8",
+    )
+    surface = _surface(
+        select=["greet"], index={"path": "docs/memory-index.md", "targets": ["docs/topic-a.md"]},
+    )
+    client = _fake(tmp_path)
+    report = x.check_exposure(
+        surface, base=tmp_path / "base", snapshot=collection, client=client,
+        client_name="codex", timeout=10,
+    )
+    assert report.status == "refused"
+    assert "collision" in (report.reason or "")
 
 
 def test_check_exposure_refuses_the_whole_run_on_a_marker_collision(
@@ -274,12 +348,44 @@ def test_check_exposure_index_is_exposed_when_the_client_actually_loads_it(tmp_p
     assert by_layer["index-target"]["verdict"] == x.EXPOSED
 
 
+def test_check_exposure_detects_truncation_mid_marker_despite_wrapper_and_trailing_content(
+    tmp_path: Path,
+) -> None:
+    """Regression for a cross-model review finding (PR #90): `classify_marker`
+    used to search only the very END of the whole rendered blob for a
+    truncated marker's prefix, but a real render wraps planted content in
+    closing tags (`</INSTRUCTIONS>`) and appends further messages afterward -
+    so a marker cut mid-string almost never ends up at the literal tail.
+    Drives the FULL render path (the fake client's own AGENTS.md wrapper and
+    trailing prompt message included) with the cut landing exactly mid-way
+    through the outside marker, and requires TRUNCATED, not HIDDEN - which a
+    cut this far into the marker's own text should never produce."""
+    entry = x.AlwaysLoadedFile(path="AGENTS.md", claimed_limit_bytes=200)
+    snapshot = _snapshot(tmp_path)
+    # Peeking at the layout: nonce VALUES differ between this call and the
+    # one check_exposure makes internally, but byte OFFSETS depend only on
+    # fixed lengths (a 16-hex-char nonce is always 16 characters), so the
+    # computed cut point is positionally valid for the real run below.
+    planted_content, (_inside, outside) = x._plant_always_loaded(snapshot, entry)
+    outside_start = planted_content.index(outside.text.encode())
+    cut_at = outside_start + len(outside.text) - 4  # cut only the last 4 characters
+
+    surface = _surface(always_loaded=[{"path": "AGENTS.md", "claimed_limit_bytes": 200}])
+    client = _fake(tmp_path, expose_paths=["AGENTS.md"], truncate={"AGENTS.md": cut_at})
+    report = x.check_exposure(
+        surface, base=tmp_path / "base", snapshot=snapshot, client=client,
+        client_name="codex", timeout=10,
+    )
+    markers = {m["marker_id"]: m for m in report.markers}
+    assert markers["always_loaded:AGENTS.md:outside"]["verdict"] == x.TRUNCATED
+
+
 def test_check_exposure_reports_a_real_truncation_from_the_fake_client(tmp_path: Path) -> None:
     """The full render path, not just `classify_marker` in isolation:
     the fake client actually cuts the rendered AGENTS.md block at a
     configured byte count, and the reported verdicts must reflect it."""
-    surface = _surface(always_loaded=[{"path": "AGENTS.md", "claimed_limit_bytes": 60}])
-    client = _fake(tmp_path, expose_paths=["AGENTS.md"], truncate={"AGENTS.md": 60})
+    surface = _surface(always_loaded=[{"path": "AGENTS.md", "claimed_limit_bytes": 200}])
+    client = _fake(tmp_path, expose_paths=["AGENTS.md"], truncate={"AGENTS.md": 200})
     report = x.check_exposure(
         surface, base=tmp_path / "base", snapshot=_snapshot(tmp_path), client=client,
         client_name="codex", timeout=10,
@@ -315,6 +421,23 @@ def test_check_exposure_empty_output_reports_unmeasured_not_hidden(tmp_path: Pat
     gives UNMEASURED"."""
     surface = _surface(always_loaded=[{"path": "AGENTS.md"}])
     client = _fake(tmp_path, mode="empty")
+    report = x.check_exposure(
+        surface, base=tmp_path / "base", snapshot=_snapshot(tmp_path), client=client,
+        client_name="codex", timeout=10,
+    )
+    assert all(item["verdict"] == x.UNMEASURED for item in report.markers)
+    assert all(item["verdict"] == x.UNMEASURED for item in report.skills)
+
+
+def test_check_exposure_textless_response_reports_unmeasured_not_hidden(tmp_path: Path) -> None:
+    """Regression for a cross-model review finding (PR #90): exit 0 with a
+    well-formed but entirely textless JSON response (`[{"content": []}]`) is
+    a DIFFERENT blind case from empty stdout - distinguishing them was the
+    exact gap this test closes. Fails on the pre-fix code, which fell
+    through to `status="ok"` with an empty `raw_text` and classified every
+    marker/skill HIDDEN instead of UNMEASURED."""
+    surface = _surface(always_loaded=[{"path": "AGENTS.md"}])
+    client = _fake(tmp_path, mode="textless")
     report = x.check_exposure(
         surface, base=tmp_path / "base", snapshot=_snapshot(tmp_path), client=client,
         client_name="codex", timeout=10,

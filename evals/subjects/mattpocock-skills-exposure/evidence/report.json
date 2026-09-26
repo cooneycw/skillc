@@ -1,6 +1,8 @@
 {
  "kind": "exposure-report",
  "client": "codex",
+ "client_version": "0.157.1",
+ "client_flags": [],
  "status": "ok",
  "reason": null,
  "markers": [],

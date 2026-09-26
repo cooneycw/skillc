@@ -104,7 +104,7 @@ from pathlib import Path
 
 from . import materialize
 from .materialize import Refused
-from .spec import FrontmatterError, parse_yaml_document
+from .spec import FrontmatterError, parse_frontmatter, parse_yaml_document
 
 EXPOSURE_SCHEMA = 1
 
@@ -119,6 +119,13 @@ MARKER_PREFIX = "SKILLC-EXPOSURE-"
 #: marker's own start - enough that a client boundary a few bytes either
 #: side of the exact claim still classifies unambiguously.
 _BOUNDARY_GAP = 64
+
+#: The smallest `claimed_limit_bytes` that can even hold the "inside" marker's
+#: own minimal footprint (`MARKER_PREFIX` + "INSIDE-" + a 16-hex-char nonce +
+#: a newline, ~40 bytes) with a little room to spare - anything smaller makes
+#: "expect EXPOSED" structurally impossible, for any client (cross-model
+#: review, PR #90).
+_MIN_CLAIMED_LIMIT_BYTES = 64
 
 _EXPOSURE_ONLY_KEYS = {"exposure_schema", "always_loaded", "index"}
 
@@ -195,6 +202,15 @@ def _parse_always_loaded(raw: object) -> tuple[AlwaysLoadedFile, ...]:
         limit = item.get("claimed_limit_bytes")
         if limit is not None and (isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0):
             raise Refused("always_loaded claimed_limit_bytes must be a positive integer or absent")
+        if limit is not None and limit < _MIN_CLAIMED_LIMIT_BYTES:
+            # Below this, the "inside" marker's own minimal footprint (the
+            # fixed prefix plus its 16-hex-char nonce) cannot fit inside the
+            # claimed limit at all, making "expect EXPOSED" impossible for
+            # any client, real or fake (cross-model review, PR #90).
+            raise Refused(
+                f"always_loaded claimed_limit_bytes must be at least {_MIN_CLAIMED_LIMIT_BYTES} "
+                f"(the inside marker's own footprint), got {limit}"
+            )
         out.append(AlwaysLoadedFile(path=path, claimed_limit_bytes=limit))
     return tuple(out)
 
@@ -231,10 +247,17 @@ def _nonce() -> str:
 def _plant_always_loaded(source_dir: Path, entry: AlwaysLoadedFile) -> tuple[bytes, list[Marker]]:
     """The content to write into the arm's workspace at `entry.path`, and
     the marker(s) planted inside it. Reads the real file if the acquired
-    source has one at that path (kept as the base for a no-limit marker);
-    otherwise starts from empty content - either way, `source_dir` itself
-    is only ever READ, never written (the arm's own workspace copy is what
-    carries the plant)."""
+    source has one at that path; otherwise starts from empty content -
+    either way, `source_dir` itself is only ever READ, never written (the
+    arm's own workspace copy is what carries the plant).
+
+    The REAL content is always PRESERVED as a prefix, in both branches -
+    never replaced wholesale by synthetic filler (cross-model review, PR
+    #90: an earlier draft discarded it entirely in the claimed-limit branch,
+    which measured a fabricated stand-in's exposure, never the author's own
+    declared file - directly contradicting this module's own opening claim,
+    "measure what actually reaches the model...never what the author's files
+    merely declare")."""
     real = source_dir / entry.path
     base = real.read_bytes() if real.is_file() else b""
     if entry.claimed_limit_bytes is None:
@@ -246,20 +269,36 @@ def _plant_always_loaded(source_dir: Path, entry: AlwaysLoadedFile) -> tuple[byt
     limit = entry.claimed_limit_bytes
     inside = f"{MARKER_PREFIX}INSIDE-{_nonce()}"
     outside = f"{MARKER_PREFIX}OUTSIDE-{_nonce()}"
-    prefix_len = max(limit - len(inside) - 1, 0)
-    content = (b"." * prefix_len) + inside.encode() + b"\n"
-    content += (b"." * _BOUNDARY_GAP) + b"\n" + outside.encode() + b"\n"
+    if len(base) >= limit:
+        # The real declared file already exceeds the claimed limit on its
+        # own - markers appended after it cannot test THIS boundary
+        # meaningfully. Surfaced explicitly in the note rather than silently
+        # producing a test of a different boundary than the one declared.
+        content = base + b"\n" + inside.encode() + b"\n" + outside.encode() + b"\n"
+        caveat = f" - the real file is already {len(base)} bytes, past the {limit}-byte claim on its own"
+        inside_note = f"planted after the real content{caveat}"
+        outside_note = f"planted after the real content{caveat}"
+    else:
+        room = limit - len(base) - len(inside) - 1
+        content = base + (b"." * room) + inside.encode() + b"\n"
+        content += (b"." * _BOUNDARY_GAP) + b"\n" + outside.encode() + b"\n"
+        inside_note = (
+            f"planted after the real {len(base)}-byte file to end at byte {limit} "
+            f"of a {limit}-byte claimed limit - expect EXPOSED"
+        )
+        outside_note = f"planted to start beyond the {limit}-byte claimed limit - expect TRUNCATED or HIDDEN"
     markers = [
-        Marker(f"always_loaded:{entry.path}:inside", inside, f"always_loaded:{entry.path}",
-               f"planted to end at byte {len(prefix_len * b'.') + len(inside)} of a "
-               f"{limit}-byte claimed limit - expect EXPOSED"),
-        Marker(f"always_loaded:{entry.path}:outside", outside, f"always_loaded:{entry.path}",
-               f"planted to start beyond the {limit}-byte claimed limit - expect TRUNCATED or HIDDEN"),
+        Marker(f"always_loaded:{entry.path}:inside", inside, f"always_loaded:{entry.path}", inside_note),
+        Marker(f"always_loaded:{entry.path}:outside", outside, f"always_loaded:{entry.path}", outside_note),
     ]
     return content, markers
 
 
-def _plant_index(index: IndexFile) -> tuple[bytes, list[Marker]]:
+def _plant_index(source_dir: Path, index: IndexFile) -> tuple[bytes, list[Marker]]:
+    """Like `_plant_always_loaded`: the real declared index content (if any)
+    is preserved as a prefix, never replaced (cross-model review, PR #90)."""
+    real = source_dir / index.path
+    base = real.read_bytes() if real.is_file() else b""
     marker = f"{MARKER_PREFIX}INDEX-{_nonce()}"
     lines = [marker, "", "On-demand targets:"]
     target_markers = []
@@ -270,7 +309,8 @@ def _plant_index(index: IndexFile) -> tuple[bytes, list[Marker]]:
                    "declared on-demand target name - expect EXPOSED (listed), "
                    "never that the target's own content was fetched")
         )
-    content = "\n".join(lines).encode() + b"\n"
+    appended = "\n".join(lines).encode() + b"\n"
+    content = base + b"\n" + appended if base else appended
     return content, [
         Marker("index", marker, "index", "the index file itself - expect EXPOSED"),
         *target_markers,
@@ -288,15 +328,26 @@ def check_collisions(markers: list[Marker], ambient: list[str]) -> list[Marker]:
     this module's own test suite): comparing only strings that differ from
     the marker's own text is backwards - an ambient string EQUAL to a
     marker's text is the single worst collision there is, and excluding
-    exact-equal candidates hid exactly that case. Another marker's text is
-    excluded by its INDEX in the list, not by value, so two independently
-    generated markers that happen to collide with EACH OTHER are still
-    caught (structurally near-impossible with nonces, but a real check
-    should not simply assume its own inputs never collide)."""
+    exact-equal candidates hid exactly that case.
+
+    Ambient comparison is ONE-DIRECTIONAL - is the FULL marker contained in
+    the ambient text - never the reverse (cross-model review, PR #90: a
+    skill merely named `topic` is not a collision risk for a target marker
+    `docs/topic-a.md` just because `topic` happens to be a substring of it;
+    rendering the short ambient string cannot somehow produce the longer
+    marker's own text). Marker-to-marker comparison stays SYMMETRIC and
+    excluded by INDEX rather than value, since two independently generated
+    markers - potentially of different lengths - genuinely could collide
+    with each other in either direction (structurally near-impossible with
+    nonces, but a real check should not simply assume its own inputs never
+    collide)."""
     colliding: list[Marker] = []
     for i, marker in enumerate(markers):
-        candidates = [*ambient, *(m.text for j, m in enumerate(markers) if j != i)]
-        if any(candidate and (marker.text in candidate or candidate in marker.text) for candidate in candidates):
+        if any(candidate and marker.text in candidate for candidate in ambient):
+            colliding.append(marker)
+            continue
+        others = (m.text for j, m in enumerate(markers) if j != i)
+        if any(other and (marker.text in other or other in marker.text) for other in others):
             colliding.append(marker)
     return colliding
 
@@ -344,7 +395,19 @@ def render_codex(
         ]
     except (ValueError, AttributeError):
         texts = [out]
-    return Rendering("ok", "", "\n".join(texts), listing)
+    raw_text = "\n".join(texts)
+    if not raw_text.strip():
+        # A well-formed but textless response (`[]`, `{}`,
+        # `[{"content":[]}]`) is exit 0 with nothing observable, same as
+        # empty stdout above - never "ok" with an empty raw_text, which
+        # would classify every marker HIDDEN across the board rather than
+        # UNMEASURED (cross-model review, PR #90). If `listing.status ==
+        # "ok"` the skills block itself contributed text, so raw_text is
+        # guaranteed non-blank in that case - this path is reached only
+        # when nothing at all was extractable.
+        return Rendering("failed", "client output parsed but contained no observable text", "",
+                          materialize.Listing("failed"))
+    return Rendering("ok", "", raw_text, listing)
 
 
 #: The Claude Code arm is a declared limit, not a per-run measurement - see
@@ -365,15 +428,30 @@ def render_claude_code() -> Rendering:
 # --------------------------------------------------------------- classification
 
 
+#: A truncation match must cover at least this fraction of the marker's own
+#: text - deep enough into its random nonce (16 hex chars, `secrets.token_hex(8)`)
+#: that a coincidental match is not practically possible, and past the
+#: fixed, SHARED `MARKER_PREFIX` every marker begins with (cross-model
+#: review, PR #90: a naive shortest-acceptable-prefix search could match the
+#: literal `MARKER_PREFIX` text inside a DIFFERENT, fully-EXPOSED marker's
+#: own rendered text, reporting a HIDDEN marker as falsely TRUNCATED).
+_MIN_TRUNCATION_FRACTION = 0.75
+
+
 def classify_marker(marker: Marker, rendered: str) -> dict[str, object]:
+    """A marker's cut point is searched for ANYWHERE in the rendered text,
+    never only at its very end (cross-model review, PR #90: a real render
+    wraps planted content in closing tags and further messages - `# path
+    instructions for <cwd>\\n\\n<INSTRUCTIONS>\\n<content>\\n\\n</INSTRUCTIONS>`,
+    then more items after it - so a marker cut mid-string almost never ends
+    up at the literal tail of the whole rendered blob, and an `endswith`
+    check missed exactly the realistic case it needed to catch)."""
     if marker.text in rendered:
         return {"marker_id": marker.marker_id, "layer": marker.layer, "verdict": EXPOSED, "note": marker.note}
-    # The longest proper prefix of the marker that appears at the very end of
-    # the rendered text is the observed cut point - a marker cut anywhere else
-    # is not a truncation of THIS marker, so only a tail match counts.
-    for cut in range(len(marker.text) - 1, 0, -1):
+    floor = max(len(MARKER_PREFIX) + 8, int(len(marker.text) * _MIN_TRUNCATION_FRACTION))
+    for cut in range(len(marker.text) - 1, floor - 1, -1):
         prefix = marker.text[:cut]
-        if rendered.endswith(prefix):
+        if prefix in rendered:
             return {
                 "marker_id": marker.marker_id, "layer": marker.layer, "verdict": TRUNCATED,
                 "note": marker.note, "cut_point_bytes": cut,
@@ -397,6 +475,23 @@ def _policy_hidden_cause(skill_dir: Path) -> str | None:
     if isinstance(policy, dict) and policy.get("allow_implicit_invocation") is False:
         return "policy (agents/openai.yaml policy.allow_implicit_invocation: false)"
     return None
+
+
+def _skill_description(skill_dir: Path) -> str | None:
+    """A skill's own declared description - natural-language text that could
+    legitimately contain almost anything, including an accidental marker
+    match, so it belongs in `check_collisions`'s ambient population (the
+    module's own docstring already claimed this was checked; cross-model
+    review, PR #90, found it was not actually collected anywhere)."""
+    skill_md = skill_dir / "SKILL.md"
+    if not skill_md.is_file():
+        return None
+    try:
+        frontmatter, _body = parse_frontmatter(skill_md.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, FrontmatterError):
+        return None
+    description = frontmatter.get("description")
+    return description if isinstance(description, str) else None
 
 
 # ------------------------------------------------------------------------ report
@@ -485,13 +580,17 @@ def check_exposure(
             dest.write_bytes(content)
             markers.extend(planted)
         if surface.index is not None:
-            content, planted = _plant_index(surface.index)
+            content, planted = _plant_index(source.surface_dir, surface.index)
             dest = arm.workspace / surface.index.path
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(content)
             markers.extend(planted)
 
-        ambient = [str(root), str(arm.home), str(arm.workspace), *(e.name for e in entries)]
+        descriptions = [
+            d for e in entries
+            if (d := _skill_description(source.surface_dir / e.directory)) is not None
+        ]
+        ambient = [str(root), str(arm.home), str(arm.workspace), *(e.name for e in entries), *descriptions]
         colliding = check_collisions(markers, ambient)
         if colliding:
             names = ", ".join(m.marker_id for m in colliding)

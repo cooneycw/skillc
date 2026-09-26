@@ -14,7 +14,8 @@ caller launches).
 Sidecar fields:
   mode            "normal" (default) | "crash" | "hang" | "empty" (exit 0,
                   nothing on stdout - its own blind case, distinct from a
-                  crash)
+                  crash) | "textless" (exit 0, well-formed JSON, but no
+                  extractable text - distinct from "empty": no output at all)
   expose_paths    workspace-relative paths to read and wrap as a
                   `user`-role AGENTS.md-shaped message, in this order -
                   a path NOT listed here is never exposed at all, exactly
@@ -94,6 +95,11 @@ def main(argv: list[str]) -> int:
     if mode == "empty":
         # Exit 0, nothing on stdout - its own blind case, distinct from a
         # crash: named explicitly by #55's acceptance criteria.
+        return 0
+    if mode == "textless":
+        # Exit 0, well-formed JSON, but nothing extractable - distinct from
+        # "empty" (no output at all). Cross-model review, PR #90.
+        print(json.dumps([{"role": "developer", "content": []}]))
         return 0
 
     codex_home = Path(os.environ["CODEX_HOME"])
