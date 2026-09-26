@@ -9,14 +9,34 @@ installation and the agent under test INSIDE whatever isolation it provides,
 and can be asked - independently of what it reported while running - whether
 its work actually stopped and whether nothing of it remains.
 
-skillc ships its own Docker-backed implementation
-(`skillc/docker_backend.py`), and that backend is a complete, standalone
-answer to #10: it needs no other system. The seam exists so ANOTHER backend -
-a different isolation technology, or one supplied by a larger system this
-skillc instance happens to run inside - can implement the same contract
-later, without this module importing, calling, naming or assuming anything
-about it. Nothing here does; a backend is exactly `ExecutionBackend`'s six
-methods and `describe()`'s claims, never more.
+skillc will ship its own Docker-backed implementation (`skillc/docker_backend.py`,
+a later #10 PR - it does not exist at this commit), and that backend will be a
+complete, standalone answer to #10: it needs no other system. The seam exists
+so ANOTHER backend - a different isolation technology, or one supplied by a
+larger system this skillc instance happens to run inside - can implement the
+same contract later, without this module importing, calling, naming or
+assuming anything about it. Nothing here does; a backend is exactly
+`ExecutionBackend`'s methods and `describe()`'s claims, never more.
+
+NEUTRAL IDENTITY IS A BACKEND OBLIGATION, not an implementation detail left to
+whichever backend ships first (operator rule, skillc is public: no hostnames,
+usernames, uids, home paths, IPs or internal URLs in anything committed,
+reported or graded). Every backend must:
+
+  - present a fixed, non-host identity inside its isolation: a fixed
+    unprivileged user/uid (e.g. `candidate`), a fixed `--hostname`-style
+    value, and fixed logical paths (e.g. `/work`, `/home/candidate`) - never
+    the host's own;
+  - report only those logical values from `describe()`, from anything
+    `install()` or `execute()` returns, and from `str(handle)` - a handle
+    whose string form embeds a host path, hostname or uid has already leaked
+    the thing this rule exists to keep out of a public ledger or receipt;
+  - derive a per-attempt name (a container name or equivalent) from the
+    attempt ID alone, never from anything host-identifying.
+  - The controller does the same on its own side: a host-side location (the
+    evidence store, an export destination) is recorded relative or logical,
+    never as an absolute host path, in anything that could be committed or
+    pasted into a public issue.
 
 WHICH LIFECYCLE STEP OWNS WHICH SIDE (interfaces.md's numbering):
 
@@ -55,6 +75,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -63,6 +84,23 @@ class BackendUnavailable(Exception):
     """The backend cannot be used right now (no daemon, no credentials, an
     unreachable remote). Always a refusal - see the module docstring. Never
     caught and silently retried as a host execution."""
+
+
+class Confirmation(Enum):
+    """The only three answers `confirm_stopped()`/`confirm_absent()` may give.
+
+    A caller-visible `bool` cannot say "I could not observe" - a backend whose
+    daemon died mid-attempt would have to answer either True (a confirmation
+    it never made) or False (indistinguishable from "confirmed still there").
+    UNKNOWN is a third, real answer, and it is NEVER treated as CONFIRMED: the
+    same rule interfaces.md already states for a criterion outcome ("missing
+    mandatory evidence prevents PASS") and #39 states for observation
+    coverage. A backend that cannot tell must return UNKNOWN, not guess.
+    """
+
+    CONFIRMED = "confirmed"
+    NOT_CONFIRMED = "not-confirmed"
+    UNKNOWN = "unknown"
 
 
 @dataclass(frozen=True)
@@ -160,7 +198,7 @@ class ExecutionBackend(Protocol):
         watching it."""
         ...
 
-    def confirm_stopped(self, handle: object) -> bool:
+    def confirm_stopped(self, handle: object) -> Confirmation:
         """Step 6: ask the BACKEND, independent of `execute()`'s own return,
         whether every process it started for `handle` is gone. The only fact
         a caller may treat as a confirmed stop - never `execute()`'s own
@@ -169,7 +207,11 @@ class ExecutionBackend(Protocol):
         this is its own method rather than folded into `execute()`: `docker
         run`'s host-side CLI process ending proves nothing about the
         container, which is owned by the daemon, not the CLI's process tree.)
-        """
+
+        Returns `Confirmation.UNKNOWN`, never a guessed `NOT_CONFIRMED` or
+        `CONFIRMED`, when the backend itself cannot be reached to ask (the
+        daemon died mid-attempt, a remote went unreachable). `UNKNOWN` is
+        never treated as a confirmed stop by any caller."""
         ...
 
     def export(self, handle: object, dest: Path) -> None:
@@ -185,10 +227,14 @@ class ExecutionBackend(Protocol):
         once, and safe to call after a failed `prepare`/`install`/`execute`."""
         ...
 
-    def confirm_absent(self, handle: object) -> bool:
+    def confirm_absent(self, handle: object) -> Confirmation:
         """Step 9: ask the BACKEND whether `handle`'s resources are actually
         gone, after `destroy()`. Never trust `destroy()`'s own return value
         alone - `docker rm -f` can report success while the daemon still
         lists the container, so this asks again, independently, exactly as
-        `confirm_stopped` never trusts `execute()`."""
+        `confirm_stopped` never trusts `execute()`.
+
+        Returns `Confirmation.UNKNOWN`, never a guessed answer, when the
+        backend cannot be reached to ask - the same rule `confirm_stopped`
+        follows, and for the same reason."""
         ...
