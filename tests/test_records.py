@@ -598,3 +598,48 @@ def test_two_lifecycles_for_one_attempt_conflict(tmp_path: Path) -> None:
 
 def test_only_the_controller_produces_a_lifecycle() -> None:
     assert list(records.producer_authority(_lifecycle(producer="subject")))
+# --------------------------------------------------------------- mandatory is a bool (#37)
+
+REPRO_37 = CONTROLS / "criterion-vocabulary" / "bad" / "string-mandatory.json"
+
+
+@pytest.mark.parametrize("flag", ["true", "false", 1, 0, None, [True]],
+                         ids=["str-true", "str-false", "int-1", "int-0", "null", "list"])
+def test_a_non_boolean_mandatory_flag_is_refused(flag: object) -> None:
+    """`derive_status` selects mandatory criteria with `is True`, so anything other
+    than a real bool silently makes the criterion optional - and a VIOLATED one
+    then drops out of the verdict. `1` and `0` are the bool/int trap: they are
+    ints, not bools, whatever `1 == True` says."""
+    rec = _record(**{**GOOD_RESULT, "criteria": [
+        {"id": "c1", "mandatory": flag, "outcome": "SATISFIED", "evidence": ["log:c1"]}]})
+    findings = list(records.criterion_vocabulary(rec))
+    assert findings and "mandatory" in findings[0], flag
+
+
+def test_a_missing_mandatory_flag_is_refused() -> None:
+    """Absent reads as optional to `derive_status` - the same hole as a string."""
+    rec = _record(**{**GOOD_RESULT, "criteria": [
+        {"id": "c1", "outcome": "SATISFIED", "evidence": ["log:c1"]}]})
+    assert list(records.criterion_vocabulary(rec))
+
+
+@pytest.mark.parametrize("flag", [True, False])
+def test_a_boolean_mandatory_flag_is_accepted(flag: bool) -> None:
+    rec = _record(**{**GOOD_RESULT, "criteria": [
+        {"id": "c1", "mandatory": flag, "outcome": "SATISFIED", "evidence": ["log:c1"]}]})
+    assert list(records.criterion_vocabulary(rec)) == []
+
+
+def test_the_string_mandatory_repro_derives_a_clean_PASS_so_only_vocabulary_can_see_it() -> None:
+    """Why this is a vocabulary rule and not a derivation fix: the violation does
+    not contradict the status, it DISAPPEARS, so derived-status finds nothing."""
+    rec = records.load(REPRO_37)
+    assert records.derive_status(rec) == rec.data["status"] == "PASS"
+    assert list(records.derived_status(rec)) == []
+    assert list(records.criterion_vocabulary(rec))
+
+
+def test_check_records_refuses_the_string_mandatory_repro(tmp_path: Path) -> None:
+    shutil.copy(REPRO_37, tmp_path / "record.json")
+    rc = cli.cmd_check_records(argparse.Namespace(path=str(tmp_path), rule=None))
+    assert rc == 1, "a VIOLATED criterion flagged \"mandatory\": \"true\" derived a clean PASS"
