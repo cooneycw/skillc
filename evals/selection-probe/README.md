@@ -27,6 +27,14 @@ for the cost stop this directory's `run-manifest.json` observes.
   it's under $5"), enforced in code by `skillc.cost_estimate.authorize` -
   refused regardless of any approved budget above it. The estimate below is
   $0.675, comfortably under.
+- **Token-assumption sensitivity.** The published 50,000-input-token
+  assumption reads like a single turn; a real multi-turn agentic Codex
+  session re-sends its context (including the 74-skill listing) every turn,
+  so real input could run 10-20x higher. At the same prices and 6 attempts:
+  500,000 input tokens/attempt -> **$4.05** (still under the ceiling);
+  1,000,000 input tokens/attempt -> **$7.80** (OVER the $5 ceiling -
+  `authorize()` would refuse it, before any cache discount). The first live
+  attempt's observed tokens replace this placeholder.
 
 ## The three cases (`cases.json`)
 

@@ -46,7 +46,7 @@
     "assumptions": {
       "estimated_input_tokens_per_attempt": 50000,
       "estimated_output_tokens_per_attempt": 5000,
-      "basis": "no attempt has ever run against this subject; these are placeholder assumptions (system prompt + CPP skill listing + goal.md for input, agent reasoning/tool calls/patch for output), not measurements. The first live attempt should replace them with observed values."
+      "basis": "no attempt has ever run against this subject; these are placeholder assumptions (system prompt + CPP skill listing + goal.md for input, agent reasoning/tool calls/patch for output), not measurements. The first live attempt should replace them with observed values. This assumption reads like a single turn and is weak in a specific, known direction: a multi-turn agentic Codex session re-sends its context (including the 74-skill listing) every turn, so real input could be 10-20x higher. Sensitivity, at these prices, same 6 attempts: 500,000 input tokens/attempt -> $4.05 total (still under the $5 ceiling); 1,000,000 input tokens/attempt -> $7.80 total (OVER the $5 ceiling - skillc.cost_estimate.authorize would refuse it before any cache discount is applied)."
     },
     "estimated_usd": 0.675
   },
