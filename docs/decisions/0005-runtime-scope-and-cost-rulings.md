@@ -109,7 +109,14 @@ Full acceptance: #12.
   work already exist; #64 and #69's tiers 2/3 do not yet. This ADR does
   not close any of those issues, and states no acceptance beyond what they
   already carry.
-- **README is checked, not merely told.** #73's own README-drift checks
-  (`ci/readme_drift.py`) verify the commands, version and milestone claims
-  this document's companion README refresh makes; this ADR is the
-  narrative record those checks do not themselves carry.
+- **README is checked, not merely told - but only for structural facts, not
+  for narrative claims.** `ci/readme_drift.py` verifies that the documented
+  command list matches `skillc`'s real subcommands, that the printed version
+  matches the installed package, and that the milestone table's rows and
+  states match `docs/milestones.json`. It cannot and does not verify prose
+  claims about what is implemented (for example, whether a given backend
+  exists) - those are read by a human, or caught by the review this ADR's own
+  delivery PR went through. `ci/changelog_check.py` similarly checks only that
+  a `skillc`-touching PR added an `[Unreleased]` entry or carries an exempt
+  trailer, not that the entry is accurate. This ADR is the narrative record
+  those checks do not themselves carry, and it is not itself machine-checked.

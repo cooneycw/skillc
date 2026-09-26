@@ -23,6 +23,8 @@ backend behind the same seam - the reference backend (skillc driving Docker
 directly) is what closes #10 and remains fully functional on its own, never
 required. See [ADR 0005](docs/decisions/0005-runtime-scope-and-cost-rulings.md).
 
+<a id="status"></a>
+
 **Status:** the static checker, native materialization (`skillc materialize`),
 the trial controller, the independent verifier and the execution-backend seam
 all exist and are exercised by real evidence (see the machine-readable table
@@ -224,10 +226,14 @@ uv run skillc selftest
 must be up to date with `main` before merging (strict mode), and force-push
 and branch deletion are blocked. Before opening a PR, run
 `uv run skillc selftest && uv run pytest && uv run ruff check . && uv run mypy`
-and `uv run skillc leak-check .`; a PR that changes `skillc/` also needs a new
-entry under `CHANGELOG.md`'s `[Unreleased]` section, or a
-`Changelog-exempt: <reason>` trailer on its last commit. See #73's CI steps
-(`changelog-check`, `readme-drift`) for what else is checked automatically.
+and `uv run skillc leak-check . --exclude controls/leak-check/bad --exclude
+tests/test_leak.py --exclude ci/leak-check-control.sh` (the excludes skip this
+repo's own seeded-bad fixtures, which a bare scan would otherwise report as
+findings - see CI's `leak-check` step for the authoritative list); a PR that
+changes `skillc/` also needs a new entry under `CHANGELOG.md`'s `[Unreleased]`
+section, or a `Changelog-exempt: <reason>` trailer on its last commit. See
+#73's CI steps (`changelog-check`, `readme-drift`) for what else is checked
+automatically.
 
 ## Exit codes
 
@@ -369,19 +375,23 @@ Progress will be reported as a profile: qualified levels, success by scenario,
 honesty of completion claims, human interventions, time and cost. A hard task
 passed once does not erase failures on easier tasks or establish a reliable level.
 
-## First milestone: delivered; Level 2+ remains proposed
+## First milestone: mostly delivered; the Docker backend and Level 2+ remain proposed
 
 The static-checker trust gaps are repaired (#2, #3), the CPP small-fix pilot
 proved an independent grader with known-good/bad controls (#5, #9), and the
 [interface contracts](docs/specs/evaluation-facility/interfaces.md) are
-defined and qualify a replaceable execution backend (#10). One disposable
-Docker trial has been implemented against real subjects (`skillc materialize`,
-`skillc/lifecycle.py`, `skillc/verify.py`), and the same interfaces are proven
-against a second, independently authored collection (#11) - see the milestone
-table near the top of this README for what is closed versus still open.
-Expanding to Level 2 and beyond, and running a paid trial, remain proposed
-work: no model call has been made against any subject yet, and none is
-authorized by anything in this repository (#12).
+defined. `skillc materialize` proves native installation against a real
+client for two independently structured collections (#7, #11 - the second
+needing no adapter change). The `ExecutionBackend` protocol (#10's seam), a
+lifecycle driver that exercises the full prepare/install/execute/confirm/
+export/destroy/finalize sequence, and an optional-backend grading path in
+`skillc/verify.py` all exist and are tested - **against a fake,
+host-subprocess backend**. `skillc/docker_backend.py`, the real Docker-backed
+implementation the seam was built for, **does not exist yet**; that is what
+closes #10 (see the milestone table near the top of this README). Expanding
+to Level 2 and beyond, and running a paid trial, remain proposed work: no
+model call has been made against any subject yet, and none is authorized by
+anything in this repository (#12).
 
 The [implementation plan](PLAN.md) sequences delivery against the specification;
 the [review agenda](docs/specs/evaluation-facility/review.md) identifies open choices. No
