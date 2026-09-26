@@ -166,9 +166,10 @@ sys.exit(main())
 
 
 def _read_regular(path: Path) -> bytes:
-    """A regular file's bytes, never through a link."""
+    """A regular file's bytes, never through a link, and never blocking: a FIFO
+    candidate code put in its place is refused, not waited on."""
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except OSError as exc:
         raise Refused(f"{path} is not a readable regular file: {exc.strerror}") from None
     try:
@@ -266,14 +267,18 @@ class GraderDef:
         """The bytes of the three files, read once. Grading executes THESE bytes,
         never the files again, so a file replaced while candidate code runs - even
         one that restores itself afterwards - is never what runs."""
-        return {"probe": _read_regular(self.probe), "inputs": _read_regular(self.inputs),
+        return {"definition": _read_regular(self.root / GRADER_FILE),
+                "probe": _read_regular(self.probe), "inputs": _read_regular(self.inputs),
                 "judge": _read_regular(self.judge)}
 
     def digest(self, loaded: dict[str, bytes] | None = None) -> str:
-        """The pin: the definition's fields and the bytes of its files (read now,
-        unless `loaded` supplies the bytes that will actually run)."""
+        """The pin: the definition file's bytes, the fields as loaded, the names and
+        bytes of the files it runs (read now, unless `loaded` supplies the bytes that
+        will actually run). A change to `grader.json` alone changes it too."""
         data = loaded if loaded is not None else self.read()
         return trial.sha256_bytes(trial.canonical({
+            "definition": trial.sha256_bytes(data["definition"]),
+            "files": [self.probe.name, self.inputs.name, self.judge.name],
             "id": self.id, "revision": self.revision, "criteria": list(self.criteria),
             "probe": trial.sha256_bytes(data["probe"]),
             "inputs": trial.sha256_bytes(data["inputs"]),

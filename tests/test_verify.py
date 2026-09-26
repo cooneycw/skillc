@@ -672,3 +672,48 @@ def test_an_ancestors_environment_is_NOT_hidden(store: Path, base: Path, grading
     if not mark.exists():
         pytest.skip("the candidate could not report; /proc is not readable here")
     assert mark.read_text() == "found"
+
+
+def test_a_change_to_the_definition_file_alone_refuses_the_result(store: Path, base: Path, grading: Path,
+                                                                  tmp_path: Path) -> None:
+    # Counter-model re-review: the pin once covered only the three files grader.json
+    # names, so rewriting grader.json itself went unnoticed.
+    grader = _task_copy(tmp_path)
+    definition = grader.root / verify.GRADER_FILE
+    writer = (f"import os\nos.chmod({str(definition)!r}, 0o600)\n"
+              f"open({str(definition)!r}, 'w').write('{{}}')\n" + CORRECT)
+    experiment, attempt_id = _captured(store, base, _source(tmp_path, writer), grader=grader.identity())
+    with pytest.raises(t.Refused, match="grader definition changed"):
+        verify.grade(experiment, attempt_id, grader, grading)
+
+
+def test_the_pin_covers_the_names_of_the_files_it_runs(tmp_path: Path) -> None:
+    renamed = tmp_path / "judge_copy.py"
+    shutil.copy2(GRADER.judge, renamed)
+    assert GRADER.with_judge(renamed).digest() != GRADER.digest()
+
+
+def test_a_fifo_in_place_of_the_judge_file_is_refused_not_waited_on(store: Path, base: Path, grading: Path,
+                                                                    tmp_path: Path) -> None:
+    # Counter-model re-review: the post-grading re-read of the grader files opened
+    # without O_NONBLOCK, so a FIFO planted there hung the verifier after every
+    # deadline had passed.
+    grader = _task_copy(tmp_path)
+    writer = f"import os\nos.unlink({str(grader.judge)!r})\nos.mkfifo({str(grader.judge)!r})\n" + CORRECT
+    experiment, attempt_id = _captured(store, base, _source(tmp_path, writer), grader=grader.identity())
+    with pytest.raises(t.Refused, match="not a (readable )?regular file"):
+        verify.grade(experiment, attempt_id, grader, grading)
+
+
+def test_a_fifo_in_place_of_the_ownership_marker_does_not_hang_cleanup(store: Path, base: Path, grading: Path,
+                                                                       tmp_path: Path) -> None:
+    marker = ("import os\n"
+              "path = os.path.join(os.path.dirname(os.path.dirname(os.getcwd())), '.skillc-owned')\n"
+              "os.unlink(path)\nos.mkfifo(path)\n") + CORRECT
+    experiment, attempt_id = _captured(store, base, _source(tmp_path, marker))
+    result = verify.grade(experiment, attempt_id, GRADER, grading)
+    verification = result["verification"]
+    assert isinstance(verification, dict)
+    # Not removed - the marker no longer proves ownership - but recorded, not hung.
+    assert verification["containment"]["cleanup"] == "refused-not-owned"
+    assert result["status"] == "PASS"

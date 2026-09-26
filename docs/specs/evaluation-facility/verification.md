@@ -41,8 +41,10 @@ unknown fields are refused:
 | `judge.file`, `judge.timeout` | The program that holds the answers and emits the criteria |
 
 Files are plain names in the grader's own directory. A name with a path
-separator, or a file that is a link, is refused. `GraderDef.digest()` covers
-every field and the bytes of all three files.
+separator, or a file that is a link, is refused. `GraderDef.digest()` covers the
+bytes of `grader.json` itself, every field as loaded, the names of the three
+files and their bytes. So rewriting only the definition, or pointing it at a
+different file with the same bytes, changes the pin.
 
 **The pin.** The ledger's `grader` identity carries that digest
 (`{"id", "revision", "digest"}`), written by the controller before dispatch. The
@@ -107,10 +109,14 @@ so the verifier **quarantines itself**: every later grading run in that process
 refuses until an operator calls `verify.clear_quarantine()`. A survivor could
 otherwise write into the next run's store or judge.
 
-The probe's report and stderr are opened non-blocking and without following a
-link, and read only if they are regular files, within a bound. A FIFO swapped in
-for the report would otherwise block the verifier forever, after every deadline
-had passed.
+Every file candidate code could have replaced is opened non-blocking and without
+following a link, and read only if it is a regular file, within a bound. That
+covers the probe's report and stderr, the grader's files when they are re-read
+after grading, and the disposable root's ownership marker at cleanup
+(`materialize.cleanup`, which #8's workspace cleanup shares). A FIFO swapped in for
+any of them would otherwise block the verifier forever, after every deadline had
+passed. A replaced marker makes cleanup report `refused-not-owned` and leave the
+root in place, and the result records that.
 
 **What the probe prints is an observation.** Candidate code shares the probe's
 process and can write the probe's report. It gains nothing it could not gain by
@@ -220,6 +226,8 @@ grades.
 | Candidate outlives the probe | a `setsid` process -> swept, pid dead, result stands | - |
 | Candidate replaces the judge with a self-restoring always-pass | -> refused; the swapped judge never ran | - |
 | Candidate replaces the report with a FIFO | -> FAIL (`R4-interface`), no hang | - |
+| Candidate replaces a grader file or the ownership marker with a FIFO | grader file -> refused; marker -> cleanup `refused-not-owned`; neither hangs | - |
+| Candidate rewrites only `grader.json` | -> refused | - |
 | Candidate kills the supervisor | -> INCONCLUSIVE, `containment` | - |
 | ... and stays alive | -> killed by the fallback sweep; the verifier quarantines and refuses the next run until cleared | after `clear_quarantine`, the reference PASSes |
 | Evaluator credentials, inheritance | a secret in the verifier's environment is absent from the candidate's `os.environ` | the dump holds `PATH` (it ran) |
@@ -244,7 +252,8 @@ Each protection was also removed once, and the test that names it went red:
 - the judge re-read from disk (the self-restoring judge PASSed);
 - no fallback sweep (the survivor stayed alive);
 - no quarantine;
-- a blocking read of the report (the verifier hung on the FIFO).
+- a blocking read of the report, of a grader file, or of the marker (each hung);
+- `grader.json`, or the file names, left out of the pin.
 
 ## Trust assumptions
 

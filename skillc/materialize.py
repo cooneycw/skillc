@@ -37,6 +37,7 @@ import re
 import secrets
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tarfile
@@ -539,14 +540,32 @@ def create_root(base: Path, forbidden: list[Path]) -> tuple[Path, str]:
     return root, nonce
 
 
+def _marker_nonce(path: Path) -> object:
+    """The nonce an ownership marker records, or None.
+
+    The marker sits in a directory the subject (or candidate code, #9) can write,
+    so it is opened without following a link and without blocking, and read only
+    if it is a small regular file: a FIFO put in its place would otherwise hang
+    cleanup forever."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return None
+    with os.fdopen(fd, "rb") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            return None
+        try:
+            data = json.loads(handle.read(4096))
+        except ValueError:
+            return None
+    return data.get("nonce") if isinstance(data, dict) else None
+
+
 def cleanup(root: Path, nonce: str) -> dict[str, object]:
     """Remove a root this run created. Safe to repeat; refuses anything else."""
     if not root.exists():
         return {"status": "already-absent", "errors": []}
-    try:
-        owner = json.loads((root / MARKER).read_text(encoding="utf-8")).get("nonce")
-    except (OSError, ValueError):
-        owner = None
+    owner = _marker_nonce(root / MARKER)
     if owner != nonce:
         return {"status": "refused-not-owned", "errors": [f"{root} carries no matching marker"]}
     errors: list[str] = []
