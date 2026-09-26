@@ -478,6 +478,28 @@ def test_check_canary_refuses_a_requested_but_failed_tool_call():
         tb.check_canary(events, "tdd", nonce)
 
 
+def test_check_canary_refuses_an_errored_tool_use_even_when_its_output_matches():
+    """Adversarial red case (found by the orchestrator's own mutation
+    testing on this PR): a tool_use whose OUTPUT contains the nonce marker -
+    e.g. a tool that echoes its rejected request text into an error payload -
+    must still be refused when the same event also carries an error. Without
+    this case, `test_check_canary_refuses_a_requested_but_failed_tool_call`
+    above is satisfied by the missing-output path alone, and the `error`
+    check itself can be deleted with no test going red."""
+    nonce = tb.new_canary_nonce()
+    events = [
+        {"type": "skill_invocation", "skill": "tdd"},
+        {
+            "type": "tool_use",
+            "tool": "Write",
+            "error": "permission denied",
+            "output": f"refused to write: touched:{nonce}",
+        },
+    ]
+    with pytest.raises(tb.CanaryNotSatisfied):
+        tb.check_canary(events, "tdd", nonce)
+
+
 def test_check_canary_refuses_a_denied_tool_call_with_no_output_at_all():
     nonce = tb.new_canary_nonce()
     events = [
