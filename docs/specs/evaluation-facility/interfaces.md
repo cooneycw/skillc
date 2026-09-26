@@ -60,7 +60,7 @@ actually stopped and whether nothing of it remains.
 | 2 | *(controller: `trial.plan`)* | Not a backend concern |
 | 3 | `prepare(attempt_id)` | Returns an opaque handle; raises `BackendUnavailable` rather than a handle it cannot back |
 | 4 | `install(handle, surface)` | The skill starts inside the isolation, never staged on the host and copied in |
-| 5 | `execute(handle, argv, limits, cancel)` | The agent under test starts inside the isolation |
+| 5 | `execute(handle, argv, limits, cancel, stdin)` | The agent under test starts inside the isolation. `stdin` (optional, `None` by default) is the channel a grader's probe reads held-out inputs from - added for #10's PR2, backward compatible with every caller that does not pass it |
 | 6 | `confirm_stopped(handle)` | Queried FROM the backend - never inferred from `execute()`'s own exit or timeout. Returns a `Confirmation` (`CONFIRMED` / `NOT_CONFIRMED` / `UNKNOWN`), never a bare bool - a backend that cannot observe returns `UNKNOWN`, never a guess, and `UNKNOWN` is never treated as a confirmed stop |
 | 7 | `export(handle, dest)` | Copies out; the CONTROLLER re-hashes and freezes on its own side (`trial.capture`), so a backend cannot forge what was frozen. Must be safe to call more than once, without mutating its own state: the lifecycle driver exports once before `execute()` and once after, and refuses a capture identical to the pre-execution state - see "Liveness" below |
 | 8 | *(a separate backend instance, same seam)* | See below |

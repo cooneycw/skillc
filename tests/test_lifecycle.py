@@ -14,6 +14,7 @@ showing what happens with the liveness comparison bypassed.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import signal
@@ -23,6 +24,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import IO
 
 import pytest
 
@@ -114,18 +116,25 @@ class FakeBackend:
 
     def execute(
         self, handle: object, argv: Sequence[str], limits: Limits,
-        cancel: Callable[[], bool] | None = None,
+        cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,
     ) -> ExecuteResult:
         assert isinstance(handle, _Handle)
         if self._raise_in_execute:
             raise RuntimeError("fake backend execute() crashed unexpectedly")
-        try:
-            proc = subprocess.Popen(
-                list(argv), cwd=handle.root, env={"PATH": os.environ.get("PATH", os.defpath)},
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
-            )
-        except OSError as exc:
-            return ExecuteResult(reason="launch-failed", exit_code=None, error=str(exc))
+        with contextlib.ExitStack() as stack:
+            stdin_source: int | IO[bytes] = subprocess.DEVNULL
+            if stdin is not None:
+                stdin_path = handle.root / "stdin"
+                stdin_path.write_bytes(stdin)
+                stdin_source = stack.enter_context(open(stdin_path, "rb"))
+            try:
+                proc = subprocess.Popen(
+                    list(argv), cwd=handle.root, env={"PATH": os.environ.get("PATH", os.defpath)},
+                    stdin=stdin_source, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+            except OSError as exc:
+                return ExecuteResult(reason="launch-failed", exit_code=None, error=str(exc))
         handle.proc = proc
         deadline = time.monotonic() + limits.timeout
         reason = "exited"

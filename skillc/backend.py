@@ -199,12 +199,21 @@ class ExecutionBackend(Protocol):
 
     def execute(
         self, handle: object, argv: Sequence[str], limits: Limits,
-        cancel: Callable[[], bool] | None = None,
+        cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,
     ) -> ExecuteResult:
         """Step 5: start the subject's real argv INSIDE the backend and wait,
         subject to `limits.timeout` and `cancel`. The agent under test starts
         inside the isolation - never on the host with the backend only
-        watching it."""
+        watching it.
+
+        `stdin`, when given, is written to the subject's standard input and
+        then closed - the channel a grader's probe reads its held-out inputs
+        from (found needing this: #10's PR2, routing `verify.py`'s probe
+        stage through this same seam). `None` (the default, and every caller
+        before this parameter existed) means the subject's stdin is closed or
+        empty, exactly as before. A backend that cannot deliver stdin must
+        declare that limit through `describe()`'s `unobserved`, never
+        silently drop what it was given."""
         ...
 
     def confirm_stopped(self, handle: object) -> Confirmation:
