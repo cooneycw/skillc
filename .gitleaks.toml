@@ -1,0 +1,12 @@
+# gitleaks config for skillc (#43). The default ruleset, plus one allowlist.
+[extend]
+useDefault = true
+
+# The trial-capture tests (#8) plant this fake AWS key in a subject workspace and
+# assert it is never exported. It is test data, not a credential. The entry is
+# the exact value, anchored, matched against the secret: any other key, in any
+# file, is still a finding. ci/secret-scan-control.sh proves both halves.
+[[allowlists]]
+description = "trial-capture canary (#8)"
+regexTarget = "secret"
+regexes = ['''^AKIAABCDEFGHIJKLMNOP$''']

@@ -50,3 +50,13 @@ steps:
       - uv run --no-sync bash ci/typecheck-control.sh
     environment:
       UV_PROJECT_ENVIRONMENT: /tmp/skillc-venv
+
+  # Secret scan of the checked-out tree, which is what a squash merge lands.
+  # Not `gitleaks git`: the clone is --depth=1, so a history scan would cover
+  # one commit and still print green. The control proves the scan can find one.
+  - name: secret-scan
+    image: zricethezav/gitleaks:v8.30.1
+    depends_on: []
+    commands:
+      - gitleaks dir . --config .gitleaks.toml --redact --no-banner
+      - bash ci/secret-scan-control.sh
