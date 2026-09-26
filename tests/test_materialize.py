@@ -811,6 +811,14 @@ def test_the_committed_mattpocock_evidence_is_ready_and_well_formed() -> None:
     assert receipt["client"]["version"] == subject["client"]["version"]
     assert receipt["readiness"] == dict.fromkeys(m.READINESS_FACTS, m.SATISFIED)
     assert report["control"]["listed"] is True
-    assert sorted(s["name"] for s in report["inventory"]["skills"]) == [
-        "diagnosing-bugs", "tdd",
+    installed_names = sorted(s["name"] for s in report["inventory"]["skills"])
+    assert installed_names == ["diagnosing-bugs", "tdd"]
+    # Cross-model review: `readiness` is a DERIVED claim; re-derive the same
+    # fact from the RAW canary listing rather than trusting the summary - an
+    # emptied or tampered treatment listing must not pass just because the
+    # receipt still says SATISFIED and the inventory still names the skills.
+    treatment_lines = [
+        line for line in report["canary"]["treatment"]["listed"]
+        if "/.codex/skills/." not in line
     ]
+    assert sorted(line.split()[0] for line in treatment_lines) == installed_names
