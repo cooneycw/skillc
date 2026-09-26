@@ -1,0 +1,21 @@
+{
+ "kind": "exposure-report",
+ "client": "codex",
+ "client_version": "0.157.1",
+ "client_flags": [],
+ "status": "ok",
+ "reason": null,
+ "markers": [],
+ "skills": [
+  {
+   "skill": "tdd",
+   "verdict": "EXPOSED",
+   "cause": null
+  },
+  {
+   "skill": "diagnosing-bugs",
+   "verdict": "EXPOSED",
+   "cause": null
+  }
+ ]
+}

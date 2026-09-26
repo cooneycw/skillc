@@ -1,0 +1,13 @@
+{
+  "subject_schema": 1,
+  "exposure_schema": 1,
+  "locator": "github.com/mattpocock/skills",
+  "revision": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
+  "surface": "codex-skills",
+  "skills_root": "skills/engineering",
+  "select": ["tdd", "diagnosing-bugs"],
+  "client": {
+    "name": "codex",
+    "version": "0.157.1"
+  }
+}

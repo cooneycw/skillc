@@ -1,0 +1,19 @@
+{
+  "subject_schema": 1,
+  "exposure_schema": 1,
+  "locator": "local-fixture:exposure-synthetic",
+  "revision": "v1",
+  "surface": "codex-skills",
+  "skills_root": ".",
+  "client": {
+    "name": "codex",
+    "version": "0.157.1"
+  },
+  "always_loaded": [
+    {"path": "AGENTS.md", "claimed_limit_bytes": 2000}
+  ],
+  "index": {
+    "path": "docs/memory-index.md",
+    "targets": ["docs/topic-a.md"]
+  }
+}

@@ -20,7 +20,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import __version__, checks, leak, materialize, records
+from . import __version__, checks, exposure, leak, materialize, records
 from .checks import ERROR, Finding
 from .spec import DEFAULT_TARGET, TARGETS, Manifest, ManifestError, Skill, discover
 
@@ -609,6 +609,57 @@ def cmd_materialize(args: argparse.Namespace) -> int:
     return 0 if result.ready else 1
 
 
+def cmd_exposure(args: argparse.Namespace) -> int:
+    """Measure what a client's session-start input actually contains, per
+    declared marker and skill. Exit 0 only when every declared item was
+    actually observed (EXPOSED, TRUNCATED or a named HIDDEN cause) - a
+    single UNMEASURED item, or a refused run, is never zero findings."""
+    out = Path(args.out).resolve()
+    if (out / "report.json").exists():
+        print(f"skillc: {out} already holds evidence; refusing to overwrite it", file=sys.stderr)
+        return 2
+    try:
+        surface = exposure.ExposureSurface.load(Path(args.surface))
+    except exposure.Refused as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+    client_bin = materialize.find_client(args.client_bin) if args.client == "codex" else None
+    try:
+        origin = Path(args.repo or args.snapshot).resolve()
+        materialize.refuse_protected(out, materialize.forbidden_roots(origin), "write evidence")
+        report = exposure.check_exposure(
+            surface,
+            base=Path(args.base) if args.base else Path(tempfile.gettempdir()),
+            repo=Path(args.repo) if args.repo else None,
+            snapshot=Path(args.snapshot) if args.snapshot else None,
+            client=client_bin,
+            client_name=args.client,
+            timeout=args.timeout,
+            keep=args.keep,
+        )
+    except exposure.Refused as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "report.json").write_text(json.dumps(report.to_dict(), indent=1) + "\n", encoding="utf-8")
+
+    if report.status == "refused":
+        print(f"skillc: REFUSED - {report.reason}", file=sys.stderr)
+        return 2
+    for item in report.markers:
+        print(f"{item['verdict']:10} marker  {item['layer']:30} {item.get('note', '')}")
+    for item in report.skills:
+        cause = f" ({item['cause']})" if item.get("cause") else ""
+        print(f"{item['verdict']:10} skill   {item['skill']}{cause}")
+    unmeasured = [i for i in [*report.markers, *report.skills] if i["verdict"] == exposure.UNMEASURED]
+    if unmeasured:
+        print(f"\nskillc: UNMEASURED - {len(unmeasured)} declared item(s) could not be observed")
+        return 1
+    print(f"\nskillc: measured - evidence in {out}")
+    return 0
+
+
 def cmd_rules(args: argparse.Namespace) -> int:
     width = max(len(rule.id) for rule in checks.ALL_RULES)
     for rule in checks.ALL_RULES:
@@ -732,6 +783,24 @@ def build_parser() -> argparse.ArgumentParser:
     p_mat.add_argument("--keep", action="store_true", help="keep the disposable root")
     p_mat.add_argument("--timeout", type=float, default=120, help="per client call, seconds")
     p_mat.set_defaults(func=cmd_materialize)
+
+    p_exp = sub.add_parser(
+        "exposure",
+        help="measure what actually reaches the model, per client, with no model call",
+    )
+    p_exp.add_argument("surface", help="exposure surface declaration (extends subject.json)")
+    exp_source = p_exp.add_mutually_exclusive_group(required=True)
+    exp_source.add_argument("--repo", help="git checkout to read the pinned revision from")
+    exp_source.add_argument("--snapshot", help="local directory holding the skills root")
+    p_exp.add_argument("--out", required=True, help="directory for report.json")
+    p_exp.add_argument(
+        "--client", choices=("codex", "claude-code"), default="codex", help="client to measure (default: codex)",
+    )
+    p_exp.add_argument("--client-bin", help="client executable (default: codex on PATH)")
+    p_exp.add_argument("--base", help="where the disposable root is created (default: TMPDIR)")
+    p_exp.add_argument("--keep", action="store_true", help="keep the disposable root")
+    p_exp.add_argument("--timeout", type=float, default=120, help="per client call, seconds")
+    p_exp.set_defaults(func=cmd_exposure)
 
     p_rules = sub.add_parser("rules", help="list the rules")
     p_rules.set_defaults(func=cmd_rules)

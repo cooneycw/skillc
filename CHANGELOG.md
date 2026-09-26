@@ -57,6 +57,38 @@ collection) closes.
   `left-running` (the daemon confirms something is still there) - a fourth
   outcome, `unknown`, now keeps the two distinct, with its own regression
   test confirmed red on the pre-fix commit.
+- **`skillc exposure`, a rung-2 exposure check with planted markers**
+  ([ADR 0004](docs/decisions/0004-evaluate-the-exposed-knowledge-surface.md),
+  #55): measures what actually reaches a client's rendered session-start
+  input, per client, with no model call - never what the author's files
+  merely declare. A surface declaration extends `subject.json` with
+  `always_loaded` (instruction files, each with an optional
+  `claimed_limit_bytes`) and `index` (an on-demand file naming `targets`);
+  the skill-listing layer reuses `materialize.py`'s own Subject/inventory/
+  install/canary machinery wholesale. Every declared item reports `EXPOSED`,
+  `TRUNCATED` (with the real cut point, never a bare pass/fail against a
+  predicted one), `HIDDEN` (with a `policy` cause when known - verified
+  empirically against codex-cli 0.157.1 that `agents/openai.yaml`'s
+  `policy.allow_implicit_invocation: false` excludes a skill from the
+  listing entirely), or `UNMEASURED` (a blind render reports every declared
+  item this way, never an empty list - "nothing checked" and "checked but
+  unobservable" are different facts). A marker whose text collides with
+  ambient text (the checkout path, the disposable home, a skill's own
+  description, or another marker) refuses the whole run rather than produce
+  an untrustworthy verdict - found by this PR's own test suite to have a
+  real gap in its first draft (an ambient string EQUAL to a marker's text
+  was excluded from the comparison instead of being the clearest case).
+  Claude Code has no supported model-free render command identified
+  (`claude --help`, 2026-09-26) and reports `UNMEASURED` by declaration.
+  Evidence published against the real `codex-cli 0.157.1`: mattpocock/skills
+  (pinned, as in #11 - skill-listing layer only) and a synthetic surface
+  built to exercise all three layers together
+  (`evals/subjects/exposure-synthetic/`) - which honestly reports that the
+  real client did not truncate `AGENTS.md` at the claimed boundary tested,
+  contradicting ADR 0004's original ~25 KB observation, and that a declared
+  index file is not auto-surfaced at all unless something actually loads it.
+  Refs #55, not Closes: the Claude Code arm's `UNMEASURED` status means the
+  acceptance is not fully met without a paid call.
 - **Conformance through the real adapter, a no-Docker proof, and a published
   support matrix** (#80, Refs #10): interfaces.md's "Conformance cases
   required before trusting a backend" table, restated with a

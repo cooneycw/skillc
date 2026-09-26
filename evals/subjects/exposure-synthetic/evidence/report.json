@@ -1,0 +1,41 @@
+{
+ "kind": "exposure-report",
+ "client": "codex",
+ "client_version": "0.157.1",
+ "client_flags": [],
+ "status": "ok",
+ "reason": null,
+ "markers": [
+  {
+   "marker_id": "always_loaded:AGENTS.md:inside",
+   "layer": "always_loaded:AGENTS.md",
+   "verdict": "EXPOSED",
+   "note": "planted after the real 169-byte file to end at byte 2000 of a 2000-byte claimed limit - expect EXPOSED"
+  },
+  {
+   "marker_id": "always_loaded:AGENTS.md:outside",
+   "layer": "always_loaded:AGENTS.md",
+   "verdict": "EXPOSED",
+   "note": "planted to start beyond the 2000-byte claimed limit - expect TRUNCATED or HIDDEN"
+  },
+  {
+   "marker_id": "index",
+   "layer": "index",
+   "verdict": "HIDDEN",
+   "note": "the index file itself - expect EXPOSED"
+  },
+  {
+   "marker_id": "index-target:docs/topic-a.md",
+   "layer": "index-target",
+   "verdict": "HIDDEN",
+   "note": "declared on-demand target name - expect EXPOSED (listed), never that the target's own content was fetched"
+  }
+ ],
+ "skills": [
+  {
+   "skill": "greet",
+   "verdict": "EXPOSED",
+   "cause": null
+  }
+ ]
+}
