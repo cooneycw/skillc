@@ -321,20 +321,34 @@ def test_snapshot_host_paths_refuses_an_empty_declaration() -> None:
         reap.snapshot_host_paths([])
 
 
-def test_an_unreadable_declared_path_is_unresolved_not_unchanged(tmp_path: Path) -> None:
+def test_an_unreadable_declared_path_is_unresolved_not_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Codex review, MEDIUM: an `OSError` (permission denied) used to collapse
     into the same `None` as confirmed absence, so an unreadable file
     compared as "unchanged" against itself - a false claim of certainty this
     instrument does not have. It must be `unresolved`, never `changed` (we
-    cannot confirm a difference) and never silently absent from both."""
+    cannot confirm a difference) and never silently absent from both.
+
+    Unreadability is forced by monkeypatching `Path.read_bytes`, not by
+    `chmod(0o000)` (orchestrator review of PR #91, CI pipeline 138): CI's
+    `python:3.12-slim` gate step runs as root, and root reads a chmod-000
+    file anyway, so the permission-based version passed only for a non-root
+    user - it never exercised the UNREADABLE path in CI at all. A forced
+    `PermissionError` is deterministic identically as root or not.
+    """
     watched = tmp_path / "watched.txt"
     watched.write_text("original\n")
-    watched.chmod(0o000)
-    try:
-        before = reap.snapshot_host_paths([watched])
-        after = reap.snapshot_host_paths([watched])
-    finally:
-        watched.chmod(0o644)  # restore so pytest's own cleanup can remove tmp_path
+    real_read_bytes = Path.read_bytes
+
+    def _refuse_read(self: Path) -> bytes:
+        if self == watched:
+            raise PermissionError(f"forced unreadable for this test: {self}")
+        return real_read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", _refuse_read)
+    before = reap.snapshot_host_paths([watched])
+    after = reap.snapshot_host_paths([watched])
 
     assert before.digests[str(watched)] == reap.UNREADABLE
     result = reap.diff_host_paths(before, after)
