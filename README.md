@@ -188,9 +188,11 @@ on the rule's stable id, never on its prose `detail`. `scripts/repair_hint.py`
 is the smallest useful consumer: it reads the JSON and prints one line of
 repair guidance per finding. `ci/clean-install-check.sh` proves the packaged
 checker, installed from a built wheel into a clean environment, still
-discriminates good from bad, and correctly refuses to run `selftest` without
-its own committed redcases (which are fixture data, not shipped). Details,
-schema and limits: [docs/findings.md](docs/findings.md).
+discriminates good from bad, refuses to run `selftest` without its own
+committed redcases (fixture data, not shipped) and correctly certifies when a
+fresh copy of them is supplied. Retains a build/install identity record and
+carries its own committed negative control. Details, schema and limits:
+[docs/findings.md](docs/findings.md).
 
 ## Adding a rule
 
