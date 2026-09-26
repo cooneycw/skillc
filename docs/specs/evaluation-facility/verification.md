@@ -380,22 +380,32 @@ actually run this way, against a real trial, on a real Docker host.
 
 ## Grading tiers (#69)
 
-Three tiers, owner-ratified as the target architecture (issue #69) - only the
-first is built:
+Three tiers, owner-ratified as the target architecture (issue #69; the
+tier model, what each tier does and does not establish, and the same-model
+limitation are recorded in [ADR 0006](../../decisions/0006-grading-tiers.md)):
 
 1. **Deterministic** (built, this is `GRADING_TIER`). Structural/outcome
    checks, no model call. Everything above this section describes it.
-2. **LLM-judge + deterministic** (not built; #69). A model call added on top,
-   using whichever model is configured. If that model is the same one that
-   produced the candidate's work, this is the weaker, "generic" case: it
+2. **Same-model** (the seam is built - `skillc/judge.py`, this PR; no real
+   adapter yet). A model call added on top. If that model is the same one
+   that produced the candidate's work, this is the weaker, "generic" case: it
    reintroduces the self-assessment bias independent grading exists to avoid.
    A verdict record from this tier MUST say so in the record itself, not only
    in documentation, so a same-model grade is never read as an independent one.
-3. **Independent-llm-judge + deterministic** (not built; #69). The judge call
-   is routed to a DIFFERENT, independently configured model -
+3. **Independent** (the seam is built; no real adapter yet). The judge call is
+   routed to a DIFFERENT, independently configured model -
    [`mcp-second-opinion`](https://github.com/cooneycw/mcp-second-opinion) is
    the owner-named planned mechanism (#69), a standalone public tool with no
    coupling to this project; skillc does not vendor or depend on it (ADR 0003).
+
+**The seam vs. the real adapter, precisely.** `skillc.judge.Judge` is a
+stdlib-only Protocol (`describe`/`evaluate`), `skillc.judge.run_tier` is what
+`verify.grade`'s `judges` parameter calls per tier, and `skillc.judge.FakeJudge`
+is the ONLY implementation this build ships - #69's own acceptance forbids a
+real model call in the test suite. An `mcp-second-opinion` adapter that
+implements this same Protocol, the cost-estimate extension for its paid calls,
+and the calling convention that speaks MCP to the server as an external
+process are a follow-up PR (ADR 0006), kept separate to stay reviewable.
 
 ### Verdicts are a keyed collection, never a single value (owner ruling on #69)
 
@@ -423,12 +433,15 @@ So the shape is a collection keyed by tier name, not one value:
   own entry, `status: "UNAVAILABLE"`, and that entry MUST state why
   (`reason`) - a bare absence is never read as "unavailable", and neither is
   an `UNAVAILABLE` status with no stated reason.
-- **`verification.disagreement`** is reserved for the per-criterion
-  same-model-vs-independent comparison tiers 2/3 make possible. Today it is
-  always `{"available": false, "reason": "fewer than two judge tiers"}`:
-  comparing needs two independently-graded verdicts, and there is exactly one
-  tier, ever, in this build. This build never fabricates a comparison to fill
-  the field.
+- **`verification.disagreement`** is the per-criterion
+  same-model-vs-independent comparison, computed by
+  `skillc.judge.compute_disagreement` whenever `verify.grade` is given
+  judges for both tiers (this PR). It is
+  `{"available": false, "reason": "fewer than two judge tiers"}` whenever
+  fewer than two REAL (non-`UNAVAILABLE`) verdicts exist to compare -
+  including the common case today, where no `judges` argument is given at
+  all. This build never fabricates a comparison to fill the field, and a
+  real (non-fake) judge call is still owed to the follow-up adapter PR.
 - **The top-level `status`/`criteria` are unchanged, and today are exactly the
   deterministic tier's own** - the same values as
   `verification.verdicts.deterministic.status`/`.criteria`, literally, not a
@@ -446,29 +459,44 @@ So the shape is a collection keyed by tier name, not one value:
   apply here for the same reason it did not have to apply there - no v2 bundle
   existed outside the committed controls when either change landed.
 
-Rules that apply once tiers 2/3 exist, recorded now so #69 does not have to
-re-derive them:
+Rules the seam enforces, delivered in this PR:
 
-- **Tier 1 must keep working with no judge at all.** Nothing in `skillc/`
-  imports or requires a judge mechanism; tiers 2/3 are additive.
-- **An unavailable judge yields `UNKNOWN` for that tier's criteria, and that
-  tier's own entry in `verdicts` reflects it. It never silently falls back to
-  a lower tier** - the same rule this PR already applies to an unavailable
-  execution backend, generalized to judges. An unavailable judge makes only
-  ITS OWN tier unavailable; it never removes or degrades another tier's entry.
+- **Tier 1 keeps working with no judge at all.** Nothing in `skillc/`
+  imports or requires a judge mechanism; `judges` defaults to `None` and
+  `verify.grade`'s behavior is byte-for-byte the same as before this PR when
+  it is not given (`tests/test_verify_judge.py::test_grade_with_no_judges_is_unchanged`).
+- **An unavailable judge yields `UNAVAILABLE` for that whole tier, stated
+  with a reason, and never silently falls back to a lower tier**
+  (`skillc.judge.JudgeUnavailable`, caught by `run_tier`) - the same rule
+  this build already applies to an unavailable execution backend, generalized
+  to judges. It makes only ITS OWN tier unavailable; it never removes or
+  degrades another tier's entry (`test_grade_with_one_unavailable_judge_still_reports_the_other`).
 - **A model-backed judge takes schema-constrained output only** (addendum item
-  60): validate every field; a malformed response fails the grade whole, with
-  no partial credit. Candidate text reaching a judge is untrusted, and a judge
-  with tool access can be steered.
+  60): `skillc.judge.parse_judge_verdict` validates every field and raises
+  `MalformedJudgeOutput` rather than accepting a partial match; `run_tier`
+  turns that into an `UNKNOWN` outcome for the ONE malformed criterion, never
+  the whole tier. Candidate text reaching a judge is untrusted, and a judge
+  with tool access can be steered - this seam does not itself defend against
+  a judge being steered by candidate content, only against a malformed
+  RESPONSE once one arrives.
 - **A model-backed judge call is a paid call**, so it is subject to the same
   cost-stop discipline as `lifecycle.py`'s real-agent guard (addendum item 51):
-  nothing in this build's test suite may make one, by construction.
-- Anything sent to an external judge passes the machine-identity leak check
-  (#63) first.
+  nothing in this build's test suite may make one, by construction - every
+  `Judge` in this test suite is `skillc.judge.FakeJudge`. The cost-estimate
+  extension for a real judge's paid calls is owed to the follow-up adapter PR.
+- **Anything sent to an external judge passes the machine-identity leak check
+  (#63) first** - `skillc.judge.run_tier` calls `check_judge_input` before
+  EITHER `describe()` or `evaluate()`, and a leak is a REFUSAL to grade at all
+  (`verify.Refused`, nothing written), never a tier-level `UNAVAILABLE`: an
+  unreachable judge and a judge that must not receive this input are
+  different facts (`test_grade_refuses_and_writes_nothing_when_goal_text_leaks`).
 
-Not implemented in this PR: no judge mechanism is called anywhere, and no
-`judge` sub-record exists yet. This section is the contract #69 builds
-against, not a promise this PR keeps.
+**What this PR does not deliver**, owed to the follow-up adapter PR (ADR
+0006): the real `mcp-second-opinion` MCP client, the cost-estimate extension
+counting its paid calls toward a run's estimate, and any wiring that decides
+WHICH judges a real trial's `config` requests. `verify.grade`'s `judges`
+parameter and `goal_text` are plumbing a caller must supply explicitly; no
+default configuration turns them on.
 
 ## Issue #10 addendum items owned by grading (9-13, 57-61)
 

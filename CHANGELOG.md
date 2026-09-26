@@ -89,6 +89,31 @@ collection) closes.
   index file is not auto-surfaced at all unless something actually loads it.
   Refs #55, not Closes: the Claude Code arm's `UNMEASURED` status means the
   acceptance is not fully met without a paid call.
+- **The grading-tier judge seam** (Refs #69): `skillc/judge.py` adds a
+  stdlib-only `Judge` Protocol for the same-model and independent tiers
+  (ADR 0006), schema-constrained output validation (`parse_judge_verdict`
+  refuses a malformed field outright - a malformed criterion becomes
+  `UNKNOWN` with a stated reason, never the whole tier), per-tier
+  availability (`JudgeUnavailable` makes only that tier `UNAVAILABLE`, with a
+  reason, never a silent drop), the leak-check on judge input before either
+  judge is ever called (`check_judge_input`, #63 - a leak is a refusal to
+  grade at all, not a tier-level unavailability), and the per-criterion
+  same-model-vs-independent disagreement record (`compute_disagreement`,
+  unavailable until both tiers report a real verdict). `FakeJudge` is the
+  only implementation shipped - #69's own acceptance forbids a real model
+  call in the test suite. `skillc/verify.py`'s `grade()` gains an optional
+  `judges`/`goal_text` parameter wired into `verification.tiers_enabled`/
+  `verdicts`/`disagreement`; passing neither leaves `grade()`'s behavior
+  unchanged. The real `mcp-second-opinion` adapter and the cost-estimate
+  extension for its paid calls are a follow-up PR, kept separate to stay
+  reviewable. A `/codex:code_review` pass found and fixed four issues before
+  push: the leak-check scanned only file content, missing filenames and
+  criterion ids also transmitted to a judge; a malformed `missing` field was
+  silently discarded on a `SATISFIED`/`VIOLATED` entry instead of refusing
+  the whole response; two responses for one criterion let response ORDER
+  decide the grade (last-wins) instead of both being refused as ambiguous;
+  and `judges={"deterministic": ...}` could silently overwrite the
+  deterministic tier's own verdict, now refused before any grading starts.
 - **Conformance through the real adapter, a no-Docker proof, and a published
   support matrix** (#80, Refs #10): interfaces.md's "Conformance cases
   required before trusting a backend" table, restated with a
