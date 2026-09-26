@@ -30,11 +30,20 @@ passes before asking a model to solve it.
 | Collection comparison | Common eligible tasks and matched configuration | Collection A versus B |
 | Single-skill ablation | Otherwise identical scaffold and task | One identified skill or instruction treatment |
 | Detection control | Same grader and relevant fixture | A known-bad artifact or documented degraded variant |
+| Client/model drift | Subject revision, tasks, evaluator, environment and budget | Client version or resolved model identity |
 
 Do not compare a restricted baseline with an unrestricted candidate and attribute
 the difference to skills. If required capabilities make matched arms impossible,
 report a compatibility/product comparison rather than a causal benefit claim.
 Additional model calls made by scaffolding count toward the same declared budget.
+
+Client/model drift binds both identities in the ledger. A trial whose client or
+model differs from the declared one is a different comparison, not drift evidence.
+The arm is adapted from
+[config-drift-checker](https://github.com/jameskomo/config-drift-checker/tree/0aca62bf43fcc6c9e873b507dcb6f2a4455f2de1)
+by @jameskomo (FSL-1.1-Apache-2.0), which re-runs a pinned suite on each Claude Code
+release; see [its lessons note](../../research/config-drift-checker-lessons.md) (#40).
+No release watcher is adopted, and repeat-variance flagging stays deferred to #15.
 
 Use a clean environment and fresh conversation for each independent trial. Reset
 persistent client memory and caches that could carry task answers across arms.
@@ -167,7 +176,7 @@ not establish that our proposed tasks or thresholds are valid.
 [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents)
 
 Harbor separates task instructions, environments and verification, and documents
-an opt-in separate verifier environment. It is a reuse candidate, not an adopted
-dependency or proof that its defaults meet this protocol.
+an opt-in separate verifier environment. It is a design reference only: skillc
+takes no runtime dependency on it ([ADR 0003](../../decisions/0003-no-external-evaluation-runtime.md)).
 [Task overview](https://docs.harborframework.com/core-concepts/tasks/overview),
 [Separate verifier](https://docs.harborframework.com/core-concepts/tasks/separate-verifier)

@@ -37,7 +37,9 @@ to EF-01 through EF-11 or to the initial milestone acceptance, which are unchang
 The owner has authorized planning, a documentation PR/merge and issue scaffolding.
 Runtime implementation and paid trials are outside this change. These
 documents specify proposed behavior; they do not claim any evaluation facility
-exists. The existing static checker remains the only implemented product surface.
+exists. The implemented surfaces are the static checker, record validation
+(`check-records`, [records.md](records.md)) and native materialization
+(`materialize`, [materialization.md](materialization.md)); no trial runner exists.
 
 This document owns product scope, capability levels and functional acceptance.
 The protocol owns result semantics and experiment rules. The interface document

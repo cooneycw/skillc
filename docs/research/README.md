@@ -7,6 +7,10 @@
   what skillc takes as ideas and what it avoids, after
   [ADR 0003](../decisions/0003-no-external-evaluation-runtime.md) ruled out a
   runtime dependency. Static inspection only.
+- [config-drift-checker lessons and concept map, September 26, 2026](config-drift-checker-lessons.md):
+  provenance, adopted and declined ideas from
+  [jameskomo/config-drift-checker](https://github.com/jameskomo/config-drift-checker) at
+  `0aca62b` (FSL-1.1-Apache-2.0), with their skillc owners. Static reading only.
 
 ## Provenance and limits
 
