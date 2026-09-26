@@ -471,3 +471,41 @@ def test_an_unknown_target_directory_name_is_refused(
     assert any(
         line.startswith("MALFORMED") and "unknown target" in line for line in out.splitlines()
     ), out
+
+
+def test_an_empty_declared_targets_directory_is_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Cross-model review (round 2): `targets/` present but every case under it
+    removed used to read as "no target case here", the same as never having
+    committed one - silently dropping coverage rather than flagging the gap."""
+    controls = _controls_copy(tmp_path)
+    shutil.rmtree(controls / "trigger-shape" / "targets" / "claude-code")
+    shutil.rmtree(controls / "trigger-shape" / "targets" / "portable")
+    rc, out = _selftest(controls, capsys)
+    assert rc == 1, out
+    assert any(
+        line.startswith("MALFORMED") and "trigger-shape" in line and "declares no target case" in line
+        for line in out.splitlines()
+    ), out
+
+
+@pytest.mark.parametrize("side", ["good", "bad"])
+def test_an_unparseable_target_control_is_refused_not_certified(
+    tmp_path: Path, side: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Cross-model review (round 2): `_target_case` read finding counts without
+    checking `parse_error` first. An unparseable good control has nothing that
+    could have fired trigger-shape - `own == 0` looked exactly like a passing
+    silence. An unparseable bad control's one finding is the PARSER's, attributed
+    to trigger-shape by the same blind count - looked exactly like a correct
+    fire. Both must be UNPARSED, mirroring the base pair's existing discipline."""
+    controls = _controls_copy(tmp_path)
+    target = "claude-code" if side == "good" else "portable"
+    fixture = controls / "trigger-shape" / "targets" / target / side / "rotate-credential" / "SKILL.md"
+    fixture.write_text("# no frontmatter\n", encoding="utf-8")
+    rc, out = _selftest(controls, capsys)
+    assert rc == 1, out
+    assert any(
+        line.startswith("UNPARSED") and f"trigger-shape[{target}]" in line for line in out.splitlines()
+    ), out

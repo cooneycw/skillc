@@ -268,6 +268,11 @@ def _target_dirs(rule_dir: Path) -> tuple[list[Path], str | None]:
     if not targets_root.is_dir():
         return [], None
     dirs = sorted(p for p in targets_root.iterdir() if p.is_dir())
+    if not dirs:
+        # Distinct from "no targets/ at all": someone deleted every case but
+        # left the empty directory behind, which must not read as "nothing to
+        # check here" the same way absence legitimately does.
+        return [], "targets/ exists but declares no target case - remove it or add one"
     for d in dirs:
         if d.name not in TARGETS:
             return [], f"targets/{d.name} names an unknown target (known: {', '.join(TARGETS)})"
@@ -276,45 +281,71 @@ def _target_dirs(rule_dir: Path) -> tuple[list[Path], str | None]:
     return dirs, None
 
 
+def _bad_verdict(rule: checks.Rule, bad: list[_Subject], target: str) -> tuple[str, str] | None:
+    """The base pair's `_refusal` discipline for `bad`, scoped to one target."""
+    unparsed = [s for s in bad if s.parse_error is not None]
+    if not rule.parser and unparsed:
+        s = unparsed[0]
+        return "UNPARSED", (
+            f"known-bad input under {target!r} does not parse ({s.shown}); a parse "
+            f"failure cannot prove a semantic rule"
+        )
+    if rule.parser and not unparsed:
+        return "UNPARSED", f"parser rule has no unparseable known-bad input under {target!r}"
+    silent = [s for s in bad if not s.own]
+    if silent:
+        return "BLIND", f"silent on {len(silent)} of {len(bad)} known-bad input(s) under {target!r}"
+    return None
+
+
+def _good_verdict(good: list[_Subject], target: str) -> tuple[str, str] | None:
+    """The base pair's `_refusal` discipline for `good`, scoped to one target."""
+    unparsed = [s for s in good if s.parse_error is not None]
+    if unparsed:
+        s = unparsed[0]
+        return "UNPARSED", f"known-good input under {target!r} does not parse ({s.shown}: {s.parse_error})"
+    noisy = [s for s in good if s.own]
+    if noisy:
+        return "NOISY", f"fired on its known-good input under {target!r}: {noisy[0].shown}"
+    return None
+
+
 def _target_case(rule: checks.Rule, target_dir: Path) -> list[tuple[str, str]]:
     """Verdicts for one `targets/<target>/` case.
 
     Unlike the base pair, a target case may commit only ONE side - the other
     side's behaviour at this target is already proven elsewhere (the base pair,
     or a sibling case), so an absent side is not scored. A side that IS
-    committed must still be non-empty and must still discriminate, exactly as
-    the base pair requires: present-but-empty is EMPTY, not skipped.
+    committed is held to the SAME discipline as the base pair: present-but-empty
+    is EMPTY, and an unparseable input is UNPARSED rather than being silently
+    credited as a passing good (nothing ran) or a correctly-firing bad (a parse
+    failure, not the rule, produced the only finding) - `_bad_verdict` and
+    `_good_verdict` are that discipline, not a looser one for this optional layer.
     """
     target = target_dir.name
     results: list[tuple[str, str]] = []
     ok_parts: list[str] = []
-    bad_dir, good_dir = target_dir / "bad", target_dir / "good"
-    if bad_dir.is_dir():
-        bad = _population(rule, bad_dir, target=target)
-        if not bad:
-            results.append(("EMPTY", f"no subject in its known-bad control under {target!r}"))
-        else:
-            silent = [s for s in bad if not s.own]
-            if silent:
-                results.append((
-                    "BLIND",
-                    f"silent on {len(silent)} of {len(bad)} known-bad input(s) under {target!r}",
-                ))
-            else:
-                ok_parts.append(f"red on bad ({sum(s.own for s in bad)})")
+    good_dir, bad_dir = target_dir / "good", target_dir / "bad"
     if good_dir.is_dir():
         good = _population(rule, good_dir, target=target)
         if not good:
             results.append(("EMPTY", f"no subject in its known-good control under {target!r}"))
         else:
-            noisy = [s for s in good if s.own]
-            if noisy:
-                results.append((
-                    "NOISY",
-                    f"fired on its known-good input under {target!r}: {noisy[0].shown}",
-                ))
+            verdict = _good_verdict(good, target)
+            if verdict:
+                results.append(verdict)
             else:
                 ok_parts.append(f"green on good ({len(good)})")
+    if bad_dir.is_dir():
+        bad = _population(rule, bad_dir, target=target)
+        if not bad:
+            results.append(("EMPTY", f"no subject in its known-bad control under {target!r}"))
+        else:
+            verdict = _bad_verdict(rule, bad, target)
+            if verdict:
+                results.append(verdict)
+            else:
+                ok_parts.append(f"red on bad ({sum(s.own for s in bad)})")
     if not results:
         results.append(("ok", ", ".join(ok_parts)))
     return results
