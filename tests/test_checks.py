@@ -711,3 +711,111 @@ def test_an_unparseable_target_control_is_refused_not_certified(
     assert any(
         line.startswith("UNPARSED") and f"trigger-shape[{target}]" in line for line in out.splitlines()
     ), out
+
+
+# ------------------------------------------ invocation-consistency (#50)
+
+
+def _skill_with_openai_yaml(
+    tmp_path: Path, name: str, skill_block: str, openai_yaml: str | None
+) -> Skill:
+    d = tmp_path / name
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(f"---\n{skill_block}---\nbody\n", encoding="utf-8")
+    if openai_yaml is not None:
+        agents = d / "agents"
+        agents.mkdir()
+        (agents / "openai.yaml").write_text(openai_yaml, encoding="utf-8")
+    return Skill.load(d / "SKILL.md")
+
+
+def test_invocation_consistency_is_silent_without_agents_openai_yaml(tmp_path: Path) -> None:
+    """The file is an upstream convention, not a specification requirement - its
+    absence says nothing about a second client to compare against."""
+    skill = _skill_with_openai_yaml(
+        tmp_path, "x", "name: x\ndescription: Use when x.\ndisable-model-invocation: true\n", None
+    )
+    assert checks.run(skill, only="invocation-consistency", target="claude-code") == []
+
+
+def test_invocation_consistency_reports_an_unparseable_openai_yaml(tmp_path: Path) -> None:
+    """A file skillc cannot read must not read as agreement - it is reported."""
+    skill = _skill_with_openai_yaml(
+        tmp_path, "x",
+        "name: x\ndescription: Use when x.\ndisable-model-invocation: true\n",
+        "policy: {allow_implicit_invocation: false}\n",  # a flow mapping: outside the subset
+    )
+    findings = checks.run(skill, only="invocation-consistency", target="claude-code")
+    assert findings, "an unparseable agents/openai.yaml must not silently read as agreement"
+    assert "openai.yaml" in findings[0].detail
+
+
+def test_invocation_consistency_reports_a_non_mapping_policy(tmp_path: Path) -> None:
+    skill = _skill_with_openai_yaml(
+        tmp_path, "x",
+        "name: x\ndescription: Use when x.\ndisable-model-invocation: true\n",
+        "policy: true\n",
+    )
+    findings = checks.run(skill, only="invocation-consistency", target="claude-code")
+    assert findings and "not a mapping" in findings[0].detail
+
+
+def test_invocation_consistency_reports_a_non_boolean_allow_implicit_invocation(tmp_path: Path) -> None:
+    skill = _skill_with_openai_yaml(
+        tmp_path, "x",
+        "name: x\ndescription: Use when x.\ndisable-model-invocation: true\n",
+        'policy:\n  allow_implicit_invocation: "false"\n',  # a quoted string, not a boolean
+    )
+    findings = checks.run(skill, only="invocation-consistency", target="claude-code")
+    assert findings and "not a boolean" in findings[0].detail
+
+
+def test_invocation_consistency_reports_an_explicit_null_policy(tmp_path: Path) -> None:
+    """Codex cross-model review: an explicit `null` is a present value of the
+    wrong type, exactly like any other wrong type - `.get(...) is not None`
+    cannot tell "absent" and "present but null" apart, and conflating them
+    either silently read null as agreement or produced a misleading disagreement
+    diagnostic depending on Claude's own declared state. Confirmed both were
+    real on the pre-fix code before writing this test."""
+    skill = _skill_with_openai_yaml(
+        tmp_path, "x",
+        "name: x\ndescription: Use when x.\ndisable-model-invocation: true\n",
+        "policy: null\n",
+    )
+    findings = checks.run(skill, only="invocation-consistency", target="claude-code")
+    assert findings and "not a mapping" in findings[0].detail
+
+
+def test_invocation_consistency_reports_an_explicit_null_allow_implicit_invocation(
+    tmp_path: Path,
+) -> None:
+    skill = _skill_with_openai_yaml(
+        tmp_path, "x",
+        "name: x\ndescription: Use when x.\ndisable-model-invocation: true\n",
+        "policy:\n  allow_implicit_invocation: null\n",
+    )
+    findings = checks.run(skill, only="invocation-consistency", target="claude-code")
+    assert findings and "not a boolean" in findings[0].detail
+
+
+def test_invocation_consistency_reports_an_unreadable_openai_yaml(tmp_path: Path) -> None:
+    """The other guard Codex named as a red case: invalid UTF-8, not just a
+    parse failure on otherwise-decodable text."""
+    skill = _skill_with_openai_yaml(
+        tmp_path, "x", "name: x\ndescription: Use when x.\ndisable-model-invocation: true\n", ""
+    )
+    (skill.path.parent / "agents" / "openai.yaml").write_bytes(b"policy:\n  allow_implicit_invocation: \xff\xfe")
+    findings = checks.run(skill, only="invocation-consistency", target="claude-code")
+    assert findings and "unreadable" in findings[0].detail
+
+
+def test_invocation_consistency_is_scoped_to_claude_code(tmp_path: Path) -> None:
+    """The claim - do these two client-specific declarations agree - has no
+    portable-specification stake, exactly like `claude-code-field`."""
+    skill = _skill_with_openai_yaml(
+        tmp_path, "x",
+        "name: x\ndescription: Use when x.\ndisable-model-invocation: true\n",
+        "policy:\n  allow_implicit_invocation: true\n",  # disagrees
+    )
+    assert checks.run(skill, target="claude-code") != []
+    assert [f for f in checks.run(skill, target="portable") if f.rule == "invocation-consistency"] == []

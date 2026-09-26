@@ -113,6 +113,29 @@ there would hide that real concern for it. This is a decision, not a default:
 skillc does not know every client's invocation rules, so it warns for the ones
 it cannot rule out rather than assuming they all behave like Claude Code.
 
+## agents/openai.yaml and invocation-consistency
+
+`invocation-consistency` (#50) reads a second, optional per-skill file:
+`agents/openai.yaml`, beside `SKILL.md`. It is parsed with `parse_yaml_document`,
+the SAME documented subset above minus the `---` frontmatter delimiters -
+`agents/openai.yaml` is a standalone YAML file, not a frontmatter block. Every
+limit in this page (no flow collections, no anchors, no lists of mappings, and
+so on) applies to it identically, and a construct outside the subset is
+diagnosed the same way frontmatter's is: as `invalid YAML` or as `outside the
+YAML subset skillc reads`, reported on the skill rather than silently treated as
+agreement between clients.
+
+The rule compares `disable-model-invocation` (this file's frontmatter) against
+`policy.allow_implicit_invocation` (`agents/openai.yaml`). Both default to "the
+model may invoke it" when absent - `disable-model-invocation` is not `true`, and
+`allow_implicit_invocation` is not `false`. A value present but not the expected
+type (`policy` not a mapping, or `allow_implicit_invocation` not a boolean) is
+reported rather than guessed at. The field itself is an upstream convention
+(mattpocock/skills' `.agents/invocation.md`), not a Codex specification - it was
+read there on 2026-09-26, at
+[`c55ee46`](https://github.com/mattpocock/skills/tree/c55ee46073ed923f86ce59a5eb3b6d895095d1b7);
+re-read it before relying on this rule after that convention changes.
+
 ## Not covered
 
 Types of optional fields (`metadata` as a string-to-string map, `compatibility`

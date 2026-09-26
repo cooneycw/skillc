@@ -26,7 +26,9 @@ from .spec import (
     REQUIRED_FIELDS,
     SPEC_FIELDS,
     TARGETS,
+    FrontmatterError,
     Skill,
+    parse_yaml_document,
 )
 
 ERROR = "error"
@@ -229,6 +231,84 @@ def _ref_depth(skill: Skill, target: str) -> Iterator[str]:
         )
 
 
+# mattpocock/skills' own convention for shipping to more than one client
+# (`.agents/invocation.md`), read 2026-09-26 at c55ee46073ed923f86ce59a5eb3b6d895095d1b7
+# (#50). Not a Codex specification - `agents/openai.yaml` is an upstream
+# convention, so there is nothing else to cite; this date is what a later change
+# to that convention would need to invalidate.
+CODEX_POLICY_READ = "2026-09-26"
+
+
+def _invocation_consistency(skill: Skill, target: str) -> Iterator[str]:
+    """Target `claude-code`: Claude Code's `disable-model-invocation` and Codex's
+    `agents/openai.yaml` `policy.allow_implicit_invocation` both say whether the
+    MODEL may invoke a skill without being asked. A skill that ships to both
+    clients can end up user-invoked in one and auto-selectable in the other if
+    the two disagree - exactly the split skillc exists to surface, and one no
+    other rule reads `agents/openai.yaml` to catch.
+
+    Scoped to `claude-code` for the same reason `claude-code-field` is: the
+    portable specification has no invocation control at all, so under
+    `--target portable` `disable-model-invocation` is already reported as a
+    non-portable extension by `unknown-field`, and "does Claude Code's
+    invocation flag agree with Codex's" is not a claim the portable profile has
+    any stake in.
+
+    Silent when `agents/openai.yaml` is absent: that file is an upstream
+    convention, not a specification requirement, so a skill that never carries
+    it says nothing about a second client to compare against.
+    """
+    openai_yaml = skill.path.parent / "agents" / "openai.yaml"
+    if not openai_yaml.is_file():
+        return
+    try:
+        text = openai_yaml.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        yield f"agents/openai.yaml is unreadable: {exc}"
+        return
+    try:
+        doc = parse_yaml_document(text)
+    except FrontmatterError as exc:
+        # A file skillc cannot read says nothing about agreement - reported,
+        # never silently folded into "consistent" the way absence is.
+        yield f"agents/openai.yaml {exc}"
+        return
+
+    # `in` on purpose, not `.get(...) is not None`: an ABSENT key defaults (below),
+    # but a key present with an explicit `null` is a value of the wrong type, same
+    # as any other wrong type, and `.get` cannot tell the two apart.
+    policy: dict[str, object] = {}
+    if "policy" in doc:
+        found = doc["policy"]
+        if not isinstance(found, dict):
+            yield f"agents/openai.yaml policy is {_kind(found)}, not a mapping - cannot compare"
+            return
+        policy = found
+    allow_implicit: object = None
+    if "allow_implicit_invocation" in policy:
+        allow_implicit = policy["allow_implicit_invocation"]
+        if not isinstance(allow_implicit, bool):
+            yield (
+                f"agents/openai.yaml policy.allow_implicit_invocation is {_kind(allow_implicit)}, "
+                f"not a boolean - cannot compare"
+            )
+            return
+
+    # Absence defaults to "the model may invoke it" on BOTH sides - the same
+    # default `disable-model-invocation` already has in Claude Code.
+    codex_user_invoked = allow_implicit is False
+    claude_user_invoked = skill.frontmatter.get("disable-model-invocation") is True
+    if claude_user_invoked == codex_user_invoked:
+        return
+    claude_label = "user-invoked" if claude_user_invoked else "model-invoked"
+    codex_label = "user-invoked" if codex_user_invoked else "model-invoked"
+    yield (
+        f"disable-model-invocation makes this skill {claude_label} in Claude Code, but "
+        f"agents/openai.yaml's policy.allow_implicit_invocation makes it {codex_label} in "
+        f"Codex - keep the two in sync (a skill is user-invoked in both harnesses or neither)"
+    )
+
+
 RULES: tuple[Rule, ...] = (
     Rule("name-spec", ERROR, "name is spec-legal and matches its directory", _name_spec),
     Rule("required-fields", ERROR, "required frontmatter is present and in range", _required_fields),
@@ -239,6 +319,9 @@ RULES: tuple[Rule, ...] = (
          _claude_code_field, target=CLAUDE_CODE.id),
     Rule("body-budget", WARN, "SKILL.md body stays inside the line budget", _body_budget),
     Rule("ref-depth", WARN, "references stay one level deep", _ref_depth),
+    Rule("invocation-consistency", ERROR,
+         "Claude Code's disable-model-invocation and Codex's agents/openai.yaml agree",
+         _invocation_consistency, target=CLAUDE_CODE.id),
     Rule("frontmatter", ERROR, "frontmatter is present and parses", _frontmatter, parser=True),
 )
 

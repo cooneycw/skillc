@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rotate Credential"
+policy:
+  allow_implicit_invocation: false
