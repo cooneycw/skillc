@@ -46,9 +46,17 @@ every field and the bytes of all three files.
 
 **The pin.** The ledger's `grader` identity carries that digest
 (`{"id", "revision", "digest"}`), written by the controller before dispatch. The
-verifier refuses to grade when the pin is missing or differs. It re-reads the
-digest after grading and refuses the result if the grader changed while it
-graded. A missing digest is refused, never warn-and-proceed.
+verifier reads the three files **once**, before any candidate code runs, and
+refuses to grade when the pin is missing or does not match those bytes. The probe
+and the judge are then written from those bytes, never from the grader's files.
+After grading, it re-reads the files and refuses the result if they changed. A
+missing digest is refused, never warn-and-proceed.
+
+Executing the pinned bytes, and not only re-checking the files afterwards, is
+load-bearing. A candidate can swap in a judge that prints PASS and restores the
+original when it runs. Re-read from disk, that judge would run, and the files
+would match again by the time they were checked. The counter-model review found
+this; `test_a_self_restoring_judge_is_never_what_runs` pins it.
 
 ## The three stages
 
@@ -63,8 +71,9 @@ graded. A missing digest is refused, never warn-and-proceed.
 - The answer key is not there. The probe reports what the candidate did. It never
   sees what it should have done.
 - The environment is exactly `PATH`, a `HOME` inside the root, `LANG` and
-  `PYTHONDONTWRITEBYTECODE`. Nothing is inherited, so no evaluator credential
-  reaches candidate code.
+  `PYTHONDONTWRITEBYTECODE`. Nothing is **inherited**, so no evaluator credential
+  is handed to candidate code. That is not confidentiality: see "Trust
+  assumptions".
 - Manifest paths are rechecked before they are written. A stored bundle is
   untrusted input (lesson 6 below), and a `..` part is refused.
 
@@ -89,6 +98,19 @@ file or pipe the supervisor holds, but it cannot choose the supervisor's exit
 status. Only 0 and 10 count as a confirmed sweep. Anything else is recorded as a
 `containment` failure: every required criterion is UNKNOWN and the result is
 INCONCLUSIVE.
+
+When containment is lost (anything but 0, 10 or 21), the verifier makes a best-effort
+second sweep. It SIGKILLs every process whose working directory is inside the
+probe's directory, or whose `HOME` is the probe's, and records the count as
+`fallback_killed`. Nothing then establishes that every candidate process is gone,
+so the verifier **quarantines itself**: every later grading run in that process
+refuses until an operator calls `verify.clear_quarantine()`. A survivor could
+otherwise write into the next run's store or judge.
+
+The probe's report and stderr are opened non-blocking and without following a
+link, and read only if they are regular files, within a bound. A FIFO swapped in
+for the report would otherwise block the verifier forever, after every deadline
+had passed.
 
 **What the probe prints is an observation.** Candidate code shares the probe's
 process and can write the probe's report. It gains nothing it could not gain by
@@ -153,7 +175,14 @@ That is not supported yet, and every case is currently read as setup-not-goal.
   client, attempt or trial (a stale receipt);
 - a frozen object no longer matches its digest (#8's `frozen_artifacts`);
 - after grading, the grader's digest, the experiment store's contents (a snapshot
-  of every file, link and directory) or the ledger's history differ from before.
+  of every file, link and directory) or the ledger's history differ from before;
+- the verifier is quarantined after lost containment.
+
+The store snapshot covers the whole experiment, so a legitimate concurrent write,
+such as another attempt's capture landing mid-grade, is refused exactly like
+tampering. That is fail-closed: a false refusal, never a false PASS. The
+refusal says so, and grading needs an experiment nothing else is writing. No lock
+enforces that yet.
 
 A refusal is loud: the attempt stays owed a grade, and `attempt-accounting` says
 so. A grader that gives no verdict is **not** refused. That result is stored as
@@ -189,8 +218,12 @@ grades.
 | Modified local tests, checker or pass file | wrong candidate + trivial tests, an always-pass `grade_slug.py`, `grader.json`, `expected.json` -> FAIL | - |
 | Candidate writes verifier output | a forged verdict on the probe's report channel -> FAIL (`R4-interface` "malformed"); a planted `result-*.json` or an edited ledger -> refused; an edited judge file -> refused | the same body without the write -> PASS |
 | Candidate outlives the probe | a `setsid` process -> swept, pid dead, result stands | - |
+| Candidate replaces the judge with a self-restoring always-pass | -> refused; the swapped judge never ran | - |
+| Candidate replaces the report with a FIFO | -> FAIL (`R4-interface`), no hang | - |
 | Candidate kills the supervisor | -> INCONCLUSIVE, `containment` | - |
-| Evaluator credentials | a secret in the verifier's environment is absent from the candidate's dump | the dump holds `PATH` (it ran) |
+| ... and stays alive | -> killed by the fallback sweep; the verifier quarantines and refuses the next run until cleared | after `clear_quarantine`, the reference PASSes |
+| Evaluator credentials, inheritance | a secret in the verifier's environment is absent from the candidate's `os.environ` | the dump holds `PATH` (it ran) |
+| Evaluator credentials, confidentiality | **a limit, pinned**: candidate code reads the token from an ancestor's `/proc/<pid>/environ` | - |
 | Stale receipt, missing digest | no receipt, a planted stale receipt, no pin, a wrong pin, a modified object -> refused | - |
 | Readiness | canary VIOLATED + correct -> INCONCLUSIVE; + wrong -> FAIL | - |
 | Status derived | a judge claiming `status: PASS` beside violated criteria -> FAIL | - |
@@ -207,7 +240,11 @@ Each protection was also removed once, and the test that names it went red:
 - status copied;
 - no readiness criterion;
 - a crash read as FAIL;
-- the supervisor's exit trusted blindly.
+- the supervisor's exit trusted blindly;
+- the judge re-read from disk (the self-restoring judge PASSed);
+- no fallback sweep (the survivor stayed alive);
+- no quarantine;
+- a blocking read of the report (the verifier hung on the FIFO).
 
 ## Trust assumptions
 
@@ -217,6 +254,14 @@ The following are assumed, not shown:
   trusted.** interfaces.md places them inside the trusted system. The verifier
   process imports `skillc`; a subject that rewrites installed Python files is
   outside what is checked here.
+- **Evaluator credentials must not be in the verifier's environment.** The
+  environment is not inherited, but same-user candidate code can walk its
+  ancestors and read `/proc/<pid>/environ` of any of them. Whatever started the
+  verifier started with is readable.
+  `test_an_ancestors_environment_is_NOT_hidden` pins that. Keeping credentials
+  away from candidate code needs a separate user: the Docker lane (#10). Until
+  then, run grading from a process tree that holds no credential. Only
+  non-inheritance is established here.
 - **Candidate code runs as the evaluator's own user.**
   - A write to the evidence store, the ledger or the grader's files is therefore
     **detected** (snapshot and digest), not **prevented**.
@@ -235,6 +280,9 @@ The following are assumed, not shown:
   enforced.
 - **Linux.** The sweep needs `prctl` and `/proc`. Elsewhere the supervisor exits
   21 and the result is INCONCLUSIVE.
+- **Quarantine is per process.** It stops the verifier that lost containment. A
+  different process on the same host is not told, and a survivor that left the
+  probe's directory and changed its `HOME` escapes the fallback sweep.
 
 ## Unobserved properties
 

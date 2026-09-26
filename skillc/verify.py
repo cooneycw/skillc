@@ -17,7 +17,8 @@ GRADING IS THREE STAGES, AND ONLY ONE RUNS CANDIDATE CODE.
      EXIT CODE, the one channel candidate code cannot write. What the probe
      prints is an observation, never a verdict.
   2. JUDGE (trusted). It starts only after that confirmed sweep, in a new
-     directory holding just the judge file, which holds the answers. No
+     directory holding just the judge, written from bytes read and pinned BEFORE
+     any candidate code ran - never re-read from the grader's files. No
      candidate process is alive to write on its stdout, the success channel.
   3. ASSEMBLE (this process). The judge's report must carry exactly the grader's
      required criteria and satisfy the record contract. The status is DERIVED by
@@ -33,6 +34,10 @@ WHAT THIS DOES NOT ESTABLISH. Candidate code runs as the evaluator's own user, s
 a write to the store or to the grader's files is DETECTED, not prevented, and the
 answer key's file on disk is readable by a candidate that goes looking for it.
 Prevention needs a separate user or container, which is the Docker lane (#10).
+The environment is not inherited, but same-user code can read an ancestor's
+through /proc, so evaluator credentials must not be in the verifier's environment
+until #10 provides a separate user. If containment is lost, this process is
+quarantined: every later grading run refuses until an operator clears it.
 The controller host, this package and the Python standard library are trusted.
 verification.md lists every assumption.
 
@@ -257,12 +262,22 @@ class GraderDef:
             raise Refused(f"{judge} is not a regular file")
         return replace(self, judge=judge)
 
-    def digest(self) -> str:
+    def read(self) -> dict[str, bytes]:
+        """The bytes of the three files, read once. Grading executes THESE bytes,
+        never the files again, so a file replaced while candidate code runs - even
+        one that restores itself afterwards - is never what runs."""
+        return {"probe": _read_regular(self.probe), "inputs": _read_regular(self.inputs),
+                "judge": _read_regular(self.judge)}
+
+    def digest(self, loaded: dict[str, bytes] | None = None) -> str:
+        """The pin: the definition's fields and the bytes of its files (read now,
+        unless `loaded` supplies the bytes that will actually run)."""
+        data = loaded if loaded is not None else self.read()
         return trial.sha256_bytes(trial.canonical({
             "id": self.id, "revision": self.revision, "criteria": list(self.criteria),
-            "probe": trial.sha256_bytes(_read_regular(self.probe)),
-            "inputs": trial.sha256_bytes(_read_regular(self.inputs)),
-            "judge": trial.sha256_bytes(_read_regular(self.judge)),
+            "probe": trial.sha256_bytes(data["probe"]),
+            "inputs": trial.sha256_bytes(data["inputs"]),
+            "judge": trial.sha256_bytes(data["judge"]),
             "probe_timeout": self.probe_timeout, "judge_timeout": self.judge_timeout,
         }))
 
@@ -290,8 +305,10 @@ class Graded:
 
 
 def _env(home: Path) -> dict[str, str]:
-    """The whole environment of a grading process. Nothing is inherited, so no
-    evaluator credential reaches candidate code, or the judge."""
+    """The whole environment of a grading process. Nothing is INHERITED, so no
+    evaluator credential is handed to candidate code or the judge. That is not
+    confidentiality: same-user code can still read an ancestor's environment
+    through /proc (verification.md, "Trust assumptions"); that needs #10's boundary."""
     return {"PATH": os.defpath, "HOME": str(home), "LANG": "C.UTF-8", "PYTHONDONTWRITEBYTECODE": "1"}
 
 
@@ -316,36 +333,93 @@ def _write_tree(dest: Path, files: list[tuple[str, bytes, bool]]) -> None:
             out.write(data)
 
 
-def _read_observations(path: Path) -> str:
-    """The probe's report, bounded, never through a link. Absent reads as empty:
-    the judge decides what no report means for the candidate."""
+def _read_untrusted(path: Path, limit: int, tail: bool = False) -> bytes | None:
+    """At most `limit` bytes of a file candidate code could have replaced.
+
+    Opened non-blocking and without following a link, and read only if it is a
+    regular file: a FIFO swapped in for it would otherwise block forever, after
+    every deadline has passed. None when it is not a readable regular file."""
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except OSError:
-        return ""
+        return None
     with os.fdopen(fd, "rb") as handle:
-        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
-            return ""
-        return handle.read(MAX_OBSERVATION_BYTES).decode("utf-8", errors="replace")
+        info = os.fstat(handle.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            return None
+        if tail and info.st_size > limit:
+            handle.seek(info.st_size - limit)
+        return handle.read(limit)
+
+
+def _read_observations(path: Path) -> str:
+    """The probe's report. Absent or not a regular file reads as empty: the judge
+    decides what no report means for the candidate."""
+    data = _read_untrusted(path, MAX_OBSERVATION_BYTES)
+    return data.decode("utf-8", errors="replace") if data is not None else ""
 
 
 def _tail(path: Path) -> str:
-    try:
-        lines = path.read_bytes()[-4096:].decode("utf-8", errors="replace").strip().splitlines()
-    except OSError:
-        return "no stderr"
+    data = _read_untrusted(path, 4096, tail=True)
+    lines = data.decode("utf-8", errors="replace").strip().splitlines() if data else []
     return lines[-1] if lines else "no stderr"
 
 
-def _probe(grader: GraderDef, work: Path) -> tuple[dict[str, object], dict[str, object]]:
+#: Set when a probe's containment was lost. Every later grading run in this
+#: process refuses until an operator clears it: a surviving candidate process could
+#: otherwise write into the next run's store or judge.
+_quarantine: str | None = None
+
+
+def _set_quarantine(reason: str) -> None:
+    global _quarantine
+    _quarantine = reason
+
+
+def clear_quarantine() -> None:
+    """An operator's statement that the host was checked after lost containment."""
+    global _quarantine
+    _quarantine = None
+
+
+def _kill_inside(work: Path, home: Path) -> int:
+    """Best effort, after the supervisor failed: SIGKILL every process whose working
+    directory is inside this probe's directory or whose HOME is its HOME. A process
+    that moved out and changed both is not found; that is why the caller quarantines."""
+    prefix, killed, me = str(work) + os.sep, 0, os.getpid()
+    marker = f"HOME={home}".encode()
+    for name in os.listdir("/proc") if os.path.isdir("/proc") else []:
+        if not name.isdigit() or int(name) == me:
+            continue
+        inside = False
+        try:
+            inside = (os.readlink(f"/proc/{name}/cwd") + os.sep).startswith(prefix)
+        except OSError:
+            pass
+        if not inside:
+            try:
+                with open(f"/proc/{name}/environ", "rb") as handle:
+                    inside = marker in handle.read().split(b"\0")
+            except OSError:
+                pass
+        if inside:
+            try:
+                os.kill(int(name), signal.SIGKILL)
+                killed += 1
+            except OSError:
+                pass
+    return killed
+
+
+def _probe(grader: GraderDef, loaded: dict[str, bytes], work: Path) -> tuple[dict[str, object], dict[str, object]]:
     """Stage 1: run candidate code under the supervisor. Returns the envelope the
     judge will read and the containment observation."""
     harness, home = work / "harness", work / "home"
     for d in (harness, home):
         d.mkdir(mode=0o700)
     probe = harness / grader.probe.name
-    _write_tree(harness, [(grader.probe.name, _read_regular(grader.probe), False)])
-    inputs = _read_regular(grader.inputs)
+    _write_tree(harness, [(grader.probe.name, loaded["probe"], False)])
+    inputs = loaded["inputs"]
     observations, errors = work / "observations", work / "probe.stderr"
     argv = [
         sys.executable, "-I", "-S", "-B", "-c", SUPERVISOR,
@@ -368,22 +442,29 @@ def _probe(grader: GraderDef, work: Path) -> tuple[dict[str, object], dict[str, 
         "supervisor_exit": code, "confirmed": confirmed, "timed_out": code == TIMED_OUT,
     }
     if not confirmed:
+        containment["fallback_killed"] = _kill_inside(work, home)
         containment["reason"] = {
             UNCONFIRMED: "descendants of the probe survived the sweep",
             UNSUPPORTED: "this host cannot contain the probe (no prctl subreaper or /proc)",
             None: "the supervisor did not finish; its process group was killed",
         }.get(code, f"the supervisor ended abnormally ({code}); candidate code may have killed it")
         containment["stderr"] = _tail(errors)
+        if code != UNSUPPORTED:
+            # Nothing established that every candidate process is gone. One that left
+            # the root and changed its environment is out of reach of the fallback,
+            # and could interfere with the next grading run, so this verifier stops.
+            _set_quarantine(f"probe containment was lost ({containment['reason']})")
     envelope = {"observations": _read_observations(observations), "timed_out": code == TIMED_OUT}
     return envelope, containment
 
 
-def _judge(grader: GraderDef, work: Path, envelope: dict[str, object]) -> tuple[str, str, object]:
+def _judge(grader: GraderDef, loaded: dict[str, bytes], work: Path,
+           envelope: dict[str, object]) -> tuple[str, str, object]:
     """Stage 2: the trusted judge, in a directory created after the sweep."""
     home = work / "home"
     home.mkdir(mode=0o700, parents=True)
     judge = work / grader.judge.name
-    _write_tree(work, [(grader.judge.name, _read_regular(grader.judge), False)])
+    _write_tree(work, [(grader.judge.name, loaded["judge"], False)])
     proc = subprocess.Popen(
         [sys.executable, "-I", "-S", "-B", str(judge), "--judge"], cwd=work, env=_env(home),
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
@@ -456,14 +537,19 @@ def _status(criteria: list[dict[str, object]]) -> str:
 
 
 def grade_files(grader: GraderDef, files: list[tuple[str, bytes, bool]], base: Path,
-                forbidden: list[Path] | None = None) -> Graded:
+                forbidden: list[Path] | None = None, loaded: dict[str, bytes] | None = None) -> Graded:
     """Grade candidate files through the three stages, in a disposable owned root.
 
     `files` are (relative path, bytes, executable). The root is removed afterwards,
     whatever happened, and its cleanup outcome is part of the containment record.
     """
+    if _quarantine is not None:
+        raise Refused(f"this verifier is quarantined: {_quarantine}; an operator must check the host "
+                      "and call verify.clear_quarantine() before grading again")
     if not files:
         raise Refused("nothing to grade: an empty candidate is not a clean one")
+    if loaded is None:
+        loaded = grader.read()
     digests = sorted({trial.sha256_bytes(data) for _, data, _ in files})
     try:
         root, nonce = create_root(base, [*(forbidden or []), grader.root])
@@ -474,12 +560,12 @@ def grade_files(grader: GraderDef, files: list[tuple[str, bytes, bool]], base: P
         probe_dir.mkdir(mode=0o700)
         (probe_dir / "candidate").mkdir(mode=0o700)
         _write_tree(probe_dir / "candidate", files)
-        envelope, containment = _probe(grader, probe_dir)
+        envelope, containment = _probe(grader, loaded, probe_dir)
         if not containment["confirmed"]:
             category, detail = "containment", f"the probe was not contained: {containment['reason']}"
             criteria = _unknown(grader, detail)
         else:
-            category, detail, report = _judge(grader, root / "judge", envelope)
+            category, detail, report = _judge(grader, loaded, root / "judge", envelope)
             assembled = None
             if category == "verdict":
                 category, detail, assembled = _assemble(grader, report, digests)
@@ -604,7 +690,8 @@ def grade(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base
     if (pin.get("id"), pin.get("revision")) != (grader.id, grader.revision):
         raise Refused(f"the ledger plans grader {pin.get('id')!r} revision {pin.get('revision')!r}, "
                       f"not {grader.id!r} revision {grader.revision!r}")
-    if grader.digest() != pin["digest"]:
+    loaded = grader.read()
+    if grader.digest(loaded) != pin["digest"]:
         raise Refused("the grader definition does not match the digest the ledger pinned")
     lifecycle = experiment.root / f"lifecycle-{attempt_id}.json"
     if lifecycle.is_symlink() or not lifecycle.is_file() or \
@@ -620,7 +707,7 @@ def grade(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base
     ]
 
     before = _snapshot(experiment.root)
-    graded = grade_files(grader, files, base, [*(forbidden or []), experiment.root.parent.resolve()])
+    graded = grade_files(grader, files, base, [*(forbidden or []), experiment.root.parent.resolve()], loaded)
 
     # Everything candidate code could have reached is checked again. A change here
     # is not a verdict on the candidate: the measurement itself is compromised.
@@ -628,7 +715,9 @@ def grade(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base
         raise Refused("the grader definition changed while it was grading; no result is written")
     changed = _changed(before, _snapshot(experiment.root))
     if changed:
-        raise Refused(f"the evidence store changed while candidate code ran ({changed}); no result is written")
+        raise Refused(f"the evidence store changed while candidate code ran ({changed}); no result is written. "
+                      "A concurrent controller write to this experiment also triggers this: grade an "
+                      "experiment nothing else is writing")
     if trial.Experiment.open(experiment.root).ledger != experiment.ledger:
         raise Refused("the ledger changed while candidate code ran; no result is written")
     trial.frozen_artifacts(experiment, attempt_id)

@@ -15,7 +15,8 @@ The acceptance items of #9, and the case that proves each:
                                         test_a_write_into_the_evidence_store_refuses_the_result,
                                         test_a_write_to_the_grader_definition_refuses_the_result,
                                         test_a_process_that_leaves_its_session_is_swept_before_the_judge
-  evaluator credentials ............... test_candidate_code_never_sees_the_evaluators_environment
+  evaluator credentials ............... test_candidate_code_does_not_inherit_the_evaluators_environment
+                                        (and its limit: test_an_ancestors_environment_is_NOT_hidden)
   stale receipts, missing digests ..... test_*_receipt_*, test_*_pin_*, test_a_modified_artifact_is_not_graded
   broken graders ...................... test_a_grader_that_gives_no_verdict_stores_INCONCLUSIVE, ...
   deterministic regrading lineage ..... test_a_regrade_repeats_the_outcomes_and_keeps_the_original
@@ -49,6 +50,14 @@ RECEIPT = json.loads((HERE.parent / "controls" / "installation-receipt" / "good"
 
 #: A candidate body that is correct, for sources that add hostile behaviour to it.
 CORRECT = REFERENCE.read_text(encoding="utf-8")
+
+
+@pytest.fixture(autouse=True)
+def _no_quarantine_leaks() -> object:
+    """A test that loses containment on purpose must not quarantine the next one."""
+    verify.clear_quarantine()
+    yield
+    verify.clear_quarantine()
 
 
 @pytest.fixture
@@ -348,7 +357,7 @@ def test_killing_the_supervisor_is_INCONCLUSIVE_never_a_verdict(store: Path, bas
     assert all(o == "UNKNOWN" for k, o in _outcomes(result).items() if k != verify.READINESS_CRITERION)
 
 
-def test_candidate_code_never_sees_the_evaluators_environment(store: Path, base: Path, grading: Path,
+def test_candidate_code_does_not_inherit_the_evaluators_environment(store: Path, base: Path, grading: Path,
                                                               tmp_path: Path,
                                                               monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SKILLC_EVALUATOR_TOKEN", "evaluator-secret-value")
@@ -546,3 +555,120 @@ def test_an_artifact_path_that_climbs_out_is_refused(grading: Path) -> None:
 def test_an_empty_candidate_is_refused(grading: Path) -> None:
     with pytest.raises(t.Refused, match="empty"):
         verify.grade_files(GRADER, [], grading)
+
+
+SELF_RESTORING = '''
+import os, shutil
+judge = JUDGE
+shutil.copy2(judge, judge + ".orig")
+always = ("import json, os, shutil\\n"
+          "shutil.move(%r, %r)\\n"
+          "print(json.dumps({'criteria': [{'id': c, 'mandatory': True, 'outcome': 'SATISFIED', "
+          "'evidence': ['forged']} for c in ('R4-interface', 'reported-example', 'R1', 'R2', 'R3')]}))\\n"
+          ) % (judge + ".orig", judge)
+os.chmod(judge, 0o600)
+open(judge, "w").write(always)
+'''
+
+
+def test_a_self_restoring_judge_is_never_what_runs(store: Path, base: Path, grading: Path,
+                                                  tmp_path: Path) -> None:
+    # Codex review: the candidate swaps in a judge that prints PASS and puts the
+    # real one back. Were the judge re-read from disk after the probe, it would run,
+    # restore the file, and the post-grading digest check would match. The verifier
+    # runs the bytes it pinned before any candidate code, so the wrong candidate FAILs.
+    grader = _task_copy(tmp_path)
+    body = f"JUDGE = {str(grader.judge)!r}\n" + SELF_RESTORING + WRONG.read_text(encoding="utf-8")
+    experiment, attempt_id = _captured(store, base, _source(tmp_path, body), grader=grader.identity())
+    with pytest.raises(t.Refused, match="grader definition changed"):
+        verify.grade(experiment, attempt_id, grader, grading)
+    # The swapped judge never ran: had it, it would have restored the original.
+    assert "forged" in grader.judge.read_text()
+
+
+def test_a_fifo_in_place_of_the_report_does_not_hang_the_verifier(store: Path, base: Path, grading: Path,
+                                                                 tmp_path: Path) -> None:
+    fifo = ("import os\n"
+            "path = os.path.join(os.path.dirname(os.getcwd()), 'observations')\n"
+            "os.unlink(path)\nos.mkfifo(path)\nos._exit(0)\n")
+    experiment, attempt_id = _captured(store, base, _source(tmp_path, fifo))
+    result = verify.grade(experiment, attempt_id, GRADER, grading)
+    assert result["status"] == "FAIL"
+    assert _outcomes(result)["R4-interface"] == "VIOLATED"
+
+
+STAYS_ALIVE = '''
+import os, signal, time
+if os.fork() == 0:
+    open(PIDFILE + ".tmp", "w").write(str(os.getpid()))
+    os.rename(PIDFILE + ".tmp", PIDFILE)
+    while True:
+        time.sleep(0.05)
+deadline = time.monotonic() + 10
+while not os.path.exists(PIDFILE) and time.monotonic() < deadline:
+    time.sleep(0.02)
+os.kill(os.getppid(), signal.SIGKILL)
+'''
+
+
+def test_a_candidate_that_kills_the_supervisor_and_stays_alive_is_killed_and_quarantines(
+        store: Path, base: Path, grading: Path, tmp_path: Path) -> None:
+    pidfile = tmp_path / "survivor.pid"
+    body = f"PIDFILE = {str(pidfile)!r}\n" + STAYS_ALIVE + CORRECT
+    experiment, attempt_id = _captured(store, base, _source(tmp_path, body))
+    result = verify.grade(experiment, attempt_id, GRADER, grading)
+    assert result["status"] == "INCONCLUSIVE"
+    verification = result["verification"]
+    assert isinstance(verification, dict)
+    assert verification["containment"]["fallback_killed"] >= 1
+    pid = int(pidfile.read_text())
+    deadline = time.monotonic() + 5
+    while _alive(pid) and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert not _alive(pid)
+    # Nothing established that EVERY process is gone, so grading stops until an
+    # operator says otherwise.
+    with pytest.raises(t.Refused, match="quarantined"):
+        verify.grade_directory(GRADER, TASK / "reference", grading)
+    verify.clear_quarantine()
+    assert verify.grade_directory(GRADER, TASK / "reference", grading).status == "PASS"
+
+
+ANCESTORS = '''
+import os
+found, pid = False, os.getpid()
+while pid > 1:
+    try:
+        stat = open(f"/proc/{pid}/stat", "rb").read()
+        pid = int(stat[stat.rfind(b")") + 2:].split()[1])
+        if b"SKILLC_EVALUATOR_TOKEN=" in open(f"/proc/{pid}/environ", "rb").read():
+            found = True
+            break
+    except OSError:
+        break
+open(MARK, "w").write("found" if found else "hidden")
+'''
+
+
+def test_an_ancestors_environment_is_NOT_hidden(store: Path, base: Path, grading: Path, tmp_path: Path,
+                                                monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pins a LIMIT, as #8 pins the setsid one. The verifier does not hand its
+    environment to candidate code, but same-user code can read an ancestor's
+    through /proc. Confidentiality needs a separate user: the Docker lane (#10).
+    If this ever reports "hidden", the host added a boundary; update the docs."""
+    mark = tmp_path / "ancestors"
+    # The token must be in the environment the verifier's ANCESTORS started with,
+    # so run the grading in a child process that carries it from birth.
+    monkeypatch.setenv("SKILLC_EVALUATOR_TOKEN", "evaluator-secret-value")
+    body = f"MARK = {str(mark)!r}\n" + ANCESTORS + CORRECT
+    experiment, attempt_id = _captured(store, base, _source(tmp_path, body))
+    script = (
+        "import sys; from pathlib import Path; from skillc import verify, trial\n"
+        f"e = trial.Experiment.open(Path({str(experiment.root)!r}))\n"
+        f"verify.grade(e, {attempt_id!r}, verify.GraderDef.load(Path({str(TASK)!r})), Path({str(grading)!r}))\n"
+    )
+    import subprocess
+    subprocess.run([sys.executable, "-c", script], check=True, env=dict(os.environ))
+    if not mark.exists():
+        pytest.skip("the candidate could not report; /proc is not readable here")
+    assert mark.read_text() == "found"
