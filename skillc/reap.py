@@ -20,9 +20,15 @@ UNKNOWN NEVER REAPS, the same rule `ExecutionBackend.confirm_absent` already
 states for a single attempt (`backend.py`), generalized to a sweep over many.
 If the daemon cannot even be asked (`docker ps` itself fails - an unreachable
 daemon, a timeout), nothing is removed and every requested attempt id is
-reported `left-running`: an unconfirmable absence is not a confirmed one, and
-guessing "probably already gone" here is exactly the guess `Confirmation`
-exists to forbid elsewhere in this codebase.
+reported `"unknown"` - a FOURTH, DISTINCT outcome from `"left-running"`
+(orchestrator review of this PR: the first cut folded both into
+`"left-running"`, conflating "we asked and it confirms something is still
+there" with "we could not ask at all"). An unconfirmable absence is not a
+confirmed one, and guessing "probably already gone" here is exactly the
+guess `Confirmation` exists to forbid elsewhere in this codebase - so is
+guessing "probably still running", which is what collapsing `"unknown"`
+into `"left-running"` would silently assert about a daemon that was never
+actually reached.
 
 REGISTER-BEFORE-FAIL IS ALREADY TRUE, BY CONSTRUCTION, NOT SOMETHING THIS
 MODULE ADDS. `compose_run_argv` (docker_backend.py) writes both labels onto a
@@ -189,10 +195,17 @@ def diff(before: Snapshot, after: Snapshot) -> SnapshotDiff:
 #:   ordinary, idempotent no-op, not evidence anything was ever removed.
 #: - "reaped": something was found, `docker rm -f` was issued, and a
 #:   follow-up label-filtered list confirms nothing with those labels remains.
-#: - "left-running": either the daemon could not be asked (UNKNOWN never
-#:   reaps) or something with these labels is STILL listed after the removal
-#:   attempt - never conflated with "already-absent".
-REAP_OUTCOMES = ("already-absent", "reaped", "left-running")
+#: - "left-running": the daemon COULD be asked, and it CONFIRMS something
+#:   with these labels is still there after the removal attempt - a known
+#:   fact, not a guess.
+#: - "unknown": the daemon could not be asked at all, at EITHER the initial
+#:   list or the confirming re-list (orchestrator review of this PR: the
+#:   first cut folded this into "left-running", conflating "we know
+#:   something is still there" with "we don't know anything" - exactly the
+#:   distinction `Confirmation` keeps everywhere else in this codebase).
+#:   UNKNOWN never reaps, but it is also never asserted as a running
+#:   container the way "left-running" is.
+REAP_OUTCOMES = ("already-absent", "reaped", "left-running", "unknown")
 
 
 @dataclass(frozen=True)
@@ -219,6 +232,10 @@ class ReapReport:
     @property
     def left_running(self) -> tuple[str, ...]:
         return tuple(e.attempt_id for e in self.outcomes if e.outcome == "left-running")
+
+    @property
+    def unknown(self) -> tuple[str, ...]:
+        return tuple(e.attempt_id for e in self.outcomes if e.outcome == "unknown")
 
 
 def reap(
@@ -263,8 +280,11 @@ def reap(
         label_filters = [(OWNER_LABEL_KEY, OWNER_LABEL_VALUE), (ATTEMPT_LABEL_KEY, attempt_id)]
         target_ids = _list_ids(docker_bin, env, timeout, label_filters)
         if target_ids is None:
+            # UNKNOWN, not "left-running" (orchestrator review of this PR): we
+            # do not know whether anything is there at all, which is a
+            # different fact from knowing something confirmed still is.
             daemon_reachable = False
-            outcomes.append(ReapOutcome(attempt_id, "left-running"))
+            outcomes.append(ReapOutcome(attempt_id, "unknown"))
             continue
         if not target_ids:
             outcomes.append(ReapOutcome(attempt_id, "already-absent"))
@@ -280,7 +300,7 @@ def reap(
         still_there = _list_ids(docker_bin, env, timeout, label_filters)
         if still_there is None:
             daemon_reachable = False
-            outcomes.append(ReapOutcome(attempt_id, "left-running"))
+            outcomes.append(ReapOutcome(attempt_id, "unknown"))
         elif any(target_id in still_there for target_id in target_ids):
             outcomes.append(ReapOutcome(attempt_id, "left-running"))
         else:

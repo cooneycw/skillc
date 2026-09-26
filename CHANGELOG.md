@@ -52,6 +52,11 @@ collection) closes.
   because a missing dict key defaulted to the same `None` used for confirmed
   absence (now compared against a distinct not-declared sentinel). All fixed
   with committed regression tests confirmed red on the pre-fix code first.
+  A subsequent orchestrator review found one more: `reap()`'s outcome
+  vocabulary conflated `unknown` (the daemon could not be asked) into
+  `left-running` (the daemon confirms something is still there) - a fourth
+  outcome, `unknown`, now keeps the two distinct, with its own regression
+  test confirmed red on the pre-fix commit.
 - **Conformance through the real adapter, a no-Docker proof, and a published
   support matrix** (#80, Refs #10): interfaces.md's "Conformance cases
   required before trusting a backend" table, restated with a

@@ -84,9 +84,21 @@ candidates, so a foreign container that merely looks like one of ours can
 never appear in that list; it is not merely unlikely to be touched, it is
 structurally unreachable to `reap()`.
 
-**UNKNOWN never reaps.** If the daemon cannot even be asked (`docker ps`
-itself fails), nothing is removed and every requested attempt id is reported
-`left-running` - never `already-absent`, which is a different, positive fact.
+**Four outcomes, not three - `unknown` is distinct from `left-running`**
+(orchestrator review of this PR): `already-absent` (nothing found, an
+ordinary idempotent no-op), `reaped` (found, removed, confirmed gone),
+`left-running` (found, removal attempted, the daemon CONFIRMS something with
+these labels is still there), and `unknown` (the daemon could not be asked
+at all - `docker ps` itself failed, at either the initial list or the
+confirming re-list). UNKNOWN NEVER REAPS: nothing is removed for an attempt
+in that state. The first cut folded `unknown` into `left-running`, which
+asserted a container was confirmed running when the truth was that nothing
+could be confirmed either way - exactly the distinction `Confirmation` keeps
+everywhere else in this codebase.
+`test_unknown_and_left_running_are_kept_distinct_in_one_call` drives one
+`reap()` call over two attempts at once - one confirmed still running, one
+whose own listing call times out - and asserts both land correctly in the
+SAME report, never collapsed into the same outcome.
 
 **Register-before-fail is already true, by construction, not something this
 module adds.** `compose_run_argv` (#77) writes both labels onto a container
@@ -217,3 +229,9 @@ empty-population gap in both `reap()` and `snapshot_host_paths()`, and the
 host-path three-state collapse), all fixed above with committed regression
 tests confirmed red on the pre-fix code before the fix, per this repo's
 negative-control discipline.
+
+A subsequent orchestrator review of the same branch (at `2495473`) found one
+more: `reap()`'s outcome vocabulary conflated `unknown` (the daemon could not
+be asked) into `left-running` (the daemon confirms something is still
+there) - fixed as described above, with its own committed regression test
+confirmed red on `2495473` before the fix.

@@ -151,19 +151,61 @@ def test_reaping_two_attempts_only_removes_the_named_ones(docker_state: Path) ->
 
 def test_unknown_never_reaps_when_the_daemon_is_unreachable(docker_state: Path) -> None:
     """UNKNOWN never reaps: the daemon cannot even be asked, so nothing is
-    removed and the attempt is reported left-running, never already-absent
-    and never reaped - the two are different facts."""
+    removed and the attempt is reported `unknown` - never `left-running`
+    (which asserts the daemon CONFIRMS something is still there, a fact this
+    call could not establish), never `already-absent`, never `reaped`."""
     _run(docker_state, "orphan", _owned_labels("att-1"))
     (docker_state / ".down").touch()
 
     report = reap.reap(_docker_bin(docker_state), ["att-1"])
     assert report.daemon_reachable is False
-    assert report.outcome_for("att-1") == "left-running"
+    assert report.outcome_for("att-1") == "unknown"
+    assert report.unknown == ("att-1",)
     assert report.reaped == ()
+    assert report.left_running == ()
 
     (docker_state / ".down").unlink()
     still = reap.snapshot(_docker_bin(docker_state))
     assert "orphan" in still.owned  # nothing was actually removed
+
+
+def test_unknown_and_left_running_are_kept_distinct_in_one_call(
+    docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Orchestrator review of this PR: reporting `left-running` for BOTH
+    "the daemon confirms something is still there" and "the daemon could
+    not be asked" made the two indistinguishable per attempt - a caller
+    processing a mixed batch could not tell "known to be running" from
+    "unknown" for any individual attempt id, even though the report-level
+    `daemon_reachable` flag went false. This drives one `reap()` call over
+    two attempts at once: one whose container genuinely cannot be removed
+    (confirmed `left-running`) and one whose OWN listing call times out
+    (`unknown`), and asserts both outcomes land correctly in the SAME
+    report. Confirmed red on the pre-fix code (2495473): that build has no
+    `unknown` outcome at all, so `report.outcome_for("att-unreachable")`
+    returned `"left-running"` there instead.
+    """
+    _run(docker_state, "stuck-one", _owned_labels("att-stuck"))
+    (docker_state / ".stuck-stuck-one").touch()
+    real_run = subprocess.run
+
+    def _flaky_run(
+        argv: list[str], *, capture_output: bool = False, env: dict[str, str] | None = None,
+        check: bool = False, timeout: float | None = None, text: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        if any("label=skillc.attempt-id=att-unreachable" in str(a) for a in argv):
+            raise subprocess.TimeoutExpired(cmd=argv, timeout=timeout or 0)
+        return real_run(
+            argv, capture_output=capture_output, env=env, check=check, timeout=timeout, text=text,
+        )
+
+    monkeypatch.setattr(reap.subprocess, "run", _flaky_run)
+    report = reap.reap(_docker_bin(docker_state), ["att-stuck", "att-unreachable"])
+
+    assert report.outcome_for("att-stuck") == "left-running"
+    assert report.outcome_for("att-unreachable") == "unknown"
+    assert report.left_running == ("att-stuck",)
+    assert report.unknown == ("att-unreachable",)
 
 
 def test_a_container_that_cannot_be_confirmed_removed_is_left_running(docker_state: Path) -> None:
