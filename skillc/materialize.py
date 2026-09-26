@@ -32,6 +32,7 @@ import hashlib
 import io
 import json
 import os
+import posixpath
 import re
 import secrets
 import shutil
@@ -78,7 +79,7 @@ READINESS_FACTS = (
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _ROOT_LINE_RE = re.compile(r"^- `(r\d+)` = `(.+)`$")
-_SKILL_LINE_RE = re.compile(r"^- (\S[^:]*): .*\(file: (r\d+)/([^)]+)\)$")
+_SKILL_LINE_RE = re.compile(r"^- (\S[^:]*): (.*) \(file: (r\d+)/([^)]+)\)$")
 _LINK_RE = re.compile(r"\]\(([^)\s]+)\)")
 _TICK_RE = re.compile(r"`([^`\s]+)`")
 
@@ -152,7 +153,7 @@ class Subject:
         if not isinstance(client.get("version"), str) or not client["version"]:
             raise Refused("subject declaration pins no client version")
         root = str(data["skills_root"])
-        if Path(root).is_absolute() or ".." in Path(root).parts:
+        if _escapes(root):
             raise Refused(f"skills_root {root!r} escapes the subject")
         select = data.get("select", "all")
         if select == "all":
@@ -162,8 +163,10 @@ class Subject:
         else:
             raise Refused("select must be \"all\" or a non-empty list of skill names")
         manifest = data.get("checksum_manifest")
-        if manifest is not None and (not isinstance(manifest, str) or not manifest):
-            raise Refused("checksum_manifest must be a relative path or absent")
+        if manifest is not None and (
+            not isinstance(manifest, str) or not manifest or _escapes(manifest)
+        ):
+            raise Refused("checksum_manifest must be a relative path inside a skill, or absent")
         return cls(
             locator=str(data["locator"]),
             revision=str(data["revision"]),
@@ -175,6 +178,12 @@ class Subject:
             client_version=str(client["version"]),
             raw=data,
         )
+
+
+def _escapes(rel: str) -> bool:
+    """True when a declared relative path is absolute or climbs out of its base."""
+    norm = posixpath.normpath(rel)
+    return rel.startswith("/") or norm == ".." or norm.startswith("../")
 
 
 def _patterns(data: dict[str, object], key: str, groups: int) -> tuple[ExternalPattern, ...]:
@@ -306,7 +315,16 @@ def acquire_snapshot(subject: Subject, snapshot: Path, staging: Path) -> Source:
     surface = snapshot / subject.skills_root
     if not surface.is_dir():
         raise Refused(f"skills root {subject.skills_root!r} is absent under {snapshot}")
-    tree_files(surface)  # refuses symlinks before anything is copied
+    # Every component from the snapshot down to the skills root, not only what is
+    # below it: copytree follows a symlinked root to wherever it points.
+    step = snapshot
+    for part in Path(subject.skills_root).parts:
+        step = step / part
+        if step.is_symlink():
+            raise Refused(f"symlink in the path to the skills root: {step.relative_to(snapshot)}")
+    if not surface.resolve().is_relative_to(snapshot.resolve()):
+        raise Refused(f"skills root {subject.skills_root!r} resolves outside {snapshot}")
+    tree_files(surface)  # refuses symlinks below it before anything is copied
     target = staging / "surface"
     shutil.copytree(surface, target)
     digest = tree_digest(target)
@@ -362,7 +380,10 @@ def _verify_checksums(skill_dir: Path, manifest_rel: str) -> str:
         parts = line.split(None, 1)
         if len(parts) != 2 or not re.fullmatch(r"[0-9a-f]{64}", parts[0]):
             raise Refused(f"{skill_dir.name}/{manifest_rel}:{lineno}: malformed checksum line")
-        target = manifest.parent / parts[1].strip().lstrip("*")
+        listed_path = parts[1].strip().lstrip("*")
+        target = manifest.parent / listed_path
+        if _escapes(listed_path) or not target.resolve().is_relative_to(skill_dir.resolve()):
+            raise Refused(f"{skill_dir.name}: checksum lists {listed_path}, outside the skill")
         if not target.is_file():
             raise Refused(f"{skill_dir.name}: checksum lists a missing file {parts[1].strip()}")
         if sha256_file(target) != "sha256:" + parts[0]:
@@ -415,7 +436,10 @@ def inventory(subject: Subject, source: Source) -> list[SkillEntry]:
         # a static finding below: a heuristic here would refuse sound skills that
         # mention files of the repository they document.
         declared = {m for p in subject.required for m in re.findall(p.pattern, body)}
-        required = sorted(_links(body) | declared)
+        escaping = sorted(r for r in _links(body) | declared if _escapes(r))
+        if escaping:
+            raise Refused(f"{child.name}: SKILL.md requires {escaping}, outside the skill")
+        required = sorted({posixpath.normpath(r) for r in _links(body) | declared})
         missing = [r for r in required if r not in present]
         if missing:
             raise Refused(f"{child.name}: SKILL.md references missing file(s) {missing}")
@@ -549,9 +573,31 @@ def fingerprint_host(host_codex: Path) -> dict[str, object]:
 def fingerprint_source(source: Source, subject: Subject) -> dict[str, object]:
     if source.kind == "snapshot":
         return {"surface": tree_digest(source.origin / subject.skills_root)}
-    head = _git(source.origin, "rev-parse", "HEAD").stdout.decode().strip()
-    status = _git(source.origin, "status", "--porcelain=v1", "--untracked-files=all").stdout
-    return {"head": head, "status": sha256_bytes(status)}
+    head = _git(source.origin, "rev-parse", "HEAD")
+    status = _git(source.origin, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+    if head.returncode != 0 or status.returncode != 0:
+        return {"error": "git could not report the source state"}
+    # Status codes alone cannot see a SECOND edit to an already-modified file, so
+    # the contents of every dirty and untracked path are part of the fingerprint.
+    contents = hashlib.sha256()
+    records = status.stdout.split(b"\0")
+    index = 0
+    while index < len(records):
+        entry = records[index]
+        index += 1
+        if len(entry) < 4:
+            continue
+        if entry[:1] in (b"R", b"C"):
+            index += 1  # the rename's origin path follows as its own record
+        rel = entry[3:].decode(errors="surrogateescape")
+        path = source.origin / rel
+        digest = sha256_file(path) if path.is_file() and not path.is_symlink() else "absent"
+        contents.update(f"{rel}\0{digest}\n".encode(errors="surrogateescape"))
+    return {
+        "head": head.stdout.decode().strip(),
+        "status": sha256_bytes(status.stdout),
+        "dirty_contents": "sha256:" + contents.hexdigest(),
+    }
 
 
 # ---------------------------------------------------------------- the client
@@ -563,8 +609,12 @@ class Listing:
 
     status: str  # "ok", "absent", "failed", "unparseable", "timeout"
     detail: str = ""
-    entries: list[tuple[str, str]] = field(default_factory=list)  # (name, absolute file)
+    rows: list[tuple[str, str, str]] = field(default_factory=list)  # name, file, description
     normalized: str = ""  # everything else the client would be given, arm paths removed
+
+    @property
+    def entries(self) -> list[tuple[str, str]]:
+        return [(name, path) for name, path, _ in self.rows]
 
 
 def run_client(argv: list[str], home: Path, codex_home: Path, cwd: Path,
@@ -587,7 +637,10 @@ def run_client(argv: list[str], home: Path, codex_home: Path, cwd: Path,
 
 
 def client_version(argv: list[str], home: Path, codex_home: Path, cwd: Path) -> str:
-    code, out, _ = run_client(argv, home, codex_home, cwd, ("--version",), 30)
+    try:
+        code, out, _ = run_client(argv, home, codex_home, cwd, ("--version",), 30)
+    except OSError:
+        return "unknown"
     if code != 0:
         return "unknown"
     match = re.search(r"(\d+\.\d+\.\d+\S*)", out)
@@ -598,7 +651,12 @@ def parse_listing(stdout: str, arm_dir: Path) -> Listing:
     """Pull the skill listing out of the rendered prompt input.
 
     No listing block is UNPARSEABLE, not "no skills": the client seeds its own
-    skills in every home, so a missing block means the output changed shape.
+    skills in every home, so a missing block means the output changed shape. A
+    row in the listing that does not parse is unparseable too - dropping it would
+    turn parser blindness into a clean absence.
+
+    Only the listing block itself is replaced in `normalized`. Everything else in
+    that message, and the non-row text inside the block, is kept for parity.
     """
     try:
         items = json.loads(stdout)
@@ -606,42 +664,71 @@ def parse_listing(stdout: str, arm_dir: Path) -> Listing:
         return Listing("unparseable", f"client output is not JSON: {exc}")
     if not isinstance(items, list):
         return Listing("unparseable", "client output is not a list")
-    entries: list[tuple[str, str]] = []
+    rows: list[tuple[str, str, str]] = []
     texts: list[str] = []
     seen_block = False
     for item in items:
         if not isinstance(item, dict):
             return Listing("unparseable", "client output item is not an object")
         for content in item.get("content", []) or []:
-            text = str(content.get("text", "")) if isinstance(content, dict) else ""
-            if "<skills_instructions>" in text:
+            if not isinstance(content, dict):
+                return Listing("unparseable", "client output content is not an object")
+            text = str(content.get("text", ""))
+            open_at = text.find("<skills_instructions>")
+            if open_at >= 0:
+                close_at = text.find("</skills_instructions>", open_at)
+                if close_at < 0:
+                    return Listing("unparseable", "skills listing is not closed")
+                block = text[open_at:close_at]
+                kept, problem = _parse_block(block, rows)
+                if problem:
+                    return Listing("unparseable", problem)
                 seen_block = True
-                roots: dict[str, str] = {}
-                for line in text.splitlines():
-                    root = _ROOT_LINE_RE.match(line)
-                    if root:
-                        roots[root.group(1)] = root.group(2)
-                        continue
-                    skill = _SKILL_LINE_RE.match(line)
-                    if skill:
-                        base = roots.get(skill.group(2))
-                        if base is None:
-                            return Listing("unparseable", f"skill {skill.group(1)} names an "
-                                           f"undeclared root {skill.group(2)}")
-                        entries.append((skill.group(1), f"{base}/{skill.group(3)}"))
-                text = "<skills_instructions/>"  # compared separately, as entries
-            texts.append(f"{item.get('role')}|{content.get('type') if isinstance(content, dict) else ''}|{text}")
+                text = text[:open_at] + "\n".join(kept) + text[close_at:]
+            texts.append(f"{item.get('role')}|{content.get('type')}|{text}")
     if not seen_block:
         return Listing("unparseable", "no skills listing in the client output")
     normalized = "\n".join(texts).replace(str(arm_dir), "<ARM>")
-    return Listing("ok", entries=entries, normalized=normalized)
+    return Listing("ok", rows=rows, normalized=normalized)
+
+
+def _parse_block(block: str, rows: list[tuple[str, str, str]]) -> tuple[list[str], str | None]:
+    """Collect skill rows; return the block's other lines. Any unparseable row is fatal."""
+    roots: dict[str, str] = {}
+    kept: list[str] = []
+    section = ""
+    for line in block.splitlines():
+        if line.startswith("### "):
+            section = line
+            kept.append(line)
+            continue
+        if section == "### Skill roots" and line.startswith("- "):
+            root = _ROOT_LINE_RE.match(line)
+            if not root:
+                return kept, f"unparseable skill-root row: {line[:120]}"
+            roots[root.group(1)] = root.group(2)
+            continue
+        if section == "### Available skills" and line.startswith("- "):
+            skill = _SKILL_LINE_RE.match(line)
+            if not skill:
+                return kept, f"unparseable skill row: {line[:120]}"
+            base = roots.get(skill.group(3))
+            if base is None:
+                return kept, f"skill {skill.group(1)} names an undeclared root {skill.group(3)}"
+            rows.append((skill.group(1), f"{base}/{skill.group(4)}", skill.group(2)))
+            continue
+        kept.append(line)
+    return kept, None
 
 
 def canary(argv: list[str] | None, arm: Arm, timeout: float) -> Listing:
     if argv is None:
         return Listing("absent", f"client {CLIENT!r} not found")
-    code, out, err = run_client(argv, arm.home, arm.codex_home, arm.workspace,
-                                (*CANARY_ARGV, CANARY_PROMPT), timeout)
+    try:
+        code, out, err = run_client(argv, arm.home, arm.codex_home, arm.workspace,
+                                    (*CANARY_ARGV, CANARY_PROMPT), timeout)
+    except OSError as exc:
+        return Listing("failed", f"client could not be started: {exc}")
     if code is None:
         return Listing("timeout", f"client did not finish within {timeout}s")
     if code != 0:
@@ -716,6 +803,12 @@ def _relative(listing: Listing, arm: Arm) -> set[tuple[str, str]]:
     return {(n, p.replace(home, "<HOME>")) for n, p in _resolved(listing)}
 
 
+def _rows(listing: Listing, arm: Arm) -> set[tuple[str, str, str]]:
+    """Listing rows WITH their descriptions, arm home replaced, for parity."""
+    home = str(arm.home.resolve())
+    return {(n, str(Path(p).resolve()).replace(home, "<HOME>"), d) for n, p, d in listing.rows}
+
+
 @dataclass
 class Readiness:
     discovery_canary: str
@@ -761,11 +854,11 @@ def derive_readiness(
     else:
         planted = _expected(control, entries[:1])
         contaminated = sorted(n for n, _ in _resolved(b_list) if n in names)
-        foreign = sorted(
-            n for n, p in _resolved(b_list)
-            if Path(p).is_relative_to(baseline.skills.resolve())
-            and not Path(p).is_relative_to((baseline.skills / CLIENT_SYSTEM_DIR).resolve())
-        )
+        # Anything the baseline lists from outside the client's own directory is
+        # foreign, wherever it lives and whatever it is called: a skill leaking in
+        # from a host root would otherwise sit in BOTH arms and pass parity too.
+        system = (baseline.skills / CLIENT_SYSTEM_DIR).resolve()
+        foreign = sorted(n for n, p in _resolved(b_list) if not Path(p).is_relative_to(system))
         if not planted <= _resolved(c_list):
             absence = UNKNOWN
             reasons["baseline_absence"] = (
@@ -791,8 +884,8 @@ def derive_readiness(
     else:
         home = str(treatment.home.resolve())
         treated = {(n, p.replace(home, "<HOME>")) for n, p in _expected(treatment, entries)}
-        ordinary_t = _relative(t_list, treatment) - treated
-        ordinary_b = _relative(b_list, baseline)
+        ordinary_t = {r for r in _rows(t_list, treatment) if (r[0], r[1]) not in treated}
+        ordinary_b = _rows(b_list, baseline)
         if ordinary_t != ordinary_b:
             parity = VIOLATED
             reasons["ordinary_parity"] = (
@@ -934,10 +1027,15 @@ def materialize(
         }
         source_after = fingerprint_source(source, subject)
         report["source_immutability"] = {"before": source_before, "after": source_after}
-        facts["source_unchanged"] = SATISFIED if source_before == source_after else VIOLATED
-        reasons["source_unchanged"] = ("source fingerprint identical before and after"
-                                       if source_before == source_after
-                                       else "the source changed during the run")
+        if "error" in source_before or "error" in source_after:
+            facts["source_unchanged"] = UNKNOWN
+            reasons["source_unchanged"] = "git could not report the source state"
+        elif source_before == source_after:
+            facts["source_unchanged"] = SATISFIED
+            reasons["source_unchanged"] = "source fingerprint identical before and after"
+        else:
+            facts["source_unchanged"] = VIOLATED
+            reasons["source_unchanged"] = "the source changed during the run"
         layer = treatment.workspace / "AGENTS.md"
         receipt = {
             "version": 2,
@@ -971,6 +1069,11 @@ def materialize(
     except Refused as exc:
         report["refused"] = str(exc)
         receipt = None
+    except (OSError, UnicodeError) as exc:
+        # An unreadable file, a missing fixture, a client that deleted what was
+        # installed: still a recorded refusal with its cleanup, never a traceback.
+        report["refused"] = f"operational failure: {exc!r}"
+        receipt = None
     finally:
         report["cleanup"] = {"status": "kept", "errors": []} if keep else cleanup(root, nonce)
         host_after = fingerprint_host(host_codex)
@@ -989,7 +1092,9 @@ def materialize(
 
 
 def find_client(explicit: str | None) -> list[str] | None:
+    """The client to run, or None when there is none: an absent client is UNKNOWN."""
     if explicit:
-        return [str(Path(explicit).resolve())]
+        path = Path(explicit).resolve()
+        return [str(path)] if path.is_file() and os.access(path, os.X_OK) else None
     found = shutil.which(CLIENT)
     return [found] if found else None

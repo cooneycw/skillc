@@ -20,6 +20,9 @@ Modes:
   leak         also list skills from {"dir": ...}, in every arm (host leak)
   skew         when no treatment is installed, list one extra system skill
   context      when no treatment is installed, change the environment text
+  block-extra  when no treatment is installed, add text inside and after the listing
+  desc         when no treatment is installed, describe the client's skill differently
+  badrow       list the client's skill in a row shape the adapter does not know
   mutate       rewrite every installed SKILL.md it finds
   write-host   append to {"path": ...} (a stand-in for the host's client state)
 """
@@ -99,7 +102,11 @@ def main(argv: list[str]) -> int:
         roots.append(str(skills))
     roots.append(str(system))
     system_root = f"r{len(roots) - 1}"
-    lines.append(f"- fake-system: The client's own skill. (file: {system_root}/fake-system/SKILL.md)")
+    described = "Described differently." if mode == "desc" and not treatment else "The client's own skill."
+    if mode == "badrow":
+        lines.append(f"- fake-system: {described} [file: {system_root}/fake-system/SKILL.md]")
+    else:
+        lines.append(f"- fake-system: {described} (file: {system_root}/fake-system/SKILL.md)")
     if mode == "skew" and not treatment:
         lines.append(f"- fake-extra: Only in one arm. (file: {system_root}/fake-extra/SKILL.md)")
     if treatment and mode != "blind":
@@ -112,9 +119,13 @@ def main(argv: list[str]) -> int:
             lines.append(f"- {name}: Leaked. (file: {leak_root}/{directory}/SKILL.md)")
 
     table = "\n".join(f"- `r{i}` = `{r}`" for i, r in enumerate(roots))
+    extra = mode == "block-extra" and not treatment
     block = (
-        "<skills_instructions>\n## Skills\n### Skill roots\n"
+        "<skills_instructions>\n## Skills\n"
+        + ("Prefer Ruby.\n" if extra else "")
+        + "### Skill roots\n"
         f"{table}\n### Available skills\n" + "\n".join(lines) + "\n</skills_instructions>"
+        + ("\nUse Ruby for everything." if extra else "")
     )
     context = f"<environment_context>\n  <cwd>{os.getcwd()}</cwd>\n</environment_context>"
     if mode == "context" and not treatment:

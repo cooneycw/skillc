@@ -199,6 +199,31 @@ def test_a_hung_client_is_stopped_and_UNKNOWN(tmp_path: Path) -> None:
     assert result.report["cleanup"] == {"status": "removed", "errors": []}
 
 
+def test_a_baseline_that_sees_a_foreign_skill_is_VIOLATED(tmp_path: Path) -> None:
+    """A leak under a name no treatment skill has: parity alone would pass it."""
+    leak = tmp_path / "leak"
+    shutil.copytree(FIXTURE / "collection" / "skills" / "tidy", leak / "neighbor")
+    text = (leak / "neighbor" / "SKILL.md").read_text().replace("name: tidy", "name: neighbor")
+    (leak / "neighbor" / "SKILL.md").write_text(text)
+    facts = _facts(_run(tmp_path, _fake(tmp_path, "leak", dir=str(leak))))
+    assert facts["baseline_absence"] == m.VIOLATED
+
+
+def test_an_unknown_listing_row_is_UNKNOWN_not_an_empty_listing(tmp_path: Path) -> None:
+    result = _run(tmp_path, _fake(tmp_path, "badrow"))
+    assert _facts(result)["baseline_absence"] == m.UNKNOWN
+    readiness = result.report["readiness"]
+    assert isinstance(readiness, dict)
+    assert "unparseable skill row" in readiness["reasons"]["baseline_absence"]
+
+
+def test_a_missing_client_executable_is_UNKNOWN_not_a_crash(tmp_path: Path) -> None:
+    assert m.find_client(str(tmp_path / "no-such-codex")) is None
+    result = _run(tmp_path, [str(tmp_path / "no-such-codex")])
+    assert _facts(result)["discovery_canary"] == m.UNKNOWN
+    assert result.report["cleanup"] == {"status": "removed", "errors": []}
+
+
 def test_a_baseline_that_sees_the_treatment_is_VIOLATED(tmp_path: Path) -> None:
     leak = tmp_path / "leak"
     shutil.copytree(FIXTURE / "collection" / "skills" / "greet", leak / "greet")
@@ -206,7 +231,7 @@ def test_a_baseline_that_sees_the_treatment_is_VIOLATED(tmp_path: Path) -> None:
     assert facts["baseline_absence"] == m.VIOLATED
 
 
-@pytest.mark.parametrize("mode", ["skew", "context"])
+@pytest.mark.parametrize("mode", ["skew", "context", "block-extra", "desc"])
 def test_arms_that_differ_outside_the_treatment_are_VIOLATED(tmp_path: Path, mode: str) -> None:
     facts = _facts(_run(tmp_path, _fake(tmp_path, mode)))
     assert facts["ordinary_parity"] == m.VIOLATED
@@ -286,10 +311,55 @@ def test_a_mentioned_path_is_a_static_finding_not_a_refusal(tmp_path: Path) -> N
     assert any("docs/style.md" in f for f in findings["unresolved_mentions"])
 
 
+def test_an_equivalent_link_spelling_is_accepted(tmp_path: Path) -> None:
+    snap = _snapshot(tmp_path)
+    greet = snap / "skills" / "greet" / "SKILL.md"
+    greet.write_text(greet.read_text().replace("(scripts/hello.sh)", "(./scripts/hello.sh)"))
+    assert _run(tmp_path, _fake(tmp_path), snapshot=snap).ready
+
+
+def test_a_required_reference_outside_the_skill_is_refused(tmp_path: Path) -> None:
+    snap = _snapshot(tmp_path)
+    greet = snap / "skills" / "greet" / "SKILL.md"
+    greet.write_text(greet.read_text().replace("(scripts/hello.sh)", "(../tidy/SKILL.md)"))
+    assert "outside the skill" in _refused(tmp_path, snap)
+
+
+def test_a_checksum_entry_outside_the_skill_is_refused(tmp_path: Path) -> None:
+    snap = _snapshot(tmp_path)
+    tidy = snap / "skills" / "tidy" / "SKILL.md"
+    digest = m.sha256_file(tidy).removeprefix("sha256:")
+    manifest = snap / "skills" / "greet" / "scripts" / "SHA256SUMS"
+    manifest.write_text(manifest.read_text() + f"{digest}  ../../tidy/SKILL.md\n")
+    assert "outside the skill" in _refused(tmp_path, snap)
+
+
+def test_an_unreadable_entry_point_is_refused_not_raised(tmp_path: Path) -> None:
+    snap = _snapshot(tmp_path)
+    (snap / "skills" / "tidy" / "SKILL.md").write_bytes(b"---\nname: \xff\xfe\n---\n")
+    assert "operational failure" in _refused(tmp_path, snap)
+
+
+def test_a_missing_workspace_fixture_is_refused_not_raised(tmp_path: Path) -> None:
+    result = _run(tmp_path, _fake(tmp_path), workspace_fixture=tmp_path / "absent")
+    assert result.receipt is None
+    assert "operational failure" in str(result.report["refused"])
+    assert _leftovers(tmp_path) == []
+
+
 def test_a_checksum_mismatch_is_refused(tmp_path: Path) -> None:
     snap = _snapshot(tmp_path)
     (snap / "skills" / "greet" / "scripts" / "hello.sh").write_text("echo changed\n")
     assert "checksum mismatch" in _refused(tmp_path, snap)
+
+
+def test_a_symlinked_skills_root_is_refused(tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    shutil.copytree(FIXTURE / "collection" / "skills", outside)
+    snap = tmp_path / "linked"
+    snap.mkdir()
+    (snap / "skills").symlink_to(outside)
+    assert "symlink in the path to the skills root" in _refused(tmp_path, snap)
 
 
 def test_a_symlink_is_refused(tmp_path: Path) -> None:
@@ -366,6 +436,8 @@ def test_a_selection_installs_only_what_it_names(tmp_path: Path) -> None:
     ({"client": {"name": "other", "version": "1"}}, "unsupported client"),
     ({"client": {"name": "codex"}}, "pins no client version"),
     ({"skills_root": "../outside"}, "escapes the subject"),
+    ({"checksum_manifest": "../SHA256SUMS"}, "inside a skill"),
+    ({"checksum_manifest": "/etc/SHA256SUMS"}, "inside a skill"),
     ({"required_references": [{"pattern": "no group"}]}, "capture group"),
     ({"external_references": [{"pattern": "(grouped)"}]}, "capture group"),
     ({"select": []}, "select must be"),
@@ -413,6 +485,19 @@ def test_git_acquisition_installs_the_commit_not_the_dirty_tree(tmp_path: Path) 
     assert receipt is not None
     assert receipt["subject"]["revision"] == sha  # type: ignore[index]
     assert _installed(receipt)[".codex/skills/tidy/SKILL.md"] == committed
+
+
+@needs_git
+def test_a_second_edit_to_an_already_dirty_source_file_is_VIOLATED(tmp_path: Path) -> None:
+    """`git status` reads ` M` before and after; only the contents can tell."""
+    repo, sha = _git_repo(tmp_path)
+    dirty = repo / "skills" / "tidy" / "SKILL.md"
+    dirty.write_text(dirty.read_text() + "\nalready dirty\n")
+    client = _fake(tmp_path, "write-host", path=str(dirty))
+    result = m.materialize(_subject(revision=sha), attempt_id="a", trial_id="t",
+                           base=tmp_path / "base", repo=repo, client=client,
+                           host_codex=_host(tmp_path))
+    assert _facts(result)["source_unchanged"] == m.VIOLATED
 
 
 @needs_git
