@@ -1,6 +1,6 @@
 # ADR 0004: Evaluate the exposed knowledge surface, not only the skill files
 
-- Status: Proposed
+- Status: Accepted (owner, 2026-09-26)
 - Date: 2026-09-26
 - Decision owner: Repository owner
 - Amends: [ADR 0002](0002-independent-goal-driven-evaluation.md), its treatment of
