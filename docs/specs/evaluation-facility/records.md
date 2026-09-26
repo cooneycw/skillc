@@ -429,6 +429,7 @@ bundle cases as well, including against every record rule.
 | `criterion-vocabulary` | record | an outcome outside the vocabulary; a non-boolean `mandatory` (`"true"` would drop a violation out of the derivation) |
 | `result-evidence` | record | SATISFIED without evidence; UNKNOWN without `missing`; no graded digests; no grader; a run state without reason |
 | `derived-status` | record | a status copied rather than derived |
+| `verdict-tiers` | record | a `verification.verdicts` entry for a tier absent from `verification.tiers_enabled` (#69) |
 | `attempt-lifecycle` | record | an unknown stop reason or disposition; a non-result without a reason; captured before a confirmed stop; no cleanup |
 | `ledger-binding` | bundle | cross-trial receipt; stale receipt; attempt the ledger never issued; altered artifact; unplanned grader; a `skill-invocations` path the attempt's receipt never installed (#39); a trial declaring `case.observes_selection: true` whose manifest has no `skill-invocations` stream (#26/#39) |
 | `unique-ids` | bundle | duplicate attempt ID; conflicting receipts; duplicate result ID |

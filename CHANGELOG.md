@@ -31,6 +31,19 @@ collection) closes.
   imports the Docker backend at load" check itself can report the other
   verdict, and a positive control proves a Docker-stripped PATH actually
   makes `docker` unreachable before trusting the green run that follows.
+- **Per-tier verdicts as a keyed collection, not one field** (Refs #69, Refs
+  #10): a fresh owner ruling on #69 superseded #76's single
+  `verification.grading_tier` before any real trial record ever carried it.
+  Every result now records `verification.tiers_enabled` (which tiers were
+  requested) and `verification.verdicts` (an object keyed by tier name, each
+  entry with its own `status`/`criteria`/`backend`), never averaged or
+  overridden across tiers; `verification.disagreement` is reserved, always
+  `{"available": false, "reason": "fewer than two judge tiers"}` until a
+  second tier exists to compare against. The top-level `status`/`criteria`
+  are unchanged and, stated explicitly now, come from the deterministic tier
+  alone. `check-records`' new `verdict-tiers` rule refuses a verdict entry
+  for a tier absent from `tiers_enabled`. Not a new envelope version: nothing
+  outside this build's own tests ever produced or read the field it replaces.
 - **The Docker backend's implementation** (Refs #77, Refs #10, on top of the
   interface above): real bodies for `prepare`/`install`/`execute`/
   `confirm_stopped`/`export`/`destroy`/`confirm_absent`, all through the

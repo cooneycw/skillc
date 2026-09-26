@@ -239,7 +239,7 @@ grades.
 | Status derived | a judge claiming `status: PASS` beside violated criteria -> FAIL | - |
 | Always-pass/always-fail/crash/no-output graders | crash, no-output, omits-criterion -> stored INCONCLUSIVE with their category; always-pass and always-fail are refused by `qualify.py` through this path | - |
 | Deterministic regrading lineage | a regrade with another judge -> refused (pin) | regrade -> same criteria, linked, original retained |
-| Backend-driven probe (#10 PR2) | `confirm_stopped()` UNKNOWN/NOT_CONFIRMED -> INCONCLUSIVE, never treated as confirmed; `BackendUnavailable` from `prepare()`/`install()` -> INCONCLUSIVE, never a silent fall-back to the bare-subprocess path | a `FakeBackend` that runs as an ordinary host subprocess (proves the driver's sequencing only, never a boundary - see below) -> PASS, `verification.probe_backend` names it |
+| Backend-driven probe (#10 PR2) | `confirm_stopped()` UNKNOWN/NOT_CONFIRMED -> INCONCLUSIVE, never treated as confirmed; `BackendUnavailable` from `prepare()`/`install()` -> INCONCLUSIVE, never a silent fall-back to the bare-subprocess path | a `FakeBackend` that runs as an ordinary host subprocess (proves the driver's sequencing only, never a boundary - see below) -> PASS, `verification.verdicts.deterministic.backend` names it |
 
 Each protection was also removed once, and the test that names it went red:
 
@@ -397,18 +397,61 @@ first is built:
    the owner-named planned mechanism (#69), a standalone public tool with no
    coupling to this project; skillc does not vendor or depend on it (ADR 0003).
 
+### Verdicts are a keyed collection, never a single value (owner ruling on #69)
+
+The first cut of this PR gave every result a single `verification.grading_tier`
+field. A fresh owner ruling superseded that before any real trial record ever
+existed: when more than one tier is enabled, a trial is graded by ALL of them
+together, each with its OWN verdict - never averaged, weighted, or overridden.
+So the shape is a collection keyed by tier name, not one value:
+
+- **`verification.tiers_enabled`** is the list of tier names this result
+  actually requested, e.g. `["deterministic"]` today. A tier absent from this
+  list was never asked for; a tier present in it but missing from `verdicts`
+  is a *different* fact - it was requested and came back unavailable. The two
+  must never be confused.
+- **`verification.verdicts`** is an object keyed by tier name, one entry per
+  tier that actually produced a verdict. Each entry carries its own `status`
+  (one of the closed `PROTOCOL_STATUSES`), its own `criteria`, and a `backend`
+  identity where one applies (`describe()`'s claim, or `None` for the
+  bare-subprocess path); tiers 2/3 add a `judge` sub-record (model + version)
+  beside those. **An entry for a tier not in `tiers_enabled` is refused**
+  (`check-records`' `verdict-tiers` rule) - the shape this PR's #69 sign-off
+  specifically asked for, so a verdict can never appear to have run without
+  being declared.
+- **`verification.disagreement`** is reserved for the per-criterion
+  same-model-vs-independent comparison tiers 2/3 make possible. Today it is
+  always `{"available": false, "reason": "fewer than two judge tiers"}`:
+  comparing needs two independently-graded verdicts, and there is exactly one
+  tier, ever, in this build. This build never fabricates a comparison to fill
+  the field.
+- **The top-level `status`/`criteria` are unchanged, and today are exactly the
+  deterministic tier's own** - the same values as
+  `verification.verdicts.deterministic.status`/`.criteria`, literally, not a
+  recomputation that could drift. Existing consumers that only read the
+  top-level fields keep working unmodified. Once tiers 2/3 exist, the
+  top-level fields **must keep coming from the deterministic tier alone** -
+  never a blend of tiers - and this document is the place that says so, so a
+  later PR does not have to re-derive the rule under deadline.
+- **This is a reshape, not a new envelope version.** `verification.grading_tier`
+  and `verification.probe_backend` (this PR's own first cut) are removed
+  outright rather than kept alongside the new shape: nothing outside this
+  build's own tests ever produced or consumed a record carrying them, so there
+  is no real consumer a version bump would protect. records.md's own rule for
+  an additive version-2 change (`attempt-lifecycle`, added by #8) does not
+  apply here for the same reason it did not have to apply there - no v2 bundle
+  existed outside the committed controls when either change landed.
+
 Rules that apply once tiers 2/3 exist, recorded now so #69 does not have to
 re-derive them:
 
 - **Tier 1 must keep working with no judge at all.** Nothing in `skillc/`
   imports or requires a judge mechanism; tiers 2/3 are additive.
-- **An unavailable judge yields `UNKNOWN` for that tier's criteria. It never
-  silently falls back to a lower tier** - the same rule this PR already applies
-  to an unavailable execution backend, generalized to judges.
-- **Every verdict records which tier produced it, and which judge model and
-  version** (when a judge ran). `verification.grading_tier` is that field,
-  already written by every result this build produces (currently always
-  `"deterministic"`); tiers 2/3 add a `judge` sub-record beside it.
+- **An unavailable judge yields `UNKNOWN` for that tier's criteria, and that
+  tier's own entry in `verdicts` reflects it. It never silently falls back to
+  a lower tier** - the same rule this PR already applies to an unavailable
+  execution backend, generalized to judges. An unavailable judge makes only
+  ITS OWN tier unavailable; it never removes or degrades another tier's entry.
 - **A model-backed judge takes schema-constrained output only** (addendum item
   60): validate every field; a malformed response fails the grade whole, with
   no partial credit. Candidate text reaching a judge is untrusted, and a judge
