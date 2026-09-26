@@ -48,6 +48,12 @@ task levels beyond Level 1 remain documentation only.
   plug-in (#64); no machine identities in outputs (#63); `mcp-second-opinion`
   as the model-judge mechanism, with all enabled grading tiers producing
   separate verdicts (#69); and the cost stop on paid runs (#12).
+- [ADR 0006: Grading tiers - a judge seam, never averaged with the
+  deterministic floor](decisions/0006-grading-tiers.md) records what each
+  tier does and does not establish, the same-model limitation made a
+  measured per-criterion disagreement record, and the boundary between this
+  PR's seam/fake judge and the real `mcp-second-opinion` adapter, which is a
+  follow-up PR (#69).
 
 ## Research and prior reviews
 

@@ -228,9 +228,10 @@ must be up to date with `main` before merging (strict mode), and force-push
 and branch deletion are blocked. Before opening a PR, run
 `uv run skillc selftest && uv run pytest && uv run ruff check . && uv run mypy`
 and `uv run skillc leak-check . --exclude controls/leak-check/bad --exclude
-tests/test_leak.py --exclude ci/leak-check-control.sh` (the excludes skip this
-repo's own seeded-bad fixtures, which a bare scan would otherwise report as
-findings - see CI's `leak-check` step for the authoritative list); a PR that
+tests/test_leak.py --exclude ci/leak-check-control.sh --exclude
+tests/fixtures/leak_seeds` (the excludes skip this repo's own seeded-bad
+fixtures, which a bare scan would otherwise report as findings - see CI's
+`leak-check` step for the authoritative list); a PR that
 changes `skillc/` also needs a new entry under `CHANGELOG.md`'s `[Unreleased]`
 section, or a `Changelog-exempt: <reason>` trailer on its last commit. See
 #73's CI steps (`changelog-check`, `readme-drift`) for what else is checked

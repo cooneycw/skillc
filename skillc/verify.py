@@ -76,10 +76,12 @@ import stat
 import subprocess
 import sys
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 
 from . import checks, provenance, records, trial
+from . import judge as judge_seam
 from .backend import BackendUnavailable, Confirmation, ExecutionBackend, Limits
 from .materialize import Refused as NotOwned
 from .materialize import cleanup as remove_owned
@@ -949,7 +951,8 @@ def _ptrace_scope() -> str:
 
 def grade(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base: Path,
           forbidden: list[Path] | None = None, regrade_of: str | None = None,
-          backend: ExecutionBackend | None = None) -> dict[str, object]:
+          backend: ExecutionBackend | None = None,
+          judges: Mapping[str, judge_seam.Judge] | None = None, goal_text: str = "") -> dict[str, object]:
     """Grade one captured attempt and store its `verified-result`.
 
     Refused, and nothing written, when the ledger pins no grader digest or another
@@ -958,26 +961,46 @@ def grade(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base
     is NOT a refusal: that result is stored, INCONCLUSIVE, with its reason.
 
     `backend` is forwarded to `grade_files` (see there). Every result records
-    `verification.tiers_enabled` (today, always `[GRADING_TIER]` - #69's
-    llm-judge tiers do not exist yet, so nothing else is ever requested) and
-    `verification.verdicts`, a collection keyed by tier name: today exactly
-    `{GRADING_TIER: {...}}`, each entry carrying its own `status`, `criteria`
-    and `backend` (the backend's own `describe()` identity when one graded
-    this attempt's probe, else `None` for the bare-subprocess path) - so a
-    reader never has to infer which boundary applied from the shape of
-    `containment` alone, and a future tier's verdict never overwrites or
-    averages with this one. The top-level `status`/`criteria` are unchanged
-    and, today, are exactly the deterministic tier's own - stated here because
-    #69 requires it never be read as a blend once other tiers exist.
-    `verification.disagreement` is reserved and unavailable
-    (`DISAGREEMENT_UNAVAILABLE_REASON`) until a second tier exists to compare
-    against; this build never fabricates one.
+    `verification.tiers_enabled` (`[GRADING_TIER]`, plus one entry per key in
+    `judges` - #69's own tier names, `skillc.judge.SAME_MODEL_TIER`/
+    `INDEPENDENT_TIER`) and `verification.verdicts`, a collection keyed by
+    tier name, each entry carrying its own `status`, `criteria` and (for the
+    deterministic tier) `backend` - so a reader never has to infer which
+    boundary applied from the shape of `containment` alone, and no tier's
+    verdict ever overwrites or averages with another's. The top-level
+    `status`/`criteria` stay exactly the deterministic tier's own, whatever
+    `judges` says - #69 requires it never be read as a blend.
+
+    `judges`, when given, maps a tier name to a `skillc.judge.Judge` - see
+    that module for the seam, schema validation and the ONLY implementation
+    it ships (`FakeJudge`, for tests: #69's own acceptance forbids a real
+    model call in this suite). Each judge grades `grader.criteria` - the
+    SAME ids the deterministic tier already checks, so its own
+    `verification.disagreement` comparison is between two opinions of the
+    same criteria, not different ones - against `goal_text` and the frozen
+    candidate files, THROUGH `skillc.judge.run_tier`, which leak-checks that
+    input before either judge is ever called (#63) and turns an unreachable
+    judge into that tier's own `UNAVAILABLE` verdict, never a refusal of the
+    whole grade. A LEAK, unlike an unreachable judge, IS a refusal
+    (`Refused`, nothing written) - candidate-carried machine identity must
+    never reach an external judge process, approved budget or not.
+    `verification.disagreement` is computed by `skillc.judge.compute_disagreement`
+    and stays unavailable (`skillc.judge.DISAGREEMENT_UNAVAILABLE_REASON`)
+    unless both the same-model and independent tiers report a real verdict.
 
     This is a reshape of the single `verification.grading_tier` field #76
     shipped, not a new envelope version: nothing outside this build's own
     tests has ever produced or read that field on a real trial (#69's msg
     1368), so there is no consumer for record-envelope versioning to protect.
     """
+    if judges:
+        unknown_tiers = set(judges) - set(judge_seam.JUDGE_TIERS)
+        if unknown_tiers:
+            raise Refused(
+                f"judges carries key(s) {sorted(unknown_tiers)}, not one of {list(judge_seam.JUDGE_TIERS)} - "
+                f"{GRADING_TIER!r} in particular must never be passed here, or a judge's own verdict "
+                "would silently overwrite the deterministic tier's"
+            )
     planned = experiment.trial_of(attempt_id)
     pin = planned.get("grader")
     assert isinstance(pin, dict)
@@ -1022,6 +1045,30 @@ def grade(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base
 
     criteria = [*graded.criteria, _readiness(receipt_name, receipt)]
     status = _status(criteria)
+
+    tiers_enabled = [GRADING_TIER]
+    verdicts: dict[str, object] = {
+        GRADING_TIER: {
+            "status": status,
+            "criteria": criteria,
+            "backend": graded.containment.get("backend"),
+        },
+    }
+    if judges:
+        candidate_files = [(str(a["path"]), _read_frozen(experiment, str(a["digest"]))) for a in frozen]
+        for tier_name, one_judge in judges.items():
+            try:
+                verdicts[tier_name] = judge_seam.run_tier(
+                    tier_name, one_judge, grader.criteria, goal_text, candidate_files
+                )
+            except judge_seam.JudgeInputLeaked as exc:
+                raise Refused(str(exc)) from exc
+            tiers_enabled.append(tier_name)
+    disagreement = (
+        judge_seam.compute_disagreement(verdicts) if judges
+        else {"available": False, "reason": DISAGREEMENT_UNAVAILABLE_REASON}
+    )
+
     result: dict[str, object] = {
         "version": 2,
         "kind": records.VERIFIED_RESULT,
@@ -1040,15 +1087,9 @@ def grade(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base
             "category": graded.category, "detail": graded.detail,
             "containment": graded.containment, "ptrace_scope": _ptrace_scope(),
             "provenance": provenance.stamp().as_dict(),
-            "tiers_enabled": [GRADING_TIER],
-            "verdicts": {
-                GRADING_TIER: {
-                    "status": status,
-                    "criteria": criteria,
-                    "backend": graded.containment.get("backend"),
-                },
-            },
-            "disagreement": {"available": False, "reason": DISAGREEMENT_UNAVAILABLE_REASON},
+            "tiers_enabled": tiers_enabled,
+            "verdicts": verdicts,
+            "disagreement": disagreement,
         },
     }
     if regrade_of is not None:

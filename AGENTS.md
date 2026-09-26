@@ -34,6 +34,10 @@ specification rejects, and it proves its own rules can fail before reporting the
 - `skillc/verify.py` - the independent verifier and result assembler: grades a disposable
   copy of the frozen artifacts in a contained probe, then a trusted judge, and derives
   the result; see [verification spec](docs/specs/evaluation-facility/verification.md)
+- `skillc/judge.py` - the grading-tier judge seam (#69): a stdlib-only `Judge` Protocol,
+  schema-constrained output validation, per-tier availability, the leak-check on judge
+  input, and the same-model-vs-independent disagreement record; `FakeJudge` is the only
+  implementation shipped - see [ADR 0006](docs/decisions/0006-grading-tiers.md)
 - `skillc/trial_bootstrap.py` - the per-trial home, onboarding seed, MCP config,
   invocation and skill+tool liveness canary a live agent needs to actually start and
   work inside a Docker trial, independent of which `ExecutionBackend` runs it; see
