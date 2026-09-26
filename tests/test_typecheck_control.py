@@ -21,7 +21,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 REAL = f"{sys.executable} -m mypy"
-SCOPE = 'files = ["skillc", "tests"]'
+SCOPE = 'files = ["skillc", "tests", "ci"]'
 
 pytestmark = pytest.mark.skipif(
     shutil.which("bash") is None or shutil.which("tar") is None, reason="needs bash and tar"

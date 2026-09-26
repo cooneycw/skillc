@@ -1,0 +1,7 @@
+{
+  "milestones": [
+    {"version": "0.1.0", "label": "static checker", "issue": null, "state": "closed"},
+    {"version": "0.2.0", "label": "real Docker trial end to end (#10)", "issue": 10, "state": "open"},
+    {"version": "0.3.0", "label": "second independent collection (#11)", "issue": 11, "state": "open"}
+  ]
+}

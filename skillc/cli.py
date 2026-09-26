@@ -20,7 +20,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import checks, leak, materialize, records
+from . import __version__, checks, leak, materialize, records
 from .checks import ERROR, Finding
 from .spec import DEFAULT_TARGET, TARGETS, Manifest, ManifestError, Skill, discover
 
@@ -671,10 +671,16 @@ def cmd_leak_check(args: argparse.Namespace) -> int:
     return 1 if result.findings else 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """Separate from `main` so #73's README drift check can introspect the
+    real subcommand set (`registered_commands` in `ci/readme_drift.py`)
+    instead of a hand-maintained list that could silently fall behind it."""
     parser = argparse.ArgumentParser(
         prog="skillc",
         description="Skills are the new code. Code doesn't ship uncompiled.",
+    )
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {__version__}",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -744,7 +750,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_leak.set_defaults(func=cmd_leak_check)
 
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
     return int(args.func(args))
 
 
