@@ -180,10 +180,17 @@ def test_an_unparseable_good_case_is_refused(
 def test_a_parser_rule_must_be_shown_an_unparseable_input(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The parser rule's explicit expectation: its bad case does NOT parse."""
+    """The parser rule's explicit expectation: its bad case does NOT parse.
+
+    EVERY bad case is overwritten with parseable input: one left unparseable would
+    still satisfy the expectation, which is what makes it the parser rule's own.
+    """
     controls = _controls_copy(tmp_path)
     good = controls / "frontmatter" / "good" / "no-frontmatter" / "SKILL.md"
-    shutil.copy(good, controls / "frontmatter" / "bad" / "no-frontmatter" / "SKILL.md")
+    bad = sorted((controls / "frontmatter" / "bad").rglob("SKILL.md"))
+    assert bad, "no frontmatter bad case to overwrite"
+    for path in bad:
+        shutil.copy(good, path)
     rc, out = _selftest(controls, capsys)
     assert rc == 1, out
     assert any(

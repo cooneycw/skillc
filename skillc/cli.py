@@ -19,7 +19,7 @@ from pathlib import Path
 
 from . import checks, records
 from .checks import ERROR, Finding
-from .spec import discover
+from .spec import DEFAULT_TARGET, TARGETS, discover
 
 
 def _controls_root(explicit: str | None) -> Path:
@@ -42,9 +42,27 @@ def _unknown_rule(only: str | None, family: tuple[checks.Rule, ...] | tuple[chec
     return False
 
 
+def _target_conflict(only: str | None, target: str | None) -> bool:
+    """`--rule X --target Y` where X belongs to another target asks two things at once."""
+    rule = checks.RULES_BY_ID.get(only or "")
+    if target is None or rule is None or rule.target in (None, target):
+        return False
+    print(
+        f"skillc: rule {rule.id!r} checks target {rule.target!r}, not {target!r}",
+        file=sys.stderr,
+    )
+    return True
+
+
 def cmd_check(args: argparse.Namespace) -> int:
     if _unknown_rule(args.rule, checks.RULES):
         return 2
+    target = getattr(args, "target", None)
+    if _target_conflict(args.rule, target):
+        return 2
+    selected = checks.RULES_BY_ID.get(args.rule or "")
+    # A named scoped rule speaks for ITS target, whatever the default is.
+    target = target or (selected.target if selected else None) or DEFAULT_TARGET
     root = Path(args.path).resolve()
     if not root.exists():
         print(f"skillc: no such path: {root}", file=sys.stderr)
@@ -58,7 +76,7 @@ def cmd_check(args: argparse.Namespace) -> int:
 
     findings: list[Finding] = []
     for skill in skills:
-        findings.extend(checks.run(skill, only=args.rule))
+        findings.extend(checks.run(skill, only=args.rule, target=target))
 
     base = root if root.is_dir() else root.parent
     for finding in findings:
@@ -70,6 +88,19 @@ def cmd_check(args: argparse.Namespace) -> int:
         f"\nskillc: {len(skills)} skill(s) checked, "
         f"{errors} error(s), {warns} warning(s)"
     )
+    # Field findings are true of ONE client profile. Say which - and say so when no
+    # field rule ran, so a green here cannot be read as a field check that passed.
+    # An unparseable skill gets only the parser finding, so it was not field-checked.
+    parsed = sum(1 for s in skills if s.parse_error is None)
+    if selected is not None and selected.target is None:
+        print(f"skillc: field rules NOT checked (--rule {selected.id} only)")
+    elif not parsed:
+        print("skillc: field rules NOT checked - no skill's frontmatter parsed")
+    else:
+        print(
+            f"skillc: field rules checked against target '{target}' "
+            f"on {parsed} of {len(skills)} skill(s)"
+        )
     if args.strict and warns:
         return 1
     return 1 if errors else 0
@@ -222,7 +253,9 @@ def cmd_selftest(args: argparse.Namespace) -> int:
 def cmd_rules(args: argparse.Namespace) -> int:
     width = max(len(rule.id) for rule in checks.ALL_RULES)
     for rule in checks.ALL_RULES:
-        print(f"{rule.severity:5}  {rule.id:{width}}  {rule.summary}")
+        scope = getattr(rule, "target", None)
+        suffix = f"  [target: {scope}]" if scope else ""
+        print(f"{rule.severity:5}  {rule.id:{width}}  {rule.summary}{suffix}")
     return 0
 
 
@@ -237,6 +270,11 @@ def main(argv: list[str] | None = None) -> int:
     p_check.add_argument("path", nargs="?", default=".", help="skill dir, tree, or SKILL.md")
     p_check.add_argument("--rule", help="run only this rule")
     p_check.add_argument("--strict", action="store_true", help="exit non-zero on warnings too")
+    p_check.add_argument(
+        "--target",
+        choices=TARGETS,
+        help=f"client profile the field rules check against (default: {DEFAULT_TARGET})",
+    )
     p_check.set_defaults(func=cmd_check)
 
     p_self = sub.add_parser("selftest", help="prove every rule can report the other verdict")
