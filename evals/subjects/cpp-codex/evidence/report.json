@@ -1,5 +1,5 @@
 {
- "started": "2026-09-26T14:12:50Z",
+ "started": "2026-09-26T14:21:27Z",
  "adapter": {
   "name": "skillc-codex-skills",
   "version": "1"
@@ -1418,12 +1418,12 @@
  },
  "source_immutability": {
   "before": {
-   "head": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b",
+   "head": "5bed7408efbb213a98bc5662e525d0a934d6053d",
    "status": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
    "dirty_contents": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
   },
   "after": {
-   "head": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b",
+   "head": "5bed7408efbb213a98bc5662e525d0a934d6053d",
    "status": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
    "dirty_contents": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
   }
@@ -1434,19 +1434,21 @@
  },
  "host_immutability": {
   "before": {
-   "path": "~/.codex",
-   "skills": "sha256:a9be066be297bcd15f1ca9953e49430662cf0da63d35acf9e04efe7403bca490",
-   "config.toml": "sha256:e77057d8afcbb88d00559204476ef1e668ba6f36657b2487bddb232f8894e589",
-   "AGENTS.md": "sha256:4a2e547a8fc8ffb6066c2a7337d007c5519ffb76e719ebb8b118e7c0e2cf3a65"
+   "~/.codex": {
+    "skills": "sha256:a9be066be297bcd15f1ca9953e49430662cf0da63d35acf9e04efe7403bca490",
+    "config.toml": "sha256:e77057d8afcbb88d00559204476ef1e668ba6f36657b2487bddb232f8894e589",
+    "AGENTS.md": "sha256:4a2e547a8fc8ffb6066c2a7337d007c5519ffb76e719ebb8b118e7c0e2cf3a65"
+   }
   },
   "after": {
-   "path": "~/.codex",
-   "skills": "sha256:a9be066be297bcd15f1ca9953e49430662cf0da63d35acf9e04efe7403bca490",
-   "config.toml": "sha256:e77057d8afcbb88d00559204476ef1e668ba6f36657b2487bddb232f8894e589",
-   "AGENTS.md": "sha256:4a2e547a8fc8ffb6066c2a7337d007c5519ffb76e719ebb8b118e7c0e2cf3a65"
+   "~/.codex": {
+    "skills": "sha256:a9be066be297bcd15f1ca9953e49430662cf0da63d35acf9e04efe7403bca490",
+    "config.toml": "sha256:e77057d8afcbb88d00559204476ef1e668ba6f36657b2487bddb232f8894e589",
+    "AGENTS.md": "sha256:4a2e547a8fc8ffb6066c2a7337d007c5519ffb76e719ebb8b118e7c0e2cf3a65"
+   }
   }
  },
- "finished": "2026-09-26T14:12:50Z",
+ "finished": "2026-09-26T14:21:27Z",
  "readiness": {
   "discovery_canary": "SATISFIED",
   "baseline_absence": "SATISFIED",

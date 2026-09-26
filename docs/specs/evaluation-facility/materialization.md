@@ -47,7 +47,10 @@ reach a string literal in the adapter, and is shown able to fail on a planted on
 ## Refused by name
 
 Nothing here is guessed. Each of these stops the run, removes what it created,
-writes a report and **no receipt**:
+writes a report and **no receipt**. Names are read for every skill in the
+surface, because selection is by name; everything else is checked for the
+SELECTED skills only, so a broken neighbour that is not installed does not block
+a treatment that does not include it.
 
 - an unpinned or unresolvable revision; a skills root absent at it
 - an empty surface ("empty discovery"), or a selected name not in it
@@ -85,7 +88,7 @@ each guard was removed in turn to confirm its test goes red.
 | `baseline_absence` | the baseline lists nothing from outside the client's own `.system` directory, AND the control arm lists its planted skill | the baseline lists any skill from elsewhere - a treatment skill, or a differently named one leaking from another root | the control's planted skill was NOT listed - absence then proves nothing - or a client answer is unusable |
 | `ordinary_parity` | outside the treatment, the arms list the same skills with the same descriptions, and all other client input - including text around and inside the listing block - is identical after replacing each arm's own path | any of it differs | a client answer is unusable |
 | `source_unchanged` | the source fingerprint (HEAD, `git status`, and the CONTENTS of every dirty or untracked path; or the snapshot's digest) is identical before and after | it changed | git could not report the source state |
-| `host_unchanged` | the host client's skills tree, `config.toml` and `AGENTS.md` are identical before and after | they changed | - |
+| `host_unchanged` | in every host client home in effect (`~/.codex` and any `$CODEX_HOME`), the skills tree, `config.toml` and `AGENTS.md` are identical before and after | they changed | a home could not be read |
 
 `skillc materialize` exits 0 only when all five are SATISFIED. A receipt is still
 written when one is not: a receipt whose canary failed is valid evidence
@@ -94,8 +97,11 @@ written when one is not: a receipt whose canary failed is valid evidence
 The canary is `codex debug prompt-input`, which renders what a session would be
 given - including the skill list and the file behind each entry - without a
 model call. It is a debug surface, so its shape is pinned with the client
-version; a missing listing block is UNKNOWN, never "no skills", because the
-client lists its own skills in every home.
+version. A missing listing block is UNKNOWN, never "no skills", because the
+client lists its own skills in every home. So is a second listing block, and any
+line inside a listing section that is not a row the adapter recognizes: a skill
+written in a shape the parser skipped would otherwise never reach the absence
+check.
 
 ## Four facts, kept apart
 
@@ -113,8 +119,10 @@ client is ever asked, and nothing pastes instructions into a prompt instead.
   bytes are never installed as the commit.
 - Each run creates one root with a random marker. `cleanup` removes only a root
   whose marker matches; it is safe to repeat and refuses anything else.
-- A root may not be created inside the host's `~/.codex`, `~/.agents`,
-  `~/.claude`, `$CODEX_HOME` or the source.
+- Neither the disposable root nor the CLI's `--out` evidence directory may be
+  inside the host's `~/.codex`, `~/.agents`, `~/.claude`, `$CODEX_HOME` or the
+  source, resolved through symlinks. Evidence written into the source would
+  change it after `source_unchanged` was taken.
 - The client runs with an empty environment apart from `HOME`, `CODEX_HOME`,
   `PATH` and `LANG`, in its own process group, and the group is killed on
   timeout.
