@@ -28,6 +28,8 @@ specification rejects, and it proves its own rules can fail before reporting the
 - `skillc/cli.py` - `check`, `check-records`, `selftest`, `rules`
 - `controls/<rule-id>/{bad,good}/` - the committed redcases
 - `evals/` - behavioural evals; see `evals/README.md`
+- `evals/level1/<task>/` - a goal-based task: pinned fixture, public `goal.md`, grader,
+  reference/alternative/wrong candidates and a `qualify.py` gate that must refuse broken graders
 
 ## Verify
 
