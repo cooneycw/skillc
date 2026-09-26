@@ -523,7 +523,7 @@ class Manifest:
     def load(cls, path: Path) -> Manifest:
         try:
             text = path.read_text(encoding="utf-8")
-        except OSError as exc:
+        except (OSError, UnicodeError) as exc:
             raise ManifestError(f"manifest unreadable: {path}: {exc}") from exc
         try:
             data = json.loads(text)
@@ -544,6 +544,14 @@ class Manifest:
         seen: set[Path] = set()
         for entry in skills:
             resolved = (plugin_root / entry).resolve()
+            if not resolved.is_relative_to(plugin_root):
+                # Claude Code itself refuses a component outside the plugin
+                # root ("Path escapes plugin directory"). Mirror that: an
+                # escaping entry is a malformed manifest, not a dangling one -
+                # the whole declaration cannot be trusted, not just this entry.
+                raise ManifestError(
+                    f"manifest entry escapes the plugin root: {entry!r} in {path}"
+                )
             if resolved not in seen:
                 seen.add(resolved)
                 declared.append(resolved)

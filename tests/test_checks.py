@@ -280,6 +280,61 @@ def test_manifest_unreadable_raises(tmp_path: Path) -> None:
         Manifest.load(tmp_path / "absent.json")
 
 
+def test_manifest_invalid_utf8_is_refused_not_a_traceback(tmp_path: Path) -> None:
+    """`UnicodeDecodeError` is a `ValueError`, not an `OSError` - a decode
+    failure must not escape past the read that is supposed to catch it
+    (issue #53 review: /codex:code_review)."""
+    manifest_dir = tmp_path / ".claude-plugin"
+    manifest_dir.mkdir()
+    manifest_path = manifest_dir / "plugin.json"
+    manifest_path.write_bytes(b"\xff\xfe not valid utf-8")
+    with pytest.raises(ManifestError):
+        Manifest.load(manifest_path)
+
+
+@pytest.mark.parametrize(
+    "entry",
+    ["../escaped", "../../etc/passwd", "/etc/passwd"],
+)
+def test_manifest_entry_escaping_the_plugin_root_is_refused(
+    tmp_path: Path, entry: str
+) -> None:
+    """Claude Code itself refuses a manifest component outside the plugin
+    root ('Path escapes plugin directory'); a scoping check that accepted one
+    could report a clean run over a skill the real plugin loader would never
+    have loaded (issue #53 review: /codex:code_review)."""
+    _write_skill(tmp_path / "skills" / "present", "present")
+    manifest_path = _write_manifest(tmp_path, [entry])
+    with pytest.raises(ManifestError):
+        Manifest.load(manifest_path)
+
+
+def test_check_manifest_control_dangling_entry_reds() -> None:
+    """The committed bad/dangling-entry control must still fire (issue #53
+    review: /codex:code_review found the committed controls unreferenced by
+    any test)."""
+    fixture = CONTROLS / "check-manifest" / "bad" / "dangling-entry"
+    manifest_path = fixture / ".claude-plugin" / "plugin.json"
+    rc = cli.cmd_check(
+        argparse.Namespace(
+            path=str(fixture), rule=None, strict=False, manifest=str(manifest_path)
+        )
+    )
+    assert rc == 1
+
+
+def test_check_manifest_control_clean_is_green() -> None:
+    """The committed good/clean control must stay green."""
+    fixture = CONTROLS / "check-manifest" / "good" / "clean"
+    manifest_path = fixture / ".claude-plugin" / "plugin.json"
+    rc = cli.cmd_check(
+        argparse.Namespace(
+            path=str(fixture), rule=None, strict=False, manifest=str(manifest_path)
+        )
+    )
+    assert rc == 0
+
+
 def test_parse_frontmatter_nested_mapping() -> None:
     fm, body = parse_frontmatter(
         "---\nname: a-skill\ndescription: Use when testing.\nmetadata:\n  version: '1.0'\n---\nbody\n"
