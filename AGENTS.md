@@ -57,3 +57,15 @@ that step can still go red.
 `mypy` takes its scope from `[tool.mypy] files` in `pyproject.toml` (`skillc` and
 `tests`). `ci/typecheck-control.sh` plants a type error in a test module and
 requires mypy to report it, so narrowing that scope turns CI red.
+
+`secret-scan` runs gitleaks over the checked-out tree with `.gitleaks.toml`, and
+`ci/secret-scan-control.sh` plants a key and requires it to be found. CI only
+sees a secret after it is on GitHub, so install the pre-push hook once per clone:
+
+```bash
+bash ci/install-hooks.sh
+```
+
+It scans the commits a push would send and refuses on a finding, or when
+gitleaks is missing. It installs into `.git/hooks` beside the existing hooks;
+do not set `core.hooksPath`, which would switch those off.
