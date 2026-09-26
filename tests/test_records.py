@@ -902,3 +902,138 @@ def test_skill_invocations_absent_is_fine_when_not_declared(tmp_path: Path) -> N
     ledger = _ledger_with_observes_selection(False)
     bundle = _write_bundle(tmp_path, ledger, GOOD_RECEIPT, GOOD_MANIFEST)
     assert list(records.ledger_binding(bundle)) == []
+
+
+# ------------------------------------------------------------- pilot-report (#12)
+
+GOOD_PILOT_REPORT = _control("pilot-report/good/record.json")
+
+
+def _report_entry(**fields: object) -> dict[str, object]:
+    base: dict[str, object] = {
+        "attempt_id": "att-1",
+        "trial_id": "t-1",
+        "disposition": "captured",
+        "criteria": [{"id": "R1", "outcome": "SATISFIED"}],
+        "uncertainty": "none",
+        "interventions": 0,
+        "cost_usd": {"setup": 0.01, "agent": 0.15, "grading": 0.02, "total": 0.18},
+        "time_seconds": {"setup": 5, "agent": 120, "grading": 10, "total": 135},
+    }
+    base.update(fields)
+    return base
+
+
+def test_pilot_report_accepts_a_well_formed_entry() -> None:
+    report = {**GOOD_PILOT_REPORT, "attempts": [_report_entry()]}
+    assert list(records.pilot_report(_record(**report))) == []
+
+
+def test_pilot_report_refuses_an_empty_attempts_list() -> None:
+    report = {**GOOD_PILOT_REPORT, "attempts": []}
+    findings = list(records.pilot_report(_record(**report)))
+    assert findings and "no attempts" in findings[0]
+
+
+def test_pilot_report_refuses_a_bad_disposition() -> None:
+    report = {**GOOD_PILOT_REPORT, "attempts": [_report_entry(disposition="finished")]}
+    findings = list(records.pilot_report(_record(**report)))
+    assert findings and "disposition" in findings[0]
+
+
+def test_pilot_report_refuses_a_bad_criterion_outcome() -> None:
+    report = {**GOOD_PILOT_REPORT, "attempts": [_report_entry(criteria=[{"id": "R1", "outcome": "MAYBE"}])]}
+    findings = list(records.pilot_report(_record(**report)))
+    assert findings and "outcome" in findings[0]
+
+
+def test_pilot_report_refuses_a_missing_uncertainty() -> None:
+    entry = _report_entry()
+    del entry["uncertainty"]
+    report = {**GOOD_PILOT_REPORT, "attempts": [entry]}
+    findings = list(records.pilot_report(_record(**report)))
+    assert findings and "uncertainty" in findings[0]
+
+
+def test_pilot_report_refuses_a_negative_intervention_count() -> None:
+    report = {**GOOD_PILOT_REPORT, "attempts": [_report_entry(interventions=-1)]}
+    findings = list(records.pilot_report(_record(**report)))
+    assert findings and "interventions" in findings[0]
+
+
+def test_pilot_report_refuses_a_split_missing_a_key() -> None:
+    """Missing values must be explicit ('UNKNOWN'), never a silently absent
+    key (#12's own requirement)."""
+    entry = _report_entry(cost_usd={"setup": 0.01, "agent": 0.15, "grading": 0.02})  # no "total"
+    report = {**GOOD_PILOT_REPORT, "attempts": [entry]}
+    findings = list(records.pilot_report(_record(**report)))
+    assert findings and "no 'total'" in findings[0]
+
+
+def test_pilot_report_accepts_an_explicit_unknown_split_value() -> None:
+    entry = _report_entry(
+        disposition="unavailable", criteria=[],
+        cost_usd={"setup": 0.0, "agent": "UNKNOWN", "grading": "UNKNOWN", "total": "UNKNOWN"},
+        time_seconds={"setup": 1, "agent": "UNKNOWN", "grading": "UNKNOWN", "total": "UNKNOWN"},
+    )
+    report = {**GOOD_PILOT_REPORT, "attempts": [entry]}
+    assert list(records.pilot_report(_record(**report))) == []
+
+
+def test_pilot_report_refuses_a_split_that_does_not_sum(tmp_path: Path) -> None:
+    entry = _report_entry(cost_usd={"setup": 0.01, "agent": 0.15, "grading": 0.02, "total": 99.0})
+    report = {**GOOD_PILOT_REPORT, "attempts": [entry]}
+    findings = list(records.pilot_report(_record(**report)))
+    assert findings and "does not equal" in findings[0]
+
+
+def test_pilot_report_refuses_a_duplicate_attempt_id() -> None:
+    report = {**GOOD_PILOT_REPORT, "attempts": [_report_entry(), _report_entry()]}
+    findings = list(records.pilot_report(_record(**report)))
+    assert findings and "more than once" in findings[0]
+
+
+def test_ledger_binding_refuses_a_pilot_report_missing_a_scheduled_attempt(tmp_path: Path) -> None:
+    """#12's own control: a report omitting a scheduled attempt is refused."""
+    ledger = {**GOOD_LEDGER, "trials": [
+        {**GOOD_LEDGER["trials"][0], "attempts": [{"attempt_id": "att-1"}, {"attempt_id": "att-2"}]},  # type: ignore[index]
+    ]}
+    report = {**GOOD_PILOT_REPORT, "attempts": [_report_entry(attempt_id="att-1")]}
+    bundle = _write_bundle(tmp_path, ledger, report)
+    findings = list(records.ledger_binding(bundle))
+    assert findings and "omits scheduled attempt" in findings[0] and "att-2" in findings[0]
+
+
+def test_ledger_binding_refuses_a_pilot_report_naming_an_unplanned_attempt(tmp_path: Path) -> None:
+    ledger = {**GOOD_LEDGER, "trials": [
+        {**GOOD_LEDGER["trials"][0], "attempts": [{"attempt_id": "att-1"}]},  # type: ignore[index]
+    ]}
+    report = {**GOOD_PILOT_REPORT, "attempts": [_report_entry(attempt_id="att-1"), _report_entry(attempt_id="att-99")]}
+    bundle = _write_bundle(tmp_path, ledger, report)
+    findings = list(records.ledger_binding(bundle))
+    assert findings and "never planned" in findings[0] and "att-99" in findings[0]
+
+
+def test_ledger_binding_accepts_a_pilot_report_covering_every_scheduled_attempt(tmp_path: Path) -> None:
+    ledger = {**GOOD_LEDGER, "trials": [
+        {**GOOD_LEDGER["trials"][0], "attempts": [{"attempt_id": "att-1"}, {"attempt_id": "att-2"}]},  # type: ignore[index]
+    ]}
+    report = {**GOOD_PILOT_REPORT, "attempts": [
+        _report_entry(attempt_id="att-1"), _report_entry(attempt_id="att-2"),
+    ]}
+    bundle = _write_bundle(tmp_path, ledger, report)
+    assert list(records.ledger_binding(bundle)) == []
+
+
+def test_ledger_binding_does_not_crash_on_an_unhashable_attempt_id(tmp_path: Path) -> None:
+    """Red case from cross-model review: a report entry's attempt_id being a
+    list or dict (already malformed per `pilot_report`'s own rule) must not
+    crash this bundle rule via an unhashable set element - it must report a
+    finding instead."""
+    ledger = {**GOOD_LEDGER, "trials": [
+        {**GOOD_LEDGER["trials"][0], "attempts": [{"attempt_id": "att-1"}]},  # type: ignore[index]
+    ]}
+    report = {**GOOD_PILOT_REPORT, "attempts": [{**_report_entry(), "attempt_id": ["not", "a", "string"]}]}
+    bundle = _write_bundle(tmp_path, ledger, report)
+    findings = list(records.ledger_binding(bundle))  # must not raise
+    assert findings and "omits scheduled attempt" in findings[0] and "att-1" in findings[0]

@@ -53,7 +53,14 @@ VERIFIED_RESULT = "verified-result"
 #: and cleanup cannot live in it; and a result cannot say "INCONCLUSIVE, nothing
 #: was captured", because a graded result must cite what it graded.
 ATTEMPT_LIFECYCLE = "attempt-lifecycle"
-KINDS = (INSTALLATION_RECEIPT, TRIAL_LEDGER, ARTIFACT_MANIFEST, VERIFIED_RESULT, ATTEMPT_LIFECYCLE)
+#: Additive in version 2 (#12): the evidence report a completed pilot's
+#: acceptance requires - per-attempt disposition, per-criterion success,
+#: uncertainty and intervention counts, and a cost/time split into setup,
+#: agent and grading, with missing values explicit. Not attempt-bound: like
+#: `TRIAL_LEDGER`, it is ONE record summarizing every attempt an experiment
+#: planned, produced after a run rather than before one.
+PILOT_REPORT = "pilot-report"
+KINDS = (INSTALLATION_RECEIPT, TRIAL_LEDGER, ARTIFACT_MANIFEST, VERIFIED_RESULT, ATTEMPT_LIFECYCLE, PILOT_REPORT)
 
 #: Records that belong to ONE attempt. The ledger is not one of them: it issues
 #: the attempt identifiers the others cite.
@@ -67,8 +74,18 @@ AUTHORIZED_PRODUCER = {
     ARTIFACT_MANIFEST: "controller",
     VERIFIED_RESULT: "assembler",
     ATTEMPT_LIFECYCLE: "controller",
+    PILOT_REPORT: "assembler",
 }
 RECEIPT_CHECKER = "controller"
+
+#: The four cost/time split components a pilot report's own control requires
+#: (#12's acceptance: "Separate setup/agent/grading cost and time"). Closed:
+#: an entry missing one of these keys is refused, not silently treated as
+#: zero - matching this codebase's "silence is not absence" convention
+#: (`skill-invocations`, `observation-coverage`). A missing VALUE is the
+#: literal string `"UNKNOWN"`, the same spelling `skill-invocations` already
+#: uses for the same reason.
+PILOT_REPORT_SPLIT_KEYS = ("setup", "agent", "grading", "total")
 
 #: Fixed by interfaces.md, not chosen here.
 CRITERION_OUTCOMES = ("SATISFIED", "VIOLATED", "UNKNOWN")
@@ -811,6 +828,93 @@ def attempt_lifecycle(record: Record) -> Iterator[str]:
         yield "no cleanup failures list; an empty list says none, a missing one says unknown"
 
 
+def _pilot_report_split(entry: dict[str, object], where: str, field_name: str) -> Iterator[str]:
+    """One cost/time split (`cost_usd` or `time_seconds`): EXACTLY the four
+    keys `PILOT_REPORT_SPLIT_KEYS`, each a non-negative number or the literal
+    `"UNKNOWN"` - a missing key is refused rather than read as zero."""
+    split = entry.get(field_name)
+    if not isinstance(split, dict):
+        yield f"{where}: {field_name} is not an object"
+        return
+    unknown_keys = set(split) - set(PILOT_REPORT_SPLIT_KEYS)
+    if unknown_keys:
+        yield f"{where}: {field_name} carries unknown key(s) {sorted(unknown_keys)}"
+    numeric: dict[str, float] = {}
+    for key in PILOT_REPORT_SPLIT_KEYS:
+        if key not in split:
+            yield f"{where}: {field_name} has no {key!r}"
+            continue
+        value = split[key]
+        if value == "UNKNOWN":
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+            yield f"{where}: {field_name}.{key} is {value!r}, not a non-negative number or 'UNKNOWN'"
+            continue
+        numeric[key] = value
+    # Consistency only when every component is a real number - an "UNKNOWN"
+    # anywhere makes the sum unverifiable, not wrong.
+    if set(numeric) == set(PILOT_REPORT_SPLIT_KEYS):
+        parts_total = numeric["setup"] + numeric["agent"] + numeric["grading"]
+        if abs(parts_total - numeric["total"]) > 1e-9:
+            yield (
+                f"{where}: {field_name} total {numeric['total']} does not equal "
+                f"setup+agent+grading ({parts_total})"
+            )
+
+
+def pilot_report(record: Record) -> Iterator[str]:
+    """The evidence report a completed pilot's acceptance requires (#12): every
+    scheduled attempt's disposition, per-criterion success, uncertainty,
+    intervention count, and a cost/time split into setup, agent and grading -
+    with missing values explicit, never a silent absence.
+
+    Whether every SCHEDULED attempt (from the ledger) appears here at all is a
+    bundle fact (`ledger_binding`'s pilot-report check, #12) - this rule only
+    checks each entry's own shape, exactly as `observation_coverage` checks a
+    stream's shape while `ledger_binding` checks it against the receipt.
+    """
+    if record.parse_error is not None or record.kind != PILOT_REPORT:
+        return
+    attempts = record.data.get("attempts")
+    if not isinstance(attempts, list) or not attempts:
+        yield "pilot report names no attempts; an empty report is refused, not passed"
+        return
+    seen_ids: set[str] = set()
+    for index, entry in enumerate(attempts):
+        where = f"attempts[{index}]"
+        if not isinstance(entry, dict):
+            yield f"{where} is not an object"
+            continue
+        attempt_id = entry.get("attempt_id")
+        if not _nonempty_str(attempt_id):
+            yield f"{where}: no attempt_id"
+        elif attempt_id in seen_ids:
+            yield f"{where}: attempt_id {attempt_id!r} appears more than once"
+        else:
+            seen_ids.add(attempt_id)  # type: ignore[arg-type]
+        if not _nonempty_str(entry.get("trial_id")):
+            yield f"{where}: no trial_id"
+        disposition = entry.get("disposition")
+        if disposition not in DISPOSITIONS:
+            yield f"{where}: disposition {disposition!r} is not one of {list(DISPOSITIONS)}"
+        criteria = entry.get("criteria")
+        if not isinstance(criteria, list):
+            yield f"{where}: no criteria list"
+        else:
+            for c_index, criterion in enumerate(criteria):
+                if not isinstance(criterion, dict) or not _nonempty_str(criterion.get("id")):
+                    yield f"{where}: criteria[{c_index}] has no id"
+                elif criterion.get("outcome") not in CRITERION_OUTCOMES:
+                    yield f"{where}: criteria[{c_index}] outcome {criterion.get('outcome')!r} is not one of {list(CRITERION_OUTCOMES)}"
+        if not _nonempty_str(entry.get("uncertainty")):
+            yield f"{where}: no uncertainty - explicit, even when there is none to report (e.g. 'none')"
+        interventions = entry.get("interventions")
+        if isinstance(interventions, bool) or not isinstance(interventions, int) or interventions < 0:
+            yield f"{where}: interventions is {interventions!r}, not a non-negative integer"
+        yield from _pilot_report_split(entry, where, "cost_usd")
+        yield from _pilot_report_split(entry, where, "time_seconds")
+
+
 # ---------------------------------------------------------------------------
 # Bundle rules: facts that exist only BETWEEN records. Each is paired with a
 # committed control whose bad and good cases are bundle directories.
@@ -887,7 +991,11 @@ def ledger_binding(bundle: Bundle) -> Iterator[str]:
       - a manifest for a trial whose `case.observes_selection` is `true` (#26)
         carries no `skill-invocations` stream at all - #39's "left to #26"
         control, closing it: the stream is required when the case says so,
-        and only this rule has the trial's case identity to check it against.
+        and only this rule has the trial's case identity to check it against;
+      - a `pilot-report` (#12) that omits a scheduled attempt, or names one
+        the ledger never planned - only this rule has the ledger's own
+        planned population to check a report against; `pilot_report` checks
+        each entry's own shape, not which attempts are present at all.
     """
     ledgers = bundle.of_kind(TRIAL_LEDGER)
     if len(ledgers) != 1:
@@ -959,6 +1067,23 @@ def ledger_binding(bundle: Bundle) -> Iterator[str]:
                         f"{where}: graded {digest!r}, which no manifest for this "
                         f"attempt captured"
                     )
+
+    for report in bundle.of_kind(PILOT_REPORT):
+        attempts = report.data.get("attempts")
+        entries = attempts if isinstance(attempts, list) else []
+        # Only a non-empty STRING id can ever match a planned attempt_id (also
+        # a string, from _ledger_attempts). An unhashable id (a list or dict -
+        # `pilot_report`'s own rule already flags it as malformed) must not
+        # reach a set literal here: building `{..., [], ...}` raises
+        # TypeError immediately, crashing this rule instead of reporting a
+        # finding (found by cross-model review).
+        reported_ids = {e["attempt_id"] for e in entries if isinstance(e, dict) and _nonempty_str(e.get("attempt_id"))}
+        where = f"{report.path.name} ({report.kind})"
+        for attempt_id in plan:
+            if attempt_id not in reported_ids:
+                yield f"{where}: omits scheduled attempt {attempt_id!r}"
+        for reported_id in reported_ids - set(plan):
+            yield f"{where}: reports attempt {reported_id!r}, which the ledger never planned"
 
 
 def unique_ids(bundle: Bundle) -> Iterator[str]:

@@ -48,6 +48,28 @@ collection) closes.
   `UNAVAILABLE` entry with a stated reason, never a silent absence. Not a
   new envelope version: nothing outside this build's own tests ever
   produced or read the field it replaces.
+- **The matched pilot's predeclared experiment record, evidence-report
+  schema and cost estimate** (Refs #12, planning only - no paid run):
+  `evals/matched-pilot/` predeclares the first bounded matched pilot's exact
+  model/client/subject identities (the image digest is named explicitly as
+  owed to the live build, never invented), goal population (the
+  already-qualified `slug-small-fix` grader, #5), treatment-vs-baseline
+  definition, repeat schedule (3 repeats x 2 arms = 6 attempts), arm order,
+  time/monetary caps (the same $5 operator ceiling #26 uses) and stated
+  clarification/approval behavior, planned through the real controller
+  against a throwaway store. Reuses `skillc/cost_estimate.py` unchanged - no
+  second estimator - with the same sensitivity lines ($0.675 at the stated
+  assumption, $4.05 at 500k input tokens/attempt, $7.80 - over the ceiling -
+  at 1M). `skillc/records.py` adds a new `pilot-report` record kind: the
+  evidence report #12's acceptance requires (per-attempt disposition,
+  per-criterion outcomes, uncertainty, intervention counts, and a cost/time
+  split into setup/agent/grading with missing values explicit, never a
+  silently absent key), with its own record-shape rule and a
+  `ledger_binding` completeness check refusing a report that omits a
+  scheduled attempt or names one the ledger never planned - the committed
+  control #12's acceptance names by name. No paid model call, live agent,
+  image build or report generator exists anywhere in this work; the
+  manifest's `execution` stays `"incomplete"` pending an approved budget.
 - **The Docker backend's implementation** (Refs #77, Refs #10, on top of the
   interface above): real bodies for `prepare`/`install`/`execute`/
   `confirm_stopped`/`export`/`destroy`/`confirm_absent`, all through the

@@ -22,6 +22,7 @@ The current roadmap is [PLAN.md](../PLAN.md), with the
 | Probe | Status |
 |---|---|
 | [Selection probe](selection-probe/README.md) | Three predeclared cases plan through the real controller and a cost estimate is committed (#26); no live attempt has run - `run-manifest.json`'s `execution` stays `"incomplete"` pending an approved budget (ADR 0005) |
+| [Matched pilot](matched-pilot/README.md) | The predeclared experiment record, treatment-vs-baseline plan and cost estimate are committed, reusing #26's estimator (#12); the evidence-report schema (`pilot-report`, #12) is defined and its bundle control is committed - no live attempt has run, `execution` stays `"incomplete"` |
 
 No behavioral runner is implemented here yet. The former example plugin command
 and YAML were unverified research, not an executable contract. skillc depends on
