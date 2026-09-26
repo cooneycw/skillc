@@ -68,10 +68,17 @@ fallback (new prose IS a content change) but not the nonce canary.
 
 STRUCTURALLY UNABLE TO LAUNCH A REAL AGENT (addendum item 51). Every call
 into a backend's `execute()` passes first through `_refuse_real_agent`, which
-raises `RealAgentBlocked` for `claude` or `codex` as `argv[0]` unless
-`SKILLC_ALLOW_REAL_AGENT=1` is set. This is the harness's OWN safety property,
-not a backend concern: a test (or an operator's typo) can never spend against
-a real subscription through this driver by accident.
+raises `RealAgentBlocked` when `claude` or `codex` appears ANYWHERE in argv -
+not only at `argv[0]` - unless `SKILLC_ALLOW_REAL_AGENT=1` is set. Checking
+only `argv[0]` would leave `["/usr/bin/env", "codex"]` or
+`["sh", "-c", "claude ..."]` unblocked (found by cross-model review); scanning
+the whole argv is not a perfect sandbox either, but it closes the obvious
+wrapper bypass rather than checking a position an attacker or a typo would
+not need to use. This is the harness's OWN safety property, not a backend
+concern: a test (or an operator's typo) must never spend against a real
+subscription through this driver by accident - which is also why the tests
+for this guard explicitly clear the opt-in variable rather than trust
+whatever the ambient environment happens to hold.
 
 Stdlib only (AGENTS.md).
 """
@@ -80,13 +87,15 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import secrets
 import shutil
+import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from . import trial
-from .backend import BackendUnavailable, Confirmation, ExecutionBackend, Limits
+from .backend import BackendUnavailable, Confirmation, ExecuteResult, ExecutionBackend, Limits
 
 #: The key `surface` carries the per-attempt liveness nonce under, passed to
 #: `install()`. Never sent in the prompt or any other input the subject reads
@@ -104,15 +113,52 @@ class RealAgentBlocked(Exception):
     real agent"). Set `SKILLC_ALLOW_REAL_AGENT=1` to opt in deliberately."""
 
 
+#: Wrappers whose NEXT meaningful argument is the real command, not the
+#: wrapper itself - `env codex ...` and `sh -c "codex ..."` both name the
+#: agent somewhere other than argv[0].
+SHELL_WRAPPERS = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
+_REAL_AGENT_WORD = re.compile(
+    r"\b(" + "|".join(re.escape(name) for name in REAL_AGENT_BINARIES) + r")\b"
+)
+
+
+def _blocked(name: str) -> RealAgentBlocked:
+    return RealAgentBlocked(
+        f"refusing to launch {name!r} without {ALLOW_REAL_AGENT_ENV}=1 - this would run a real "
+        f"agent CLI, possibly against a paid subscription (issue #10 addendum item 51)"
+    )
+
+
 def _refuse_real_agent(argv: Sequence[str]) -> None:
-    if not argv:
+    if os.environ.get(ALLOW_REAL_AGENT_ENV) == "1" or not argv:
         return
-    name = Path(str(argv[0])).name
-    if name in REAL_AGENT_BINARIES and os.environ.get(ALLOW_REAL_AGENT_ENV) != "1":
-        raise RealAgentBlocked(
-            f"refusing to launch {name!r} without {ALLOW_REAL_AGENT_ENV}=1 - this would run a "
-            f"real agent CLI, possibly against a paid subscription (issue #10 addendum item 51)"
-        )
+
+    # An exact basename match against EVERY argv element - not just argv[0]
+    # (found by cross-model review) - already catches `["codex", ...]` and
+    # `["/usr/bin/env", "codex"]` alike, since "codex" is its own distinct
+    # element either way. It does NOT false-positive on an ordinary path
+    # merely installed under a directory named "claude" or "codex" (measured
+    # on this very host: its own home directory), because a basename compares
+    # only the final path component, never a substring of the whole path.
+    for arg in argv:
+        name = Path(str(arg)).name
+        if name in REAL_AGENT_BINARIES:
+            raise _blocked(name)
+
+    # `sh -c "codex ..."` is the one shape basename matching cannot see: the
+    # whole command sits inside ONE argv element as a string with other
+    # words. Scoped to exactly the argument right after `-c` for a
+    # recognized shell wrapper - never a blanket scan of every argv element,
+    # which would reintroduce the false positive above (a path is not a
+    # command line, and searching one as if it were finds words that were
+    # never a command).
+    first = Path(str(argv[0])).name
+    if first in SHELL_WRAPPERS and "-c" in argv:
+        idx = list(argv).index("-c")
+        if idx + 1 < len(argv):
+            match = _REAL_AGENT_WORD.search(str(argv[idx + 1]))
+            if match:
+                raise _blocked(match.group(1))
 
 
 def _snapshot(root: Path) -> dict[str, str]:
@@ -135,8 +181,17 @@ def _snapshot(root: Path) -> dict[str, str]:
 def _canary_proof(workspace: Path, canary_path: object, nonce: str) -> bool:
     if not isinstance(canary_path, str) or not canary_path:
         return False
-    target = (workspace / canary_path).resolve()
-    if not target.is_relative_to(workspace.resolve()) or target.is_symlink() or not target.is_file():
+    raw = workspace / canary_path
+    # Checked BEFORE resolving: .resolve() follows a symlink chain to its
+    # target, so a check made against the resolved path can never see the
+    # symlink that got it there - `target.is_symlink()` after `.resolve()`
+    # is always False, which is dead code (found by cross-model review). A
+    # leaf-level symlink into a real proof file elsewhere must be refused
+    # here, before resolution ever runs.
+    if raw.is_symlink():
+        return False
+    target = raw.resolve()
+    if not target.is_relative_to(workspace.resolve()) or not target.is_file():
         return False
     return target.read_text(encoding="utf-8", errors="replace") == f"touched:{nonce}"
 
@@ -174,74 +229,105 @@ def run_through_backend(
 ) -> dict[str, object]:
     """Drive `attempt_id` through `backend` from prepare to teardown, and
     finalize it. Returns `trial.finalize`'s lifecycle record, plus
-    `backend_teardown` (see the module docstring)."""
+    `backend_teardown` and `signal` (see the module docstring).
+
+    TEARDOWN IS UNCONDITIONAL once `prepare()` has returned a handle
+    (found by cross-model review: the first version of this function let an
+    exception from `install()`, the baseline export, `execute()` or
+    `confirm_stopped()` escape before `destroy()`/`confirm_absent()` ever
+    ran, which could leave a backend's resources alive with nothing left to
+    tear them down). Everything from `install()` onward runs inside a
+    `try/finally` whose `finally` always calls `destroy()` and
+    `confirm_absent()`, however the body ends - including for a genuinely
+    unexpected exception, which still propagates to the caller AFTER
+    teardown, never silently swallowed.
+    """
     _refuse_real_agent(argv)
 
     try:
         handle = backend.prepare(attempt_id)
     except BackendUnavailable as exc:
         record = trial.finalize(experiment, attempt_id, disposition="unavailable", reason=str(exc))
-        return {**record, "backend_teardown": None}
+        return {**record, "backend_teardown": None, "readiness": None, "signal": None}
 
     workspace = trial.allocate_workspace(experiment, attempt_id, base, forbidden or [])
     nonce = secrets.token_hex(16)
+    readiness: dict[str, object] | None = None
+    result: object = None
+    unavailable_reason: str | None = None
+
     try:
-        readiness = backend.install(handle, {**surface, CANARY_NONCE_KEY: nonce})
-    except BackendUnavailable as exc:
-        # Reachable a moment ago (prepare() succeeded); not reachable now. Not
-        # the pre-flight case, but still nothing dispatched - the controller
-        # never guesses a cause beyond what the backend reported.
-        backend.destroy(handle)
-        record = trial.finalize(experiment, attempt_id, disposition="unavailable", reason=str(exc))
-        return {**record, "backend_teardown": None, "readiness": None}
-
-    canary_path = readiness.get("canary_path") if isinstance(readiness, dict) else None
-    before = None if canary_path else _snapshot_via_export(backend, handle, base / f"{attempt_id}-preexec")
-
-    experiment.record(attempt_id, "dispatched")
-    experiment.record(attempt_id, "started")
-    result = backend.execute(handle, argv, limits, cancel)
-    if result.reason != "exited":
-        experiment.record(attempt_id, "stop-requested", reason=result.reason)
-
-    stop_confirmation = backend.confirm_stopped(handle)
-    confirmed = stop_confirmation is Confirmation.CONFIRMED
-    stop: dict[str, object] = {"reason": result.reason, "confirmed": confirmed, "exit_code": result.exit_code}
-    if result.error is not None:
-        stop["error"] = result.error
-    if result.signal is not None:
-        stop["signal"] = result.signal
-    experiment.record(attempt_id, "stopped", **stop)
-    experiment.record(attempt_id, "stop-confirmed" if confirmed else "stop-unconfirmed")
-
-    if confirmed and result.reason != "launch-failed":
         try:
-            backend.export(handle, workspace)
-        except OSError as exc:
-            experiment.record(attempt_id, "capture-failed", reason=f"export failed: {exc}")
+            readiness = backend.install(handle, {**surface, CANARY_NONCE_KEY: nonce})
+        except BackendUnavailable as exc:
+            # Reachable a moment ago (prepare() succeeded); not reachable now.
+            # Not the pre-flight case, but still nothing dispatched - the
+            # controller never guesses a cause beyond what the backend
+            # reported. Teardown still happens, in the shared `finally` below.
+            unavailable_reason = str(exc)
         else:
-            live = (
-                _canary_proof(workspace, canary_path, nonce) if canary_path
-                else _snapshot(workspace) != before
-            )
-            if not live:
-                experiment.record(
-                    attempt_id, "capture-failed",
-                    reason="liveness: no proof the subject actually ran - "
-                           + ("the canary was never touched" if canary_path else
-                              "no observable change between install and execute"),
-                )
-            else:
-                _ensure_spool_files(experiment, attempt_id)
+            canary_path = readiness.get("canary_path") if isinstance(readiness, dict) else None
+            try:
+                before = None if canary_path else _snapshot_via_export(backend, handle, base)
+            except OSError:
+                # Cannot establish a baseline; fall back to "empty" rather than
+                # crash. This WEAKENS the content-diff check for this one
+                # attempt (any output at all now reads as "live"), but
+                # trial.capture's own empty-capture rule still refuses a
+                # subject that produces nothing, and a genuinely broken
+                # export() will fail again, loudly, at the real export below.
+                before = {}
+
+            experiment.record(attempt_id, "dispatched")
+            experiment.record(attempt_id, "started")
+            result = backend.execute(handle, argv, limits, cancel)
+            assert isinstance(result, ExecuteResult)
+            if result.reason != "exited":
+                experiment.record(attempt_id, "stop-requested", reason=result.reason)
+
+            stop_confirmation = backend.confirm_stopped(handle)
+            confirmed = stop_confirmation is Confirmation.CONFIRMED
+            stop: dict[str, object] = {
+                "reason": result.reason, "confirmed": confirmed, "exit_code": result.exit_code,
+            }
+            if result.error is not None:
+                stop["error"] = result.error
+            if result.signal is not None:
+                stop["signal"] = result.signal
+            experiment.record(attempt_id, "stopped", **stop)
+            experiment.record(attempt_id, "stop-confirmed" if confirmed else "stop-unconfirmed")
+
+            if confirmed and result.reason != "launch-failed":
                 try:
-                    trial.capture(experiment, attempt_id)
-                except trial.Refused:
-                    pass  # capture() already recorded capture-failed; nothing more to add here
+                    backend.export(handle, workspace)
+                except OSError as exc:
+                    experiment.record(attempt_id, "capture-failed", reason=f"export failed: {exc}")
+                else:
+                    live = (
+                        _canary_proof(workspace, canary_path, nonce) if canary_path
+                        else _snapshot(workspace) != before
+                    )
+                    if not live:
+                        experiment.record(
+                            attempt_id, "capture-failed",
+                            reason="liveness: no proof the subject actually ran - "
+                                   + ("the canary was never touched" if canary_path else
+                                      "no observable change between install and execute"),
+                        )
+                    else:
+                        _ensure_spool_files(experiment, attempt_id)
+                        try:
+                            trial.capture(experiment, attempt_id)
+                        except trial.Refused:
+                            pass  # capture() already recorded capture-failed; nothing more here
+    finally:
+        backend.destroy(handle)
+        teardown_confirmation = backend.confirm_absent(handle)
 
-    backend.destroy(handle)
-    teardown_confirmation = backend.confirm_absent(handle)
-
-    record = trial.finalize(experiment, attempt_id)
+    if unavailable_reason is not None:
+        record = trial.finalize(experiment, attempt_id, disposition="unavailable", reason=unavailable_reason)
+    else:
+        record = trial.finalize(experiment, attempt_id)
     trial.cleanup_workspace(experiment, attempt_id)
     return {
         **record, "backend_teardown": teardown_confirmation.value, "readiness": readiness,
@@ -250,17 +336,24 @@ def run_through_backend(
         # though it IS written to the raw journal event. Surfaced here so a caller
         # is never left guessing a cause from a bare negative exit code (addendum
         # item 12: "exit 137 is SIGKILL, not OOM").
-        "signal": result.signal,
+        "signal": result.signal if isinstance(result, ExecuteResult) else None,
     }
 
 
-def _snapshot_via_export(backend: ExecutionBackend, handle: object, into: Path) -> dict[str, str]:
+def _snapshot_via_export(backend: ExecutionBackend, handle: object, base: Path) -> dict[str, str]:
     """The pre-execution liveness baseline for the content-diff fallback:
     exported through the same `export()` a real capture uses, so the
-    comparison is over exactly what a capture would see. `into` is scratch,
-    never the attempt's real workspace - nothing here is captured or
-    recorded, and it is removed once read."""
-    into.mkdir(parents=True, exist_ok=True)
+    comparison is over exactly what a capture would see. Scratch, never the
+    attempt's real workspace - nothing here is captured or recorded, and it
+    is removed once read.
+
+    `tempfile.mkdtemp`, not a deterministic `<attempt_id>-preexec` path
+    (found by cross-model review): a deterministic path can already exist -
+    from a stale run, or anything else - and `mkdir(exist_ok=True)` would
+    silently adopt it, folding its contents into the baseline and then
+    `rmtree`-ing something this call never created. `mkdtemp` is exclusively
+    created and impossible to collide with an existing directory."""
+    into = Path(tempfile.mkdtemp(dir=base))
     try:
         backend.export(handle, into)
         return _snapshot(into)

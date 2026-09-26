@@ -58,6 +58,8 @@ class FakeBackend:
         unavailable: bool = False,
         install_unavailable: bool = False,
         export_fails: bool = False,
+        export_fails_once: bool = False,
+        raise_in_execute: bool = False,
         force_confirm_stopped: Confirmation | None = None,
         force_confirm_absent: Confirmation | None = None,
         supports_canary: bool = True,
@@ -66,10 +68,13 @@ class FakeBackend:
         self._unavailable = unavailable
         self._install_unavailable = install_unavailable
         self._export_fails = export_fails
+        self._export_fails_once = export_fails_once
+        self._raise_in_execute = raise_in_execute
         self._force_confirm_stopped = force_confirm_stopped
         self._force_confirm_absent = force_confirm_absent
         self._supports_canary = supports_canary
         self.destroyed: set[str] = set()
+        self.export_calls = 0
 
     def describe(self) -> BackendDescription:
         return BackendDescription(
@@ -112,6 +117,8 @@ class FakeBackend:
         cancel: Callable[[], bool] | None = None,
     ) -> ExecuteResult:
         assert isinstance(handle, _Handle)
+        if self._raise_in_execute:
+            raise RuntimeError("fake backend execute() crashed unexpectedly")
         try:
             proc = subprocess.Popen(
                 list(argv), cwd=handle.root, env={"PATH": os.environ.get("PATH", os.defpath)},
@@ -165,8 +172,11 @@ class FakeBackend:
 
     def export(self, handle: object, dest: Path) -> None:
         assert isinstance(handle, _Handle)
+        self.export_calls += 1
         if self._export_fails:
             raise OSError("fake backend export forced to fail")
+        if self._export_fails_once and self.export_calls == 1:
+            raise OSError("fake backend export forced to fail on its first call (the baseline)")
         for item in handle.root.iterdir():
             target = dest / item.name
             if item.is_dir():
@@ -286,6 +296,10 @@ def test_provider_unavailable_before_dispatch_is_unavailable(store: Path, base: 
 
 
 def test_install_failure_is_unavailable_and_still_tears_down(store: Path, base: Path) -> None:
+    """Cross-model review: the first version of this path called destroy()
+    but skipped confirm_absent() and workspace cleanup, inconsistent with
+    every other path's teardown discipline. Both now run through the shared
+    `finally`."""
     experiment, attempt_id = _planned(store)
     backend = FakeBackend(base, install_unavailable=True)
     record = lifecycle.run_through_backend(
@@ -295,6 +309,9 @@ def test_install_failure_is_unavailable_and_still_tears_down(store: Path, base: 
     events = [e.get("event") for e in experiment.events(attempt_id)]
     assert "dispatched" not in events
     assert attempt_id in backend.destroyed, "a failed install must still be torn down"
+    assert record["backend_teardown"] == "confirmed"
+    cleaned = [e for e in experiment.events(attempt_id) if e.get("event") == "cleaned"]
+    assert cleaned, "the allocated workspace must still be cleaned up, not merely the backend handle"
 
 
 def test_export_failure_is_inconclusive_with_its_own_reason(store: Path, base: Path) -> None:
@@ -307,6 +324,38 @@ def test_export_failure_is_inconclusive_with_its_own_reason(store: Path, base: P
     )
     assert record["disposition"] == "inconclusive"
     assert "export failed" in str(record["reason"])
+    assert attempt_id in backend.destroyed, "a failed real export must still tear the backend down"
+
+
+def test_baseline_export_failure_does_not_crash_the_driver(store: Path, base: Path) -> None:
+    """Cross-model review: the pre-execution baseline export (used by the
+    content-diff fallback) ran outside any error handler in the first version
+    - an OSError there escaped uncaught, skipping finalize/destroy/cleanup
+    entirely. It now degrades to an empty baseline instead, and the attempt
+    still completes and tears down normally."""
+    experiment, attempt_id = _planned(store)
+    backend = FakeBackend(base, supports_canary=False, export_fails_once=True)
+    record = lifecycle.run_through_backend(
+        backend, experiment, attempt_id, _argv("work"), {"skill": "x"}, Limits(timeout=5), base,
+    )
+    assert record["disposition"] == "captured", (
+        "an empty baseline still correctly reads 'work' mode's real output as live"
+    )
+    assert attempt_id in backend.destroyed
+
+
+def test_an_unexpected_exception_in_execute_still_tears_down(store: Path, base: Path) -> None:
+    """Cross-model review: a backend that raises something other than
+    BackendUnavailable or OSError (a genuine bug, not a modelled failure path)
+    must not leak its resources. The exception still propagates - it is not
+    silently swallowed - but destroy()/confirm_absent() run first."""
+    experiment, attempt_id = _planned(store)
+    backend = FakeBackend(base, raise_in_execute=True)
+    with pytest.raises(RuntimeError, match="crashed unexpectedly"):
+        lifecycle.run_through_backend(
+            backend, experiment, attempt_id, _argv("work"), {"skill": "x"}, Limits(timeout=5), base,
+        )
+    assert attempt_id in backend.destroyed, "teardown must run even when execute() raises unexpectedly"
 
 
 def test_an_empty_surface_still_completes_with_readiness_reflecting_it(store: Path, base: Path) -> None:
@@ -463,13 +512,49 @@ def test_real_agent_binaries_are_blocked_without_explicit_opt_in(
 
 
 @pytest.mark.parametrize("name", ["claude", "codex"])
-def test_real_agent_binaries_are_named_explicitly(name: str, store: Path, base: Path) -> None:
+def test_real_agent_binaries_are_named_explicitly(
+    name: str, store: Path, base: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Explicitly cleared, never inherited (cross-model review): if the
+    ambient environment already carries SKILLC_ALLOW_REAL_AGENT=1 - a leftover
+    from an unrelated manual run - this test must still exercise the BLOCKED
+    path, not silently attempt a real launch because the opt-in happened to
+    already be set."""
+    monkeypatch.delenv(lifecycle.ALLOW_REAL_AGENT_ENV, raising=False)
     experiment, attempt_id = _planned(store)
     backend = FakeBackend(base)
     with pytest.raises(lifecycle.RealAgentBlocked, match=name):
         lifecycle.run_through_backend(
             backend, experiment, attempt_id, [name], {"skill": "x"}, Limits(timeout=5), base,
         )
+
+
+@pytest.mark.parametrize("argv", [["/usr/bin/env", "codex"], ["sh", "-c", "claude --whatever"]])
+def test_real_agent_wrapper_bypasses_are_blocked(
+    argv: list[str], store: Path, base: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cross-model review: checking only argv[0] left `env`/`sh -c` wrappers
+    unblocked. The guard scans the whole argv, not just its first element."""
+    monkeypatch.delenv(lifecycle.ALLOW_REAL_AGENT_ENV, raising=False)
+    experiment, attempt_id = _planned(store)
+    backend = FakeBackend(base)
+    with pytest.raises(lifecycle.RealAgentBlocked):
+        lifecycle.run_through_backend(
+            backend, experiment, attempt_id, argv, {"skill": "x"}, Limits(timeout=5), base,
+        )
+
+
+def test_a_path_merely_containing_the_word_claude_is_not_blocked() -> None:
+    """The negative case for the fix above: an early version scanned every
+    argv element for the whole word "claude"/"codex" anywhere in its text,
+    which false-positived on a real interpreter path measured during this
+    PR's own review - a host whose account name happened to be "claude" made
+    `_refuse_real_agent` refuse every single test in this file, since
+    `sys.executable` resolved under it. A path is not a command line; only an
+    exact basename, or the argument right after a shell's `-c`, may trigger
+    the guard. The account name here is a placeholder, not this host's."""
+    account_flavoured_path = "/home/some-claude-shaped-account/.venv/bin/python3"
+    lifecycle._refuse_real_agent([account_flavoured_path, "-c", "print('hi')"])  # must not raise
 
 
 def test_real_agent_binaries_proceed_with_explicit_opt_in(
@@ -488,3 +573,48 @@ def test_real_agent_binaries_proceed_with_explicit_opt_in(
         backend, experiment, attempt_id, [str(fake_as_codex), "work"], {"skill": "x"}, Limits(timeout=5), base,
     )
     assert record["disposition"] == "captured"
+
+
+# ------------------------------------------------------- _canary_proof edge cases
+
+
+def test_canary_proof_accepts_a_correct_plain_file(tmp_path: Path) -> None:
+    (tmp_path / "result.txt").write_text("touched:abc123")
+    assert lifecycle._canary_proof(tmp_path, "result.txt", "abc123") is True
+
+
+def test_canary_proof_rejects_a_stale_nonce_from_another_attempt(tmp_path: Path) -> None:
+    (tmp_path / "result.txt").write_text("touched:some-other-attempts-nonce")
+    assert lifecycle._canary_proof(tmp_path, "result.txt", "abc123") is False
+
+
+def test_canary_proof_rejects_a_missing_file(tmp_path: Path) -> None:
+    assert lifecycle._canary_proof(tmp_path, "never-written.txt", "abc123") is False
+
+
+def test_canary_proof_rejects_a_leaf_symlink_to_a_valid_proof(tmp_path: Path) -> None:
+    """Cross-model review: `.resolve()` follows a symlink chain, so checking
+    `is_symlink()` AFTER resolving can never see the symlink that got there -
+    that check was dead code. A symlink at the leaf must be refused even when
+    it points at a file that would otherwise pass."""
+    real = tmp_path / "real-result.txt"
+    real.write_text("touched:abc123")
+    link = tmp_path / "result.txt"
+    link.symlink_to(real)
+    assert lifecycle._canary_proof(tmp_path, "result.txt", "abc123") is False
+
+
+def test_canary_proof_rejects_a_path_that_escapes_the_workspace(tmp_path: Path) -> None:
+    outside = tmp_path.parent / "outside-result.txt"
+    outside.write_text("touched:abc123")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    try:
+        assert lifecycle._canary_proof(workspace, "../outside-result.txt", "abc123") is False
+    finally:
+        outside.unlink()
+
+
+def test_canary_proof_rejects_a_non_string_path(tmp_path: Path) -> None:
+    assert lifecycle._canary_proof(tmp_path, None, "abc123") is False
+    assert lifecycle._canary_proof(tmp_path, "", "abc123") is False
