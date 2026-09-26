@@ -9,10 +9,19 @@ argv, exit codes) and not only the pure function.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from ci import changelog_check as cc
+
+#: materialization.md: "CI cannot run the real acquisition or canary. The CI
+#: image has neither git nor Codex" - the same reason test_materialize.py's
+#: real-git tests skip there. These two tests drive real throwaway git repos,
+#: so they follow the same established convention.
+needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
 
 UNRELEASED_WITH_ENTRY = "## [Unreleased]\n\n### Added\n\n- A new thing (#1)\n\n## [0.1.0] - 2026-01-01\n\nFirst.\n"
 UNRELEASED_EMPTY = "## [Unreleased]\n\n## [0.1.0] - 2026-01-01\n\nFirst.\n"
@@ -182,6 +191,7 @@ def _commit(repo: Path, message: str) -> None:
     subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", message], check=True)
 
 
+@needs_git
 def test_the_gate_script_itself_discriminates(tmp_path: Path) -> None:
     repo = _repo(tmp_path, "repo")
     (repo / "CHANGELOG.md").write_text(UNRELEASED_EMPTY, encoding="utf-8")
@@ -204,6 +214,7 @@ def test_the_gate_script_itself_discriminates(tmp_path: Path) -> None:
     assert rc == 0, "gate refused a compliant changelog update"
 
 
+@needs_git
 def test_the_gate_uses_the_merge_base_not_the_moving_target_tip(tmp_path: Path) -> None:
     """Cross-model review [MEDIUM]: diffing against the target branch's
     current tip - rather than the fork point - misattributes changes. A
