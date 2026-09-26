@@ -93,3 +93,30 @@ milestone acceptance are unchanged. The
 [traceability table](../../../PLAN.md#supplemental-decision-traceability) separates
 accepted scope from delivered evidence; deferred work is not completed work.
 No protocol change or new interface schema is needed for these dispositions.
+
+## September 26 config-drift-checker review
+
+Reviewed for [#38](https://github.com/cooneycw/skillc/issues/38) against these
+documents and the ADRs. The source is
+[jameskomo/config-drift-checker at 0aca62b](https://github.com/jameskomo/config-drift-checker/tree/0aca62bf43fcc6c9e873b507dcb6f2a4455f2de1)
+by @jameskomo (FSL-1.1-Apache-2.0), read statically. Its eval cases use the format
+of Anthropic's `claude plugin eval`. Provenance, upstream locations and declined
+ideas are in the [lessons note](../../research/config-drift-checker-lessons.md).
+Per [ADR 0003](../../decisions/0003-no-external-evaluation-runtime.md), skillc
+takes ideas, not code.
+
+No concept below conflicts with an ADR. Each either fits an existing clause or is
+translated to one before adoption.
+
+| Concept | Disposition | Rationale and owner |
+|---|---|---|
+| Discovered versus invoked | accepted bounded follow-up | [Spec section 5](spec.md#subject-acquisition) and [interfaces.md](interfaces.md#installation-and-execution-lifecycle) already keep invocation distinct and require unknown when it is unobservable. Records version 2 has no field for it. [#39](https://github.com/cooneycw/skillc/issues/39) first decides whether a required stream is a version change, then adds the observation with controls. Depends on #8; prerequisite for #26. |
+| Near-miss non-trigger case | already in scope | [#26](https://github.com/cooneycw/skillc/issues/26) owns it. Selection stays an observation, separate from outcome, unless a case declares invocation a requirement. |
+| Degraded-description variant | already in scope | [Protocol section 2](protocol.md#2-comparison-arms) "Detection control", kept distinct from benefit comparisons by ADR 0002. #26's manifest states which property its variant proves. |
+| Client/model drift | accepted, documented here | Added as a [protocol section 2](protocol.md#2-comparison-arms) row ([#40](https://github.com/cooneycw/skillc/issues/40)). An additional arm is not a hard boundary, so no ADR amendment. No watcher or scheduler. |
+| Repeat-variance (noise band) flagging | deferred with a revisit trigger | As built upstream it learns thresholds from observed history, operates on scores that average graders, and downgrades in-band drops to warnings. That conflicts with [protocol section 7](protocol.md#7-aggregation-and-progression), [records derivation](records.md#derivation) and PLAN section D. Revisit when #12 yields repeated, accounted outcomes and #15 takes up Q7. It is then admissible only as a predeclared policy over per-criterion outcomes, with a committed case where a real break inside the band still goes red. |
+| Autonomous subject repair | rejected | [Spec section 4](spec.md#4-scope-and-boundaries) excludes subject changes; #26 and #28 exclude subject edits and automatic reruns. |
+
+EF-01 through EF-11 and initial milestone acceptance are unchanged. Apart from the
+added client/model drift row, no protocol change or new interface schema is made
+here; #39 owns the one record change.
