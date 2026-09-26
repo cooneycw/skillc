@@ -14,6 +14,7 @@ Every acceptance item names its own case:
 from __future__ import annotations
 
 import pytest
+from fixtures.leak_seeds.judge_seeds import HOME_PATH_LEAK, PRIVATE_IP_LEAK, PRIVATE_IP_LEAK_2
 
 from skillc import judge
 
@@ -200,14 +201,14 @@ def test_run_tier_refuses_leaked_goal_text_before_calling_the_judge() -> None:
 
     with pytest.raises(judge.JudgeInputLeaked):
         judge.run_tier(judge.SAME_MODEL_TIER, RecordingJudge(), ["R1"],
-                        "please read /home/alice/notes.txt", [("out.txt", b"ok")])
+                        f"please read {HOME_PATH_LEAK}/notes.txt", [("out.txt", b"ok")])
     assert calls == []  # the judge was never called at all
 
 
 def test_run_tier_refuses_leaked_candidate_content() -> None:
     with pytest.raises(judge.JudgeInputLeaked):
         judge.run_tier(judge.SAME_MODEL_TIER, judge.FakeJudge(), ["R1"], "goal",
-                        [("out.txt", b"server at 10.0.0.5 leaked")])
+                        [("out.txt", f"server at {PRIVATE_IP_LEAK} leaked".encode())])
 
 
 # --------------------------------------------------------------- check_judge_input
@@ -219,12 +220,12 @@ def test_check_judge_input_accepts_clean_input() -> None:
 
 def test_check_judge_input_refuses_a_home_path_in_the_goal() -> None:
     with pytest.raises(judge.JudgeInputLeaked, match="<goal>"):
-        judge.check_judge_input("see /home/alice/secret", [])
+        judge.check_judge_input(f"see {HOME_PATH_LEAK}/secret", [])
 
 
 def test_check_judge_input_refuses_a_private_ip_in_candidate_content() -> None:
     with pytest.raises(judge.JudgeInputLeaked, match="out.txt"):
-        judge.check_judge_input("goal", [("out.txt", b"connect to 192.168.1.50")])
+        judge.check_judge_input("goal", [("out.txt", f"connect to {PRIVATE_IP_LEAK_2}".encode())])
 
 
 def test_check_judge_input_decodes_undecodable_bytes_permissively() -> None:
@@ -238,12 +239,12 @@ def test_check_judge_input_refuses_a_leak_in_a_filename_with_clean_content() -> 
     CONTENT, so a private IP or home path spelled into the FILENAME reached
     the judge unchecked."""
     with pytest.raises(judge.JudgeInputLeaked, match="filename"):
-        judge.check_judge_input("goal", [("192.168.1.50.txt", b"perfectly clean content")])
+        judge.check_judge_input("goal", [(f"{PRIVATE_IP_LEAK_2}.txt", b"perfectly clean content")])
 
 
 def test_check_judge_input_refuses_a_leak_in_a_criterion_id() -> None:
     with pytest.raises(judge.JudgeInputLeaked, match="criterion id"):
-        judge.check_judge_input("goal", [], criteria=["/home/alice/R1"])
+        judge.check_judge_input("goal", [], criteria=[f"{HOME_PATH_LEAK}/R1"])
 
 
 # --------------------------------------------------------------- compute_disagreement

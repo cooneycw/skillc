@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from fixtures.leak_seeds.judge_seeds import HOME_PATH_LEAK
 
 from skillc import cli, judge, verify
 from skillc import trial as t
@@ -161,7 +162,7 @@ def test_grade_refuses_and_writes_nothing_when_goal_text_leaks(store: Path, base
     before = list((experiment.root / "objects").rglob("*"))
     with pytest.raises(verify.Refused, match="machine-identity"):
         verify.grade(experiment, attempt_id, GRADER, grading, judges=judges,
-                     goal_text="see /home/alice/notes for context")
+                     goal_text=f"see {HOME_PATH_LEAK}/notes for context")
     # No result was written for this attempt.
     results = [p for p in experiment.root.glob("result-*.json")]
     assert results == []
