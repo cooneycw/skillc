@@ -32,6 +32,9 @@ Documentation only; the behavioral evaluation facility is not implemented.
   records the planning direction and decisions deferred to implementation issues.
 - [ADR 0003: No external evaluation runtime](decisions/0003-no-external-evaluation-runtime.md)
   rules out a runtime dependency on Coder Eval or Harbor (#6).
+- [ADR 0004: Evaluate the exposed knowledge surface](decisions/0004-evaluate-the-exposed-knowledge-surface.md)
+  (Proposed) widens the subject to layered, exposed knowledge and defines the
+  valid/exposed/reachable/selected/effective ladder (#55).
 
 ## Research and prior reviews
 

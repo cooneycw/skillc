@@ -5,7 +5,7 @@
 - Decision owner: Repository owner
 - Amends: [ADR 0002](0002-independent-goal-driven-evaluation.md), its treatment of
   instruction and memory files as held-constant environment rather than subject
-- Delivery issue: to be filed with this ADR (rung-2 exposure check)
+- Delivery issue: [#55](https://github.com/cooneycw/skillc/issues/55) (rung-2 exposure check)
 
 ## Context
 
