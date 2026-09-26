@@ -196,7 +196,10 @@ def _unescape(inner: str, lineno: int) -> str:
             digits = inner[i + 2: i + 2 + width]
             if len(digits) != width or not all(c in "0123456789abcdefABCDEF" for c in digits):
                 raise _invalid(lineno, f"malformed escape '\\{code}{digits}'")
-            out.append(chr(int(digits, 16)))
+            point = int(digits, 16)
+            if point > 0x10FFFF:
+                raise _invalid(lineno, f"escape '\\{code}{digits}' is not a Unicode code point")
+            out.append(chr(point))
             i += 2 + width
         else:
             raise _invalid(lineno, f"unknown escape '\\{code}'")
@@ -219,7 +222,7 @@ def _scalar(raw: str, lineno: int) -> object:
         raise _unsupported(lineno, "an explicit key")
     if value == "-" or value.startswith("- "):
         raise _invalid(lineno, "a list item where a single value was expected")
-    if ": " in value or value.endswith(":"):
+    if _MAPPING_INDICATOR_RE.search(value):
         # Real loaders reject this ("mapping values are not allowed here"), and a
         # client that cannot parse the block loads the skill with NO fields set.
         raise _invalid(
@@ -230,7 +233,11 @@ def _scalar(raw: str, lineno: int) -> object:
 
 
 # --- block structure -------------------------------------------------------------
-_BLOCK_HEADER_RE = re.compile(r"([|>])(?:([1-9])([-+]?)|([-+])([1-9]?))?\s*(?:#.*)?\Z")
+# A comment after a block header needs whitespace before its '#': `|# x` is invalid.
+_BLOCK_HEADER_RE = re.compile(r"([|>])(?:([1-9])([-+]?)|([-+])([1-9]?))?(?:[ \t]+(?:#.*)?)?\Z")
+# ':' followed by whitespace (a space OR a tab) or ending a plain value starts a
+# mapping value, which a plain scalar may not contain.
+_MAPPING_INDICATOR_RE = re.compile(r":(?:[ \t]|\Z)")
 
 
 def _indent(raw: str, lineno: int) -> int:
@@ -363,12 +370,13 @@ class _Parser:
         lines: list[str] = []
         for offset, raw in enumerate(body):
             if not raw.strip():
+                # Spaces beyond the content indentation ARE content, not an empty line.
                 lines.append(raw[content:] if len(raw) > content else "")
                 continue
             if len(raw) - len(raw.lstrip(" ")) < content:
                 raise _invalid(self.no(start + offset), "block text is less indented than its first line")
             lines.append(raw[content:])
-        last = max((k for k, line in enumerate(lines) if line.strip()), default=-1)
+        last = max((k for k, line in enumerate(lines) if line), default=-1)
         kept, trailing = lines[: last + 1], len(lines) - last - 1
         text = _fold(kept) if style == ">" else "\n".join(kept)
         # The frontmatter block excludes the newline before its closing `---`, so

@@ -60,7 +60,9 @@ def cmd_check(args: argparse.Namespace) -> int:
     target = getattr(args, "target", None)
     if _target_conflict(args.rule, target):
         return 2
-    target = target or DEFAULT_TARGET
+    selected = checks.RULES_BY_ID.get(args.rule or "")
+    # A named scoped rule speaks for ITS target, whatever the default is.
+    target = target or (selected.target if selected else None) or DEFAULT_TARGET
     root = Path(args.path).resolve()
     if not root.exists():
         print(f"skillc: no such path: {root}", file=sys.stderr)
@@ -86,8 +88,12 @@ def cmd_check(args: argparse.Namespace) -> int:
         f"\nskillc: {len(skills)} skill(s) checked, "
         f"{errors} error(s), {warns} warning(s)"
     )
-    # Field findings are true of ONE client profile. Say which, on every run.
-    print(f"skillc: field rules checked against target '{target}'")
+    # Field findings are true of ONE client profile. Say which - and say so when no
+    # field rule ran, so a green here cannot be read as a field check that passed.
+    if selected is None or selected.target is not None:
+        print(f"skillc: field rules checked against target '{target}'")
+    else:
+        print(f"skillc: field rules NOT checked (--rule {selected.id} only)")
     if args.strict and warns:
         return 1
     return 1 if errors else 0

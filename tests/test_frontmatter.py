@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import shutil
 import sys
 from pathlib import Path
 
@@ -68,6 +69,9 @@ INSIDE_THE_SUBSET = {
     "quoting": "a: 'it''s'\nb: \"tab\\there \\u00e9 \\/\"\nc: C# code # comment\n",
     "colons-without-space": "a: http://x.y/z\nb: e.g. foo:bar\n",
     "comment-only-value": "a: # nothing here\nb: 1\n",
+    "whitespace-content-line": "d: |+\n  Use when x\n     \nlicense: MIT\n",
+    "whitespace-content-folded": "d: >\n  a\n     \n  b\n",
+    "header-comment": "d: | # note\n  x\n",
 }
 
 
@@ -105,6 +109,9 @@ INVALID_YAML = {
     "text-after-quote": "a: 'x' y\n",
     "reserved-indicator": "a: @x\n",
     "tab-indent": "m:\n\tk: v\n",
+    "tab-after-colon": "d: Use when:\tx\n",
+    "header-comment-without-space": "d: |# c\n  x\n",
+    "escape-beyond-unicode": 'd: "Use when \\U00110000"\n',
 }
 OUTSIDE_THE_SUBSET = {
     "flow-sequence": "t: [a, b]\n",
@@ -122,7 +129,9 @@ OUTSIDE_THE_SUBSET = {
 def test_what_skillc_calls_invalid_a_yaml_loader_also_rejects(block: str) -> None:
     with pytest.raises(FrontmatterError, match="invalid YAML"):
         _parse(block)
-    with pytest.raises(yaml.YAMLError):
+    # PyYAML rejects an out-of-range escape by crashing with ValueError from chr(),
+    # not a YAMLError; that is still a rejection.
+    with pytest.raises((yaml.YAMLError, ValueError)):
         yaml.safe_load(block)
 
 
@@ -253,6 +262,11 @@ def test_a_rule_and_a_target_that_disagree_are_refused(tmp_path: Path) -> None:
 # --------------------------------------------------------------- stdlib only
 
 
+def _runtime_sources(root: Path) -> list[str]:
+    # rglob, not glob: a runtime subpackage is runtime too.
+    return [p.read_text(encoding="utf-8") for p in sorted(root.rglob("*.py"))]
+
+
 def _third_party(sources: list[str]) -> tuple[set[str], list[str]]:
     """Every top-level module the sources import, and those outside the stdlib."""
     imported: set[str] = set()
@@ -266,18 +280,55 @@ def _third_party(sources: list[str]) -> tuple[set[str], list[str]]:
 
 
 def test_the_runtime_imports_only_the_standard_library() -> None:
-    sources = [p.read_text(encoding="utf-8") for p in (ROOT / "skillc").glob("*.py")]
-    imported, third_party = _third_party(sources)
+    imported, third_party = _third_party(_runtime_sources(ROOT / "skillc"))
     assert imported, "the import walk found nothing - it is blind, not clean"
     assert third_party == [], f"skillc/ must stay stdlib-only: {third_party}"
 
 
-def test_the_stdlib_walk_can_see_a_third_party_import() -> None:
-    """Negative control for the walk above: a planted import is caught."""
-    sources = [p.read_text(encoding="utf-8") for p in (ROOT / "skillc").glob("*.py")]
-    planted = "import yaml\nfrom pydantic.fields import Field\nfrom . import spec\n"
-    assert _third_party([*sources, planted])[1] == ["pydantic", "yaml"]
+def test_the_stdlib_walk_can_see_a_third_party_import(tmp_path: Path) -> None:
+    """Negative control for the walk above: a planted import is caught, even nested."""
+    runtime = tmp_path / "skillc"
+    shutil.copytree(ROOT / "skillc", runtime)
+    nested = runtime / "parsers"
+    nested.mkdir()
+    (nested / "yaml_reader.py").write_text(
+        "import yaml\nfrom pydantic.fields import Field\nfrom . import spec\n", encoding="utf-8"
+    )
+    assert _third_party(_runtime_sources(runtime))[1] == ["pydantic", "yaml"]
 
 
 def test_discovery_still_loads_every_control() -> None:
     assert discover(CONTROLS), "no control skill discovered"
+
+
+def test_an_invalid_escape_is_a_finding_not_a_crash(tmp_path: Path) -> None:
+    """One malformed skill must not abort the scan of the others."""
+    bad = _skill(tmp_path, "bad", 'name: bad\ndescription: "Use when \\U00110000"\n')
+    _skill(tmp_path, "good", "name: good\ndescription: Use when x.\n")
+    assert bad.parse_error and "invalid YAML" in bad.parse_error
+    assert len(discover(tmp_path)) == 2
+
+
+def test_a_whitespace_content_line_counts_toward_the_description_limit(tmp_path: Path) -> None:
+    """Spaces kept by `|+` are content: dropping them let a 1,041-char description pass."""
+    block = "name: x\ndescription: |+\n  Use when " + "a" * 1000 + "\n" + " " * 32 + "\nlicense: MIT\n"
+    skill = _skill(tmp_path, "x", block)
+    assert skill.get("description") == yaml.safe_load(block)["description"]
+    assert any("over the 1024 limit" in f.detail for f in checks.run(skill))
+
+
+@pytest.mark.parametrize(
+    ("argv", "scope"),
+    [
+        (["--rule", "claude-code-field"], "field rules checked against target 'claude-code'"),
+        (["--rule", "unknown-field"], "field rules checked against target 'portable'"),
+        (["--rule", "name-spec"], "field rules NOT checked (--rule name-spec only)"),
+        ([], "field rules checked against target 'portable'"),
+    ],
+)
+def test_the_scope_line_names_the_rules_that_ran(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], argv: list[str], scope: str
+) -> None:
+    skill = _skill(tmp_path, "x", EXTENSION)
+    cli.main(["check", str(skill.path), *argv])
+    assert scope in capsys.readouterr().out
