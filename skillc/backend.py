@@ -127,7 +127,15 @@ class ExecutionBackend(Protocol):
         """Step 3: allocate a workspace/home INSIDE this backend's own
         isolation for `attempt_id` and return an opaque handle. Must raise
         `BackendUnavailable` rather than return a handle for a backend it
-        cannot actually use - a handle implies the isolation exists."""
+        cannot actually use - a handle implies the isolation exists.
+
+        A raising `prepare()` owns cleanup of whatever it already allocated
+        before the failure - it must never leave a partial resource (a created
+        but unready container, a half-written home) behind on any exception.
+        No handle is returned on that path, and `destroy()`/`confirm_absent()`
+        both require one; a caller has no other way to reach it. `destroy()`
+        after a successful `prepare()` is the only supported cleanup path this
+        Protocol provides (issue #10 review: /codex:code_review)."""
         ...
 
     def install(self, handle: object, surface: Mapping[str, object]) -> dict[str, object]:

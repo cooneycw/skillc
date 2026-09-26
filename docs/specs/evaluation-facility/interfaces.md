@@ -79,6 +79,13 @@ caller that cannot `prepare()` declares the attempt through
 constructs a host `subprocess` argv as a fallback. No method on the Protocol
 has a documented failure mode of "try the host instead."
 
+**A raising `prepare()` owns its own cleanup.** It returns no handle on that
+path, and `destroy()`/`confirm_absent()` both require one - a caller has no
+other way to reach whatever a failed `prepare()` already allocated. A backend
+that creates a container or workspace before it can confirm the isolation is
+usable must tear that down itself before raising `BackendUnavailable` or any
+other exception, never leave it for a handle nobody received.
+
 **skillc ships its own Docker-backed implementation** and that backend is a
 complete, standalone answer to #10: skillc depends on no other system to
 demonstrate the full lifecycle. The seam exists so ANOTHER backend - a
