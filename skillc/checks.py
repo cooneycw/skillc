@@ -16,13 +16,16 @@ from pathlib import Path
 from . import records
 from .spec import (
     BODY_LINE_BUDGET,
+    CLAUDE_CODE,
     COMPATIBILITY_MAX,
+    DEFAULT_TARGET,
     DESCRIPTION_MAX,
-    HARNESS_FIELDS,
     NAME_MAX,
     NAME_RE,
+    PORTABLE,
     REQUIRED_FIELDS,
     SPEC_FIELDS,
+    TARGETS,
     Skill,
 )
 
@@ -63,6 +66,11 @@ class Rule:
     proven by input that does not parse. A semantic rule (`parser=False`) must be
     proven on subjects that DO parse, or a parse failure could stand in for it;
     a parser rule must be proven on at least one subject that does NOT.
+
+    `target` scopes a rule to one client profile (spec.TARGETS). A rule with no
+    target applies everywhere; a scoped rule runs only when its target is the one
+    selected, because a claim about which fields load is only true of a named
+    client.
     """
 
     id: str
@@ -70,6 +78,7 @@ class Rule:
     summary: str
     check: Callable[[Skill], Iterator[str]]
     parser: bool = False
+    target: str | None = None
 
 
 def _frontmatter(skill: Skill) -> Iterator[str]:
@@ -92,12 +101,34 @@ def _name_spec(skill: Skill) -> Iterator[str]:
         yield f"name {name!r} does not match its directory {skill.dir_name!r}"
 
 
+def _kind(value: object) -> str:
+    if value is None:
+        return "null (no value)"
+    if isinstance(value, bool):
+        return f"a boolean ({value!r})"
+    if isinstance(value, int | float):
+        return f"a number ({value!r})"
+    if isinstance(value, dict):
+        return "a mapping"
+    if isinstance(value, list):
+        return "a list"
+    return type(value).__name__  # pragma: no cover - the parser yields no other type
+
+
 def _required_fields(skill: Skill) -> Iterator[str]:
-    for missing in sorted(REQUIRED_FIELDS - set(skill.frontmatter)):
-        yield f"missing required field {missing!r}"
+    # This rule OWNS the type of a required field. The rules that read one
+    # (`name-spec`, `trigger-shape`) see only strings via `Skill.get`, so a
+    # mapping-valued name used to pass every rule unexamined.
+    for key in sorted(REQUIRED_FIELDS):
+        if key not in skill.frontmatter:
+            yield f"missing required field {key!r}"
+            continue
+        value = skill.frontmatter[key]
+        if not isinstance(value, str):
+            yield f"{key} must be a string, got {_kind(value)}"
+        elif not value.strip():
+            yield f"{key} is empty"
     description = skill.get("description")
-    if description is not None and not description.strip():
-        yield "description is empty"
     if description and len(description) > DESCRIPTION_MAX:
         yield f"description is {len(description)} characters, over the {DESCRIPTION_MAX} limit"
     compatibility = skill.get("compatibility")
@@ -117,10 +148,29 @@ def _trigger_shape(skill: Skill) -> Iterator[str]:
 
 
 def _unknown_field(skill: Skill) -> Iterator[str]:
-    for key in sorted(set(skill.frontmatter) - SPEC_FIELDS - HARNESS_FIELDS):
+    """Target `portable`: a field the Agent Skills specification does not define."""
+    for key in sorted(set(skill.frontmatter) - SPEC_FIELDS):
+        if key in CLAUDE_CODE.extensions:
+            yield (
+                f"{key!r} is a {CLAUDE_CODE.label} extension, not an Agent Skills "
+                f"specification field; other clients may ignore it "
+                f"(check with --target {CLAUDE_CODE.id} if that is the only client)"
+            )
+        else:
+            yield (
+                f"{key!r} is not an Agent Skills specification field, nor one any "
+                f"target profile skillc knows documents; content here may be inert. "
+                f"Fold it into 'description' or 'metadata'"
+            )
+
+
+def _claude_code_field(skill: Skill) -> Iterator[str]:
+    """Target `claude-code`: a field outside the spec AND Claude Code's documentation."""
+    for key in sorted(set(skill.frontmatter) - CLAUDE_CODE.fields):
         yield (
-            f"{key!r} is not a field any harness loads; content here is inert. "
-            f"Fold it into 'description' or 'metadata'"
+            f"{key!r} is not a field {CLAUDE_CODE.label} documents (profile read from "
+            f"{CLAUDE_CODE.source} on {CLAUDE_CODE.verified}); content here is inert "
+            f"for that client. Fold it into 'description' or 'metadata'"
         )
 
 
@@ -155,7 +205,10 @@ RULES: tuple[Rule, ...] = (
     Rule("name-spec", ERROR, "name is spec-legal and matches its directory", _name_spec),
     Rule("required-fields", ERROR, "required frontmatter is present and in range", _required_fields),
     Rule("trigger-shape", WARN, "description says when to fire, not just what it does", _trigger_shape),
-    Rule("unknown-field", WARN, "no content parked in a field nothing loads", _unknown_field),
+    Rule("unknown-field", WARN, "every field is defined by the portable specification",
+         _unknown_field, target=PORTABLE),
+    Rule("claude-code-field", WARN, "every field is one Claude Code documents",
+         _claude_code_field, target=CLAUDE_CODE.id),
     Rule("body-budget", WARN, "SKILL.md body stays inside the line budget", _body_budget),
     Rule("ref-depth", WARN, "references stay one level deep", _ref_depth),
     Rule("frontmatter", ERROR, "frontmatter is present and parses", _frontmatter, parser=True),
@@ -229,8 +282,17 @@ def run_record(record: records.Record, only: str | None = None) -> list[Finding]
     return findings
 
 
-def run(skill: Skill, only: str | None = None) -> list[Finding]:
-    """Apply every rule (or one) to a single skill.
+def require_target(target: str) -> None:
+    """An unknown target is a caller error, never a request for no field rules."""
+    if target not in TARGETS:
+        raise ValueError(f"unknown target {target!r}; known targets: {', '.join(TARGETS)}")
+
+
+def run(skill: Skill, only: str | None = None, target: str = DEFAULT_TARGET) -> list[Finding]:
+    """Apply every rule for `target` (or exactly one rule) to a single skill.
+
+    Naming a rule with `only` runs it whatever its target: the caller has said
+    which claim they want checked.
 
     A SKILL.md that does not parse gets the parser rule's finding and nothing
     else, WHICHEVER rule was selected: `skillc check --rule name-spec` must still
@@ -238,10 +300,13 @@ def run(skill: Skill, only: str | None = None) -> list[Finding]:
     its presence - is what `selftest` credits (tests/test_records.py).
     """
     require_known(only, RULES)
+    require_target(target)
     if skill.parse_error is not None:
         selected = [rule for rule in RULES if rule.id == PARSER_RULE]
+    elif only:
+        selected = [rule for rule in RULES if rule.id == only]
     else:
-        selected = [rule for rule in RULES if not only or rule.id == only]
+        selected = [rule for rule in RULES if rule.target in (None, target)]
     findings: list[Finding] = []
     for rule in selected:
         findings.extend(

@@ -60,16 +60,17 @@ known-bad and known-good pair:
 ```
 $ skillc selftest
 ok       name-spec             red on bad (2), green on good (1)
-ok       required-fields       red on bad (1), green on good (1)
+ok       required-fields       red on bad (5), green on good (2)
 ok       trigger-shape         red on bad (1), green on good (1)
-ok       unknown-field         red on bad (1), green on good (1)
+ok       unknown-field         red on bad (2), green on good (1)
+ok       claude-code-field     red on bad (1), green on good (1)
 ok       body-budget           red on bad (1), green on good (1)
 ok       ref-depth             red on bad (1), green on good (1)
-ok       frontmatter           red on bad (1), green on good (1)
+ok       frontmatter           red on bad (3), green on good (2)
 ok       record-envelope       red on bad (2), green on good (1)
 ...
 
-skillc selftest: 12/12 rule(s) discriminate
+skillc selftest: 13/13 rule(s) discriminate
 ```
 
 Five verdicts fail the run:
@@ -98,14 +99,24 @@ fail proves nothing about the rules it blesses.
 
 ```
 $ skillc rules
-error  name-spec        name is spec-legal and matches its directory
-error  required-fields  required frontmatter is present and in range
-warn   trigger-shape    description says when to fire, not just what it does
-warn   unknown-field    no content parked in a field nothing loads
-warn   body-budget      SKILL.md body stays inside the line budget
-warn   ref-depth        references stay one level deep
-error  frontmatter      frontmatter is present and parses
+error  name-spec          name is spec-legal and matches its directory
+error  required-fields    required frontmatter is present and in range
+warn   trigger-shape      description says when to fire, not just what it does
+warn   unknown-field      every field is defined by the portable specification  [target: portable]
+warn   claude-code-field  every field is one Claude Code documents  [target: claude-code]
+warn   body-budget        SKILL.md body stays inside the line budget
+warn   ref-depth          references stay one level deep
+error  frontmatter        frontmatter is present and parses
 ```
+
+Frontmatter is read by a **documented subset of YAML**, not a YAML
+implementation: block mappings and lists, single-line and quoted values, and `|`/`>`
+block text. Anything else is an error that says whether real YAML also rejects it
+or `skillc` simply does not read it. `name` and `description` must be non-empty
+strings. Which fields "load" depends on the client, so the field rules are scoped:
+`--target portable` (the default, the Agent Skills specification) or
+`--target claude-code` (plus Claude Code's documented extensions, read on a stated
+date). See [docs/frontmatter.md](docs/frontmatter.md).
 
 (`skillc rules` also lists the evaluation-record rules checked by
 `skillc check-records`.) An unknown `--rule` is refused with exit 2 before

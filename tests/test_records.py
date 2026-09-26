@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 from skillc import checks, cli, records
-from skillc.spec import discover
+from skillc.spec import DEFAULT_TARGET, discover
 
 CONTROLS = Path(__file__).resolve().parent.parent / "controls"
 
@@ -87,7 +87,10 @@ def test_each_bad_case_fires_ITS_OWN_rule_and_NOTHING_ELSE(
     else:
         skills = discover(bad_dir)
         own = [f for sk in skills for f in checks.run(sk, only=rule.id)]
-        every = [f for sk in skills for f in checks.run(sk)]
+        # Under the rule's OWN target: a field rule for one client is minimal when
+        # it is the only thing that fires for that client, not for every client.
+        target = rule.target or DEFAULT_TARGET
+        every = [f for sk in skills for f in checks.run(sk, target=target)]
 
     assert own, f"{rule.id} is silent on its own known-bad input"
     # A parser rule is proven BY input that does not parse; that is its explicit
