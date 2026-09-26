@@ -35,7 +35,17 @@ collection) closes.
   can never be silently overwritten back to `"running"` by a write that
   started earlier but finished later. Evidence: a 100-run stress loop of
   the flaky test found 4 failures on the pre-fix fixture and 0 after.
-
+- **The no-project-name-branch genericity guard now covers every core module
+  added since #71** (Refs #11): `tests/test_materialize.py`'s `CORE_MODULES`
+  predated the Docker backend and everything built on it, so it covered
+  `materialize.py`/`trial.py`/`verify.py`/`backend.py`/`lifecycle.py` but not
+  `docker_backend.py`, `reap.py`, `trial_bootstrap.py`, `cost_estimate.py`,
+  `exposure.py` or `judge.py` - six real "runner or grader" modules a
+  project-name branch could have reached with no test noticing. Each was
+  independently AST-scanned for a subject-word literal before being added
+  (all clean), and the existing planted-literal negative control - already
+  parametrized over the whole tuple - proves the guard actually reaches each
+  new module rather than merely listing it.
 - **The failure-path matrix and trustworthy cleanup** (#79, Refs #10):
   [`docs/specs/evaluation-facility/failure-matrix.md`](docs/specs/evaluation-facility/failure-matrix.md)
   states all ten of #10's addendum failure paths through the real driver

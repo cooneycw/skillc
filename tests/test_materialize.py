@@ -708,10 +708,24 @@ SUBJECT_WORDS = ("power-pack", "cpp", "sha256sums", ".claude/scripts", "codex/sk
 #: The core modules a project-name branch must never reach: the adapter
 #: (materialize), the controller/runner (trial), the verifier (verify), the
 #: execution backend seam (backend, #65), and the lifecycle driver that ties
-#: them together (lifecycle, #10 PR1b). Evals fixtures, tests and the subject
-#: declarations themselves are excluded on purpose - a subject.json naming its
-#: own subject is the mechanism, not a defect.
-CORE_MODULES = ("materialize.py", "trial.py", "verify.py", "backend.py", "lifecycle.py")
+#: them together (lifecycle, #10 PR1b). Extended (#11's own re-check, after
+#: #77-#92 added real core surface this tuple predates): the Docker-backed
+#: execution backend (docker_backend, #77/#83/#85), its label-scoped
+#: reaping and snapshots (reap, #79/#91), the per-trial agent bootstrap
+#: (trial_bootstrap, #78), the pre-spend cost projection the trial ledger's
+#: case format uses (cost_estimate, #26/#86), the rung-2 exposure check
+#: that reuses materialize's own machinery (exposure, #55/#90), and the
+#: grading-tier judge seam (judge, #69/#92) - each independently AST-scanned
+#: for a `SUBJECT_WORDS` literal before being added here, so none of these
+#: seven entries could have been silently covering a real branch this test
+#: would otherwise miss. Evals fixtures, tests and the subject declarations
+#: themselves are excluded on purpose - a subject.json naming its own
+#: subject is the mechanism, not a defect.
+CORE_MODULES = (
+    "materialize.py", "trial.py", "verify.py", "backend.py", "lifecycle.py",
+    "docker_backend.py", "reap.py", "trial_bootstrap.py", "cost_estimate.py",
+    "exposure.py", "judge.py",
+)
 
 
 def _subject_literals(source: str) -> list[str]:
