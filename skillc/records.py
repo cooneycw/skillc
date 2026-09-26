@@ -87,6 +87,15 @@ OBSERVATION_COVERAGE = ("complete", "partial", "unsupported")
 #: must never read as a stream that saw nothing.
 REQUIRED_OBSERVATIONS = ("client-events", "process-lifecycle")
 
+#: The optional per-skill invocation stream (#39, concept from config-drift-checker,
+#: docs/research/config-drift-checker-lessons.md, per ADR 0003). Deliberately NOT
+#: in REQUIRED_OBSERVATIONS: unlike client-events/process-lifecycle, making it
+#: mandatory would invalidate every v2 manifest written before this stream existed.
+#: records.md "skill-invocations" records the version decision and the scope this
+#: leaves to #26 (making it required for a case that declares selection as an
+#: observation - #26's case format does not exist yet, so that wiring is deferred).
+SKILL_INVOCATIONS = "skill-invocations"
+
 #: What the controller concluded about one attempt. Only `captured` hands the
 #: attempt to grading; the other three are explicit non-results, each with a reason,
 #: and none of them may be dropped (EF-07).
@@ -467,6 +476,59 @@ def artifact_digest(record: Record) -> Iterator[str]:
             yield f"artifact {entry.get('path', index)!r} has digest {entry['digest']!r}"
 
 
+def _skill_invocations(entry: dict[str, object]) -> Iterator[str]:
+    """The optional `skill-invocations` stream (#39): one row per installed skill,
+    keyed by path to `installation-receipt.installed` (the cross-check against the
+    receipt itself is `ledger_binding`'s, which is the rule with a receipt to
+    read). Each row carries a `count` - either a non-negative integer or the
+    literal string `"UNKNOWN"`.
+
+    Coverage governs which is legal, the same rule `observation_coverage` already
+    enforces for a whole stream, applied per skill: incomplete coverage may only
+    ever report UNKNOWN, never a real count including 0 - a silent skill is not an
+    uninvoked one. Complete coverage must report a real count, since "unknown" is
+    not an honest answer once everything was seen.
+    """
+    coverage = entry.get("coverage")
+    skills = entry.get("skills")
+    if not isinstance(skills, list):
+        yield "observation 'skill-invocations' carries no skills list"
+        return
+    if coverage == "complete" and not skills:
+        # `installation-receipt` refuses an empty `installed` list, so every
+        # attempt with a receipt has at least one installed skill. "Complete"
+        # coverage naming none is the same silent-empty-population defect
+        # `artifact_digest` already refuses for an empty capture, one level up.
+        yield (
+            "observation 'skill-invocations' declares complete coverage but names "
+            "no skills; a capture that recorded nothing is not a capture that "
+            "found nothing"
+        )
+    seen: set[str] = set()
+    for index, row in enumerate(skills):
+        if not isinstance(row, dict) or not _nonempty_str(row.get("path")):
+            yield f"skill-invocations entry {index} names no path"
+            continue
+        path, count = row["path"], row.get("count")
+        if path in seen:
+            yield (
+                f"skill-invocations: {path!r} appears more than once; a second row "
+                f"is a conflicting count, and nothing here can say which is true"
+            )
+        seen.add(path)
+        if coverage != "complete":
+            if count != "UNKNOWN":
+                yield (
+                    f"skill-invocations: {path!r} has coverage {coverage!r} but "
+                    f"count {count!r}, not 'UNKNOWN' - silence is not 'not invoked'"
+                )
+        elif isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            yield (
+                f"skill-invocations: {path!r} has count {count!r}, not a "
+                f"non-negative integer, under complete coverage"
+            )
+
+
 def observation_coverage(record: Record) -> Iterator[str]:
     """Each required stream declares its origin and coverage; failures are listed.
 
@@ -496,6 +558,8 @@ def observation_coverage(record: Record) -> Iterator[str]:
                 f"observation {stream!r} has coverage {entry.get('coverage')!r}, not "
                 f"one of {list(OBSERVATION_COVERAGE)}"
             )
+        if stream == SKILL_INVOCATIONS:
+            yield from _skill_invocations(entry)
     for stream in REQUIRED_OBSERVATIONS:
         if stream not in declared:
             yield (
@@ -667,6 +731,35 @@ def _ident(value: object, *keys: str) -> tuple[object, ...]:
     return tuple(value.get(k) for k in keys) if isinstance(value, dict) else ()
 
 
+def _skill_invocation_binding(
+    record: Record, where: str, installed: set[str] | None
+) -> Iterator[str]:
+    """A `skill-invocations` row must name a skill the attempt's own receipt
+    installed. No receipt for this attempt in the bundle is a silent skip here:
+    that gap is `attempt-accounting`'s finding, not a mismatch this rule can call.
+    A malformed `skills` list is `observation_coverage`'s finding; this rule only
+    checks well-formed rows against the receipt.
+    """
+    if installed is None:
+        return
+    observations = record.data.get("observations")
+    if not isinstance(observations, list):
+        return
+    for entry in observations:
+        if not isinstance(entry, dict) or entry.get("stream") != SKILL_INVOCATIONS:
+            continue
+        skills = entry.get("skills")
+        if not isinstance(skills, list):
+            continue
+        for row in skills:
+            path = row.get("path") if isinstance(row, dict) else None
+            if isinstance(path, str) and path and path not in installed:
+                yield (
+                    f"{where}: skill-invocations names {path!r}, which this "
+                    f"attempt's installation receipt never installed"
+                )
+
+
 def ledger_binding(bundle: Bundle) -> Iterator[str]:
     """Every record is bound to an attempt the ledger planned, under that trial's
     identities, and a result graded bytes that were actually captured.
@@ -678,7 +771,10 @@ def ledger_binding(bundle: Bundle) -> Iterator[str]:
       - a result whose grader differs from the trial's, other than a regrade's new
         revision, graded under a configuration nobody planned;
       - a result citing a digest its attempt's manifest does not list graded bytes
-        nobody captured - an altered or substituted artifact.
+        nobody captured - an altered or substituted artifact;
+      - a manifest's `skill-invocations` stream (#39) names a skill the attempt's
+        own installation receipt never installed. `observation_coverage` checks the
+        stream's own shape; only this rule has the receipt to check it against.
     """
     ledgers = bundle.of_kind(TRIAL_LEDGER)
     if len(ledgers) != 1:
@@ -696,6 +792,14 @@ def ledger_binding(bundle: Bundle) -> Iterator[str]:
             if isinstance(a, dict) and _nonempty_str(a.get("digest"))
         } if isinstance(artifacts, list) else set()
         captured.setdefault(manifest.attempt_id, set()).update(digests)
+    installed_paths: dict[str, set[str]] = {}
+    for receipt in bundle.of_kind(INSTALLATION_RECEIPT):
+        entries = receipt.data.get("installed")
+        paths = {
+            e["path"] for e in entries or []
+            if isinstance(e, dict) and _nonempty_str(e.get("path"))
+        } if isinstance(entries, list) else set()
+        installed_paths.setdefault(receipt.attempt_id, set()).update(paths)
 
     for record in bundle.records:
         if record.kind not in ATTEMPT_BOUND or not record.attempt_id:
@@ -710,6 +814,8 @@ def ledger_binding(bundle: Bundle) -> Iterator[str]:
                 f"{where}: names trial {record.trial_id!r}, but the ledger planned this "
                 f"attempt under {trial.get('trial_id')!r}; a cross-trial record"
             )
+        if record.kind == ARTIFACT_MANIFEST:
+            yield from _skill_invocation_binding(record, where, installed_paths.get(record.attempt_id))
         if record.kind == INSTALLATION_RECEIPT:
             for ident, keys in (("subject", ("digest",)), ("client", ("name", "version"))):
                 got = _ident(record.data.get(ident), *keys)
