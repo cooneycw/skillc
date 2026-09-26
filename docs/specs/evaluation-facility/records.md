@@ -1,7 +1,7 @@
 # Evaluation records, version 2
 
 - Status: Executable. `skillc check-records` refuses records and bundles this document rejects.
-- Date: 2026-09-26 (version 1: 2026-09-21, slice of #4 in #17)
+- Date: 2026-09-26 (version 1: 2026-09-21, slice of #4 in #17; `attempt-lifecycle` added in #8)
 - Governing documents: [interfaces](interfaces.md), [protocol](protocol.md), [specification](spec.md)
 - Decision: [ADR 0001](../../decisions/0001-every-check-ships-a-redcase.md)
 
@@ -18,6 +18,11 @@ executable form** so that something can refuse a malformed instance:
 | Trial ledger | `kind: trial-ledger` | `controller` |
 | Artifact and observation bundle | `kind: artifact-manifest` | `controller` |
 | Verified result | `kind: verified-result` | `assembler` (the controller's result assembler) |
+| Trial ledger (lifecycle, termination, cleanup) | `kind: attempt-lifecycle` | `controller` |
+
+`attempt-lifecycle` was added to version 2 by #8. It is **additive**: no existing
+record changes meaning, and no v2 bundle existed outside the committed controls
+when it was added. The one stricter rule is `attempt-accounting`, below.
 
 A record that passes validation is **well formed and internally consistent**, and a
 bundle that passes is **consistent with its own ledger**. Neither is true because of
@@ -50,9 +55,9 @@ Every record is a JSON object carrying:
 | Field | Meaning |
 |---|---|
 | `version` | integer `2`. See "Versions" below. |
-| `kind` | one of the four kinds above. |
+| `kind` | one of the five kinds above. |
 | `producer` | the role that produced it. Exactly one role is authorized per kind. |
-| `attempt_id`, `trial_id` | on the three attempt-bound kinds. The ledger issues them; it carries neither. |
+| `attempt_id`, `trial_id` | on the four attempt-bound kinds. The ledger issues them; it carries neither. |
 | `raw` | optional: `{ref, digest}` pointing at the backend's original record. |
 
 ### Identifiers
@@ -134,8 +139,9 @@ attempt, has an expected population of zero, and nothing measured against it cou
 ever go missing.
 
 Budgets, lifecycle, termination and cleanup observations are required ledger
-outputs in interfaces.md, but the runtime that records them is #8. Version 2 permits
-them as additional fields and does not yet require their shape.
+outputs in interfaces.md. The ledger is immutable once dispatched, so lifecycle,
+termination and cleanup live in `attempt-lifecycle` (below). A budget may be carried
+as an additional trial field; its shape is not yet required.
 
 ## `artifact-manifest`
 
@@ -161,6 +167,28 @@ must be present as a list, empty when there were none.
 These two streams are the initial set, not a census. Cost/token observation and
 nested-worker coverage are named in interfaces.md and join this list when a producer
 can report them (#8, #12).
+
+## `attempt-lifecycle`
+
+Produced by the controller ([capture.md](capture.md)), one per planned attempt: what
+became of it.
+
+| Field | Content |
+|---|---|
+| `disposition` | `captured`, `not-run`, `unavailable` or `inconclusive` |
+| `reason` | required unless `captured`: a non-result says why |
+| `stop` | `reason` (`exited`, `timeout`, `budget-exhausted`, `operator-cancelled`, `launch-failed`, `never-started`, `unobserved`) and `confirmed` (boolean) |
+| `events` | non-empty, starting at `planned`; each an event from the fixed vocabulary with its time |
+| `cleanup` | `status` (`removed`, `already-absent`, `not-needed`, `partial`, `refused-not-owned`) and a `failures` list |
+
+`captured` requires a **confirmed** stop, a stop reason under which something ran,
+and a `captured` event: bytes taken before the subject stopped could still have
+been changing. `not-run` requires `never-started`. Only `not-run` and `unavailable`
+may say `never-started`.
+
+Why a separate kind rather than a result: a v2 result cannot say "INCONCLUSIVE,
+nothing was captured". A graded result must cite graded digests, and INCONCLUSIVE
+may not be declared as a run state.
 
 ## `verified-result`
 
@@ -237,16 +265,27 @@ says so on every run.
 validation failure:
 
 - no trial or attempt ID is planned twice;
-- an attempt has at most one receipt and one manifest. A second one is a conflicting
-  account, and nothing here can say which is true;
+- an attempt has at most one receipt, one manifest and one lifecycle. A second one
+  is a conflicting account, and nothing here can say which is true;
 - results may be several (a regrade is a new result), but each `result_id` is unique.
 
-**`attempt-accounting`.** "Every planned attempt remains accounted for" (EF-07):
+**`attempt-accounting`.** "Every planned attempt remains accounted for" (EF-07).
+The controller's account is the lifecycle record (#8):
 
-- every planned attempt has a result. A non-start is accounted as `NOT_RUN`, never
-  dropped;
+- every planned attempt has an `attempt-lifecycle`. Without one it has silently
+  dropped out, whatever results exist;
+- a `captured` attempt has its artifact manifest and a result. Without a result,
+  grading is still owed;
+- a `not-run` or `unavailable` attempt needs no result. A result it does have
+  declares the matching run state (`NOT_RUN`, `UNAVAILABLE`);
+- an attempt the controller did not capture carries no manifest and no graded
+  result, and a captured one carries no declared non-run: the accounts would
+  disagree;
 - an attempt that was graded (its result declares no run state) also has its
   installation receipt and artifact manifest.
+
+Before #8 this rule required a result for every planned attempt. It now requires a
+lifecycle instead, and a result only where bytes were captured.
 
 **`lineage`.** protocol.md: "A rerun gets a new ID and links to the original.
 Regrading creates a new result linked to the unchanged original artifact ... Neither
@@ -258,8 +297,9 @@ operation erases the earlier attempt."
 
 ## Retention boundary
 
-The initial boundary, which #8 turns into a location, access and retention policy
-before any real private or model evidence exists (review.md Q5):
+The boundary below is unchanged. #8 turned it into a location, access and
+retention policy, in [capture.md](capture.md#storage-access-and-retention-reviewmd-q5)
+(review.md Q5):
 
 - Evidence is **local and private**, in controller-owned storage. Nothing is
   published automatically.
@@ -272,7 +312,9 @@ before any real private or model evidence exists (review.md Q5):
 - Records never live in the subject's writable environment. That is a property of
   the controller (#8, #9), not something a record can show about itself.
 
-No part of this boundary is enforced beyond the `raw` digest and lineage rules above.
+`check-records` enforces nothing here beyond the `raw` digest and lineage rules.
+The controller (`skillc/trial.py`) enforces the store location, write-once records
+and export exclusions.
 
 ## Rules and their controls
 
@@ -294,9 +336,10 @@ bundle cases as well, including against every record rule.
 | `criterion-vocabulary` | record | an outcome outside the vocabulary |
 | `result-evidence` | record | SATISFIED without evidence; UNKNOWN without `missing`; no graded digests; no grader; a run state without reason |
 | `derived-status` | record | a status copied rather than derived |
+| `attempt-lifecycle` | record | an unknown stop reason or disposition; a non-result without a reason; captured before a confirmed stop; no cleanup |
 | `ledger-binding` | bundle | cross-trial receipt; stale receipt; attempt the ledger never issued; altered artifact; unplanned grader |
 | `unique-ids` | bundle | duplicate attempt ID; conflicting receipts; duplicate result ID |
-| `attempt-accounting` | bundle | planned attempt with no result; graded without receipt; graded without manifest |
+| `attempt-accounting` | bundle | planned attempt with no lifecycle; captured with no result; graded without receipt; graded without manifest; captured but declared NOT_RUN; graded but not captured; manifest but not captured |
 | `lineage` | bundle | retry reusing its own ID; regrade whose original was erased; regrade of different bytes |
 
 Record and bundle rules live in the **same registry and the same selftest loop** as
@@ -308,8 +351,9 @@ the `SKILL.md` rules. Only the subject-loading step knows the family.
 
 This completes #4's contract versioning. What it deliberately does not do:
 
-- **No runtime.** Nothing here produces a record. The controller that writes the
-  ledger, captures artifacts and assembles results is #8 and #9. Runtime packages
+- **No runtime here.** This module validates. The controller that writes the
+  ledger, lifecycle and manifests is `skillc/trial.py` (#8,
+  [capture.md](capture.md)); result assembly is #9. Runtime packages
   stay outside `skillc/`, which the stdlib import walk in `tests/test_frontmatter.py`
   enforces with its own negative control.
 - **No authentication.** Digests are checked for agreement between records, never

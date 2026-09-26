@@ -42,6 +42,7 @@ GOOD_RESULT = _control("result-evidence/good/record.json")
 GOOD_RECEIPT = _control("installation-receipt/good/receipt.json")
 GOOD_LEDGER = _control("trial-ledger/good/ledger.json")
 GOOD_MANIFEST = _control("artifact-digest/good/record.json")
+GOOD_LIFECYCLE = _control("attempt-lifecycle/good/captured.json")
 
 
 # --------------------------------------------------------------- the pairing
@@ -448,7 +449,7 @@ def test_an_established_violation_stays_FAIL_in_a_bundle_with_unknowns(tmp_path:
         {"id": "a", "mandatory": True, "outcome": "VIOLATED", "evidence": ["log:a"]},
         {"id": "b", "mandatory": True, "outcome": "UNKNOWN", "missing": "trace lost"},
     ]}
-    bundle = _write_bundle(tmp_path, GOOD_LEDGER, GOOD_RECEIPT, GOOD_MANIFEST, result)
+    bundle = _write_bundle(tmp_path, GOOD_LEDGER, GOOD_RECEIPT, GOOD_MANIFEST, GOOD_LIFECYCLE, result)
     assert checks.run_bundle(bundle) == []
     assert [f for r in bundle.records for f in checks.run_record(r)] == []
 
@@ -552,3 +553,48 @@ def test_accounting_under_two_ledgers_says_it_could_not_run(tmp_path: Path) -> N
     bundle = _write_bundle(tmp_path, GOOD_LEDGER, GOOD_LEDGER)
     rc = cli.cmd_check_records(argparse.Namespace(path=str(tmp_path), rule="attempt-accounting"))
     assert list(records.attempt_accounting(bundle)) and rc == 1
+
+
+# --------------------------------------------------------------- attempt lifecycle (#8)
+
+def _lifecycle(**fields: object) -> records.Record:
+    return _record(**{**GOOD_LIFECYCLE, **fields})
+
+
+def test_a_not_run_attempt_must_say_it_never_started() -> None:
+    """A not-run attempt never started: a not-run with a timeout ran. And a captured
+    one that never started captured nothing. Only not-run and unavailable (a
+    dependency failed before dispatch) may say never-started."""
+    ran = _lifecycle(disposition="not-run", reason="budget", stop={"reason": "timeout", "confirmed": True})
+    assert any("never started" in d for d in records.attempt_lifecycle(ran))
+    never = _lifecycle(stop={"reason": "never-started", "confirmed": True})
+    assert list(records.attempt_lifecycle(never))
+    blocked = _lifecycle(disposition="unavailable", reason="provider unreachable",
+                         stop={"reason": "never-started", "confirmed": True})
+    assert list(records.attempt_lifecycle(blocked)) == []
+
+
+def test_lifecycle_events_start_at_planned_and_carry_times() -> None:
+    late = _lifecycle(events=[{"event": "started", "at": "t"}, {"event": "captured", "at": "t"}])
+    assert any("start at planned" in d for d in records.attempt_lifecycle(late))
+    untimed = _lifecycle(events=[{"event": "planned"}, {"event": "captured", "at": "t"}])
+    assert any("has no time" in d for d in records.attempt_lifecycle(untimed))
+    uncaptured = _lifecycle(events=[{"event": "planned", "at": "t"}])
+    assert any("no captured event" in d for d in records.attempt_lifecycle(uncaptured))
+
+
+def test_a_lifecycle_is_bound_to_a_planned_attempt(tmp_path: Path) -> None:
+    """The new kind joins ATTEMPT_BOUND, so ledger-binding refuses a lifecycle for
+    an attempt the ledger never issued - an account of an attempt nobody planned."""
+    stray = {**GOOD_LIFECYCLE, "attempt_id": "att-9"}
+    bundle = _write_bundle(tmp_path, GOOD_LEDGER, GOOD_LIFECYCLE, stray)
+    assert any("att-9" in d for d in records.ledger_binding(bundle))
+
+
+def test_two_lifecycles_for_one_attempt_conflict(tmp_path: Path) -> None:
+    bundle = _write_bundle(tmp_path, GOOD_LEDGER, GOOD_LIFECYCLE, GOOD_LIFECYCLE)
+    assert any("attempt-lifecycle" in d for d in records.unique_ids(bundle))
+
+
+def test_only_the_controller_produces_a_lifecycle() -> None:
+    assert list(records.producer_authority(_lifecycle(producer="subject")))
