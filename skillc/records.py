@@ -442,6 +442,12 @@ def trial_ledger(record: Record) -> Iterator[str]:
         ):
             for missing in _identity(trial, ident, *keys):
                 yield f"trial {name!r}: {missing}"
+        case = trial.get("case")
+        if isinstance(case, dict) and "observes_selection" in case and not isinstance(case["observes_selection"], bool):
+            yield (
+                f"trial {name!r}: case.observes_selection must be a boolean, "
+                f"not {case['observes_selection']!r}"
+            )
         attempts = trial.get("attempts")
         if not isinstance(attempts, list) or not attempts:
             yield f"trial {name!r} plans no attempts; its expected population is empty"
@@ -760,6 +766,26 @@ def _skill_invocation_binding(
                 )
 
 
+def _skill_invocations_required_but_absent(record: Record, where: str, trial: dict[str, object]) -> Iterator[str]:
+    """#39's "left to #26" control: when the attempt's TRIAL declares
+    `case.observes_selection: true` (#26), its manifest's `observations`
+    must include a `skill-invocations` stream - silence no longer means "not
+    declared", it means the case's own contract was not met. A trial that
+    does not declare it (the default) requires nothing here; `#39`'s stream
+    stays optional exactly as `records.md` states.
+    """
+    case = trial.get("case")
+    if not isinstance(case, dict) or case.get("observes_selection") is not True:
+        return
+    observations = record.data.get("observations")
+    entries = observations if isinstance(observations, list) else []
+    if not any(isinstance(e, dict) and e.get("stream") == SKILL_INVOCATIONS for e in entries):
+        yield (
+            f"{where}: this attempt's trial declares case.observes_selection: true, "
+            f"so a 'skill-invocations' observation is required, but none is present"
+        )
+
+
 def ledger_binding(bundle: Bundle) -> Iterator[str]:
     """Every record is bound to an attempt the ledger planned, under that trial's
     identities, and a result graded bytes that were actually captured.
@@ -774,7 +800,11 @@ def ledger_binding(bundle: Bundle) -> Iterator[str]:
         nobody captured - an altered or substituted artifact;
       - a manifest's `skill-invocations` stream (#39) names a skill the attempt's
         own installation receipt never installed. `observation_coverage` checks the
-        stream's own shape; only this rule has the receipt to check it against.
+        stream's own shape; only this rule has the receipt to check it against;
+      - a manifest for a trial whose `case.observes_selection` is `true` (#26)
+        carries no `skill-invocations` stream at all - #39's "left to #26"
+        control, closing it: the stream is required when the case says so,
+        and only this rule has the trial's case identity to check it against.
     """
     ledgers = bundle.of_kind(TRIAL_LEDGER)
     if len(ledgers) != 1:
@@ -816,6 +846,7 @@ def ledger_binding(bundle: Bundle) -> Iterator[str]:
             )
         if record.kind == ARTIFACT_MANIFEST:
             yield from _skill_invocation_binding(record, where, installed_paths.get(record.attempt_id))
+            yield from _skill_invocations_required_but_absent(record, where, trial)
         if record.kind == INSTALLATION_RECEIPT:
             for ident, keys in (("subject", ("digest",)), ("client", ("name", "version"))):
                 got = _ident(record.data.get(ident), *keys)

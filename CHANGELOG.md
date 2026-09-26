@@ -29,6 +29,35 @@ collection) closes.
   with `exec`/`kill`/`cp`/detached `run`); the real daemon boundary remains
   owed to the operator's live run (#10). Rests on PR #83 (merged as `2fcf6a5`
   on `main`), which landed the interface this builds on.
+- **The case format, `case.observes_selection`, and #39's last control**
+  (Refs #26 - its no-run part; Closes #39): a trial ledger's `case` identity
+  gains an optional boolean, `observes_selection` - type-checked at plan
+  time (`skillc/trial.py`'s generalized `_OPTIONAL_IDENTITY`) and again on
+  any already-written ledger (`skillc/records.trial_ledger`). Declaring it
+  `true` makes the `skill-invocations` observation stream (#39) REQUIRED for
+  that trial's attempts, not merely optional - its absence is now refused by
+  `skillc/records.ledger_binding`, closing the one control #39 deferred to
+  this issue. `skillc/cost_estimate.py` adds a pre-spend cost projection and
+  the spend gate (`authorize`) ADR 0005 rule 5 requires: a live run may
+  proceed only with an approved budget at or above the estimate, and
+  separately never above the operator's own $5 ceiling for the whole run
+  (relayed via master, 2026-09-26) regardless of any larger approved budget.
+  `evals/selection-probe/` publishes three predeclared cases (intended use, a
+  near miss, an overlapping choice), each planning BOTH matched arms
+  (treatment/baseline) as its own trial and reusing the already-qualified
+  `slug-small-fix` grader (#5), planned through the real controller against a
+  throwaway store, with a committed run manifest (6 attempts, $0.675
+  estimated) whose every published number is asserted equal to what the code
+  computes. A `/codex:code_review` pass found and fixed four issues before
+  push: the estimate originally priced only the treatment arm, omitting the
+  baseline's own paid attempt; `authorize` accepted a NaN/infinite budget
+  (a `<` comparison against NaN is always False); `estimated_usd` was rounded
+  before authorization, letting a tiny positive cost round down to a
+  budget-of-$0 pass; and the manifest-consistency test checked only the
+  final dollar figure, not the published price/token assumptions it was
+  computed from. No paid model call, live agent or image build happens
+  anywhere in this work; the manifest's `execution` stays `"incomplete"`
+  pending an approved budget.
 - **The Docker backend's interface** (Refs #77, sub-issue of #10):
   `skillc.docker_backend.DockerBackend`'s constructor/config, `describe()`'s
   claims, the composed `docker run` argv (`compose_run_argv`, a committed

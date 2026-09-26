@@ -222,17 +222,24 @@ a non-negative integer or the literal string `"UNKNOWN"`.
   against, exactly as it already does for a stale receipt or an altered
   artifact.
 
-**Left to #26, deliberately.** The issue's own acceptance list includes "the
-stream is required by the chosen version but absent" as a refused case. #39
-does not implement that: making the stream required is supposed to be gated by
-"an attempt whose case declares selection as an observation" (the issue's own
-words), and a *case* is not yet a record kind or a validated field anywhere in
-this schema - it is #26's and #12's territory. Inventing a stand-in field now
-(for example a boolean on the trial ledger) would very likely disagree with
-whatever #26 designs once cases are actually specified, and would spend #26's
-design decision inside a bounded follow-up that is explicitly "not a gate" for
-anything downstream. So today `skill-invocations` is optional unconditionally;
-#26 adds the rule that makes it required when a case says so.
+**Closed by #26.** The issue's own acceptance list includes "the stream is
+required by the chosen version but absent" as a refused case; #39 deferred it
+because a *case* was not yet a record kind or a validated field anywhere in
+this schema. #26 adds exactly one field to close it: `case.observes_selection`,
+an OPTIONAL boolean on the trial ledger's existing `case` identity (`id`,
+`revision`). Absent (the default) means the same as before this section: the
+`skill-invocations` stream stays fully optional. Declared `true` means the
+attempt's own case observes native skill selection as a criterion, and
+`records.ledger_binding` then REQUIRES a `skill-invocations` observation in
+that attempt's manifest - its absence is refused, not silently accepted.
+`skillc/trial.py`'s `_OPTIONAL_IDENTITY` type-checks the field at plan time
+(a caller writing `"observes_selection": "true"` gets a refusal naming the
+type, not a silently-stringified truthy value); `records.trial_ledger`
+type-checks it again on any already-written ledger record, since a producer
+outside this controller could write one directly. Committed controls:
+`controls/trial-ledger/{bad,good}/observes-selection*.json` (the type check)
+and `controls/ledger-binding/{bad,good}/skill-invocations-*` (the requirement
+itself, bad = declared but absent, good = declared and present).
 
 **The client route is a fact each adapter declares, not one skillc infers.**
 Claude Code exposes invocation as a `Skill` tool call, so its adapter can
@@ -416,14 +423,14 @@ bundle cases as well, including against every record rule.
 | `producer-authority` | record | forged subject verdict; unchecked receipt; adapter-produced ledger |
 | `attempt-binding` | record | no attempt; malformed attempt ID; no trial |
 | `installation-receipt` | record | empty install; no readiness; subject without digest |
-| `trial-ledger` | record | no trials; a trial with no attempts; missing grader identity; malformed attempt ID |
+| `trial-ledger` | record | no trials; a trial with no attempts; missing grader identity; malformed attempt ID; `case.observes_selection` present but not a boolean (#26) |
 | `artifact-digest` | record | an artifact without a digest; an empty manifest |
 | `observation-coverage` | record | a silent required stream; an unknown origin; no `capture_failures`; a `skill-invocations` count that is not `UNKNOWN` under incomplete coverage, or not a real integer under complete coverage; complete coverage naming no skills; a duplicate skill path with conflicting counts (#39) |
 | `criterion-vocabulary` | record | an outcome outside the vocabulary; a non-boolean `mandatory` (`"true"` would drop a violation out of the derivation) |
 | `result-evidence` | record | SATISFIED without evidence; UNKNOWN without `missing`; no graded digests; no grader; a run state without reason |
 | `derived-status` | record | a status copied rather than derived |
 | `attempt-lifecycle` | record | an unknown stop reason or disposition; a non-result without a reason; captured before a confirmed stop; no cleanup |
-| `ledger-binding` | bundle | cross-trial receipt; stale receipt; attempt the ledger never issued; altered artifact; unplanned grader; a `skill-invocations` path the attempt's receipt never installed (#39) |
+| `ledger-binding` | bundle | cross-trial receipt; stale receipt; attempt the ledger never issued; altered artifact; unplanned grader; a `skill-invocations` path the attempt's receipt never installed (#39); a trial declaring `case.observes_selection: true` whose manifest has no `skill-invocations` stream (#26/#39) |
 | `unique-ids` | bundle | duplicate attempt ID; conflicting receipts; duplicate result ID |
 | `attempt-accounting` | bundle | planned attempt with no lifecycle; captured with no result; graded without receipt; graded without manifest; captured but declared NOT_RUN; graded but not captured; manifest but not captured |
 | `lineage` | bundle | retry reusing its own ID; regrade whose original was erased; regrade of different bytes |

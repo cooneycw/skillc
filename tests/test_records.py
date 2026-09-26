@@ -739,3 +739,65 @@ def test_an_invoked_skill_the_receipt_installed_is_accepted(tmp_path: Path) -> N
     ]}
     bundle = _write_bundle(tmp_path, GOOD_LEDGER, GOOD_RECEIPT, manifest)
     assert list(records.ledger_binding(bundle)) == []
+
+
+# ------------------------------------------------- case.observes_selection (#26)
+
+
+def test_case_observes_selection_must_be_a_boolean() -> None:
+    ledger = {**GOOD_LEDGER, "trials": [
+        {**GOOD_LEDGER["trials"][0], "case": {  # type: ignore[index]
+            **GOOD_LEDGER["trials"][0]["case"], "observes_selection": "true",  # type: ignore[index]
+        }},
+    ]}
+    findings = list(records.trial_ledger(_record(**ledger)))
+    assert findings and "boolean" in findings[0]
+
+
+def test_case_observes_selection_true_is_accepted() -> None:
+    ledger = {**GOOD_LEDGER, "trials": [
+        {**GOOD_LEDGER["trials"][0], "case": {  # type: ignore[index]
+            **GOOD_LEDGER["trials"][0]["case"], "observes_selection": True,  # type: ignore[index]
+        }},
+    ]}
+    assert list(records.trial_ledger(_record(**ledger))) == []
+
+
+def _ledger_with_observes_selection(value: bool) -> dict[str, object]:
+    return {**GOOD_LEDGER, "trials": [
+        {**GOOD_LEDGER["trials"][0], "case": {  # type: ignore[index]
+            **GOOD_LEDGER["trials"][0]["case"], "observes_selection": value,  # type: ignore[index]
+        }},
+    ]}
+
+
+def test_skill_invocations_required_but_absent_is_refused(tmp_path: Path) -> None:
+    """#39's own control, closed by #26: a trial that declares
+    `case.observes_selection: true` but whose manifest carries no
+    `skill-invocations` stream is refused, not silently accepted."""
+    ledger = _ledger_with_observes_selection(True)
+    bundle = _write_bundle(tmp_path, ledger, GOOD_RECEIPT, GOOD_MANIFEST)
+    findings = list(records.ledger_binding(bundle))
+    assert findings and "required" in findings[0] and "skill-invocations" in findings[0]
+
+
+def test_skill_invocations_declared_satisfies_the_requirement(tmp_path: Path) -> None:
+    ledger = _ledger_with_observes_selection(True)
+    installed_path = GOOD_RECEIPT["installed"][0]["path"]  # type: ignore[index]
+    manifest = {**GOOD_MANIFEST, "observations": [
+        *GOOD_MANIFEST["observations"],  # type: ignore[misc]
+        {
+            "stream": "skill-invocations", "origin": "observed", "coverage": "complete",
+            "skills": [{"path": installed_path, "count": 0}],
+        },
+    ]}
+    bundle = _write_bundle(tmp_path, ledger, GOOD_RECEIPT, manifest)
+    assert list(records.ledger_binding(bundle)) == []
+
+
+def test_skill_invocations_absent_is_fine_when_not_declared(tmp_path: Path) -> None:
+    """The default: a trial that never declares `observes_selection` requires
+    nothing here - #39's stream stays optional exactly as records.md states."""
+    ledger = _ledger_with_observes_selection(False)
+    bundle = _write_bundle(tmp_path, ledger, GOOD_RECEIPT, GOOD_MANIFEST)
+    assert list(records.ledger_binding(bundle)) == []

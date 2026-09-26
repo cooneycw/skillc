@@ -76,9 +76,18 @@ _IDENTITIES = {
     "client": ("name", "version"),
     "image": ("digest",),
 }
-#: Identity keys a plan MAY carry. The grader's `digest` pins the grader definition
-#: the verifier must find (skillc.verify, #9): it refuses to grade without one.
-_OPTIONAL_IDENTITY = {"grader": ("digest",)}
+#: Identity keys a plan MAY carry, each with its required type when present.
+#: The grader's `digest` pins the grader definition the verifier must find
+#: (skillc.verify, #9): it refuses to grade without one. The case's
+#: `observes_selection` (#26) declares that this trial's attempts observe
+#: native skill selection as a criterion, not merely task outcome - absent
+#: (the default) means it does not, and `records.ledger_binding` (#39) makes
+#: the `skill-invocations` observation stream REQUIRED, not merely optional,
+#: for exactly the attempts of a trial that declares it.
+_OPTIONAL_IDENTITY: dict[str, tuple[tuple[str, type], ...]] = {
+    "grader": (("digest", str),),
+    "case": (("observes_selection", bool),),
+}
 _LABEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,47}$")
 
 #: Directories never exported, whatever the declared scope: VCS metadata, and the
@@ -408,19 +417,41 @@ def _extension_problem(old: dict[str, object], new: dict[str, object]) -> str | 
 # ------------------------------------------------------------------ planning
 
 
-def _strict_identity(trial: dict[str, object], name: str, keys: tuple[str, ...]) -> dict[str, str]:
+def _strict_identity(trial: dict[str, object], name: str, keys: tuple[str, ...]) -> dict[str, object]:
+    """Required `keys` are always non-empty strings. An optional key
+    (`_OPTIONAL_IDENTITY`) is type-checked against its declared type when
+    PRESENT and otherwise simply omitted from the result - so a caller that
+    never mentions `observes_selection` gets an identity with no such key,
+    not a key defaulted to `False`, keeping "not declared" and "declared
+    false" the same thing for a boolean nobody has a reason to write as
+    `false` explicitly."""
     value = trial.get(name)
     if not isinstance(value, dict):
         raise Refused(f"trial {trial.get('label')!r}: no {name} identity")
     optional = _OPTIONAL_IDENTITY.get(name, ())
-    unknown = set(value) - set(keys) - set(optional)
+    optional_keys = {k for k, _ in optional}
+    unknown = set(value) - set(keys) - optional_keys
     if unknown:
         raise Refused(f"trial {trial.get('label')!r}: {name} carries unknown fields {sorted(unknown)}")
-    present = (*keys, *(k for k in optional if k in value))
-    for key in present:
+    result: dict[str, object] = {}
+    for key in keys:
         if not isinstance(value.get(key), str) or not str(value[key]).strip():
             raise Refused(f"trial {trial.get('label')!r}: {name} identity has no {key}")
-    return {k: str(value[k]) for k in present}
+        result[key] = str(value[key])
+    for key, kind in optional:
+        if key not in value:
+            continue
+        if kind is str:
+            if not isinstance(value[key], str) or not str(value[key]).strip():
+                raise Refused(f"trial {trial.get('label')!r}: {name} identity has no {key}")
+            result[key] = str(value[key])
+        elif kind is bool:
+            if not isinstance(value[key], bool):
+                raise Refused(f"trial {trial.get('label')!r}: {name}.{key} must be a boolean, not {value[key]!r}")
+            result[key] = value[key]
+        else:  # pragma: no cover - defensive; every declared type above is handled
+            raise Refused(f"trial {trial.get('label')!r}: {name}.{key} has an unsupported declared type {kind!r}")
+    return result
 
 
 def plan(spec: dict[str, object], store: Path) -> Experiment:

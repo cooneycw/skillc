@@ -1,0 +1,56 @@
+{
+  "manifest_schema": 1,
+  "experiment": "selection-probe",
+  "_comment": "Prepared, not run (ADR 0005 rule 5): every number below is computed by tests/test_selection_probe.py from skillc/cost_estimate.py and evals/selection-probe/cases.json, not hand-typed. A future change to the case count, arm count, repeat schedule or token/price assumptions that forgets to update this file is caught by that test.",
+  "subject": {
+    "name": "cpp-codex",
+    "locator": "github.com/cooneycw/claude-power-pack",
+    "revision": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b"
+  },
+  "client": {"name": "codex", "version": "0.157.1"},
+  "grader": {"id": "slug-small-fix", "revision": "2"},
+  "cases": [
+    "selection-probe-intended-use",
+    "selection-probe-near-miss",
+    "selection-probe-overlapping-choice"
+  ],
+  "treatment_vs_baseline": {
+    "treatment": "the whole CPP pack (74 skills) installed, per subject.json's select: \"all\"",
+    "baseline": "an identical disposable home with no skill installed",
+    "note": "each case plans BOTH arms as its own trial (found missing from the cost estimate by cross-model review, #26) - the baseline arm still runs a real, paid agent attempt (it must show no skill invoked, which needs the same live call as the treatment arm), so both count toward the estimate below"
+  },
+  "repeat_schedule": {
+    "arms_per_case": 2,
+    "attempts_per_trial": 1,
+    "rationale": "a bounded pilot per #26's own resource-bounds section: three cases, one collection, one client configuration, no repeats added until a benefit appears"
+  },
+  "arm_order": "treatment then baseline, per case, matching skillc/materialize.py's existing arm ordering",
+  "time_caps": {
+    "per_attempt_seconds": 900,
+    "total_seconds": 5400,
+    "note": "not yet enforced by any committed control in this PR - #10's Docker backend Limits (skillc/backend.py) is where this would be wired once #77's implementation lands"
+  },
+  "monetary_ceiling_usd": 5.00,
+  "monetary_ceiling_source": "operator ruling relayed 2026-09-26 (msg 1401/1402): \"don't worry about the cost estimate... i expect it's under $5\" - enforced in code by skillc.cost_estimate.authorize, refused regardless of any approved budget above it",
+  "cost_estimate": {
+    "trials": 3,
+    "arms_per_case": 2,
+    "attempts_per_trial": 1,
+    "total_attempts": 6,
+    "price": {
+      "name": "gpt-5.1-codex",
+      "input_usd_per_million": 1.25,
+      "output_usd_per_million": 10.00,
+      "source": "pricepertoken.com, 2026-09-26 (third-party aggregator, not independently confirmed against OpenAI's own page)"
+    },
+    "assumptions": {
+      "estimated_input_tokens_per_attempt": 50000,
+      "estimated_output_tokens_per_attempt": 5000,
+      "basis": "no attempt has ever run against this subject; these are placeholder assumptions (system prompt + CPP skill listing + goal.md for input, agent reasoning/tool calls/patch for output), not measurements. The first live attempt should replace them with observed values. This assumption reads like a single turn and is weak in a specific, known direction: a multi-turn agentic Codex session re-sends its context (including the 74-skill listing) every turn, so real input could be 10-20x higher. Sensitivity, at these prices, same 6 attempts: 500,000 input tokens/attempt -> $4.05 total (still under the $5 ceiling); 1,000,000 input tokens/attempt -> $7.80 total (OVER the $5 ceiling - skillc.cost_estimate.authorize would refuse it before any cache discount is applied)."
+    },
+    "estimated_usd": 0.675
+  },
+  "monetary_cap_usd": null,
+  "approved_budget_usd": null,
+  "execution": "incomplete - no approved budget (ADR 0005 rule 5)"
+}
