@@ -494,6 +494,16 @@ def criterion_vocabulary(record: Record) -> Iterator[str]:
                 f"criterion {entry.get('id', index)!r} reports {outcome!r}, which is "
                 f"not one of {list(CRITERION_OUTCOMES)}"
             )
+        # `derive_status` selects with `is True`, so a string "true", a 1 or a
+        # missing flag would make the criterion optional, and a VIOLATED one would
+        # drop out of the verdict rather than contradict it - which derived-status
+        # cannot see (#37). bool, not int: `1` is an int that equals True.
+        mandatory = entry.get("mandatory")
+        if not isinstance(mandatory, bool):
+            yield (
+                f"criterion {entry.get('id', index)!r} has mandatory {mandatory!r}, "
+                f"which is not a JSON boolean; it would silently read as optional"
+            )
 
 
 def result_evidence(record: Record) -> Iterator[str]:

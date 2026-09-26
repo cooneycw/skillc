@@ -171,7 +171,7 @@ Produced by the assembler.
 | `result_id` | this result's own identifier |
 | `grader` | `id`, `revision` |
 | `graded_digests` | the artifact digests it graded. Required unless a run state is declared. |
-| `criteria` | each with `id`, `mandatory`, `outcome` (`SATISFIED`/`VIOLATED`/`UNKNOWN`) |
+| `criteria` | each with `id`, `mandatory` (a JSON boolean), `outcome` (`SATISFIED`/`VIOLATED`/`UNKNOWN`) |
 | `status` | `PASS`/`FAIL`/`UNAVAILABLE`/`INCONCLUSIVE`/`NOT_RUN`, **derived** |
 | `run_state` | optional, only `UNAVAILABLE` or `NOT_RUN`, with a `reason` |
 | `regrade_of` | optional, the `result_id` this regrades |
@@ -291,7 +291,7 @@ bundle cases as well, including against every record rule.
 | `trial-ledger` | record | no trials; a trial with no attempts; missing grader identity; malformed attempt ID |
 | `artifact-digest` | record | an artifact without a digest; an empty manifest |
 | `observation-coverage` | record | a silent required stream; an unknown origin; no `capture_failures` |
-| `criterion-vocabulary` | record | an outcome outside the vocabulary |
+| `criterion-vocabulary` | record | an outcome outside the vocabulary; a non-boolean `mandatory` (`"true"` would drop a violation out of the derivation) |
 | `result-evidence` | record | SATISFIED without evidence; UNKNOWN without `missing`; no graded digests; no grader; a run state without reason |
 | `derived-status` | record | a status copied rather than derived |
 | `ledger-binding` | bundle | cross-trial receipt; stale receipt; attempt the ledger never issued; altered artifact; unplanned grader |
