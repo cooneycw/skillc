@@ -8,10 +8,10 @@ for the gate itself: the same gate, one planted defect, and it must refuse.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import re
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -43,12 +43,23 @@ def _outcomes(candidate: Path, timeout: float = 10) -> dict[str, str]:
     return {c["id"]: c["outcome"] for c in result["criteria"]}
 
 
+def _git_blob_id(data: bytes) -> str:
+    """The id `git hash-object` gives these bytes, computed without git.
+
+    CI runs in a slim image with no git binary, so shelling out to it failed
+    there while passing everywhere git happens to be installed.
+    """
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+def test_the_blob_id_matches_git() -> None:
+    # Known value: `printf 'hello\n' | git hash-object --stdin`.
+    assert _git_blob_id(b"hello\n") == "ce013625030ba8dba906f756967f9e9ca394464a"
+
+
 def test_the_fixture_is_the_pinned_cpp_blob() -> None:
-    blob = subprocess.run(
-        ["git", "hash-object", str(TASK / "fixture" / "src" / "slugify.py")],
-        capture_output=True, text=True, check=True,
-    ).stdout.strip()
-    assert blob == PINNED_FIXTURE_BLOB
+    data = (TASK / "fixture" / "src" / "slugify.py").read_bytes()
+    assert _git_blob_id(data) == PINNED_FIXTURE_BLOB
     assert PINNED_FIXTURE_BLOB in (TASK / "PROVENANCE.md").read_text(encoding="utf-8")
 
 
