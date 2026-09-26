@@ -14,8 +14,8 @@ skillc's README has always credited this repository's `writing-for-agents` skill
 as the basis for its description, trigger, progressive-disclosure and pruning
 rules, but with no pinned revision and no provenance note. This document is that
 note, pinned at `c55ee46073ed923f86ce59a5eb3b6d895095d1b7`, and it records the
-static scan baseline three later issues (#50, #51, #52) cite against that same
-commit.
+static scan baseline four later issues (#50, #51, #52, #53) cite against that
+same commit.
 
 skillc does not run, import, wrap or vendor this repository. **Everything below
 is static reading** of the pinned source, plus one execution: `skillc check`
@@ -33,10 +33,10 @@ ideas, not code.
 | Concept | Upstream location (pinned) | skillc owner | Translation |
 |---|---|---|---|
 | A description states a triggering condition, not just a capability, because the model reads it to decide whether to fire | [`skills/productivity/writing-for-agents/SKILL.md` L14-17](https://github.com/mattpocock/skills/blob/c55ee46073ed923f86ce59a5eb3b6d895095d1b7/skills/productivity/writing-for-agents/SKILL.md#L14-L17) ("Context pointers": "list the **branches** that should trigger reaching it") | `trigger-shape` (`skillc/checks.py:139-147`) | A `WARN` when a description has no triggering phrase. #51 found the rule's premise does not hold for a user-invoked skill, whose description this same repository's convention keeps human-facing (see the next row) |
-| A user-invoked skill's description is human-facing, not a model trigger, and should have its trigger lists stripped | [`skills/productivity/writing-for-agents/SKILL-MECHANICS.md` L10](https://github.com/mattpocock/skills/blob/c55ee46073ed923f86ce59a5eb3b6d895095d1b7/skills/productivity/writing-for-agents/SKILL-MECHANICS.md#L10) ("the `description` becomes human-facing: a one-line summary, trigger lists stripped") | #51 | Narrows `trigger-shape` to skip a skill declaring `disable-model-invocation: true` under `--target claude-code`, where that field is documented |
+| A user-invoked skill's description is human-facing, not a model trigger, and should have its trigger lists stripped | [`skills/productivity/writing-for-agents/SKILL-MECHANICS.md` L10](https://github.com/mattpocock/skills/blob/c55ee46073ed923f86ce59a5eb3b6d895095d1b7/skills/productivity/writing-for-agents/SKILL-MECHANICS.md#L10) ("the `description` becomes human-facing: a one-line summary, trigger lists stripped") | #51 | Proposed in #51: narrow `trigger-shape` to skip a skill declaring `disable-model-invocation: true` under `--target claude-code`, where that field is documented. Not yet landed; the exact behaviour is still being decided in that PR |
 | Progressive disclosure keeps a document's top legible by pushing branch-specific material behind a pointer, one level down | [`skills/productivity/writing-for-agents/SKILL.md` L29-43](https://github.com/mattpocock/skills/blob/c55ee46073ed923f86ce59a5eb3b6d895095d1b7/skills/productivity/writing-for-agents/SKILL.md#L29-L43) (the information hierarchy: in-file step, in-file reference, disclosed reference) | `ref-depth` (`skillc/checks.py:185-201`), `body-budget` (`skillc/checks.py:177-182`) | `ref-depth` warns when a reference chain goes deeper than one hop; `body-budget` warns when the body itself sprawls past a line budget instead of disclosing. #52 found `ref-depth` over-counts a chain that loops back to `SKILL.md` or re-visits an already-linked sibling |
 | Pruning: keep one authoritative place per meaning, and cut a line that no longer bears on the task | [`skills/productivity/writing-for-agents/SKILL.md` L76-81](https://github.com/mattpocock/skills/blob/c55ee46073ed923f86ce59a5eb3b6d895095d1b7/skills/productivity/writing-for-agents/SKILL.md#L76-L81) ("Pruning": single source of truth, relevance, no-ops) | `body-budget` (`skillc/checks.py:177-182`) | Translated as a line-budget ceiling rather than a semantic duplication check; skillc has no rule yet that detects restated meaning directly |
-| User- vs model-invoked is the one axis every skill declares, and each harness excludes a user-invoked skill from the model's reach in its own field | [`.agents/invocation.md` L5, L10](https://github.com/mattpocock/skills/blob/c55ee46073ed923f86ce59a5eb3b6d895095d1b7/.agents/invocation.md#L5-L10) (L5: `disable-model-invocation` / `policy.allow_implicit_invocation`; L10: "Keep the two in sync: a skill is user-invoked in both harnesses or neither") | #50 | A new `invocation-consistency` rule reading both the Claude Code frontmatter field and Codex's `agents/openai.yaml`, refusing to treat an unreadable second-client file as agreement |
+| User- vs model-invoked is the one axis every skill declares, and each harness excludes a user-invoked skill from the model's reach in its own field | [`.agents/invocation.md` L5, L10](https://github.com/mattpocock/skills/blob/c55ee46073ed923f86ce59a5eb3b6d895095d1b7/.agents/invocation.md#L5-L10) (L5: `disable-model-invocation` / `policy.allow_implicit_invocation`; L10: "Keep the two in sync: a skill is user-invoked in both harnesses or neither") | #50 | Proposed in #50: a new `invocation-consistency` rule reading both the Claude Code frontmatter field and Codex's `agents/openai.yaml`, refusing to treat an unreadable second-client file as agreement. Not yet landed |
 | A distributable collection ships a declared subset, named in the client's own manifest, not every `SKILL.md` under the tree | [`.claude-plugin/plugin.json` `skills` array](https://github.com/mattpocock/skills/blob/c55ee46073ed923f86ce59a5eb3b6d895095d1b7/.claude-plugin/plugin.json) (25 entries, engineering/ and productivity/ only); [`CLAUDE.md`](https://github.com/mattpocock/skills/blob/c55ee46073ed923f86ce59a5eb3b6d895095d1b7/CLAUDE.md) states the promoted-bucket convention this manifest encodes | #53 | `skillc check --manifest <plugin.json>` scopes the scan to declared entries and reports the undeclared remainder as a count, rather than mixing shipped and draft skills into one total |
 
 ## Static scan baseline at c55ee46
@@ -61,10 +61,12 @@ Per-rule breakdown:
 | `trigger-shape` | 22 | 22 |
 | `ref-depth` | 4 | 4 |
 
-Both totals match the ad hoc figures #50-#53 cite from a throwaway script run
-earlier the same day (skillc `6afaca8`); re-running with skillc's actual
-checker at `64cde40` reproduces them exactly, so this baseline is a
-confirmation, not a new measurement.
+Both totals match the ad hoc figures #51, #52 and #53 cite: those were first
+taken by an ad hoc run of `skillc check` itself at skillc `6afaca8`, earlier
+the same day (only #50's `openai.yaml` agreement check used a throwaway
+script, not `skillc check`). Re-running `skillc check` at `64cde40` reproduces
+the `6afaca8` figures exactly, so this baseline is a reproduction, not a new
+measurement.
 
 ### Which warnings are false positives, and which issue owns each
 
