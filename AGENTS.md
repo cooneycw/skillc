@@ -25,11 +25,18 @@ specification rejects, and it proves its own rules can fail before reporting the
   frontmatter subset and target profiles are documented in [docs/frontmatter.md](docs/frontmatter.md)
 - `skillc/checks.py` - the rules; each declares the control that proves it
 - `skillc/records.py` - the four evaluation-record contracts (receipt, ledger, manifest, result) and the bundle rules that bind them to a ledger; see [records spec](docs/specs/evaluation-facility/records.md)
-- `skillc/cli.py` - `check`, `check-records`, `selftest`, `rules`
+- `skillc/materialize.py` - installs a declared skill surface into disposable homes and
+  proves what the client lists; see [materialization spec](docs/specs/evaluation-facility/materialization.md).
+  Generic: subject conventions live in `subject.json`, never in this module
+- `skillc/cli.py` - `check`, `check-records`, `selftest`, `rules`, `materialize`
 - `controls/<rule-id>/{bad,good}/` - the committed redcases
 - `evals/` - behavioural evals; see `evals/README.md`
 - `evals/level1/<task>/` - a goal-based task: pinned fixture, public `goal.md`, grader,
   reference/alternative/wrong candidates and a `qualify.py` gate that must refuse broken graders
+- `evals/subjects/<subject>/` - a declared subject (`subject.json`, `SUBJECT.md`) and the
+  evidence `skillc materialize` produced for it
+- `tests/fixtures/codex-subject/` - a two-skill collection and `fake_codex.py`, a stand-in
+  client for CI, which has neither git nor Codex
 
 ## Verify
 

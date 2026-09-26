@@ -107,7 +107,9 @@ means *unknown*, and unknown is refused.
 
 Readiness is **reported**, not required to be satisfied: a receipt whose discovery
 canary failed is a valid, useful receipt. What readiness then allows the result to
-claim is the grader's and assembler's business (#7, #9).
+claim is the grader's and assembler's business (#9). The first producer,
+`skillc materialize` (#7), adds `ordinary_parity`, `source_unchanged` and
+`host_unchanged` beside the two required facts; see [materialization.md](materialization.md).
 
 ## `trial-ledger`
 
@@ -316,4 +318,5 @@ This completes #4's contract versioning. What it deliberately does not do:
   bundle. No rule yet asks whether two bundles planned the same attempt.
 - **Readiness does not yet gate a PASS.** A PASS over a receipt whose discovery
   canary failed is not refused here. That judgement needs the case's declared role
-  for setup (protocol.md section 3) and belongs with #7 and #9.
+  for setup (protocol.md section 3) and belongs with #9. #7 now PRODUCES readiness
+  ([materialization.md](materialization.md)); it does not gate on it.
