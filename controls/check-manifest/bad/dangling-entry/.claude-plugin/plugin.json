@@ -1,0 +1,4 @@
+{
+  "name": "dangling-entry-fixture",
+  "skills": ["./skills/present", "./skills/missing"]
+}

@@ -11,6 +11,7 @@ step.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -496,3 +497,54 @@ def discover(root: Path) -> list[Skill]:
     if root.is_file() and root.name == "SKILL.md":
         return [Skill.load(root)]
     return [Skill.load(p) for p in sorted(root.rglob("SKILL.md"))]
+
+
+class ManifestError(Exception):
+    """A plugin manifest that cannot be trusted to say what it declares."""
+
+
+@dataclass(frozen=True)
+class Manifest:
+    """A Claude Code plugin manifest's declared skill directories.
+
+    Only the `skills` field is read - a plugin manifest is a third-party
+    format skillc does not own, so an unrelated field is neither validated
+    nor an error. Entries resolve against the PLUGIN root, not the manifest's
+    own directory: the conventional location is `<plugin root>/.claude-plugin/
+    plugin.json`, and its `skills` entries (e.g. `./skills/foo`) are relative
+    to `<plugin root>`.
+    """
+
+    path: Path
+    plugin_root: Path
+    declared: tuple[Path, ...]  # resolved directories, manifest order, de-duplicated
+
+    @classmethod
+    def load(cls, path: Path) -> Manifest:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise ManifestError(f"manifest unreadable: {path}: {exc}") from exc
+        try:
+            data = json.loads(text)
+        except ValueError as exc:
+            raise ManifestError(f"manifest is not valid JSON: {path}: {exc}") from exc
+        if not isinstance(data, dict):
+            raise ManifestError(f"manifest is not a JSON object: {path}")
+        skills = data.get("skills")
+        if not isinstance(skills, list) or not all(
+            isinstance(entry, str) and entry for entry in skills
+        ):
+            raise ManifestError(
+                f"manifest has no 'skills' list of non-empty strings: {path}"
+            )
+        plugin_root = path.parent.parent if path.parent.name == ".claude-plugin" else path.parent
+        plugin_root = plugin_root.resolve()
+        declared: list[Path] = []
+        seen: set[Path] = set()
+        for entry in skills:
+            resolved = (plugin_root / entry).resolve()
+            if resolved not in seen:
+                seen.add(resolved)
+                declared.append(resolved)
+        return cls(path=path, plugin_root=plugin_root, declared=tuple(declared))
