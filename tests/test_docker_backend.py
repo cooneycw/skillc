@@ -1,13 +1,14 @@
-"""Tests for the Docker backend's INTERFACE (#77, sub-issue of #10): the
-`DockerBackend` constructor/config, `describe()`'s claims, and the composed
-`docker run` argv (`compose_run_argv`). The full lifecycle (`prepare`,
-`install`, `execute`, `confirm_stopped`, `export`, `destroy`,
-`confirm_absent`) is #77's own follow-up implementation PR, tracked there -
-every one of those methods raises `NotImplementedError` here on purpose.
+"""Tests for the Docker backend (#77, sub-issue of #10): the `DockerBackend`
+constructor/config, `describe()`'s claims, the composed `docker run` argv
+(`compose_run_argv`, PR #83's interface), and the real lifecycle
+(`prepare`, `install`, `execute`, `confirm_stopped`, `export`, `destroy`,
+`confirm_absent`) this PR adds.
 
-Tested here only against a fake `docker` CLI script - no daemon is available
-in this session. This proves argv composition and `describe()`'s claims,
-never a containment boundary; see `describe()`'s own `unobserved` claims.
+Tested here only against a fake `docker` CLI script
+(`tests/fixtures/docker-backend/fake_docker.py`) - no daemon is available in
+this session. This proves the lifecycle state machine, argv composition and
+`describe()`'s claims, never a containment boundary; see `describe()`'s own
+`unobserved` claims.
 """
 
 from __future__ import annotations
@@ -18,7 +19,8 @@ from pathlib import Path
 import pytest
 
 from skillc import docker_backend as d
-from skillc.backend import ExecutionBackend, Limits
+from skillc import lifecycle as lc
+from skillc.backend import BackendUnavailable, Confirmation, ExecutionBackend, Limits
 
 FAKE_DOCKER = Path(__file__).resolve().parent / "fixtures" / "docker-backend" / "fake_docker.py"
 
@@ -134,31 +136,6 @@ def test_describe_reports_the_fixed_candidate_user_regardless_of_the_host_caller
     assert any(f"{d.CANDIDATE_UID}:{d.CANDIDATE_GID}" in claim for claim in description.isolation)
     assert any("non-root" in claim for claim in description.isolation)
     assert not any("0:0" in claim for claim in description.isolation)
-
-
-def test_every_lifecycle_method_is_stubbed_pending_the_implementation_pr(
-    base: Path, docker_state: Path,
-) -> None:
-    """This PR is #77's interface only. Each method beyond `describe()` must
-    refuse loudly (NotImplementedError), never silently do nothing or return
-    a guessed value - a caller building against this interface before the
-    implementation PR lands must see an unmistakable refusal, not a result
-    that looks real."""
-    backend = _backend(base, docker_state)
-    with pytest.raises(NotImplementedError):
-        backend.prepare("a-000000000000")
-    with pytest.raises(NotImplementedError):
-        backend.install(object(), {})
-    with pytest.raises(NotImplementedError):
-        backend.execute(object(), ["true"], Limits(timeout=1))
-    with pytest.raises(NotImplementedError):
-        backend.confirm_stopped(object())
-    with pytest.raises(NotImplementedError):
-        backend.export(object(), Path("/nonexistent"))
-    with pytest.raises(NotImplementedError):
-        backend.destroy(object())
-    with pytest.raises(NotImplementedError):
-        backend.confirm_absent(object())
 
 
 # -------------------------------------------------------------- compose_run_argv
@@ -296,3 +273,199 @@ def test_composed_argv_never_forwards_a_bare_dash_e() -> None:
     # every -e's following value must have a "=" - never a bare name
     values = [argv[i + 1] for i, a in enumerate(argv) if a == "-e"]
     assert all("=" in v for v in values)
+
+
+# ------------------------------------------------------------------ lifecycle
+
+
+def test_prepare_raises_when_daemon_unreachable(base: Path, docker_state: Path) -> None:
+    _sentinel(docker_state, ".down")
+    backend = _backend(base, docker_state)
+    with pytest.raises(BackendUnavailable):
+        backend.prepare("a-lc-000000000001")
+
+
+def test_prepare_raises_when_docker_run_itself_fails(base: Path, docker_state: Path) -> None:
+    """The daemon is reachable (`version` succeeds) but the actual `docker
+    run -d` that starts this attempt's container is refused - prepare() must
+    turn that into BackendUnavailable too, never construct a handle for a
+    container that was never actually created."""
+    _sentinel(docker_state, ".refuse-run")
+    backend = _backend(base, docker_state)
+    with pytest.raises(BackendUnavailable):
+        backend.prepare("a-lc-000000000002")
+
+
+def test_prepare_raises_when_the_docker_binary_is_missing(base: Path) -> None:
+    backend = d.DockerBackend(
+        image="fake-image:1", base_dir=base, docker_bin=["/nonexistent/docker-binary-xyz"],
+    )
+    with pytest.raises(BackendUnavailable):
+        backend.prepare("a-lc-000000000003")
+
+
+def test_install_reports_discovery_canary_violated_when_nothing_is_declared(
+    base: Path, docker_state: Path,
+) -> None:
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000004")
+    readiness = backend.install(handle, {})
+    assert readiness["discovery_canary"] == "VIOLATED"
+    assert readiness["declared"] == 0
+    assert "canary_path" not in readiness
+    backend.destroy(handle)
+
+
+def test_install_counts_a_non_path_surface_value_without_copying_it(
+    base: Path, docker_state: Path,
+) -> None:
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000005")
+    readiness = backend.install(handle, {"meta": {"not": "a host path"}})
+    assert readiness["declared"] == 1
+    assert readiness["discovery_canary"] == "SATISFIED"
+    backend.destroy(handle)
+
+
+def test_install_raises_when_the_container_is_already_gone(
+    base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000006")
+    backend.destroy(handle)
+    surface_file = tmp_path / "x.txt"
+    surface_file.write_text("x")
+    with pytest.raises(BackendUnavailable):
+        backend.install(handle, {"x.txt": surface_file})
+
+
+def test_full_lifecycle_happy_path_installs_executes_and_exports(
+    base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """The whole seam, end to end, against the fake CLI: prepare() starts one
+    persistent container; install() copies a declared surface file and plants
+    the liveness canary via `docker cp`; execute() runs a real subprocess via
+    `docker exec` that touches the canary and writes its own output;
+    confirm_stopped() reports CONFIRMED once the container's own placeholder
+    has been stopped too (not just the exec'd process); export() copies
+    everything back out via `docker cp`; destroy()+confirm_absent() tear it
+    down for real."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000007")
+
+    surface_file = tmp_path / "skill.txt"
+    surface_file.write_text("skill contents\n")
+    nonce = "test-nonce-abc"
+    readiness = backend.install(handle, {"skill.txt": surface_file, lc.CANARY_NONCE_KEY: nonce})
+    assert readiness["discovery_canary"] == "SATISFIED"
+    assert readiness["declared"] == 1
+    assert readiness["canary_path"] == d.CANARY_RESULT_FILENAME
+
+    script = (
+        "import pathlib;"
+        "p = pathlib.Path('.skillc-canary');"
+        "n = p.read_text(encoding='utf-8') if p.exists() else '';"
+        "pathlib.Path('.skillc-canary-result').write_text(f'touched:{n}', encoding='utf-8');"
+        "pathlib.Path('out.txt').write_text('subject output', encoding='utf-8')"
+    )
+    result = backend.execute(handle, [sys.executable, "-c", script], Limits(timeout=5))
+    assert result.reason == "exited"
+    assert result.exit_code == 0
+
+    assert backend.confirm_stopped(handle) is Confirmation.CONFIRMED
+
+    dest = tmp_path / "export"
+    backend.export(handle, dest)
+    assert (dest / "out.txt").read_text(encoding="utf-8") == "subject output"
+    assert (dest / d.CANARY_RESULT_FILENAME).read_text(encoding="utf-8") == f"touched:{nonce}"
+    assert (dest / "skill.txt").read_text(encoding="utf-8") == "skill contents\n"
+
+    backend.destroy(handle)
+    assert backend.confirm_absent(handle) is Confirmation.CONFIRMED
+
+
+def test_execute_delivers_stdin_like_a_bare_host_process(base: Path, docker_state: Path) -> None:
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000008")
+    backend.install(handle, {})
+    script = "import sys, pathlib; pathlib.Path('in.txt').write_bytes(sys.stdin.buffer.read())"
+    result = backend.execute(
+        handle, [sys.executable, "-c", script], Limits(timeout=5), stdin=b"hello from the test",
+    )
+    assert result.reason == "exited"
+    assert result.exit_code == 0
+    dest = docker_state.parent / "stdin-export"
+    backend.export(handle, dest)
+    assert (dest / "in.txt").read_bytes() == b"hello from the test"
+    backend.destroy(handle)
+
+
+def test_execute_timeout_kills_the_container_and_confirm_stopped_agrees(
+    base: Path, docker_state: Path,
+) -> None:
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000009")
+    backend.install(handle, {})
+    result = backend.execute(
+        handle, [sys.executable, "-c", "import time; time.sleep(60)"],
+        Limits(timeout=0.3, grace=1.0),
+    )
+    assert result.reason == "timeout"
+    assert result.signal in ("SIGTERM", "SIGKILL")
+    assert backend.confirm_stopped(handle) is Confirmation.CONFIRMED
+    backend.destroy(handle)
+    assert backend.confirm_absent(handle) is Confirmation.CONFIRMED
+
+
+def test_execute_cancellation_kills_the_container(base: Path, docker_state: Path) -> None:
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000010")
+    backend.install(handle, {})
+    result = backend.execute(
+        handle, [sys.executable, "-c", "import time; time.sleep(60)"],
+        Limits(timeout=30, grace=1.0), cancel=lambda: True,
+    )
+    assert result.reason == "operator-cancelled"
+    assert backend.confirm_stopped(handle) is Confirmation.CONFIRMED
+    backend.destroy(handle)
+
+
+def test_execute_reports_launch_failed_when_the_docker_binary_is_missing(
+    base: Path, docker_state: Path,
+) -> None:
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000011")
+    backend.install(handle, {})
+    broken = d.DockerBackend(
+        image="fake-image:1", base_dir=base, docker_bin=["/nonexistent/docker-binary-xyz"],
+    )
+    result = broken.execute(handle, ["true"], Limits(timeout=1))
+    assert result.reason == "launch-failed"
+    assert result.exit_code is None
+    assert result.error is not None
+    backend.destroy(handle)
+
+
+def test_confirm_stopped_is_unknown_when_the_daemon_is_unreachable(
+    base: Path, docker_state: Path,
+) -> None:
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000012")
+    backend.install(handle, {})
+    _sentinel(docker_state, ".down")
+    assert backend.confirm_stopped(handle) is Confirmation.UNKNOWN
+    assert backend.confirm_absent(handle) is Confirmation.UNKNOWN
+
+
+def test_confirm_absent_is_not_confirmed_when_rm_lies(base: Path, docker_state: Path) -> None:
+    """Negative control: fake_docker's `.stuck-NAME` sentinel makes `rm -f`
+    report success without actually removing the container - confirm_absent()
+    must catch that lie via an independent `inspect`, never trust destroy()'s
+    own exit code."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000013")
+    assert isinstance(handle, d._Handle)
+    backend.install(handle, {})
+    _sentinel(docker_state, f".stuck-{handle.name}")
+    backend.destroy(handle)
+    assert backend.confirm_absent(handle) is Confirmation.NOT_CONFIRMED

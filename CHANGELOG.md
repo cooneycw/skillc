@@ -16,6 +16,19 @@ collection) closes.
 
 ### Added
 
+- **The Docker backend's implementation** (Refs #77, Refs #10, on top of the
+  interface above): real bodies for `prepare`/`install`/`execute`/
+  `confirm_stopped`/`export`/`destroy`/`confirm_absent`, all through the
+  `docker` CLI. One persistent container per attempt (`docker run -d` at
+  `prepare()`, acted on afterward via `docker cp`/`docker exec` - never a
+  bind mount, a shared volume or a second container), running as the fixed
+  `10001:10001` candidate user. `confirm_stopped()`/`confirm_absent()` return
+  `Confirmation.UNKNOWN` whenever the daemon cannot be asked at all, and a
+  cleanup sweep must never reap on that answer. Proven here only against a
+  fake `docker` CLI (`tests/fixtures/docker-backend/fake_docker.py`, extended
+  with `exec`/`kill`/`cp`/detached `run`); the real daemon boundary remains
+  owed to the operator's live run (#10). Rests on PR #83 (merged as `2fcf6a5`
+  on `main`), which landed the interface this builds on.
 - **The Docker backend's interface** (Refs #77, sub-issue of #10):
   `skillc.docker_backend.DockerBackend`'s constructor/config, `describe()`'s
   claims, the composed `docker run` argv (`compose_run_argv`, a committed
@@ -25,8 +38,8 @@ collection) closes.
   candidate user is a fixed, host-independent uid:gid (`10001:10001`), never
   the host caller's own - the container's own `id`, file ownership and
   transcripts would otherwise carry a piece of the host's real identity.
-  Every lifecycle method beyond `describe()` raises `NotImplementedError`
-  pending #77's own follow-up implementation PR.
+  The follow-up implementation PR above fills in every lifecycle method
+  beyond `describe()`.
 - **Trial image and per-trial agent bootstrap** (#78, Refs #10):
   `skillc/trial_bootstrap.py` composes a private per-trial home owned by a
   fixed `candidate` (10001:10001) identity, an onboarding seed bound to
