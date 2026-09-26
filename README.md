@@ -73,7 +73,7 @@ ok       record-envelope       red on bad (7), green on good (2)
 skillc selftest: 23/23 rule(s) discriminate
 ```
 
-Five verdicts fail the run:
+Six verdicts fail the run:
 
 | verdict | meaning |
 |---|---|
@@ -82,6 +82,16 @@ Five verdicts fail the run:
 | `EMPTY` | a control directory holds no input, so that side proves nothing |
 | `UNPARSED` | a control input does not parse, so the parser - not the rule - decided it |
 | `UNPROVEN` | no committed control exists, so nothing has shown the rule can fail |
+| `MALFORMED` | a `targets/<target>/` case names an unknown target, or neither `bad/` nor `good/` | 
+
+A rule whose behaviour varies by `--target` (`trigger-shape` is the first, #51)
+also commits `controls/<rule-id>/targets/<target>/{bad,good}/`: the base pair
+above always runs at the default target and cannot see a target-dependent
+regression, so `skillc selftest` reports each such case on its own line, e.g.
+`ok trigger-shape[claude-code] green on good (1)`. A target case may commit
+only one side when the other is already proven elsewhere (the base pair, or a
+sibling case) - but a side it DOES commit is held to the same discipline as the
+base pair: empty is `EMPTY`, not skipped.
 
 Only findings the rule under test raised count as red. Two rules are parser
 controls (`frontmatter`, `record-envelope`): their known-bad input must include
@@ -116,7 +126,11 @@ or `skillc` simply does not read it. `name` and `description` must be non-empty
 strings. Which fields "load" depends on the client, so the field rules are scoped:
 `--target portable` (the default, the Agent Skills specification) or
 `--target claude-code` (plus Claude Code's documented extensions, read on a stated
-date). See [docs/frontmatter.md](docs/frontmatter.md).
+date). See [docs/frontmatter.md](docs/frontmatter.md). `trigger-shape` itself runs
+under every target but reads the active one: it stays silent under `claude-code`
+on a `disable-model-invocation: true` skill, whose description the model never
+reads to decide anything, and still fires under `portable`, where another client
+may auto-select on it regardless (see [frontmatter.md](docs/frontmatter.md#trigger-shape-and-user-invoked-skills)).
 
 (`skillc rules` also lists the evaluation-record rules checked by
 `skillc check-records`: per-record rules for the installation receipt, trial
@@ -175,6 +189,12 @@ skillc/checks.py                          the function, registered in RULES
 controls/<rule-id>/bad/<skill>/SKILL.md   an input it MUST fire on
 controls/<rule-id>/good/<skill>/SKILL.md  an input it MUST stay silent on
 ```
+
+If the rule's verdict on the SAME input varies by `--target`, also commit
+`controls/<rule-id>/targets/<target>/{bad,good}/<skill>/SKILL.md` for each
+target where the behaviour differs from the base pair above - one side is
+enough when the other is already proven. `skillc selftest` and the test suite
+both pick these up the same way it picks up the base pair.
 
 `skillc selftest` and the test suite both pick the pairing up automatically. If
 you cannot name the input that makes your new rule fire, you have just learned

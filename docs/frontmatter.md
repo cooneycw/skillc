@@ -95,6 +95,24 @@ what the client loads. When Claude Code changes, re-read the source, update
 `--rule` names one rule and runs it whatever the target; `--rule` and `--target`
 that disagree are refused.
 
+## trigger-shape and user-invoked skills
+
+`trigger-shape` warns when a description states a capability but no triggering
+condition, on the premise that "the model reads this to decide whether to fire
+the skill". A skill with `disable-model-invocation: true` breaks that premise
+under `claude-code`: the model cannot fire it at all, so it never reads the
+description to decide anything. `--target claude-code` stays silent on such a
+skill's description shape (issue #51); a model-invoked skill under the same
+target is unaffected.
+
+`--target portable` still fires on the identical skill. The Agent Skills
+specification has no invocation control, so `disable-model-invocation` is a
+Claude Code extension a conforming client is free to ignore - such a client may
+still read the description to auto-select the skill, and silencing the warning
+there would hide that real concern for it. This is a decision, not a default:
+skillc does not know every client's invocation rules, so it warns for the ones
+it cannot rule out rather than assuming they all behave like Claude Code.
+
 ## Not covered
 
 Types of optional fields (`metadata` as a string-to-string map, `compatibility`

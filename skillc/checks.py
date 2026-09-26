@@ -70,23 +70,25 @@ class Rule:
     `target` scopes a rule to one client profile (spec.TARGETS). A rule with no
     target applies everywhere; a scoped rule runs only when its target is the one
     selected, because a claim about which fields load is only true of a named
-    client.
+    client. `check` is always handed the ACTIVE target, even for a rule with no
+    `target` of its own, so a rule that applies everywhere can still vary what it
+    says between profiles (`trigger-shape` is the one that does).
     """
 
     id: str
     severity: str
     summary: str
-    check: Callable[[Skill], Iterator[str]]
+    check: Callable[[Skill, str], Iterator[str]]
     parser: bool = False
     target: str | None = None
 
 
-def _frontmatter(skill: Skill) -> Iterator[str]:
+def _frontmatter(skill: Skill, target: str) -> Iterator[str]:
     if skill.parse_error is not None:
         yield skill.parse_error
 
 
-def _name_spec(skill: Skill) -> Iterator[str]:
+def _name_spec(skill: Skill, target: str) -> Iterator[str]:
     name = skill.get("name")
     if name is None:
         return
@@ -115,7 +117,7 @@ def _kind(value: object) -> str:
     return type(value).__name__  # pragma: no cover - the parser yields no other type
 
 
-def _required_fields(skill: Skill) -> Iterator[str]:
+def _required_fields(skill: Skill, target: str) -> Iterator[str]:
     # This rule OWNS the type of a required field. The rules that read one
     # (`name-spec`, `trigger-shape`) see only strings via `Skill.get`, so a
     # mapping-valued name used to pass every rule unexamined.
@@ -136,18 +138,27 @@ def _required_fields(skill: Skill) -> Iterator[str]:
         yield f"compatibility is {len(compatibility)} characters, over {COMPATIBILITY_MAX}"
 
 
-def _trigger_shape(skill: Skill) -> Iterator[str]:
+def _trigger_shape(skill: Skill, target: str) -> Iterator[str]:
     description = skill.get("description")
     if not description or not description.strip():
         return  # required-fields owns that failure; do not double-report
-    if not TRIGGER_RE.search(description):
-        yield (
-            "description states a capability but no triggering condition - "
-            "the model reads this to decide whether to fire the skill"
-        )
+    if TRIGGER_RE.search(description):
+        return
+    if target == CLAUDE_CODE.id and skill.frontmatter.get("disable-model-invocation") is True:
+        # The model cannot fire a user-invoked skill, so it never reads this
+        # description to decide whether to - the premise this rule warns
+        # under does not hold for this client. Under `portable` the field is
+        # a Claude Code extension a conforming client need not honour, so the
+        # description may still steer auto-selection there; keep warning.
+        # See docs/frontmatter.md#trigger-shape-and-user-invoked-skills.
+        return
+    yield (
+        "description states a capability but no triggering condition - "
+        "the model reads this to decide whether to fire the skill"
+    )
 
 
-def _unknown_field(skill: Skill) -> Iterator[str]:
+def _unknown_field(skill: Skill, target: str) -> Iterator[str]:
     """Target `portable`: a field the Agent Skills specification does not define."""
     for key in sorted(set(skill.frontmatter) - SPEC_FIELDS):
         if key in CLAUDE_CODE.extensions:
@@ -164,7 +175,7 @@ def _unknown_field(skill: Skill) -> Iterator[str]:
             )
 
 
-def _claude_code_field(skill: Skill) -> Iterator[str]:
+def _claude_code_field(skill: Skill, target: str) -> Iterator[str]:
     """Target `claude-code`: a field outside the spec AND Claude Code's documentation."""
     for key in sorted(set(skill.frontmatter) - CLAUDE_CODE.fields):
         yield (
@@ -174,7 +185,7 @@ def _claude_code_field(skill: Skill) -> Iterator[str]:
         )
 
 
-def _body_budget(skill: Skill) -> Iterator[str]:
+def _body_budget(skill: Skill, target: str) -> Iterator[str]:
     if skill.body_lines > BODY_LINE_BUDGET:
         yield (
             f"body is {skill.body_lines} lines, over the {BODY_LINE_BUDGET}-line budget - "
@@ -182,8 +193,8 @@ def _body_budget(skill: Skill) -> Iterator[str]:
         )
 
 
-def _ref_depth(skill: Skill) -> Iterator[str]:
-    """A second-hop target only counts if it is a NEW file: not SKILL.md itself,
+def _ref_depth(skill: Skill, target: str) -> Iterator[str]:
+    """A second-hop link only counts if it is a NEW file: not SKILL.md itself,
     and not something SKILL.md already links directly. A back-link to the entry
     point, or a sibling already linked from SKILL.md, is not a deeper chain -
     the agent reaches it either way. Every distinct chain is reported, sorted
@@ -191,13 +202,13 @@ def _ref_depth(skill: Skill) -> Iterator[str]:
     """
     base = skill.path.parent
     skill_path = skill.path.resolve()
-    first_hop_targets = MD_LINK_RE.findall(skill.body)
+    first_hop_links = MD_LINK_RE.findall(skill.body)
     first_hop_paths = {
-        resolved for t in first_hop_targets if (resolved := (base / t).resolve()).is_file()
+        resolved for link in first_hop_links if (resolved := (base / link).resolve()).is_file()
     }
     chains: set[tuple[str, str]] = set()
-    for target in first_hop_targets:
-        first = (base / target).resolve()
+    for link in first_hop_links:
+        first = (base / link).resolve()
         if first not in first_hop_paths:
             continue
         try:
@@ -210,10 +221,10 @@ def _ref_depth(skill: Skill) -> Iterator[str]:
                 continue
             if resolved_second == skill_path or resolved_second in first_hop_paths:
                 continue
-            chains.add((target, second))
-    for target, second in sorted(chains):
+            chains.add((link, second))
+    for link, second in sorted(chains):
         yield (
-            f"{target} links on to {second}: references must stay one level "
+            f"{link} links on to {second}: references must stay one level "
             f"deep or the agent reads only part of the chain"
         )
 
@@ -396,6 +407,7 @@ def run(skill: Skill, only: str | None = None, target: str = DEFAULT_TARGET) -> 
     findings: list[Finding] = []
     for rule in selected:
         findings.extend(
-            Finding(rule.id, rule.severity, skill.path, detail) for detail in rule.check(skill)
+            Finding(rule.id, rule.severity, skill.path, detail)
+            for detail in rule.check(skill, target)
         )
     return findings
