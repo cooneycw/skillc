@@ -1,6 +1,6 @@
 # Integration, reporting and verification contracts
 
-- Status: Planning specification; executable schemas are a delivery task
+- Status: Planning specification; the executable record forms for all four contracts are in [records.md](records.md)
 - Date: 2026-09-20
 - Governing documents: [specification](spec.md), [protocol](protocol.md)
 - Research: [pinned Coder Eval handoff](../../research/coder-eval-skillc-contract-handoff-2026-09-20.md)

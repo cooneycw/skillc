@@ -24,7 +24,7 @@ specification rejects, and it proves its own rules can fail before reporting the
 - `skillc/spec.py` - the Agent Skills specification as a checkable object; its
   frontmatter subset and target profiles are documented in [docs/frontmatter.md](docs/frontmatter.md)
 - `skillc/checks.py` - the rules; each declares the control that proves it
-- `skillc/records.py` - evaluation records as checkable objects; see [records spec](docs/specs/evaluation-facility/records.md)
+- `skillc/records.py` - the four evaluation-record contracts (receipt, ledger, manifest, result) and the bundle rules that bind them to a ledger; see [records spec](docs/specs/evaluation-facility/records.md)
 - `skillc/cli.py` - `check`, `check-records`, `selftest`, `rules`
 - `controls/<rule-id>/{bad,good}/` - the committed redcases
 - `evals/` - behavioural evals; see `evals/README.md`

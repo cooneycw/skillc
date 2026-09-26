@@ -69,8 +69,8 @@ Existing coverage and changed assumptions affect the proposed mechanisms:
   results, and [ADR 0002](../../decisions/0002-independent-goal-driven-evaluation.md#decision)
   makes backend adoption conditional. Neither old proposal adds an acceptance gate.
 - The September 20 planning baseline predates executable
-  [record validation](records.md#boundary). Two record forms now exist, but the
-  ledger, installation receipts and evidence authentication remain open. The
+  [record validation](records.md#boundary). All four record forms now exist
+  (#4); evidence authentication and the runtime that produces them remain open. The
   baseline's historical six-rule/12-test counts are not current completion evidence.
 - [#9](https://github.com/cooneycw/skillc/issues/9) protects the evaluator;
   [#14](https://github.com/cooneycw/skillc/issues/14) measures the subject's behavior.

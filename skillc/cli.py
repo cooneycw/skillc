@@ -28,7 +28,10 @@ def _controls_root(explicit: str | None) -> Path:
     return Path(__file__).resolve().parent.parent / "controls"
 
 
-def _unknown_rule(only: str | None, family: tuple[checks.Rule, ...] | tuple[checks.RecordRule, ...]) -> bool:
+def _unknown_rule(
+    only: str | None,
+    family: tuple[checks.Rule, ...] | tuple[checks.RecordRule | checks.BundleRule, ...],
+) -> bool:
     """Refuse an unknown --rule BEFORE scanning.
 
     A selector that matches no rule checks nothing, and nothing found reads
@@ -110,11 +113,13 @@ def cmd_check_records(args: argparse.Namespace) -> int:
     """Refuse evaluation records the contract rejects.
 
     What a green here means, and it is deliberately narrower than it looks:
-    the records are WELL FORMED AND INTERNALLY CONSISTENT. It does not mean the
-    result is true. Every run says so, including the passing ones, because a line
-    that only appears on failure is a line nobody reads before quoting the green.
+    the records are WELL FORMED AND INTERNALLY CONSISTENT, and each bundle is
+    consistent with its own ledger. It does not mean the result is true. Every run
+    says so, including the passing ones, because a line that only appears on
+    failure is a line nobody reads before quoting the green. It also says how many
+    records were bound to no ledger, so "checked alone" never reads as "bound".
     """
-    if _unknown_rule(args.rule, checks.RECORD_RULES):
+    if _unknown_rule(args.rule, checks.evidence_rules()):
         return 2
     root = Path(args.path).resolve()
     if not root.exists():
@@ -127,16 +132,35 @@ def cmd_check_records(args: argparse.Namespace) -> int:
         print(f"skillc: no record found under {root} - nothing was checked")
         return 2
 
+    bundles = records.discover_bundles(root)
+    if not bundles and any(r.id == args.rule for r in checks.BUNDLE_RULES):
+        # A bundle rule with no bundle to read checks nothing; saying 0 errors
+        # would read exactly like a bundle that bound correctly.
+        print(f"skillc: no bundle (a directory holding a trial ledger) under {root} - "
+              f"{args.rule} checked nothing")
+        return 2
     findings: list[Finding] = []
     for record in found:
         findings.extend(checks.run_record(record, only=args.rule))
+    for bundle in bundles:
+        findings.extend(checks.run_bundle(bundle, only=args.rule))
 
     base = root if root.is_dir() else root.parent
     for finding in findings:
         print(finding.render(base))
 
     errors = sum(1 for f in findings if f.severity == ERROR)
-    print(f"\nskillc: {len(found)} record(s) checked, {errors} error(s)")
+    bound = {r.path for b in bundles for r in b.records}
+    loose = sum(1 for r in found if r.path not in bound)
+    print(
+        f"\nskillc: {len(found)} record(s) in {len(bundles)} bundle(s) checked, "
+        f"{errors} error(s)"
+    )
+    if loose:
+        print(
+            f"skillc: {loose} record(s) belong to no bundle and were checked alone - "
+            f"NOT against any ledger"
+        )
     print(f"skillc: examined {records.WHAT_WAS_EXAMINED}")
     return 1 if errors else 0
 
@@ -154,8 +178,23 @@ class _Subject:
         return f"{self.path.parent.name}/{self.path.name}"
 
 
-def _population(rule: checks.Rule | checks.RecordRule, where: Path) -> list[_Subject]:
+def _population(
+    rule: checks.Rule | checks.RecordRule | checks.BundleRule, where: Path
+) -> list[_Subject]:
     # The ONLY family-aware step. Everything after it is subject-agnostic.
+    if isinstance(rule, checks.BundleRule):
+        # Every CASE DIRECTORY is a subject, whether or not it loads as a bundle.
+        # Enumerating only what discovery found would let a case whose ledger
+        # became unreadable drop out of the population and leave a green behind.
+        subjects = []
+        for case in sorted(p for p in where.iterdir() if p.is_dir()):
+            bundle = records.bundle_at(case)
+            if bundle is None:
+                subjects.append(_Subject(case, "not a bundle: no readable trial ledger", 0))
+                continue
+            own = sum(f.rule == rule.id for f in checks.run_bundle(bundle, only=rule.id))
+            subjects.append(_Subject(case, bundle.parse_error, own))
+        return subjects
     if isinstance(rule, checks.RecordRule):
         return [
             _Subject(r.path, r.parse_error,
@@ -170,7 +209,7 @@ def _population(rule: checks.Rule | checks.RecordRule, where: Path) -> list[_Sub
 
 
 def _refusal(
-    rule: checks.Rule | checks.RecordRule, bad: list[_Subject], good: list[_Subject]
+    rule: checks.Rule | checks.RecordRule | checks.BundleRule, bad: list[_Subject], good: list[_Subject]
 ) -> tuple[str, str] | None:
     """Why this rule's control does not prove it, or None when it does.
 
