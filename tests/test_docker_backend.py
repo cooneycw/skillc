@@ -13,7 +13,9 @@ this session. This proves the lifecycle state machine, argv composition and
 
 from __future__ import annotations
 
+import io
 import sys
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -319,10 +321,31 @@ def test_install_reports_discovery_canary_violated_when_nothing_is_declared(
 def test_install_counts_a_non_path_surface_value_without_copying_it(
     base: Path, docker_state: Path,
 ) -> None:
+    """Regression for a cross-model review finding (PR #85): `discovery_canary`
+    must reflect what was actually COPIED, never merely what was declared - a
+    non-path value (or a path that does not exist) is counted in `declared`
+    but installs nothing, so readiness must not certify SATISFIED for it.
+    This fails on the pre-fix code, which reported SATISFIED here regardless
+    of whether anything was actually installed."""
     backend = _backend(base, docker_state)
     handle = backend.prepare("a-lc-000000000005")
     readiness = backend.install(handle, {"meta": {"not": "a host path"}})
     assert readiness["declared"] == 1
+    assert readiness["installed"] == 0
+    assert readiness["discovery_canary"] == "VIOLATED"
+    backend.destroy(handle)
+
+
+def test_install_reports_installed_and_discovery_canary_satisfied_for_a_real_copy(
+    base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000005b")
+    surface_file = tmp_path / "skill.txt"
+    surface_file.write_text("skill contents\n")
+    readiness = backend.install(handle, {"skill.txt": surface_file})
+    assert readiness["declared"] == 1
+    assert readiness["installed"] == 1
     assert readiness["discovery_canary"] == "SATISFIED"
     backend.destroy(handle)
 
@@ -469,3 +492,129 @@ def test_confirm_absent_is_not_confirmed_when_rm_lies(base: Path, docker_state: 
     _sentinel(docker_state, f".stuck-{handle.name}")
     backend.destroy(handle)
     assert backend.confirm_absent(handle) is Confirmation.NOT_CONFIRMED
+
+
+# ------------------------------------------------------- cross-model review (PR #85)
+
+
+def test_owned_tar_sets_the_fixed_candidate_ownership_on_every_member(tmp_path: Path) -> None:
+    """Regression for a cross-model review finding (PR #85): a plain `docker
+    cp HOST_PATH NAME:DEST` preserves the SOURCE's own uid/gid, which could
+    be anything on the controller's host - not the fixed candidate identity.
+    `install()` instead builds its own tar stream so every member's ownership
+    is set explicitly, regardless of the host file's real ownership."""
+    surface_dir = tmp_path / "surface"
+    surface_dir.mkdir()
+    (surface_dir / "a.txt").write_text("a")
+    (surface_dir / "sub").mkdir()
+    (surface_dir / "sub" / "b.txt").write_text("b")
+
+    payload = d._owned_tar(surface_dir, "skill")
+    with tarfile.open(fileobj=io.BytesIO(payload)) as tar:
+        members = tar.getmembers()
+        assert members
+        for member in members:
+            assert member.uid == d.CANDIDATE_UID
+            assert member.gid == d.CANDIDATE_GID
+
+
+def test_owned_tar_bytes_sets_the_fixed_candidate_ownership(tmp_path: Path) -> None:
+    payload = d._owned_tar_bytes("canary", b"hello")
+    with tarfile.open(fileobj=io.BytesIO(payload)) as tar:
+        member = tar.getmembers()[0]
+        assert member.uid == d.CANDIDATE_UID
+        assert member.gid == d.CANDIDATE_GID
+        extracted = tar.extractfile(member)
+        assert extracted is not None
+        assert extracted.read() == b"hello"
+
+
+def test_handle_env_is_captured_once_at_prepare_time(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression for a cross-model review finding (PR #85): prepare() must
+    capture the resolved docker connection environment ONCE and every later
+    call must reuse it - never re-read `os.environ` per call - so an ambient
+    DOCKER_HOST change mid-attempt cannot point confirm_stopped()/export()/
+    destroy() at a different daemon than the one prepare() actually used.
+    Fails on the pre-fix code, which had no captured env at all (every call
+    recomputed `_docker_env()` fresh)."""
+    monkeypatch.setenv("DOCKER_HOST", "unix:///original.sock")
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000016")
+    assert isinstance(handle, d._Handle)
+    assert handle.env.get("DOCKER_HOST") == "unix:///original.sock"
+    monkeypatch.setenv("DOCKER_HOST", "unix:///changed-after-prepare.sock")
+    assert handle.env.get("DOCKER_HOST") == "unix:///original.sock"
+    backend.destroy(handle)
+
+
+def test_handle_repr_never_leaks_the_connection_environment(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DOCKER_HOST", "unix:///should-not-appear-in-repr.sock")
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000017")
+    assert isinstance(handle, d._Handle)
+    assert "should-not-appear-in-repr" not in repr(handle)
+    backend.destroy(handle)
+
+
+def test_confirm_stopped_is_unknown_on_an_unrecognized_inspect_error(
+    base: Path, docker_state: Path,
+) -> None:
+    """Regression for a cross-model review finding (PR #85): docker's own CLI
+    uses the SAME non-zero exit code for "no such object" and for other
+    daemon-side errors (permission denial, TLS failure, ...) - only an
+    explicit "no such" message may be trusted as a confirmed absence. Fails
+    on the pre-fix code, which treated any non-zero exit other than "cannot
+    connect" as a confirmed absence."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000018")
+    assert isinstance(handle, d._Handle)
+    backend.install(handle, {})
+    _sentinel(docker_state, f".inspect-error-{handle.name}")
+    assert backend.confirm_stopped(handle) is Confirmation.UNKNOWN
+    assert backend.confirm_absent(handle) is Confirmation.UNKNOWN
+
+
+def test_prepare_cleans_up_a_container_that_was_created_but_failed_to_start(
+    base: Path, docker_state: Path,
+) -> None:
+    """Regression for a cross-model review finding (PR #85): backend.py's own
+    Protocol requires a raising prepare() to own cleanup of whatever it
+    already allocated. Docker creates a container before starting it, so a
+    start failure can leave one behind now that --rm is dropped from this
+    call. Fails on the pre-fix code, which left the orphaned state file in
+    place after raising."""
+    _sentinel(docker_state, ".refuse-start")
+    backend = _backend(base, docker_state)
+    with pytest.raises(BackendUnavailable):
+        backend.prepare("a-lc-000000000019")
+    name = d._container_name("a-lc-000000000019")
+    assert not (docker_state / f"{name}.json").exists()
+
+
+def test_execute_stop_escalation_falls_back_to_killing_the_local_client(
+    base: Path, docker_state: Path,
+) -> None:
+    """Regression for a cross-model review finding (PR #85): if even the
+    second `docker kill` leaves the subject running (a stuck daemon, or - as
+    simulated here via `.stuck-NAME` - a container that lies about being
+    killed), `_stop()` must still reap ITS OWN local docker-exec client
+    process directly (SIGKILL, which cannot be blocked or ignored) rather
+    than returning with it still running. Fails on the pre-fix code, which
+    could leave that local process alive after two TimeoutExpired escalations
+    (this test would otherwise hang for the full sleep duration)."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000020")
+    assert isinstance(handle, d._Handle)
+    backend.install(handle, {})
+    _sentinel(docker_state, f".stuck-{handle.name}")
+    result = backend.execute(
+        handle, [sys.executable, "-c", "import time; time.sleep(5)"],
+        Limits(timeout=0.3, grace=0.3),
+    )
+    assert result.reason == "timeout"
+    assert result.signal == "SIGKILL"
+    backend.destroy(handle)

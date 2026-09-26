@@ -72,14 +72,21 @@ container is definitely gone) and is reported as `CONFIRMED`, never confused
 with the unreachable case.
 
 WHAT THIS PR DOES NOT DEMONSTRATE. `execute()` stops a runaway subject by
-killing the whole per-attempt container (`docker kill`), not the exec'd
-process alone - `docker exec` does not reliably proxy signals to the exec'd
-process the way `docker run --sig-proxy` does for its own foreground process,
-and every container here belongs to exactly one attempt, so this is safe but
-coarser than a per-process signal. `install()` materializes a declared
-surface entry only when its value names an existing host path; a richer
-surface contract (dependency resolution inside the container) is future
-work. Fake `docker` CLI only in this test suite (`tests/fixtures/docker-backend/
+killing the whole per-attempt container (`docker kill`) - and that reaches
+the CONTAINER's own init/placeholder process, not a separately exec'd
+subject: a real daemon does not forward a container-level signal to an exec
+session the way `docker run --sig-proxy` forwards to its own foreground
+process (cross-model review, PR #85, sharpening an earlier, vaguer claim
+here). So `limits.grace`'s `SIGTERM`-then-`SIGKILL` escalation cannot promise
+the SUBJECT itself gets a graceful signal - only that the whole attempt
+stops within grace of the second kill. A true per-subject graceful signal
+needs an in-container supervisor this backend does not provide; routed to
+the Nit Store (#20) as a supplemental finding rather than built here.
+`install()` materializes a declared surface entry only when its value names
+an existing host path, and reports `discovery_canary`/`installed` from what
+was ACTUALLY copied, never merely what was declared; a richer surface
+contract (dependency resolution inside the container) is future work. Fake
+`docker` CLI only in this test suite (`tests/fixtures/docker-backend/
 fake_docker.py`) - this proves the LIFECYCLE state machine and the composed
 argv, never a real containment boundary; that remains owed to the operator's
 live run (#10). See `describe()`'s own `unobserved` claims for the rest.
@@ -87,10 +94,12 @@ live run (#10). See `describe()`'s own `unobserved` claims for the rest.
 
 from __future__ import annotations
 
+import io
 import os
 import re
 import subprocess
-import tempfile
+import tarfile
+import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -359,6 +368,43 @@ def _as_existing_path(value: object) -> Path | None:
     return None
 
 
+def _owned_tarinfo(info: tarfile.TarInfo) -> tarfile.TarInfo:
+    """Every tar member `install()` sends into a container is rewritten to
+    the fixed candidate identity - never the host's own uid/gid, which is
+    whatever happened to create the surface file on the controller's side
+    (cross-model review, PR #85: a plain `docker cp` preserves the SOURCE's
+    ownership verbatim, so a mode-0600 file copied in under a different uid
+    would be unreadable to `candidate` after a fully "successful" install)."""
+    info.uid = CANDIDATE_UID
+    info.gid = CANDIDATE_GID
+    info.uname = CANDIDATE_USER_NAME
+    info.gname = CANDIDATE_USER_NAME
+    return info
+
+
+def _owned_tar(host_path: Path, arcname: str) -> bytes:
+    """A tar stream of `host_path` (file or directory, recursively), every
+    member owned by the fixed candidate identity - for `docker cp -
+    NAME:DEST`, which extracts it there. See `_owned_tarinfo`."""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+        tar.add(host_path, arcname=arcname, filter=_owned_tarinfo)
+    return buf.getvalue()
+
+
+def _owned_tar_bytes(arcname: str, data: bytes) -> bytes:
+    """Like `_owned_tar`, for in-memory bytes with no host file backing them
+    (the liveness canary) - never staged to a temp file first."""
+    buf = io.BytesIO()
+    info = tarfile.TarInfo(name=arcname)
+    info.size = len(data)
+    info.mode = 0o644
+    info = _owned_tarinfo(info)
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+        tar.addfile(info, io.BytesIO(data))
+    return buf.getvalue()
+
+
 @dataclass(frozen=True)
 class _Handle:
     """Opaque to the controller (backend.py's own rule): `attempt_id` and
@@ -366,10 +412,25 @@ class _Handle:
     (the dataclass default) never leaks a host path, uid or hostname. No
     `work_dir`/`home_dir` fields - there is no host-side directory backing
     this attempt at all, since data moves by `docker cp`, never a bind
-    mount."""
+    mount.
+
+    `env` is the exact environment `prepare()` resolved and used to start
+    THIS attempt's container, captured once and reused by every later call
+    (`install`/`execute`/`confirm_stopped`/`export`/`destroy`/
+    `confirm_absent`) instead of each one re-reading `os.environ` on its own
+    (cross-model review, PR #85: an ambient `DOCKER_HOST`/`DOCKER_CONTEXT`
+    change mid-attempt could otherwise point later calls at a DIFFERENT
+    daemon than the one that actually holds this container - a stale
+    connection's "no such object" would then read as a false CONFIRMED
+    absence, and a same-named container on the NEW daemon could be killed or
+    removed by mistake). `repr=False`: printing a handle must never leak a
+    connection string that could itself be host-identifying (a local socket
+    path, a remote host/port) - the same neutral-identity rule `str(handle)`
+    already has to honor for uid/hostname/paths."""
 
     attempt_id: str
     name: str
+    env: Mapping[str, str] = field(repr=False)
 
 
 @dataclass(frozen=True)
@@ -423,13 +484,17 @@ class DockerBackend:
                 ("a disk bound actually enforced - --storage-opt size= is refused outright "
                  "by any storage driver other than overlay2 on a compatible backing "
                  "filesystem, so a set disk_limit is a request, not a guarantee"),
-                ("a timeout or cancellation stopping only the exec'd process - execute() "
-                 "stops the WHOLE per-attempt container instead, because docker exec does "
-                 "not reliably proxy signals to the exec'd process the way docker run "
-                 "--sig-proxy does for its own foreground process"),
+                ("a graceful signal delivered to the exec'd subject itself on timeout or "
+                 "cancellation - docker kill reaches this attempt's CONTAINER (its own "
+                 "init/placeholder process), never a separately exec'd session, so the "
+                 "SIGTERM-then-SIGKILL escalation only bounds when the whole attempt stops, "
+                 "not whether the subject itself got a chance to flush anything"),
                 ("dependency resolution inside the container - install() copies in any "
                  "declared surface entry naming an existing host path; it does not run a "
                  "package manager or resolve a dependency closure"),
+                ("baseline_absence - always reported SATISFIED without checking the "
+                 "image's own contents for an undeclared skill already present, matching "
+                 "the reference FakeBackend's own scope (tests/test_lifecycle.py)"),
             ),
         )
 
@@ -455,8 +520,16 @@ class DockerBackend:
         """Step 3: start this attempt's one persistent container, detached,
         running the keep-alive placeholder. Raises `BackendUnavailable` -
         never returns a handle - when the daemon is unreachable or the
-        `docker run` itself fails; nothing is left behind on that path since
-        no container was ever created."""
+        `docker run` itself fails.
+
+        Docker creates a container before it starts it, so a failed START
+        (an image missing the placeholder binary, say) can still leave one
+        behind - and `--rm` cannot save us here, since `_keepalive_run_argv`
+        deliberately drops it (see that method's own docstring). A raising
+        `prepare()` must not leave a partial resource behind
+        (`backend.ExecutionBackend.prepare`'s own stated contract) - found by
+        cross-model review, which named the pre-fix code an actual violation
+        of that already-merged contract, not merely a hardening opportunity."""
         env = _docker_env()
         if probe_daemon(self.docker_bin, self.daemon_timeout, env) is None:
             raise BackendUnavailable(f"docker daemon unreachable via {' '.join(self.docker_bin)!r}")
@@ -469,58 +542,87 @@ class DockerBackend:
                 f"docker run failed to start a container for {attempt_id!r}: {exc}"
             ) from exc
         if started.returncode != 0:
+            # Best-effort: whether or not a container was actually created,
+            # this makes sure none is left behind under this name.
+            subprocess.run(
+                [*self.docker_bin, "rm", "-f", name], capture_output=True, env=env, check=False,
+            )
             raise BackendUnavailable(
                 f"docker run failed to start a container for {attempt_id!r}: {started.stderr.strip()}"
             )
-        return _Handle(attempt_id=attempt_id, name=name)
+        return _Handle(attempt_id=attempt_id, name=name, env=env)
 
     def install(self, handle: object, surface: Mapping[str, object]) -> dict[str, object]:
         """Step 4: copy every declared surface entry that names an existing
-        host path into the running container via `docker cp`, plant the
-        liveness canary (`lifecycle.CANARY_NONCE_KEY`) the same way when
-        present, and report readiness evidence. Raises `BackendUnavailable`
-        if a declared copy fails - a materialization failure makes this
-        attempt's backend unusable, exactly like an unreachable daemon."""
+        host path into the running container, plant the liveness canary
+        (`lifecycle.CANARY_NONCE_KEY`) the same way when present, and report
+        readiness evidence. Raises `BackendUnavailable` if a declared copy
+        fails - a materialization failure makes this attempt's backend
+        unusable, exactly like an unreachable daemon.
+
+        Copied as a TAR STREAM this method builds itself (`_owned_tar`), piped
+        into `docker cp - NAME:DEST`, never a plain `docker cp HOST_PATH
+        NAME:DEST` (cross-model review, PR #85): a real `docker cp` preserves
+        the SOURCE's own uid/gid in the copied tar, which is whatever the
+        CONTROLLER's host process happens to own - not `CANDIDATE_UID`. A
+        mode-0600 declared file, or a mode-0700 declared directory, would
+        install successfully and then be unreadable to the very identity
+        meant to use it. Building the tar ourselves lets every entry's
+        ownership be set to the fixed candidate identity regardless of what
+        the host file is actually owned by."""
         assert isinstance(handle, _Handle)
-        env = _docker_env()
         nonce = surface.get(CANARY_NONCE_KEY)
         declared = {k: v for k, v in surface.items() if k != CANARY_NONCE_KEY}
 
+        installed = 0
         for key, value in declared.items():
             host_path = _as_existing_path(value)
             if host_path is None:
                 continue
-            dest = f"{handle.name}:{CONTAINER_WORKSPACE}/{key}"
+            payload = _owned_tar(host_path, key)
             try:
                 copied = subprocess.run(
-                    [*self.docker_bin, "cp", str(host_path), dest],
-                    capture_output=True, text=True, env=env, check=False,
+                    [*self.docker_bin, "cp", "-", f"{handle.name}:{CONTAINER_WORKSPACE}"],
+                    input=payload, capture_output=True, env=handle.env, check=False,
+                    timeout=self.daemon_timeout,
                 )
-            except OSError as exc:
+            except (OSError, subprocess.TimeoutExpired) as exc:
                 raise BackendUnavailable(f"docker cp failed installing {key!r}: {exc}") from exc
             if copied.returncode != 0:
                 raise BackendUnavailable(
-                    f"docker cp failed installing {key!r} for {handle.attempt_id!r}: {copied.stderr.strip()}"
+                    f"docker cp failed installing {key!r} for {handle.attempt_id!r}: "
+                    f"{copied.stderr.decode('utf-8', errors='replace').strip()}"
                 )
+            installed += 1
 
+        # `discovery_canary`/`installed` reflect what was actually copied,
+        # never merely what was declared (cross-model review, PR #85): a
+        # surface entry naming a missing path, or a non-path value, must not
+        # certify readiness for something that was never materialized.
         readiness: dict[str, object] = {
-            "discovery_canary": "SATISFIED" if declared else "VIOLATED",
+            "discovery_canary": "SATISFIED" if installed else "VIOLATED",
+            # Never independently verified - always reported SATISFIED,
+            # matching the reference FakeBackend's own scope
+            # (tests/test_lifecycle.py). See describe()'s `unobserved`.
             "baseline_absence": "SATISFIED",
             "declared": len(declared),
+            "installed": installed,
         }
         if isinstance(nonce, str) and nonce:
-            with tempfile.TemporaryDirectory() as tmp:
-                canary_file = Path(tmp) / CANARY_HOST_FILENAME
-                canary_file.write_text(nonce, encoding="utf-8")
-                copied = subprocess.run(
-                    [*self.docker_bin, "cp", str(canary_file),
-                     f"{handle.name}:{CONTAINER_WORKSPACE}/{CANARY_HOST_FILENAME}"],
-                    capture_output=True, text=True, env=env, check=False,
+            payload = _owned_tar_bytes(CANARY_HOST_FILENAME, nonce.encode("utf-8"))
+            canary_copied: subprocess.CompletedProcess[bytes] | None
+            try:
+                canary_copied = subprocess.run(
+                    [*self.docker_bin, "cp", "-", f"{handle.name}:{CONTAINER_WORKSPACE}"],
+                    input=payload, capture_output=True, env=handle.env, check=False,
+                    timeout=self.daemon_timeout,
                 )
+            except (OSError, subprocess.TimeoutExpired):
+                canary_copied = None
             # A failed canary plant is not fatal to install() itself - the
             # driver's weaker content-diff fallback still applies whenever
             # canary_path is absent (lifecycle.py's own documented fallback).
-            if copied.returncode == 0:
+            if canary_copied is not None and canary_copied.returncode == 0:
                 readiness["canary_path"] = CANARY_RESULT_FILENAME
         return readiness
 
@@ -541,7 +643,17 @@ class DockerBackend:
         returning - `confirm_stopped()` (step 6) must confirm the WHOLE
         attempt has stopped, not merely that the exec'd process did, and the
         container's own placeholder process (`_KEEPALIVE_ARGV`) would
-        otherwise keep it reporting "running" forever."""
+        otherwise keep it reporting "running" forever.
+
+        Stdin delivery and stderr collection each run on their own thread,
+        started BEFORE the deadline/cancel poll loop begins (cross-model
+        review, PR #85). A synchronous `proc.stdin.write(stdin)` beforehand
+        would block on a subject that never reads its stdin - for as long as
+        the pipe buffer allows, defeating `limits.timeout` before the loop
+        even starts - and reading `proc.stderr` only after `proc.wait()`
+        risks the classic two-pipe deadlock: a subject that writes past the
+        stderr pipe's buffer blocks on that write while nothing is draining
+        it, and this method was blocked in `proc.wait()` waiting for exit."""
         assert isinstance(handle, _Handle)
         exec_argv = [*self.docker_bin, "exec"]
         if stdin is not None:
@@ -550,21 +662,41 @@ class DockerBackend:
 
         try:
             proc = subprocess.Popen(
-                exec_argv, env=_docker_env(),
+                exec_argv, env=handle.env,
                 stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
             )
         except OSError as exc:
             return ExecuteResult(reason="launch-failed", exit_code=None, error=str(exc))
 
+        stderr_chunks: list[bytes] = []
+        assert proc.stderr is not None
+        stderr_pipe = proc.stderr
+
+        def _drain_stderr() -> None:
+            while chunk := stderr_pipe.read(65536):
+                stderr_chunks.append(chunk)
+
+        stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
+        stderr_thread.start()
+
         if stdin is not None:
             assert proc.stdin is not None
-            try:
-                proc.stdin.write(stdin)
-            except BrokenPipeError:
-                pass
-            finally:
-                proc.stdin.close()
+            stdin_pipe = proc.stdin
+            payload = stdin
+
+            def _feed_stdin() -> None:
+                try:
+                    stdin_pipe.write(payload)
+                except (BrokenPipeError, OSError):
+                    pass
+                finally:
+                    try:
+                        stdin_pipe.close()
+                    except OSError:
+                        pass
+
+            threading.Thread(target=_feed_stdin, daemon=True).start()
 
         deadline = time.monotonic() + limits.timeout
         reason = "exited"
@@ -582,78 +714,100 @@ class DockerBackend:
             signal_name = self._stop(handle, proc, limits.grace)
         else:
             proc.wait()
-            self._stop_container(handle.name)
+            self._kill_container(handle, "KILL")
 
-        stderr = proc.stderr.read() if proc.stderr else b""
+        stderr_thread.join(timeout=limits.grace + self.daemon_timeout)
+        stderr = b"".join(stderr_chunks)
         code = proc.returncode
         error = None
         if reason == "exited" and code not in (0, None) and stderr:
             error = stderr.decode("utf-8", errors="replace").strip() or None
         return ExecuteResult(reason=reason, exit_code=code, error=error, signal=signal_name)
 
-    def _stop_container(self, name: str) -> None:
-        """Cleanup after a subject that exited on its own: the container's
-        own placeholder process (`_KEEPALIVE_ARGV`) is otherwise never
-        signaled and keeps the container reporting "running" forever. Not
-        graceful - there is nothing mid-work to interrupt in an idle
-        placeholder - so a single default-signal `docker kill` is enough."""
-        subprocess.run([*self.docker_bin, "kill", name], capture_output=True, env=_docker_env(), check=False)
+    def _kill_container(self, handle: _Handle, sig: str) -> None:
+        """`docker kill --signal SIG` against this attempt's own container,
+        bounded by `daemon_timeout` and never letting an exception escape -
+        best-effort, because `confirm_stopped()`/`confirm_absent()`
+        independently verify the outcome afterward rather than trusting this
+        call's own success (cross-model review, PR #85: an unbounded
+        `subprocess.run` here could hang forever against a stalled daemon)."""
+        try:
+            subprocess.run(
+                [*self.docker_bin, "kill", "--signal", sig, handle.name],
+                capture_output=True, env=handle.env, check=False, timeout=self.daemon_timeout,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
 
     def _stop(self, handle: _Handle, proc: subprocess.Popen[bytes], grace: float) -> str:
-        """Timeout/cancellation escalation: a `docker exec` client process
-        does not reliably proxy signals to the exec'd process the way
-        `docker run --sig-proxy` does for its own foreground process, so
-        this stops the WHOLE per-attempt container instead - safe, because
-        every container this backend creates belongs to exactly one
-        attempt. `SIGTERM` first (honoring `limits.grace`), `SIGKILL` if the
-        exec client has not exited within grace."""
-        env = _docker_env()
-        subprocess.run(
-            [*self.docker_bin, "kill", "--signal", "TERM", handle.name],
-            capture_output=True, env=env, check=False,
-        )
+        """Timeout/cancellation escalation: `docker kill` reaches this
+        attempt's CONTAINER (its own init/placeholder process), not the
+        separately exec'd subject - a real daemon does not forward a
+        container-level signal to an exec session the way `docker run
+        --sig-proxy` forwards to its own foreground process. So this cannot
+        promise the subject itself gets a graceful `SIGTERM`; what it
+        guarantees is that the whole attempt (container included) stops
+        within `grace` of the second kill. `SIGKILL` on the local exec
+        client itself is the final fallback if even that leaves our own
+        child process still running - `proc` must never outlive this call
+        (cross-model review, PR #85: the pre-fix code could return with
+        `proc` still alive after two `subprocess.TimeoutExpired`s, leaking
+        it)."""
+        self._kill_container(handle, "TERM")
         try:
             proc.wait(timeout=grace)
             return "SIGTERM"
         except subprocess.TimeoutExpired:
             pass
-        subprocess.run(
-            [*self.docker_bin, "kill", "--signal", "KILL", handle.name],
-            capture_output=True, env=env, check=False,
-        )
+        self._kill_container(handle, "KILL")
         try:
             proc.wait(timeout=grace)
         except subprocess.TimeoutExpired:
-            pass
+            proc.kill()  # our OWN child process, not the container - SIGKILL cannot be blocked
+            proc.wait()
         return "SIGKILL"
 
-    def _inspect_status(self, name: str) -> str | None:
-        """The container's `.State.Status`, `""` if the daemon reports it
-        gone ("no such object" - a confident, positive fact, never guessed),
-        or `None` if the daemon could not be asked at all
-        (unreachable/timeout, or a non-zero exit whose stderr says so).
-        `confirm_stopped()`/`confirm_absent()` turn `None` into
-        `Confirmation.UNKNOWN`, never a guessed CONFIRMED/NOT_CONFIRMED -
-        UNKNOWN never reaps.
+    def _inspect(self, handle: _Handle) -> tuple[bool, bool, str | None]:
+        """Returns `(reachable, absent, status)`.
 
-        A non-zero exit is NOT on its own "gone": docker's own CLI uses
-        the same exit code for "no such object" and "cannot connect to the
-        Docker daemon" (found while testing this exact method) - conflating
-        them would let a merely-unreachable daemon read as a *confirmed*
-        absence, which is precisely the guessed confidence this seam's
-        UNKNOWN exists to refuse. Only stderr distinguishes them."""
+        - `reachable=False` (daemon unreachable, a timeout, or ANY docker CLI
+          error this method cannot positively identify as "no such object")
+          means `confirm_stopped()`/`confirm_absent()` must answer
+          `Confirmation.UNKNOWN` - never a guess. `absent`/`status` are
+          meaningless in this case.
+        - `reachable=True, absent=True` means the daemon gave a genuine "no
+          such object" answer - a confident, positive fact.
+        - `reachable=True, absent=False, status=<str>` is the container's
+          own `.State.Status`.
+
+        Docker's own CLI uses the SAME non-zero exit code for "no such
+        object" and for "cannot connect to the Docker daemon" - and, found
+        by cross-model review, also for permission failures, TLS errors, a
+        malformed name, and any other daemon-side error this method has no
+        specific text for. Treating every non-zero exit as "gone" (the
+        pre-fix code's actual bug, not merely a hardening gap) would let a
+        merely-unreachable daemon read as a *confirmed* absence - so only an
+        explicit "no such" message is trusted as absence; every OTHER
+        failure, unrecognized or not, is UNKNOWN. A successful call with
+        empty stdout is likewise never trusted as a status - an existing
+        container's inspect does not do that in practice, so empty output is
+        itself treated as something this method cannot make sense of,
+        UNKNOWN rather than a guessed absence."""
         try:
             proc = subprocess.run(
-                [*self.docker_bin, "inspect", "--format", "{{.State.Status}}", name],
-                capture_output=True, text=True, timeout=self.daemon_timeout, env=_docker_env(), check=False,
+                [*self.docker_bin, "inspect", "--format", "{{.State.Status}}", handle.name],
+                capture_output=True, text=True, timeout=self.daemon_timeout, env=handle.env, check=False,
             )
         except (OSError, subprocess.TimeoutExpired):
-            return None
+            return False, False, None
         if proc.returncode != 0:
-            if "cannot connect" in proc.stderr.lower():
-                return None
-            return ""
-        return proc.stdout.strip()
+            if "no such" in proc.stderr.lower():
+                return True, True, None
+            return False, False, None
+        status = proc.stdout.strip()
+        if not status:
+            return False, False, None
+        return True, False, status
 
     def confirm_stopped(self, handle: object) -> Confirmation:
         """Step 6: ask the daemon, independent of `execute()`'s own return,
@@ -661,10 +815,10 @@ class DockerBackend:
         `execute()`'s own observation - the same discipline `confirm_absent`
         applies to `destroy()`."""
         assert isinstance(handle, _Handle)
-        status = self._inspect_status(handle.name)
-        if status is None:
+        reachable, absent, status = self._inspect(handle)
+        if not reachable:
             return Confirmation.UNKNOWN
-        if status in ("", "exited", "dead"):
+        if absent or status in ("exited", "dead"):
             return Confirmation.CONFIRMED
         if status == "running":
             return Confirmation.NOT_CONFIRMED
@@ -680,9 +834,9 @@ class DockerBackend:
         try:
             copied = subprocess.run(
                 [*self.docker_bin, "cp", f"{handle.name}:{CONTAINER_WORKSPACE}/.", str(dest)],
-                capture_output=True, text=True, env=_docker_env(), check=False,
+                capture_output=True, text=True, env=handle.env, check=False, timeout=self.daemon_timeout,
             )
-        except OSError as exc:
+        except (OSError, subprocess.TimeoutExpired) as exc:
             raise OSError(f"docker cp export failed for {handle.attempt_id!r}: {exc}") from exc
         if copied.returncode != 0:
             raise OSError(f"docker cp export failed for {handle.attempt_id!r}: {copied.stderr.strip()}")
@@ -692,9 +846,13 @@ class DockerBackend:
         call after a failed `install`/`execute` (the container is always
         created by the time a caller has a handle at all)."""
         assert isinstance(handle, _Handle)
-        subprocess.run(
-            [*self.docker_bin, "rm", "-f", handle.name], capture_output=True, env=_docker_env(), check=False,
-        )
+        try:
+            subprocess.run(
+                [*self.docker_bin, "rm", "-f", handle.name],
+                capture_output=True, env=handle.env, check=False, timeout=self.daemon_timeout,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass  # best-effort; confirm_absent() independently verifies the outcome
 
     def confirm_absent(self, handle: object) -> Confirmation:
         """Step 9: ask the daemon whether this attempt's container is
@@ -703,9 +861,7 @@ class DockerBackend:
         `execute()`'s. Only a genuine "no such object" answer is CONFIRMED;
         an unreachable daemon is UNKNOWN, never a guess."""
         assert isinstance(handle, _Handle)
-        status = self._inspect_status(handle.name)
-        if status is None:
+        reachable, absent, _status = self._inspect(handle)
+        if not reachable:
             return Confirmation.UNKNOWN
-        if status == "":
-            return Confirmation.CONFIRMED
-        return Confirmation.NOT_CONFIRMED
+        return Confirmation.CONFIRMED if absent else Confirmation.NOT_CONFIRMED

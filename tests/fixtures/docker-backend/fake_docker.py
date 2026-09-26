@@ -42,7 +42,11 @@ not a docker clone:
         EITHER form fail outright (exit 1, nothing created) - simulating the
         daemon itself refusing container creation, the fault
         `DockerBackend.prepare()` must turn into `BackendUnavailable` rather
-        than a fallback.
+        than a fallback. A `.refuse-start` sentinel instead simulates a
+        container Docker CREATED but that then failed to START (`-d` only):
+        the state file is left behind, a real ORPHAN, so a test can prove
+        `prepare()` cleans it up before raising rather than leaving a
+        partial resource behind.
     exec [-i] -w WORKDIR -- NAME ARGV...
         Requires NAME's state to be "running" (else exit 1, "No such
         container" or "is not running"). Runs ARGV as a real subprocess
@@ -67,15 +71,21 @@ not a docker clone:
         the state (simulating a container that ignores the signal, a daemon
         lie `confirm_stopped()` must not trust).
     cp SRC DEST
-        Exactly one of SRC/DEST is a `NAME:PATH` reference; the other is an
-        ordinary host path. Host -> container copies a file or directory
-        into NAME's fsroot at PATH (creating parent directories as needed).
-        Container -> host requires NAME:PATH to exist; a trailing `/.` on
-        PATH copies PATH's CONTENTS into DEST (DEST must already exist, as a
-        real `docker cp`'s directory-contents form requires), otherwise PATH
-        itself is copied into DEST as a new entry named after PATH's own
-        basename. Exits 1 (no such container/path) or 2 (bad usage) on the
-        failure paths `DockerBackend.export()`/`install()` must handle.
+        `SRC == "-"` (what `DockerBackend.install()` uses): reads a tar
+        stream from stdin and extracts it into DEST (`NAME:PATH`) - this is
+        how the real backend controls every copied-in member's ownership
+        itself, since a plain host-path `docker cp` would instead preserve
+        the SOURCE's own uid/gid.
+        Otherwise, exactly one of SRC/DEST is a `NAME:PATH` reference; the
+        other is an ordinary host path. Host -> container copies a file or
+        directory into NAME's fsroot at PATH (creating parent directories as
+        needed). Container -> host requires NAME:PATH to exist; a trailing
+        `/.` on PATH copies PATH's CONTENTS into DEST (DEST must already
+        exist, as a real `docker cp`'s directory-contents form requires),
+        otherwise PATH itself is copied into DEST as a new entry named after
+        PATH's own basename. Exits 1 (no such container/path) or 2 (bad
+        usage) on the failure paths `DockerBackend.export()`/`install()`
+        must handle.
     inspect --format {{.State.Status}} NAME
         Prints the state file's status, or exits 1 if absent ("No such
         object").
@@ -104,6 +114,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 
 #: Must match docker_backend.CONTAINER_WORKSPACE. Kept as a separate literal
@@ -143,6 +154,13 @@ def cmd_version(state_dir: Path, _rest: list[str]) -> int:
 
 def cmd_inspect(state_dir: Path, rest: list[str]) -> int:
     name = rest[-1]
+    if (state_dir / f".inspect-error-{name}").exists():
+        # An UNRECOGNIZED daemon-side error (permission denial, TLS failure,
+        # ...) - the same non-zero exit real docker also uses for "no such
+        # object", but a DIFFERENT message. DockerBackend must treat this as
+        # UNKNOWN, never as a confirmed absence.
+        print("Error: permission denied while trying to inspect", file=sys.stderr)
+        return 1
     path = _state_file(state_dir, name)
     if not path.is_file():
         print("Error: No such object: " + name, file=sys.stderr)
@@ -292,6 +310,30 @@ def cmd_cp(state_dir: Path, rest: list[str]) -> int:
         print("fake_docker: cp requires SRC DEST", file=sys.stderr)
         return 2
     src, dest = rest
+
+    if src == "-":
+        # A tar stream on stdin, extracted into the container - what
+        # `DockerBackend.install()` uses so it controls every member's
+        # ownership itself, rather than a plain host-path copy (which would
+        # preserve the SOURCE's own uid/gid, never the fixed candidate one).
+        dest_ref = _is_container_ref(dest)
+        if not dest_ref:
+            print("fake_docker: cp - requires a NAME:PATH destination", file=sys.stderr)
+            return 2
+        name, cpath = dest_ref
+        if not _state_file(state_dir, name).is_file():
+            print(f"Error: No such container: {name}", file=sys.stderr)
+            return 1
+        mapped = _in_container(state_dir, name, cpath)
+        mapped.mkdir(parents=True, exist_ok=True)
+        try:
+            with tarfile.open(fileobj=sys.stdin.buffer, mode="r|*") as tar:
+                tar.extractall(mapped, filter="data")
+        except tarfile.TarError as exc:
+            print(f"Error: bad tar stream: {exc}", file=sys.stderr)
+            return 1
+        return 0
+
     src_ref = _is_container_ref(src)
     dest_ref = _is_container_ref(dest)
 
@@ -368,6 +410,15 @@ def cmd_run(state_dir: Path, rest: list[str]) -> int:
     _in_container(state_dir, name, WORK_CONTAINER_PATH).mkdir(parents=True, exist_ok=True)
 
     if detached:
+        if (state_dir / ".refuse-start").exists():
+            # Simulates a container Docker CREATED but that then failed to
+            # actually START (e.g. an image missing the placeholder binary):
+            # the state file/fsroot are left behind as a real orphan would
+            # be, so a test can prove DockerBackend.prepare() cleans it up
+            # itself before raising, per backend.py's own stated contract.
+            _state_file(state_dir, name).write_text(json.dumps({"status": "created", "image": image, "env": env}))
+            print("Error response from daemon: OCI runtime create failed (fault injection)", file=sys.stderr)
+            return 1
         _state_file(state_dir, name).write_text(json.dumps({"status": "running", "image": image, "env": env}))
         return 0
 
