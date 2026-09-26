@@ -494,11 +494,28 @@ def _skill_invocations(entry: dict[str, object]) -> Iterator[str]:
     if not isinstance(skills, list):
         yield "observation 'skill-invocations' carries no skills list"
         return
+    if coverage == "complete" and not skills:
+        # `installation-receipt` refuses an empty `installed` list, so every
+        # attempt with a receipt has at least one installed skill. "Complete"
+        # coverage naming none is the same silent-empty-population defect
+        # `artifact_digest` already refuses for an empty capture, one level up.
+        yield (
+            "observation 'skill-invocations' declares complete coverage but names "
+            "no skills; a capture that recorded nothing is not a capture that "
+            "found nothing"
+        )
+    seen: set[str] = set()
     for index, row in enumerate(skills):
         if not isinstance(row, dict) or not _nonempty_str(row.get("path")):
             yield f"skill-invocations entry {index} names no path"
             continue
         path, count = row["path"], row.get("count")
+        if path in seen:
+            yield (
+                f"skill-invocations: {path!r} appears more than once; a second row "
+                f"is a conflicting count, and nothing here can say which is true"
+            )
+        seen.add(path)
         if coverage != "complete":
             if count != "UNKNOWN":
                 yield (

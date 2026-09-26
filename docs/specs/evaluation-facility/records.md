@@ -208,6 +208,14 @@ a non-negative integer or the literal string `"UNKNOWN"`.
   document already states for a whole stream, applied per skill.
 - If `coverage` is `complete`, every row's `count` must be a real non-negative
   integer; `"UNKNOWN"` under complete coverage is dishonest, not cautious.
+- Complete coverage naming no skills at all is refused: `installation-receipt`
+  never allows an empty `installed` list, so a receipted attempt always has at
+  least one installed skill, and "complete" over zero rows is the same
+  silent-empty-population defect `artifact_digest` already refuses for an empty
+  capture, one level up (found in cross-model review, #39).
+- No path may repeat within one stream: a second row for the same skill is a
+  conflicting count, and nothing here can say which is true (found in
+  cross-model review, #39).
 - Each `path` must be one the attempt's own `installation-receipt` actually
   installed. `observation_coverage` (a record rule) checks the stream's own
   shape; only `ledger_binding` (a bundle rule) has the receipt to check a path
@@ -410,7 +418,7 @@ bundle cases as well, including against every record rule.
 | `installation-receipt` | record | empty install; no readiness; subject without digest |
 | `trial-ledger` | record | no trials; a trial with no attempts; missing grader identity; malformed attempt ID |
 | `artifact-digest` | record | an artifact without a digest; an empty manifest |
-| `observation-coverage` | record | a silent required stream; an unknown origin; no `capture_failures`; a `skill-invocations` count that is not `UNKNOWN` under incomplete coverage, or not a real integer under complete coverage (#39) |
+| `observation-coverage` | record | a silent required stream; an unknown origin; no `capture_failures`; a `skill-invocations` count that is not `UNKNOWN` under incomplete coverage, or not a real integer under complete coverage; complete coverage naming no skills; a duplicate skill path with conflicting counts (#39) |
 | `criterion-vocabulary` | record | an outcome outside the vocabulary; a non-boolean `mandatory` (`"true"` would drop a violation out of the derivation) |
 | `result-evidence` | record | SATISFIED without evidence; UNKNOWN without `missing`; no graded digests; no grader; a run state without reason |
 | `derived-status` | record | a status copied rather than derived |

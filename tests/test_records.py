@@ -682,6 +682,28 @@ def test_UNKNOWN_is_refused_under_complete_coverage() -> None:
     assert findings and "non-negative integer" in findings[0]
 
 
+def test_complete_coverage_naming_no_skills_is_refused() -> None:
+    """`installation-receipt` refuses an empty `installed` list, so every attempt
+    with a receipt has at least one installed skill - "complete" coverage naming
+    none is the silent-empty-population defect, one level up (codex review)."""
+    rec = _with_skill_invocations(origin="observed", coverage="complete", skills=[])
+    assert list(records.observation_coverage(rec))
+
+
+def test_a_duplicate_path_with_conflicting_counts_is_refused() -> None:
+    """Two rows for the same skill let a reader pick whichever count it likes
+    (codex review)."""
+    rec = _with_skill_invocations(
+        origin="observed", coverage="complete",
+        skills=[
+            {"path": ".codex/skills/slug/SKILL.md", "count": 0},
+            {"path": ".codex/skills/slug/SKILL.md", "count": 1},
+        ],
+    )
+    findings = list(records.observation_coverage(rec))
+    assert findings and "more than once" in findings[0]
+
+
 def test_zero_is_a_legitimate_count_under_complete_coverage() -> None:
     rec = _with_skill_invocations(
         origin="observed", coverage="complete",
