@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# pre-push: refuse to push commits that carry a secret (#47).
+#
+# CI's secret-scan checks what a merge lands, but by then a secret on a PR
+# branch is already on GitHub. This scans the commits a push would send, with
+# the repo's .gitleaks.toml, and refuses on a finding. Installed by
+# ci/install-hooks.sh; ci/secret-scan-control.sh proves it refuses a planted key.
+#
+# It fails closed: no gitleaks, or a scan that errors, refuses the push too.
+# A scan that could not run has not shown the push is clean.
+# GITLEAKS overrides the command (default `gitleaks`).
+set -uo pipefail
+
+remote="$1"
+top="$(git rev-parse --show-toplevel)"
+gl="${GITLEAKS:-gitleaks}"
+
+refuse() { echo "pre-push: REFUSED - $*" >&2; exit 1; }
+
+command -v "${gl%% *}" > /dev/null \
+  || refuse "gitleaks not found; install it (~/.local/bin/gitleaks)"
+[[ -f "$top/.gitleaks.toml" ]] \
+  || refuse "$top/.gitleaks.toml missing; this branch predates the secret scan - rebase on main"
+
+while read -r _lref lsha _rref rsha; do
+  [[ "$lsha" =~ ^0+$ ]] && continue  # a delete sends no content
+  # Only the commits the remote does not already have. A remote sha we do not
+  # hold locally (a force push over unfetched work) cannot bound a range.
+  if [[ "$rsha" =~ ^0+$ ]] || ! git cat-file -e "$rsha^{commit}" 2> /dev/null; then
+    range="$lsha --not --remotes=$remote"
+  else
+    range="$rsha..$lsha"
+  fi
+  $gl git "$top" --log-opts="$range" --config "$top/.gitleaks.toml" \
+    --exit-code 3 --redact --no-banner --log-level warn
+  case $? in
+    0) ;;
+    3) refuse "gitleaks found a secret in the commits being pushed (above)" ;;
+    *) refuse "gitleaks could not scan $range" ;;
+  esac
+done
+exit 0

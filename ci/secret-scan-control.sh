@@ -12,6 +12,11 @@
 #   1. a planted AWS key under tests/ -> exit 3 (the allowlist is not path-wide)
 #   2. the #8 canary under tests/      -> exit 0 (the allowlist entry still holds)
 #   3. the unmodified copy            -> exit 0 (matches the step's own verdict)
+# Then the pre-push hook (#47) in a throwaway repo: a planted key pushed to an
+# existing branch and as a new branch, buried under a clean commit, is refused
+# and the remote does not move,
+# a push with no gitleaks is refused, a clean push lands, and the installer
+# will not overwrite a pre-push it did not write.
 #
 # Why the step scans the tree and not history: Woodpecker clones --depth=1, so
 # `gitleaks git` would scan one commit and report green. Full-history scans are
@@ -56,4 +61,54 @@ copy
 scan "$scratch/tree"; rc=$?
 [[ $rc -eq 0 ]] || { cat "$scratch/scan.out" >&2; fail "unmodified tree: want exit 0, got $rc"; }
 
-echo "secret-scan-control: ok - planted key found, canary allowlisted, tree clean"
+# The pre-push hook (#47), against a throwaway repo and a bare remote. A push
+# the hook refuses must leave the remote ref where it was.
+export GITLEAKS="${GL[*]}"
+export GIT_AUTHOR_NAME=control GIT_AUTHOR_EMAIL=control@invalid
+export GIT_COMMITTER_NAME=control GIT_COMMITTER_EMAIL=control@invalid
+repo="$scratch/repo"
+git init -q --bare "$scratch/remote.git"
+git init -q -b main "$repo"
+mkdir -p "$repo/ci/hooks"
+cp "$root/.gitleaks.toml" "$repo/"
+cp "$root/ci/hooks/pre-push" "$root/ci/install-hooks.sh" "$repo/ci/hooks/"
+mv "$repo/ci/hooks/install-hooks.sh" "$repo/ci/"
+git -C "$repo" add -A && git -C "$repo" commit -qm base
+git -C "$repo" remote add origin "$scratch/remote.git"
+git -C "$repo" push -q origin main || fail "hook: base push (no hook yet) failed"
+base="$(git -C "$repo" rev-parse main)"
+
+echo "#!/bin/sh" > "$repo/.git/hooks/pre-push"
+(cd "$repo" && bash ci/install-hooks.sh > /dev/null 2>&1) \
+  && fail "hook: installer overwrote a pre-push it did not write"
+rm "$repo/.git/hooks/pre-push"
+(cd "$repo" && bash ci/install-hooks.sh > /dev/null) || fail "hook: installer failed"
+
+remote_main() { git -C "$scratch/remote.git" rev-parse main; }
+
+echo "key = \"$planted\"" > "$repo/leak.py"
+git -C "$repo" add leak.py && git -C "$repo" commit -qm leak
+# Buried under a clean commit: a hook that scans only the tip must miss it.
+echo "later" > "$repo/later.txt"
+git -C "$repo" add later.txt && git -C "$repo" commit -qm later
+git -C "$repo" push -q origin main > "$scratch/push.out" 2>&1 \
+  && fail "hook: pushed a planted key to an existing branch"
+grep -q "found a secret" "$scratch/push.out" \
+  || { cat "$scratch/push.out" >&2; fail "hook: refused, but not for the secret"; }
+[[ "$(remote_main)" == "$base" ]] || fail "hook: remote main moved on a refused push"
+
+git -C "$repo" push -q origin main:leaky > "$scratch/push.out" 2>&1 \
+  && fail "hook: pushed a planted key as a new branch"
+grep -q "found a secret" "$scratch/push.out" \
+  || { cat "$scratch/push.out" >&2; fail "hook: new branch refused, but not for the secret"; }
+
+git -C "$repo" reset -q --hard "$base"
+echo "clean" > "$repo/clean.txt"
+git -C "$repo" add clean.txt && git -C "$repo" commit -qm clean
+GITLEAKS=no-such-gitleaks git -C "$repo" push -q origin main > /dev/null 2>&1 \
+  && fail "hook: pushed with no gitleaks (must fail closed)"
+git -C "$repo" push -q origin main > "$scratch/push.out" 2>&1 \
+  || { cat "$scratch/push.out" >&2; fail "hook: refused a clean push"; }
+[[ "$(remote_main)" == "$(git -C "$repo" rev-parse main)" ]] || fail "hook: clean push did not land"
+
+echo "secret-scan-control: ok - planted key found, canary allowlisted, tree clean, pre-push refuses"
