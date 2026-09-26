@@ -117,6 +117,7 @@ not a docker clone:
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import shutil
@@ -124,7 +125,9 @@ import signal
 import subprocess
 import sys
 import tarfile
+import tempfile
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 
 #: Must match docker_backend.CONTAINER_WORKSPACE. Kept as a separate literal
@@ -155,12 +158,64 @@ def _stuck(state_dir: Path, name: str) -> bool:
     return (state_dir / f".stuck-{name}").exists()
 
 
+def _atomic_write_json(path: Path, data: dict) -> None:
+    """Write `data` to `path` via a temp file in the SAME directory plus
+    `os.replace()` - atomic on POSIX, so a concurrent reader (a separate
+    `inspect`/`kill`/`exec` invocation, each its own OS process) sees either
+    the complete old content or the complete new content, never a torn
+    write. An in-place `path.write_text(...)` truncates the file before the
+    new bytes land, so a reader racing it can see a partial or empty file
+    and raise `JSONDecodeError` - exactly the flake orchestrator review of
+    PR #94 found in `test_execute_cancellation_kills_the_container` (#77):
+    `kill` and `exec`'s own background write raced `inspect`, which then
+    exited nonzero on a decode error rather than "no such object" -
+    `DockerBackend._inspect_status` correctly read that as UNKNOWN, not a
+    guess, but the fixture's own write was the actual bug.
+    """
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.tmp-")
+    try:
+        with os.fdopen(fd, "w") as tmp_file:
+            tmp_file.write(json.dumps(data))
+        os.replace(tmp_name, path)
+    except BaseException:
+        Path(tmp_name).unlink(missing_ok=True)
+        raise
+
+
+def _rewrite_state(
+    state_dir: Path, name: str, mutate: Callable[[dict], dict],
+) -> dict:
+    """Read-modify-write NAME's state file under an exclusive per-name file
+    lock, so two independent writers (`kill`'s status flip and `exec`'s own
+    `finally` block clearing `exec_pid`, run from separate OS processes)
+    can never lose one's update to the other's stale read - the other half
+    of the same race `_atomic_write_json` closes for readers. `mutate`
+    receives the CURRENT on-disk dict (never a snapshot taken before the
+    lock was acquired) and returns the dict to write, so whichever writer
+    runs last always builds on the other's result - a status flip to
+    `"exited"` is never silently overwritten back to `"running"` by a
+    write that started earlier but finished later.
+    """
+    lock_path = state_dir / f".lock-{name}"
+    with open(lock_path, "a+") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        try:
+            path = _state_file(state_dir, name)
+            data = json.loads(path.read_text(encoding="utf-8"))
+            data = mutate(data)
+            _atomic_write_json(path, data)
+            return data
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+
+
 def _write_state(
     state_dir: Path, name: str, status: str, image: str, env: dict[str, str], labels: dict[str, str],
     container_id: str,
 ) -> None:
-    _state_file(state_dir, name).write_text(
-        json.dumps({"status": status, "image": image, "env": env, "labels": labels, "id": container_id})
+    _atomic_write_json(
+        _state_file(state_dir, name),
+        {"status": status, "image": image, "env": env, "labels": labels, "id": container_id},
     )
 
 
@@ -300,8 +355,7 @@ def cmd_kill(state_dir: Path, rest: list[str]) -> int:
             os.killpg(pid, sig)
         except (ProcessLookupError, PermissionError):
             pass
-    data["status"] = "exited"
-    path.write_text(json.dumps(data))
+    _rewrite_state(state_dir, name, lambda d: {**d, "status": "exited"})
     return 0
 
 
@@ -350,16 +404,21 @@ def cmd_exec(state_dir: Path, rest: list[str]) -> int:
         return 127
     # Recorded so a SEPARATE `docker kill` invocation - a different OS
     # process, sharing nothing but this state file - can actually reach and
-    # signal it. See cmd_kill's own docstring.
-    data["exec_pid"] = proc.pid
-    path.write_text(json.dumps(data))
+    # signal it. See cmd_kill's own docstring. Locked read-modify-write
+    # (`_rewrite_state`), not a blind write of `data`: a concurrent `kill`
+    # could otherwise still be holding an EARLIER read of this same file,
+    # and whichever of the two writes lands second would silently discard
+    # the other's update.
+    _rewrite_state(state_dir, name, lambda d: {**d, "exec_pid": proc.pid})
     try:
         proc.wait()
     finally:
         if path.is_file():
-            latest = json.loads(path.read_text(encoding="utf-8"))
-            latest.pop("exec_pid", None)
-            path.write_text(json.dumps(latest))
+            # Mutates whatever is CURRENTLY on disk, never the `data` this
+            # function read at entry: a concurrent `kill` may have flipped
+            # `status` to `"exited"` in between, and that must survive this
+            # write untouched - only `exec_pid` is ever removed here.
+            _rewrite_state(state_dir, name, lambda d: {k: v for k, v in d.items() if k != "exec_pid"})
     return proc.returncode
 
 

@@ -16,6 +16,26 @@ collection) closes.
 
 ### Added
 
+- **The fake `docker` CLI's state-file writes are now atomic and locked**
+  (Refs #77): `test_execute_cancellation_kills_the_container` flaked on
+  main at roughly 1 in 25 runs. Root cause: `tests/fixtures/docker-backend/
+  fake_docker.py` rewrote each container's state file in place
+  (`path.write_text(json.dumps(...))`), which truncates the file before the
+  new bytes land; `kill` and a concurrently running `exec`'s own background
+  write could race a separate `inspect` invocation's read, which then saw a
+  torn or empty file, raised `JSONDecodeError`, and exited nonzero without
+  the "no such object" message - `DockerBackend._inspect_status` correctly
+  read that as UNKNOWN rather than guessing CONFIRMED, so the product code
+  was honest and the fixture was racy. Every state write now goes through
+  `_atomic_write_json` (temp file in the same directory, then
+  `os.replace()`, atomic on POSIX) and, where a write is a read-modify-write
+  (`kill`'s status flip, `exec`'s own `finally`), `_rewrite_state` under an
+  exclusive per-name file lock, mutating whatever is CURRENTLY on disk
+  rather than a stale in-memory snapshot - so a status flip to `"exited"`
+  can never be silently overwritten back to `"running"` by a write that
+  started earlier but finished later. Evidence: a 100-run stress loop of
+  the flaky test found 4 failures on the pre-fix fixture and 0 after.
+
 - **The failure-path matrix and trustworthy cleanup** (#79, Refs #10):
   [`docs/specs/evaluation-facility/failure-matrix.md`](docs/specs/evaluation-facility/failure-matrix.md)
   states all ten of #10's addendum failure paths through the real driver
