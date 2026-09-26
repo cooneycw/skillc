@@ -31,7 +31,7 @@ testpaths = ["tests"]
 [tool.mypy]
 # The typecheck scope, declared once. CI, AGENTS.md and ci/typecheck-control.sh
 # all run bare `mypy`, so narrowing this list is what the control catches (#19).
-files = ["skillc", "tests"]
+files = ["skillc", "tests", "ci"]
 # The Level 1 task keeps several candidate `src/slugify.py` files side by side on
 # purpose (#5). They are one module name many times over, so a whole-tree
 # `mypy .` must not discover them; the grader and gate beside them stay in reach.

@@ -13,17 +13,35 @@ Accessible projects become test subjects through supported adapters. Claude
 Power Pack (CPP) will be the first subject, supplied as a pinned external input
 and exercised in disposable environments. The facility belongs in skillc.
 
-**Status:** the static checker exists. The task levels, Docker facility and
-behavioral comparisons below are a documentation-only proposal, not implemented
-features. See the [specification](docs/specs/evaluation-facility/spec.md),
+**Status:** the static checker exists. The task levels and full behavioral
+comparisons below are still a documentation-only proposal; the evaluation
+facility's static checker, materialization, controller and verifier pieces
+have landed incrementally as their own milestones (see the machine-readable
+table below, checked in CI against [`docs/milestones.json`](docs/milestones.json),
+#73). See the [specification](docs/specs/evaluation-facility/spec.md),
 [architecture decision](docs/decisions/0002-independent-goal-driven-evaluation.md) and
 [PLAN.md](PLAN.md) for the design and delivery sequence.
 
+<!-- milestones:start (checked against docs/milestones.json, #73) -->
+| Milestone | State |
+|---|---|
+| 0.1.0 - static checker | closed |
+| 0.2.0 - real Docker trial end to end (#10) | open |
+| 0.3.0 - second independent collection (#11) | open |
+<!-- milestones:end -->
+
+**Version:** `0.1.0` (checked in CI against the package version, #73)
+
+<!-- commands:start (checked against the real argparse parser, #73) -->
 ```bash
-skillc selftest           # prove every rule can still report the other verdict
-skillc check ./skills     # check a collection after validating the rules
-skillc rules              # what it checks, and at what severity
+skillc check ./skills         # check a collection after validating the rules
+skillc selftest                # prove every rule can still report the other verdict
+skillc check-records <path>    # refuse evaluation records the contract rejects
+skillc materialize <subject>   # install a declared skill surface and prove what a client lists
+skillc rules                   # what it checks, and at what severity
+skillc leak-check <path>       # refuse a tree or bundle carrying a machine identity
 ```
+<!-- commands:end -->
 
 The existing static checker has zero runtime dependencies and requires Python
 3.11+. The proposed evaluation facility will have separate execution requirements.
