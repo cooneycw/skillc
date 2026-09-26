@@ -181,9 +181,13 @@ class _Subject:
 
 
 def _population(
-    rule: checks.Rule | checks.RecordRule | checks.BundleRule, where: Path
+    rule: checks.Rule | checks.RecordRule | checks.BundleRule,
+    where: Path,
+    target: str = DEFAULT_TARGET,
 ) -> list[_Subject]:
     # The ONLY family-aware step. Everything after it is subject-agnostic.
+    # `target` matters only to the `checks.Rule` branch below - a record or
+    # bundle rule has no target to vary against.
     if isinstance(rule, checks.BundleRule):
         # Every CASE DIRECTORY is a subject, whether or not it loads as a bundle.
         # Enumerating only what discovery found would let a case whose ledger
@@ -205,7 +209,7 @@ def _population(
         ]
     return [
         _Subject(s.path, s.parse_error,
-                 sum(f.rule == rule.id for f in checks.run(s, only=rule.id)))
+                 sum(f.rule == rule.id for f in checks.run(s, only=rule.id, target=target)))
         for s in discover(where)
     ]
 
@@ -247,6 +251,75 @@ def _refusal(
     return None
 
 
+def _target_dirs(rule_dir: Path) -> tuple[list[Path], str | None]:
+    """Optional `targets/<target>/{bad,good}` cases layered on the base pair.
+
+    A rule with no `targets/` directory commits none - this layer is additive,
+    for the rule that needs to prove it behaves differently per target
+    (`trigger-shape` is the first, #51). Most rules need nothing here.
+
+    A `targets/` directory that exists is not optional in ITS OWN CONTENTS: a
+    subdirectory naming an unknown target, or one with neither `bad/` nor
+    `good/` under it, is MALFORMED and refused, never silently skipped - a
+    typo'd target name, or a case emptied down to nothing, must not quietly
+    stop being checked.
+    """
+    targets_root = rule_dir / "targets"
+    if not targets_root.is_dir():
+        return [], None
+    dirs = sorted(p for p in targets_root.iterdir() if p.is_dir())
+    for d in dirs:
+        if d.name not in TARGETS:
+            return [], f"targets/{d.name} names an unknown target (known: {', '.join(TARGETS)})"
+        if not (d / "bad").is_dir() and not (d / "good").is_dir():
+            return [], f"targets/{d.name} has neither bad/ nor good/ - nothing to check"
+    return dirs, None
+
+
+def _target_case(rule: checks.Rule, target_dir: Path) -> list[tuple[str, str]]:
+    """Verdicts for one `targets/<target>/` case.
+
+    Unlike the base pair, a target case may commit only ONE side - the other
+    side's behaviour at this target is already proven elsewhere (the base pair,
+    or a sibling case), so an absent side is not scored. A side that IS
+    committed must still be non-empty and must still discriminate, exactly as
+    the base pair requires: present-but-empty is EMPTY, not skipped.
+    """
+    target = target_dir.name
+    results: list[tuple[str, str]] = []
+    ok_parts: list[str] = []
+    bad_dir, good_dir = target_dir / "bad", target_dir / "good"
+    if bad_dir.is_dir():
+        bad = _population(rule, bad_dir, target=target)
+        if not bad:
+            results.append(("EMPTY", f"no subject in its known-bad control under {target!r}"))
+        else:
+            silent = [s for s in bad if not s.own]
+            if silent:
+                results.append((
+                    "BLIND",
+                    f"silent on {len(silent)} of {len(bad)} known-bad input(s) under {target!r}",
+                ))
+            else:
+                ok_parts.append(f"red on bad ({sum(s.own for s in bad)})")
+    if good_dir.is_dir():
+        good = _population(rule, good_dir, target=target)
+        if not good:
+            results.append(("EMPTY", f"no subject in its known-good control under {target!r}"))
+        else:
+            noisy = [s for s in good if s.own]
+            if noisy:
+                results.append((
+                    "NOISY",
+                    f"fired on its known-good input under {target!r}: {noisy[0].shown}",
+                ))
+            else:
+                ok_parts.append(f"green on good ({len(good)})")
+    if not results:
+        results.append(("ok", ", ".join(ok_parts)))
+    return results
+
+
 def cmd_selftest(args: argparse.Namespace) -> int:
     """Each rule must fire on its committed bad case and stay silent on its good one."""
     root = _controls_root(args.controls)
@@ -257,6 +330,7 @@ def cmd_selftest(args: argparse.Namespace) -> int:
     width = max(len(rule.id) for rule in checks.ALL_RULES)
     failures = 0
     unproven = 0
+    target_failures = 0
 
     # ONE loop over ONE registry. The coverage check below is subject-agnostic - it
     # asks whether a control directory exists, keyed on rule.id - and so are the
@@ -283,12 +357,30 @@ def cmd_selftest(args: argparse.Namespace) -> int:
                 f"green on good ({len(good)})"
             )
 
+        # Target-scoped cases (optional; `_target_dirs` returns none for a rule
+        # that has not committed any). A malformed `targets/` entry - an unknown
+        # target name, or a case with neither side - is its own refusal and does
+        # not stop the base pair above from having already been reported.
+        if isinstance(rule, checks.Rule):
+            target_dirs, malformed = _target_dirs(root / rule.id)
+            if malformed:
+                print(f"MALFORMED {rule.id:{width}}  {malformed}")
+                target_failures += 1
+            for target_dir in target_dirs:
+                label = f"{rule.id}[{target_dir.name}]"
+                for verdict, detail in _target_case(rule, target_dir):
+                    print(f"{verdict:8} {label:{width}}  {detail}")
+                    if verdict != "ok":
+                        target_failures += 1
+
     total = len(checks.ALL_RULES)
     print(f"\nskillc selftest: {total - failures - unproven}/{total} rule(s) discriminate", end="")
     if unproven:
         print(f", {unproven} unproven", end="")
+    if target_failures:
+        print(f", {target_failures} target-case failing", end="")
     print(f", {failures} failing" if failures else "")
-    return 1 if (failures or unproven) else 0
+    return 1 if (failures or unproven or target_failures) else 0
 
 
 def cmd_materialize(args: argparse.Namespace) -> int:

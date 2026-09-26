@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import shutil
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -361,3 +362,112 @@ def test_check_still_reports_an_unparseable_skill_under_any_selector(tmp_path: P
     path.write_text("# no frontmatter\n", encoding="utf-8")
     findings = checks.run(Skill.load(path), only="name-spec")
     assert [f.rule for f in findings] == ["frontmatter"]
+
+
+# --------------------------------- target-scoped selftest cases (#51 rework)
+#
+# `trigger-shape` behaves differently under `claude-code` than under `portable`
+# on the same input, yet the base bad/good pair alone cannot see that: it
+# always runs at the default target (`_population`'s default), so it stays
+# green whichever way the target-dependent branch breaks. These commit the
+# instrument's own redcase: selftest must go red when that branch regresses,
+# and must go red when the committed target cases it depends on disappear.
+
+
+def test_a_healthy_selftest_reports_the_trigger_shape_target_cases(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rc, out = _selftest(CONTROLS, capsys)
+    assert rc == 0, out
+    lines = out.splitlines()
+    assert any(
+        line.startswith("ok") and "trigger-shape[claude-code]" in line and "good" in line
+        for line in lines
+    ), out
+    assert any(
+        line.startswith("ok") and "trigger-shape[portable]" in line and "bad" in line
+        for line in lines
+    ), out
+
+
+def test_selftest_goes_red_if_the_claude_code_suppression_stops_checking_the_target(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The regression named in review: drop the `target == "claude-code"` guard
+    so the suppression fires under every target. The base pair (run at the
+    default target, `portable`) cannot see this - it never asked for
+    `claude-code` and the model-invoked bad case has nothing to suppress. Only
+    the committed `targets/portable/bad` case (a user-invoked skill that must
+    still fire under `portable`) goes silent and catches it."""
+
+    def regressed(skill: Skill, target: str) -> Iterator[str]:
+        description = skill.get("description")
+        if not description or not description.strip():
+            return
+        if checks.TRIGGER_RE.search(description):
+            return
+        if skill.frontmatter.get("disable-model-invocation") is True:
+            return  # the dropped guard: no `target ==` check at all
+        yield (
+            "description states a capability but no triggering condition - "
+            "the model reads this to decide whether to fire the skill"
+        )
+
+    monkeypatch.setattr(
+        checks, "RULES",
+        tuple(dataclasses.replace(r, check=regressed) if r.id == "trigger-shape" else r
+              for r in checks.RULES),
+    )
+    rc, out = _selftest(CONTROLS, capsys)
+    assert rc == 1, out
+    lines = out.splitlines()
+    assert any(line.startswith("ok") and line.split()[1] == "trigger-shape" for line in lines), (
+        "the base pair should stay green - it cannot see this regression, which is the point"
+    )
+    assert any(
+        line.startswith("BLIND") and "trigger-shape[portable]" in line for line in lines
+    ), out
+
+
+def test_selftest_refuses_an_emptied_target_case(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Emptying a committed target side (dir present, no subject in it) must be
+    EMPTY, not silently absent - the same discipline the base pair already has."""
+    controls = _controls_copy(tmp_path)
+    bad_dir = controls / "trigger-shape" / "targets" / "portable" / "bad" / "rotate-credential"
+    (bad_dir / "SKILL.md").unlink()
+    bad_dir.rmdir()
+    rc, out = _selftest(controls, capsys)
+    assert rc == 1, out
+    assert any(
+        line.startswith("EMPTY") and "trigger-shape[portable]" in line for line in out.splitlines()
+    ), out
+
+
+def test_selftest_refuses_a_deleted_target_case(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Deleting a committed side entirely, leaving neither bad/ nor good/ under
+    that target, is MALFORMED - it must not silently read as "no case here"."""
+    controls = _controls_copy(tmp_path)
+    shutil.rmtree(controls / "trigger-shape" / "targets" / "portable" / "bad")
+    rc, out = _selftest(controls, capsys)
+    assert rc == 1, out
+    assert any(
+        line.startswith("MALFORMED") and "trigger-shape" in line and "targets/portable" in line
+        for line in out.splitlines()
+    ), out
+
+
+def test_an_unknown_target_directory_name_is_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    controls = _controls_copy(tmp_path)
+    bogus = controls / "trigger-shape" / "targets" / "every-harness" / "good"
+    shutil.copytree(controls / "trigger-shape" / "good", bogus)
+    rc, out = _selftest(controls, capsys)
+    assert rc == 1, out
+    assert any(
+        line.startswith("MALFORMED") and "unknown target" in line for line in out.splitlines()
+    ), out

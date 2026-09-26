@@ -238,15 +238,23 @@ def test_trigger_shape_still_reds_a_model_invoked_skill_under_every_target() -> 
 
 def test_trigger_shape_is_silent_for_a_disabled_model_invocation_skill_under_claude_code() -> None:
     """#51: the model cannot fire a `disable-model-invocation: true` skill, so the
-    premise trigger-shape warns under does not hold for the claude-code target."""
-    user_invoked = discover(CONTROLS / "trigger-shape" / "good-claude-code")
-    claude = [f for s in user_invoked for f in checks.run(s, only="trigger-shape", target="claude-code")]
+    premise trigger-shape warns under does not hold for the claude-code target.
+    These are `skillc selftest`'s own committed target cases (controls/trigger-
+    shape/targets/), read directly here as a second, independent check."""
+    silent_under_claude_code = discover(CONTROLS / "trigger-shape" / "targets" / "claude-code" / "good")
+    claude = [
+        f for s in silent_under_claude_code for f in checks.run(s, only="trigger-shape", target="claude-code")
+    ]
     assert claude == [], f"trigger-shape is noisy on a user-invoked skill under claude-code: {claude}"
 
     # Under `portable` the field is a Claude Code extension a conforming client
     # need not honour, so the description may still drive auto-selection there -
     # the warning must not be silently dropped (decided in docs/frontmatter.md).
-    portable = [f for s in user_invoked for f in checks.run(s, only="trigger-shape", target="portable")]
+    # The SAME user-invoked skill, committed separately because here it must fire.
+    fires_under_portable = discover(CONTROLS / "trigger-shape" / "targets" / "portable" / "bad")
+    portable = [
+        f for s in fires_under_portable for f in checks.run(s, only="trigger-shape", target="portable")
+    ]
     assert [f.rule for f in portable] == ["trigger-shape"]
 
 
