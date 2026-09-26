@@ -62,7 +62,7 @@ actually stopped and whether nothing of it remains.
 | 4 | `install(handle, surface)` | The skill starts inside the isolation, never staged on the host and copied in |
 | 5 | `execute(handle, argv, limits, cancel)` | The agent under test starts inside the isolation |
 | 6 | `confirm_stopped(handle)` | Queried FROM the backend - never inferred from `execute()`'s own exit or timeout. Returns a `Confirmation` (`CONFIRMED` / `NOT_CONFIRMED` / `UNKNOWN`), never a bare bool - a backend that cannot observe returns `UNKNOWN`, never a guess, and `UNKNOWN` is never treated as a confirmed stop |
-| 7 | `export(handle, dest)` | Copies out; the CONTROLLER re-hashes and freezes on its own side (`trial.capture`), so a backend cannot forge what was frozen |
+| 7 | `export(handle, dest)` | Copies out; the CONTROLLER re-hashes and freezes on its own side (`trial.capture`), so a backend cannot forge what was frozen. Must be safe to call more than once, without mutating its own state: the lifecycle driver exports once before `execute()` and once after, and refuses a capture identical to the pre-execution state - see "Liveness" below |
 | 8 | *(a separate backend instance, same seam)* | See below |
 | 9 | `destroy(handle)` + `confirm_absent(handle)` | Both idempotent; `confirm_absent` returns the same three-way `Confirmation` and never trusts `destroy()`'s own return, for the same reason `confirm_stopped` never trusts `execute()`'s |
 
@@ -108,6 +108,23 @@ from the attempt ID alone. The controller does the same on its own side: a
 host-side location (the evidence store, an export destination) is recorded
 relative or logical in anything that could be committed or pasted into a
 public issue, never as an absolute host path.
+
+**Liveness is a lifecycle requirement, not a Docker one.** A subject that
+starts, does nothing, and exits 0 looks identical to one that never ran, and
+identical to one that ran and succeeded, using exit code alone. Measured
+concretely on a sibling platform: a Claude Code container wedged on a first-run
+prompt, and a Codex container missing its tool-call sidecar, both reported
+`exit 0` while doing zero work, invisible to a healthy-looking container.
+"Exit 0 plus plausible output" must never reach grading as `captured`.
+
+`skillc/lifecycle.py`'s driver (#10, PR1b) establishes liveness generically,
+without depending on any client's transcript format: it calls `export()`
+once right after `install()` (before `execute()` runs anything) and once
+after, and compares the two snapshots by content digest. Identical snapshots
+mean nothing observable happened, whatever the exit code says, and the
+attempt is finalized `inconclusive` with a `liveness` reason - never
+`captured`. A fake client that exits 0 having done nothing is the committed
+negative control for this check (`tests/fixtures/backend-lifecycle/fake_client.py`, driven through `tests/test_lifecycle.py`'s `FakeBackend`).
 
 ## Reporting semantics
 
