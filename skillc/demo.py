@@ -89,15 +89,21 @@ uv run skillc trial-demo --docker
 def _watched_snapshot() -> dict[str, object]:
     """A shallow listing (names only, never content) of each watched path -
     enough to notice something appeared, disappeared or was renamed, without
-    this demo reading through a real client's transcripts."""
+    this demo reading through a real client's transcripts. Keyed by
+    `_display_path`, never the raw absolute path: a changed-path report built
+    from this snapshot (`_host_state_report`) can end up in the printed
+    paste-back block, and the raw form would put the operator's real
+    `/home/<name>` into it - `_display_path` is what keeps that block
+    leak-safe on a real host, not just in this function's own callers."""
     snapshot: dict[str, object] = {}
     for path in WATCHED_HOST_PATHS:
+        key = _display_path(path)
         if not path.exists():
-            snapshot[str(path)] = None
+            snapshot[key] = None
         elif path.is_dir():
-            snapshot[str(path)] = sorted(p.name for p in path.iterdir())
+            snapshot[key] = sorted(p.name for p in path.iterdir())
         else:
-            snapshot[str(path)] = path.stat().st_size
+            snapshot[key] = path.stat().st_size
     return snapshot
 
 
@@ -106,9 +112,25 @@ def _host_state_report(before: dict[str, object], after: dict[str, object]) -> l
     return changes
 
 
+def _display_path(path: Path) -> str:
+    """A leak-safe display form: `~`-relative when `path` sits under the real
+    home directory, never the resolved absolute path with the operator's
+    actual username in it. `WATCHED_HOST_PATHS` is built from `Path.home()`,
+    so printing it unqualified would put a real `/home/<name>` path into the
+    block on every run on a real host - which `leak.scan_text` would then
+    correctly refuse, since only `/home/candidate` is allowlisted (found
+    while adding the watched-path report: it is not a hypothetical, it fires
+    on the very first real invocation)."""
+    try:
+        return f"~/{path.relative_to(Path.home())}"
+    except ValueError:
+        return str(path)
+
+
 def _paste_back_block(
     disposition: str, liveness_method: str | None, backend_teardown: str | None,
     readiness: dict[str, object] | None, host_changes: list[str], control: bool,
+    watched_paths: tuple[Path, ...] = WATCHED_HOST_PATHS,
 ) -> str:
     stamp = provenance.stamp().as_dict()
     image_digest = readiness.get("image_digest") if isinstance(readiness, dict) else None
@@ -122,6 +144,13 @@ def _paste_back_block(
         f"skillc_version: {stamp['skillc_version']}",
         f"source_commit: {stamp['source_commit']}",
         f"source_dirty: {stamp['dirty']}",
+        # A small, DECLARED population, not a general host integrity scan
+        # (bug found by cross-model review: the earlier block reported
+        # "unchanged" with no statement of what was even looked at, which
+        # reads as a stronger claim than it is). Named here explicitly so a
+        # reader of the pasted block - not just this module's docstring -
+        # knows the check's own scope.
+        f"host_state_watched_paths: {[_display_path(p) for p in watched_paths]}",
         f"host_state_unchanged: {not host_changes}",
     ]
     if host_changes:
@@ -189,6 +218,7 @@ def run(
         disposition = str(record.get("disposition"))
         liveness_method = record.get("liveness_method")
         backend_teardown = record.get("backend_teardown")
+        reason = record.get("reason")
         raw_readiness = record.get("readiness")
         readiness = raw_readiness if isinstance(raw_readiness, dict) else None
 
@@ -196,15 +226,20 @@ def run(
             disposition,
             liveness_method if isinstance(liveness_method, str) or liveness_method is None else None,
             backend_teardown if isinstance(backend_teardown, str) or backend_teardown is None else None,
-            readiness, host_changes, control,
+            readiness, host_changes, control, WATCHED_HOST_PATHS,
         )
         # A self-check the operator does not have to redo, not merely a
         # claim that this block is clean.
         findings = list(leak.scan_text(block, leak.load_denylist(None)))
         if findings:
             print("skillc trial-demo: REFUSING to print the paste-back block - it leaked:", file=sys.stderr)
-            for line_no, kind, matched in findings:
-                print(f"  line {line_no}: {kind}: {matched}", file=sys.stderr)
+            # NEVER print `matched` (bug found by cross-model review): that is
+            # the actual sensitive text the refusal exists to withhold, and
+            # printing it here would defeat the whole point of refusing.
+            # `line_no`/`kind` are enough to act on the refusal without
+            # reproducing what was found.
+            for line_no, kind, _matched in findings:
+                print(f"  line {line_no}: {kind}", file=sys.stderr)
             return 1
 
         print(block)
@@ -215,13 +250,37 @@ def run(
                 file=sys.stderr,
             )
 
+        # Confirmed teardown is required either way (bug found by cross-model
+        # review: neither branch used to check it at all) - a captured or
+        # correctly-refused attempt whose container was never confirmed gone
+        # is not a clean demonstration of the lifecycle, whatever its
+        # disposition says.
+        teardown_confirmed = backend_teardown == "confirmed"
         if control:
-            if disposition == "inconclusive" and liveness_method is not None:
+            # The control must go red BECAUSE the liveness check caught the
+            # reply-only client - not merely "inconclusive for some other
+            # reason" (bug found by cross-model review), which would prove
+            # nothing about the liveness check this control exists to test.
+            liveness_refused = (
+                disposition == "inconclusive"
+                and liveness_method is not None
+                and isinstance(reason, str)
+                and "liveness" in reason
+            )
+            if liveness_refused and teardown_confirmed:
                 return 0
             print(
-                f"skillc trial-demo --control: expected an inconclusive liveness refusal, "
-                f"got disposition={disposition!r} - the control did NOT go red",
+                "skillc trial-demo --control: expected a liveness-caused inconclusive refusal "
+                f"AND a confirmed teardown, got disposition={disposition!r} reason={reason!r} "
+                f"backend_teardown={backend_teardown!r} - the control did NOT go red as expected",
                 file=sys.stderr,
             )
             return 1
-        return 0 if disposition == "captured" else 1
+        if disposition == "captured" and teardown_confirmed:
+            return 0
+        print(
+            f"skillc trial-demo: expected disposition=captured and a confirmed teardown, got "
+            f"disposition={disposition!r} backend_teardown={backend_teardown!r}",
+            file=sys.stderr,
+        )
+        return 1

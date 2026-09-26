@@ -9,8 +9,11 @@ same discipline for the fake host-subprocess backend.
 
 from __future__ import annotations
 
+import json
+import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -122,6 +125,26 @@ def test_two_attempts_get_separate_empty_private_homes(base: Path, docker_state:
         assert list((home / ".claude").iterdir()) == []
 
 
+def test_a_second_prepare_for_the_same_attempt_refuses_without_destroying_the_first(
+    base: Path, docker_state: Path,
+) -> None:
+    """Regression for a bug found by cross-model review: `prepare()` used to
+    treat ANY OSError from its mkdir calls - including the FileExistsError
+    from calling it twice for one attempt_id - as this call's own failure,
+    and `rmtree`'d the workspace root on the way out. That destroyed the
+    FIRST call's already-returned, possibly in-use handle. This fails on the
+    pre-fix code: the second `prepare()` there does not raise at all, and the
+    first handle's work_dir is gone afterward."""
+    backend = _backend(base, docker_state)
+    h1 = backend.prepare("a-000000000001")
+    assert isinstance(h1, d._Handle)
+    (h1.work_dir / "in-progress.txt").write_text("do not delete me\n")
+    with pytest.raises(BackendUnavailable):
+        backend.prepare("a-000000000001")
+    assert h1.work_dir.is_dir()
+    assert (h1.work_dir / "in-progress.txt").read_text() == "do not delete me\n"
+
+
 # -------------------------------------------------------------- compose_run_argv
 
 
@@ -139,6 +162,7 @@ def _compose(**overrides: object) -> list[str]:
         "pids_limit": d.DEFAULT_PIDS_LIMIT,
         "cpus": d.DEFAULT_CPUS,
         "shm_size": d.DEFAULT_SHM_SIZE,
+        "container_user": d._container_user(),
     }
     defaults.update(overrides)
     return d.compose_run_argv(**defaults)  # type: ignore[arg-type]
@@ -158,10 +182,21 @@ def test_composed_argv_never_mounts_the_docker_socket_or_widens_privilege() -> N
 
 def test_composed_argv_carries_neutral_identity() -> None:
     argv = _compose()
-    assert "--user" in argv and argv[argv.index("--user") + 1] == d.CONTAINER_USER
+    assert "--user" in argv and argv[argv.index("--user") + 1] == d._container_user()
     assert "--hostname" in argv and argv[argv.index("--hostname") + 1] == d.CONTAINER_HOSTNAME
     assert f"/tmp/work:{d.CONTAINER_WORKSPACE}:rw" in argv
     assert f"/tmp/home:{d.CONTAINER_HOME}:rw" in argv
+
+
+def test_composed_argv_carries_the_real_host_uid_never_a_fixed_placeholder() -> None:
+    """Regression for the fixed-'1000:1000' bug (found by cross-model review):
+    `prepare()` creates the bind-mounted directories owned by whoever runs
+    this process, so a container started under a DIFFERENT uid could not
+    read or write its own mount. `container_user` must reflect the real
+    caller, not a constant - this fails on the pre-fix code whenever the
+    host uid/gid is not literally 1000:1000."""
+    argv = _compose(container_user="4242:4242")
+    assert argv[argv.index("--user") + 1] == "4242:4242"
 
 
 def test_composed_argv_carries_matched_memory_and_swap_and_other_limits() -> None:
@@ -211,6 +246,22 @@ def test_install_stamps_provenance_of_the_controller_not_the_candidate(
     assert isinstance(stamped, dict)
     assert set(stamped) == {"skillc_version", "source_commit", "dirty"}
     assert stamped["skillc_version"]
+
+
+def test_install_reports_readiness_facts_as_unknown_never_a_guessed_satisfied(
+    base: Path, docker_state: Path,
+) -> None:
+    """Regression for a bug found by cross-model review: this backend only
+    WRITES the declared surface - it never runs `materialize.py`'s own
+    discovery/baseline observation against a real client - so claiming
+    SATISFIED for `discovery_canary`/`baseline_absence` was a guess, not a
+    check result. Fails on the pre-fix code, which reports SATISFIED for any
+    non-empty declared surface regardless of what was actually observed."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-000000000011")
+    readiness = backend.install(handle, {"skill": "x"})
+    assert readiness["discovery_canary"] == "UNKNOWN"
+    assert readiness["baseline_absence"] == "UNKNOWN"
 
 
 def test_install_records_none_digest_when_the_image_is_unresolvable(base: Path, docker_state: Path) -> None:
@@ -277,10 +328,74 @@ def test_install_seeds_a_claude_onboarding_placeholder_when_declared(
     handle = backend.prepare("a-000000000006")
     assert isinstance(handle, d._Handle)
     readiness = backend.install(handle, {"skill": "x", "client": "claude", "client_version": "2.1.281"})
-    seed = (handle.home_dir / ".claude.json").read_text()
-    assert "hasCompletedOnboarding" in seed
-    assert "hasTrustDialogAccepted" in seed
+    seed_text = (handle.home_dir / ".claude.json").read_text()
+    # Regression for a bug found by cross-model review: the hand-built seed
+    # string had 5 literal closing braces against 3 opened, since it was not
+    # an f-string and no `{{` escaping applied there - `json.loads` fails on
+    # the pre-fix code, which is exactly why the earlier substring-only
+    # assertions never caught it.
+    seed = json.loads(seed_text)
+    assert seed["hasCompletedOnboarding"] is True
+    assert seed["projects"][d.CONTAINER_WORKSPACE]["hasTrustDialogAccepted"] is True
     assert readiness["client_version"] == "2.1.281"
+
+
+def test_docker_backend_passes_a_consistent_env_to_every_docker_invocation(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression for a bug found by cross-model review: `execute()` used to
+    launch its `docker run` subprocess with a stripped `env={"PATH": ...}`
+    while `probe_daemon`/`container_state`/`force_remove`/
+    `_resolve_image_digest` all inherited the full ambient environment - so a
+    `DOCKER_HOST` set in the environment could have `execute()` target the
+    default daemon while confirmation/teardown queried a DIFFERENT one,
+    falsely confirming teardown of a container still running elsewhere on
+    the daemon `execute()` actually used. Fails on the pre-fix code: the env
+    recorded for `execute()`'s own `Popen` call there carries no
+    `DOCKER_HOST` key at all, while every other captured call's env does."""
+    monkeypatch.setenv("DOCKER_HOST", "tcp://example-marker:2375")
+    seen_envs: list[object] = []
+    real_run: Any = subprocess.run
+    real_popen: Any = subprocess.Popen
+
+    def _is_docker_argv(args: tuple[Any, ...]) -> bool:
+        # Scopes this check to the DOCKER CLI invocations this backend makes
+        # - never `provenance.py`'s own `git` calls, which legitimately
+        # inherit the ambient environment and have nothing to do with which
+        # daemon a docker command reaches.
+        return bool(args) and "fake_docker.py" in " ".join(str(a) for a in args[0])
+
+    def _record_run(*args: Any, **kwargs: Any) -> Any:
+        if _is_docker_argv(args):
+            seen_envs.append(kwargs.get("env"))
+        return real_run(*args, **kwargs)
+
+    def _record_popen(*args: Any, **kwargs: Any) -> Any:
+        if _is_docker_argv(args):
+            seen_envs.append(kwargs.get("env"))
+        return real_popen(*args, **kwargs)
+
+    monkeypatch.setattr(d.subprocess, "run", _record_run)
+    monkeypatch.setattr(d.subprocess, "Popen", _record_popen)
+
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-envcheck-000001")
+    assert isinstance(handle, d._Handle)
+    backend.install(handle, {"skill": "x"})
+    result = backend.execute(handle, _argv("work"), Limits(timeout=5))
+    backend.confirm_stopped(handle)
+    backend.destroy(handle)
+    backend.confirm_absent(handle)
+
+    assert result.reason == "exited"
+    # Every call this backend made - prepare's probe, install's digest
+    # resolution, execute's own docker run, and both confirmation queries -
+    # must carry the identical connection env, never each inheriting the
+    # ambient environment independently.
+    assert len(seen_envs) >= 5
+    for env in seen_envs:
+        assert isinstance(env, dict)
+        assert env.get("DOCKER_HOST") == "tcp://example-marker:2375"
 
 
 def test_execute_delivers_stdin_to_the_subject(base: Path, docker_state: Path) -> None:

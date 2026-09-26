@@ -68,6 +68,7 @@ says so under `unobserved`, not just this docstring.
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import shutil
 import signal
@@ -90,8 +91,21 @@ from .lifecycle import CANARY_NONCE_KEY
 
 DAEMON_TIMEOUT = 5.0
 
-#: Neutral identity - never the host's own (interfaces.md "Execution backend").
-CONTAINER_USER = "1000:1000"
+def _container_user() -> str:
+    """The uid:gid the container runs as. MUST be the real host uid/gid, not a
+    fixed placeholder like "1000:1000" (bug found by cross-model review):
+    `prepare()` creates `work_dir`/`home_dir` owned by whatever user runs this
+    process, and a container started with a DIFFERENT uid cannot read or
+    write its own bind-mounted directories - it fails at the first write, not
+    at startup, which is why a fixed constant looked fine in every test
+    against a fake CLI. `os.getuid`/`os.getgid` are POSIX-only, matching this
+    package's `subprocess`-and-Docker approach generally (AGENTS.md)."""
+    return f"{os.getuid()}:{os.getgid()}"
+
+
+#: A neutral HOSTNAME and logical paths - never the host's own (interfaces.md
+#: "Execution backend"). The container's UID is real (see `_container_user`);
+#: neutrality here means no host machine identity, not a fake numeric owner.
 CONTAINER_HOSTNAME = "skillc-trial"
 CONTAINER_WORKSPACE = "/work"
 CONTAINER_HOME = "/home/candidate"
@@ -110,14 +124,42 @@ DEFAULT_SHM_SIZE = "64m"
 SANDBOX_MODE = "unsandboxed-container-is-the-fence"
 
 
-def probe_daemon(docker_bin: Sequence[str], timeout: float = DAEMON_TIMEOUT) -> str | None:
+#: Which daemon/context the `docker` CLI talks to - forwarded EXPLICITLY and
+#: identically to every invocation this backend makes (see `_docker_env`),
+#: never left to each call's own ambient inheritance.
+DOCKER_CONNECTION_VARS = ("DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG", "DOCKER_CERT_PATH", "DOCKER_TLS_VERIFY")
+
+
+def _docker_env() -> dict[str, str]:
+    """A consistent environment for every docker CLI call THIS BACKEND makes
+    - never each call inheriting the ambient environment independently
+    (found by cross-model review: `execute()` stripped its subprocess to just
+    `PATH` while every other call inherited the full environment, so a
+    caller with `DOCKER_HOST`/`DOCKER_CONTEXT` set could have `execute()`
+    target the default daemon while `confirm_stopped`/`confirm_absent`/
+    `destroy` queried a DIFFERENT one - an absence there would falsely
+    confirm teardown of a container still running on the daemon `execute()`
+    actually used)."""
+    env = {"PATH": os.environ.get("PATH", os.defpath)}
+    for name in DOCKER_CONNECTION_VARS:
+        value = os.environ.get(name)
+        if value is not None:
+            env[name] = value
+    return env
+
+
+def probe_daemon(
+    docker_bin: Sequence[str], timeout: float = DAEMON_TIMEOUT, env: Mapping[str, str] | None = None,
+) -> str | None:
     """The daemon's server version, or None when it cannot be reached. Never
     raises for "not found" or "unreachable" - a caller must turn either into
-    a refusal, never a host-side fallback."""
+    a refusal, never a host-side fallback. `env=None` inherits the caller's
+    own environment (the default, for standalone use); `DockerBackend`
+    always passes `_docker_env()` explicitly."""
     try:
         proc = subprocess.run(
             [*docker_bin, "version", "--format", "{{.Server.Version}}"],
-            capture_output=True, timeout=timeout, text=True, check=False,
+            capture_output=True, timeout=timeout, text=True, check=False, env=env,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -126,30 +168,42 @@ def probe_daemon(docker_bin: Sequence[str], timeout: float = DAEMON_TIMEOUT) -> 
     return proc.stdout.strip() or None
 
 
-def container_state(docker_bin: Sequence[str], name: str, timeout: float = DAEMON_TIMEOUT) -> str | None:
+def container_state(
+    docker_bin: Sequence[str], name: str, timeout: float = DAEMON_TIMEOUT, env: Mapping[str, str] | None = None,
+) -> str | None:
     """Ask the DAEMON whether `name` exists, and its status if so - the only
     fact `confirm_stopped`/`confirm_absent` trust. Three distinct answers:
-    a status string (present), `None` (confirmed absent), or `"unknown"`
-    (the query itself failed - never collapsed into "absent")."""
+    a status string (present), `None` (CONFIRMED absent), or `"unknown"`
+    (the query itself failed, or failed for a reason OTHER than "this
+    container does not exist" - never collapsed into "absent"; found by
+    cross-model review: a disconnected daemon, a permission error or a
+    server error also exit non-zero, and treating that the same as a genuine
+    "No such object" would let a query the daemon never actually answered
+    read as a confirmed teardown). `env=None` inherits the caller's own
+    environment; `DockerBackend` always passes `_docker_env()` explicitly."""
     try:
         proc = subprocess.run(
             [*docker_bin, "inspect", "--format", "{{.State.Status}}", name],
-            capture_output=True, timeout=timeout, text=True, check=False,
+            capture_output=True, timeout=timeout, text=True, check=False, env=env,
         )
     except (OSError, subprocess.TimeoutExpired):
         return "unknown"
     if proc.returncode != 0:
-        return None
+        return None if "No such" in proc.stderr else "unknown"
     return proc.stdout.strip() or None
 
 
-def force_remove(docker_bin: Sequence[str], name: str, timeout: float = DAEMON_TIMEOUT) -> bool:
+def force_remove(
+    docker_bin: Sequence[str], name: str, timeout: float = DAEMON_TIMEOUT, env: Mapping[str, str] | None = None,
+) -> bool:
     """`docker rm -f name`: idempotent (an already-absent container is
     success - there is nothing left to remove), and forcibly stops a running
-    one, so a separate `docker stop` is not needed first."""
+    one, so a separate `docker stop` is not needed first. `env=None` inherits
+    the caller's own environment; `DockerBackend` always passes
+    `_docker_env()` explicitly."""
     try:
         proc = subprocess.run(
-            [*docker_bin, "rm", "-f", name], capture_output=True, timeout=timeout, text=True, check=False,
+            [*docker_bin, "rm", "-f", name], capture_output=True, timeout=timeout, text=True, check=False, env=env,
         )
     except (OSError, subprocess.TimeoutExpired):
         return False
@@ -158,13 +212,36 @@ def force_remove(docker_bin: Sequence[str], name: str, timeout: float = DAEMON_T
     return "No such container" in proc.stderr
 
 
-def _resolve_image_digest(docker_bin: Sequence[str], image: str, timeout: float = DAEMON_TIMEOUT) -> str | None:
+def _copy_tree_no_symlinks(src: Path, dest: Path) -> None:
+    """Recursively copy `src` into `dest`, skipping (never following) a
+    symlink at ANY depth. `shutil.copytree(symlinks=False)` DEREFERENCES a
+    symlink found inside the tree instead of skipping it - exactly backwards
+    for untrusted candidate output: a `nested/leak -> /etc/passwd` would
+    otherwise export the host file it points to (found by cross-model
+    review). Matches `trial.py`'s own capture discipline: never follow,
+    whatever a link points to."""
+    for entry in src.iterdir():
+        if entry.is_symlink():
+            continue
+        target = dest / entry.name
+        if entry.is_dir():
+            target.mkdir(exist_ok=True)
+            _copy_tree_no_symlinks(entry, target)
+        elif entry.is_file():
+            shutil.copy2(entry, target)
+
+
+def _resolve_image_digest(
+    docker_bin: Sequence[str], image: str, timeout: float = DAEMON_TIMEOUT, env: Mapping[str, str] | None = None,
+) -> str | None:
     """The digest of the image that will actually run - never the tag alone
-    (addendum D13/D14: two builds of one tag can differ)."""
+    (addendum D13/D14: two builds of one tag can differ). `env=None` inherits
+    the caller's own environment; `DockerBackend` always passes
+    `_docker_env()` explicitly."""
     try:
         proc = subprocess.run(
             [*docker_bin, "image", "inspect", image, "--format", "{{.Id}}"],
-            capture_output=True, timeout=timeout, text=True, check=False,
+            capture_output=True, timeout=timeout, text=True, check=False, env=env,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -202,6 +279,7 @@ def compose_run_argv(
     pids_limit: str,
     cpus: str,
     shm_size: str,
+    container_user: str,
 ) -> list[str]:
     """The full `docker run` argv. Pure - makes no call, mutates nothing. A
     FIXED, closed set of flags: there is no passthrough for arbitrary extra
@@ -216,7 +294,7 @@ def compose_run_argv(
     return [
         *docker_bin, "run", "--rm", "-i", "--name", name,
         "--network", network,
-        "--user", CONTAINER_USER,
+        "--user", container_user,
         "--hostname", CONTAINER_HOSTNAME,
         "--init",
         "--memory", memory, "--memory-swap", memory,
@@ -259,14 +337,14 @@ class DockerBackend:
     daemon_timeout: float = DAEMON_TIMEOUT
 
     def describe(self) -> BackendDescription:
-        version = probe_daemon(self.docker_bin, self.daemon_timeout)
+        version = probe_daemon(self.docker_bin, self.daemon_timeout, _docker_env())
         return BackendDescription(
             name="docker",
             version=version or "unreachable",
             isolation=(
                 "container (pid/mount/network namespaces)",
                 f"network={self.network} by default",
-                f"non-root user {CONTAINER_USER}",
+                f"non-root user {_container_user()}",
                 "resource limits enforced: memory, memory-swap (equal), pids, cpus, shm-size",
                 f"sandbox: {SANDBOX_MODE}",
                 "no docker socket, no docker binary, no passthrough flags in the composed argv",
@@ -282,13 +360,21 @@ class DockerBackend:
         )
 
     def prepare(self, attempt_id: str) -> object:
-        version = probe_daemon(self.docker_bin, self.daemon_timeout)
+        version = probe_daemon(self.docker_bin, self.daemon_timeout, _docker_env())
         if version is None:
             raise BackendUnavailable(
                 f"docker daemon unreachable via {' '.join(self.docker_bin)!r}"
             )
         name = f"skillc-{attempt_id}"
         root = self.base_dir / f"handle-{attempt_id}"
+        if root.exists():
+            # Refuse, never destroy: a second `prepare()` for an attempt_id
+            # already prepared (found by cross-model review) must not
+            # `rmtree` a workspace that may be IN USE - the old code's except
+            # block ran on ANY OSError, including the FileExistsError from
+            # this exact collision, and wiped the pre-existing directory
+            # regardless of what it held.
+            raise BackendUnavailable(f"a workspace for attempt {attempt_id!r} already exists")
         work_dir, home_dir = root / "work", root / "home"
         try:
             for d in (work_dir, home_dir):
@@ -300,6 +386,8 @@ class DockerBackend:
             for sub in (".claude", ".codex"):
                 (home_dir / sub).mkdir(mode=0o700)
         except OSError:
+            # Safe here: this call is the one that just created `root`, so a
+            # failure partway through belongs to THIS attempt alone.
             shutil.rmtree(root, ignore_errors=True)
             raise
         return _Handle(attempt_id=attempt_id, name=name, work_dir=work_dir, home_dir=home_dir)
@@ -309,7 +397,7 @@ class DockerBackend:
         nonce = surface.get(CANARY_NONCE_KEY)
         declared = {k: v for k, v in surface.items() if k != CANARY_NONCE_KEY}
         readiness: dict[str, object] = {
-            "image_digest": _resolve_image_digest(self.docker_bin, self.image, self.daemon_timeout),
+            "image_digest": _resolve_image_digest(self.docker_bin, self.image, self.daemon_timeout, _docker_env()),
             "sandbox_mode": SANDBOX_MODE,
             "declared": len(declared),
             # Which skillc produced this receipt (operator request, addendum
@@ -359,19 +447,29 @@ class DockerBackend:
         client = declared.get("client")
         if client == "claude":
             client_version = declared.get("client_version", "unpinned")
-            (handle.home_dir / ".claude.json").write_text(
-                '{"hasCompletedOnboarding": true, "bypassPermissionsModeAccepted": true, '
-                f'"projects": {{"{CONTAINER_WORKSPACE}": {{"hasTrustDialogAccepted": true, '
-                '"enabledMcpjsonServers": []}}}}}',
-                encoding="utf-8",
-            )
+            seed = {
+                "hasCompletedOnboarding": True,
+                "bypassPermissionsModeAccepted": True,
+                "projects": {
+                    CONTAINER_WORKSPACE: {
+                        "hasTrustDialogAccepted": True,
+                        "enabledMcpjsonServers": [],
+                    },
+                },
+            }
+            (handle.home_dir / ".claude.json").write_text(json.dumps(seed), encoding="utf-8")
             readiness["client_version"] = client_version
 
         if isinstance(nonce, str):
             (handle.work_dir / ".skillc-canary").write_text(nonce, encoding="utf-8")
             readiness["canary_path"] = ".skillc-canary-result"
-        readiness["discovery_canary"] = "SATISFIED"
-        readiness["baseline_absence"] = "SATISFIED"
+        # UNKNOWN, never a blind SATISFIED (bug found by cross-model review):
+        # this backend only WRITES the declared surface into the workspace -
+        # it never runs `materialize.py`'s own discovery/baseline observation
+        # against a real client, so it has no evidence for either fact.
+        # Claiming SATISFIED here would be a guess dressed as a check result.
+        readiness["discovery_canary"] = "UNKNOWN"
+        readiness["baseline_absence"] = "UNKNOWN"
         return readiness
 
     def execute(
@@ -382,6 +480,7 @@ class DockerBackend:
         docker_argv = compose_run_argv(
             self.docker_bin, self.image, handle.name, handle.work_dir, handle.home_dir,
             argv, self.env, self.network, self.memory, self.pids_limit, self.cpus, self.shm_size,
+            _container_user(),
         )
         # `stdin` is delivered via a real FILE, never a pipe this process
         # writes to by hand: a pipe write large enough to fill the OS buffer
@@ -397,7 +496,7 @@ class DockerBackend:
                 stdin_source = stack.enter_context(open(stdin_path, "rb"))
             try:
                 proc = subprocess.Popen(
-                    docker_argv, cwd=handle.work_dir, env={"PATH": os.environ.get("PATH", os.defpath)},
+                    docker_argv, cwd=handle.work_dir, env=_docker_env(),
                     stdin=stdin_source, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                     start_new_session=True,
                 )
@@ -440,7 +539,7 @@ class DockerBackend:
 
     def confirm_stopped(self, handle: object) -> Confirmation:
         assert isinstance(handle, _Handle)
-        status = container_state(self.docker_bin, handle.name, self.daemon_timeout)
+        status = container_state(self.docker_bin, handle.name, self.daemon_timeout, _docker_env())
         if status == "unknown":
             return Confirmation.UNKNOWN
         if status is None or status in ("exited", "dead"):
@@ -449,23 +548,16 @@ class DockerBackend:
 
     def export(self, handle: object, dest: Path) -> None:
         assert isinstance(handle, _Handle)
-        for item in handle.work_dir.iterdir():
-            if item.is_symlink():
-                continue  # never follow a symlink out of the bind mount
-            target = dest / item.name
-            if item.is_dir():
-                shutil.copytree(item, target, dirs_exist_ok=True, symlinks=False)
-            elif item.is_file():
-                shutil.copy2(item, target)
+        _copy_tree_no_symlinks(handle.work_dir, dest)
 
     def destroy(self, handle: object) -> None:
         assert isinstance(handle, _Handle)
-        force_remove(self.docker_bin, handle.name, self.daemon_timeout)
+        force_remove(self.docker_bin, handle.name, self.daemon_timeout, _docker_env())
         shutil.rmtree(handle.work_dir.parent, ignore_errors=True)
 
     def confirm_absent(self, handle: object) -> Confirmation:
         assert isinstance(handle, _Handle)
-        status = container_state(self.docker_bin, handle.name, self.daemon_timeout)
+        status = container_state(self.docker_bin, handle.name, self.daemon_timeout, _docker_env())
         if status == "unknown":
             return Confirmation.UNKNOWN
         return Confirmation.CONFIRMED if status is None else Confirmation.NOT_CONFIRMED

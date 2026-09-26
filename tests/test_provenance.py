@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
 from skillc import __version__, provenance
+
+#: Woodpecker's gate step runs in a python:3.12-slim image, which does not
+#: ship git (found by w3's PR2, #10, via a real CI failure: these tests
+#: invoke real git to build scratch repos and hard-crashed there instead of
+#: skipping). Matches `tests/test_materialize.py`'s own marker for the same
+#: reason.
+needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
 
 
 def _git(args: list[str], cwd: Path) -> None:
@@ -26,6 +34,7 @@ def _scratch_repo(tmp_path: Path) -> Path:
     return repo
 
 
+@needs_git
 def test_stamp_reports_the_real_checkout() -> None:
     """Run against skillc's own checkout (this test's default source_root) -
     a real git repository, so this asserts the HAPPY path end to end."""
@@ -44,6 +53,7 @@ def test_stamp_is_unknown_outside_any_git_work_tree(tmp_path: Path) -> None:
     assert result.skillc_version == __version__  # never UNKNOWN - this package always has one
 
 
+@needs_git
 def test_stamp_is_unknown_when_git_is_not_on_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -54,6 +64,7 @@ def test_stamp_is_unknown_when_git_is_not_on_path(
     assert result.dirty is None
 
 
+@needs_git
 def test_dirty_is_false_on_a_clean_checkout(tmp_path: Path) -> None:
     repo = _scratch_repo(tmp_path)
     result = provenance.stamp(repo)
@@ -61,6 +72,7 @@ def test_dirty_is_false_on_a_clean_checkout(tmp_path: Path) -> None:
     assert result.dirty is False
 
 
+@needs_git
 def test_dirty_is_true_with_an_uncommitted_change(tmp_path: Path) -> None:
     repo = _scratch_repo(tmp_path)
     (repo / "file.txt").write_text("changed\n")
@@ -73,6 +85,7 @@ def test_as_dict_carries_exactly_the_agreed_field_names() -> None:
     assert set(result.as_dict()) == {"skillc_version", "source_commit", "dirty"}
 
 
+@needs_git
 def test_a_subdirectory_of_an_unrelated_repo_is_unknown_not_misattributed(tmp_path: Path) -> None:
     """Found by w3's cross-model review: running git FROM source_root is not
     enough - it only proves SOME repository was found, not that source_root
