@@ -32,6 +32,9 @@ from skillc.backend import Confirmation, Limits
 
 FAKE_DOCKER = Path(__file__).resolve().parent / "fixtures" / "docker-backend" / "fake_docker.py"
 FAKE_CLIENT = Path(__file__).resolve().parent / "fixtures" / "backend-lifecycle" / "fake_client.py"
+_SPEC_DIR = Path(__file__).resolve().parent.parent / "docs" / "specs" / "evaluation-facility"
+INTERFACES_MD = _SPEC_DIR / "interfaces.md"
+SUPPORT_MATRIX_MD = _SPEC_DIR / "support-matrix.md"
 
 
 def _docker_bin(state_dir: Path) -> list[str]:
@@ -112,15 +115,20 @@ CONFORMANCE_CASES: tuple[ConformanceCase, ...] = (
         ef_codes=("EF-03",),
         status="demonstrated-here",
         note=(
-            "DockerBackend.install() reports discovery_canary VIOLATED - "
-            "never SATISFIED - when nothing was actually copied in, tracked "
-            "separately from what was merely declared. See "
-            "tests/test_docker_backend.py::"
+            "Narrowly demonstrated (cross-model review, PR #87, caught this "
+            "note originally overclaiming the whole row): DockerBackend."
+            "install() reports discovery_canary VIOLATED - never SATISFIED - "
+            "for the FULLY-EMPTY case, when nothing at all was declared or "
+            "copied in. See tests/test_docker_backend.py::"
             "test_install_reports_discovery_canary_violated_when_nothing_is_declared. "
-            "Whether a controller/verifier turns a VIOLATED readiness into a "
-            "hard refusal of the attempt is trial.py's/verify.py's decision, "
-            "not this backend's - the backend's job ends at reporting the "
-            "true fact, and that mapping is out of this PR's scope."
+            "NOT demonstrated: detecting ONE missing required helper among "
+            "otherwise-successfully-copied files (discovery_canary is "
+            "all-or-nothing today, not per-entry) and baseline contamination "
+            "(baseline_absence is always reported SATISFIED without "
+            "inspecting the image's own contents - describe()'s own "
+            "unobserved claim). Whether a controller/verifier turns a "
+            "VIOLATED readiness into a hard refusal of the attempt is "
+            "trial.py's/verify.py's decision, not this backend's."
         ),
     ),
     ConformanceCase(
@@ -247,6 +255,69 @@ def test_every_conformance_case_has_a_definite_status_and_a_citation() -> None:
     assert seen_ef_codes == {"EF-01", "EF-02", "EF-03", "EF-04", "EF-05", "EF-07", "EF-08", "EF-10"}
 
 
+def _markdown_table_rows(text: str, heading: str) -> list[list[str]]:
+    """Every row (as a list of cell strings) of the FIRST markdown table
+    under `heading`, up to the next `## ` heading - skips the header row and
+    the `|---|...` separator."""
+    _before, _, after = text.partition(heading)
+    section, _, _rest = after.partition("\n## ")
+    rows: list[list[str]] = []
+    seen_header = False
+    for line in section.splitlines():
+        line = line.strip()
+        if not line.startswith("|"):
+            continue
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        if not seen_header:
+            seen_header = True
+            continue  # the header row itself
+        if all(set(c) <= {"-"} for c in cells):
+            continue  # the |---|---| separator row
+        rows.append(cells)
+    return rows
+
+
+def test_every_interfaces_md_conformance_row_has_a_matching_case() -> None:
+    """Regression for a cross-model review finding (PR #87): the prior
+    completeness check only unioned EF codes, so removing a whole row whose
+    codes appear on another row stayed green - dropping the forged-success
+    row entirely, for instance, was invisible to it. This reads
+    interfaces.md's own table and requires an exact 1:1 name match against
+    CONFORMANCE_CASES, catching a removed, renamed or duplicated row.
+    Fails on the pre-fix check with that row removed (it would still report
+    the same EF code union from the remaining rows)."""
+    md_rows = _markdown_table_rows(
+        INTERFACES_MD.read_text(encoding="utf-8"),
+        "## Conformance cases required before trusting a backend",
+    )
+    md_case_names = [row[0] for row in md_rows]
+    declared_names = [case.case for case in CONFORMANCE_CASES]
+    assert set(md_case_names) == set(declared_names)
+    assert len(md_case_names) == len(declared_names) == len(CONFORMANCE_CASES)
+
+
+def test_the_support_matrix_conformance_table_matches_the_declared_cases() -> None:
+    """Regression for a cross-model review finding (PR #87): nothing
+    previously tied support-matrix.md's own restated table back to
+    CONFORMANCE_CASES, despite this file's own module docstring and the
+    matrix's own text both claiming they cannot drift apart. Fails on the
+    pre-fix state (no such check existed) if the matrix's Status column for
+    any case is ever edited to something CONFORMANCE_CASES does not declare."""
+    matrix_rows = _markdown_table_rows(
+        SUPPORT_MATRIX_MD.read_text(encoding="utf-8"),
+        "## Conformance cases (interfaces.md), restated with status",
+    )
+    matrix_by_case = {row[0]: row[2] for row in matrix_rows}
+    declared = {case.case: case.status for case in CONFORMANCE_CASES}
+    assert set(matrix_by_case) == set(declared)
+    for case_name, declared_status in declared.items():
+        # A split case's Status cell combines two statuses in prose (e.g.
+        # "demonstrated-here (...) / owed-to-live-run (...)") - a substring
+        # match is the honest check here, an exact match would force every
+        # split row into a single misleading status instead.
+        assert declared_status in matrix_by_case[case_name], (case_name, matrix_by_case[case_name])
+
+
 # ------------------------------------------------ demonstrated-here, through DockerBackend
 
 
@@ -329,7 +400,13 @@ def test_two_attempts_never_share_container_state(
     outputs"/EF-05, EF-08: two attempts (as an agent's attempt and the
     verifier's own probe would be, per interfaces.md step 8) never share a
     container name or any copied-in state - a file installed into one is
-    never visible to the other's export."""
+    never visible to the other's export.
+
+    A's own export is checked FIRST and asserted to actually contain the
+    file (cross-model review, PR #87): without that positive check, a
+    broken install() or export() that silently copies/exports nothing would
+    make B's exclusion check pass vacuously - both sides empty proves
+    nothing about isolation."""
     backend = _backend(base, docker_state)
     handle_a = backend.prepare("a-conformance-000000000003a")
     handle_b = backend.prepare("a-conformance-000000000003b")
@@ -339,8 +416,13 @@ def test_two_attempts_never_share_container_state(
 
     only_in_a = tmp_path / "only-in-a.txt"
     only_in_a.write_text("secret to a\n")
-    backend.install(handle_a, {"only-in-a.txt": only_in_a})
+    readiness_a = backend.install(handle_a, {"only-in-a.txt": only_in_a})
+    assert readiness_a["installed"] == 1
     backend.install(handle_b, {})
+
+    dest_a = tmp_path / "export-a"
+    backend.export(handle_a, dest_a)
+    assert (dest_a / "only-in-a.txt").read_text(encoding="utf-8") == "secret to a\n"
 
     dest_b = tmp_path / "export-b"
     backend.export(handle_b, dest_b)
