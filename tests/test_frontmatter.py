@@ -112,6 +112,7 @@ INVALID_YAML = {
     "tab-after-colon": "d: Use when:\tx\n",
     "header-comment-without-space": "d: |# c\n  x\n",
     "escape-beyond-unicode": 'd: "Use when \\U00110000"\n',
+    "over-indented-leading-blank": "d: |\n    \n  Use when x.\n",
 }
 OUTSIDE_THE_SUBSET = {
     "flow-sequence": "t: [a, b]\n",
@@ -332,3 +333,50 @@ def test_the_scope_line_names_the_rules_that_ran(
     skill = _skill(tmp_path, "x", EXTENSION)
     cli.main(["check", str(skill.path), *argv])
     assert scope in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        "name: " + "9" * 4400 + "\ndescription: Use when x.\n",
+        "name: x\ndescription: Use when x.\nmetadata:\n"
+        + "".join(" " * (2 * (d + 1)) + "k:\n" for d in range(600)),
+    ],
+    ids=["huge-number", "deep-nesting"],
+)
+def test_a_pathological_skill_is_a_finding_and_the_scan_continues(
+    tmp_path: Path, block: str
+) -> None:
+    bad = _skill(tmp_path, "bad", block)
+    _skill(tmp_path, "good", "name: good\ndescription: Use when x.\n")
+    assert bad.parse_error and "outside the YAML subset" in bad.parse_error
+    assert [f.rule for f in checks.run(bad)] == ["frontmatter"]
+    assert len(discover(tmp_path)) == 2
+
+
+def test_an_unexpected_parser_crash_is_attributed_to_its_skill(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fallback: a parser defect nobody has found yet still yields a finding."""
+    from skillc import spec
+
+    def crash(_text: str) -> tuple[dict[str, object], str]:
+        raise RecursionError("planted")
+
+    monkeypatch.setattr(spec, "parse_frontmatter", crash)
+    skill = _skill(tmp_path, "x", "name: x\ndescription: Use when x.\n")
+    assert skill.parse_error and "could not parse" in skill.parse_error
+
+
+def test_the_scope_line_counts_only_skills_whose_fields_were_checked(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    unreadable = "name: x\ndescription: Use when x.\nallowed-tools: [Read]\n"
+    _skill(tmp_path / "all-bad", "x", unreadable)
+    cli.main(["check", str(tmp_path / "all-bad"), "--rule", "claude-code-field"])
+    assert "field rules NOT checked - no skill's frontmatter parsed" in capsys.readouterr().out
+
+    _skill(tmp_path / "mixed", "x", unreadable)
+    _skill(tmp_path / "mixed", "y", "name: y\ndescription: Use when y.\n")
+    cli.main(["check", str(tmp_path / "mixed")])
+    assert "target 'portable' on 1 of 2 skill(s)" in capsys.readouterr().out

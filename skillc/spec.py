@@ -124,17 +124,18 @@ _ESCAPES = {
 _HEX_ESCAPES = {"x": 2, "u": 4, "U": 8}
 
 
-def _resolve_plain(value: str) -> object:
+def _resolve_plain(value: str, lineno: int) -> object:
     if value in _NULL:
         return None
     if value in _TRUE:
         return True
     if value in _FALSE:
         return False
-    if _INT_RE.match(value):
-        return int(value)
-    if _OCT_RE.match(value) or _HEX_RE.match(value):
-        return int(value, 0)
+    if _INT_RE.match(value) or _OCT_RE.match(value) or _HEX_RE.match(value):
+        try:
+            return int(value, 10 if _INT_RE.match(value) else 0)
+        except ValueError as exc:  # beyond Python's integer-string limit
+            raise _unsupported(lineno, f"a {len(value)}-digit number") from exc
     if _FLOAT_RE.match(value):
         return float(value)
     if _INF_RE.match(value):
@@ -229,7 +230,7 @@ def _scalar(raw: str, lineno: int) -> object:
             lineno,
             f"': ' inside an unquoted value ({value!r}) - quote the value or use a '>' block",
         )
-    return _resolve_plain(value)
+    return _resolve_plain(value, lineno)
 
 
 # --- block structure -------------------------------------------------------------
@@ -286,6 +287,11 @@ def _fold(lines: list[str]) -> str:
     return "".join(out)
 
 
+#: Nesting deeper than this is refused rather than recursed into: no skill needs it,
+#: and an unbounded depth lets one file exhaust the stack and abort the whole scan.
+MAX_DEPTH = 32
+
+
 class _Parser:
     def __init__(self, lines: list[str], first_lineno: int) -> None:
         self.lines = [line.rstrip("\r") for line in lines]
@@ -299,7 +305,9 @@ class _Parser:
             i += 1
         return i
 
-    def mapping(self, i: int, indent: int) -> tuple[dict[str, object], int]:
+    def mapping(self, i: int, indent: int, depth: int = 0) -> tuple[dict[str, object], int]:
+        if depth > MAX_DEPTH:
+            raise _unsupported(self.no(i), f"nesting deeper than {MAX_DEPTH} levels")
         result: dict[str, object] = {}
         while True:
             i = self.next_significant(i)
@@ -329,9 +337,11 @@ class _Parser:
                 # YAML requires unique keys; loaders that tolerate them disagree
                 # on which value wins, so the field's value is undefined.
                 raise _invalid(lineno, f"duplicate key {key!r}")
-            result[key], i = self.value(i + 1, indent, value, lineno)
+            result[key], i = self.value(i + 1, indent, value, lineno, depth)
 
-    def value(self, i: int, indent: int, raw_value: str, lineno: int) -> tuple[object, int]:
+    def value(
+        self, i: int, indent: int, raw_value: str, lineno: int, depth: int
+    ) -> tuple[object, int]:
         text = raw_value.strip()
         header = _BLOCK_HEADER_RE.match(text) if text[:1] in {"|", ">"} else None
         if header:
@@ -346,7 +356,7 @@ class _Parser:
             if _is_item(child.strip()) and child_indent >= indent:
                 return self.sequence(j, child_indent)
             if child_indent > indent:
-                return self.mapping(j, child_indent)
+                return self.mapping(j, child_indent, depth + 1)
         return None, i
 
     def block_scalar(
@@ -367,6 +377,16 @@ class _Parser:
         else:
             firsts = [len(r) - len(r.lstrip(" ")) for r in body if r.strip()]
             content = firsts[0] if firsts else indent + 1
+            # A blank line BEFORE the first text may not be more indented than it:
+            # the text's own indentation is what fixes the block's.
+            for offset, raw in enumerate(body):
+                if raw.strip():
+                    break
+                if len(raw) > content:
+                    raise _invalid(
+                        self.no(start + offset),
+                        "a leading blank line is more indented than the block text",
+                    )
         lines: list[str] = []
         for offset, raw in enumerate(body):
             if not raw.strip():
@@ -464,6 +484,10 @@ class Skill:
             frontmatter, body = parse_frontmatter(text)
         except FrontmatterError as exc:
             return cls(path=path, parse_error=str(exc))
+        except (ValueError, RecursionError) as exc:
+            # A parser defect must become THIS skill's finding, never abort the scan
+            # of every other skill. Still an error: nothing here was checked.
+            return cls(path=path, parse_error=f"skillc could not parse this frontmatter: {exc!r}")
         return cls(path=path, frontmatter=frontmatter, body=body)
 
 

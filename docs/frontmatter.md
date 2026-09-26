@@ -41,7 +41,12 @@ Anything outside the subset is a `frontmatter` **error**, with one of two messag
 - **`outside the YAML subset skillc reads`** - the input may be valid YAML, but
   `skillc` does not read it: flow collections (`[a, b]`, `{a: 1}`), anchors,
   aliases, tags, explicit keys, a plain or quoted value continued onto the next
-  line, nested lists, lists of mappings, and block text inside a list.
+  line, nested lists, lists of mappings, block text inside a list, nesting
+  deeper than 32 levels, and a number too long for Python to convert.
+
+A parser defect nobody has found yet is caught too: it becomes that skill's
+`frontmatter` error ("skillc could not parse this frontmatter") and the scan goes
+on to the other skills.
 
 Both are errors on purpose. A skill `skillc` cannot read has had none of its other
 rules applied, and an unchecked skill must not read as a clean one. Rewrite the
@@ -61,7 +66,9 @@ before this rule owned the type, a mapping-valued `name` passed every rule.
 ## Field rules are scoped to a target
 
 Which fields a client loads is a property of **that client**. `skillc check
---target` names the client the field rules speak for; every run prints it.
+--target` names the client the field rules speak for. Every run prints the target
+and how many skills the field rules actually examined (an unparseable skill is not
+field-checked), or says plainly that no field rule ran.
 
 | Target | Rule | Fields known | Source |
 |---|---|---|---|

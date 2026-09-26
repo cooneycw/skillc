@@ -90,10 +90,17 @@ def cmd_check(args: argparse.Namespace) -> int:
     )
     # Field findings are true of ONE client profile. Say which - and say so when no
     # field rule ran, so a green here cannot be read as a field check that passed.
-    if selected is None or selected.target is not None:
-        print(f"skillc: field rules checked against target '{target}'")
-    else:
+    # An unparseable skill gets only the parser finding, so it was not field-checked.
+    parsed = sum(1 for s in skills if s.parse_error is None)
+    if selected is not None and selected.target is None:
         print(f"skillc: field rules NOT checked (--rule {selected.id} only)")
+    elif not parsed:
+        print("skillc: field rules NOT checked - no skill's frontmatter parsed")
+    else:
+        print(
+            f"skillc: field rules checked against target '{target}' "
+            f"on {parsed} of {len(skills)} skill(s)"
+        )
     if args.strict and warns:
         return 1
     return 1 if errors else 0
