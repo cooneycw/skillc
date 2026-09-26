@@ -21,7 +21,7 @@ from pathlib import Path
 
 from . import checks, materialize, records
 from .checks import ERROR, Finding
-from .spec import DEFAULT_TARGET, TARGETS, discover
+from .spec import DEFAULT_TARGET, TARGETS, Manifest, ManifestError, Skill, discover
 
 
 def _controls_root(explicit: str | None) -> Path:
@@ -73,13 +73,51 @@ def cmd_check(args: argparse.Namespace) -> int:
         print(f"skillc: no such path: {root}", file=sys.stderr)
         return 2
 
-    skills = discover(root)
-    if not skills:
-        # Silence here would be indistinguishable from a clean run. Say so.
-        print(f"skillc: no SKILL.md found under {root} - nothing was checked")
-        return 2
-
+    manifest_arg = getattr(args, "manifest", None)
+    scope: tuple[int, int, int] | None = None  # (declared, checked, undeclared)
     findings: list[Finding] = []
+    if manifest_arg:
+        manifest_path = Path(manifest_arg).resolve()
+        try:
+            manifest = Manifest.load(manifest_path)
+        except ManifestError as exc:
+            print(f"skillc: {exc}", file=sys.stderr)
+            return 2
+        if not manifest.declared:
+            # A manifest that names nothing is as empty a population as a tree
+            # with no SKILL.md - see the same contract just below.
+            print(f"skillc: manifest {manifest_path} declares no skills - nothing was checked")
+            return 2
+
+        skills: list[Skill] = []
+        for declared_dir in manifest.declared:
+            skill_md = declared_dir / "SKILL.md"
+            if skill_md.is_file():
+                skills.append(Skill.load(skill_md))
+            else:
+                # A dangling entry must never read as a clean skill - it is an
+                # error even though nothing here was checked, not silence.
+                findings.append(
+                    Finding(
+                        rule="manifest-entry",
+                        severity=ERROR,
+                        path=skill_md,
+                        detail="declared in the manifest but no SKILL.md exists here",
+                    )
+                )
+        skills.sort(key=lambda s: s.path)
+        declared_set = set(manifest.declared)
+        undeclared = sum(
+            1 for s in discover(root) if s.path.parent.resolve() not in declared_set
+        )
+        scope = (len(manifest.declared), len(skills), undeclared)
+    else:
+        skills = discover(root)
+        if not skills:
+            # Silence here would be indistinguishable from a clean run. Say so.
+            print(f"skillc: no SKILL.md found under {root} - nothing was checked")
+            return 2
+
     for skill in skills:
         findings.extend(checks.run(skill, only=args.rule, target=target))
 
@@ -89,10 +127,17 @@ def cmd_check(args: argparse.Namespace) -> int:
 
     errors = sum(1 for f in findings if f.severity == ERROR)
     warns = len(findings) - errors
-    print(
-        f"\nskillc: {len(skills)} skill(s) checked, "
-        f"{errors} error(s), {warns} warning(s)"
-    )
+    if scope is not None:
+        declared, checked, undeclared = scope
+        print(
+            f"\nskillc: {declared} declared, {checked} checked, {undeclared} undeclared, "
+            f"{errors} error(s), {warns} warning(s)"
+        )
+    else:
+        print(
+            f"\nskillc: {len(skills)} skill(s) checked, "
+            f"{errors} error(s), {warns} warning(s)"
+        )
     # Field findings are true of ONE client profile. Say which - and say so when no
     # field rule ran, so a green here cannot be read as a field check that passed.
     # An unparseable skill gets only the parser finding, so it was not field-checked.
@@ -384,6 +429,10 @@ def main(argv: list[str] | None = None) -> int:
         "--target",
         choices=TARGETS,
         help=f"client profile the field rules check against (default: {DEFAULT_TARGET})",
+    )
+    p_check.add_argument(
+        "--manifest",
+        help="scope to a plugin manifest's declared skills (e.g. .claude-plugin/plugin.json)",
     )
     p_check.set_defaults(func=cmd_check)
 

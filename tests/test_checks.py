@@ -11,13 +11,21 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import json
 import shutil
 from pathlib import Path
 
 import pytest
 
 from skillc import checks, cli, records
-from skillc.spec import FrontmatterError, Skill, discover, parse_frontmatter
+from skillc.spec import (
+    FrontmatterError,
+    Manifest,
+    ManifestError,
+    Skill,
+    discover,
+    parse_frontmatter,
+)
 
 CONTROLS = Path(__file__).resolve().parent.parent / "controls"
 
@@ -131,6 +139,200 @@ def test_check_on_an_empty_tree_is_not_a_pass(tmp_path: Path) -> None:
     """Silence must not be indistinguishable from a clean run."""
     rc = cli.cmd_check(argparse.Namespace(path=str(tmp_path), rule=None, strict=False))
     assert rc == 2
+
+
+def _write_skill(path: Path, name: str) -> None:
+    path.mkdir(parents=True)
+    (path / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: Use when testing manifest scoping.\n---\nBody.\n",
+        encoding="utf-8",
+    )
+
+
+def _write_manifest(plugin_root: Path, skills: list[str]) -> Path:
+    manifest_dir = plugin_root / ".claude-plugin"
+    manifest_dir.mkdir(parents=True)
+    manifest_path = manifest_dir / "plugin.json"
+    manifest_path.write_text(json.dumps({"name": "fixture", "skills": skills}), encoding="utf-8")
+    return manifest_path
+
+
+def test_check_manifest_dangling_entry_is_an_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A manifest entry with no SKILL.md must never read as a clean skill."""
+    _write_skill(tmp_path / "skills" / "present", "present")
+    manifest_path = _write_manifest(tmp_path, ["./skills/present", "./skills/missing"])
+    rc = cli.cmd_check(
+        argparse.Namespace(
+            path=str(tmp_path), rule=None, strict=False, manifest=str(manifest_path)
+        )
+    )
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "manifest-entry" in out
+    assert "skills/missing" in out
+    assert "1 declared, 0 checked" not in out  # sanity: the valid entry still checked
+    assert "2 declared, 1 checked, 0 undeclared" in out
+
+
+def test_check_manifest_clean_is_green(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Every manifest entry resolving to a real skill is an ordinary clean run."""
+    _write_skill(tmp_path / "skills" / "present", "present")
+    manifest_path = _write_manifest(tmp_path, ["./skills/present"])
+    rc = cli.cmd_check(
+        argparse.Namespace(
+            path=str(tmp_path), rule=None, strict=False, manifest=str(manifest_path)
+        )
+    )
+    assert rc == 0
+    assert "1 declared, 1 checked, 0 undeclared, 0 error(s)" in capsys.readouterr().out
+
+
+def test_check_manifest_reports_the_undeclared_remainder(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A skill in the tree but not in the manifest counts as undeclared, not
+    silently ignored."""
+    _write_skill(tmp_path / "skills" / "declared", "declared")
+    _write_skill(tmp_path / "skills" / "extra", "extra")
+    manifest_path = _write_manifest(tmp_path, ["./skills/declared"])
+    rc = cli.cmd_check(
+        argparse.Namespace(
+            path=str(tmp_path), rule=None, strict=False, manifest=str(manifest_path)
+        )
+    )
+    assert rc == 0
+    assert "1 declared, 1 checked, 1 undeclared" in capsys.readouterr().out
+
+
+def test_check_manifest_matching_zero_skills_is_refused(tmp_path: Path) -> None:
+    """A manifest declaring nothing is as empty a population as a tree with no
+    SKILL.md, not a silent no-op."""
+    manifest_path = _write_manifest(tmp_path, [])
+    rc = cli.cmd_check(
+        argparse.Namespace(
+            path=str(tmp_path), rule=None, strict=False, manifest=str(manifest_path)
+        )
+    )
+    assert rc == 2
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "not json at all",
+        json.dumps({"name": "x"}),  # no 'skills' key
+        json.dumps({"skills": "not-a-list"}),
+        json.dumps({"skills": [""]}),  # empty string entry
+        json.dumps(["not", "an", "object"]),
+    ],
+)
+def test_check_manifest_malformed_is_refused_not_silently_ignored(
+    tmp_path: Path, content: str
+) -> None:
+    """A malformed manifest must be refused (exit 2), never silently fall back
+    to checking the whole tree as though no manifest were given."""
+    _write_skill(tmp_path / "skills" / "present", "present")
+    manifest_dir = tmp_path / ".claude-plugin"
+    manifest_dir.mkdir()
+    manifest_path = manifest_dir / "plugin.json"
+    manifest_path.write_text(content, encoding="utf-8")
+    rc = cli.cmd_check(
+        argparse.Namespace(
+            path=str(tmp_path), rule=None, strict=False, manifest=str(manifest_path)
+        )
+    )
+    assert rc == 2
+
+
+def test_check_manifest_missing_file_is_refused(tmp_path: Path) -> None:
+    rc = cli.cmd_check(
+        argparse.Namespace(
+            path=str(tmp_path),
+            rule=None,
+            strict=False,
+            manifest=str(tmp_path / "no-such-manifest.json"),
+        )
+    )
+    assert rc == 2
+
+
+def test_manifest_resolves_entries_against_the_plugin_root(tmp_path: Path) -> None:
+    """`.claude-plugin/plugin.json` entries are relative to the PLUGIN root
+    (the manifest's grandparent), not the manifest's own directory."""
+    _write_skill(tmp_path / "skills" / "engineering" / "foo", "foo")
+    manifest_path = _write_manifest(tmp_path, ["./skills/engineering/foo"])
+    manifest = Manifest.load(manifest_path)
+    assert manifest.plugin_root == tmp_path.resolve()
+    assert manifest.declared == ((tmp_path / "skills" / "engineering" / "foo").resolve(),)
+
+
+def test_manifest_deduplicates_repeated_entries(tmp_path: Path) -> None:
+    _write_skill(tmp_path / "skills" / "foo", "foo")
+    manifest_path = _write_manifest(tmp_path, ["./skills/foo", "./skills/foo"])
+    manifest = Manifest.load(manifest_path)
+    assert manifest.declared == ((tmp_path / "skills" / "foo").resolve(),)
+
+
+def test_manifest_unreadable_raises(tmp_path: Path) -> None:
+    with pytest.raises(ManifestError):
+        Manifest.load(tmp_path / "absent.json")
+
+
+def test_manifest_invalid_utf8_is_refused_not_a_traceback(tmp_path: Path) -> None:
+    """`UnicodeDecodeError` is a `ValueError`, not an `OSError` - a decode
+    failure must not escape past the read that is supposed to catch it
+    (issue #53 review: /codex:code_review)."""
+    manifest_dir = tmp_path / ".claude-plugin"
+    manifest_dir.mkdir()
+    manifest_path = manifest_dir / "plugin.json"
+    manifest_path.write_bytes(b"\xff\xfe not valid utf-8")
+    with pytest.raises(ManifestError):
+        Manifest.load(manifest_path)
+
+
+@pytest.mark.parametrize(
+    "entry",
+    ["../escaped", "../../etc/passwd", "/etc/passwd"],
+)
+def test_manifest_entry_escaping_the_plugin_root_is_refused(
+    tmp_path: Path, entry: str
+) -> None:
+    """Claude Code itself refuses a manifest component outside the plugin
+    root ('Path escapes plugin directory'); a scoping check that accepted one
+    could report a clean run over a skill the real plugin loader would never
+    have loaded (issue #53 review: /codex:code_review)."""
+    _write_skill(tmp_path / "skills" / "present", "present")
+    manifest_path = _write_manifest(tmp_path, [entry])
+    with pytest.raises(ManifestError):
+        Manifest.load(manifest_path)
+
+
+def test_check_manifest_control_dangling_entry_reds() -> None:
+    """The committed bad/dangling-entry control must still fire (issue #53
+    review: /codex:code_review found the committed controls unreferenced by
+    any test)."""
+    fixture = CONTROLS / "check-manifest" / "bad" / "dangling-entry"
+    manifest_path = fixture / ".claude-plugin" / "plugin.json"
+    rc = cli.cmd_check(
+        argparse.Namespace(
+            path=str(fixture), rule=None, strict=False, manifest=str(manifest_path)
+        )
+    )
+    assert rc == 1
+
+
+def test_check_manifest_control_clean_is_green() -> None:
+    """The committed good/clean control must stay green."""
+    fixture = CONTROLS / "check-manifest" / "good" / "clean"
+    manifest_path = fixture / ".claude-plugin" / "plugin.json"
+    rc = cli.cmd_check(
+        argparse.Namespace(
+            path=str(fixture), rule=None, strict=False, manifest=str(manifest_path)
+        )
+    )
+    assert rc == 0
 
 
 def test_parse_frontmatter_nested_mapping() -> None:
