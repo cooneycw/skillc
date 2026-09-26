@@ -18,6 +18,10 @@ task levels beyond Level 1 remain documentation only.
 - [Independent grading and result assembly](specs/evaluation-facility/verification.md):
   how `skillc/verify.py` grades frozen output outside the subject's reach, and the
   trust assumptions and unobserved properties it states.
+- [Trial image and agent bootstrap](specs/evaluation-facility/trial-bootstrap.md):
+  `skillc/trial_bootstrap.py` and `docker/trial/` - the per-trial home, onboarding
+  seed, MCP config, invocation and skill+tool liveness canary a live agent needs to
+  actually start and work inside a Docker trial (#78).
 - [Design review](specs/evaluation-facility/review.md): open decisions and questions
   to challenge before implementation.
 - [Delivery plan](../PLAN.md): staged milestones and their acceptance evidence.

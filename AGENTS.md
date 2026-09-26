@@ -34,6 +34,13 @@ specification rejects, and it proves its own rules can fail before reporting the
 - `skillc/verify.py` - the independent verifier and result assembler: grades a disposable
   copy of the frozen artifacts in a contained probe, then a trusted judge, and derives
   the result; see [verification spec](docs/specs/evaluation-facility/verification.md)
+- `skillc/trial_bootstrap.py` - the per-trial home, onboarding seed, MCP config,
+  invocation and skill+tool liveness canary a live agent needs to actually start and
+  work inside a Docker trial, independent of which `ExecutionBackend` runs it; see
+  [trial-bootstrap spec](docs/specs/evaluation-facility/trial-bootstrap.md)
+- `docker/trial/` - the pinned trial image (`Dockerfile`, `pinned-versions.json`,
+  `check_pins.py`) that `skillc/trial_bootstrap.py`'s composed home/seed/invocation runs
+  inside
 - `skillc/cli.py` - `check`, `check-records`, `selftest`, `rules`, `materialize`
 - `controls/<rule-id>/{bad,good}/` - the committed redcases
 - `evals/` - behavioural evals; see `evals/README.md`
