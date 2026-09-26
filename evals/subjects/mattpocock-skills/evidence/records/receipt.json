@@ -1,0 +1,92 @@
+{
+ "version": 2,
+ "kind": "installation-receipt",
+ "producer": "subject-adapter",
+ "checked_by": "controller",
+ "attempt_id": "att-11-mattpocock-1",
+ "trial_id": "t-11-mattpocock",
+ "subject": {
+  "locator": "github.com/mattpocock/skills",
+  "revision": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
+  "digest": "sha256:99d2a648f9d15edb0ca1a73847349ec2dfcb3031da7033611ec5648fcdecd162"
+ },
+ "surface": "codex-skills",
+ "treatment": "native-install",
+ "adapter": {
+  "name": "skillc-codex-skills",
+  "version": "1"
+ },
+ "client": {
+  "name": "codex",
+  "version": "0.157.1"
+ },
+ "layers": [
+  {
+   "name": "client input, normalized (treatment arm)",
+   "digest": "sha256:98f5f1d0ba021236b1152df48bd8a2bdc9fd469879ca0f1affd4e9780c87e6f1"
+  },
+  {
+   "name": "CODEX_HOME/config.toml",
+   "digest": null,
+   "state": "absent"
+  },
+  {
+   "name": "CODEX_HOME/AGENTS.md",
+   "digest": null,
+   "state": "absent"
+  },
+  {
+   "name": "workspace/AGENTS.md",
+   "digest": null,
+   "state": "absent"
+  }
+ ],
+ "dependencies": [],
+ "allowed_writes": [
+  "home/",
+  "workspace/"
+ ],
+ "installed": [
+  {
+   "path": ".codex/skills/diagnosing-bugs/SKILL.md",
+   "digest": "sha256:77f3cf31bc99b2f49af943222526531fcc9fc41d047626d3640e875e85af3e84"
+  },
+  {
+   "path": ".codex/skills/diagnosing-bugs/agents/openai.yaml",
+   "digest": "sha256:3e430dbe4334a87597488c060cb3dc3786bb00c9182877d6f5ec41f62490e90b"
+  },
+  {
+   "path": ".codex/skills/diagnosing-bugs/scripts/hitl-loop.template.sh",
+   "digest": "sha256:35103539fc36873eea36074769ad454f9379d6fc8b2dc0e26ce987fd3bfe5503"
+  },
+  {
+   "path": ".codex/skills/tdd/SKILL.md",
+   "digest": "sha256:cb01f66bebfaa25fa1f88e6b7e769cd9fd9f35b1120b8563749820738814c927"
+  },
+  {
+   "path": ".codex/skills/tdd/agents/openai.yaml",
+   "digest": "sha256:ea6f01cf1b8c06a4b0f5b649d74b1b8ce8685e72af1b38d70d877693e092af0b"
+  },
+  {
+   "path": ".codex/skills/tdd/mocking.md",
+   "digest": "sha256:3ceb807fdf4a47d6a93d4d9a891e5ba6d362a6247bd08adc451feebfc17361ef"
+  },
+  {
+   "path": ".codex/skills/tdd/tests.md",
+   "digest": "sha256:859f9e592c188fda4fc7277dd180e4ce9c7a2e13f6efe1f6f29eccc9d28c106a"
+  }
+ ],
+ "readiness": {
+  "discovery_canary": "SATISFIED",
+  "baseline_absence": "SATISFIED",
+  "ordinary_parity": "SATISFIED",
+  "source_unchanged": "SATISFIED",
+  "host_unchanged": "SATISFIED"
+ },
+ "observations": {
+  "installed": "7 file(s) in 2 skill(s)",
+  "available": "SATISFIED",
+  "invoked": "NOT_OBSERVED",
+  "task_outcome": "NOT_APPLICABLE"
+ }
+}

@@ -1,0 +1,177 @@
+{
+ "started": "2026-09-26T18:33:34Z",
+ "adapter": {
+  "name": "skillc-codex-skills",
+  "version": "1"
+ },
+ "subject": {
+  "subject_schema": 1,
+  "locator": "github.com/mattpocock/skills",
+  "revision": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
+  "surface": "codex-skills",
+  "skills_root": "skills/engineering",
+  "select": [
+   "tdd",
+   "diagnosing-bugs"
+  ],
+  "client": {
+   "name": "codex",
+   "version": "0.157.1"
+  }
+ },
+ "observations": {
+  "installed": "7 file(s) in 2 skill(s)",
+  "available": "SATISFIED",
+  "invoked": "NOT_OBSERVED",
+  "task_outcome": "NOT_APPLICABLE"
+ },
+ "source": {
+  "kind": "git",
+  "revision": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
+  "digest": "sha256:99d2a648f9d15edb0ca1a73847349ec2dfcb3031da7033611ec5648fcdecd162"
+ },
+ "inventory": {
+  "skills": [
+   {
+    "directory": "diagnosing-bugs",
+    "name": "diagnosing-bugs",
+    "files": 3,
+    "checksums": "not-declared",
+    "required_refs": []
+   },
+   {
+    "directory": "tdd",
+    "name": "tdd",
+    "files": 4,
+    "checksums": "not-declared",
+    "required_refs": [
+     "mocking.md",
+     "tests.md"
+    ]
+   }
+  ],
+  "not_installed_entries": [
+   "README.md",
+   "ask-matt",
+   "code-review",
+   "codebase-design",
+   "domain-modeling",
+   "grill-with-docs",
+   "implement",
+   "improve-codebase-architecture",
+   "prototype",
+   "research",
+   "resolving-merge-conflicts",
+   "setup-matt-pocock-skills",
+   "to-spec",
+   "to-tickets",
+   "triage",
+   "wayfinder",
+   "wizard"
+  ]
+ },
+ "static_findings": {
+  "note": "static observations only; they never establish or refute readiness",
+  "unresolved_mentions": [
+   "diagnosing-bugs: SKILL.md mentions CONTEXT.md, not in this skill (static; not readiness)",
+   "tdd: SKILL.md mentions CONTEXT.md, not in this skill (static; not readiness)"
+  ]
+ },
+ "client": {
+  "name": "codex",
+  "declared": "0.157.1",
+  "observed": "0.157.1",
+  "argv": [
+   "codex"
+  ]
+ },
+ "canary": {
+  "treatment": {
+   "status": "ok",
+   "detail": "",
+   "listed": [
+    "diagnosing-bugs <HOME>/.codex/skills/diagnosing-bugs/SKILL.md",
+    "imagegen <HOME>/.codex/skills/.system/imagegen/SKILL.md",
+    "openai-docs <HOME>/.codex/skills/.system/openai-docs/SKILL.md",
+    "plugin-creator <HOME>/.codex/skills/.system/plugin-creator/SKILL.md",
+    "skill-creator <HOME>/.codex/skills/.system/skill-creator/SKILL.md",
+    "skill-installer <HOME>/.codex/skills/.system/skill-installer/SKILL.md",
+    "tdd <HOME>/.codex/skills/tdd/SKILL.md"
+   ]
+  },
+  "baseline": {
+   "status": "ok",
+   "detail": "",
+   "listed": [
+    "imagegen <HOME>/.codex/skills/.system/imagegen/SKILL.md",
+    "openai-docs <HOME>/.codex/skills/.system/openai-docs/SKILL.md",
+    "plugin-creator <HOME>/.codex/skills/.system/plugin-creator/SKILL.md",
+    "skill-creator <HOME>/.codex/skills/.system/skill-creator/SKILL.md",
+    "skill-installer <HOME>/.codex/skills/.system/skill-installer/SKILL.md"
+   ]
+  },
+  "control": {
+   "status": "ok",
+   "detail": "",
+   "listed": [
+    "diagnosing-bugs <HOME>/.codex/skills/diagnosing-bugs/SKILL.md",
+    "imagegen <HOME>/.codex/skills/.system/imagegen/SKILL.md",
+    "openai-docs <HOME>/.codex/skills/.system/openai-docs/SKILL.md",
+    "plugin-creator <HOME>/.codex/skills/.system/plugin-creator/SKILL.md",
+    "skill-creator <HOME>/.codex/skills/.system/skill-creator/SKILL.md",
+    "skill-installer <HOME>/.codex/skills/.system/skill-installer/SKILL.md"
+   ]
+  }
+ },
+ "control": {
+  "planted": "diagnosing-bugs",
+  "listed": true
+ },
+ "source_immutability": {
+  "before": {
+   "head": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
+   "status": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "dirty_contents": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "after": {
+   "head": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
+   "status": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "dirty_contents": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+ },
+ "cleanup": {
+  "status": "removed",
+  "errors": []
+ },
+ "host_immutability": {
+  "before": {
+   "~/.codex": {
+    "skills": "sha256:9f8d680fb75b64c7f7869bb21d62522ce4f6826993a24ebcbb7484ae2820479d",
+    "config.toml": "sha256:e5d533440b4ef6587293b3596dda46dd8525f9a39107108b75c67b6f2e49aafc",
+    "AGENTS.md": "absent"
+   }
+  },
+  "after": {
+   "~/.codex": {
+    "skills": "sha256:9f8d680fb75b64c7f7869bb21d62522ce4f6826993a24ebcbb7484ae2820479d",
+    "config.toml": "sha256:e5d533440b4ef6587293b3596dda46dd8525f9a39107108b75c67b6f2e49aafc",
+    "AGENTS.md": "absent"
+   }
+  }
+ },
+ "finished": "2026-09-26T18:33:34Z",
+ "readiness": {
+  "discovery_canary": "SATISFIED",
+  "baseline_absence": "SATISFIED",
+  "ordinary_parity": "SATISFIED",
+  "source_unchanged": "SATISFIED",
+  "host_unchanged": "SATISFIED",
+  "reasons": {
+   "discovery_canary": "all 2 installed skill(s) listed",
+   "baseline_absence": "no treatment skill listed in the baseline; the planted control was listed",
+   "ordinary_parity": "identical client input apart from the treatment",
+   "source_unchanged": "source fingerprint identical before and after",
+   "host_unchanged": "host client state identical before and after"
+  }
+ }
+}
