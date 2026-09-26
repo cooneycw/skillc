@@ -111,16 +111,14 @@ Regrading fixed output and rerunning an agent are different operations. Stochast
 judges may disagree on replay; preserve configuration and disagreements rather
 than promise deterministic results.
 
-## Coder Eval fit
+## External runtimes
 
-The pinned handoff provides static evidence of useful adapters, typed records,
-Docker execution, repeated comparisons and report generation. Its installation
-warnings, container-produced results, contract echo and event framing do not
-satisfy every contract above. Missing reference digests can warn and proceed;
-skillc must enforce its own mandatory evidence policy. Its inspected Codex adapter
-requests full access, so qualification must use the isolated Docker lane.
-
-Evaluate Coder Eval first as a replaceable execution/measurement backend. Keep
-its optional dependencies outside the stdlib-only static checker. Adoption is
-conditional on conformance evidence, not the feature list. No backend trial or
-forgery exploit has been performed as part of this plan.
+skillc depends on no external evaluation runtime
+([ADR 0003](../../decisions/0003-no-external-evaluation-runtime.md)). The contracts
+above are implemented by skillc's own controller, capture and verifier (#8, #9,
+#10). Coder Eval and Harbor remain design references; the
+[lessons and contract map](../../research/coder-eval-lessons.md) records what the
+pinned static reading of Coder Eval showed, including the traps these contracts
+exist to refuse: container-authored results, contract echo and stdout framing as
+authentication, and missing digests that warn and proceed. No Coder Eval trial or
+forgery attempt has been performed.

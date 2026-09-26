@@ -12,9 +12,10 @@ The current roadmap is [PLAN.md](../PLAN.md), with the
 | [slug small-fix](level1/slug-small-fix/README.md) | 1 - Basic execution | Grader certified by `qualify.py` against a fixture, reference, alternatives, wrong outputs and broken-grader controls (#5); no model trial run |
 
 No behavioral runner is implemented here yet. The former example plugin command
-and YAML were unverified research, not an executable contract. Backend selection
-now requires a conformance investigation, starting with the pinned Coder Eval
-research. This directory does not promise compatibility with a particular CLI.
+and YAML were unverified research, not an executable contract. skillc depends on
+no external evaluation runtime ([ADR 0003](../docs/decisions/0003-no-external-evaluation-runtime.md));
+its own runner arrives with #8 and #10. This directory does not promise
+compatibility with a particular CLI.
 
 Static validity, skill invocation and successful delivery are distinct measurements.
 Matched with/without comparisons test benefit on the selected tasks. Equal results
