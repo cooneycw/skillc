@@ -3,6 +3,10 @@
 - [Coder Eval contract handoff, September 20, 2026](coder-eval-skillc-contract-handoff-2026-09-20.md):
   inspected integration and result contracts, evidence-verification limits, and
   proposed reuse boundaries for skillc.
+- [Coder Eval lessons and contract map, September 26, 2026](coder-eval-lessons.md):
+  what skillc takes as ideas and what it avoids, after
+  [ADR 0003](../decisions/0003-no-external-evaluation-runtime.md) ruled out a
+  runtime dependency. Static inspection only.
 
 ## Provenance and limits
 

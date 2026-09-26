@@ -25,11 +25,14 @@ Documentation only; the behavioral evaluation facility is not implemented.
 - [ADR 0001: Every check ships a redcase](decisions/0001-every-check-ships-a-redcase.md)
 - [ADR 0002: Independent, goal-driven evaluation](decisions/0002-independent-goal-driven-evaluation.md)
   records the planning direction and decisions deferred to implementation issues.
+- [ADR 0003: No external evaluation runtime](decisions/0003-no-external-evaluation-runtime.md)
+  rules out a runtime dependency on Coder Eval or Harbor (#6).
 
 ## Research and prior reviews
 
 - [Coder Eval contract research](research/README.md) records the pinned source
-  assessment and the limits that a backend adapter must address.
+  assessment and the [lessons skillc keeps](research/coder-eval-lessons.md) now
+  that no backend adapter will be built.
 
 The reports in the following table were moved from the owner's Downloads folder on 2026-09-15.
 They are historical inputs to the assessment, not current compatibility

@@ -34,10 +34,12 @@ remaining choices to issues. This plan owns order and delivery gates.
 - Use the existing CPP small-fix/slug pilot as the Level 1 fixture seed, pinned
   independently from the subject. It is a measurement canary with possible ceiling
   effects; a null result is valid. Do not inherit its historical confounded prompts.
-- Evaluate Coder Eval first as a replaceable backend, using the
-  [pinned static inspection](docs/research/coder-eval-skillc-contract-handoff-2026-09-20.md).
-  Backend adoption requires conformance evidence. The inspected Codex full-access
-  path must remain inside the isolated Docker lane.
+- Depend on no external evaluation runtime
+  ([ADR 0003](docs/decisions/0003-no-external-evaluation-runtime.md), #6). Coder
+  Eval and Harbor are design references only; the
+  [lessons and contract map](docs/research/coder-eval-lessons.md) records what
+  the pinned static inspection taught. skillc owns its runner (#8, #10), and any
+  agent it launches runs inside the Docker lane, never on the host.
 - Own four contracts in skillc: installation receipt, controller trial ledger,
   immutable artifact/observation capture, and independently verified results.
   A valid JSON record, hash or echoed config alone does not authenticate success.
@@ -59,7 +61,7 @@ inputs are independent. Do not run paid trials merely because their issue exists
 | [#3](https://github.com/cooneycw/skillc/issues/3) | P0 | Make frontmatter types and supported syntax explicit | Planning baseline |
 | [#4](https://github.com/cooneycw/skillc/issues/4) | P0 | Version the installation, ledger, artifact and verified-result contracts | Planning baseline |
 | [#5](https://github.com/cooneycw/skillc/issues/5) | P0 | Establish the first Level 1 goal and prove its grader | [#4](https://github.com/cooneycw/skillc/issues/4) |
-| [#6](https://github.com/cooneycw/skillc/issues/6) | P0 | Qualify Coder Eval as a replaceable backend with bounded conformance probes | [#4](https://github.com/cooneycw/skillc/issues/4), [#5](https://github.com/cooneycw/skillc/issues/5) |
+| [#6](https://github.com/cooneycw/skillc/issues/6) | P0 | Decide the evaluation runtime: no external dependency ([ADR 0003](docs/decisions/0003-no-external-evaluation-runtime.md)) | [#4](https://github.com/cooneycw/skillc/issues/4), [#5](https://github.com/cooneycw/skillc/issues/5) |
 | [#7](https://github.com/cooneycw/skillc/issues/7) | P1 | Materialize CPP natively and prove a clean comparison baseline | [#3](https://github.com/cooneycw/skillc/issues/3), [#4](https://github.com/cooneycw/skillc/issues/4), [#6](https://github.com/cooneycw/skillc/issues/6) |
 | [#8](https://github.com/cooneycw/skillc/issues/8) | P1 | Implement controller-owned trial accounting and artifact capture | [#4](https://github.com/cooneycw/skillc/issues/4) |
 | [#9](https://github.com/cooneycw/skillc/issues/9) | P1 | Implement independent grading and adversarial evaluator controls | [#5](https://github.com/cooneycw/skillc/issues/5), [#8](https://github.com/cooneycw/skillc/issues/8) |
@@ -70,7 +72,7 @@ inputs are independent. Do not run paid trials merely because their issue exists
 | [#14](https://github.com/cooneycw/skillc/issues/14) | P2 | Add workflow-judgment and resilience evaluations | [#13](https://github.com/cooneycw/skillc/issues/13) |
 | [#15](https://github.com/cooneycw/skillc/issues/15) | P2 | Calibrate adaptive tasks and define evidence-backed level qualification | [#14](https://github.com/cooneycw/skillc/issues/14) |
 
-The critical sequence is contracts -> first grader -> backend decision -> native
+The critical sequence is contracts -> first grader -> runtime decision -> native
 installation -> complete lifecycle -> second collection -> matched pilot. Static
 repairs and controller capture can proceed alongside the relevant design work.
 Independent verification joins the complete-lifecycle gate before live comparisons.
@@ -80,7 +82,7 @@ flowchart LR
     S[Static trust repairs] --> E[Complete Docker lifecycle]
     F[Frontmatter compatibility] --> I[Native installation]
     C[Contracts] --> T[First task and grader]
-    T --> B[Backend conformance decision]
+    T --> B[Runtime decision: own runner]
     C --> L[Ledger and capture]
     T --> V[Independent verifier]
     L --> V
@@ -108,10 +110,11 @@ Maps to EF-03, EF-04, EF-05 and EF-11. No live model is needed.
 
 ### B. Qualify the backend and enforce owned evidence
 
-[#6](https://github.com/cooneycw/skillc/issues/6) is bounded: inspect one pinned candidate, demonstrate one small
-control-driven path, then adopt/wrap/reject with reasons. Investigate alternatives
-only for named unmet requirements. Coder Eval's execute/grade separation is a
-candidate seam, not a verified protected grading boundary.
+[#6](https://github.com/cooneycw/skillc/issues/6) decided the runtime: skillc depends on no external evaluation
+runtime ([ADR 0003](docs/decisions/0003-no-external-evaluation-runtime.md)). Its
+probe and forgery acceptance items moved to #8, #9 and #10, which now own the
+runner, capture and verifier. The [lessons document](docs/research/coder-eval-lessons.md)
+keeps what the static reading of Coder Eval taught, without claiming any run.
 
 [#7](https://github.com/cooneycw/skillc/issues/7), [#8](https://github.com/cooneycw/skillc/issues/8) and [#9](https://github.com/cooneycw/skillc/issues/9) deliver native receipts,
 complete trial accounting, protected capture and independent verdicts.

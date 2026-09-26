@@ -1,6 +1,7 @@
 # ADR 0002: Independent, goal-driven evaluation with progressive difficulty
 
-- Status: Accepted as planning direction; backend selection remains open
+- Status: Accepted as planning direction; backend selection amended by
+  [ADR 0003](0003-no-external-evaluation-runtime.md) (no external evaluation runtime)
 - Date: 2026-09-20
 - Decision owner: Repository owner
 - Specification: [Evaluation facility](../specs/evaluation-facility/spec.md)
