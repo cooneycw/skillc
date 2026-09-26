@@ -130,11 +130,20 @@ class ExecuteResult:
     independently, because a launcher exiting (or being killed) proves
     nothing about what it left running inside the backend's isolation.
     Mirrors `trial.run_attempt`'s own stop-record shape, so a caller can carry
-    this into `trial.finalize` largely unchanged."""
+    this into `trial.finalize` largely unchanged.
+
+    `signal` names an infrastructure kill EXPLICITLY - never a guessed cause
+    (issue #10 addendum item 12: "exit 137 is SIGKILL, not OOM"; three parties
+    once relayed "OOM" for a kill a memory check showed was not one). Set it
+    from the signal that actually terminated the process (`SIGKILL`,
+    `SIGTERM`, ...), never inferred from a raw exit code alone - a backend
+    that cannot determine the signal leaves this `None` rather than guess.
+    """
 
     reason: str  # "exited" | "timeout" | "operator-cancelled" | "launch-failed"
     exit_code: int | None
     error: str | None = None
+    signal: str | None = None
 
 
 @dataclass(frozen=True)
@@ -219,7 +228,14 @@ class ExecutionBackend(Protocol):
         controller-owned directory outside the backend. The CONTROLLER
         re-hashes and freezes what lands here (`trial.capture`); `export`
         itself produces no manifest, digest or verdict, and nothing it claims
-        about what it copied is trusted without that freeze."""
+        about what it copied is trusted without that freeze.
+
+        May be called more than once per attempt, to different `dest`
+        directories, and must not mutate what it reads: the lifecycle driver
+        takes a liveness snapshot before `execute()` and compares it against
+        the post-execution export (PR1b) - a backend for which `export` has a
+        side effect, or that returns something different on a second call
+        with nothing having run in between, breaks that comparison."""
         ...
 
     def destroy(self, handle: object) -> None:
