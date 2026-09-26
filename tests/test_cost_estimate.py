@@ -67,6 +67,113 @@ def test_assumptions_are_carried_through_unmodified():
 
 
 # --------------------------------------------------------------------------
+# Judge-call cost (#69 follow-up): tiers 2/3 make paid calls, counted only
+# when explicitly enabled.
+# --------------------------------------------------------------------------
+
+JUDGE_PRICE = ce.ModelPrice(
+    name="fake-judge-model", input_usd_per_million=2.50, output_usd_per_million=10.00, source="test",
+)
+
+
+def test_estimate_without_judges_matches_the_pre_69_follow_up_behavior():
+    """judge_tiers_enabled=0 (the default) must add nothing - the exact
+    number #26/#12's manifests already committed must not silently change
+    the day this function grew judge-cost support."""
+    cost = ce.estimate(
+        trials=3, attempts_per_trial=1,
+        estimated_input_tokens_per_attempt=50_000, estimated_output_tokens_per_attempt=5_000,
+        price=PRICE,
+    )
+    assert cost.judge_tiers_enabled == 0
+    assert cost.judge_calls_total == 0
+    assert cost.judge_price is None
+    assert cost.estimated_usd == pytest.approx(3 * (50_000 / 1_000_000 * 1.25 + 5_000 / 1_000_000 * 10.00))
+
+
+def test_estimate_with_one_judge_tier_adds_one_call_per_attempt():
+    cost = ce.estimate(
+        trials=3, attempts_per_trial=1,
+        estimated_input_tokens_per_attempt=50_000, estimated_output_tokens_per_attempt=5_000,
+        price=PRICE,
+        judge_tiers_enabled=1, judge_price=JUDGE_PRICE,
+        estimated_judge_input_tokens_per_call=100_000, estimated_judge_output_tokens_per_call=2_000,
+    )
+    assert cost.judge_calls_total == 3  # 3 attempts * 1 tier
+    agent_cost = 3 * (50_000 / 1_000_000 * 1.25 + 5_000 / 1_000_000 * 10.00)
+    judge_cost = 3 * (100_000 / 1_000_000 * 2.50 + 2_000 / 1_000_000 * 10.00)
+    assert cost.estimated_usd == pytest.approx(agent_cost + judge_cost)
+
+
+def test_estimate_with_two_judge_tiers_doubles_the_judge_calls():
+    cost = ce.estimate(
+        trials=3, attempts_per_trial=1,
+        estimated_input_tokens_per_attempt=50_000, estimated_output_tokens_per_attempt=5_000,
+        price=PRICE,
+        judge_tiers_enabled=2, judge_price=JUDGE_PRICE,
+        estimated_judge_input_tokens_per_call=100_000, estimated_judge_output_tokens_per_call=2_000,
+    )
+    assert cost.judge_calls_total == 6  # 3 attempts * 2 tiers, ADR 0005: "two paid judge calls per trial"
+
+
+def test_estimate_refuses_an_invalid_judge_tier_count():
+    with pytest.raises(ValueError, match="0, 1 or 2"):
+        ce.estimate(
+            trials=1, attempts_per_trial=1,
+            estimated_input_tokens_per_attempt=1000, estimated_output_tokens_per_attempt=1000,
+            price=PRICE, judge_tiers_enabled=3,
+        )
+
+
+def test_estimate_refuses_judges_enabled_with_no_judge_price():
+    """A cost enabled but not priced is refused - the silent gap ADR 0005
+    exists to close."""
+    with pytest.raises(ValueError, match="judge_price"):
+        ce.estimate(
+            trials=1, attempts_per_trial=1,
+            estimated_input_tokens_per_attempt=1000, estimated_output_tokens_per_attempt=1000,
+            price=PRICE, judge_tiers_enabled=1,
+        )
+
+
+def test_estimate_refuses_judges_enabled_with_no_judge_token_assumption():
+    with pytest.raises(ValueError, match="judge call estimated to cost nothing"):
+        ce.estimate(
+            trials=1, attempts_per_trial=1,
+            estimated_input_tokens_per_attempt=1000, estimated_output_tokens_per_attempt=1000,
+            price=PRICE, judge_tiers_enabled=1, judge_price=JUDGE_PRICE,
+        )
+
+
+def test_a_plan_under_the_ceiling_without_judges_is_over_it_with_them():
+    """The orchestrator's own control: a plan comfortably under $5 without
+    judges must be refused once both judge tiers are enabled and the judge
+    cost pushes it over - and refused ONLY in that configuration, not by
+    some unconditional new ceiling check."""
+    without_judges = ce.estimate(
+        trials=6, attempts_per_trial=1,
+        estimated_input_tokens_per_attempt=50_000, estimated_output_tokens_per_attempt=5_000,
+        price=PRICE,
+    )
+    assert without_judges.estimated_usd <= ce.CEILING_USD
+    ce.authorize(without_judges, approved_budget_usd=without_judges.estimated_usd)  # must not raise
+
+    expensive_judge_price = ce.ModelPrice(
+        name="expensive-judge", input_usd_per_million=500.0, output_usd_per_million=500.0, source="test",
+    )
+    with_judges = ce.estimate(
+        trials=6, attempts_per_trial=1,
+        estimated_input_tokens_per_attempt=50_000, estimated_output_tokens_per_attempt=5_000,
+        price=PRICE,
+        judge_tiers_enabled=2, judge_price=expensive_judge_price,
+        estimated_judge_input_tokens_per_call=50_000, estimated_judge_output_tokens_per_call=5_000,
+    )
+    assert with_judges.estimated_usd > ce.CEILING_USD
+    with pytest.raises(ce.SpendNotAuthorized, match="ceiling"):
+        ce.authorize(with_judges, approved_budget_usd=1_000_000.0)
+
+
+# --------------------------------------------------------------------------
 # authorize(): the spend gate. Committed negative controls for ADR 0005 rule 5.
 # --------------------------------------------------------------------------
 

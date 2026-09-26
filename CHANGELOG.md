@@ -357,6 +357,41 @@ collection) closes.
   (#49), each naming the pinned commit and licence per
   [ADR 0003](docs/decisions/0003-no-external-evaluation-runtime.md) (ideas,
   never code).
+- **The `mcp-second-opinion` `Judge` adapter and its cost-estimate wiring**
+  (Refs #69, the seam PR's follow-up): `skillc/judge_mcp_second_opinion.py`
+  implements `skillc.judge.Judge` against a real
+  [`cooneycw/mcp-second-opinion`](https://github.com/cooneycw/mcp-second-opinion)
+  server, speaking MCP as an external process - stdlib `subprocess` plus
+  line-delimited JSON-RPC 2.0 over stdio (the `initialize` handshake,
+  `notifications/initialized`, one `tools/call`), no MCP SDK, matching
+  `skillc/docker_backend.py`'s own precedent for an external tool with no
+  vendored client library. An absent binary, a failed handshake, a timeout,
+  or a tool-level error each become `JudgeUnavailable` with a stated reason;
+  an unparseable verdict becomes `[]`, which `run_tier` turns into an honest
+  per-criterion `UNKNOWN`, never a crash. The real tool's own schema
+  (`get_code_second_opinion`: `code`/`language` required,
+  `additionalProperties: false`, no field for a structured criteria list) is
+  respected rather than worked around: the criteria ids are embedded as a
+  JSON array literal inside `issue_description`, and the first JSON array of
+  objects is parsed back out of the free-text response. Every one of its own
+  tests drives a committed fake MCP stdio server
+  (`tests/fixtures/mcp-second-opinion/fake_server.py`,
+  `happy`/`garbage-handshake`/`hang`/`tool-error`/`unparseable-verdict`
+  modes) instead of a real server - #69's own acceptance forbids a real model
+  call in the test suite, now enforced structurally by an AST-walk test that
+  refuses any `McpSecondOpinionJudge(...)` construction in the whole test
+  suite that omits an explicit `command=` override, with its own planted-
+  offender negative control. `skillc/cost_estimate.py`'s `estimate()` gains
+  `judge_tiers_enabled` (0, 1 or 2), `judge_price` and per-call token
+  assumptions: `judge_tiers_enabled=0` (the default) reproduces the
+  function's pre-adapter behavior byte-for-byte, and enabling judge tiers
+  adds paid calls into the same `estimated_usd` `authorize()` already checks
+  against the $5 ceiling (ADR 0005) - a committed control shows a plan
+  comfortably under the ceiling without judges crossing it once two judge
+  tiers are enabled, refused in exactly that configuration and no other.
+  Still owed: the judge does not yet run inside #10's grading boundary (a
+  separate backend instance) - it spawns directly on the host today, bounded
+  only by ordinary OS-level process isolation.
 
 ### Fixed
 
