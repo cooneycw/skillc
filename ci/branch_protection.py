@@ -20,6 +20,7 @@ not by hand-editing what `--check` compares against.
 
 from __future__ import annotations
 
+import argparse
 import json
 import subprocess
 import sys
@@ -99,18 +100,28 @@ def apply_protection(repo: str = REPO, branch: str = BRANCH) -> None:
     )
 
 
+def _parse_args(args: list[str]) -> argparse.Namespace:
+    """A real parser, not a membership test - cross-model review: `--apply
+    --dry-run` used to silently ignore the unsupported `--dry-run` and still
+    perform the real write. Any unrecognized flag now refuses (exit 2) before
+    either mode runs, and `--check`/`--apply` are mutually exclusive and
+    required, so "neither" and "both" are refused the same way."""
+    parser = argparse.ArgumentParser(prog="branch-protection")
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--check", action="store_true", help="read-only: report drift")
+    group.add_argument("--apply", action="store_true", help="write: apply the policy")
+    return parser.parse_args(args)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = argv if argv is not None else sys.argv[1:]
-    check = "--check" in args
-    apply = "--apply" in args
-    if check == apply:
-        print(
-            "branch-protection: pass exactly one of --check (read-only) or "
-            "--apply (writes; a real, hard-to-reverse change)",
-            file=sys.stderr,
-        )
-        return 2
-    if apply:
+    try:
+        parsed = _parse_args(args)
+    except SystemExit as exc:
+        # exc.code is 0 for --help, 2 for a parse error - `or` would wrongly
+        # turn a genuine 0 into 2, so check for None explicitly.
+        return int(exc.code) if exc.code is not None else 2
+    if parsed.apply:
         print(f"branch-protection: applying policy to {REPO}@{BRANCH}", file=sys.stderr)
         apply_protection()
         print("branch-protection: applied")

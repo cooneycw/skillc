@@ -60,9 +60,16 @@ def readme_commands(readme_text: str) -> set[str] | None:
 
 
 def command_drift(readme_text: str, real: set[str]) -> list[str]:
+    if not real:
+        # Never actually empty (skillc always registers subcommands), but a
+        # comparison against an empty population proves nothing either way -
+        # refuse rather than let it read as a match (cross-model review).
+        return ["no real commands were discovered from the argparse parser"]
     documented = readme_commands(readme_text)
     if documented is None:
         return ["README has no <!-- commands:start --> ... <!-- commands:end --> block"]
+    if not documented:
+        return ["README's commands block names no commands - an empty block cannot match"]
     problems = []
     missing = sorted(real - documented)
     if missing:
@@ -115,16 +122,24 @@ def status_drift(readme_text: str, milestones_data: dict[str, object]) -> list[s
     rows = readme_milestones(readme_text)
     if rows is None:
         return ["README has no <!-- milestones:start --> ... <!-- milestones:end --> block"]
+    if not rows:
+        return ["README's milestones table has no rows - an empty table cannot match"]
     entries = milestones_data.get("milestones")
-    if not isinstance(entries, list):
-        return ["docs/milestones.json has no 'milestones' list"]
+    if not isinstance(entries, list) or not entries:
+        # A malformed-only list (see below) is caught separately, so this is
+        # specifically "no list, or a list with nothing in it at all" -
+        # cross-model review: an empty population must not read as a match.
+        return ["docs/milestones.json has no non-empty 'milestones' list"]
     problems = []
     file_by_label: dict[str, str] = {}
     for entry in entries:
         if not isinstance(entry, dict):
+            problems.append(f"docs/milestones.json has a non-object milestone entry: {entry!r}")
             continue
         label = f"{entry.get('version')} - {entry.get('label')}"
         file_by_label[label] = str(entry.get("state"))
+    if not file_by_label:
+        problems.append("docs/milestones.json's 'milestones' list has no usable entries")
     for label, file_state in file_by_label.items():
         readme_state = rows.get(label)
         if readme_state is None:

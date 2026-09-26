@@ -93,6 +93,9 @@ steps:
     depends_on: []
     commands:
       - apt-get update -qq && apt-get install -y -qq --no-install-recommends git > /dev/null
+      # Unshallow first (best effort): a merge-base needs shared history, which
+      # a shallow clone's default depth may not carry.
+      - git fetch --unshallow origin --quiet 2>/dev/null || true
       - git fetch origin main --quiet
       - python3 ci/changelog_check.py origin/main
 

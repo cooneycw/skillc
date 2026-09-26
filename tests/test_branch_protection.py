@@ -14,6 +14,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from ci import branch_protection as bp
 
 CONTROLS = Path(__file__).resolve().parent.parent / "controls" / "branch-protection"
@@ -78,3 +80,16 @@ def test_apply_body_is_well_formed() -> None:
 def test_main_refuses_when_neither_or_both_flags_are_given() -> None:
     assert bp.main([]) == 2
     assert bp.main(["--check", "--apply"]) == 2
+
+
+def test_an_unrecognized_flag_refuses_before_any_write(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cross-model review [MEDIUM]: `--apply --dry-run` used to silently ignore
+    the unsupported `--dry-run` and perform the real write anyway. Confirmed
+    real on the pre-fix code. `apply_protection` is monkeypatched to explode
+    if reached at all - the assertion is "never called", not "called safely"."""
+
+    def _boom(*_a: object, **_k: object) -> None:
+        raise AssertionError("apply_protection() was called despite an unrecognized flag")
+
+    monkeypatch.setattr(bp, "apply_protection", _boom)
+    assert bp.main(["--apply", "--dry-run"]) == 2

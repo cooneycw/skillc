@@ -30,10 +30,25 @@ def test_touches_skillc() -> None:
     assert cc.touches_skillc(["tests/test_cli.py", "README.md"]) is False
 
 
-def test_escape_trailer_is_case_and_position_insensitive_within_the_message() -> None:
+def test_escape_trailer_is_case_insensitive_in_the_final_paragraph() -> None:
     assert cc.has_escape_trailer("fix: thing\n\nChangelog-exempt: docs typo\n") is True
     assert cc.has_escape_trailer("fix: thing\n\nCHANGELOG-EXEMPT: docs typo\n") is True
     assert cc.has_escape_trailer("fix: thing\n\nno trailer here\n") is False
+
+
+def test_escape_trailer_requires_a_nonempty_reason() -> None:
+    """Cross-model review [MEDIUM]: an empty reason exempts silently, defeating
+    the point of asking for one. Confirmed real on the pre-fix code."""
+    assert cc.has_escape_trailer("fix: thing\n\nChangelog-exempt:\n") is False
+    assert cc.has_escape_trailer("fix: thing\n\nChangelog-exempt:    \n") is False
+
+
+def test_escape_trailer_must_be_in_the_final_paragraph() -> None:
+    """Cross-model review [MEDIUM]: a mention earlier in the body - describing
+    or quoting the convention - is not the same as declaring it for THIS
+    commit. Confirmed real on the pre-fix code."""
+    message = "fix: thing\n\nChangelog-exempt: docs typo\n\nSigned-off-by: someone\n"
+    assert cc.has_escape_trailer(message) is False
 
 
 # ------------------------------------------------------- the committed pairs
@@ -114,6 +129,42 @@ def test_good_no_base_changelog_and_a_populated_unreleased_section() -> None:
     assert problem is None
 
 
+def test_bad_an_entry_was_removed_and_nothing_new_added() -> None:
+    """Cross-model review [MEDIUM]: the base pair required only "different from
+    base", so deleting an existing entry (net negative, no new content) used
+    to satisfy it. Confirmed real on the pre-fix code."""
+    two_entries = (
+        "## [Unreleased]\n\n- First thing (#1)\n- Second thing (#2)\n\n"
+        "## [0.1.0] - 2026-01-01\n\nFirst.\n"
+    )
+    one_entry = "## [Unreleased]\n\n- First thing (#1)\n\n## [0.1.0] - 2026-01-01\n\nFirst.\n"
+    problem = cc.missing_changelog_entry(
+        changed_files=["skillc/checks.py"],
+        base_changelog=two_entries,
+        head_changelog=one_entry,
+        head_commit_message="feat: add a rule\n",
+    )
+    assert problem is not None
+
+
+def test_good_an_entry_was_added_alongside_an_unrelated_removal() -> None:
+    two_entries = (
+        "## [Unreleased]\n\n- First thing (#1)\n- Second thing (#2)\n\n"
+        "## [0.1.0] - 2026-01-01\n\nFirst.\n"
+    )
+    swapped = (
+        "## [Unreleased]\n\n- First thing (#1)\n- Third thing (#3)\n\n"
+        "## [0.1.0] - 2026-01-01\n\nFirst.\n"
+    )
+    problem = cc.missing_changelog_entry(
+        changed_files=["skillc/checks.py"],
+        base_changelog=two_entries,
+        head_changelog=swapped,
+        head_commit_message="feat: add a rule\n",
+    )
+    assert problem is None
+
+
 # --------------------------------------------------- the gate script itself
 
 
@@ -151,6 +202,35 @@ def test_the_gate_script_itself_discriminates(tmp_path: Path) -> None:
     _commit(repo, "docs: changelog")
     rc = _run_in(repo, ["main"])
     assert rc == 0, "gate refused a compliant changelog update"
+
+
+def test_the_gate_uses_the_merge_base_not_the_moving_target_tip(tmp_path: Path) -> None:
+    """Cross-model review [MEDIUM]: diffing against the target branch's
+    current tip - rather than the fork point - misattributes changes. A
+    docs-only branch that never touched skillc/ must not be flagged just
+    because main moved on and touched skillc/ (and even added its own
+    Unreleased entry) after the branch forked. Confirmed real on the pre-fix
+    code, which diffed against origin/main's tip directly."""
+    repo = _repo(tmp_path, "repo")
+    (repo / "CHANGELOG.md").write_text(UNRELEASED_EMPTY, encoding="utf-8")
+    (repo / "skillc").mkdir()
+    (repo / "skillc" / "x.py").write_text("x = 1\n", encoding="utf-8")
+    (repo / "README.md").write_text("original\n", encoding="utf-8")
+    _commit(repo, "base")
+    subprocess.run(["git", "-C", str(repo), "branch", "feature"], check=True)
+
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "feature"], check=True)
+    (repo / "README.md").write_text("docs change\n", encoding="utf-8")
+    _commit(repo, "docs: unrelated, never touches skillc/")
+
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "main"], check=True)
+    (repo / "skillc" / "x.py").write_text("x = 2\n", encoding="utf-8")
+    (repo / "CHANGELOG.md").write_text(UNRELEASED_WITH_ENTRY, encoding="utf-8")
+    _commit(repo, "feat: main's own unrelated change, with its own changelog entry")
+
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "feature"], check=True)
+    rc = _run_in(repo, ["main"])
+    assert rc == 0, "a docs-only branch was flagged for a change only main made after the fork"
 
 
 def _run_in(repo: Path, args: list[str]) -> int:

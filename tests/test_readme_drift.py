@@ -60,6 +60,26 @@ def test_bad_no_commands_block_at_all() -> None:
     assert rd.command_drift("nothing here", {"check"}) != []
 
 
+def test_bad_empty_real_command_set_is_not_a_match() -> None:
+    """One side non-empty already mismatches via ordinary set difference; kept
+    as a sanity check, not the precise vacuous-pass case (below)."""
+    assert rd.command_drift(FULL_COMMANDS_BLOCK, set()) != []
+
+
+def test_bad_readme_commands_block_is_empty() -> None:
+    empty_block = "<!-- commands:start -->\n```bash\n```\n<!-- commands:end -->\n"
+    assert rd.command_drift(empty_block, {"check"}) != []
+
+
+def test_bad_both_sides_empty_is_not_a_vacuous_match() -> None:
+    """Cross-model review [MEDIUM], the precise case: an empty commands block
+    against an empty real set matched by ordinary set equality (both empty),
+    so it read as agreement with nothing actually compared. Confirmed real on
+    the pre-fix code: `command_drift(empty_block, set()) == []` there."""
+    empty_block = "<!-- commands:start -->\n```bash\n```\n<!-- commands:end -->\n"
+    assert rd.command_drift(empty_block, set()) != []
+
+
 # ----------------------------------------------------------------- version
 
 
@@ -116,6 +136,37 @@ def test_bad_a_closed_milestone_still_reads_open_in_the_readme() -> None:
 
 def test_bad_readme_has_no_milestones_block() -> None:
     assert rd.status_drift("nothing here", MILESTONES_DATA) != []
+
+
+def test_bad_empty_milestones_table_is_not_a_match() -> None:
+    """Cross-model review [MEDIUM]: an empty table and an empty file's
+    'milestones' list must not read as agreement. Confirmed real on the
+    pre-fix code."""
+    empty_block = "<!-- milestones:start -->\n| Milestone | State |\n|---|---|\n<!-- milestones:end -->\n"
+    assert rd.status_drift(empty_block, MILESTONES_DATA) != []
+
+
+def test_bad_empty_milestones_file_is_not_a_match() -> None:
+    empty_data: dict[str, object] = {"milestones": []}
+    assert rd.status_drift(MILESTONES_BLOCK, empty_data) != []
+
+
+def test_bad_both_milestones_sides_empty_is_not_a_vacuous_match() -> None:
+    """Cross-model review [MEDIUM], the precise case: an empty table against
+    an empty file's 'milestones' list matched by having nothing to disagree
+    on. Confirmed real on the pre-fix code: `status_drift` returned `[]` for
+    this exact pair there."""
+    empty_block = "<!-- milestones:start -->\n| Milestone | State |\n|---|---|\n<!-- milestones:end -->\n"
+    empty_data: dict[str, object] = {"milestones": []}
+    assert rd.status_drift(empty_block, empty_data) != []
+
+
+def test_bad_malformed_milestone_entries_are_reported_not_skipped() -> None:
+    """Cross-model review [MEDIUM]: a list of only non-dict entries used to be
+    silently skipped down to an empty (falsely matching) population."""
+    malformed_data: dict[str, object] = {"milestones": ["not a dict", 42]}
+    problems = rd.status_drift(MILESTONES_BLOCK, malformed_data)
+    assert any("non-object milestone entry" in p for p in problems)
 
 
 _MILESTONE_ENTRIES: list[dict[str, object]] = [
