@@ -34,6 +34,8 @@ FIXTURE = Path(__file__).resolve().parent / "fixtures" / "codex-subject"
 REPO = Path(__file__).resolve().parent.parent
 EVIDENCE = REPO / "evals" / "subjects" / "cpp-codex" / "evidence"
 RECEIPT = EVIDENCE / "records" / "receipt.json"
+MATTPOCOCK_EVIDENCE = REPO / "evals" / "subjects" / "mattpocock-skills" / "evidence"
+MATTPOCOCK_RECEIPT = MATTPOCOCK_EVIDENCE / "records" / "receipt.json"
 
 needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
 needs_codex = pytest.mark.skipif(shutil.which("codex") is None, reason="codex is not installed")
@@ -697,9 +699,19 @@ def test_cli_exit_follows_readiness_and_never_overwrites_evidence(
 
 
 #: Words that belong to one subject's conventions. They may appear in the
-#: subject's declaration, never in the generic adapter.
+#: subject's declaration, never in the generic adapter or the core runner/
+#: verifier modules (#11: a second, independently-authored subject is the
+#: proof that no branch crept in for the first one).
 SUBJECT_WORDS = ("power-pack", "cpp", "sha256sums", ".claude/scripts", "codex/skills",
-                 "claude_plugin_root", "reference.md")
+                 "claude_plugin_root", "reference.md", "mattpocock")
+
+#: The core modules a project-name branch must never reach: the adapter
+#: (materialize), the controller/runner (trial), the verifier (verify), the
+#: execution backend seam (backend, #65), and the lifecycle driver that ties
+#: them together (lifecycle, #10 PR1b). Evals fixtures, tests and the subject
+#: declarations themselves are excluded on purpose - a subject.json naming its
+#: own subject is the mechanism, not a defect.
+CORE_MODULES = ("materialize.py", "trial.py", "verify.py", "backend.py", "lifecycle.py")
 
 
 def _subject_literals(source: str) -> list[str]:
@@ -720,15 +732,29 @@ def _subject_literals(source: str) -> list[str]:
     ]
 
 
-def test_the_adapter_names_no_subject() -> None:
-    source = (REPO / "skillc" / "materialize.py").read_text(encoding="utf-8")
+@pytest.mark.parametrize("module", CORE_MODULES)
+def test_the_core_names_no_subject(module: str) -> None:
+    source = (REPO / "skillc" / module).read_text(encoding="utf-8")
     assert _subject_literals(source) == []
 
 
-def test_the_subject_guard_sees_a_planted_literal() -> None:
-    source = (REPO / "skillc" / "materialize.py").read_text(encoding="utf-8")
+@pytest.mark.parametrize("module", CORE_MODULES)
+def test_the_subject_guard_sees_a_planted_literal(module: str) -> None:
+    """The negative control (#11): plant a project-name branch and require the
+    guard to see it, in EVERY core module it claims to cover - a guard proven
+    only on materialize.py could go blind on the other three without any test
+    noticing."""
+    source = (REPO / "skillc" / module).read_text(encoding="utf-8")
     planted = source + '\nMANIFEST = "scripts/SHA256SUMS"\n'
     assert _subject_literals(planted) == ["scripts/SHA256SUMS"]
+
+
+def test_the_subject_guard_sees_a_planted_mattpocock_branch() -> None:
+    """#11's own second subject: a literal name branch for it must be as
+    visible to the guard as CPP's ever was."""
+    source = (REPO / "skillc" / "materialize.py").read_text(encoding="utf-8")
+    planted = source + '\nif locator == "mattpocock": pass\n'
+    assert _subject_literals(planted) == ["mattpocock"]
 
 
 # ----------------------------------------------------------- the real client
@@ -773,3 +799,27 @@ def test_the_committed_cpp_evidence_is_ready_and_well_formed() -> None:
     assert len(report["inventory"]["skills"]) == len(
         [line for line in report["canary"]["treatment"]["listed"] if "/.codex/skills/." not in line]
     )
+
+
+def test_the_committed_mattpocock_evidence_is_ready_and_well_formed() -> None:
+    """#11's second subject, proving the same adapter and readiness facts
+    against an independently authored collection with a different layout."""
+    receipt = json.loads(MATTPOCOCK_RECEIPT.read_text(encoding="utf-8"))
+    report = json.loads((MATTPOCOCK_EVIDENCE / "report.json").read_text(encoding="utf-8"))
+    subject = json.loads((MATTPOCOCK_EVIDENCE.parent / "subject.json").read_text(encoding="utf-8"))
+    assert checks.run_record(records.Record(path=Path("receipt.json"), data=receipt)) == []
+    assert receipt["subject"]["revision"] == subject["revision"]
+    assert receipt["client"]["version"] == subject["client"]["version"]
+    assert receipt["readiness"] == dict.fromkeys(m.READINESS_FACTS, m.SATISFIED)
+    assert report["control"]["listed"] is True
+    installed_names = sorted(s["name"] for s in report["inventory"]["skills"])
+    assert installed_names == ["diagnosing-bugs", "tdd"]
+    # Cross-model review: `readiness` is a DERIVED claim; re-derive the same
+    # fact from the RAW canary listing rather than trusting the summary - an
+    # emptied or tampered treatment listing must not pass just because the
+    # receipt still says SATISFIED and the inventory still names the skills.
+    treatment_lines = [
+        line for line in report["canary"]["treatment"]["listed"]
+        if "/.codex/skills/." not in line
+    ]
+    assert sorted(line.split()[0] for line in treatment_lines) == installed_names
