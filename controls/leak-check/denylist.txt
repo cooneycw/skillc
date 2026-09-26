@@ -1,0 +1,3 @@
+# Obviously-fake hostname for the negative control (issue #63). Never a real
+# machine name - the real deny-list stays out of this repository.
+example-host.internal

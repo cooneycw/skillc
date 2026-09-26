@@ -60,3 +60,20 @@ steps:
     commands:
       - gitleaks dir . --config .gitleaks.toml --redact --no-banner
       - bash ci/secret-scan-control.sh
+
+  # Machine-identity leak scan of the checked-out tree (#63): skillc is public,
+  # so a home-directory path, a uid/gid, a private IP or a denylisted hostname
+  # must not be committed. Two narrow exclusions, each a single path that
+  # exists to hold seeded, obviously-fake leak examples on purpose - not a
+  # general allowlist: controls/leak-check/bad/ (the negative control's fixture)
+  # and tests/test_leak.py (this scanner's own unit-test literals).
+  - name: leak-check
+    image: python:3.12-slim
+    depends_on: []
+    commands:
+      - pip install uv
+      - uv sync --locked --extra dev
+      - uv run --no-sync skillc leak-check . --exclude controls/leak-check/bad --exclude tests/test_leak.py
+      - uv run --no-sync bash ci/leak-check-control.sh
+    environment:
+      UV_PROJECT_ENVIRONMENT: /tmp/skillc-venv

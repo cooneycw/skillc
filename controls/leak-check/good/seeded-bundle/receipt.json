@@ -1,0 +1,6 @@
+{
+  "notes": "Materialized under $SKILLC_WORKSPACE_ROOT/skillc-runs/2026-09-26",
+  "host": "skillc-executor",
+  "endpoint": "skillc-testdb:8000",
+  "process": "container entrypoint, uid and gid assigned by the runtime"
+}
