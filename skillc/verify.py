@@ -30,19 +30,39 @@ is the grader definition against the ledger's pin, the whole experiment store
 against a snapshot, the ledger against its history, and the frozen bytes against
 their digests. Any change REFUSES the result. It is never warn-and-proceed.
 
-WHAT THIS DOES NOT ESTABLISH. Candidate code runs as the evaluator's own user, so
-a write to the store or to the grader's files is DETECTED, not prevented, and the
-answer key's file on disk is readable by a candidate that goes looking for it.
-Prevention needs a separate user or container, which is the Docker lane (#10).
-The environment is not inherited, but same-user code can read an ancestor's
-through /proc, so evaluator credentials must not be in the verifier's environment
-until #10 provides a separate user. If containment is lost, this process is
-quarantined: every later grading run refuses until an operator clears it.
-The controller host, this package and the Python standard library are trusted.
-verification.md lists every assumption.
+WHAT THIS DOES NOT ESTABLISH BY DEFAULT. Candidate code runs as the evaluator's
+own user, so a write to the store or to the grader's files is DETECTED, not
+prevented, and the answer key's file on disk is readable by a candidate that
+goes looking for it. The environment is not inherited, but same-user code can
+read an ancestor's through /proc, so evaluator credentials must not be in the
+verifier's environment. If containment is lost, this process is quarantined:
+every later grading run refuses until an operator clears it. The controller
+host, this package and the Python standard library are trusted. verification.md
+lists every assumption.
 
-Stdlib only (AGENTS.md). Linux only: the sweep needs `prctl` and `/proc`. Anywhere
-else it fails closed, to INCONCLUSIVE.
+THE PROBE MAY RUN THROUGH AN EXECUTION BACKEND INSTEAD (#10 PR2). `grade`/
+`grade_files` take an optional `backend: ExecutionBackend | None`. `None` (the
+default) is the bare-subprocess path above, unchanged. Given a backend, ONLY
+stage 1 changes: the probe runs inside a fresh, separate backend instance
+(interfaces.md step 8 - "a SEPARATE backend instance, through this same seam")
+via prepare/install/execute/confirm_stopped/export/destroy/confirm_absent,
+exactly the seam `skillc/lifecycle.py` drives for agent execution. The judge
+(stage 2) is unchanged either way: it is trusted code, never candidate code, so
+it needs no container.
+
+Confidentiality and prevention become the BACKEND's claims (`describe()`'s
+`isolation`/`unobserved`), never this module's own - this module still performs
+its detection-based checks regardless, as defense in depth, but a real
+prevention claim is the backend's to make. No concrete backend ships in this
+repository at this commit (`skillc/docker_backend.py` does not exist yet), so
+every such claim is OWED TO THE LIVE RUN (issue #10 comment 5848522578, lesson
+E17: "unit tests on a fake backend prove the lifecycle, never the boundary")
+until one exists and is actually run this way -
+`tests/test_verify.py::test_an_ancestors_environment_is_NOT_hidden` stays
+exactly as documented; it cannot flip without that live run.
+
+Stdlib only (AGENTS.md). Linux only: the bare-subprocess sweep needs `prctl` and
+`/proc`. Anywhere else it fails closed, to INCONCLUSIVE.
 """
 
 from __future__ import annotations
@@ -59,12 +79,22 @@ import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 
-from . import checks, records, trial
+from . import checks, provenance, records, trial
+from .backend import BackendUnavailable, Confirmation, ExecutionBackend, Limits
 from .materialize import Refused as NotOwned
 from .materialize import cleanup as remove_owned
 from .materialize import create_root
 
 Refused = trial.Refused
+
+#: The only grading tier this build implements: deterministic outcome checks,
+#: no model call. #69 (owner-ratified target: deterministic / llm-judge /
+#: independent-llm-judge) adds the other two; this field lets a reader of a
+#: verified-result see which tier produced it without guessing from whether a
+#: `judge` sub-record happens to be present. Never "Level" - skillc already
+#: uses that word for TASK difficulty (evals/level1, #13-#15), so reusing it
+#: for grading tiers would read as a claim about the task ladder instead.
+GRADING_TIER = "deterministic"
 
 GRADER_FILE = "grader.json"
 _GRADER_KEYS = {"id", "revision", "criteria", "probe", "judge"}
@@ -370,6 +400,33 @@ def _tail(path: Path) -> str:
     return lines[-1] if lines else "no stderr"
 
 
+def _abnormal_exit_reason(code: int | None) -> str:
+    """Why the supervisor ended abnormally, named EXPLICITLY when the cause is
+    knowable, never a guessed "OOM" or "candidate code may have killed it"
+    (issue #10 addendum item 12: "exit 137 is SIGKILL, not OOM"; three parties
+    once relayed OOM for a kill a memory check showed was not one).
+
+    Python's `Popen.returncode` is the NEGATIVE signal number when a process is
+    terminated by a signal (POSIX; positive is a normal exit status), so a
+    negative code here names the exact signal - still not its CAUSE (the kernel
+    OOM killer, an operator, a resource limit), which this process cannot see
+    from the exit code alone. That is why this says "terminated by", never
+    "killed by the OOM killer": stating the mechanism it can prove, not a
+    reason it would have to guess.
+    """
+    if code is not None and code < 0:
+        try:
+            name = signal.Signals(-code).name
+        except ValueError:
+            name = f"signal {-code}"
+        return (
+            f"the supervisor was terminated by {name} (exit code {code}); this process "
+            "cannot tell from the exit code alone whether that was the kernel OOM killer, "
+            "an operator, or a resource limit - check the host's own OOM/cgroup records"
+        )
+    return f"the supervisor ended abnormally ({code}); candidate code may have killed it"
+
+
 #: Set when a probe's containment was lost. Every later grading run in this
 #: process refuses until an operator clears it: a surviving candidate process could
 #: otherwise write into the next run's store or judge.
@@ -452,7 +509,7 @@ def _probe(grader: GraderDef, loaded: dict[str, bytes], work: Path) -> tuple[dic
             UNCONFIRMED: "descendants of the probe survived the sweep",
             UNSUPPORTED: "this host cannot contain the probe (no prctl subreaper or /proc)",
             None: "the supervisor did not finish; its process group was killed",
-        }.get(code, f"the supervisor ended abnormally ({code}); candidate code may have killed it")
+        }.get(code, _abnormal_exit_reason(code))
         containment["stderr"] = _tail(errors)
         if code != UNSUPPORTED:
             # Nothing established that every candidate process is gone. One that left
@@ -460,6 +517,129 @@ def _probe(grader: GraderDef, loaded: dict[str, bytes], work: Path) -> tuple[dic
             # and could interfere with the next grading run, so this verifier stops.
             _set_quarantine(f"probe containment was lost ({containment['reason']})")
     envelope = {"observations": _read_observations(observations), "timed_out": code == TIMED_OUT}
+    return envelope, containment
+
+
+#: The backend's fixed logical workspace root for a probe-shaped install
+#: (#10 PR2, agreed directly with the Docker backend's author over mailbox
+#: coordination) - the same example backend.py's own module docstring already
+#: names ("fixed logical paths (e.g. /work, /home/candidate) - never the
+#: host's own").
+PROBE_WORKDIR = "/work"
+
+
+def _probe_surface(grader: GraderDef, loaded: dict[str, bytes],
+                    files: list[tuple[str, bytes, bool]]) -> dict[str, object]:
+    """The grader-shaped surface for a probe-style `install()`: flat
+    `{relative path: bytes}` entries, one per file the backend must place
+    under `PROBE_WORKDIR`. NOT #7's skill-materialization vocabulary -
+    `ExecutionBackend.install()`'s `surface` has no Protocol-fixed key set, so
+    probe callers use their own, agreed directly with the Docker backend's
+    author rather than guessed: any declared entry whose value is `bytes` is
+    written at that relative path. Held-out `inputs` are NOT here - they go to
+    the probe's stdin at `execute()`, matching the bare-subprocess path
+    exactly, so an existing probe.py needs no rewrite to run either way."""
+    surface: dict[str, object] = {grader.probe.name: loaded["probe"]}
+    for rel, data, _executable in files:
+        surface[f"candidate/{rel}"] = data
+    return surface
+
+
+def _probe_via_backend(
+    grader: GraderDef, loaded: dict[str, bytes], files: list[tuple[str, bytes, bool]],
+    work: Path, backend: ExecutionBackend,
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Stage 1, through an `ExecutionBackend` instead of a bare host subprocess
+    (#10 PR2, interfaces.md step 8: "a SEPARATE backend instance, through this
+    same seam"). Returns the SAME (envelope, containment) shape `_probe`
+    does, so `_judge`/`_assemble` need no changes at all - only what produces
+    the envelope changes.
+
+    Confidentiality and prevention are the BACKEND's claims (`describe()`'s
+    `isolation`/`unobserved`), never asserted here. See the module docstring:
+    no concrete backend exists in this repository at this commit, so those
+    claims are owed to the live run, whatever this function returns.
+
+    `confirm_stopped()` is the SOLE containment authority - there is no
+    subreaper-supervisor trick here, because that exists specifically to
+    catch a same-PID-namespace escapee; a backend's own teardown (`destroy`,
+    confirmed by `confirm_absent`) is what removes everything regardless.
+    `BackendUnavailable`, from either `prepare()` or `install()`, is a
+    refusal - `confirmed` stays False and nothing falls back to the bare
+    subprocess path silently.
+
+    THE OBSERVATIONS CONVENTION. `ExecutionBackend.execute()` has no field for
+    a launched process's own stdout - `lifecycle.py`'s `_ensure_spool_files`
+    already names this exact gap for agent execution ("a real backend's
+    stdio becomes an ordinary exported artifact today, not the client-events/
+    client-stderr observation streams run_attempt-driven attempts get") and
+    resolves it the same way this does: a probe-serving backend is expected to
+    capture the started process's stdout to a file named `observations` at its
+    workspace root, so it appears after `export()` at exactly the path this
+    function reads. Documented convention, not a Protocol change - the same
+    tier as the `candidate/<path>` placement convention above.
+    """
+    describe = backend.describe()
+    backend_identity: dict[str, object] = {
+        "name": describe.name, "version": describe.version,
+        "isolation": list(describe.isolation), "unobserved": list(describe.unobserved),
+    }
+    empty_envelope = {"observations": "", "timed_out": False}
+
+    try:
+        handle = backend.prepare(f"probe-{secrets.token_hex(8)}")
+    except BackendUnavailable as exc:
+        return empty_envelope, {
+            "backend": backend_identity, "confirmed": False, "timed_out": False,
+            "backend_unavailable": True, "reason": f"backend unavailable at prepare(): {exc}",
+        }
+
+    containment: dict[str, object] = {"backend": backend_identity, "confirmed": False, "timed_out": False}
+    envelope = empty_envelope
+    try:
+        try:
+            backend.install(handle, _probe_surface(grader, loaded, files))
+        except BackendUnavailable as exc:
+            containment["backend_unavailable"] = True
+            containment["reason"] = f"backend unavailable at install(): {exc}"
+        else:
+            argv = [
+                sys.executable, "-I", "-S", "-B",
+                f"{PROBE_WORKDIR}/{grader.probe.name}", f"{PROBE_WORKDIR}/candidate",
+            ]
+            result = backend.execute(
+                handle, argv, Limits(timeout=grader.probe_timeout), stdin=loaded["inputs"],
+            )
+            stop_confirmation = backend.confirm_stopped(handle)
+            confirmed = stop_confirmation is Confirmation.CONFIRMED
+            containment["confirmed"] = confirmed
+            containment["timed_out"] = result.reason == "timeout"
+            containment["exit_code"] = result.exit_code
+            if result.error is not None:
+                containment["error"] = result.error
+            if result.signal is not None:
+                containment["signal"] = result.signal
+            if not confirmed:
+                containment["reason"] = (
+                    f"the backend could not confirm the probe stopped ({stop_confirmation.value})"
+                )
+            else:
+                exported = work / "exported"
+                exported.mkdir(mode=0o700, exist_ok=True)
+                try:
+                    backend.export(handle, exported)
+                except OSError as exc:
+                    containment["confirmed"] = False
+                    containment["reason"] = f"export failed: {exc}"
+                else:
+                    envelope = {
+                        "observations": _read_observations(exported / "observations"),
+                        "timed_out": containment["timed_out"],
+                    }
+    finally:
+        backend.destroy(handle)
+        containment["teardown"] = backend.confirm_absent(handle).value
+
     return envelope, containment
 
 
@@ -542,11 +722,18 @@ def _status(criteria: list[dict[str, object]]) -> str:
 
 
 def grade_files(grader: GraderDef, files: list[tuple[str, bytes, bool]], base: Path,
-                forbidden: list[Path] | None = None, loaded: dict[str, bytes] | None = None) -> Graded:
+                forbidden: list[Path] | None = None, loaded: dict[str, bytes] | None = None,
+                backend: ExecutionBackend | None = None) -> Graded:
     """Grade candidate files through the three stages, in a disposable owned root.
 
     `files` are (relative path, bytes, executable). The root is removed afterwards,
     whatever happened, and its cleanup outcome is part of the containment record.
+
+    `backend` is None by default: stage 1 (the probe) runs as it always has, a
+    bare host subprocess under the supervisor. Given an `ExecutionBackend`
+    (#10 PR2), stage 1 runs inside a fresh, separate instance of it instead -
+    see the module docstring for what that does and does not establish. Stage
+    2 (the judge) never changes: it is trusted code, not candidate code.
     """
     if _quarantine is not None:
         raise Refused(f"this verifier is quarantined: {_quarantine}; an operator must check the host "
@@ -563,9 +750,16 @@ def grade_files(grader: GraderDef, files: list[tuple[str, bytes, bool]], base: P
     try:
         probe_dir = root / "probe"
         probe_dir.mkdir(mode=0o700)
-        (probe_dir / "candidate").mkdir(mode=0o700)
-        _write_tree(probe_dir / "candidate", files)
-        envelope, containment = _probe(grader, loaded, probe_dir)
+        if backend is None:
+            (probe_dir / "candidate").mkdir(mode=0o700)
+            _write_tree(probe_dir / "candidate", files)
+            envelope, containment = _probe(grader, loaded, probe_dir)
+        else:
+            # Candidate/probe/inputs bytes go THROUGH the backend's install(),
+            # never staged on this host first - install()'s own contract
+            # ("the skill starts inside the isolation - never staged on the
+            # host and merely copied in afterward") applies here too.
+            envelope, containment = _probe_via_backend(grader, loaded, files, probe_dir, backend)
         if not containment["confirmed"]:
             category, detail = "containment", f"the probe was not contained: {containment['reason']}"
             criteria = _unknown(grader, detail)
@@ -678,13 +872,22 @@ def _ptrace_scope() -> str:
 
 
 def grade(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base: Path,
-          forbidden: list[Path] | None = None, regrade_of: str | None = None) -> dict[str, object]:
+          forbidden: list[Path] | None = None, regrade_of: str | None = None,
+          backend: ExecutionBackend | None = None) -> dict[str, object]:
     """Grade one captured attempt and store its `verified-result`.
 
     Refused, and nothing written, when the ledger pins no grader digest or another
     one, the attempt was not captured, its receipt is missing or stale, or anything
     candidate code could reach changed while it ran. A grader that gives no verdict
     is NOT a refusal: that result is stored, INCONCLUSIVE, with its reason.
+
+    `backend` is forwarded to `grade_files` (see there). Every result records
+    `verification.grading_tier` (today, always `GRADING_TIER` -
+    "deterministic": #69's llm-judge tiers do not exist yet) and
+    `verification.probe_backend` (the backend's own `describe()` identity when
+    one graded this attempt's probe, else `None` for the bare-subprocess
+    path) - so a reader never has to infer which boundary applied from the
+    shape of `containment` alone.
     """
     planned = experiment.trial_of(attempt_id)
     pin = planned.get("grader")
@@ -712,7 +915,8 @@ def grade(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base
     ]
 
     before = _snapshot(experiment.root)
-    graded = grade_files(grader, files, base, [*(forbidden or []), experiment.root.parent.resolve()], loaded)
+    graded = grade_files(grader, files, base, [*(forbidden or []), experiment.root.parent.resolve()],
+                          loaded, backend=backend)
 
     # Everything candidate code could have reached is checked again. A change here
     # is not a verdict on the candidate: the measurement itself is compromised.
@@ -742,6 +946,9 @@ def grade(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base
         "verification": {
             "category": graded.category, "detail": graded.detail,
             "containment": graded.containment, "ptrace_scope": _ptrace_scope(),
+            "grading_tier": GRADING_TIER,
+            "probe_backend": graded.containment.get("backend"),
+            "provenance": provenance.stamp(),
         },
     }
     if regrade_of is not None:

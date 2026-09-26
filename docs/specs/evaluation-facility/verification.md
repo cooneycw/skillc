@@ -1,7 +1,9 @@
 # Independent grading and result assembly
 
 - Status: Implemented as `skillc/verify.py`, #9. API only; no CLI subcommand yet.
-  #10 drives it end to end in the Docker lane.
+  #10 PR2 adds an optional execution-backend seam for the probe stage (below);
+  #10's Docker backend, which would actually drive it end to end, does not
+  exist in this repository yet.
 - Date: 2026-09-26
 - Governing documents: [interfaces](interfaces.md), [protocol](protocol.md), [records](records.md), [capture](capture.md)
 - Decisions: [ADR 0001](../../decisions/0001-every-check-ships-a-redcase.md), [ADR 0003](../../decisions/0003-no-external-evaluation-runtime.md)
@@ -237,6 +239,7 @@ grades.
 | Status derived | a judge claiming `status: PASS` beside violated criteria -> FAIL | - |
 | Always-pass/always-fail/crash/no-output graders | crash, no-output, omits-criterion -> stored INCONCLUSIVE with their category; always-pass and always-fail are refused by `qualify.py` through this path | - |
 | Deterministic regrading lineage | a regrade with another judge -> refused (pin) | regrade -> same criteria, linked, original retained |
+| Backend-driven probe (#10 PR2) | `confirm_stopped()` UNKNOWN/NOT_CONFIRMED -> INCONCLUSIVE, never treated as confirmed; `BackendUnavailable` from `prepare()`/`install()` -> INCONCLUSIVE, never a silent fall-back to the bare-subprocess path | a `FakeBackend` that runs as an ordinary host subprocess (proves the driver's sequencing only, never a boundary - see below) -> PASS, `verification.probe_backend` names it |
 
 Each protection was also removed once, and the test that names it went red:
 
@@ -267,16 +270,28 @@ The following are assumed, not shown:
   environment is not inherited, but same-user candidate code can walk its
   ancestors and read `/proc/<pid>/environ` of any of them. Whatever started the
   verifier started with is readable.
-  `test_an_ancestors_environment_is_NOT_hidden` pins that. Keeping credentials
-  away from candidate code needs a separate user: the Docker lane (#10). Until
-  then, run grading from a process tree that holds no credential. Only
-  non-inheritance is established here.
-- **Candidate code runs as the evaluator's own user.**
+  `test_an_ancestors_environment_is_NOT_hidden` pins that as a LIMIT, not a bug:
+  it asserts the token IS found, and its own docstring says to update it if a
+  host ever reports "hidden". Keeping credentials away from candidate code
+  needs a separate process/user namespace boundary - #10 PR2 lets the probe run
+  through an `ExecutionBackend` instead of a bare subprocess (see "Execution
+  backend for the probe" below), but no concrete backend exists in this
+  repository at this commit, so this test cannot flip yet: doing so needs an
+  actual container run, not a fake backend standing in for one (lesson E17,
+  below). Until a real backend demonstrates otherwise, run grading from a
+  process tree that holds no credential. Only non-inheritance is established
+  here.
+- **Candidate code runs as the evaluator's own user, UNLESS a backend is
+  given.** This is the bare-subprocess (`backend=None`) default:
   - A write to the evidence store, the ledger or the grader's files is therefore
     **detected** (snapshot and digest), not **prevented**.
   - The answer key is not in the probe's directory, argv, stdin or environment,
     but its file on disk is readable by a candidate that searches for it.
-  - Prevention needs a separate user or a container: the Docker lane (#10).
+  - Prevention needs a separate user or a container. Given an `ExecutionBackend`
+    (#10 PR2), prevention becomes whatever THAT backend's own `describe()`
+    claims - never this module's own claim, and never assumed true merely
+    because a backend was supplied. This module's detection-based checks above
+    still run regardless, as defense in depth.
 - **The judge is correct.** `qualify.py` certifies it against committed good and
   bad candidates and broken-grader controls. The verifier does not re-run that
   certification, and cannot tell a blind grader from a working one on one
@@ -312,6 +327,121 @@ The following are not checked, and should not be read as held:
 - **`check-records` does not verify the grader digest.** A result is bound to its
   ledger by grader id and revision, as before. The pin is enforced when grading,
   not when a bundle is read back.
+- **A backend's isolation claims, when no real backend exists yet.** #10 PR2's
+  tests exercise the probe-via-backend DRIVER (sequencing, refusal on
+  `BackendUnavailable`, non-confirmed handling) against a fake backend that
+  runs as an ordinary host subprocess and says so in its own `describe()`.
+  That proves the driver correctly drives ANY conforming backend through the
+  steps; it proves nothing about confidentiality or write-prevention, which
+  are properties only a real, isolating backend has. See the next section.
+
+## Execution backend for the probe (#10 PR2)
+
+`grade`/`grade_files` accept an optional `backend: ExecutionBackend | None`.
+`None` (the default) is everything above, unchanged. Given a backend, only
+stage 1 (the probe) changes: it runs inside a fresh, SEPARATE instance of that
+backend (interfaces.md step 8), through `skillc/backend.py`'s Protocol -
+`prepare` / `install` / `execute` / `confirm_stopped` / `export` / `destroy` /
+`confirm_absent` - the same seam `skillc/lifecycle.py` drives for agent
+execution. Stage 2 (the judge) is unchanged either way: it is trusted code,
+never candidate code, so it needs no container.
+
+**Surface convention for probe use.** `install()`'s `surface` parameter has no
+Protocol-fixed key set (`Mapping[str, object]`); #7/`lifecycle.py`'s
+agent-execution callers use a skill-materialization vocabulary, and probe
+callers use a different one, agreed directly with the Docker backend's author
+(#10, mailbox coordination): every surface entry whose value is `bytes` is
+written into the backend's fixed workspace root at that relative path (the
+grader's probe file, `inputs`, and `candidate/<path>` per candidate file).
+Nothing here requires a Protocol change.
+
+**`confirm_stopped()` is the sole containment authority** when a backend is
+used - never the bare-subprocess supervisor's exit code, which does not exist
+in this path. `UNKNOWN` and `NOT_CONFIRMED` are both treated as NOT contained,
+exactly as the bare-subprocess path already treats an unswept probe: criteria
+go UNKNOWN, the judge never runs.
+
+**`BackendUnavailable` is a refusal, never a silent fall-back** to the
+bare-subprocess path - matching `backend.py`'s own rule for agent execution,
+generalized to grading. A caller that wants the fallback behaviour asks for it
+explicitly by passing `backend=None`; this module never chooses that for them.
+
+**What this establishes, and what it does not.** This module's OWN guarantees
+(non-inheritance of environment, detection via snapshot/digest, quarantine on
+lost containment) apply regardless of whether a backend is used - defense in
+depth, never removed. A backend's OWN claims - confidentiality, write
+prevention - are exactly what its `describe()` states, no more; this module
+never asserts them on the backend's behalf. **No concrete backend exists in
+this repository at this commit** (`skillc/docker_backend.py` is not written
+yet), so every claim a real backend WOULD make is OWED TO THE LIVE RUN (issue
+#10 comment 5848522578, lesson E17: "unit tests on a fake backend prove the
+lifecycle, never the boundary") until #10's Docker backend lands and is
+actually run this way, against a real trial, on a real Docker host.
+
+## Grading tiers (#69)
+
+Three tiers, owner-ratified as the target architecture (issue #69) - only the
+first is built:
+
+1. **Deterministic** (built, this is `GRADING_TIER`). Structural/outcome
+   checks, no model call. Everything above this section describes it.
+2. **LLM-judge + deterministic** (not built; #69). A model call added on top,
+   using whichever model is configured. If that model is the same one that
+   produced the candidate's work, this is the weaker, "generic" case: it
+   reintroduces the self-assessment bias independent grading exists to avoid.
+   A verdict record from this tier MUST say so in the record itself, not only
+   in documentation, so a same-model grade is never read as an independent one.
+3. **Independent-llm-judge + deterministic** (not built; #69). The judge call
+   is routed to a DIFFERENT, independently configured model -
+   [`mcp-second-opinion`](https://github.com/cooneycw/mcp-second-opinion) is
+   the owner-named planned mechanism (#69), a standalone public tool with no
+   coupling to this project; skillc does not vendor or depend on it (ADR 0003).
+
+Rules that apply once tiers 2/3 exist, recorded now so #69 does not have to
+re-derive them:
+
+- **Tier 1 must keep working with no judge at all.** Nothing in `skillc/`
+  imports or requires a judge mechanism; tiers 2/3 are additive.
+- **An unavailable judge yields `UNKNOWN` for that tier's criteria. It never
+  silently falls back to a lower tier** - the same rule this PR already applies
+  to an unavailable execution backend, generalized to judges.
+- **Every verdict records which tier produced it, and which judge model and
+  version** (when a judge ran). `verification.grading_tier` is that field,
+  already written by every result this build produces (currently always
+  `"deterministic"`); tiers 2/3 add a `judge` sub-record beside it.
+- **A model-backed judge takes schema-constrained output only** (addendum item
+  60): validate every field; a malformed response fails the grade whole, with
+  no partial credit. Candidate text reaching a judge is untrusted, and a judge
+  with tool access can be steered.
+- **A model-backed judge call is a paid call**, so it is subject to the same
+  cost-stop discipline as `lifecycle.py`'s real-agent guard (addendum item 51):
+  nothing in this build's test suite may make one, by construction.
+- Anything sent to an external judge passes the machine-identity leak check
+  (#63) first.
+
+Not implemented in this PR: no judge mechanism is called anywhere, and no
+`judge` sub-record exists yet. This section is the contract #69 builds
+against, not a promise this PR keeps.
+
+## Issue #10 addendum items owned by grading (9-13, 57-61)
+
+The assignment scoped these fourteen items to the grading side (the trial
+lifecycle's items are w1's). Not every item fits a single PR; this states
+which are satisfied, which are out of scope for what this grader shape even
+does, and which are deferred with a reason, rather than leaving the gap
+implicit.
+
+| Item | Status | Why |
+|---|---|---|
+| 9. Parse every result, not the last one | Satisfied by construction, not new work | `grade` operates on exactly one attempt; `_judge` reads exactly one report. There is no "last of several" for a single grading run to get wrong. |
+| 10. An observation failure is UNKNOWN, never clean | Already satisfied, verified not introduced | Every `_judge` failure category (timeout/exit-nonzero/no-output/unparseable/criteria-set/contract) routes through `_unknown()`, never a fabricated SATISFIED. |
+| 11. Four verdicts (PASS/FAIL/UNKNOWN/BLOCKED), each with a positive control | Partially - vocabulary gap noted, not closed here | skillc's existing five statuses (PASS/FAIL/INCONCLUSIVE/UNAVAILABLE/NOT_RUN, records.md) predate this PR and were not designed against this addendum item. UNAVAILABLE and INCONCLUSIVE together cover UNKNOWN/BLOCKED's intent (an unavailable backend or judge is UNAVAILABLE; a lost probe is INCONCLUSIVE), but there is no status literally named BLOCKED. Widening `records.py`'s closed status vocabulary is a bigger, separate decision than this PR's scope; noted here rather than decided unilaterally. |
+| 12. Infra-kill is not a grade; exit 137 is SIGKILL, not OOM | Improved (bare-subprocess path); already correct (backend path) | `_abnormal_exit_reason` now decodes a negative `Popen.returncode` to its exact signal name instead of guessing "candidate code may have killed it". The backend path never had this gap: `ExecuteResult.signal` is explicit by the Protocol's own design (`backend.py`). |
+| 13. Never compare a record to itself | Already satisfied, verified not introduced | `grade` snapshots the experiment store and re-derives the ledger BEFORE grading, and compares both AFTER - never a record against its own later self, always two independently taken snapshots. |
+| 57. Grade from transcript structure, not text matching | Out of scope for this grader shape | Today's graders (the level-1 slug task) grade candidate CODE, not an agent's transcript/tool-use log. There is no transcript being graded anywhere in `verify.py`; this item applies to a future transcript-shaped grader, not this PR's probe/judge boundary. |
+| 58/59. A "found nothing" needs a planted hit; "never exercised" is UNKNOWN | Applied to this PR's own new code, not solved in general | Every new path here (backend unavailable at prepare/install, unconfirmed stop, export failure) has a committed test that plants the exact failure and confirms it is caught (`tests/test_verify_backend.py`), verified BLIND-then-green by hand for the core case. The backend BOUNDARY itself remains unexercised against a fake - stated as owed to the live run throughout this document, never conflated with "proven". |
+| 60. An LLM grader takes schema-constrained output only | Stated as a contract, not implemented | See "Grading tiers" above - this is tier 2/3's rule, recorded in this document for #69 to build against. Nothing in this PR calls a judge model. |
+| 61. Redaction covers retained copies | Not implemented; stated as a known gap | `containment["stderr"]`/`containment["error"]` (either grading path) are truncated, never redacted - if a probe or candidate printed something sensitive it read from elsewhere, it is not scrubbed before being written into the stored `verified-result`. Left for #69 or a dedicated follow-up; not attempted here without a stated redaction policy to build against. |
 
 ## Credit
 
