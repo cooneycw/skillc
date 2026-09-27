@@ -105,7 +105,7 @@ import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import IO
 
 from .backend import (
@@ -454,6 +454,15 @@ class _BoundedDrain:
         return b"".join(self._chunks)
 
 
+class HomeTreeTooLarge(Exception):
+    """`read_home_tree` refuses rather than silently truncate (in the spirit
+    of #102's bounded-capture rule): a directory this large is itself
+    unexpected for a single trial's private home, and reading all of it
+    into memory unconditionally is not safe. Distinct from
+    `BackendUnavailable` - this is a population-too-large refusal, not an
+    infrastructure failure."""
+
+
 @dataclass(frozen=True)
 class _Handle:
     """Opaque to the controller (backend.py's own rule): `attempt_id` and
@@ -793,6 +802,115 @@ class DockerBackend:
                     f"docker cp for {container_relpath!r} returned a non-regular-file entry for {handle.attempt_id!r}"
                 )
             return extracted.read()
+
+    #: Conservative defaults for `read_home_tree` - a single trial's private
+    #: home (#78: fresh, empty, never shared) has no legitimate reason to
+    #: hold more than a handful of small transcript files.
+    HOME_TREE_MAX_BYTES = 8 * 1024 * 1024
+    HOME_TREE_MAX_FILES = 256
+
+    def read_home_tree(
+        self, handle: object, container_reldir: str, *,
+        max_bytes: int | None = None, max_files: int | None = None,
+    ) -> dict[str, bytes]:
+        """Read back every REGULAR FILE under `container_reldir` (relative
+        to `CONTAINER_HOME`) as `{relpath: bytes}`, `relpath` given relative
+        to `container_reldir` itself - the directory-tree counterpart to
+        `read_home_file`, for exactly one purpose (#106): finding a real
+        agent's transcript file, whose exact name each client CLI chooses
+        for itself at runtime and which cannot be predicted in advance (a
+        session UUID, embedded in the filename).
+
+        A MISSING directory - the ordinary state before an agent has
+        written anything there yet - is NOT an error: `docker cp`'s own
+        failure on a path that does not exist becomes an EMPTY result here,
+        because from a caller's perspective "nothing exists yet" and
+        "nothing was found" are the same fact. Only a subprocess-level
+        failure (the daemon itself is unreachable) raises
+        `BackendUnavailable` - the same distinction `read_home_file`
+        already makes for a single file.
+
+        Bounded, never silently truncated (in the spirit of #102's
+        bounded-capture rule) - AND never unboundedly BUFFERED first either
+        (cross-model review: an earlier version called `subprocess.run
+        (capture_output=True)`, which reads the WHOLE tar stream into
+        memory before either limit is ever checked - a single huge file
+        under `container_reldir` could exhaust host memory before
+        `HomeTreeTooLarge` ever got a chance to fire, exactly the
+        resource-exhaustion path #102 closed for `execute()`'s own stdout).
+        The raw tar stream itself now drains through `_BoundedDrain`, the
+        same mechanism `execute()` uses: `max_bytes` bounds the RAW stream,
+        not merely the sum of extracted file contents (tar's own per-entry
+        overhead means the true content bound is always slightly smaller
+        than `max_bytes`, never larger - a conservative direction). A
+        truncated stream is refused outright, before any tar parsing is
+        attempted, rather than parsed as a corrupt archive. `max_files`
+        still bounds the member COUNT once parsing does happen. Either
+        bound raises `HomeTreeTooLarge` with a stated reason rather than
+        returning a partial tree a caller could mistake for the whole one -
+        a private trial home this large would itself be an unexplained
+        fact, not something to quietly read part of.
+        """
+        assert isinstance(handle, _Handle)
+        max_bytes = self.HOME_TREE_MAX_BYTES if max_bytes is None else max_bytes
+        max_files = self.HOME_TREE_MAX_FILES if max_files is None else max_files
+        try:
+            proc = subprocess.Popen(
+                [*self.docker_bin, "cp", f"{handle.name}:{CONTAINER_HOME}/{container_reldir}", "-"],
+                env=handle.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+        except OSError as exc:
+            raise BackendUnavailable(
+                f"docker cp failed reading {container_reldir!r} from home for {handle.attempt_id!r}: {exc}"
+            ) from exc
+
+        assert proc.stdout is not None and proc.stderr is not None
+        stdout_drain = _BoundedDrain(proc.stdout, max_bytes)
+        stdout_thread = threading.Thread(target=stdout_drain.run, daemon=True)
+        stdout_thread.start()
+        stderr_drain = _BoundedDrain(proc.stderr, 65536)
+        stderr_thread = threading.Thread(target=stderr_drain.run, daemon=True)
+        stderr_thread.start()
+
+        try:
+            returncode = proc.wait(timeout=self.daemon_timeout)
+        except subprocess.TimeoutExpired as exc:
+            proc.kill()
+            proc.wait()
+            raise BackendUnavailable(
+                f"docker cp timed out reading {container_reldir!r} from home for {handle.attempt_id!r}: {exc}"
+            ) from exc
+        finally:
+            stdout_thread.join(timeout=self.daemon_timeout)
+            stderr_thread.join(timeout=self.daemon_timeout)
+
+        if returncode != 0:
+            return {}  # no such directory yet - nothing to find, not a failure
+
+        if stdout_drain.truncated:
+            raise HomeTreeTooLarge(
+                f"{container_reldir!r}'s raw archive stream exceeded {max_bytes} bytes for "
+                f"{handle.attempt_id!r} - refusing rather than parse a truncated tree"
+            )
+
+        tree: dict[str, bytes] = {}
+        top = PurePosixPath(container_reldir).name
+        with tarfile.open(fileobj=io.BytesIO(stdout_drain.captured_bytes()), mode="r:*") as tar:
+            for member in tar.getmembers():
+                if not member.isfile():
+                    continue
+                if len(tree) >= max_files:
+                    raise HomeTreeTooLarge(
+                        f"{container_reldir!r} has more than {max_files} file(s) for "
+                        f"{handle.attempt_id!r} - refusing rather than return a partial tree"
+                    )
+                extracted = tar.extractfile(member)
+                if extracted is None:
+                    continue
+                member_path = PurePosixPath(member.name)
+                relpath = member_path.relative_to(top) if member_path.parts and member_path.parts[0] == top else member_path
+                tree[str(relpath)] = extracted.read()
+        return tree
 
     def execute(
         self, handle: object, argv: Sequence[str], limits: Limits,

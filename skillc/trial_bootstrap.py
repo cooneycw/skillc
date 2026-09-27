@@ -491,14 +491,25 @@ def new_canary_nonce() -> str:
     return secrets.token_hex(16)
 
 
-def compose_canary_instruction(skill_name: str, nonce: str) -> str:
+def compose_canary_instruction(skill_name: str, nonce: str, result_filename: str | None = None) -> str:
     """A prompt fragment appended to the trial's real goal, instructing the
     agent to invoke `skill_name` and then use a tool to prove it, tagged
-    with `nonce`."""
+    with `nonce`.
+
+    `result_filename` (issue #106) names the file the agent must write to,
+    when a caller needs it to be one specific, already-meaningful name -
+    `docker_backend.CANARY_RESULT_FILENAME`, the SAME file
+    `install()`'s own backend-planted content canary already reads back
+    after `export()`. Passing it here unifies the two proofs onto one
+    nonce and one artifact rather than inventing a second one (cross-model
+    review: minimizing prompt contamination in the very behaviour being
+    measured). Omitted (the default, every pre-#106 caller), the filename is
+    derived from `nonce` exactly as before."""
+    filename = result_filename if result_filename is not None else f"skillc-canary-{nonce}.txt"
     return (
         f"Before doing anything else, invoke the '{skill_name}' skill, then "
         f"use a tool to write the exact text 'touched:{nonce}' to a file "
-        f"named 'skillc-canary-{nonce}.txt' in the working directory."
+        f"named '{filename}' in the working directory."
     )
 
 
@@ -554,6 +565,55 @@ def check_canary(
             f"no tool_use event's confirmed, error-free output carries the canary "
             f"marker {nonce_marker!r} - the agent answered, or the tool call "
             "failed, without a confirmed touch of the canary"
+        )
+
+
+def check_agent_canary(transcript_events: Sequence[Mapping[str, object]], skill_name: str) -> None:
+    """A REAL-AGENT variant of `check_canary` (issue #106), for exactly the
+    case that function's own docstring names as unavailable to a real
+    client: neither a real Claude Code `Write` result nor a real Codex
+    `exec` result echoes a written file's own content back in its OUTPUT
+    (confirmed empirically, #107) - so requiring the nonce marker IN that
+    output, as `check_canary` does, is always red against a genuine live
+    transcript, whatever the agent actually did.
+
+    This checks the SAME two-track shape `check_canary` does - a
+    `skill_invocation` for `skill_name`, plus a `tool_use` event that is
+    CONFIRMED (no `error`) - but never inspects `output` content at all.
+    The content proof moves elsewhere: `compose_canary_instruction`'s
+    `result_filename` parameter (#106) points the agent at
+    `docker_backend.CANARY_RESULT_FILENAME`, which `install()`'s own
+    backend-planted canary already reads back and verifies AFTER `export()`
+    - `record["disposition"] == "captured"` already IS that content proof,
+    given the caller passed the same nonce into both places
+    (`lifecycle.run_through_backend`'s own `nonce` parameter, #106). This
+    function answers a narrower, DIFFERENT question: did the TRANSCRIPT
+    show the agent doing real, confirmed tool work to get there, or did
+    disposition happen to reach `captured` some other way?
+
+    NOT verified here: that the confirmed tool call specifically targeted
+    the result file (a scope decision, not an oversight - `transcript_adapter.py`'s
+    normalized `tool_use` events carry no `input`/target field at all, by
+    design, so checking "targeting that file" would need a second, separate
+    change to that shape). A skill invocation plus ANY confirmed tool call
+    is what this checks; the FILE's own correctness is `disposition`'s job,
+    not this function's.
+    """
+    skill_invoked = any(
+        event.get("type") == "skill_invocation" and event.get("skill") == skill_name
+        for event in transcript_events
+    )
+    if not skill_invoked:
+        raise CanaryNotSatisfied(f"no skill_invocation event for '{skill_name}' in the transcript - not live")
+
+    tool_confirmed = any(
+        event.get("type") == "tool_use" and not event.get("error")
+        for event in transcript_events
+    )
+    if not tool_confirmed:
+        raise CanaryNotSatisfied(
+            "no confirmed, error-free tool_use event in the transcript - the agent "
+            "answered, or every tool call failed, without a confirmed tool touch"
         )
 
 

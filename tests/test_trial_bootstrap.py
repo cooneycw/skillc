@@ -621,3 +621,83 @@ def test_check_canary_refuses_a_stale_nonce():
 def test_bwrap_decision_is_recorded_and_unsandboxed():
     assert tb.BWRAP_DECISION.sandboxed is False
     assert tb.BWRAP_DECISION.rationale
+
+# --------------------------------------------------------------------------
+# compose_canary_instruction's result_filename (issue #106)
+# --------------------------------------------------------------------------
+
+
+def test_compose_canary_instruction_default_filename_is_unchanged():
+    """Omitting result_filename must produce EXACTLY the same text as
+    before this parameter existed - every pre-#106 caller's prompt stays
+    byte-identical."""
+    nonce = tb.new_canary_nonce()
+    assert tb.compose_canary_instruction("tdd", nonce) == (
+        f"Before doing anything else, invoke the 'tdd' skill, then "
+        f"use a tool to write the exact text 'touched:{nonce}' to a file "
+        f"named 'skillc-canary-{nonce}.txt' in the working directory."
+    )
+
+
+def test_compose_canary_instruction_uses_the_given_result_filename():
+    nonce = tb.new_canary_nonce()
+    instruction = tb.compose_canary_instruction("tdd", nonce, result_filename=".skillc-canary-result")
+    assert ".skillc-canary-result" in instruction
+    assert f"skillc-canary-{nonce}.txt" not in instruction
+
+
+# --------------------------------------------------------------------------
+# check_agent_canary (issue #106)
+# --------------------------------------------------------------------------
+
+
+def test_check_agent_canary_accepts_a_skill_invocation_and_a_confirmed_tool_use():
+    events = [
+        {"type": "skill_invocation", "skill": "tdd"},
+        {"type": "tool_use", "output": "File created successfully at: /work/out.txt", "error": False},
+    ]
+    tb.check_agent_canary(events, "tdd")  # must not raise
+
+
+def test_check_agent_canary_never_inspects_output_content():
+    """The whole point of this function (#106): a real Write/exec result
+    never echoes file content, so a confirmed tool_use with UNRELATED
+    output must still satisfy it - unlike check_canary, which would refuse
+    this for missing the nonce marker."""
+    events = [
+        {"type": "skill_invocation", "skill": "tdd"},
+        {"type": "tool_use", "output": "completely unrelated output, no nonce anywhere", "error": False},
+    ]
+    tb.check_agent_canary(events, "tdd")  # must not raise
+
+
+def test_check_agent_canary_refuses_a_failed_tool_call():
+    """Named red case (cross-model review): the file may exist (satisfying
+    lifecycle's own backend content check) via a failed tool call in the
+    transcript - the transcript proof must still refuse."""
+    events = [
+        {"type": "skill_invocation", "skill": "tdd"},
+        {"type": "tool_use", "output": "permission denied", "error": "permission denied"},
+    ]
+    with pytest.raises(tb.CanaryNotSatisfied):
+        tb.check_agent_canary(events, "tdd")
+
+
+def test_check_agent_canary_refuses_no_skill_invocation():
+    events = [{"type": "tool_use", "output": "ok", "error": False}]
+    with pytest.raises(tb.CanaryNotSatisfied):
+        tb.check_agent_canary(events, "tdd")
+
+
+def test_check_agent_canary_refuses_a_no_op_transcript():
+    with pytest.raises(tb.CanaryNotSatisfied):
+        tb.check_agent_canary([], "tdd")
+
+
+def test_check_agent_canary_refuses_the_wrong_skill_name():
+    events = [
+        {"type": "skill_invocation", "skill": "diagnosing-bugs"},
+        {"type": "tool_use", "output": "ok", "error": False},
+    ]
+    with pytest.raises(tb.CanaryNotSatisfied):
+        tb.check_agent_canary(events, "tdd")

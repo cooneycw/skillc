@@ -34,10 +34,10 @@ result typically confirms only that a file was written, never echoing its
 content. That check is therefore always red against an unmodified real
 transcript, unless a per-client adapter re-reads the actual written file back
 from the exported output to synthesize `output`. Per-client transcript
-adapters now exist (issue #106, its first split PR); the driver loop that
-would run a real agent through this command and consume them is the second
-half of #106, not built here - this demo's liveness canary uses
-`lifecycle.py`'s own file-content mechanism instead, which has no such gap
+adapters now exist (issue #106's first split PR); wiring a REAL agent through
+`trial_bootstrap.py`'s own bootstrap, with that adapter, is #106's own job -
+`skillc/agent_trial.py`, not this module, which keeps using
+`lifecycle.py`'s own file-content mechanism instead, since that has no such gap
 for a SCRIPTED subject.
 
 THE PASTE-BACK BLOCK IS LEAK-CHECKED BEFORE IT EXISTS TO BE PRINTED
