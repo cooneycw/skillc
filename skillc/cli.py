@@ -794,7 +794,11 @@ def cmd_collection_run(args: argparse.Namespace) -> int:
     client_argv = args.client_argv.split() if args.client_argv else list(cc.DEFAULT_CLIENT_ARGV)
     credential_path = Path(args.credential) if args.credential else None
     agent_timeout = args.agent_timeout if args.agent_timeout is not None else cc.DEFAULT_AGENT_TIMEOUT
-    run_root = cc.new_run_root(base, args.subject)
+    try:
+        run_root = cc.new_run_root(base, args.subject)
+    except demo.SubjectRefused as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
 
     try:
         try:

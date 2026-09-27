@@ -129,7 +129,13 @@ def new_run_root(base: Path, subject_name: str) -> Path:
     and store. Fixed `<base>/<subject>-checkout` names made a second run of the
     same subject on a host fail at `git clone` (the first run's checkout was
     never removed), and two concurrent runs would share one directory - the
-    same defect class #118 fixed in `skillc demo`."""
+    same defect class #118 fixed in `skillc demo`.
+
+    Refuses (`demo.SubjectRefused`) a name that is empty, `.`/`..`, or carries
+    a path separator, before anything is created: the name becomes part of a
+    path here, ahead of the subject declaration being read (codex review)."""
+    if subject_name in ("", ".", "..") or "/" in subject_name or os.sep in subject_name:
+        raise demo.SubjectRefused(f"subject name {subject_name!r} is not a plain name under evals/subjects/")
     base.mkdir(parents=True, exist_ok=True)
     return Path(tempfile.mkdtemp(prefix=f"skillc-collection-run-{subject_name}-", dir=base))
 

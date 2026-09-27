@@ -645,3 +645,20 @@ def test_cmd_collection_run_exits_0_on_full_success(
         "whatever", image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base=str(base), timeout=5,
     )
     assert cli.cmd_collection_run(args) == 0
+
+
+@pytest.mark.parametrize("name", ["missing/collection", "../subjects/cpp-codex", "..", ""])
+def test_a_path_like_subject_is_refused_before_any_scratch_path(
+    name: str, base: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Codex review of #11: the per-run root is built from the subject name,
+    so a name carrying a path separator reached `mkdtemp`'s prefix before the
+    subject was validated and died with a host-path traceback - #118's defect
+    class - instead of the controlled `SubjectRefused`, exit 2."""
+    from skillc import cli
+
+    with pytest.raises(demo.SubjectRefused):
+        cc.new_run_root(base, name)
+    assert cli.main(["collection-run", name, "--base", str(base)]) == 2
+    assert "Traceback" not in capsys.readouterr().err
+    assert list(base.iterdir()) == []
