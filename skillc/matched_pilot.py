@@ -14,12 +14,15 @@ files, the baseline gets `{}`. A second copy of the wiring could differ from
 the first in a way that would read as a treatment effect.
 
 TIME CAPS ARE ENFORCED HERE, not only stated. Each attempt's agent limit
-(`Limits.timeout`) is the SMALLER of the per-attempt cap and what remains of
-the total cap, so agent execution can never run past the total. An attempt
-that would start with nothing left is finalized `not-run` with that reason -
-reported, never dropped (`ledger_binding` refuses a report that omits a
-scheduled attempt). Setup, grading and teardown are not killed mid-way, so
-the wall-clock can pass the total by those alone, for the last attempt.
+(`Limits.timeout`) is the SMALLER of the per-attempt cap and what remained of
+the total cap WHEN THE ATTEMPT STARTED. An attempt that would start with
+nothing left is finalized `not-run` with that reason - reported, never
+dropped (`ledger_binding` refuses a report that omits a scheduled attempt).
+The allowance is computed before the attempt's setup (prepare, install,
+credential delivery), and the agent's clock starts only at launch, so the
+last attempt can pass the total by its own setup, grading and teardown time -
+seconds, not a second agent run. Carrying an absolute deadline into the
+backend's `execute()` would close that; it is not done here.
 
 MISSING IS EXPLICIT. Anything the run cannot measure is the literal
 `"UNKNOWN"` (the `pilot-report` rule's own convention), never a zero:
@@ -147,6 +150,12 @@ def load_declaration(manifest_path: Path = MANIFEST_PATH) -> PilotDeclaration:
             f"goal_population.task.grader {task.get('grader')!r} is not the task this runner executes "
             f"({demo.GRADER_ROOT.relative_to(ROOT)}/grader.json)"
         )
+    goal_path = (ROOT / str(task.get("goal"))).resolve()
+    if goal_path != (demo.GRADER_ROOT / "goal.md").resolve():
+        raise ManifestRefused(
+            f"goal_population.task.goal {task.get('goal')!r} is not the goal this runner executes "
+            f"({demo.GRADER_ROOT.relative_to(ROOT)}/goal.md)"
+        )
     grader = json.loads(grader_path.read_text(encoding="utf-8"))
     if (str(task.get("id")), str(task.get("revision"))) != (grader["id"], grader["revision"]):
         raise ManifestRefused("goal_population.task id/revision does not match the grader it names")
@@ -220,7 +229,9 @@ class AttemptOutcome:
 
     scheduled: ScheduledAttempt
     record: dict[str, object]
-    wall_seconds: float
+    #: `None` when the runner never timed this attempt (recovered from the
+    #: ledger after an interruption) - reported as UNKNOWN, never as zero.
+    wall_seconds: float | None
     runner_note: str | None = None
 
     def to_json(self) -> dict[str, object]:
@@ -239,7 +250,8 @@ class AttemptOutcome:
                 attempt_id=str(data["attempt_id"]), trial_id=str(data["trial_id"]),
                 arm=str(data["arm"]), repeat=int(str(data["repeat"])),
             ),
-            record=record, wall_seconds=float(str(data["wall_seconds"])),
+            record=record,
+            wall_seconds=None if data.get("wall_seconds") is None else float(str(data["wall_seconds"])),
             runner_note=data.get("runner_note") if isinstance(data.get("runner_note"), str) else None,  # type: ignore[arg-type]
         )
 
@@ -350,6 +362,10 @@ def _time_split(outcome: AttemptOutcome, agent: float | None) -> dict[str, objec
     grading_value = float(grading) if isinstance(grading, (int, float)) and not isinstance(grading, bool) else 0.0
     if record.get("disposition") == "not-run":
         return {"setup": 0, "agent": 0, "grading": 0, "total": 0}
+    if outcome.wall_seconds is None:
+        # Recovered, not timed: only the journal's agent time is known.
+        return {"setup": UNKNOWN, "agent": UNKNOWN if agent is None else _round(agent),
+                "grading": UNKNOWN, "total": UNKNOWN}
     if agent is None:
         # Dispatched never happened (unavailable) - the agent ran for no time,
         # and nothing was graded; everything spent was setup and teardown.
@@ -480,7 +496,7 @@ def reconcile(experiment: trial.Experiment, outcomes: Sequence[AttemptOutcome]) 
                 # dispatched attempt with no capture is `inconclusive`.
                 else trial.finalize(experiment, scheduled.attempt_id, reason=note)
             )
-            outcome = AttemptOutcome(scheduled, record, 0.0, runner_note=note)
+            outcome = AttemptOutcome(scheduled, record, None, runner_note=note)
         reconciled.append(outcome)
     return reconciled
 
@@ -702,6 +718,9 @@ def run_pilot(
         declaration, store, treatment_digest=treatment_digest, image_digest=image_digest,
     )
     outcomes: list[AttemptOutcome] = []
+    # Checkpoint BEFORE the first attempt: an interruption during it must
+    # still leave `pilot-report` a store to reconcile against.
+    write_outcomes(run_dir, experiment, outcomes)
 
     def run_attempt(scheduled: ScheduledAttempt, budget: float) -> dict[str, object]:
         agent_backend, grading_backend = backends()
@@ -737,7 +756,7 @@ EVIDENCE_DIR = PILOT_DIR / "evidence" / "records"
 #: driver grades through `verify.grade_files` and stores no `verified-result`
 #: record (that needs an installation receipt the agent path does not write),
 #: so `attempt-accounting` correctly says the result is owed. Every OTHER
-#: finding refuses publication.
+#: finding refuses publication. Tracked as #139; remove this tolerance there.
 KNOWN_GAP_RULE = "attempt-accounting"
 KNOWN_GAP_TEXT = "is captured but has no result"
 
@@ -758,3 +777,12 @@ def bundle_findings(root: Path) -> tuple[list[str], int]:
     known = [f for f in errors if f.rule == KNOWN_GAP_RULE and KNOWN_GAP_TEXT in f.detail]
     unexpected = [f"{f.rule}: {f.detail}" for f in errors if f not in known]
     return unexpected, len(known)
+
+
+_BUNDLE_FILE_RE = re.compile(r"(ledger|report)\.json|(lifecycle|manifest|receipt|result)-[A-Za-z0-9_.-]+\.json")
+
+
+def is_bundle_file(path: Path) -> bool:
+    """Whether `path` is a regular file of the shape `export_bundle` writes.
+    Anything else in a destination makes the destination not ours to replace."""
+    return path.is_file() and not path.is_symlink() and _BUNDLE_FILE_RE.fullmatch(path.name) is not None

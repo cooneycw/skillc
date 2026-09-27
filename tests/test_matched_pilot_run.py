@@ -477,21 +477,24 @@ def test_an_outcome_the_ledger_never_planned_is_refused(tmp_path: Path) -> None:
         mp.reconcile(experiment, [stray])
 
 
-def test_a_failed_export_leaves_the_previous_bundle_and_a_rerun_replaces_it_whole(tmp_path: Path) -> None:
-    """Review finding: exports used to write into the destination in place,
-    so a re-run left the previous run's records beside the new ledger, and a
-    leak in an unrelated neighbouring file deleted the clean new records."""
-    evidence = tmp_path / "evidence"
-    evidence.mkdir()
-    (evidence / "lifecycle-a-oldrun.json").write_text("{}")
-    (evidence / "notes.txt").write_text("see /home/someoperator/notes")  # a leaking NEIGHBOUR
-
+def _unavailable_outcomes(tmp_path: Path) -> tuple[trial.Experiment, list[mp.AttemptOutcome]]:
     experiment, schedule = _fake_schedule(tmp_path)
     outcomes = mp.run_schedule(
         experiment, schedule,
         lambda s, _b: trial.finalize(experiment, s.attempt_id, disposition="unavailable", reason="fake"),
         total_seconds=10_000, per_attempt_seconds=900,
     )
+    return experiment, outcomes
+
+
+def test_a_failed_export_leaves_the_previous_bundle_and_a_rerun_replaces_it_whole(tmp_path: Path) -> None:
+    """Review finding: exports used to write into the destination in place,
+    so a re-run left the previous run's records beside the new ledger."""
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    (evidence / "lifecycle-a-oldrun.json").write_text("{}")  # a previous run's record
+
+    experiment, outcomes = _unavailable_outcomes(tmp_path)
     bad = mp.build_report(experiment, outcomes)
     _entries(bad)[0]["uncertainty"] = "read /home/someoperator/.codex/auth.json"
     assert cli._export_pilot_evidence(experiment, bad, evidence) == 1
@@ -499,11 +502,87 @@ def test_a_failed_export_leaves_the_previous_bundle_and_a_rerun_replaces_it_whol
     assert not (evidence / "report.json").exists()
 
     good = mp.build_report(experiment, outcomes)
-    assert cli._export_pilot_evidence(experiment, good, evidence) == 0  # the neighbour did not block it
+    assert cli._export_pilot_evidence(experiment, good, evidence) == 0
     assert not (evidence / "lifecycle-a-oldrun.json").exists()  # replaced whole, no mixing
-    assert not (evidence / "notes.txt").exists()
     assert mp.bundle_findings(evidence) == ([], 0)
     assert not list(tmp_path.glob(".evidence.staging-*"))
+
+
+@pytest.mark.parametrize("foreign", ["README.md", "claims.json", "notes.txt"])
+def test_export_refuses_to_replace_a_destination_holding_files_it_does_not_own(
+    tmp_path: Path, foreign: str,
+) -> None:
+    """Second review finding: replacing the destination deleted it whole, so
+    `--evidence evals/matched-pilot/evidence` would have taken the README and
+    the reviewed claims with it."""
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    (evidence / foreign).write_text("not the exporter's")
+    experiment, outcomes = _unavailable_outcomes(tmp_path)
+    assert cli._export_pilot_evidence(experiment, mp.build_report(experiment, outcomes), evidence) == 2
+    assert (evidence / foreign).read_text() == "not the exporter's"
+
+
+def test_export_refuses_a_symlinked_destination(tmp_path: Path) -> None:
+    """Bundle-shaped contents only, so the ownership check alone would let
+    this through: only the symlink refusal stops publishing into (and
+    deleting) the link's target."""
+    real = tmp_path / "real"
+    real.mkdir()
+    (real / "ledger.json").write_text("{}")
+    link = tmp_path / "evidence"
+    link.symlink_to(real)
+    experiment, outcomes = _unavailable_outcomes(tmp_path)
+    assert cli._export_pilot_evidence(experiment, mp.build_report(experiment, outcomes), link) == 2
+    assert (real / "ledger.json").read_text() == "{}"
+
+
+def test_a_goal_the_runner_does_not_execute_is_refused(tmp_path: Path) -> None:
+    path = _manifest_with(tmp_path, goal_population__task__goal="evals/other-task/goal.md")
+    with pytest.raises(mp.ManifestRefused, match="not the goal this runner executes"):
+        mp.load_declaration(path)
+
+
+def test_an_interruption_during_the_first_attempt_is_still_reconcilable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Second review finding: `outcomes.json` was first written after an
+    attempt returned, so dying inside the first attempt left nothing for
+    `pilot-report` to read."""
+    def die(**_kwargs: object) -> dict[str, object]:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cc, "run_level1_agent_attempt", die)
+    declaration = mp.load_declaration()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    with pytest.raises(KeyboardInterrupt):
+        mp.run_pilot(
+            declaration, run_dir=run_dir, treatment_home_files={}, treatment_digest=TREATMENT_DIGEST,
+            image_digest=None, backends=lambda: (object(), object()), argv_for=lambda _s: [],
+        )
+    experiment, outcomes = mp.read_outcomes(run_dir)
+    assert outcomes == []
+    reconciled = mp.reconcile(experiment, outcomes)
+    assert len(reconciled) == 6
+    evidence = tmp_path / "evidence"
+    mp.export_bundle(experiment, mp.build_report(experiment, reconciled), evidence)
+    assert mp.bundle_findings(evidence) == ([], 0)
+
+
+def test_recovered_attempts_report_unknown_timings_never_zero(tmp_path: Path) -> None:
+    """Second review finding: a reconciled attempt got wall time 0.0, which
+    published invented zeros for setup and grading."""
+    experiment, schedule = _fake_schedule(tmp_path)
+    dispatched = schedule[0].attempt_id
+    experiment.record(dispatched, "dispatched")
+    experiment.record(dispatched, "started")
+    reconciled = mp.reconcile(experiment, [])
+    entries = _entries(mp.build_report(experiment, reconciled))
+    assert entries[0]["disposition"] == "inconclusive"
+    assert entries[0]["time_seconds"] == {"setup": "UNKNOWN", "agent": "UNKNOWN", "grading": "UNKNOWN", "total": "UNKNOWN"}
+    # Never dispatched: confirmed non-execution, so zero is the true value.
+    assert entries[1]["time_seconds"] == {"setup": 0, "agent": 0, "grading": 0, "total": 0}
 
 
 def test_export_refuses_a_bundle_that_fails_check_records(tmp_path: Path) -> None:

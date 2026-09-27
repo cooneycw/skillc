@@ -106,8 +106,10 @@ formatting problem. The agent-trial driver (#106) grades through
 `verify.grade_files` and does not store a `verified-result` record. Storing
 one needs an installation receipt that path does not write. The grades above
 come from that same grader. They are in the report, but not yet recorded as
-first-class results. `tests/test_matched_pilot.py` pins this as the only
-finding, so any other one fails the suite.
+first-class results. Tracked as
+[#139](https://github.com/cooneycw/skillc/issues/139). `tests/test_matched_pilot.py` pins this as the only
+finding, so any other one fails the suite, and `skillc pilot-run` refuses to
+publish a bundle with any other finding.
 
 ## Raw artifacts
 

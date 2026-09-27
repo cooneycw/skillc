@@ -910,7 +910,22 @@ def _export_pilot_evidence(experiment: object, report: dict[str, object], eviden
 
     from . import matched_pilot as mp
 
+    if evidence.is_symlink():
+        print(f"skillc: refusing to publish through a symlink: {evidence}", file=sys.stderr)
+        return 2
     evidence = evidence.resolve()
+    if evidence.exists():
+        # Replacing the destination deletes it, so it must hold nothing but a
+        # bundle this exporter could have written - never a README, a claims
+        # file or anything else that merely sits there.
+        foreign = sorted(p.name for p in evidence.iterdir() if not mp.is_bundle_file(p))
+        if foreign or not evidence.is_dir():
+            print(
+                f"skillc: refusing to replace {evidence}: it holds file(s) this exporter does not own "
+                f"({', '.join(foreign) or 'not a directory'}); point --evidence at a bundle-only directory",
+                file=sys.stderr,
+            )
+            return 2
     evidence.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f".{evidence.name}.staging-", dir=evidence.parent))
     try:
