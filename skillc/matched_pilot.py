@@ -779,16 +779,27 @@ def bundle_findings(root: Path) -> tuple[list[str], int]:
     bundles = records.discover_bundles(root)
     if not found or not bundles:
         return [f"no record or no bundle under {root}; nothing was checked"], 0
-    findings = [f for record in found for f in checks.run_record(record)]
-    findings += [f for bundle in bundles for f in checks.run_bundle(bundle)]
-    errors = [f for f in findings if f.severity == checks.ERROR]
-    pre_fix = all(
-        ledger.data.get("experiment_id") in KNOWN_GAP_EXPERIMENTS
-        for bundle in bundles for ledger in bundle.of_kind(records.TRIAL_LEDGER)
-    )
-    known = [f for f in errors if pre_fix and f.rule == KNOWN_GAP_RULE and KNOWN_GAP_TEXT in f.detail]
-    unexpected = [f"{f.rule}: {f.detail}" for f in errors if f not in known]
-    return unexpected, len(known)
+    errors = [f for record in found for f in checks.run_record(record) if f.severity == checks.ERROR]
+    known = 0
+    for bundle in bundles:
+        # Decided per bundle, from that bundle's own ledger (codex review): a
+        # clean neighbouring bundle must not change how this one is read.
+        ledgers = bundle.of_kind(records.TRIAL_LEDGER)
+        pre_fix = len(ledgers) == 1 and _is_known_gap_experiment(ledgers[0].data.get("experiment_id"))
+        for finding in checks.run_bundle(bundle):
+            if finding.severity != checks.ERROR:
+                continue
+            if pre_fix and finding.rule == KNOWN_GAP_RULE and KNOWN_GAP_TEXT in finding.detail:
+                known += 1
+            else:
+                errors.append(finding)
+    return [f"{f.rule}: {f.detail}" for f in errors], known
+
+
+def _is_known_gap_experiment(experiment_id: object) -> bool:
+    # A string first: a malformed id (a list, an object) is the ledger rule's
+    # finding, never a crash of this membership test (codex review).
+    return isinstance(experiment_id, str) and experiment_id in KNOWN_GAP_EXPERIMENTS
 
 
 _BUNDLE_FILE_RE = re.compile(r"(ledger|report)\.json|(lifecycle|manifest|observation|receipt|result)-[A-Za-z0-9_.-]+\.json")

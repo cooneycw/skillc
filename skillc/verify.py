@@ -1208,20 +1208,32 @@ def regrade(experiment: trial.Experiment, result_id: str, grader: GraderDef, bas
     if isinstance(verification, dict) and verification.get("readiness_source") == AGENT_OBSERVATION_READINESS:
         # The same stand-in the original was graded on (#139), read back from
         # the store: an agent attempt has no receipt to regrade against.
-        _eligible_observation(attempt_id, _stored_observation(experiment, attempt_id))
+        _eligible_observation(attempt_id, _stored_observation(experiment, attempt_id, original))
         return _grade_and_store(experiment, attempt_id, grader, base, forbidden, regrade_of=result_id,
                                 readiness_source=AGENT_OBSERVATION_READINESS)[0]
     return grade(experiment, attempt_id, grader, base, forbidden, regrade_of=result_id)
 
 
-def _stored_observation(experiment: trial.Experiment, attempt_id: str) -> dict[str, object]:
+def _stored_observation(experiment: trial.Experiment, attempt_id: str,
+                        original: Mapping[str, object]) -> dict[str, object]:
     """The attempt's stored agent-observation, flattened to the fields
-    `_eligible_observation` reads. Absent or unreadable is refused."""
+    `_eligible_observation` reads. Refused when absent, not a valid
+    agent-observation, or bound to another attempt or trial - the same
+    staleness `_receipt` refuses (codex review: a copied observation from
+    another attempt must not stand in for this one)."""
     path = experiment.root / observation_record_name(attempt_id)
     if path.is_symlink() or not path.is_file():
         raise Refused(f"attempt {attempt_id!r} has no {path.name}; its agent-path result cannot be regraded")
     data = json.loads(_read_regular(path))
-    transcript = data.get("transcript") if isinstance(data, dict) else None
-    status = data.get("status") if isinstance(data, dict) else None
+    record = records.Record(path, data)
+    if record.kind != records.AGENT_OBSERVATION:
+        raise Refused(f"{path.name} is not an agent-observation record")
+    problems = [f.detail for f in checks.run_record(record)]
+    if problems:
+        raise Refused(f"{path.name} is not valid: {problems[0]}")
+    if data.get("attempt_id") != attempt_id or data.get("trial_id") != original.get("trial_id"):
+        raise Refused(f"{path.name} names another attempt or trial; a stale observation stands in for nothing")
+    transcript = data.get("transcript")
+    status = data.get("status")
     return {"status": "unknown" if status != "observed" else status,
             **(transcript if isinstance(transcript, dict) else {})}

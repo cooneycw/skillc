@@ -504,6 +504,8 @@ def test_a_regrade_repeats_the_outcomes_and_keeps_the_original(store: Path, base
                        GRADER.with_judge(TASK / "grader-controls" / "always_pass.py"), grading)
 
 
+_OBSERVED = json.loads((Path(__file__).resolve().parent.parent / "controls" / "agent-observation" / "good"
+                        / "observed.json").read_text(encoding="utf-8"))
 _CONFIRMED = {"status": "observed", "prompt_delivered": True, "canary_satisfied": True, "grading_eligible": True}
 
 
@@ -540,10 +542,19 @@ def test_an_agent_result_regrades_on_its_stored_observation(store: Path, base: P
     original, _graded = verify.grade_agent_attempt(experiment, attempt_id, GRADER, grading, _CONFIRMED)
     with pytest.raises(verify.Refused, match="no observation-"):
         verify.regrade(experiment, str(original["result_id"]), GRADER, grading)
-    (experiment.root / verify.observation_record_name(attempt_id)).write_text(json.dumps({
-        "status": "observed",
-        "transcript": {"prompt_delivered": True, "canary_satisfied": True, "grading_eligible": True},
-    }), encoding="utf-8")
+    observation_path = experiment.root / verify.observation_record_name(attempt_id)
+    trial_id = experiment.trial_of(attempt_id)["trial_id"]
+    # Another attempt's valid observation, copied in under this attempt's name,
+    # stands in for nothing (codex review).
+    observation_path.write_text(json.dumps({**_OBSERVED, "attempt_id": "a-someone-else", "trial_id": trial_id}),
+                                encoding="utf-8")
+    with pytest.raises(verify.Refused, match="another attempt"):
+        verify.regrade(experiment, str(original["result_id"]), GRADER, grading)
+    observation_path.write_text(json.dumps({**_OBSERVED, "status": "bogus"}), encoding="utf-8")
+    with pytest.raises(verify.Refused, match="not valid"):
+        verify.regrade(experiment, str(original["result_id"]), GRADER, grading)
+    observation_path.write_text(json.dumps({**_OBSERVED, "attempt_id": attempt_id, "trial_id": trial_id}),
+                                encoding="utf-8")
     again = verify.regrade(experiment, str(original["result_id"]), GRADER, grading)
     assert again["regrade_of"] == original["result_id"]
     assert again["verification"]["readiness_source"] == "agent-observation"  # type: ignore[index]

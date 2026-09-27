@@ -142,6 +142,35 @@ def test_the_known_gap_is_tolerated_only_for_the_pre_fix_run(tmp_path: Path) -> 
     assert len([u for u in unexpected if mp.KNOWN_GAP_TEXT in u]) == 6
 
 
+def _copy_committed(into: Path, experiment_id: object = None) -> Path:
+    into.mkdir(parents=True)
+    for source in mp.EVIDENCE_DIR.iterdir():
+        (into / source.name).write_bytes(source.read_bytes())
+    if experiment_id is not None:
+        ledger = json.loads((into / "ledger.json").read_text(encoding="utf-8"))
+        ledger["experiment_id"] = experiment_id
+        (into / "ledger.json").write_text(json.dumps(ledger), encoding="utf-8")
+    return into
+
+
+def test_a_clean_neighbouring_bundle_does_not_change_the_pre_fix_reading(tmp_path: Path) -> None:
+    """Codex review, red before the fix: the tolerance was decided over every
+    bundle at once, so adding a clean later bundle beside the historical one
+    turned its six tolerated findings into unexpected ones."""
+    _copy_committed(tmp_path / "root" / "historical")
+    (tmp_path / "fresh").mkdir()
+    experiment, outcomes, _ = _run_fake_pilot(tmp_path / "fresh")
+    mp.export_bundle(experiment, mp.build_report(experiment, outcomes), tmp_path / "root" / "later")
+    unexpected, known = mp.bundle_findings(tmp_path / "root")
+    assert unexpected == [] and known == 6
+
+
+@pytest.mark.parametrize("experiment_id", [["matched-pilot-6ab82dc6"], {"id": "x"}])
+def test_a_malformed_experiment_id_is_a_finding_not_a_crash(experiment_id: object, tmp_path: Path) -> None:
+    unexpected, known = mp.bundle_findings(_copy_committed(tmp_path / "bad", experiment_id))
+    assert known == 0 and unexpected
+
+
 def test_time_split_sums_and_agent_time_comes_from_the_journal(tmp_path: Path) -> None:
     experiment, outcomes, _ = _run_fake_pilot(tmp_path)
     report = mp.build_report(experiment, outcomes)

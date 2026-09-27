@@ -1464,11 +1464,13 @@ def _receipt_stand_in(attempt_id: str, graded: list[Record], observation: Record
         readiness = [
             c for c in criteria if isinstance(c, dict) and c.get("id") == _READINESS_CRITERION
         ] if isinstance(criteria, list) else []
-        if [c.get("outcome") for c in readiness] != ["UNKNOWN"]:
+        # MANDATORY and UNKNOWN (codex review): an optional UNKNOWN criterion
+        # drops out of `derive_status`, so a PASS would stand on no readiness.
+        if [(c.get("mandatory"), c.get("outcome")) for c in readiness] != [(True, "UNKNOWN")]:
             yield (
                 f"attempt {attempt_id!r}: {result.path.name} stands an agent-observation in for its receipt, "
-                f"but its {_READINESS_CRITERION!r} criterion is not exactly one UNKNOWN; an observation "
-                f"never establishes installation readiness"
+                f"but its {_READINESS_CRITERION!r} criterion is not exactly one mandatory UNKNOWN; an "
+                f"observation never establishes installation readiness, so it must still gate PASS"
             )
         if observation is None:
             yield (

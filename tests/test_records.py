@@ -1081,3 +1081,18 @@ def test_a_receiptless_result_that_declares_no_stand_in_is_still_refused(tmp_pat
 
     [finding] = _stand_in_findings(tmp_path, edit_result=undeclared)
     assert "graded without its installation receipt" in finding
+
+
+def test_an_optional_readiness_criterion_cannot_let_a_stand_in_pass(tmp_path: Path) -> None:
+    """Codex review, red before the fix: an optional UNKNOWN drops out of
+    `derive_status`, so the result derived PASS with no readiness at all."""
+    def optional(data: dict[str, object]) -> None:
+        criteria = data["criteria"]
+        assert isinstance(criteria, list)
+        for criterion in criteria:
+            if criterion["id"] == "installation-ready":
+                criterion["mandatory"] = False
+        data["status"] = "PASS"
+
+    [finding] = _stand_in_findings(tmp_path, edit_result=optional)
+    assert "not exactly one mandatory UNKNOWN" in finding
