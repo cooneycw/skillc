@@ -882,11 +882,17 @@ collection) closes.
   there and requires it reported (#19).
 - The fixture pin is computed without needing a `git` binary at import time
   (#5 follow-up).
-- `ci/typecheck-control.sh`'s scratch-copy `tar` no longer races a parallel
-  gate step's `__pycache__` writes: excluding `__pycache__`, `.pytest_cache`
-  and `*.pyc` from the copy stops the intermittent `file changed as we read
-  it` red on main (Nit Store, skillc#20; #73). None of the three are ever
-  gate input, so excluding them changes nothing the control checks.
+- `ci/typecheck-control.sh`'s scratch copy no longer races a parallel gate
+  step's `__pycache__` writes, in either of the two shapes that raced on
+  main: a rewritten `.pyc` reported as `file changed as we read it`
+  (pipeline 209), and a `__pycache__` subdirectory appearing inside a
+  directory `tar` was still archiving, reported against that directory
+  itself rather than the file (pipeline 140). `find` now builds the exact
+  list of `*.py`/`pyproject.toml` files mypy ever reads from the copy, so
+  `tar` archives that fixed list rather than walking a tree whose entries a
+  parallel step can still be changing (Nit Store, skillc#20; #73). A copy
+  that genuinely fails - an unreadable source file - still fails the
+  control; that case is now committed alongside the fix.
 
 ### CI / process
 

@@ -24,18 +24,27 @@ trap 'rm -rf "$scratch"' EXIT
 fail() { echo "typecheck-control: FAIL - $*" >&2; exit 1; }
 
 # The working tree, not `git ls-files`: an untracked test module is still one
-# the gate would read.
-#
-# __pycache__/.pytest_cache/*.pyc are excluded because a parallel CI step
-# writes them while this control runs (#20, comment 5850673964): tar reads
-# a file's size at stat time and again when it finishes reading it, and a
-# .pyc rewritten in between is reported as "file changed as we read it" -
-# a race in the control's own copy, not in mypy's scope. None of the three
-# are ever gate input, so excluding them changes nothing this control checks.
+# the gate would read. A fixed LIST of `*.py`/`pyproject.toml` files, not a
+# directory tree - never `tar -cf - .` over the raw working directory (#20,
+# comment 5850673964). Excluding __pycache__/.pytest_cache as tar MEMBERS
+# fixed one shape of the race (pipeline 209: a rewritten .pyc reported as
+# "file changed as we read it") but not the other: pipeline 140 failed with
+# `tar: ./tests: file changed as we read it` on tests/ ITSELF, from pytest
+# creating a __pycache__ subdirectory inside it while tar was archiving
+# tests/'s own directory listing - excluding a member never touches its
+# parent's entry count. mypy only ever reads `*.py` files plus
+# `pyproject.toml` (for its own `[tool.mypy]` config) from this copy, so
+# `find` builds that exact list up front and tar is never asked to archive
+# a directory whose contents a parallel step might change mid-read.
 mkdir "$scratch/tree"
-tar -C "$root" --exclude=./.git --exclude=./.venv --exclude=./.mypy_cache \
-    --exclude=__pycache__ --exclude=.pytest_cache --exclude='*.pyc' \
-    -cf - . \
+file_list="$scratch/files.lst"
+( cd "$root" && find . \
+    \( -name .git -o -name .venv -o -name .mypy_cache \
+       -o -name __pycache__ -o -name .pytest_cache -o -name .ruff_cache \) -prune -o \
+    -type f \( -name '*.py' -o -name 'pyproject.toml' \) -print0
+) > "$file_list"
+[[ -s "$file_list" ]] || fail "found no *.py files to copy"
+tar -C "$root" --null -T "$file_list" -cf - \
     | tar -C "$scratch/tree" -xf - || fail "could not copy the tree"
 
 # Derived, not hardcoded: a renamed test module must not silently empty this case.
