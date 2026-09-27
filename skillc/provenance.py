@@ -5,8 +5,8 @@ demo's paste-back block is meant to carry this stamp.
 
 ONE SHARED FUNCTION, not each producer hand-rolling git-invocation edge cases
 (detached HEAD, no `.git` at all in a built wheel, the `git` binary missing)
-independently and drifting apart - agreed with w3 (#10 PR2) so both sides land
-the same field names and the same UNKNOWN discipline.
+independently and drifting apart - agreed in PR #76's review so both sides
+land the same field names and the same UNKNOWN discipline.
 
 Stdlib only (AGENTS.md): `git` via `subprocess`, never a VCS library.
 """
@@ -66,7 +66,7 @@ def stamp(source_root: Path | None = None) -> Provenance:
     without having to locate it itself.
 
     Running git FROM `source_root` is not enough to prove the discovered
-    repository treats `source_root` as its own root (found by w3's
+    repository treats `source_root` as its own root (found in PR #76's
     cross-model review): an installed wheel living under `site-packages`
     inside some UNRELATED enclosing project's git checkout would otherwise
     silently inherit THAT project's HEAD and dirty status, misattributed as

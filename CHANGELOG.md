@@ -525,8 +525,69 @@ collection) closes.
   figure's size - each confirmed to fail on the pre-fix `authorize()`
   (temporarily reverted to gate on the combined total regardless of the new
   flag).
-
-### Fixed
+- **skillc stands alone: owner rulings are cited by ADR section, issue or PR
+  - never a private fleet message number or a worker name** (#100): found
+  reviewing PR #99, which does not itself carry the pattern in its tracked
+  files - the same pattern was in its PR body and therefore its squash-commit
+  message on `main`, which cannot be rewritten after the fact. [ADR
+  0005](docs/decisions/0005-runtime-scope-and-cost-rulings.md) rule 6 gains
+  the credential rule (the operator's normal, rotating, on-machine OAuth
+  login, never a long-lived key - issue #98's comment thread), completing the
+  three facts the rule needed recorded durably. The remaining `msg NNNN`/bare
+  worker-name citations in tracked files (`skillc/lifecycle.py`,
+  `skillc/provenance.py`, `skillc/verify.py`, and their tests, plus
+  `docs/specs/evaluation-facility/verification.md`) are replaced with the PR
+  whose review actually found the thing (`PR #70`, `PR #76`, `PR #88`) or,
+  where the citation was a work-split note rather than a review finding, a
+  plain description with no fleet identity attached. A new guard test
+  (`tests/test_private_citations.py`) fails the whole suite if any git-tracked
+  file (outside `docs/research/`'s dated historical documents and
+  `tests/test_leak.py`'s/`tests/fixtures/leak_seeds/`'s deliberately-seeded
+  examples) cites `msg NNNN` or a bare `w<digit>` token, with five committed
+  controls including one built directly from a red case the guard's own
+  construction surfaced: a citation split across a wrapped Python comment
+  line (`skillc/lifecycle.py`'s own original text was exactly this shape) is
+  invisible to a per-line search and to a naive newline-to-space join alike,
+  because the second line's own `# ` marker still separates the two halves -
+  the guard reconnects a citation by stripping each line's leading `#` before
+  joining, and this same, more careful check caught a NINTH real offender
+  (`skillc/verify.py:993`, a wrapped private-message citation) that an
+  earlier manual `grep` sweep over the same tracked population had missed
+  for the identical reason. Confirmed to fail
+  against every one of the pre-fix files (reverted via `git checkout
+  origin/main --`), then restored. `.github/PULL_REQUEST_TEMPLATE.md` (new)
+  and README's Contributing section add the rule for PR bodies and commit
+  messages, which a file-content guard structurally cannot see - the actual
+  gap PR #99's review found. A `/codex:code_review` pass then found and fixed
+  four more issues in the guard itself, each with its own committed red case
+  confirmed to fail on the pre-fix version: the guard's own new test file and
+  new PR template - whose committed examples and checklist wording must
+  literally contain the forbidden pattern to describe or test it - were not
+  excluded from the scan, so the guard would have failed CI on its own
+  committed content forever (now excluded, for the same reason
+  `tests/test_leak.py` already excludes itself from `skillc leak-check`); an
+  empty or all-unreadable file population reported the same "clean" verdict
+  as a real, fully-inspected one, so `_scan` now reports a separate
+  `inspected` count the main test asserts is nonzero, alongside a
+  minimum-tracked-file-count floor; a tracked symlink would have been scanned
+  as its resolved TARGET's content, so an unrelated, untracked file could
+  flip this guard's verdict without anything tracked changing at all -
+  symlinks are now skipped, matching `skillc/leak.py`'s own handling of the
+  identical hazard; and the single-file exclusion entries used the same
+  prefix match as the directory entries, so `tests/test_leak.py.bak` would
+  have been silently excluded alongside the one file actually meant - now an
+  exact match for anything not ending in `/`.
+  **Then found in PR review: the guard never ran in CI at all.** It was
+  built on `git ls-files` and `pytest.mark.skipif`-skipped whenever `git`
+  was not on PATH - true of the CI gate's own `python:3.12-slim` image, so
+  both its real tests were silently skipped there (`tests/test_
+  private_citations.py s..s.....` in the gate log) on this PR and every one
+  after it: a gate that let work through and could not fail where it ran.
+  Rebuilt on `os.walk` (sharing `skillc/leak.py`'s own `SKIP_DIRS` rather
+  than a second list that could drift from it) - no external binary, so it
+  needs no skip and none remains. Reproduced the reviewer's own manual proof
+  with `git` unresolvable on `PATH`: a planted message-number citation in
+  `skillc/reap.py` fails the guard, cleanly reverted, all nine tests green.
 
 - A non-boolean criterion `mandatory` flag is refused, not silently dropped
   from the derivation (#37).

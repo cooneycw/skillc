@@ -516,7 +516,7 @@ supply explicitly; no default configuration turns them on.
 ## Issue #10 addendum items owned by grading (9-13, 57-61)
 
 The assignment scoped these fourteen items to the grading side (the trial
-lifecycle's items are w1's). Not every item fits a single PR; this states
+lifecycle's items are scoped to a separate PR). Not every item fits a single PR; this states
 which are satisfied, which are out of scope for what this grader shape even
 does, and which are deferred with a reason, rather than leaving the gap
 implicit.

@@ -87,8 +87,8 @@ def test_as_dict_carries_exactly_the_agreed_field_names() -> None:
 
 @needs_git
 def test_a_subdirectory_of_an_unrelated_repo_is_unknown_not_misattributed(tmp_path: Path) -> None:
-    """Found by w3's cross-model review: running git FROM source_root is not
-    enough - it only proves SOME repository was found, not that source_root
+    """Found in PR #76's cross-model review: running git FROM source_root is
+    not enough - it only proves SOME repository was found, not that source_root
     is that repository's OWN root. An installed wheel living under
     site-packages inside an unrelated enclosing project's checkout would
     otherwise silently inherit that project's HEAD and dirty status. Here:

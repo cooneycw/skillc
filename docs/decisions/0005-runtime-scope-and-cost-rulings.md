@@ -115,15 +115,18 @@ outside reader can resolve.
 - **"Normal Claude and codex"** (owner ruling, 2026-09-27): agent runs
   (#26's and #12's treatment and baseline attempts) use the operator's
   normal Claude Code and Codex subscription logins, not a pay-per-use API
-  key - the credential is the normal rotating OAuth login, never a
-  long-lived key. They sit inside the normal subscription budget, not
-  metered spend, so their token/price figures are a usage quota, not a
-  dollar charge. **This ruling covers agent runs only.** Judge calls
-  (tiers 2/3, rule 4 above) call external providers with API keys and stay
-  dollar-metered and subject to the $5 ceiling exactly as before -
+  key. They sit inside the normal subscription budget, not metered spend,
+  so their token/price figures are a usage quota, not a dollar charge.
+  **This ruling covers agent runs only.** Judge calls (tiers 2/3, rule 4
+  above) call external providers with API keys and stay dollar-metered and
+  subject to the $5 ceiling exactly as before -
   `skillc.cost_estimate.authorize`'s `agent_uses_subscription_login` flag
   gates on judge spend alone in this mode, never on the agent-side figure.
-  The in-container credential path (issue #98) is the prerequisite for
+- **The credential rule** (owner clarification, issue #98's comment
+  thread): the credential behind a subscription-login agent run is the
+  operator's normal, rotating, on-machine login (Claude Code's and Codex's
+  own OAuth session) - never a long-lived key of any kind. The
+  in-container credential path (issue #98) is the prerequisite for
   actually running an agent attempt under this ruling; it is not delivered
   by this record.
 
