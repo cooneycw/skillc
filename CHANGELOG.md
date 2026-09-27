@@ -16,6 +16,68 @@ collection) closes.
 
 ### Added
 
+- **`tests/conftest.py`: no test can reach a real credential by default**
+  (Refs #106): cross-model review of PR #117 found that a test passing
+  `credential_explicit_path=None` with no override of its own resolved and
+  READ the operator's real Claude subscription credential on the host that
+  ran it - `credential.resolve_path` did exactly what it is documented to
+  do (fall through to the standard, documented location), and that location
+  happened to hold a real, live credential on that particular machine. CI
+  (no real credential at that path) failed the test; the local run passed
+  it, silently. Nothing was committed, but a suite able to reach a real
+  secret at all is a standing hazard independent of whether a run actually
+  leaks one. `_no_real_credential_defaults`, autouse for every test, points
+  `HOME` and `CODEX_HOME` at fresh empty per-test directories and sets both
+  named credential env-var overrides to explicit, guaranteed-nonexistent
+  paths - set, not merely deleted, so an ambient export from an unrelated
+  shell session cannot leak through either. `tests/test_conftest_hermeticity.py`
+  proves it both ways: `resolve_path(client, explicit=None)` refuses for
+  every client under the fixture, confirmed red (found the real credential,
+  did not raise) when the fixture's own body is disabled on the exact host
+  that produced the original leak; and a second test proves the underlying
+  check CAN see a reachable default when one is deliberately planted at the
+  standard location with the redirect undone - the positive control for the
+  first. The one offending test in `test_agent_trial.py` now passes an
+  explicit fake credential like every other test in that file.
+
+- **`agent_trial.py` exposes which skills a real attempt actually invoked,
+  and a skill-free canary mode** (Refs #106, Refs #26): found while wiring
+  #26's run driver against the real, merged interface - `record` exposed
+  only whether ONE pre-named `skill_name`'s own canary fired, never which
+  skill(s), if any, a transcript actually showed invoked. The events
+  `_make_observe_before_teardown` already parses to check that canary were
+  computed and discarded every time; a selection probe with two applicable
+  skills (or zero, for its near-miss/baseline arms) cannot be answered by a
+  single yes/no about one pre-chosen name at all. `TranscriptObservation`
+  gains `skill_invocations` (every invoked skill's name, in order, empty
+  when no single transcript file was found) and `skill_invocation_detection`
+  (`"structural"` for Claude Code's dedicated `Skill` tool call,
+  `"heuristic"` for Codex's SKILL.md-read inference, #107) - both flow
+  through to `record["observation"]` unchanged for every existing caller.
+
+  Second, sharper finding: the existing canary instruction names the skill
+  it wants invoked ("invoke the '<skill>' skill, then..."), which is prompt
+  contamination for a SELECTION probe - every "selected" result would be an
+  artifact of the instruction, not a measurement of what the agent chose.
+  `skill_name` is now optional through `run_one_attempt`,
+  `compose_canary_instruction` and `check_agent_canary`: `None` composes an
+  instruction naming no skill at all (only the tool write), and the canary
+  then requires just a confirmed, error-free tool use - selection becomes
+  purely what `skill_invocations` observes, never a canary requirement.
+  The named-skill mode (#106/#107's own liveness proof) is unchanged; #26
+  and #12 use skill-free mode.
+
+  `tests/fixtures/agent-trial/fake_agent_client.py` gains `--plant-skill`
+  (repeatable), letting a test control which skill(s), if any, the fake
+  transcript shows invoked independently of the prompt's own named skill -
+  defaults preserve every existing test's behavior exactly (the prompt's
+  named skill in named-canary mode, none at all in skill-free mode). Every
+  acceptance path has a mutation-confirmed test: a skill name leaking into
+  the skill-free instruction, a failed tool call still refusing in
+  skill-free mode, `skill_invocations` collapsing to empty, and
+  `skill_invocation_detection` collapsing to one value for both clients each
+  turn a passing suite red.
+
 - **`skillc demo --subject <name>`: install a declared skill collection into
   a real container's home, re-check its digests in-container, and observe
   the client's own discovery of it** (Refs #101, Refs #11, Refs #81, Refs

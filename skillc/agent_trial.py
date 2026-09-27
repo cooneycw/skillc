@@ -102,6 +102,8 @@ class ClientSpec:
     transcript_suffix: str
     parse_transcript: Callable[[str], list[ta.NormalizedEvent]]
     supports_name_flag: bool
+    #: "structural" | "heuristic" - see `TranscriptObservation.skill_invocation_detection`.
+    skill_invocation_detection: str
     #: Client-specific extra home files beyond the credential - the
     #: onboarding seed dance for Claude Code (#78); nothing at all for Codex,
     #: whose `exec` subcommand needed no seed in every live probe run for
@@ -148,6 +150,7 @@ CLIENT_SPECS: dict[str, ClientSpec] = {
         transcript_suffix=".jsonl",
         parse_transcript=ta.parse_claude_code_transcript,
         supports_name_flag=True,
+        skill_invocation_detection="structural",
         compose_home_files=_claude_home_files,
     ),
     "codex": ClientSpec(
@@ -157,6 +160,7 @@ CLIENT_SPECS: dict[str, ClientSpec] = {
         transcript_suffix=".jsonl",
         parse_transcript=ta.parse_codex_transcript,
         supports_name_flag=False,
+        skill_invocation_detection="heuristic",
         compose_home_files=_codex_home_files,
     ),
 }
@@ -200,6 +204,23 @@ class TranscriptObservation:
     prompt_delivery_reason: str | None
     canary_satisfied: bool
     canary_reason: str | None
+    #: The names of every `skill_invocation` event in the transcript, in the
+    #: order they appear - never only the one `skill_name` a canary was
+    #: checked against, and never dropped once parsed (issue #26 review:
+    #: `_make_observe_before_teardown` already parses these events to check
+    #: the canary, then discarded them - a selection probe needs to know
+    #: which skill(s), if any, were invoked, not merely whether one
+    #: pre-named skill's own canary fired). Empty when no single transcript
+    #: file was found (the same condition that leaves every other field
+    #: above at its "could not observe" default).
+    skill_invocations: tuple[str, ...] = ()
+    #: Whether `skill_invocations` is a STRUCTURAL guarantee for this client
+    #: (Claude Code has a dedicated `Skill` tool call) or a best-effort
+    #: HEURISTIC (Codex has no `skill_invocation` transcript marker of its
+    #: own - `transcript_adapter.py`'s own module docstring - and infers one
+    #: from an `exec` call reading a `SKILL.md`). A selection probe's report
+    #: must be able to say which, never present a heuristic as structural.
+    skill_invocation_detection: str = "structural"
 
     def to_fields(self) -> dict[str, object]:
         return {
@@ -208,6 +229,8 @@ class TranscriptObservation:
             "prompt_delivery_reason": self.prompt_delivery_reason,
             "canary_satisfied": self.canary_satisfied,
             "canary_reason": self.canary_reason,
+            "skill_invocations": list(self.skill_invocations),
+            "skill_invocation_detection": self.skill_invocation_detection,
             # Computed HERE, once, from the real dataclass fields - never
             # re-derived from the flattened dict `run_one_attempt`'s own
             # grading gate reads (PR #113 review: two separate
@@ -225,7 +248,7 @@ class TranscriptObservation:
 
 
 def _make_observe_before_teardown(
-    *, spec: ClientSpec, expected_prompt: str, skill_name: str,
+    *, spec: ClientSpec, expected_prompt: str, skill_name: str | None,
     delivered_credential_bytes: dict[str, bytes],
 ) -> Callable[[ExecutionBackend, object], Mapping[str, object]]:
     def hook(backend: ExecutionBackend, handle: object) -> dict[str, object]:
@@ -244,6 +267,7 @@ def _make_observe_before_teardown(
         observation = TranscriptObservation(
             files_found=len(matches), prompt_delivered=False, prompt_delivery_reason=None,
             canary_satisfied=False, canary_reason=None,
+            skill_invocation_detection=spec.skill_invocation_detection,
         )
         if len(matches) != 1:
             observation = TranscriptObservation(
@@ -251,6 +275,7 @@ def _make_observe_before_teardown(
                 prompt_delivery_reason=f"expected exactly one transcript file, found {len(matches)}",
                 canary_satisfied=False,
                 canary_reason=f"expected exactly one transcript file, found {len(matches)}",
+                skill_invocation_detection=spec.skill_invocation_detection,
             )
         else:
             (_, raw), = matches.items()
@@ -269,9 +294,18 @@ def _make_observe_before_teardown(
             except CanaryNotSatisfied as exc:
                 canary_satisfied = False
                 canary_reason = str(exc)
+            # Every skill_invocation the transcript shows, in order - never
+            # only `skill_name`'s own (issue #26 review): `check_agent_canary`
+            # above answers "was THIS skill invoked", a different, narrower
+            # question than "which skill(s), if any, were invoked at all".
+            invocations = tuple(
+                str(event["skill"]) for event in events
+                if event.get("type") == "skill_invocation" and "skill" in event
+            )
             observation = TranscriptObservation(
                 files_found=1, prompt_delivered=prompt_delivered, prompt_delivery_reason=prompt_reason,
                 canary_satisfied=canary_satisfied, canary_reason=canary_reason,
+                skill_invocations=invocations, skill_invocation_detection=spec.skill_invocation_detection,
             )
 
         usage = credential.CredentialUsage(
@@ -314,7 +348,7 @@ def run_one_attempt(
     client: str,
     base_argv: Sequence[str],
     prompt: str,
-    skill_name: str,
+    skill_name: str | None,
     surface: Mapping[str, object],
     limits: Limits,
     base: Path,
@@ -335,7 +369,19 @@ def run_one_attempt(
     `client` must name one of `CLIENT_SPECS`. `cli_version`, when omitted,
     is read from `docker/trial/pinned-versions.json` via
     `trial_bootstrap.pinned_cli_version` - never guessed.
-    """
+
+    `skill_name=None` composes a SKILL-FREE canary instruction (issue #26
+    review): the named-skill form ("invoke the '<skill>' skill, then...")
+    tells the agent which skill to use, which is exactly the answer a
+    SELECTION probe exists to observe rather than supply - every "selected"
+    result under that instruction would be an artifact of the prompt, not a
+    measurement. With `skill_name=None`, the instruction mentions no skill at
+    all (only the tool write of `touched:<nonce>`), `check_agent_canary`
+    requires only a confirmed, error-free tool use, and skill selection
+    becomes purely what `TranscriptObservation.skill_invocations` observes.
+    The named-skill form is unchanged and still the right choice outside a
+    selection probe (#106/#107's own liveness proof, where naming the skill
+    under test is the point)."""
     if client not in CLIENT_SPECS:
         raise credential.CredentialRefused(f"unknown client {client!r}: expected one of {sorted(CLIENT_SPECS)}")
     spec = CLIENT_SPECS[client]

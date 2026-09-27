@@ -701,3 +701,68 @@ def test_check_agent_canary_refuses_the_wrong_skill_name():
     ]
     with pytest.raises(tb.CanaryNotSatisfied):
         tb.check_agent_canary(events, "tdd")
+
+
+# --------------------------------------------------------------------------
+# Skill-free canary mode (issue #26 review): a SELECTION probe's own prompt
+# must never name the skill it is trying to observe, or every "selected"
+# result would be an artifact of the instruction, not a measurement.
+# --------------------------------------------------------------------------
+
+
+def test_compose_canary_instruction_skill_free_names_no_skill():
+    """Red case (issue #26): the composed instruction must contain no skill
+    name at all. Confirmed red by planting one into the skill-free branch
+    before this test was added - see the mutation check below in the
+    module's own review notes; a skill name appearing here would silently
+    turn a selection probe's own instruction into the answer key."""
+    nonce = tb.new_canary_nonce()
+    instruction = tb.compose_canary_instruction(None, nonce)
+    assert "invoke" not in instruction.lower()
+    assert " skill" not in instruction.lower()  # the 'skillc-canary-...' default filename legitimately contains "skill"
+    assert instruction == (
+        f"Before doing anything else, use a tool to write the exact text "
+        f"'touched:{nonce}' to a file named 'skillc-canary-{nonce}.txt' in the working directory."
+    )
+
+
+def test_compose_canary_instruction_named_mode_is_unchanged_alongside_skill_free():
+    """Regression: adding the skill-free branch must not touch the existing
+    named-skill text in any way."""
+    nonce = tb.new_canary_nonce()
+    assert tb.compose_canary_instruction("tdd", nonce) == (
+        f"Before doing anything else, invoke the 'tdd' skill, then "
+        f"use a tool to write the exact text 'touched:{nonce}' to a file "
+        f"named 'skillc-canary-{nonce}.txt' in the working directory."
+    )
+
+
+def test_check_agent_canary_skill_free_accepts_a_confirmed_tool_use_alone():
+    events = [{"type": "tool_use", "output": "anything", "error": False}]
+    tb.check_agent_canary(events, None)  # must not raise - no skill clause to satisfy
+
+
+def test_check_agent_canary_skill_free_ignores_any_skill_invocation_present():
+    """A skill invocation happening to be present in skill-free mode is
+    exactly the MEASUREMENT this mode exists to observe elsewhere
+    (`TranscriptObservation.skill_invocations`) - the canary itself must
+    neither require nor reject it."""
+    events = [
+        {"type": "skill_invocation", "skill": "tdd"},
+        {"type": "tool_use", "output": "anything", "error": False},
+    ]
+    tb.check_agent_canary(events, None)  # must not raise
+
+
+def test_check_agent_canary_skill_free_still_refuses_a_failed_tool_call():
+    """Red case (issue #26's own acceptance: "a failed tool call is still
+    not live"): skill-free mode drops the skill requirement, never the tool
+    requirement."""
+    events = [{"type": "tool_use", "output": "permission denied", "error": "permission denied"}]
+    with pytest.raises(tb.CanaryNotSatisfied):
+        tb.check_agent_canary(events, None)
+
+
+def test_check_agent_canary_skill_free_refuses_a_no_op_transcript():
+    with pytest.raises(tb.CanaryNotSatisfied):
+        tb.check_agent_canary([], None)

@@ -31,7 +31,7 @@ import sys
 from pathlib import Path
 
 
-def _claude_transcript(prompt: str, skill: str, nonce: str, fail_canary: bool) -> list[dict[str, object]]:
+def _claude_transcript(prompt: str, skills: tuple[str, ...], nonce: str, fail_canary: bool) -> list[dict[str, object]]:
     lines: list[dict[str, object]] = [
         {"type": "user", "message": {"role": "user", "content": prompt}},
     ]
@@ -41,20 +41,21 @@ def _claude_transcript(prompt: str, skill: str, nonce: str, fail_canary: bool) -
             "message": {"role": "assistant", "content": [{"type": "text", "text": "Here is a plain-prose answer."}]},
         })
         return lines
-    lines.append({
-        "type": "assistant",
-        "message": {
-            "role": "assistant",
-            "content": [{"type": "tool_use", "id": "toolu_skill0001", "name": "Skill", "input": {"skill": skill}}],
-        },
-    })
-    lines.append({
-        "type": "user",
-        "message": {
-            "role": "user",
-            "content": [{"type": "tool_result", "tool_use_id": "toolu_skill0001", "content": "loaded", "is_error": False}],
-        },
-    })
+    for index, skill in enumerate(skills):
+        lines.append({
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "tool_use", "id": f"toolu_skill{index:04d}", "name": "Skill", "input": {"skill": skill}}],
+            },
+        })
+        lines.append({
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": f"toolu_skill{index:04d}", "content": "loaded", "is_error": False}],
+            },
+        })
     lines.append({
         "type": "assistant",
         "message": {
@@ -74,7 +75,7 @@ def _claude_transcript(prompt: str, skill: str, nonce: str, fail_canary: bool) -
     return lines
 
 
-def _codex_transcript(prompt: str, skill: str, nonce: str, fail_canary: bool) -> list[dict[str, object]]:
+def _codex_transcript(prompt: str, skills: tuple[str, ...], nonce: str, fail_canary: bool) -> list[dict[str, object]]:
     def message(role: str, text: str) -> dict[str, object]:
         return {"type": "response_item", "payload": {"type": "message", "role": role,
                                                        "content": [{"type": "input_text", "text": text}]}}
@@ -95,8 +96,10 @@ def _codex_transcript(prompt: str, skill: str, nonce: str, fail_canary: bool) ->
     if fail_canary:
         lines.append(message("assistant", "Here is a plain-prose answer."))
         return lines
-    lines.append(exec_call("call_skill", f"cat .codex/skills/{skill}/SKILL.md"))
-    lines.append(exec_output("call_skill", 0, "# skill\n"))
+    for index, skill in enumerate(skills):
+        call_id = f"call_skill{index:04d}"
+        lines.append(exec_call(call_id, f"cat .codex/skills/{skill}/SKILL.md"))
+        lines.append(exec_output(call_id, 0, "# skill\n"))
     lines.append(exec_call("call_write", f"echo 'touched:{nonce}' | tee canary.txt"))
     lines.append(exec_output("call_write", 0, f"touched:{nonce}\n"))
     return lines
@@ -122,6 +125,13 @@ def main() -> int:
     parser.add_argument("--plant-leak", action="store_true",
                          help="append an obviously-fake credential-shaped value to the transcript - "
                               "for #106's own leak-check acceptance, proving the scan catches a real one")
+    parser.add_argument("--plant-skill", action="append", default=[],
+                         help="a skill_invocation event to write into the transcript, independent of the prompt's "
+                              "own named skill - repeatable. Issue #26's skill-free canary mode names no skill in "
+                              "the prompt at all, so a test simulating 'the agent selected X anyway' (or nothing) "
+                              "needs a way to control this directly. Defaults (when omitted) to the prompt's own "
+                              "named skill in named-canary mode, and to none at all in skill-free mode - every "
+                              "existing named-mode test is unaffected.")
     parser.add_argument("prompt")
     args = parser.parse_args()
 
@@ -142,16 +152,22 @@ def main() -> int:
     # itself, exactly as `trial_bootstrap.compose_canary_instruction`
     # composes it: "invoke the '<skill>' skill... write the exact text
     # 'touched:<nonce>'...". A real agent reads its own instructions the
-    # same way.
+    # same way. The skill clause is OPTIONAL (issue #26's skill-free canary
+    # mode composes no skill clause at all) - only the nonce/result-file
+    # clauses are required for this to be a canary instruction at all.
     skill_match = re.search(r"invoke the '([^']+)' skill", args.prompt)
     nonce_match = re.search(r"touched:([0-9a-f]+)", args.prompt)
     result_file_match = re.search(r"named '([^']+)' in the working directory", args.prompt)
-    if skill_match is None or nonce_match is None or result_file_match is None:
+    if nonce_match is None or result_file_match is None:
         print("fake_agent_client: could not find the canary instruction in the prompt", file=sys.stderr)
         return 2
-    skill = skill_match.group(1)
     nonce = nonce_match.group(1)
     result_filename = result_file_match.group(1)
+    # Default: the prompt's own named skill in named-canary mode (every
+    # existing test's own behaviour, unchanged), nothing at all in
+    # skill-free mode - `--plant-skill` overrides either default explicitly.
+    default_skills = [skill_match.group(1)] if skill_match is not None else []
+    skills = tuple(args.plant_skill) if args.plant_skill else tuple(default_skills)
 
     # lifecycle.run_through_backend's OWN backend-planted content canary
     # (independent of the transcript-based one below) reads THIS file back
@@ -167,7 +183,7 @@ def main() -> int:
 
     recorded_prompt = "a completely different prompt, never the one delivered" if args.mismatched_prompt else args.prompt
     builder = _claude_transcript if args.format == "claude-fake" else _codex_transcript
-    lines = builder(recorded_prompt, skill, nonce, args.fail_canary)
+    lines = builder(recorded_prompt, skills, nonce, args.fail_canary)
 
     if args.plant_leak:
         # An API-key-SHAPED value, not an OAuth key:value pair: the latter's
