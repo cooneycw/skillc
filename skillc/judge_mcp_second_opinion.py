@@ -240,13 +240,23 @@ class McpSecondOpinionJudge:
         rather than calling the buffered `stdin.write()` directly - a
         candidate payload can exceed the OS pipe's capacity, and a plain
         blocking write has no deadline at all if the child stops reading
-        (cross-model review, this PR: `test_a_stalled_reader_is_a_write_timeout`)."""
+        (cross-model review, this PR: `test_a_stalled_reader_is_a_write_timeout`).
+
+        The fd is NON-BLOCKING for the loop (#129): `select` reports a pipe
+        writable when ANY space is free, not when a whole chunk fits, so a
+        blocking `os.write` of a chunk larger than the free space waited
+        forever once the child stopped reading - the deadline was never
+        checked again. Non-blocking, a write takes what fits and a full pipe
+        raises `BlockingIOError`, which goes back to `select` and the clock."""
         assert proc.stdin is not None
         stdin = proc.stdin
+        fd = stdin.fileno()
         payload = (json.dumps(message) + "\n").encode("utf-8")
         deadline = time.monotonic() + timeout
         sent = 0
+        was_blocking = os.get_blocking(fd)
         try:
+            os.set_blocking(fd, False)
             while sent < len(payload):
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
@@ -254,9 +264,17 @@ class McpSecondOpinionJudge:
                 _, ready, _ = select.select([], [stdin], [], remaining)
                 if not ready:
                     raise JudgeUnavailable(f"{self.command[0]!r} did not accept input within {timeout:g}s")
-                sent += os.write(stdin.fileno(), payload[sent:sent + _CHUNK_SIZE])
+                try:
+                    sent += os.write(fd, payload[sent:sent + _CHUNK_SIZE])
+                except BlockingIOError:
+                    continue
         except (BrokenPipeError, OSError) as exc:
             raise JudgeUnavailable(f"could not write to {self.command[0]!r}: {exc}") from exc
+        finally:
+            try:
+                os.set_blocking(fd, was_blocking)
+            except OSError:
+                pass  # the pipe may already be gone; nothing left to restore
 
     def _read_result(self, reader: _LineReader, timeout: float, what: str, expected_id: int) -> dict[str, object]:
         """Reads until a message whose `id` matches `expected_id` arrives,
