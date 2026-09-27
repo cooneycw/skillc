@@ -521,6 +521,7 @@ def test_an_inconclusive_grade_is_unknown_never_a_task_failure(
 # daemon and no real agent binary.
 # --------------------------------------------------------------------------
 
+import dataclasses
 import sys
 import time
 from base64 import urlsafe_b64encode
@@ -808,43 +809,209 @@ def test_an_unknown_arm_is_refused_by_the_real_runner(tmp_path: Path) -> None:
     assert runner.backend.delivered == {}  # type: ignore[attr-defined]
 
 
-@pytest.mark.skipif(
-    os.environ.get("SKILLC_ALLOW_REAL_AGENT") != "1",
-    reason="launches a real codex agent for every planned attempt - operator-run only (ADR 0005 rule 5)",
-)
-def test_real_agent_selection_probe(tmp_path: Path) -> None:  # pragma: no cover - operator-run only
-    """The live probe, as a runnable harness: the pinned cpp-codex collection,
-    the trial image, the real `codex` client under the operator's subscription
-    login, all six planned attempts. Asserts only what must hold whatever the
-    agent does - every planned attempt reported in both arms, each in the
-    driver's own vocabulary; the findings themselves are the report, printed
-    for the operator to record."""
+# --------------------------------------------------------------------------
+# Follow-up to the first live run (#26): the record's reason, the named
+# detection-control mode and its guards, the predeclared control, the exit
+# rule, and the `skillc selection-probe` command. The SKILLC_ALLOW_REAL_AGENT
+# pytest harness that used to sit here is gone: tests/conftest.py (rightly)
+# keeps every test away from a real credential, so it could never launch,
+# and it passed on six `unavailable` attempts anyway.
+# --------------------------------------------------------------------------
+
+from types import SimpleNamespace
+
+CONTROL = json.loads((PROBE_DIR / "detection-control.json").read_text(encoding="utf-8"))
+
+
+def test_a_non_captured_attempt_keeps_the_records_own_reason(tmp_path: Path) -> None:
+    """Confirmed red when `transcript_from_record` drops `reason`: the
+    first live run had to read the attempt journal to learn why all six
+    attempts were `unavailable`."""
+    transcript = sp.transcript_from_record(
+        {"disposition": "unavailable", "reason": "no codex credential at /x"}, _plan(tmp_path), "unused",
+    )
+    assert "no codex credential at /x" in transcript.detail
+
+
+def test_a_named_runner_is_refused_for_a_selection_run(tmp_path: Path) -> None:
+    """A canary that names the skill supplies the answer a selection run
+    measures. Confirmed red when the guard is removed: the run launches."""
+    experiment, runner, _docker_bin = _real_runner_parts(tmp_path)
+    named = dataclasses.replace(runner, skill_name="qa-test")
+    with pytest.raises(sp.SelectionProbeRefused, match="detection control, never a selection result"):
+        sp.run_planned_selection_probe(
+            experiment, CASES, named, base=tmp_path / "work", grader=GRADER,
+            grading_backend=d.DockerBackend(image="fake-image:1", base_dir=tmp_path / "work"),
+        )
+    assert named.backend.delivered == {}  # type: ignore[attr-defined]
+
+
+def test_a_control_without_a_named_runner_is_refused(tmp_path: Path) -> None:
+    experiment, runner, _docker_bin = _real_runner_parts(tmp_path)
+    with pytest.raises(sp.SelectionProbeRefused, match="names the skill it must detect"):
+        sp.run_planned_selection_probe(
+            experiment, CASES, runner, base=tmp_path / "work", grader=GRADER,
+            grading_backend=d.DockerBackend(image="fake-image:1", base_dir=tmp_path / "work"),
+            detection_control=True,
+        )
+
+
+def test_the_committed_control_narrows_to_its_declared_case() -> None:
+    narrowed = sp.detection_control_cases(CASES, CONTROL)
+    listed = narrowed["cases"]
+    assert isinstance(listed, list) and len(listed) == 1
+    case: dict[str, object] = listed[0]
+    assert case["id"] == CONTROL["base_case"]["id"] == INTENDED_USE
+    applicable = case["applicable_skills"]
+    assert isinstance(applicable, list) and CONTROL["skill_name"] in applicable
+
+
+def test_a_control_declared_against_another_revision_is_refused() -> None:
+    stale = {**CONTROL, "base_case": {**CONTROL["base_case"], "revision": "c0"}}
+    with pytest.raises(sp.SelectionProbeRefused, match="revision"):
+        sp.detection_control_cases(CASES, stale)
+
+
+def _arm(disposition: str = "captured", selection: str = "not-selected") -> sp.ArmResult:
+    return sp.ArmResult(disposition=disposition, selection=selection, task_success=None)
+
+
+def _report(*pairs: tuple[sp.ArmResult, sp.ArmResult]) -> sp.SelectionProbeReport:
+    return sp.SelectionProbeReport(cases=tuple(
+        sp.CaseResult(case_id=f"c{i}", kind="k", applicable_skills=(), treatment=t_, baseline=b_)
+        for i, (t_, b_) in enumerate(pairs)
+    ))
+
+
+def test_a_selection_run_is_ok_only_when_every_attempt_was_captured() -> None:
+    """The first live attempt's shape - six `unavailable` arms, all reading
+    `unknown` - must NOT be ok; that is exactly what the removed pytest
+    harness called a pass. Confirmed red when the capture check is removed."""
+    unavailable = _arm("unavailable", "unknown")
+    ok, why = sp.probe_verdict(_report(*[(unavailable, unavailable)] * 3), detection_control=False)
+    assert not ok and "c0/treatment=unavailable" in why
+    ok, _ = sp.probe_verdict(_report((_arm(), _arm()), (_arm(), _arm("inconclusive", "unknown"))),
+                             detection_control=False)
+    assert not ok
+    ok, _ = sp.probe_verdict(_report(*[(_arm(), _arm())] * 3), detection_control=False)
+    assert ok
+    assert sp.probe_verdict(_report(), detection_control=False)[0] is False
+
+
+def test_a_control_is_ok_only_when_detected_in_treatment_and_absent_in_baseline() -> None:
+    """Both halves are needed: detected-in-treatment shows the pipeline CAN
+    see an invocation; absent-in-baseline shows it does not report one that
+    could not have happened. Confirmed red when either check is removed."""
+    detected, unknown = _arm(selection="selected"), _arm("inconclusive", "unknown")
+    assert sp.probe_verdict(_report((detected, unknown)), detection_control=True)[0]
+    assert sp.probe_verdict(_report((detected, _arm())), detection_control=True)[0]
+    assert not sp.probe_verdict(_report((_arm(), unknown)), detection_control=True)[0]
+    assert not sp.probe_verdict(_report((unknown, unknown)), detection_control=True)[0]
+    assert not sp.probe_verdict(_report((detected, detected)), detection_control=True)[0]
+
+
+def _run_control(tmp_path: Path, baseline: dict[str, object]) -> tuple[bool, str]:
+    """The control end to end on the fake docker: treatment has the skill and
+    the named canary; the baseline script says what the fake agent does
+    where nothing was installed."""
+    base = tmp_path / "work"
+    base.mkdir()
+    docker_state = tmp_path / "docker-state"
+    docker_bin = [sys.executable, str(FAKE_DOCKER), "--state", str(docker_state)]
+    cases = sp.detection_control_cases(CASES, CONTROL)
+    experiment = sp.plan_selection_probe(
+        cases, MANIFEST, treatment_subject_digest=_TREATMENT_SUBJECT_DIGEST,
+        baseline_subject_digest=sp.BASELINE_SUBJECT_DIGEST, image_digest=_PLACEHOLDER_IMAGE_DIGEST,
+        store=t.open_store(tmp_path / "store", forbidden=[]), experiment_name=str(CONTROL["experiment"]),
+    )
+    runner = sp.agent_trial_runner(
+        experiment=experiment, backend=_HomeRecordingBackend(image="fake-image:1", base_dir=base, docker_bin=docker_bin),
+        base=base, client="codex",
+        argv_for=_argv_for(experiment, docker_state, {(INTENDED_USE, "baseline"): baseline}),
+        treatment_home_files=_COLLECTION, goal="Fix the slug helper.", timeout=5,
+        credential_explicit_path=_codex_credential(tmp_path), skill_name=str(CONTROL["skill_name"]),
+    )
+    report = sp.run_planned_selection_probe(
+        experiment, cases, runner, base=base, grader=GRADER, detection_control=True,
+        grading_backend=d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=docker_bin),
+    )
+    return sp.probe_verdict(report, detection_control=True)
+
+
+def test_the_control_end_to_end_detects_the_named_skill(tmp_path: Path) -> None:
+    """With nothing installed the named canary cannot be satisfied, so the
+    baseline reads unknown - the expected shape, not a failure."""
+    ok, why = _run_control(tmp_path, _script(fail_canary=True))
+    assert ok, why
+
+
+def test_the_control_end_to_end_flags_an_invocation_in_the_empty_baseline(tmp_path: Path) -> None:
+    """A baseline that somehow shows the skill being read - nothing was
+    installed there - must fail the control, not pass it."""
+    ok, why = _run_control(tmp_path, _script())
+    assert not ok and "baseline" in why
+
+
+def _cli_fakes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, report: sp.SelectionProbeReport) -> list[dict[str, object]]:
+    """`cmd_selection_probe` with the acquisition and the run itself
+    replaced - no docker, no git clone, no credential, no agent."""
     from skillc import collection_conformance as cc
     from skillc import demo
 
-    base = tmp_path / "run"
-    base.mkdir()
-    acquired = cc.acquire_collection(str(CASES["subject"]), base)
-    docker_bin = ["docker"]
-    image = os.environ.get("SKILLC_TRIAL_IMAGE", demo.DEFAULT_IMAGE)
-    image_digest = demo.resolve_image_digest(docker_bin, image, None, 120) or "UNKNOWN"
-    backend, grading_backend = cc.agent_backends(image=image, base=base, docker_bin=docker_bin, daemon_timeout=120)
-    experiment = sp.plan_selection_probe(
-        CASES, MANIFEST, treatment_subject_digest=acquired.source.digest,
-        baseline_subject_digest=_BASELINE_SUBJECT_DIGEST, image_digest=image_digest,
-        store=t.open_store(tmp_path / "store", forbidden=[]),
-    )
-    runner = sp.agent_trial_runner(
-        experiment=experiment, backend=backend, base=base, client="codex",
-        argv_for=lambda _attempt_id: list(cc.DEFAULT_CLIENT_ARGV),
-        treatment_home_files=cc._collection_home_files(acquired.source, acquired.files),
-        timeout=cc.DEFAULT_AGENT_TIMEOUT, cli_version=acquired.subject.client_version,
-    )
-    report = sp.run_planned_selection_probe(
-        experiment, CASES, runner, base=base, grader=GRADER, grading_backend=grading_backend,
-    )
-    assert len(report.cases) == 3
-    for case in report.cases:
-        for arm in (case.treatment, case.baseline):
-            assert arm.selection in sp.SELECTION_STATUSES
-        print(case)
+    seen: list[dict[str, object]] = []
+
+    def fake_acquire(name: str, root: Path) -> object:
+        return SimpleNamespace(
+            subject=SimpleNamespace(client="codex", client_version="0.157.1", revision="v1"),
+            source=SimpleNamespace(digest=_TREATMENT_SUBJECT_DIGEST), files=[],
+        )
+
+    def fake_run(experiment: object, cases: object, runner: object, **kwargs: object) -> sp.SelectionProbeReport:
+        seen.append({"runner": runner, "cases": cases, **kwargs})
+        return report
+
+    monkeypatch.setattr(cc, "acquire_collection", fake_acquire)
+    monkeypatch.setattr(cc, "_collection_home_files", lambda *a: {})
+    monkeypatch.setattr(demo, "resolve_image_digest", lambda *a, **k: None)
+    monkeypatch.setattr(sp, "run_planned_selection_probe", fake_run)
+    return seen
+
+
+def test_cli_exits_1_when_attempts_were_not_captured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The exact shape the removed harness passed: every arm unavailable."""
+    from skillc import cli
+
+    unavailable = _arm("unavailable", "unknown")
+    seen = _cli_fakes(monkeypatch, tmp_path, _report(*[(unavailable, unavailable)] * 3))
+    assert cli.main(["selection-probe", "--base", str(tmp_path)]) == 1
+    [call] = seen
+    assert call["detection_control"] is False
+    assert call["runner"].skill_name is None  # type: ignore[attr-defined]
+    assert call["grading_backend"] is not call["runner"].backend  # type: ignore[attr-defined]
+    assert "verdict: NOT ok" in capsys.readouterr().out
+
+
+def test_cli_exits_0_when_every_attempt_was_captured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from skillc import cli
+
+    _cli_fakes(monkeypatch, tmp_path, _report(*[(_arm(), _arm())] * 3))
+    assert cli.main(["selection-probe", "--base", str(tmp_path)]) == 0
+    out = capsys.readouterr().out
+    assert "verdict: ok" in out and "report_written=True" in out
+
+
+def test_cli_detection_control_names_the_declared_skill_on_the_declared_case(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from skillc import cli
+
+    seen = _cli_fakes(monkeypatch, tmp_path, _report((_arm(selection="selected"), _arm("inconclusive", "unknown"))))
+    assert cli.main(["selection-probe", "--detection-control", "--base", str(tmp_path)]) == 0
+    [call] = seen
+    assert call["detection_control"] is True
+    assert call["runner"].skill_name == CONTROL["skill_name"]  # type: ignore[attr-defined]
+    assert [c["id"] for c in call["cases"]["cases"]] == [INTENDED_USE]  # type: ignore[index]

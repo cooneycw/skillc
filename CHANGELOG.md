@@ -10,6 +10,20 @@ and version plan.
 
 ### Added
 
+- **`skillc selection-probe [--detection-control]`: the operator command for
+  #26's live run** (Refs #26). It runs every predeclared case through
+  `selection_probe.agent_trial_runner`, one attempt per arm, and exits 1
+  unless every attempt was captured. A report of `unknown`s is not a
+  measurement. With `--detection-control` it runs the predeclared control
+  instead (`evals/selection-probe/detection-control.json`): the intended-use
+  case only, with the canary naming `qa-test`. That exits 1 unless the
+  treatment arm reads `selected` and the empty baseline does not. A runner
+  whose canary names a skill is refused for a selection run, and an unnamed
+  one for a control. A non-captured attempt's report now keeps the record's
+  own `reason`. The `SKILLC_ALLOW_REAL_AGENT` pytest harness is removed:
+  `tests/conftest.py` keeps every test away from a real credential, so it
+  could never launch, and it passed on six `unavailable` attempts.
+
 - **Every real-agent attempt now persists its observation as an
   `agent-observation` record** (Refs #106). `agent_trial.run_one_attempt`
   writes `observation-<attempt>.json` beside `lifecycle-<attempt>.json` on

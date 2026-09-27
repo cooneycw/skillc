@@ -5,29 +5,32 @@ below. It is not a description of the shipped system, it is not a second
 statement of the issue contract or of a Tier 3 spec, and it does not graduate.
 
 - Issue:             #26
-- Base SHA:          ab04c6c (origin/main), merged into PR #114's branch as 3f3ab26
-- Necessity verdict: Needs reframing
+- Base SHA:          a0fb533 (origin/main)
+- Necessity verdict: Partially addressed (driver merged in #114; first live run done 2026-09-27; detection control, operator command and evidence owed)
 - Approval:          granted
-- Approver:          cooneycw (repository owner), interactive reply "approved"
-- Recorded at:       2026-09-27T13:08:00Z
+- Approver:          cooneycw (repository owner), reply "1.yes. 2. yes. 3. delete" to the follow-up proposed after the first live run
+- Recorded at:       2026-09-27T15:20:00Z
 
 ## Section B evidence
-- commits: 15a7036 (#121, extra_home_files on main), b9d4b44 (#117), d8089ae (#113),
-  795a3ff (#105), 39d6ae8 (#103), 662c628 (#86)
-- PRs: #86, #103, #105, #107, #108, #113, #117, #121, #125, #126 merged; #114 open draft
-- dup/super: #106 (open, live session on agent_trial.py); #39 closed by #86; #11 closed
-  by #126; no duplicate of #26
-- The picked-up branch issue-26-agent-trial-home-surface (9bcbfeb) is superseded by
-  15a7036 and is not shipped by this run.
+- merged: #114 (3fed8cc, the driver and real runner), #142 (a0fb533, per-attempt agent-observation records)
+- first live run: 2026-09-27 14:26Z, six attempts, all captured, none selected, all PASS
+  (https://github.com/cooneycw/skillc/issues/26#issuecomment-5856746724)
+- defects found in #114 during that run: the SKILLC_ALLOW_REAL_AGENT pytest harness cannot reach a real
+  credential (tests/conftest.py) and passes on all-unavailable; transcript_from_record drops the record's reason
+- dup/super: none
 
 ## Section C - the approved plan
-Work continues on PR #114's branch (issue-26-selection-probe-driver), current main merged in.
+1. `skillc/selection_probe.py` - keep the record's `reason` for a non-captured attempt; a named-skill runner mode used ONLY for a detection control, refused for a selection run (and vice versa); `experiment_name` on planning; the predeclared control's loader and case subset; one exit rule per run kind
+2. `skillc/cli.py` - `skillc selection-probe [--detection-control]`: the operator command, exits 1 unless every attempt is captured (probe) or the control detects in treatment and not in baseline (control)
+3. `evals/selection-probe/detection-control.json` - the predeclared control, committed and pushed BEFORE it runs: intended-use case, prompt names `qa-test`; what it proves and does not
+4. `tests/test_selection_probe.py` - remove the blind real-agent pytest test; tests and red cases for the exit rules, the mode guards, the reason, the control subset
+5. `tests/test_cli.py` - `selection-probe` wiring: all-unavailable exits 1, all-captured exits 0
+6. `evals/selection-probe/evidence/README.md` - the first live run and the control run, verbatim
+7. `README.md` - the new command in the command block
+8. `CHANGELOG.md` - entries
+9. `docs/flow-runs/issue-26.md` - this plan record
 
-1. `skillc/selection_probe.py` - real AttemptRunner adapter over agent_trial.run_one_attempt (skill_name=None; treatment arm gets the collection via extra_home_files, baseline gets none; record -> AttemptTranscript from skill_invocations + detection kind; non-captured -> unknown; launch failure -> None)
-2. `tests/test_selection_probe.py` - adapter translation tests on the fake docker with red cases (baseline receives no skill files; unavailable -> unknown; recorded invocations -> selected), plus one SKILLC_ALLOW_REAL_AGENT-gated real-agent test
-3. `CHANGELOG.md` - entry for the adapter
-4. `docs/flow-runs/issue-26.md` - this plan record
-
-Scope: 4 files, ~200-300 lines. PR stays "Refs #26"; live probes remain owed.
-Risks: #106 live session may change run_one_attempt's record shape; detection kind may
-not be on the record; claude vs codex skills paths - reuse main's collection_run layout.
+Scope: ~9 files, ~500 lines; one live control run (2 real codex attempts, subscription login).
+Risks: main moves fast (several sessions merging); the named-skill canary on the baseline arm cannot be
+satisfied (no skill installed) and so reads unknown/inconclusive by design; a CLI test must not reach a real
+credential or agent.
