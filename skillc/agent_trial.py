@@ -116,6 +116,11 @@ class ClientSpec:
     #: the agent's closing message) out of the raw transcript - issue #12.
     #: `None` for a client with no adapter yet, recorded as `run_metadata: None`.
     run_metadata: Callable[[str], dict[str, object]] | None = None
+    #: Reads the skills the client itself listed to the model out of the
+    #: real transcript (issue #124) - `None` when this client's transcript
+    #: carries no such listing at all. Codex's rollout has none this adapter
+    #: reads; its discovery evidence is the model-free canary instead.
+    read_skill_listing: Callable[[str], tuple[str, ...] | None] | None = None
 
 
 @dataclass(frozen=True)
@@ -237,6 +242,7 @@ CLIENT_SPECS: dict[str, ClientSpec] = {
         supports_name_flag=True,
         skill_invocation_detection="structural",
         compose_home_files=_claude_home_files,
+        read_skill_listing=ta.claude_code_skill_listing,
     ),
     "codex": ClientSpec(
         name="codex",
@@ -325,6 +331,13 @@ class TranscriptObservation:
     #: from an `exec` call reading a `SKILL.md`). A selection probe's report
     #: must be able to say which, never present a heuristic as structural.
     skill_invocation_detection: str = "structural"
+    #: Every skill name the client's own `skill_listing` told the model about,
+    #: read from the real transcript (issue #124) - `None` when not observable
+    #: (no single transcript file, a client whose transcript carries no
+    #: listing, or a transcript with no listing attachment), never `()`
+    #: standing in for "could not see". `skills_listed_source` says which.
+    skills_listed: tuple[str, ...] | None = None
+    skills_listed_source: str = "not observed"
 
     def to_fields(self) -> dict[str, object]:
         return {
@@ -335,6 +348,8 @@ class TranscriptObservation:
             "canary_reason": self.canary_reason,
             "skill_invocations": list(self.skill_invocations),
             "skill_invocation_detection": self.skill_invocation_detection,
+            "skills_listed": list(self.skills_listed) if self.skills_listed is not None else None,
+            "skills_listed_source": self.skills_listed_source,
             # Computed HERE, once, from the real dataclass fields - never
             # re-derived from the flattened dict `run_one_attempt`'s own
             # grading gate reads (PR #113 review: two separate
@@ -419,10 +434,19 @@ def _make_observe_before_teardown(
                 str(event["skill"]) for event in events
                 if event.get("type") == "skill_invocation" and "skill" in event
             )
+            if spec.read_skill_listing is None:
+                listed, listed_source = None, f"not available: the {spec.name} transcript carries no skill listing"
+            else:
+                listed = spec.read_skill_listing(raw.decode("utf-8", errors="replace"))
+                listed_source = (
+                    "transcript skill_listing attachment" if listed is not None
+                    else "not observed: the transcript has no skill_listing attachment"
+                )
             observation = TranscriptObservation(
                 files_found=1, prompt_delivered=prompt_delivered, prompt_delivery_reason=prompt_reason,
                 canary_satisfied=canary_satisfied, canary_reason=canary_reason,
                 skill_invocations=invocations, skill_invocation_detection=spec.skill_invocation_detection,
+                skills_listed=listed, skills_listed_source=listed_source,
             )
 
         usage = credential.CredentialUsage(

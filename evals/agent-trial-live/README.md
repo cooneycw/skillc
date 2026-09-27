@@ -89,6 +89,11 @@ The paste-back now prints both: the journal's event as
 `(record, at finalize)`. The runs below show both lines. The ordering defect
 in `lifecycle.py` is recorded in the Nit Store (#20) rather than changed here.
 
+**Fixed since, in #127:** the workspace is now cleaned before the record is
+finalized, so later runs show `workspace_cleanup(record, at finalize)=removed`
+in agreement with the journal. The runs below predate that fix and are left
+verbatim.
+
 ### cpp-codex
 
 ```

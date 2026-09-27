@@ -290,3 +290,63 @@ def test_codex_run_metadata_reports_absent_as_none_never_a_default() -> None:
     assert meta["model"] is None
     assert meta["cli_version"] is None
     assert meta["token_usage"] is None
+# ------------------------------------------- Claude Code skill listing (#124)
+
+
+def _listing_line(names: object, *, initial: bool = True) -> str:
+    return json.dumps({"type": "attachment", "attachment": {
+        "type": "skill_listing", "names": names, "skillCount": 0, "isInitial": initial, "content": "",
+    }})
+
+
+def test_claude_skill_listing_reads_every_listed_name_in_order() -> None:
+    raw = "\n".join([
+        _listing_line(["tdd", "diagnosing-bugs"]),
+        json.dumps({"type": "user", "message": {"role": "user", "content": "hi"}}),
+        _listing_line(["diagnosing-bugs", "late-skill"], initial=False),
+    ])
+    assert ta.claude_code_skill_listing(raw) == ("tdd", "diagnosing-bugs", "late-skill")
+
+
+def test_claude_skill_listing_absent_is_none_not_empty() -> None:
+    """The distinction the discovery check stands on: no attachment means
+    NOT OBSERVABLE (UNMEASURED downstream), never "the client listed
+    nothing", which would turn every installed skill into a false
+    not-listed."""
+    raw = json.dumps({"type": "user", "message": {"role": "user", "content": "skill_listing mentioned in prose"}})
+    assert ta.claude_code_skill_listing(raw) is None
+    # The control: a real attachment with an empty list IS an observation.
+    assert ta.claude_code_skill_listing(_listing_line([])) == ()
+
+
+def test_claude_skill_listing_unreadable_attachment_is_none_not_an_absence() -> None:
+    """Counter-model review (#124): a listing the parser cannot fully read is
+    an incomplete population - never a basis for `not-listed`."""
+    assert ta.claude_code_skill_listing(_listing_line("tdd")) is None
+    assert ta.claude_code_skill_listing(_listing_line(["tdd", 7])) is None
+    assert ta.claude_code_skill_listing(_listing_line([{"name": "tdd"}])) is None
+    # A valid initial listing followed by an unreadable delta: still None.
+    raw = "\n".join([_listing_line(["tdd"]), _listing_line([{"name": "x"}], initial=False)])
+    assert ta.claude_code_skill_listing(raw) is None
+    # The control: the same shapes, readable, are an observation.
+    raw_ok = "\n".join([_listing_line(["tdd"]), _listing_line(["x"], initial=False)])
+    assert ta.claude_code_skill_listing(raw_ok) == ("tdd", "x")
+
+
+def test_claude_skill_listing_does_not_disturb_the_event_stream() -> None:
+    """The attachment line is not a message: `verify_first_user_message`
+    must still see the real prompt first."""
+    raw = "\n".join([
+        _listing_line(["tdd"]),
+        json.dumps({"type": "user", "message": {"role": "user", "content": "the prompt"}}),
+    ])
+    assert ta.parse_claude_code_transcript(raw) == [{"role": "user", "content": "the prompt"}]
+
+
+def test_claude_skill_listing_delta_only_is_none_not_a_complete_listing() -> None:
+    """Counter-model review (#124): a delta names additions, not the full set.
+    Without a readable initial listing, an omission cannot be inferred."""
+    assert ta.claude_code_skill_listing(_listing_line(["late-skill"], initial=False)) is None
+    # The control: the same delta after an initial listing is merged in.
+    raw = "\n".join([_listing_line(["tdd"]), _listing_line(["late-skill"], initial=False)])
+    assert ta.claude_code_skill_listing(raw) == ("tdd", "late-skill")

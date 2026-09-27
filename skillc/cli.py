@@ -783,16 +783,21 @@ def cmd_collection_run(args: argparse.Namespace) -> int:
 
     Requires `SKILLC_ALLOW_REAL_AGENT=1` (`lifecycle.py`'s own structural
     guard - this command sets no gate of its own) and the operator's own
-    Codex subscription login (`~/.codex/auth.json` by default, or
-    `--credential`), per ADR 0005 rule 6, "Normal Claude and codex" - never
-    metered API spend."""
+    subscription login for the client the subject's surface declares
+    (issue #124: `~/.codex/auth.json` for codex, `~/.claude/.credentials.json`
+    for claude, by default, or `--credential`), per ADR 0005 rule 6, "Normal
+    Claude and codex" - never metered API spend.
+
+    Exits 1 unless the attempt is captured AND graded PASS, and also when the
+    transcript's own skill listing measurably omits a selected skill
+    (`CollectionAgentResult.discovery_failed`, issue #124). UNMEASURED
+    discovery is printed, not failed."""
     from . import collection_conformance as cc
     from . import credential, demo, reap, trial
 
     docker_bin = tuple(args.docker_bin.split()) if args.docker_bin else ("docker",)
     base = Path(args.base) if args.base else Path(tempfile.gettempdir())
     image = args.image or demo.DEFAULT_IMAGE
-    client_argv = args.client_argv.split() if args.client_argv else list(cc.DEFAULT_CLIENT_ARGV)
     credential_path = Path(args.credential) if args.credential else None
     agent_timeout = args.agent_timeout if args.agent_timeout is not None else cc.DEFAULT_AGENT_TIMEOUT
     try:
@@ -807,6 +812,10 @@ def cmd_collection_run(args: argparse.Namespace) -> int:
         except demo.SubjectRefused as exc:
             print(f"skillc: {exc}", file=sys.stderr)
             return 2
+        client_argv = (
+            args.client_argv.split() if args.client_argv
+            else list(cc.DEFAULT_CLIENT_ARGVS[acquired.subject.client])
+        )
 
         # Resolved BEFORE planning, so the plan's own image.digest reflects the
         # image that actually runs - `demo.run_demo`'s own "resolved before
@@ -825,7 +834,7 @@ def cmd_collection_run(args: argparse.Namespace) -> int:
         # grading containers alike): the operator's own credential file, and
         # the daemon's skillc-owned containers. Both are observations only -
         # neither changes what the attempt itself does.
-        host_before = cc.read_host_credential(materialize.CLIENT, credential_path)
+        host_before = cc.read_host_credential(acquired.subject.client, credential_path)
         daemon_before = reap.snapshot(docker_bin, timeout=args.timeout)
         minimum = (
             args.minimum_credential_seconds if args.minimum_credential_seconds is not None
@@ -838,7 +847,7 @@ def cmd_collection_run(args: argparse.Namespace) -> int:
             minimum_credential_seconds=minimum,
         )
         daemon_after = reap.snapshot(docker_bin, timeout=args.timeout)
-        host_after = cc.read_host_credential(materialize.CLIENT, credential_path)
+        host_after = cc.read_host_credential(acquired.subject.client, credential_path)
     finally:
         cc.discard_acquisition(run_root, args.subject)
 
@@ -896,7 +905,10 @@ def cmd_collection_run(args: argparse.Namespace) -> int:
         result.record.get("backend_teardown") == "confirmed"
         and result.attributable_leftovers == []
     )
-    return 0 if result.record.get("disposition") == "captured" and graded_ok and cleanup_ok else 1
+    # Issue #124: a selected skill the transcript's own listing measurably
+    # omits fails the run too; UNMEASURED discovery is printed, not failed.
+    captured = result.record.get("disposition") == "captured"
+    return 0 if captured and graded_ok and cleanup_ok and not result.discovery_failed else 1
 
 
 def _export_pilot_evidence(experiment: object, report: dict[str, object], evidence: Path) -> int:
@@ -1256,8 +1268,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_collection_run.add_argument(
         "--client-argv", default=None,
         help="the real client invocation, space-separated words (default: "
-             "collection_conformance.DEFAULT_CLIENT_ARGV - the documented no-nested-sandbox mechanism, "
-             "trial_bootstrap.BWRAP_DECISION, plus --skip-git-repo-check) - never invented per-run",
+             "collection_conformance.DEFAULT_CLIENT_ARGVS for the client the subject's surface declares - "
+             "codex: the documented no-nested-sandbox mechanism, trial_bootstrap.BWRAP_DECISION, plus "
+             "--skip-git-repo-check; claude: -p --dangerously-skip-permissions) - never invented per-run",
     )
     p_collection_run.add_argument(
         "--minimum-credential-seconds", type=float, default=None,

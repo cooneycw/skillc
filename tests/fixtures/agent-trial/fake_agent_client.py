@@ -132,6 +132,12 @@ def main() -> int:
                               "needs a way to control this directly. Defaults (when omitted) to the prompt's own "
                               "named skill in named-canary mode, and to none at all in skill-free mode - every "
                               "existing named-mode test is unaffected.")
+    parser.add_argument("--no-skill-listing", action="store_true",
+                         help="claude-fake only: write no skill_listing attachment at all - a client version "
+                              "that stopped emitting one (issue #124: must read as UNMEASURED, never as empty)")
+    parser.add_argument("--omit-listed", action="append", default=[],
+                         help="claude-fake only: leave this installed skill OUT of the skill_listing attachment - "
+                              "a client that did not tell the model about a skill it was given (repeatable)")
     parser.add_argument("prompt")
     args = parser.parse_args()
 
@@ -184,6 +190,22 @@ def main() -> int:
     recorded_prompt = "a completely different prompt, never the one delivered" if args.mismatched_prompt else args.prompt
     builder = _claude_transcript if args.format == "claude-fake" else _codex_transcript
     lines = builder(recorded_prompt, skills, nonce, args.fail_canary)
+    if args.format == "claude-fake" and not args.no_skill_listing:
+        # Issue #124: the real client lists the skills it FOUND under
+        # ~/.claude/skills/ - so this reads the installed directories off disk
+        # rather than being told which ones to list. A skill whose files never
+        # reached the home is therefore missing here exactly as it would be
+        # from a real listing; `--omit-listed` drops one that IS installed.
+        skills_dir = Path(args.home) / ".claude" / "skills"
+        found = sorted(p.parent.name for p in skills_dir.glob("*/SKILL.md")) if skills_dir.is_dir() else []
+        names = [n for n in found if n not in args.omit_listed]
+        # The real attachment shape (skillc/transcript_adapter.py,
+        # `_CLAUDE_SKILL_LISTING_TYPE`), inserted before the first turn as the
+        # real client does.
+        lines.insert(0, {"type": "attachment", "attachment": {
+            "type": "skill_listing", "names": names, "skillCount": len(names), "isInitial": True,
+            "content": "".join(f"- {n}: a skill\n" for n in names),
+        }})
 
     if args.plant_leak:
         # An API-key-SHAPED value, not an OAuth key:value pair: the latter's

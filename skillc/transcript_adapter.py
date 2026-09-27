@@ -172,6 +172,63 @@ def parse_claude_code_transcript(raw_jsonl: str) -> list[NormalizedEvent]:
     return events
 
 
+#: The attachment a real Claude Code transcript carries for the skills the
+#: model was given (issue #124). Read from 1,604 real attachments across this
+#: host's transcripts (2.1.263-2.1.266, interactive and `-p` alike): the line is
+#: `{"type": "attachment", "attachment": {"type": "skill_listing", "names":
+#: [...], "skillCount": N, "isInitial": bool, "content": "..."}}`, with
+#: `isInitial: false` entries as later deltas.
+_CLAUDE_SKILL_LISTING_TYPE = "skill_listing"
+
+
+def claude_code_skill_listing(raw_jsonl: str) -> tuple[str, ...] | None:
+    """Every skill name any `skill_listing` attachment in a real Claude Code
+    transcript lists, de-duplicated in first-seen order - the skills the
+    client itself told the model about, which is the closest thing Claude
+    Code has to a discovery listing (it has no model-free listing command).
+
+    `None` - NOT an empty tuple - when the transcript holds no readable
+    INITIAL `skill_listing` attachment (`isInitial: true`): a client version
+    that stopped emitting it, a transcript cut short, or one carrying only
+    later deltas must read as "not observable", never as "the client listed
+    nothing". A delta says what was ADDED, not what was never listed, so it
+    cannot on its own support a `not-listed` (counter-model review, #124).
+    An initial attachment whose `names` is present but empty is a real
+    observation and returns `()`.
+
+    Also `None` when ANY `skill_listing` attachment cannot be fully read - a
+    `names` that is not a list, or a member that is not a string. A partly
+    read listing is an incomplete population, and an absence inferred from it
+    would be a format change reported as a missing skill (counter-model
+    review, #124)."""
+    names: list[str] = []
+    seen_listing = False
+    unreadable = False
+    for line in raw_jsonl.splitlines():
+        line = line.strip()
+        if not line or _CLAUDE_SKILL_LISTING_TYPE not in line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, Mapping) or obj.get("type") != "attachment":
+            continue
+        attachment = obj.get("attachment")
+        if not isinstance(attachment, Mapping) or attachment.get("type") != _CLAUDE_SKILL_LISTING_TYPE:
+            continue
+        listed = attachment.get("names")
+        if not isinstance(listed, list) or not all(isinstance(name, str) for name in listed):
+            unreadable = True
+            continue
+        if attachment.get("isInitial") is True:
+            seen_listing = True
+        for name in listed:
+            if name not in names:
+                names.append(name)
+    return tuple(names) if seen_listing and not unreadable else None
+
+
 #: The harness-injected wrapper a real Codex transcript's FIRST `user`-role
 #: message carries, ahead of the actual prompt - confirmed empirically
 #: (2026-09-27): every live probe's first `user` message was this, never

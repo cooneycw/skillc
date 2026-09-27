@@ -123,6 +123,24 @@ each docker call and the agent. Each fix has a test that fails without it
 In every one of those failures the trial machinery reported the truth
 (`inconclusive`, never graded), which is the behaviour it exists for.
 
+## Annotation (#124): `refresh_observed_in_container=None` above is a key bug, not "not observable"
+
+The three `refresh_observed_in_container=None` lines above are recorded
+verbatim and left unedited, but they do not mean what they appear to. The
+paste-back (`collection_conformance.build_collection_paste_back`) read the key
+`refresh_observed_in_container`; the record stores the value as
+`credential_refresh_observed_in_container`
+(`credential.CredentialUsage.to_record_fields`). So these lines printed `None`
+whatever the record held, and the record held a real `True`/`False` for every
+captured run. The observation is not persisted to the run store, so those
+values cannot be recovered. What this evidence shows about an in-container
+refresh during #11's runs is therefore **nothing**, and the reason is the
+misread key, not the credential being unobservable. The key was fixed in
+parallel by #106 (merged first) and #124; #124's Claude Code runs read `False`
+([evals/claude-code-agent-arm](../../claude-code-agent-arm/evidence/README.md)).
+#98's closing accounting cited this `None` as "not observable"; the correction
+is posted on #98.
+
 ## What this does NOT show
 
 - Which collection helps an agent more. Both passed a ceiling-prone canary
