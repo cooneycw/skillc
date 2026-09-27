@@ -64,7 +64,7 @@ import sys
 import tempfile
 import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO
@@ -1251,7 +1251,7 @@ _REPLY_ONLY_ARGV: tuple[str, ...] = (verify.PROBE_INTERPRETER, "-c", "pathlib_un
 _CANARY_UNTOUCHED = "the canary was never touched"
 
 
-def _reply_only_seed(record: dict[str, object]) -> ControlSeed:
+def _reply_only_seed(record: Mapping[str, object]) -> ControlSeed:
     """CAUGHT only for the specific failure this seed provokes (issue #122,
     from the nit store): the subject genuinely ran - a confirmed stop,
     `exited`, exit code 0 - and the attempt is `inconclusive` because the
