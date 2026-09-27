@@ -466,12 +466,15 @@ def run_through_backend(
             teardown_confirmation = Confirmation.UNKNOWN
         else:
             confirm_absent_error = None
+        teardown_errors = [e for e in (destroy_error, confirm_absent_error) if e is not None]
+        # Journalled HERE, inside `finally` (#127 review): an unexpected raise
+        # from execute() propagates past everything below, and this event is
+        # then the only surviving account of whether the container went away.
+        experiment.record(
+            attempt_id, "backend-teardown", confirmation=teardown_confirmation.value,
+            error="; ".join(teardown_errors) if teardown_errors else None,
+        )
 
-    teardown_errors = [e for e in (destroy_error, confirm_absent_error) if e is not None]
-    experiment.record(
-        attempt_id, "backend-teardown", confirmation=teardown_confirmation.value,
-        error="; ".join(teardown_errors) if teardown_errors else None,
-    )
     # CLEAN BEFORE FINALIZING (#127): finalize() derives the persisted record's
     # `cleanup` from the journal's `cleaned` event, so the reverse order wrote
     # `partial / never cleaned up` on every attempt, whatever cleanup then did.

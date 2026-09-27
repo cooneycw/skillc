@@ -414,6 +414,10 @@ def test_an_unexpected_exception_in_execute_still_tears_down(store: Path, base: 
             backend, experiment, attempt_id, _argv("work"), {"skill": "x"}, Limits(timeout=5), base,
         )
     assert attempt_id in backend.destroyed, "teardown must run even when execute() raises unexpectedly"
+    # #127 review: the teardown outcome is journalled on this path too, where
+    # no return value exists to carry it.
+    teardown = [e for e in experiment.events(attempt_id) if e.get("event") == "backend-teardown"]
+    assert [e["confirmation"] for e in teardown] == ["confirmed"]
 
 
 def test_an_empty_surface_still_completes_with_readiness_reflecting_it(store: Path, base: Path) -> None:
