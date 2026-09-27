@@ -1,0 +1,138 @@
+{
+  "run_id": "finish-b3f532c6",
+  "plan_name": "finish",
+  "step_records": [
+    {
+      "step_id": "lint",
+      "status": "success",
+      "exit_code": 0,
+      "output": "All checks passed!\n",
+      "error": null,
+      "started_at": "2026-09-27T08:12:02-0400",
+      "finished_at": "2026-09-27T08:12:03-0400",
+      "attempt": 1,
+      "max_attempts": 1,
+      "tests": null,
+      "coverage": {
+        "state": "unknown",
+        "units": null,
+        "unit_name": "unit",
+        "tool": "unknown",
+        "scope": "stage",
+        "component": "",
+        "evidence": "",
+        "invocations": 0,
+        "empty_invocations": 0,
+        "streams": [
+          "stdout",
+          "stderr"
+        ]
+      },
+      "subsumed_by": null,
+      "not_run_reason": null
+    },
+    {
+      "step_id": "test",
+      "status": "success",
+      "exit_code": 0,
+      "output": "============================= test session starts ==============================\nplatform linux -- Python 3.11.16, pytest-9.1.1, pluggy-1.6.0\nrootdir: /home/cooneycw/Projects/skillc-issue-127-lifecycle-run-through-backend-finalizes-before-cle\nconfigfile: pyproject.toml\ntestpaths: tests\ncollected 1317 items\n\ntests/test_agent_trial.py .........................                      [  1%]\ntests/test_backend.py ...                                                [  2%]\ntests/test_branch_protection.py .........                                [  2%]\ntests/test_changelog_check.py ................                           [  4%]\ntests/test_checks.py ................................................... [  7%]\n...................                                                      [  9%]\ntests/test_collection_conformance.py ............................        [ 11%]\ntests/test_conftest_hermeticity.py ..                                    [ 11%]\ntests/test_cost_estimate.py ...............................              [ 13%]\ntests/test_credential.py .................................               [ 16%]\ntests/test_demo.py ..................................................... [ 20%]\n..........                                                               [ 21%]\ntests/test_docker_backend.py ........................................... [ 24%]\n.................                                                        [ 25%]\ntests/test_docker_conformance.py ........                                [ 26%]\ntests/test_exposure.py .........................................         [ 29%]\ntests/test_findings_json.py .............                                [ 30%]\ntests/test_frontmatter.py .........................ss................... [ 34%]\n............................................................             [ 38%]\ntests/test_judge.py .............................                        [ 40%]\ntests/test_judge_mcp_second_opinion.py ....................              [ 42%]\ntests/test_leak.py ..............................................        [ 45%]\ntests/test_level1_slug.py ................................               [ 48%]\ntests/test_lifecycle.py ................................................ [ 51%]\n.                                                                        [ 51%]\ntests/test_matched_pilot.py .........                                    [ 52%]\ntests/test_materialize.py .............................................. [ 56%]\n........................................................................ [ 61%]\n........                                                                 [ 62%]\ntests/test_negative_control.py ...........                               [ 63%]\ntests/test_no_docker_required.py .......                                 [ 63%]\ntests/test_private_citations.py .........                                [ 64%]\ntests/test_provenance.py .......                                         [ 64%]\ntests/test_readme_drift.py .....................                         [ 66%]\ntests/test_reap.py .....................                                 [ 67%]\ntests/test_records.py .................................................. [ 71%]\n........................................................................ [ 77%]\n................................                                         [ 79%]\ntests/test_repair_hint.py .......                                        [ 80%]\ntests/test_second_collection_conformance.py ............                 [ 81%]\ntests/test_selection_probe.py .........                                  [ 81%]\ntests/test_transcript_adapter.py ....................                    [ 83%]\ntests/test_trial.py .................................................... [ 87%]\n...................                                                      [ 88%]\ntests/test_trial_bootstrap.py .......................................... [ 91%]\n...............................                                          [ 94%]\ntests/test_typecheck_control.py .....                                    [ 94%]\ntests/test_verify.py ................................................    [ 98%]\ntests/test_verify_backend.py ..............                              [ 99%]\ntests/test_verify_judge.py ......                                        [ 99%]\ntests/test_version.py ...                                                [100%]\n\n================= 1315 passed, 2 skipped in 180.59s (0:03:00) ==================\n",
+      "error": null,
+      "started_at": "2026-09-27T08:12:03-0400",
+      "finished_at": "2026-09-27T08:15:04-0400",
+      "attempt": 1,
+      "max_attempts": 1,
+      "tests": {
+        "passed": 1315,
+        "failed": 0,
+        "skipped": 2,
+        "errors": 0,
+        "executed": 1315,
+        "framework": "pytest",
+        "invocations": 1,
+        "empty_invocations": 0,
+        "summary_streams": [
+          "stdout"
+        ]
+      },
+      "coverage": null,
+      "subsumed_by": null,
+      "not_run_reason": null
+    },
+    {
+      "step_id": "typecheck",
+      "status": "success",
+      "exit_code": 0,
+      "output": "Success: no issues found in 81 source files\n",
+      "error": null,
+      "started_at": "2026-09-27T08:15:04-0400",
+      "finished_at": "2026-09-27T08:15:09-0400",
+      "attempt": 1,
+      "max_attempts": 1,
+      "tests": null,
+      "coverage": {
+        "state": "covered",
+        "units": 81,
+        "unit_name": "source file",
+        "tool": "mypy",
+        "scope": "stage",
+        "component": "",
+        "evidence": "Success: no issues found in 81 source files",
+        "invocations": 1,
+        "empty_invocations": 0,
+        "streams": [
+          "stdout"
+        ]
+      },
+      "subsumed_by": null,
+      "not_run_reason": null
+    },
+    {
+      "step_id": "security_scan",
+      "status": "failed",
+      "exit_code": 1,
+      "output": "BLOCKED: \ud83d\udd34 CRITICAL: AWS Access Key detected at .gitleaks.toml:12 [AWS_ACCESS_KEY]\nBLOCKED: \ud83d\udd34 CRITICAL: Anthropic API key detected at tests/test_leak.py:187 [ANTHROPIC_API_KEY]\nBLOCKED: \ud83d\udd34 CRITICAL: Anthropic API key detected at tests/test_leak.py:201 [ANTHROPIC_API_KEY]\nBLOCKED: \ud83d\udd34 CRITICAL: AWS Access Key detected at ci/secret-scan-control.sh:56 [AWS_ACCESS_KEY]\nSECURITY_GATE: flow_finish FAIL (blocked=4 warned=0; secrets-scanned=438 skipped-checks=0; blocks-on=CRITICAL warns-on=HIGH)\n\nSecurity gate 'flow_finish' FAILED. Fix critical issues before proceeding.\n",
+      "error": "",
+      "started_at": "2026-09-27T08:15:33-0400",
+      "finished_at": "2026-09-27T08:15:34-0400",
+      "attempt": 3,
+      "max_attempts": 1,
+      "tests": null,
+      "coverage": {
+        "state": "covered",
+        "units": 438,
+        "unit_name": "source file",
+        "tool": "security-gate",
+        "scope": "component",
+        "component": "secrets scan",
+        "evidence": "SECURITY_GATE: flow_finish FAIL (blocked=4 warned=0; secrets-scanned=438 skipped-checks=0; blocks-on=CRITICAL warns-on=HIGH)",
+        "invocations": 1,
+        "empty_invocations": 0,
+        "streams": [
+          "stdout"
+        ]
+      },
+      "subsumed_by": null,
+      "not_run_reason": null
+    },
+    {
+      "step_id": "verify",
+      "status": "pending",
+      "exit_code": 0,
+      "output": "",
+      "error": null,
+      "started_at": null,
+      "finished_at": null,
+      "attempt": 0,
+      "max_attempts": 1,
+      "tests": null,
+      "coverage": null,
+      "subsumed_by": null,
+      "not_run_reason": null
+    }
+  ],
+  "current_index": 3,
+  "started_at": "2026-09-27T08:12:02-0400",
+  "finished_at": null,
+  "status": "failed",
+  "tree_signature": "2f671b15478f41eb4548a93c199013026cfdfa05"
+}
