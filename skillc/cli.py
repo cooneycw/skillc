@@ -930,6 +930,148 @@ def cmd_collection_run(args: argparse.Namespace) -> int:
     return 0 if captured and graded_ok and cleanup_ok and not result.discovery_failed else 1
 
 
+def cmd_selection_probe(args: argparse.Namespace) -> int:
+    """Issue #26's live run: every predeclared selection case, both arms, one
+    real agent attempt each (`evals/selection-probe/cases.json` and
+    `run-manifest.json`), through `selection_probe.agent_trial_runner`. With
+    `--detection-control`, the predeclared control instead
+    (`detection-control.json`): the intended-use case only, the canary naming
+    the skill - a check that the pipeline can see an invocation, never a
+    selection result.
+
+    Requires `SKILLC_ALLOW_REAL_AGENT=1` (`lifecycle.py`'s own guard) and the
+    operator's subscription login, per ADR 0005 rule 6. Each attempt's
+    observation is persisted by `run_one_attempt` (#142) in the store; the
+    report is written beside it only when it passes the leak check.
+
+    Exits 1 unless `selection_probe.probe_verdict` is ok: every attempt
+    captured for a selection run; detected in treatment and absent in
+    baseline for the control. Exits 2 when the run is refused before it
+    starts."""
+    from . import collection_conformance as cc
+    from . import credential, demo, trial, verify
+    from . import selection_probe as sp
+
+    docker_bin = tuple(args.docker_bin.split()) if args.docker_bin else ("docker",)
+    base = Path(args.base) if args.base else Path(tempfile.gettempdir())
+    image = args.image or demo.DEFAULT_IMAGE
+    agent_timeout = args.agent_timeout if args.agent_timeout is not None else cc.DEFAULT_AGENT_TIMEOUT
+    minimum = (
+        args.minimum_credential_seconds if args.minimum_credential_seconds is not None
+        else credential.MINIMUM_REMAINING_SECONDS
+    )
+    cases, manifest = sp.load_cases(), sp.load_manifest()
+    control = sp.load_detection_control() if args.detection_control else None
+    experiment_name = str(control["experiment"]) if control is not None else "selection-probe"
+    subject = str(cases["subject"])
+    try:
+        planned_cases = sp.detection_control_cases(cases, control) if control is not None else cases
+        run_root = cc.new_run_root(base, experiment_name)
+    except (sp.SelectionProbeRefused, demo.SubjectRefused) as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+
+    store_path = run_root / f"{experiment_name}-store"
+    try:
+        try:
+            acquired = cc.acquire_collection(subject, run_root)
+        except demo.SubjectRefused as exc:
+            print(f"skillc: {exc}", file=sys.stderr)
+            return 2
+        client_argv = (
+            args.client_argv.split() if args.client_argv
+            else list(cc.DEFAULT_CLIENT_ARGVS[acquired.subject.client])
+        )
+        image_digest = demo.resolve_image_digest(docker_bin, image, None, args.timeout)
+        experiment = sp.plan_selection_probe(
+            planned_cases, manifest, treatment_subject_digest=acquired.source.digest,
+            baseline_subject_digest=sp.BASELINE_SUBJECT_DIGEST, image_digest=image_digest or "UNKNOWN",
+            store=trial.open_store(store_path, forbidden=[]), experiment_name=experiment_name,
+        )
+        backend, grading_backend = cc.agent_backends(
+            image=image, base=run_root, docker_bin=docker_bin, daemon_timeout=args.timeout,
+        )
+        runner = sp.agent_trial_runner(
+            experiment=experiment, backend=backend, base=run_root, client=acquired.subject.client,
+            argv_for=lambda _attempt_id: client_argv,
+            treatment_home_files=cc._collection_home_files(acquired.source, acquired.files),
+            timeout=agent_timeout, cli_version=acquired.subject.client_version,
+            credential_explicit_path=Path(args.credential) if args.credential else None,
+            minimum_credential_seconds=minimum,
+            skill_name=str(control["skill_name"]) if control is not None else None,
+        )
+        try:
+            report = sp.run_planned_selection_probe(
+                experiment, planned_cases, runner, base=run_root,
+                grader=verify.GraderDef.load(sp.GRADER_ROOT), grading_backend=grading_backend,
+                detection_control=control is not None,
+            )
+        except sp.SelectionProbeRefused as exc:
+            print(f"skillc: {exc}", file=sys.stderr)
+            return 2
+    finally:
+        cc.discard_acquisition(run_root, subject)
+
+    ok, why = sp.probe_verdict(report, detection_control=control is not None)
+    document = {
+        "experiment": experiment.id, "kind": "detection-control" if control is not None else "selection",
+        "control": control["id"] if control is not None else None,
+        "subject": subject, "subject_revision": acquired.subject.revision,
+        "subject_digest": acquired.source.digest, "image": image, "image_digest": image_digest,
+        "client": acquired.subject.client, "client_version": acquired.subject.client_version,
+        "verdict": {"ok": ok, "why": why},
+        "cases": [
+            {
+                "case_id": case.case_id, "kind": case.kind, "applicable_skills": list(case.applicable_skills),
+                "treatment": {**dataclasses.asdict(case.treatment), "observed": sorted(case.treatment.observed)},
+                "baseline": {**dataclasses.asdict(case.baseline), "observed": sorted(case.baseline.observed)},
+                "baseline_contaminated": case.baseline_contaminated,
+            }
+            for case in report.cases
+        ],
+    }
+    text = demo.redact_known_host_paths(json.dumps(document, indent=2, sort_keys=True, default=str), base=run_root)
+    written = False
+    if not cc.evidence_leak_findings(json.loads(text), text):
+        try:
+            store_path.mkdir(parents=True, exist_ok=True)
+            (store_path / "selection-probe-report.json").write_text(text + "\n", encoding="utf-8")
+            written = True
+        except OSError:
+            pass
+
+    lines = [(
+        f"{document['kind']} run: experiment={experiment.id} subject={subject}@{acquired.subject.revision} "
+        f"client={acquired.subject.client} {acquired.subject.client_version}"
+    )]
+    for case in report.cases:
+        for arm, result in (("treatment", case.treatment), ("baseline", case.baseline)):
+            lines.append(
+                f"  {case.case_id} {arm}: disposition={result.disposition} selection={result.selection} "
+                f"task_success={result.task_success} invoked={sorted(result.observed)}"
+                f"{' (heuristic detection)' if result.codex_best_effort else ''}"
+                f"{' - ' + result.detail if result.detail else ''}"
+            )
+    lines.append(f"  report_written={written} store={store_path}")
+    lines.append(f"verdict: {'ok' if ok else 'NOT ok'} - {why}")
+    # The console gets the same protection as the report file: redacted, then
+    # leak-checked as a whole and refused rather than printed (#26 review - a
+    # record's own `reason` can carry a host path or a private address).
+    try:
+        demo.print_paste_back(demo.redact_known_host_paths("\n".join(lines), base=run_root))
+    except demo.PasteBackRefused as exc:
+        # Categories only: each finding reads "<line>: <category>: <value>",
+        # and the value is exactly what must not be shown (#26 re-review).
+        categories = sorted({
+            parts[1] for parts in (line.split(": ", 2) for line in str(exc).splitlines()[1:]) if len(parts) == 3
+        })
+        print(f"skillc: the selection-probe output failed its own leak check and was NOT printed "
+              f"({', '.join(categories) or 'unclassified'}); the verdict was {'ok' if ok else 'NOT ok'}",
+              file=sys.stderr)
+        return 2
+    return 0 if ok else 1
+
+
 def _export_pilot_evidence(experiment: object, report: dict[str, object], evidence: Path) -> int:
     """Publish the bundle as ONE unit. It is exported into a fresh staging
     directory beside `evidence`, and only that staging copy is leak-checked
@@ -1301,6 +1443,40 @@ def build_parser() -> argparse.ArgumentParser:
              "(default: credential.MINIMUM_REMAINING_SECONDS; raise it to run the below-threshold control)",
     )
     p_collection_run.set_defaults(func=cmd_collection_run)
+
+    p_selection_probe = sub.add_parser(
+        "selection-probe",
+        help="issue #26: run the predeclared selection cases (or, with --detection-control, the "
+             "predeclared detection control) through a real agent, one attempt per arm",
+    )
+    p_selection_probe.add_argument(
+        "--detection-control", action="store_true",
+        help="run evals/selection-probe/detection-control.json instead: the canary names the skill, "
+             "so the result shows detection works - it is never a selection result",
+    )
+    p_selection_probe.add_argument("--image", help="trial image (default: skillc.demo.DEFAULT_IMAGE)")
+    p_selection_probe.add_argument(
+        "--docker-bin", help="docker executable (repeatable words, space-separated; default: docker)",
+    )
+    p_selection_probe.add_argument("--base", help="where the disposable root is created (default: TMPDIR)")
+    p_selection_probe.add_argument("--timeout", type=float, default=30, help="per-container-call timeout, seconds")
+    p_selection_probe.add_argument(
+        "--agent-timeout", type=float, default=None,
+        help="each agent's own wall-clock limit, seconds (default: collection_conformance.DEFAULT_AGENT_TIMEOUT)",
+    )
+    p_selection_probe.add_argument(
+        "--credential", help="explicit path to the client credential file (default: the documented standard location)",
+    )
+    p_selection_probe.add_argument(
+        "--client-argv", default=None,
+        help="the real client invocation, space-separated words (default: "
+             "collection_conformance.DEFAULT_CLIENT_ARGVS for the subject's client)",
+    )
+    p_selection_probe.add_argument(
+        "--minimum-credential-seconds", type=float, default=None,
+        help="refuse to launch below this remaining credential life (default: credential.MINIMUM_REMAINING_SECONDS)",
+    )
+    p_selection_probe.set_defaults(func=cmd_selection_probe)
 
     p_pilot_run = sub.add_parser(
         "pilot-run",

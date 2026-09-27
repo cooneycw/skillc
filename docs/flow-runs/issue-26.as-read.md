@@ -5,10 +5,10 @@ The issue is the authority; read it. This copy exists so a later check can
 report that the source moved. It does not graduate.
 
 - Issue:        #26
-- Read at:      2026-09-27T12:59:27Z
-- updatedAt:    2026-09-27T11:53:52Z   (context only - moves on comments and labels)
-- Body digest:  955370953c1bf4fd46f2cc0fb97d2b76f2f2dfbc5a111e68df32094df6da96f1   (sha256 of the FULL body; the verdict keys on this)
-- Stored bytes: 3236 of 3236 (cap 16384)
+- Read at:      2026-09-27T17:15:21Z
+- updatedAt:    2026-09-27T14:32:29Z   (context only - moves on comments and labels)
+- Body digest:  b27c07cc89a54b8f6b7794cce6d13e2ad8ea2978b55996fec9cde800036cdff1   (sha256 of the FULL body; the verdict keys on this)
+- Stored bytes: 4065 of 4065 (cap 16384)
 
 ## Body as read
 Parent: #1
@@ -64,4 +64,9 @@ be prepared but execution remains incomplete.
 Null, negative and inconclusive results are valid. A completed experiment need
 not settle the maintainer's decision. Do not claim benefit outside the tested
 requests/configuration or level qualification from this probe.
+
+
+## Folded in from the Nit Store (#20), 2026-09-27
+
+- [ ] **A `coverage: complete` skill-invocations stream can omit an installed skill** (`records.py` `_skill_invocations` / `_skill_invocation_binding`). The bundle rule checks that reported paths belong to the receipt, but never that every installed path appears. Reproduced at `70ead2c`: a second installed skill with no invocation row gives exit 0, 0 errors. This limits this issue's per-skill selection/non-selection reporting. Require the row set to cover the receipt's installed set for `complete`, define missing-row semantics for partial/unsupported coverage, and commit a two-skill red case missing one row plus its complete green twin. (https://github.com/cooneycw/skillc/issues/20#issuecomment-5848531649) *Note for PR #114: this was folded in after the PR opened.*
 
