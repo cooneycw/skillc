@@ -463,7 +463,7 @@ def test_describe_never_claims_blocked_egress_on_an_open_network(base: Path, doc
     # The control: the contained backend still states its unverified claim.
     closed_isolation, closed_unobserved = _describe_text(grading)
     assert "egress OPEN" not in closed_isolation
-    assert "network=none" in closed_isolation
+    assert "network=none by default" in closed_isolation
     assert "egress actually blocked" in closed_unobserved
 
 

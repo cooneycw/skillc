@@ -519,7 +519,7 @@ class DockerBackend:
             version=version or "unreachable",
             isolation=(
                 "container (pid/mount/network namespaces)",
-                (f"network={self.network}" if self.network == "none"
+                (f"network={self.network} by default" if self.network == "none"
                  else f"network={self.network}: egress OPEN (owner ruling on issue #11; agent containers only)"),
                 f"fixed non-root user {_container_user()} ({CANDIDATE_USER_NAME}), independent of the host caller",
                 "resource limits enforced: memory, memory-swap (equal), pids, cpus, shm-size",

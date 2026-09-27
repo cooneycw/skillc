@@ -60,6 +60,10 @@ repository.
 
 - container (pid/mount/network namespaces)
 - network=none by default
+  - since #11: an agent container built by `collection_conformance.agent_backends`
+    instead claims `network=bridge: egress OPEN (owner ruling on issue #11; agent
+    containers only)` and drops the "egress actually blocked" line below; the
+    grading container keeps `network=none`
 - fixed non-root user 10001:10001 (candidate), independent of the host caller
 - resource limits enforced: memory, memory-swap (equal), pids, cpus, shm-size
 - disk: no per-container bound set (`disk_limit` is `None`) - or `--storage-opt
@@ -138,10 +142,12 @@ rule 6), which accepts this coverage for #10:
 | Kill-by-signal | fake-only (timing-fragile; overlaps the timeout seed) |
 
 **Still not established by any run**, live or fake: network egress
-actually blocked, verified from inside a container; a real client starting,
-completing a turn and satisfying the liveness canary (the demo makes no
-model call; owed to the first agent run under #11 and #26); and anything
-about a skill being selected, changing behaviour or helping (#26, #12).
+actually blocked, verified from inside a container; and anything about a
+skill being selected, changing behaviour or helping (#26, #12). A real
+client starting, completing a turn and satisfying the liveness canary WAS
+established by #11's live `skillc collection-run`, once per collection (both
+captured, graded PASS; [evidence](../../../evals/second-collection-conformance/evidence/README.md)),
+with the agent container's egress open by owner ruling.
 The conformance table below keeps its fake-daemon statuses, because it
 mirrors `tests/test_docker_conformance.py`; this section is the live
 evidence alongside it.
