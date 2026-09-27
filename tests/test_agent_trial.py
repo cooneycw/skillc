@@ -62,7 +62,9 @@ def _planned(store: Path) -> tuple[t.Experiment, str]:
     spec: dict[str, object] = {
         "experiment": "agent-trial",
         "trials": [{
-            "label": "t", "case": {"id": "c", "revision": "r1"}, "grader": {"id": "g", "revision": "g1"},
+            # The grader these attempts are graded by, digest pinned (#139): the
+            # verifier stores a result against nothing else.
+            "label": "t", "case": {"id": "c", "revision": "r1"}, "grader": verify.GraderDef.load(GRADER_ROOT).identity(),
             "subject": {"digest": "sha256:00"}, "client": {"name": "fake", "version": "1"},
             "image": {"digest": "sha256:01"}, "config": {}, "attempts": 1,
         }],
@@ -951,17 +953,16 @@ def _check_records(path: Path, rule: str | None = None) -> int:
     return cli.cmd_check_records(argparse.Namespace(path=str(path), rule=rule))
 
 
-#: The one finding a captured agent store carries today, independent of #106:
-#: `run_one_attempt` grades through `verify.grade_files`, which writes no
-#: `verified-result`, so `attempt-accounting` reports grading as still owed.
-#: Recorded in the Nit Store rather than fixed here.
-_KNOWN_ACCOUNTING_GAP = "is captured but has no result; grading is still owed"
+#: What `attempt-accounting` says about a captured attempt with no stored
+#: result. Since #139 a GRADED agent attempt stores one, so this is owed only
+#: where grading was blocked - which is exactly what it should still say.
+_GRADING_OWED = "is captured but has no result; grading is still owed"
 
 
-def _store_is_clean(path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """Every evidence rule passes on the store, except `attempt-accounting`,
-    whose ONLY finding may be the known gap above - any other accounting
-    finding still fails this."""
+def _store_is_clean(path: Path, capsys: pytest.CaptureFixture[str], *, grading_owed: bool = False) -> None:
+    """Every evidence rule passes on the store. `attempt-accounting` is clean
+    too, unless `grading_owed` - a captured attempt whose grading was blocked -
+    in which case its ONLY finding is that grading is still owed."""
     from skillc import checks
 
     capsys.readouterr()
@@ -970,9 +971,12 @@ def _store_is_clean(path: Path, capsys: pytest.CaptureFixture[str]) -> None:
             continue
         assert _check_records(path, rule.id) == 0, rule.id
     capsys.readouterr()
-    _check_records(path, "attempt-accounting")
+    code = _check_records(path, "attempt-accounting")
     errors = [line for line in capsys.readouterr().out.splitlines() if line.startswith("error")]
-    assert all(_KNOWN_ACCOUNTING_GAP in line for line in errors), errors
+    if grading_owed:
+        assert code == 1 and len(errors) == 1 and _GRADING_OWED in errors[0], errors
+    else:
+        assert code == 0 and errors == [], errors
 
 
 def _saved_observation(experiment: t.Experiment, attempt_id: str) -> dict[str, object]:
@@ -1024,6 +1028,44 @@ def test_a_graded_attempt_persists_its_observation_and_check_records_accepts_the
     _store_is_clean(experiment.root, capsys)
 
 
+def test_a_graded_attempt_stores_a_verified_result_bound_to_its_manifest_and_pin(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """#139: the grade used to live only in the returned dict. Now the attempt
+    stores a `verified-result`, graded over exactly the bytes its manifest
+    captured, under the grader the ledger pinned. The observation stands in for
+    the receipt, and readiness stays UNKNOWN (owner decision B1), so a task
+    PASS is stored as INCONCLUSIVE - never a PASS no receipt readied."""
+    experiment, attempt_id, record = _graded_codex_attempt(store, base, docker_state, tmp_path)
+    [path] = experiment.root.glob("result-*.json")
+    stored = json.loads(path.read_text(encoding="utf-8"))
+    graded = record["graded"]
+    assert isinstance(graded, dict)
+    assert graded["status"] == "PASS" and graded["result_id"] == stored["result_id"]
+    assert graded["result_status"] == stored["status"] == "INCONCLUSIVE"
+    assert stored["attempt_id"] == attempt_id and stored["producer"] == "assembler"
+    assert stored["grader"] == experiment.trial_of(attempt_id)["grader"]
+    manifest = json.loads((experiment.root / f"manifest-{attempt_id}.json").read_text(encoding="utf-8"))
+    assert stored["graded_digests"] == sorted({a["digest"] for a in manifest["artifacts"]})
+    assert stored["verification"]["readiness_source"] == "agent-observation"
+    [readiness] = [c for c in stored["criteria"] if c["id"] == verify.READINESS_CRITERION]
+    assert readiness["outcome"] == "UNKNOWN"
+    assert at.observation_record_name(attempt_id) in readiness["missing"]
+    assert not list(experiment.root.glob("receipt-*.json"))
+
+
+def test_the_stored_stand_in_needs_its_observation(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Negative control for the stand-in on a real store: without the
+    observation record, the receiptless result is graded without its receipt."""
+    experiment, attempt_id, _record = _graded_codex_attempt(store, base, docker_state, tmp_path)
+    (experiment.root / at.observation_record_name(attempt_id)).unlink()
+    capsys.readouterr()
+    assert _check_records(experiment.root, "attempt-accounting") == 1
+    assert "holds no agent-observation" in capsys.readouterr().out
+
+
 def test_a_blocked_grade_is_persisted_with_its_reason(
     store: Path, base: Path, docker_state: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -1046,7 +1088,9 @@ def test_a_blocked_grade_is_persisted_with_its_reason(
     assert isinstance(grading, dict)
     assert grading["eligible"] is False and grading["graded_status"] is None
     assert "prompt_delivered=False" in str(grading["blocked_reason"])
-    _store_is_clean(experiment.root, capsys)
+    # #139's red case: an attempt captured but never graded still owes its grade.
+    assert not list(experiment.root.glob("result-*.json"))
+    _store_is_clean(experiment.root, capsys, grading_owed=True)
 
 
 def test_an_attempt_blocked_before_launch_persists_a_not_observed_record(

@@ -114,6 +114,21 @@ _JUDGE_KEYS = {"file", "timeout"}
 READINESS_CRITERION = "installation-ready"
 #: The receipt facts records.md requires. Anything but SATISFIED is not ready.
 READINESS_FACTS = ("discovery_canary", "baseline_absence")
+#: What stands in for the installation receipt on the agent-trial path (#139),
+#: recorded as `verification.readiness_source`. The agent path writes no
+#: receipt: the baseline arm installs nothing, which the receipt contract
+#: refuses, and nothing on it establishes that a client discovered what was
+#: delivered. The attempt's `agent-observation` record stands in for ACCOUNTING
+#: only - `records.attempt_accounting` requires it in the bundle - and never for
+#: readiness: `installation-ready` stays UNKNOWN on this path, so readiness
+#: still gates PASS (verification.md).
+AGENT_OBSERVATION_READINESS = records.OBSERVATION_STAND_IN
+
+
+def observation_record_name(attempt_id: str) -> str:
+    """The agent-observation record's file name, beside the attempt's lifecycle
+    record. `agent_trial` writes it; a stand-in result names it."""
+    return f"observation-{attempt_id}.json"
 
 #: The most of the probe's report the judge is given.
 MAX_OBSERVATION_BYTES = 1024 * 1024
@@ -960,6 +975,47 @@ def _ptrace_scope() -> str:
         return "unknown"
 
 
+def _observation_readiness(attempt_id: str) -> dict[str, object]:
+    """The verifier's `installation-ready` criterion on the agent-trial path
+    (#139, owner decision B1): UNKNOWN, always. The observation that stands in
+    for the receipt shows the prompt arrived and the agent was live - not that
+    the subject was installed as planned and discovered - so it cannot satisfy
+    readiness, and the trial cannot PASS on it."""
+    return {"id": READINESS_CRITERION, "mandatory": True, "outcome": "UNKNOWN",
+            "missing": f"no installation receipt on the agent-trial path; "
+                       f"{observation_record_name(attempt_id)} stands in for it in attempt accounting "
+                       "but does not establish that the subject was installed and discovered"}
+
+
+def _eligible_observation(attempt_id: str, observation: Mapping[str, object]) -> None:
+    """Refuse to grade on an observation that did not confirm the attempt."""
+    if observation.get("status") == "unknown":
+        raise Refused(f"attempt {attempt_id!r}: its transcript observation is unknown; "
+                      "an unconfirmed attempt is never graded")
+    if observation.get("grading_eligible") is not True or observation.get("prompt_delivered") is not True \
+            or observation.get("canary_satisfied") is not True:
+        raise Refused(f"attempt {attempt_id!r}: its observation does not confirm both prompt delivery and "
+                      "the canary, so it cannot stand in for an installation receipt")
+
+
+def grade_agent_attempt(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base: Path,
+                        observation: Mapping[str, object], backend: ExecutionBackend | None = None,
+                        forbidden: list[Path] | None = None) -> tuple[dict[str, object], Graded]:
+    """Grade one captured agent-trial attempt and store its `verified-result`
+    (#139), exactly as `grade` does - the same pin, capture, snapshot, ledger
+    and frozen-digest checks - except that the controller's transcript
+    `observation` (what `agent_trial` records for the attempt) stands in for
+    the installation receipt. Refused, nothing written, unless it confirms
+    both prompt delivery and the canary.
+
+    Returns the stored result and the task grade (`Graded`, without the
+    verifier's readiness criterion), which is what the agent driver reports
+    as the attempt's own grade."""
+    _eligible_observation(attempt_id, observation)
+    return _grade_and_store(experiment, attempt_id, grader, base, forbidden, backend=backend,
+                            readiness_source=AGENT_OBSERVATION_READINESS)
+
+
 def grade(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base: Path,
           forbidden: list[Path] | None = None, regrade_of: str | None = None,
           backend: ExecutionBackend | None = None,
@@ -1005,6 +1061,15 @@ def grade(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base
     own ruling, Refs #69), so there is no consumer for record-envelope
     versioning to protect.
     """
+    return _grade_and_store(experiment, attempt_id, grader, base, forbidden, regrade_of,
+                            backend, judges, goal_text)[0]
+
+
+def _grade_and_store(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base: Path,
+                     forbidden: list[Path] | None = None, regrade_of: str | None = None,
+                     backend: ExecutionBackend | None = None,
+                     judges: Mapping[str, judge_seam.Judge] | None = None, goal_text: str = "",
+                     readiness_source: str = records.INSTALLATION_RECEIPT) -> tuple[dict[str, object], Graded]:
     if judges:
         unknown_tiers = set(judges) - set(judge_seam.JUDGE_TIERS)
         if unknown_tiers:
@@ -1031,7 +1096,13 @@ def grade(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base
         raise Refused(f"attempt {attempt_id!r} is not a finalized capture; nothing else can be graded")
     if base.resolve().is_relative_to(experiment.root.parent.resolve()):
         raise Refused("refusing to grade inside the evidence store")
-    receipt_name, receipt = _receipt(experiment, attempt_id, planned)
+    if readiness_source == records.INSTALLATION_RECEIPT:
+        receipt_name, receipt = _receipt(experiment, attempt_id, planned)
+        readiness = _readiness(receipt_name, receipt)
+    elif readiness_source == AGENT_OBSERVATION_READINESS:
+        readiness = _observation_readiness(attempt_id)
+    else:
+        raise Refused(f"unknown readiness source {readiness_source!r}")
     frozen = trial.frozen_artifacts(experiment, attempt_id)
     files = [
         (str(a["path"]), _read_frozen(experiment, str(a["digest"])), a.get("mode") == "x")
@@ -1055,7 +1126,7 @@ def grade(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base
         raise Refused("the ledger changed while candidate code ran; no result is written")
     trial.frozen_artifacts(experiment, attempt_id)
 
-    criteria = [*graded.criteria, _readiness(receipt_name, receipt)]
+    criteria = [*graded.criteria, readiness]
     status = _status(criteria)
 
     tiers_enabled = [GRADING_TIER]
@@ -1104,10 +1175,14 @@ def grade(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base
             "disagreement": disagreement,
         },
     }
+    if readiness_source != records.INSTALLATION_RECEIPT:
+        verification = result["verification"]
+        assert isinstance(verification, dict)
+        verification["readiness_source"] = readiness_source
     if regrade_of is not None:
         result["regrade_of"] = regrade_of
     trial.add_result(experiment, result)
-    return result
+    return result, graded
 
 
 def _read_frozen(experiment: trial.Experiment, digest: str) -> bytes:
@@ -1128,4 +1203,25 @@ def regrade(experiment: trial.Experiment, result_id: str, grader: GraderDef, bas
     if path.is_symlink() or not path.is_file():
         raise Refused(f"no stored result {result_id!r} to regrade")
     original = json.loads(_read_regular(path))
-    return grade(experiment, str(original.get("attempt_id")), grader, base, forbidden, regrade_of=result_id)
+    attempt_id = str(original.get("attempt_id"))
+    verification = original.get("verification")
+    if isinstance(verification, dict) and verification.get("readiness_source") == AGENT_OBSERVATION_READINESS:
+        # The same stand-in the original was graded on (#139), read back from
+        # the store: an agent attempt has no receipt to regrade against.
+        _eligible_observation(attempt_id, _stored_observation(experiment, attempt_id))
+        return _grade_and_store(experiment, attempt_id, grader, base, forbidden, regrade_of=result_id,
+                                readiness_source=AGENT_OBSERVATION_READINESS)[0]
+    return grade(experiment, attempt_id, grader, base, forbidden, regrade_of=result_id)
+
+
+def _stored_observation(experiment: trial.Experiment, attempt_id: str) -> dict[str, object]:
+    """The attempt's stored agent-observation, flattened to the fields
+    `_eligible_observation` reads. Absent or unreadable is refused."""
+    path = experiment.root / observation_record_name(attempt_id)
+    if path.is_symlink() or not path.is_file():
+        raise Refused(f"attempt {attempt_id!r} has no {path.name}; its agent-path result cannot be regraded")
+    data = json.loads(_read_regular(path))
+    transcript = data.get("transcript") if isinstance(data, dict) else None
+    status = data.get("status") if isinstance(data, dict) else None
+    return {"status": "unknown" if status != "observed" else status,
+            **(transcript if isinstance(transcript, dict) else {})}

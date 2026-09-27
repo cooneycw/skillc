@@ -504,6 +504,52 @@ def test_a_regrade_repeats_the_outcomes_and_keeps_the_original(store: Path, base
                        GRADER.with_judge(TASK / "grader-controls" / "always_pass.py"), grading)
 
 
+_CONFIRMED = {"status": "observed", "prompt_delivered": True, "canary_satisfied": True, "grading_eligible": True}
+
+
+def test_an_agent_attempt_is_graded_on_its_observation_and_never_readied_by_it(
+        store: Path, base: Path, grading: Path) -> None:
+    """#139: no receipt, the observation stands in - and readiness is UNKNOWN
+    (owner decision B1), so a task PASS is stored as INCONCLUSIVE."""
+    experiment, attempt_id = _captured(store, base, REFERENCE, receipt=False)
+    result, graded = verify.grade_agent_attempt(experiment, attempt_id, GRADER, grading, _CONFIRMED)
+    assert graded.status == "PASS"
+    assert result["status"] == "INCONCLUSIVE"
+    assert _outcomes(result)[verify.READINESS_CRITERION] == "UNKNOWN"
+    assert result["verification"]["readiness_source"] == "agent-observation"  # type: ignore[index]
+    assert (experiment.root / f"result-{result['result_id']}.json").is_file()
+
+
+@pytest.mark.parametrize("observation", [
+    {**_CONFIRMED, "canary_satisfied": False, "grading_eligible": False},
+    {**_CONFIRMED, "prompt_delivered": False, "grading_eligible": False},
+    {**_CONFIRMED, "grading_eligible": False},
+    {"status": "unknown", "reason": "hook failed"},
+    {},
+])
+def test_an_unconfirmed_observation_stands_in_for_nothing(
+        observation: dict[str, object], store: Path, base: Path, grading: Path) -> None:
+    experiment, attempt_id = _captured(store, base, REFERENCE, receipt=False)
+    with pytest.raises(verify.Refused):
+        verify.grade_agent_attempt(experiment, attempt_id, GRADER, grading, observation)
+    assert not list(experiment.root.glob("result-*.json"))
+
+
+def test_an_agent_result_regrades_on_its_stored_observation(store: Path, base: Path, grading: Path) -> None:
+    experiment, attempt_id = _captured(store, base, REFERENCE, receipt=False)
+    original, _graded = verify.grade_agent_attempt(experiment, attempt_id, GRADER, grading, _CONFIRMED)
+    with pytest.raises(verify.Refused, match="no observation-"):
+        verify.regrade(experiment, str(original["result_id"]), GRADER, grading)
+    (experiment.root / verify.observation_record_name(attempt_id)).write_text(json.dumps({
+        "status": "observed",
+        "transcript": {"prompt_delivered": True, "canary_satisfied": True, "grading_eligible": True},
+    }), encoding="utf-8")
+    again = verify.regrade(experiment, str(original["result_id"]), GRADER, grading)
+    assert again["regrade_of"] == original["result_id"]
+    assert again["verification"]["readiness_source"] == "agent-observation"  # type: ignore[index]
+    assert _outcomes(again) == _outcomes(original)
+
+
 def test_a_regrade_of_nothing_stored_is_refused(store: Path, grading: Path) -> None:
     experiment, _attempt_id = _plan(store)
     with pytest.raises(t.Refused, match="no stored result"):

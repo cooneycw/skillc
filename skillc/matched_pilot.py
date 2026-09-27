@@ -55,7 +55,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import demo, records, trial
+from . import demo, records, trial, verify
 from .lifecycle import RealAgentBlocked
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -192,14 +192,16 @@ def plan_pilot(
     repeat-outer, arm-inner, so the schedule interleaves T,B,T,B,... rather
     than running each arm as one block (which would confound the arm with
     time of day, login state and provider load)."""
-    grader = json.loads(declaration.grader_path.read_text(encoding="utf-8"))
+    # The full identity, digest included (#139): the verifier refuses to store a
+    # result against a ledger that pins no grader digest.
+    grader_pin = verify.GraderDef.load(declaration.grader_path.parent).identity()
     trials: list[dict[str, object]] = []
     for repeat in range(1, declaration.repeats_per_arm + 1):
         for arm in declaration.arms:
             trials.append({
                 "label": f"matched_pilot_{arm}_{repeat}",
                 "case": {"id": declaration.task_id, "revision": declaration.task_revision},
-                "grader": {"id": grader["id"], "revision": grader["revision"]},
+                "grader": dict(grader_pin),
                 "subject": {"digest": treatment_digest if arm == TREATMENT else BASELINE_SUBJECT_DIGEST},
                 "client": {"name": declaration.client_name, "version": declaration.client_version},
                 "image": {"digest": image_digest or UNKNOWN},
@@ -636,7 +638,9 @@ def summarize(report: Mapping[str, object]) -> dict[str, object]:
 
 def export_bundle(experiment: trial.Experiment, report: Mapping[str, object], into: Path) -> list[Path]:
     """Copy the ledger and every per-attempt record the store holds
-    (lifecycle, artifact manifest, and any receipt or result), and write the
+    (lifecycle, artifact manifest, agent observation, and any receipt or
+    result - the observation is what stands in for a receipt on this path,
+    #139, so a bundle without it cannot account for its grades), and write the
     report, into `into` - the directory `skillc check-records` reads as one
     bundle. The content-addressed objects and the journals stay private."""
     into.mkdir(parents=True, exist_ok=True)
@@ -645,7 +649,7 @@ def export_bundle(experiment: trial.Experiment, report: Mapping[str, object], in
     target = into / "ledger.json"
     target.write_bytes(ledger.read_bytes())
     written.append(target)
-    for pattern in ("lifecycle-*.json", "manifest-*.json", "receipt-*.json", "result-*.json"):
+    for pattern in ("lifecycle-*.json", "manifest-*.json", "observation-*.json", "receipt-*.json", "result-*.json"):
         for source in sorted(experiment.root.glob(pattern)):
             target = into / source.name
             target.write_bytes(source.read_bytes())
@@ -752,13 +756,17 @@ PRIVATE_OBSERVATIONS_FILENAME = "private-observations.json"
 EVIDENCE_DIR = PILOT_DIR / "evidence" / "records"
 
 
-#: The one finding a captured agent-trial attempt still carries: the #106
-#: driver grades through `verify.grade_files` and stores no `verified-result`
-#: record (that needs an installation receipt the agent path does not write),
-#: so `attempt-accounting` correctly says the result is owed. Every OTHER
-#: finding refuses publication. Tracked as #139; remove this tolerance there.
+#: The one finding the #12 live run's bundle carries: that run (2026-09-27,
+#: before #139) graded through `verify.grade_files` and stored no
+#: `verified-result`, so `attempt-accounting` correctly says the result is
+#: owed. Since #139 the agent driver stores one, so the tolerance is scoped to
+#: exactly that pre-fix experiment - a bundle from any later run carrying the
+#: same finding is refused like every other finding. The run's ledger pins no
+#: grader digest, so its results cannot be stored after the fact; a clean
+#: regeneration is owed to #12 (a new run).
 KNOWN_GAP_RULE = "attempt-accounting"
 KNOWN_GAP_TEXT = "is captured but has no result"
+KNOWN_GAP_EXPERIMENTS = frozenset({"matched-pilot-6ab82dc6"})
 
 
 def bundle_findings(root: Path) -> tuple[list[str], int]:
@@ -774,12 +782,16 @@ def bundle_findings(root: Path) -> tuple[list[str], int]:
     findings = [f for record in found for f in checks.run_record(record)]
     findings += [f for bundle in bundles for f in checks.run_bundle(bundle)]
     errors = [f for f in findings if f.severity == checks.ERROR]
-    known = [f for f in errors if f.rule == KNOWN_GAP_RULE and KNOWN_GAP_TEXT in f.detail]
+    pre_fix = all(
+        ledger.data.get("experiment_id") in KNOWN_GAP_EXPERIMENTS
+        for bundle in bundles for ledger in bundle.of_kind(records.TRIAL_LEDGER)
+    )
+    known = [f for f in errors if pre_fix and f.rule == KNOWN_GAP_RULE and KNOWN_GAP_TEXT in f.detail]
     unexpected = [f"{f.rule}: {f.detail}" for f in errors if f not in known]
     return unexpected, len(known)
 
 
-_BUNDLE_FILE_RE = re.compile(r"(ledger|report)\.json|(lifecycle|manifest|receipt|result)-[A-Za-z0-9_.-]+\.json")
+_BUNDLE_FILE_RE = re.compile(r"(ledger|report)\.json|(lifecycle|manifest|observation|receipt|result)-[A-Za-z0-9_.-]+\.json")
 
 
 def is_bundle_file(path: Path) -> bool:

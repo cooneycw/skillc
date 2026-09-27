@@ -10,6 +10,37 @@ and version plan.
 
 ### Added
 
+- **A graded agent-trial attempt now stores its `verified-result`** (Refs
+  #139). `agent_trial.run_one_attempt` grades through the verifier's result
+  assembler (`verify.grade_agent_attempt`) instead of `verify.grade_files`
+  alone. So the result keeps the ledger's grader pin, the capture check, the
+  store snapshot and the frozen-digest checks, and `attempt-accounting` no
+  longer reports every captured agent attempt as "grading is still owed".
+  - **The receipt question.** The agent path writes no installation receipt:
+    the baseline arm installs nothing, which the receipt contract refuses, and
+    nothing on the path establishes that a client discovered what was
+    delivered. The attempt's `agent-observation` record stands in for the
+    receipt in ATTEMPT ACCOUNTING only. The result declares it
+    (`verification.readiness_source: agent-observation`), and the verifier's
+    `installation-ready` criterion is always UNKNOWN on this path, so
+    readiness still gates PASS: a task PASS is stored as INCONCLUSIVE, and a
+    task FAIL is still FAIL. The driver's returned `graded.status` stays the
+    task grade, with `result_status` beside it.
+  - `attempt-accounting` accepts a receiptless graded result only when it
+    declares the stand-in, keeps `installation-ready` UNKNOWN, and the bundle
+    holds that attempt's observed, grading-eligible `agent-observation`. New
+    controls: `good/agent-observation-stands-in`,
+    `bad/stand-in-without-observation` and `bad/stand-in-claims-readiness`.
+  - Agent-trial ledgers now pin the grader's digest (`matched_pilot.plan_pilot`,
+    `collection_conformance.plan_collection_attempt`), which the verifier
+    requires. The collection plan used to pin revision `g1` of a grader at
+    revision `2`.
+  - `pilot-run`/`pilot-report` export `observation-*.json` into the bundle.
+    The #12 bundle's known-gap tolerance is narrowed to that one pre-fix
+    experiment (`matched-pilot-6ab82dc6`). Its ledger pins no grader digest,
+    so its results cannot be stored after the fact, and a clean bundle is owed
+    to a new #12 run.
+
 - **Every real-agent attempt now persists its observation as an
   `agent-observation` record** (Refs #106). `agent_trial.run_one_attempt`
   writes `observation-<attempt>.json` beside `lifecycle-<attempt>.json` on

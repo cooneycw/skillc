@@ -487,7 +487,13 @@ The controller's account is the lifecycle record (#8):
   result, and a captured one carries no declared non-run: the accounts would
   disagree;
 - an attempt that was graded (its result declares no run state) also has its
-  installation receipt and artifact manifest.
+  installation receipt and artifact manifest. The one stand-in for the receipt
+  (#139) is an agent-trial result that declares
+  `verification.readiness_source: agent-observation`. It is accepted only when
+  the bundle holds that attempt's `agent-observation`, observed and eligible
+  for grading, and the result's `installation-ready` criterion is UNKNOWN. The
+  observation accounts for the grade. It never readies a PASS
+  ([verification.md](verification.md#the-result)).
 
 Before #8 this rule required a result for every planned attempt. It now requires a
 lifecycle instead, and a result only where bytes were captured.
@@ -547,7 +553,7 @@ bundle cases as well, including against every record rule.
 | `pilot-report` | record | empty attempts list; bad disposition or criterion outcome; no uncertainty; a negative intervention count; a cost/time split missing a key or whose parts do not sum to its total; a duplicate attempt ID (#12) |
 | `ledger-binding` | bundle | cross-trial receipt; stale receipt; attempt the ledger never issued; altered artifact; unplanned grader; a `skill-invocations` path the attempt's receipt never installed (#39); a trial declaring `case.observes_selection: true` whose manifest has no `skill-invocations` stream (#26/#39); a `pilot-report` that omits a scheduled attempt or names one the ledger never planned (#12) |
 | `unique-ids` | bundle | duplicate attempt ID; conflicting receipts; duplicate result ID |
-| `attempt-accounting` | bundle | planned attempt with no lifecycle; captured with no result; graded without receipt; graded without manifest; captured but declared NOT_RUN; graded but not captured; manifest but not captured |
+| `attempt-accounting` | bundle | planned attempt with no lifecycle; captured with no result; graded without receipt; graded without manifest; captured but declared NOT_RUN; graded but not captured; manifest but not captured; receipt stand-in with no agent-observation, or claiming readiness (#139) |
 | `lineage` | bundle | retry reusing its own ID; regrade whose original was erased; regrade of different bytes |
 
 Record and bundle rules live in the **same registry and the same selftest loop** as
