@@ -10,6 +10,82 @@ and version plan.
 
 ### Added
 
+- **`selection_probe.agent_trial_runner`: the real `AttemptRunner`**
+  (Refs #26): each planned attempt becomes one `agent_trial.run_one_attempt`
+  in skill-free canary mode (`skill_name=None`), with the declared collection
+  delivered through `extra_home_files` into the TREATMENT arm's home only -
+  the baseline arm receives nothing extra whatever the caller passes,
+  enforced by the runner rather than trusted to it. The prompt is the task's
+  own `goal.md` plus the case's `prompt_addendum`. `transcript_from_record`
+  reads selection from the record's `skill_invocations` alone (never the
+  canary), sets `codex_best_effort` when detection is `"heuristic"`, and
+  reports a captured attempt whose prompt delivery or canary was not
+  confirmed as `"inconclusive"` - neither a selection nor a graded outcome.
+  `run_planned_selection_probe` runs an already-planned experiment (the real
+  runner needs it before running), and both entry points take a
+  `grading_backend`, so a real agent's output is probed in a separate
+  container, never on the host. Proven end to end on the fake `docker` CLI
+  and the scripted fake client across all six planned attempts; confirmed
+  red when the collection reaches both arms, when the `grading_eligible`
+  check is dropped, and when `skill_invocations` is ignored. A live run is a
+  `SKILLC_ALLOW_REAL_AGENT=1`-gated test, owed to the operator.
+
+  Cross-model review of this change found four defects in the driver, all
+  fixed here: with no `grading_backend` the candidate ran as a host
+  subprocess (now refused before any attempt unless `allow_host_grading=True`,
+  for trusted fixtures only); a repeated attempt passed attendance and was
+  then dropped from the report (repeats are now refused up front); an
+  `INCONCLUSIVE` grade was reported as task failure (now `None`, with the
+  grader's reason); and selection was judged against the supplied case file
+  rather than the frozen planned configuration (now the plan decides, and a
+  case revision that differs from the plan is refused). A re-review found two
+  more: the agent's own backend could be passed as the grading backend,
+  carrying its network egress into grading (the runner now exposes
+  `.backend`, and reuse or a grading backend with egress is refused), and a
+  plan missing a declared case or arm produced a report that read as
+  complete (the plan must now cover every declared `(case, arm)`). Each is
+  confirmed red on the unfixed code.
+
+- **`skillc.selection_probe`: the run driver for #26's three predeclared
+  cases** (Refs #26): plans both arms of every case
+  (`evals/selection-probe/cases.json`) through the real controller (reusing,
+  never duplicating, the shape `tests/test_selection_probe.py`'s own no-run
+  deliverable already proved), runs every planned attempt through a pluggable
+  `AttemptRunner` seam, grades the same public `slug-small-fix` task outcome
+  independently of what it observed about selection, and reports both side
+  by side. Nothing runs for real: `lifecycle.py`'s own existing guard already
+  refuses to launch `claude`/`codex` without `SKILLC_ALLOW_REAL_AGENT=1`, and
+  every test of the driver's own logic uses a FAKE runner that never calls
+  `execute()` at all.
+
+  Selection vocabulary: `"selected"`, `"not-selected"`, `"unknown"` - a
+  non-`"captured"` disposition (`"unavailable"`, `"not-run"`,
+  `"inconclusive"`) is ALWAYS `"unknown"`, never `"not-selected"`, per #26's
+  own decision-traceability rule ("do not substitute prompted invocation").
+  The baseline arm's `applicable_skills` is always empty by construction, so
+  `"selected"` there is exactly this probe's own contamination signal -
+  `CaseResult.baseline_contaminated` is a named alias of that same result,
+  one mechanism rather than two. `run_selection_probe` refuses
+  (`SelectionProbeRefused`) if any planned attempt is missing from the
+  results - `AttemptRunner` may return `None` for an attempt that could not
+  even be launched, distinct from an `AttemptTranscript` reporting a real,
+  non-captured disposition (which is a result, not an absence). Every
+  acceptance path named above has a committed test confirmed red on its own
+  mutation before being added: dropping the disposition check, disabling the
+  attendance check, and breaking `baseline_contaminated` each turn a
+  passing suite red.
+
+  Building this against the real `trial.plan()` output (not a hand-written
+  fixture) surfaced a real bug before it ever reached a real driver: a
+  planned trial's `config` is stored as a content-addressed digest reference
+  (`trial.py`'s own "the resolved configuration is stored as an object and
+  the ledger binds its digest"), never the literal `arm`/`prompt_addendum`/
+  `applicable_skills` dict - reading `trial_dict["config"]["arm"]` directly,
+  as an early draft did, raised `KeyError` the first time it ran against a
+  real plan. Fixed by resolving each trial's config back through
+  `experiment.object_path(digest)` (the same pattern `verify.py`'s own
+  `_read_frozen` already uses) before handing it to any runner.
+
 - **The Claude Code agent arm: a `claude-code-skills` surface and a
   per-collection Level 1 run on Claude Code** (Refs #124).
   `materialize.SURFACES` declares two surfaces, each bound to one client
