@@ -15,8 +15,10 @@ this pilot does **not** fork a second cost estimator.
   Codex CLI **subscription login** (the normal rotating OAuth login, never a
   long-lived key) - not a pay-per-use API key (ADR 0005 rule 6, owner ruling
   2026-09-27: "Normal Claude and codex"). The in-container credential path
-  for a subscription-login agent run (issue #98) is not yet built; that is
-  the real remaining blocker, not a dollar gate.
+  for a subscription-login agent run (`skillc/credential.py`,
+  `docker_backend.DockerBackend.deliver_home_file`/`read_home_file`, issue
+  #98) is now built; `skillc/trial.py`'s real attempt-execution loop is the
+  real remaining blocker, not a dollar gate.
 - **Task:** the already-qualified [slug-small-fix](../level1/slug-small-fix/README.md)
   goal and grader (#5), used verbatim - unlike #26, this pilot measures
   task-outcome benefit and completion time, not selection behavior, so there
@@ -60,15 +62,15 @@ Delivered and tested (`tests/test_matched_pilot.py`):
   names explicitly (`controls/ledger-binding/{bad,good}/pilot-report-*`).
 
 Explicitly NOT delivered here, per "keep runtime implementation out of the
-planning PR" (#12's own text), the cost stop (ADR 0005 rule 5), and the
-in-container credential prerequisite (rule 6, issue #98): no live agent
-attempt, no image build, no report GENERATOR (the schema is defined and
+planning PR" (#12's own text) and the cost stop (ADR 0005 rule 5): no live
+agent attempt, no image build, no report GENERATOR (the schema is defined and
 validated; producing a real report needs a real run), and no enforced
 time/monetary cap at runtime (stated, not yet wired to a running meter - the
-same gap #26's manifest already names for its own time caps). `execution`
-stays `"incomplete"` until #98's in-container credential path and
-`skillc/trial.py`'s real execution loop both exist - not blocked on a dollar
-budget, since this pilot enables no judge tier. A judge-call spend over the
+same gap #26's manifest already names for its own time caps). The
+in-container credential prerequisite (rule 6, issue #98) IS now built;
+`execution` stays `"incomplete"` for the remaining reason -
+`skillc/trial.py`'s real execution loop does not exist yet - not blocked on a
+dollar budget, since this pilot enables no judge tier. A judge-call spend over the
 $5 ceiling would still be refused regardless of any approved budget, exactly
 as before.
 

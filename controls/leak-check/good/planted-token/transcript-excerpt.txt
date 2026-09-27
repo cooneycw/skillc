@@ -1,0 +1,6 @@
+The clean twin of bad/planted-token/transcript-excerpt.txt (#98): the same
+shape, with every credential value redacted rather than present, proving the
+check is not simply refusing anything containing the word "token".
+
+"access_token": "REDACTED"
+client init with an API key (redacted)

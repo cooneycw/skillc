@@ -1,0 +1,9 @@
+Simulates a credential value that leaked into an exported record or
+paste-back (#98) - obviously fake, never a real token. Plain text, not JSON:
+a JSON fixture would force the surrounding quotes to be escaped (\") on
+disk, which is exactly the shape the regexes do NOT match - a real exported
+transcript excerpt or raw credential-file paste-back looks like this, one
+level of quoting, not two.
+
+"access_token": "planted-fake-oauth-token-value-0000"
+client init with sk-ant-api03-planted0000000000000000000000

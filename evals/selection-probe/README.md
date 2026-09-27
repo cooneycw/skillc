@@ -16,8 +16,10 @@ for the subscription-login ruling below.
   under the operator's normal Codex CLI **subscription login** (the normal
   rotating OAuth login, never a long-lived key) - not a pay-per-use API key
   (ADR 0005 rule 6, owner ruling 2026-09-27: "Normal Claude and codex"). The
-  in-container credential path for a subscription-login agent run (issue #98)
-  is not yet built; that is the real remaining blocker, not a dollar gate.
+  in-container credential path for a subscription-login agent run
+  (`skillc/credential.py`, `docker_backend.DockerBackend.deliver_home_file`/
+  `read_home_file`, issue #98) is now built; `skillc/trial.py`'s real
+  attempt-execution loop is the real remaining blocker, not a dollar gate.
 - **Task:** the already-qualified [slug-small-fix](../level1/slug-small-fix/README.md)
   goal and grader (#5), reused verbatim or with a short addendum below - every
   case grades the SAME public task outcome, independent of what it observes
@@ -89,12 +91,12 @@ Delivered and tested (`tests/test_selection_probe.py`):
   proves a large agent quota with under-ceiling judge spend is authorized,
   and judge spend over the ceiling is refused regardless of the agent quota.
 
-Explicitly NOT delivered here, per the cost stop (ADR 0005 rule 5) and the
-in-container credential prerequisite (rule 6, issue #98): no live agent
-attempt, no image build (`image.digest` in the plan is a named placeholder -
-#77's Docker backend implementation is a follow-up PR), and no enforced
-time/monetary cap (the manifest's `time_caps` are stated, not yet wired to
-any committed control). `execution` stays `"incomplete"` until #98's
-in-container credential path and `skillc/trial.py`'s real execution loop
-both exist - not blocked on a dollar budget, since this probe enables no
+Explicitly NOT delivered here, per the cost stop (ADR 0005 rule 5): no live
+agent attempt, no image build (`image.digest` in the plan is a named
+placeholder - #77's Docker backend implementation is a follow-up PR), and no
+enforced time/monetary cap (the manifest's `time_caps` are stated, not yet
+wired to any committed control). The in-container credential prerequisite
+(rule 6, issue #98) IS now built; `execution` stays `"incomplete"` for the
+remaining reason - `skillc/trial.py`'s real execution loop does not exist
+yet - not blocked on a dollar budget, since this probe enables no
 judge tier.
