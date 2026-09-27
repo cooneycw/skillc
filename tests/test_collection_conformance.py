@@ -418,10 +418,11 @@ def test_paste_back_refresh_line_reads_a_real_driver_record(
     text = cc.build_collection_paste_back(result)
     assert "refresh_observed_in_container=False" in text
     assert "backend_teardown=confirmed" in text
-    # The record says "partial" (finalized before the workspace is cleaned);
-    # the journal's own event, written after, says what happened.
+    # The journal's own event says what happened; since #127 the record,
+    # finalized after cleanup, agrees with it rather than reading "partial".
     assert result.workspace_cleaned == "removed"
     assert "workspace_cleaned(journal)=removed" in text
+    assert "workspace_cleanup(record, at finalize)=removed" in text
     remaining = result.record["observation"]["credential_remaining_seconds_at_launch"]  # type: ignore[index]
     assert isinstance(remaining, int) and 3000 <= remaining <= 3600
 

@@ -61,6 +61,15 @@ and version plan.
 
 ### Fixed
 
+- **Every backend attempt's lifecycle record said its workspace was never
+  cleaned up** (#127): `lifecycle.run_through_backend` finalized before
+  cleaning, so the persisted `cleanup` read `partial` even when the journal
+  said `removed`. That included #11's live PASS runs. The workspace is now
+  cleaned first, so the record reports what cleanup did. The container's
+  `destroy()`/`confirm_absent()` outcome is journalled as a `backend-teardown`
+  detail event, even when `execute()` raises. `collection-run`'s
+  `workspace_cleanup(record, at finalize)` line (#136) now agrees with its
+  `workspace_cleaned(journal)` line.
 - **`--client <bare name>` was resolved against the cwd, not PATH** (Refs
   #124, folded in from the Nit Store). `materialize.find_client("codex")`
   reported a client on PATH as not found. A name with no path separator is
