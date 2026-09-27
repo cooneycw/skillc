@@ -718,12 +718,21 @@ def cmd_demo(args: argparse.Namespace) -> int:
     recorded_attempt_ids: list[str] = []
 
     try:
+        if args.cancel_target is not None:
+            # Hidden (issue #122): the child `--control`'s cancellation seed
+            # interrupts. Inside this `try` on purpose, so a SIGINT reaches
+            # the real handler below, not a copy of it.
+            return demo.run_cancel_target(
+                image=args.image or demo.DEFAULT_IMAGE, docker_bin=docker_bin, base=base, timeout=args.timeout,
+                sleep=args.cancel_target, recorded_attempt_ids=recorded_attempt_ids,
+            )
         if args.control:
-            ok = demo.run_control(
+            control = demo.run_control(
                 image=args.image or demo.DEFAULT_IMAGE, docker_bin=docker_bin, base=base, timeout=args.timeout,
                 recorded_attempt_ids=recorded_attempt_ids,
             )
-            if ok:
+            demo.print_paste_back(control.paste_back)
+            if control.ok:
                 print("skillc: --control - every seeded failure was caught")
                 return 0
             print("skillc: --control - at least one seeded failure was NOT caught", file=sys.stderr)
@@ -751,11 +760,7 @@ def cmd_demo(args: argparse.Namespace) -> int:
     except KeyboardInterrupt:
         # A fixed line, no exception text at all - never anything to scrub,
         # by construction, since KeyboardInterrupt carries none.
-        print(
-            "skillc: demo interrupted - containers labelled for this run may remain; "
-            "run the reap sweep or re-run to clean up",
-            file=sys.stderr,
-        )
+        print(demo.INTERRUPT_LINE, file=sys.stderr, flush=True)
         if not recorded_attempt_ids:
             print(
                 "skillc: no attempt ids were recorded before the interrupt - nothing to sweep",
@@ -1004,6 +1009,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--control", action="store_true",
         help="run the seeded negative controls instead - exits non-zero unless every one was caught",
     )
+    # Issue #122: the child process `--control`'s cancellation seed runs and
+    # interrupts. Not an operator-facing mode, so it is kept out of --help.
+    p_demo.add_argument("--cancel-target", type=float, default=None, metavar="SECONDS", help=argparse.SUPPRESS)
     p_demo.set_defaults(func=cmd_demo)
 
     p_collection_run = sub.add_parser(

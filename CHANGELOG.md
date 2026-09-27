@@ -8,7 +8,20 @@ and version plan.
 
 ## [Unreleased]
 
-Nothing yet - see `0.2.0` below for everything that landed since `0.1.0`.
+### Added
+
+- `skillc demo --control` seeds the two failure paths most likely to differ on
+  a real Docker daemon ([#122](https://github.com/cooneycw/skillc/issues/122)):
+  a **timeout** (an exec sleeping past its limit must stop as `timeout`,
+  confirmed from `docker inspect`, `inconclusive`, and leave nothing behind)
+  and an **operator cancellation** (a real SIGINT to a child `skillc demo`
+  process group mid-exec must print the fixed interrupt line, exit `1`, clean
+  up only its own attempt, and leave a foreign skillc-owned container
+  running). Each has a committed red case: disabled timeout enforcement, and
+  an unscoped interrupt sweep.
+- `--control` now prints a leak-checked paste-back block with one
+  `CAUGHT`/`NOT CAUGHT` line per seed, instead of a single aggregate line.
+  #122 closes only on the operator's live run of it against a real daemon.
 
 ## [0.2.0] - 2026-09-27
 

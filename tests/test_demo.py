@@ -28,6 +28,8 @@ FAKE_DOCKER = Path(__file__).resolve().parent / "fixtures" / "docker-backend" / 
 #: `materialize.py`'s own fake codex client (#7) - reused here for the
 #: in-container discovery listing, never a real ambient `codex` on PATH.
 CODEX_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "codex-subject"
+#: Issue #122's red-case child: skillc's CLI with the interrupt sweep unscoped.
+UNSCOPED_INTERRUPT_CHILD = Path(__file__).resolve().parent / "fixtures" / "demo-control" / "unscoped_interrupt_child.py"
 
 
 def _docker_bin(state_dir: Path) -> list[str]:
@@ -102,9 +104,21 @@ def test_run_demo_paste_back_is_leak_clean(base: Path, docker_state: Path) -> No
 # ------------------------------------------------------------- run_control
 
 
+def _run_control(base: Path, docker_state: Path, **overrides: object) -> demo.ControlResult:
+    """`run_control` with issue #122's two new seeds shortened for the fake
+    `docker` - the same seeds, a sub-second limit and a few-second sleep in
+    place of the operator's 3s/30s and 60s."""
+    kwargs: dict[str, object] = {
+        "image": "fake-image:1", "docker_bin": _docker_bin(docker_state), "base": base, "timeout": 5,
+        "timeout_limit": 0.5, "timeout_sleep": 5.0, "cancel_sleep": 4.0,
+    }
+    kwargs.update(overrides)
+    return demo.run_control(**kwargs)  # type: ignore[arg-type]
+
+
 def test_run_control_reports_every_seeded_failure_caught(base: Path, docker_state: Path) -> None:
-    ok = demo.run_control(image="fake-image:1", docker_bin=_docker_bin(docker_state), base=base, timeout=5)
-    assert ok is True
+    result = _run_control(base, docker_state)
+    assert result.ok is True
 
 
 def test_run_control_is_not_vacuously_green_when_the_bad_candidate_is_actually_good(
@@ -117,8 +131,8 @@ def test_run_control_is_not_vacuously_green_when_the_bad_candidate_is_actually_g
     the overall verdict flips to False - proving the grading-control check is
     load-bearing, not decorative."""
     monkeypatch.setattr(demo, "BAD_CANDIDATE", demo.GOOD_CANDIDATE)
-    ok = demo.run_control(image="fake-image:1", docker_bin=_docker_bin(docker_state), base=base, timeout=5)
-    assert ok is False
+    result = _run_control(base, docker_state)
+    assert result.ok is False
 
 
 def test_run_control_is_not_vacuously_green_when_the_orphan_is_reachable_by_confirm_absent(
@@ -139,8 +153,8 @@ def test_run_control_is_not_vacuously_green_when_the_orphan_is_reachable_by_conf
         return handle
 
     monkeypatch.setattr(dbe.DockerBackend, "prepare", _prepare_and_immediately_destroy)
-    ok = demo.run_control(image="fake-image:1", docker_bin=_docker_bin(docker_state), base=base, timeout=5)
-    assert ok is False
+    result = _run_control(base, docker_state)
+    assert result.ok is False
 
 
 # --------------------------------------------------------------- leak-check
@@ -686,8 +700,8 @@ def test_run_control_orphan_prepare_failure_is_not_caught_never_raises(
     mechanism it could not even seed), never raise a traceback."""
     docker_state.mkdir(parents=True, exist_ok=True)
     (docker_state / ".down").touch()
-    ok = demo.run_control(image="fake-image:1", docker_bin=_docker_bin(docker_state), base=base, timeout=5)
-    assert ok is False
+    result = _run_control(base, docker_state)
+    assert result.ok is False
 
 
 def test_describe_error_safely_scrubs_a_leaky_message() -> None:
@@ -988,7 +1002,7 @@ def test_cmd_demo_control_exits_0_when_every_seeded_failure_caught(
 ) -> None:
     from skillc import cli
 
-    monkeypatch.setattr(demo, "run_control", lambda **kwargs: True)
+    monkeypatch.setattr(demo, "run_control", lambda **kwargs: demo.ControlResult(True, "control block\n", ()))
     args = _demo_args(image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base=str(base), control=True)
     assert cli.cmd_demo(args) == 0
 
@@ -998,9 +1012,165 @@ def test_cmd_demo_control_exits_1_when_a_seeded_failure_is_not_caught(
 ) -> None:
     from skillc import cli
 
-    monkeypatch.setattr(demo, "run_control", lambda **kwargs: False)
+    monkeypatch.setattr(demo, "run_control", lambda **kwargs: demo.ControlResult(False, "control block\n", ()))
     args = _demo_args(image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base=str(base), control=True)
     assert cli.cmd_demo(args) == 1
+
+
+def test_cmd_demo_control_prints_its_block_through_the_leak_check(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Issue #122: `--control` prints its per-seed block, and prints it
+    through `print_paste_back` - a leaky block is refused (exit 2, nothing
+    printed), exactly like the normal demo's."""
+    from skillc import cli
+
+    args = _demo_args(image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base=str(base), control=True)
+    monkeypatch.setattr(demo, "run_control", lambda **kwargs: demo.ControlResult(True, "control block\n", ()))
+    assert cli.cmd_demo(args) == 0
+    assert "control block" in capsys.readouterr().out
+
+    monkeypatch.setattr(demo, "run_control", lambda **kwargs: demo.ControlResult(True, _seeded_leak_text(), ()))
+    assert cli.cmd_demo(args) == 2
+    captured = capsys.readouterr()
+    assert "exampleuser" not in captured.out and "exampleuser" not in captured.err
+
+
+# ------------------------ issue #122: the timeout and cancellation seeds
+
+
+def test_run_control_reports_all_six_seeds_in_a_leak_clean_block(base: Path, docker_state: Path) -> None:
+    result = _run_control(base, docker_state)
+    assert result.ok is True
+    assert len(result.seeds) == 6
+    assert all(seed.caught for seed in result.seeds)
+    assert result.paste_back.count("[CAUGHT]") == 6
+    assert "NOT CAUGHT" not in result.paste_back
+    assert demo.leak_check_text(result.paste_back) == []
+
+
+def test_build_control_paste_back_renders_a_not_caught_seed_distinctly() -> None:
+    seeds = [demo.ControlSeed("a", True, "e1"), demo.ControlSeed("b", False, "e2")]
+    block = demo.build_control_paste_back(seeds, "img:1", None)
+    assert "[CAUGHT] a - e1" in block
+    assert "[NOT CAUGHT] b - e2" in block
+    assert "image_digest=UNKNOWN" in block
+
+
+def test_timeout_seed_is_caught_with_a_confirmed_timeout_stop(base: Path, docker_state: Path) -> None:
+    seed = demo.run_timeout_control(
+        image="fake-image:1", docker_bin=_docker_bin(docker_state), base=base, timeout=5, limit=0.5, sleep=5,
+    )
+    assert seed.caught is True, seed.evidence
+    assert "stop reason=timeout confirmed=True" in seed.evidence
+    assert "disposition=inconclusive" in seed.evidence
+
+
+def test_timeout_seed_is_not_caught_when_timeout_enforcement_is_disabled(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Red case (issue #122): disable the timeout enforcement - `execute()`
+    is handed a limit longer than the subject's sleep - and the seed must
+    report NOT caught. The subject then finishes on its own (`exited`),
+    which proves nothing about enforcement."""
+    from skillc import docker_backend as dbe
+    from skillc.backend import Limits
+
+    real_execute = dbe.DockerBackend.execute
+
+    def _unenforced(self: dbe.DockerBackend, handle: object, argv: object, limits: Limits, *rest: object, **kw: object) -> object:
+        return real_execute(self, handle, argv, Limits(timeout=limits.timeout + 60), *rest, **kw)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(dbe.DockerBackend, "execute", _unenforced)
+    seed = demo.run_timeout_control(
+        image="fake-image:1", docker_bin=_docker_bin(docker_state), base=base, timeout=5, limit=0.3, sleep=1,
+    )
+    assert seed.caught is False
+    assert "stop reason=exited" in seed.evidence
+
+
+def test_run_control_is_not_ok_when_timeout_enforcement_is_disabled(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same red case, through `run_control`: one seed not caught flips
+    the whole `--control` verdict and shows in the block."""
+    from skillc import docker_backend as dbe
+    from skillc.backend import Limits
+
+    real_execute = dbe.DockerBackend.execute
+
+    def _unenforced(self: dbe.DockerBackend, handle: object, argv: object, limits: Limits, *rest: object, **kw: object) -> object:
+        return real_execute(self, handle, argv, Limits(timeout=limits.timeout + 60), *rest, **kw)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(dbe.DockerBackend, "execute", _unenforced)
+    result = _run_control(base, docker_state, timeout_limit=0.3, timeout_sleep=1.0)
+    assert result.ok is False
+    assert "[NOT CAUGHT] timeout" in result.paste_back
+
+
+def test_cancellation_seed_is_caught_and_leaves_the_foreign_container_untouched(
+    base: Path, docker_state: Path,
+) -> None:
+    """A real SIGINT to a real child `skillc demo --cancel-target` process
+    group, mid-exec, against the fake `docker`."""
+    seed = demo.run_cancellation_control(
+        image="fake-image:1", docker_bin=_docker_bin(docker_state), base=base, timeout=5, sleep=4,
+    )
+    assert seed.caught is True, seed.evidence
+    assert "interrupt_line=present exit=1" in seed.evidence
+    assert "independent=already-absent" in seed.evidence
+    assert "foreign=running (untouched)" in seed.evidence
+    # The seed tears its own foreign container down afterwards.
+    assert not reap.snapshot(_docker_bin(docker_state)).owned
+
+
+def test_cancellation_seed_is_not_caught_when_the_interrupt_sweep_is_unscoped(
+    base: Path, docker_state: Path,
+) -> None:
+    """Red case (issue #122): disable the interrupt handler's scoping - the
+    child sweeps every skillc-owned container, #118's pre-fix behaviour -
+    and the seed must report NOT caught, because the foreign container is
+    gone."""
+    seed = demo.run_cancellation_control(
+        image="fake-image:1", docker_bin=_docker_bin(docker_state), base=base, timeout=5, sleep=4,
+        child_command=[sys.executable, str(UNSCOPED_INTERRUPT_CHILD)],
+    )
+    assert seed.caught is False
+    assert "interrupt_line=present exit=1" in seed.evidence  # the interrupt itself was handled
+    assert "foreign=NOT running" in seed.evidence
+
+
+def test_cancellation_seed_is_not_caught_when_the_child_never_starts_its_exec(
+    base: Path, docker_state: Path,
+) -> None:
+    """A child that never announces its exec gets no SIGINT and cannot
+    certify anything - NOT caught, and the wait is bounded, never a hang."""
+    seed = demo.run_cancellation_control(
+        image="fake-image:1", docker_bin=_docker_bin(docker_state), base=base, timeout=5, sleep=4,
+        ready_timeout=1.0, child_command=[sys.executable, "-c", "import time; time.sleep(30)"],
+    )
+    assert seed.caught is False
+    assert "never announced its exec" in seed.evidence
+    assert not reap.snapshot(_docker_bin(docker_state)).owned
+
+
+def test_cancellation_seed_is_not_caught_when_the_daemon_is_down(base: Path, docker_state: Path) -> None:
+    docker_state.mkdir(parents=True, exist_ok=True)
+    (docker_state / ".down").touch()
+    seed = demo.run_cancellation_control(
+        image="fake-image:1", docker_bin=_docker_bin(docker_state), base=base, timeout=5, sleep=4,
+    )
+    assert seed.caught is False
+    assert "never ran" in seed.evidence
+
+
+def test_cancel_target_mode_is_hidden_from_help(capsys: pytest.CaptureFixture[str]) -> None:
+    from skillc import cli
+
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args(["demo", "--help"])
+    assert "--cancel-target" not in capsys.readouterr().out
+    assert cli.build_parser().parse_args(["demo", "--cancel-target", "5"]).cancel_target == 5.0
 
 
 # --------------- item 1 continued: KeyboardInterrupt is a BaseException,
