@@ -1254,8 +1254,16 @@ def materialize(
 
 
 def find_client(explicit: str | None) -> list[str] | None:
-    """The client to run, or None when there is none: an absent client is UNKNOWN."""
+    """The client to run, or None when there is none: an absent client is UNKNOWN.
+
+    `explicit` is a path, or a bare executable name (no path separator) looked
+    up on PATH the way a shell would (issue #124, from the Nit Store: `--client
+    codex` used to resolve against the cwd and report "not found" for a client
+    that was on PATH)."""
     if explicit:
+        if os.sep not in explicit and "/" not in explicit:
+            found_named = shutil.which(explicit)
+            return [found_named] if found_named else None
         path = Path(explicit).resolve()
         return [str(path)] if path.is_file() and os.access(path, os.X_OK) else None
     found = shutil.which(CLIENT)

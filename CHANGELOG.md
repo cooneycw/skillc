@@ -35,6 +35,11 @@ and version plan.
 
 ### Fixed
 
+- **`--client <bare name>` was resolved against the cwd, not PATH** (Refs
+  #124, folded in from the Nit Store). `materialize.find_client("codex")`
+  reported a client on PATH as not found. A name with no path separator is
+  now looked up with `shutil.which`; a path is still a path.
+
 - **`skillc collection-run` printed `refresh_observed_in_container=None` on
   every run, whatever the record held** (Refs #124). The paste-back read the
   key `refresh_observed_in_container`; the record stores

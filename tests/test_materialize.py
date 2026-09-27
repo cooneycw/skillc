@@ -261,6 +261,23 @@ def test_an_unreadable_host_after_the_run_is_UNKNOWN_and_still_reported(
     assert not result.ready
 
 
+def test_a_bare_client_name_is_found_on_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Issue #124 (folded in from the Nit Store): `--client <name>` is searched
+    on PATH like a shell would, not resolved against the cwd."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    exe = bin_dir / "some-client"
+    exe.write_text("#!/bin/sh\n")
+    exe.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir))
+    monkeypatch.chdir(tmp_path)  # not where the client is
+    assert m.find_client("some-client") == [str(exe)]
+    assert m.find_client("not-on-path") is None
+    # A path (it has a separator) is still a path, not a PATH search.
+    assert m.find_client(str(exe)) == [str(exe.resolve())]
+    assert m.find_client("./some-client") is None
+
+
 def test_a_missing_client_executable_is_UNKNOWN_not_a_crash(tmp_path: Path) -> None:
     assert m.find_client(str(tmp_path / "no-such-codex")) is None
     result = _run(tmp_path, [str(tmp_path / "no-such-codex")])
