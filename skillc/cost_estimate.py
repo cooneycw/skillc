@@ -13,23 +13,23 @@ explicit, sufficient, human-approved budget UNDER the operator's own ceiling.
 
 `estimate()`'s inputs are themselves assumptions, not measurements: no
 attempt has run, so there is nothing to measure yet. Every assumed value is
-named in `RunCostEstimate.assumptions` so a reader (or `master`) can see
-exactly what would have to be wrong for the number to be wrong, rather than
-trusting a bare dollar figure.
+named in `RunCostEstimate.assumptions` so a human reviewer can see exactly
+what would have to be wrong for the number to be wrong, rather than trusting
+a bare dollar figure.
 
-**The $5 ceiling (operator ruling, relayed 2026-09-26 via master, msg 1401/
-1402): "don't worry about the cost estimate... i expect it's under $5."**
-`authorize()` refuses ANY estimate over `CEILING_USD`, even one an operator
-would otherwise approve a larger budget for - the ceiling and the approved
-budget are two independent refusals, and either alone is enough to stop a
-run. What this module does NOT do: track spend DURING a live run and stop it
-mid-flight when it crosses the ceiling. That needs the attempt loop itself
-(`skillc/trial.py`'s controller, once #10's Docker backend implementation
-lands - #77's follow-up PR), which does not exist yet; every `execute()` body
-on the real backend still raises `NotImplementedError`. This module's ceiling
-is the pre-run refusal ADR 0005 and the operator both ask for; a running-spend
-stop is owed to that later work, named here rather than silently assumed
-covered.
+**The $5 ceiling ([ADR 0005](../docs/decisions/0005-runtime-scope-and-cost-rulings.md)
+rule 6, owner ruling, 2026-09-26): "don't worry about the cost estimate... i
+expect it's under $5."** `authorize()` refuses ANY estimate over
+`CEILING_USD`, even one an operator would otherwise approve a larger budget
+for - the ceiling and the approved budget are two independent refusals, and
+either alone is enough to stop a run. What this module does NOT do: track
+spend DURING a live run and stop it mid-flight when it crosses the ceiling.
+That needs the attempt loop itself (`skillc/trial.py`'s controller, once
+#10's Docker backend implementation lands - #77's follow-up PR), which does
+not exist yet; every `execute()` body on the real backend still raises
+`NotImplementedError`. This module's ceiling is the pre-run refusal ADR 0005
+and the operator both ask for; a running-spend stop is owed to that later
+work, named here rather than silently assumed covered.
 
 Stdlib only (AGENTS.md).
 """
@@ -39,10 +39,30 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
-#: The operator's own ceiling for the whole paid run (msg 1401/1402), not
+#: The operator's own ceiling for the whole paid run (ADR 0005 rule 6), not
 #: merely a budget someone could approve past. `authorize()` refuses above
 #: this regardless of `approved_budget_usd`.
 CEILING_USD = 5.00
+
+#: The owner's own ruling, verbatim (ADR 0005 rule 6). Quoted, not
+#: paraphrased broader, per that record's own instruction.
+SUBSCRIPTION_LOGIN_RULING = "Normal Claude and codex"
+
+#: What that ruling covers, restated in full sentences (ADR 0005 rule 6) -
+#: this is a RESTATEMENT, not the owner's verbatim words; kept separate from
+#: `SUBSCRIPTION_LOGIN_RULING` above so a reader never mistakes one for the
+#: other. Agent runs (#26's and #12's treatment/baseline attempts) use the
+#: operator's normal Claude Code and Codex subscription logins (the normal
+#: rotating OAuth login, never a long-lived key), not a pay-per-use API key,
+#: and sit inside the normal subscription budget, not metered spend. It does
+#: NOT cover judge calls: `mcp-second-opinion` calls provider APIs with API
+#: keys, so judge-call cost stays dollar-metered and subject to
+#: `CEILING_USD` regardless of this ruling.
+SUBSCRIPTION_LOGIN_RULING_SCOPE = (
+    "covers agent runs (treatment/baseline attempts) only, via the operator's "
+    "normal Claude Code and Codex subscription logins - not judge calls, "
+    "which use provider API keys and stay dollar-metered"
+)
 
 
 class SpendNotAuthorized(Exception):
@@ -95,6 +115,13 @@ class RunCostEstimate:
     judge_tiers_enabled: int = 0
     judge_calls_total: int = 0
     judge_price: ModelPrice | None = None
+    #: The JUDGE-only slice of `estimated_usd` (ADR 0005 rule 6): kept separate so
+    #: `authorize()` can gate on judge spend alone for a subscription-login
+    #: agent run, where the agent portion of `estimated_usd` is a usage/quota
+    #: figure, not a dollar charge. Always 0.0 when no judge tier is enabled.
+    #: `estimated_usd` itself is UNCHANGED and still the full agent+judge
+    #: total, for any caller that still wants that combined figure.
+    judge_estimated_usd: float = 0.0
 
 
 def estimate(
@@ -172,38 +199,63 @@ def estimate(
         judge_tiers_enabled=judge_tiers_enabled,
         judge_calls_total=judge_calls_total,
         judge_price=judge_price if judge_tiers_enabled > 0 else None,
+        judge_estimated_usd=judge_cost,
     )
 
 
-def authorize(cost: RunCostEstimate, approved_budget_usd: float | None) -> None:
+def authorize(
+    cost: RunCostEstimate, approved_budget_usd: float | None, *, agent_uses_subscription_login: bool = False,
+) -> None:
     """The only function in this module that may say a live run may
-    proceed. Raises `SpendNotAuthorized` when:
+    proceed. Raises `SpendNotAuthorized` when the GATED figure below exceeds
+    `CEILING_USD`, or is not covered by `approved_budget_usd`:
 
-    - the estimate itself exceeds `CEILING_USD` - the operator's own ceiling,
-      refused regardless of any approved budget (msg 1401/1402);
+    - the gated figure exceeds `CEILING_USD` - the operator's own ceiling,
+      refused regardless of any approved budget (ADR 0005 rule 6);
     - `approved_budget_usd` is `None` (no budget was ever approved - the
       ADR 0005 default), non-finite, or negative - a NaN budget must not
       silently pass the `<` comparison below (Codex code-review finding);
-    - `approved_budget_usd` is less than `cost.estimated_usd`.
+    - `approved_budget_usd` is less than the gated figure.
+
+    `agent_uses_subscription_login=False` (the default) gates on
+    `cost.estimated_usd`, the full agent+judge total - unchanged, pre-ADR-0005-
+    rule-6 behavior. Pass `True` for a run whose agent attempts (#26's and
+    #12's treatment/baseline) run under the operator's normal Claude Code/Codex
+    SUBSCRIPTION login, not a pay-per-use API key (`SUBSCRIPTION_LOGIN_RULING`,
+    ADR 0005 rule 6, verbatim: "Normal Claude and codex") - that ruling does
+    NOT cover judge calls, which use provider API keys and stay dollar-metered
+    (`SUBSCRIPTION_LOGIN_RULING_SCOPE`), so this gates on
+    `cost.judge_estimated_usd` alone: the agent portion of `estimated_usd` is
+    a usage/quota figure under that login, never compared against a dollar
+    ceiling or budget. A large agent quota with zero or small judge spend
+    needs no approved budget at all; judge spend above `CEILING_USD` is
+    refused exactly as before, regardless of the agent quota's size.
 
     Never rounds, waives, or silently caps the run to fit an insufficient
     budget: the estimate and the approval are two independent numbers, and a
     caller narrowing the run to match an insufficient budget would be
     approximating the very spend this gate exists to keep explicit."""
-    if cost.estimated_usd > CEILING_USD:
+    gated_usd = cost.judge_estimated_usd if agent_uses_subscription_login else cost.estimated_usd
+    if gated_usd > CEILING_USD:
         raise SpendNotAuthorized(
-            f"estimated cost ${cost.estimated_usd:.4f} exceeds the ${CEILING_USD:.2f} operator ceiling "
+            f"estimated cost ${gated_usd:.4f} exceeds the ${CEILING_USD:.2f} operator ceiling "
             f"for the whole run - refused regardless of any approved budget"
         )
+    if gated_usd <= 0:
+        # Subscription-login mode with no judge tier enabled: nothing here is
+        # dollar-metered spend, so there is nothing left to approve a budget
+        # for (ADR 0005 rule 6). `agent_uses_subscription_login=False` can
+        # never reach this branch - `estimate()` refuses a zero-cost population.
+        return
     if approved_budget_usd is None:
         raise SpendNotAuthorized(
-            f"no budget has been approved; estimated cost is ${cost.estimated_usd:.4f} for "
+            f"no budget has been approved; estimated cost is ${gated_usd:.4f} for "
             f"{cost.total_attempts} attempt(s) - the run manifest is prepared, execution stays incomplete"
         )
     if isinstance(approved_budget_usd, bool) or math.isnan(approved_budget_usd) or math.isinf(approved_budget_usd) or approved_budget_usd < 0:
         raise SpendNotAuthorized(f"approved_budget_usd must be a finite, non-negative number, not {approved_budget_usd!r}")
-    if approved_budget_usd < cost.estimated_usd:
+    if approved_budget_usd < gated_usd:
         raise SpendNotAuthorized(
-            f"approved budget ${approved_budget_usd:.4f} is less than the ${cost.estimated_usd:.4f} "
+            f"approved budget ${approved_budget_usd:.4f} is less than the ${gated_usd:.4f} "
             f"estimate for {cost.total_attempts} attempt(s)"
         )

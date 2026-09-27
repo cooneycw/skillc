@@ -442,6 +442,36 @@ collection) closes.
   Still owed: the judge does not yet run inside #10's grading boundary (a
   separate backend instance) - it spawns directly on the host today, bounded
   only by ordinary OS-level process isolation.
+- **Subscription-login agent runs are not dollar-metered; judge calls still
+  are** (Refs #26, Refs #12): [ADR 0005](docs/decisions/0005-runtime-scope-and-cost-rulings.md)
+  rule 6 records, verbatim and dated, the owner's ruling that #26's and
+  #12's agent attempts (treatment/baseline) run under the operator's normal
+  Claude Code/Codex subscription login - the normal rotating OAuth login,
+  never a long-lived key - not a pay-per-use API key, so their token/price
+  figures are a usage quota, not a dollar charge. The ruling does NOT cover
+  judge calls (`mcp-second-opinion`, #69, uses provider API keys and stays
+  dollar-metered). `skillc.cost_estimate.RunCostEstimate` gains
+  `judge_estimated_usd`, the judge-only slice of `estimated_usd`, and
+  `authorize()` gains `agent_uses_subscription_login` (default `False`,
+  fully backward compatible): when `True`, it gates on `judge_estimated_usd`
+  alone rather than the combined total - a large agent quota needs no
+  approved budget by itself, and a subscription-login run with no judge tier
+  enabled needs no budget at all, while judge spend over the $5 ceiling is
+  still refused regardless of the agent quota's size, exactly as before.
+  Both `evals/selection-probe/run-manifest.json` and
+  `evals/matched-pilot/run-manifest.json` (and their READMEs) record the
+  ruling and relabel their agent-attempt figures as a quota/usage indicator,
+  reference issue #98 (the in-container credential path) as the actual
+  remaining prerequisite for a live run, and drop every private
+  fleet-message-number citation the two files carried, replacing each with
+  a reference to ADR 0005's own section - skillc is public, and a message
+  number is a channel no outside reader can resolve. Two committed controls
+  (`tests/test_cost_estimate.py`) prove the split: a plan with an enormous
+  agent-side figure and under-ceiling judge spend is authorized, and one
+  whose judge spend crosses the ceiling is refused regardless of the agent
+  figure's size - each confirmed to fail on the pre-fix `authorize()`
+  (temporarily reverted to gate on the combined total regardless of the new
+  flag).
 
 ### Fixed
 

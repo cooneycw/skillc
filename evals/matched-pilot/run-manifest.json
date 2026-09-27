@@ -1,7 +1,15 @@
 {
   "manifest_schema": 1,
   "experiment": "matched-pilot",
-  "_comment": "Prepared, not run (ADR 0005 rule 5; issue #12's own acceptance: 'If no budget is approved, prepare the reviewable run manifest and leave execution incomplete'). Every number under cost_estimate is computed by tests/test_matched_pilot.py from skillc/cost_estimate.py, not hand-typed - the SAME estimator #26 uses, not a second one (orchestrator instruction, msg 1410). Runtime implementation is deliberately out of scope here, per #12's own text: 'Keep runtime implementation out of the planning PR.'",
+  "_comment": "Prepared, not run (ADR 0005 rule 5; issue #12's own acceptance: 'If no budget is approved, prepare the reviewable run manifest and leave execution incomplete'). Every number under cost_estimate is computed by tests/test_matched_pilot.py from skillc/cost_estimate.py, not hand-typed - the SAME estimator #26 uses, not a second one. Runtime implementation is deliberately out of scope here, per #12's own text: 'Keep runtime implementation out of the planning PR.'",
+  "subscription_login_ruling": {
+    "ruling": "Normal Claude and codex",
+    "date": "2026-09-27",
+    "source": "ADR 0005 rule 6 (docs/decisions/0005-runtime-scope-and-cost-rulings.md)",
+    "scope": "covers agent runs (this pilot's treatment/baseline attempts) only, via the operator's normal Codex subscription login (the normal rotating OAuth login, never a long-lived key) - not judge calls, which use provider API keys and stay dollar-metered. This pilot enables no judge tier, so no dollar-metered spend is estimated below at all.",
+    "client_login": {"codex": "operator's normal Codex CLI subscription login (OAuth), not a pay-per-use API key"},
+    "prerequisite": "the in-container credential path for a subscription-login agent run (issue #98) is not yet built; this manifest states the ruling and relabels the estimate, it does not deliver that prerequisite"
+  },
 
   "predeclared_experiment_record": {
     "model": {
@@ -15,7 +23,7 @@
       "revision": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b"
     },
     "image_digest": "owed-to-the-live-build",
-    "image_digest_note": "no image has been built for this pilot - #77/#85's Docker backend implementation exists, but building and running it is the operator's live run, not this planning PR. This is a named refusal to invent one, not a placeholder shaped like a real digest (orchestrator instruction, msg 1410).",
+    "image_digest_note": "no image has been built for this pilot - #77/#85's Docker backend implementation exists, but building and running it is the operator's live run, not this planning PR. This is a named refusal to invent one, not a placeholder shaped like a real digest (issue #10 lesson D13).",
     "goal_population": {
       "task": {"id": "slug-small-fix", "revision": "2", "goal": "evals/level1/slug-small-fix/goal.md", "grader": "evals/level1/slug-small-fix/grader.json"},
       "note": "the SAME already-qualified task and grader #26's selection probe reuses (#5) - #12 measures task-outcome benefit and completion time, not selection behavior, so no case-format prompt addendum is used here"
@@ -38,10 +46,10 @@
       "note": "not yet enforced by any committed control in this PR - skillc/backend.py's Limits is where this would be wired once a live run drives it"
     },
     "monetary_ceiling_usd": 5.00,
-    "monetary_ceiling_source": "operator ruling relayed 2026-09-26 (msg 1401/1402, carried into #12 per msg 1410): the $5 whole-run ceiling applies here too, enforced in code by skillc.cost_estimate.authorize, refused regardless of any approved budget above it",
+    "monetary_ceiling_source": "operator ruling, 2026-09-26 (ADR 0005 rule 6), carried into #12: the $5 ceiling applies here too, enforced in code by skillc.cost_estimate.authorize. Applies to dollar-metered judge-call spend; this pilot enables no judge tier (judge_estimated_quota_usd_equivalent below is 0), so the ceiling is trivially satisfied and no budget approval is required for it.",
     "clarification_and_approval_behavior": {
       "clarification": "no interactive clarification is available during a trial - attempts run non-interactively (codex exec / an equivalent non-interactive invocation, matching skillc/trial_bootstrap.py's own 'never auto-answer' rule from #78). If the agent's own output poses a clarifying question instead of proceeding, that attempt's pilot-report entry declares it explicitly under 'uncertainty' and counts it in 'interventions' - it is never auto-answered from outside the attempt.",
-      "approval": "the SAME gate #26 uses: skillc.cost_estimate.authorize() refuses to authorize execution without an approved budget at or above the estimate, and separately refuses any estimate over the $5 ceiling regardless of a larger approved budget. No paid call may start without both."
+      "approval": "the SAME gate #26 uses: skillc.cost_estimate.authorize() refuses to authorize execution without an approved budget at or above any dollar-metered (judge) spend, and separately refuses any such spend over the $5 ceiling regardless of a larger approved budget. This pilot's agent-attempt quota is not dollar-metered (ADR 0005 rule 6) and needs no such approval by itself."
     }
   },
 
@@ -60,12 +68,15 @@
     "assumptions": {
       "estimated_input_tokens_per_attempt": 50000,
       "estimated_output_tokens_per_attempt": 5000,
-      "basis": "no attempt has ever run against this subject; these are placeholder assumptions (system prompt + CPP skill listing + goal.md for input, agent reasoning/tool calls/patch for output), not measurements. The first live attempt should replace them with observed values. This assumption reads like a single turn and is weak in a specific, known direction: a multi-turn agentic Codex session re-sends its context (including the 74-skill listing) every turn, so real input could be 10-20x higher. Sensitivity, at these prices, same 6 attempts: 500,000 input tokens/attempt -> $4.05 total (still under the $5 ceiling); 1,000,000 input tokens/attempt -> $7.80 total (OVER the $5 ceiling - skillc.cost_estimate.authorize would refuse it before any cache discount is applied)."
+      "basis": "no attempt has ever run against this subject; these are placeholder assumptions (system prompt + CPP skill listing + goal.md for input, agent reasoning/tool calls/patch for output), not measurements. The first live attempt should replace them with observed values. This assumption reads like a single turn and is weak in a specific, known direction: a multi-turn agentic Codex session re-sends its context (including the 74-skill listing) every turn, so real input could be 10-20x higher. Sensitivity, same 6 attempts, expressed at the same public per-token prices purely as a QUOTA indicator (see quota_note): 500,000 input tokens/attempt -> 4.05 quota-usd-equivalent; 1,000,000 input tokens/attempt -> 7.80 quota-usd-equivalent."
     },
-    "estimated_usd": 0.675
+    "estimated_agent_quota_usd_equivalent": 0.675,
+    "quota_note": "NOT a dollar charge (ADR 0005 rule 6): this pilot's agent attempts run under the operator's normal Codex subscription login, so this figure is a usage/quota indicator only, computed at public per-token prices for comparability, never billed and never compared against monetary_ceiling_usd.",
+    "judge_estimated_quota_usd_equivalent": 0.0,
+    "judge_note": "no judge tier is enabled for this pilot - #69's grading tiers are a separate concern from this pilot's deterministic grading, so there is no dollar-metered judge spend to estimate here."
   },
 
   "monetary_cap_usd": null,
   "approved_budget_usd": null,
-  "execution": "incomplete - no approved budget (ADR 0005 rule 5)"
+  "execution": "incomplete - no live run: the agent-quota figure needs no budget approval under ADR 0005 rule 6 (no judge tier is enabled, so judge spend is $0), but the in-container credential path for a subscription-login agent run (issue #98) is not yet built, and skillc/trial.py's real attempt-execution loop does not exist yet either"
 }
