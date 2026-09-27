@@ -9,49 +9,41 @@ adapter path both subjects' existing evidence already proves.
 
 **Prepared, not run**, exactly like [the matched pilot](../matched-pilot/README.md)
 and for the same reason: execution needs a live capability that does not
-exist in this repository yet - a `--subject <name>` flag that materializes
-the named subject through `materialize.py`, installs it via
-`DockerBackend.install()` into a real container, and observes client-side
-discovery plus an in-container digest re-verification against the
-installation receipt, with no model call (the design the orchestrator
-ruled on, msg 1474/1479). **As of msg 1488 (`w1`), this flag is being split
-out of #81/#97 into its own follow-up PR under #11**: PR #97 (already
-open) carries an EARLIER, materialize-only `--subject` shape (no container
-install, no discovery, no digest check), built before the fuller design was
-settled, and is not being widened to match it - the fuller design lands
-separately. Once that follow-up PR exists, these two runs execute in the
-SAME operator session as #81's own live demo - one runbook, not two, per
-the orchestrator's instruction (msg 1470).
+fully exist yet. `skillc demo --subject <name>` (#81, #10) already exists in
+PR #97, materializing the named subject on the HOST via
+`materialize.materialize()`. It does not yet install into the real
+container, run discovery there, or re-verify a digest - that fuller
+behavior (`DockerBackend.install()`, client-side discovery inside the
+container, an in-container digest check against the installation receipt,
+no model call) is a follow-up PR under #11. Once that lands, these two runs
+execute in the same operator session as #81's own live demo - one runbook,
+not two.
 
 ## What this delivers, and what it does not
 
 Delivered here:
 
-- **The exact command per subject** (`run-manifest.json`'s `runs`), stated
-  as `AGREED, not yet implemented` rather than guessed at - the design was
-  confirmed by direct question to w1 before this manifest was written
-  (`skillc/demo.py`'s WIP, as of `ad3fdf3`, does not yet materialize any
-  skill collection at all; asking first rather than building against a
-  guess avoided real rework).
+- **The exact command per subject** (`run-manifest.json`'s `runs`): `skillc
+  demo --subject cpp-codex` and `skillc demo --subject mattpocock-skills`,
+  the real flag PR #97 already wires - stated with its current (host-only)
+  behavior alongside the fuller behavior this manifest's `expected_paste_back`
+  describes, so the two are never conflated.
 - **The expected paste-back shape per subject**: an installation-receipt
   summary matching each subject's ALREADY-recorded host evidence
   (`evals/subjects/*/evidence/report.json`) - proving the Docker-backed run
   is expected to reproduce the SAME facts the host adapter path already
-  established, not a new claim - plus a `discovered` field. That field is
-  explicitly `owed to #81's client-listing discovery step`, never invented,
-  in case w1 splits that step into a follow-up PR (the orchestrator's own
-  contingency, msg 1474).
+  established, not a new claim - plus `digest_check` and `discovered`
+  fields. Both are explicitly `owed to the follow-up PR under #11`, never
+  invented.
 - **Citations, not re-proofs**, for the two acceptance bullets already
   closed by existing work: no-project-name-branch (the genericity guard,
   #94) and unsupported-formats-refused-before-selection
   (`test_a_malformed_subject_declaration_is_refused`'s 10 parametrized
   cases, generic to `materialize.Subject.from_dict` and therefore already
-  covering both subjects). Re-demonstrating either here would be redundant
-  work the orchestrator explicitly said to skip (msg 1474).
+  covering both subjects).
 - **The bounded compatibility statement**, below.
 - **The acceptance status against #11's four bullets** (`run-manifest.json`'s
-  `acceptance_status`), stated plainly per orchestrator ruling (msg 1479,
-  relayed from the operator): the no-agent demo this manifest prepares -
+  `acceptance_status`): the no-agent demo this manifest prepares -
   installation plus discovery plus an in-container digest re-verification
   against the receipt - gives conformance evidence for bullets 1, 3 and
   part of 4. It does **not** satisfy bullet 2 ("the same client, Level 1
@@ -78,8 +70,8 @@ benchmark" and the same discipline the matched pilot follows:
 ## The bounded compatibility statement
 
 **What is shown compatible, and by what kind of evidence - kept separate on
-purpose (codex review of this PR: the first draft blurred them into one
-"end to end" claim the evidence does not support):**
+purpose (a "proven end to end" claim would blur two different kinds of
+evidence into one overclaim):**
 
 - **By actual execution:** `skillc materialize` has been RUN against both
   `cpp-codex` and `mattpocock-skills`, on the host, with no adapter change
@@ -99,10 +91,10 @@ purpose (codex review of this PR: the first draft blurred them into one
   dispatch it through a backend, capture, grade) has been run for
   `cpp-codex` or `mattpocock-skills` - only `materialize.py`'s own
   installation step has real execution evidence. That is precisely the gap
-  this manifest's two runs are prepared to close, once #81's `--subject`
-  flag and a real Docker daemon exist to run them against - not a gap this
-  document can claim closed by citing the adapter-only evidence or the
-  genericity guard.
+  this manifest's two runs are prepared to close, once the `--subject`
+  follow-up PR and a real Docker daemon exist to run them against - not a
+  gap this document can claim closed by citing the adapter-only evidence or
+  the genericity guard.
 
 **What is NOT shown, and is not claimed to be:**
 
@@ -123,17 +115,10 @@ purpose (codex review of this PR: the first draft blurred them into one
   (`codex debug prompt-input`); Claude Code has no equivalent no-model
   render command as of this writing (`skillc/exposure.py`'s own module
   docstring states the same limit for its rung-2 check).
-
-## Process note: asking before building
-
-The design question this manifest depends on - what `--subject` actually
-parametrizes - was genuinely ambiguous from #81's WIP alone: neither of its
-two existing demos (`run_lifecycle_demo`, `run_grading_demo`) touched
-`materialize.py` or any subject declaration at the time this manifest was
-written. Rather than guess and risk rework, the question was asked directly
-(of `w1`, who owns `#81`) with the two readings that seemed possible from
-the code as it stood; the orchestrator settled it (msg 1474) before this
-manifest's `runs` section was written. The same discipline applies going
-forward: if `w1`'s eventual implementation diverges from what is stated
-here, this manifest is wrong and should be corrected against the real
-interface, not defended against it.
+- That the remaining agent run (bullet 2, above) is metered or paid-per-call
+  spend. It runs on the operator's normal Claude Code/Codex subscription
+  login, inside the normal usage budget - quoted verbatim from the ruling
+  on #98: "Normal Claude and codex". It is not gated by the #12 $5 cost
+  stop, which covers judge calls only (e.g. `mcp-second-opinion`, which use
+  provider API keys); it does need #98's subscription-credential injection
+  into a trial container first.

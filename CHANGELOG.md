@@ -17,12 +17,12 @@ collection) closes.
 ### Added
 
 - **The second-collection conformance manifest states its own scope boundary
-  and the owner's funding ruling explicitly** (Refs #11): orchestrator
-  review (relayed from the operator) found the manifest needed to say
-  plainly that its own two runs - installation, discovery, an in-container
-  digest check - satisfy acceptance bullets 1 and 3 but NOT bullet 2 ("the
-  same client, Level 1 fixture, contract and grader"), which needs an agent
-  actually working Level 1 with each collection installed. Added
+  and the owner's funding ruling explicitly** (Refs #11): review found the
+  manifest needed to say plainly that its own two runs - installation,
+  discovery, an in-container digest check - satisfy acceptance bullets 1
+  and 3 but NOT bullet 2 ("the same client, Level 1 fixture, contract and
+  grader"), which needs an agent actually working Level 1 with each
+  collection installed. Added
   `acceptance_status` (bullet-by-bullet, plus what remains after this
   manifest's own runs execute) to `run-manifest.json`, with a test proving
   it says so. That remaining agent run's funding basis is quoted verbatim,
@@ -36,12 +36,14 @@ collection) closes.
   it) - the manifest previously attributed the flag to #81 directly.
 - **The second-collection conformance run, prepared** (Refs #11):
   [`evals/second-collection-conformance/`](evals/second-collection-conformance/README.md)
-  states the exact command per subject (`cpp-codex`, `mattpocock-skills`),
-  through the agreed `--subject <name>` design for #81's operator demo
-  (materialize the named subject, install it into the real container via
+  states the exact command per subject (`skillc demo --subject cpp-codex`,
+  `skillc demo --subject mattpocock-skills`), against the fuller
+  install+discovery+digest-check design for `--subject` (materialize the
+  named subject, install it into the real container via
   `DockerBackend.install()`, observe client-side discovery with no model
-  call - confirmed by direct question to `w1` rather than guessed, since
-  #81's WIP did not yet touch `materialize.py` at all), the expected
+  call) that a follow-up PR under #11 will deliver - PR #97's own
+  `--subject` is host-materialize-only today, and this manifest states
+  that distinction explicitly rather than conflating the two. The expected
   paste-back shape per subject (an installation-receipt summary matching
   each subject's already-recorded host evidence, plus a `discovered` field
   explicitly marked `owed to the follow-up` rather than invented), and the

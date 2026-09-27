@@ -109,8 +109,8 @@ def test_neither_run_invents_a_discovery_result() -> None:
 
 
 def test_neither_run_invents_a_digest_check_result() -> None:
-    """Orchestrator instruction (msg 1479): the in-container digest check is
-    w1's to implement, not this manifest's to assert a result for."""
+    """The in-container digest check is a follow-up PR's to implement (#11),
+    not this manifest's to assert a result for."""
     for subject, run in _runs_by_subject().items():
         digest_check = run["expected_paste_back"]["digest_check"]  # type: ignore[index]
         assert "owed to" in digest_check, f"{subject}: 'digest_check' does not defer: {digest_check!r}"
@@ -121,12 +121,11 @@ def test_the_manifest_states_it_is_not_yet_executed() -> None:
 
 
 def test_the_manifest_states_11_stays_open_after_its_own_runs() -> None:
-    """Orchestrator ruling (msg 1479, relayed from the operator): the
-    no-agent demo this manifest prepares gives installation and discovery
-    conformance only - it does not satisfy #11's acceptance bullet 2, which
-    needs an agent actually working Level 1 with each collection installed.
-    The manifest must say so plainly, not let a green demo run read as
-    #11's own close."""
+    """The no-agent demo this manifest prepares gives installation and
+    discovery conformance only - it does not satisfy #11's acceptance
+    bullet 2, which needs an agent actually working Level 1 with each
+    collection installed. The manifest must say so plainly, not let a
+    green demo run read as #11's own close."""
     status = _manifest()["acceptance_status"]
     assert isinstance(status, dict)
     bullet_2 = status["bullet_2_same_client_fixture_contract_grader"]
@@ -137,11 +136,11 @@ def test_the_manifest_states_11_stays_open_after_its_own_runs() -> None:
 
 
 def test_the_agent_run_s_funding_basis_quotes_the_owner_ruling_verbatim() -> None:
-    """Owner ruling (msg 1481), quoted, not paraphrased wider (orchestrator's
-    own instruction): agent runs use the operator's normal subscription
-    login, not metered spend, and are NOT gated by the #12 cost stop (that
-    covers judge calls only). A paraphrase risks widening or narrowing a
-    ruling that was given in exact words for a reason."""
+    """The owner's ruling on #98, quoted rather than paraphrased: agent runs
+    use the operator's normal subscription login, not metered spend, and
+    are NOT gated by the #12 cost stop (that covers judge calls only). A
+    paraphrase risks widening or narrowing a ruling that was given in exact
+    words for a reason."""
     bullet_2 = _manifest()["acceptance_status"]["bullet_2_same_client_fixture_contract_grader"]  # type: ignore[index]
     assert '"Normal Claude and codex"' in bullet_2
     assert "NOT metered" in bullet_2
