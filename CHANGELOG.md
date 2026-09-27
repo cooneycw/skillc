@@ -8,11 +8,23 @@ and version plan.
 
 ## [Unreleased]
 
-Everything below has landed since `0.1.0` and is not yet part of a tagged
-release; `0.2.0` is planned when [#10](https://github.com/cooneycw/skillc/issues/10)
-(a real Docker trial end to end) closes, `0.3.0` when
-[#11](https://github.com/cooneycw/skillc/issues/11) (a second independent
-collection) closes.
+### Fixed
+
+- **`skillc collection-run`'s paste-back printed `refresh_observed_in_container=None`
+  on every run** (Refs #106). It read `refresh_observed_in_container`, but the
+  driver writes `credential_refresh_observed_in_container`. #11's live
+  evidence therefore showed "not observed" for a comparison that had actually
+  been made. The earlier test hand-built its record with the same wrong key;
+  the new one reads a record produced by the real driver.
+
+- **The mcp-second-opinion judge could block past its write deadline**
+  (#129): `_write` polled `select` and then made a BLOCKING 64 KiB
+  `os.write`. A pipe reads as writable when any space is free, so a child
+  that stopped reading could wedge the write forever, and the deadline was
+  never checked again. This intermittently hung CI's required `gate` step
+  in `test_a_stalled_reader_is_a_write_timeout`. The write loop now runs
+  on a non-blocking fd, and a full pipe goes back to `select` and the
+  clock. A deterministic regression test pre-fills the pipe.
 
 ### Added
 
@@ -40,6 +52,59 @@ collection) closes.
   effort, CLI version, cumulative token usage and closing message from a
   real codex rollout, surfaced as `observation.run_metadata`.
   `agent_trial.run_one_attempt` also returns `grading_seconds`.
+
+- **`skillc collection-run` keeps evidence for #106's live run** (Refs #106).
+  The paste-back is grouped into prompt delivery, canary, credential,
+  outcome, cleanup and transcript format:
+  - the credential's remaining life at launch;
+  - the operator's host credential before and after (a digest comparison;
+    the bytes are never read into the record);
+  - a daemon snapshot diff of skillc-owned containers around the whole run;
+  - the stop reason and exit code, per-criterion grades, and the refusal
+    reason;
+  - the journal's own workspace `cleaned` event;
+  - a census of the real transcript: client version, model, line types, and
+    the codex `response_item` types the adapter does not know.
+
+  An evidence envelope is written into the kept store, holding the record and
+  every observation above. It is leak-checked both as its string leaves and
+  as the serialized text, because `json.dumps` escaping hid an embedded
+  OAuth-shaped token from a text-only scan. A PASS now exits 1 if teardown
+  was not confirmed, or if a container labelled with one of this run's own
+  attempt ids (agent or grading probe) remains. The daemon-wide diff is
+  context only, since it cannot attribute. A transcript with no response
+  items reports its drift as not assessed. `--minimum-credential-seconds`
+  runs the below-threshold control.
+  Live evidence: `evals/agent-trial-live/`.
+
+## [0.2.0] - 2026-09-27
+
+Refs [#10](https://github.com/cooneycw/skillc/issues/10) (a real Docker
+trial end to end, now closed) and [#80](https://github.com/cooneycw/skillc/issues/80)
+(the support matrix restated from that run, now closed). The operator ran `skillc demo`,
+`--control` and `--subject` for both collections on a real Docker daemon at
+commit `8e06030`: all four commands exited `0`, every acceptance item read
+`MET`, and the three seeded `--control` failures were all caught (evidence:
+[#10's live-run comment](https://github.com/cooneycw/skillc/issues/10#issuecomment-5855368984),
+restated in [support-matrix.md](docs/specs/evaluation-facility/support-matrix.md)
+and the coverage ruling in
+[ADR 0005 rule 6](docs/decisions/0005-runtime-scope-and-cost-rulings.md)).
+That run covers `skillc demo`'s own scripted lifecycle proof, grading run
+and three seeded negative controls on a real daemon - not an independent live
+re-run of every case in the conformance table or failure-path matrix, most
+of which stay proven against the fake `docker` CLI, per the owner's own
+ruling; the two paths judged most likely to differ on a real daemon
+(timeout, operator cancellation) are tracked for a real-daemon seed under
+[#122](https://github.com/cooneycw/skillc/issues/122). [#11](https://github.com/cooneycw/skillc/issues/11) (a second
+independent collection) also closed in this release: the operator's live
+Level 1 agent run, once per collection with the same codex client, fixture,
+contract and grader, captured and graded `PASS` for both `cpp-codex` and
+`mattpocock-skills` (evidence: [evals/second-collection-conformance/evidence/README.md](evals/second-collection-conformance/evidence/README.md)). By owner ruling recorded
+on #11, the agent container runs on the bridge network; the grading
+container stays `network=none`. Still owed: the Claude Code agent arm under
+[#124](https://github.com/cooneycw/skillc/issues/124), skill-selection measurement
+under [#26](https://github.com/cooneycw/skillc/issues/26), and the judge-call
+cost ceiling under [#12](https://github.com/cooneycw/skillc/issues/12).
 
 ### Fixed
 
