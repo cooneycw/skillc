@@ -514,17 +514,29 @@ def test_skill_invocation_detection_is_heuristic_for_codex(
     assert observation["skill_invocation_detection"] == "heuristic"
 
 
-def test_skill_invocations_is_empty_when_no_transcript_was_found(store: Path, base: Path, docker_state: Path) -> None:
+def test_skill_invocations_is_empty_when_no_transcript_was_found(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
     """The same "could not observe" condition every other observation field
-    defaults on (zero or multiple transcript files) - never a guessed list."""
+    defaults on (zero or multiple transcript files) - never a guessed list.
+
+    `credential_explicit_path` is an explicit FAKE credential, never `None`
+    (PR #117 review): `None` means "no override", which falls through to
+    `credential.resolve_path`'s own standard-location default - on a host
+    with a real login there, this test would resolve and READ the
+    operator's actual subscription credential, exactly what happened when
+    an earlier version of this test ran outside CI. The point here is "no
+    transcript", not "no credential", so the credential stays valid and
+    only the transcript is absent."""
     backend = _backend(base, docker_state)
     experiment, attempt_id = _planned(store)
+    cred_path = _fresh_credential(tmp_path, "claude")
     argv = [sys.executable, "-c", "import pathlib; pathlib.Path('agent-touched.txt').write_text('ran')"]
 
     record = at.run_one_attempt(
         backend=backend, experiment=experiment, attempt_id=attempt_id, client="claude",
         base_argv=argv, prompt="x", skill_name="x", surface={}, limits=Limits(timeout=5), base=base,
-        credential_explicit_path=None,
+        credential_explicit_path=cred_path,
     )
 
     observation = _observation(record)

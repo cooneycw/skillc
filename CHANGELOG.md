@@ -16,6 +16,30 @@ collection) closes.
 
 ### Added
 
+- **`tests/conftest.py`: no test can reach a real credential by default**
+  (Refs #106): cross-model review of PR #117 found that a test passing
+  `credential_explicit_path=None` with no override of its own resolved and
+  READ the operator's real Claude subscription credential on the host that
+  ran it - `credential.resolve_path` did exactly what it is documented to
+  do (fall through to the standard, documented location), and that location
+  happened to hold a real, live credential on that particular machine. CI
+  (no real credential at that path) failed the test; the local run passed
+  it, silently. Nothing was committed, but a suite able to reach a real
+  secret at all is a standing hazard independent of whether a run actually
+  leaks one. `_no_real_credential_defaults`, autouse for every test, points
+  `HOME` and `CODEX_HOME` at fresh empty per-test directories and sets both
+  named credential env-var overrides to explicit, guaranteed-nonexistent
+  paths - set, not merely deleted, so an ambient export from an unrelated
+  shell session cannot leak through either. `tests/test_conftest_hermeticity.py`
+  proves it both ways: `resolve_path(client, explicit=None)` refuses for
+  every client under the fixture, confirmed red (found the real credential,
+  did not raise) when the fixture's own body is disabled on the exact host
+  that produced the original leak; and a second test proves the underlying
+  check CAN see a reachable default when one is deliberately planted at the
+  standard location with the redirect undone - the positive control for the
+  first. The one offending test in `test_agent_trial.py` now passes an
+  explicit fake credential like every other test in that file.
+
 - **`agent_trial.py` exposes which skills a real attempt actually invoked,
   and a skill-free canary mode** (Refs #106, Refs #26): found while wiring
   #26's run driver against the real, merged interface - `record` exposed
