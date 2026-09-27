@@ -1,0 +1,20 @@
+{
+  "branch": "issue-127-lifecycle-run-through-backend-finalizes-before-cle",
+  "counts": {
+    "accepted": 1,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "fd6bf3dd1901c7cf5a296c4c82d1b828703c9a43",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "127",
+  "passes": 2,
+  "recorded_at": "2026-09-27T12:11:56Z",
+  "red_cases": {
+    "already_covered": 4,
+    "proposed": 4
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "schema": 1,
+  "status": "ran"
+}
