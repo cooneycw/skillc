@@ -8,7 +8,9 @@ outcome or completion time on an already-qualified task?
 This is the evidence for #12's run under [`run-manifest.json`](../run-manifest.json).
 **Current declaration: [`run-manifest-2026-09-27-gpt-6-astra.json`](../run-manifest-2026-09-27-gpt-6-astra.json)**
 (issue #141). It supersedes this run, pins `gpt-6-astra` at launch, and has
-not been run yet. A run under it replaces this bundle.
+not been run yet. This bundle stays as it is (owner ruling on #139). The re-run under the new
+declaration is #147, which publishes to its own directory beside this one, so do not run
+`pilot-run` with its default `--evidence` destination until #147 settles it.
 
 **Answer at this size: nothing measurable.** All six attempts passed, three
 per arm. The completion-time differences go both ways and are the size of
@@ -110,14 +112,20 @@ manifests and the `pilot-report`. `skillc check-records records/` passes the
 `pilot-report` rule (every scheduled attempt present, well formed) and
 `ledger-binding`. It reports **6 `attempt-accounting` errors, one per
 attempt: "captured but has no result"**. That is a true statement, not a
-formatting problem. The agent-trial driver (#106) grades through
-`verify.grade_files` and does not store a `verified-result` record. Storing
-one needs an installation receipt that path does not write. The grades above
-come from that same grader. They are in the report, but not yet recorded as
-first-class results. Tracked as
-[#139](https://github.com/cooneycw/skillc/issues/139). `tests/test_matched_pilot.py` pins this as the only
-finding, so any other one fails the suite, and `skillc pilot-run` refuses to
-publish a bundle with any other finding.
+formatting problem. At run time the agent-trial driver (#106) graded through
+`verify.grade_files` and stored no `verified-result` record. The grades above
+come from that same grader. They are in the report, but not recorded as
+first-class results.
+
+[#139](https://github.com/cooneycw/skillc/issues/139) fixed the driver: a graded
+attempt now stores its result, with its `agent-observation` standing in for the
+receipt in accounting and `installation-ready` UNKNOWN. This run cannot be
+backfilled. Its ledger pins the grader by id and revision only, and the verifier
+refuses to store a result without a pinned digest. The tolerance is now scoped
+to this one experiment (`matched_pilot.KNOWN_GAP_EXPERIMENTS`), so a later run
+carrying the same finding is refused. `tests/test_matched_pilot.py` pins this as
+the only finding, so any other one fails the suite, and `skillc pilot-run`
+refuses to publish a bundle with any other finding.
 
 ## Raw artifacts
 

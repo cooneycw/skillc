@@ -98,8 +98,10 @@ not know are now recorded under `observed_at_run` in `run-manifest.json`:
 - the model is `gpt-6-astra`, not the assumed `gpt-5.1-codex`;
 - input tokens ran 77k-102k per attempt, not the assumed 50k.
 
-Still not delivered: a stored `verified-result` per attempt. The #106 agent
-path grades but does not record one, which the evidence README states.
+Still not delivered: a stored `verified-result` per attempt for THIS run. The
+agent path stores one since #139, but this run predates that, and its ledger
+pins no grader digest, so its results cannot be stored after the fact. A clean
+bundle needs a new run; the evidence README states the gap.
 
 ## If the judge-call estimate for a larger population would exceed $5
 

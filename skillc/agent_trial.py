@@ -38,7 +38,7 @@ GRADING IS A SEPARATE, LATER GATE THIS MODULE OWNS, layered ON TOP of
 `lifecycle.py`'s own disposition (#106's own acceptance: "prompt-delivery
 mismatch: the attempt is BLOCKED, not graded"). `lifecycle.py` stays
 generic - it has no concept of "graded" at all - so `run_one_attempt`
-itself refuses to call `verify.grade_files` unless the observation shows
+itself refuses to call `verify.grade_agent_attempt` unless the observation shows
 BOTH the prompt-delivery check and the liveness canary were confirmed
 against the real transcript. A captured-but-unconfirmed attempt is real
 data (kept in the record, under `observation`), but never handed to the
@@ -489,8 +489,9 @@ def _frozen_candidate_files(experiment: trial.Experiment, attempt_id: str) -> li
 
 
 def observation_record_name(attempt_id: str) -> str:
-    """Beside `trial._lifecycle_name(attempt_id)` in the experiment root."""
-    return f"observation-{attempt_id}.json"
+    """Beside `trial._lifecycle_name(attempt_id)` in the experiment root - the
+    name a stand-in `verified-result` cites (#139), so it has one definition."""
+    return verify.observation_record_name(attempt_id)
 
 
 def _as_list(value: object) -> list[object] | None:
@@ -732,9 +733,16 @@ def run_one_attempt(
                         "interfaces.md's step 8 rule, reusing the same instance risks carrying the "
                         "agent attempt's own state into the probe's isolation"
                     )
-                files = _frozen_candidate_files(experiment, attempt_id)
                 grading_started = time.monotonic()
-                graded_result = verify.grade_files(grader, files, base, backend=grading_backend)
+                # Through the verifier's result assembler, never `grade_files`
+                # alone (#139): the grade used to live only in this returned
+                # dict, so every captured attempt read as "grading is still
+                # owed" to attempt-accounting. The observation stands in for
+                # the installation receipt this path never writes, for
+                # accounting only - readiness stays UNKNOWN on the stored result.
+                stored, graded_result = verify.grade_agent_attempt(
+                    experiment, attempt_id, grader, base, observation, backend=grading_backend,
+                )
             except Exception as exc:
                 # The attempt ran and was observed; a grading failure (a
                 # quarantined verifier, a frozen artifact that no longer
@@ -751,9 +759,13 @@ def run_one_attempt(
                 )
                 raise
             grading_seconds = time.monotonic() - grading_started
+            # `status` is the TASK grade (the grader's own criteria); the stored
+            # result's status adds the verifier's readiness criterion, which
+            # is UNKNOWN on this path, and is carried beside it, never merged.
             graded = {
                 "status": graded_result.status, "category": graded_result.category,
                 "detail": graded_result.detail, "criteria": graded_result.criteria,
+                "result_id": stored["result_id"], "result_status": stored["status"],
             }
 
     result: dict[str, object] = {

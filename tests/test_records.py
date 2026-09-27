@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -1037,3 +1038,73 @@ def test_ledger_binding_does_not_crash_on_an_unhashable_attempt_id(tmp_path: Pat
     bundle = _write_bundle(tmp_path, ledger, report)
     findings = list(records.ledger_binding(bundle))  # must not raise
     assert findings and "omits scheduled attempt" in findings[0] and "att-1" in findings[0]
+
+
+# ------------------------------------------ the agent-path receipt stand-in (#139)
+
+_STAND_IN = CONTROLS / "attempt-accounting" / "good" / "agent-observation-stands-in"
+
+
+_Edit = Callable[[dict[str, object]], None] | None
+
+
+def _stand_in_findings(tmp_path: Path, edit_observation: _Edit = None, edit_result: _Edit = None) -> list[str]:
+    case = tmp_path / "case"
+    shutil.copytree(_STAND_IN, case)
+    for name, edit in (("observation.json", edit_observation), ("result.json", edit_result)):
+        if edit is not None:
+            data = json.loads((case / name).read_text(encoding="utf-8"))
+            edit(data)
+            (case / name).write_text(json.dumps(data), encoding="utf-8")
+    bundle = records.bundle_at(case)
+    assert bundle is not None
+    return list(records.attempt_accounting(bundle))
+
+
+def test_the_stand_in_accounts_for_a_receiptless_grade(tmp_path: Path) -> None:
+    assert _stand_in_findings(tmp_path) == []
+
+
+def test_an_ineligible_observation_stands_in_for_nothing(tmp_path: Path) -> None:
+    def ineligible(data: dict[str, object]) -> None:
+        data["transcript"]["grading_eligible"] = False  # type: ignore[index]
+
+    [finding] = _stand_in_findings(tmp_path, edit_observation=ineligible)
+    assert "not an observed, grading-eligible attempt" in finding
+
+
+def test_a_receiptless_result_that_declares_no_stand_in_is_still_refused(tmp_path: Path) -> None:
+    """The widening's own control: an observation in the bundle is not enough -
+    the result must say it rests on one, or it was graded without a receipt."""
+    def undeclared(data: dict[str, object]) -> None:
+        del data["verification"]
+
+    [finding] = _stand_in_findings(tmp_path, edit_result=undeclared)
+    assert "graded without its installation receipt" in finding
+
+
+def test_an_optional_readiness_criterion_cannot_let_a_stand_in_pass(tmp_path: Path) -> None:
+    """Codex review, red before the fix: an optional UNKNOWN drops out of
+    `derive_status`, so the result derived PASS with no readiness at all."""
+    def optional(data: dict[str, object]) -> None:
+        criteria = data["criteria"]
+        assert isinstance(criteria, list)
+        for criterion in criteria:
+            if criterion["id"] == "installation-ready":
+                criterion["mandatory"] = False
+        data["status"] = "PASS"
+
+    [finding] = _stand_in_findings(tmp_path, edit_result=optional)
+    assert "not exactly one mandatory UNKNOWN" in finding
+
+
+def test_a_receipt_beside_the_stand_in_does_not_let_it_claim_readiness(tmp_path: Path) -> None:
+    """Codex re-review, red before the fix: stand-in checks ran only when no
+    receipt existed, so adding one let a stand-in result claim readiness."""
+    case = tmp_path / "case"
+    shutil.copytree(CONTROLS / "attempt-accounting" / "bad" / "stand-in-claims-readiness", case)
+    shutil.copy(CONTROLS / "attempt-accounting" / "good" / "complete" / "receipt.json", case / "receipt.json")
+    bundle = records.bundle_at(case)
+    assert bundle is not None
+    [finding] = list(records.attempt_accounting(bundle))
+    assert "not exactly one mandatory UNKNOWN" in finding

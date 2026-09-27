@@ -31,6 +31,44 @@ and version plan.
     launch. A run from before this change recorded nothing, so it needs an
     explicit `--manifest`.
 
+- **A graded agent-trial attempt now stores its `verified-result`** (Refs
+  #139). `agent_trial.run_one_attempt` grades through the verifier's result
+  assembler (`verify.grade_agent_attempt`) instead of `verify.grade_files`
+  alone. So the result keeps the ledger's grader pin, the capture check, the
+  store snapshot and the frozen-digest checks, and `attempt-accounting` no
+  longer reports every captured agent attempt as "grading is still owed".
+  - **The receipt question.** The agent path writes no installation receipt:
+    the baseline arm installs nothing, which the receipt contract refuses, and
+    nothing on the path establishes that a client discovered what was
+    delivered. The attempt's `agent-observation` record stands in for the
+    receipt in ATTEMPT ACCOUNTING only. The result declares it
+    (`verification.readiness_source: agent-observation`), and the verifier's
+    `installation-ready` criterion is always UNKNOWN on this path, so
+    readiness still gates PASS: a task PASS is stored as INCONCLUSIVE, and a
+    task FAIL is still FAIL. The driver's returned `graded.status` stays the
+    task grade, with `result_status` beside it.
+  - `attempt-accounting` accepts a receiptless graded result only when it
+    declares the stand-in, keeps `installation-ready` as exactly one MANDATORY
+    UNKNOWN, and the bundle holds that attempt's observed, grading-eligible
+    `agent-observation`. A result declaring the stand-in is held to that even
+    when a receipt also exists. New controls: `good/agent-observation-stands-in`,
+    `bad/stand-in-without-observation`, `bad/stand-in-claims-readiness`,
+    `bad/stand-in-optional-readiness` and
+    `bad/stand-in-with-receipt-claims-readiness`.
+  - `verify.regrade` of an agent-path result reads the stored observation. It
+    must be valid and bound to that attempt and trial. The regrade also needs
+    an explicit grading `backend`, and is refused without one: agent-written
+    code is never regraded as a bare host process.
+  - Agent-trial ledgers now pin the grader's digest (`matched_pilot.plan_pilot`,
+    `collection_conformance.plan_collection_attempt`), which the verifier
+    requires. The collection plan used to pin revision `g1` of a grader at
+    revision `2`.
+  - `pilot-run`/`pilot-report` export `observation-*.json` into the bundle.
+    The #12 bundle's known-gap tolerance is narrowed to that one pre-fix
+    experiment (`matched-pilot-6ab82dc6`). Its ledger pins no grader digest,
+    so its results cannot be stored after the fact, and a clean bundle is owed
+    to a new #12 run.
+
 - **`skillc selection-probe [--detection-control]`: the operator command for
   #26's live run** (Refs #26). It runs every predeclared case through
   `selection_probe.agent_trial_runner`, one attempt per arm, and exits 1
