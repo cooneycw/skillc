@@ -382,7 +382,7 @@ def test_paste_back_is_leak_clean_and_names_every_planned_field() -> None:
         "credential_delivered=True source=subscription", "remaining_at_launch=120m",
         "host_credential_unchanged=True", "host_remaining_after=60m",
         "stop.reason=exited stop.exit_code=0 stop.confirmed=True",
-        "workspace_cleanup=cleaned", "backend_teardown=confirmed", "leaked_owned_containers=0",
+        "workspace_cleanup(record, at finalize)=cleaned", "backend_teardown=confirmed", "leaked_owned_containers=0",
         "client_version=0.157.1 model=some-model", "unrecognized_types=[]",
     ):
         assert field in text
@@ -416,6 +416,10 @@ def test_paste_back_refresh_line_reads_a_real_driver_record(
     text = cc.build_collection_paste_back(result)
     assert "refresh_observed_in_container=False" in text
     assert "backend_teardown=confirmed" in text
+    # The record says "partial" (finalized before the workspace is cleaned);
+    # the journal's own event, written after, says what happened.
+    assert result.workspace_cleaned == "removed"
+    assert "workspace_cleaned(journal)=removed" in text
     remaining = result.record["observation"]["credential_remaining_seconds_at_launch"]  # type: ignore[index]
     assert isinstance(remaining, int) and 3000 <= remaining <= 3600
 
@@ -446,6 +450,8 @@ def test_below_threshold_credential_blocks_before_launch_and_leaves_no_container
     assert after.reachable and not after.owned
     assert reap.diff(before, after).leaked == frozenset()
     assert result.record["graded"] is None
+    # The control's paste-back names its own cause, not only its disposition.
+    assert "below the required 86400s" in cc.build_collection_paste_back(result)
 
 
 def test_host_credential_check_reports_a_changed_file(tmp_path: Path) -> None:

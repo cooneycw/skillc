@@ -205,6 +205,12 @@ class CollectionAgentResult:
     #: `reap.diff` of two daemon snapshots taken around the whole run - the
     #: agent container AND the grading container. `None` = not taken.
     daemon_diff: reap.SnapshotDiff | None = None
+    #: The journal's own last `cleaned` event status for the attempt's
+    #: workspace (e.g. "removed"). `lifecycle.run_through_backend` finalizes
+    #: the record BEFORE it cleans the workspace, so the record's `cleanup`
+    #: always reads "partial" on a lifecycle-driven attempt; the journal event
+    #: is written after the removal and is the fact. `None` = no such event.
+    workspace_cleaned: str | None = None
     #: Where the run's evidence store was kept, already redacted for printing.
     store_display: str | None = None
     #: Whether the full record JSON was written into the store (it is only
@@ -376,8 +382,10 @@ def run_collection_agent_attempt(
         grader=grader, grading_backend=grading_backend,
         extra_home_files=extra_home_files,
     )
+    cleaned = [e for e in experiment.events(attempt_id) if e.get("event") == "cleaned"]
     return CollectionAgentResult(
         subject_name, acquired.subject.revision, materialize.CLIENT, record, agent_network=backend.network,
+        workspace_cleaned=str(cleaned[-1].get("status")) if cleaned else None,
     )
 
 
@@ -436,7 +444,7 @@ def build_collection_paste_back(result: CollectionAgentResult) -> str:
         f"    host_credential_unchanged={host.unchanged if host else None}",
         f"    host_remaining_after={_fmt_seconds(host.after.remaining_seconds) if host else 'None'}",
         "  [outcome]",
-        f"    disposition={record.get('disposition')}",
+        f"    disposition={record.get('disposition')} reason={record.get('reason')}",
         (
             f"    stop.reason={stop_d.get('reason')} stop.exit_code={stop_d.get('exit_code')} "
             f"stop.confirmed={stop_d.get('confirmed')}"
@@ -446,7 +454,8 @@ def build_collection_paste_back(result: CollectionAgentResult) -> str:
         f"    graded.criteria={criteria_text}",
         f"    grading_blocked_reason={record.get('grading_blocked_reason')}",
         "  [cleanup]",
-        f"    workspace_cleanup={cleanup_d.get('status')} failures={cleanup_d.get('failures')}",
+        f"    workspace_cleaned(journal)={result.workspace_cleaned}",
+        f"    workspace_cleanup(record, at finalize)={cleanup_d.get('status')}",
         f"    backend_teardown={record.get('backend_teardown')}",
         f"    backend_teardown_error={record.get('backend_teardown_error')}",
         (

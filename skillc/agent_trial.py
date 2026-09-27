@@ -55,13 +55,15 @@ acceptance, mirroring #96's structural test for the judge) -
 writes a realistic transcript for each client format, never a real
 `claude`/`codex` binary.
 
-OWED TO THE OPERATOR'S LIVE RUN, stated plainly rather than assumed: the
-exact real argv that launches a real client (this module takes `base_argv`
-and `prompt` as caller-supplied parameters, deliberately never inventing
-its own - the same layering `run_through_backend` itself already uses for
-`argv`); whether a real login still works on the operator's host after a
-trial; and the real transcript format drift either CLI might introduce
-between the pinned version this was built against and a later one.
+THE OPERATOR'S LIVE RUN (issue #106, `evals/agent-trial-live/README.md`):
+codex-cli 0.157.1, on a real subscription login, once per collection. The
+real argv stays caller-supplied (this module takes `base_argv` and `prompt`
+as parameters, deliberately never inventing its own - the same layering
+`run_through_backend` itself already uses for `argv`). The host login still
+answered `codex login status` afterwards, with a byte-identical credential
+file. `transcript_census` found no unrecognized transcript types. Still NOT
+shown: an in-container token refresh, Claude Code (#124), and drift in any
+later CLI version - the census is how a later run would see it.
 
 Docker-specific, deliberately: `deliver_home_file`/`read_home_file`/
 `read_home_tree` are `DockerBackend` methods, not part of the generic

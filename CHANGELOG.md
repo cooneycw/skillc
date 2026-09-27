@@ -16,6 +16,13 @@ collection) closes.
 
 ### Fixed
 
+- **`skillc collection-run`'s paste-back printed `refresh_observed_in_container=None`
+  on every run** (Refs #106). It read `refresh_observed_in_container`, but the
+  driver writes `credential_refresh_observed_in_container`. #11's live
+  evidence therefore showed "not observed" for a comparison that had actually
+  been made. The earlier test hand-built its record with the same wrong key;
+  the new one reads a record produced by the real driver.
+
 - **`skillc collection-run` could not complete a real agent attempt: no
   network, a refused workspace, a 30-second agent limit, and colliding
   scratch paths** (Refs #11): all found on the first live runs, none of
@@ -145,6 +152,24 @@ collection) closes.
   which fails on the host-global sweep (both are gone there).
 
 ### Added
+
+- **`skillc collection-run` keeps evidence for #106's live run** (Refs #106).
+  The paste-back is grouped into prompt delivery, canary, credential,
+  outcome, cleanup and transcript format:
+  - the credential's remaining life at launch;
+  - the operator's host credential before and after (a digest comparison;
+    the bytes are never read into the record);
+  - a daemon snapshot diff of skillc-owned containers around the whole run;
+  - the stop reason and exit code, per-criterion grades, and the refusal
+    reason;
+  - the journal's own workspace `cleaned` event;
+  - a census of the real transcript: client version, model, line types, and
+    the codex `response_item` types the adapter does not know.
+
+  The full record is written, leak-checked, into the kept store. A PASS now
+  exits 1 if teardown was not confirmed or a skillc-owned container was left
+  behind. `--minimum-credential-seconds` runs the below-threshold control.
+  Live evidence: `evals/agent-trial-live/`.
 
 - **`skillc collection-run <subject>` (issue #11's remaining acceptance
   bullet, "the same client, Level 1 fixture, contract and grader")**: one
