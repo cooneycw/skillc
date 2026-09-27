@@ -13,7 +13,7 @@ import sys
 
 from skillc import cli, demo
 
-demo._cancel_target_argv = demo._sleep_argv
+demo._cancel_target_argv = demo._sleep_argv  # type: ignore[assignment]
 
 if __name__ == "__main__":
     raise SystemExit(cli.main(sys.argv[1:]))
