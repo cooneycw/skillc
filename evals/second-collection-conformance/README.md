@@ -120,5 +120,10 @@ evidence into one overclaim):**
   login, inside the normal usage budget - quoted verbatim from the ruling
   on #98: "Normal Claude and codex". It is not gated by the #12 $5 cost
   stop, which covers judge calls only (e.g. `mcp-second-opinion`, which use
-  provider API keys); it does need #98's subscription-credential injection
-  into a trial container first.
+  provider API keys). The subscription-credential mechanism it needs
+  (`skillc/credential.py`, `docker_backend.DockerBackend.deliver_home_file`/
+  `read_home_file` - resolved from a documented standard location, delivered
+  candidate-owned into the trial container's home directory, never mounted
+  or exported, refused below a minimum remaining life) is delivered under
+  #98; the agent run itself is still not, and is not this manifest's own
+  remaining item to close.

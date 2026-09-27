@@ -8,7 +8,7 @@
     "source": "ADR 0005 rule 6 (docs/decisions/0005-runtime-scope-and-cost-rulings.md)",
     "scope": "covers agent runs (this probe's treatment/baseline attempts) only, via the operator's normal Codex subscription login (the normal rotating OAuth login, never a long-lived key) - not judge calls, which use provider API keys and stay dollar-metered. This probe enables no judge tier, so no dollar-metered spend is estimated below at all.",
     "client_login": {"codex": "operator's normal Codex CLI subscription login (OAuth), not a pay-per-use API key"},
-    "prerequisite": "the in-container credential path for a subscription-login agent run (issue #98) is not yet built; this manifest states the ruling and relabels the estimate, it does not deliver that prerequisite"
+    "prerequisite": "the in-container credential path for a subscription-login agent run (skillc/credential.py, docker_backend.DockerBackend.deliver_home_file/read_home_file, issue #98) is now built; this manifest states the ruling and relabels the estimate, it did not itself deliver that prerequisite"
   },
   "subject": {
     "name": "cpp-codex",
@@ -63,5 +63,5 @@
   },
   "monetary_cap_usd": null,
   "approved_budget_usd": null,
-  "execution": "incomplete - no live run: the agent-quota figure needs no budget approval under ADR 0005 rule 6 (no judge tier is enabled, so judge spend is $0), but the in-container credential path for a subscription-login agent run (issue #98) is not yet built, and skillc/trial.py's real attempt-execution loop does not exist yet either"
+  "execution": "incomplete - no live run: the agent-quota figure needs no budget approval under ADR 0005 rule 6 (no judge tier is enabled, so judge spend is $0); the in-container credential path for a subscription-login agent run (issue #98) is now built, but skillc/trial.py's real attempt-execution loop does not exist yet"
 }

@@ -3,9 +3,30 @@
 skillc is public, and it will soon produce evidence bundles, ledgers and
 receipts from real trial runs (#10). Nothing stops a committed file, a PR body,
 or a produced bundle from carrying the operator's machine identities. This
-module scans text for four classes: an absolute home-directory path, a
-`uid=`/`gid=` number, a private (RFC 1918) IPv4 address, and a hostname from a
-locally-configured deny-list. Stdlib only, like the rest of `skillc/`.
+module scans text for five classes: an absolute home-directory path, a
+`uid=`/`gid=` number, a private (RFC 1918) IPv4 address, a hostname from a
+locally-configured deny-list, and credential material (#98: a subscription
+login copied into a trial container raises the stakes of a leak well above
+a machine identity - a token is not merely embarrassing, it is usable).
+Stdlib only, like the rest of `skillc/`.
+
+CREDENTIAL MATERIAL (#98) is matched two ways, both requiring an actual
+VALUE, never a bare key name alone - this module's own source, and any
+prose describing a client's credential schema, legitimately mentions field
+names like `"expiresAt"` or `"access_token"` without ever containing a real
+secret, and must not trip its own scan:
+
+- an OAuth-shaped `"access_token"`/`"accessToken"`/`"refresh_token"`/
+  `"refreshToken"` JSON key immediately followed by a long opaque string
+  value;
+- a recognizable API-key prefix (`sk-`, optionally `sk-ant-`) followed by
+  20+ opaque characters.
+
+What this CANNOT see, on top of the four classes' own stated limits below:
+a credential value split across lines, wrapped, or re-encoded (base64,
+URL-encoding); a token shape this module does not yet recognize; or a
+credential referenced only by a variable name with no literal value present
+in the scanned text.
 
 What this CANNOT see - stated plainly, because absence of a finding here is
 not proof of absence:
@@ -42,6 +63,26 @@ HOME_PATH_RE = re.compile(r"/(?:home|Users)/([A-Za-z0-9_.-]+)")
 UID_GID_RE = re.compile(r"\b(?:uid|gid)=\d+")
 
 IPV4_RE = re.compile(r"\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b")
+
+#: An OAuth-shaped token KEY immediately followed by a long opaque VALUE
+#: (#98) - requires the value, never fires on the key name alone (this
+#: module's own docstring, and skillc/credential.py's, both discuss these
+#: field names in prose with no value attached, and must stay silent).
+OAUTH_TOKEN_RE = re.compile(
+    r'"(?:access|refresh)_?[Tt]oken"\s*:\s*"([A-Za-z0-9_.\-]{20,})"'
+)
+
+#: A recognizable API-key prefix (Anthropic's `sk-ant-...`, or the generic
+#: `sk-...` shape several providers share) followed by enough opaque
+#: characters that a short, coincidental match is implausible.
+API_KEY_RE = re.compile(r"\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}\b")
+
+#: The finding this yields for either pattern NEVER includes the matched
+#: value itself (cross-model review, #98): the whole point of this class is
+#: that the scanned text carries a real secret, so echoing `match.group(0)`
+#: into a finding, a log line, or a review comment would create a second
+#: copy of it at the exact moment of detection. See `scan_text`'s two
+#: `credential-token` yields below.
 
 #: Known-safe values a bare regex would otherwise flag - compared against the
 #: EXACT matched text (a whole home-directory path, a whole `uid=`/`gid=`
@@ -162,6 +203,14 @@ def scan_text(text: str, denylist: frozenset[str]) -> Iterator[tuple[int, str, s
         for name in denylist:
             if name in line:
                 yield lineno, "denylisted-hostname", name
+        for match in OAUTH_TOKEN_RE.finditer(line):
+            if match.group(0) in ALLOWLIST:
+                continue
+            yield lineno, "credential-token", "OAuth-shaped token value present (redacted)"
+        for match in API_KEY_RE.finditer(line):
+            if match.group(0) in ALLOWLIST:
+                continue
+            yield lineno, "credential-token", "API-key-shaped value present (redacted)"
 
 
 def _files(root: Path) -> Iterator[Path]:

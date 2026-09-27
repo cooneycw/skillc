@@ -394,13 +394,17 @@ def _owned_tar(host_path: Path, arcname: str) -> bytes:
     return buf.getvalue()
 
 
-def _owned_tar_bytes(arcname: str, data: bytes) -> bytes:
+def _owned_tar_bytes(arcname: str, data: bytes, mode: int = 0o644) -> bytes:
     """Like `_owned_tar`, for in-memory bytes with no host file backing them
-    (the liveness canary) - never staged to a temp file first."""
+    (the liveness canary, and #98's subscription credential) - never staged
+    to a temp file first. `mode` defaults to the liveness canary's own
+    0o644; #98's credential delivery passes 0o600 explicitly, since a
+    world/group-readable credential file would defeat the point of a fixed,
+    single-user candidate identity."""
     buf = io.BytesIO()
     info = tarfile.TarInfo(name=arcname)
     info.size = len(data)
-    info.mode = 0o644
+    info.mode = mode
     info = _owned_tarinfo(info)
     with tarfile.open(fileobj=buf, mode="w") as tar:
         tar.addfile(info, io.BytesIO(data))
@@ -627,6 +631,102 @@ class DockerBackend:
             if canary_copied is not None and canary_copied.returncode == 0:
                 readiness["canary_path"] = CANARY_RESULT_FILENAME
         return readiness
+
+    def deliver_home_file(self, handle: object, container_relpath: str, data: bytes, *, mode: int = 0o600) -> None:
+        """Copy `data` into the container's HOME directory at
+        `container_relpath` (relative to `CONTAINER_HOME`, e.g.
+        `.claude/.credentials.json`) - the same candidate-owned tar-stream
+        mechanism `install()` uses for `CONTAINER_WORKSPACE`, aimed at
+        `CONTAINER_HOME` instead (#98: the operator's subscription
+        credential belongs in the candidate's home, where each client's own
+        standard location expects to find it, never in `/work`).
+
+        NOT part of the `ExecutionBackend` Protocol (`backend.py`) - this is
+        Docker-specific for now, until a second backend needs the same
+        capability and this generalizes into the seam itself. Never a bind
+        mount, never baked into the image, never in argv - the same three
+        guarantees `install()` already gives, extended to a destination
+        `install()` itself does not reach.
+
+        A direct structural consequence, not merely a policy: `export()`
+        only ever reads from `CONTAINER_WORKSPACE` (see its own
+        implementation), so the bytes delivered HERE, at this exact
+        location, can NEVER appear in an exported workspace by way of
+        `export()` itself - not because of a check, but because export()
+        never looks in `CONTAINER_HOME` at all. This is a narrower
+        guarantee than "the credential can never leak into an export": a
+        running candidate process can still read its own home directory and
+        write those same bytes into `CONTAINER_WORKSPACE` on purpose or by
+        accident (cross-model review, #98) - `deliver_home_file`/`export()`
+        do not and cannot prevent that, which is exactly why `skillc/leak.py`
+        scans exported content for credential material independently rather
+        than relying on this placement alone.
+
+        `.claude` and `.codex` already exist under `CONTAINER_HOME`, owned
+        by the candidate identity (#78's image build) - this method never
+        creates a directory itself, only a leaf file inside one that must
+        already exist.
+        """
+        assert isinstance(handle, _Handle)
+        payload = _owned_tar_bytes(container_relpath, data, mode=mode)
+        try:
+            copied = subprocess.run(
+                [*self.docker_bin, "cp", "-", f"{handle.name}:{CONTAINER_HOME}"],
+                input=payload, capture_output=True, env=handle.env, check=False,
+                timeout=self.daemon_timeout,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise BackendUnavailable(
+                f"docker cp failed delivering {container_relpath!r} to home for {handle.attempt_id!r}: {exc}"
+            ) from exc
+        if copied.returncode != 0:
+            raise BackendUnavailable(
+                f"docker cp failed delivering {container_relpath!r} to home for {handle.attempt_id!r}: "
+                f"{copied.stderr.decode('utf-8', errors='replace').strip()}"
+            )
+
+    def read_home_file(self, handle: object, container_relpath: str) -> bytes:
+        """Read back the current bytes at `container_relpath` (relative to
+        `CONTAINER_HOME`) - the read-side counterpart to `deliver_home_file`,
+        for exactly one purpose (#98): letting a caller compare a delivered
+        credential's bytes against its current in-container bytes to observe
+        whether an in-container refresh happened, before `destroy()` discards
+        the container and that fact along with it.
+
+        `docker cp NAME:PATH -` streams a tar archive to stdout even for a
+        single file, so this reads that stream back with `tarfile` rather
+        than treating stdout as the raw file content. Raises
+        `BackendUnavailable` on any failure - an unreadable container is the
+        same class of fact as an unreachable daemon, not a signal about the
+        credential itself.
+        """
+        assert isinstance(handle, _Handle)
+        try:
+            result = subprocess.run(
+                [*self.docker_bin, "cp", f"{handle.name}:{CONTAINER_HOME}/{container_relpath}", "-"],
+                capture_output=True, env=handle.env, check=False, timeout=self.daemon_timeout,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise BackendUnavailable(
+                f"docker cp failed reading {container_relpath!r} from home for {handle.attempt_id!r}: {exc}"
+            ) from exc
+        if result.returncode != 0:
+            raise BackendUnavailable(
+                f"docker cp failed reading {container_relpath!r} from home for {handle.attempt_id!r}: "
+                f"{result.stderr.decode('utf-8', errors='replace').strip()}"
+            )
+        with tarfile.open(fileobj=io.BytesIO(result.stdout), mode="r:*") as tar:
+            members = tar.getmembers()
+            if not members:
+                raise BackendUnavailable(
+                    f"docker cp for {container_relpath!r} returned an empty archive for {handle.attempt_id!r}"
+                )
+            extracted = tar.extractfile(members[0])
+            if extracted is None:
+                raise BackendUnavailable(
+                    f"docker cp for {container_relpath!r} returned a non-regular-file entry for {handle.attempt_id!r}"
+                )
+            return extracted.read()
 
     def execute(
         self, handle: object, argv: Sequence[str], limits: Limits,

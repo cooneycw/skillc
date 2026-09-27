@@ -407,6 +407,142 @@ def test_full_lifecycle_happy_path_installs_executes_and_exports(
     assert backend.confirm_absent(handle) is Confirmation.CONFIRMED
 
 
+# ---------------------------------------------- deliver_home_file (#98)
+
+def test_deliver_home_file_lands_where_a_client_would_read_it(base: Path, docker_state: Path) -> None:
+    """`deliver_home_file` targets CONTAINER_HOME, never CONTAINER_WORKSPACE.
+
+    Checked against the fake CLI's own mapped state, not through `execute()`
+    reading an absolute path back - the fake CLI runs a REAL host subprocess
+    with no chroot (its own module docstring: "proves the LIFECYCLE, never
+    a containment boundary"), so an absolute `/home/candidate/...` read
+    would resolve on the REAL host filesystem, not inside any simulated
+    container, and could not tell "landed in the container's home" apart
+    from "happens to exist on this host". The mapped-path convention
+    (`{name}.fsroot/<container path>`) is the fake CLI's own documented
+    state model, used here deliberately rather than by accident."""
+    backend = _backend(base, docker_state)
+    attempt_id = "a-lc-000000000010"
+    handle = backend.prepare(attempt_id)
+    backend.deliver_home_file(handle, ".claude/.credentials.json", b"fake-credential-bytes")
+
+    name = d._container_name(attempt_id)
+    mapped = docker_state / f"{name}.fsroot" / "home" / "candidate" / ".claude" / ".credentials.json"
+    assert mapped.read_bytes() == b"fake-credential-bytes"
+    backend.destroy(handle)
+
+
+def test_a_delivered_home_file_is_absent_from_export_output(
+    base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """Control (#98's own acceptance): the credential is absent from
+    export() output, PROVIDED nothing inside the container copies it out of
+    home first. `export()` never reads CONTAINER_HOME itself, so this test's
+    own placement of the file is never the reason it stays absent here - but
+    that is narrower than "the credential can never leak into an export"
+    (see `deliver_home_file`'s own docstring, and the sibling test below,
+    which is the negative case cross-model review asked for)."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000011")
+    backend.deliver_home_file(handle, ".claude/.credentials.json", b"fake-credential-bytes")
+
+    surface_file = tmp_path / "skill.txt"
+    surface_file.write_text("skill contents\n")
+    backend.install(handle, {"skill.txt": surface_file})
+
+    dest = tmp_path / "export"
+    backend.export(handle, dest)
+    exported_names = {p.name for p in dest.rglob("*") if p.is_file()}
+    assert ".credentials.json" not in exported_names
+    for path in dest.rglob("*"):
+        if path.is_file():
+            assert b"fake-credential-bytes" not in path.read_bytes()
+    backend.destroy(handle)
+
+
+def test_a_candidate_copying_its_own_credential_into_work_does_reach_export(
+    base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """Red case for the guarantee above (cross-model review, #98): a
+    delivered home file is absent from export() only because nothing put it
+    in CONTAINER_WORKSPACE. If a candidate process reads its own home
+    directory and writes those bytes into `/work` - exactly what a real
+    agent COULD do, on purpose or by accident - export DOES surface them.
+    `deliver_home_file`/`export()` structurally prevent nothing here; this
+    is why `skillc/leak.py` scans exported content independently rather
+    than relying on the credential's delivery location alone."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000011a")
+    backend.deliver_home_file(handle, ".claude/.credentials.json", b"fake-credential-bytes")
+    backend.install(handle, {})
+
+    name = d._container_name("a-lc-000000000011a")
+    home_file = docker_state / f"{name}.fsroot" / "home" / "candidate" / ".claude" / ".credentials.json"
+    work_copy = docker_state / f"{name}.fsroot" / "work" / "auth-copy.json"
+    work_copy.parent.mkdir(parents=True, exist_ok=True)
+    work_copy.write_bytes(home_file.read_bytes())  # simulates a candidate's own `cp`
+
+    dest = tmp_path / "export"
+    backend.export(handle, dest)
+    assert (dest / "auth-copy.json").read_bytes() == b"fake-credential-bytes"
+    backend.destroy(handle)
+
+
+def test_a_delivered_home_file_is_gone_after_destroy(base: Path, docker_state: Path) -> None:
+    """Control (#98's own acceptance): the credential is absent from the
+    container after destroy() - the whole container is confirmed gone, so
+    nothing delivered to its home survives independently of it."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000012")
+    backend.deliver_home_file(handle, ".codex/auth.json", b"fake-codex-auth-bytes")
+    backend.destroy(handle)
+    assert backend.confirm_absent(handle) is Confirmation.CONFIRMED
+    # The container is gone entirely - a second delivery attempt against the
+    # same (now-dead) handle must fail, never silently re-create it.
+    with pytest.raises(BackendUnavailable):
+        backend.deliver_home_file(handle, ".codex/auth.json", b"fake-codex-auth-bytes")
+
+
+def test_read_home_file_reads_back_what_was_delivered(base: Path, docker_state: Path) -> None:
+    """`read_home_file` is `deliver_home_file`'s read-side counterpart
+    (#98): a caller compares its result against what it delivered to observe
+    whether an in-container refresh happened, before `destroy()` discards
+    the container and that fact along with it."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000013")
+    backend.deliver_home_file(handle, ".claude/.credentials.json", b"fake-credential-bytes")
+    assert backend.read_home_file(handle, ".claude/.credentials.json") == b"fake-credential-bytes"
+    backend.destroy(handle)
+
+
+def test_read_home_file_observes_an_in_container_change(base: Path, docker_state: Path) -> None:
+    """A refresh happening inside the container changes the file's bytes on
+    disk under the fake CLI's mapped state - the same white-box convention
+    `test_deliver_home_file_lands_where_a_client_would_read_it` uses, standing
+    in for what a real refreshing client would do to its own credential
+    file. `read_home_file` must see the CHANGED bytes, not the delivered
+    ones, or `credential.refresh_observed` could never detect a real one."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000014")
+    backend.deliver_home_file(handle, ".claude/.credentials.json", b"original-bytes")
+
+    name = d._container_name("a-lc-000000000014")
+    mapped = docker_state / f"{name}.fsroot" / "home" / "candidate" / ".claude" / ".credentials.json"
+    mapped.write_bytes(b"refreshed-bytes")
+
+    assert backend.read_home_file(handle, ".claude/.credentials.json") == b"refreshed-bytes"
+    backend.destroy(handle)
+
+
+def test_read_home_file_fails_on_a_dead_container(base: Path, docker_state: Path) -> None:
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000015")
+    backend.deliver_home_file(handle, ".claude/.credentials.json", b"fake-credential-bytes")
+    backend.destroy(handle)
+    with pytest.raises(BackendUnavailable):
+        backend.read_home_file(handle, ".claude/.credentials.json")
+
+
 def test_execute_delivers_stdin_like_a_bare_host_process(base: Path, docker_state: Path) -> None:
     backend = _backend(base, docker_state)
     handle = backend.prepare("a-lc-000000000008")

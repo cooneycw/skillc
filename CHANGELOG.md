@@ -16,6 +16,59 @@ collection) closes.
 
 ### Added
 
+- **A trial container carries the operator's subscription login, never a
+  long-lived key, never mounted or exported, with a leak-check for token
+  material** (Refs #98, Refs #10): the owner's ruling, quoted verbatim (from
+  issue #98), is that agent runs use "Normal Claude and codex" - the
+  operator's own Claude Code and Codex subscription logins, inside the
+  normal usage budget, not metered spend and not a cloud secret store.
+  `skillc/credential.py` resolves exactly one documented standard location
+  per client (an explicit path, then a named environment variable, then the
+  client's own standard file), refusing rather than scanning a home
+  directory for one it wasn't told about; reads it fresh on every trial,
+  never caching a copy; and refuses to start a trial whose access token's
+  remaining life is below a stated threshold (or cannot be determined at
+  all - including a `NaN`/`Infinity`/boolean expiry value, which Python's
+  own JSON parser otherwise accepts silently), because a refresh happening
+  INSIDE the container can rotate the refresh token and invalidate the
+  operator's own host copy, with no write-back protection here. Codex's own
+  `~/.codex/auth.json` has no `expires_at` field anywhere at the path this
+  module first guessed at - found by cross-model review against a real file
+  on the host, which would have made a genuine fresh Codex login always
+  read as undeterminable and always refused; the expiry now comes from
+  decoding the `exp` claim of the JWT already sitting at
+  `tokens.access_token`. `docker_backend.DockerBackend.deliver_home_file`
+  copies the credential into the candidate's home directory (never `/work`,
+  never a bind mount, never baked into the image, never in argv) using the
+  same candidate-owned tar-stream mechanism `install()` already uses for the
+  workspace; because `export()` only ever reads from the workspace, a
+  credential delivered here cannot appear in an exported trial BY WAY OF
+  `export()` itself - narrower than "can never leak into an export": a
+  running candidate process can still read its own home directory and copy
+  those bytes into the workspace on purpose or by accident (cross-model
+  review), which is exactly why the leak-check below scans exported content
+  independently rather than relying on delivery placement alone; a
+  committed red case proves the copy-out case does reach export.
+  `read_home_file` is the read-side counterpart, letting a caller observe
+  (when it chooses to compare) whether an in-container refresh changed the
+  delivered bytes before `destroy()` discards the container and the fact
+  along with it - documented as a byte-difference signal, not proof of a
+  real token rotation, since any rewrite of the file reports the same way
+  (`credential.refresh_observed`). `CredentialUsage` builds a record's
+  fields from what the caller already knows (the client, "subscription",
+  whether delivery succeeded, whether a refresh was observed) and has no
+  field a token value could occupy. `skillc/leak.py` gained a fifth
+  detection class, an OAuth-shaped token value or a recognizable API-key
+  prefix, each requiring the actual value rather than a bare field name; a
+  finding never repeats the matched value itself, so the detector does not
+  create a second copy of a real secret at the moment it detects one
+  (cross-model review). A committed planted-fake-token fixture pair
+  (plain text, not JSON - an earlier JSON-wrapped version force-escaped its
+  own quotes and left the OAuth half of the pair silently undetected, also
+  found by cross-model review) proves it discriminates, checked for both
+  patterns independently. Checking whether the operator's own HOST login
+  still works after a trial is explicitly NOT done here; that is owed to the
+  operator's own live run, for both clients, as issue #98 states.
 - **The second-collection conformance manifest states its own scope boundary
   and the owner's funding ruling explicitly** (Refs #11): review found the
   manifest needed to say plainly that its own two runs - installation,

@@ -471,6 +471,29 @@ def cmd_cp(state_dir: Path, rest: list[str]) -> int:
             return 1
         return 0
 
+    if dest == "-":
+        # The reverse of the `src == "-"` case above: a tar stream OUT to
+        # stdout (`docker_backend.DockerBackend.read_home_file`, #98), rather
+        # than a plain host-directory copy - real `docker cp` supports both
+        # directions of `-`, and a caller reading a single file back (to
+        # compare against what it delivered) needs the stream form, not a
+        # directory dumped on disk.
+        src_ref = _is_container_ref(src)
+        if not src_ref:
+            print("fake_docker: cp SRC - requires a NAME:PATH source", file=sys.stderr)
+            return 2
+        name, cpath = src_ref
+        if not _state_file(state_dir, name).is_file():
+            print(f"Error: No such container:path: {src}", file=sys.stderr)
+            return 1
+        mapped = _in_container(state_dir, name, cpath)
+        if not mapped.exists():
+            print(f"Error: No such container:path: {src}", file=sys.stderr)
+            return 1
+        with tarfile.open(fileobj=sys.stdout.buffer, mode="w|") as tar:
+            tar.add(mapped, arcname=Path(cpath).name)
+        return 0
+
     src_ref = _is_container_ref(src)
     dest_ref = _is_container_ref(dest)
 

@@ -11,6 +11,7 @@ proves the check is not simply refusing everything.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -27,10 +28,41 @@ def test_the_seeded_bundle_discriminates() -> None:
     bad = leak.scan_path(CONTROLS / "bad", denylist)
     assert bad.findings, "leak-check is blind on its own seeded-leak bundle"
     kinds = {f.kind for f in bad.findings}
-    assert kinds == {"home-path", "uid-gid", "private-ip", "denylisted-hostname"}, kinds
+    # "credential-token" comes from bad/planted-token/ (#98), scanned here
+    # too since scan_path walks the whole bad/ tree recursively - not a
+    # separate concern from the original four classes, just a fifth one.
+    assert kinds == {"home-path", "uid-gid", "private-ip", "denylisted-hostname", "credential-token"}, kinds
 
     good = leak.scan_path(CONTROLS / "good", denylist)
     assert good.findings == [], f"leak-check is noisy on its clean twin: {good.findings}"
+
+
+def test_the_planted_token_control_discriminates() -> None:
+    """Dedicated committed control (#98's own acceptance: "a planted fake
+    token in an exported transcript or record must be refused"), scanned in
+    isolation from the original four-class bundle above so a regression here
+    is unambiguous about which fixture pair caught it.
+
+    Asserts BOTH detail strings, not merely "some finding of kind
+    credential-token" - cross-model review found that the weaker assertion
+    let the fixture's OAuth line go completely undetected (a JSON-escaping
+    mismatch between the regex and an earlier, JSON-wrapped fixture) while
+    its neighbouring API-key line alone still made the test pass. Checking
+    both independently is what would have caught that."""
+    denylist = leak.load_denylist(str(CONTROLS / "denylist.txt"))
+
+    bad = leak.scan_path(CONTROLS / "bad" / "planted-token", denylist)
+    assert bad.findings, "leak-check is blind on its own planted-token fixture"
+    assert {f.kind for f in bad.findings} == {"credential-token"}
+    details = {f.detail for f in bad.findings}
+    assert "OAuth-shaped token value present (redacted)" in details, details
+    assert "API-key-shaped value present (redacted)" in details, details
+    for f in bad.findings:
+        assert "planted-fake-oauth-token-value-0000" not in f.detail
+        assert "sk-ant-api03-planted" not in f.detail
+
+    good = leak.scan_path(CONTROLS / "good" / "planted-token", denylist)
+    assert good.findings == [], f"leak-check is noisy on the planted-token control's clean twin: {good.findings}"
 
 
 def test_cli_exits_1_on_the_seeded_bundle_and_0_on_the_clean_twin(
@@ -150,12 +182,37 @@ def test_an_explicit_denylist_silences_the_warning(
         ("internal peer 10.0.0.1", "private-ip"),
         ("internal peer 172.16.4.9", "private-ip"),
         ("internal peer 192.168.1.5", "private-ip"),
+        ('"access_token": "abcdefghijklmnopqrstuvwxyz123456"', "credential-token"),
+        ('"refreshToken":"zzzzzzzzzzzzzzzzzzzzzzzzzzzz"', "credential-token"),
+        ("sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789", "credential-token"),
     ],
 )
 def test_each_class_fires_on_its_own_minimal_input(line: str, kind: str) -> None:
     findings = list(leak.scan_text(line, frozenset()))
     assert findings, f"{kind} did not fire on {line!r}"
     assert all(k == kind for _, k, _ in findings), findings
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        '"access_token": "abcdefghijklmnopqrstuvwxyz123456"',
+        '"refreshToken":"zzzzzzzzzzzzzzzzzzzzzzzzzzzz"',
+        "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789",
+    ],
+)
+def test_a_credential_token_finding_never_repeats_the_matched_value(line: str) -> None:
+    """The whole point of this class is that the scanned line carries a real
+    secret (#98, cross-model review) - a finding, log line, or review comment
+    that echoed the matched value back would create a second copy of it at
+    the exact moment of detection. Every value fragment long enough to be
+    the credential itself must be absent from every finding's `detail`."""
+    findings = list(leak.scan_text(line, frozenset()))
+    assert findings
+    secret_fragment = re.search(r"[A-Za-z0-9_.\-]{20,}", line)
+    assert secret_fragment is not None
+    for _, _, detail in findings:
+        assert secret_fragment.group(0) not in detail, (secret_fragment.group(0), detail)
 
 
 @pytest.mark.parametrize(
@@ -169,6 +226,14 @@ def test_each_class_fires_on_its_own_minimal_input(line: str, kind: str) -> None
         "edit .claude/settings.local.json before committing",
         "fixed logical paths (e.g. /work, /home/candidate)",
         'account_flavoured_path = "/home/some-claude-shaped-account/.venv/bin/python3"',
+        # #98: mentioning a credential SCHEMA field name, with no value attached,
+        # must never fire - skillc/credential.py's own docstring does exactly this.
+        '("claudeAiOauth", "expiresAt") is the field path this module tries first',
+        "the key is named access_token in both clients' documentation",
+        # A short sk- prefix is not a plausible real key - the 20+ char
+        # threshold exists so ordinary prose mentioning "sk-something" once
+        # in a while does not become a false positive.
+        "a short sk-abc prefix is not long enough to be a real key",
     ],
 )
 def test_each_non_leak_stays_silent(line: str) -> None:
