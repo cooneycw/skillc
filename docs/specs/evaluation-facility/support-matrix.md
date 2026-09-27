@@ -117,9 +117,7 @@ Evidence: the leak-checked paste-back blocks and EXIT lines posted on #10
 | Image digest that ran, recorded | MET: the digest above appears in every block |
 | Cleanup sweep, label-scoped | every reap outcome `already-absent`, `daemon_reachable=True` |
 | Declared host paths unchanged | `changed=[]`, `unresolved=[]` on every run |
-| Seeded control: reply-only client (never touches the canary) | caught: not captured |
-| Seeded control: container deliberately left running | caught: found and removed by the label-scoped reap |
-| Seeded control: leaky composition (known-bad grading candidate, planted host value in a paste-back) | caught |
+| `--control`: the seeded failures (reply-only client never touching the canary; a container deliberately left running; a leaky composition, meaning a known-bad grading candidate and a planted host value in a paste-back) | all caught, `EXIT=0`. The output is one aggregate line with no per-case breakdown. Each case being caught is entailed by `skillc/demo.py`'s `run_control`, which returns true only when every seeded failure is caught; it is not printed separately |
 | `--subject cpp-codex` (claude-power-pack @ `85e9b03a`) | 74 skills / 273 files installed; in-container digests matched; 74/74 discovered by the client's own listing |
 | `--subject mattpocock-skills` (@ `c55ee460`) | 2 skills / 7 files installed; digests matched; 2/2 discovered |
 | Exit codes | `EXIT=0` for all four commands; no traceback anywhere |
@@ -136,7 +134,7 @@ rule 6), which accepts this coverage for #10:
 | Capture failure | fake-only (no portable way to make a live `docker cp` fail) |
 | Empty task selection | fake-only (decided before any container exists; identical driver logic) |
 | Teardown failure | fake-only (a real `docker rm` cannot be forced to fail generically) |
-| Launch failure | fake-only (a missing image is covered by #118's tests) |
+| Launch failure | fake-only (a failing `docker run` surfaces as the same `BackendUnavailable` the tested daemon-unreachable path raises, so it is covered only incidentally; no dedicated test plants a rejected image) |
 | Kill-by-signal | fake-only (timing-fragile; overlaps the timeout seed) |
 
 **Still not established by any run**, live or fake: network egress
