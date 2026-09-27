@@ -688,14 +688,7 @@ def cmd_demo(args: argparse.Namespace) -> int:
         print("skillc: --control - at least one seeded failure was NOT caught", file=sys.stderr)
         return 1
 
-    try:
-        result = demo.run_demo(
-            image=args.image or demo.DEFAULT_IMAGE, docker_bin=docker_bin, base=base, timeout=args.timeout,
-            subject_name=args.subject or demo.DEFAULT_SUBJECT,
-        )
-    except demo.SubjectRefused as exc:
-        print(f"skillc: {exc}", file=sys.stderr)
-        return 2
+    result = demo.run_demo(image=args.image or demo.DEFAULT_IMAGE, docker_bin=docker_bin, base=base, timeout=args.timeout)
     try:
         demo.print_paste_back(result.paste_back)
     except demo.PasteBackRefused as exc:
@@ -854,11 +847,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_demo.add_argument("--docker-bin", help="docker executable (repeatable words, space-separated; default: docker)")
     p_demo.add_argument("--base", help="where the disposable root is created (default: TMPDIR)")
     p_demo.add_argument("--timeout", type=float, default=30, help="per-container-call timeout, seconds")
-    p_demo.add_argument(
-        "--subject",
-        help="evals/subjects/<name> to materialize alongside the lifecycle/grading demos "
-             "(default: skillc.demo.DEFAULT_SUBJECT, read from evals/subjects/DEFAULT_SUBJECT)",
-    )
     p_demo.add_argument(
         "--control", action="store_true",
         help="run the seeded negative controls instead - exits non-zero unless every one was caught",

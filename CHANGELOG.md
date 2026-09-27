@@ -215,18 +215,23 @@ collection) closes.
   only remapped a `cwd=`-relative argv path into the simulated container
   filesystem, not an absolute one, and `verify.py`'s own probe-invocation
   convention always passes an absolute path - also fixed and regression
-  tested. `--subject <name>` selects `evals/subjects/<name>/subject.json` to
-  materialize alongside the lifecycle/grading proofs - one command, one
-  runbook, for both CPP and a second collection (#11), never two. The name
-  only ever builds a path, never a branch in code; acquisition clones the
-  subject's own declared source fresh at its pinned revision. An unknown or
-  malformed `--subject` is refused before any Docker work starts. The
-  default name itself is read from `evals/subjects/DEFAULT_SUBJECT` (one
-  line, data) rather than a literal in `skillc/demo.py` - the just-merged
-  genericity guard (#11's "no subject-name branch anywhere in skillc/",
-  above) scans every `skillc/*.py` module by AST and would otherwise flag a
-  hardcoded default the moment this module landed, exactly as its own
-  `GENERICITY_EXEMPT` comment anticipates.
+  tested. Cross-model review found the recorded image digest wasn't bound to
+  the image either backend actually ran: it used to resolve after both
+  demonstrations, so a mid-run rebuild or retag of the image tag would
+  silently record the replacement instead - now resolved once, before either
+  `DockerBackend` is created. The review also found two of `_acceptance_items`'s
+  three checks were blind: dropping `reap_ok`'s `not reap_report.unknown`
+  clause, or `host_ok`'s `not host_diff.unresolved` clause, or replacing
+  `digest_ok` outright with `True`, left every existing test green. Three new
+  tests, each confirmed red on its own mutation before being added, close all
+  three. An earlier draft of this command also carried a `--subject <name>`
+  flag materializing a second declared skill collection (#11) alongside the
+  lifecycle/grading proofs; pulled back out before merge on review - it only
+  materialized into a local snapshot rather than installing into the real
+  container, which would have misled the operator about what the flag
+  actually proved. The full version (real installation, in-container digest
+  re-verification, client-listing discovery) is real follow-up work for #11,
+  not silently dropped.
 
 - **The failure-path matrix and trustworthy cleanup** (#79, Refs #10):
   [`docs/specs/evaluation-facility/failure-matrix.md`](docs/specs/evaluation-facility/failure-matrix.md)

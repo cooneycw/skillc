@@ -10,59 +10,16 @@ on these tests passing.
 
 from __future__ import annotations
 
-import json
-import shutil
 import sys
 from pathlib import Path
 
 import pytest
 
-from skillc import demo, materialize, reap
+from skillc import demo, reap
 from skillc.docker_backend import DAEMON_TIMEOUT
+from skillc.verify import Graded
 
 FAKE_DOCKER = Path(__file__).resolve().parent / "fixtures" / "docker-backend" / "fake_docker.py"
-#: `materialize.py`'s own fixture (`skills_root: "skills"`) - reused rather
-#: than building a fresh one for this module alone.
-CODEX_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "codex-subject"
-SUBJECT_SNAPSHOT = CODEX_FIXTURE / "collection"
-
-
-def _fake_codex_client(tmp_path: Path) -> list[str]:
-    """`materialize.py`'s own fake codex client (#7) - a real, ambient
-    `codex` on PATH must never be invoked by this file's tests. Found by
-    this PR's own review: `run_demo`'s materialize demo defaults to
-    `materialize.find_client(None)`, which searches PATH for a REAL codex -
-    present in this sandbox, so the first version of these tests silently
-    ran a live client, non-deterministic and certain to behave differently
-    wherever `codex` is absent (CI's own `needs_codex` skip convention in
-    tests/test_materialize.py exists for exactly this reason)."""
-    script = tmp_path / "client" / "fake_codex.py"
-    script.parent.mkdir(exist_ok=True)
-    shutil.copy(CODEX_FIXTURE / "fake_codex.py", script)
-    script.with_suffix(".mode").write_text(json.dumps({"mode": "normal"}), encoding="utf-8")
-    return [sys.executable, str(script)]
-
-
-def _fake_subject() -> materialize.Subject:
-    """A `--subject` stand-in that needs no network and no git history -
-    `run_demo`'s own tests must never depend on either. `load_demo_subject`
-    is monkeypatched to return this instead of reading a real
-    `evals/subjects/<name>/subject.json`."""
-    return materialize.Subject.from_dict({
-        "subject_schema": 1, "locator": "test", "revision": "v1", "surface": "codex-skills",
-        "skills_root": "skills", "select": "all", "client": {"name": "codex", "version": "9.9.9"},
-    })
-
-
-@pytest.fixture(autouse=True)
-def _no_network_subject(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Every test in this file gets a subject that resolves from a local
-    fixture, never a real `evals/subjects/` entry or a git clone, AND a fake
-    codex client, never a real ambient one - `demo.py` itself is tested here
-    only against the fake docker CLI, and the materialize demo it now also
-    runs must be equally offline and deterministic."""
-    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _fake_subject())
-    monkeypatch.setattr(materialize, "find_client", lambda _explicit: _fake_codex_client(tmp_path))
 
 
 def _docker_bin(state_dir: Path) -> list[str]:
@@ -95,7 +52,7 @@ def _seeded_leak_text() -> str:
 
 
 def test_run_demo_happy_path_is_ok_with_every_item_met(base: Path, docker_state: Path) -> None:
-    result = demo.run_demo(image="fake-image:1", docker_bin=_docker_bin(docker_state), base=base, timeout=5, subject_source=SUBJECT_SNAPSHOT)
+    result = demo.run_demo(image="fake-image:1", docker_bin=_docker_bin(docker_state), base=base, timeout=5)
     assert result.ok is True
     assert "NOT MET" not in result.paste_back
     assert result.lifecycle_record["disposition"] == "captured"
@@ -108,15 +65,15 @@ def test_run_demo_records_the_image_digest_that_actually_ran(base: Path, docker_
     """Two different `image` values must produce two different recorded
     digests - proving this reads the daemon's own answer rather than a fixed
     or derived-from-nothing string."""
-    result_a = demo.run_demo(image="fake-image:1", docker_bin=_docker_bin(docker_state), base=base, timeout=5, subject_source=SUBJECT_SNAPSHOT)
-    result_b = demo.run_demo(image="fake-image:2", docker_bin=_docker_bin(docker_state), base=base, timeout=5, subject_source=SUBJECT_SNAPSHOT)
+    result_a = demo.run_demo(image="fake-image:1", docker_bin=_docker_bin(docker_state), base=base, timeout=5)
+    result_b = demo.run_demo(image="fake-image:2", docker_bin=_docker_bin(docker_state), base=base, timeout=5)
     assert result_a.image_digest != result_b.image_digest
 
 
 def test_run_demo_paste_back_is_leak_clean(base: Path, docker_state: Path) -> None:
     """The happy path's own paste-back block must pass its own leak-check -
     printing it via `print_paste_back` must not raise."""
-    result = demo.run_demo(image="fake-image:1", docker_bin=_docker_bin(docker_state), base=base, timeout=5, subject_source=SUBJECT_SNAPSHOT)
+    result = demo.run_demo(image="fake-image:1", docker_bin=_docker_bin(docker_state), base=base, timeout=5)
     demo.print_paste_back(result.paste_back)  # raises PasteBackRefused on failure
 
 
@@ -238,18 +195,75 @@ def test_build_paste_back_reports_unknown_digest_explicitly() -> None:
 # --------------------------------------------------------------- acceptance items
 
 
+def _ok_lifecycle_record() -> dict[str, object]:
+    return {"disposition": "captured"}
+
+
+def _ok_graded() -> Graded:
+    return Graded(status="PASS", category="", detail="", criteria=[], containment={})
+
+
+def _ok_reap_report() -> reap.ReapReport:
+    return reap.ReapReport(daemon_reachable=True, outcomes=(reap.ReapOutcome("a1", "reaped"),))
+
+
+def _ok_host_diff() -> reap.HostPathDiff:
+    return reap.HostPathDiff(changed=(), unresolved=())
+
+
 def test_acceptance_items_flags_unchanged_host_paths_as_not_met() -> None:
-    from skillc.verify import Graded
+    lifecycle_record = _ok_lifecycle_record()
+    graded_ok = _ok_graded()
+    reap_report = _ok_reap_report()
 
-    lifecycle_record: dict[str, object] = {"disposition": "captured"}
-    graded_ok = Graded(status="PASS", category="", detail="", criteria=[], containment={})
-    reap_report = reap.ReapReport(daemon_reachable=True, outcomes=(reap.ReapOutcome("a1", "reaped"),))
-
-    clean_diff = reap.HostPathDiff(changed=(), unresolved=())
-    items_clean = demo._acceptance_items(lifecycle_record, graded_ok, reap_report, clean_diff, "sha256:x", None)
+    clean_diff = _ok_host_diff()
+    items_clean = demo._acceptance_items(lifecycle_record, graded_ok, reap_report, clean_diff, "sha256:x")
     assert all(item.met for item in items_clean)
 
     dirty_diff = reap.HostPathDiff(changed=("pyproject.toml",), unresolved=())
-    items_dirty = demo._acceptance_items(lifecycle_record, graded_ok, reap_report, dirty_diff, "sha256:x", None)
+    items_dirty = demo._acceptance_items(lifecycle_record, graded_ok, reap_report, dirty_diff, "sha256:x")
     host_item = next(i for i in items_dirty if i.name == "declared host paths unchanged")
     assert host_item.met is False
+
+
+def test_acceptance_items_flags_unresolved_host_paths_as_not_met() -> None:
+    """The other half of `host_ok` (`reap.HostPathDiff.unresolved`, e.g. a
+    path that could not be read for comparison) - a path this demo could not
+    even check is not evidence the path is unchanged, and this half was
+    unguarded by any test until now (cross-model review, PR #97): mutating
+    `host_ok` to drop the `unresolved` clause left every existing demo test
+    green. Confirmed red on that exact mutation before adding this test."""
+    unresolved_diff = reap.HostPathDiff(changed=(), unresolved=("README.md",))
+    items = demo._acceptance_items(
+        _ok_lifecycle_record(), _ok_graded(), _ok_reap_report(), unresolved_diff, "sha256:x",
+    )
+    host_item = next(i for i in items if i.name == "declared host paths unchanged")
+    assert host_item.met is False
+
+
+def test_acceptance_items_flags_an_unknown_reap_outcome_as_not_met() -> None:
+    """`reap_ok`'s `not reap_report.unknown` clause - unguarded until now
+    (cross-model review, PR #97): dropping that clause left every existing
+    demo test green, because none of them ever produced an `unknown` reap
+    outcome. Confirmed red on that exact mutation before adding this test."""
+    unknown_report = reap.ReapReport(daemon_reachable=True, outcomes=(reap.ReapOutcome("a1", "unknown"),))
+    items = demo._acceptance_items(
+        _ok_lifecycle_record(), _ok_graded(), unknown_report, _ok_host_diff(), "sha256:x",
+    )
+    cleanup_item = next(i for i in items if i.name == "cleanup sweep confirms no owned container left running")
+    assert cleanup_item.met is False
+
+
+def test_acceptance_items_flags_a_missing_image_digest_as_not_met() -> None:
+    """`digest_ok = image_digest is not None` - unguarded until now
+    (cross-model review, PR #97): replacing it with `True` left every existing
+    demo test green, because none of them ever passed a `None` digest to
+    `_acceptance_items` directly. Confirmed red on that exact mutation before
+    adding this test. The paste-back's own `image_digest=UNKNOWN` rendering
+    for a `None` digest is already covered separately by
+    `test_build_paste_back_reports_unknown_digest_explicitly`."""
+    items = demo._acceptance_items(
+        _ok_lifecycle_record(), _ok_graded(), _ok_reap_report(), _ok_host_diff(), None,
+    )
+    digest_item = next(i for i in items if i.name == "image digest recorded")
+    assert digest_item.met is False
