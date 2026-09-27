@@ -310,6 +310,10 @@ def run_planned_selection_probe(
     be built against the experiment before it runs.
 
     Refused before ANY attempt runs:
+      - a `grading_backend` that IS the runner's own agent backend
+        (`AgentTrialRunner.backend`), or that has network egress.
+      - a plan that does not cover every (case, arm) the supplied cases
+        declare, including an empty one.
       - no `grading_backend` without `allow_host_grading=True`. With no
         backend, `verify.grade_files` executes the candidate as a HOST
         subprocess - acceptable only for committed, trusted fixture
@@ -331,6 +335,19 @@ def run_planned_selection_probe(
             "no grading_backend: the candidate would be executed on the host - pass a separate "
             "grading backend, or allow_host_grading=True for trusted fixture candidates only"
         )
+    if grading_backend is not None and grading_backend is getattr(runner, "backend", None):
+        # interfaces.md step 8: the grader runs in a SEPARATE instance, never
+        # the one the agent's own attempt used - `run_one_attempt`'s own
+        # identity guard only fires when IT grades, which this driver does not.
+        raise SelectionProbeRefused(
+            "grading_backend is the runner's own agent backend - grading needs a separate instance"
+        )
+    grading_network = getattr(grading_backend, "network", "none")
+    if grading_network != "none":
+        raise SelectionProbeRefused(
+            f"grading_backend has network={grading_network!r} - candidate grading "
+            "never gets egress (collection_conformance.agent_backends' own split)"
+        )
     grader = grader if grader is not None else verify.GraderDef.load(GRADER_ROOT)
 
     planned = [(_resolved_trial(experiment, trial_dict), attempt) for trial_dict, attempt in experiment.attempts()]
@@ -339,6 +356,7 @@ def run_planned_selection_probe(
     all_cases = cases["cases"]
     assert isinstance(all_cases, list)
     case_by_id: dict[str, dict[str, object]] = {c["id"]: c for c in all_cases}
+    expected_pairs = {(str(case_id), arm) for case_id in case_by_id for arm in ARMS}
     per_arm: dict[tuple[str, str], int] = {}
     for trial_dict, _attempt in planned:
         case_ref = trial_dict["case"]
@@ -355,6 +373,16 @@ def run_planned_selection_probe(
         raise SelectionProbeRefused(
             f"(case, arm) pairs planned with more than one attempt: {repeated} - the report "
             "carries one result per arm, so a repeat would be run and then dropped"
+        )
+    # Attendance (below) checks results against the attempts the plan ISSUED;
+    # this checks the plan against what the cases DECLARE - an experiment
+    # missing a case or a baseline would otherwise yield a report that looks
+    # complete over a smaller population, and an empty one a report of nothing.
+    absent = sorted(expected_pairs - per_arm.keys())
+    if not expected_pairs or absent:
+        raise SelectionProbeRefused(
+            f"the plan does not cover every declared (case, arm) pair: missing {absent or 'all'} - "
+            "a report over a partial population would read as complete"
         )
 
     transcripts: dict[str, AttemptTranscript] = {}
@@ -477,7 +505,7 @@ def agent_trial_runner(
     cli_version: str | None = None,
     credential_explicit_path: str | Path | None = None,
     minimum_credential_seconds: float = credential.MINIMUM_REMAINING_SECONDS,
-) -> AttemptRunner:
+) -> AgentTrialRunner:
     """The real `AttemptRunner`: each planned attempt becomes one
     `agent_trial.run_one_attempt` against `experiment`, in SKILL-FREE mode
     (`skill_name=None`) - a canary that names a skill would supply the very
@@ -501,30 +529,56 @@ def agent_trial_runner(
     ONE grading path whichever runner produced the transcript.
 
     Launching a real `claude`/`codex` still requires
-    `SKILLC_ALLOW_REAL_AGENT=1` - `lifecycle.py`'s own guard, unchanged."""
-    resolved_goal = goal if goal is not None else (GRADER_ROOT / "goal.md").read_text(encoding="utf-8")
-    resolved_surface = (
-        surface if surface is not None
-        else collection_conformance._fixture_surface(GRADER_ROOT / "fixture")
+    `SKILLC_ALLOW_REAL_AGENT=1` - `lifecycle.py`'s own guard, unchanged.
+
+    The returned runner exposes `.backend`, so `run_planned_selection_probe`
+    can refuse to grade in the agent's own backend."""
+    return AgentTrialRunner(
+        experiment=experiment, backend=backend, base=base, client=client, argv_for=argv_for,
+        treatment_home_files=treatment_home_files,
+        goal=goal if goal is not None else (GRADER_ROOT / "goal.md").read_text(encoding="utf-8"),
+        surface=(
+            surface if surface is not None
+            else collection_conformance._fixture_surface(GRADER_ROOT / "fixture")
+        ),
+        timeout=timeout, cli_version=cli_version, credential_explicit_path=credential_explicit_path,
+        minimum_credential_seconds=minimum_credential_seconds,
     )
 
-    def run(trial_dict: dict[str, object], attempt: dict[str, object]) -> AttemptTranscript | None:
+
+@dataclass(frozen=True)
+class AgentTrialRunner:
+    """`agent_trial_runner`'s result: an `AttemptRunner` that also names the
+    agent backend it launches into (see that function for the behaviour)."""
+
+    experiment: trial.Experiment
+    backend: DockerBackend
+    base: Path
+    client: str
+    argv_for: Callable[[str], Sequence[str]]
+    treatment_home_files: Mapping[str, bytes]
+    goal: str
+    surface: Mapping[str, object]
+    timeout: float
+    cli_version: str | None
+    credential_explicit_path: str | Path | None
+    minimum_credential_seconds: float
+
+    def __call__(self, trial_dict: dict[str, object], attempt: dict[str, object]) -> AttemptTranscript | None:
         config = trial_dict["config"]
         assert isinstance(config, dict)
         arm = str(config["arm"])
         if arm not in ARMS:
             raise SelectionProbeRefused(f"planned trial names unknown arm {arm!r}")
         addendum = str(config.get("prompt_addendum") or "")
-        prompt = f"{resolved_goal}\n\n{addendum}" if addendum else resolved_goal
+        prompt = f"{self.goal}\n\n{addendum}" if addendum else self.goal
         attempt_id = str(attempt["attempt_id"])
         record = agent_trial.run_one_attempt(
-            backend=backend, experiment=experiment, attempt_id=attempt_id, client=client,
-            base_argv=argv_for(attempt_id), prompt=prompt, skill_name=None,
-            surface=resolved_surface, limits=Limits(timeout=timeout), base=base,
-            credential_explicit_path=credential_explicit_path,
-            minimum_credential_seconds=minimum_credential_seconds, cli_version=cli_version,
-            extra_home_files=dict(treatment_home_files) if arm == "treatment" else {},
+            backend=self.backend, experiment=self.experiment, attempt_id=attempt_id, client=self.client,
+            base_argv=self.argv_for(attempt_id), prompt=prompt, skill_name=None,
+            surface=self.surface, limits=Limits(timeout=self.timeout), base=self.base,
+            credential_explicit_path=self.credential_explicit_path,
+            minimum_credential_seconds=self.minimum_credential_seconds, cli_version=self.cli_version,
+            extra_home_files=dict(self.treatment_home_files) if arm == "treatment" else {},
         )
-        return transcript_from_record(record, experiment, attempt_id)
-
-    return run
+        return transcript_from_record(record, self.experiment, attempt_id)

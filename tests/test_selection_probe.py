@@ -704,6 +704,65 @@ def test_transcript_from_record_never_turns_a_blocked_attempt_into_not_selected(
         assert sp.selection_status(transcript, ["qa-test"]) == "unknown"
 
 
+
+def _real_runner_parts(tmp_path: Path) -> tuple[t.Experiment, sp.AgentTrialRunner, list[str]]:
+    base = tmp_path / "work"
+    base.mkdir()
+    docker_bin = [sys.executable, str(FAKE_DOCKER), "--state", str(tmp_path / "docker-state")]
+    experiment = _plan(tmp_path)
+    backend = _HomeRecordingBackend(image="fake-image:1", base_dir=base, docker_bin=docker_bin)
+    runner = sp.agent_trial_runner(
+        experiment=experiment, backend=backend, base=base, client="codex",
+        argv_for=lambda _a: [], treatment_home_files=_COLLECTION, goal="x",
+    )
+    return experiment, runner, docker_bin
+
+
+def test_grading_in_the_agents_own_backend_is_refused_before_any_attempt(tmp_path: Path) -> None:
+    """interfaces.md step 8: grading runs in a SEPARATE instance. The runner
+    exposes its backend, so passing the same one to grade is refused before
+    anything launches. Confirmed red when the identity check is removed: the
+    run launches (and here fails on the empty argv) instead of refusing."""
+    experiment, runner, _docker_bin = _real_runner_parts(tmp_path)
+    with pytest.raises(sp.SelectionProbeRefused, match="separate instance"):
+        sp.run_planned_selection_probe(
+            experiment, CASES, runner, base=tmp_path / "work", grader=GRADER, grading_backend=runner.backend,
+        )
+    assert runner.backend.delivered == {}  # type: ignore[attr-defined]
+
+
+def test_a_grading_backend_with_egress_is_refused(tmp_path: Path) -> None:
+    experiment, runner, docker_bin = _real_runner_parts(tmp_path)
+    open_grader = d.DockerBackend(image="fake-image:1", base_dir=tmp_path / "work", docker_bin=docker_bin, network="bridge")
+    with pytest.raises(sp.SelectionProbeRefused, match="network"):
+        sp.run_planned_selection_probe(
+            experiment, CASES, runner, base=tmp_path / "work", grader=GRADER, grading_backend=open_grader,
+        )
+
+
+def test_a_plan_missing_a_declared_case_or_arm_is_refused(tmp_path: Path) -> None:
+    """Attendance checks results against the attempts the plan issued; this
+    checks the plan against what the cases declare. A plan of one case, a
+    plan with no baseline for a case, and a declaration of zero cases are
+    all refused before the runner is called. Confirmed red when the check is
+    removed: the one-case plan returns a one-case report as if complete."""
+    store = t.open_store(tmp_path / "store", forbidden=[])
+    one_case = {**CASES, "cases": [CASES["cases"][0]]}
+    partial = sp.plan_selection_probe(
+        one_case, MANIFEST, treatment_subject_digest=_TREATMENT_SUBJECT_DIGEST,
+        baseline_subject_digest=_BASELINE_SUBJECT_DIGEST, image_digest=_PLACEHOLDER_IMAGE_DIGEST, store=store,
+    )
+    runner, calls = _counting_runner()
+    # the one-case plan against three declared cases trips the population
+    # check; against zero declared cases, the planned case is itself unknown
+    for declared, reason in ((CASES, "does not cover"), ({**CASES, "cases": []}, "not in the supplied cases")):
+        with pytest.raises(sp.SelectionProbeRefused, match=reason):
+            sp.run_planned_selection_probe(
+                partial, declared, runner, base=tmp_path / "grading", grader=GRADER, allow_host_grading=True,
+            )
+    assert calls == []
+
+
 @pytest.mark.skipif(
     os.environ.get("SKILLC_ALLOW_REAL_AGENT") != "1",
     reason="launches a real codex agent for every planned attempt - operator-run only (ADR 0005 rule 5)",

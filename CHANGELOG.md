@@ -38,8 +38,13 @@ and version plan.
   `INCONCLUSIVE` grade was reported as task failure (now `None`, with the
   grader's reason); and selection was judged against the supplied case file
   rather than the frozen planned configuration (now the plan decides, and a
-  case revision that differs from the plan is refused). Each is confirmed red
-  on the unfixed code.
+  case revision that differs from the plan is refused). A re-review found two
+  more: the agent's own backend could be passed as the grading backend,
+  carrying its network egress into grading (the runner now exposes
+  `.backend`, and reuse or a grading backend with egress is refused), and a
+  plan missing a declared case or arm produced a report that read as
+  complete (the plan must now cover every declared `(case, arm)`). Each is
+  confirmed red on the unfixed code.
 
 - **`skillc.selection_probe`: the run driver for #26's three predeclared
   cases** (Refs #26): plans both arms of every case
