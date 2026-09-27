@@ -110,3 +110,54 @@ whatever happened. #11's Codex paste-backs carry the same blind `None`. The
 record is not persisted to the store, so those runs' real values could not
 be recovered. The key was fixed (with a regression test, red on the old key)
 and both runs were repeated. The blocks above are the repeats.
+
+## 5. Post-merge smoke, after #106's evidence changes landed on main
+
+#106 (merged while this PR was open) restructured the paste-back into
+sections, added a host-credential before/after comparison and a teardown
+gate. The merge makes that comparison read the SUBJECT's client (it named
+codex). One more Claude Code run on the merged tree, 2026-09-27T13:34:56Z to 2026-09-27T13:35:29Z, shows
+the combined path. `host_credential_unchanged=True` is now read against the
+Claude login itself:
+
+```
+collection agent run: mattpocock-skills-claude-code revision=c55ee46073ed923f86ce59a5eb3b6d895095d1b7 client=claude
+  agent_network=bridge
+  attempt_id=a-c806b40f6e82
+  [prompt delivery]
+    prompt_delivered=True
+    prompt_delivery_reason=None
+    transcript_files_found=1
+  [canary]
+    canary_satisfied=True
+    canary_reason=None
+    liveness_method=canary
+  [credential]
+    credential_delivered=True source=subscription
+    remaining_at_launch=321m
+    refresh_observed_in_container=False
+    host_credential_unchanged=True
+    host_remaining_after=320m
+  [outcome]
+    disposition=captured reason=None
+    stop.reason=exited stop.exit_code=0 stop.confirmed=True
+    skill_invocations=[] (detection=structural)
+    graded.status=PASS
+    graded.criteria=R4-interface=SATISFIED, reported-example=SATISFIED, R1=SATISFIED, R2=SATISFIED, R3=SATISFIED
+    grading_blocked_reason=None
+  [cleanup]
+    workspace_cleaned(journal)=removed
+    workspace_cleanup(record, at finalize)=partial
+    backend_teardown=confirmed
+    backend_teardown_error=None
+    attributable_leftover_containers=0 (attempts_checked=2)
+    context: daemon_comparable=True leaked_owned_containers=0 foreign_vanished=0
+    store_kept=<tmp>/skillc-collection-run-mattpocock-skills-claude-code-cqvvhg_w/mattpocock-skills-claude-code-store record_written=True
+  [discovery]
+    discovery={'diagnosing-bugs': 'listed', 'tdd': 'listed'} (source=transcript skill_listing)
+  [transcript format]
+    client_version=2.1.283 model=claude-opus-5-5
+    unrecognized_types=None (response_items_inspected=None)
+    line_types={'agent-name': 3, 'assistant': 4, 'atis-latch': 3, 'attachment': 19, 'cost-state': 1, 'custom-title': 3, 'last-prompt': 3, 'queue-operation': 2, 'user': 3}
+EXIT=0
+```
