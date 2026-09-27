@@ -63,7 +63,7 @@ skillc exposure <surface>      # measure what actually reaches the model, per cl
 skillc rules                   # what it checks, and at what severity
 skillc leak-check <path>       # refuse a tree or bundle carrying a machine identity
 skillc demo                    # the operator demo: a real Docker trial lifecycle, end to end (#10 closes on this run)
-skillc collection-run <subject> # #11's remaining bullet: one real agent attempt per skill collection (owed to the operator's live run)
+skillc collection-run <subject> # #11: one real agent attempt per skill collection (run live: evals/second-collection-conformance/evidence/)
 ```
 <!-- commands:end -->
 

@@ -1,9 +1,10 @@
 """#11's second-collection conformance manifest (`evals/second-collection-
-conformance/run-manifest.json`) cites each subject's ALREADY-recorded host
-evidence rather than inventing numbers - this proves the citation is exact,
-so a future regeneration of either subject's evidence cannot silently drift
-out of sync with what this manifest claims. No model call, no Docker call:
-this is a plain JSON structure and cross-reference check.
+conformance/run-manifest.json`) cites each subject's recorded evidence rather
+than inventing numbers - the host evidence (`evals/subjects/*/evidence/`) and
+the live runs (`evals/second-collection-conformance/evidence/README.md`). These
+tests prove every citation is exact and attributed to the right subject, so a
+manifest claim cannot drift from, or outrun, the evidence it names. No model
+call, no Docker call: a plain JSON structure and cross-reference check.
 """
 
 from __future__ import annotations
@@ -77,7 +78,7 @@ def test_the_installation_receipt_summary_matches_the_real_evidence() -> None:
         report = json.loads(report_path.read_text(encoding="utf-8"))
         installed = report["observations"]["installed"]
         available = report["observations"]["available"]
-        summary = run["expected_paste_back"]["installation_receipt_summary"]  # type: ignore[index]
+        summary = run["host_evidence"]["installation_receipt_summary"]  # type: ignore[index]
         problems = _receipt_summary_problems(installed, available, summary)
         assert problems == [], f"{subject}: {problems}"
 
@@ -99,40 +100,93 @@ def test_the_receipt_check_refuses_empty_observations() -> None:
     ]
 
 
-def test_neither_run_invents_a_discovery_result() -> None:
-    """#11's acceptance is prepared-not-run; a real per-skill discovery
-    verdict does not exist until #81's client-listing step lands. Every
-    `discovered` field must say so, in words, rather than assert a result."""
+EVIDENCE = CONFORMANCE_DIR / "evidence" / "README.md"
+
+
+def _block(evidence: str, opener: str) -> str:
+    """The text from the line starting with `opener` through the next
+    `EXIT=` line - one subject's own printed block, so a line cited for one
+    collection cannot be satisfied by the other collection's block. Empty
+    when the opener is absent."""
+    lines = evidence.splitlines()
+    for i, line in enumerate(lines):
+        if line.startswith(opener):
+            for j in range(i, len(lines)):
+                if lines[j].startswith("EXIT="):
+                    return "\n".join(lines[i:j + 1])
+            return "\n".join(lines[i:])
+    return ""
+
+
+def _uncited(evidence: str, opener: str, cited: list[str]) -> list[str]:
+    """Every cited line that is NOT a whole line of `opener`'s block. An
+    empty citation list is itself a problem: nothing cited proves nothing."""
+    if not cited:
+        return ["no lines cited"]
+    block_lines = {line.strip() for line in _block(evidence, opener).splitlines()}
+    return [line for line in cited if line.strip() not in block_lines]
+
+
+def _openers(subject: str) -> dict[str, str]:
+    return {"demo_subject": f"subject: {subject} revision=", "collection_run": f"collection agent run: {subject} "}
+
+
+def test_every_observed_line_is_in_that_subject_s_own_evidence_block() -> None:
+    evidence = EVIDENCE.read_text(encoding="utf-8")
     for subject, run in _runs_by_subject().items():
-        discovered = run["expected_paste_back"]["discovered"]  # type: ignore[index]
-        assert "owed to" in discovered, f"{subject}: 'discovered' does not defer to the follow-up: {discovered!r}"
+        observed = run["observed"]
+        assert isinstance(observed, dict) and set(observed) == {"demo_subject", "collection_run"}
+        for leg, opener in _openers(subject).items():
+            missing = _uncited(evidence, opener, observed[leg])
+            assert missing == [], f"{subject}/{leg}: cited but not in the evidence block: {missing}"
 
 
-def test_neither_run_invents_a_digest_check_result() -> None:
-    """The in-container digest check is a follow-up PR's to implement (#11),
-    not this manifest's to assert a result for."""
+def test_both_agent_runs_are_captured_and_graded() -> None:
+    """Bullet 2's MET rests on exactly these two facts per collection."""
     for subject, run in _runs_by_subject().items():
-        digest_check = run["expected_paste_back"]["digest_check"]  # type: ignore[index]
-        assert "owed to" in digest_check, f"{subject}: 'digest_check' does not defer: {digest_check!r}"
+        agent_lines = run["observed"]["collection_run"]  # type: ignore[index]
+        assert "disposition=captured" in agent_lines, subject
+        assert "graded.status=PASS" in agent_lines, subject
 
 
-def test_the_manifest_states_it_is_not_yet_executed() -> None:
-    assert "not executed" in _manifest()["execution"]  # type: ignore[operator]
+def test_the_control_is_cited_from_its_own_block_and_blocked() -> None:
+    control = _manifest()["control"]
+    assert isinstance(control, dict)
+    evidence = EVIDENCE.read_text(encoding="utf-8")
+    # The control's block is the LAST mattpocock-skills agent block.
+    tail = evidence[evidence.rindex("collection agent run: mattpocock-skills "):]
+    assert _uncited(tail, "collection agent run: mattpocock-skills ", control["observed"]) == []
+    assert "disposition=unavailable" in control["observed"]
 
 
-def test_the_manifest_states_11_stays_open_after_its_own_runs() -> None:
-    """The no-agent demo this manifest prepares gives installation and
-    discovery conformance only - it does not satisfy #11's acceptance
-    bullet 2, which needs an agent actually working Level 1 with each
-    collection installed. The manifest must say so plainly, not let a
-    green demo run read as #11's own close."""
+def test_the_citation_check_can_fail() -> None:
+    """Negative controls for the instrument above, against the REAL evidence:
+    a planted wrong verdict, a line that belongs to the OTHER collection, a
+    subject with no block at all, and an empty citation list are each refused."""
+    evidence = EVIDENCE.read_text(encoding="utf-8")
+    mp = "collection agent run: mattpocock-skills "
+    assert _uncited(evidence, mp, ["graded.status=FAIL"]) == ["graded.status=FAIL"]
+    assert _uncited(evidence, "collection agent run: cpp-codex ", ["skill_invocations=['diagnosing-bugs'] (detection=heuristic)"]) != []
+    assert _uncited(evidence, "collection agent run: no-such-subject ", ["EXIT=0"]) == ["EXIT=0"]
+    assert _uncited(evidence, mp, []) == ["no lines cited"]
+    # A substring of a real line is not a whole line.
+    assert _uncited(evidence, mp, ["graded.status=PA"]) == ["graded.status=PA"]
+
+
+def test_the_manifest_states_it_was_executed_and_names_its_evidence() -> None:
+    execution = _manifest()["execution"]
+    assert isinstance(execution, str) and execution.startswith("executed")
+    assert "evidence/README.md" in execution
+    assert EVIDENCE.is_file()
+
+
+def test_every_bullet_is_met() -> None:
     status = _manifest()["acceptance_status"]
     assert isinstance(status, dict)
-    bullet_2 = status["bullet_2_same_client_fixture_contract_grader"]
-    assert "NOT MET" in bullet_2
-    remaining = status["what_remains_after_this_manifest_s_own_runs_execute"]
-    assert "agent" in remaining.lower()
-    assert "model call" in remaining.lower()
+    bullets = {k: v for k, v in status.items() if k.startswith("bullet_")}
+    assert len(bullets) == 4
+    for key, value in bullets.items():
+        assert value.startswith("MET"), f"{key}: {value[:60]!r}"
 
 
 def test_the_agent_run_s_funding_basis_quotes_the_owner_ruling_verbatim() -> None:
