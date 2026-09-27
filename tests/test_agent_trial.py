@@ -636,6 +636,77 @@ def test_skill_free_canary_still_refuses_a_failed_tool_call(
     assert record["graded"] is None
 
 
+# ------------------------------------------------ extra_home_files (issue #11)
+
+
+class _HomeFileCapturingBackend(d.DockerBackend):
+    """Records every `deliver_home_file` call - test-only, so a caller-
+    supplied `extra_home_files` mapping can be proven to actually reach the
+    container (path and bytes both), the same "prove the mechanism wires up"
+    discipline `_TranscriptCapturingBackend` above already applies to
+    `read_home_tree`. Delivery happens inside `before_execute`, well before
+    `destroy()` removes the container `run_one_attempt` itself never lets a
+    caller read back from afterward."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+        self.delivered: dict[str, bytes] = {}
+
+    def deliver_home_file(self, handle: object, container_relpath: str, data: bytes, **kwargs: object) -> None:
+        super().deliver_home_file(handle, container_relpath, data, **kwargs)  # type: ignore[arg-type]
+        self.delivered[container_relpath] = data
+
+
+def test_extra_home_files_are_delivered_alongside_the_credential_and_seed(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """A declared skill collection's own surface (issue #11) rides through
+    the same `before_execute` hook that already delivers the credential and
+    the client's own seed - never a second delivery mechanism."""
+    backend = _HomeFileCapturingBackend(
+        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state),
+    )
+    experiment, attempt_id = _planned(store)
+    cred_path = _fresh_credential(tmp_path, "codex")
+    home = _mapped_home(docker_state, attempt_id)
+    argv = _fake_argv(fmt="codex-fake", home=home, transcript_relpath=".codex/sessions/2026/01/01/rollout-x.jsonl")
+    extra = {".codex/skills/tdd/SKILL.md": b"---\nname: tdd\n---\nBody.\n"}
+
+    record = at.run_one_attempt(
+        backend=backend, experiment=experiment, attempt_id=attempt_id, client="codex",
+        base_argv=argv, prompt="Fix the slug helper.", skill_name=None,
+        surface={}, limits=Limits(timeout=5), base=base, credential_explicit_path=cred_path,
+        extra_home_files=extra,
+    )
+
+    assert record["disposition"] == "captured"
+    assert backend.delivered[".codex/skills/tdd/SKILL.md"] == extra[".codex/skills/tdd/SKILL.md"]
+
+
+def test_extra_home_files_default_omits_nothing_delivered_before(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """`extra_home_files=None` (the default) must deliver exactly what a
+    caller who never knew this parameter existed already got - no new file,
+    no behavior change for #106's own existing callers."""
+    backend = _HomeFileCapturingBackend(
+        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state),
+    )
+    experiment, attempt_id = _planned(store)
+    cred_path = _fresh_credential(tmp_path, "codex")
+    home = _mapped_home(docker_state, attempt_id)
+    argv = _fake_argv(fmt="codex-fake", home=home, transcript_relpath=".codex/sessions/2026/01/01/rollout-y.jsonl")
+
+    record = at.run_one_attempt(
+        backend=backend, experiment=experiment, attempt_id=attempt_id, client="codex",
+        base_argv=argv, prompt="Fix the slug helper.", skill_name=None,
+        surface={}, limits=Limits(timeout=5), base=base, credential_explicit_path=cred_path,
+    )
+
+    assert record["disposition"] == "captured"
+    assert not any(path.startswith(".codex/skills/") for path in backend.delivered)
+
+
 # --------------------------------------------------------- no real model call
 
 #: A `frozenset` literal (`{...}`), deliberately NOT a list/tuple literal -

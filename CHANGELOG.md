@@ -121,6 +121,35 @@ collection) closes.
 
 ### Added
 
+- **`skillc collection-run <subject>` (issue #11's remaining acceptance
+  bullet, "the same client, Level 1 fixture, contract and grader")**: one
+  real agent attempt against `evals/level1/slug-small-fix`, per declared
+  skill collection (`cpp-codex`, `mattpocock-skills`), driven through
+  `skillc/agent_trial.py` (#106) in `agent_trial.py`'s skill-free canary
+  mode (issue #26: the instruction names no skill, so any skill the agent
+  invokes on its own is an observation, never an artifact of the prompt).
+  `skillc/agent_trial.py`'s `run_one_attempt` gains a new `extra_home_files`
+  parameter that delivers a declared collection's own selected skill files
+  into the SAME container the agent runs in, alongside the credential and
+  seed - reusing `demo.load_demo_subject`/`materialize.acquire_snapshot`/
+  `demo.subject_surface_files` (issue #101) rather than a second
+  subject-loading path. The prompt and starting fixture default to the
+  task's own fixed data (`goal.md` verbatim, `fixture/src/` only - never
+  the sibling `fixture/expected.json`, the grader's own ground truth for
+  it). Paste-back per collection: `disposition`, `prompt_delivered`,
+  `canary_satisfied`, `graded.status`, `refresh_observed_in_container`,
+  `skill_invocations`, `skill_invocation_detection`. Missing-credential
+  control: `disposition == "unavailable"`, BLOCKED before any container
+  launches. Structurally unable to launch a real agent without
+  `SKILLC_ALLOW_REAL_AGENT=1` (`lifecycle.py`'s own existing guard; this
+  command adds no gate of its own), funded per
+  [ADR 0005](docs/decisions/0005-runtime-scope-and-cost-rulings.md) rule 6
+  ("Normal Claude and codex" - the operator's own subscription login, not
+  metered spend). Built and proven entirely against the fake `docker` CLI
+  (`skillc/collection_conformance.py`, `tests/test_collection_conformance.py`);
+  the operator's own real run is still owed, exactly like every other
+  real-Docker leg in this repository.
+
 - **`tests/conftest.py`: no test can reach a real credential by default**
   (Refs #106): cross-model review of PR #117 found that a test passing
   `credential_explicit_path=None` with no override of its own resolved and

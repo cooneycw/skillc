@@ -169,6 +169,7 @@ CLIENT_SPECS: dict[str, ClientSpec] = {
 def _make_before_execute(
     *, spec: ClientSpec, ctx: _AttemptContext, credential_explicit_path: str | Path | None,
     minimum_credential_seconds: float, delivered_credential_bytes: dict[str, bytes],
+    extra_home_files: Mapping[str, bytes],
 ) -> Callable[[ExecutionBackend, object], None]:
     """`delivered_credential_bytes` is an OUT-parameter (a single-entry dict
     the caller reads afterward) - `observe_before_teardown` needs these
@@ -187,6 +188,16 @@ def _make_before_execute(
         delivered_credential_bytes["relpath"] = credential_relpath.encode("utf-8")  # type: ignore[assignment]
 
         for relpath, data in spec.compose_home_files(ctx).items():
+            backend.deliver_home_file(handle, relpath, data)
+        # Caller-supplied, never spec-derived (issue #11): a declared skill
+        # collection to install alongside the credential and seed, into the
+        # SAME container the agent runs in - so a skill-free canary run can
+        # genuinely observe whether the agent selects one of these on its
+        # own, not merely that the harness plumbing works. Delivered last,
+        # after the client's own home files, so a colliding path (unlikely -
+        # `compose_home_files` never writes under `.codex/skills/`) is
+        # decided by the caller's own intent, not by dict ordering luck.
+        for relpath, data in extra_home_files.items():
             backend.deliver_home_file(handle, relpath, data)
 
     return hook
@@ -359,6 +370,7 @@ def run_one_attempt(
     cli_version: str | None = None,
     grader: verify.GraderDef | None = None,
     grading_backend: ExecutionBackend | None = None,
+    extra_home_files: Mapping[str, bytes] | None = None,
 ) -> dict[str, object]:
     """Drive one real-agent attempt end to end and, only when the real
     transcript confirms both prompt delivery and the liveness canary, grade
@@ -381,7 +393,14 @@ def run_one_attempt(
     becomes purely what `TranscriptObservation.skill_invocations` observes.
     The named-skill form is unchanged and still the right choice outside a
     selection probe (#106/#107's own liveness proof, where naming the skill
-    under test is the point)."""
+    under test is the point).
+
+    `extra_home_files` (issue #11): additional container-home files delivered
+    alongside the credential and the client's own seed - a declared skill
+    collection's own surface, keyed by container-relative path, exactly the
+    shape `demo.install_subject` already builds for the no-agent `--subject`
+    leg. `None` (the default) delivers nothing beyond what `spec` already
+    composes, so every existing caller is unaffected."""
     if client not in CLIENT_SPECS:
         raise credential.CredentialRefused(f"unknown client {client!r}: expected one of {sorted(CLIENT_SPECS)}")
     spec = CLIENT_SPECS[client]
@@ -412,6 +431,7 @@ def run_one_attempt(
         spec=spec, ctx=ctx, credential_explicit_path=credential_explicit_path,
         minimum_credential_seconds=minimum_credential_seconds,
         delivered_credential_bytes=delivered_credential_bytes,
+        extra_home_files=extra_home_files or {},
     )
     observe_before_teardown = _make_observe_before_teardown(
         spec=spec, expected_prompt=full_prompt, skill_name=skill_name,

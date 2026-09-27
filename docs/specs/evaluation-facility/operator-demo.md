@@ -161,28 +161,39 @@ branch anywhere in skillc/", `tests/test_materialize.py`) AST-scans every
 `skillc/*.py` module and would otherwise flag a hardcoded default the moment
 it landed.
 
-## The Level 1 agent run per collection (#11's remaining acceptance bullet) - IN PREPARATION
+## The Level 1 agent run per collection (#11's remaining acceptance bullet)
 
-**Not yet built.** This section is a placeholder stating the design, not a
-capability this command has today - stated here rather than silently, the
-same discipline every other owed-to-the-live-run gap in this repository
-follows.
+**Built and proven against the fake `docker` CLI; the real run itself is
+owed to the operator's own live session** - the same evidence rule as every
+other real-Docker leg on this page (see "Evidence rule" above).
 
 `--subject`'s own three legs above (install, digest re-check, discovery)
 prove the collection lands intact and the client can see it - explicitly
 NOT that any skill is invoked, selected, or helps (see "What this shows,
 and what it does NOT show" above). Issue #11's own remaining acceptance
-bullet - "the same client, Level 1 fixture, contract and grader" - needs an
-actual agent attempt, through `skillc/agent_trial.py` (#106), once per
-collection (`cpp-codex`, `mattpocock-skills`), against
+bullet - "the same client, Level 1 fixture, contract and grader" - is
+`skillc collection-run <subject>` (`skillc/collection_conformance.py`),
+which drives one actual agent attempt through `skillc/agent_trial.py`
+(#106), once per collection (`cpp-codex`, `mattpocock-skills`), against
 `evals/level1/slug-small-fix`, on the client each subject's own declaration
-names (`codex`, codex-cli `0.157.1` for both).
+names (`codex`, codex-cli `0.157.1` for both). It installs that
+collection's declared, selected skill files into the SAME container the
+agent runs in - `agent_trial.run_one_attempt`'s own `extra_home_files`
+parameter (issue #11) - so a spontaneous skill invocation is genuinely
+possible, not merely plumbed through.
 
-The canary instruction will run in `agent_trial.py`'s SKILL-FREE mode
-(naming no skill): #11 measures collection conformance, not skill
-selection - #26's own job - and a canary instruction that names a skill
-would contaminate exactly the measurement #26 needs to make later. This
-prep is blocked on that skill-free mode landing in `agent_trial.py` first.
+```bash
+SKILLC_ALLOW_REAL_AGENT=1 skillc collection-run cpp-codex
+SKILLC_ALLOW_REAL_AGENT=1 skillc collection-run mattpocock-skills
+```
+
+The canary instruction runs in `agent_trial.py`'s SKILL-FREE mode (naming no
+skill): #11 measures collection conformance, not skill selection - #26's
+own job - and a canary instruction that names a skill would contaminate
+exactly the measurement #26 needs to make later. Whatever the agent invokes
+on its own is still observed (`skill_invocations`), never hidden by the
+canary's own indifference to it - a first, informal signal for #26, not its
+answer.
 
 Funding basis for the agent run itself, quoted verbatim rather than
 paraphrased ([ADR 0005](../../decisions/0005-runtime-scope-and-cost-rulings.md)
@@ -191,16 +202,26 @@ operator's own normal Codex subscription login, inside the normal usage
 budget, not metered API spend and not gated by the $5 judge-call ceiling
 (rule 5), which covers judge calls only. Gated behind
 `SKILLC_ALLOW_REAL_AGENT=1` (`lifecycle.py`'s own structural guard against
-an accidental real launch), exactly like every other real-agent path this
-repository has.
+an accidental real launch); `collection-run` adds no gate of its own.
 
-Planned paste-back shape, per collection: `disposition`, `prompt_delivered`,
-`canary_satisfied`, `graded.status`, and `refresh_observed_in_container` -
-leak-checked before printing, exactly like the rest of this command's own
-block. Planned control: a run with the credential deliberately absent must
-report `disposition == "unavailable"` (BLOCKED before the agent ever
-launches), matching `skillc/agent_trial.py`'s own existing acceptance for a
-missing credential.
+The prompt and starting fixture are the task's own fixed data, never
+invented by this command: `evals/level1/slug-small-fix/goal.md` verbatim
+(#5's own "agent-facing request, identical for every arm"), and
+`fixture/src/` installed into the workspace - never the sibling
+`fixture/expected.json`, the grader's own ground truth for it, which would
+hand the agent the answer key.
+
+Paste-back shape, per collection: `disposition`, `prompt_delivered`,
+`canary_satisfied`, `graded.status`, `refresh_observed_in_container`, and
+`skill_invocations`/`skill_invocation_detection` (issue #26: every skill
+name the transcript shows invoked, and whether that client's own detection
+is `structural` or `heuristic` - `heuristic` for Codex, since it has no
+native skill-invocation marker of its own) - leak-checked before printing,
+exactly like the rest of this command's own block. Control, proven against
+the fake docker (`tests/test_collection_conformance.py`): a run with the
+credential deliberately absent reports `disposition == "unavailable"`
+(BLOCKED before the agent ever launches, no container remains), matching
+`skillc/agent_trial.py`'s own existing acceptance for a missing credential.
 
 ## How long it takes
 

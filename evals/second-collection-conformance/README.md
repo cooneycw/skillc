@@ -47,10 +47,14 @@ Delivered here:
   installation plus discovery plus an in-container digest re-verification
   against the receipt - gives conformance evidence for bullets 1, 3 and
   part of 4. It does **not** satisfy bullet 2 ("the same client, Level 1
-  fixture, contract and grader"), which needs an agent actually WORKING
-  the Level 1 task with each collection installed - a real model call this
-  no-agent demo deliberately never makes. **#11 stays open after this
-  manifest's own two runs execute**; one item remains, below.
+  fixture, contract and grader") by itself, which needs an agent actually
+  WORKING the Level 1 task with each collection installed - a real model
+  call this no-agent demo deliberately never makes. The harness for that
+  agent run now exists (`skillc collection-run <subject>`,
+  `skillc/collection_conformance.py`), built and proven against the fake
+  `docker` CLI (`tests/test_collection_conformance.py`); the operator's own
+  live run of it is what remains. **#11 stays open after this manifest's
+  own two runs execute**; one item remains, below.
 
 Explicitly NOT delivered here, per #11's own "do not build a second large
 benchmark" and the same discipline the matched pilot follows:
@@ -125,5 +129,7 @@ evidence into one overclaim):**
   `read_home_file` - resolved from a documented standard location, delivered
   candidate-owned into the trial container's home directory, never mounted
   or exported, refused below a minimum remaining life) is delivered under
-  #98; the agent run itself is still not, and is not this manifest's own
-  remaining item to close.
+  #98; the agent run itself is now a built harness
+  (`skillc collection-run <subject>`, proven against the fake docker), still
+  not the operator's own live run of it, and that live run is not this
+  manifest's own remaining item to close.
