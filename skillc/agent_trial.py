@@ -159,7 +159,8 @@ def transcript_census(client: str, raw: str) -> dict[str, object]:
     """What the REAL transcript's own format looked like, independent of what
     the adapter made of it (issue #106): the client version and model the
     transcript itself names, a count per line type, and - for codex - every
-    `response_item` payload type the adapter does not know. Only those three
+    `response_item` payload type the adapter does not know, and how many
+    response items there were to judge (zero reads as not assessed). Only those three
     identity fields are read; nothing account-scoped (codex's session_meta
     also carries account and user ids) is ever copied into the census.
 
@@ -171,6 +172,7 @@ def transcript_census(client: str, raw: str) -> dict[str, object]:
     client_version: str | None = None
     model: str | None = None
     unrecognized: set[str] = set()
+    response_items = 0
     for line in raw.splitlines():
         line = line.strip()
         if not line:
@@ -193,8 +195,10 @@ def transcript_census(client: str, raw: str) -> dict[str, object]:
                 client_version = client_version or payload["cli_version"]
             if top == "turn_context" and isinstance(payload, dict) and isinstance(payload.get("model"), str):
                 model = model or payload["model"]
-            if top == "response_item" and payload_type not in CODEX_KNOWN_RESPONSE_ITEM_TYPES:
-                unrecognized.add(str(payload_type))
+            if top == "response_item":
+                response_items += 1
+                if payload_type not in CODEX_KNOWN_RESPONSE_ITEM_TYPES:
+                    unrecognized.add(str(payload_type))
         else:
             if isinstance(obj.get("version"), str):
                 client_version = client_version or obj["version"]
@@ -205,7 +209,11 @@ def transcript_census(client: str, raw: str) -> dict[str, object]:
         "transcript_client_version": client_version,
         "transcript_model": model,
         "transcript_line_types": dict(sorted(line_types.items())),
-        "transcript_unrecognized_types": sorted(unrecognized) if client == "codex" else None,
+        "transcript_response_items_inspected": response_items if client == "codex" else None,
+        # An empty population is "not assessed", never a clean result (codex
+        # review): a transcript whose response items vanished or were renamed
+        # entirely is exactly the drift this exists to see.
+        "transcript_unrecognized_types": sorted(unrecognized) if client == "codex" and response_items else None,
     }
 
 
@@ -351,6 +359,7 @@ def _make_observe_before_teardown(
 
         census: dict[str, object] = {
             "transcript_client_version": None, "transcript_model": None,
+            "transcript_response_items_inspected": None,
             "transcript_line_types": None, "transcript_unrecognized_types": None,
         }
         observation = TranscriptObservation(

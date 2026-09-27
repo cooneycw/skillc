@@ -842,15 +842,27 @@ def cmd_collection_run(args: argparse.Namespace) -> int:
     finally:
         cc.discard_acquisition(run_root, args.subject)
 
-    # The full record, kept beside the store it describes - only when it
-    # passes the same leak check as the paste-back, after the same host-path
-    # redaction; a record that fails is never written, and the paste-back
-    # says so (`record_written=False`).
+    attempt_ids = [*backend.prepared_ids, *grading_backend.prepared_ids]
+    result = dataclasses.replace(
+        result,
+        host_credential=cc.HostCredentialCheck(before=host_before, after=host_after),
+        daemon_diff=reap.diff(daemon_before, daemon_after),
+        attributable_leftovers=cc.attributable_leftovers(docker_bin, attempt_ids, args.timeout),
+        attempts_checked=len(attempt_ids),
+        store_display=demo.redact_known_host_paths(str(store_path)),
+    )
+    # The whole evidence envelope, kept beside the store it describes - only
+    # when it passes the leak check (leaves AND serialized text) after the
+    # same host-path redaction; one that fails is never written, and the
+    # paste-back says so (`record_written=False`).
+    envelope = cc.evidence_envelope(result)
     record_text = demo.redact_known_host_paths(
-        json.dumps(result.record, indent=2, sort_keys=True, default=str), base=run_root,
+        json.dumps(envelope, indent=2, sort_keys=True, default=str), base=run_root,
     )
     record_written = False
-    if not demo.leak_check_text(record_text):
+    # Leaves of the REDACTED document: re-parsing un-escapes each string
+    # exactly as the reader of the file will see it.
+    if not cc.evidence_leak_findings(json.loads(record_text), record_text):
         try:
             store_path.mkdir(parents=True, exist_ok=True)
             (store_path / "collection-run-record.json").write_text(record_text + "\n", encoding="utf-8")
@@ -858,13 +870,7 @@ def cmd_collection_run(args: argparse.Namespace) -> int:
             pass
         else:
             record_written = True
-    result = dataclasses.replace(
-        result,
-        host_credential=cc.HostCredentialCheck(before=host_before, after=host_after),
-        daemon_diff=reap.diff(daemon_before, daemon_after),
-        store_display=demo.redact_known_host_paths(str(store_path)),
-        record_written=record_written,
-    )
+    result = dataclasses.replace(result, record_written=record_written)
 
     paste_back = cc.build_collection_paste_back(result)
     try:
@@ -883,10 +889,12 @@ def cmd_collection_run(args: argparse.Namespace) -> int:
     # Issue #106: a PASS that left a container behind, or could not confirm
     # its own teardown, is not a clean run - the cleanup evidence is part of
     # the verdict, not a footnote to it.
-    diff = result.daemon_diff
+    # Attributed to THIS run's attempt ids only (codex review): the
+    # daemon-wide diff is context in the paste-back, never the verdict, since
+    # a concurrent run's container would otherwise fail a clean run.
     cleanup_ok = (
         result.record.get("backend_teardown") == "confirmed"
-        and diff is not None and diff.comparable and not diff.leaked
+        and result.attributable_leftovers == []
     )
     return 0 if result.record.get("disposition") == "captured" and graded_ok and cleanup_ok else 1
 

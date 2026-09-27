@@ -225,6 +225,31 @@ EXIT=1
 
 Record `reason`: `codex credential has 596822s remaining, below the required 1000000000s - refusing rather than risk needing to refresh mid-trial`.
 
+## After the runs: two paste-back lines added by the cross-model review
+
+The blocks above are the paste-back exactly as it printed during these runs.
+The counter-model review of this PR then changed two things. Neither changes
+what these runs showed:
+
+- **Cleanup is now judged per run.** The exit code is decided by
+  `attributable_leftover_containers`: containers still labelled with this
+  run's own attempt ids, meaning the agent's and each grading probe's. The
+  daemon-wide `leaked_owned_containers` line is printed as `context:` only,
+  because a concurrent run's container would otherwise fail a clean run.
+  These runs came before that line, but their evidence is stronger than it.
+  The daemon-wide diff was 0 on every run, and afterwards **no** skillc-owned
+  container of any attempt remained (section 3). No attempt, this run's
+  included, could have left one.
+- **An empty transcript is no longer read as "no drift".** The census now
+  reports `response_items_inspected` and prints `unrecognized_types=None`
+  (not assessed) when that count is zero. Both captured runs inspected 11
+  response items: 5 tool calls, 5 outputs, and 8 or 7 messages plus
+  reasoning, per their `line_types`. So their `[]` is a real result.
+
+The kept `collection-run-record.json` files from these runs hold the driver
+record only. The saved file is now an envelope that also carries the host
+comparison, the attributable leftovers and the journal's cleanup event.
+
 ## 3. The host login afterwards
 
 | | before (13:02:39Z) | after (13:05:10Z) |

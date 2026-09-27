@@ -166,9 +166,15 @@ collection) closes.
   - a census of the real transcript: client version, model, line types, and
     the codex `response_item` types the adapter does not know.
 
-  The full record is written, leak-checked, into the kept store. A PASS now
-  exits 1 if teardown was not confirmed or a skillc-owned container was left
-  behind. `--minimum-credential-seconds` runs the below-threshold control.
+  An evidence envelope is written into the kept store, holding the record and
+  every observation above. It is leak-checked both as its string leaves and
+  as the serialized text, because `json.dumps` escaping hid an embedded
+  OAuth-shaped token from a text-only scan. A PASS now exits 1 if teardown
+  was not confirmed, or if a container labelled with one of this run's own
+  attempt ids (agent or grading probe) remains. The daemon-wide diff is
+  context only, since it cannot attribute. A transcript with no response
+  items reports its drift as not assessed. `--minimum-credential-seconds`
+  runs the below-threshold control.
   Live evidence: `evals/agent-trial-live/`.
 
 - **`skillc collection-run <subject>` (issue #11's remaining acceptance

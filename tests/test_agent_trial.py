@@ -916,3 +916,13 @@ def test_census_reads_version_and_model_and_copies_no_account_ids() -> None:
 def test_census_does_not_assess_claude_drift() -> None:
     census = at.transcript_census("claude", (_CLAUDE_FIXTURES / "live-canary.jsonl").read_text())
     assert census["transcript_unrecognized_types"] is None  # not assessed, never "no drift"
+
+
+@pytest.mark.parametrize("raw", ["", "not json\n", '{"type": "session_meta", "payload": {"cli_version": "0.157.1"}}\n'])
+def test_census_with_no_response_items_is_not_assessed(raw: str) -> None:
+    """Codex review, red on the first census: an empty, malformed or
+    item-less transcript reported `[]` - indistinguishable from a transcript
+    whose every response item was recognized."""
+    census = at.transcript_census("codex", raw)
+    assert census["transcript_response_items_inspected"] == 0
+    assert census["transcript_unrecognized_types"] is None

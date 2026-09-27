@@ -68,12 +68,12 @@ import os
 import shutil
 import tempfile
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import agent_trial, credential, demo, materialize, reap, trial, verify
 from .backend import Limits
-from .docker_backend import DockerBackend
+from .docker_backend import ATTEMPT_LABEL_KEY, OWNER_LABEL_KEY, OWNER_LABEL_VALUE, DockerBackend
 
 #: The Level 1 task's own starting state (`evals/level1/slug-small-fix/fixture/src`)
 #: - installed into the agent's `/work`, never the sibling `fixture/expected.json`
@@ -111,17 +111,54 @@ DEFAULT_CLIENT_ARGV = ("codex", "exec", "--sandbox", "danger-full-access", "--sk
 DEFAULT_AGENT_TIMEOUT = 900.0
 
 
+@dataclass(frozen=True)
+class TrackingDockerBackend(DockerBackend):
+    """A `DockerBackend` that remembers every attempt id it was asked to
+    `prepare()` - the agent's own attempt and each grading probe's random
+    `probe-<hex>` id alike - so a cleanup check can ask the daemon about THIS
+    run's containers by their attempt label, rather than attributing every
+    skillc-owned container that appeared meanwhile to this run (codex review:
+    `reap.diff` documents that it cannot establish causation)."""
+
+    prepared_ids: list[str] = field(default_factory=list, compare=False)
+
+    def prepare(self, attempt_id: str) -> object:
+        self.prepared_ids.append(attempt_id)
+        return super().prepare(attempt_id)
+
+
+def attributable_leftovers(
+    docker_bin: Sequence[str], attempt_ids: Sequence[str], timeout: float,
+) -> list[str] | None:
+    """Every container still carrying skillc's ownership label AND one of
+    `attempt_ids`' attempt labels - `None` when the daemon could not be asked
+    about any one of them, never an empty list standing in for "unreachable".
+    An empty `attempt_ids` is also `None`: nothing was checked, so nothing can
+    be claimed clean."""
+    if not attempt_ids:
+        return None
+    found: list[str] = []
+    for attempt_id in attempt_ids:
+        names = reap._list_names(
+            docker_bin, None, timeout, [(OWNER_LABEL_KEY, OWNER_LABEL_VALUE), (ATTEMPT_LABEL_KEY, attempt_id)],
+        )
+        if names is None:
+            return None
+        found.extend(names)
+    return found
+
+
 def agent_backends(
     *, image: str, base: Path, docker_bin: Sequence[str], daemon_timeout: float,
-) -> tuple[DockerBackend, DockerBackend]:
+) -> tuple[TrackingDockerBackend, TrackingDockerBackend]:
     """`(agent backend, grading backend)` for one collection run. The agent
     backend runs on `AGENT_NETWORK` (see its comment for the ruling); the
     grading backend is left on `DockerBackend`'s own default, deliberately
     not passed a network, so the grader never gains egress by this ruling."""
-    agent = DockerBackend(
+    agent = TrackingDockerBackend(
         image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=daemon_timeout, network=AGENT_NETWORK,
     )
-    grading = DockerBackend(image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=daemon_timeout)
+    grading = TrackingDockerBackend(image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=daemon_timeout)
     return agent, grading
 
 
@@ -202,9 +239,15 @@ class CollectionAgentResult:
     agent_network: str | None = None
     #: Filled by the CLI around the run (issue #106); `None` = not observed.
     host_credential: HostCredentialCheck | None = None
-    #: `reap.diff` of two daemon snapshots taken around the whole run - the
-    #: agent container AND the grading container. `None` = not taken.
+    #: `reap.diff` of two daemon snapshots taken around the whole run -
+    #: CONTEXT only: it counts any skillc-owned container that appeared,
+    #: including a concurrent run's. `None` = not taken.
     daemon_diff: reap.SnapshotDiff | None = None
+    #: Containers still labelled with one of THIS run's attempt ids (the
+    #: agent's and every grading probe's) after the run - the cleanup verdict.
+    #: `None` = could not be asked, or no attempt id was prepared.
+    attributable_leftovers: list[str] | None = None
+    attempts_checked: int | None = None
     #: The journal's own last `cleaned` event status for the attempt's
     #: workspace (e.g. "removed"). `lifecycle.run_through_backend` finalizes
     #: the record BEFORE it cleans the workspace, so the record's `cleanup`
@@ -389,6 +432,54 @@ def run_collection_agent_attempt(
     )
 
 
+def _string_leaves(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [leaf for k, v in value.items() for leaf in (*_string_leaves(k), *_string_leaves(v))]
+    if isinstance(value, (list, tuple)):
+        return [leaf for item in value for leaf in _string_leaves(item)]
+    return []
+
+
+def evidence_leak_findings(evidence: object, serialized: str) -> list[str]:
+    """Leak-check an evidence object BOTH as its string leaves and as the
+    serialized text (codex review): `json.dumps` escapes the quotes inside a
+    string value, so an OAuth-shaped `{"access_token": "..."}` embedded in, say,
+    a grader's detail text stops matching the token pattern once serialized.
+    Scanning the leaves catches that; scanning the text catches anything a
+    leaf split would hide."""
+    findings = [f for leaf in _string_leaves(evidence) for f in demo.leak_check_text(leaf)]
+    return findings + demo.leak_check_text(serialized)
+
+
+def evidence_envelope(result: CollectionAgentResult) -> dict[str, object]:
+    """Everything the paste-back states, in one saved document - the driver's
+    record AND the observations the CLI made around it (codex review: saving
+    only the record left a cleanup exit 1 or a host comparison unexplained
+    once the terminal output was gone). The host credential appears as its
+    comparison and remaining life only - never its digest or bytes."""
+    host = result.host_credential
+    diff = result.daemon_diff
+    return {
+        "subject": result.subject_name, "revision": result.revision, "client": result.client,
+        "agent_network": result.agent_network,
+        "record": result.record,
+        "workspace_cleaned_journal": result.workspace_cleaned,
+        "host_credential": None if host is None else {
+            "unchanged": host.unchanged,
+            "remaining_seconds_before": host.before.remaining_seconds,
+            "remaining_seconds_after": host.after.remaining_seconds,
+        },
+        "attributable_leftovers": result.attributable_leftovers,
+        "attempts_checked": result.attempts_checked,
+        "daemon_context": None if diff is None else {
+            "comparable": diff.comparable, "leaked": sorted(diff.leaked),
+            "foreign_vanished": sorted(diff.foreign_vanished),
+        },
+    }
+
+
 def _fmt_seconds(value: object) -> str:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return "None"
@@ -459,14 +550,22 @@ def build_collection_paste_back(result: CollectionAgentResult) -> str:
         f"    backend_teardown={record.get('backend_teardown')}",
         f"    backend_teardown_error={record.get('backend_teardown_error')}",
         (
-            f"    daemon_comparable={diff.comparable if diff else None} "
+            f"    attributable_leftover_containers="
+            f"{len(result.attributable_leftovers) if result.attributable_leftovers is not None else None} "
+            f"(attempts_checked={result.attempts_checked})"
+        ),
+        (
+            f"    context: daemon_comparable={diff.comparable if diff else None} "
             f"leaked_owned_containers={len(diff.leaked) if diff and diff.comparable else None} "
             f"foreign_vanished={len(diff.foreign_vanished) if diff and diff.comparable else None}"
         ),
         f"    store_kept={result.store_display} record_written={result.record_written}",
         "  [transcript format]",
         f"    client_version={obs.get('transcript_client_version')} model={obs.get('transcript_model')}",
-        f"    unrecognized_types={obs.get('transcript_unrecognized_types')}",
+        (
+            f"    unrecognized_types={obs.get('transcript_unrecognized_types')} "
+            f"(response_items_inspected={obs.get('transcript_response_items_inspected')})"
+        ),
         f"    line_types={obs.get('transcript_line_types')}",
     ]
     return "\n".join(lines)

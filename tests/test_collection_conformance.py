@@ -383,6 +383,7 @@ def test_paste_back_is_leak_clean_and_names_every_planned_field() -> None:
         "host_credential_unchanged=True", "host_remaining_after=60m",
         "stop.reason=exited stop.exit_code=0 stop.confirmed=True",
         "workspace_cleanup(record, at finalize)=cleaned", "backend_teardown=confirmed", "leaked_owned_containers=0",
+        "attributable_leftover_containers=None",
         "client_version=0.157.1 model=some-model", "unrecognized_types=[]",
     ):
         assert field in text
@@ -671,6 +672,16 @@ def _stub_acquisition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(demo, "acquire_subject_checkout", _fake_acquire)
 
 
+def _prepared(kwargs: dict[str, object]) -> None:
+    """What a real attempt does to the tracking backends: prepare one attempt
+    each. Nothing exists on the fake daemon under these ids, so the
+    attributable-leftover check has real ids to ask about and finds none."""
+    for key, attempt_id in (("backend", "a-fake"), ("grading_backend", "probe-fake")):
+        backend = kwargs[key]
+        assert isinstance(backend, cc.TrackingDockerBackend)
+        backend.prepared_ids.append(attempt_id)
+
+
 def _fake_collection_result(
     subject_name: str, *, disposition: str, graded: dict[str, object] | None,
     backend_teardown: str = "confirmed",
@@ -703,6 +714,7 @@ def test_cmd_collection_run_exits_1_when_grading_is_blocked(
     _stub_acquisition(tmp_path, monkeypatch)
 
     def _fake_run(**kwargs: object) -> cc.CollectionAgentResult:
+        _prepared(kwargs)
         return _fake_collection_result("whatever", disposition="captured", graded=None)
 
     monkeypatch.setattr(cc, "run_collection_agent_attempt", _fake_run)
@@ -722,6 +734,7 @@ def test_cmd_collection_run_exits_1_when_grading_failed(
     _stub_acquisition(tmp_path, monkeypatch)
 
     def _fake_run(**kwargs: object) -> cc.CollectionAgentResult:
+        _prepared(kwargs)
         return _fake_collection_result(
             "whatever", disposition="captured", graded={"status": "FAIL", "detail": "wrong output"},
         )
@@ -743,6 +756,7 @@ def test_cmd_collection_run_exits_0_on_full_success(
     _stub_acquisition(tmp_path, monkeypatch)
 
     def _fake_run(**kwargs: object) -> cc.CollectionAgentResult:
+        _prepared(kwargs)
         return _fake_collection_result("whatever", disposition="captured", graded={"status": "PASS", "detail": "ok"})
 
     monkeypatch.setattr(cc, "run_collection_agent_attempt", _fake_run)
@@ -780,6 +794,7 @@ def test_cmd_collection_run_exits_1_when_teardown_is_not_confirmed(
     _stub_acquisition(tmp_path, monkeypatch)
 
     def _fake_run(**kwargs: object) -> cc.CollectionAgentResult:
+        _prepared(kwargs)
         return _fake_collection_result(
             "whatever", disposition="captured", graded={"status": "PASS"}, backend_teardown="unknown",
         )
@@ -791,29 +806,113 @@ def test_cmd_collection_run_exits_1_when_teardown_is_not_confirmed(
     assert cli.cmd_collection_run(args) == 1
 
 
-def test_cmd_collection_run_exits_1_and_reports_a_leaked_container(
+def test_cmd_collection_run_exits_1_on_a_container_left_by_this_run(
     tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Issue #106: a skillc-owned container that appears during the run and
-    is still there afterwards is reported and fails the run, even on PASS."""
+    """Issue #106: a container still labelled with one of THIS run's attempt
+    ids fails the run, even on PASS."""
+    from skillc import cli
+
+    _stub_acquisition(tmp_path, monkeypatch)
+    asked: list[list[str]] = []
+
+    def _leftovers(docker_bin: object, attempt_ids: list[str], timeout: float) -> list[str]:
+        asked.append(list(attempt_ids))
+        return ["skillc-a-fake"]
+
+    monkeypatch.setattr(cc, "attributable_leftovers", _leftovers)
+
+    def _fake_run(**kwargs: object) -> cc.CollectionAgentResult:
+        _prepared(kwargs)
+        return _fake_collection_result("whatever", disposition="captured", graded={"status": "PASS"})
+
+    monkeypatch.setattr(cc, "run_collection_agent_attempt", _fake_run)
+    args = _collection_run_args(
+        "whatever", image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base=str(base), timeout=5,
+    )
+    assert cli.cmd_collection_run(args) == 1
+    assert asked == [["a-fake", "probe-fake"]]  # the agent's id AND the grading probe's
+    assert "attributable_leftover_containers=1 (attempts_checked=2)" in capsys.readouterr().out
+
+
+def test_a_concurrent_run_s_container_does_not_fail_a_clean_run(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Codex review: the daemon-wide diff cannot attribute. A skillc-owned
+    container a NEIGHBOUR started during this run is reported as context,
+    and does not flip a clean run's verdict."""
     from skillc import cli
 
     _stub_acquisition(tmp_path, monkeypatch)
     snaps = iter([
         reap.Snapshot(True, frozenset(), frozenset()),
-        reap.Snapshot(True, frozenset({"skillc-left-behind"}), frozenset()),
+        reap.Snapshot(True, frozenset({"skillc-someone-else"}), frozenset()),
     ])
     monkeypatch.setattr(reap, "snapshot", lambda *a, **k: next(snaps))
-    monkeypatch.setattr(
-        cc, "run_collection_agent_attempt",
-        lambda **kw: _fake_collection_result("whatever", disposition="captured", graded={"status": "PASS"}),
-    )
+
+    def _fake_run(**kwargs: object) -> cc.CollectionAgentResult:
+        _prepared(kwargs)
+        return _fake_collection_result("whatever", disposition="captured", graded={"status": "PASS"})
+
+    monkeypatch.setattr(cc, "run_collection_agent_attempt", _fake_run)
     args = _collection_run_args(
         "whatever", image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base=str(base), timeout=5,
     )
-    assert cli.cmd_collection_run(args) == 1
-    assert "leaked_owned_containers=1" in capsys.readouterr().out
+    assert cli.cmd_collection_run(args) == 0
+    out = capsys.readouterr().out
+    assert "attributable_leftover_containers=0 (attempts_checked=2)" in out
+    assert "context: daemon_comparable=True leaked_owned_containers=1" in out
+
+
+def test_no_prepared_attempt_is_not_a_clean_cleanup(docker_state: Path) -> None:
+    """An empty id list means nothing was checked: `None`, never `[]`."""
+    assert cc.attributable_leftovers(_docker_bin(docker_state), [], 5) is None
+    assert cc.attributable_leftovers(_docker_bin(docker_state), ["a-none"], 5) == []
+
+
+def test_attributable_leftovers_finds_a_real_container_on_the_fake_daemon(
+    base: Path, docker_state: Path,
+) -> None:
+    """The check against a daemon that really holds the container: prepared
+    and never destroyed, it is found by its attempt label."""
+    backend = cc.TrackingDockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+    handle = backend.prepare("a-kept")
+    try:
+        found = cc.attributable_leftovers(_docker_bin(docker_state), backend.prepared_ids, 5)
+        assert found is not None and len(found) == 1
+    finally:
+        backend.destroy(handle)
+    assert cc.attributable_leftovers(_docker_bin(docker_state), backend.prepared_ids, 5) == []
+
+
+def test_an_oauth_token_embedded_in_a_record_string_blocks_the_record_file(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Codex review, red on the serialized-text-only check: `json.dumps`
+    escapes the quotes inside a string value, so OAuth-shaped JSON embedded
+    in a grader's detail stopped matching the token pattern. The record file
+    must not be written; the paste-back says `record_written=False`."""
+    from skillc import cli
+
+    _stub_acquisition(tmp_path, monkeypatch)
+    token_json = json.dumps({"access_token": "Zq7" + "x" * 37})
+
+    def _fake_run(**kwargs: object) -> cc.CollectionAgentResult:
+        _prepared(kwargs)
+        return _fake_collection_result(
+            "whatever", disposition="captured", graded={"status": "PASS", "detail": token_json},
+        )
+
+    monkeypatch.setattr(cc, "run_collection_agent_attempt", _fake_run)
+    args = _collection_run_args(
+        "whatever", image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base=str(base), timeout=5,
+    )
+    cli.cmd_collection_run(args)
+    assert "record_written=False" in capsys.readouterr().out
+    assert not list(base.glob("skillc-collection-run-whatever-*/whatever-store/collection-run-record.json"))
 
 
 def test_cmd_collection_run_reports_a_host_credential_the_run_changed(
@@ -830,6 +929,7 @@ def test_cmd_collection_run_reports_a_host_credential_the_run_changed(
 
     def _fake_run(**kwargs: object) -> cc.CollectionAgentResult:
         assert kwargs["minimum_credential_seconds"] == 5
+        _prepared(kwargs)
         cred.write_text(cred.read_text() + " ")
         return _fake_collection_result("whatever", disposition="captured", graded={"status": "PASS"})
 
@@ -843,4 +943,10 @@ def test_cmd_collection_run_reports_a_host_credential_the_run_changed(
     assert "host_credential_unchanged=False" in out
     assert "record_written=True" in out
     [record_file] = list(base.glob("skillc-collection-run-whatever-*/whatever-store/collection-run-record.json"))
-    assert json.loads(record_file.read_text())["disposition"] == "captured"
+    saved = json.loads(record_file.read_text())
+    # The envelope, not the bare record (codex review): what the paste-back
+    # states about the host and the cleanup is saved too - never the digest.
+    assert saved["record"]["disposition"] == "captured"
+    assert saved["host_credential"]["unchanged"] is False
+    assert saved["attributable_leftovers"] == [] and saved["attempts_checked"] == 2
+    assert "digest" not in json.dumps(saved["host_credential"])
