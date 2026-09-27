@@ -34,7 +34,18 @@ collection) closes.
   refused before selection (`test_a_malformed_subject_declaration_is_refused`'s
   10 parametrized cases, generic to both subjects). Prepared, not run - like
   the matched pilot (#12/#89), execution needs a capability (#81's demo,
-  #10's live daemon) that does not exist yet.
+  #10's live daemon) that does not exist yet. Cross-model review found a
+  real overclaim (the compatibility statement blurred "materialize.py was
+  actually run against both subjects" together with "trial.py/verify.py/
+  docker_backend.py carry no subject-name branch" into one "proven end to
+  end" claim - only the first is execution evidence, the second is a static
+  guarantee, and neither shows a full trial has ever run for either
+  subject; rewritten to keep the three kinds of claim separate), an
+  arithmetic error (11 model-invoked skills total, of which 2 are selected,
+  leaves 9 unselected, not 11), and a vacuous-pass bug in the new test
+  (`"" in summary` is `True` unconditionally, so an empty evidence
+  observation would have passed silently - fixed with an explicit
+  non-empty check and its own negative control).
 - **The fake `docker` CLI's state-file writes are now atomic and locked**
   (Refs #77): `test_execute_cancellation_kills_the_container` flaked on
   main at roughly 1 in 25 runs. Root cause: `tests/fixtures/docker-backend/

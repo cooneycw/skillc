@@ -62,19 +62,32 @@ benchmark" and the same discipline the matched pilot follows:
 
 ## The bounded compatibility statement
 
-**What is shown compatible:** `skillc materialize`, the trial controller
-(`trial.py`), the independent verifier (`verify.py`) and the execution
-backend (`backend.py`/`docker_backend.py`) install and account for
-`cpp-codex` and `mattpocock-skills` through the IDENTICAL code path - no
-subject-name branch anywhere that code touches (cited above, not
-re-proven), and no adapter change was needed to add the second subject
-(`mattpocock-skills/SUBJECT.md`'s own finding, #71/#11: "proving the
-adapter needed no change for an independently authored collection with a
-different layout"). Both subjects' committed host-side evidence already
-demonstrates this end to end without a real daemon; this manifest's own
-contribution is stating exactly what it will take to demonstrate it AGAIN
-with a real one, so that #10's live run and #11's close can happen in the
-same operator session rather than two separate ones.
+**What is shown compatible, and by what kind of evidence - kept separate on
+purpose (codex review of this PR: the first draft blurred them into one
+"end to end" claim the evidence does not support):**
+
+- **By actual execution:** `skillc materialize` has been RUN against both
+  `cpp-codex` and `mattpocock-skills`, on the host, with no adapter change
+  between them (`mattpocock-skills/SUBJECT.md`'s own finding, #71/#11:
+  "proving the adapter needed no change for an independently authored
+  collection with a different layout"). This is real, executed evidence -
+  the installation counts and readiness facts this manifest cites are from
+  those actual runs.
+- **By static proof, never by execution:** `trial.py`, `verify.py`,
+  `backend.py` and `docker_backend.py` carry no subject-name branch
+  (cited above, not re-proven) - a structural guarantee that NEITHER
+  subject could be special-cased in that code, whether or not either has
+  ever actually been run through it.
+- **Not shown at all, by either kind of evidence:** that the trial
+  controller, the verifier, or a real execution backend has ever actually
+  processed EITHER subject end to end. No full trial (plan an attempt,
+  dispatch it through a backend, capture, grade) has been run for
+  `cpp-codex` or `mattpocock-skills` - only `materialize.py`'s own
+  installation step has real execution evidence. That is precisely the gap
+  this manifest's two runs are prepared to close, once #81's `--subject`
+  flag and a real Docker daemon exist to run them against - not a gap this
+  document can claim closed by citing the adapter-only evidence or the
+  genericity guard.
 
 **What is NOT shown, and is not claimed to be:**
 

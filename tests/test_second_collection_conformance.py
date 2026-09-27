@@ -47,6 +47,26 @@ def test_each_run_names_a_command_carrying_its_own_subject_name() -> None:
         assert f"--subject {subject}" in run["command"]  # type: ignore[operator]
 
 
+def _receipt_summary_problems(installed: str, available: str, summary: str) -> list[str]:
+    """Every way `summary` could fail to be an honest citation of
+    `installed`/`available`. Both are required NONEMPTY (codex review of
+    this PR): `"" in summary` is True unconditionally in Python, so an
+    empty observation would otherwise pass the membership check silently -
+    exactly the "found nothing because there was nothing to look at"
+    failure this repository's own negative-control discipline exists to
+    catch."""
+    problems = []
+    if not installed:
+        problems.append("evidence's 'installed' observation is empty")
+    if not available:
+        problems.append("evidence's 'available' observation is empty")
+    if installed and installed not in summary:
+        problems.append(f"manifest cites {summary!r}, evidence says installed={installed!r}")
+    if available and available not in summary:
+        problems.append(f"manifest cites {summary!r}, evidence says available={available!r}")
+    return problems
+
+
 def test_the_installation_receipt_summary_matches_the_real_evidence() -> None:
     """The manifest CITES each subject's already-recorded observations - this
     proves the citation is exact, not a stale or hand-typed approximation.
@@ -58,8 +78,25 @@ def test_the_installation_receipt_summary_matches_the_real_evidence() -> None:
         installed = report["observations"]["installed"]
         available = report["observations"]["available"]
         summary = run["expected_paste_back"]["installation_receipt_summary"]  # type: ignore[index]
-        assert installed in summary, f"{subject}: manifest cites {summary!r}, evidence says {installed!r}"
-        assert available in summary, f"{subject}: manifest cites {summary!r}, evidence says {available!r}"
+        problems = _receipt_summary_problems(installed, available, summary)
+        assert problems == [], f"{subject}: {problems}"
+
+
+def test_the_receipt_check_refuses_empty_observations() -> None:
+    """The negative control for the emptiness guard above (codex review,
+    MEDIUM): before this fix, an empty `installed`/`available` observation
+    passed the membership check silently, since an empty string is a
+    substring of anything. Confirmed this reproduces the described failure
+    class, not merely asserted to."""
+    assert _receipt_summary_problems("", "", "installed: 273 file(s) in 74 skill(s)") == [
+        "evidence's 'installed' observation is empty",
+        "evidence's 'available' observation is empty",
+    ]
+    # Nonempty and genuinely mismatched is still caught, unaffected by the fix.
+    assert _receipt_summary_problems("999 file(s)", "SATISFIED", "installed: 273 file(s)") == [
+        "manifest cites 'installed: 273 file(s)', evidence says installed='999 file(s)'",
+        "manifest cites 'installed: 273 file(s)', evidence says available='SATISFIED'",
+    ]
 
 
 def test_neither_run_invents_a_discovery_result() -> None:
