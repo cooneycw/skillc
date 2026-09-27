@@ -491,7 +491,7 @@ def new_canary_nonce() -> str:
     return secrets.token_hex(16)
 
 
-def compose_canary_instruction(skill_name: str, nonce: str, result_filename: str | None = None) -> str:
+def compose_canary_instruction(skill_name: str | None, nonce: str, result_filename: str | None = None) -> str:
     """A prompt fragment appended to the trial's real goal, instructing the
     agent to invoke `skill_name` and then use a tool to prove it, tagged
     with `nonce`.
@@ -504,8 +504,21 @@ def compose_canary_instruction(skill_name: str, nonce: str, result_filename: str
     nonce and one artifact rather than inventing a second one (cross-model
     review: minimizing prompt contamination in the very behaviour being
     measured). Omitted (the default, every pre-#106 caller), the filename is
-    derived from `nonce` exactly as before."""
+    derived from `nonce` exactly as before.
+
+    `skill_name=None` (issue #26 review) composes a SKILL-FREE instruction:
+    no skill is named anywhere in the text, only the tool write. A
+    SELECTION probe's own prompt must never name the answer it is trying to
+    observe - naming a skill here would make every "selected" result an
+    artifact of this instruction, not a measurement of what the agent chose
+    on its own. `check_agent_canary` accepts the same `None` and requires
+    only the tool-write half in that mode."""
     filename = result_filename if result_filename is not None else f"skillc-canary-{nonce}.txt"
+    if skill_name is None:
+        return (
+            f"Before doing anything else, use a tool to write the exact text "
+            f"'touched:{nonce}' to a file named '{filename}' in the working directory."
+        )
     return (
         f"Before doing anything else, invoke the '{skill_name}' skill, then "
         f"use a tool to write the exact text 'touched:{nonce}' to a file "
@@ -568,7 +581,7 @@ def check_canary(
         )
 
 
-def check_agent_canary(transcript_events: Sequence[Mapping[str, object]], skill_name: str) -> None:
+def check_agent_canary(transcript_events: Sequence[Mapping[str, object]], skill_name: str | None) -> None:
     """A REAL-AGENT variant of `check_canary` (issue #106), for exactly the
     case that function's own docstring names as unavailable to a real
     client: neither a real Claude Code `Write` result nor a real Codex
@@ -591,6 +604,12 @@ def check_agent_canary(transcript_events: Sequence[Mapping[str, object]], skill_
     show the agent doing real, confirmed tool work to get there, or did
     disposition happen to reach `captured` some other way?
 
+    `skill_name=None` (issue #26 review, matching `compose_canary_instruction`'s
+    own skill-free mode) checks ONLY the confirmed-tool-use half - a
+    selection probe's canary must never require the very invocation it
+    exists to observe, or the "measurement" would just be proof the agent
+    followed an explicit instruction.
+
     NOT verified here: that the confirmed tool call specifically targeted
     the result file (a scope decision, not an oversight - `transcript_adapter.py`'s
     normalized `tool_use` events carry no `input`/target field at all, by
@@ -599,12 +618,13 @@ def check_agent_canary(transcript_events: Sequence[Mapping[str, object]], skill_
     is what this checks; the FILE's own correctness is `disposition`'s job,
     not this function's.
     """
-    skill_invoked = any(
-        event.get("type") == "skill_invocation" and event.get("skill") == skill_name
-        for event in transcript_events
-    )
-    if not skill_invoked:
-        raise CanaryNotSatisfied(f"no skill_invocation event for '{skill_name}' in the transcript - not live")
+    if skill_name is not None:
+        skill_invoked = any(
+            event.get("type") == "skill_invocation" and event.get("skill") == skill_name
+            for event in transcript_events
+        )
+        if not skill_invoked:
+            raise CanaryNotSatisfied(f"no skill_invocation event for '{skill_name}' in the transcript - not live")
 
     tool_confirmed = any(
         event.get("type") == "tool_use" and not event.get("error")

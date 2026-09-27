@@ -112,12 +112,18 @@ def _graded(record: dict[str, object]) -> dict[str, object]:
 
 def _fake_argv(*, fmt: str, home: Path, transcript_relpath: str, fail_canary: bool = False,
                mismatched_prompt: bool = False, copy_solution: Path | None = None,
-               plant_leak: bool = False) -> list[str]:
+               plant_leak: bool = False, plant_skill: list[str] | None = None) -> list[str]:
     """The skill name and nonce are never passed here - the fake client
     reads both out of the prompt text itself (see its own module docstring
     and `main()`), exactly as a real agent would read its own instructions.
     `agent_trial.run_one_attempt` appends the prompt as the LAST argv
-    element, so this list is everything BEFORE it."""
+    element, so this list is everything BEFORE it.
+
+    `plant_skill` (issue #26): which skill_invocation event(s), if any, the
+    fake client writes into the transcript - independent of whatever skill
+    (if any) the prompt itself names. Omitted, the fake client's own default
+    applies (the prompt's named skill in named-canary mode, none at all in
+    skill-free mode)."""
     argv = [
         sys.executable, str(FAKE_CLIENT), "--format", fmt, "--home", str(home),
         "--transcript-relpath", transcript_relpath,
@@ -130,6 +136,8 @@ def _fake_argv(*, fmt: str, home: Path, transcript_relpath: str, fail_canary: bo
         argv.extend(["--copy-solution", str(copy_solution)])
     if plant_leak:
         argv.append("--plant-leak")
+    for skill in plant_skill or ():
+        argv.extend(["--plant-skill", skill])
     return argv
 
 
@@ -447,6 +455,173 @@ def test_end_to_end_happy_path_for_codex(store: Path, base: Path, docker_state: 
     assert _observation(record)["credential_client"] == "codex"
     assert record["grading_blocked_reason"] is None
     assert _graded(record)["status"] == "PASS"
+
+
+# ------------------------------------------------- skill_invocations (issue #26)
+
+
+def test_skill_invocations_reports_every_invoked_skill_not_only_the_named_one(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """The transcript can show MORE than the one skill a canary was checked
+    against - `observation["skill_invocations"]` must report all of it, in
+    order, never collapse to just `skill_name`'s own confirmation."""
+    backend = _backend(base, docker_state)
+    experiment, attempt_id = _planned(store)
+    cred_path = _fresh_credential(tmp_path, "claude")
+    home = _mapped_home(docker_state, attempt_id)
+    argv = _fake_argv(
+        fmt="claude-fake", home=home,
+        transcript_relpath=".claude/projects/test/33333333-3333-3333-3333-333333333333.jsonl",
+        plant_skill=["security-scan", "security-deep"],
+    )
+
+    record = at.run_one_attempt(
+        backend=backend, experiment=experiment, attempt_id=attempt_id, client="claude",
+        base_argv=argv, prompt="Check for security issues.", skill_name="security-scan",
+        surface={}, limits=Limits(timeout=5), base=base, credential_explicit_path=cred_path,
+    )
+
+    observation = _observation(record)
+    assert observation["skill_invocations"] == ["security-scan", "security-deep"]
+    assert observation["skill_invocation_detection"] == "structural"
+
+
+def test_skill_invocation_detection_is_heuristic_for_codex(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """Issue #26's report must be able to say Codex's own detection is
+    best-effort, never present it as the same structural guarantee Claude
+    Code's dedicated `Skill` tool call gives (`transcript_adapter.py`'s own
+    module docstring: Codex has no `skill_invocation` marker of its own)."""
+    backend = _backend(base, docker_state)
+    experiment, attempt_id = _planned(store)
+    cred_path = _fresh_credential(tmp_path, "codex")
+    home = _mapped_home(docker_state, attempt_id)
+    argv = _fake_argv(
+        fmt="codex-fake", home=home, transcript_relpath=".codex/sessions/2026/01/01/rollout-y.jsonl",
+        plant_skill=["qa-test"],
+    )
+
+    record = at.run_one_attempt(
+        backend=backend, experiment=experiment, attempt_id=attempt_id, client="codex",
+        base_argv=argv, prompt="Run the tests.", skill_name="qa-test",
+        surface={}, limits=Limits(timeout=5), base=base, credential_explicit_path=cred_path,
+    )
+
+    observation = _observation(record)
+    assert observation["skill_invocations"] == ["qa-test"]
+    assert observation["skill_invocation_detection"] == "heuristic"
+
+
+def test_skill_invocations_is_empty_when_no_transcript_was_found(store: Path, base: Path, docker_state: Path) -> None:
+    """The same "could not observe" condition every other observation field
+    defaults on (zero or multiple transcript files) - never a guessed list."""
+    backend = _backend(base, docker_state)
+    experiment, attempt_id = _planned(store)
+    argv = [sys.executable, "-c", "import pathlib; pathlib.Path('agent-touched.txt').write_text('ran')"]
+
+    record = at.run_one_attempt(
+        backend=backend, experiment=experiment, attempt_id=attempt_id, client="claude",
+        base_argv=argv, prompt="x", skill_name="x", surface={}, limits=Limits(timeout=5), base=base,
+        credential_explicit_path=None,
+    )
+
+    observation = _observation(record)
+    assert observation["skill_invocations"] == []
+    assert observation["transcript_files_found"] == 0
+
+
+# --------------------------------------------------- skill-free canary (issue #26)
+
+
+def test_skill_free_canary_accepts_an_attempt_that_invokes_no_skill_at_all(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """`skill_name=None` composes a skill-free instruction; the fake client
+    (given no `--plant-skill`) writes no skill_invocation event at all - the
+    near-miss case's own shape. The canary must still be satisfied on the
+    tool-write alone, and `skill_invocations` must observe the true, empty
+    result rather than anything derived from `skill_name`."""
+    backend = _backend(base, docker_state)
+    experiment, attempt_id = _planned(store)
+    cred_path = _fresh_credential(tmp_path, "claude")
+    home = _mapped_home(docker_state, attempt_id)
+    argv = _fake_argv(
+        fmt="claude-fake", home=home,
+        transcript_relpath=".claude/projects/test/44444444-4444-4444-4444-444444444444.jsonl",
+    )
+
+    record = at.run_one_attempt(
+        backend=backend, experiment=experiment, attempt_id=attempt_id, client="claude",
+        base_argv=argv, prompt="Fix the slug helper.", skill_name=None,
+        surface={}, limits=Limits(timeout=5), base=base, credential_explicit_path=cred_path,
+    )
+
+    assert record["disposition"] == "captured"
+    observation = _observation(record)
+    assert observation["canary_satisfied"] is True
+    assert observation["skill_invocations"] == []
+
+
+def test_skill_free_canary_still_observes_a_false_positive_invocation(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """Red case (issue #26's own acceptance): in skill-free mode, an
+    invocation the agent made ANYWAY (never asked for, since the prompt
+    names no skill) must still be OBSERVED via `skill_invocations`, not
+    hidden by the canary's own indifference to it - the canary and the
+    measurement are deliberately different concerns now."""
+    backend = _backend(base, docker_state)
+    experiment, attempt_id = _planned(store)
+    cred_path = _fresh_credential(tmp_path, "claude")
+    home = _mapped_home(docker_state, attempt_id)
+    argv = _fake_argv(
+        fmt="claude-fake", home=home,
+        transcript_relpath=".claude/projects/test/55555555-5555-5555-5555-555555555555.jsonl",
+        plant_skill=["qa-test"],
+    )
+
+    record = at.run_one_attempt(
+        backend=backend, experiment=experiment, attempt_id=attempt_id, client="claude",
+        base_argv=argv, prompt="Fix the slug helper.", skill_name=None,
+        surface={}, limits=Limits(timeout=5), base=base, credential_explicit_path=cred_path,
+    )
+
+    assert record["disposition"] == "captured"
+    observation = _observation(record)
+    assert observation["canary_satisfied"] is True  # the canary itself is indifferent to this
+    assert observation["skill_invocations"] == ["qa-test"]  # but the observation is not
+
+
+def test_skill_free_canary_still_refuses_a_failed_tool_call(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """Red case (issue #26's own acceptance: "a failed tool call is still
+    not live"), through the real `run_one_attempt` path this time, not just
+    the unit-level `check_agent_canary` test in `test_trial_bootstrap.py`."""
+    backend = _backend(base, docker_state)
+    grading_backend = _backend(base, docker_state)
+    experiment, attempt_id = _planned(store)
+    cred_path = _fresh_credential(tmp_path, "claude")
+    home = _mapped_home(docker_state, attempt_id)
+    argv = _fake_argv(
+        fmt="claude-fake", home=home,
+        transcript_relpath=".claude/projects/test/66666666-6666-6666-6666-666666666666.jsonl",
+        fail_canary=True,
+    )
+
+    record = at.run_one_attempt(
+        backend=backend, experiment=experiment, attempt_id=attempt_id, client="claude",
+        base_argv=argv, prompt="Fix the slug helper.", skill_name=None,
+        surface={}, limits=Limits(timeout=5), base=base, credential_explicit_path=cred_path,
+        grader=verify.GraderDef.load(GRADER_ROOT), grading_backend=grading_backend,
+    )
+
+    observation = _observation(record)
+    assert observation["canary_satisfied"] is False
+    assert record["grading_blocked_reason"] is not None
+    assert record["graded"] is None
 
 
 # --------------------------------------------------------- no real model call
