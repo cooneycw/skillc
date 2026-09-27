@@ -1040,16 +1040,28 @@ def cmd_selection_probe(args: argparse.Namespace) -> int:
         except OSError:
             pass
 
-    print(f"{document['kind']} run: experiment={experiment.id} subject={subject}@{acquired.subject.revision} "
-          f"client={acquired.subject.client} {acquired.subject.client_version}")
+    lines = [(
+        f"{document['kind']} run: experiment={experiment.id} subject={subject}@{acquired.subject.revision} "
+        f"client={acquired.subject.client} {acquired.subject.client_version}"
+    )]
     for case in report.cases:
         for arm, result in (("treatment", case.treatment), ("baseline", case.baseline)):
-            print(f"  {case.case_id} {arm}: disposition={result.disposition} selection={result.selection} "
-                  f"task_success={result.task_success} invoked={sorted(result.observed)}"
-                  f"{' (heuristic detection)' if result.codex_best_effort else ''}"
-                  f"{' - ' + result.detail if result.detail else ''}")
-    print(f"  report_written={written} store={demo.redact_known_host_paths(str(store_path))}")
-    print(f"verdict: {'ok' if ok else 'NOT ok'} - {why}")
+            lines.append(
+                f"  {case.case_id} {arm}: disposition={result.disposition} selection={result.selection} "
+                f"task_success={result.task_success} invoked={sorted(result.observed)}"
+                f"{' (heuristic detection)' if result.codex_best_effort else ''}"
+                f"{' - ' + result.detail if result.detail else ''}"
+            )
+    lines.append(f"  report_written={written} store={store_path}")
+    lines.append(f"verdict: {'ok' if ok else 'NOT ok'} - {why}")
+    # The console gets the same protection as the report file: redacted, then
+    # leak-checked as a whole and refused rather than printed (#26 review - a
+    # record's own `reason` can carry a host path or a private address).
+    try:
+        demo.print_paste_back(demo.redact_known_host_paths("\n".join(lines), base=run_root))
+    except demo.PasteBackRefused as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
     return 0 if ok else 1
 
 

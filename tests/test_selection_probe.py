@@ -565,8 +565,9 @@ def _codex_credential(tmp_path: Path) -> Path:
 
 def _script(
     *, plant: tuple[str, ...] = (), candidate: Path | None = GOOD_CANDIDATE, fail_canary: bool = False,
+    plant_none: bool = False,
 ) -> dict[str, object]:
-    return {"plant": plant, "candidate": candidate, "fail_canary": fail_canary}
+    return {"plant": plant, "candidate": candidate, "fail_canary": fail_canary, "plant_none": plant_none}
 
 
 def _argv_for(
@@ -589,6 +590,8 @@ def _argv_for(
             argv.extend(["--copy-solution", str(script["candidate"])])
         if script["fail_canary"]:
             argv.append("--fail-canary")
+        if script.get("plant_none"):
+            argv.append("--plant-none")
         for skill in script["plant"]:  # type: ignore[attr-defined]
             argv.extend(["--plant-skill", str(skill)])
         return argv
@@ -872,8 +875,14 @@ def test_a_control_declared_against_another_revision_is_refused() -> None:
         sp.detection_control_cases(CASES, stale)
 
 
-def _arm(disposition: str = "captured", selection: str = "not-selected") -> sp.ArmResult:
-    return sp.ArmResult(disposition=disposition, selection=selection, task_success=None)
+def _arm(
+    disposition: str = "captured", selection: str = "not-selected", *,
+    confirmed: bool = True, observed: frozenset[str] = frozenset(),
+) -> sp.ArmResult:
+    return sp.ArmResult(
+        disposition=disposition, selection=selection, task_success=None,
+        observed=observed, observation_confirmed=confirmed,
+    )
 
 
 def _report(*pairs: tuple[sp.ArmResult, sp.ArmResult]) -> sp.SelectionProbeReport:
@@ -910,6 +919,44 @@ def test_a_control_is_ok_only_when_detected_in_treatment_and_absent_in_baseline(
     assert not sp.probe_verdict(_report((detected, detected)), detection_control=True)[0]
 
 
+def test_a_control_baseline_that_was_never_observed_certifies_nothing() -> None:
+    """Absence must be SEEN: a baseline that never launched, or whose
+    transcript was never read, is missing evidence, not an empty observation.
+    Confirmed red when the `observation_confirmed` check is removed: the
+    unavailable baseline passes the control (cross-model review)."""
+    detected = _arm(selection="selected")
+    never = _arm("unavailable", "unknown", confirmed=False)
+    ok, why = sp.probe_verdict(_report((detected, never)), detection_control=True)
+    assert not ok and "never observed" in why
+
+
+def test_a_control_baseline_invoking_another_skill_fails_even_when_inconclusive() -> None:
+    """The named canary fails in the baseline by design, which makes the
+    attempt inconclusive - that must not hide an invocation it DID record.
+    Confirmed red when the `observed` check is removed: a baseline showing
+    `security-scan` passes (cross-model review)."""
+    detected = _arm(selection="selected")
+    leaky = _arm("inconclusive", "unknown", observed=frozenset({"security-scan"}))
+    ok, why = sp.probe_verdict(_report((detected, leaky)), detection_control=True)
+    assert not ok and "security-scan" in why
+
+
+def test_an_inconclusive_record_keeps_its_invocations_and_observation_state(tmp_path: Path) -> None:
+    """Confirmed red when `transcript_from_record` drops events for an
+    inconclusive attempt: the baseline's `security-scan` read disappears."""
+    experiment = _plan(tmp_path)
+    read = sp.transcript_from_record({"disposition": "captured", "observation": {
+        "transcript_files_found": 1, "prompt_delivered": True, "canary_satisfied": False,
+        "grading_eligible": False, "skill_invocations": ["security-scan"],
+    }}, experiment, "unused")
+    assert read.disposition == "inconclusive" and read.observation_confirmed
+    assert sp.observed_skills(read) == frozenset({"security-scan"})
+    missing = sp.transcript_from_record({"disposition": "captured", "observation": {
+        "transcript_files_found": 0, "grading_eligible": False, "skill_invocations": [],
+    }}, experiment, "unused")
+    assert not missing.observation_confirmed
+
+
 def _run_control(tmp_path: Path, baseline: dict[str, object]) -> tuple[bool, str]:
     """The control end to end on the fake docker: treatment has the skill and
     the named canary; the baseline script says what the fake agent does
@@ -941,7 +988,7 @@ def _run_control(tmp_path: Path, baseline: dict[str, object]) -> tuple[bool, str
 def test_the_control_end_to_end_detects_the_named_skill(tmp_path: Path) -> None:
     """With nothing installed the named canary cannot be satisfied, so the
     baseline reads unknown - the expected shape, not a failure."""
-    ok, why = _run_control(tmp_path, _script(fail_canary=True))
+    ok, why = _run_control(tmp_path, _script(plant_none=True))
     assert ok, why
 
 
@@ -1015,3 +1062,22 @@ def test_cli_detection_control_names_the_declared_skill_on_the_declared_case(
     assert call["detection_control"] is True
     assert call["runner"].skill_name == CONTROL["skill_name"]  # type: ignore[attr-defined]
     assert [c["id"] for c in call["cases"]["cases"]] == [INTENDED_USE]  # type: ignore[index]
+
+
+def test_cli_never_prints_a_detail_that_fails_the_leak_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A record's own reason can carry a private address. The report file
+    already refused it; the console must not print it either. Confirmed red
+    when the output goes to `print` instead of `demo.print_paste_back`: the
+    address reaches stdout (cross-model review). The refusal names the
+    finding on stderr, as `collection-run`'s paste-back already does."""
+    from skillc import cli
+
+    leaky = sp.ArmResult(disposition="unavailable", selection="unknown", task_success=None,
+                         detail="daemon unreachable at 10.23.45.67")
+    _cli_fakes(monkeypatch, tmp_path, _report((leaky, leaky)))
+    assert cli.main(["selection-probe", "--base", str(tmp_path)]) == 2
+    captured = capsys.readouterr()
+    assert "10.23.45.67" not in captured.out
+    assert "NOT printed" in captured.err

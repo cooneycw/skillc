@@ -149,6 +149,12 @@ class AttemptTranscript:
     candidate_files: tuple[tuple[str, bytes, bool], ...] = ()  # verify.grade_files' own (relpath, bytes, executable) convention
     codex_best_effort: bool = False  # transcript_adapter.py: Codex's own skill-invocation detection is best-effort, never a structural guarantee
     detail: str = ""
+    #: The transcript was found and read (exactly one file, no hook failure),
+    #: so `events` is an OBSERVATION - an empty tuple then means "looked and
+    #: saw none", not "had nothing to look at". Independent of `disposition`:
+    #: an attempt whose named canary failed is inconclusive, yet its
+    #: transcript was still read.
+    observation_confirmed: bool = False
 
     def __post_init__(self) -> None:
         if self.disposition not in records.DISPOSITIONS:
@@ -224,6 +230,7 @@ class ArmResult:
     observed: frozenset[str] = field(default_factory=frozenset)
     codex_best_effort: bool = False
     detail: str = ""
+    observation_confirmed: bool = False
 
 
 @dataclass(frozen=True)
@@ -447,6 +454,7 @@ def run_planned_selection_probe(
                 observed=observed_skills(transcript),
                 codex_best_effort=transcript.codex_best_effort,
                 detail="; ".join(part for part in (transcript.detail, grading_detail) if part),
+                observation_confirmed=transcript.observation_confirmed,
             )
         results.append(CaseResult(
             case_id=case_id, kind=str(case["kind"]), applicable_skills=applicable,
@@ -482,34 +490,36 @@ def transcript_from_record(
     observation = record.get("observation")
     obs = observation if isinstance(observation, dict) else {}
     heuristic = obs.get("skill_invocation_detection") == "heuristic"
+    # The invocations the transcript showed are kept whatever the canary
+    # said: a failed canary makes the attempt inconclusive (no selection, no
+    # grade), but an invocation it recorded is still evidence - a detection
+    # control's baseline must be able to see one (#26 review).
+    confirmed = bool(obs) and obs.get("status") != "unknown" and obs.get("transcript_files_found") == 1
+    invocations = obs.get("skill_invocations")
+    events: tuple[dict[str, object], ...] = tuple(
+        {"type": "skill_invocation", "skill": str(name)}
+        for name in (invocations if isinstance(invocations, list) else [])
+    )
+
+    def made(disposition: str, detail: str = "",
+             candidate_files: tuple[tuple[str, bytes, bool], ...] = ()) -> AttemptTranscript:
+        return AttemptTranscript(
+            disposition=disposition, events=events, candidate_files=candidate_files,
+            codex_best_effort=heuristic, detail=detail, observation_confirmed=confirmed,
+        )
+
     if disposition != "captured":
         reason = record.get("reason")
-        return AttemptTranscript(
-            disposition=disposition, codex_best_effort=heuristic,
-            detail=f"attempt disposition is {disposition!r}" + (f": {reason}" if reason else ""),
-        )
+        return made(disposition, f"attempt disposition is {disposition!r}" + (f": {reason}" if reason else ""))
     if not obs or obs.get("status") == "unknown":
-        return AttemptTranscript(
-            disposition="inconclusive", codex_best_effort=heuristic,
-            detail=f"the transcript observation is unknown: {obs.get('reason', 'no observation recorded')}",
-        )
+        return made("inconclusive", f"the transcript observation is unknown: {obs.get('reason', 'no observation recorded')}")
     if not obs.get("grading_eligible"):
-        return AttemptTranscript(
-            disposition="inconclusive", codex_best_effort=heuristic,
-            detail=(
-                f"prompt_delivered={obs.get('prompt_delivered')!r}, "
-                f"canary_satisfied={obs.get('canary_satisfied')!r} - neither selection nor "
-                "outcome is reported for an attempt the transcript did not confirm"
-            ),
-        )
-    invocations = obs.get("skill_invocations")
-    skills = [str(name) for name in invocations] if isinstance(invocations, list) else []
-    return AttemptTranscript(
-        disposition="captured",
-        events=tuple({"type": "skill_invocation", "skill": name} for name in skills),
-        candidate_files=tuple(agent_trial._frozen_candidate_files(experiment, attempt_id)),
-        codex_best_effort=heuristic,
-    )
+        return made("inconclusive", (
+            f"prompt_delivered={obs.get('prompt_delivered')!r}, "
+            f"canary_satisfied={obs.get('canary_satisfied')!r} - neither selection nor "
+            "outcome is reported for an attempt the transcript did not confirm"
+        ))
+    return made("captured", candidate_files=tuple(agent_trial._frozen_candidate_files(experiment, attempt_id)))
 
 
 def agent_trial_runner(
@@ -656,7 +666,10 @@ def probe_verdict(report: SelectionProbeReport, *, detection_control: bool) -> t
     prompt names it) reads `selected` AND the baseline arm (nothing
     installed) does not. The first shows the pipeline can see a real
     invocation; the second that it does not report one that could not have
-    happened."""
+    happened. "Does not" means the baseline's transcript WAS read and showed
+    no invocation of any skill - an attempt that never produced an
+    observation (a failed launch, a missing transcript) proves nothing
+    either way and fails the control."""
     if not report.cases:
         return False, "the report has no cases"
     if detection_control:
@@ -664,9 +677,14 @@ def probe_verdict(report: SelectionProbeReport, *, detection_control: bool) -> t
         if case.treatment.selection != "selected":
             return False, (f"control NOT detected: treatment reads {case.treatment.selection!r} "
                            f"({case.treatment.disposition}; {case.treatment.detail or 'no detail'})")
-        if case.baseline.selection == "selected":
-            return False, "control reported an invocation in the baseline arm, where nothing was installed"
-        return True, "control detected in treatment, absent in baseline"
+        if case.baseline.selection == "selected" or case.baseline.observed:
+            return False, (f"control reported an invocation in the baseline arm, where nothing was "
+                           f"installed: {sorted(case.baseline.observed) or case.baseline.selection}")
+        if not case.baseline.observation_confirmed:
+            return False, (f"control baseline was never observed ({case.baseline.disposition}; "
+                           f"{case.baseline.detail or 'no detail'}) - absence cannot be certified from "
+                           "missing evidence")
+        return True, "control detected in treatment; baseline observed with no invocation"
     missing = [
         f"{case.case_id}/{arm}={result.disposition}"
         for case in report.cases
