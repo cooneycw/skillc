@@ -424,3 +424,114 @@ def test_the_binary_name_scan_does_not_fire_on_a_client_keyword() -> None:
     case from a real one; documented here rather than silently accepted."""
     tree = ast.parse('at.run_one_attempt(client="codex")\n', filename="<planted>")
     assert _find_real_binary_names_in_argv_literals(tree) == []
+
+
+# ------------------------------------------- the live run's three defaults (#11)
+#
+# The first live `skillc collection-run` found three defaults that fake-docker
+# tests could not: codex refused the non-git `/work`, the agent container had
+# no network, and one `--timeout` bounded both a docker call and the agent. Each
+# test below FAILS on the #121 code these defaults replaced.
+
+
+def test_default_client_argv_skips_the_git_repo_check() -> None:
+    assert "--skip-git-repo-check" in cc.DEFAULT_CLIENT_ARGV
+
+
+def test_agent_backend_has_egress_and_the_grading_backend_does_not(base: Path, docker_state: Path) -> None:
+    agent, grading = cc.agent_backends(
+        image="fake-image:1", base=base, docker_bin=_docker_bin(docker_state), daemon_timeout=5,
+    )
+    assert agent.network == cc.AGENT_NETWORK != "none"
+    assert grading.network == "none"
+
+
+def _describe_text(backend: d.DockerBackend) -> tuple[str, str]:
+    description = backend.describe()
+    return "\n".join(description.isolation), "\n".join(description.unobserved)
+
+
+def test_describe_never_claims_blocked_egress_on_an_open_network(base: Path, docker_state: Path) -> None:
+    agent, grading = cc.agent_backends(
+        image="fake-image:1", base=base, docker_bin=_docker_bin(docker_state), daemon_timeout=5,
+    )
+    open_isolation, open_unobserved = _describe_text(agent)
+    assert "egress OPEN" in open_isolation
+    assert "egress actually blocked" not in open_unobserved
+    # The control: the contained backend still states its unverified claim.
+    closed_isolation, closed_unobserved = _describe_text(grading)
+    assert "egress OPEN" not in closed_isolation
+    assert "network=none" in closed_isolation
+    assert "egress actually blocked" in closed_unobserved
+
+
+def test_paste_back_states_the_agent_network() -> None:
+    record: dict[str, object] = {"disposition": "unavailable", "observation": None, "graded": None}
+    stated = cc.build_collection_paste_back(cc.CollectionAgentResult("s", "v1", "c", record, agent_network="bridge"))
+    unknown = cc.build_collection_paste_back(cc.CollectionAgentResult("s", "v1", "c", record))
+    assert "agent_network=bridge" in stated
+    assert "agent_network=None" in unknown
+
+
+def test_each_run_gets_its_own_root_and_drops_its_acquisition(base: Path) -> None:
+    first = cc.new_run_root(base, "subject-a")
+    second = cc.new_run_root(base, "subject-a")
+    assert first != second and first.parent == second.parent == base
+    for suffix in ("checkout", "staging", "store"):
+        (first / f"subject-a-{suffix}").mkdir()
+    cc.discard_acquisition(first, "subject-a")
+    assert not (first / "subject-a-checkout").exists()
+    assert not (first / "subject-a-staging").exists()
+    assert (first / "subject-a-store").is_dir()  # the evidence stays
+
+
+def test_cli_wires_the_agent_timeout_backends_and_run_root(
+    base: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`cmd_collection_run` end to end with the acquisition, planning and the
+    attempt itself replaced - the wiring is what is under test: the agent's
+    wall-clock limit is NOT `--timeout`, the agent backend has egress while
+    the grader does not, and a second run of the same subject on the same
+    base does not collide with the first."""
+    from skillc import cli
+
+    seen: list[dict[str, object]] = []
+
+    def fake_acquire(name: str, root: Path) -> object:
+        (root / f"{name}-checkout").mkdir()
+        return object()
+
+    def fake_run(**kwargs: object) -> cc.CollectionAgentResult:
+        seen.append(kwargs)
+        backend = kwargs["backend"]
+        assert isinstance(backend, d.DockerBackend)
+        return cc.CollectionAgentResult(
+            str(kwargs["subject_name"]), "v1", "codex", {"disposition": "unavailable"}, agent_network=backend.network,
+        )
+
+    monkeypatch.setattr(cc, "acquire_collection", fake_acquire)
+    monkeypatch.setattr(demo, "resolve_image_digest", lambda *a, **k: None)
+    monkeypatch.setattr(trial, "open_store", lambda path, forbidden: path)
+    monkeypatch.setattr(cc, "plan_collection_attempt", lambda *a, **k: (object(), "a-1"))
+    monkeypatch.setattr(cc, "run_collection_agent_attempt", fake_run)
+
+    argv = ["collection-run", "subject-a", "--base", str(base), "--timeout", "7"]
+    assert cli.main(argv) == 1  # not captured, not PASS
+    assert cli.main(argv) == 1  # the same subject again: no fixed-path collision
+
+    first, second = seen
+    assert first["timeout"] == cc.DEFAULT_AGENT_TIMEOUT != 7
+    assert list(first["base_argv"]) == list(cc.DEFAULT_CLIENT_ARGV)  # type: ignore[call-overload]
+    agent, grading = first["backend"], first["grading_backend"]
+    assert isinstance(agent, d.DockerBackend) and isinstance(grading, d.DockerBackend)
+    assert agent.network == cc.AGENT_NETWORK and grading.network == "none"
+    assert first["base"] != second["base"]
+    for run in (first, second):
+        run_root = run["base"]
+        assert isinstance(run_root, Path) and run_root.parent == base
+        assert not (run_root / "subject-a-checkout").exists()
+    assert "agent_network=bridge" in capsys.readouterr().out
+
+    seen.clear()
+    assert cli.main([*argv, "--agent-timeout", "42"]) == 1
+    assert seen[0]["timeout"] == 42

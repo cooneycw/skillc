@@ -64,6 +64,8 @@ Stdlib only (AGENTS.md), plus this repository's own modules.
 from __future__ import annotations
 
 import os
+import shutil
+import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -82,6 +84,62 @@ from .docker_backend import DockerBackend
 #: way for the same reason.
 _FIXTURE_SRC_DIRNAME = "src"
 
+#: The AGENT container's network. A hosted-model client must reach its
+#: provider, and `DockerBackend`'s own default (`"none"`) made every real
+#: attempt unable to: the first live `collection-run` delivered its prompt,
+#: then every request failed and codex exited 1 - `inconclusive`, never graded.
+#: Owner ruling, recorded on issue #11 (2026-09-27): "i'm fine for a container
+#: (controlled by what we place into it) to have network access. i'm not going
+#: to submit hostile repos". Only the agent container gets it - the GRADING
+#: container keeps `DockerBackend`'s `"none"` (`agent_backends` below).
+#: REVERSAL TRIGGER: revisit (a provider-only egress allowlist or proxy) the
+#: moment skillc is pointed at a subject, fixture or collection the operator
+#: did not choose and trust - the ruling's premise is no hostile inputs.
+AGENT_NETWORK = "bridge"
+
+#: The real client invocation when the caller supplies none. `--skip-git-repo-check`
+#: is required, not a convenience: the trial workspace `/work` is not a git
+#: repository, and codex-cli 0.157.1 refuses to start outside one ("Not inside
+#: a trusted directory and --skip-git-repo-check was not specified") - the
+#: first live run exited 1 in 0.4s on exactly that.
+DEFAULT_CLIENT_ARGV = ("codex", "exec", "--sandbox", "danger-full-access", "--skip-git-repo-check")
+
+#: The agent's own wall-clock limit, separate from the per-docker-call
+#: `daemon_timeout`: one `--timeout` used to feed both, so the runbook command
+#: (no `--timeout`) would have killed a real agent after 30 seconds.
+DEFAULT_AGENT_TIMEOUT = 900.0
+
+
+def agent_backends(
+    *, image: str, base: Path, docker_bin: Sequence[str], daemon_timeout: float,
+) -> tuple[DockerBackend, DockerBackend]:
+    """`(agent backend, grading backend)` for one collection run. The agent
+    backend runs on `AGENT_NETWORK` (see its comment for the ruling); the
+    grading backend is left on `DockerBackend`'s own default, deliberately
+    not passed a network, so the grader never gains egress by this ruling."""
+    agent = DockerBackend(
+        image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=daemon_timeout, network=AGENT_NETWORK,
+    )
+    grading = DockerBackend(image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=daemon_timeout)
+    return agent, grading
+
+
+def new_run_root(base: Path, subject_name: str) -> Path:
+    """A fresh, unique directory under `base` for ONE run's checkout, staging
+    and store. Fixed `<base>/<subject>-checkout` names made a second run of the
+    same subject on a host fail at `git clone` (the first run's checkout was
+    never removed), and two concurrent runs would share one directory - the
+    same defect class #118 fixed in `skillc demo`."""
+    base.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix=f"skillc-collection-run-{subject_name}-", dir=base))
+
+
+def discard_acquisition(run_root: Path, subject_name: str) -> None:
+    """Remove the run's checkout and staging copies - inputs re-derivable from
+    the subject's pinned revision. The store, the run's evidence, is kept."""
+    for suffix in ("checkout", "staging"):
+        shutil.rmtree(run_root / f"{subject_name}-{suffix}", ignore_errors=True)
+
 
 @dataclass(frozen=True)
 class CollectionAgentResult:
@@ -89,6 +147,10 @@ class CollectionAgentResult:
     revision: str
     client: str
     record: dict[str, object]
+    #: The agent container's network as actually configured, stated in the
+    #: paste-back so no record implies containment it did not have. `None`
+    #: when unknown (a result built outside `run_collection_agent_attempt`).
+    agent_network: str | None = None
 
 
 @dataclass(frozen=True)
@@ -255,7 +317,9 @@ def run_collection_agent_attempt(
         grader=grader, grading_backend=grading_backend,
         extra_home_files=extra_home_files,
     )
-    return CollectionAgentResult(subject_name, acquired.subject.revision, materialize.CLIENT, record)
+    return CollectionAgentResult(
+        subject_name, acquired.subject.revision, materialize.CLIENT, record, agent_network=backend.network,
+    )
 
 
 def build_collection_paste_back(result: CollectionAgentResult) -> str:
@@ -272,6 +336,7 @@ def build_collection_paste_back(result: CollectionAgentResult) -> str:
     lines = [
         "",
         f"collection agent run: {result.subject_name} revision={result.revision} client={result.client}",
+        f"  agent_network={result.agent_network}",
         f"  disposition={result.record.get('disposition')}",
         f"  prompt_delivered={obs.get('prompt_delivered')}",
         f"  canary_satisfied={obs.get('canary_satisfied')}",
