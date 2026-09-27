@@ -674,37 +674,104 @@ def cmd_demo(args: argparse.Namespace) -> int:
     real daemon - never on this command's own tests passing, never on CI.
 
     `--control` inverts the verdict: it exits 0 only when every SEEDED
-    failure was actually caught, never when the run itself looked clean."""
+    failure was actually caught, never when the run itself looked clean.
+
+    EXIT CODES, pinned to the runbook (issue #118): `0` success (or, under
+    `--control`, every seeded failure was caught); `1` NOT MET, or the run
+    could not even complete (a refused subject, a backend that never came
+    up, an interruption, or any other failure this command did not
+    anticipate); `2` ONLY a leak-check refusal of the paste-back block
+    itself - never any other meaning. Every branch below returns one of
+    exactly these three, and the top-level `except Exception` (plus the
+    separate `except KeyboardInterrupt`, below) is what makes that a
+    structural guarantee rather than a hope: NOTHING this command does not
+    explicitly handle can produce a fourth exit code, or a raw traceback, or
+    unscanned text on stdout/stderr (issue #118's own finding: an uncaught
+    `BackendUnavailable` used to print a traceback carrying the operator's
+    home directory and username - `demo.py`'s own entry points no longer let
+    that kind of failure escape uncaught, and this is the second,
+    independent layer for whatever they still miss).
+
+    `KeyboardInterrupt` NEEDS ITS OWN CLAUSE (found by cross-model review of
+    this exact fix): it is a `BaseException`, not an `Exception`, so the
+    guard above never sees it, and Ctrl-C is exactly what an operator
+    watching a slow real daemon actually presses - #118's leak would
+    otherwise come back through that one specific route, via Python's own
+    default traceback for an uncaught `KeyboardInterrupt`, whose frames name
+    the installed `skillc` paths (usually under the operator's home in a
+    `uv`/venv layout).
+
+    THE INTERRUPT SWEEP IS SCOPED TO THIS RUN'S OWN ATTEMPT IDS, NEVER
+    HOST-GLOBAL (issue #118 review, second pass): an earlier version called a
+    `reap_all_owned()` that removed every skillc-owned container on the
+    daemon regardless of which run started it - reproduced for real under a
+    genuine SIGINT, where it reaped a foreign container from another attempt
+    entirely. `recorded_attempt_ids` is built here, before either `run_demo`
+    or `run_control` is called, and handed to them so each records its own
+    attempt id the instant it exists (see `demo.run_demo`'s own docstring) -
+    so if this command has recorded nothing yet when the interrupt lands, it
+    sweeps nothing, rather than guessing at what else might be this run's."""
     from . import demo
 
     docker_bin = tuple(args.docker_bin.split()) if args.docker_bin else ("docker",)
     base = Path(args.base) if args.base else Path(tempfile.gettempdir())
+    recorded_attempt_ids: list[str] = []
 
-    if args.control:
-        ok = demo.run_control(image=args.image or demo.DEFAULT_IMAGE, docker_bin=docker_bin, base=base, timeout=args.timeout)
-        if ok:
-            print("skillc: --control - every seeded failure was caught")
-            return 0
-        print("skillc: --control - at least one seeded failure was NOT caught", file=sys.stderr)
-        return 1
-
-    subject_name = None
-    if args.subject is not None:
-        subject_name = args.subject or demo.DEFAULT_SUBJECT
     try:
+        if args.control:
+            ok = demo.run_control(
+                image=args.image or demo.DEFAULT_IMAGE, docker_bin=docker_bin, base=base, timeout=args.timeout,
+                recorded_attempt_ids=recorded_attempt_ids,
+            )
+            if ok:
+                print("skillc: --control - every seeded failure was caught")
+                return 0
+            print("skillc: --control - at least one seeded failure was NOT caught", file=sys.stderr)
+            return 1
+
+        subject_name = None
+        if args.subject is not None:
+            subject_name = args.subject or demo.DEFAULT_SUBJECT
         result = demo.run_demo(
             image=args.image or demo.DEFAULT_IMAGE, docker_bin=docker_bin, base=base, timeout=args.timeout,
-            subject_name=subject_name,
+            subject_name=subject_name, recorded_attempt_ids=recorded_attempt_ids,
         )
-    except demo.SubjectRefused as exc:
-        print(f"skillc: {exc}", file=sys.stderr)
-        return 2
-    try:
         demo.print_paste_back(result.paste_back)
-    except demo.PasteBackRefused as exc:
-        print(f"skillc: {exc}", file=sys.stderr)
+        return 0 if result.ok else 1
+    except demo.PasteBackRefused:
+        # Never print `exc` itself here: its own message is built from
+        # `leak.scan_text`'s findings, which NAME the leaked value found
+        # (issue #118 review) - printing it would be the exact leak this
+        # whole mechanism exists to prevent, one level up.
+        print(
+            "skillc: the paste-back block failed its own leak-check and was refused - nothing was printed",
+            file=sys.stderr,
+        )
         return 2
-    return 0 if result.ok else 1
+    except KeyboardInterrupt:
+        # A fixed line, no exception text at all - never anything to scrub,
+        # by construction, since KeyboardInterrupt carries none.
+        print(
+            "skillc: demo interrupted - containers labelled for this run may remain; "
+            "run the reap sweep or re-run to clean up",
+            file=sys.stderr,
+        )
+        if not recorded_attempt_ids:
+            print(
+                "skillc: no attempt ids were recorded before the interrupt - nothing to sweep",
+                file=sys.stderr,
+            )
+            return 1
+        try:
+            report = demo.reap.reap(docker_bin, recorded_attempt_ids, None, timeout=10)
+            outcomes = [(o.attempt_id, o.outcome) for o in report.outcomes]
+            print(f"skillc: best-effort cleanup - outcomes={outcomes}, daemon_reachable={report.daemon_reachable}", file=sys.stderr)
+        except Exception as exc:  # noqa: BLE001 - best-effort: a cleanup failure must not itself crash this handler
+            print(f"skillc: best-effort cleanup also failed - {demo.describe_error_safely(exc, base=base)}", file=sys.stderr)
+        return 1
+    except Exception as exc:  # noqa: BLE001 - the top-level guard (issue #118), deliberately broad: see the docstring above
+        print(f"skillc: demo failed unexpectedly - {demo.describe_error_safely(exc, base=base)}", file=sys.stderr)
+        return 1
 
 
 def cmd_rules(args: argparse.Namespace) -> int:

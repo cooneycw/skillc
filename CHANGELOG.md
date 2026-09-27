@@ -14,6 +14,111 @@ release; `0.2.0` is planned when [#10](https://github.com/cooneycw/skillc/issues
 [#11](https://github.com/cooneycw/skillc/issues/11) (a second independent
 collection) closes.
 
+### Fixed
+
+- **`skillc demo` on a real daemon: a traceback leaked host paths, a fixed
+  scratch path collided across runs, the exit-code contract was broken, and
+  two acceptance items were vacuously MET** (Refs #118, Refs #81, Refs #10,
+  Refs #101): found on the operator's first live run of `skillc demo`
+  against a real Docker daemon - the image build failed, and that alone
+  exposed four independent defects.
+  1. `demo --control` and `demo --subject <name>` died with an uncaught
+     `BackendUnavailable` from `DockerBackend.prepare()` in `run_control`
+     and `run_subject_demo`, and the raw traceback printed the operator's
+     own home directory and username - "the paste-back is leak-checked
+     before printing" held only on the happy path. Both call sites now
+     catch the failure and report it through the normal, leak-checked
+     result (a NOT-EXERCISED `SubjectResult` for the subject leg; the
+     seeded orphan read as NOT caught for `--control`, never a raised
+     exception). `skillc/cli.py`'s `cmd_demo` also gained a top-level
+     `except Exception` guard - a second, independent layer - that scrubs
+     ANY unanticipated exception through `demo.describe_error_safely`
+     (replaces the message with the exception's type name alone if the
+     message itself fails its own leak-check) before printing one line to
+     stderr, never a traceback. Also found in review: `PasteBackRefused`'s
+     own message is built from `leak.scan_text`'s findings, which NAME the
+     leaked value found - `cmd_demo` printing `str(exc)` for that specific
+     exception would have been the exact leak this whole mechanism exists
+     to prevent, one level up; it now prints a fixed, generic message
+     instead.
+  2. `--subject` cloned into a FIXED `base / "subject-checkout"` path - a
+     second run against the same `base` (the operator's own sequence: the
+     first crashed before cleanup) could be handed a directory an earlier,
+     hard-crashed process had already touched and never got to clean up.
+     `run_subject_demo` now uses a fresh `tempfile.mkdtemp` per call for
+     both the checkout and the staging directory, removed in `finally` -
+     never a name any other call, past or concurrent, could already hold.
+  3. The exit-code contract (the runbook's own `0`/`1`/`2` meanings) was
+     broken: a refused subject exited `2`, which the runbook reserves
+     exclusively for a leak-check refusal. `SubjectRefused` (along with
+     everything else the top-level guard now catches) exits `1` - "could
+     not run" - never `2`.
+  4. With no image reachable at all, `demo` correctly reported the lifecycle
+     as unavailable and grading as inconclusive, but still reported `[MET]`
+     for "cleanup sweep confirms no owned container left running" and
+     "declared host paths unchanged" - true only because nothing ever
+     started, not a real claim about a demo that ran. `AcceptanceItem`
+     gains an `exercised` flag; both main-demo items read `NOT EXERCISED`
+     (never `MET`) whenever the lifecycle leg's own disposition is
+     `"unavailable"`, and all five of a not-exercised subject leg's items
+     read the same way, with the failure reason as evidence.
+
+  Every item has a mutation-confirmed test reproducing the operator's own
+  symptom before the fix: a raw exception (with a planted home path)
+  propagating uncaught through `cmd_demo`; the seeded orphan step raising
+  instead of reading as not-caught; a second `run_subject_demo` call
+  failing when handed a directory a simulated prior crash left non-empty
+  at the old fixed path; `SubjectRefused` exiting `2`; and both "vacuous
+  MET" items reading `MET` against a trivially-clean (nothing happened)
+  reap report and host diff.
+
+  Independent review of the fix itself found three more real gaps, folded
+  into the same PR before merge:
+  - `KeyboardInterrupt` is a `BaseException`, not an `Exception` - the
+    top-level guard never saw it, and Ctrl-C on a slow real daemon is
+    exactly what an operator does, so #118's leak came back through that
+    one route (Python's own default traceback, naming the installed
+    `skillc` paths). `cmd_demo` gains its own `except KeyboardInterrupt`:
+    a fixed line, no exception text at all, then a best-effort cleanup
+    sweep.
+  - The acquisition-failure catch around `acquire_subject_checkout(...)`
+    was itself untested - every existing test either supplied an explicit
+    `checkout=` (bypassing acquisition) or monkeypatched the function away
+    entirely, so deleting the catch left all 56 tests green. A new test
+    makes the underlying `git clone` SUBPROCESS call fail for real,
+    exercising the function's own exception-wrapping.
+  - `describe_error_safely` only scrubbed what `leak_check_text` recognises,
+    and that check's home-path pattern only matches `/home/<user>/...` - a
+    checkout under `/opt`, `/srv`, or any non-`/home` layout sailed through
+    completely unscrubbed (reproduced live: an unreadable `subject.json`
+    outside `/home` printed its own absolute path, twice, unscrubbed).
+    `demo.redact_known_host_paths` replaces every occurrence of a host path
+    this process already knows (`REPO_ROOT`, `Path.home()`,
+    `tempfile.gettempdir()`, the run's own `base`) with a generic
+    placeholder, longest match first, BEFORE the leak-check ever runs - in
+    both `describe_error_safely` and the two places `run_subject_demo`
+    builds a `not_exercised_reason` that flows into the paste-back. The
+    leak-check remains the second, independent layer for anything this
+    substitution does not name; `leak.py`'s own pattern was deliberately
+    left unwidened, since a bare "any absolute path" rule would
+    false-positive on legitimate container paths like `/work` and
+    `/home/candidate`.
+
+  A second review pass, against a real SIGINT this time, found the interrupt
+  sweep above still wrong: its first cut used `reap.reap_all_owned` - every
+  skillc-owned container on the daemon, regardless of which run started it -
+  and it reaped a container from an unrelated, concurrent attempt.
+  `reap_all_owned` is removed (nothing else called it); `cmd_demo` now builds
+  a `recorded_attempt_ids` list before calling `run_demo`/`run_control`, and
+  each records its own attempt id the instant it exists - before the backend
+  call that could hang - so the interrupt handler can scope the sweep to
+  `reap.reap(docker_bin, recorded_attempt_ids, ...)`, the existing,
+  already attempt-scoped function, and sweep nothing at all if nothing was
+  recorded yet. Confirmed red against the removed function: two owned
+  containers, one carrying a recorded attempt id and one foreign; after the
+  interrupt the foreign one survives and only the recorded one is reaped,
+  which fails on the host-global sweep (both are gone there).
+
 ### Added
 
 - **`tests/conftest.py`: no test can reach a real credential by default**
