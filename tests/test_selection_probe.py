@@ -1102,3 +1102,11 @@ def test_a_baseline_transcript_that_is_not_this_attempts_is_not_an_observation(t
             "grading_eligible": False, "skill_invocations": [],
         }}, experiment, "unused")
         assert transcript.observation_confirmed is expected
+
+
+def test_a_control_naming_a_skill_its_case_does_not_allow_is_refused() -> None:
+    with pytest.raises(sp.SelectionProbeRefused, match="not applicable"):
+        sp.detection_control_cases(CASES, {**CONTROL, "skill_name": "security-scan"})
+    missing = {**CONTROL, "base_case": {"id": "missing-case", "revision": "c1"}}
+    with pytest.raises(sp.SelectionProbeRefused, match="revision"):
+        sp.detection_control_cases(CASES, missing)
