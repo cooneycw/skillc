@@ -20,7 +20,27 @@
      "graded.status=PASS",
      "EXIT=0"
     ]
-   }
+   },
+   "selected_skills": [
+    "best-practices",
+    "boot",
+    "browser-tiered",
+    "cicd-verification",
+    "claude-md-config",
+    "code-quality",
+    "context-efficiency",
+    "documentation",
+    "evaluate",
+    "hooks-automation",
+    "idd-workflow",
+    "infrastructure-hardening",
+    "mcp-optimization",
+    "project-deploy",
+    "python-packaging",
+    "secrets",
+    "session-management",
+    "spec-driven-dev"
+   ]
   },
   {
    "subject": "mattpocock-skills-claude-code",
@@ -38,15 +58,21 @@
      "graded.status=PASS",
      "EXIT=0"
     ]
-   }
+   },
+   "selected_skills": [
+    "diagnosing-bugs",
+    "tdd"
+   ]
   }
  ],
  "control": {
   "command": "SKILLC_ALLOW_REAL_AGENT=1 skillc collection-run mattpocock-skills-claude-code --credential /nonexistent/skillc-control/.credentials.json",
   "observed": [
    "disposition=unavailable",
+   "discovery=UNMEASURED (no transcript observation)",
    "EXIT=1"
-  ]
+  ],
+  "subject": "mattpocock-skills-claude-code"
  },
  "host_login_after_trial": {
   "command": "claude -p \"Reply with exactly the single word OK and nothing else.\"",
@@ -54,5 +80,6 @@
    "OK",
    "EXIT=0"
   ]
- }
+ },
+ "_selected_skills_comment": "selected_skills is the inventory materialize.inventory resolved at the pinned revision (`select: \"all\"` for cpp-claude-code: 18 directories under .claude/skills at 85e9b03a). tests/test_claude_code_agent_arm.py requires each run's discovery map to have exactly these keys, every one listed."
 }

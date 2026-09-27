@@ -188,11 +188,13 @@ def claude_code_skill_listing(raw_jsonl: str) -> tuple[str, ...] | None:
     Code has to a discovery listing (it has no model-free listing command).
 
     `None` - NOT an empty tuple - when the transcript holds no readable
-    `skill_listing` attachment at all: a client version that stopped emitting
-    it, or a transcript cut short, must read as "not observable", never as
-    "the client listed nothing" (which would turn every installed skill into
-    a false not-listed). An attachment whose `names` is present but empty is a
-    real observation and returns `()`."""
+    INITIAL `skill_listing` attachment (`isInitial: true`): a client version
+    that stopped emitting it, a transcript cut short, or one carrying only
+    later deltas must read as "not observable", never as "the client listed
+    nothing". A delta says what was ADDED, not what was never listed, so it
+    cannot on its own support a `not-listed` (counter-model review, #124).
+    An initial attachment whose `names` is present but empty is a real
+    observation and returns `()`."""
     names: list[str] = []
     seen_listing = False
     for line in raw_jsonl.splitlines():
@@ -211,7 +213,8 @@ def claude_code_skill_listing(raw_jsonl: str) -> tuple[str, ...] | None:
         listed = attachment.get("names")
         if not isinstance(listed, list):
             continue
-        seen_listing = True
+        if attachment.get("isInitial") is True:
+            seen_listing = True
         for name in listed:
             if isinstance(name, str) and name not in names:
                 names.append(name)

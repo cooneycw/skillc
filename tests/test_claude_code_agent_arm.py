@@ -8,6 +8,7 @@ call: a plain JSON structure and cross-reference check.
 
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 
@@ -75,33 +76,101 @@ def test_every_cited_line_is_in_its_own_subject_s_block() -> None:
         assert _uncited(evidence, f"collection agent run: {subject} ", cited) == [], subject
 
 
+_SOURCE_SUFFIX = " (source=transcript skill_listing)"
+
+
+def _discovery_problems(selected: list[str], discovery_line: str) -> list[str]:
+    """Every way `discovery_line` fails to show each of `selected` listed from
+    the transcript. The map is PARSED and compared as a set - an empty map, or
+    one missing a skill, is a problem, never a vacuous pass (counter-model
+    review, #124: a substring check let `discovery={}` through for a subject
+    selecting "all")."""
+    if not selected:
+        return ["no selected skills to check - an empty population proves nothing"]
+    if not discovery_line.startswith("discovery=") or not discovery_line.endswith(_SOURCE_SUFFIX):
+        return [f"not a transcript-sourced discovery line: {discovery_line!r}"]
+    try:
+        observed = ast.literal_eval(discovery_line[len("discovery="):-len(_SOURCE_SUFFIX)])
+    except (ValueError, SyntaxError):
+        return [f"discovery map does not parse: {discovery_line!r}"]
+    if not isinstance(observed, dict):
+        return [f"discovery is not a map: {observed!r}"]
+    problems = []
+    if set(observed) != set(selected):
+        problems.append(f"keys {sorted(observed)} != selected {sorted(selected)}")
+    problems += [f"{name}={value}" for name, value in sorted(observed.items()) if value != "listed"]
+    return problems
+
+
 def test_each_run_passed_and_listed_every_selected_skill_from_the_transcript() -> None:
     """The acceptance the manifest stands for, re-read from the cited lines:
-    captured, PASS, EXIT=0, and a transcript-sourced discovery line naming
-    every selected skill as `listed` - never UNMEASURED or not-listed."""
+    captured, PASS, EXIT=0, and a transcript-sourced discovery map whose keys
+    are exactly the run's selected inventory, every one `listed`."""
     for subject, run in _runs().items():
         cited = run["observed"]["collection_run"]  # type: ignore[index]
         assert {"disposition=captured", "graded.status=PASS", "EXIT=0"} <= set(cited), subject
         [discovery] = [line for line in cited if line.startswith("discovery=")]
-        assert discovery.endswith("(source=transcript skill_listing)"), subject
-        assert "not-listed" not in discovery and "UNMEASURED" not in discovery, subject
+        selected = run["selected_skills"]
+        assert isinstance(selected, list)
         declared = json.loads((ROOT / str(run["subject_declaration"])).read_text(encoding="utf-8"))
         if isinstance(declared["select"], list):
-            for name in declared["select"]:
-                assert f"'{name}': 'listed'" in discovery, (subject, name)
+            assert sorted(declared["select"]) == sorted(selected), subject
+        assert _discovery_problems(selected, discovery) == [], subject
+
+
+def test_the_discovery_check_refuses_an_empty_or_partial_map() -> None:
+    """Negative control for the check above: the codex-review red cases."""
+    selected = ["diagnosing-bugs", "tdd"]
+    assert _discovery_problems(selected, "discovery={}" + _SOURCE_SUFFIX) != []
+    assert _discovery_problems(selected, "discovery={'tdd': 'listed'}" + _SOURCE_SUFFIX) != []
+    assert _discovery_problems(
+        selected, "discovery={'diagnosing-bugs': 'listed', 'tdd': 'not-listed'}" + _SOURCE_SUFFIX,
+    ) == ["tdd=not-listed"]
+    assert _discovery_problems([], "discovery={}" + _SOURCE_SUFFIX) != []
+    assert _discovery_problems(selected, "discovery=UNMEASURED (no listing)") != []
+
+
+def _control_problems(evidence: str, subject: str, cited: list[str]) -> list[str]:
+    """The control's OWN subject block must be the unavailable one, and must
+    say so and exit non-zero independently of what the manifest cites
+    (counter-model review, #124: the check used to accept empty citations and
+    an unavailable block ending `EXIT=0`, from any subject)."""
+    if not cited:
+        return ["the control cites nothing"]
+    opener = f"collection agent run: {subject} "
+    blocks = [
+        _block(evidence[i:], opener) for i in range(len(evidence)) if evidence.startswith(opener, i)
+    ]
+    unavailable = [b for b in blocks if "disposition=unavailable" in b]
+    if len(unavailable) != 1:
+        return [f"expected exactly one unavailable block for {subject}, found {len(unavailable)}"]
+    [block] = unavailable
+    problems = [line for line in cited if line not in block]
+    exits = [line for line in block if line.startswith("EXIT=")]
+    if exits != ["EXIT=1"]:
+        problems.append(f"control exit is {exits}, not EXIT=1")
+    return problems
 
 
 def test_the_control_is_unavailable_and_exits_nonzero() -> None:
-    evidence = EVIDENCE.read_text(encoding="utf-8")
     control = _manifest()["control"]
     assert isinstance(control, dict)
-    blocks = [
-        _block(evidence[i:], "collection agent run: ")
-        for i in range(len(evidence)) if evidence.startswith("collection agent run: ", i)
-    ]
-    unavailable = [b for b in blocks if "disposition=unavailable" in b]
-    assert len(unavailable) == 1
-    assert set(control["observed"]) <= set(unavailable[0])
+    evidence = EVIDENCE.read_text(encoding="utf-8")
+    assert _control_problems(evidence, str(control["subject"]), list(control["observed"])) == []
+
+
+def test_the_control_check_refuses_a_zero_exit_an_empty_citation_and_another_subject() -> None:
+    evidence = EVIDENCE.read_text(encoding="utf-8")
+    subject = "mattpocock-skills-claude-code"
+    good = ["disposition=unavailable", "EXIT=1"]
+    assert _control_problems(evidence, subject, []) != []
+    assert _control_problems(evidence, "cpp-claude-code", good) != []  # no unavailable block of its own
+    zero_exit = evidence.replace(
+        "grading_blocked_reason=attempt disposition is 'unavailable', not captured\nEXIT=1",
+        "grading_blocked_reason=attempt disposition is 'unavailable', not captured\nEXIT=0",
+    )
+    assert zero_exit != evidence
+    assert _control_problems(zero_exit, subject, ["disposition=unavailable"]) != []
 
 
 def test_the_citation_check_refuses_a_line_borrowed_from_the_other_collection() -> None:

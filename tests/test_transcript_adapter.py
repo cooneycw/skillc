@@ -303,3 +303,12 @@ def test_claude_skill_listing_does_not_disturb_the_event_stream() -> None:
         json.dumps({"type": "user", "message": {"role": "user", "content": "the prompt"}}),
     ])
     assert ta.parse_claude_code_transcript(raw) == [{"role": "user", "content": "the prompt"}]
+
+
+def test_claude_skill_listing_delta_only_is_none_not_a_complete_listing() -> None:
+    """Counter-model review (#124): a delta names additions, not the full set.
+    Without a readable initial listing, an omission cannot be inferred."""
+    assert ta.claude_code_skill_listing(_listing_line(["late-skill"], initial=False)) is None
+    # The control: the same delta after an initial listing is merged in.
+    raw = "\n".join([_listing_line(["tdd"]), _listing_line(["late-skill"], initial=False)])
+    assert ta.claude_code_skill_listing(raw) == ("tdd", "late-skill")
