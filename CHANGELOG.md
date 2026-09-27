@@ -16,6 +16,16 @@ collection) closes.
 
 ### Fixed
 
+- **`skillc collection-run` printed `refresh_observed_in_container=None` on
+  every run, whatever the record held** (Refs #124). The paste-back read the
+  key `refresh_observed_in_container`; the record stores
+  `credential_refresh_observed_in_container`
+  (`credential.CredentialUsage.to_record_fields`). The paste-back test wrote
+  the same wrong key by hand, so both agreed. It now builds the value with
+  the real producer and was red on the old key. #11's Codex evidence shows
+  this blind `None`. The first #124 Claude runs did too, and were repeated
+  after the fix; both read `False`.
+
 - **`skillc collection-run` could not complete a real agent attempt: no
   network, a refused workspace, a 30-second agent limit, and colliding
   scratch paths** (Refs #11): all found on the first live runs, none of

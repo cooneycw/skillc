@@ -1,0 +1,58 @@
+{
+ "manifest_schema": 1,
+ "experiment": "claude-code-agent-arm",
+ "_comment": "Executed (#124). One real Claude Code 2.1.283 agent attempt per Claude subject on evals/level1/slug-small-fix, through agent_trial.run_one_attempt in skill-free canary mode, graded by the fixture's own grader in a separate network=none container. Every observed line is cited verbatim from evidence/README.md, and tests/test_claude_code_agent_arm.py fails if one is not in that subject's own block.",
+ "funding_basis": "ADR 0005 rule 6, \"Normal Claude and codex\": the operator's normal Claude subscription login, not metered API spend, not gated by the #12 judge-call ceiling.",
+ "runs": [
+  {
+   "subject": "cpp-claude-code",
+   "subject_declaration": "evals/subjects/cpp-claude-code/subject.json",
+   "agent_command": "SKILLC_ALLOW_REAL_AGENT=1 skillc collection-run cpp-claude-code",
+   "observed": {
+    "collection_run": [
+     "collection agent run: cpp-claude-code revision=85e9b03ad2af1c41020ff6d92d36fa257bdacd2b client=claude",
+     "agent_network=bridge",
+     "disposition=captured",
+     "prompt_delivered=True",
+     "canary_satisfied=True",
+     "refresh_observed_in_container=False",
+     "discovery={'best-practices': 'listed', 'boot': 'listed', 'browser-tiered': 'listed', 'cicd-verification': 'listed', 'claude-md-config': 'listed', 'code-quality': 'listed', 'context-efficiency': 'listed', 'documentation': 'listed', 'evaluate': 'listed', 'hooks-automation': 'listed', 'idd-workflow': 'listed', 'infrastructure-hardening': 'listed', 'mcp-optimization': 'listed', 'project-deploy': 'listed', 'python-packaging': 'listed', 'secrets': 'listed', 'session-management': 'listed', 'spec-driven-dev': 'listed'} (source=transcript skill_listing)",
+     "graded.status=PASS",
+     "EXIT=0"
+    ]
+   }
+  },
+  {
+   "subject": "mattpocock-skills-claude-code",
+   "subject_declaration": "evals/subjects/mattpocock-skills-claude-code/subject.json",
+   "agent_command": "SKILLC_ALLOW_REAL_AGENT=1 skillc collection-run mattpocock-skills-claude-code",
+   "observed": {
+    "collection_run": [
+     "collection agent run: mattpocock-skills-claude-code revision=c55ee46073ed923f86ce59a5eb3b6d895095d1b7 client=claude",
+     "agent_network=bridge",
+     "disposition=captured",
+     "prompt_delivered=True",
+     "canary_satisfied=True",
+     "refresh_observed_in_container=False",
+     "discovery={'diagnosing-bugs': 'listed', 'tdd': 'listed'} (source=transcript skill_listing)",
+     "graded.status=PASS",
+     "EXIT=0"
+    ]
+   }
+  }
+ ],
+ "control": {
+  "command": "SKILLC_ALLOW_REAL_AGENT=1 skillc collection-run mattpocock-skills-claude-code --credential /nonexistent/skillc-control/.credentials.json",
+  "observed": [
+   "disposition=unavailable",
+   "EXIT=1"
+  ]
+ },
+ "host_login_after_trial": {
+  "command": "claude -p \"Reply with exactly the single word OK and nothing else.\"",
+  "observed": [
+   "OK",
+   "EXIT=0"
+  ]
+ }
+}
