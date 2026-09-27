@@ -1,0 +1,20 @@
+{
+  "branch": "issue-122-skillc-demo-control-real-daemon-seeds-for-timeout",
+  "counts": {
+    "accepted": 4,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "e99d8a9f308b2da9ed965f014bb33cea426439a9",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "122",
+  "passes": 2,
+  "recorded_at": "2026-09-27T13:30:27Z",
+  "red_cases": {
+    "already_covered": 9,
+    "proposed": 11
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "schema": 1,
+  "status": "ran"
+}

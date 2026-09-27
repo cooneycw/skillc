@@ -16,6 +16,7 @@ import argparse
 import dataclasses
 import json
 import os
+import signal
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -719,12 +720,21 @@ def cmd_demo(args: argparse.Namespace) -> int:
     recorded_attempt_ids: list[str] = []
 
     try:
+        if args.cancel_target is not None:
+            # Hidden (issue #122): the child `--control`'s cancellation seed
+            # interrupts. Inside this `try` on purpose, so a SIGINT reaches
+            # the real handler below, not a copy of it.
+            return demo.run_cancel_target(
+                image=args.image or demo.DEFAULT_IMAGE, docker_bin=docker_bin, base=base, timeout=args.timeout,
+                sleep=args.cancel_target, recorded_attempt_ids=recorded_attempt_ids,
+            )
         if args.control:
-            ok = demo.run_control(
+            control = demo.run_control(
                 image=args.image or demo.DEFAULT_IMAGE, docker_bin=docker_bin, base=base, timeout=args.timeout,
                 recorded_attempt_ids=recorded_attempt_ids,
             )
-            if ok:
+            demo.print_paste_back(control.paste_back)
+            if control.ok:
                 print("skillc: --control - every seeded failure was caught")
                 return 0
             print("skillc: --control - at least one seeded failure was NOT caught", file=sys.stderr)
@@ -752,23 +762,32 @@ def cmd_demo(args: argparse.Namespace) -> int:
     except KeyboardInterrupt:
         # A fixed line, no exception text at all - never anything to scrub,
         # by construction, since KeyboardInterrupt carries none.
-        print(
-            "skillc: demo interrupted - containers labelled for this run may remain; "
-            "run the reap sweep or re-run to clean up",
-            file=sys.stderr,
-        )
+        print(demo.INTERRUPT_LINE, file=sys.stderr, flush=True)
         if not recorded_attempt_ids:
             print(
                 "skillc: no attempt ids were recorded before the interrupt - nothing to sweep",
                 file=sys.stderr,
             )
             return 1
+        # A SECOND Ctrl-C during the sweep would raise KeyboardInterrupt
+        # here, which `except Exception` does not catch - Python's own
+        # traceback, the #118 host-path leak class, would print (issue #122,
+        # from the nit store). SIGINT is ignored for the sweep's own bounded
+        # duration and restored afterwards. `signal.signal` works only on the
+        # main thread; elsewhere the sweep runs unshielded rather than not at all.
+        try:
+            previous_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
+        except ValueError:
+            previous_handler = None
         try:
             report = demo.reap.reap(docker_bin, recorded_attempt_ids, None, timeout=10)
             outcomes = [(o.attempt_id, o.outcome) for o in report.outcomes]
             print(f"skillc: best-effort cleanup - outcomes={outcomes}, daemon_reachable={report.daemon_reachable}", file=sys.stderr)
         except Exception as exc:  # noqa: BLE001 - best-effort: a cleanup failure must not itself crash this handler
             print(f"skillc: best-effort cleanup also failed - {demo.describe_error_safely(exc, base=base)}", file=sys.stderr)
+        finally:
+            if previous_handler is not None:
+                signal.signal(signal.SIGINT, previous_handler)
         return 1
     except Exception as exc:  # noqa: BLE001 - the top-level guard (issue #118), deliberately broad: see the docstring above
         print(f"skillc: demo failed unexpectedly - {demo.describe_error_safely(exc, base=base)}", file=sys.stderr)
@@ -1244,6 +1263,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--control", action="store_true",
         help="run the seeded negative controls instead - exits non-zero unless every one was caught",
     )
+    # Issue #122: the child process `--control`'s cancellation seed runs and
+    # interrupts. Not an operator-facing mode, so it is kept out of --help.
+    p_demo.add_argument("--cancel-target", type=float, default=None, metavar="SECONDS", help=argparse.SUPPRESS)
     p_demo.set_defaults(func=cmd_demo)
 
     p_collection_run = sub.add_parser(

@@ -580,7 +580,7 @@ def _probe_surface(grader: GraderDef, loaded: dict[str, bytes],
 
 def _probe_via_backend(
     grader: GraderDef, loaded: dict[str, bytes], files: list[tuple[str, bytes, bool]],
-    work: Path, backend: ExecutionBackend,
+    work: Path, backend: ExecutionBackend, recorded_attempt_ids: list[str] | None = None,
 ) -> tuple[dict[str, object], dict[str, object]]:
     """Stage 1, through an `ExecutionBackend` instead of a bare host subprocess
     (#10 PR2, interfaces.md step 8: "a SEPARATE backend instance, through this
@@ -628,8 +628,11 @@ def _probe_via_backend(
     }
     empty_envelope = {"observations": "", "timed_out": False}
 
+    probe_attempt_id = f"probe-{secrets.token_hex(8)}"
+    if recorded_attempt_ids is not None:
+        recorded_attempt_ids.append(probe_attempt_id)  # before prepare(), so a caller's sweep can name it
     try:
-        handle = backend.prepare(f"probe-{secrets.token_hex(8)}")
+        handle = backend.prepare(probe_attempt_id)
     except BackendUnavailable as exc:
         return empty_envelope, {
             "backend": backend_identity, "confirmed": False, "timed_out": False,
@@ -801,7 +804,8 @@ def _status(criteria: list[dict[str, object]]) -> str:
 
 def grade_files(grader: GraderDef, files: list[tuple[str, bytes, bool]], base: Path,
                 forbidden: list[Path] | None = None, loaded: dict[str, bytes] | None = None,
-                backend: ExecutionBackend | None = None) -> Graded:
+                backend: ExecutionBackend | None = None,
+                recorded_attempt_ids: list[str] | None = None) -> Graded:
     """Grade candidate files through the three stages, in a disposable owned root.
 
     `files` are (relative path, bytes, executable). The root is removed afterwards,
@@ -812,6 +816,11 @@ def grade_files(grader: GraderDef, files: list[tuple[str, bytes, bool]], base: P
     (#10 PR2), stage 1 runs inside a fresh, separate instance of it instead -
     see the module docstring for what that does and does not establish. Stage
     2 (the judge) never changes: it is trusted code, not candidate code.
+
+    `recorded_attempt_ids`, given with a `backend`, gets the probe's own
+    attempt id appended before `prepare()` (issue #122): a caller's
+    label-scoped reap sweep can then cover the probe's container too, not
+    only the attempts it created itself. Omitted, nothing changes.
     """
     if _quarantine is not None:
         raise Refused(f"this verifier is quarantined: {_quarantine}; an operator must check the host "
@@ -837,7 +846,9 @@ def grade_files(grader: GraderDef, files: list[tuple[str, bytes, bool]], base: P
             # never staged on this host first - install()'s own contract
             # ("the skill starts inside the isolation - never staged on the
             # host and merely copied in afterward") applies here too.
-            envelope, containment = _probe_via_backend(grader, loaded, files, probe_dir, backend)
+            envelope, containment = _probe_via_backend(
+                grader, loaded, files, probe_dir, backend, recorded_attempt_ids,
+            )
         if not containment["confirmed"]:
             category, detail = "containment", f"the probe was not contained: {containment['reason']}"
             criteria = _unknown(grader, detail)

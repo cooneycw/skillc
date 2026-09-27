@@ -54,18 +54,24 @@ convention.
 from __future__ import annotations
 
 import os
+import re
 import secrets
 import shutil
+import signal
 import stat
 import subprocess
+import sys
 import tempfile
-from collections.abc import Sequence
+import threading
+import time
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import IO
 
 from . import docker_backend as dbe
 from . import leak, lifecycle, materialize, provenance, reap, trial, verify
-from .backend import Limits
+from .backend import Confirmation, Limits
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -260,14 +266,17 @@ def _candidate_files(candidate_dir: Path) -> list[tuple[str, bytes, bool]]:
     return files
 
 
-def run_grading_demo(backend: dbe.DockerBackend, candidate_dir: Path, base: Path) -> verify.Graded:
+def run_grading_demo(
+    backend: dbe.DockerBackend, candidate_dir: Path, base: Path, *, recorded_attempt_ids: list[str] | None = None,
+) -> verify.Graded:
     """Grade `candidate_dir` against the certified `slug-small-fix` task
     through `backend` - a fresh instance, never the lifecycle demo's own (the
     same "separate backend instance, same seam" interfaces.md step 8
-    requires)."""
+    requires). `recorded_attempt_ids` gets the probe's attempt id before its
+    container exists (issue #122), so the caller's sweep covers it."""
     grader = verify.GraderDef.load(GRADER_ROOT)
     files = _candidate_files(candidate_dir)
-    return verify.grade_files(grader, files, base, backend=backend)
+    return verify.grade_files(grader, files, base, backend=backend, recorded_attempt_ids=recorded_attempt_ids)
 
 
 # --------------------------------------------------------------- subject demo
@@ -677,6 +686,39 @@ def _acceptance_items(
     ]
 
 
+def _fleet_item_and_observation(
+    fleet_diff: reap.SnapshotDiff, own_attempt_ids: Sequence[str],
+) -> tuple[AcceptanceItem, str | None]:
+    """The fleet check, ALWAYS emitted (issue #122, from the nit store): an
+    incomparable pair of snapshots is unverified - `NOT EXERCISED` - never an
+    omitted item that lets the demo pass without it.
+
+    Only a change ATTRIBUTABLE to this run can fail it: a new owned
+    container whose name is one of this run's own attempt containers. Any
+    other change - a neighbour's new container, a foreign container that
+    vanished - is reported as an unattributed OBSERVATION, never a failure
+    (`reap.diff`'s own docstring: attribution is not causation). The
+    observation carries counts, never names: a foreign container's name is
+    the operator's own data, and nothing this block should repeat."""
+    name = "no container leaked by this run"
+    if not fleet_diff.comparable:
+        return AcceptanceItem(
+            name, False, "fleet snapshots incomparable - the daemon could not be listed before or after; unverified",
+            exercised=False,
+        ), None
+    own_names = {dbe._container_name(attempt_id) for attempt_id in own_attempt_ids}
+    ours = sorted(fleet_diff.leaked & own_names)
+    unattributed_new = len(fleet_diff.leaked - own_names)
+    vanished = len(fleet_diff.foreign_vanished)
+    observation = None
+    if unattributed_new or vanished:
+        observation = (
+            f"fleet observations (not attributed to this run, never a failure): "
+            f"{unattributed_new} new skillc-owned container(s), {vanished} foreign container(s) vanished"
+        )
+    return AcceptanceItem(name, not ours, f"leaked by this run={ours}"), observation
+
+
 # --------------------------------------------------------------- paste-back
 
 
@@ -747,7 +789,7 @@ def describe_error_safely(exc: BaseException, *, base: Path | None = None) -> st
 
 def build_paste_back(
     items: list[AcceptanceItem], image: str, image_digest: str | None, reap_report: reap.ReapReport,
-    subject_result: SubjectResult | None = None,
+    subject_result: SubjectResult | None = None, fleet_observation: str | None = None,
 ) -> str:
     prov = provenance.stamp()
     lines = [
@@ -765,6 +807,9 @@ def build_paste_back(
     for outcome in reap_report.outcomes:
         lines.append(f"  {outcome.attempt_id}: {outcome.outcome}")
     lines.append(f"  daemon_reachable={reap_report.daemon_reachable}")
+    if fleet_observation is not None:
+        lines.append("")
+        lines.append(fleet_observation)
     if subject_result is not None:
         lines.append(build_subject_paste_back(subject_result))
     return "\n".join(lines) + "\n"
@@ -830,11 +875,10 @@ def run_demo(
     - `cmd_demo`'s `KeyboardInterrupt` handler reads it to scope its
     best-effort cleanup to exactly this run's own containers (issue #118
     review: a host-global sweep reaped a foreign run's container under a real
-    interrupt). The grading demo's own internal probe attempt id is not
-    threaded through - `verify.grade_files` does not expose it - so an
-    interrupt during grading alone leaves nothing recorded to sweep; that is
-    the accepted, narrower gap this fix leaves in place rather than widening
-    `verify.py`'s own API for it."""
+    interrupt). The grading probe's attempt id is threaded through too
+    (issue #122, via `verify.grade_files(recorded_attempt_ids=...)`), so an
+    interrupt during grading can reach its container, and the normal-path
+    sweep covers it."""
     env = None  # inherit the operator's own ambient environment, like a plain `docker` invocation
     host_paths = [REPO_ROOT / p for p in HOST_PATHS_TO_WATCH]
     host_before = reap.snapshot_host_paths(host_paths)
@@ -849,18 +893,24 @@ def run_demo(
     lifecycle_backend = dbe.DockerBackend(image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=timeout)
     grading_backend = dbe.DockerBackend(image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=timeout)
 
-    lifecycle_record = run_lifecycle_demo(lifecycle_backend, base, recorded_attempt_ids=recorded_attempt_ids)
-    graded = run_grading_demo(grading_backend, GOOD_CANDIDATE, base)
+    own_ids: list[str] = recorded_attempt_ids if recorded_attempt_ids is not None else []
+    lifecycle_record = run_lifecycle_demo(lifecycle_backend, base, recorded_attempt_ids=own_ids)
+    before_grading = len(own_ids)
+    graded = run_grading_demo(grading_backend, GOOD_CANDIDATE, base, recorded_attempt_ids=own_ids)
+    probe_ids = own_ids[before_grading:]
 
     subject_result: SubjectResult | None = None
     if subject_name is not None:
         subject_result = run_subject_demo(
             subject_name=subject_name, image=image, docker_bin=docker_bin, base=base, timeout=timeout,
             checkout=subject_checkout, client_argv=subject_client,
-            recorded_attempt_ids=recorded_attempt_ids,
+            recorded_attempt_ids=own_ids,
         )
 
-    attempt_ids = [str(lifecycle_record["attempt_id"])]
+    # The grading probe's attempt is swept too (issue #122): cleanup MET
+    # used to cover the lifecycle attempt alone, a narrower population than
+    # its wording claimed. The subject leg sweeps its own attempt itself.
+    attempt_ids = [str(lifecycle_record["attempt_id"]), *probe_ids]
     reap_report = reap.reap(docker_bin, attempt_ids, env, timeout)
 
     fleet_after = reap.snapshot(docker_bin, env, timeout)
@@ -871,25 +921,405 @@ def run_demo(
     items = _acceptance_items(lifecycle_record, graded, reap_report, host_diff, image_digest)
     if subject_result is not None:
         items += _subject_acceptance_items(subject_result)
-    if fleet_diff.comparable and (fleet_diff.leaked or fleet_diff.foreign_vanished):
-        items.append(AcceptanceItem(
-            "no unexpected container leak or foreign disappearance", False,
-            f"leaked={list(fleet_diff.leaked)}, foreign_vanished={list(fleet_diff.foreign_vanished)}",
-        ))
-    paste_back = build_paste_back(items, image, image_digest, reap_report, subject_result)
+    fleet_item, fleet_observation = _fleet_item_and_observation(fleet_diff, own_ids)
+    items.append(fleet_item)
+    paste_back = build_paste_back(items, image, image_digest, reap_report, subject_result, fleet_observation)
     ok = all(item.met for item in items)
     return DemoResult(ok, paste_back, lifecycle_record, graded, reap_report, host_diff, image_digest, subject_result)
+
+
+# ------------------------------------------------------------------ --control
+
+
+@dataclass(frozen=True)
+class ControlSeed:
+    """One seeded failure and whether `--control` caught it. `evidence` is
+    built only from facts this process derived itself (dispositions, reap
+    outcomes, exit codes, attempt ids) - never raw text from a container or
+    a child process - so the block it lands in is leak-checked, never
+    trusted to be clean by construction alone."""
+
+    name: str
+    caught: bool
+    evidence: str
+
+
+@dataclass(frozen=True)
+class ControlResult:
+    ok: bool
+    paste_back: str
+    seeds: tuple[ControlSeed, ...]
+
+
+#: Issue #122's timeout seed: a subject that sleeps well past a short limit.
+#: The gap is wide on purpose - a real daemon's `docker exec` start-up is
+#: counted against the limit, so a narrow one could let a slow daemon read
+#: as a timeout for the wrong reason, and a sleep that finished first would
+#: read as `exited`, never as a false catch.
+TIMEOUT_CONTROL_LIMIT = 3.0
+TIMEOUT_CONTROL_SLEEP = 30.0
+
+#: Issue #122's cancellation seed: how long the child's exec would run if
+#: never interrupted, and the bounded waits for its two readiness signals.
+CANCEL_TARGET_SLEEP = 60.0
+CANCEL_READY_TIMEOUT = 120.0
+CANCEL_LIVE_TIMEOUT = 60.0
+
+#: Printed by `--cancel-target` to stderr, once, as soon as its attempt is
+#: planned - BEFORE `prepare()` creates any container (counter-model
+#: re-review: announced any later, a parent killing the child in between
+#: could not name the container it left). The parent reads the attempt id
+#: from it, and nothing else - it is NOT the evidence that the exec is in
+#: flight (see `CANCEL_LIVE_FILE`).
+CANCEL_READY_MARKER = "skillc: cancel-target attempt="
+
+#: Written into the container's workspace by the cancel-target's own
+#: subject, as its first act inside the exec, before it sleeps. The parent
+#: sends SIGINT only after reading this file back out of the RUNNING
+#: container (counter-model review: a marker printed before `execute()` plus
+#: a fixed delay is a timing argument, not evidence a live exec exists).
+CANCEL_LIVE_FILE = ".skillc-cancel-live"
+
+#: The fixed line `cmd_demo`'s `KeyboardInterrupt` handler prints - defined
+#: here so the handler and the cancellation seed that checks for it cannot
+#: drift apart.
+INTERRUPT_LINE = (
+    "skillc: demo interrupted - containers labelled for this run may remain; "
+    "run the reap sweep or re-run to clean up"
+)
+
+_ATTEMPT_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+_CLEANUP_PAIR_RE = re.compile(r"\('([^']+)', '([^']+)'\)")
+
+
+def _plan_one_attempt(base: Path, experiment: str, label: str) -> tuple[trial.Experiment, str]:
+    """One planned attempt in the control store - the same scripted-subject
+    trial shape every seed uses, planned through the real controller."""
+    store = trial.open_store(base / "control-store", forbidden=[])
+    spec: dict[str, object] = {
+        "experiment": experiment,
+        "trials": [{
+            "label": label, "case": {"id": "c", "revision": "r1"},
+            "grader": {"id": "g", "revision": "g1"}, "subject": {"digest": "sha256:00"},
+            "client": {"name": "scripted", "version": "1"}, "image": {"digest": "sha256:01"},
+            "config": {}, "attempts": 1,
+        }],
+    }
+    planned = trial.plan(spec, store)
+    [(_t, attempt)] = list(planned.attempts())
+    return planned, str(attempt["attempt_id"])
+
+
+def _sleep_argv(seconds: float) -> list[str]:
+    return [verify.PROBE_INTERPRETER, "-c", f"import time; time.sleep({float(seconds)!r})"]
+
+
+def run_timeout_control(
+    *, image: str, docker_bin: Sequence[str], base: Path, timeout: float = 30,
+    limit: float = TIMEOUT_CONTROL_LIMIT, sleep: float = TIMEOUT_CONTROL_SLEEP,
+    recorded_attempt_ids: list[str] | None = None,
+) -> ControlSeed:
+    """Issue #122's timeout seed: one attempt, through the real driver,
+    whose command sleeps past `limit`. On a real daemon the limit is
+    enforced across `docker exec` and `docker kill`, so this is where real
+    daemon semantics can differ from the fake's.
+
+    CAUGHT only when every part holds: the stop reason is `timeout` (never
+    `exited` - a subject that finished on its own proves nothing about
+    enforcement); `confirm_stopped` confirmed the stop from the daemon's own
+    `docker inspect`; the disposition is `inconclusive` - a lifecycle status,
+    never a grading FAIL charged to the subject; and the reap sweep finds
+    nothing left for the attempt (`reaped` or `already-absent`, never
+    `left-running` or `unknown`)."""
+    name = "timeout: an exec past its limit is stopped, confirmed and cleaned up"
+    backend = dbe.DockerBackend(image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=timeout)
+    experiment, attempt_id = _plan_one_attempt(base, "control", "timeout")
+    if recorded_attempt_ids is not None:
+        recorded_attempt_ids.append(attempt_id)
+    record = lifecycle.run_through_backend(
+        backend, experiment, attempt_id, _sleep_argv(sleep), {"demo": "x"}, Limits(timeout=limit), base,
+    )
+    stop = record.get("stop")
+    stop = stop if isinstance(stop, dict) else {}
+    outcome = reap.reap(docker_bin, [attempt_id], None, timeout).outcome_for(attempt_id)
+    caught = (
+        stop.get("reason") == "timeout"
+        and stop.get("confirmed") is True
+        and record.get("disposition") == "inconclusive"
+        and outcome in ("reaped", "already-absent")
+    )
+    evidence = (
+        f"limit={limit}s sleep={sleep}s stop reason={stop.get('reason')} confirmed={stop.get('confirmed')} "
+        f"signal={record.get('signal')} disposition={record.get('disposition')} "
+        f"attempt={attempt_id} reap={outcome}"
+    )
+    return ControlSeed(name, caught, evidence)
+
+
+def _cancel_target_argv(sleep: float) -> list[str]:
+    """The cancel-target's subject: mark itself live, then sleep."""
+    return [
+        verify.PROBE_INTERPRETER, "-c",
+        f"import pathlib, time; pathlib.Path({CANCEL_LIVE_FILE!r}).write_text('live'); time.sleep({float(sleep)!r})",
+    ]
+
+
+def _exec_is_live(docker_bin: Sequence[str], attempt_id: str, timeout: float) -> bool:
+    """True once `CANCEL_LIVE_FILE` exists in the attempt's RUNNING
+    container - asked of the daemon with a second `docker exec`, which
+    itself fails on a container that is not running."""
+    try:
+        proc = subprocess.run(
+            [*docker_bin, "exec", "-w", dbe.CONTAINER_WORKSPACE, "--", dbe._container_name(attempt_id),
+             "test", "-f", CANCEL_LIVE_FILE],
+            capture_output=True, timeout=timeout, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return proc.returncode == 0
+
+
+def run_cancel_target(
+    *, image: str, docker_bin: Sequence[str], base: Path, timeout: float, sleep: float,
+    recorded_attempt_ids: list[str],
+) -> int:
+    """The CHILD side of the cancellation seed (`skillc demo --cancel-target
+    SECONDS`, a hidden flag): one attempt whose exec marks itself live
+    (`CANCEL_LIVE_FILE`) and sleeps `sleep` seconds, announcing
+    `CANCEL_READY_MARKER<attempt id>` on stderr before any container exists
+    (see that constant). It runs inside
+    `cmd_demo`'s own `try`, so a SIGINT lands on the real
+    `KeyboardInterrupt` handler and its scoped sweep - the thing under test,
+    not a copy of it. The attempt id is recorded before any backend call, as
+    `run_lifecycle_demo` does.
+
+    Returning at all means the interrupt never came: exit 1, never 0."""
+    backend = dbe.DockerBackend(image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=timeout)
+    experiment, attempt_id = _plan_one_attempt(base, "control", "cancel-target")
+    recorded_attempt_ids.append(attempt_id)
+    print(f"{CANCEL_READY_MARKER}{attempt_id}", file=sys.stderr, flush=True)
+    record = lifecycle.run_through_backend(
+        backend, experiment, attempt_id, _cancel_target_argv(sleep), {"demo": "x"}, Limits(timeout=sleep + 60), base,
+    )
+    print(f"skillc: cancel-target was never interrupted - disposition={record.get('disposition')}", file=sys.stderr)
+    return 1
+
+
+def run_cancellation_control(
+    *, image: str, docker_bin: Sequence[str], base: Path, timeout: float = 30,
+    sleep: float = CANCEL_TARGET_SLEEP, ready_timeout: float = CANCEL_READY_TIMEOUT,
+    live_timeout: float = CANCEL_LIVE_TIMEOUT, child_command: Sequence[str] | None = None,
+    recorded_attempt_ids: list[str] | None = None,
+) -> ControlSeed:
+    """Issue #122's cancellation seed: a real SIGINT delivered to a real
+    `skillc demo` process while its exec is in flight.
+
+    A FOREIGN skillc-owned container is prepared first - owned, labelled,
+    running, and not the child's. The child (`skillc demo --cancel-target`,
+    `child_command` overriding only how skillc's CLI is launched) starts in
+    its own session and announces its attempt id before creating any
+    container. The parent then waits
+    until the child's subject has written `CANCEL_LIVE_FILE` inside the
+    running container - the evidence that the exec is in flight - and sends
+    SIGINT to the child's whole process group, as Ctrl-C in a terminal does,
+    so the `docker exec` client gets it too.
+
+    CAUGHT only when every part holds: the exec was observed live; the child
+    printed the fixed `INTERRUPT_LINE` and exited 1; its own cleanup line
+    reports its attempt `reaped` or `already-absent`; an independent reap
+    afterward finds it `already-absent` (`reaped` there would mean the child
+    left it running, and this seed removed it); the foreign container was
+    still running (`confirm_stopped` NOT_CONFIRMED); and this seed's own
+    removal of the foreign container is confirmed. The handler normally
+    reports `already-absent`, because the driver's own `finally` tears the
+    container down before the handler sweeps - accepted by the owner on
+    #122, since the independent reap is what shows nothing was left.
+
+    However this function ends - including an interrupt of `--control`
+    itself - the child's process group is killed and waited for, and the
+    child's attempt id is appended to `recorded_attempt_ids` the moment it
+    is announced, so the caller's own scoped sweep can reach its container."""
+    name = "operator cancellation: a real SIGINT mid-exec is handled and scoped to this run"
+    foreign_backend = dbe.DockerBackend(image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=timeout)
+    foreign_id = f"control-foreign-{secrets.token_hex(6)}"
+    if recorded_attempt_ids is not None:
+        recorded_attempt_ids.append(foreign_id)
+    try:
+        foreign = foreign_backend.prepare(foreign_id)
+    except dbe.BackendUnavailable:
+        return ControlSeed(name, False, "the foreign container could not be prepared - the seed never ran")
+
+    lines: list[str] = []
+    ready = threading.Event()
+    child_attempt: list[str] = []
+
+    def _read(stream: IO[str]) -> None:
+        for raw in stream:
+            line = raw.rstrip("\n")
+            lines.append(line)
+            if line.startswith(CANCEL_READY_MARKER) and not ready.is_set():
+                candidate = line[len(CANCEL_READY_MARKER):].strip()
+                if _ATTEMPT_ID_RE.match(candidate):
+                    child_attempt.append(candidate)
+                    if recorded_attempt_ids is not None:
+                        recorded_attempt_ids.append(candidate)
+                ready.set()
+
+    def _signal_group(proc: subprocess.Popen[str], sig: signal.Signals) -> None:
+        try:
+            os.killpg(proc.pid, sig)
+        except ProcessLookupError:
+            pass
+
+    proc: subprocess.Popen[str] | None = None
+    foreign_removed: Confirmation | None = None
+    try:
+        argv = [
+            *(child_command if child_command is not None else [sys.executable, "-m", "skillc.cli"]),
+            "demo", "--cancel-target", str(sleep), "--image", image, "--docker-bin", " ".join(docker_bin),
+            "--base", str(base), "--timeout", str(timeout),
+        ]
+        try:
+            proc = subprocess.Popen(
+                argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                text=True, errors="replace", start_new_session=True,
+            )
+        except OSError:
+            return ControlSeed(name, False, "the child skillc process could not be started - the seed never ran")
+        assert proc.stderr is not None
+        reader = threading.Thread(target=_read, args=(proc.stderr,), daemon=True)
+        reader.start()
+
+        announced = ready.wait(ready_timeout) and bool(child_attempt)
+        live = False
+        if announced:
+            deadline = time.monotonic() + live_timeout
+            while proc.poll() is None and time.monotonic() < deadline:
+                if _exec_is_live(docker_bin, child_attempt[0], timeout):
+                    live = True
+                    break
+                time.sleep(0.1)
+
+        sent: float | None = None
+        if live:
+            _signal_group(proc, signal.SIGINT)
+            sent = time.monotonic()
+        else:
+            _signal_group(proc, signal.SIGKILL)
+        try:
+            exit_code = proc.wait(timeout=max(60.0, timeout * 4))
+        except subprocess.TimeoutExpired:
+            _signal_group(proc, signal.SIGKILL)
+            exit_code = proc.wait()
+        exited_after = time.monotonic() - sent if sent is not None else None
+        reader.join(timeout=5)
+
+        attempt = child_attempt[0] if child_attempt else None
+        independent = reap.reap(docker_bin, [attempt], None, timeout).outcome_for(attempt) if attempt else None
+        foreign_state = foreign_backend.confirm_stopped(foreign)
+        foreign_running = foreign_state is Confirmation.NOT_CONFIRMED
+        foreign_backend.destroy(foreign)
+        foreign_removed = foreign_backend.confirm_absent(foreign)
+
+        if attempt is None:
+            return ControlSeed(
+                name, False,
+                f"the child never announced its attempt (waited {ready_timeout}s) - no SIGINT was sent, exit={exit_code}",
+            )
+        if not live:
+            return ControlSeed(
+                name, False,
+                f"the child's exec was never observed live (waited {live_timeout}s) - no SIGINT was sent, "
+                f"the child was killed; attempt={attempt} independent={independent} "
+                f"foreign_removed={foreign_removed.value}",
+            )
+
+        interrupt_line = INTERRUPT_LINE in lines
+        handler_outcome: str | None = None
+        for line in lines:
+            if line.startswith("skillc: best-effort cleanup - outcomes="):
+                handler_outcome = dict(_CLEANUP_PAIR_RE.findall(line)).get(attempt)
+        caught = (
+            interrupt_line and exit_code == 1
+            and handler_outcome in ("reaped", "already-absent")
+            and independent == "already-absent"
+            and foreign_running
+            and foreign_removed is Confirmation.CONFIRMED
+        )
+        exited = f"{exited_after:.1f}s" if exited_after is not None else "unknown"
+        evidence = (
+            f"exec observed live, then SIGINT to the child's process group; "
+            f"interrupt_line={'present' if interrupt_line else 'ABSENT'} exit={exit_code} "
+            f"child exited {exited} after SIGINT (exec would have run {sleep}s) "
+            f"attempt={attempt} handler={handler_outcome} independent={independent} "
+            f"foreign={'running (untouched)' if foreign_running else f'NOT running ({foreign_state.value})'} "
+            f"foreign_removed={foreign_removed.value}"
+        )
+        return ControlSeed(name, caught, evidence)
+    finally:
+        if proc is not None and proc.poll() is None:
+            _signal_group(proc, signal.SIGKILL)
+            proc.wait()
+        if foreign_removed is None:
+            foreign_backend.destroy(foreign)
+            foreign_backend.confirm_absent(foreign)
+
+
+#: The reply-only subject: runs, exits 0, never touches the canary.
+_REPLY_ONLY_ARGV: tuple[str, ...] = (verify.PROBE_INTERPRETER, "-c", "pathlib_unused = 1")
+
+#: The liveness reason `lifecycle.run_through_backend` records when the
+#: canary exists but was never touched - the ONE failure the reply-only
+#: seed exists to provoke.
+_CANARY_UNTOUCHED = "the canary was never touched"
+
+
+def _reply_only_seed(record: Mapping[str, object]) -> ControlSeed:
+    """CAUGHT only for the specific failure this seed provokes (issue #122,
+    from the nit store): the subject genuinely ran - a confirmed stop,
+    `exited`, exit code 0 - and the attempt is `inconclusive` because the
+    canary was never touched. `!= "captured"` alone accepted ANY failure: a
+    launch failure, an unavailable daemon or a timeout never exercised the
+    liveness check at all, yet read as caught."""
+    stop = record.get("stop")
+    stop = stop if isinstance(stop, dict) else {}
+    ran = stop.get("reason") == "exited" and stop.get("exit_code") == 0 and stop.get("confirmed") is True
+    canary_untouched = _CANARY_UNTOUCHED in str(record.get("reason", ""))
+    caught = ran and record.get("disposition") == "inconclusive" and canary_untouched
+    return ControlSeed(
+        "reply-only client never touches the canary", caught,
+        f"lifecycle disposition={record.get('disposition')} stop reason={stop.get('reason')} "
+        f"exit_code={stop.get('exit_code')} canary_untouched={canary_untouched}",
+    )
+
+
+def build_control_paste_back(seeds: Sequence[ControlSeed], image: str, image_digest: str | None) -> str:
+    prov = provenance.stamp()
+    lines = [
+        "skillc operator demo --control - paste-back block",
+        f"skillc_version={prov.skillc_version} source_commit={prov.source_commit} dirty={prov.dirty}",
+        f"image={image} image_digest={image_digest or 'UNKNOWN'}",
+        "",
+        "seeded failures (each must be CAUGHT for --control to pass):",
+    ]
+    for seed in seeds:
+        lines.append(f"  [{'CAUGHT' if seed.caught else 'NOT CAUGHT'}] {seed.name} - {seed.evidence}")
+    return "\n".join(lines) + "\n"
 
 
 def run_control(
     *, image: str, docker_bin: Sequence[str], base: Path, timeout: float = 30,
     recorded_attempt_ids: list[str] | None = None,
-) -> bool:
-    """Runs the seeded negative controls and returns True only if EVERY one
-    was actually caught - never that everything came back clean, which would
-    be the wrong verdict for a deliberately broken run.
+    timeout_limit: float = TIMEOUT_CONTROL_LIMIT, timeout_sleep: float = TIMEOUT_CONTROL_SLEEP,
+    cancel_sleep: float = CANCEL_TARGET_SLEEP, cancel_child_command: Sequence[str] | None = None,
+) -> ControlResult:
+    """Runs the seeded negative controls. `ok` is True only if EVERY one was
+    actually caught - never that everything came back clean, which would be
+    the wrong verdict for a deliberately broken run. `paste_back` reports
+    each seed on its own line (issue #122: the earlier single aggregate line
+    left each case entailed but never shown).
 
-    Three seeded failures, matching the issue's own list:
+    Six seeded failures:
       1. the reply-only client (a subject that never touches the canary) -
          caught by `lifecycle.py`'s own liveness check (`inconclusive`, never
          `captured`).
@@ -903,33 +1333,27 @@ def run_control(
          operator's real daemon, but "teardown never ran" is exactly the
          crash scenario `reap()` exists to catch, and is trivial to seed
          honestly on any daemon, fake or real.
-      3. a leaky composition - the known-bad grading candidate, and a
-         planted host value in a synthesized paste-back block.
+      3. a known-bad grading candidate must FAIL.
+      4. a leaky paste-back block must be refused.
+      5. a timeout (`run_timeout_control`, issue #122).
+      6. an operator cancellation by a real SIGINT (`run_cancellation_control`,
+         issue #122).
+    The `timeout_*`/`cancel_*` arguments exist so tests against the fake
+    `docker` can run the same seeds quickly; the CLI never passes them.
     """
     env = None  # inherit the operator's own ambient environment, like a plain `docker` invocation
+    image_digest = resolve_image_digest(docker_bin, image, env, timeout)
     backend = dbe.DockerBackend(image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=timeout)
+    seeds: list[ControlSeed] = []
 
     # 1. Reply-only subject: never touches the canary.
-    store = trial.open_store(base / "control-store", forbidden=[])
-    spec: dict[str, object] = {
-        "experiment": "control",
-        "trials": [{
-            "label": "reply-only", "case": {"id": "c", "revision": "r1"},
-            "grader": {"id": "g", "revision": "g1"}, "subject": {"digest": "sha256:00"},
-            "client": {"name": "scripted", "version": "1"}, "image": {"digest": "sha256:01"},
-            "config": {}, "attempts": 1,
-        }],
-    }
-    experiment = trial.plan(spec, store)
-    [(_t, attempt)] = list(experiment.attempts())
-    attempt_id = str(attempt["attempt_id"])
+    experiment, attempt_id = _plan_one_attempt(base, "control", "reply-only")
     if recorded_attempt_ids is not None:
         recorded_attempt_ids.append(attempt_id)
-    reply_only_argv = [verify.PROBE_INTERPRETER, "-c", "pathlib_unused = 1"]  # does nothing; never touches the canary
     record = lifecycle.run_through_backend(
-        backend, experiment, attempt_id, reply_only_argv, {"demo": "x"}, Limits(timeout=30), base,
+        backend, experiment, attempt_id, list(_REPLY_ONLY_ARGV), {"demo": "x"}, Limits(timeout=30), base,
     )
-    reply_only_caught = record.get("disposition") != "captured"
+    seeds.append(_reply_only_seed(record))
 
     # 2. A container deliberately left running - reap() must find and
     # remove it (a genuine orphan, teardown never invoked on purpose).
@@ -945,15 +1369,23 @@ def run_control(
     try:
         orphan_backend.prepare(orphan_attempt_id)  # note: never destroy()'d - that is the seeded failure
     except dbe.BackendUnavailable:
-        left_running_caught = False
+        seeds.append(ControlSeed(
+            "container left running is found by the reap sweep", False,
+            "prepare failed - the orphan was never seeded",
+        ))
     else:
-        orphan_report = reap.reap(docker_bin, [orphan_attempt_id], env, timeout)
-        left_running_caught = orphan_report.outcome_for(orphan_attempt_id) == "reaped"
+        orphan_outcome = reap.reap(docker_bin, [orphan_attempt_id], env, timeout).outcome_for(orphan_attempt_id)
+        seeds.append(ControlSeed(
+            "container left running is found by the reap sweep", orphan_outcome == "reaped",
+            f"reap outcome={orphan_outcome}",
+        ))
 
     # 3. A known-bad grading candidate must FAIL, not PASS.
     grading_backend = dbe.DockerBackend(image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=timeout)
     graded = run_grading_demo(grading_backend, BAD_CANDIDATE, base)
-    bad_candidate_caught = graded.status == "FAIL"
+    seeds.append(ControlSeed(
+        "known-bad grading candidate FAILs", graded.status == "FAIL", f"grading status={graded.status}",
+    ))
 
     # 4. A leaky paste-back must be refused, never printed. Built from two
     # fragments on purpose: `skillc/leak.py`'s own docstring names "built at
@@ -970,5 +1402,20 @@ def run_control(
         leak_caught = False
     except PasteBackRefused:
         leak_caught = True
+    seeds.append(ControlSeed(
+        "leaky paste-back block is refused", leak_caught,
+        "the planted block was refused and not printed" if leak_caught else "the planted block was PRINTED",
+    ))
 
-    return reply_only_caught and left_running_caught and bad_candidate_caught and leak_caught
+    # 5 and 6: issue #122's real-daemon seeds.
+    seeds.append(run_timeout_control(
+        image=image, docker_bin=docker_bin, base=base, timeout=timeout,
+        limit=timeout_limit, sleep=timeout_sleep, recorded_attempt_ids=recorded_attempt_ids,
+    ))
+    seeds.append(run_cancellation_control(
+        image=image, docker_bin=docker_bin, base=base, timeout=timeout,
+        sleep=cancel_sleep, child_command=cancel_child_command, recorded_attempt_ids=recorded_attempt_ids,
+    ))
+
+    ok = all(seed.caught for seed in seeds)
+    return ControlResult(ok, build_control_paste_back(seeds, image, image_digest), tuple(seeds))

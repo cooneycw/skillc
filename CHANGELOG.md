@@ -10,6 +10,18 @@ and version plan.
 
 ### Added
 
+- `skillc demo --control` seeds the two failure paths most likely to differ on
+  a real Docker daemon ([#122](https://github.com/cooneycw/skillc/issues/122)):
+  a **timeout** (an exec sleeping past its limit must stop as `timeout`,
+  confirmed from `docker inspect`, `inconclusive`, and leave nothing behind)
+  and an **operator cancellation** (a real SIGINT to a child `skillc demo`
+  process group mid-exec must print the fixed interrupt line, exit `1`, clean
+  up only its own attempt, and leave a foreign skillc-owned container
+  running). Each has a committed red case: disabled timeout enforcement, and
+  an unscoped interrupt sweep.
+- `--control` now prints a leak-checked paste-back block with one
+  `CAUGHT`/`NOT CAUGHT` line per seed, instead of a single aggregate line.
+  #122 closes only on the operator's live run of it against a real daemon.
 - **`skillc pilot-run` and `skillc pilot-report`: the first bounded matched
   pilot, run on its predeclared schedule** (Refs #12; one disclosed protocol
   deviation, the model - see `evals/matched-pilot/evidence/README.md`). `skillc/matched_pilot.py` reads
@@ -176,6 +188,23 @@ and version plan.
 
 ### Fixed
 
+Five honesty gaps in `skillc demo` and `--control`, folded into #122 from the
+Nit Store ([#20](https://github.com/cooneycw/skillc/issues/20)), each with a red case:
+
+- **The reply-only control accepted any failure.** A launch failure or a
+  timeout that never exercised the canary counted as caught. It now requires
+  an exit-0 run whose canary was never touched.
+- **The fleet check could be silently omitted.** With the daemon unreachable
+  the item was left out and the demo could pass without it. It is now always
+  emitted, `NOT EXERCISED` when the snapshots are incomparable.
+- **A neighbour's change failed the run.** Only a new container named for one
+  of this run's own attempts now fails it. Other fleet changes are counted
+  as observations, with no container names printed.
+- **The reap sweep missed the grading probe's attempt.** `verify.grade_files`
+  takes `recorded_attempt_ids` and reports the probe's id before `prepare()`.
+  The demo sweeps it, and an interrupt during grading can reach it.
+- **A second Ctrl-C during the interrupt sweep escaped** as a raw traceback.
+  SIGINT is ignored for the sweep's own bounded duration, then restored.
 - **Every backend attempt's lifecycle record said its workspace was never
   cleaned up** (#127): `lifecycle.run_through_backend` finalized before
   cleaning, so the persisted `cleanup` read `partial` even when the journal
