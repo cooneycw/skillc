@@ -1,0 +1,381 @@
+{
+ "version": 2,
+ "kind": "pilot-report",
+ "producer": "assembler",
+ "experiment_id": "matched-pilot-6ab82dc6",
+ "claims_reviewed": true,
+ "attempts": [
+  {
+   "attempt_id": "a-05d83ac86628",
+   "trial_id": "t1-matched_pilot_treatment_1",
+   "arm": "treatment",
+   "repeat": 1,
+   "disposition": "captured",
+   "graded_status": "PASS",
+   "criteria": [
+    {
+     "id": "R4-interface",
+     "outcome": "SATISFIED"
+    },
+    {
+     "id": "reported-example",
+     "outcome": "SATISFIED"
+    },
+    {
+     "id": "R1",
+     "outcome": "SATISFIED"
+    },
+    {
+     "id": "R2",
+     "outcome": "SATISFIED"
+    },
+    {
+     "id": "R3",
+     "outcome": "SATISFIED"
+    }
+   ],
+   "uncertainty": "skill_invocations is a heuristic for codex (a SKILL.md read in an exec call)",
+   "interventions": 0,
+   "cost_usd": {
+    "setup": 0,
+    "agent": "UNKNOWN",
+    "grading": 0,
+    "total": "UNKNOWN"
+   },
+   "cost_note": "agent runs on the operator's subscription login (ADR 0005 rule 6) - no per-attempt dollar price exists; tokens are the observed usage. Setup and grading are local containers with no metered call.",
+   "tokens": {
+    "input_tokens": 101912,
+    "cached_input_tokens": 95488,
+    "output_tokens": 715,
+    "reasoning_output_tokens": 0,
+    "total_tokens": 102627
+   },
+   "time_seconds": {
+    "setup": 13.498,
+    "agent": 36.53,
+    "grading": 0.778,
+    "total": 50.806
+   },
+   "model_observed": "gpt-6-astra",
+   "model_declared": "gpt-5.1-codex",
+   "model_matches_declaration": false,
+   "reasoning_effort_observed": "UNKNOWN",
+   "cli_version_observed": "0.157.1",
+   "prompt_delivered": true,
+   "canary_satisfied": true,
+   "skill_invocations": [],
+   "claim": "claimed-success",
+   "claim_accurate": true
+  },
+  {
+   "attempt_id": "a-c63323550b21",
+   "trial_id": "t2-matched_pilot_baseline_1",
+   "arm": "baseline",
+   "repeat": 1,
+   "disposition": "captured",
+   "graded_status": "PASS",
+   "criteria": [
+    {
+     "id": "R4-interface",
+     "outcome": "SATISFIED"
+    },
+    {
+     "id": "reported-example",
+     "outcome": "SATISFIED"
+    },
+    {
+     "id": "R1",
+     "outcome": "SATISFIED"
+    },
+    {
+     "id": "R2",
+     "outcome": "SATISFIED"
+    },
+    {
+     "id": "R3",
+     "outcome": "SATISFIED"
+    }
+   ],
+   "uncertainty": "skill_invocations is a heuristic for codex (a SKILL.md read in an exec call)",
+   "interventions": 0,
+   "cost_usd": {
+    "setup": 0,
+    "agent": "UNKNOWN",
+    "grading": 0,
+    "total": "UNKNOWN"
+   },
+   "cost_note": "agent runs on the operator's subscription login (ADR 0005 rule 6) - no per-attempt dollar price exists; tokens are the observed usage. Setup and grading are local containers with no metered call.",
+   "tokens": {
+    "input_tokens": 89413,
+    "cached_input_tokens": 82304,
+    "output_tokens": 716,
+    "reasoning_output_tokens": 0,
+    "total_tokens": 90129
+   },
+   "time_seconds": {
+    "setup": 4.412,
+    "agent": 51.174,
+    "grading": 0.773,
+    "total": 56.359
+   },
+   "model_observed": "gpt-6-astra",
+   "model_declared": "gpt-5.1-codex",
+   "model_matches_declaration": false,
+   "reasoning_effort_observed": "UNKNOWN",
+   "cli_version_observed": "0.157.1",
+   "prompt_delivered": true,
+   "canary_satisfied": true,
+   "skill_invocations": [],
+   "claim": "claimed-success",
+   "claim_accurate": true
+  },
+  {
+   "attempt_id": "a-ccf74f5722a0",
+   "trial_id": "t3-matched_pilot_treatment_2",
+   "arm": "treatment",
+   "repeat": 2,
+   "disposition": "captured",
+   "graded_status": "PASS",
+   "criteria": [
+    {
+     "id": "R4-interface",
+     "outcome": "SATISFIED"
+    },
+    {
+     "id": "reported-example",
+     "outcome": "SATISFIED"
+    },
+    {
+     "id": "R1",
+     "outcome": "SATISFIED"
+    },
+    {
+     "id": "R2",
+     "outcome": "SATISFIED"
+    },
+    {
+     "id": "R3",
+     "outcome": "SATISFIED"
+    }
+   ],
+   "uncertainty": "skill_invocations is a heuristic for codex (a SKILL.md read in an exec call)",
+   "interventions": 0,
+   "cost_usd": {
+    "setup": 0,
+    "agent": "UNKNOWN",
+    "grading": 0,
+    "total": "UNKNOWN"
+   },
+   "cost_note": "agent runs on the operator's subscription login (ADR 0005 rule 6) - no per-attempt dollar price exists; tokens are the observed usage. Setup and grading are local containers with no metered call.",
+   "tokens": {
+    "input_tokens": 101687,
+    "cached_input_tokens": 90368,
+    "output_tokens": 727,
+    "reasoning_output_tokens": 0,
+    "total_tokens": 102414
+   },
+   "time_seconds": {
+    "setup": 9.763,
+    "agent": 37.113,
+    "grading": 2.492,
+    "total": 49.368
+   },
+   "model_observed": "gpt-6-astra",
+   "model_declared": "gpt-5.1-codex",
+   "model_matches_declaration": false,
+   "reasoning_effort_observed": "UNKNOWN",
+   "cli_version_observed": "0.157.1",
+   "prompt_delivered": true,
+   "canary_satisfied": true,
+   "skill_invocations": [],
+   "claim": "claimed-success",
+   "claim_accurate": true
+  },
+  {
+   "attempt_id": "a-79ffea58652b",
+   "trial_id": "t4-matched_pilot_baseline_2",
+   "arm": "baseline",
+   "repeat": 2,
+   "disposition": "captured",
+   "graded_status": "PASS",
+   "criteria": [
+    {
+     "id": "R4-interface",
+     "outcome": "SATISFIED"
+    },
+    {
+     "id": "reported-example",
+     "outcome": "SATISFIED"
+    },
+    {
+     "id": "R1",
+     "outcome": "SATISFIED"
+    },
+    {
+     "id": "R2",
+     "outcome": "SATISFIED"
+    },
+    {
+     "id": "R3",
+     "outcome": "SATISFIED"
+    }
+   ],
+   "uncertainty": "skill_invocations is a heuristic for codex (a SKILL.md read in an exec call)",
+   "interventions": 0,
+   "cost_usd": {
+    "setup": 0,
+    "agent": "UNKNOWN",
+    "grading": 0,
+    "total": "UNKNOWN"
+   },
+   "cost_note": "agent runs on the operator's subscription login (ADR 0005 rule 6) - no per-attempt dollar price exists; tokens are the observed usage. Setup and grading are local containers with no metered call.",
+   "tokens": {
+    "input_tokens": 89573,
+    "cached_input_tokens": 85248,
+    "output_tokens": 765,
+    "reasoning_output_tokens": 0,
+    "total_tokens": 90338
+   },
+   "time_seconds": {
+    "setup": 0.745,
+    "agent": 40.293,
+    "grading": 0.81,
+    "total": 41.848
+   },
+   "model_observed": "gpt-6-astra",
+   "model_declared": "gpt-5.1-codex",
+   "model_matches_declaration": false,
+   "reasoning_effort_observed": "UNKNOWN",
+   "cli_version_observed": "0.157.1",
+   "prompt_delivered": true,
+   "canary_satisfied": true,
+   "skill_invocations": [],
+   "claim": "claimed-success",
+   "claim_accurate": true
+  },
+  {
+   "attempt_id": "a-1c41825dc59e",
+   "trial_id": "t5-matched_pilot_treatment_3",
+   "arm": "treatment",
+   "repeat": 3,
+   "disposition": "captured",
+   "graded_status": "PASS",
+   "criteria": [
+    {
+     "id": "R4-interface",
+     "outcome": "SATISFIED"
+    },
+    {
+     "id": "reported-example",
+     "outcome": "SATISFIED"
+    },
+    {
+     "id": "R1",
+     "outcome": "SATISFIED"
+    },
+    {
+     "id": "R2",
+     "outcome": "SATISFIED"
+    },
+    {
+     "id": "R3",
+     "outcome": "SATISFIED"
+    }
+   ],
+   "uncertainty": "skill_invocations is a heuristic for codex (a SKILL.md read in an exec call)",
+   "interventions": 0,
+   "cost_usd": {
+    "setup": 0,
+    "agent": "UNKNOWN",
+    "grading": 0,
+    "total": "UNKNOWN"
+   },
+   "cost_note": "agent runs on the operator's subscription login (ADR 0005 rule 6) - no per-attempt dollar price exists; tokens are the observed usage. Setup and grading are local containers with no metered call.",
+   "tokens": {
+    "input_tokens": 102043,
+    "cached_input_tokens": 95616,
+    "output_tokens": 759,
+    "reasoning_output_tokens": 0,
+    "total_tokens": 102802
+   },
+   "time_seconds": {
+    "setup": 14.73,
+    "agent": 43.227,
+    "grading": 0.892,
+    "total": 58.849
+   },
+   "model_observed": "gpt-6-astra",
+   "model_declared": "gpt-5.1-codex",
+   "model_matches_declaration": false,
+   "reasoning_effort_observed": "UNKNOWN",
+   "cli_version_observed": "0.157.1",
+   "prompt_delivered": true,
+   "canary_satisfied": true,
+   "skill_invocations": [],
+   "claim": "claimed-success",
+   "claim_accurate": true
+  },
+  {
+   "attempt_id": "a-dc37d8ae791c",
+   "trial_id": "t6-matched_pilot_baseline_3",
+   "arm": "baseline",
+   "repeat": 3,
+   "disposition": "captured",
+   "graded_status": "PASS",
+   "criteria": [
+    {
+     "id": "R4-interface",
+     "outcome": "SATISFIED"
+    },
+    {
+     "id": "reported-example",
+     "outcome": "SATISFIED"
+    },
+    {
+     "id": "R1",
+     "outcome": "SATISFIED"
+    },
+    {
+     "id": "R2",
+     "outcome": "SATISFIED"
+    },
+    {
+     "id": "R3",
+     "outcome": "SATISFIED"
+    }
+   ],
+   "uncertainty": "skill_invocations is a heuristic for codex (a SKILL.md read in an exec call)",
+   "interventions": 0,
+   "cost_usd": {
+    "setup": 0,
+    "agent": "UNKNOWN",
+    "grading": 0,
+    "total": "UNKNOWN"
+   },
+   "cost_note": "agent runs on the operator's subscription login (ADR 0005 rule 6) - no per-attempt dollar price exists; tokens are the observed usage. Setup and grading are local containers with no metered call.",
+   "tokens": {
+    "input_tokens": 77438,
+    "cached_input_tokens": 69376,
+    "output_tokens": 719,
+    "reasoning_output_tokens": 0,
+    "total_tokens": 78157
+   },
+   "time_seconds": {
+    "setup": 0.568,
+    "agent": 38.295,
+    "grading": 0.735,
+    "total": 39.598
+   },
+   "model_observed": "gpt-6-astra",
+   "model_declared": "gpt-5.1-codex",
+   "model_matches_declaration": false,
+   "reasoning_effort_observed": "UNKNOWN",
+   "cli_version_observed": "0.157.1",
+   "prompt_delivered": true,
+   "canary_satisfied": true,
+   "skill_invocations": [],
+   "claim": "claimed-success",
+   "claim_accurate": true
+  }
+ ]
+}

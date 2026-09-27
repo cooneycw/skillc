@@ -261,6 +261,35 @@ def test_codex_skill_heuristic_requires_a_real_skill_md_filename_boundary() -> N
     assert not any(e.get("type") == "skill_invocation" for e in events)
 
 
+# ------------------------------------------------ codex run metadata (#12)
+
+
+def test_codex_run_metadata_reads_the_last_turn_and_the_last_token_count() -> None:
+    raw = (FIXTURES / "codex" / "run-metadata.jsonl").read_text(encoding="utf-8")
+    meta = ta.codex_run_metadata(raw)
+    assert meta["model"] == "fake-model-b"  # the LAST turn_context, not the first
+    assert meta["reasoning_effort"] == "high"
+    assert meta["cli_version"] == "9.9.9"
+    assert meta["token_usage"] == {
+        "input_tokens": 300, "cached_input_tokens": 120, "output_tokens": 30,
+        "reasoning_output_tokens": 6, "total_tokens": 330,
+    }
+    assert meta["final_agent_message"] == "Done: the helper now passes every example."
+
+
+def test_codex_run_metadata_never_copies_account_identifiers() -> None:
+    raw = (FIXTURES / "codex" / "run-metadata.jsonl").read_text(encoding="utf-8")
+    assert "user-FAKE" not in json.dumps(ta.codex_run_metadata(raw))
+
+
+def test_codex_run_metadata_reports_absent_as_none_never_a_default() -> None:
+    """Red case: a rollout with no identity events (the existing no-op
+    fixture) must yield None everywhere, never a guessed model."""
+    raw = (FIXTURES / "codex" / "no-op.jsonl").read_text(encoding="utf-8")
+    meta = ta.codex_run_metadata(raw)
+    assert meta["model"] is None
+    assert meta["cli_version"] is None
+    assert meta["token_usage"] is None
 # ------------------------------------------- Claude Code skill listing (#124)
 
 

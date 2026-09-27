@@ -1,0 +1,45 @@
+{
+ "version": 2,
+ "kind": "attempt-lifecycle",
+ "producer": "controller",
+ "attempt_id": "a-05d83ac86628",
+ "trial_id": "t1-matched_pilot_treatment_1",
+ "disposition": "captured",
+ "stop": {
+  "reason": "exited",
+  "confirmed": true,
+  "exit_code": 0
+ },
+ "events": [
+  {
+   "event": "planned",
+   "at": "2026-09-27T13:26:05.088722Z"
+  },
+  {
+   "event": "dispatched",
+   "at": "2026-09-27T13:26:18.325107Z"
+  },
+  {
+   "event": "started",
+   "at": "2026-09-27T13:26:18.325279Z"
+  },
+  {
+   "event": "stopped",
+   "at": "2026-09-27T13:26:54.855658Z"
+  },
+  {
+   "event": "stop-confirmed",
+   "at": "2026-09-27T13:26:54.855821Z"
+  },
+  {
+   "event": "captured",
+   "at": "2026-09-27T13:26:55.001298Z"
+  }
+ ],
+ "cleanup": {
+  "status": "partial",
+  "failures": [
+   "the workspace was never cleaned up"
+  ]
+ }
+}

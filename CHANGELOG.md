@@ -22,6 +22,45 @@ and version plan.
 - `--control` now prints a leak-checked paste-back block with one
   `CAUGHT`/`NOT CAUGHT` line per seed, instead of a single aggregate line.
   #122 closes only on the operator's live run of it against a real daemon.
+- **`skillc pilot-run` and `skillc pilot-report`: the first bounded matched
+  pilot, run on its predeclared schedule** (Refs #12; one disclosed protocol
+  deviation, the model - see `evals/matched-pilot/evidence/README.md`). `skillc/matched_pilot.py` reads
+  `evals/matched-pilot/run-manifest.json` and runs its schedule: codex on
+  the Level 1 `slug-small-fix` task, with the whole cpp-codex pack installed
+  (treatment) or nothing (baseline), 3 repeats interleaved T,B,T,B,T,B. Both
+  arms go through one path, `collection_conformance.run_level1_agent_attempt`,
+  and differ only in what is installed.
+  - The declared pins are checked before anything runs: the subject
+    revision, the client version, and the image digest, which must equal the
+    declared one. Containers run by that digest, never the tag. A mismatch
+    refuses the run. The declared model is not enforced at launch; every
+    report entry compares it with the observed model, and the summary lists
+    any mismatch as a protocol deviation.
+  - Each attempt's agent limit is the smaller of the 900 s per-attempt cap and
+    what remained of the 5400 s total when the attempt started, so only the
+    last attempt's own setup can carry it past the total (nit-stored: an
+    absolute deadline into `execute()`). An attempt with nothing left is
+    finalized `not-run` and still reported. Caps must be positive and finite.
+  - Every attempt the ledger planned is reported. An interrupted run's
+    missing attempts are reconciled from the ledger, never dropped. The
+    bundle is built in a fresh staging directory, then leak-checked and run
+    through `check-records`. It replaces the previous bundle only if both
+    pass. The one tolerated finding is the named gap that the agent-trial
+    path stores no `verified-result`.
+  - The `pilot-report` gives each attempt's disposition, per-criterion
+    outcome, uncertainty, interventions, a setup/agent/grading time split
+    (agent time from the trial journal), observed model, CLI version and
+    tokens. Agent dollar cost is `UNKNOWN` (subscription login, ADR 0005
+    rule 6), and so is claim accuracy until a reviewed claims file is merged
+    with `pilot-report --claims`. Claim accuracy is `true`/`false` only
+    against a PASS or FAIL grade. A reviewed `asked-clarification` counts as
+    an intervention.
+  - Raw evidence stays in a private run directory; the exported bundle is
+    leak-checked and removed again on any finding.
+- **`transcript_adapter.codex_run_metadata`**: the observed model, reasoning
+  effort, CLI version, cumulative token usage and closing message from a
+  real codex rollout, surfaced as `observation.run_metadata`.
+  `agent_trial.run_one_attempt` also returns `grading_seconds`.
 - **`selection_probe.agent_trial_runner`: the real `AttemptRunner`**
   (Refs #26): each planned attempt becomes one `agent_trial.run_one_attempt`
   in skill-free canary mode (`skill_name=None`), with the declared collection

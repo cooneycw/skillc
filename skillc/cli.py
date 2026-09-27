@@ -930,6 +930,179 @@ def cmd_collection_run(args: argparse.Namespace) -> int:
     return 0 if captured and graded_ok and cleanup_ok and not result.discovery_failed else 1
 
 
+def _export_pilot_evidence(experiment: object, report: dict[str, object], evidence: Path) -> int:
+    """Publish the bundle as ONE unit. It is exported into a fresh staging
+    directory beside `evidence`, and only that staging copy is leak-checked
+    and record-checked - never a neighbouring file already in `evidence`.
+    Only when both pass does it replace `evidence` wholesale, so a re-run
+    never mixes two runs' records and a failed export leaves the previous
+    bundle untouched. Returns a process exit code."""
+    import shutil
+
+    from . import matched_pilot as mp
+
+    if evidence.is_symlink():
+        print(f"skillc: refusing to publish through a symlink: {evidence}", file=sys.stderr)
+        return 2
+    evidence = evidence.resolve()
+    if evidence.exists():
+        # Replacing the destination deletes it, so it must hold nothing but a
+        # bundle this exporter could have written - never a README, a claims
+        # file or anything else that merely sits there.
+        foreign = sorted(p.name for p in evidence.iterdir() if not mp.is_bundle_file(p))
+        if foreign or not evidence.is_dir():
+            print(
+                f"skillc: refusing to replace {evidence}: it holds file(s) this exporter does not own "
+                f"({', '.join(foreign) or 'not a directory'}); point --evidence at a bundle-only directory",
+                file=sys.stderr,
+            )
+            return 2
+    evidence.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=f".{evidence.name}.staging-", dir=evidence.parent))
+    try:
+        written = mp.export_bundle(experiment, report, staging)  # type: ignore[arg-type]
+        result = leak.scan_path(staging, leak.load_denylist(None))
+        if result.findings or result.scanned == 0:
+            for finding in result.findings:
+                print(finding.render(staging), file=sys.stderr)
+            print("skillc: the pilot bundle failed its leak check; nothing was published", file=sys.stderr)
+            return 1
+        unexpected, known = mp.bundle_findings(staging)
+        if unexpected:
+            for line in unexpected:
+                print(f"skillc: {line}", file=sys.stderr)
+            print("skillc: the pilot bundle failed check-records; nothing was published", file=sys.stderr)
+            return 1
+        if evidence.exists():
+            shutil.rmtree(evidence)
+        staging.rename(evidence)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+    print(f"skillc: published {len(written)} record(s) to {evidence.name}/: leak-checked "
+          f"({result.scanned} scanned, 0 found); check-records clean except {known} known "
+          f"'{mp.KNOWN_GAP_TEXT}' finding(s) (no verified-result is stored on the agent-trial path)")
+    return 0
+
+
+def _print_pilot_summary(report: dict[str, object]) -> int:
+    from . import demo
+    from . import matched_pilot as mp
+
+    try:
+        demo.print_paste_back(json.dumps(mp.summarize(report), indent=1))
+    except demo.PasteBackRefused as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_pilot_run(args: argparse.Namespace) -> int:
+    """Issue #12: run the predeclared matched pilot
+    (`evals/matched-pilot/run-manifest.json`) end to end and export its
+    evidence report. Requires `SKILLC_ALLOW_REAL_AGENT=1` (`lifecycle.py`'s
+    own guard) and the operator's own Codex subscription login (ADR 0005
+    rule 6). The declared pins are CHECKED against what would actually run -
+    the subject revision, the client version, a resolvable image digest -
+    and a mismatch refuses the run rather than recording a pilot of
+    something other than what was declared."""
+    import secrets
+    from datetime import UTC, datetime
+
+    from . import collection_conformance as cc
+    from . import demo, trial_bootstrap
+    from . import matched_pilot as mp
+
+    try:
+        declaration = mp.load_declaration(Path(args.manifest) if args.manifest else mp.MANIFEST_PATH)
+    except (mp.ManifestRefused, OSError, KeyError, ValueError) as exc:
+        print(f"skillc: the run manifest cannot be run as written: {exc}", file=sys.stderr)
+        return 2
+    pinned = trial_bootstrap.pinned_cli_version("codex")
+    if declaration.client_name != "codex" or pinned != declaration.client_version:
+        print(
+            f"skillc: manifest declares {declaration.client_name} {declaration.client_version}, but the trial "
+            f"image pins codex {pinned}; refusing a run of a client other than the declared one",
+            file=sys.stderr,
+        )
+        return 2
+    docker_bin = tuple(args.docker_bin.split()) if args.docker_bin else ("docker",)
+    image = args.image or demo.DEFAULT_IMAGE
+    image_digest = demo.resolve_image_digest(docker_bin, image, None, args.timeout)
+    if image_digest is None:
+        print(f"skillc: could not resolve the digest of image {image!r}; a pilot never runs on an unknown image",
+              file=sys.stderr)
+        return 2
+    if image_digest != declaration.image_digest:
+        print(
+            f"skillc: image {image!r} resolves to {image_digest}, but the manifest declares "
+            f"{declaration.image_digest}; refusing a run on an image other than the declared one",
+            file=sys.stderr,
+        )
+        return 2
+
+    private_root = Path(args.private_dir).expanduser() if args.private_dir else mp.DEFAULT_PRIVATE_ROOT
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    run_dir = private_root / f"{stamp}-{secrets.token_hex(3)}"
+    run_dir.mkdir(parents=True, mode=0o700)
+    print(f"skillc: private run directory: {run_dir}", file=sys.stderr)
+
+    try:
+        acquired = cc.acquire_collection(declaration.subject_name, run_dir)
+    except demo.SubjectRefused as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+    try:
+        if acquired.subject.revision != declaration.subject_revision:
+            print(
+                f"skillc: subject {declaration.subject_name!r} is pinned at {acquired.subject.revision}, "
+                f"but the manifest declares {declaration.subject_revision}; refusing",
+                file=sys.stderr,
+            )
+            return 2
+        home_files = cc._collection_home_files(acquired.source, acquired.files)
+    finally:
+        cc.discard_acquisition(run_dir, declaration.subject_name)
+
+    client_argv = args.client_argv.split() if args.client_argv else list(cc.DEFAULT_CLIENT_ARGV)
+    credential_path = Path(args.credential) if args.credential else None
+    experiment, outcomes = mp.run_pilot(
+        declaration, run_dir=run_dir, treatment_home_files=home_files,
+        treatment_digest=acquired.source.digest, image_digest=image_digest,
+        # By the resolved immutable digest, never the tag: a tag re-pointed
+        # mid-run would otherwise change the image under later attempts.
+        backends=lambda: cc.agent_backends(
+            image=image_digest, base=run_dir, docker_bin=docker_bin, daemon_timeout=args.timeout,
+        ),
+        argv_for=lambda _scheduled: client_argv, credential_explicit_path=credential_path,
+    )
+    (run_dir / mp.PRIVATE_OBSERVATIONS_FILENAME).write_text(
+        json.dumps(mp.private_observations(outcomes), indent=1) + "\n", encoding="utf-8",
+    )
+    report = mp.build_report(experiment, mp.reconcile(experiment, outcomes), declared_model=declaration.model)
+    code = _export_pilot_evidence(experiment, report, Path(args.evidence) if args.evidence else mp.EVIDENCE_DIR)
+    return code or _print_pilot_summary(report)
+
+
+def cmd_pilot_report(args: argparse.Namespace) -> int:
+    """Rebuild a pilot run's report from its private run directory - the step
+    that merges a REVIEWED claims file (`--claims`) once a person has read the
+    private final messages. Makes no agent or docker call."""
+    from . import matched_pilot as mp
+
+    run_dir = Path(args.run_dir).expanduser()
+    try:
+        declaration = mp.load_declaration(Path(args.manifest) if args.manifest else mp.MANIFEST_PATH)
+        experiment, outcomes = mp.read_outcomes(run_dir)
+        claims = mp.load_claims(Path(args.claims)) if args.claims else None
+        reconciled = mp.reconcile(experiment, outcomes)
+    except (OSError, KeyError, ValueError) as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+    report = mp.build_report(experiment, reconciled, claims, declared_model=declaration.model)
+    code = _export_pilot_evidence(experiment, report, Path(args.evidence) if args.evidence else mp.EVIDENCE_DIR)
+    return code or _print_pilot_summary(report)
+
+
 def cmd_rules(args: argparse.Namespace) -> int:
     width = max(len(rule.id) for rule in checks.ALL_RULES)
     for rule in checks.ALL_RULES:
@@ -1127,6 +1300,36 @@ def build_parser() -> argparse.ArgumentParser:
              "(default: credential.MINIMUM_REMAINING_SECONDS; raise it to run the below-threshold control)",
     )
     p_collection_run.set_defaults(func=cmd_collection_run)
+
+    p_pilot_run = sub.add_parser(
+        "pilot-run",
+        help="issue #12: run the predeclared matched pilot (evals/matched-pilot/run-manifest.json) and "
+             "export its leak-checked evidence report (a real agent run, behind SKILLC_ALLOW_REAL_AGENT=1)",
+    )
+    p_pilot_run.add_argument("--manifest", help="run manifest (default: evals/matched-pilot/run-manifest.json)")
+    p_pilot_run.add_argument("--image", help="trial image (default: skillc.demo.DEFAULT_IMAGE)")
+    p_pilot_run.add_argument("--docker-bin", help="docker executable (space-separated words; default: docker)")
+    p_pilot_run.add_argument("--timeout", type=float, default=30, help="per-container-call timeout, seconds")
+    p_pilot_run.add_argument("--credential", help="explicit path to the client credential file")
+    p_pilot_run.add_argument(
+        "--client-argv", default=None,
+        help="the real client invocation (default: collection_conformance.DEFAULT_CLIENT_ARGV)",
+    )
+    p_pilot_run.add_argument(
+        "--private-dir", help="where the private run directory is created (default: ~/.local/share/skillc/pilot-runs)",
+    )
+    p_pilot_run.add_argument("--evidence", help="where the committed bundle is exported (default: evals/matched-pilot/evidence/records)")
+    p_pilot_run.set_defaults(func=cmd_pilot_run)
+
+    p_pilot_report = sub.add_parser(
+        "pilot-report",
+        help="rebuild a pilot run's evidence report from its private run directory, merging a reviewed claims file",
+    )
+    p_pilot_report.add_argument("run_dir", help="the private run directory pilot-run printed")
+    p_pilot_report.add_argument("--claims", help='JSON {"claims": {attempt_id: claimed-success|claimed-failure|no-claim}}')
+    p_pilot_report.add_argument("--manifest", help="run manifest (default: evals/matched-pilot/run-manifest.json)")
+    p_pilot_report.add_argument("--evidence", help="where the bundle is exported (default: evals/matched-pilot/evidence/records)")
+    p_pilot_report.set_defaults(func=cmd_pilot_report)
 
     p_rules = sub.add_parser("rules", help="list the rules")
     p_rules.set_defaults(func=cmd_rules)
