@@ -400,7 +400,9 @@ def plan_collection_attempt(
         "experiment": "collection-conformance",
         "trials": [{
             "label": subject_name, "case": {"id": "slug-small-fix", "revision": "r1"},
-            "grader": {"id": "slug-small-fix", "revision": "g1"}, "subject": {"digest": acquired.source.digest},
+            # The grader this attempt is actually graded by, digest included
+            # (#139): the verifier stores no result against any other pin.
+            "grader": verify.GraderDef.load(demo.GRADER_ROOT).identity(), "subject": {"digest": acquired.source.digest},
             "client": {"name": acquired.subject.client, "version": acquired.subject.client_version},
             "image": {"digest": image_digest or "UNKNOWN"}, "config": {}, "attempts": 1,
         }],

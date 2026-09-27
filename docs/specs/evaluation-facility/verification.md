@@ -174,6 +174,29 @@ FAIL, because VIOLATED is tested before UNKNOWN. A case whose goal IS the
 installation (protocol.md section 3) would need that role declared per case.
 That is not supported yet, and every case is currently read as setup-not-goal.
 
+**The agent-trial path has no receipt (#139).** A real-agent attempt
+(`agent_trial.run_one_attempt`) is graded through
+`verify.grade_agent_attempt`. That entry runs every check `grade` runs,
+except the receipt check. The agent path writes no installation receipt, for two
+reasons. A baseline arm installs nothing, and the receipt contract refuses an
+empty `installed` list. And nothing on the path establishes that the client
+discovered what was delivered. In place of the receipt, the controller's
+transcript observation for the attempt must confirm both prompt delivery and the
+canary, or grading is refused and nothing is written. The stored result declares
+`verification.readiness_source: agent-observation`.
+
+The observation stands in for the receipt in **attempt accounting only, never
+for readiness.** It shows the attempt ran as planned, not that the subject was
+installed and discovered. So on this path `installation-ready` is always
+UNKNOWN, naming `observation-<attempt>.json`, and readiness still gates PASS: a
+task PASS is stored as INCONCLUSIVE, and a task violation is still FAIL. A
+regrade of such a result reads the stored observation instead, refused unless
+it is a valid agent-observation bound to the same attempt and trial. It needs an
+explicit grading backend: agent-written code is never regraded as a bare host
+process. A real readiness
+source for the agent path, such as a client's own skill listing, would have to
+replace this rule rather than widen it.
+
 **Refused, and nothing written**, when:
 
 - the ledger pins no grader digest, or a different one, or plans another grader
@@ -181,6 +204,8 @@ That is not supported yet, and every case is currently read as setup-not-goal.
 - the attempt is not a finalized `captured` attempt;
 - the attempt has no installation receipt, or its receipt names another subject,
   client, attempt or trial (a stale receipt);
+  on the agent-trial path, instead, its observation does not confirm both
+  prompt delivery and the canary (#139);
 - a frozen object no longer matches its digest (#8's `frozen_artifacts`);
 - after grading, the grader's digest, the experiment store's contents (a snapshot
   of every file, link and directory) or the ledger's history differ from before;
