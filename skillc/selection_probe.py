@@ -72,6 +72,11 @@ GRADER_ROOT = Path(__file__).resolve().parent.parent / "evals" / "level1" / "slu
 
 ARMS: tuple[str, ...] = ("treatment", "baseline")
 
+#: The baseline arm installs nothing, so there is no receipt to read a real
+#: digest from - a named placeholder rather than a plausible-looking value
+#: (issue #10 lesson D13).
+BASELINE_SUBJECT_DIGEST = "sha256:0000000000000000000000000000000000000000000000000000000000baseline"
+
 SELECTION_STATUSES = ("selected", "not-selected", "unknown")
 
 
@@ -91,6 +96,7 @@ def load_manifest(path: Path = PROBE_ROOT / "run-manifest.json") -> dict[str, ob
 def plan_selection_probe(
     cases: dict[str, object], manifest: dict[str, object], *,
     treatment_subject_digest: str, baseline_subject_digest: str, image_digest: str, store: Path,
+    experiment_name: str = "selection-probe",
 ) -> trial.Experiment:
     """Plans BOTH arms of every case as its own trial through the real
     controller - the exact shape `tests/test_selection_probe.py`'s own
@@ -127,7 +133,7 @@ def plan_selection_probe(
                 },
                 "attempts": attempts_per_trial,
             })
-    spec: dict[str, object] = {"experiment": "selection-probe", "trials": trials}
+    spec: dict[str, object] = {"experiment": experiment_name, "trials": trials}
     return trial.plan(spec, store)
 
 
@@ -143,6 +149,12 @@ class AttemptTranscript:
     candidate_files: tuple[tuple[str, bytes, bool], ...] = ()  # verify.grade_files' own (relpath, bytes, executable) convention
     codex_best_effort: bool = False  # transcript_adapter.py: Codex's own skill-invocation detection is best-effort, never a structural guarantee
     detail: str = ""
+    #: The transcript was found and read (exactly one file, no hook failure),
+    #: so `events` is an OBSERVATION - an empty tuple then means "looked and
+    #: saw none", not "had nothing to look at". Independent of `disposition`:
+    #: an attempt whose named canary failed is inconclusive, yet its
+    #: transcript was still read.
+    observation_confirmed: bool = False
 
     def __post_init__(self) -> None:
         if self.disposition not in records.DISPOSITIONS:
@@ -218,6 +230,7 @@ class ArmResult:
     observed: frozenset[str] = field(default_factory=frozenset)
     codex_best_effort: bool = False
     detail: str = ""
+    observation_confirmed: bool = False
 
 
 @dataclass(frozen=True)
@@ -304,12 +317,16 @@ def run_planned_selection_probe(
     experiment: trial.Experiment, cases: dict[str, object], runner: AttemptRunner, *,
     base: Path, grader: verify.GraderDef | None = None,
     grading_backend: ExecutionBackend | None = None, allow_host_grading: bool = False,
+    detection_control: bool = False,
 ) -> SelectionProbeReport:
     """`run_selection_probe` over an ALREADY-planned experiment - the same
     attendance rule, grading and report assembly, split out so a runner can
     be built against the experiment before it runs.
 
     Refused before ANY attempt runs:
+      - a runner whose canary NAMES a skill, unless `detection_control=True` -
+        a prompt that names the skill supplies the selection it would report -
+        and a control whose runner names none.
       - a `grading_backend` that IS the runner's own agent backend
         (`AgentTrialRunner.backend`), or that has network egress.
       - a plan that does not cover every (case, arm) the supplied cases
@@ -330,6 +347,16 @@ def run_planned_selection_probe(
         `applicable_skills`, never against `cases`, so editing the case file
         after planning cannot change a verdict; `cases` supplies only the
         case's kind for the report."""
+    named = getattr(runner, "skill_name", None)
+    if named is not None and not detection_control:
+        raise SelectionProbeRefused(
+            f"the runner's canary names the skill {named!r} - a prompted invocation is a detection "
+            "control, never a selection result (#26: do not substitute prompted invocation)"
+        )
+    if detection_control and named is None:
+        raise SelectionProbeRefused(
+            "a detection control needs a runner whose canary names the skill it must detect"
+        )
     if grading_backend is None and not allow_host_grading:
         raise SelectionProbeRefused(
             "no grading_backend: the candidate would be executed on the host - pass a separate "
@@ -427,6 +454,7 @@ def run_planned_selection_probe(
                 observed=observed_skills(transcript),
                 codex_best_effort=transcript.codex_best_effort,
                 detail="; ".join(part for part in (transcript.detail, grading_detail) if part),
+                observation_confirmed=transcript.observation_confirmed,
             )
         results.append(CaseResult(
             case_id=case_id, kind=str(case["kind"]), applicable_skills=applicable,
@@ -462,33 +490,43 @@ def transcript_from_record(
     observation = record.get("observation")
     obs = observation if isinstance(observation, dict) else {}
     heuristic = obs.get("skill_invocation_detection") == "heuristic"
-    if disposition != "captured":
-        return AttemptTranscript(
-            disposition=disposition, codex_best_effort=heuristic,
-            detail=f"attempt disposition is {disposition!r}",
-        )
-    if not obs or obs.get("status") == "unknown":
-        return AttemptTranscript(
-            disposition="inconclusive", codex_best_effort=heuristic,
-            detail=f"the transcript observation is unknown: {obs.get('reason', 'no observation recorded')}",
-        )
-    if not obs.get("grading_eligible"):
-        return AttemptTranscript(
-            disposition="inconclusive", codex_best_effort=heuristic,
-            detail=(
-                f"prompt_delivered={obs.get('prompt_delivered')!r}, "
-                f"canary_satisfied={obs.get('canary_satisfied')!r} - neither selection nor "
-                "outcome is reported for an attempt the transcript did not confirm"
-            ),
-        )
-    invocations = obs.get("skill_invocations")
-    skills = [str(name) for name in invocations] if isinstance(invocations, list) else []
-    return AttemptTranscript(
-        disposition="captured",
-        events=tuple({"type": "skill_invocation", "skill": name} for name in skills),
-        candidate_files=tuple(agent_trial._frozen_candidate_files(experiment, attempt_id)),
-        codex_best_effort=heuristic,
+    # The invocations the transcript showed are kept whatever the canary
+    # said: a failed canary makes the attempt inconclusive (no selection, no
+    # grade), but an invocation it recorded is still evidence - a detection
+    # control's baseline must be able to see one (#26 review).
+    # Confirmed means THIS attempt's transcript was read: exactly one file,
+    # no hook failure, AND its first user message is this attempt's own
+    # prompt (which carries the attempt's nonce). An empty, malformed or
+    # unrelated file is not an observation of anything (#26 re-review).
+    confirmed = (
+        bool(obs) and obs.get("status") != "unknown" and obs.get("transcript_files_found") == 1
+        and obs.get("prompt_delivered") is True
     )
+    invocations = obs.get("skill_invocations")
+    events: tuple[dict[str, object], ...] = tuple(
+        {"type": "skill_invocation", "skill": str(name)}
+        for name in (invocations if isinstance(invocations, list) else [])
+    )
+
+    def made(disposition: str, detail: str = "",
+             candidate_files: tuple[tuple[str, bytes, bool], ...] = ()) -> AttemptTranscript:
+        return AttemptTranscript(
+            disposition=disposition, events=events, candidate_files=candidate_files,
+            codex_best_effort=heuristic, detail=detail, observation_confirmed=confirmed,
+        )
+
+    if disposition != "captured":
+        reason = record.get("reason")
+        return made(disposition, f"attempt disposition is {disposition!r}" + (f": {reason}" if reason else ""))
+    if not obs or obs.get("status") == "unknown":
+        return made("inconclusive", f"the transcript observation is unknown: {obs.get('reason', 'no observation recorded')}")
+    if not obs.get("grading_eligible"):
+        return made("inconclusive", (
+            f"prompt_delivered={obs.get('prompt_delivered')!r}, "
+            f"canary_satisfied={obs.get('canary_satisfied')!r} - neither selection nor "
+            "outcome is reported for an attempt the transcript did not confirm"
+        ))
+    return made("captured", candidate_files=tuple(agent_trial._frozen_candidate_files(experiment, attempt_id)))
 
 
 def agent_trial_runner(
@@ -505,6 +543,7 @@ def agent_trial_runner(
     cli_version: str | None = None,
     credential_explicit_path: str | Path | None = None,
     minimum_credential_seconds: float = credential.MINIMUM_REMAINING_SECONDS,
+    skill_name: str | None = None,
 ) -> AgentTrialRunner:
     """The real `AttemptRunner`: each planned attempt becomes one
     `agent_trial.run_one_attempt` against `experiment`, in SKILL-FREE mode
@@ -532,7 +571,15 @@ def agent_trial_runner(
     `SKILLC_ALLOW_REAL_AGENT=1` - `lifecycle.py`'s own guard, unchanged.
 
     The returned runner exposes `.backend`, so `run_planned_selection_probe`
-    can refuse to grade in the agent's own backend."""
+    can refuse to grade in the agent's own backend.
+
+    `skill_name` switches the canary to its NAMED form ("invoke <skill>,
+    then..."), which tells the agent which skill to use. That is the answer a
+    selection probe exists to observe, so a named runner is ONLY for the
+    predeclared detection control (`detection-control.json`): it shows the
+    pipeline can see a real invocation at all. `run_planned_selection_probe`
+    refuses a named runner for a selection run, and an unnamed one for a
+    control."""
     return AgentTrialRunner(
         experiment=experiment, backend=backend, base=base, client=client, argv_for=argv_for,
         treatment_home_files=treatment_home_files,
@@ -542,7 +589,7 @@ def agent_trial_runner(
             else collection_conformance._fixture_surface(GRADER_ROOT / "fixture")
         ),
         timeout=timeout, cli_version=cli_version, credential_explicit_path=credential_explicit_path,
-        minimum_credential_seconds=minimum_credential_seconds,
+        minimum_credential_seconds=minimum_credential_seconds, skill_name=skill_name,
     )
 
 
@@ -563,6 +610,7 @@ class AgentTrialRunner:
     cli_version: str | None
     credential_explicit_path: str | Path | None
     minimum_credential_seconds: float
+    skill_name: str | None = None
 
     def __call__(self, trial_dict: dict[str, object], attempt: dict[str, object]) -> AttemptTranscript | None:
         config = trial_dict["config"]
@@ -575,10 +623,81 @@ class AgentTrialRunner:
         attempt_id = str(attempt["attempt_id"])
         record = agent_trial.run_one_attempt(
             backend=self.backend, experiment=self.experiment, attempt_id=attempt_id, client=self.client,
-            base_argv=self.argv_for(attempt_id), prompt=prompt, skill_name=None,
+            base_argv=self.argv_for(attempt_id), prompt=prompt, skill_name=self.skill_name,
             surface=self.surface, limits=Limits(timeout=self.timeout), base=self.base,
             credential_explicit_path=self.credential_explicit_path,
             minimum_credential_seconds=self.minimum_credential_seconds, cli_version=self.cli_version,
             extra_home_files=dict(self.treatment_home_files) if arm == "treatment" else {},
         )
         return transcript_from_record(record, self.experiment, attempt_id)
+
+
+# ------------------------------------------------ detection control and exit rules (#26)
+
+
+def load_detection_control(path: Path = PROBE_ROOT / "detection-control.json") -> dict[str, object]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def detection_control_cases(cases: dict[str, object], control: dict[str, object]) -> dict[str, object]:
+    """`cases` narrowed to the control's one base case, planned (both arms)
+    under the control's own experiment name. Refused if the base case or
+    its revision is not the one the control was declared against."""
+    base = control["base_case"]
+    assert isinstance(base, dict)
+    all_cases = cases["cases"]
+    assert isinstance(all_cases, list)
+    matching = [c for c in all_cases if c["id"] == base["id"]]
+    if not matching or matching[0]["revision"] != base["revision"]:
+        raise SelectionProbeRefused(
+            f"detection control is declared against {base['id']!r} revision {base['revision']!r}, "
+            "which the supplied cases do not contain"
+        )
+    [case] = matching
+    if control["skill_name"] not in case["applicable_skills"]:
+        raise SelectionProbeRefused(
+            f"control skill {control['skill_name']!r} is not applicable to {case['id']!r}"
+        )
+    return {**cases, "cases": [case]}
+
+
+def probe_verdict(report: SelectionProbeReport, *, detection_control: bool) -> tuple[bool, str]:
+    """`(ok, why)` for the operator command's exit status.
+
+    A selection run is ok only when EVERY arm of every case was captured -
+    a report of `unknown`s is not a measurement, however orderly it looks
+    (the first live attempt at this ran six `unavailable` attempts and a
+    harness that only checked the vocabulary called it a pass).
+
+    A detection control is ok only when the treatment arm (skill installed,
+    prompt names it) reads `selected` AND the baseline arm (nothing
+    installed) does not. The first shows the pipeline can see a real
+    invocation; the second that it does not report one that could not have
+    happened. "Does not" means the baseline's transcript WAS read and showed
+    no invocation of any skill - an attempt that never produced an
+    observation (a failed launch, a missing transcript) proves nothing
+    either way and fails the control."""
+    if not report.cases:
+        return False, "the report has no cases"
+    if detection_control:
+        [case] = report.cases
+        if case.treatment.selection != "selected":
+            return False, (f"control NOT detected: treatment reads {case.treatment.selection!r} "
+                           f"({case.treatment.disposition}; {case.treatment.detail or 'no detail'})")
+        if case.baseline.selection == "selected" or case.baseline.observed:
+            return False, (f"control reported an invocation in the baseline arm, where nothing was "
+                           f"installed: {sorted(case.baseline.observed) or case.baseline.selection}")
+        if not case.baseline.observation_confirmed:
+            return False, (f"control baseline was never observed ({case.baseline.disposition}; "
+                           f"{case.baseline.detail or 'no detail'}) - absence cannot be certified from "
+                           "missing evidence")
+        return True, "control detected in treatment; baseline observed with no invocation"
+    missing = [
+        f"{case.case_id}/{arm}={result.disposition}"
+        for case in report.cases
+        for arm, result in (("treatment", case.treatment), ("baseline", case.baseline))
+        if result.disposition != "captured"
+    ]
+    if missing:
+        return False, "not every attempt was captured: " + ", ".join(missing)
+    return True, f"all {2 * len(report.cases)} attempts captured"
