@@ -1154,7 +1154,7 @@ def test_cancellation_seed_is_not_caught_when_the_child_never_starts_its_exec(
         ready_timeout=1.0, child_command=[sys.executable, "-c", "import time; time.sleep(30)"],
     )
     assert seed.caught is False
-    assert "never announced its exec" in seed.evidence
+    assert "never announced its attempt" in seed.evidence
     assert not reap.snapshot(_docker_bin(docker_state)).owned
 
 
@@ -1229,6 +1229,26 @@ def test_cancellation_seed_interrupted_itself_kills_the_child_and_records_its_at
     report = reap.reap(_docker_bin(docker_state), recorded)
     assert not report.left_running and not report.unknown
     assert not reap.snapshot(_docker_bin(docker_state)).owned
+
+
+def test_cancel_target_announces_its_attempt_before_any_container_exists(
+    base: Path, docker_state: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Counter-model re-review of #122: the attempt id must be announced
+    BEFORE `prepare()`, so a parent that kills the child mid-prepare or
+    mid-install can still name - and reap - the container it left. With the
+    daemon down, `prepare()` fails, and the announcement must already have
+    been printed; announced from `before_execute` (the first version), it
+    never would be."""
+    docker_state.mkdir(parents=True, exist_ok=True)
+    (docker_state / ".down").touch()
+    recorded: list[str] = []
+    exit_code = demo.run_cancel_target(
+        image="fake-image:1", docker_bin=_docker_bin(docker_state), base=base, timeout=5, sleep=1,
+        recorded_attempt_ids=recorded,
+    )
+    assert exit_code == 1
+    assert f"{demo.CANCEL_READY_MARKER}{recorded[0]}" in capsys.readouterr().err
 
 
 def test_cancellation_seed_is_not_caught_when_the_daemon_is_down(base: Path, docker_state: Path) -> None:

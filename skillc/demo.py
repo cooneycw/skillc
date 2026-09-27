@@ -901,10 +901,13 @@ CANCEL_TARGET_SLEEP = 60.0
 CANCEL_READY_TIMEOUT = 120.0
 CANCEL_LIVE_TIMEOUT = 60.0
 
-#: Printed by `--cancel-target` to stderr, once, from `before_execute`. The
-#: parent reads the attempt id from it, and nothing else - it is NOT the
-#: evidence that the exec is in flight (see `CANCEL_LIVE_FILE`).
-CANCEL_READY_MARKER = "skillc: cancel-target exec starting attempt="
+#: Printed by `--cancel-target` to stderr, once, as soon as its attempt is
+#: planned - BEFORE `prepare()` creates any container (counter-model
+#: re-review: announced any later, a parent killing the child in between
+#: could not name the container it left). The parent reads the attempt id
+#: from it, and nothing else - it is NOT the evidence that the exec is in
+#: flight (see `CANCEL_LIVE_FILE`).
+CANCEL_READY_MARKER = "skillc: cancel-target attempt="
 
 #: Written into the container's workspace by the cancel-target's own
 #: subject, as its first act inside the exec, before it sleeps. The parent
@@ -1017,9 +1020,10 @@ def run_cancel_target(
     recorded_attempt_ids: list[str],
 ) -> int:
     """The CHILD side of the cancellation seed (`skillc demo --cancel-target
-    SECONDS`, a hidden flag): one attempt whose exec sleeps `sleep` seconds,
-    announcing `CANCEL_READY_MARKER<attempt id>` on stderr from
-    `before_execute`, immediately before `execute()` starts. It runs inside
+    SECONDS`, a hidden flag): one attempt whose exec marks itself live
+    (`CANCEL_LIVE_FILE`) and sleeps `sleep` seconds, announcing
+    `CANCEL_READY_MARKER<attempt id>` on stderr before any container exists
+    (see that constant). It runs inside
     `cmd_demo`'s own `try`, so a SIGINT lands on the real
     `KeyboardInterrupt` handler and its scoped sweep - the thing under test,
     not a copy of it. The attempt id is recorded before any backend call, as
@@ -1029,13 +1033,9 @@ def run_cancel_target(
     backend = dbe.DockerBackend(image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=timeout)
     experiment, attempt_id = _plan_one_attempt(base, "control", "cancel-target")
     recorded_attempt_ids.append(attempt_id)
-
-    def _announce(_backend: object, _handle: object) -> None:
-        print(f"{CANCEL_READY_MARKER}{attempt_id}", file=sys.stderr, flush=True)
-
+    print(f"{CANCEL_READY_MARKER}{attempt_id}", file=sys.stderr, flush=True)
     record = lifecycle.run_through_backend(
-        backend, experiment, attempt_id, _cancel_target_argv(sleep), {"demo": "x"}, Limits(timeout=sleep + 60),
-        base, before_execute=_announce,
+        backend, experiment, attempt_id, _cancel_target_argv(sleep), {"demo": "x"}, Limits(timeout=sleep + 60), base,
     )
     print(f"skillc: cancel-target was never interrupted - disposition={record.get('disposition')}", file=sys.stderr)
     return 1
@@ -1053,7 +1053,8 @@ def run_cancellation_control(
     A FOREIGN skillc-owned container is prepared first - owned, labelled,
     running, and not the child's. The child (`skillc demo --cancel-target`,
     `child_command` overriding only how skillc's CLI is launched) starts in
-    its own session and announces its attempt id. The parent then waits
+    its own session and announces its attempt id before creating any
+    container. The parent then waits
     until the child's subject has written `CANCEL_LIVE_FILE` inside the
     running container - the evidence that the exec is in flight - and sends
     SIGINT to the child's whole process group, as Ctrl-C in a terminal does,
@@ -1159,7 +1160,7 @@ def run_cancellation_control(
         if attempt is None:
             return ControlSeed(
                 name, False,
-                f"the child never announced its exec (waited {ready_timeout}s) - no SIGINT was sent, exit={exit_code}",
+                f"the child never announced its attempt (waited {ready_timeout}s) - no SIGINT was sent, exit={exit_code}",
             )
         if not live:
             return ControlSeed(
