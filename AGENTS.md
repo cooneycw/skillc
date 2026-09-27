@@ -63,8 +63,10 @@ specification rejects, and it proves its own rules can fail before reporting the
   and asserted equal to the code that produces it - no live attempt has run
 - `evals/matched-pilot/` - the first bounded matched pilot's predeclared experiment
   record and cost estimate (#12), reusing `skillc/cost_estimate.py` rather than a
-  second estimator; see `skillc/records.py`'s `pilot-report` kind for the evidence
-  report schema this pilot's acceptance requires - no live attempt has run
+  second estimator, and its live evidence (`evidence/`: 6 attempts, run 2026-09-27)
+- `skillc/matched_pilot.py` - `skillc pilot-run`/`pilot-report`: runs the predeclared
+  pilot schedule (pins checked, caps enforced), reconciles every planned attempt, and
+  publishes a leak-checked, record-checked `pilot-report` bundle
 - `evals/level1/<task>/` - a goal-based task: pinned fixture, public `goal.md`, a grader
   (`grader.json`: probe, inputs, judge), reference/alternative/wrong candidates and a
   `qualify.py` gate that must refuse broken graders

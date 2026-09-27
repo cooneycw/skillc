@@ -50,3 +50,10 @@ Fixtures:
   call is requested but fails").
 - `no-op.jsonl` - a prompt and a prose-only reply, no tool call at all. Red
   case (#106's own acceptance: "red on a no-op transcript").
+- `run-metadata.jsonl` - the run-identity events a real rollout carries
+  beside the conversation (issue #12): `session_meta.cli_version`, one
+  `turn_context` per turn (`model`, `effort`), cumulative `token_count`
+  events, and assistant messages. Two turns with DIFFERENT models and two
+  token counts, so a reader that takes the first value instead of the last
+  is caught. Shapes observed on a live codex-cli 0.157.1 rollout
+  (2026-09-27); every value is fake.

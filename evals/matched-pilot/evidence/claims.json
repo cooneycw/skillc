@@ -1,0 +1,13 @@
+{
+ "reviewed_by": "the /flow:auto #12 session, reading each attempt's closing message in the private run directory",
+ "reviewed_on": "2026-09-27",
+ "rule": "claimed-success: the closing message states the fix was made and verified; claimed-failure: it states the task was not done; no-claim: it states neither",
+ "claims": {
+  "a-05d83ac86628": "claimed-success",
+  "a-c63323550b21": "claimed-success",
+  "a-ccf74f5722a0": "claimed-success",
+  "a-79ffea58652b": "claimed-success",
+  "a-1c41825dc59e": "claimed-success",
+  "a-dc37d8ae791c": "claimed-success"
+ }
+}
