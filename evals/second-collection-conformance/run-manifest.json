@@ -1,0 +1,43 @@
+{
+ "manifest_schema": 1,
+ "experiment": "second-collection-conformance",
+ "_comment": "Prepared, not run (#11's own text: 'Publish conformance evidence for both collections and a bounded compatibility statement; do not build a second large benchmark'). Execution needs #81's operator demo command, which is in progress (issue-81-operator-demo, w1) and #10's own live Docker run - neither exists yet. This manifest states the exact command each run will use, per the agreed --subject design (orchestrator ruling, msg 1474, relayed to w1): --subject <name> materializes evals/subjects/<name>/subject.json through materialize.py and installs it via DockerBackend.install() into the real container used by #81's demo, then observes discovery via the client's own no-model listing (the same codex debug prompt-input path skillc/exposure.py already uses) - never a model call. The lifecycle and grading demos #81 already has are unchanged: slug-small-fix stays the graded task regardless of --subject.",
+
+ "runs": [
+  {
+   "subject": "cpp-codex",
+   "subject_declaration": "evals/subjects/cpp-codex/subject.json",
+   "command": "skillc trial demo --docker --subject cpp-codex",
+   "command_status": "AGREED (orchestrator ruling, msg 1474), not yet implemented - #81's --subject flag is in progress",
+   "expected_paste_back": {
+    "installation_receipt_summary": "installed: 273 file(s) in 74 skill(s); available: SATISFIED (5/5 readiness facts) - matching evals/subjects/cpp-codex/evidence/report.json's already-recorded observations, through the SAME materialize.py adapter, now inside a real container instead of the host",
+    "discovered": "owed to #81's client-listing discovery step (its own scope item 4) - if w1 splits that into a follow-up PR, this field stays 'owed to the follow-up' rather than an invented result"
+   }
+  },
+  {
+   "subject": "mattpocock-skills",
+   "subject_declaration": "evals/subjects/mattpocock-skills/subject.json",
+   "command": "skillc trial demo --docker --subject mattpocock-skills",
+   "command_status": "AGREED (orchestrator ruling, msg 1474), not yet implemented - #81's --subject flag is in progress",
+   "expected_paste_back": {
+    "installation_receipt_summary": "installed: 7 file(s) in 2 skill(s); available: SATISFIED (5/5 readiness facts) - matching evals/subjects/mattpocock-skills/evidence/report.json's already-recorded observations",
+    "discovered": "expected: both selected skills (tdd, diagnosing-bugs) discovered - owed to #81's client-listing discovery step, not invented here",
+    "known_gap_not_exercised_by_this_run": "the OTHER 23 of 25 manifest-shipped skills are deliberately never selected in this subject's declaration, matching evals/subjects/mattpocock-skills/SUBJECT.md's own selection rationale: 14 are policy-hidden (disable-model-invocation + agents/openai.yaml's allow_implicit_invocation: false) and would misreport under today's policy-unaware discovery step (filed on the Nit Store, #20) - this run does not claim anything about those 14, or the 11 model-invoked-but-unselected skills"
+   }
+  }
+ ],
+
+ "no_project_name_branch": {
+  "claim": "materialize.py, trial.py, verify.py, backend.py, lifecycle.py, docker_backend.py, reap.py, trial_bootstrap.py, cost_estimate.py, exposure.py, judge.py, checks.py, records.py, cli.py, leak.py, provenance.py and spec.py carry no subject-name literal",
+  "evidence": "tests/test_materialize.py's genericity guard (CORE_MODULES, an open set derived from every skillc/*.py file since #94) - cited here per orchestrator instruction (msg 1474: 'cite it rather than re-prove it'), not re-demonstrated in this manifest"
+ },
+
+ "unsupported_formats_refused_before_selection": {
+  "claim": "an unsupported surface, an unsupported client, or a malformed subject declaration is refused by materialize.Subject.from_dict BEFORE any selection happens, for either subject or any other",
+  "evidence": "tests/test_materialize.py::test_a_malformed_subject_declaration_is_refused, 10 parametrized cases (unknown keys, unsupported surface, unsupported client, no client version, an escaping path, a malformed select, and more) - the logic is generic, not subject-specific, so it applies to cpp-codex and mattpocock-skills identically; cited per orchestrator instruction (msg 1474), not re-proven per-subject here"
+ },
+
+ "bounded_compatibility_statement": "See README.md in this directory for the full statement. In one line: skillc materialize, the trial controller, the verifier and the Docker backend install and account for both subjects through the identical, subject-agnostic code path - proven on the host today (both subjects' committed evidence) and, once #81's --subject flag lands, proven again inside a real Docker container. This says NOTHING about which collection helps an agent more, about task outcomes, or about any paid model call - #10/#12/#26 own those questions, not this manifest.",
+
+ "execution": "not executed - owed to the operator's live run, in the SAME session as #81's demo (one runbook, per orchestrator instruction msg 1470), once w1's --subject flag lands"
+}

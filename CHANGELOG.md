@@ -16,6 +16,25 @@ collection) closes.
 
 ### Added
 
+- **The second-collection conformance run, prepared** (Refs #11):
+  [`evals/second-collection-conformance/`](evals/second-collection-conformance/README.md)
+  states the exact command per subject (`cpp-codex`, `mattpocock-skills`),
+  through the agreed `--subject <name>` design for #81's operator demo
+  (materialize the named subject, install it into the real container via
+  `DockerBackend.install()`, observe client-side discovery with no model
+  call - confirmed by direct question to `w1` rather than guessed, since
+  #81's WIP did not yet touch `materialize.py` at all), the expected
+  paste-back shape per subject (an installation-receipt summary matching
+  each subject's already-recorded host evidence, plus a `discovered` field
+  explicitly marked `owed to the follow-up` rather than invented), and the
+  bounded compatibility statement #11's own text asks for - what is and is
+  not shown compatible between the two collections. Cites, rather than
+  re-proves, two acceptance bullets already closed by existing work: no
+  project-name branch (the genericity guard, #94) and unsupported formats
+  refused before selection (`test_a_malformed_subject_declaration_is_refused`'s
+  10 parametrized cases, generic to both subjects). Prepared, not run - like
+  the matched pilot (#12/#89), execution needs a capability (#81's demo,
+  #10's live daemon) that does not exist yet.
 - **The fake `docker` CLI's state-file writes are now atomic and locked**
   (Refs #77): `test_execute_cancellation_kills_the_container` flaked on
   main at roughly 1 in 25 runs. Root cause: `tests/fixtures/docker-backend/
