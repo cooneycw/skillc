@@ -84,6 +84,11 @@ def test_a_red_that_names_another_file_turns_the_step_red(tmp_path: Path) -> Non
     assert "mypy exited 1 without reporting tests/" in result.stderr, result.stderr
 
 
+@pytest.mark.skipif(
+    os.geteuid() == 0,
+    reason="root bypasses chmod(0o000) (DAC override), so this probe cannot "
+    "become unreadable under a root test runner (cross-model review, PR #116)",
+)
 def test_an_unreadable_source_file_turns_the_step_red(tmp_path: Path) -> None:
     """A copy that genuinely fails must still fail (#20 comment 5850673964):
     the fix for the tar-vs-parallel-writer race must not turn every copy
