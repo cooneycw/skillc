@@ -10,6 +10,7 @@ stop): `trial.plan()` only ever writes a ledger to a throwaway store.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from skillc import cost_estimate as ce
@@ -177,28 +178,35 @@ def test_authorize_agrees_with_the_manifests_own_execution_state() -> None:
     """The manifest is a subscription-login run (ADR 0005 rule 6) with no
     judge tier enabled, so `authorize()` in that mode succeeds
     unconditionally - $0 of dollar-metered spend needs no budget approval.
-    The manifest's own `execution` field stays "incomplete" for a DIFFERENT,
-    still-real reason (issue #98's in-container credential path,
-    skillc/trial.py's execution loop), so the two facts are checked
-    independently rather than via the old one-to-one implication a plain
-    dollar gate used to support."""
+    `execution` must agree with the committed evidence: "incomplete" while no
+    report is committed, "run" once one is - never claiming a run that left
+    no report, nor hiding one that did."""
     cost = _committed_estimate()
     ce.authorize(
         cost, approved_budget_usd=MANIFEST["approved_budget_usd"], agent_uses_subscription_login=True,
     )  # must not raise: no judge tier enabled, so judge spend is $0
-    assert MANIFEST["execution"].startswith("incomplete"), (
-        "execution should still name #98/trial.py as the real blocker, not a dollar gate"
-    )
+    ran = (PILOT_DIR / "evidence" / "records" / "report.json").exists()
+    assert MANIFEST["execution"].startswith("run" if ran else "incomplete")
 
 
-def test_the_image_digest_is_named_as_owed_not_invented() -> None:
-    """Issue #10 lesson D13: the image digest is owed to the live build -
-    say so rather than invent a value that looks like a real one. A
-    hash-shaped placeholder (e.g. 'sha256:000...') would read as data; this
-    must not be that shape."""
+def test_the_image_digest_is_declared_and_matches_what_ran() -> None:
+    """Issue #10 lesson D13 held while no image existed: the field said
+    'owed' rather than invent a digest. Declared now, it must be a real
+    sha256 digest, and once evidence is committed, every trial the ledger
+    planned must name that SAME image - a declaration the run did not honour
+    is refused here."""
     digest = RECORD["image_digest"]
-    assert not digest.startswith("sha256:")
-    assert "owed" in digest
+    assert re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
+    ledger_path = PILOT_DIR / "evidence" / "records" / "ledger.json"
+    if ledger_path.exists():
+        ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+        assert {t["image"]["digest"] for t in ledger["trials"]} == {digest}
+
+
+def test_artifact_retention_was_decided_before_capture() -> None:
+    retention = MANIFEST["predeclared_experiment_record"]["artifact_retention"]
+    assert "before capture" in retention["decided"]
+    assert "outside any git work tree" in retention["private"]
 
 
 def test_goal_population_reuses_the_already_qualified_grader_not_a_new_one() -> None:

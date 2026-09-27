@@ -76,6 +76,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -109,6 +110,10 @@ class ClientSpec:
     #: whose `exec` subcommand needed no seed in every live probe run for
     #: #106/#107 (confirmed empirically, 2026-09-27, not assumed).
     compose_home_files: Callable[[_AttemptContext], dict[str, bytes]]
+    #: Reads the run's own identity (observed model, CLI version, token usage,
+    #: the agent's closing message) out of the raw transcript - issue #12.
+    #: `None` for a client with no adapter yet, recorded as `run_metadata: None`.
+    run_metadata: Callable[[str], dict[str, object]] | None = None
 
 
 @dataclass(frozen=True)
@@ -162,6 +167,7 @@ CLIENT_SPECS: dict[str, ClientSpec] = {
         supports_name_flag=False,
         skill_invocation_detection="heuristic",
         compose_home_files=_codex_home_files,
+        run_metadata=ta.codex_run_metadata,
     ),
 }
 
@@ -275,6 +281,7 @@ def _make_observe_before_teardown(
         tree = backend.read_home_tree(handle, spec.transcript_container_reldir)
         matches = {path: data for path, data in tree.items() if path.endswith(spec.transcript_suffix)}
 
+        run_metadata: dict[str, object] | None = None
         observation = TranscriptObservation(
             files_found=len(matches), prompt_delivered=False, prompt_delivery_reason=None,
             canary_satisfied=False, canary_reason=None,
@@ -290,7 +297,10 @@ def _make_observe_before_teardown(
             )
         else:
             (_, raw), = matches.items()
-            events = spec.parse_transcript(raw.decode("utf-8", errors="replace"))
+            text = raw.decode("utf-8", errors="replace")
+            events = spec.parse_transcript(text)
+            if spec.run_metadata is not None:
+                run_metadata = spec.run_metadata(text)
             prompt_delivered = True
             prompt_reason = None
             try:
@@ -322,7 +332,7 @@ def _make_observe_before_teardown(
         usage = credential.CredentialUsage(
             client=spec.name, delivered=cred_bytes is not None, refresh_observed_in_container=refresh_observed,
         )
-        return {**observation.to_fields(), **usage.to_record_fields()}
+        return {**observation.to_fields(), **usage.to_record_fields(), "run_metadata": run_metadata}
 
     return hook
 
@@ -445,6 +455,9 @@ def run_one_attempt(
 
     graded: dict[str, object] | None = None
     grading_blocked_reason: str | None = None
+    #: Wall-clock of the grading call alone (issue #12's setup/agent/grading
+    #: split); `None` when nothing was graded.
+    grading_seconds: float | None = None
     observation = record.get("observation")
     if grader is not None:
         if record.get("disposition") != "captured":
@@ -474,10 +487,15 @@ def run_one_attempt(
                     "agent attempt's own state into the probe's isolation"
                 )
             files = _frozen_candidate_files(experiment, attempt_id)
+            grading_started = time.monotonic()
             graded_result = verify.grade_files(grader, files, base, backend=grading_backend)
+            grading_seconds = time.monotonic() - grading_started
             graded = {
                 "status": graded_result.status, "category": graded_result.category,
                 "detail": graded_result.detail, "criteria": graded_result.criteria,
             }
 
-    return {**record, "graded": graded, "grading_blocked_reason": grading_blocked_reason}
+    return {
+        **record, "graded": graded, "grading_blocked_reason": grading_blocked_reason,
+        "grading_seconds": grading_seconds,
+    }

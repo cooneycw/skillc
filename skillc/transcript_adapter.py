@@ -330,3 +330,70 @@ def parse_codex_transcript(raw_jsonl: str) -> list[NormalizedEvent]:
             events.append({"type": "tool_use", "output": output_text, "error": error})
 
     return events
+
+
+#: The token counters a Codex `token_count` event's `total_token_usage`
+#: carries (confirmed against a live codex-cli 0.157.1 rollout on this host,
+#: 2026-09-27). Copied by name only - any other key is dropped.
+_CODEX_TOKEN_KEYS = ("input_tokens", "cached_input_tokens", "output_tokens", "reasoning_output_tokens", "total_tokens")
+
+
+def codex_run_metadata(raw_jsonl: str) -> dict[str, object]:
+    """What a real Codex rollout says about the run itself, rather than the
+    conversation (issue #12: the pilot's model identity is OBSERVED, not the
+    manifest's assumption):
+
+      - `model` / `reasoning_effort`: the LAST `turn_context` event's own
+        `model` and `effort`;
+      - `cli_version`: the `session_meta` event's own `cli_version`;
+      - `token_usage`: the LAST `token_count` event's cumulative
+        `info.total_token_usage`, restricted to `_CODEX_TOKEN_KEYS`;
+      - `final_agent_message`: the text of the last `assistant` message - the
+        agent's own closing claim, for a reviewer to read. It is transcript
+        content: kept with the private run, never committed.
+
+    Every value is `None` when the rollout does not carry it - absent is
+    reported as absent, never filled with a default. `session_meta` also
+    carries account identifiers; nothing from it but `cli_version` is read."""
+    meta: dict[str, object] = {
+        "model": None, "reasoning_effort": None, "cli_version": None,
+        "token_usage": None, "final_agent_message": None,
+    }
+    for line in raw_jsonl.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        payload = obj.get("payload")
+        if not isinstance(payload, Mapping):
+            continue
+        kind = obj.get("type")
+        if kind == "session_meta":
+            version = payload.get("cli_version")
+            if isinstance(version, str):
+                meta["cli_version"] = version
+        elif kind == "turn_context":
+            model = payload.get("model")
+            if isinstance(model, str):
+                meta["model"] = model
+            effort = payload.get("effort")
+            if isinstance(effort, str):
+                meta["reasoning_effort"] = effort
+        elif kind == "event_msg" and payload.get("type") == "token_count":
+            info = payload.get("info")
+            total = info.get("total_token_usage") if isinstance(info, Mapping) else None
+            if isinstance(total, Mapping):
+                meta["token_usage"] = {
+                    key: total[key] for key in _CODEX_TOKEN_KEYS
+                    if isinstance(total.get(key), int) and not isinstance(total.get(key), bool)
+                }
+        elif kind == "response_item" and payload.get("type") == "message" and payload.get("role") == "assistant":
+            text = _codex_message_text(payload.get("content"))
+            if text:
+                meta["final_agent_message"] = text
+    return meta

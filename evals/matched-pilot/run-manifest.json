@@ -22,8 +22,8 @@
       "locator": "github.com/cooneycw/claude-power-pack",
       "revision": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b"
     },
-    "image_digest": "owed-to-the-live-build",
-    "image_digest_note": "no image has been built for this pilot - #77/#85's Docker backend implementation exists, but building and running it is the operator's live run, not this planning PR. This is a named refusal to invent one, not a placeholder shaped like a real digest (issue #10 lesson D13).",
+    "image_digest": "sha256:d1b2ced9dc6d25e9e1bc673c1973f032ced50a11da234fcd617ee376ff36eefc",
+    "image_digest_note": "declared 2026-09-27, before the run: the skillc-trial:latest image #10's operator run built and #11's live run used (evals/second-collection-conformance/evidence/README.md). Until then this field said 'owed-to-the-live-build' rather than invent a value (issue #10 lesson D13). skillc pilot-run resolves the digest of the image that actually runs and records THAT in the ledger; tests/test_matched_pilot.py checks the two agree.",
     "goal_population": {
       "task": {"id": "slug-small-fix", "revision": "2", "goal": "evals/level1/slug-small-fix/goal.md", "grader": "evals/level1/slug-small-fix/grader.json"},
       "note": "the SAME already-qualified task and grader #26's selection probe reuses (#5) - #12 measures task-outcome benefit and completion time, not selection behavior, so no case-format prompt addendum is used here"
@@ -47,6 +47,12 @@
     },
     "monetary_ceiling_usd": 5.00,
     "monetary_ceiling_source": "operator ruling, 2026-09-26 (ADR 0005 rule 6), carried into #12: the $5 ceiling applies here too, enforced in code by skillc.cost_estimate.authorize. Applies to dollar-metered judge-call spend; this pilot enables no judge tier (judge_estimated_quota_usd_equivalent below is 0), so the ceiling is trivially satisfied and no budget approval is required for it.",
+    "artifact_retention": {
+      "decided": "2026-09-27, before capture (owner approval of the #12 plan)",
+      "private": "the trial store (journals, content-addressed captured objects), each attempt's private outcome record and the agents' closing messages stay in a private run directory outside any git work tree: ~/.local/share/skillc/pilot-runs/<run-id>/ (skillc.trial.open_store refuses a store inside a work tree). Transcripts carry account identifiers, so they are never committed.",
+      "committed": "the ledger, the lifecycle records, the artifact manifests and the assembled pilot-report, exported to evals/matched-pilot/evidence/records/ and leak-checked by skillc pilot-run before they are left in place (a finding removes the exported files again)",
+      "runner": "skillc pilot-run (skillc/matched_pilot.py)"
+    },
     "clarification_and_approval_behavior": {
       "clarification": "no interactive clarification is available during a trial - attempts run non-interactively (codex exec / an equivalent non-interactive invocation, matching skillc/trial_bootstrap.py's own 'never auto-answer' rule from #78). If the agent's own output poses a clarifying question instead of proceeding, that attempt's pilot-report entry declares it explicitly under 'uncertainty' and counts it in 'interventions' - it is never auto-answered from outside the attempt.",
       "approval": "the SAME gate #26 uses: skillc.cost_estimate.authorize() refuses to authorize execution without an approved budget at or above any dollar-metered (judge) spend, and separately refuses any such spend over the $5 ceiling regardless of a larger approved budget. This pilot's agent-attempt quota is not dollar-metered (ADR 0005 rule 6) and needs no such approval by itself."
@@ -78,5 +84,5 @@
 
   "monetary_cap_usd": null,
   "approved_budget_usd": null,
-  "execution": "incomplete - no live run: the agent-quota figure needs no budget approval under ADR 0005 rule 6 (no judge tier is enabled, so judge spend is $0); the in-container credential path for a subscription-login agent run (issue #98) is now built, but skillc/trial.py's real attempt-execution loop does not exist yet"
+  "execution": "incomplete - the runner exists (skillc pilot-run, #12) and the run is approved (owner, 2026-09-27; subscription login, no judge tier, $0 metered), but it has not been run yet"
 }

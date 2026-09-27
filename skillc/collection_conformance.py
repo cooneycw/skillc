@@ -269,6 +269,44 @@ def plan_collection_attempt(
     return experiment, str(attempt["attempt_id"])
 
 
+def run_level1_agent_attempt(
+    *,
+    experiment: trial.Experiment,
+    attempt_id: str,
+    backend: DockerBackend,
+    grading_backend: DockerBackend,
+    base: Path,
+    base_argv: Sequence[str],
+    extra_home_files: Mapping[str, bytes],
+    cli_version: str,
+    prompt: str | None = None,
+    surface: Mapping[str, object] | None = None,
+    timeout: float = 30,
+    credential_explicit_path: str | Path | None = None,
+    minimum_credential_seconds: float = credential.MINIMUM_REMAINING_SECONDS,
+) -> dict[str, object]:
+    """One real (or, in tests, scripted-fake) codex attempt against the Level 1
+    task, in skill-free canary mode, graded by the fixture's own grader -
+    whatever `extra_home_files` installs. `run_collection_agent_attempt`
+    passes a collection's selected skills; the matched pilot's baseline arm
+    (issue #12) passes `{}`, so both arms go through this one path and differ
+    ONLY in what is installed - never a second copy of the prompt, fixture
+    or grader wiring that could drift from the first."""
+    resolved_prompt = prompt if prompt is not None else (demo.GRADER_ROOT / "goal.md").read_text(encoding="utf-8")
+    resolved_surface = surface if surface is not None else _fixture_surface(demo.GRADER_ROOT / "fixture")
+    grader = verify.GraderDef.load(demo.GRADER_ROOT)
+    return agent_trial.run_one_attempt(
+        backend=backend, experiment=experiment, attempt_id=attempt_id, client=materialize.CLIENT,
+        base_argv=base_argv, prompt=resolved_prompt, skill_name=None,
+        surface=resolved_surface, limits=Limits(timeout=timeout), base=base,
+        credential_explicit_path=credential_explicit_path,
+        minimum_credential_seconds=minimum_credential_seconds,
+        cli_version=cli_version,
+        grader=grader, grading_backend=grading_backend,
+        extra_home_files=extra_home_files,
+    )
+
+
 def run_collection_agent_attempt(
     *,
     subject_name: str,
@@ -308,20 +346,11 @@ def run_collection_agent_attempt(
     prompt, since bullet 2 fixes this task for every collection; a caller
     that needs a different one (this module's own tests, a red case) may
     still override either."""
-    resolved_prompt = prompt if prompt is not None else (demo.GRADER_ROOT / "goal.md").read_text(encoding="utf-8")
-    resolved_surface = surface if surface is not None else _fixture_surface(demo.GRADER_ROOT / "fixture")
-    extra_home_files = _collection_home_files(acquired.source, acquired.files)
-
-    grader = verify.GraderDef.load(demo.GRADER_ROOT)
-    record = agent_trial.run_one_attempt(
-        backend=backend, experiment=experiment, attempt_id=attempt_id, client=materialize.CLIENT,
-        base_argv=base_argv, prompt=resolved_prompt, skill_name=None,
-        surface=resolved_surface, limits=Limits(timeout=timeout), base=base,
-        credential_explicit_path=credential_explicit_path,
-        minimum_credential_seconds=minimum_credential_seconds,
-        cli_version=acquired.subject.client_version,
-        grader=grader, grading_backend=grading_backend,
-        extra_home_files=extra_home_files,
+    record = run_level1_agent_attempt(
+        experiment=experiment, attempt_id=attempt_id, backend=backend, grading_backend=grading_backend,
+        base=base, base_argv=base_argv, extra_home_files=_collection_home_files(acquired.source, acquired.files),
+        cli_version=acquired.subject.client_version, prompt=prompt, surface=surface, timeout=timeout,
+        credential_explicit_path=credential_explicit_path, minimum_credential_seconds=minimum_credential_seconds,
     )
     return CollectionAgentResult(
         subject_name, acquired.subject.revision, materialize.CLIENT, record, agent_network=backend.network,
