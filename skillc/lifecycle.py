@@ -238,6 +238,7 @@ def run_through_backend(
     cancel: Callable[[], bool] | None = None,
     observe_before_teardown: Callable[[ExecutionBackend, object], Mapping[str, object]] | None = None,
     before_execute: Callable[[ExecutionBackend, object], None] | None = None,
+    nonce: str | None = None,
 ) -> dict[str, object]:
     """Drive `attempt_id` through `backend` from prepare to teardown, and
     finalize it. Returns `trial.finalize`'s lifecycle record, plus
@@ -281,6 +282,17 @@ def run_through_backend(
     Omitting the argument changes nothing, for the same reason
     `observe_before_teardown`'s omission does.
 
+    `nonce` (issue #106) lets a caller supply the liveness canary's nonce
+    itself, rather than one this function mints internally. This exists for
+    exactly one reason: a caller composing a REAL agent's prompt (which
+    becomes part of `argv`, fixed before this function is ever called) needs
+    to embed the SAME nonce the backend will plant, so the agent's own canary
+    instruction and `install()`'s backend-planted file-content canary are ONE
+    proof, not two independent ones with two different nonces - unifying them
+    minimizes prompt contamination in the very behaviour being measured
+    (cross-model review). Omitted (the default, every pre-#106 caller),
+    a fresh nonce is minted exactly as before.
+
     TEARDOWN IS UNCONDITIONAL once `prepare()` has returned a handle
     (found by cross-model review: the first version of this function let an
     exception from `install()`, the baseline export, `execute()` or
@@ -322,7 +334,7 @@ def run_through_backend(
         }
 
     workspace = trial.allocate_workspace(experiment, attempt_id, base, forbidden or [])
-    nonce = secrets.token_hex(16)
+    nonce = nonce if nonce is not None else secrets.token_hex(16)
     readiness: dict[str, object] | None = None
     result: object = None
     unavailable_reason: str | None = None

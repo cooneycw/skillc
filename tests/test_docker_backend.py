@@ -566,6 +566,79 @@ def test_read_home_file_fails_on_a_dead_container(base: Path, docker_state: Path
         backend.read_home_file(handle, ".claude/.credentials.json")
 
 
+# ---------------------------------------------- read_home_tree (#106)
+
+def test_read_home_tree_on_a_missing_directory_is_empty_not_an_error(base: Path, docker_state: Path) -> None:
+    """The ordinary state before an agent has run at all - not a failure."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000016")
+    assert backend.read_home_tree(handle, ".claude/projects") == {}
+    backend.destroy(handle)
+
+
+def test_read_home_tree_finds_a_realistic_transcript_path(base: Path, docker_state: Path) -> None:
+    """A real transcript's exact name (a client-chosen session uuid nested
+    under a mangled-cwd directory) cannot be predicted in advance - this is
+    exactly why the tree read exists rather than a fixed relpath."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000017")
+    backend.deliver_home_file(
+        handle, ".claude/projects/-work/22222222-2222-2222-2222-222222222222.jsonl", b"line one\n",
+    )
+    tree = backend.read_home_tree(handle, ".claude/projects")
+    assert tree == {"-work/22222222-2222-2222-2222-222222222222.jsonl": b"line one\n"}
+    backend.destroy(handle)
+
+
+def test_read_home_tree_finds_multiple_files_under_the_directory(base: Path, docker_state: Path) -> None:
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000018")
+    backend.deliver_home_file(handle, ".codex/sessions/2026/09/27/rollout-a.jsonl", b"a")
+    backend.deliver_home_file(handle, ".codex/sessions/2026/09/27/rollout-b.jsonl", b"b")
+    tree = backend.read_home_tree(handle, ".codex/sessions")
+    assert tree == {
+        "2026/09/27/rollout-a.jsonl": b"a",
+        "2026/09/27/rollout-b.jsonl": b"b",
+    }
+    backend.destroy(handle)
+
+
+def test_read_home_tree_refuses_past_the_file_count_bound(base: Path, docker_state: Path) -> None:
+    """Control (#106's own acceptance, in the spirit of #102): never
+    silently truncate a population that is too large - refuse instead."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000019")
+    for i in range(3):
+        backend.deliver_home_file(handle, f".claude/projects/f{i}.jsonl", b"x")
+    with pytest.raises(d.HomeTreeTooLarge):
+        backend.read_home_tree(handle, ".claude/projects", max_files=2)
+    backend.destroy(handle)
+
+
+def test_read_home_tree_refuses_past_the_byte_bound(base: Path, docker_state: Path) -> None:
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-00000000001a")
+    backend.deliver_home_file(handle, ".claude/projects/big.jsonl", b"x" * 100)
+    with pytest.raises(d.HomeTreeTooLarge):
+        backend.read_home_tree(handle, ".claude/projects", max_bytes=10)
+    backend.destroy(handle)
+
+
+def test_read_home_tree_on_a_dead_container_is_empty_not_an_error(base: Path, docker_state: Path) -> None:
+    """Deliberately NOT the same contract as `read_home_file` (its own dead-
+    container test expects `BackendUnavailable`): the fake CLI (and real
+    `docker cp`) report a destroyed container and a merely-missing directory
+    through the SAME `No such container:path` shape, with no reliable way
+    to tell them apart from the caller's side - and a caller here already
+    treats both as "found nothing" identically (`agent_trial.py`'s own
+    exactly-one-file check reports UNKNOWN either way), so there is nothing
+    to gain by trying to distinguish them."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-00000000001b")
+    backend.destroy(handle)
+    assert backend.read_home_tree(handle, ".claude/projects") == {}
+
+
 def test_execute_resolves_an_absolute_workspace_path_in_argv(base: Path, docker_state: Path) -> None:
     """Regression (#81, in the fake CLI fixture itself): the fake's `cwd=`
     change resolves a RELATIVE path, but does nothing for an absolute one -

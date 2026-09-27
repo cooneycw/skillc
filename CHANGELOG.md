@@ -71,6 +71,62 @@ collection) closes.
   gains a `--subject` section with the required "what this shows and does
   NOT show" text verbatim, and a table of each subject's pinned revision and
   install location.
+- **`skillc/agent_trial.py`: the agent trial driver, one real-agent attempt
+  end to end** (Refs #106): composes the subscription credential (#98), the
+  per-trial home and onboarding seed (#78), the real transcript - discovered
+  via a new `DockerBackend.read_home_tree` (bounded, in the spirit of #102;
+  a missing directory is an empty result, never an error, since neither
+  client's transcript filename is known in advance) and normalized through
+  the per-client adapter (#107) - and grading through `verify.grade_files`
+  with a SEPARATE backend instance (interfaces.md's step 8). Wires into
+  `lifecycle.run_through_backend`'s two new hooks: credential delivery and
+  seed composition happen in `before_execute` (a failure BLOCKS the attempt
+  before `execute()` ever runs); reading the transcript and credential back,
+  and checking prompt delivery and the liveness canary against them, happens
+  in `observe_before_teardown` (a failure is recorded as an unknown
+  observation, never blocking the attempt itself). Grading is a separate,
+  later gate this module owns on top of `lifecycle.py`'s own disposition -
+  a captured-but-unconfirmed attempt (prompt-delivery mismatch, or an
+  unsatisfied canary) is real data, kept in the record, but never handed to
+  the verifier.
+
+  ONE nonce and ONE instruction serve both of the canary's independent
+  proofs, not two (cross-model review: minimizing prompt contamination in
+  the very behaviour being measured) - `lifecycle.run_through_backend` gains
+  an optional `nonce` parameter so a caller composing a real agent's prompt
+  (fixed as part of `argv`, before that function ever runs) can supply the
+  SAME nonce the backend will independently plant and verify via its own
+  file-content canary after `export()`. `trial_bootstrap.compose_canary_instruction`
+  gains a `result_filename` parameter pointing the agent at that same file
+  (`docker_backend.CANARY_RESULT_FILENAME`) instead of inventing a second
+  artifact. A new `trial_bootstrap.check_agent_canary` answers the narrower,
+  transcript-side question - a confirmed skill invocation plus a confirmed
+  tool call, never inspecting output content, since neither a real Claude
+  Code `Write` result nor a real Codex `exec` result echoes a written file's
+  content (confirmed empirically, #107) - while `disposition == "captured"`
+  already carries the backend's own content proof; named red case: the file
+  can be correct while the transcript shows only a failed tool call or no
+  skill invocation at all, and the transcript proof must still refuse. This
+  closes the gap `skillc/demo.py`'s own docstring named as "real follow-up
+  work, owed to a future issue" - that issue was #106.
+
+  Structurally unable to launch without `SKILLC_ALLOW_REAL_AGENT=1`
+  (`lifecycle.py`'s own existing guard, unchanged) and no real model call
+  anywhere in `tests/test_agent_trial.py` (an AST scan of the test file's
+  own argv-shaped literals, mirroring #96's judge test) - every test runs
+  against the fake docker CLI and a scripted fake client
+  (`tests/fixtures/agent-trial/fake_agent_client.py`) that writes a
+  realistic transcript for each client format and reads back a `--home`
+  path, since the fake CLI runs a real host subprocess with no chroot. A
+  full happy path grades PASS against the real, certified
+  `evals/level1/slug-small-fix` task, reading the exported candidate from
+  the attempt's frozen, content-addressed evidence
+  (`trial.frozen_artifacts`) rather than a live workspace directory -
+  `run_through_backend` removes the raw workspace unconditionally before
+  returning, so nothing else is reachable by the time a caller gets the
+  record back. The record and the transcript are both leak-checked
+  (including the credential-token class, #98/#105), with a committed
+  planted-token negative control proving the check is not vacuous.
 
 - **`lifecycle.run_through_backend` gains two generic, optional hooks,
   `observe_before_teardown` and `before_execute`** (Refs #106, split of the
