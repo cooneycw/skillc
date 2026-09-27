@@ -88,21 +88,23 @@ through the independent label-scoped sweep (#79), and records the image
 digest that actually ran (`docker image inspect --format {{.Id}}`, never a
 claim from the `--image` string alone, which could be a floating tag).
 
-### Why no real agent
+### Why no real agent, in THIS command's own two demos
 
 A real Claude Code `Write` tool result, and a real Codex `exec` result alike,
 typically confirm only that a file was written, never echoing its content
 back - so a transcript-based liveness check that requires a `tool_use`
 event's output to literally carry a nonce is red against an unmodified real
-transcript from either client. Per-client transcript adapters that translate
-a real transcript into the normalized event shape such a check consumes now
-exist (issue #106, its first split PR). The driver loop that would run a
-real agent through this command, consume those adapters, and resolve the
-write-doesn't-echo-content gap end to end is the second half of #106, still
-not built. This
-command sidesteps the whole gap for now by using the driver's own
-file-content-based canary with a scripted subject instead, which has no such
-gap - a deliberate, bounded scope decision, not an oversight.
+transcript from either client. `skillc/agent_trial.py` (issue #106) is the
+driver that resolves this end to end - per-client transcript adapters
+(#107), the credential and seed delivery, and the liveness canary unified
+onto lifecycle's own backend-planted nonce (#108) - and is fully built and
+merged. It is a SEPARATE entry point from `skillc demo`, not a mode of it:
+this command's own lifecycle and grading demos above still use a trivial
+scripted subject and the driver's plain file-content canary, which has no
+write-doesn't-echo-content gap to begin with, so there is nothing here for
+`agent_trial.py` to fix. The Level 1 agent run per collection this issue's
+own remaining acceptance bullet needs is a separate demonstration, prepared
+below.
 
 ## `--subject`: installing a declared skill collection into a real container
 
@@ -158,6 +160,47 @@ in `skillc/demo.py` - the genericity guard (issue #11's "no subject-name
 branch anywhere in skillc/", `tests/test_materialize.py`) AST-scans every
 `skillc/*.py` module and would otherwise flag a hardcoded default the moment
 it landed.
+
+## The Level 1 agent run per collection (#11's remaining acceptance bullet) - IN PREPARATION
+
+**Not yet built.** This section is a placeholder stating the design, not a
+capability this command has today - stated here rather than silently, the
+same discipline every other owed-to-the-live-run gap in this repository
+follows.
+
+`--subject`'s own three legs above (install, digest re-check, discovery)
+prove the collection lands intact and the client can see it - explicitly
+NOT that any skill is invoked, selected, or helps (see "What this shows,
+and what it does NOT show" above). Issue #11's own remaining acceptance
+bullet - "the same client, Level 1 fixture, contract and grader" - needs an
+actual agent attempt, through `skillc/agent_trial.py` (#106), once per
+collection (`cpp-codex`, `mattpocock-skills`), against
+`evals/level1/slug-small-fix`, on the client each subject's own declaration
+names (`codex`, codex-cli `0.157.1` for both).
+
+The canary instruction will run in `agent_trial.py`'s SKILL-FREE mode
+(naming no skill): #11 measures collection conformance, not skill
+selection - #26's own job - and a canary instruction that names a skill
+would contaminate exactly the measurement #26 needs to make later. This
+prep is blocked on that skill-free mode landing in `agent_trial.py` first.
+
+Funding basis for the agent run itself, quoted verbatim rather than
+paraphrased ([ADR 0005](../../decisions/0005-runtime-scope-and-cost-rulings.md)
+rule 6, owner ruling 2026-09-27): **"Normal Claude and codex"** - the
+operator's own normal Codex subscription login, inside the normal usage
+budget, not metered API spend and not gated by the $5 judge-call ceiling
+(rule 5), which covers judge calls only. Gated behind
+`SKILLC_ALLOW_REAL_AGENT=1` (`lifecycle.py`'s own structural guard against
+an accidental real launch), exactly like every other real-agent path this
+repository has.
+
+Planned paste-back shape, per collection: `disposition`, `prompt_delivered`,
+`canary_satisfied`, `graded.status`, and `refresh_observed_in_container` -
+leak-checked before printing, exactly like the rest of this command's own
+block. Planned control: a run with the credential deliberately absent must
+report `disposition == "unavailable"` (BLOCKED before the agent ever
+launches), matching `skillc/agent_trial.py`'s own existing acceptance for a
+missing credential.
 
 ## How long it takes
 
