@@ -20,6 +20,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
+from fixtures.leak_seeds.judge_seeds import HOME_PATH_LEAK
 
 from skillc import cli, trial
 from skillc import collection_conformance as cc
@@ -312,7 +313,7 @@ def test_a_leaking_bundle_is_removed_not_left_in_place(tmp_path: Path) -> None:
         total_seconds=10_000, per_attempt_seconds=900,
     )
     report = mp.build_report(experiment, outcomes)
-    _entries(report)[0]["uncertainty"] = "read /home/someoperator/.codex/auth.json"
+    _entries(report)[0]["uncertainty"] = f"read {HOME_PATH_LEAK}/.codex/auth.json"
     evidence = tmp_path / "evidence"
     assert cli._export_pilot_evidence(experiment, report, evidence) == 1
     assert not evidence.exists() or not any(evidence.iterdir())
@@ -496,7 +497,7 @@ def test_a_failed_export_leaves_the_previous_bundle_and_a_rerun_replaces_it_whol
 
     experiment, outcomes = _unavailable_outcomes(tmp_path)
     bad = mp.build_report(experiment, outcomes)
-    _entries(bad)[0]["uncertainty"] = "read /home/someoperator/.codex/auth.json"
+    _entries(bad)[0]["uncertainty"] = f"read {HOME_PATH_LEAK}/.codex/auth.json"
     assert cli._export_pilot_evidence(experiment, bad, evidence) == 1
     assert (evidence / "lifecycle-a-oldrun.json").exists()  # previous bundle untouched
     assert not (evidence / "report.json").exists()
