@@ -123,7 +123,12 @@ def test_the_committed_cost_estimate_matches_what_the_code_computes() -> None:
     assert manifest_cost["price"]["output_usd_per_million"] == _PRICE.output_usd_per_million
     assert manifest_cost["assumptions"]["estimated_input_tokens_per_attempt"] == _ASSUMED_INPUT_TOKENS_PER_ATTEMPT
     assert manifest_cost["assumptions"]["estimated_output_tokens_per_attempt"] == _ASSUMED_OUTPUT_TOKENS_PER_ATTEMPT
-    assert cost.estimated_usd == manifest_cost["estimated_usd"]
+    # ADR 0005 rule 6: relabelled as a quota/usage figure, not a dollar charge
+    # (this probe's agent attempts run under the operator's normal Codex
+    # subscription login) - still the exact number `estimate()` computes.
+    assert cost.estimated_usd == manifest_cost["estimated_agent_quota_usd_equivalent"]
+    assert manifest_cost["judge_estimated_quota_usd_equivalent"] == 0.0
+    assert cost.judge_estimated_usd == 0.0
 
 
 def _committed_estimate() -> ce.RunCostEstimate:
@@ -137,33 +142,59 @@ def _committed_estimate() -> ce.RunCostEstimate:
     )
 
 
-def test_the_estimate_is_within_the_operator_ceiling() -> None:
-    """Operator ruling (msg 1401/1402): the whole run must stay under $5. If
-    this ever fails, the estimate must be reported to the orchestrator and
-    the run must NOT proceed - never silently accepted."""
-    assert _committed_estimate().estimated_usd <= ce.CEILING_USD
+def test_the_judge_spend_is_within_the_operator_ceiling() -> None:
+    """Operator ruling (ADR 0005 rule 6): dollar-metered JUDGE spend must
+    stay under $5 - this probe's agent-attempt quota is not dollar-metered
+    (subscription login) and is never checked against this ceiling (Codex
+    code-review finding: an earlier version of this test checked the
+    combined total, which would have wrongly rejected a future manifest
+    whose agent quota grew large with $0 judge spend). If judge spend ever
+    exceeds the ceiling, the estimate must be reported to the orchestrator
+    and the run must NOT proceed - never silently accepted."""
+    assert _committed_estimate().judge_estimated_usd <= ce.CEILING_USD
+
+
+def test_a_large_agent_quota_alone_does_not_breach_the_ceiling() -> None:
+    """Red case for the fix above: an agent-only figure well over $5 (this
+    probe's own token-assumption-sensitivity note names 1,000,000
+    input-tokens/attempt as producing an over-$5 COMBINED total) must still
+    authorize in subscription mode, because the ceiling gates judge spend
+    alone. The pre-fix combined-total check would have rejected this."""
+    huge_agent_only = ce.estimate(
+        trials=len(CASES["cases"]) * len(_ARMS),
+        attempts_per_trial=MANIFEST["repeat_schedule"]["attempts_per_trial"],
+        estimated_input_tokens_per_attempt=1_000_000,
+        estimated_output_tokens_per_attempt=_ASSUMED_OUTPUT_TOKENS_PER_ATTEMPT,
+        price=_PRICE,
+    )
+    assert huge_agent_only.estimated_usd > ce.CEILING_USD, "the agent-only figure must exceed the ceiling for this control to mean anything"
+    assert huge_agent_only.judge_estimated_usd == 0.0
+    ce.authorize(
+        huge_agent_only, approved_budget_usd=None, agent_uses_subscription_login=True,
+    )  # must not raise - no judge spend to gate, however large the agent quota
 
 
 def test_authorize_agrees_with_the_manifests_own_execution_state() -> None:
-    """The manifest states its OWN `approved_budget_usd` and `execution`
-    fields - prove `authorize()` actually agrees with them, rather than
-    hardcoding `None` independently of what the manifest says (Codex
-    code-review finding on #26)."""
+    """The manifest is a subscription-login run (ADR 0005 rule 6) with no
+    judge tier enabled, so `authorize()` in that mode succeeds
+    unconditionally - $0 of dollar-metered spend needs no budget approval.
+    The manifest's own `execution` field stays "incomplete" for a DIFFERENT,
+    still-real reason (issue #98's in-container credential path,
+    skillc/trial.py's execution loop), so the two facts are checked
+    independently rather than via the old one-to-one implication a plain
+    dollar gate used to support (Codex code-review finding on #26, the
+    original version of this test)."""
     cost = _committed_estimate()
-    try:
-        ce.authorize(cost, approved_budget_usd=MANIFEST["approved_budget_usd"])
-    except ce.SpendNotAuthorized:
-        authorized = False
-    else:
-        authorized = True
-    if MANIFEST["execution"].startswith("incomplete"):
-        assert not authorized, "the manifest claims execution is incomplete, but authorize() would allow it"
-    else:
-        assert authorized, "the manifest claims execution may proceed, but authorize() refuses it"
+    ce.authorize(
+        cost, approved_budget_usd=MANIFEST["approved_budget_usd"], agent_uses_subscription_login=True,
+    )  # must not raise: no judge tier enabled, so judge spend is $0
+    assert MANIFEST["execution"].startswith("incomplete"), (
+        "execution should still name #98/trial.py as the real blocker, not a dollar gate"
+    )
 
 
 def test_authorize_refuses_an_estimate_over_the_ceiling() -> None:
-    """Red case: the operator's $5 ceiling (msg 1401/1402) is refused
+    """Red case: the operator's $5 ceiling (ADR 0005 rule 6) is refused
     regardless of any approved budget, however large."""
     over_ceiling = ce.estimate(
         trials=1000, attempts_per_trial=1,

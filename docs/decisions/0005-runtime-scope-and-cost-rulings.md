@@ -7,7 +7,10 @@
 - Related: [#63](https://github.com/cooneycw/skillc/issues/63) (leak-check),
   [#64](https://github.com/cooneycw/skillc/issues/64) (managed-container backend),
   [#69](https://github.com/cooneycw/skillc/issues/69) (grading tiers),
-  [#12](https://github.com/cooneycw/skillc/issues/12) (cost stop)
+  [#12](https://github.com/cooneycw/skillc/issues/12) (cost stop),
+  [#26](https://github.com/cooneycw/skillc/issues/26) (selection probe,
+  subscription-login ruling applied), [#98](https://github.com/cooneycw/skillc/issues/98)
+  (in-container credential path, the prerequisite rule 6 names)
 
 ## Context
 
@@ -98,6 +101,31 @@ schedule, arm order, and per-trial/total time and monetary caps must be
 recorded. Without an approved budget, the run manifest is prepared and
 execution is reported incomplete, never silently skipped or approximated.
 Full acceptance: #12.
+
+### 6. Two rulings, verbatim and dated, that later files cite by section
+
+Both quoted here so a later file can cite this section instead of a private
+message number - skillc is public, and a message number is a channel no
+outside reader can resolve.
+
+- **The $5 ceiling** (owner ruling, 2026-09-26): "don't worry about the cost
+  estimate... i expect it's under $5." Applies to the whole paid run's
+  estimated cost, enforced in code by `skillc.cost_estimate.authorize` -
+  refused regardless of any approved budget above it (rule 5 above).
+- **"Normal Claude and codex"** (owner ruling, 2026-09-27): agent runs
+  (#26's and #12's treatment and baseline attempts) use the operator's
+  normal Claude Code and Codex subscription logins, not a pay-per-use API
+  key - the credential is the normal rotating OAuth login, never a
+  long-lived key. They sit inside the normal subscription budget, not
+  metered spend, so their token/price figures are a usage quota, not a
+  dollar charge. **This ruling covers agent runs only.** Judge calls
+  (tiers 2/3, rule 4 above) call external providers with API keys and stay
+  dollar-metered and subject to the $5 ceiling exactly as before -
+  `skillc.cost_estimate.authorize`'s `agent_uses_subscription_login` flag
+  gates on judge spend alone in this mode, never on the agent-side figure.
+  The in-container credential path (issue #98) is the prerequisite for
+  actually running an agent attempt under this ruling; it is not delivered
+  by this record.
 
 ## Consequences
 

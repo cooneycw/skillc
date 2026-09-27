@@ -174,6 +174,89 @@ def test_a_plan_under_the_ceiling_without_judges_is_over_it_with_them():
 
 
 # --------------------------------------------------------------------------
+# Subscription-login agent runs (ADR 0005 rule 6): the operator ruled that
+# #26's and #12's agent attempts run under the normal Claude Code/Codex
+# subscription login, not a pay-per-use API key, so their token/price figures
+# are a usage quota, not a dollar charge - the ruling does NOT cover judge
+# calls (mcp-second-opinion uses provider API keys), which stay dollar-metered.
+# --------------------------------------------------------------------------
+
+
+#: Deliberately cheap, so 1,000,000 judge calls at 1 token each still stay
+#: under the $5 ceiling - the control below needs a judge tier count large
+#: enough to pair with a huge agent quota, priced cheaply enough to stay small.
+_CHEAP_JUDGE_PRICE = ce.ModelPrice(
+    name="cheap-judge", input_usd_per_million=1.0, output_usd_per_million=1.0, source="test",
+)
+
+
+def test_a_large_agent_quota_with_judge_spend_under_the_ceiling_is_authorized():
+    """ADR 0005 rule 6's own committed control: in subscription-login
+    mode, an enormous AGENT-side figure (a huge usage quota, not a dollar
+    charge) must not by itself block authorization - only judge spend is
+    gated, and it is comfortably under $5 here."""
+    huge_agent_quota = ce.estimate(
+        trials=1_000_000, attempts_per_trial=1,
+        estimated_input_tokens_per_attempt=1000, estimated_output_tokens_per_attempt=1000,
+        price=PRICE,
+        judge_tiers_enabled=1, judge_price=_CHEAP_JUDGE_PRICE,
+        estimated_judge_input_tokens_per_call=1, estimated_judge_output_tokens_per_call=1,
+    )
+    assert huge_agent_quota.estimated_usd > ce.CEILING_USD, "the agent-only figure must dwarf the ceiling for this control to mean anything"
+    assert 0 < huge_agent_quota.judge_estimated_usd <= ce.CEILING_USD
+    ce.authorize(
+        huge_agent_quota, approved_budget_usd=huge_agent_quota.judge_estimated_usd,
+        agent_uses_subscription_login=True,
+    )  # must not raise - the huge agent quota is not dollar-metered
+
+
+def test_judge_spend_over_the_ceiling_is_refused_even_in_subscription_mode():
+    """The other half of the same control: a large agent quota does not buy
+    the judge tier a pass. Judge spend over $5 refuses regardless of any
+    approved budget, exactly as the pre-1482 combined check did."""
+    huge_agent_and_judges = ce.estimate(
+        trials=1_000_000, attempts_per_trial=1,
+        estimated_input_tokens_per_attempt=1000, estimated_output_tokens_per_attempt=1000,
+        price=PRICE,
+        judge_tiers_enabled=2, judge_price=ce.ModelPrice(
+            name="expensive-judge", input_usd_per_million=500.0, output_usd_per_million=500.0, source="test",
+        ),
+        estimated_judge_input_tokens_per_call=50_000, estimated_judge_output_tokens_per_call=5_000,
+    )
+    assert huge_agent_and_judges.judge_estimated_usd > ce.CEILING_USD
+    with pytest.raises(ce.SpendNotAuthorized, match="ceiling"):
+        ce.authorize(huge_agent_and_judges, approved_budget_usd=1_000_000.0, agent_uses_subscription_login=True)
+
+
+def test_subscription_mode_with_no_judges_needs_no_approved_budget():
+    """A pure agent-only pilot (#26/#12's own current manifests: no judge
+    tier is enabled) has $0 of dollar-metered spend under this ruling, so
+    there is nothing left to approve a budget for."""
+    agent_only = ce.estimate(
+        trials=6, attempts_per_trial=1,
+        estimated_input_tokens_per_attempt=50_000, estimated_output_tokens_per_attempt=5_000,
+        price=PRICE,
+    )
+    assert agent_only.judge_estimated_usd == 0.0
+    ce.authorize(agent_only, approved_budget_usd=None, agent_uses_subscription_login=True)  # must not raise
+
+
+def test_subscription_mode_still_gates_a_tiny_judge_spend_without_a_budget():
+    """Red case: subscription mode does not turn off the gate entirely -
+    even a small, positive judge spend still needs an approved budget."""
+    small_judge_spend = ce.estimate(
+        trials=1, attempts_per_trial=1,
+        estimated_input_tokens_per_attempt=1000, estimated_output_tokens_per_attempt=1000,
+        price=PRICE,
+        judge_tiers_enabled=1, judge_price=JUDGE_PRICE,
+        estimated_judge_input_tokens_per_call=1000, estimated_judge_output_tokens_per_call=1000,
+    )
+    assert 0 < small_judge_spend.judge_estimated_usd <= ce.CEILING_USD
+    with pytest.raises(ce.SpendNotAuthorized, match="no budget has been approved"):
+        ce.authorize(small_judge_spend, approved_budget_usd=None, agent_uses_subscription_login=True)
+
+
+# --------------------------------------------------------------------------
 # authorize(): the spend gate. Committed negative controls for ADR 0005 rule 5.
 # --------------------------------------------------------------------------
 
@@ -212,7 +295,7 @@ def test_authorize_accepts_a_generous_budget():
 
 
 # --------------------------------------------------------------------------
-# The $5 operator ceiling (msg 1401/1402) - refused regardless of any
+# The $5 operator ceiling (ADR 0005 rule 6) - refused regardless of any
 # approved budget, however large.
 # --------------------------------------------------------------------------
 
