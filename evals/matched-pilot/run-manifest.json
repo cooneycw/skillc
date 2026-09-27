@@ -84,5 +84,13 @@
 
   "monetary_cap_usd": null,
   "approved_budget_usd": null,
-  "execution": "incomplete - the runner exists (skillc pilot-run, #12) and the run is approved (owner, 2026-09-27; subscription login, no judge tier, $0 metered), but it has not been run yet"
+  "execution": "run - 2026-09-27 13:26Z, skillc pilot-run at 3e1e3fb, all 6 scheduled attempts captured and graded; evidence in evals/matched-pilot/evidence/ (approved by the owner 2026-09-27; subscription login, no judge tier, $0 metered)",
+  "observed_at_run": {
+    "model": "gpt-6-astra",
+    "model_note": "read from every attempt's own codex rollout (turn_context.model), not assumed. The predeclared 'gpt-5.1-codex' above was an unconfirmed assumption and is WRONG for this run; it is left as written because it is the predeclaration, and cost_estimate.price (a gpt-5.1-codex price) therefore does not apply to the observed model.",
+    "reasoning_effort": "high",
+    "cli_version": "0.157.1",
+    "image_digest": "sha256:d1b2ced9dc6d25e9e1bc673c1973f032ced50a11da234fcd617ee376ff36eefc",
+    "input_tokens_per_attempt": "77,438-102,043 (see the report), against the 50,000 placeholder assumed above"
+  }
 }

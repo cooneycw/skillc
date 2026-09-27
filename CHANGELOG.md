@@ -14,6 +14,33 @@ release; `0.2.0` is planned when [#10](https://github.com/cooneycw/skillc/issues
 [#11](https://github.com/cooneycw/skillc/issues/11) (a second independent
 collection) closes.
 
+### Added
+
+- **`skillc pilot-run` and `skillc pilot-report`: the first bounded matched
+  pilot, run as predeclared** (Refs #12). `skillc/matched_pilot.py` reads
+  `evals/matched-pilot/run-manifest.json` and runs its schedule: codex on
+  the Level 1 `slug-small-fix` task, with the whole cpp-codex pack installed
+  (treatment) or nothing (baseline), 3 repeats interleaved T,B,T,B,T,B. Both
+  arms go through one path, `collection_conformance.run_level1_agent_attempt`,
+  and differ only in what is installed.
+  - The declared pins are checked before anything runs (subject revision,
+    client version, a resolvable image digest). A mismatch refuses the run.
+  - The 900 s per-attempt cap is the agent's own limit. The 5400 s total cap
+    is enforced as a start gate: an attempt it cuts is finalized `not-run`
+    and still reported.
+  - The `pilot-report` gives each attempt's disposition, per-criterion
+    outcome, uncertainty, interventions, a setup/agent/grading time split
+    (agent time from the trial journal), observed model, CLI version and
+    tokens. Agent dollar cost is `UNKNOWN` (subscription login, ADR 0005
+    rule 6), and so is claim accuracy until a reviewed claims file is merged
+    with `pilot-report --claims`.
+  - Raw evidence stays in a private run directory; the exported bundle is
+    leak-checked and removed again on any finding.
+- **`transcript_adapter.codex_run_metadata`**: the observed model, reasoning
+  effort, CLI version, cumulative token usage and closing message from a
+  real codex rollout, surfaced as `observation.run_metadata`.
+  `agent_trial.run_one_attempt` also returns `grading_seconds`.
+
 ### Fixed
 
 - **`skillc collection-run` could not complete a real agent attempt: no

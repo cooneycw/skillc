@@ -220,3 +220,35 @@ def test_clarification_and_approval_behavior_are_both_stated() -> None:
     behavior = RECORD["clarification_and_approval_behavior"]
     assert behavior["clarification"]
     assert behavior["approval"]
+
+
+# ------------------------------------------------ the committed live evidence
+
+_EVIDENCE = PILOT_DIR / "evidence" / "records"
+
+
+def test_the_committed_evidence_accounts_for_every_scheduled_attempt() -> None:
+    """The committed live bundle (#12): every rule is clean except the one
+    named gap - a captured agent-trial attempt stores no `verified-result`
+    (#106's driver grades through `verify.grade_files`). Any OTHER finding,
+    including a report that omits an attempt, fails here."""
+    from skillc import checks, records
+
+    findings = []
+    for record in records.discover(_EVIDENCE):
+        findings.extend(checks.run_record(record))
+    [bundle] = records.discover_bundles(_EVIDENCE)
+    findings.extend(checks.run_bundle(bundle))
+    errors = [f for f in findings if f.severity == checks.ERROR]
+    unexpected = [f for f in errors if not (f.rule == "attempt-accounting" and "is captured but has no result" in f.detail)]
+    assert unexpected == []
+    report = json.loads((_EVIDENCE / "report.json").read_text(encoding="utf-8"))
+    assert len(errors) == len(report["attempts"]) == MANIFEST["cost_estimate"]["total_attempts"]
+    assert [e["arm"] for e in report["attempts"]] == ["treatment", "baseline"] * _REPEATS_PER_ARM
+
+
+def test_the_committed_report_carries_the_reviewed_claims() -> None:
+    report = json.loads((_EVIDENCE / "report.json").read_text(encoding="utf-8"))
+    claims = json.loads((PILOT_DIR / "evidence" / "claims.json").read_text(encoding="utf-8"))["claims"]
+    assert report["claims_reviewed"] is True
+    assert {e["attempt_id"]: e["claim"] for e in report["attempts"]} == claims
