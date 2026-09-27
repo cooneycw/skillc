@@ -716,31 +716,32 @@ def run_one_attempt(
                 "never graded without both confirmed against the real transcript"
             )
         else:
-            if grading_backend is None:
-                raise ValueError("grading_backend is required when grader is given - never the agent's own backend")
-            if grading_backend is backend:
-                # Cross-model review: the ORIGINAL check only rejected `None`,
-                # so passing the SAME instance the agent already used for
-                # `backend` silently proceeded - interfaces.md's step 8 rule
-                # ("a SEPARATE backend instance") is a structural requirement,
-                # not merely a naming convention, and this is what actually
-                # enforces it rather than trusting a caller to have read the
-                # docstring.
-                raise ValueError(
-                    "grading_backend must be a SEPARATE instance from the agent's own backend - "
-                    "interfaces.md's step 8 rule, reusing the same instance risks carrying the "
-                    "agent attempt's own state into the probe's isolation"
-                )
             try:
+                if grading_backend is None:
+                    raise ValueError("grading_backend is required when grader is given - never the agent's own backend")
+                if grading_backend is backend:
+                    # Cross-model review: the ORIGINAL check only rejected `None`,
+                    # so passing the SAME instance the agent already used for
+                    # `backend` silently proceeded - interfaces.md's step 8 rule
+                    # ("a SEPARATE backend instance") is a structural requirement,
+                    # not merely a naming convention, and this is what actually
+                    # enforces it rather than trusting a caller to have read the
+                    # docstring.
+                    raise ValueError(
+                        "grading_backend must be a SEPARATE instance from the agent's own backend - "
+                        "interfaces.md's step 8 rule, reusing the same instance risks carrying the "
+                        "agent attempt's own state into the probe's isolation"
+                    )
                 files = _frozen_candidate_files(experiment, attempt_id)
                 grading_started = time.monotonic()
                 graded_result = verify.grade_files(grader, files, base, backend=grading_backend)
             except Exception as exc:
                 # The attempt ran and was observed; a grading failure (a
                 # quarantined verifier, a frozen artifact that no longer
-                # verifies) must not take its observation with it (codex
-                # review). Persist it with the failure as the blocked reason,
-                # then let the failure propagate exactly as before.
+                # verifies, a missing or reused grading backend) must not take
+                # its observation with it (codex review, both passes). Persist
+                # it with the failure as the blocked reason, then let the
+                # failure propagate exactly as before.
                 failed = {
                     **record, "graded": None, "grading_seconds": None,
                     "grading_blocked_reason": f"grading raised {type(exc).__name__}: {exc}",

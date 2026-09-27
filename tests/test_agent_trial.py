@@ -1182,3 +1182,29 @@ def test_an_unwritable_store_reports_write_failed(store: Path, monkeypatch: pyte
 
     monkeypatch.setattr(Path, "write_text", _refuse)
     assert at.write_observation_record(experiment, attempt_id, data) == "write-failed"
+
+
+@pytest.mark.parametrize("which", ["missing", "reused"])
+def test_a_grading_backend_refusal_still_persists_the_observation(
+    which: str, store: Path, base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """Codex review pass 2, red before the fix: both grading-backend guards
+    raised BEFORE the persistence-protected block, so a missing or reused
+    grading backend discarded an observed attempt's observation."""
+    backend = _backend(base, docker_state)
+    experiment, attempt_id = _planned(store)
+    argv = _fake_argv(
+        fmt="codex-fake", home=_mapped_home(docker_state, attempt_id),
+        transcript_relpath=".codex/sessions/2026/01/01/rollout-gb.jsonl", copy_solution=GRADER_ROOT / "reference",
+    )
+    with pytest.raises(ValueError):
+        at.run_one_attempt(
+            backend=backend, experiment=experiment, attempt_id=attempt_id, client="codex",
+            base_argv=argv, prompt="Fix the slug helper.", skill_name="demo-skill",
+            surface={}, limits=Limits(timeout=5), base=base,
+            credential_explicit_path=_fresh_credential(tmp_path, "codex"),
+            grader=verify.GraderDef.load(GRADER_ROOT), grading_backend=None if which == "missing" else backend,
+        )
+    grading = _saved_observation(experiment, attempt_id)["grading"]
+    assert isinstance(grading, dict) and "grading raised ValueError" in str(grading["blocked_reason"])
+    assert _check_records(experiment.root, "agent-observation") == 0

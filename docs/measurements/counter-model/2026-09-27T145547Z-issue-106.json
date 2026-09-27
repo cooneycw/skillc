@@ -1,0 +1,20 @@
+{
+  "branch": "issue-106-agent-trial-driver-one-attempt-end-to-end-with-a-r",
+  "counts": {
+    "accepted": 5,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "0a88bd24a531bc82e94cd78e178347706181c876",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "106",
+  "passes": 2,
+  "recorded_at": "2026-09-27T14:55:47Z",
+  "red_cases": {
+    "already_covered": 10,
+    "proposed": 13
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "schema": 1,
+  "status": "ran"
+}
