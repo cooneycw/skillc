@@ -39,7 +39,7 @@ all caught (evidence:
 restated in
 [support-matrix.md](docs/specs/evaluation-facility/support-matrix.md)). That
 run covers `skillc demo`'s own scripted lifecycle proof, grading run and
-four negative controls - most of the wider conformance table and
+three seeded negative controls - most of the wider conformance table and
 failure-path matrix stay proven only against a fake `docker` CLI, by the
 owner's own ruling
 ([ADR 0005 rule 6](docs/decisions/0005-runtime-scope-and-cost-rulings.md)),
@@ -377,9 +377,9 @@ judge seam itself now exists too (`skillc/judge.py`, #92): schema-constrained
 output validation, a per-tier `UNAVAILABLE` outcome when a judge cannot run,
 a pre-send machine-identity leak check (#63), and the disagreement record -
 but exercised only against a `FakeJudge`, never a real model. The
-`mcp-second-opinion` adapter that would route a real independent-judge call,
-and the cost wiring a paid judge call needs, are **not built**; no judge
-call has been made against any subject. Today exactly one tier is ever
+`mcp-second-opinion` adapter that routes a real independent-judge call, and
+its cost-estimate wiring, exist (#96) and are tested against a fake server;
+no real judge call has been made against any subject. Today exactly one tier is ever
 enabled - `deterministic` - so the shape is proven but no judge tier
 actually grades anything yet; that remains #69's own acceptance.
 
@@ -475,8 +475,8 @@ grading tier, never averaged or overridden. The judge seam itself now
 exists too (#69/#92): schema-constrained judge output, a per-tier
 `UNAVAILABLE` outcome, a pre-send leak check, and the disagreement record -
 but exercised only against a `FakeJudge`; the `mcp-second-opinion` adapter
-and the cost wiring a real judge call needs are not built, and no judge
-call has been made. The trial ledger's case format gained an optional
+and its cost wiring exist (#96) but are tested only against a fake server,
+and no real judge call has been made. The trial ledger's case format gained an optional
 `case.observes_selection` declaration and a pre-spend cost projection
 (#26/#39, #86), and a matched-pilot experiment record and evidence-report
 schema exist (#12, #89) - prepared for a treatment-vs-baseline comparison

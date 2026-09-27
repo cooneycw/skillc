@@ -25,7 +25,7 @@ restated in [support-matrix.md](docs/specs/evaluation-facility/support-matrix.md
 and the coverage ruling in
 [ADR 0005 rule 6](docs/decisions/0005-runtime-scope-and-cost-rulings.md)).
 That run covers `skillc demo`'s own scripted lifecycle proof, grading run
-and four negative controls on a real daemon - not an independent live
+and three seeded negative controls on a real daemon - not an independent live
 re-run of every case in the conformance table or failure-path matrix, most
 of which stay proven against the fake `docker` CLI, per the owner's own
 ruling; the two paths judged most likely to differ on a real daemon
