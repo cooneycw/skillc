@@ -467,7 +467,8 @@ def run_subject_demo(
             try:
                 acquire_subject_checkout(subject, owned_checkout)
             except SubjectRefused as exc:
-                return _not_exercised_subject_result(subject_name, subject.revision, f"acquisition failed: {exc}")
+                reason = redact_known_host_paths(f"acquisition failed: {exc}", base=base)
+                return _not_exercised_subject_result(subject_name, subject.revision, reason)
             repo = owned_checkout
 
         try:
@@ -490,7 +491,8 @@ def run_subject_demo(
         try:
             handle = backend.prepare(attempt_id)
         except dbe.BackendUnavailable as exc:
-            return _not_exercised_subject_result(subject_name, subject.revision, f"backend unavailable: {exc}")
+            reason = redact_known_host_paths(f"backend unavailable: {exc}", base=base)
+            return _not_exercised_subject_result(subject_name, subject.revision, reason)
         try:
             receipt = install_subject(backend, handle, source, files)
             digest_status, mismatches = recheck_subject_digests(backend, handle, files)
@@ -650,16 +652,57 @@ def leak_check_text(text: str) -> list[str]:
     return [f"{lineno}: {kind}: {detail}" for lineno, kind, detail in leak.scan_text(text, denylist)]
 
 
-def describe_error_safely(exc: BaseException) -> str:
+def redact_known_host_paths(text: str, *, base: Path | None = None) -> str:
+    """Replace every occurrence of a host-local absolute path THIS PROCESS
+    ALREADY KNOWS with a generic placeholder, longest candidate first -
+    `<base>` (the run's own disposable root, when given), `<repo>` (this
+    checkout's root), `<home>` (the operator's home directory), `<tmp>`
+    (the system temp directory).
+
+    Cross-model review of issue #118's own fix: `leak_check_text` (via
+    `leak.scan_text`'s `HOME_PATH_RE`) only matches `/home/<user>/...` - a
+    checkout under `/opt`, `/srv`, or any non-`/home` layout sailed through
+    it completely unscrubbed (reproduced live: an unreadable
+    `subject.json` under a non-`/home` checkout printed its own absolute
+    path, twice, via `SubjectRefused`'s message). Widening `leak.py`'s own
+    pattern to catch every absolute path was rejected - it would
+    false-positive on legitimate CONTAINER paths this codebase prints on
+    purpose, like `/work` and `/home/candidate`. This is the alternative:
+    proactively replace the SPECIFIC host paths this process can name in
+    advance, before the leak-check ever runs - the leak-check remains the
+    second, independent layer for anything this substitution does not
+    name, never replaced by it.
+
+    Longest-first matters: if `base` is nested under the system temp
+    directory (the common case - `tempfile.gettempdir()` is `run_demo`'s
+    own default `--base`), replacing `<tmp>` first would leave
+    `<tmp>/<base's-own-subdirectory-name>` instead of the more specific,
+    more useful `<base>`."""
+    candidates: list[tuple[str, str]] = [
+        (str(REPO_ROOT), "<repo>"),
+        (str(Path.home()), "<home>"),
+        (tempfile.gettempdir(), "<tmp>"),
+    ]
+    if base is not None:
+        candidates.append((str(base), "<base>"))
+    for original, placeholder in sorted(candidates, key=lambda pair: len(pair[0]), reverse=True):
+        if original:
+            text = text.replace(original, placeholder)
+    return text
+
+
+def describe_error_safely(exc: BaseException, *, base: Path | None = None) -> str:
     """A one-line description of `exc`, scrubbed the same way the paste-back
     block itself is (issue #118): an uncaught exception's own message can
     carry an absolute host path just as easily as the block can (a
     subprocess `CalledProcessError`, an `OSError` naming a real file) - this
     is the SAME guarantee `print_paste_back` gives that block, applied to
-    the one other place raw text could reach the operator's terminal. A
-    leaky message is replaced with its type name alone; nothing partial is
-    ever printed."""
-    detail = f"{type(exc).__name__}: {exc}"
+    the one other place raw text could reach the operator's terminal.
+    `redact_known_host_paths` runs FIRST (see its own docstring for why);
+    `leak_check_text` is the second, independent layer for anything that
+    substitution does not name - a message still leaky after both is
+    replaced with its type name alone, nothing partial ever printed."""
+    detail = redact_known_host_paths(f"{type(exc).__name__}: {exc}", base=base)
     if leak_check_text(detail):
         return f"{type(exc).__name__} (detail withheld - it failed its own leak-check)"
     return detail

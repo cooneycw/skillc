@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -31,6 +32,20 @@ CODEX_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "codex-subject"
 
 def _docker_bin(state_dir: Path) -> list[str]:
     return [sys.executable, str(FAKE_DOCKER), "--state", str(state_dir)]
+
+
+def _run_owned_container(state_dir: Path, name: str, attempt_id: str) -> None:
+    """A container the fake docker CLI reports as skillc-owned, carrying
+    `attempt_id`'s own label - the same shape `tests/test_reap.py`'s own
+    `_run`/`_owned_labels` build, reused here for the `reap_all_owned`
+    best-effort-cleanup test rather than duplicated as a second fixture."""
+    from skillc.docker_backend import ATTEMPT_LABEL_KEY, OWNER_LABEL_KEY, OWNER_LABEL_VALUE
+
+    argv = [*_docker_bin(state_dir), "run", "--rm", "-d", "--name", name]
+    argv += ["--label", f"{OWNER_LABEL_KEY}={OWNER_LABEL_VALUE}", "--label", f"{ATTEMPT_LABEL_KEY}={attempt_id}"]
+    argv += ["--", "fake-image:1", "sleep", "infinity"]
+    result = subprocess.run(argv, capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.fixture
@@ -627,6 +642,41 @@ def test_run_subject_demo_reports_backend_unavailable_gracefully_never_raises(
     assert all(not item.exercised and not item.met for item in items)
 
 
+def test_run_subject_demo_reports_a_genuine_acquisition_failure_gracefully_never_raises(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Red case (issue #118, cross-model review): deleting the
+    `try/except SubjectRefused` around `acquire_subject_checkout(...)` left
+    every OTHER test in this file green, because none of them ever make
+    real acquisition raise - every other test either passes an explicit
+    `checkout=` (bypassing acquisition entirely) or monkeypatches
+    `acquire_subject_checkout` itself away. This test does neither: it lets
+    `acquire_subject_checkout` run for real, and makes the `git clone`
+    SUBPROCESS CALL underneath it fail (never the function itself mocked
+    away), so `SubjectRefused` is raised by the function's own real
+    exception-wrapping code, exactly as a real network failure would."""
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject())
+    real_run = subprocess.run
+
+    def _failing_clone(
+        argv: list[str], *, check: bool = False, timeout: float | None = None, capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[bytes]:
+        if len(argv) >= 2 and argv[0] == "git" and argv[1] == "clone":
+            raise subprocess.CalledProcessError(128, argv, output=b"", stderr=b"fatal: could not resolve host")
+        return real_run(argv, check=check, timeout=timeout, capture_output=capture_output)
+
+    monkeypatch.setattr(demo.subprocess, "run", _failing_clone)
+
+    result = demo.run_subject_demo(
+        subject_name="whatever", image="fake-image:1", docker_bin=_docker_bin(docker_state),
+        base=base, timeout=5,
+    )
+    assert result.not_exercised_reason is not None
+    assert "acquisition failed" in result.not_exercised_reason
+    items = demo._subject_acceptance_items(result)
+    assert all(not item.exercised and not item.met for item in items)
+
+
 def test_run_control_orphan_prepare_failure_is_not_caught_never_raises(
     base: Path, docker_state: Path,
 ) -> None:
@@ -652,6 +702,60 @@ def test_describe_error_safely_keeps_a_clean_message() -> None:
     exc = RuntimeError("no subject declaration at evals/subjects/whatever/subject.json")
     described = demo.describe_error_safely(exc)
     assert "no subject declaration" in described
+
+
+def test_redact_known_host_paths_scrubs_a_non_home_checkout_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Red case (issue #118, cross-model review): `leak_check_text`'s own
+    `HOME_PATH_RE` only matches `/home/<user>/...` - a checkout under `/opt`,
+    `/srv`, or (as here) an arbitrary `tmp_path` sailed through it completely
+    unscrubbed. Reproduced live: an unreadable `subject.json` under a
+    non-`/home` checkout printed its own absolute path, twice, via
+    `SubjectRefused`'s message. `redact_known_host_paths` must replace a
+    KNOWN host path (this checkout's own `REPO_ROOT`, monkeypatched to a
+    non-`/home` `tmp_path` here) with `<repo>` even though it never matches
+    the leak-check's own pattern at all. Confirmed red (the raw path comes
+    through untouched) with the substitution removed."""
+    fake_repo_root = tmp_path / "opt" / "skillc-install"
+    fake_repo_root.mkdir(parents=True)
+    monkeypatch.setattr(demo, "REPO_ROOT", fake_repo_root)
+
+    message = f"could not read {fake_repo_root}/evals/subjects/whatever/subject.json: Permission denied"
+    redacted = demo.redact_known_host_paths(message)
+    assert str(fake_repo_root) not in redacted
+    assert "<repo>/evals/subjects/whatever/subject.json" in redacted
+
+
+def test_describe_error_safely_scrubs_a_non_home_path_via_redaction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same red case, through the actual CLI-facing entry point: even
+    though this message NEVER matches `leak_check_text` at all (no `/home/`
+    anywhere in it), `describe_error_safely` must still not print the raw
+    path - `redact_known_host_paths` runs first, unconditionally, not only
+    as a fallback once the leak-check already found something."""
+    fake_repo_root = tmp_path / "opt" / "skillc-install"
+    fake_repo_root.mkdir(parents=True)
+    monkeypatch.setattr(demo, "REPO_ROOT", fake_repo_root)
+    assert demo.leak_check_text(str(fake_repo_root)) == [], "test setup: this path must not itself trip the leak-check"
+
+    exc = RuntimeError(f"unreadable: {fake_repo_root}/evals/subjects/whatever/subject.json")
+    described = demo.describe_error_safely(exc)
+    assert str(fake_repo_root) not in described
+    assert "<repo>" in described
+
+
+def test_redact_known_host_paths_prefers_base_over_a_containing_tmp_prefix(tmp_path: Path) -> None:
+    """Longest-first matters: `base` is typically nested UNDER the system
+    temp directory (`run_demo`'s own default `--base`) - replacing `<tmp>`
+    first would leave `<tmp>/<base's-own-subdirectory-name>` instead of the
+    more specific, more useful `<base>`."""
+    base = tmp_path / "skillc-run-12345"
+    base.mkdir()
+    message = f"failed: {base}/subject-checkout"
+    redacted = demo.redact_known_host_paths(message, base=base)
+    assert redacted == "failed: <base>/subject-checkout"
 
 
 def test_cmd_demo_scrubs_an_unexpected_exception_never_prints_a_raw_traceback(
@@ -897,6 +1001,77 @@ def test_cmd_demo_control_exits_1_when_a_seeded_failure_is_not_caught(
     monkeypatch.setattr(demo, "run_control", lambda **kwargs: False)
     args = _demo_args(image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base=str(base), control=True)
     assert cli.cmd_demo(args) == 1
+
+
+# --------------- item 1 continued: KeyboardInterrupt is a BaseException,
+# --------------- not caught by "except Exception" (cross-model review)
+
+
+def test_cmd_demo_keyboard_interrupt_from_run_demo_never_prints_a_traceback(
+    docker_state: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Red case: `except Exception` alone does not catch `KeyboardInterrupt`
+    (a `BaseException`, not an `Exception`) - remove `cmd_demo`'s own
+    `except KeyboardInterrupt` clause and this test fails with the
+    interrupt escaping `cmd_demo` entirely (pytest reports it as an error,
+    not a clean assertion failure) - exactly what let Python's own default
+    traceback, naming the installed `skillc` paths, reach the operator's
+    terminal on a real Ctrl-C."""
+    from skillc import cli
+
+    def _interrupted(**kwargs: object) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(demo, "run_demo", _interrupted)
+    args = _demo_args(image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base="/tmp")
+
+    exit_code = cli.cmd_demo(args)
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Traceback" not in captured.err
+    assert "interrupted" in captured.err
+
+
+def test_cmd_demo_keyboard_interrupt_from_run_control_never_prints_a_traceback(
+    docker_state: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from skillc import cli
+
+    def _interrupted(**kwargs: object) -> bool:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(demo, "run_control", _interrupted)
+    args = _demo_args(
+        image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base="/tmp", control=True,
+    )
+
+    exit_code = cli.cmd_demo(args)
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Traceback" not in captured.err
+    assert "interrupted" in captured.err
+
+
+def test_cmd_demo_keyboard_interrupt_runs_a_best_effort_cleanup_sweep(
+    docker_state: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The best-effort reap sweep actually runs and reports a real outcome -
+    not merely a fixed line claiming it did."""
+    from skillc import cli
+
+    _run_owned_container(docker_state, "att-1-container", "att-1")
+
+    def _interrupted(**kwargs: object) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(demo, "run_demo", _interrupted)
+    args = _demo_args(image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base="/tmp")
+
+    exit_code = cli.cmd_demo(args)
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "best-effort cleanup" in captured.err
+    assert "reaped" in captured.err
 
 
 # --------------- item 4: NOT EXERCISED, never a vacuous MET

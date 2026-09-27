@@ -267,6 +267,82 @@ def test_reap_removes_by_container_id_never_by_name(
     assert len(target) == 12 and all(ch in "0123456789abcdef" for ch in target)  # the fake's own id shape
 
 
+# --------------------------------------------------- reap_all_owned() (issue #118)
+
+
+def test_reap_all_owned_removes_every_owned_container_regardless_of_attempt_id(docker_state: Path) -> None:
+    """`reap()`'s broader sibling: no `attempt_ids` to pass at all - this
+    demo.py's own `KeyboardInterrupt` handler needs it precisely because it
+    cannot know which attempt ids were in flight when interrupted."""
+    _run(docker_state, "att-1-container", _owned_labels("att-1"))
+    _run(docker_state, "att-2-container", _owned_labels("att-2"))
+    report = reap.reap_all_owned(_docker_bin(docker_state))
+    assert report.daemon_reachable is True
+    assert len(report.outcomes) == 2
+    assert all(o.outcome == "reaped" for o in report.outcomes)
+
+
+def test_reap_all_owned_never_touches_a_foreign_container(docker_state: Path) -> None:
+    """The same label-scoping guarantee `snapshot()`/`reap()` already give -
+    a container with no `OWNER_LABEL` at all is structurally unreachable to
+    this sweep, not merely unlikely to be hit."""
+    _run(docker_state, "att-1-container", _owned_labels("att-1"))
+    _run(docker_state, "foreign-container", {"some.other.label": "x"})
+    report = reap.reap_all_owned(_docker_bin(docker_state))
+    assert len(report.outcomes) == 1
+
+    still_running = subprocess.run(
+        [*_docker_bin(docker_state), "ps", "-a", "--filter", "name=foreign-container", "--format", "{{.Names}}"],
+        capture_output=True, text=True, check=False,
+    )
+    assert "foreign-container" in still_running.stdout
+
+
+def test_reap_all_owned_reports_nothing_owned_as_a_clean_empty_sweep(docker_state: Path) -> None:
+    report = reap.reap_all_owned(_docker_bin(docker_state))
+    assert report.daemon_reachable is True
+    assert report.outcomes == ()
+
+
+def test_reap_all_owned_reports_unreachable_never_a_guessed_clean_sweep(docker_state: Path) -> None:
+    docker_state.mkdir(parents=True, exist_ok=True)
+    (docker_state / ".down").touch()
+    report = reap.reap_all_owned(_docker_bin(docker_state))
+    assert report.daemon_reachable is False
+    assert report.outcomes == ()
+
+
+def test_reap_all_owned_removes_by_container_id_never_by_name(
+    docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same ID-not-name discipline as `reap()` itself (codex review, HIGH,
+    on that function) - this sibling reuses the identical act-then-confirm
+    shape and must not silently regress it."""
+    _run(docker_state, "att-1-container", _owned_labels("att-1"))
+    calls: list[list[str]] = []
+    real_run = subprocess.run
+
+    def _spy(
+        argv: list[str], *, capture_output: bool = False, env: dict[str, str] | None = None,
+        check: bool = False, timeout: float | None = None, text: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(list(argv))
+        return real_run(
+            argv, capture_output=capture_output, env=env, check=check, timeout=timeout, text=text,
+        )
+
+    monkeypatch.setattr(reap.subprocess, "run", _spy)
+    report = reap.reap_all_owned(_docker_bin(docker_state))
+    assert len(report.outcomes) == 1
+    assert report.outcomes[0].outcome == "reaped"
+
+    rm_calls = [c for c in calls if "rm" in c]
+    assert len(rm_calls) == 1
+    target = rm_calls[0][-1]
+    assert target != "att-1-container"
+    assert len(target) == 12 and all(ch in "0123456789abcdef" for ch in target)
+
+
 # --------------------------------------------------- declared host paths
 
 def test_an_unmodified_declared_host_path_reports_no_change(tmp_path: Path) -> None:

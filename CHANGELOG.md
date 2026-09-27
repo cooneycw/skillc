@@ -72,6 +72,40 @@ collection) closes.
   MET" items reading `MET` against a trivially-clean (nothing happened)
   reap report and host diff.
 
+  Independent review of the fix itself found three more real gaps, folded
+  into the same PR before merge:
+  - `KeyboardInterrupt` is a `BaseException`, not an `Exception` - the
+    top-level guard never saw it, and Ctrl-C on a slow real daemon is
+    exactly what an operator does, so #118's leak came back through that
+    one route (Python's own default traceback, naming the installed
+    `skillc` paths). `cmd_demo` gains its own `except KeyboardInterrupt`:
+    a fixed line, no exception text at all, then a best-effort cleanup
+    sweep. `reap.py` gains `reap_all_owned` - a broader sibling to `reap()`
+    for exactly this case, since an interrupted command may never have
+    learned which specific attempt ids were even in flight.
+  - The acquisition-failure catch around `acquire_subject_checkout(...)`
+    was itself untested - every existing test either supplied an explicit
+    `checkout=` (bypassing acquisition) or monkeypatched the function away
+    entirely, so deleting the catch left all 56 tests green. A new test
+    makes the underlying `git clone` SUBPROCESS call fail for real,
+    exercising the function's own exception-wrapping.
+  - `describe_error_safely` only scrubbed what `leak_check_text` recognises,
+    and that check's home-path pattern only matches `/home/<user>/...` - a
+    checkout under `/opt`, `/srv`, or any non-`/home` layout sailed through
+    completely unscrubbed (reproduced live: an unreadable `subject.json`
+    outside `/home` printed its own absolute path, twice, unscrubbed).
+    `demo.redact_known_host_paths` replaces every occurrence of a host path
+    this process already knows (`REPO_ROOT`, `Path.home()`,
+    `tempfile.gettempdir()`, the run's own `base`) with a generic
+    placeholder, longest match first, BEFORE the leak-check ever runs - in
+    both `describe_error_safely` and the two places `run_subject_demo`
+    builds a `not_exercised_reason` that flows into the paste-back. The
+    leak-check remains the second, independent layer for anything this
+    substitution does not name; `leak.py`'s own pattern was deliberately
+    left unwidened, since a bare "any absolute path" rule would
+    false-positive on legitimate container paths like `/work` and
+    `/home/candidate`.
+
 ### Added
 
 - **`tests/conftest.py`: no test can reach a real credential by default**

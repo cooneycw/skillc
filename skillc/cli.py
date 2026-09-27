@@ -679,17 +679,27 @@ def cmd_demo(args: argparse.Namespace) -> int:
     EXIT CODES, pinned to the runbook (issue #118): `0` success (or, under
     `--control`, every seeded failure was caught); `1` NOT MET, or the run
     could not even complete (a refused subject, a backend that never came
-    up, or any other failure this command did not anticipate); `2` ONLY a
-    leak-check refusal of the paste-back block itself - never any other
-    meaning. Every branch below returns one of exactly these three, and the
-    top-level `except Exception` is what makes that a structural guarantee
-    rather than a hope: NOTHING this command does not explicitly handle can
-    produce a fourth exit code, or a raw traceback, or unscanned text on
-    stdout/stderr (issue #118's own finding: an uncaught `BackendUnavailable`
-    used to print a traceback carrying the operator's home directory and
-    username - `demo.py`'s own entry points no longer let that kind of
-    failure escape uncaught, and this is the second, independent layer for
-    whatever they still miss)."""
+    up, an interruption, or any other failure this command did not
+    anticipate); `2` ONLY a leak-check refusal of the paste-back block
+    itself - never any other meaning. Every branch below returns one of
+    exactly these three, and the top-level `except Exception` (plus the
+    separate `except KeyboardInterrupt`, below) is what makes that a
+    structural guarantee rather than a hope: NOTHING this command does not
+    explicitly handle can produce a fourth exit code, or a raw traceback, or
+    unscanned text on stdout/stderr (issue #118's own finding: an uncaught
+    `BackendUnavailable` used to print a traceback carrying the operator's
+    home directory and username - `demo.py`'s own entry points no longer let
+    that kind of failure escape uncaught, and this is the second,
+    independent layer for whatever they still miss).
+
+    `KeyboardInterrupt` NEEDS ITS OWN CLAUSE (found by cross-model review of
+    this exact fix): it is a `BaseException`, not an `Exception`, so the
+    guard above never sees it, and Ctrl-C is exactly what an operator
+    watching a slow real daemon actually presses - #118's leak would
+    otherwise come back through that one specific route, via Python's own
+    default traceback for an uncaught `KeyboardInterrupt`, whose frames name
+    the installed `skillc` paths (usually under the operator's home in a
+    `uv`/venv layout)."""
     from . import demo
 
     docker_bin = tuple(args.docker_bin.split()) if args.docker_bin else ("docker",)
@@ -725,8 +735,26 @@ def cmd_demo(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
+    except KeyboardInterrupt:
+        # A fixed line, no exception text at all - never anything to scrub,
+        # by construction, since KeyboardInterrupt carries none. A
+        # best-effort, short-bounded cleanup sweep follows: never by
+        # attempt_ids (this command may have been interrupted before it
+        # ever learned which ones were in flight at all).
+        print(
+            "skillc: demo interrupted - containers labelled for this run may remain; "
+            "run the reap sweep or re-run to clean up",
+            file=sys.stderr,
+        )
+        try:
+            report = demo.reap.reap_all_owned(docker_bin, None, timeout=10)
+            outcomes = [(o.attempt_id, o.outcome) for o in report.outcomes]
+            print(f"skillc: best-effort cleanup - outcomes={outcomes}, daemon_reachable={report.daemon_reachable}", file=sys.stderr)
+        except Exception as exc:  # noqa: BLE001 - best-effort: a cleanup failure must not itself crash this handler
+            print(f"skillc: best-effort cleanup also failed - {demo.describe_error_safely(exc, base=base)}", file=sys.stderr)
+        return 1
     except Exception as exc:  # noqa: BLE001 - the top-level guard (issue #118), deliberately broad: see the docstring above
-        print(f"skillc: demo failed unexpectedly - {demo.describe_error_safely(exc)}", file=sys.stderr)
+        print(f"skillc: demo failed unexpectedly - {demo.describe_error_safely(exc, base=base)}", file=sys.stderr)
         return 1
 
 
