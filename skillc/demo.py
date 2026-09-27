@@ -87,11 +87,25 @@ BAD_CANDIDATE = GRADER_ROOT / "wrong" / "no-lowercase"
 
 DEFAULT_IMAGE = "skillc-trial:latest"
 
-#: The subject this demo materializes when `--subject` is not given - #7's
-#: original collection. A NAME ONLY, used exclusively to build a path below;
-#: never branched on (#11's own "no subject-name branch in skillc/"
-#: requirement, enforced by tests/test_materialize.py's CORE_MODULES scan).
-DEFAULT_SUBJECT = "cpp-codex"
+def _read_default_subject() -> str:
+    """The subject name this demo materializes when `--subject` is not given,
+    read from `evals/subjects/DEFAULT_SUBJECT` (one line, the name only)
+    rather than a literal in this file. A hardcoded name here would itself be
+    a subject-name branch: `tests/test_materialize.py`'s genericity guard
+    (#11's "no subject-name branch anywhere in skillc/") AST-scans every
+    `skillc/*.py` module for exactly this shape, and its own
+    `GENERICITY_EXEMPT` comment says to prefer reading such a default from a
+    declared `evals/subjects/*/subject.json`-adjacent source instead of a
+    literal - so the exemption is never needed at all. The returned value is
+    still a NAME ONLY, used exclusively to build a path; nothing here
+    branches on it."""
+    path = REPO_ROOT / "evals" / "subjects" / "DEFAULT_SUBJECT"
+    return path.read_text(encoding="utf-8").strip()
+
+
+#: See `_read_default_subject` - resolved once at import time from data, not
+#: a literal, so this module names no subject.
+DEFAULT_SUBJECT = _read_default_subject()
 
 
 class SubjectRefused(Exception):

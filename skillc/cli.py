@@ -857,7 +857,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_demo.add_argument(
         "--subject",
         help="evals/subjects/<name> to materialize alongside the lifecycle/grading demos "
-             "(default: skillc.demo.DEFAULT_SUBJECT, the original CPP collection)",
+             "(default: skillc.demo.DEFAULT_SUBJECT, read from evals/subjects/DEFAULT_SUBJECT)",
     )
     p_demo.add_argument(
         "--control", action="store_true",

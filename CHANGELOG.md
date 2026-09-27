@@ -216,12 +216,17 @@ collection) closes.
   filesystem, not an absolute one, and `verify.py`'s own probe-invocation
   convention always passes an absolute path - also fixed and regression
   tested. `--subject <name>` selects `evals/subjects/<name>/subject.json` to
-  materialize alongside the lifecycle/grading proofs (default: the original
-  CPP collection) - one command, one runbook, for both CPP and a second
-  collection (#11), never two. The name only ever builds a path, never a
-  branch in code; acquisition clones the subject's own declared source fresh
-  at its pinned revision. An unknown or malformed `--subject` is refused
-  before any Docker work starts.
+  materialize alongside the lifecycle/grading proofs - one command, one
+  runbook, for both CPP and a second collection (#11), never two. The name
+  only ever builds a path, never a branch in code; acquisition clones the
+  subject's own declared source fresh at its pinned revision. An unknown or
+  malformed `--subject` is refused before any Docker work starts. The
+  default name itself is read from `evals/subjects/DEFAULT_SUBJECT` (one
+  line, data) rather than a literal in `skillc/demo.py` - the just-merged
+  genericity guard (#11's "no subject-name branch anywhere in skillc/",
+  above) scans every `skillc/*.py` module by AST and would otherwise flag a
+  hardcoded default the moment this module landed, exactly as its own
+  `GENERICITY_EXEMPT` comment anticipates.
 
 - **The failure-path matrix and trustworthy cleanup** (#79, Refs #10):
   [`docs/specs/evaluation-facility/failure-matrix.md`](docs/specs/evaluation-facility/failure-matrix.md)
