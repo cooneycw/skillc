@@ -13,13 +13,13 @@ ONLY in `extra_home_files`: the treatment gets the subject's selected skill
 files, the baseline gets `{}`. A second copy of the wiring could differ from
 the first in a way that would read as a treatment effect.
 
-TIME CAPS ARE ENFORCED HERE, not only stated. The per-attempt cap is the
-agent's own `Limits.timeout`; the total cap is checked before each attempt
-starts, and an attempt that would start at or past it is finalized `not-run`
-with that reason - reported, never dropped (`ledger_binding` refuses a report
-that omits a scheduled attempt). The total cap is a start gate, not a kill:
-an attempt already running is bounded by its own per-attempt cap, so the
-wall-clock can exceed the total by at most one attempt's setup and grading.
+TIME CAPS ARE ENFORCED HERE, not only stated. Each attempt's agent limit
+(`Limits.timeout`) is the SMALLER of the per-attempt cap and what remains of
+the total cap, so agent execution can never run past the total. An attempt
+that would start with nothing left is finalized `not-run` with that reason -
+reported, never dropped (`ledger_binding` refuses a report that omits a
+scheduled attempt). Setup, grading and teardown are not killed mid-way, so
+the wall-clock can pass the total by those alone, for the last attempt.
 
 MISSING IS EXPLICIT. Anything the run cannot measure is the literal
 `"UNKNOWN"` (the `pilot-report` rule's own convention), never a zero:
@@ -43,6 +43,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import re
 import statistics
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -50,7 +52,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import records, trial
+from . import demo, records, trial
 from .lifecycle import RealAgentBlocked
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -66,7 +68,10 @@ BASELINE = "baseline"
 BASELINE_SUBJECT_DIGEST = "sha256:" + hashlib.sha256(b"").hexdigest()
 
 #: Allowed values in a claims file (`build_report`'s `claims`).
-CLAIM_VALUES = ("claimed-success", "claimed-failure", "no-claim")
+#: `asked-clarification`: the agent ended by asking a question instead of
+#: finishing. The manifest's declared behaviour counts that as an
+#: intervention and names it under uncertainty (it is never auto-answered).
+CLAIM_VALUES = ("claimed-success", "claimed-failure", "no-claim", "asked-clarification")
 
 UNKNOWN = "UNKNOWN"
 
@@ -91,6 +96,17 @@ class PilotDeclaration:
     client_version: str
     subject_name: str
     subject_revision: str
+    #: The declared image digest; `pilot-run` refuses to run any other.
+    image_digest: str
+    #: The declared model. NOT enforced at launch (the client picks its own
+    #: default); every report entry compares it with the observed model.
+    model: str
+
+
+def _positive_finite(value: object, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+        raise ManifestRefused(f"time_caps.{name} is {value!r}, not a positive finite number of seconds")
+    return float(value)
 
 
 def load_declaration(manifest_path: Path = MANIFEST_PATH) -> PilotDeclaration:
@@ -121,13 +137,34 @@ def load_declaration(manifest_path: Path = MANIFEST_PATH) -> PilotDeclaration:
     subject_name = subject.get("name")
     if not isinstance(subject_name, str):
         raise ManifestRefused("subject.name is not a string")
+    # The runner executes exactly one task: the Level 1 fixture
+    # `collection_conformance.run_level1_agent_attempt` loads. A manifest
+    # naming any other task or grader would be recorded in the ledger but
+    # not run, so it is refused rather than planned.
+    grader_path = (ROOT / str(task.get("grader"))).resolve()
+    if grader_path != (demo.GRADER_ROOT / "grader.json").resolve():
+        raise ManifestRefused(
+            f"goal_population.task.grader {task.get('grader')!r} is not the task this runner executes "
+            f"({demo.GRADER_ROOT.relative_to(ROOT)}/grader.json)"
+        )
+    grader = json.loads(grader_path.read_text(encoding="utf-8"))
+    if (str(task.get("id")), str(task.get("revision"))) != (grader["id"], grader["revision"]):
+        raise ManifestRefused("goal_population.task id/revision does not match the grader it names")
+    image_digest = record.get("image_digest")
+    if not isinstance(image_digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", image_digest):
+        raise ManifestRefused(f"image_digest {image_digest!r} is not a declared sha256 digest")
+    model = (record.get("model") or {}).get("name")
+    if not isinstance(model, str) or not model:
+        raise ManifestRefused("model.name is not declared")
     return PilotDeclaration(
         arms=(TREATMENT, BASELINE), repeats_per_arm=repeats, attempts_per_trial=per_trial,
-        per_attempt_seconds=float(caps["per_attempt_seconds"]), total_seconds=float(caps["total_seconds"]),
+        per_attempt_seconds=_positive_finite(caps.get("per_attempt_seconds"), "per_attempt_seconds"),
+        total_seconds=_positive_finite(caps.get("total_seconds"), "total_seconds"),
         task_id=str(task["id"]), task_revision=str(task["revision"]),
-        grader_path=ROOT / str(task["grader"]),
+        grader_path=grader_path,
         client_name=str(client["name"]), client_version=str(client["version"]),
         subject_name=subject_name, subject_revision=str(subject.get("revision")),
+        image_digest=image_digest, model=model,
     )
 
 
@@ -210,19 +247,23 @@ class AttemptOutcome:
 def run_schedule(
     experiment: trial.Experiment,
     schedule: Sequence[ScheduledAttempt],
-    run_attempt: Callable[[ScheduledAttempt], dict[str, object]],
+    run_attempt: Callable[[ScheduledAttempt, float], dict[str, object]],
     *,
     total_seconds: float,
+    per_attempt_seconds: float,
     clock: Callable[[], float] = time.monotonic,
     on_outcome: Callable[[AttemptOutcome], None] | None = None,
 ) -> list[AttemptOutcome]:
     """Run every scheduled attempt in order, enforcing the total cap as a
-    start gate. Every scheduled attempt yields exactly one outcome.
+    start gate and as each attempt's agent limit: `run_attempt` receives the
+    seconds its agent may run, `min(per_attempt_seconds, remaining)`. Every
+    scheduled attempt yields exactly one outcome.
 
     An exception out of `run_attempt` (a bug, not a failed attempt - a failed
     attempt is a disposition) does not abandon the rest of the schedule: the
-    attempt is finalized `inconclusive` with the error as its reason, if it
-    was not finalized already, and the run moves on. The one exception is
+    attempt is finalized `inconclusive` (or `unavailable`, if it never
+    started) with the error as its reason - unless it was finalized already,
+    whose record then stands - and the run moves on. The one exception is
     `RealAgentBlocked` - no opt-in - which aborts the run outright."""
     started = clock()
     outcomes: list[AttemptOutcome] = []
@@ -237,9 +278,12 @@ def run_schedule(
             outcome = AttemptOutcome(scheduled, record, 0.0, runner_note=reason)
         else:
             attempt_started = clock()
+            budget = min(per_attempt_seconds, total_seconds - elapsed)
             try:
-                record = run_attempt(scheduled)
-                note = None
+                record = run_attempt(scheduled, budget)
+                note = None if budget >= per_attempt_seconds else (
+                    f"agent limit cut to {budget:.0f}s by the total time cap"
+                )
             except RealAgentBlocked:
                 # A missing opt-in is the caller's error, not an attempt's
                 # outcome: recording six "inconclusive" attempts for a run
@@ -247,15 +291,30 @@ def run_schedule(
                 raise
             except Exception as exc:  # noqa: BLE001 - one attempt's crash must not drop the rest of the schedule
                 note = f"runner error: {type(exc).__name__}: {exc}"
-                try:
-                    record = trial.finalize(experiment, scheduled.attempt_id, disposition="inconclusive", reason=note)
-                except trial.Refused:
-                    record = {"attempt_id": scheduled.attempt_id, "disposition": "inconclusive", "reason": note}
+                record = _finalize_after_error(experiment, scheduled.attempt_id, note)
             outcome = AttemptOutcome(scheduled, record, clock() - attempt_started, runner_note=note)
         outcomes.append(outcome)
         if on_outcome is not None:
             on_outcome(outcome)
     return outcomes
+
+
+def _finalize_after_error(experiment: trial.Experiment, attempt_id: str, note: str) -> dict[str, object]:
+    """The attempt's lifecycle record after `run_attempt` raised. If the
+    attempt was already finalized (the error came later - in grading, say),
+    that record stands: a capture is never rewritten as `inconclusive`, and
+    the error is carried as the runner note instead."""
+    existing = experiment.root / f"lifecycle-{attempt_id}.json"
+    if existing.is_file():
+        record: dict[str, object] = json.loads(existing.read_text(encoding="utf-8"))
+        return record
+    try:
+        return trial.finalize(experiment, attempt_id, disposition="inconclusive", reason=note)
+    except trial.Refused:
+        # Never dispatched: the record contract allows only `not-run` or
+        # `unavailable` for an attempt that never started, and a runner error
+        # that prevented it is the latter.
+        return trial.finalize(experiment, attempt_id, disposition="unavailable", reason=note)
 
 
 def _parse_at(value: object) -> datetime | None:
@@ -362,11 +421,14 @@ def graded_status(record: Mapping[str, object]) -> str | None:
 
 def claim_accuracy(claim: str, status: str | None) -> object:
     """`True`/`False` when a success-or-failure claim can be checked against a
-    grade; `"n/a"` when the agent made no claim; `UNKNOWN` otherwise (no
-    reviewed claim, or no grade to check it against)."""
-    if claim == "no-claim":
+    PASS or FAIL grade; `"n/a"` when the agent made no claim or asked a
+    question instead; `UNKNOWN` otherwise (no reviewed claim, or a grade that
+    is neither PASS nor FAIL)."""
+    if claim in ("no-claim", "asked-clarification"):
         return "n/a"
-    if claim not in ("claimed-success", "claimed-failure") or status is None:
+    if claim not in ("claimed-success", "claimed-failure") or status not in ("PASS", "FAIL"):
+        # INCONCLUSIVE, UNAVAILABLE, NOT_RUN or no grade: the grader
+        # established neither outcome, so no claim can be checked against it.
         return UNKNOWN
     return (claim == "claimed-success") == (status == "PASS")
 
@@ -382,8 +444,50 @@ def load_claims(path: Path) -> dict[str, str]:
     return {str(k): str(v) for k, v in claims.items()}
 
 
+def schedule_from_ledger(experiment: trial.Experiment) -> list[ScheduledAttempt]:
+    """The planned schedule, recovered from the ledger alone (each trial's
+    label is `matched_pilot_<arm>_<repeat>`, carried in its trial id)."""
+    schedule = []
+    for planned_trial, attempt in experiment.attempts():
+        trial_id = str(planned_trial["trial_id"])
+        match = re.search(r"matched_pilot_(treatment|baseline)_(\d+)$", trial_id)
+        if match is None:
+            raise ManifestRefused(f"ledger trial {trial_id!r} is not a matched-pilot trial")
+        schedule.append(ScheduledAttempt(str(attempt["attempt_id"]), trial_id, match.group(1), int(match.group(2))))
+    return schedule
+
+
+def reconcile(experiment: trial.Experiment, outcomes: Sequence[AttemptOutcome]) -> list[AttemptOutcome]:
+    """One outcome per attempt the LEDGER planned, in ledger order. A planned
+    attempt with no recorded outcome (the run was interrupted) takes its
+    lifecycle record if one was written, else is finalized now - never left
+    out, since a report that omits a scheduled attempt is not a report of the
+    pilot. An outcome for an attempt the ledger never planned is refused."""
+    by_id = {o.scheduled.attempt_id: o for o in outcomes}
+    schedule = schedule_from_ledger(experiment)
+    stray = set(by_id) - {s.attempt_id for s in schedule}
+    if stray:
+        raise ManifestRefused(f"outcomes name attempt(s) the ledger never planned: {sorted(stray)}")
+    reconciled = []
+    for scheduled in schedule:
+        outcome = by_id.get(scheduled.attempt_id)
+        if outcome is None:
+            note = "no outcome was recorded for this attempt (the run was interrupted)"
+            lifecycle = experiment.root / f"lifecycle-{scheduled.attempt_id}.json"
+            record = (
+                json.loads(lifecycle.read_text(encoding="utf-8")) if lifecycle.is_file()
+                # DERIVED, not declared: never dispatched is `not-run`, a
+                # dispatched attempt with no capture is `inconclusive`.
+                else trial.finalize(experiment, scheduled.attempt_id, reason=note)
+            )
+            outcome = AttemptOutcome(scheduled, record, 0.0, runner_note=note)
+        reconciled.append(outcome)
+    return reconciled
+
+
 def build_report(
     experiment: trial.Experiment, outcomes: Sequence[AttemptOutcome], claims: Mapping[str, str] | None = None,
+    *, declared_model: str | None = None,
 ) -> dict[str, object]:
     """The `pilot-report` record: one entry per scheduled attempt, in schedule
     order. The keys the `pilot-report` rule checks are exactly its contract;
@@ -400,6 +504,14 @@ def build_report(
         observation = record.get("observation")
         obs = observation if isinstance(observation, dict) else {}
         disposition = record.get("disposition")
+        uncertainty = _uncertainty(outcome)
+        interventions = 0
+        if claim == "asked-clarification":
+            # The declared behaviour: never auto-answered, counted, named.
+            interventions = 1
+            clarification = "the agent ended by asking a clarifying question (reviewed), which nobody answered"
+            uncertainty = clarification if uncertainty == "none" else f"{uncertainty}; {clarification}"
+        observed_model = meta.get("model") or UNKNOWN
         entries.append({
             "attempt_id": attempt_id,
             "trial_id": outcome.scheduled.trial_id,
@@ -408,10 +520,11 @@ def build_report(
             "disposition": disposition,
             "graded_status": status if status is not None else UNKNOWN,
             "criteria": _criteria(record),
-            "uncertainty": _uncertainty(outcome),
+            "uncertainty": uncertainty,
             # Non-interactive by declaration: nobody answers, redirects or
-            # restarts an attempt once it starts.
-            "interventions": 0,
+            # restarts an attempt once it starts. A reviewed clarification
+            # request is the one thing that counts (see above).
+            "interventions": interventions,
             "cost_usd": (
                 {"setup": 0, "agent": 0, "grading": 0, "total": 0} if disposition == "not-run"
                 else {"setup": 0, "agent": UNKNOWN, "grading": 0, "total": UNKNOWN}
@@ -421,7 +534,12 @@ def build_report(
                          "containers with no metered call.",
             "tokens": meta.get("token_usage") if meta.get("token_usage") is not None else UNKNOWN,
             "time_seconds": _time_split(outcome, agent),
-            "model_observed": meta.get("model") or UNKNOWN,
+            "model_observed": observed_model,
+            "model_declared": declared_model or UNKNOWN,
+            "model_matches_declaration": (
+                UNKNOWN if declared_model is None or observed_model == UNKNOWN
+                else observed_model == declared_model
+            ),
             "reasoning_effort_observed": meta.get("reasoning_effort") or UNKNOWN,
             "cli_version_observed": meta.get("cli_version") or UNKNOWN,
             "prompt_delivered": obs.get("prompt_delivered", UNKNOWN),
@@ -488,6 +606,10 @@ def summarize(report: Mapping[str, object]) -> dict[str, object]:
             _round(statistics.median(diffs)) if diffs else UNKNOWN
         ),
         "claims_reviewed": report.get("claims_reviewed"),
+        "protocol_deviations": [
+            f"{e.get('attempt_id')}: ran model {e.get('model_observed')!r}, declared {e.get('model_declared')!r}"
+            for e in entries if e.get("model_matches_declaration") is False
+        ],
         "claim_accuracy": [
             {"attempt_id": e.get("attempt_id"), "claim": e.get("claim"), "accurate": e.get("claim_accurate")}
             for e in entries
@@ -581,14 +703,14 @@ def run_pilot(
     )
     outcomes: list[AttemptOutcome] = []
 
-    def run_attempt(scheduled: ScheduledAttempt) -> dict[str, object]:
+    def run_attempt(scheduled: ScheduledAttempt, budget: float) -> dict[str, object]:
         agent_backend, grading_backend = backends()
         return cc.run_level1_agent_attempt(
             experiment=experiment, attempt_id=scheduled.attempt_id,
             backend=agent_backend, grading_backend=grading_backend,  # type: ignore[arg-type]
             base=run_dir, base_argv=argv_for(scheduled),
             extra_home_files=treatment_home_files if scheduled.arm == TREATMENT else {},
-            cli_version=declaration.client_version, timeout=declaration.per_attempt_seconds,
+            cli_version=declaration.client_version, timeout=budget,
             credential_explicit_path=credential_explicit_path,
         )
 
@@ -599,7 +721,7 @@ def run_pilot(
     run_schedule(
         experiment, schedule, run_attempt,
         total_seconds=declaration.total_seconds if total_seconds is None else total_seconds,
-        clock=clock, on_outcome=on_outcome,
+        per_attempt_seconds=declaration.per_attempt_seconds, clock=clock, on_outcome=on_outcome,
     )
     return experiment, outcomes
 
@@ -609,3 +731,30 @@ DEFAULT_PRIVATE_ROOT = Path.home() / ".local" / "share" / "skillc" / "pilot-runs
 PRIVATE_OBSERVATIONS_FILENAME = "private-observations.json"
 #: The committed bundle `skillc check-records` reads.
 EVIDENCE_DIR = PILOT_DIR / "evidence" / "records"
+
+
+#: The one finding a captured agent-trial attempt still carries: the #106
+#: driver grades through `verify.grade_files` and stores no `verified-result`
+#: record (that needs an installation receipt the agent path does not write),
+#: so `attempt-accounting` correctly says the result is owed. Every OTHER
+#: finding refuses publication.
+KNOWN_GAP_RULE = "attempt-accounting"
+KNOWN_GAP_TEXT = "is captured but has no result"
+
+
+def bundle_findings(root: Path) -> tuple[list[str], int]:
+    """`skillc check-records` over `root`, split into (unexpected error
+    findings, count of the named known gap). An empty `root` - nothing to
+    check - is itself an unexpected finding, never a clean result."""
+    from . import checks
+
+    found = records.discover(root)
+    bundles = records.discover_bundles(root)
+    if not found or not bundles:
+        return [f"no record or no bundle under {root}; nothing was checked"], 0
+    findings = [f for record in found for f in checks.run_record(record)]
+    findings += [f for bundle in bundles for f in checks.run_bundle(bundle)]
+    errors = [f for f in findings if f.severity == checks.ERROR]
+    known = [f for f in errors if f.rule == KNOWN_GAP_RULE and KNOWN_GAP_TEXT in f.detail]
+    unexpected = [f"{f.rule}: {f.detail}" for f in errors if f not in known]
+    return unexpected, len(known)

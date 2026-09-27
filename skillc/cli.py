@@ -900,25 +900,41 @@ def cmd_collection_run(args: argparse.Namespace) -> int:
 
 
 def _export_pilot_evidence(experiment: object, report: dict[str, object], evidence: Path) -> int:
-    """Export the bundle, then leak-check it; on any finding the exported
-    files are removed again, so a leaking bundle never sits in the work tree
-    one `git add` from publication. Returns a process exit code."""
+    """Publish the bundle as ONE unit. It is exported into a fresh staging
+    directory beside `evidence`, and only that staging copy is leak-checked
+    and record-checked - never a neighbouring file already in `evidence`.
+    Only when both pass does it replace `evidence` wholesale, so a re-run
+    never mixes two runs' records and a failed export leaves the previous
+    bundle untouched. Returns a process exit code."""
     import shutil
 
     from . import matched_pilot as mp
 
-    written = mp.export_bundle(experiment, report, evidence)  # type: ignore[arg-type]
-    result = leak.scan_path(evidence, leak.load_denylist(None))
-    if result.findings or result.scanned == 0:
-        for finding in result.findings:
-            print(finding.render(evidence), file=sys.stderr)
-        for path in written:
-            path.unlink(missing_ok=True)
-        if evidence.exists() and not any(evidence.iterdir()):
-            shutil.rmtree(evidence, ignore_errors=True)
-        print("skillc: the exported pilot bundle failed its leak check; nothing was left in place", file=sys.stderr)
-        return 1
-    print(f"skillc: exported {len(written)} record(s), leak-checked ({result.scanned} scanned, 0 found)")
+    evidence = evidence.resolve()
+    evidence.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=f".{evidence.name}.staging-", dir=evidence.parent))
+    try:
+        written = mp.export_bundle(experiment, report, staging)  # type: ignore[arg-type]
+        result = leak.scan_path(staging, leak.load_denylist(None))
+        if result.findings or result.scanned == 0:
+            for finding in result.findings:
+                print(finding.render(staging), file=sys.stderr)
+            print("skillc: the pilot bundle failed its leak check; nothing was published", file=sys.stderr)
+            return 1
+        unexpected, known = mp.bundle_findings(staging)
+        if unexpected:
+            for line in unexpected:
+                print(f"skillc: {line}", file=sys.stderr)
+            print("skillc: the pilot bundle failed check-records; nothing was published", file=sys.stderr)
+            return 1
+        if evidence.exists():
+            shutil.rmtree(evidence)
+        staging.rename(evidence)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+    print(f"skillc: published {len(written)} record(s) to {evidence.name}/: leak-checked "
+          f"({result.scanned} scanned, 0 found); check-records clean except {known} known "
+          f"'{mp.KNOWN_GAP_TEXT}' finding(s) (no verified-result is stored on the agent-trial path)")
     return 0
 
 
@@ -970,6 +986,13 @@ def cmd_pilot_run(args: argparse.Namespace) -> int:
         print(f"skillc: could not resolve the digest of image {image!r}; a pilot never runs on an unknown image",
               file=sys.stderr)
         return 2
+    if image_digest != declaration.image_digest:
+        print(
+            f"skillc: image {image!r} resolves to {image_digest}, but the manifest declares "
+            f"{declaration.image_digest}; refusing a run on an image other than the declared one",
+            file=sys.stderr,
+        )
+        return 2
 
     private_root = Path(args.private_dir).expanduser() if args.private_dir else mp.DEFAULT_PRIVATE_ROOT
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -999,13 +1022,17 @@ def cmd_pilot_run(args: argparse.Namespace) -> int:
     experiment, outcomes = mp.run_pilot(
         declaration, run_dir=run_dir, treatment_home_files=home_files,
         treatment_digest=acquired.source.digest, image_digest=image_digest,
-        backends=lambda: cc.agent_backends(image=image, base=run_dir, docker_bin=docker_bin, daemon_timeout=args.timeout),
+        # By the resolved immutable digest, never the tag: a tag re-pointed
+        # mid-run would otherwise change the image under later attempts.
+        backends=lambda: cc.agent_backends(
+            image=image_digest, base=run_dir, docker_bin=docker_bin, daemon_timeout=args.timeout,
+        ),
         argv_for=lambda _scheduled: client_argv, credential_explicit_path=credential_path,
     )
     (run_dir / mp.PRIVATE_OBSERVATIONS_FILENAME).write_text(
         json.dumps(mp.private_observations(outcomes), indent=1) + "\n", encoding="utf-8",
     )
-    report = mp.build_report(experiment, outcomes)
+    report = mp.build_report(experiment, mp.reconcile(experiment, outcomes), declared_model=declaration.model)
     code = _export_pilot_evidence(experiment, report, Path(args.evidence) if args.evidence else mp.EVIDENCE_DIR)
     return code or _print_pilot_summary(report)
 
@@ -1018,12 +1045,14 @@ def cmd_pilot_report(args: argparse.Namespace) -> int:
 
     run_dir = Path(args.run_dir).expanduser()
     try:
+        declaration = mp.load_declaration(Path(args.manifest) if args.manifest else mp.MANIFEST_PATH)
         experiment, outcomes = mp.read_outcomes(run_dir)
         claims = mp.load_claims(Path(args.claims)) if args.claims else None
+        reconciled = mp.reconcile(experiment, outcomes)
     except (OSError, KeyError, ValueError) as exc:
         print(f"skillc: {exc}", file=sys.stderr)
         return 2
-    report = mp.build_report(experiment, outcomes, claims)
+    report = mp.build_report(experiment, reconciled, claims, declared_model=declaration.model)
     code = _export_pilot_evidence(experiment, report, Path(args.evidence) if args.evidence else mp.EVIDENCE_DIR)
     return code or _print_pilot_summary(report)
 
@@ -1248,6 +1277,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_pilot_report.add_argument("run_dir", help="the private run directory pilot-run printed")
     p_pilot_report.add_argument("--claims", help='JSON {"claims": {attempt_id: claimed-success|claimed-failure|no-claim}}')
+    p_pilot_report.add_argument("--manifest", help="run manifest (default: evals/matched-pilot/run-manifest.json)")
     p_pilot_report.add_argument("--evidence", help="where the bundle is exported (default: evals/matched-pilot/evidence/records)")
     p_pilot_report.set_defaults(func=cmd_pilot_report)
 

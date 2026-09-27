@@ -35,17 +35,30 @@ and version plan.
   (treatment) or nothing (baseline), 3 repeats interleaved T,B,T,B,T,B. Both
   arms go through one path, `collection_conformance.run_level1_agent_attempt`,
   and differ only in what is installed.
-  - The declared pins are checked before anything runs (subject revision,
-    client version, a resolvable image digest). A mismatch refuses the run.
-  - The 900 s per-attempt cap is the agent's own limit. The 5400 s total cap
-    is enforced as a start gate: an attempt it cuts is finalized `not-run`
-    and still reported.
+  - The declared pins are checked before anything runs: the subject
+    revision, the client version, and the image digest, which must equal the
+    declared one. Containers run by that digest, never the tag. A mismatch
+    refuses the run. The declared model is not enforced at launch; every
+    report entry compares it with the observed model, and the summary lists
+    any mismatch as a protocol deviation.
+  - Each attempt's agent limit is the smaller of the 900 s per-attempt cap and
+    what remains of the 5400 s total, so agent time cannot run past the
+    total. An attempt with nothing left is finalized `not-run` and still
+    reported. Caps must be positive and finite.
+  - Every attempt the ledger planned is reported. An interrupted run's
+    missing attempts are reconciled from the ledger, never dropped. The
+    bundle is built in a fresh staging directory, then leak-checked and run
+    through `check-records`. It replaces the previous bundle only if both
+    pass. The one tolerated finding is the named gap that the agent-trial
+    path stores no `verified-result`.
   - The `pilot-report` gives each attempt's disposition, per-criterion
     outcome, uncertainty, interventions, a setup/agent/grading time split
     (agent time from the trial journal), observed model, CLI version and
     tokens. Agent dollar cost is `UNKNOWN` (subscription login, ADR 0005
     rule 6), and so is claim accuracy until a reviewed claims file is merged
-    with `pilot-report --claims`.
+    with `pilot-report --claims`. Claim accuracy is `true`/`false` only
+    against a PASS or FAIL grade. A reviewed `asked-clarification` counts as
+    an intervention.
   - Raw evidence stays in a private run directory; the exported bundle is
     leak-checked and removed again on any finding.
 - **`transcript_adapter.codex_run_metadata`**: the observed model, reasoning
