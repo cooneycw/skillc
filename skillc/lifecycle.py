@@ -30,9 +30,10 @@ closed vocabulary this driver must not widen - "backend-torn-down" is not a
 legal journal event, exactly as an unknown frontmatter field is refused
 elsewhere in this codebase. Extending that version-2 record contract is out
 of scope for this PR (see records.md). So `confirm_absent()`'s `Confirmation`
-is carried ONLY in this driver's own return value, under `backend_teardown` -
-never written to the journal, so a caller who reads only the lifecycle record
-would miss it entirely.
+is carried in this driver's own return value, under `backend_teardown`, and
+(#127) in the journal as a `backend-teardown` DETAIL event - journal-only,
+like `workspace`, so the lifecycle record's schema is unchanged. A caller who
+reads only the lifecycle record still misses it; the journal beside it has it.
 
 LIVENESS: A NONCE THE BACKEND NEVER SEES IN ADVANCE (issue #10, comment
 5848522578 lesson A4, and the addendum comment items 1-2). A trivial canary
@@ -466,12 +467,19 @@ def run_through_backend(
         else:
             confirm_absent_error = None
 
+    teardown_errors = [e for e in (destroy_error, confirm_absent_error) if e is not None]
+    experiment.record(
+        attempt_id, "backend-teardown", confirmation=teardown_confirmation.value,
+        error="; ".join(teardown_errors) if teardown_errors else None,
+    )
+    # CLEAN BEFORE FINALIZING (#127): finalize() derives the persisted record's
+    # `cleanup` from the journal's `cleaned` event, so the reverse order wrote
+    # `partial / never cleaned up` on every attempt, whatever cleanup then did.
+    trial.cleanup_workspace(experiment, attempt_id)
     if unavailable_reason is not None:
         record = trial.finalize(experiment, attempt_id, disposition="unavailable", reason=unavailable_reason)
     else:
         record = trial.finalize(experiment, attempt_id)
-    trial.cleanup_workspace(experiment, attempt_id)
-    teardown_errors = [e for e in (destroy_error, confirm_absent_error) if e is not None]
     output: dict[str, object] = {
         **record, "backend_teardown": teardown_confirmation.value,
         "backend_teardown_error": "; ".join(teardown_errors) if teardown_errors else None,

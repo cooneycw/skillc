@@ -489,6 +489,73 @@ def test_teardown_success_reports_no_error(store: Path, base: Path) -> None:
     assert record["backend_teardown_error"] is None
 
 
+def _persisted_lifecycle(experiment: t.Experiment, attempt_id: str) -> dict[str, object]:
+    """The lifecycle record AS WRITTEN TO THE STORE - what a later reader
+    consults - never the driver's in-memory return value."""
+    import json
+
+    return json.loads((experiment.root / f"lifecycle-{attempt_id}.json").read_text(encoding="utf-8"))
+
+
+def test_the_persisted_record_reports_the_workspace_cleanup_that_happened(store: Path, base: Path) -> None:
+    """#127: `run_through_backend` finalized BEFORE `cleanup_workspace()`, so
+    the persisted record said `partial / the workspace was never cleaned up`
+    on every backend attempt - including #11's live PASS runs, whose journals
+    said `removed`. Red on the pre-fix order."""
+    experiment, attempt_id = _planned(store)
+    record = lifecycle.run_through_backend(
+        FakeBackend(base), experiment, attempt_id, _argv("work"), {"skill": "x"}, Limits(timeout=5), base,
+    )
+    assert record["disposition"] == "captured"
+    assert _persisted_lifecycle(experiment, attempt_id)["cleanup"] == {"status": "removed", "failures": []}
+    assert record["cleanup"] == {"status": "removed", "failures": []}
+
+
+def test_the_persisted_record_still_reports_a_real_cleanup_failure(
+    store: Path, base: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other verdict: a cleanup that fails must still land in the persisted
+    record, not be papered over by the reordering."""
+    def failing_remove(path: Path, nonce: str) -> dict[str, object]:
+        return {"status": "partial", "errors": ["planted: could not remove"]}
+
+    monkeypatch.setattr(t, "remove_owned", failing_remove)
+    experiment, attempt_id = _planned(store)
+    lifecycle.run_through_backend(
+        FakeBackend(base), experiment, attempt_id, _argv("work"), {"skill": "x"}, Limits(timeout=5), base,
+    )
+    assert _persisted_lifecycle(experiment, attempt_id)["cleanup"] == {
+        "status": "partial", "failures": ["planted: could not remove"],
+    }
+
+
+def _teardown_events(experiment: t.Experiment, attempt_id: str) -> list[dict[str, object]]:
+    return [e for e in experiment.events(attempt_id) if e.get("event") == "backend-teardown"]
+
+
+def test_container_teardown_is_journalled(store: Path, base: Path) -> None:
+    """#127: `confirm_absent()`'s outcome lived only in the return value, so a
+    reader of the store could not tell whether the container was removed."""
+    experiment, attempt_id = _planned(store)
+    lifecycle.run_through_backend(
+        FakeBackend(base), experiment, attempt_id, _argv("work"), {"skill": "x"}, Limits(timeout=5), base,
+    )
+    [event] = _teardown_events(experiment, attempt_id)
+    assert event["confirmation"] == "confirmed"
+    assert event["error"] is None
+
+
+def test_an_unconfirmed_container_teardown_is_journalled_as_unknown(store: Path, base: Path) -> None:
+    experiment, attempt_id = _planned(store)
+    lifecycle.run_through_backend(
+        FakeBackend(base, confirm_absent_raises=True), experiment, attempt_id, _argv("work"),
+        {"skill": "x"}, Limits(timeout=5), base,
+    )
+    [event] = _teardown_events(experiment, attempt_id)
+    assert event["confirmation"] == "unknown"
+    assert "crashed unexpectedly" in str(event["error"])
+
+
 def test_launch_failed_is_unavailable(store: Path, base: Path) -> None:
     experiment, attempt_id = _planned(store)
     backend = FakeBackend(base)
