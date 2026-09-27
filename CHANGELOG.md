@@ -8,7 +8,16 @@ and version plan.
 
 ## [Unreleased]
 
-Nothing yet - see `0.2.0` below for everything that landed since `0.1.0`.
+### Fixed
+
+- **The mcp-second-opinion judge could block past its write deadline**
+  (#129): `_write` polled `select` and then made a BLOCKING 64 KiB
+  `os.write`. A pipe reads as writable when any space is free, so a child
+  that stopped reading could wedge the write forever, and the deadline was
+  never checked again. This intermittently hung CI's required `gate` step
+  in `test_a_stalled_reader_is_a_write_timeout`. The write loop now runs
+  on a non-blocking fd, and a full pipe goes back to `select` and the
+  clock. A deterministic regression test pre-fills the pipe.
 
 ## [0.2.0] - 2026-09-27
 

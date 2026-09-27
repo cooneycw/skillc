@@ -106,6 +106,49 @@ def test_a_stalled_reader_is_a_write_timeout() -> None:
     assert time.monotonic() - started < 5, "the write timeout must actually bound the wait"
 
 
+def test_a_nearly_full_pipe_cannot_block_the_write_past_its_deadline() -> None:
+    """#129: `select` reports a pipe writable when ANY space is free, not when
+    a whole chunk fits, so a blocking 64 KiB `os.write` into a pipe with one
+    free page waited forever once the reader stopped - the intermittent CI
+    hang in `test_a_stalled_reader_is_a_write_timeout`. Here the pipe is
+    pre-filled to exactly that state, deterministically. SIGALRM turns the
+    pre-fix hang into a failure rather than a stuck suite."""
+    import fcntl
+    import os
+    import signal
+    from types import SimpleNamespace
+
+    read_fd, write_fd = os.pipe()
+    flags = fcntl.fcntl(write_fd, fcntl.F_GETFL)
+    fcntl.fcntl(write_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+    try:
+        while True:
+            os.write(write_fd, b"x" * 4096)
+    except BlockingIOError:
+        pass
+    os.read(read_fd, 4096)  # one page free; nothing reads again
+    fcntl.fcntl(write_fd, fcntl.F_SETFL, flags)  # blocking, as subprocess hands it over
+    stdin = os.fdopen(write_fd, "wb", buffering=0)
+    proc = SimpleNamespace(stdin=stdin)
+
+    def hung(signum: int, frame: object) -> None:
+        raise AssertionError("_write blocked past its deadline (#129)")
+
+    previous = signal.signal(signal.SIGALRM, hung)
+    signal.alarm(10)
+    try:
+        started = time.monotonic()
+        with pytest.raises(judge.JudgeUnavailable, match="did not accept input"):
+            _judge("happy")._write(proc, {"payload": "y" * 65536}, 0.5)  # type: ignore[arg-type]
+        assert time.monotonic() - started < 5
+        assert os.get_blocking(write_fd), "the fd's own blocking mode is restored afterwards"
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
+        stdin.close()
+        os.close(read_fd)
+
+
 def test_a_notification_before_the_result_is_not_mistaken_for_it() -> None:
     """Cross-model review: the MCP transport permits a notification (no
     "id") to arrive before the response to an outstanding request. Treating
