@@ -1,0 +1,20 @@
+{
+  "branch": "issue-130-check-records-a-declared-run-state-masks-an-establ",
+  "counts": {
+    "accepted": 0,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "4818176e7ca4d59fe2a32e226684eb84bf0a30c7",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "130",
+  "passes": 1,
+  "recorded_at": "2026-09-27T17:39:36Z",
+  "red_cases": {
+    "already_covered": 5,
+    "proposed": 5
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "schema": 1,
+  "status": "ran"
+}

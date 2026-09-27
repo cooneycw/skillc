@@ -512,9 +512,9 @@ def artifact_digest(record: Record) -> Iterator[str]:
                 yield f"artifact {entry.get('path', index)!r} has no {required}"
         # Present is not enough: `null` for all three with a valid digest names
         # bytes nobody can locate or re-hash (#130).
-        for field in ("path", "type"):
-            if field in entry and not _nonempty_str(entry[field]):
-                yield f"artifact {index} has {field} {entry[field]!r}"
+        for key in ("path", "type"):
+            if key in entry and not _nonempty_str(entry[key]):
+                yield f"artifact {index} has {key} {entry[key]!r}"
         size = entry.get("size")
         if "size" in entry and (isinstance(size, bool) or not isinstance(size, int) or size < 0):
             yield f"artifact {index} has size {size!r}, not a non-negative integer"
