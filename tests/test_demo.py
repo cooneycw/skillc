@@ -30,6 +30,8 @@ FAKE_DOCKER = Path(__file__).resolve().parent / "fixtures" / "docker-backend" / 
 CODEX_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "codex-subject"
 #: Issue #122's red-case child: skillc's CLI with the interrupt sweep unscoped.
 UNSCOPED_INTERRUPT_CHILD = Path(__file__).resolve().parent / "fixtures" / "demo-control" / "unscoped_interrupt_child.py"
+#: Issue #122's red-case child whose exec never marks itself live.
+NEVER_LIVE_CHILD = Path(__file__).resolve().parent / "fixtures" / "demo-control" / "never_live_child.py"
 
 
 def _docker_bin(state_dir: Path) -> list[str]:
@@ -1117,9 +1119,11 @@ def test_cancellation_seed_is_caught_and_leaves_the_foreign_container_untouched(
         image="fake-image:1", docker_bin=_docker_bin(docker_state), base=base, timeout=5, sleep=4,
     )
     assert seed.caught is True, seed.evidence
+    assert "exec observed live" in seed.evidence
     assert "interrupt_line=present exit=1" in seed.evidence
     assert "independent=already-absent" in seed.evidence
     assert "foreign=running (untouched)" in seed.evidence
+    assert "foreign_removed=confirmed" in seed.evidence
     # The seed tears its own foreign container down afterwards.
     assert not reap.snapshot(_docker_bin(docker_state)).owned
 
@@ -1151,6 +1155,79 @@ def test_cancellation_seed_is_not_caught_when_the_child_never_starts_its_exec(
     )
     assert seed.caught is False
     assert "never announced its exec" in seed.evidence
+    assert not reap.snapshot(_docker_bin(docker_state)).owned
+
+
+def test_cancellation_seed_is_not_caught_when_the_exec_is_never_observed_live(
+    base: Path, docker_state: Path,
+) -> None:
+    """Red case (counter-model review of #122): the child announces its
+    attempt but its subject never marks itself live. A marker plus a delay
+    used to be enough to send SIGINT and certify; now no SIGINT is sent, the
+    child is killed, and the container it left is reaped by the seed."""
+    seed = demo.run_cancellation_control(
+        image="fake-image:1", docker_bin=_docker_bin(docker_state), base=base, timeout=5, sleep=4,
+        live_timeout=1.5, child_command=[sys.executable, str(NEVER_LIVE_CHILD)],
+    )
+    assert seed.caught is False
+    assert "never observed live" in seed.evidence
+    assert "independent=reaped" in seed.evidence  # the killed child left its container; the seed removed it
+    assert not reap.snapshot(_docker_bin(docker_state)).owned
+
+
+def test_cancellation_seed_is_not_caught_when_the_foreign_teardown_is_unconfirmed(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Red case (counter-model review of #122): the parent's own removal of
+    the foreign container is part of the verdict - an unconfirmed removal
+    must not read CAUGHT. Only the parent is patched; the child is a separate
+    process and never calls this."""
+    from skillc import docker_backend as dbe
+    from skillc.backend import Confirmation
+
+    monkeypatch.setattr(dbe.DockerBackend, "confirm_absent", lambda self, handle: Confirmation.NOT_CONFIRMED)
+    seed = demo.run_cancellation_control(
+        image="fake-image:1", docker_bin=_docker_bin(docker_state), base=base, timeout=5, sleep=4,
+    )
+    assert seed.caught is False
+    assert "interrupt_line=present exit=1" in seed.evidence
+    assert "foreign_removed=not-confirmed" in seed.evidence
+
+
+def test_cancellation_seed_interrupted_itself_kills_the_child_and_records_its_attempt(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Counter-model review of #122: an operator interrupting `--control`
+    while the seed waits must not orphan the child (it runs in its own
+    session, so the terminal's SIGINT never reaches it). The child's attempt
+    id must already be in the caller's list, so the caller's scoped sweep
+    can reach its container."""
+    started: list[subprocess.Popen[str]] = []
+    real_popen = subprocess.Popen
+
+    def _tracking_popen(*args: object, **kwargs: object) -> subprocess.Popen[str]:
+        proc = real_popen(*args, **kwargs)  # type: ignore[call-overload]
+        started.append(proc)
+        return proc  # type: ignore[no-any-return]
+
+    def _interrupted(*args: object) -> bool:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(demo.subprocess, "Popen", _tracking_popen)
+    monkeypatch.setattr(demo, "_exec_is_live", _interrupted)
+    recorded: list[str] = []
+    with pytest.raises(KeyboardInterrupt):
+        demo.run_cancellation_control(
+            image="fake-image:1", docker_bin=_docker_bin(docker_state), base=base, timeout=5, sleep=4,
+            recorded_attempt_ids=recorded,
+        )
+    monkeypatch.undo()
+    child = next(p for p in started if "--cancel-target" in p.args)  # type: ignore[operator]
+    assert child.poll() is not None  # killed and waited for, never left running
+    child_attempts = [a for a in recorded if a.startswith("a-")]
+    assert len(child_attempts) == 1
+    report = reap.reap(_docker_bin(docker_state), recorded)
+    assert not report.left_running and not report.unknown
     assert not reap.snapshot(_docker_bin(docker_state)).owned
 
 

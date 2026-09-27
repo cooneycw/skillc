@@ -358,13 +358,17 @@ the OTHER verdict from the success path, on purpose:
    nothing left for the attempt.
 6. **An operator cancellation** (#122) - `--control` starts a second
    `skillc demo` process (a hidden `--cancel-target` mode) whose exec sleeps
-   60s, waits for it to announce that its exec is starting, waits one more
-   second, and sends a real SIGINT to that process's whole process group, as
-   Ctrl-C in a terminal does. Beforehand it starts a FOREIGN skillc-owned
-   container that the child never recorded. Caught only when the child prints
-   the fixed interrupt line and exits `1`, its own cleanup reports its attempt
-   `reaped` or `already-absent`, an independent reap afterward finds it
-   `already-absent`, and the foreign container is still running. The child
+   60s. It waits until that subject has written a marker file inside the
+   RUNNING container (read back with a second `docker exec`), which is the
+   evidence the exec is in flight, and only then sends a real SIGINT to the
+   child's whole process group, as Ctrl-C in a terminal does. Beforehand it
+   starts a FOREIGN skillc-owned container that the child never recorded.
+   Caught only when the child prints the fixed interrupt line and exits `1`,
+   its own cleanup reports its attempt `reaped` or `already-absent`, an
+   independent reap afterward finds it `already-absent`, the foreign
+   container is still running, and its own removal of the foreign container
+   is confirmed. An exec never observed live gets no SIGINT: the child is
+   killed and the seed reads `NOT CAUGHT`. The child
    normally reports `already-absent`: the driver's own teardown removes the
    container before the interrupt handler sweeps, and the independent reap is
    what shows nothing was left. The foreign container is removed afterward.
@@ -402,7 +406,12 @@ negative controls on the controls themselves:
   (`tests/fixtures/demo-control/unscoped_interrupt_child.py`, #118's
   pre-fix host-global behaviour) makes the cancellation seed read `NOT
   CAUGHT`, because the foreign container is gone;
-- a child that never starts its exec is `NOT CAUGHT` after a bounded wait.
+- a child that never starts its exec, or whose exec never marks itself live
+  (`tests/fixtures/demo-control/never_live_child.py`), is `NOT CAUGHT` after
+  a bounded wait, with no SIGINT sent;
+- an unconfirmed removal of the foreign container is `NOT CAUGHT`;
+- interrupting `--control` itself mid-seed kills the child and leaves its
+  attempt id where the scoped sweep can reach it.
 
 Those tests run against the fake `docker` CLI. Seeds 5 and 6 exist because
 the fake cannot show how a real daemon enforces a kill or delivers a signal

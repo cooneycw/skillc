@@ -896,17 +896,22 @@ TIMEOUT_CONTROL_LIMIT = 3.0
 TIMEOUT_CONTROL_SLEEP = 30.0
 
 #: Issue #122's cancellation seed: how long the child's exec would run if
-#: never interrupted, and how long after its exec-start marker the SIGINT is
-#: sent. The marker is printed from `before_execute`, immediately before
-#: `execute()` launches `docker exec`; the settle is what makes the SIGINT
-#: land while that exec is in flight rather than before it starts.
+#: never interrupted, and the bounded waits for its two readiness signals.
 CANCEL_TARGET_SLEEP = 60.0
-CANCEL_SETTLE_SECONDS = 1.0
 CANCEL_READY_TIMEOUT = 120.0
+CANCEL_LIVE_TIMEOUT = 60.0
 
-#: Printed by `--cancel-target` to stderr, once, just before its exec
-#: starts. The parent reads the attempt id from it; nothing else.
+#: Printed by `--cancel-target` to stderr, once, from `before_execute`. The
+#: parent reads the attempt id from it, and nothing else - it is NOT the
+#: evidence that the exec is in flight (see `CANCEL_LIVE_FILE`).
 CANCEL_READY_MARKER = "skillc: cancel-target exec starting attempt="
+
+#: Written into the container's workspace by the cancel-target's own
+#: subject, as its first act inside the exec, before it sleeps. The parent
+#: sends SIGINT only after reading this file back out of the RUNNING
+#: container (counter-model review: a marker printed before `execute()` plus
+#: a fixed delay is a timing argument, not evidence a live exec exists).
+CANCEL_LIVE_FILE = ".skillc-cancel-live"
 
 #: The fixed line `cmd_demo`'s `KeyboardInterrupt` handler prints - defined
 #: here so the handler and the cancellation seed that checks for it cannot
@@ -984,6 +989,29 @@ def run_timeout_control(
     return ControlSeed(name, caught, evidence)
 
 
+def _cancel_target_argv(sleep: float) -> list[str]:
+    """The cancel-target's subject: mark itself live, then sleep."""
+    return [
+        verify.PROBE_INTERPRETER, "-c",
+        f"import pathlib, time; pathlib.Path({CANCEL_LIVE_FILE!r}).write_text('live'); time.sleep({float(sleep)!r})",
+    ]
+
+
+def _exec_is_live(docker_bin: Sequence[str], attempt_id: str, timeout: float) -> bool:
+    """True once `CANCEL_LIVE_FILE` exists in the attempt's RUNNING
+    container - asked of the daemon with a second `docker exec`, which
+    itself fails on a container that is not running."""
+    try:
+        proc = subprocess.run(
+            [*docker_bin, "exec", "-w", dbe.CONTAINER_WORKSPACE, "--", dbe._container_name(attempt_id),
+             "test", "-f", CANCEL_LIVE_FILE],
+            capture_output=True, timeout=timeout, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return proc.returncode == 0
+
+
 def run_cancel_target(
     *, image: str, docker_bin: Sequence[str], base: Path, timeout: float, sleep: float,
     recorded_attempt_ids: list[str],
@@ -1006,8 +1034,8 @@ def run_cancel_target(
         print(f"{CANCEL_READY_MARKER}{attempt_id}", file=sys.stderr, flush=True)
 
     record = lifecycle.run_through_backend(
-        backend, experiment, attempt_id, _sleep_argv(sleep), {"demo": "x"}, Limits(timeout=sleep + 60), base,
-        before_execute=_announce,
+        backend, experiment, attempt_id, _cancel_target_argv(sleep), {"demo": "x"}, Limits(timeout=sleep + 60),
+        base, before_execute=_announce,
     )
     print(f"skillc: cancel-target was never interrupted - disposition={record.get('disposition')}", file=sys.stderr)
     return 1
@@ -1015,8 +1043,8 @@ def run_cancel_target(
 
 def run_cancellation_control(
     *, image: str, docker_bin: Sequence[str], base: Path, timeout: float = 30,
-    sleep: float = CANCEL_TARGET_SLEEP, settle: float = CANCEL_SETTLE_SECONDS,
-    ready_timeout: float = CANCEL_READY_TIMEOUT, child_command: Sequence[str] | None = None,
+    sleep: float = CANCEL_TARGET_SLEEP, ready_timeout: float = CANCEL_READY_TIMEOUT,
+    live_timeout: float = CANCEL_LIVE_TIMEOUT, child_command: Sequence[str] | None = None,
     recorded_attempt_ids: list[str] | None = None,
 ) -> ControlSeed:
     """Issue #122's cancellation seed: a real SIGINT delivered to a real
@@ -1025,23 +1053,27 @@ def run_cancellation_control(
     A FOREIGN skillc-owned container is prepared first - owned, labelled,
     running, and not the child's. The child (`skillc demo --cancel-target`,
     `child_command` overriding only how skillc's CLI is launched) starts in
-    its own session. Once it prints its exec-start marker, and `settle`
-    seconds after that, SIGINT goes to its whole process group, as Ctrl-C in
-    a terminal does - so the `docker exec` client gets it too, and the seed
-    shows the interrupt still reaches the process that owns cleanup.
+    its own session and announces its attempt id. The parent then waits
+    until the child's subject has written `CANCEL_LIVE_FILE` inside the
+    running container - the evidence that the exec is in flight - and sends
+    SIGINT to the child's whole process group, as Ctrl-C in a terminal does,
+    so the `docker exec` client gets it too.
 
-    CAUGHT only when every part holds: the child printed the fixed
-    `INTERRUPT_LINE`; it exited 1; its own cleanup line reports its attempt
-    `reaped` or `already-absent`; an independent reap afterward finds the
-    attempt `already-absent` (`reaped` there would mean the child left it
-    running, and this seed removed it); and the foreign container is still
-    running (`confirm_stopped` NOT_CONFIRMED). The handler normally reports
-    `already-absent`, because the driver's own `finally` tears the
+    CAUGHT only when every part holds: the exec was observed live; the child
+    printed the fixed `INTERRUPT_LINE` and exited 1; its own cleanup line
+    reports its attempt `reaped` or `already-absent`; an independent reap
+    afterward finds it `already-absent` (`reaped` there would mean the child
+    left it running, and this seed removed it); the foreign container was
+    still running (`confirm_stopped` NOT_CONFIRMED); and this seed's own
+    removal of the foreign container is confirmed. The handler normally
+    reports `already-absent`, because the driver's own `finally` tears the
     container down before the handler sweeps - accepted by the owner on
     #122, since the independent reap is what shows nothing was left.
 
-    The foreign container is torn down by this function afterwards, however
-    the seed ended."""
+    However this function ends - including an interrupt of `--control`
+    itself - the child's process group is killed and waited for, and the
+    child's attempt id is appended to `recorded_attempt_ids` the moment it
+    is announced, so the caller's own scoped sweep can reach its container."""
     name = "operator cancellation: a real SIGINT mid-exec is handled and scoped to this run"
     foreign_backend = dbe.DockerBackend(image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=timeout)
     foreign_id = f"control-foreign-{secrets.token_hex(6)}"
@@ -1064,8 +1096,18 @@ def run_cancellation_control(
                 candidate = line[len(CANCEL_READY_MARKER):].strip()
                 if _ATTEMPT_ID_RE.match(candidate):
                     child_attempt.append(candidate)
+                    if recorded_attempt_ids is not None:
+                        recorded_attempt_ids.append(candidate)
                 ready.set()
 
+    def _signal_group(proc: subprocess.Popen[str], sig: signal.Signals) -> None:
+        try:
+            os.killpg(proc.pid, sig)
+        except ProcessLookupError:
+            pass
+
+    proc: subprocess.Popen[str] | None = None
+    foreign_removed: Confirmation | None = None
     try:
         argv = [
             *(child_command if child_command is not None else [sys.executable, "-m", "skillc.cli"]),
@@ -1079,40 +1121,52 @@ def run_cancellation_control(
             )
         except OSError:
             return ControlSeed(name, False, "the child skillc process could not be started - the seed never ran")
+        assert proc.stderr is not None
         reader = threading.Thread(target=_read, args=(proc.stderr,), daemon=True)
         reader.start()
 
-        interrupted_after: float | None = None
+        announced = ready.wait(ready_timeout) and bool(child_attempt)
+        live = False
+        if announced:
+            deadline = time.monotonic() + live_timeout
+            while proc.poll() is None and time.monotonic() < deadline:
+                if _exec_is_live(docker_bin, child_attempt[0], timeout):
+                    live = True
+                    break
+                time.sleep(0.1)
+
         sent: float | None = None
-        if ready.wait(ready_timeout):
-            time.sleep(settle)
-            try:
-                os.killpg(proc.pid, signal.SIGINT)
-            except ProcessLookupError:
-                pass
+        if live:
+            _signal_group(proc, signal.SIGINT)
             sent = time.monotonic()
         else:
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+            _signal_group(proc, signal.SIGKILL)
         try:
             exit_code = proc.wait(timeout=max(60.0, timeout * 4))
         except subprocess.TimeoutExpired:
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+            _signal_group(proc, signal.SIGKILL)
             exit_code = proc.wait()
-        if sent is not None:
-            interrupted_after = time.monotonic() - sent
+        exited_after = time.monotonic() - sent if sent is not None else None
         reader.join(timeout=5)
 
         attempt = child_attempt[0] if child_attempt else None
+        independent = reap.reap(docker_bin, [attempt], None, timeout).outcome_for(attempt) if attempt else None
+        foreign_state = foreign_backend.confirm_stopped(foreign)
+        foreign_running = foreign_state is Confirmation.NOT_CONFIRMED
+        foreign_backend.destroy(foreign)
+        foreign_removed = foreign_backend.confirm_absent(foreign)
+
         if attempt is None:
             return ControlSeed(
                 name, False,
                 f"the child never announced its exec (waited {ready_timeout}s) - no SIGINT was sent, exit={exit_code}",
+            )
+        if not live:
+            return ControlSeed(
+                name, False,
+                f"the child's exec was never observed live (waited {live_timeout}s) - no SIGINT was sent, "
+                f"the child was killed; attempt={attempt} independent={independent} "
+                f"foreign_removed={foreign_removed.value}",
             )
 
         interrupt_line = INTERRUPT_LINE in lines
@@ -1120,27 +1174,30 @@ def run_cancellation_control(
         for line in lines:
             if line.startswith("skillc: best-effort cleanup - outcomes="):
                 handler_outcome = dict(_CLEANUP_PAIR_RE.findall(line)).get(attempt)
-        independent = reap.reap(docker_bin, [attempt], None, timeout).outcome_for(attempt)
-        foreign_state = foreign_backend.confirm_stopped(foreign)
-        foreign_running = foreign_state is Confirmation.NOT_CONFIRMED
-
         caught = (
             interrupt_line and exit_code == 1
             and handler_outcome in ("reaped", "already-absent")
             and independent == "already-absent"
             and foreign_running
+            and foreign_removed is Confirmation.CONFIRMED
         )
-        exited = f"{interrupted_after:.1f}s" if interrupted_after is not None else "unknown"
+        exited = f"{exited_after:.1f}s" if exited_after is not None else "unknown"
         evidence = (
+            f"exec observed live, then SIGINT to the child's process group; "
             f"interrupt_line={'present' if interrupt_line else 'ABSENT'} exit={exit_code} "
             f"child exited {exited} after SIGINT (exec would have run {sleep}s) "
             f"attempt={attempt} handler={handler_outcome} independent={independent} "
-            f"foreign={'running (untouched)' if foreign_running else f'NOT running ({foreign_state.value})'}"
+            f"foreign={'running (untouched)' if foreign_running else f'NOT running ({foreign_state.value})'} "
+            f"foreign_removed={foreign_removed.value}"
         )
         return ControlSeed(name, caught, evidence)
     finally:
-        foreign_backend.destroy(foreign)
-        foreign_backend.confirm_absent(foreign)
+        if proc is not None and proc.poll() is None:
+            _signal_group(proc, signal.SIGKILL)
+            proc.wait()
+        if foreign_removed is None:
+            foreign_backend.destroy(foreign)
+            foreign_backend.confirm_absent(foreign)
 
 
 def build_control_paste_back(seeds: Sequence[ControlSeed], image: str, image_digest: str | None) -> str:
