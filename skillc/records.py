@@ -34,7 +34,7 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -840,22 +840,14 @@ def attempt_lifecycle(record: Record) -> Iterator[str]:
         yield "no cleanup failures list; an empty list says none, a missing one says unknown"
 
 
-#: `agent-observation`'s schema is CLOSED at every level (#106): an unknown key
-#: is refused, not ignored. Every field below is a fact the controller derived,
-#: none is a place a credential or transcript text could be copied into - and a
-#: new observation field has to be named here before it can be recorded, which
-#: fails loudly (the finding names the key) rather than silently dropping it.
+#: `agent-observation`'s schema is CLOSED and TYPED at every level (#106): an
+#: unknown key is refused, a missing key is refused (silence is not absence),
+#: and every value must have its declared type - a key-only closure let an
+#: object ride in a scalar field (codex review). Every field below is a fact the
+#: controller derived; none is a place a credential or transcript text could be
+#: copied into. A new observation field has to be named here before it can be
+#: recorded, which fails loudly (the finding names the key).
 AGENT_OBSERVATION_STATUSES = ("observed", "unknown", "not-observed")
-_AO_TOP = {"version", "kind", "producer", "attempt_id", "trial_id", "client", "status", "reason",
-           "transcript", "credential", "grading"}
-_AO_TRANSCRIPT = {"files_found", "prompt_delivered", "prompt_delivery_reason", "canary_satisfied",
-                  "canary_reason", "skill_invocations", "skill_invocation_detection", "skills_listed",
-                  "skills_listed_source", "grading_eligible", "census"}
-_AO_CENSUS = {"client_version", "model", "line_types", "unrecognized_types", "response_items_inspected",
-              "error"}
-_AO_CREDENTIAL = {"delivered", "source", "remaining_seconds_at_launch", "refresh_observed_in_container"}
-_AO_GRADING = {"grader_supplied", "eligible", "blocked_reason", "graded_status", "category", "criteria"}
-_AO_CRITERION = {"id", "mandatory", "outcome"}
 _AO_DETECTION = ("structural", "heuristic")
 #: The graded statuses that ARE verdicts. Only these must follow from the
 #: record's own criteria; the grader reports the others (a backend it could not
@@ -863,104 +855,169 @@ _AO_DETECTION = ("structural", "heuristic")
 _AO_VERDICTS = ("PASS", "FAIL")
 
 
-def _closed(value: object, allowed: set[str], where: str) -> Iterator[str]:
+def _is_bool(v: object) -> bool:
+    return isinstance(v, bool)
+
+
+def _is_count(v: object) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool) and v >= 0
+
+
+def _is_opt(check: Callable[[object], bool]) -> Callable[[object], bool]:
+    return lambda v: v is None or check(v)
+
+
+def _is_text(v: object) -> bool:
+    return isinstance(v, str)
+
+
+def _is_names(v: object) -> bool:
+    return _str_list(v) is not None
+
+
+def _is_count_map(v: object) -> bool:
+    return isinstance(v, dict) and all(isinstance(k, str) and _is_count(n) for k, n in v.items())
+
+
+_Spec = dict[str, tuple[Callable[[object], bool], str]]
+_AO_TOP: _Spec = {
+    "version": (lambda v: True, "checked by record-envelope"),
+    "kind": (lambda v: True, "checked by record-envelope"),
+    "producer": (lambda v: True, "checked by producer-authority"),
+    "attempt_id": (lambda v: True, "checked by attempt-binding"),
+    "trial_id": (lambda v: True, "checked by attempt-binding"),
+    "client": (_nonempty_str, "a non-empty client name"),
+    "status": (lambda v: v in AGENT_OBSERVATION_STATUSES, f"one of {list(AGENT_OBSERVATION_STATUSES)}"),
+    "reason": (_is_opt(_is_text), "text or null"),
+    "transcript": (lambda v: v is None or isinstance(v, dict), "an object or null"),
+    "credential": (lambda v: isinstance(v, dict), "an object"),
+    "grading": (lambda v: isinstance(v, dict), "an object"),
+}
+_AO_TRANSCRIPT: _Spec = {
+    "files_found": (_is_count, "a non-negative integer"),
+    "prompt_delivered": (_is_bool, "a boolean"),
+    "prompt_delivery_reason": (_is_opt(_is_text), "text or null"),
+    "canary_satisfied": (_is_bool, "a boolean"),
+    "canary_reason": (_is_opt(_is_text), "text or null"),
+    "skill_invocations": (_is_names, "a list of skill names"),
+    "skill_invocation_detection": (lambda v: v in _AO_DETECTION, f"one of {list(_AO_DETECTION)}"),
+    "skills_listed": (_is_opt(_is_names), "a list of skill names or null"),
+    "skills_listed_source": (_is_text, "text"),
+    "grading_eligible": (_is_bool, "a boolean"),
+    "census": (lambda v: v is None or isinstance(v, dict), "an object or null"),
+}
+_AO_CENSUS: _Spec = {
+    "client_version": (_is_opt(_is_text), "text or null"),
+    "model": (_is_opt(_is_text), "text or null"),
+    "line_types": (_is_opt(_is_count_map), "a map of line type to count, or null"),
+    "unrecognized_types": (_is_opt(_is_names), "a list of type names or null"),
+    "response_items_inspected": (_is_opt(_is_count), "a non-negative integer or null"),
+    "error": (_is_opt(_is_text), "text or null"),
+}
+_AO_CREDENTIAL: _Spec = {
+    "delivered": (_is_opt(_is_bool), "a boolean or null"),
+    "source": (_is_opt(_is_text), "text or null"),
+    "remaining_seconds_at_launch": (_is_opt(_is_count), "a non-negative integer or null"),
+    "refresh_observed_in_container": (_is_opt(_is_bool), "a boolean or null"),
+}
+_AO_GRADING: _Spec = {
+    "grader_supplied": (_is_bool, "a boolean"),
+    "eligible": (_is_bool, "a boolean"),
+    "blocked_reason": (_is_opt(_nonempty_str), "non-empty text or null"),
+    "graded_status": (_is_opt(lambda v: v in PROTOCOL_STATUSES), f"one of {list(PROTOCOL_STATUSES)} or null"),
+    "category": (_is_opt(_is_text), "text or null"),
+    "criteria": (lambda v: v is None or isinstance(v, list), "a list or null"),
+}
+_AO_CRITERION: _Spec = {
+    "id": (_nonempty_str, "a non-empty id"),
+    # Literal booleans only: `derive_status` selects `mandatory is True`, so a
+    # "true" string or a 1 would silently drop a VIOLATED criterion out of the
+    # derivation - the same hole `criterion_vocabulary` closes for results.
+    "mandatory": (_is_bool, "a boolean"),
+    "outcome": (lambda v: v in CRITERION_OUTCOMES, f"one of {list(CRITERION_OUTCOMES)}"),
+}
+
+
+def _typed(value: object, spec: _Spec, where: str) -> Iterator[str]:
     if not isinstance(value, dict):
         yield f"{where} is not an object"
         return
-    for key in sorted(set(value) - allowed):
+    for key in sorted(set(value) - set(spec)):
         yield f"{where} carries unknown field {key!r}; the schema is closed - name it in records.py first"
+    for key, (check, expected) in spec.items():
+        if key not in value:
+            yield f"{where} has no {key!r}; silence is not absence - write null where nothing was observed"
+        elif not check(value[key]):
+            yield f"{where}.{key} is {value[key]!r}, not {expected}"
 
 
 def agent_observation(record: Record) -> Iterator[str]:
     """What the controller concluded from a real agent's transcript, for one
-    attempt (#106). Checked for SHAPE and for the three facts that must agree
-    with each other inside the record:
+    attempt (#106). Checked for SHAPE - closed, complete and typed at every
+    level - and for the facts that must agree inside the record:
 
-      - `grading_eligible` is exactly `prompt_delivered AND canary_satisfied` -
-        the driver's own gate, so a record cannot claim an attempt was fit to
-        grade when its own observation says it was not;
+      - positive transcript conclusions (prompt delivered, canary satisfied)
+        rest on exactly ONE transcript file - the driver reads nothing
+        otherwise, so a record claiming them from zero or two files concludes
+        more than its own population supports;
+      - `grading_eligible` is exactly `prompt_delivered AND canary_satisfied`;
       - a grader that was supplied either graded (a status) or was blocked (a
-        reason), never both and never neither - an attempt that silently got
-        neither has lost its grading account;
+        reason), never both and never neither;
       - a PASS or FAIL copied here follows from the criteria copied with it
         (`derive_status`), so the audit copy cannot say more than its evidence.
 
-    A `status` other than `observed` names its reason, and carries no transcript
-    conclusions: an attempt whose transcript was never read has none to report.
+    A `status` other than `observed` names its reason and carries no transcript
+    conclusions: an attempt whose transcript was never read has none.
     """
     if record.parse_error is not None or record.kind != AGENT_OBSERVATION:
         return
     data = record.data
-    yield from _closed(data, _AO_TOP, "the record")
-    if not _nonempty_str(data.get("client")):
-        yield "no client; whose transcript was observed is unknown"
+    yield from _typed(data, _AO_TOP, "the record")
     status = data.get("status")
-    if status not in AGENT_OBSERVATION_STATUSES:
-        yield f"status {status!r} is not one of {list(AGENT_OBSERVATION_STATUSES)}"
-    elif status != "observed" and not _nonempty_str(data.get("reason")):
+    if status in AGENT_OBSERVATION_STATUSES and status != "observed" and not _nonempty_str(data.get("reason")):
         yield f"status {status!r} gives no reason; an unobserved attempt must say why"
 
     transcript = data.get("transcript")
-    eligible_observed: bool | None = None
+    eligible_observed = False
     if status == "observed":
         if not isinstance(transcript, dict):
             yield "status observed, but no transcript conclusions are recorded"
         else:
-            yield from _closed(transcript, _AO_TRANSCRIPT, "transcript")
+            yield from _typed(transcript, _AO_TRANSCRIPT, "transcript")
             prompt, canary = transcript.get("prompt_delivered"), transcript.get("canary_satisfied")
-            eligible = transcript.get("grading_eligible")
-            for name, value in (("prompt_delivered", prompt), ("canary_satisfied", canary),
-                                ("grading_eligible", eligible)):
-                if not isinstance(value, bool):
-                    yield f"transcript.{name} is {value!r}, not a boolean"
-            if isinstance(prompt, bool) and isinstance(canary, bool) and isinstance(eligible, bool):
+            eligible, files = transcript.get("grading_eligible"), transcript.get("files_found")
+            if (prompt is True or canary is True) and files != 1:
+                yield (
+                    f"transcript claims prompt_delivered={prompt} / canary_satisfied={canary} from "
+                    f"{files!r} transcript files; a conclusion needs exactly one transcript to rest on"
+                )
+            if _is_bool(prompt) and _is_bool(canary) and _is_bool(eligible):
                 if eligible != (prompt and canary):
                     yield (
                         f"transcript.grading_eligible is {eligible}, but prompt_delivered={prompt} "
                         f"and canary_satisfied={canary}; eligibility is exactly both"
                     )
-                eligible_observed = eligible
-            files = transcript.get("files_found")
-            if not isinstance(files, int) or isinstance(files, bool) or files < 0:
-                yield f"transcript.files_found is {files!r}, not a non-negative integer"
-            invocations = transcript.get("skill_invocations")
-            if _str_list(invocations) is None:
-                yield "transcript.skill_invocations is not a list of skill names"
-            if transcript.get("skill_invocation_detection") not in _AO_DETECTION:
-                yield f"transcript.skill_invocation_detection is not one of {list(_AO_DETECTION)}"
-            listed = transcript.get("skills_listed")
-            if listed is not None and _str_list(listed) is None:
-                yield "transcript.skills_listed is neither null nor a list of skill names"
+                eligible_observed = eligible is True
             census = transcript.get("census")
-            if census is not None:
-                yield from _closed(census, _AO_CENSUS, "transcript.census")
+            if isinstance(census, dict):
+                yield from _typed(census, _AO_CENSUS, "transcript.census")
     elif transcript is not None:
         yield f"status {status!r}, but transcript conclusions are recorded; nothing was observed to conclude from"
 
     credential = data.get("credential")
-    yield from _closed(credential, _AO_CREDENTIAL, "credential")
     if isinstance(credential, dict):
-        for name in ("delivered", "refresh_observed_in_container"):
-            if not (credential.get(name) is None or isinstance(credential.get(name), bool)):
-                yield f"credential.{name} is {credential.get(name)!r}, not a boolean or null"
-        remaining = credential.get("remaining_seconds_at_launch")
-        if remaining is not None and (not isinstance(remaining, int) or isinstance(remaining, bool) or remaining < 0):
-            yield f"credential.remaining_seconds_at_launch is {remaining!r}, not a non-negative integer or null"
+        yield from _typed(credential, _AO_CREDENTIAL, "credential")
 
     grading = data.get("grading")
-    yield from _closed(grading, _AO_GRADING, "grading")
     if not isinstance(grading, dict):
         return
+    yield from _typed(grading, _AO_GRADING, "grading")
     supplied, eligible = grading.get("grader_supplied"), grading.get("eligible")
     blocked, graded = grading.get("blocked_reason"), grading.get("graded_status")
-    if not isinstance(supplied, bool):
-        yield "grading.grader_supplied is not a boolean"
-    if not isinstance(eligible, bool):
-        yield "grading.eligible is not a boolean"
-    elif eligible != (eligible_observed is True):
+    if _is_bool(eligible) and eligible != eligible_observed:
         yield (
-            f"grading.eligible is {eligible}, but the transcript conclusions make it "
-            f"{eligible_observed is True}; an attempt is eligible only when observed prompt and canary both hold"
+            f"grading.eligible is {eligible}, but the transcript conclusions make it {eligible_observed}; "
+            f"an attempt is eligible only when observed prompt and canary both hold"
         )
     if supplied is True and (graded is None) == (blocked is None):
         yield (
@@ -969,25 +1026,19 @@ def agent_observation(record: Record) -> Iterator[str]:
         )
     if supplied is False and (graded is not None or blocked is not None):
         yield "no grader was supplied, yet the record carries a grade or a blocked reason"
-    if blocked is not None and not _nonempty_str(blocked):
-        yield "grading.blocked_reason is present but empty"
+    criteria = grading.get("criteria")
+    if isinstance(criteria, list):
+        for index, criterion in enumerate(criteria):
+            yield from _typed(criterion, _AO_CRITERION, f"grading.criteria[{index}]")
     if graded is not None:
-        if graded not in PROTOCOL_STATUSES:
-            yield f"grading.graded_status {graded!r} is not one of {list(PROTOCOL_STATUSES)}"
         if eligible is not True:
             yield "a graded status on an attempt that was not eligible for grading"
-        criteria = grading.get("criteria")
         if not isinstance(criteria, list):
             yield "a graded status with no criteria; the copy cannot be checked against its evidence"
-        else:
-            for index, criterion in enumerate(criteria):
-                yield from _closed(criterion, _AO_CRITERION, f"grading.criteria[{index}]")
-                if isinstance(criterion, dict) and criterion.get("outcome") not in CRITERION_OUTCOMES:
-                    yield f"grading.criteria[{index}] outcome {criterion.get('outcome')!r} is not one of {list(CRITERION_OUTCOMES)}"
-            if graded in _AO_VERDICTS:
-                derived = derive_status(Record(path=record.path, data={"criteria": criteria}))
-                if derived != graded:
-                    yield f"grading.graded_status is {graded}, but its own criteria derive {derived}"
+        elif graded in _AO_VERDICTS:
+            derived = derive_status(Record(path=record.path, data={"criteria": criteria}))
+            if derived != graded:
+                yield f"grading.graded_status is {graded}, but its own criteria derive {derived}"
 
 
 def _pilot_report_split(entry: dict[str, object], where: str, field_name: str) -> Iterator[str]:

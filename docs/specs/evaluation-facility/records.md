@@ -289,7 +289,8 @@ may not be declared as a run state.
 Produced by the controller (`skillc/agent_trial.py`'s `run_one_attempt`), one per
 real-agent attempt, as `observation-<attempt>.json` beside
 `lifecycle-<attempt>.json`. It is written on every path, including an attempt
-blocked before launch. Before #106 these conclusions existed only in memory and a
+blocked before launch, and one whose grading raised (it is persisted with the
+failure as its blocked reason, and the failure then propagates). Before #106 these conclusions existed only in memory and a
 printed paste-back, so a misprinted field could not be recovered: #124 repeated
 two live runs for that reason.
 
@@ -302,8 +303,11 @@ two live runs for that reason.
 | `credential` | `delivered`, `source`, `remaining_seconds_at_launch`, `refresh_observed_in_container`; null where not observed |
 | `grading` | `grader_supplied`, `eligible`, and either `blocked_reason` or `graded_status` with `category` and `criteria` (`id`, `mandatory`, `outcome` only) |
 
-The schema is **closed** at every level. An unknown field is refused, so no field
-exists that a transcript excerpt or credential value could be copied into. A new
+The schema is **closed, complete and typed** at every level. An unknown field, a
+missing field, and a value of the wrong type (an object in a scalar field, say)
+are all refused, so no field exists that a transcript excerpt or credential
+value could be copied into. Positive conclusions (prompt delivered, canary
+satisfied) must rest on exactly one transcript file. A new
 observation field has to be named in `records.py` before it can be recorded,
 which fails loudly. Before writing, the controller redacts the host paths it
 knows, then leak-checks the record twice: each string as it reads once parsed,
@@ -539,7 +543,7 @@ bundle cases as well, including against every record rule.
 | `derived-status` | record | a status copied rather than derived |
 | `verdict-tiers` | record | a `verification.verdicts` entry for a tier absent from `verification.tiers_enabled`; an enabled tier with no entry at all; an `UNAVAILABLE` verdict with no stated reason (#69) |
 | `attempt-lifecycle` | record | an unknown stop reason or disposition; a non-result without a reason; captured before a confirmed stop; no cleanup |
-| `agent-observation` | record | an unknown field; eligibility that disagrees with prompt delivery and the canary; a PASS its own criteria do not derive; both a grade and a blocked reason; an unobserved status without a reason (#106) |
+| `agent-observation` | record | an unknown field; a missing field; an object in a scalar field or a census map; a `mandatory` flag that is a string, an integer or absent (each would drop a VIOLATED criterion out of the derivation); positive conclusions from zero or two transcript files; eligibility that disagrees with prompt delivery and the canary; a PASS its own criteria do not derive; both a grade and a blocked reason; an unobserved status without a reason (#106) |
 | `pilot-report` | record | empty attempts list; bad disposition or criterion outcome; no uncertainty; a negative intervention count; a cost/time split missing a key or whose parts do not sum to its total; a duplicate attempt ID (#12) |
 | `ledger-binding` | bundle | cross-trial receipt; stale receipt; attempt the ledger never issued; altered artifact; unplanned grader; a `skill-invocations` path the attempt's receipt never installed (#39); a trial declaring `case.observes_selection: true` whose manifest has no `skill-invocations` stream (#26/#39); a `pilot-report` that omits a scheduled attempt or names one the ledger never planned (#12) |
 | `unique-ids` | bundle | duplicate attempt ID; conflicting receipts; duplicate result ID |

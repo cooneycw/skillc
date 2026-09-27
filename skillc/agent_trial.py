@@ -731,9 +731,24 @@ def run_one_attempt(
                     "interfaces.md's step 8 rule, reusing the same instance risks carrying the "
                     "agent attempt's own state into the probe's isolation"
                 )
-            files = _frozen_candidate_files(experiment, attempt_id)
-            grading_started = time.monotonic()
-            graded_result = verify.grade_files(grader, files, base, backend=grading_backend)
+            try:
+                files = _frozen_candidate_files(experiment, attempt_id)
+                grading_started = time.monotonic()
+                graded_result = verify.grade_files(grader, files, base, backend=grading_backend)
+            except Exception as exc:
+                # The attempt ran and was observed; a grading failure (a
+                # quarantined verifier, a frozen artifact that no longer
+                # verifies) must not take its observation with it (codex
+                # review). Persist it with the failure as the blocked reason,
+                # then let the failure propagate exactly as before.
+                failed = {
+                    **record, "graded": None, "grading_seconds": None,
+                    "grading_blocked_reason": f"grading raised {type(exc).__name__}: {exc}",
+                }
+                write_observation_record(
+                    experiment, attempt_id, build_observation_record(failed, client=client, grader_supplied=True),
+                )
+                raise
             grading_seconds = time.monotonic() - grading_started
             graded = {
                 "status": graded_result.status, "category": graded_result.category,

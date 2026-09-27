@@ -1136,3 +1136,49 @@ def test_a_reason_naming_the_home_credential_path_is_redacted_and_written(
     assert at.write_observation_record(experiment, attempt_id, data) == "written"
     saved = _saved_observation(experiment, attempt_id)
     assert saved["reason"] == "no codex credential at <home>/.codex/auth.json"
+
+
+def test_a_grading_failure_still_persists_the_observation(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Codex review, red before the fix: persistence ran only after grading,
+    so a verifier refusal (here: quarantined) propagated out and the observed
+    attempt's observation was never written - the loss this record exists to
+    prevent. The failure still propagates; the observation survives it."""
+    def _quarantined(*args: object, **kwargs: object) -> object:
+        raise verify.Refused("this verifier is quarantined: test")
+
+    monkeypatch.setattr(verify, "grade_files", _quarantined)
+    experiment, attempt_id = _planned(store)
+    with pytest.raises(verify.Refused):
+        argv = _fake_argv(
+            fmt="codex-fake", home=_mapped_home(docker_state, attempt_id),
+            transcript_relpath=".codex/sessions/2026/01/01/rollout-q.jsonl", copy_solution=GRADER_ROOT / "reference",
+        )
+        at.run_one_attempt(
+            backend=_backend(base, docker_state), experiment=experiment, attempt_id=attempt_id, client="codex",
+            base_argv=argv, prompt="Fix the slug helper.", skill_name="demo-skill",
+            surface={}, limits=Limits(timeout=5), base=base,
+            credential_explicit_path=_fresh_credential(tmp_path, "codex"),
+            grader=verify.GraderDef.load(GRADER_ROOT), grading_backend=_backend(base, docker_state),
+        )
+    saved = _saved_observation(experiment, attempt_id)
+    assert saved["status"] == "observed"
+    grading = saved["grading"]
+    assert isinstance(grading, dict) and grading["graded_status"] is None
+    assert "grading raised Refused" in str(grading["blocked_reason"])
+    assert _check_records(experiment.root, "agent-observation") == 0
+
+
+def test_an_unwritable_store_reports_write_failed(store: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    experiment, attempt_id = _planned(store)
+    data = at.build_observation_record(
+        {"attempt_id": attempt_id, "trial_id": "t", "disposition": "unavailable", "reason": "x", "observation": None},
+        client="codex", grader_supplied=False,
+    )
+
+    def _refuse(self: Path, *args: object, **kwargs: object) -> int:
+        raise OSError("read-only store")
+
+    monkeypatch.setattr(Path, "write_text", _refuse)
+    assert at.write_observation_record(experiment, attempt_id, data) == "write-failed"
