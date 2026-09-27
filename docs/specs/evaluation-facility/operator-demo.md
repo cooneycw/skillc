@@ -56,6 +56,7 @@ root. Flags, all optional:
 | `--docker-bin "<words>"` | `docker` | the docker executable, space-separated if it needs more than one word |
 | `--base <path>` | `$TMPDIR` | where the disposable trial root is created |
 | `--timeout <seconds>` | `30` | per-container-call timeout |
+| `--subject [<name>]` | off (omit entirely to skip) | install `evals/subjects/<name>` into a real container's home too (issue #101, see below); bare with no name uses `skillc.demo.DEFAULT_SUBJECT` |
 | `--control` | off | run the seeded negative controls instead (see below) |
 
 Exit codes: `0` success (or, under `--control`, every seeded failure was
@@ -103,13 +104,71 @@ command sidesteps the whole gap for now by using the driver's own
 file-content-based canary with a scripted subject instead, which has no such
 gap - a deliberate, bounded scope decision, not an oversight.
 
+## `--subject`: installing a declared skill collection into a real container
+
+A THIRD demonstration, alongside (never replacing) the two above, so this
+command and this runbook serve as the second-collection evidence issue #11
+asks for too:
+
+1. **Install.** The declared collection is acquired from its pinned revision
+   (a real `git` clone, archived at that exact commit) and every selected
+   skill's files are copied into the container's home, at
+   `/home/candidate/.codex/skills/<skill-directory>/...` - never bind-mounted,
+   never into `/work`. A `--subject` whose `select` names a skill absent from
+   the collection is refused before any Docker work starts.
+2. **In-container digest re-check.** Every installed file's CURRENT bytes are
+   read back out of the running container and re-hashed - "landed intact" is
+   an observation, never an assumption from the install call alone. A
+   mismatch names the file.
+3. **Discovery.** The client's own listing (`codex debug prompt-input`, the
+   same argv convention `skillc.exposure`'s Codex arm already uses) runs
+   INSIDE the container via `execute()`, with no model call. Each selected
+   skill is reported `discovered` or `not-discovered`. If the listing cannot
+   complete at all (a launch failure, a crash, an empty or unparseable
+   output), every selected skill is reported `UNMEASURED` with the reason -
+   never dropped, and the overall exit is non-zero.
+4. The same host-paths-unchanged check and reap sweep as the rest of the
+   demo cover this leg's own container too, with the same four distinct
+   outcomes.
+5. The paste-back gains one additional block, per subject: name and pinned
+   revision, the installation receipt (skill count, file count), the digest
+   check, the discovered/not-discovered/UNMEASURED list, host-paths-unchanged,
+   and the reap outcome - leak-checked before printing, exactly like the rest
+   of the block.
+
+**What this shows, and what it does NOT show:**
+
+> It shows that the pinned collection installs intact into a real container
+> and that the client can see it. It does not show that any skill is invoked
+> or selected, changes behaviour, or helps. Those are #26 (selection) and #12
+> (the matched pilot), which need a model. A green demo is not evidence about
+> the skills.
+
+**Where each subject's files land, and their pinned revisions** (see
+`evals/subjects/<name>/subject.json` for the authoritative declaration):
+
+| Subject | Pinned revision | Source `skills_root` | Selected | Lands under |
+|---|---|---|---|---|
+| `cpp-codex` | `85e9b03ad2af1c41020ff6d92d36fa257bdacd2b` | `codex/skills` | all (74 skills) | `/home/candidate/.codex/skills/<skill>/` |
+| `mattpocock-skills` | `c55ee46073ed923f86ce59a5eb3b6d895095d1b7` | `skills/engineering` | `tdd`, `diagnosing-bugs` | `/home/candidate/.codex/skills/<skill>/` |
+
+The default (`--subject` with no name) is `skillc.demo.DEFAULT_SUBJECT`, read
+from `evals/subjects/DEFAULT_SUBJECT` (one line, data) rather than a literal
+in `skillc/demo.py` - the genericity guard (issue #11's "no subject-name
+branch anywhere in skillc/", `tests/test_materialize.py`) AST-scans every
+`skillc/*.py` module and would otherwise flag a hardcoded default the moment
+it landed.
+
 ## How long it takes
 
 Two container lifecycles (create, install, execute, export, destroy) plus one
 reap sweep and two fleet snapshots - on the order of the same daemon
 round-trip cost `docker_backend.py`'s own tests already exercise per
 lifecycle, times two. No model call is made, so there is no token-spend
-latency to budget for.
+latency to budget for. `--subject` adds a third container lifecycle, a git
+clone of the collection's source, and one `deliver_home_file` call per
+installed file (74 skills' worth of files for `cpp-codex`, so this leg is the
+slowest of the three by a wide margin) - still no model call.
 
 ## Reading the paste-back block
 
@@ -128,7 +187,21 @@ acceptance:
 cleanup (reap outcomes, four possible values: reaped/already-absent/left-running/unknown):
   <attempt_id>: <outcome>
   daemon_reachable=<bool>
+
+subject: <name> revision=<pinned sha>
+  installed: <N> skill(s), <M> file(s)
+  digest_check: matched|mismatched [mismatched=[...]]
+  discovery: {<skill>: discovered|not-discovered|UNMEASURED, ...} [(UNMEASURED: <reason>)]
+  host paths unchanged: changed=[...], unresolved=[...]
+  cleanup (reap outcomes):
+    <attempt_id>: <outcome>
+    daemon_reachable=<bool>
 ```
+
+The `subject:` block is present only when `--subject` was given; its own
+acceptance lines (installed skills match the declared selection, digests
+match, every selected skill discovered) appear in the `acceptance:` section
+above, prefixed `subject '<name>':`, exactly like every other line there.
 
 - **`skillc_version`/`source_commit`/`dirty`** - `skillc/provenance.py`'s
   stamp of what actually ran. `dirty=true` means the checkout that produced
@@ -194,3 +267,11 @@ prove that a real Docker daemon, given `skillc-trial:latest`, actually
 executes the lifecycle and grading demos correctly. That is what running
 `skillc demo` for real, once, on the operator's own machine, establishes -
 and its output, pasted back verbatim, is what #10 actually closes on.
+
+The same is true of `--subject` for #11: this document and its tests prove
+the install/digest-check/discovery shape against the fake daemon and a fake
+client. They do not and cannot prove that a real container installs a real
+collection intact, or that a real client's real listing actually discovers
+it. That is what running `skillc demo --subject <name>` for real establishes
+- and, per the "what this shows" note above, it establishes installation and
+discovery conformance only, never that any skill helps.

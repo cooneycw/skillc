@@ -54,6 +54,7 @@ convention.
 from __future__ import annotations
 
 import os
+import secrets
 import stat
 import subprocess
 from collections.abc import Sequence
@@ -61,7 +62,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import docker_backend as dbe
-from . import leak, lifecycle, provenance, reap, trial, verify
+from . import leak, lifecycle, materialize, provenance, reap, trial, verify
 from .backend import Limits
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -86,6 +87,80 @@ GOOD_CANDIDATE = GRADER_ROOT / "reference"
 BAD_CANDIDATE = GRADER_ROOT / "wrong" / "no-lowercase"
 
 DEFAULT_IMAGE = "skillc-trial:latest"
+
+
+def _read_default_subject() -> str:
+    """The `--subject` name used when the flag is given no value, read from
+    `evals/subjects/DEFAULT_SUBJECT` (one line, the name only) rather than a
+    literal in this file. A hardcoded name here would itself be a
+    subject-name branch: `tests/test_materialize.py`'s genericity guard
+    (issue #11's "no subject-name branch anywhere in skillc/") AST-scans
+    every `skillc/*.py` module for exactly this shape. The returned value is
+    still a NAME ONLY, used exclusively to build a path; nothing here
+    branches on it."""
+    path = REPO_ROOT / "evals" / "subjects" / "DEFAULT_SUBJECT"
+    return path.read_text(encoding="utf-8").strip()
+
+
+#: See `_read_default_subject` - resolved once at import time from data, not
+#: a literal, so this module names no subject.
+DEFAULT_SUBJECT = _read_default_subject()
+
+
+class SubjectRefused(Exception):
+    """The selected subject's declaration, its acquisition, or its selection
+    could not proceed - a clear message and a nonzero exit, before anything
+    is installed."""
+
+
+def load_demo_subject(name: str) -> materialize.Subject:
+    """`evals/subjects/<name>/subject.json`, loaded through
+    `materialize.Subject`'s own generic schema - `name` builds a path and
+    nothing else. Refuses BEFORE any acquisition or installation is
+    attempted if the declaration is missing, unsupported, or malformed."""
+    path = REPO_ROOT / "evals" / "subjects" / name / "subject.json"
+    if not path.is_file():
+        raise SubjectRefused(f"no subject declaration at evals/subjects/{name}/subject.json")
+    try:
+        return materialize.Subject.load(path)
+    except materialize.Refused as exc:
+        raise SubjectRefused(f"subject {name!r} is not usable: {exc}") from exc
+
+
+def acquire_subject_checkout(subject: materialize.Subject, into: Path, timeout: float = 300) -> Path:
+    """A fresh clone of the subject's own declared `locator`, forced to its
+    pinned `revision` via `git checkout` - this is #101's own extra network
+    dependency beyond skillc's bare clone, for whichever subject `--subject`
+    selects, stated here plainly, not hidden: installing a second collection
+    needs its own source.
+
+    `run_subject_demo` hands the result to `materialize.acquire_snapshot`,
+    never `acquire_git` - deliberately, the same call this module made for a
+    since-removed, narrower `--subject` under issue #81: `acquire_git` shells
+    out to `git` itself (`git archive` on the pinned commit) to build its
+    `Source`, which is redundant work once this function has ALREADY forced
+    the checkout to that exact commit, and it is what made this module's own
+    tests require a real `git` binary in CI's gate image, where none is
+    installed - the checked-out directory needs no further git verification
+    to be trusted.
+    Known, accepted tradeoff: `materialize.acquire_snapshot`'s own `Source`
+    reports `revision="snapshot:<digest>"`, never the real commit SHA, so
+    `run_subject_demo` reports the paste-back's `revision` from `subject.revision`
+    (the DECLARED pin) directly, never from the acquired `Source` - the
+    operator-meaningful claim either way is "the pin this subject declares",
+    which acquisition mechanics should not be able to change the wording of."""
+    url = f"https://{subject.locator}"
+    try:
+        subprocess.run(
+            ["git", "clone", "--quiet", url, str(into)], check=True, timeout=timeout, capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(into), "checkout", "--quiet", subject.revision],
+            check=True, timeout=60, capture_output=True,
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise SubjectRefused(f"could not acquire {subject.locator!r} at {subject.revision!r}: {exc}") from exc
+    return into
 
 
 # --------------------------------------------------------------- image digest
@@ -182,6 +257,257 @@ def run_grading_demo(backend: dbe.DockerBackend, candidate_dir: Path, base: Path
     return verify.grade_files(grader, files, base, backend=backend)
 
 
+# --------------------------------------------------------------- subject demo
+
+
+#: `CODEX_HOME` for the installed collection, relative to `CONTAINER_HOME` -
+#: `materialize.Arm.codex_home`'s own convention (`<home>/.codex`), aimed at
+#: a real container's home instead of a host arm directory.
+_SUBJECT_CODEX_HOME_RELPATH = ".codex"
+_SUBJECT_SKILLS_PREFIX = f"{_SUBJECT_CODEX_HOME_RELPATH}/skills"
+
+
+@dataclass(frozen=True)
+class SubjectFile:
+    directory: str  # the skill's own directory name under the subject's skills_root
+    rel: str  # relative to that directory, e.g. "SKILL.md"
+    skill: str  # the skill's declared `name`, from its own frontmatter
+    digest: str
+
+    @property
+    def container_relpath(self) -> str:
+        return f"{_SUBJECT_SKILLS_PREFIX}/{self.directory}/{self.rel}"
+
+
+def subject_surface_files(source: materialize.Source, entries: list[materialize.SkillEntry]) -> list[SubjectFile]:
+    """Every file across every selected skill, as a flat list ready to
+    deliver into a container's home - `entries` is `inventory()`'s own
+    output, so a `--subject` whose `select` names a skill absent from the
+    surface never reaches here at all: `inventory()` raises
+    `materialize.Refused` first (translated to `SubjectRefused` by the
+    caller), before any Docker work starts."""
+    return [
+        SubjectFile(entry.directory, str(f["path"]), entry.name, str(f["digest"]))
+        for entry in entries for f in entry.files
+    ]
+
+
+def install_subject(
+    backend: dbe.DockerBackend, handle: object, source: materialize.Source, files: list[SubjectFile],
+) -> dict[str, object]:
+    """Delivers every selected file into the container's home, one
+    `deliver_home_file` call per file - the same candidate-owned tar-stream
+    mechanism `install()` uses for `CONTAINER_WORKSPACE`, aimed at
+    `CONTAINER_HOME` instead (#98's own precedent). Nothing is bind-mounted.
+    Returns the installation receipt this leg's paste-back and digest
+    re-check both read from."""
+    for f in files:
+        data = (source.surface_dir / f.directory / f.rel).read_bytes()
+        backend.deliver_home_file(handle, f.container_relpath, data)
+    return {
+        "skills": sorted({f.skill for f in files}),
+        "skill_count": len({f.skill for f in files}),
+        "file_count": len(files),
+        "files": [{"path": f.container_relpath, "digest": f.digest} for f in files],
+    }
+
+
+def recheck_subject_digests(
+    backend: dbe.DockerBackend, handle: object, files: list[SubjectFile],
+) -> tuple[str, list[str]]:
+    """Re-reads every installed file's CURRENT bytes back out of the
+    container (`read_home_file`) and re-hashes them - "landed intact" is
+    observed here, never assumed from the install call alone. Returns
+    `("matched", [])` or `("mismatched", [<container_relpath>, ...])`."""
+    mismatched: list[str] = []
+    for f in files:
+        try:
+            data = backend.read_home_file(handle, f.container_relpath)
+        except dbe.BackendUnavailable as exc:
+            mismatched.append(f"{f.container_relpath}: unreadable ({exc})")
+            continue
+        if materialize.sha256_bytes(data) != f.digest:
+            mismatched.append(f.container_relpath)
+    return ("mismatched" if mismatched else "matched"), mismatched
+
+
+def run_subject_discovery(
+    backend: dbe.DockerBackend, handle: object, client_argv: list[str], selected: set[str],
+    limits: Limits, export_root: Path,
+) -> tuple[dict[str, str], str | None]:
+    """Runs the client's own listing (`codex debug prompt-input`, the same
+    argv convention `skillc.exposure`'s `render_codex` already uses) INSIDE
+    the container via `execute()`, with no model call - never
+    `materialize.run_client`'s host-local subprocess, which never touches
+    the container at all. `CODEX_HOME` is set for just this one exec via
+    `env` (coreutils, already in the trial image), pointed at the home
+    directory `install_subject` populated - the container's own ambient
+    `HOME` alone is not enough, since the real client reads `CODEX_HOME`
+    explicitly when set (`materialize.run_client` does the same for its own
+    host-local runs).
+
+    Returns `{skill_name: "discovered"|"not-discovered"}` for every name in
+    `selected`, or every one of them mapped to `"UNMEASURED"` with a reason
+    string when the listing could not run at all (a launch failure, a
+    nonzero exit, no `observations` file, or output the shared parser
+    cannot read) - never dropped, never a silent partial result."""
+
+    def unmeasured(reason: str) -> tuple[dict[str, str], str | None]:
+        return {name: "UNMEASURED" for name in selected}, reason
+
+    codex_home = f"{dbe.CONTAINER_HOME}/{_SUBJECT_CODEX_HOME_RELPATH}"
+    argv = ["env", f"CODEX_HOME={codex_home}", *client_argv, *materialize.CANARY_ARGV, materialize.CANARY_PROMPT]
+    result = backend.execute(handle, argv, limits)
+    backend.confirm_stopped(handle)
+    if result.reason != "exited" or result.exit_code != 0:
+        return unmeasured(
+            f"listing did not complete cleanly: reason={result.reason} exit_code={result.exit_code} error={result.error}"
+        )
+    export_dir = export_root / "subject-discovery-export"
+    try:
+        backend.export(handle, export_dir)
+    except OSError as exc:
+        return unmeasured(f"could not export the container's workspace: {exc}")
+    observations = export_dir / "observations"
+    if not observations.is_file():
+        return unmeasured("no observations file was exported")
+    stdout_text = observations.read_text(encoding="utf-8", errors="replace")
+    listing = materialize.parse_listing(stdout_text, export_dir)
+    if listing.status != "ok":
+        return unmeasured(f"listing {listing.status}: {listing.detail}")
+    listed = {name for name, _ in listing.entries}
+    return {name: ("discovered" if name in listed else "not-discovered") for name in selected}, None
+
+
+@dataclass(frozen=True)
+class SubjectResult:
+    subject_name: str
+    revision: str
+    receipt: dict[str, object]
+    digest_status: str
+    digest_mismatches: list[str]
+    discovery: dict[str, str]
+    discovery_reason: str | None
+    host_diff: reap.HostPathDiff
+    reap_report: reap.ReapReport
+
+
+def run_subject_demo(
+    *, subject_name: str, image: str, docker_bin: Sequence[str], base: Path, timeout: float = 30,
+    checkout: Path | None = None, client_argv: list[str] | None = None,
+) -> SubjectResult:
+    """The `--subject` leg: install the declared collection into a REAL
+    container's home, re-read its digests back from the container, and
+    observe the client's own discovery of it - a THIRD demonstration,
+    alongside (never replacing) the lifecycle and grading demos, so #81's
+    demo and #11's second-collection evidence share one command and one
+    runbook. `checkout`, when given, is an already-acquired local directory
+    holding `subject.skills_root` directly - a plain directory, never a git
+    repository (this module's own tests pass a committed fixture collection
+    here, needing no `git` binary at all); the real CLI path clones fresh via
+    `acquire_subject_checkout`, which forces it to the pinned revision before
+    this function ever sees it.
+
+    Acquired via `materialize.acquire_snapshot`, never `acquire_git` - see
+    `acquire_subject_checkout`'s own docstring for why, and why this reports
+    `subject.revision` in the result rather than the acquired `Source`'s own.
+
+    Refuses BEFORE any Docker work starts if the subject is unknown,
+    malformed, or names a selected skill absent from its surface
+    (`inventory()`'s own check, issue #101's "Install" acceptance item)."""
+    subject = load_demo_subject(subject_name)
+    repo = checkout if checkout is not None else acquire_subject_checkout(subject, base / "subject-checkout")
+    staging = base / "subject-staging"
+    staging.mkdir(parents=True, exist_ok=True)
+    try:
+        source = materialize.acquire_snapshot(subject, repo, staging)
+        entries = materialize.inventory(subject, source)
+    except materialize.Refused as exc:
+        raise SubjectRefused(f"subject {subject_name!r} could not be prepared: {exc}") from exc
+    files = subject_surface_files(source, entries)
+    selected = {e.name for e in entries}
+
+    env = None  # inherit the operator's own ambient environment, like a plain `docker` invocation
+    host_paths = [REPO_ROOT / p for p in HOST_PATHS_TO_WATCH]
+    host_before = reap.snapshot_host_paths(host_paths)
+
+    backend = dbe.DockerBackend(image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=timeout)
+    # A nonce, not just the subject name: two concurrent demo runs (or a
+    # single run's own lifecycle/grading attempt ids, which already carry
+    # their own uniqueness) must never collide on one container name.
+    attempt_id = f"subject-{subject_name}-{secrets.token_hex(4)}"
+    handle = backend.prepare(attempt_id)
+    try:
+        receipt = install_subject(backend, handle, source, files)
+        digest_status, mismatches = recheck_subject_digests(backend, handle, files)
+        discovery, discovery_reason = run_subject_discovery(
+            backend, handle, client_argv if client_argv is not None else ["codex"],
+            selected, Limits(timeout=timeout), base,
+        )
+    finally:
+        backend.destroy(handle)
+        backend.confirm_absent(handle)
+
+    reap_report = reap.reap(docker_bin, [attempt_id], env, timeout)
+    host_after = reap.snapshot_host_paths(host_paths)
+    host_diff = reap.diff_host_paths(host_before, host_after)
+    return SubjectResult(
+        subject_name, subject.revision, receipt, digest_status, mismatches, discovery, discovery_reason,
+        host_diff, reap_report,
+    )
+
+
+def _subject_acceptance_items(result: SubjectResult) -> list[AcceptanceItem]:
+    receipt_skills = result.receipt["skills"]
+    assert isinstance(receipt_skills, list)
+    install_ok = set(receipt_skills) == set(result.discovery)
+    digest_ok = result.digest_status == "matched"
+    discovery_ok = result.discovery_reason is None and all(v == "discovered" for v in result.discovery.values())
+    host_ok = not result.host_diff.changed and not result.host_diff.unresolved
+    reap_ok = result.reap_report.daemon_reachable and not result.reap_report.left_running and not result.reap_report.unknown
+    return [
+        AcceptanceItem(
+            f"subject {result.subject_name!r}: installed skills match its declared selection", install_ok,
+            f"receipt skills={result.receipt['skills']}",
+        ),
+        AcceptanceItem(
+            f"subject {result.subject_name!r}: in-container digests match the installation receipt", digest_ok,
+            f"digest_status={result.digest_status}, mismatched={result.digest_mismatches}",
+        ),
+        AcceptanceItem(
+            f"subject {result.subject_name!r}: every selected skill is discovered by the client", discovery_ok,
+            (f"discovery={result.discovery}" if result.discovery_reason is None
+             else f"UNMEASURED: {result.discovery_reason}"),
+        ),
+        AcceptanceItem(
+            f"subject {result.subject_name!r}: declared host paths unchanged", host_ok,
+            f"changed={list(result.host_diff.changed)}, unresolved={list(result.host_diff.unresolved)}",
+        ),
+        AcceptanceItem(
+            f"subject {result.subject_name!r}: cleanup sweep confirms no owned container left running", reap_ok,
+            f"reap outcomes={[o.outcome for o in result.reap_report.outcomes]}",
+        ),
+    ]
+
+
+def build_subject_paste_back(result: SubjectResult) -> str:
+    lines = [
+        "",
+        f"subject: {result.subject_name} revision={result.revision}",
+        f"  installed: {result.receipt['skill_count']} skill(s), {result.receipt['file_count']} file(s)",
+        f"  digest_check: {result.digest_status}"
+        + (f" mismatched={result.digest_mismatches}" if result.digest_mismatches else ""),
+        f"  discovery: {result.discovery}"
+        + (f" (UNMEASURED: {result.discovery_reason})" if result.discovery_reason else ""),
+        f"  host paths unchanged: changed={list(result.host_diff.changed)}, unresolved={list(result.host_diff.unresolved)}",
+        "  cleanup (reap outcomes):",
+    ]
+    for outcome in result.reap_report.outcomes:
+        lines.append(f"    {outcome.attempt_id}: {outcome.outcome}")
+    lines.append(f"    daemon_reachable={result.reap_report.daemon_reachable}")
+    return "\n".join(lines)
+
+
 # ------------------------------------------------------------ acceptance items
 
 
@@ -229,6 +555,7 @@ def leak_check_text(text: str) -> list[str]:
 
 def build_paste_back(
     items: list[AcceptanceItem], image: str, image_digest: str | None, reap_report: reap.ReapReport,
+    subject_result: SubjectResult | None = None,
 ) -> str:
     prov = provenance.stamp()
     lines = [
@@ -245,6 +572,8 @@ def build_paste_back(
     for outcome in reap_report.outcomes:
         lines.append(f"  {outcome.attempt_id}: {outcome.outcome}")
     lines.append(f"  daemon_reachable={reap_report.daemon_reachable}")
+    if subject_result is not None:
+        lines.append(build_subject_paste_back(subject_result))
     return "\n".join(lines) + "\n"
 
 
@@ -277,16 +606,29 @@ class DemoResult:
     reap_report: reap.ReapReport
     host_diff: reap.HostPathDiff
     image_digest: str | None
+    subject_result: SubjectResult | None = None
 
 
-def run_demo(*, image: str, docker_bin: Sequence[str], base: Path, timeout: float = 30) -> DemoResult:
+def run_demo(
+    *, image: str, docker_bin: Sequence[str], base: Path, timeout: float = 30,
+    subject_name: str | None = None, subject_checkout: Path | None = None,
+    subject_client: list[str] | None = None,
+) -> DemoResult:
     """The command's own normal-mode run: the success path, end to end,
     against a real daemon. Two SEPARATE `DockerBackend` instances are used -
     one for the lifecycle demo, one for grading - never shared, matching
     interfaces.md step 8's "separate backend instance, same seam"
     requirement literally, not just in spirit. `--control`'s own run is
     `run_control()` below, a genuinely different verdict shape (every SEEDED
-    failure must be CAUGHT), not this function with a flag flipped."""
+    failure must be CAUGHT), not this function with a flag flipped.
+
+    `subject_name`, when given, runs a THIRD demonstration (`run_subject_demo`,
+    issue #101) alongside the two above: installing a declared skill
+    collection into a real container's home, re-checking its digests, and
+    observing the client's own discovery of it. `None` (no `--subject` on
+    the CLI) runs exactly the two-leg demo #97 shipped, unchanged - a flag
+    that changes nothing when omitted, per the same discipline #97 itself
+    was held to."""
     env = None  # inherit the operator's own ambient environment, like a plain `docker` invocation
     host_paths = [REPO_ROOT / p for p in HOST_PATHS_TO_WATCH]
     host_before = reap.snapshot_host_paths(host_paths)
@@ -304,6 +646,13 @@ def run_demo(*, image: str, docker_bin: Sequence[str], base: Path, timeout: floa
     lifecycle_record = run_lifecycle_demo(lifecycle_backend, base)
     graded = run_grading_demo(grading_backend, GOOD_CANDIDATE, base)
 
+    subject_result: SubjectResult | None = None
+    if subject_name is not None:
+        subject_result = run_subject_demo(
+            subject_name=subject_name, image=image, docker_bin=docker_bin, base=base, timeout=timeout,
+            checkout=subject_checkout, client_argv=subject_client,
+        )
+
     attempt_ids = [str(lifecycle_record["attempt_id"])]
     reap_report = reap.reap(docker_bin, attempt_ids, env, timeout)
 
@@ -313,14 +662,16 @@ def run_demo(*, image: str, docker_bin: Sequence[str], base: Path, timeout: floa
     host_diff = reap.diff_host_paths(host_before, host_after)
 
     items = _acceptance_items(lifecycle_record, graded, reap_report, host_diff, image_digest)
+    if subject_result is not None:
+        items += _subject_acceptance_items(subject_result)
     if fleet_diff.comparable and (fleet_diff.leaked or fleet_diff.foreign_vanished):
         items.append(AcceptanceItem(
             "no unexpected container leak or foreign disappearance", False,
             f"leaked={list(fleet_diff.leaked)}, foreign_vanished={list(fleet_diff.foreign_vanished)}",
         ))
-    paste_back = build_paste_back(items, image, image_digest, reap_report)
+    paste_back = build_paste_back(items, image, image_digest, reap_report, subject_result)
     ok = all(item.met for item in items)
-    return DemoResult(ok, paste_back, lifecycle_record, graded, reap_report, host_diff, image_digest)
+    return DemoResult(ok, paste_back, lifecycle_record, graded, reap_report, host_diff, image_digest, subject_result)
 
 
 def run_control(*, image: str, docker_bin: Sequence[str], base: Path, timeout: float = 30) -> bool:

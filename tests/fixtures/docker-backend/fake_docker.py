@@ -142,6 +142,15 @@ from pathlib import Path
 #: client of the module under test.
 WORK_CONTAINER_PATH = "/work"
 
+#: Must match docker_backend.CONTAINER_HOME - same reasoning as
+#: WORK_CONTAINER_PATH above. Needed once an exec'd argv references the
+#: container's home rather than its workspace (issue #101: an in-container
+#: `codex debug prompt-input` needs `CODEX_HOME` pointed at where
+#: `deliver_home_file` actually placed things, `<fsroot>/home/candidate`,
+#: never the literal host path, which is not this fake's simulated
+#: filesystem at all).
+HOME_CONTAINER_PATH = "/home/candidate"
+
 _FLAGS_WITH_VALUE = (
     "--network", "--user", "--hostname", "--memory", "--memory-swap",
     "--pids-limit", "--cpus", "--shm-size", "-w", "--storage-opt",
@@ -376,11 +385,22 @@ def _remap_absolute(state_dir: Path, name: str, value: str) -> str:
     invocation (`verify.py`'s own convention) passes an absolute path
     (`/work/probe.py`) that failed with "No such file or directory" against
     the pre-fix fake, even though the file genuinely existed in the
-    container's simulated filesystem - `cwd=` alone never helped it."""
-    if value == WORK_CONTAINER_PATH:
-        return str(_in_container(state_dir, name, WORK_CONTAINER_PATH))
-    if value.startswith(WORK_CONTAINER_PATH + "/"):
-        return str(_in_container(state_dir, name, WORK_CONTAINER_PATH) / value[len(WORK_CONTAINER_PATH) + 1:])
+    container's simulated filesystem - `cwd=` alone never helped it.
+
+    The home prefix (`/home/candidate`) is remapped the same way, and as a
+    substring anywhere in the token, not only a whole-argv-element match
+    (issue #101): `env CODEX_HOME=/home/candidate/.codex codex ...` names the
+    container's home path INSIDE a `VAR=value` token, never as its own argv
+    element, and a whole-token check alone would leave it unrewritten -
+    pointing a discovery listing at a literal host path that is not this
+    fake's simulated filesystem at all, rather than at `deliver_home_file`'s
+    own `<fsroot>/home/candidate`."""
+    for prefix in (WORK_CONTAINER_PATH, HOME_CONTAINER_PATH):
+        mapped = str(_in_container(state_dir, name, prefix))
+        if value == prefix:
+            return mapped
+        if prefix + "/" in value:
+            value = value.replace(prefix + "/", mapped + "/")
     return value
 
 
