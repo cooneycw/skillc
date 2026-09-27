@@ -16,8 +16,16 @@ and version plan.
   said `removed`. That included #11's live PASS runs. The workspace is now
   cleaned first, so the record reports what cleanup did. The container's
   `destroy()`/`confirm_absent()` outcome is journalled as a `backend-teardown`
-  detail event, even when `execute()` raises. `collection-run`'s paste-back
-  prints `cleanup=` and `backend_teardown=`.
+  detail event, even when `execute()` raises. `collection-run`'s
+  `workspace_cleanup(record, at finalize)` line (#136) now agrees with its
+  `workspace_cleaned(journal)` line.
+- **`skillc collection-run`'s paste-back printed `refresh_observed_in_container=None`
+  on every run** (Refs #106). It read `refresh_observed_in_container`, but the
+  driver writes `credential_refresh_observed_in_container`. #11's live
+  evidence therefore showed "not observed" for a comparison that had actually
+  been made. The earlier test hand-built its record with the same wrong key;
+  the new one reads a record produced by the real driver.
+
 - **The mcp-second-opinion judge could block past its write deadline**
   (#129): `_write` polled `select` and then made a BLOCKING 64 KiB
   `os.write`. A pipe reads as writable when any space is free, so a child
@@ -26,6 +34,32 @@ and version plan.
   in `test_a_stalled_reader_is_a_write_timeout`. The write loop now runs
   on a non-blocking fd, and a full pipe goes back to `select` and the
   clock. A deterministic regression test pre-fills the pipe.
+
+### Added
+
+- **`skillc collection-run` keeps evidence for #106's live run** (Refs #106).
+  The paste-back is grouped into prompt delivery, canary, credential,
+  outcome, cleanup and transcript format:
+  - the credential's remaining life at launch;
+  - the operator's host credential before and after (a digest comparison;
+    the bytes are never read into the record);
+  - a daemon snapshot diff of skillc-owned containers around the whole run;
+  - the stop reason and exit code, per-criterion grades, and the refusal
+    reason;
+  - the journal's own workspace `cleaned` event;
+  - a census of the real transcript: client version, model, line types, and
+    the codex `response_item` types the adapter does not know.
+
+  An evidence envelope is written into the kept store, holding the record and
+  every observation above. It is leak-checked both as its string leaves and
+  as the serialized text, because `json.dumps` escaping hid an embedded
+  OAuth-shaped token from a text-only scan. A PASS now exits 1 if teardown
+  was not confirmed, or if a container labelled with one of this run's own
+  attempt ids (agent or grading probe) remains. The daemon-wide diff is
+  context only, since it cannot attribute. A transcript with no response
+  items reports its drift as not assessed. `--minimum-credential-seconds`
+  runs the below-threshold control.
+  Live evidence: `evals/agent-trial-live/`.
 
 ## [0.2.0] - 2026-09-27
 
