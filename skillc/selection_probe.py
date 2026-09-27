@@ -189,19 +189,25 @@ def selection_status(transcript: AttemptTranscript, applicable_skills: Sequence[
 def _grade(
     grader: verify.GraderDef, transcript: AttemptTranscript, base: Path,
     backend: ExecutionBackend | None = None,
-) -> bool | None:
+) -> tuple[bool | None, str]:
     """The task's own public outcome, graded independently of selection -
     `None` when the attempt's own disposition means nothing was ever
     captured to grade (never a guessed PASS or FAIL for a run that did not
-    happen). `backend`, when given, is where the grader's probe executes
+    happen), and `None` too for a grade that reached no verdict, with the
+    grader's own reason as the second element. `backend`, when given, is where the grader's probe executes
     the candidate (`verify.grade_files`' own parameter) - a real agent's
     output is untrusted code, so the real-agent path passes a SEPARATE
     grading backend (interfaces.md step 8) rather than probing it on the
     host."""
     if transcript.disposition != "captured":
-        return None
+        return None, ""
     graded = verify.grade_files(grader, list(transcript.candidate_files), base, backend=backend)
-    return graded.status == "PASS"
+    # Only PASS and FAIL are verdicts about the candidate. Anything else (an
+    # INCONCLUSIVE grade: an unconfirmed containment, a judge that did not
+    # return a verdict) is a fact about the GRADING, and reporting it as
+    # task failure would blame the candidate for the grader's own gap.
+    success = {"PASS": True, "FAIL": False}.get(graded.status)
+    return success, "" if success is not None else f"grading {graded.status}: {graded.detail}"
 
 
 @dataclass(frozen=True)
@@ -273,7 +279,7 @@ def run_selection_probe(
     cases: dict[str, object], manifest: dict[str, object], runner: AttemptRunner, *,
     treatment_subject_digest: str, baseline_subject_digest: str, image_digest: str,
     store: Path, base: Path, grader: verify.GraderDef | None = None,
-    grading_backend: ExecutionBackend | None = None,
+    grading_backend: ExecutionBackend | None = None, allow_host_grading: bool = False,
 ) -> SelectionProbeReport:
     """Plans, runs every attempt through `runner`, grades, and assembles the
     report - refusing (`SelectionProbeRefused`) if any planned attempt is
@@ -290,21 +296,66 @@ def run_selection_probe(
     )
     return run_planned_selection_probe(
         experiment, cases, runner, base=base, grader=grader, grading_backend=grading_backend,
+        allow_host_grading=allow_host_grading,
     )
 
 
 def run_planned_selection_probe(
     experiment: trial.Experiment, cases: dict[str, object], runner: AttemptRunner, *,
     base: Path, grader: verify.GraderDef | None = None,
-    grading_backend: ExecutionBackend | None = None,
+    grading_backend: ExecutionBackend | None = None, allow_host_grading: bool = False,
 ) -> SelectionProbeReport:
     """`run_selection_probe` over an ALREADY-planned experiment - the same
     attendance rule, grading and report assembly, split out so a runner can
-    be built against the experiment before it runs."""
+    be built against the experiment before it runs.
+
+    Refused before ANY attempt runs:
+      - no `grading_backend` without `allow_host_grading=True`. With no
+        backend, `verify.grade_files` executes the candidate as a HOST
+        subprocess - acceptable only for committed, trusted fixture
+        candidates (this module's own fake-runner tests), never for what a
+        real agent wrote. The default is the safe one.
+      - more than one attempt for any (case, arm). The report carries one
+        `ArmResult` per arm, so a second attempt would pass attendance and
+        then vanish from the report - a contaminated second baseline would
+        read as clean. The bounded pilot plans one attempt per arm
+        (`run-manifest.json`'s `attempts_per_trial`); repeats need a report
+        that carries every attempt, not a silent first-wins.
+      - a `cases` entry whose revision differs from the one planned. Selection
+        itself is judged against the FROZEN planned configuration's
+        `applicable_skills`, never against `cases`, so editing the case file
+        after planning cannot change a verdict; `cases` supplies only the
+        case's kind for the report."""
+    if grading_backend is None and not allow_host_grading:
+        raise SelectionProbeRefused(
+            "no grading_backend: the candidate would be executed on the host - pass a separate "
+            "grading backend, or allow_host_grading=True for trusted fixture candidates only"
+        )
     grader = grader if grader is not None else verify.GraderDef.load(GRADER_ROOT)
 
     planned = [(_resolved_trial(experiment, trial_dict), attempt) for trial_dict, attempt in experiment.attempts()]
     planned_ids = {str(attempt["attempt_id"]) for _trial, attempt in planned}
+
+    all_cases = cases["cases"]
+    assert isinstance(all_cases, list)
+    case_by_id: dict[str, dict[str, object]] = {c["id"]: c for c in all_cases}
+    per_arm: dict[tuple[str, str], int] = {}
+    for trial_dict, _attempt in planned:
+        case_ref = trial_dict["case"]
+        assert isinstance(case_ref, dict)
+        case_id, revision = str(case_ref["id"]), str(case_ref["revision"])
+        if case_id not in case_by_id or str(case_by_id[case_id]["revision"]) != revision:
+            raise SelectionProbeRefused(
+                f"planned case {case_id!r} revision {revision!r} is not in the supplied cases"
+            )
+        key = (case_id, str(trial_dict["config"]["arm"]))  # type: ignore[index]
+        per_arm[key] = per_arm.get(key, 0) + 1
+    repeated = sorted(key for key, count in per_arm.items() if count != 1)
+    if repeated:
+        raise SelectionProbeRefused(
+            f"(case, arm) pairs planned with more than one attempt: {repeated} - the report "
+            "carries one result per arm, so a repeat would be run and then dropped"
+        )
 
     transcripts: dict[str, AttemptTranscript] = {}
     for trial_dict, attempt in planned:
@@ -328,26 +379,26 @@ def run_planned_selection_probe(
             (trial_dict, transcripts[str(attempt["attempt_id"])])
         )
 
-    all_cases = cases["cases"]
-    assert isinstance(all_cases, list)
-    case_by_id: dict[str, dict[str, object]] = {c["id"]: c for c in all_cases}
     results = []
     for case_id, arms in by_case.items():
         case = case_by_id[case_id]
-        case_applicable = case["applicable_skills"]
-        assert isinstance(case_applicable, list)
-        applicable: tuple[str, ...] = tuple(case_applicable)
         arm_results: dict[str, ArmResult] = {}
+        applicable: tuple[str, ...] = ()
         for arm in ARMS:
-            trial_dict, transcript = arms[arm][0]  # first attempt of possibly-repeated trials
-            arm_applicable = applicable if arm == "treatment" else ()
+            [(trial_dict, transcript)] = arms[arm]  # exactly one - refused above otherwise
+            frozen_applicable = trial_dict["config"]["applicable_skills"]  # type: ignore[index]
+            assert isinstance(frozen_applicable, list)
+            arm_applicable = tuple(str(name) for name in frozen_applicable)
+            if arm == "treatment":
+                applicable = arm_applicable
+            success, grading_detail = _grade(grader, transcript, base, grading_backend)
             arm_results[arm] = ArmResult(
                 disposition=transcript.disposition,
                 selection=selection_status(transcript, arm_applicable),
-                task_success=_grade(grader, transcript, base, grading_backend),
+                task_success=success,
                 observed=observed_skills(transcript),
                 codex_best_effort=transcript.codex_best_effort,
-                detail=transcript.detail,
+                detail="; ".join(part for part in (transcript.detail, grading_detail) if part),
             )
         results.append(CaseResult(
             case_id=case_id, kind=str(case["kind"]), applicable_skills=applicable,

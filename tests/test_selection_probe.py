@@ -279,6 +279,7 @@ def _run(overrides: dict[tuple[str, str], sp.AttemptTranscript], tmp_path: Path)
         CASES, MANIFEST, _fake_runner(overrides),
         treatment_subject_digest=_TREATMENT_SUBJECT_DIGEST, baseline_subject_digest=_BASELINE_SUBJECT_DIGEST,
         image_digest=_PLACEHOLDER_IMAGE_DIGEST, store=store, base=tmp_path / "grading", grader=GRADER,
+        allow_host_grading=True,  # committed fixture candidates only - never an agent's output
     )
 
 
@@ -390,7 +391,7 @@ def test_report_refuses_when_an_attempt_is_missing(tmp_path: Path) -> None:
             CASES, MANIFEST, flaky_runner,
             treatment_subject_digest=_TREATMENT_SUBJECT_DIGEST, baseline_subject_digest=_BASELINE_SUBJECT_DIGEST,
             image_digest=_PLACEHOLDER_IMAGE_DIGEST, store=store,
-            base=tmp_path / "grading", grader=GRADER,
+            base=tmp_path / "grading", grader=GRADER, allow_host_grading=True,
         )
 
 
@@ -417,6 +418,102 @@ def test_selection_status_captured_with_no_applicable_skill_reports_selected_on_
     assert sp.selection_status(clean, []) == "not-selected"
 
 
+
+# --------------------------------------------------- refusals before any run
+
+
+def _counting_runner() -> tuple[sp.AttemptRunner, list[str]]:
+    calls: list[str] = []
+
+    def runner(trial_dict: dict[str, object], attempt: dict[str, object]) -> sp.AttemptTranscript | None:
+        calls.append(str(attempt["attempt_id"]))
+        return _transcript()
+    return runner, calls
+
+
+def test_no_grading_backend_is_refused_before_any_attempt_runs(tmp_path: Path) -> None:
+    """With no grading backend, `verify.grade_files` executes the candidate
+    on the HOST - so a run that has not opted in is refused before the
+    runner is called even once. Confirmed red when the check is removed: all
+    six attempts run and their output is probed on the host."""
+    runner, calls = _counting_runner()
+    with pytest.raises(sp.SelectionProbeRefused, match="grading_backend"):
+        sp.run_selection_probe(
+            CASES, MANIFEST, runner,
+            treatment_subject_digest=_TREATMENT_SUBJECT_DIGEST, baseline_subject_digest=_BASELINE_SUBJECT_DIGEST,
+            image_digest=_PLACEHOLDER_IMAGE_DIGEST, store=t.open_store(tmp_path / "store", forbidden=[]),
+            base=tmp_path / "grading", grader=GRADER,
+        )
+    assert calls == []
+
+
+def test_a_repeated_attempt_is_refused_before_any_attempt_runs(tmp_path: Path) -> None:
+    """The report carries one result per arm, so a second attempt would pass
+    attendance and then vanish - a contaminated second baseline would read
+    as clean. Refused up front instead. Confirmed red when the check is
+    removed: the run completes and reports the first attempt only."""
+    manifest = json.loads(json.dumps(MANIFEST))
+    manifest["repeat_schedule"]["attempts_per_trial"] = 2
+    runner, calls = _counting_runner()
+    with pytest.raises(sp.SelectionProbeRefused, match="more than one attempt"):
+        sp.run_selection_probe(
+            CASES, manifest, runner,
+            treatment_subject_digest=_TREATMENT_SUBJECT_DIGEST, baseline_subject_digest=_BASELINE_SUBJECT_DIGEST,
+            image_digest=_PLACEHOLDER_IMAGE_DIGEST, store=t.open_store(tmp_path / "store", forbidden=[]),
+            base=tmp_path / "grading", grader=GRADER, allow_host_grading=True,
+        )
+    assert calls == []
+
+
+def test_selection_is_judged_against_the_frozen_plan_not_the_supplied_cases(tmp_path: Path) -> None:
+    """Editing a case's `applicable_skills` after planning (same revision)
+    cannot change a verdict: the planned, content-addressed configuration
+    decides. Confirmed red when report assembly reads `cases` instead: the
+    recorded qa-test invocation flips from "selected" to "not-selected"."""
+    experiment = _plan(tmp_path)
+    edited = json.loads(json.dumps(CASES))
+    for case in edited["cases"]:
+        if case["id"] == INTENDED_USE:
+            case["applicable_skills"] = ["something-else"]
+    report = sp.run_planned_selection_probe(
+        experiment, edited, _fake_runner({(INTENDED_USE, "treatment"): _transcript(skills=("qa-test",))}),
+        base=tmp_path / "grading", grader=GRADER, allow_host_grading=True,
+    )
+    intended = _case(report, INTENDED_USE)
+    assert intended.treatment.selection == "selected"
+    assert intended.applicable_skills == ("qa-test",)
+
+
+def test_a_case_revision_that_differs_from_the_plan_is_refused(tmp_path: Path) -> None:
+    experiment = _plan(tmp_path)
+    edited = json.loads(json.dumps(CASES))
+    edited["cases"][0]["revision"] = "c-edited"
+    runner, calls = _counting_runner()
+    with pytest.raises(sp.SelectionProbeRefused, match="revision"):
+        sp.run_planned_selection_probe(
+            experiment, edited, runner, base=tmp_path / "grading", grader=GRADER, allow_host_grading=True,
+        )
+    assert calls == []
+
+
+def test_an_inconclusive_grade_is_unknown_never_a_task_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A grade that reached no verdict is a fact about the grading, not the
+    candidate - `task_success` is `None` and the grader's reason is kept.
+    Confirmed red on the old `status == "PASS"` mapping: it reports `False`."""
+    def inconclusive(*_args: object, **_kwargs: object) -> verify.Graded:
+        return verify.Graded(
+            status="INCONCLUSIVE", category="containment", detail="the probe was not contained: test",
+            criteria=[], containment={},
+        )
+    monkeypatch.setattr(sp.verify, "grade_files", inconclusive)
+    report = _run({}, tmp_path)
+    treatment = _case(report, INTENDED_USE).treatment
+    assert treatment.task_success is None
+    assert "INCONCLUSIVE" in treatment.detail and "not contained" in treatment.detail
+
+
 # --------------------------------------------------------------------------
 # The REAL AttemptRunner (`agent_trial_runner`), end to end on the fake
 # `docker` CLI and the scripted fake client `tests/test_agent_trial.py`
@@ -427,6 +524,7 @@ def test_selection_status_captured_with_no_applicable_skill_reports_selected_on_
 import sys
 import time
 from base64 import urlsafe_b64encode
+from collections.abc import Callable
 
 from skillc import docker_backend as d
 
@@ -472,7 +570,7 @@ def _script(
 
 def _argv_for(
     experiment: t.Experiment, docker_state: Path, scripts: dict[tuple[str, str], dict[str, object]],
-):  # type: ignore[no-untyped-def]
+) -> Callable[[str], list[str]]:
     """`argv_for(attempt_id)`: the fake client's argv for whichever (case,
     arm) that attempt belongs to - the fake docker maps CONTAINER_HOME to a
     host path named after the attempt, which is why the real runner takes a

@@ -30,6 +30,17 @@ and version plan.
   check is dropped, and when `skill_invocations` is ignored. A live run is a
   `SKILLC_ALLOW_REAL_AGENT=1`-gated test, owed to the operator.
 
+  Cross-model review of this change found four defects in the driver, all
+  fixed here: with no `grading_backend` the candidate ran as a host
+  subprocess (now refused before any attempt unless `allow_host_grading=True`,
+  for trusted fixtures only); a repeated attempt passed attendance and was
+  then dropped from the report (repeats are now refused up front); an
+  `INCONCLUSIVE` grade was reported as task failure (now `None`, with the
+  grader's reason); and selection was judged against the supplied case file
+  rather than the frozen planned configuration (now the plan decides, and a
+  case revision that differs from the plan is refused). Each is confirmed red
+  on the unfixed code.
+
 - **`skillc.selection_probe`: the run driver for #26's three predeclared
   cases** (Refs #26): plans both arms of every case
   (`evals/selection-probe/cases.json`) through the real controller (reusing,
