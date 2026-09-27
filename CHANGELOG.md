@@ -8,7 +8,42 @@ and version plan.
 
 ## [Unreleased]
 
-Nothing yet - see `0.2.0` below for everything that landed since `0.1.0`.
+### Added
+
+- **The Claude Code agent arm: a `claude-code-skills` surface and a
+  per-collection Level 1 run on Claude Code** (Refs #124).
+  `materialize.SURFACES` declares two surfaces, each bound to one client
+  and one install directory: `codex-skills` (codex, `~/.codex/skills/`) and
+  `claude-code-skills` (claude, `~/.claude/skills/`). A surface/client
+  mismatch is refused by name. `skillc collection-run` takes its client and
+  default argv from the subject (`DEFAULT_CLIENT_ARGVS`; claude runs
+  `claude -p --dangerously-skip-permissions` as the non-root trial user).
+  Claude Code has no model-free listing, so discovery is read from the real
+  agent transcript's `skill_listing` attachment
+  (`transcript_adapter.claude_code_skill_listing`, recorded as
+  `observation.skills_listed`). Each selected skill is reported `listed` or
+  `not-listed`, labelled `source=transcript skill_listing`. When no listing
+  was observable, including every codex run, discovery is `UNMEASURED` with
+  the reason; it is never a borrowed canary result. `collection-run` now
+  exits 1 when a selected skill is measurably `not-listed`, even on a PASS.
+  `skillc demo --subject` installs a Claude subject under `.claude/skills/`
+  and reports its discovery NOT EXERCISED. The host-local
+  `skillc materialize` refuses a Claude subject by name. New subjects are
+  `cpp-claude-code` (CPP's native `.claude/skills`, 18 skills) and
+  `mattpocock-skills-claude-code` (`tdd`, `diagnosing-bugs`). Live evidence
+  is in `evals/claude-code-agent-arm/`.
+
+### Fixed
+
+- **`skillc collection-run` printed `refresh_observed_in_container=None` on
+  every run, whatever the record held** (Refs #124). The paste-back read the
+  key `refresh_observed_in_container`; the record stores
+  `credential_refresh_observed_in_container`
+  (`credential.CredentialUsage.to_record_fields`). The paste-back test wrote
+  the same wrong key by hand, so both agreed. It now builds the value with
+  the real producer and was red on the old key. #11's Codex evidence shows
+  this blind `None`. The first #124 Claude runs did too, and were repeated
+  after the fix; both read `False`.
 
 ## [0.2.0] - 2026-09-27
 
@@ -40,16 +75,6 @@ under [#26](https://github.com/cooneycw/skillc/issues/26), and the judge-call
 cost ceiling under [#12](https://github.com/cooneycw/skillc/issues/12).
 
 ### Fixed
-
-- **`skillc collection-run` printed `refresh_observed_in_container=None` on
-  every run, whatever the record held** (Refs #124). The paste-back read the
-  key `refresh_observed_in_container`; the record stores
-  `credential_refresh_observed_in_container`
-  (`credential.CredentialUsage.to_record_fields`). The paste-back test wrote
-  the same wrong key by hand, so both agreed. It now builds the value with
-  the real producer and was red on the old key. #11's Codex evidence shows
-  this blind `None`. The first #124 Claude runs did too, and were repeated
-  after the fix; both read `False`.
 
 - **`skillc collection-run` could not complete a real agent attempt: no
   network, a refused workspace, a 30-second agent limit, and colliding
@@ -180,29 +205,6 @@ cost ceiling under [#12](https://github.com/cooneycw/skillc/issues/12).
   which fails on the host-global sweep (both are gone there).
 
 ### Added
-
-- **The Claude Code agent arm: a `claude-code-skills` surface and a
-  per-collection Level 1 run on Claude Code** (Refs #124).
-  `materialize.SURFACES` declares two surfaces, each bound to one client
-  and one install directory: `codex-skills` (codex, `~/.codex/skills/`) and
-  `claude-code-skills` (claude, `~/.claude/skills/`). A surface/client
-  mismatch is refused by name. `skillc collection-run` takes its client and
-  default argv from the subject (`DEFAULT_CLIENT_ARGVS`; claude runs
-  `claude -p --dangerously-skip-permissions` as the non-root trial user).
-  Claude Code has no model-free listing, so discovery is read from the real
-  agent transcript's `skill_listing` attachment
-  (`transcript_adapter.claude_code_skill_listing`, recorded as
-  `observation.skills_listed`). Each selected skill is reported `listed` or
-  `not-listed`, labelled `source=transcript skill_listing`. When no listing
-  was observable, including every codex run, discovery is `UNMEASURED` with
-  the reason; it is never a borrowed canary result. `collection-run` now
-  exits 1 when a selected skill is measurably `not-listed`, even on a PASS.
-  `skillc demo --subject` installs a Claude subject under `.claude/skills/`
-  and reports its discovery NOT EXERCISED. The host-local
-  `skillc materialize` refuses a Claude subject by name. New subjects are
-  `cpp-claude-code` (CPP's native `.claude/skills`, 18 skills) and
-  `mattpocock-skills-claude-code` (`tdd`, `diagnosing-bugs`). Live evidence
-  is in `evals/claude-code-agent-arm/`.
 
 - **`skillc collection-run <subject>` (issue #11's remaining acceptance
   bullet, "the same client, Level 1 fixture, contract and grader")**: one
