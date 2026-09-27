@@ -674,37 +674,174 @@ def cmd_demo(args: argparse.Namespace) -> int:
     real daemon - never on this command's own tests passing, never on CI.
 
     `--control` inverts the verdict: it exits 0 only when every SEEDED
-    failure was actually caught, never when the run itself looked clean."""
+    failure was actually caught, never when the run itself looked clean.
+
+    EXIT CODES, pinned to the runbook (issue #118): `0` success (or, under
+    `--control`, every seeded failure was caught); `1` NOT MET, or the run
+    could not even complete (a refused subject, a backend that never came
+    up, an interruption, or any other failure this command did not
+    anticipate); `2` ONLY a leak-check refusal of the paste-back block
+    itself - never any other meaning. Every branch below returns one of
+    exactly these three, and the top-level `except Exception` (plus the
+    separate `except KeyboardInterrupt`, below) is what makes that a
+    structural guarantee rather than a hope: NOTHING this command does not
+    explicitly handle can produce a fourth exit code, or a raw traceback, or
+    unscanned text on stdout/stderr (issue #118's own finding: an uncaught
+    `BackendUnavailable` used to print a traceback carrying the operator's
+    home directory and username - `demo.py`'s own entry points no longer let
+    that kind of failure escape uncaught, and this is the second,
+    independent layer for whatever they still miss).
+
+    `KeyboardInterrupt` NEEDS ITS OWN CLAUSE (found by cross-model review of
+    this exact fix): it is a `BaseException`, not an `Exception`, so the
+    guard above never sees it, and Ctrl-C is exactly what an operator
+    watching a slow real daemon actually presses - #118's leak would
+    otherwise come back through that one specific route, via Python's own
+    default traceback for an uncaught `KeyboardInterrupt`, whose frames name
+    the installed `skillc` paths (usually under the operator's home in a
+    `uv`/venv layout).
+
+    THE INTERRUPT SWEEP IS SCOPED TO THIS RUN'S OWN ATTEMPT IDS, NEVER
+    HOST-GLOBAL (issue #118 review, second pass): an earlier version called a
+    `reap_all_owned()` that removed every skillc-owned container on the
+    daemon regardless of which run started it - reproduced for real under a
+    genuine SIGINT, where it reaped a foreign container from another attempt
+    entirely. `recorded_attempt_ids` is built here, before either `run_demo`
+    or `run_control` is called, and handed to them so each records its own
+    attempt id the instant it exists (see `demo.run_demo`'s own docstring) -
+    so if this command has recorded nothing yet when the interrupt lands, it
+    sweeps nothing, rather than guessing at what else might be this run's."""
     from . import demo
 
     docker_bin = tuple(args.docker_bin.split()) if args.docker_bin else ("docker",)
     base = Path(args.base) if args.base else Path(tempfile.gettempdir())
+    recorded_attempt_ids: list[str] = []
 
-    if args.control:
-        ok = demo.run_control(image=args.image or demo.DEFAULT_IMAGE, docker_bin=docker_bin, base=base, timeout=args.timeout)
-        if ok:
-            print("skillc: --control - every seeded failure was caught")
-            return 0
-        print("skillc: --control - at least one seeded failure was NOT caught", file=sys.stderr)
-        return 1
-
-    subject_name = None
-    if args.subject is not None:
-        subject_name = args.subject or demo.DEFAULT_SUBJECT
     try:
+        if args.control:
+            ok = demo.run_control(
+                image=args.image or demo.DEFAULT_IMAGE, docker_bin=docker_bin, base=base, timeout=args.timeout,
+                recorded_attempt_ids=recorded_attempt_ids,
+            )
+            if ok:
+                print("skillc: --control - every seeded failure was caught")
+                return 0
+            print("skillc: --control - at least one seeded failure was NOT caught", file=sys.stderr)
+            return 1
+
+        subject_name = None
+        if args.subject is not None:
+            subject_name = args.subject or demo.DEFAULT_SUBJECT
         result = demo.run_demo(
             image=args.image or demo.DEFAULT_IMAGE, docker_bin=docker_bin, base=base, timeout=args.timeout,
-            subject_name=subject_name,
+            subject_name=subject_name, recorded_attempt_ids=recorded_attempt_ids,
         )
+        demo.print_paste_back(result.paste_back)
+        return 0 if result.ok else 1
+    except demo.PasteBackRefused:
+        # Never print `exc` itself here: its own message is built from
+        # `leak.scan_text`'s findings, which NAME the leaked value found
+        # (issue #118 review) - printing it would be the exact leak this
+        # whole mechanism exists to prevent, one level up.
+        print(
+            "skillc: the paste-back block failed its own leak-check and was refused - nothing was printed",
+            file=sys.stderr,
+        )
+        return 2
+    except KeyboardInterrupt:
+        # A fixed line, no exception text at all - never anything to scrub,
+        # by construction, since KeyboardInterrupt carries none.
+        print(
+            "skillc: demo interrupted - containers labelled for this run may remain; "
+            "run the reap sweep or re-run to clean up",
+            file=sys.stderr,
+        )
+        if not recorded_attempt_ids:
+            print(
+                "skillc: no attempt ids were recorded before the interrupt - nothing to sweep",
+                file=sys.stderr,
+            )
+            return 1
+        try:
+            report = demo.reap.reap(docker_bin, recorded_attempt_ids, None, timeout=10)
+            outcomes = [(o.attempt_id, o.outcome) for o in report.outcomes]
+            print(f"skillc: best-effort cleanup - outcomes={outcomes}, daemon_reachable={report.daemon_reachable}", file=sys.stderr)
+        except Exception as exc:  # noqa: BLE001 - best-effort: a cleanup failure must not itself crash this handler
+            print(f"skillc: best-effort cleanup also failed - {demo.describe_error_safely(exc, base=base)}", file=sys.stderr)
+        return 1
+    except Exception as exc:  # noqa: BLE001 - the top-level guard (issue #118), deliberately broad: see the docstring above
+        print(f"skillc: demo failed unexpectedly - {demo.describe_error_safely(exc, base=base)}", file=sys.stderr)
+        return 1
+
+
+def cmd_collection_run(args: argparse.Namespace) -> int:
+    """Issue #11's remaining acceptance bullet ("the same client, Level 1
+    fixture, contract and grader"): one real agent attempt against
+    `evals/level1/slug-small-fix`, with `SUBJECT`'s declared, selected skill
+    files installed into the same container, in skill-free canary mode.
+
+    Requires `SKILLC_ALLOW_REAL_AGENT=1` (`lifecycle.py`'s own structural
+    guard - this command sets no gate of its own) and the operator's own
+    Codex subscription login (`~/.codex/auth.json` by default, or
+    `--credential`), per ADR 0005 rule 6, "Normal Claude and codex" - never
+    metered API spend."""
+    from . import collection_conformance as cc
+    from . import demo, trial
+
+    docker_bin = tuple(args.docker_bin.split()) if args.docker_bin else ("docker",)
+    base = Path(args.base) if args.base else Path(tempfile.gettempdir())
+    image = args.image or demo.DEFAULT_IMAGE
+    client_argv = args.client_argv.split() if args.client_argv else list(cc.DEFAULT_CLIENT_ARGV)
+    credential_path = Path(args.credential) if args.credential else None
+    agent_timeout = args.agent_timeout if args.agent_timeout is not None else cc.DEFAULT_AGENT_TIMEOUT
+    try:
+        run_root = cc.new_run_root(base, args.subject)
     except demo.SubjectRefused as exc:
         print(f"skillc: {exc}", file=sys.stderr)
         return 2
+
     try:
-        demo.print_paste_back(result.paste_back)
+        try:
+            acquired = cc.acquire_collection(args.subject, run_root)
+        except demo.SubjectRefused as exc:
+            print(f"skillc: {exc}", file=sys.stderr)
+            return 2
+
+        # Resolved BEFORE planning, so the plan's own image.digest reflects the
+        # image that actually runs - `demo.run_demo`'s own "resolved before
+        # either backend starts" rule, for the same reason (codex review: a
+        # placeholder digest here left the planned evidence unable to identify
+        # its own inputs).
+        image_digest = demo.resolve_image_digest(docker_bin, image, None, args.timeout)
+        store = trial.open_store(run_root / f"{args.subject}-store", forbidden=[])
+        experiment, attempt_id = cc.plan_collection_attempt(args.subject, acquired, store, image_digest=image_digest)
+
+        backend, grading_backend = cc.agent_backends(
+            image=image, base=run_root, docker_bin=docker_bin, daemon_timeout=args.timeout,
+        )
+        result = cc.run_collection_agent_attempt(
+            subject_name=args.subject, acquired=acquired, experiment=experiment, attempt_id=attempt_id,
+            backend=backend, grading_backend=grading_backend, base=run_root,
+            base_argv=client_argv, timeout=agent_timeout, credential_explicit_path=credential_path,
+        )
+    finally:
+        cc.discard_acquisition(run_root, args.subject)
+
+    paste_back = cc.build_collection_paste_back(result)
+    try:
+        demo.print_paste_back(paste_back)
     except demo.PasteBackRefused as exc:
         print(f"skillc: {exc}", file=sys.stderr)
         return 2
-    return 0 if result.ok else 1
+
+    # Codex review: `graded is None` (grading BLOCKED - a prompt-delivery
+    # mismatch or a failed canary, `run_collection_agent_attempt`'s own
+    # `grading_blocked_reason`) must never read as success just because
+    # nothing contradicted it - a captured-but-ungraded attempt is not the
+    # same fact as a passing one. Success requires an ACTUAL PASS verdict.
+    graded = result.record.get("graded")
+    graded_ok = isinstance(graded, dict) and graded.get("status") == "PASS"
+    return 0 if result.record.get("disposition") == "captured" and graded_ok else 1
 
 
 def cmd_rules(args: argparse.Namespace) -> int:
@@ -868,6 +1005,33 @@ def build_parser() -> argparse.ArgumentParser:
         help="run the seeded negative controls instead - exits non-zero unless every one was caught",
     )
     p_demo.set_defaults(func=cmd_demo)
+
+    p_collection_run = sub.add_parser(
+        "collection-run",
+        help="issue #11's remaining bullet: one real agent attempt on evals/level1/slug-small-fix "
+             "per declared skill collection, skill-free canary mode (owed to the operator's live run)",
+    )
+    p_collection_run.add_argument("subject", help="a name under evals/subjects/<name>/subject.json")
+    p_collection_run.add_argument("--image", help="trial image (default: skillc.demo.DEFAULT_IMAGE)")
+    p_collection_run.add_argument(
+        "--docker-bin", help="docker executable (repeatable words, space-separated; default: docker)",
+    )
+    p_collection_run.add_argument("--base", help="where the disposable root is created (default: TMPDIR)")
+    p_collection_run.add_argument("--timeout", type=float, default=30, help="per-container-call timeout, seconds")
+    p_collection_run.add_argument(
+        "--agent-timeout", type=float, default=None,
+        help="the agent's own wall-clock limit, seconds (default: collection_conformance.DEFAULT_AGENT_TIMEOUT)",
+    )
+    p_collection_run.add_argument(
+        "--credential", help="explicit path to the client credential file (default: the documented standard location)",
+    )
+    p_collection_run.add_argument(
+        "--client-argv", default=None,
+        help="the real client invocation, space-separated words (default: "
+             "collection_conformance.DEFAULT_CLIENT_ARGV - the documented no-nested-sandbox mechanism, "
+             "trial_bootstrap.BWRAP_DECISION, plus --skip-git-repo-check) - never invented per-run",
+    )
+    p_collection_run.set_defaults(func=cmd_collection_run)
 
     p_rules = sub.add_parser("rules", help="list the rules")
     p_rules.set_defaults(func=cmd_rules)

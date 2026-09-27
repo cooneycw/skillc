@@ -1,8 +1,10 @@
 # The operator demo (#81, Refs #10)
 
-- Status: the command exists and is proven against the fake `docker` CLI
-  (`tests/fixtures/docker-backend/fake_docker.py`); the real-daemon success
-  path is owed to the operator's own live run.
+- Status: proven against the fake `docker` CLI
+  (`tests/fixtures/docker-backend/fake_docker.py`), and run live by the
+  operator at `8e06030` on 2026-09-27: all four commands exited 0 with every
+  item MET (https://github.com/cooneycw/skillc/issues/10#issuecomment-5855368984). What that run did and did not cover is recorded in
+  [support-matrix.md](support-matrix.md).
 - Governing documents: [support-matrix.md](support-matrix.md) (restated
   after that live run, from its results), [interfaces.md](interfaces.md)
   (the backend seam this command drives through).
@@ -161,28 +163,58 @@ branch anywhere in skillc/", `tests/test_materialize.py`) AST-scans every
 `skillc/*.py` module and would otherwise flag a hardcoded default the moment
 it landed.
 
-## The Level 1 agent run per collection (#11's remaining acceptance bullet) - IN PREPARATION
+## The Level 1 agent run per collection (#11's remaining acceptance bullet)
 
-**Not yet built.** This section is a placeholder stating the design, not a
-capability this command has today - stated here rather than silently, the
-same discipline every other owed-to-the-live-run gap in this repository
-follows.
+**Run live on 2026-09-27, once per collection: both captured, both graded
+PASS, and the missing-credential control `unavailable`.** The output is in
+[`evals/second-collection-conformance/evidence/README.md`](../../../evals/second-collection-conformance/evidence/README.md).
+A re-run on a later commit is new evidence, not a replay of that run.
+
+Three defaults changed after the first live attempts, which never reached a
+model:
+
+- **Network.** The agent container now runs on Docker's bridge network, so the
+  client can reach its provider. This follows the owner's ruling recorded on
+  #11: "i'm fine for a container (controlled by what we place into it) to have
+  network access. i'm not going to submit hostile repos". The grading
+  container keeps `network=none`. The paste-back prints `agent_network=`.
+- **Git check.** The default client argv adds `--skip-git-repo-check`. codex
+  refuses to start in the non-git `/work` without it.
+- **Timeouts.** `--agent-timeout` (default 900 s) bounds the agent.
+  `--timeout` bounds each docker call only; it used to bound both, which would
+  have stopped a real agent after 30 s.
+
+Each run also works in its own `skillc-collection-run-<subject>-*` directory
+under `--base`. The checkout and staging copies are removed afterwards and the
+store, which is the evidence, is kept.
 
 `--subject`'s own three legs above (install, digest re-check, discovery)
 prove the collection lands intact and the client can see it - explicitly
 NOT that any skill is invoked, selected, or helps (see "What this shows,
 and what it does NOT show" above). Issue #11's own remaining acceptance
-bullet - "the same client, Level 1 fixture, contract and grader" - needs an
-actual agent attempt, through `skillc/agent_trial.py` (#106), once per
-collection (`cpp-codex`, `mattpocock-skills`), against
+bullet - "the same client, Level 1 fixture, contract and grader" - is
+`skillc collection-run <subject>` (`skillc/collection_conformance.py`),
+which drives one actual agent attempt through `skillc/agent_trial.py`
+(#106), once per collection (`cpp-codex`, `mattpocock-skills`), against
 `evals/level1/slug-small-fix`, on the client each subject's own declaration
-names (`codex`, codex-cli `0.157.1` for both).
+names (`codex`, codex-cli `0.157.1` for both). It installs that
+collection's declared, selected skill files into the SAME container the
+agent runs in - `agent_trial.run_one_attempt`'s own `extra_home_files`
+parameter (issue #11) - so a spontaneous skill invocation is genuinely
+possible, not merely plumbed through.
 
-The canary instruction will run in `agent_trial.py`'s SKILL-FREE mode
-(naming no skill): #11 measures collection conformance, not skill
-selection - #26's own job - and a canary instruction that names a skill
-would contaminate exactly the measurement #26 needs to make later. This
-prep is blocked on that skill-free mode landing in `agent_trial.py` first.
+```bash
+SKILLC_ALLOW_REAL_AGENT=1 skillc collection-run cpp-codex
+SKILLC_ALLOW_REAL_AGENT=1 skillc collection-run mattpocock-skills
+```
+
+The canary instruction runs in `agent_trial.py`'s SKILL-FREE mode (naming no
+skill): #11 measures collection conformance, not skill selection - #26's
+own job - and a canary instruction that names a skill would contaminate
+exactly the measurement #26 needs to make later. Whatever the agent invokes
+on its own is still observed (`skill_invocations`), never hidden by the
+canary's own indifference to it - a first, informal signal for #26, not its
+answer.
 
 Funding basis for the agent run itself, quoted verbatim rather than
 paraphrased ([ADR 0005](../../decisions/0005-runtime-scope-and-cost-rulings.md)
@@ -191,16 +223,26 @@ operator's own normal Codex subscription login, inside the normal usage
 budget, not metered API spend and not gated by the $5 judge-call ceiling
 (rule 5), which covers judge calls only. Gated behind
 `SKILLC_ALLOW_REAL_AGENT=1` (`lifecycle.py`'s own structural guard against
-an accidental real launch), exactly like every other real-agent path this
-repository has.
+an accidental real launch); `collection-run` adds no gate of its own.
 
-Planned paste-back shape, per collection: `disposition`, `prompt_delivered`,
-`canary_satisfied`, `graded.status`, and `refresh_observed_in_container` -
-leak-checked before printing, exactly like the rest of this command's own
-block. Planned control: a run with the credential deliberately absent must
-report `disposition == "unavailable"` (BLOCKED before the agent ever
-launches), matching `skillc/agent_trial.py`'s own existing acceptance for a
-missing credential.
+The prompt and starting fixture are the task's own fixed data, never
+invented by this command: `evals/level1/slug-small-fix/goal.md` verbatim
+(#5's own "agent-facing request, identical for every arm"), and
+`fixture/src/` installed into the workspace - never the sibling
+`fixture/expected.json`, the grader's own ground truth for it, which would
+hand the agent the answer key.
+
+Paste-back shape, per collection: `disposition`, `prompt_delivered`,
+`canary_satisfied`, `graded.status`, `refresh_observed_in_container`, and
+`skill_invocations`/`skill_invocation_detection` (issue #26: every skill
+name the transcript shows invoked, and whether that client's own detection
+is `structural` or `heuristic` - `heuristic` for Codex, since it has no
+native skill-invocation marker of its own) - leak-checked before printing,
+exactly like the rest of this command's own block. Control, proven against
+the fake docker (`tests/test_collection_conformance.py`): a run with the
+credential deliberately absent reports `disposition == "unavailable"`
+(BLOCKED before the agent ever launches, no container remains), matching
+`skillc/agent_trial.py`'s own existing acceptance for a missing credential.
 
 ## How long it takes
 
@@ -223,8 +265,8 @@ image=<image> image_digest=<digest or UNKNOWN>
 acceptance:
   [MET|NOT MET] full Docker trial lifecycle (prepare..confirm_absent) - lifecycle disposition=<...>
   [MET|NOT MET] grades through the verifier's backend seam (#76) - grading status=<...>, detail=<...>
-  [MET|NOT MET] cleanup sweep confirms no owned container left running - reap outcomes=[...]
-  [MET|NOT MET] declared host paths unchanged - changed=[...], unresolved=[...]
+  [MET|NOT MET|NOT EXERCISED] cleanup sweep confirms no owned container left running - reap outcomes=[...]
+  [MET|NOT MET|NOT EXERCISED] declared host paths unchanged - changed=[...], unresolved=[...]
   [MET|NOT MET] image digest recorded - digest=<...>
 
 cleanup (reap outcomes, four possible values: reaped/already-absent/left-running/unknown):
@@ -241,6 +283,18 @@ subject: <name> revision=<pinned sha>
     daemon_reachable=<bool>
 ```
 
+When acquisition or `prepare()` never even reached the container step
+(issue #118), the `subject:` block instead reads:
+
+```
+subject: <name> revision=<pinned sha>
+  NOT EXERCISED: <reason>
+```
+
+and all five of that leg's own acceptance lines read `NOT EXERCISED` too,
+with `<reason>` as their evidence - never a guessed MET/NOT MET for work
+that never started.
+
 The `subject:` block is present only when `--subject` was given; its own
 acceptance lines (installed skills match the declared selection, digests
 match, every selected skill discovered) appear in the `acceptance:` section
@@ -249,9 +303,14 @@ above, prefixed `subject '<name>':`, exactly like every other line there.
 - **`skillc_version`/`source_commit`/`dirty`** - `skillc/provenance.py`'s
   stamp of what actually ran. `dirty=true` means the checkout that produced
   this run had uncommitted changes - paste it back anyway, but say so.
-- **Each acceptance line** - `MET` or `NOT MET`, with its own evidence
-  string; a `NOT MET` line is the first thing to read closely, not a summary
-  count.
+- **Each acceptance line** - `MET`, `NOT MET`, or (cleanup and host-paths
+  only) `NOT EXERCISED` - with its own evidence string. `NOT EXERCISED`
+  (issue #118) means the check never ran at all, because `prepare()` never
+  succeeded: with no container ever created, "no container left running"
+  and "host paths unchanged" are true only because nothing happened, which
+  is a different claim from a demo that actually ran cleanly, and is never
+  reported as `MET`. A `NOT MET` line is the first thing to read closely,
+  not a summary count.
 - **`cleanup`** - one line per reaped attempt, naming which of the four
   distinct outcomes applied. `reaped` and `already-absent` are both fine
   (the second means teardown already worked and the sweep found nothing to

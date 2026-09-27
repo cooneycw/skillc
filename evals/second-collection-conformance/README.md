@@ -1,129 +1,80 @@
 # Second-collection conformance, through the real Docker backend (#11)
 
-[`run-manifest.json`](run-manifest.json) prepares the run #11's own text
-asks for: the same client, Level 1 fixture, contract and grader, run against
-BOTH declared subjects - [cpp-codex](../subjects/cpp-codex/SUBJECT.md) (the
-whole 74-skill pack) and [mattpocock-skills](../subjects/mattpocock-skills/SUBJECT.md)
-(`tdd`, `diagnosing-bugs`) - through the real `DockerBackend`, not the host
-adapter path both subjects' existing evidence already proves.
+Issue #11 asks whether skillc's evaluation interfaces are generic. Showing that
+they work for CPP is not enough, so the same interfaces must also work for a
+second collection, independently authored and laid out differently. The two
+declared subjects are [cpp-codex](../subjects/cpp-codex/SUBJECT.md) (the whole
+74-skill pack) and [mattpocock-skills](../subjects/mattpocock-skills/SUBJECT.md)
+(`tdd`, `diagnosing-bugs`).
 
-**Prepared, not run**, exactly like [the matched pilot](../matched-pilot/README.md)
-and for the same reason: execution needs a live capability that does not
-fully exist yet. `skillc demo --subject <name>` (#81, #10) already exists in
-PR #97, materializing the named subject on the HOST via
-`materialize.materialize()`. It does not yet install into the real
-container, run discovery there, or re-verify a digest - that fuller
-behavior (`DockerBackend.install()`, client-side discovery inside the
-container, an in-container digest check against the installation receipt,
-no model call) is a follow-up PR under #11. Once that lands, these two runs
-execute in the same operator session as #81's own live demo - one runbook,
-not two.
+**Executed.** [`evidence/README.md`](evidence/README.md) holds the live
+output. [`run-manifest.json`](run-manifest.json) cites that output line by
+line, and `tests/test_second_collection_conformance.py` fails if a cited line
+is missing from the evidence or is attributed to the wrong collection.
 
-## What this delivers, and what it does not
+## What ran, per collection
 
-Delivered here:
+1. **`skillc demo --subject <name>`** (no model call; the operator's #10 run
+   at main 8e06030). The collection is cloned at its pin and installed into a
+   real container. Every installed file is re-hashed inside the container
+   against the installation receipt. The client's own listing then reports
+   which skills it discovered. Both collections: 10/10 MET, digests matched,
+   every selected skill discovered.
+2. **`skillc collection-run <name>`** (one real codex agent attempt; #11,
+   2026-09-27). The same Level 1 task (`evals/level1/slug-small-fix`), the
+   same client (codex-cli 0.157.1), the same contract
+   (`agent_trial.run_one_attempt`, skill-free canary mode) and the same grader
+   (the fixture's `grader.json`, in a separate `network=none` container). The
+   only difference is which collection is installed in the agent's home. Both
+   collections: captured, graded **PASS**.
 
-- **The exact command per subject** (`run-manifest.json`'s `runs`): `skillc
-  demo --subject cpp-codex` and `skillc demo --subject mattpocock-skills`,
-  the real flag PR #97 already wires - stated with its current (host-only)
-  behavior alongside the fuller behavior this manifest's `expected_paste_back`
-  describes, so the two are never conflated.
-- **The expected paste-back shape per subject**: an installation-receipt
-  summary matching each subject's ALREADY-recorded host evidence
-  (`evals/subjects/*/evidence/report.json`) - proving the Docker-backed run
-  is expected to reproduce the SAME facts the host adapter path already
-  established, not a new claim - plus `digest_check` and `discovered`
-  fields. Both are explicitly `owed to the follow-up PR under #11`, never
-  invented.
-- **Citations, not re-proofs**, for the two acceptance bullets already
-  closed by existing work: no-project-name-branch (the genericity guard,
-  #94) and unsupported-formats-refused-before-selection
-  (`test_a_malformed_subject_declaration_is_refused`'s 10 parametrized
-  cases, generic to `materialize.Subject.from_dict` and therefore already
-  covering both subjects).
-- **The bounded compatibility statement**, below.
-- **The acceptance status against #11's four bullets** (`run-manifest.json`'s
-  `acceptance_status`): the no-agent demo this manifest prepares -
-  installation plus discovery plus an in-container digest re-verification
-  against the receipt - gives conformance evidence for bullets 1, 3 and
-  part of 4. It does **not** satisfy bullet 2 ("the same client, Level 1
-  fixture, contract and grader"), which needs an agent actually WORKING
-  the Level 1 task with each collection installed - a real model call this
-  no-agent demo deliberately never makes. **#11 stays open after this
-  manifest's own two runs execute**; one item remains, below.
+The control, a run with the credential deliberately absent, was `unavailable`
+and blocked before the agent launched, with exit 1.
 
-Explicitly NOT delivered here, per #11's own "do not build a second large
-benchmark" and the same discipline the matched pilot follows:
+## Acceptance, against #11's four bullets
 
-- No live Docker run, no image build, no real client invocation - all owed
-  to the operator's live session, alongside #81's.
-- No claim about which collection helps an agent more, no task-outcome
-  measurement, no paid model call of any kind - #10 (the live run itself),
-  #12 (the matched pilot) and #26 (selection behavior) own those questions,
-  not this manifest.
-- No new skill selection, layout support, or adapter change -
-  `mattpocock-skills/subject.json`'s existing `select: [tdd,
-  diagnosing-bugs]` is reused verbatim; this manifest does not revisit that
-  choice or attempt the 14 policy-hidden skills the Nit Store (#20) already
-  flags as a separate, undecided gap.
+| Bullet | Status | Backed by |
+|---|---|---|
+| 1. Independent collection, different layout, compatible scope, provenance and licence | MET | `evals/subjects/mattpocock-skills/SUBJECT.md` (#71) |
+| 2. Same client, Level 1 fixture, contract and grader; installation contained in the adapter | MET | evidence section 2; the subject declaration is data, and `skillc/collection_conformance.py` names no subject |
+| 3. No project-name branch in the core; unsupported formats refused before selection | MET | `tests/test_materialize.py` genericity guard (every `skillc/*.py`, #94) and `test_a_malformed_subject_declaration_is_refused` |
+| 4. Conformance evidence for both collections and a bounded compatibility statement; no second benchmark | MET | evidence sections 1-2, and the statement below; one attempt per collection on the existing canary |
 
 ## The bounded compatibility statement
 
-**What is shown compatible, and by what kind of evidence - kept separate on
-purpose (a "proven end to end" claim would blur two different kinds of
-evidence into one overclaim):**
+**Shown by execution, for both collections, on one host:**
 
-- **By actual execution:** `skillc materialize` has been RUN against both
-  `cpp-codex` and `mattpocock-skills`, on the host, with no adapter change
-  between them (`mattpocock-skills/SUBJECT.md`'s own finding, #71/#11:
-  "proving the adapter needed no change for an independently authored
-  collection with a different layout"). This is real, executed evidence -
-  the installation counts and readiness facts this manifest cites are from
-  those actual runs.
-- **By static proof, never by execution:** `trial.py`, `verify.py`,
-  `backend.py` and `docker_backend.py` carry no subject-name branch
-  (cited above, not re-proven) - a structural guarantee that NEITHER
-  subject could be special-cased in that code, whether or not either has
-  ever actually been run through it.
-- **Not shown at all, by either kind of evidence:** that the trial
-  controller, the verifier, or a real execution backend has ever actually
-  processed EITHER subject end to end. No full trial (plan an attempt,
-  dispatch it through a backend, capture, grade) has been run for
-  `cpp-codex` or `mattpocock-skills` - only `materialize.py`'s own
-  installation step has real execution evidence. That is precisely the gap
-  this manifest's two runs are prepared to close, once the `--subject`
-  follow-up PR and a real Docker daemon exist to run them against - not a
-  gap this document can claim closed by citing the adapter-only evidence or
-  the genericity guard.
+- The collection installs intact into a real trial container. The files are
+  re-hashed in the container, and the client's own listing discovers every
+  selected skill.
+- A real agent works the Level 1 canary with that collection installed. The
+  pipeline carries it from launch through transcript, prompt-delivery check,
+  liveness canary, capture and independent grading to a verdict, through the
+  same code path for both collections.
 
-**What is NOT shown, and is not claimed to be:**
+**Shown by static proof, not by execution:** no core module carries a
+subject-name branch (the #94 AST guard). Neither collection can have been
+special-cased.
 
-- That either collection makes an agent MORE LIKELY to complete a task, or
-  complete it faster, or more safely. This manifest never runs a real
-  model against either collection at all.
-- That `mattpocock-skills`' other 23 shipped-but-unselected skills, or its
-  13 unshipped drafts, behave the same way - they are out of this
-  manifest's declared surface entirely, for the reasons
-  `mattpocock-skills/SUBJECT.md`'s own "report unsupported formats"
-  section already states.
-- That a third, fourth, or Nth independently-authored collection would
-  behave identically. Two is what #11 asks for ("do not build a second
-  large benchmark"); generalizing further is future work, not a
-  conclusion this evidence supports.
-- Anything about Claude Code specifically. Both subjects' evidence, and
-  this manifest's expected discovery step, are Codex-only
-  (`codex debug prompt-input`); Claude Code has no equivalent no-model
-  render command as of this writing (`skillc/exposure.py`'s own module
-  docstring states the same limit for its rung-2 check).
-- That the remaining agent run (bullet 2, above) is metered or paid-per-call
-  spend. It runs on the operator's normal Claude Code/Codex subscription
-  login, inside the normal usage budget - quoted verbatim from the ruling
-  on #98: "Normal Claude and codex". It is not gated by the #12 $5 cost
-  stop, which covers judge calls only (e.g. `mcp-second-opinion`, which use
-  provider API keys). The subscription-credential mechanism it needs
-  (`skillc/credential.py`, `docker_backend.DockerBackend.deliver_home_file`/
-  `read_home_file` - resolved from a documented standard location, delivered
-  candidate-owned into the trial container's home directory, never mounted
-  or exported, refused below a minimum remaining life) is delivered under
-  #98; the agent run itself is still not, and is not this manifest's own
-  remaining item to close.
+**Not shown, and not claimed:**
+
+- **Which collection helps an agent more, or whether either helps.** Both
+  passed a ceiling-prone canary once each. This is not a comparison; that
+  question belongs to #12's matched pilot.
+- **Skill selection.** In the skill-free run the agent invoked
+  `diagnosing-bugs` on its own. This is one observation from Codex's
+  heuristic detection, not a measurement; that question belongs to #26.
+- **Claude Code.** Both subjects declare codex; #124 tracks the Claude Code
+  arm.
+- **mattpocock-skills' 23 unselected skills.** This includes the 14 hidden by
+  invocation policy, for which discovery is not policy-aware; the gap is in
+  the Nit Store (#20).
+- **Contained egress.** By owner ruling (recorded on #11), the agent container
+  had open network (`agent_network=bridge`) so that it could reach its
+  provider. The grading container stayed `network=none`.
+- **Repeatability, or a third collection.** One attempt per collection, two
+  collections. #11 asks for no more ("do not build a second large benchmark").
+
+The agent runs used the operator's normal Codex subscription login, quoted
+from the ruling on #98 and ADR 0005 rule 6: "Normal Claude and codex". They
+were not metered API spend and not gated by the #12 $5 judge-call ceiling.
