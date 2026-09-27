@@ -577,8 +577,17 @@ collection) closes.
   prefix match as the directory entries, so `tests/test_leak.py.bak` would
   have been silently excluded alongside the one file actually meant - now an
   exact match for anything not ending in `/`.
-
-### Fixed
+  **Then found in PR review: the guard never ran in CI at all.** It was
+  built on `git ls-files` and `pytest.mark.skipif`-skipped whenever `git`
+  was not on PATH - true of the CI gate's own `python:3.12-slim` image, so
+  both its real tests were silently skipped there (`tests/test_
+  private_citations.py s..s.....` in the gate log) on this PR and every one
+  after it: a gate that let work through and could not fail where it ran.
+  Rebuilt on `os.walk` (sharing `skillc/leak.py`'s own `SKIP_DIRS` rather
+  than a second list that could drift from it) - no external binary, so it
+  needs no skip and none remains. Reproduced the reviewer's own manual proof
+  with `git` unresolvable on `PATH`: a planted message-number citation in
+  `skillc/reap.py` fails the guard, cleanly reverted, all nine tests green.
 
 - A non-boolean criterion `mandatory` flag is refused, not silently dropped
   from the derivation (#37).

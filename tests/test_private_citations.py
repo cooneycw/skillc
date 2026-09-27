@@ -5,9 +5,9 @@ this repository; a durable citation names an ADR section, an issue, or a PR
 instead (all three are already the convention this codebase otherwise
 follows).
 
-Scope, per issue #100's own text: every git-TRACKED file except
-`docs/research/` (dated historical research documents that cite another
-project's own paths and line numbers, never this fleet's messages),
+Scope, per issue #100's own text: every real file under the repository root
+except `docs/research/` (dated historical research documents that cite
+another project's own paths and line numbers, never this fleet's messages),
 `tests/test_leak.py` plus `tests/fixtures/leak_seeds/` (which name these
 exact strings AS SEEDED LEAK EXAMPLES on purpose - excluding them is not
 silencing a real hit, it is not re-flagging a fixture #63's own leak-check
@@ -19,9 +19,26 @@ forbid everywhere else (Codex code-review finding: an earlier version of
 this file scanned itself and its own new PR template, and would have failed
 CI on its own committed positive/negative-control examples forever).
 
-This is deliberately a CONTENT guard over tracked files, not a check on PR
-bodies or commit messages - issue #100's own correction comment found that
-distinction the hard way (a clean tracked-file sweep on PR #99 did not
+WALKS THE FILESYSTEM, NEVER `git ls-files` (PR #104's own review):
+the first version of this guard used `git ls-files` and skipped itself with
+`pytest.mark.skipif` whenever `git` was not on PATH - which is true of the
+CI gate's own `python:3.12-slim` image. So the ONE guard whose whole job is
+to keep a citation out of what CI treats as green never actually ran in CI,
+on this PR or any later one: `tests/test_private_citations.py s..s.....` in
+the gate log, an `s` for each of the two tests this decorator disabled. A
+gate that lets work through needs to be able to fail where it runs; this one
+could not. `os.walk`, the same primitive `skillc/leak.py`'s own scanner
+already uses (sharing its `SKIP_DIRS` rather than maintaining a second list
+that could drift from it), needs no external binary and runs identically
+everywhere pytest does. The tradeoff this accepts, stated rather than
+silently assumed: an UNTRACKED file left in the working tree is now part of
+the scanned population too (a real clone in CI never has one; a local
+workspace with scratch files might) - `SKIP_DIRS` plus the explicit
+exclusions above are what keep that population meaningful either way.
+
+This is deliberately a CONTENT guard over files in the checkout, not a check
+on PR bodies or commit messages - issue #100's own correction comment found
+that distinction the hard way (a clean tracked-file sweep on PR #99 did not
 prevent the same pattern from landing in that PR's squash-commit message,
 which content grep run against the checkout can never see). That half is a
 process rule stated in the PR template and README's Contributing section,
@@ -31,24 +48,34 @@ not something a test file can enforce.
 from __future__ import annotations
 
 import bisect
+import os
 import re
-import shutil
-import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-import pytest
+from skillc.leak import SKIP_DIRS
 
 ROOT = Path(__file__).resolve().parent.parent
 
-needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
+#: Version-control internals and caches are already excluded via
+#: `skillc.leak.SKIP_DIRS`; a build directory is a class of its own (never a
+#: cache, never version control) that only appears after `uv build`/`pip
+#: build` runs locally - never in a fresh CI checkout, but excluded anyway so
+#: a local run behaves the same way. `.gitignore` names exactly these three
+#: shapes.
+_EXTRA_SKIP_DIRS = frozenset({"dist", "build"})
+
+
+def _skip_dir(name: str) -> bool:
+    return name in SKIP_DIRS or name in _EXTRA_SKIP_DIRS or name.endswith(".egg-info")
+
 
 #: A standalone `msg`/`msgs` followed by a 4-digit id, or a standalone
 #: `w<digit>` token - the two shapes issue #100 names explicitly. Neither
 #: form is used anywhere in this codebase for a legitimate, non-fleet reason
-#: (confirmed by this test's own green run over every tracked file it does
-#: not exclude).
+#: (confirmed by this test's own green run over every file it does not
+#: exclude).
 PRIVATE_CITATION = re.compile(r"\bmsgs? ?\d{4}\b|\bw\d\b")
 
 #: Directory prefixes end in "/" and match anything underneath; anything
@@ -64,12 +91,12 @@ EXCLUDED_PREFIXES = (
     ".github/PULL_REQUEST_TEMPLATE.md",
 )
 
-#: This repository tracks several hundred files today. A count far below
-#: this is not "clean" - it is `git ls-files` failing, returning early, or
-#: running from the wrong directory, and a scan that saw almost nothing must
-#: not be read as a scan that found nothing wrong (Codex code-review
-#: finding: an empty or near-empty population previously passed silently).
-MINIMUM_EXPECTED_TRACKED_FILES = 100
+#: This repository holds several hundred files today. A count far below this
+#: is not "clean" - it is the walk running from the wrong directory or
+#: pruning too much, and a scan that saw almost nothing must not be read as
+#: a scan that found nothing wrong (Codex code-review finding: an empty or
+#: near-empty population previously passed silently).
+MINIMUM_EXPECTED_CANDIDATE_FILES = 100
 
 
 def _is_excluded(rel_path: str) -> bool:
@@ -82,11 +109,16 @@ def _is_excluded(rel_path: str) -> bool:
     return False
 
 
-def _tracked_files() -> list[str]:
-    result = subprocess.run(
-        ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True,
-    )
-    return [line for line in result.stdout.splitlines() if line]
+def _candidate_files(root: Path = ROOT) -> list[str]:
+    """Every file under `root`, forward-slash relative paths, minus
+    `SKIP_DIRS`/`_EXTRA_SKIP_DIRS` - the real filesystem, not `git ls-files`
+    (see the module docstring for why)."""
+    candidates: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if not _skip_dir(d))
+        for name in sorted(filenames):
+            candidates.append((Path(dirpath) / name).relative_to(root).as_posix())
+    return candidates
 
 
 def _joined_for_search(text: str) -> tuple[str, list[int], list[int]]:
@@ -168,17 +200,16 @@ def _scan(rel_paths: Sequence[str], root: Path = ROOT) -> ScanResult:
     return ScanResult(offenses=offenses, inspected=inspected, excluded=excluded, unreadable=unreadable)
 
 
-@needs_git
 def test_no_tracked_file_cites_a_private_message_number_or_worker_name() -> None:
-    tracked = _tracked_files()
-    assert len(tracked) >= MINIMUM_EXPECTED_TRACKED_FILES, (
-        f"only {len(tracked)} tracked files were found (expected at least "
-        f"{MINIMUM_EXPECTED_TRACKED_FILES}) - `git ls-files` may have failed "
-        "silently or run from the wrong directory; a check that saw almost "
-        "nothing must not be read as a check that found nothing wrong"
+    candidates = _candidate_files()
+    assert len(candidates) >= MINIMUM_EXPECTED_CANDIDATE_FILES, (
+        f"only {len(candidates)} candidate files were found (expected at least "
+        f"{MINIMUM_EXPECTED_CANDIDATE_FILES}) - the walk may have run from the "
+        "wrong directory or pruned too much; a check that saw almost nothing "
+        "must not be read as a check that found nothing wrong"
     )
-    result = _scan(tracked)
-    assert result.inspected > 0, "no tracked file was actually inspected - a scan of nothing is not a clean scan"
+    result = _scan(candidates)
+    assert result.inspected > 0, "no file was actually inspected - a scan of nothing is not a clean scan"
     assert result.offenses == [], (
         "private fleet citation found (issue #100) - replace with an ADR section, "
         "issue, or PR reference instead:\n" + "\n".join(result.offenses)
@@ -204,7 +235,6 @@ def test_a_population_of_only_unreadable_files_reports_zero_inspected(tmp_path: 
     assert result.offenses == []
 
 
-@needs_git
 def test_a_tracked_symlink_is_not_scanned_as_its_target(tmp_path: Path) -> None:
     """Red case: `Path.read_text()` follows a symlink, so scanning one would
     silently read an UNRELATED file's content under this path's name - a
