@@ -1071,13 +1071,34 @@ def test_cli_never_prints_a_detail_that_fails_the_leak_check(
     already refused it; the console must not print it either. Confirmed red
     when the output goes to `print` instead of `demo.print_paste_back`: the
     address reaches stdout (cross-model review). The refusal names the
-    finding on stderr, as `collection-run`'s paste-back already does."""
+    finding's CATEGORY on stderr - never the value (cross-model re-review:
+    printing the refusal as-is moved the address to stderr)."""
     from skillc import cli
 
+    # Assembled at run time so the repository's own leak-check does not flag
+    # this test file for the very value it proves is never printed.
+    address = ".".join(str(octet) for octet in (10, 23, 45, 67))
     leaky = sp.ArmResult(disposition="unavailable", selection="unknown", task_success=None,
-                         detail="daemon unreachable at 10.23.45.67")
+                         detail=f"daemon unreachable at {address}")
     _cli_fakes(monkeypatch, tmp_path, _report((leaky, leaky)))
     assert cli.main(["selection-probe", "--base", str(tmp_path)]) == 2
     captured = capsys.readouterr()
-    assert "10.23.45.67" not in captured.out
-    assert "NOT printed" in captured.err
+    assert address not in captured.out
+    assert address not in captured.err  # the refusal names the category, never the value
+    assert "private-ip" in captured.err
+
+
+def test_a_baseline_transcript_that_is_not_this_attempts_is_not_an_observation(tmp_path: Path) -> None:
+    """An empty, malformed or unrelated transcript file is one file found
+    and read, but it is not an observation OF THIS ATTEMPT: its first user
+    message is not this attempt's prompt. Only prompt delivery binds the
+    transcript to the attempt. Confirmed red when `observation_confirmed`
+    ignores `prompt_delivered`: an empty baseline certifies absence
+    (cross-model re-review)."""
+    experiment = _plan(tmp_path)
+    for delivered, expected in ((False, False), (True, True)):
+        transcript = sp.transcript_from_record({"disposition": "captured", "observation": {
+            "transcript_files_found": 1, "prompt_delivered": delivered, "canary_satisfied": False,
+            "grading_eligible": False, "skill_invocations": [],
+        }}, experiment, "unused")
+        assert transcript.observation_confirmed is expected

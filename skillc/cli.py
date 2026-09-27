@@ -1060,7 +1060,14 @@ def cmd_selection_probe(args: argparse.Namespace) -> int:
     try:
         demo.print_paste_back(demo.redact_known_host_paths("\n".join(lines), base=run_root))
     except demo.PasteBackRefused as exc:
-        print(f"skillc: {exc}", file=sys.stderr)
+        # Categories only: each finding reads "<line>: <category>: <value>",
+        # and the value is exactly what must not be shown (#26 re-review).
+        categories = sorted({
+            parts[1] for parts in (line.split(": ", 2) for line in str(exc).splitlines()[1:]) if len(parts) == 3
+        })
+        print(f"skillc: the selection-probe output failed its own leak check and was NOT printed "
+              f"({', '.join(categories) or 'unclassified'}); the verdict was {'ok' if ok else 'NOT ok'}",
+              file=sys.stderr)
         return 2
     return 0 if ok else 1
 

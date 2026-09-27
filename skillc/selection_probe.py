@@ -494,7 +494,14 @@ def transcript_from_record(
     # said: a failed canary makes the attempt inconclusive (no selection, no
     # grade), but an invocation it recorded is still evidence - a detection
     # control's baseline must be able to see one (#26 review).
-    confirmed = bool(obs) and obs.get("status") != "unknown" and obs.get("transcript_files_found") == 1
+    # Confirmed means THIS attempt's transcript was read: exactly one file,
+    # no hook failure, AND its first user message is this attempt's own
+    # prompt (which carries the attempt's nonce). An empty, malformed or
+    # unrelated file is not an observation of anything (#26 re-review).
+    confirmed = (
+        bool(obs) and obs.get("status") != "unknown" and obs.get("transcript_files_found") == 1
+        and obs.get("prompt_delivered") is True
+    )
     invocations = obs.get("skill_invocations")
     events: tuple[dict[str, object], ...] = tuple(
         {"type": "skill_invocation", "skill": str(name)}

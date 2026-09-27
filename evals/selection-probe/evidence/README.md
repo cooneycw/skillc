@@ -70,7 +70,12 @@ verdict: ok - control detected in treatment; baseline observed with no invocatio
   canary cannot be satisfied, so the attempt is inconclusive; this shape was
   predeclared.
 - **Required by the control's verdict:** the baseline must be observed, not
-  merely "not selected". A baseline that never launched, or whose recorded
+  merely "not selected". Observed means its transcript was read AND that
+  transcript's first user message is this attempt's own prompt
+  (`prompt_delivered=True` above, which carries the attempt's nonce). A
+  re-review added that binding after this run. The run's own output already
+  shows the baseline satisfying it, so the verdict stands under the final
+  rule. A baseline that never launched, or whose recorded
   invocations the failed canary would have hidden, now fails the control.
 - **An earlier run under a weaker rule:** at 17:20Z, commit `8229361`,
   experiment `…-a5be57db`. It gave the same arm results, and its baseline's

@@ -31,8 +31,13 @@ and version plan.
   invocations its transcript recorded. Second, the command printed raw
   details that the report file's leak check had refused. The console output
   is now redacted and leak-checked as a whole. Both are confirmed red on the
-  unfixed code. The live runs, the selection run and the detection control,
-  are recorded in `evals/selection-probe/evidence/README.md`.
+  unfixed code. A re-review found two more, also fixed. An empty, malformed
+  or unrelated transcript counted as "observed"; an observation now also
+  requires this attempt's own prompt to have been delivered, which binds the
+  transcript to the attempt. And the leak refusal printed the refused value on
+  stderr; it now names only the finding categories. The live runs, the
+  selection run and the detection control, are recorded in
+  `evals/selection-probe/evidence/README.md`.
 
 - **Every real-agent attempt now persists its observation as an
   `agent-observation` record** (Refs #106). `agent_trial.run_one_attempt`
