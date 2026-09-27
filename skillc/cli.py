@@ -787,7 +787,6 @@ def cmd_collection_run(args: argparse.Namespace) -> int:
     metered API spend."""
     from . import collection_conformance as cc
     from . import demo, trial
-    from .docker_backend import DockerBackend
 
     docker_bin = tuple(args.docker_bin.split()) if args.docker_bin else ("docker",)
     base = Path(args.base) if args.base else Path(tempfile.gettempdir())

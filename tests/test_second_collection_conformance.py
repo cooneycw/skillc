@@ -103,18 +103,25 @@ def test_the_receipt_check_refuses_empty_observations() -> None:
 EVIDENCE = CONFORMANCE_DIR / "evidence" / "README.md"
 
 
+_BLOCK_HEADERS = ("collection agent run: ", "subject: ")
+
+
 def _block(evidence: str, opener: str) -> str:
-    """The text from the line starting with `opener` through the next
-    `EXIT=` line - one subject's own printed block, so a line cited for one
+    """The text from the line starting with `opener` through ITS OWN `EXIT=`
+    line - one subject's own printed block, so a line cited for one
     collection cannot be satisfied by the other collection's block. Empty
-    when the opener is absent."""
+    when the opener is absent, AND when another run's header or a code fence
+    comes before an `EXIT=` line: an unterminated block would otherwise run
+    on into the next block and borrow its verdict (codex review of #11)."""
     lines = evidence.splitlines()
     for i, line in enumerate(lines):
         if line.startswith(opener):
-            for j in range(i, len(lines)):
+            for j in range(i + 1, len(lines)):
                 if lines[j].startswith("EXIT="):
                     return "\n".join(lines[i:j + 1])
-            return "\n".join(lines[i:])
+                if lines[j].startswith(_BLOCK_HEADERS) or lines[j].startswith("```"):
+                    return ""
+            return ""
     return ""
 
 
@@ -171,6 +178,13 @@ def test_the_citation_check_can_fail() -> None:
     assert _uncited(evidence, mp, []) == ["no lines cited"]
     # A substring of a real line is not a whole line.
     assert _uncited(evidence, mp, ["graded.status=PA"]) == ["graded.status=PA"]
+    # A block missing its own verdict and EXIT must not borrow the NEXT
+    # block's (codex review of #11: this mutation used to pass).
+    first = evidence.index(mp)
+    own = evidence[first:evidence.index("EXIT=", first)]
+    truncated = evidence.replace(own + "EXIT=0\n", own.replace("  graded.status=PASS\n", ""), 1)
+    assert truncated != evidence
+    assert _uncited(truncated, mp, ["graded.status=PASS", "EXIT=0"]) == ["graded.status=PASS", "EXIT=0"]
 
 
 def test_the_manifest_states_it_was_executed_and_names_its_evidence() -> None:
