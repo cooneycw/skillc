@@ -64,8 +64,9 @@ special-cased.
 - **Skill selection.** In the skill-free run the agent invoked
   `diagnosing-bugs` on its own. This is one observation from Codex's
   heuristic detection, not a measurement; that question belongs to #26.
-- **Claude Code.** Both subjects declare codex; #124 tracks the Claude Code
-  arm.
+- **Claude Code.** Both subjects declare codex. The Claude Code arm, with
+  one run per collection on the same task, contract and grader, is
+  [evals/claude-code-agent-arm](../claude-code-agent-arm/README.md) (#124).
 - **mattpocock-skills' 23 unselected skills.** This includes the 14 hidden by
   invocation policy, for which discovery is not policy-aware; the gap is in
   the Nit Store (#20).

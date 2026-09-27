@@ -358,6 +358,53 @@ def test_subject_surface_files_flattens_every_selected_skill(tmp_path: Path) -> 
     assert all(f.container_relpath.startswith(".codex/skills/") for f in files)
 
 
+def _claude_subject(select: object = "all") -> materialize.Subject:
+    return materialize.Subject.from_dict({
+        "subject_schema": 1, "locator": "test/test", "revision": "v1", "surface": "claude-code-skills",
+        "skills_root": "skills", "select": select, "client": {"name": "claude", "version": "2.1.283"},
+    })
+
+
+def test_subject_surface_files_follow_the_declared_surface(tmp_path: Path) -> None:
+    """Issue #124: a claude-code-skills subject lands under `.claude/skills/`,
+    where Claude Code reads user skills - never the codex default."""
+    repo = _subject_collection(tmp_path, {"greet": "greet"})
+    subject = _claude_subject()
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    source = materialize.acquire_snapshot(subject, repo, staging)
+    entries = materialize.inventory(subject, source)
+    files = demo.subject_surface_files(source, entries, subject.surface_spec.home_skills_relpath)
+    assert [f.container_relpath for f in files] == [".claude/skills/greet/SKILL.md"]
+
+
+def test_run_subject_demo_does_not_borrow_a_listing_for_a_client_without_one(
+    tmp_path: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch, base: Path,
+) -> None:
+    """Issue #124: Claude Code has no model-free listing. The install and the
+    in-container digest re-check still run; discovery is NOT EXERCISED with
+    the reason, and no listing command is launched at all - the client argv
+    given here would exit 1 if it ran, which would turn discovery into a
+    measured failure instead of the stated gap."""
+    repo = _subject_collection(tmp_path, {"greet": "greet"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _claude_subject())
+    never = [sys.executable, "-c", "import sys; sys.exit(1)"]
+
+    result = demo.run_subject_demo(
+        subject_name="whatever", image="fake-image:1", docker_bin=_docker_bin(docker_state),
+        base=base, timeout=5, checkout=repo, client_argv=never,
+    )
+    assert result.digest_status == "matched"
+    assert result.receipt["files"] == [  # type: ignore[call-overload]
+        {"path": ".claude/skills/greet/SKILL.md", "digest": result.receipt["files"][0]["digest"]},  # type: ignore[index]
+    ]
+    assert result.discovery == {"greet": "UNMEASURED"}
+    assert result.discovery_reason is not None and "no model-free listing" in result.discovery_reason
+    assert result.discovery_exercised is False
+    [item] = [i for i in demo._subject_acceptance_items(result) if "discovered" in i.name]
+    assert (item.exercised, item.met) == (False, False)
+
+
 def test_run_subject_demo_refuses_an_unknown_selected_skill(
     tmp_path: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

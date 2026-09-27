@@ -1,0 +1,12 @@
+{
+  "subject_schema": 1,
+  "locator": "github.com/cooneycw/claude-power-pack",
+  "revision": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b",
+  "surface": "claude-code-skills",
+  "skills_root": ".claude/skills",
+  "select": "all",
+  "client": {
+    "name": "claude",
+    "version": "2.1.283"
+  }
+}

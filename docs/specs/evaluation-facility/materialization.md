@@ -33,7 +33,7 @@ The adapter names no subject. A subject is a `subject.json`:
 | Key | Meaning |
 |---|---|
 | `locator`, `revision` | source identity; `revision` must be a full commit SHA |
-| `surface`, `client` | only `codex-skills` and `codex` are supported; anything else is refused by name |
+| `surface`, `client` | `codex-skills` with `codex` (installed to `~/.codex/skills/`), or `claude-code-skills` with `claude` (installed to `~/.claude/skills/`, #124); a surface outside `materialize.SURFACES`, or a client that is not that surface's own, is refused by name. The host-local `skillc materialize` run is `codex-skills` only: its availability fact is Codex's model-free listing, and Claude Code has none, so a `claude-code-skills` subject is refused there and its discovery is observed from a real agent transcript instead (`skillc collection-run`, labelled `source=transcript skill_listing`) |
 | `skills_root` | the directory whose children are skill directories |
 | `select` | `"all"`, or the skill names that make up this treatment |
 | `checksum_manifest` | optional per-skill manifest (`<sha256>  <file>` lines) to verify |

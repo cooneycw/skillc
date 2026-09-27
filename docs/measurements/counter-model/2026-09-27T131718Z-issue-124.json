@@ -1,0 +1,20 @@
+{
+  "branch": "issue-124-claude-code-agent-arm-a-claude-code-skills-surface",
+  "counts": {
+    "accepted": 4,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "d28ab3ae40b81522d1424b47456d978969de5e35",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "124",
+  "passes": 2,
+  "recorded_at": "2026-09-27T13:17:18Z",
+  "red_cases": {
+    "already_covered": 7,
+    "proposed": 10
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "schema": 1,
+  "status": "ran"
+}

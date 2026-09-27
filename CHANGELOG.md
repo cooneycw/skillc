@@ -8,34 +8,32 @@ and version plan.
 
 ## [Unreleased]
 
-### Fixed
-
-- **Every backend attempt's lifecycle record said its workspace was never
-  cleaned up** (#127): `lifecycle.run_through_backend` finalized before
-  cleaning, so the persisted `cleanup` read `partial` even when the journal
-  said `removed`. That included #11's live PASS runs. The workspace is now
-  cleaned first, so the record reports what cleanup did. The container's
-  `destroy()`/`confirm_absent()` outcome is journalled as a `backend-teardown`
-  detail event, even when `execute()` raises. `collection-run`'s
-  `workspace_cleanup(record, at finalize)` line (#136) now agrees with its
-  `workspace_cleaned(journal)` line.
-- **`skillc collection-run`'s paste-back printed `refresh_observed_in_container=None`
-  on every run** (Refs #106). It read `refresh_observed_in_container`, but the
-  driver writes `credential_refresh_observed_in_container`. #11's live
-  evidence therefore showed "not observed" for a comparison that had actually
-  been made. The earlier test hand-built its record with the same wrong key;
-  the new one reads a record produced by the real driver.
-
-- **The mcp-second-opinion judge could block past its write deadline**
-  (#129): `_write` polled `select` and then made a BLOCKING 64 KiB
-  `os.write`. A pipe reads as writable when any space is free, so a child
-  that stopped reading could wedge the write forever, and the deadline was
-  never checked again. This intermittently hung CI's required `gate` step
-  in `test_a_stalled_reader_is_a_write_timeout`. The write loop now runs
-  on a non-blocking fd, and a full pipe goes back to `select` and the
-  clock. A deterministic regression test pre-fills the pipe.
-
 ### Added
+
+- **The Claude Code agent arm: a `claude-code-skills` surface and a
+  per-collection Level 1 run on Claude Code** (Refs #124).
+  `materialize.SURFACES` declares two surfaces, each bound to one client
+  and one install directory: `codex-skills` (codex, `~/.codex/skills/`) and
+  `claude-code-skills` (claude, `~/.claude/skills/`). A surface/client
+  mismatch is refused by name. `skillc collection-run` takes its client and
+  default argv from the subject (`DEFAULT_CLIENT_ARGVS`; claude runs
+  `claude -p --dangerously-skip-permissions` as the non-root trial user).
+  Claude Code has no model-free listing, so discovery is read from the real
+  agent transcript's `skill_listing` attachment
+  (`transcript_adapter.claude_code_skill_listing`, recorded as
+  `observation.skills_listed`). Each selected skill is reported `listed` or
+  `not-listed`, labelled `source=transcript skill_listing`. When no listing
+  was observable, including every codex run, discovery is `UNMEASURED` with
+  the reason; it is never a borrowed canary result. `collection-run` now
+  exits 1 when a selected skill is measurably `not-listed`, even on a PASS.
+  `skillc demo --subject` installs a Claude subject under `.claude/skills/`
+  and reports its discovery NOT EXERCISED. The host-local
+  `skillc materialize` refuses a Claude subject by name. New subjects are
+  `cpp-claude-code` (CPP's native `.claude/skills`, 18 skills) and
+  `mattpocock-skills-claude-code` (`tdd`, `diagnosing-bugs`). Live evidence
+  is in `evals/claude-code-agent-arm/`; its first runs printed the blind
+  `refresh_observed_in_container=None` fixed under #106 and were repeated on
+  the fixed key (both read `False`).
 
 - **`skillc collection-run` keeps evidence for #106's live run** (Refs #106).
   The paste-back is grouped into prompt delivery, canary, credential,
@@ -60,6 +58,39 @@ and version plan.
   items reports its drift as not assessed. `--minimum-credential-seconds`
   runs the below-threshold control.
   Live evidence: `evals/agent-trial-live/`.
+
+### Fixed
+
+- **Every backend attempt's lifecycle record said its workspace was never
+  cleaned up** (#127): `lifecycle.run_through_backend` finalized before
+  cleaning, so the persisted `cleanup` read `partial` even when the journal
+  said `removed`. That included #11's live PASS runs. The workspace is now
+  cleaned first, so the record reports what cleanup did. The container's
+  `destroy()`/`confirm_absent()` outcome is journalled as a `backend-teardown`
+  detail event, even when `execute()` raises. `collection-run`'s
+  `workspace_cleanup(record, at finalize)` line (#136) now agrees with its
+  `workspace_cleaned(journal)` line.
+- **`--client <bare name>` was resolved against the cwd, not PATH** (Refs
+  #124, folded in from the Nit Store). `materialize.find_client("codex")`
+  reported a client on PATH as not found. A name with no path separator is
+  now looked up with `shutil.which`; a path is still a path.
+
+- **`skillc collection-run`'s paste-back printed `refresh_observed_in_container=None`
+  on every run** (Refs #106). It read `refresh_observed_in_container`, but the
+  driver writes `credential_refresh_observed_in_container`. #11's live
+  evidence therefore showed "not observed" for a comparison that had actually
+  been made. The earlier test hand-built its record with the same wrong key;
+  the new one reads a record produced by the real driver.
+
+- **The mcp-second-opinion judge could block past its write deadline**
+  (#129): `_write` polled `select` and then made a BLOCKING 64 KiB
+  `os.write`. A pipe reads as writable when any space is free, so a child
+  that stopped reading could wedge the write forever, and the deadline was
+  never checked again. This intermittently hung CI's required `gate` step
+  in `test_a_stalled_reader_is_a_write_timeout`. The write loop now runs
+  on a non-blocking fd, and a full pipe goes back to `select` and the
+  clock. A deterministic regression test pre-fills the pipe.
+
 
 ## [0.2.0] - 2026-09-27
 
