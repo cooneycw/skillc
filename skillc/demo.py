@@ -33,12 +33,12 @@ WHY NOT A REAL AGENT (the canary-adapter gap, raised on issue #81):
 result typically confirms only that a file was written, never echoing its
 content. That check is therefore always red against an unmodified real
 transcript, unless a per-client adapter re-reads the actual written file back
-from the exported output to synthesize `output` - not built here (a genuine,
-bounded scope decision, not an oversight): this demo's liveness canary uses
+from the exported output to synthesize `output`. Per-client transcript
+adapters now exist (issue #106, its first split PR); the driver loop that
+would run a real agent through this command and consume them is the second
+half of #106, not built here - this demo's liveness canary uses
 `lifecycle.py`'s own file-content mechanism instead, which has no such gap
-for a SCRIPTED subject. Wiring a REAL agent through `trial_bootstrap.py`'s
-own bootstrap, with that adapter, is real follow-up work, owed to a future
-issue - stated here plainly rather than silently assumed solved.
+for a SCRIPTED subject.
 
 THE PASTE-BACK BLOCK IS LEAK-CHECKED BEFORE IT EXISTS TO BE PRINTED
 (`leak_check_text`, reusing `skillc.leak.scan_text` directly - no file
@@ -146,7 +146,7 @@ def run_lifecycle_demo(backend: dbe.DockerBackend, base: Path) -> dict[str, obje
     experiment = trial.plan(spec, store)
     [(_trial, attempt)] = list(experiment.attempts())
     attempt_id = str(attempt["attempt_id"])
-    argv = ["python3", "-c", _LIFECYCLE_SUBJECT]
+    argv = [verify.PROBE_INTERPRETER, "-c", _LIFECYCLE_SUBJECT]
     record = lifecycle.run_through_backend(
         backend, experiment, attempt_id, argv, {"demo": "x"}, Limits(timeout=30), base,
     )
@@ -362,7 +362,7 @@ def run_control(*, image: str, docker_bin: Sequence[str], base: Path, timeout: f
     experiment = trial.plan(spec, store)
     [(_t, attempt)] = list(experiment.attempts())
     attempt_id = str(attempt["attempt_id"])
-    reply_only_argv = ["python3", "-c", "pathlib_unused = 1"]  # does nothing; never touches the canary
+    reply_only_argv = [verify.PROBE_INTERPRETER, "-c", "pathlib_unused = 1"]  # does nothing; never touches the canary
     record = lifecycle.run_through_backend(
         backend, experiment, attempt_id, reply_only_argv, {"demo": "x"}, Limits(timeout=30), base,
     )

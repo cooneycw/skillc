@@ -36,6 +36,16 @@ def _load_check_pins():
     return module
 
 
+def _load_check_interpreters():
+    spec = importlib.util.spec_from_file_location(
+        "skillc_trial_check_interpreters", REPO_ROOT / "docker" / "trial" / "check_interpreters.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 # --------------------------------------------------------------------------
 # Pinned CLI versions
 # --------------------------------------------------------------------------
@@ -88,6 +98,55 @@ def test_check_pins_reports_a_missing_arg():
     }
     messages = check_pins.check_pins(dockerfile_text, manifest)
     assert any("CLAUDE_CODE_VERSION" in m for m in messages)
+
+
+# --------------------------------------------------------------------------
+# docker/trial/check_interpreters.py: every interpreter the demo and
+# verifier invoke inside the trial container (issue #78, Refs #81, #10) must
+# actually be apt-installed by the Dockerfile - found live when the real
+# skillc-trial image turned out to have no python3 at all, undetected by
+# every existing check because they all run against the fake `docker` CLI,
+# which never looks inside an image.
+# --------------------------------------------------------------------------
+
+
+def test_check_interpreters_agrees_on_the_real_dockerfile():
+    from skillc.verify import PROBE_INTERPRETER
+
+    check_interpreters = _load_check_interpreters()
+    dockerfile_text = (REPO_ROOT / "docker" / "trial" / "Dockerfile").read_text(encoding="utf-8")
+    assert check_interpreters.check_interpreters(dockerfile_text, {PROBE_INTERPRETER}) == []
+
+
+def test_check_interpreters_reports_a_missing_interpreter():
+    """Red case (issue #78/#81): remove `python3` from the Dockerfile's own
+    apt-get install list and confirm the check reports it - this is the
+    exact regression that shipped undetected until this module existed."""
+    check_interpreters = _load_check_interpreters()
+    real_text = (REPO_ROOT / "docker" / "trial" / "Dockerfile").read_text(encoding="utf-8")
+    without_python3 = real_text.replace("        python3 \\\n", "")
+    assert "python3" not in check_interpreters.dockerfile_apt_packages(without_python3)
+    messages = check_interpreters.check_interpreters(without_python3, {"python3"})
+    assert any("python3" in m for m in messages)
+
+
+def test_check_interpreters_ignores_an_unrelated_required_name():
+    """A required interpreter this Dockerfile never claims to install (never
+    installed at all here, e.g. `node`, which ships with the base image) is
+    reported missing too - this check only knows about its OWN apt-get
+    install list, never the base image's contents, and says so structurally
+    rather than silently passing on a name it cannot see."""
+    check_interpreters = _load_check_interpreters()
+    dockerfile_text = (REPO_ROOT / "docker" / "trial" / "Dockerfile").read_text(encoding="utf-8")
+    messages = check_interpreters.check_interpreters(dockerfile_text, {"python3", "node"})
+    assert any("node" in m for m in messages)
+    assert not any("python3" in m for m in messages)
+
+
+def test_check_interpreters_reports_an_unparseable_dockerfile():
+    check_interpreters = _load_check_interpreters()
+    messages = check_interpreters.check_interpreters("FROM scratch\n", {"python3"})
+    assert messages and "could not find" in messages[0]
 
 
 # --------------------------------------------------------------------------

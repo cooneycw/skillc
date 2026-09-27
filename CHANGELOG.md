@@ -48,6 +48,27 @@ collection) closes.
   client-specific implementation (credential + seed + transcript-adapter +
   canary via a container read-back) is `skillc/agent_trial.py`, a separate
   PR still to come under the same issue.
+- **The trial image had no `python3`, undetected by any existing check**
+  (Refs #78, Refs #81, Refs #10): `skillc-trial`'s Dockerfile only
+  apt-installed `ca-certificates` and `git`, while `skillc.verify.PROBE_INTERPRETER`
+  and `skillc.demo`'s scripted lifecycle subject both invoke `python3` inside
+  the container - every check that would have caught this ran against the
+  fake `docker` CLI, which never looks inside an image. Fixed by
+  apt-installing the full `python3` package (not `python3-minimal`, whose
+  stdlib subset could not be verified against a real daemon from this
+  session). `docker/trial/check_interpreters.py` is the committed, no-daemon
+  control: it parses the Dockerfile's own apt-get install list as text and
+  refuses when a required interpreter (derived from `skillc.verify.PROBE_INTERPRETER`,
+  never a second hardcoded literal) is missing - confirmed red against a
+  copy of the Dockerfile with `python3` removed before being added.
+  `demo.py`'s own `python3` argv literals now reference
+  `verify.PROBE_INTERPRETER` directly rather than duplicating it. The
+  operator runbook gains a "Before you run" section (clone, `uv sync`, build
+  the image) noting the build itself is one of #78's own live checks
+  (`verify_codex_sidecar.js` fails the build, never a later trial, if the
+  Codex sidecar is missing), and its stale "why no real agent" paragraph is
+  updated for #106's transcript adapters.
+
 - **Per-client transcript adapters, grounded in real transcripts rather than
   guessed** (Refs #106, split 1 of 2 - the driver loop itself is a separate
   PR under the same issue): `skillc/transcript_adapter.py` translates a real

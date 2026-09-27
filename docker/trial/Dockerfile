@@ -27,11 +27,25 @@ ARG CODEX_VERSION=0.157.1
 # apt mirrors fail transiently (#10 lesson D15). Retry a bounded number of
 # times before giving up, so CI turns red for a real build problem, not a
 # flaky mirror.
+#
+# `python3` (the full package, not `python3-minimal`): `skillc.verify`'s own
+# probe interpreter and `skillc.demo`'s scripted lifecycle subject both run
+# as `python3` inside this container (issue #81) - the base image is
+# node:22-bookworm-slim, so nothing installs it otherwise, and every check
+# before this one ran against the fake `docker` CLI, which never looks
+# inside an image and so never caught its absence. `python3-minimal` was
+# considered - its stdlib subset excludes some modules the probe or a future
+# subject could reasonably need, and this session has no real daemon
+# available to verify against, so the full package is the safe default
+# rather than a guess. `docker/trial/check_interpreters.py` is the committed,
+# no-daemon control that catches a regression here without building the
+# image.
 RUN set -eu; \
     n=0; \
     until apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         git \
+        python3 \
     ; do \
         n=$((n + 1)); \
         if [ "$n" -ge 5 ]; then \
