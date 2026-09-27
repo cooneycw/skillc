@@ -13,6 +13,7 @@ someone relying on it.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import os
 import sys
@@ -786,7 +787,7 @@ def cmd_collection_run(args: argparse.Namespace) -> int:
     `--credential`), per ADR 0005 rule 6, "Normal Claude and codex" - never
     metered API spend."""
     from . import collection_conformance as cc
-    from . import demo, trial
+    from . import credential, demo, reap, trial
 
     docker_bin = tuple(args.docker_bin.split()) if args.docker_bin else ("docker",)
     base = Path(args.base) if args.base else Path(tempfile.gettempdir())
@@ -813,19 +814,57 @@ def cmd_collection_run(args: argparse.Namespace) -> int:
         # placeholder digest here left the planned evidence unable to identify
         # its own inputs).
         image_digest = demo.resolve_image_digest(docker_bin, image, None, args.timeout)
-        store = trial.open_store(run_root / f"{args.subject}-store", forbidden=[])
+        store_path = run_root / f"{args.subject}-store"
+        store = trial.open_store(store_path, forbidden=[])
         experiment, attempt_id = cc.plan_collection_attempt(args.subject, acquired, store, image_digest=image_digest)
 
         backend, grading_backend = cc.agent_backends(
             image=image, base=run_root, docker_bin=docker_bin, daemon_timeout=args.timeout,
         )
+        # Issue #106's retained evidence, taken AROUND the whole run (agent and
+        # grading containers alike): the operator's own credential file, and
+        # the daemon's skillc-owned containers. Both are observations only -
+        # neither changes what the attempt itself does.
+        host_before = cc.read_host_credential(materialize.CLIENT, credential_path)
+        daemon_before = reap.snapshot(docker_bin, timeout=args.timeout)
+        minimum = (
+            args.minimum_credential_seconds if args.minimum_credential_seconds is not None
+            else credential.MINIMUM_REMAINING_SECONDS
+        )
         result = cc.run_collection_agent_attempt(
             subject_name=args.subject, acquired=acquired, experiment=experiment, attempt_id=attempt_id,
             backend=backend, grading_backend=grading_backend, base=run_root,
             base_argv=client_argv, timeout=agent_timeout, credential_explicit_path=credential_path,
+            minimum_credential_seconds=minimum,
         )
+        daemon_after = reap.snapshot(docker_bin, timeout=args.timeout)
+        host_after = cc.read_host_credential(materialize.CLIENT, credential_path)
     finally:
         cc.discard_acquisition(run_root, args.subject)
+
+    # The full record, kept beside the store it describes - only when it
+    # passes the same leak check as the paste-back, after the same host-path
+    # redaction; a record that fails is never written, and the paste-back
+    # says so (`record_written=False`).
+    record_text = demo.redact_known_host_paths(
+        json.dumps(result.record, indent=2, sort_keys=True, default=str), base=run_root,
+    )
+    record_written = False
+    if not demo.leak_check_text(record_text):
+        try:
+            store_path.mkdir(parents=True, exist_ok=True)
+            (store_path / "collection-run-record.json").write_text(record_text + "\n", encoding="utf-8")
+        except OSError:
+            pass
+        else:
+            record_written = True
+    result = dataclasses.replace(
+        result,
+        host_credential=cc.HostCredentialCheck(before=host_before, after=host_after),
+        daemon_diff=reap.diff(daemon_before, daemon_after),
+        store_display=demo.redact_known_host_paths(str(store_path)),
+        record_written=record_written,
+    )
 
     paste_back = cc.build_collection_paste_back(result)
     try:
@@ -841,7 +880,15 @@ def cmd_collection_run(args: argparse.Namespace) -> int:
     # same fact as a passing one. Success requires an ACTUAL PASS verdict.
     graded = result.record.get("graded")
     graded_ok = isinstance(graded, dict) and graded.get("status") == "PASS"
-    return 0 if result.record.get("disposition") == "captured" and graded_ok else 1
+    # Issue #106: a PASS that left a container behind, or could not confirm
+    # its own teardown, is not a clean run - the cleanup evidence is part of
+    # the verdict, not a footnote to it.
+    diff = result.daemon_diff
+    cleanup_ok = (
+        result.record.get("backend_teardown") == "confirmed"
+        and diff is not None and diff.comparable and not diff.leaked
+    )
+    return 0 if result.record.get("disposition") == "captured" and graded_ok and cleanup_ok else 1
 
 
 def cmd_rules(args: argparse.Namespace) -> int:
@@ -1030,6 +1077,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="the real client invocation, space-separated words (default: "
              "collection_conformance.DEFAULT_CLIENT_ARGV - the documented no-nested-sandbox mechanism, "
              "trial_bootstrap.BWRAP_DECISION, plus --skip-git-repo-check) - never invented per-run",
+    )
+    p_collection_run.add_argument(
+        "--minimum-credential-seconds", type=float, default=None,
+        help="refuse to launch below this remaining credential life "
+             "(default: credential.MINIMUM_REMAINING_SECONDS; raise it to run the below-threshold control)",
     )
     p_collection_run.set_defaults(func=cmd_collection_run)
 

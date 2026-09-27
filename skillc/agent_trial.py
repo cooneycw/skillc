@@ -142,6 +142,71 @@ def _codex_home_files(ctx: _AttemptContext) -> dict[str, bytes]:
     return {}
 
 
+#: The `response_item` payload types `transcript_adapter.parse_codex_transcript`
+#: either normalizes (`message`, `custom_tool_call`, `custom_tool_call_output`)
+#: or deliberately ignores (`reasoning`), as observed on codex-cli 0.157.1
+#: (tests/fixtures/transcripts/codex/README.md). Any OTHER payload type in a
+#: real transcript is format drift the adapter silently skips - e.g. a tool
+#: call arriving as a new payload type would never pair with its result, and
+#: the canary would read "no tool use" on a genuinely live run (issue #106's
+#: owed "real transcript format drift").
+CODEX_KNOWN_RESPONSE_ITEM_TYPES = frozenset({"message", "custom_tool_call", "custom_tool_call_output", "reasoning"})
+
+
+def transcript_census(client: str, raw: str) -> dict[str, object]:
+    """What the REAL transcript's own format looked like, independent of what
+    the adapter made of it (issue #106): the client version and model the
+    transcript itself names, a count per line type, and - for codex - every
+    `response_item` payload type the adapter does not know. Only those three
+    identity fields are read; nothing account-scoped (codex's session_meta
+    also carries account and user ids) is ever copied into the census.
+
+    `unrecognized_types` is `None` for Claude Code: its transcript carries
+    many top-level line types the adapter legitimately ignores, and no drift
+    rule has been grounded for it yet (#124 is the Claude Code arm) - `None`
+    means "not assessed", never "no drift"."""
+    line_types: dict[str, int] = {}
+    client_version: str | None = None
+    model: str | None = None
+    unrecognized: set[str] = set()
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            line_types["<unparseable>"] = line_types.get("<unparseable>", 0) + 1
+            continue
+        if not isinstance(obj, dict):
+            line_types["<non-object>"] = line_types.get("<non-object>", 0) + 1
+            continue
+        top = str(obj.get("type"))
+        payload = obj.get("payload")
+        payload_type = payload.get("type") if isinstance(payload, dict) else None
+        key = f"{top}/{payload_type}" if payload_type is not None else top
+        line_types[key] = line_types.get(key, 0) + 1
+        if client == "codex":
+            if top == "session_meta" and isinstance(payload, dict) and isinstance(payload.get("cli_version"), str):
+                client_version = client_version or payload["cli_version"]
+            if top == "turn_context" and isinstance(payload, dict) and isinstance(payload.get("model"), str):
+                model = model or payload["model"]
+            if top == "response_item" and payload_type not in CODEX_KNOWN_RESPONSE_ITEM_TYPES:
+                unrecognized.add(str(payload_type))
+        else:
+            if isinstance(obj.get("version"), str):
+                client_version = client_version or obj["version"]
+            message = obj.get("message")
+            if top == "assistant" and isinstance(message, dict) and isinstance(message.get("model"), str):
+                model = model or message["model"]
+    return {
+        "transcript_client_version": client_version,
+        "transcript_model": model,
+        "transcript_line_types": dict(sorted(line_types.items())),
+        "transcript_unrecognized_types": sorted(unrecognized) if client == "codex" else None,
+    }
+
+
 CLIENT_SPECS: dict[str, ClientSpec] = {
     "claude": ClientSpec(
         name="claude",
@@ -181,7 +246,14 @@ def _make_before_execute(
         assert isinstance(backend, DockerBackend)
         cred_path = credential.resolve_path(spec.name, credential_explicit_path)
         cred_bytes = credential.read_fresh(cred_path)
-        credential.check_remaining_life_or_refuse(spec.name, cred_bytes, minimum_seconds=minimum_credential_seconds)
+        remaining = credential.check_remaining_life_or_refuse(
+            spec.name, cred_bytes, minimum_seconds=minimum_credential_seconds,
+        )
+        # Recorded, never discarded (issue #106): the remaining life the
+        # freshness check actually saw, rounded to the minute - a duration,
+        # not a token, and the only evidence a record can carry that the
+        # launch cleared the threshold rather than merely not failing.
+        delivered_credential_bytes["remaining_seconds"] = str(int(remaining // 60 * 60)).encode("ascii")
         credential_relpath = credential.CLIENT_SPECS[spec.name].container_relpath
         backend.deliver_home_file(handle, credential_relpath, cred_bytes)
         delivered_credential_bytes["bytes"] = cred_bytes
@@ -275,6 +347,10 @@ def _make_observe_before_teardown(
         tree = backend.read_home_tree(handle, spec.transcript_container_reldir)
         matches = {path: data for path, data in tree.items() if path.endswith(spec.transcript_suffix)}
 
+        census: dict[str, object] = {
+            "transcript_client_version": None, "transcript_model": None,
+            "transcript_line_types": None, "transcript_unrecognized_types": None,
+        }
         observation = TranscriptObservation(
             files_found=len(matches), prompt_delivered=False, prompt_delivery_reason=None,
             canary_satisfied=False, canary_reason=None,
@@ -290,7 +366,9 @@ def _make_observe_before_teardown(
             )
         else:
             (_, raw), = matches.items()
-            events = spec.parse_transcript(raw.decode("utf-8", errors="replace"))
+            text = raw.decode("utf-8", errors="replace")
+            census = transcript_census(spec.name, text)
+            events = spec.parse_transcript(text)
             prompt_delivered = True
             prompt_reason = None
             try:
@@ -322,7 +400,13 @@ def _make_observe_before_teardown(
         usage = credential.CredentialUsage(
             client=spec.name, delivered=cred_bytes is not None, refresh_observed_in_container=refresh_observed,
         )
-        return {**observation.to_fields(), **usage.to_record_fields()}
+        remaining_raw = delivered_credential_bytes.get("remaining_seconds")
+        remaining_at_launch = int(remaining_raw) if isinstance(remaining_raw, bytes) else None
+        return {
+            **observation.to_fields(), **usage.to_record_fields(),
+            "credential_remaining_seconds_at_launch": remaining_at_launch,
+            **census,
+        }
 
     return hook
 

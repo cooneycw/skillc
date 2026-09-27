@@ -63,6 +63,7 @@ Stdlib only (AGENTS.md), plus this repository's own modules.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import tempfile
@@ -70,7 +71,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import agent_trial, credential, demo, materialize, trial, verify
+from . import agent_trial, credential, demo, materialize, reap, trial, verify
 from .backend import Limits
 from .docker_backend import DockerBackend
 
@@ -148,6 +149,48 @@ def discard_acquisition(run_root: Path, subject_name: str) -> None:
 
 
 @dataclass(frozen=True)
+class HostCredentialState:
+    """The operator's OWN credential file, read on the host before and after
+    a run (issue #106's owed "the host login still working afterwards").
+    Holds a digest and a remaining life - never the bytes, so no field here
+    can carry a token into a record or a paste-back.
+
+    `digest`/`remaining_seconds` are `None` when the file could not be read
+    or its remaining life could not be determined; `None` is "not observed",
+    never "fine"."""
+
+    digest: str | None
+    remaining_seconds: float | None
+
+
+def read_host_credential(client: str, explicit_path: str | Path | None) -> HostCredentialState:
+    try:
+        data = credential.read_fresh(credential.resolve_path(client, explicit_path))
+    except (credential.CredentialRefused, OSError):
+        return HostCredentialState(digest=None, remaining_seconds=None)
+    return HostCredentialState(
+        digest=hashlib.sha256(data).hexdigest(),
+        remaining_seconds=credential.remaining_life_seconds(client, data),
+    )
+
+
+@dataclass(frozen=True)
+class HostCredentialCheck:
+    """Before-and-after comparison of `HostCredentialState`. `unchanged` is
+    `None` when either side was unreadable - a comparison that could not be
+    made, never a pass."""
+
+    before: HostCredentialState
+    after: HostCredentialState
+
+    @property
+    def unchanged(self) -> bool | None:
+        if self.before.digest is None or self.after.digest is None:
+            return None
+        return self.before.digest == self.after.digest
+
+
+@dataclass(frozen=True)
 class CollectionAgentResult:
     subject_name: str
     revision: str
@@ -157,6 +200,16 @@ class CollectionAgentResult:
     #: paste-back so no record implies containment it did not have. `None`
     #: when unknown (a result built outside `run_collection_agent_attempt`).
     agent_network: str | None = None
+    #: Filled by the CLI around the run (issue #106); `None` = not observed.
+    host_credential: HostCredentialCheck | None = None
+    #: `reap.diff` of two daemon snapshots taken around the whole run - the
+    #: agent container AND the grading container. `None` = not taken.
+    daemon_diff: reap.SnapshotDiff | None = None
+    #: Where the run's evidence store was kept, already redacted for printing.
+    store_display: str | None = None
+    #: Whether the full record JSON was written into the store (it is only
+    #: written when it passes the same leak check as the paste-back).
+    record_written: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -328,27 +381,83 @@ def run_collection_agent_attempt(
     )
 
 
+def _fmt_seconds(value: object) -> str:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return "None"
+    return f"{int(value) // 60}m"
+
+
 def build_collection_paste_back(result: CollectionAgentResult) -> str:
-    """The planned shape (`docs/specs/evaluation-facility/operator-demo.md`):
-    `disposition`, `prompt_delivered`, `canary_satisfied`, `graded.status`,
-    `refresh_observed_in_container`, and (issue #26's own addition to the
-    record) `skill_invocations`/`skill_invocation_detection` - leak-checked by
+    """The planned shape (`docs/specs/evaluation-facility/operator-demo.md`),
+    grouped by the five kinds of evidence issue #106's live run retains:
+    prompt delivery, the liveness canary, the credential, the outcome, and
+    cleanup - plus the real transcript's own format census. Leak-checked by
     the caller before printing, via `demo.leak_check_text`/
-    `demo.print_paste_back` directly, never a second scan convention."""
-    observation = result.record.get("observation")
+    `demo.print_paste_back` directly, never a second scan convention.
+
+    Every value is read from the record under the key the record actually
+    uses. #11's version read `refresh_observed_in_container` from the
+    observation, whose real key is `credential_refresh_observed_in_container`
+    (`credential.CredentialUsage.to_record_fields`), so the live paste-back
+    always printed `None` - a missing key reads exactly like "not observed"."""
+    record = result.record
+    observation = record.get("observation")
     obs = observation if isinstance(observation, dict) else {}
-    graded = result.record.get("graded")
-    graded_status = graded.get("status") if isinstance(graded, dict) else None
+    graded = record.get("graded")
+    graded_d = graded if isinstance(graded, dict) else {}
+    stop = record.get("stop")
+    stop_d = stop if isinstance(stop, dict) else {}
+    criteria = graded_d.get("criteria")
+    criteria_text = (
+        ", ".join(f"{c.get('id')}={c.get('outcome')}" for c in criteria if isinstance(c, dict))
+        if isinstance(criteria, list) else None
+    )
+    cleanup = record.get("cleanup")
+    cleanup_d = cleanup if isinstance(cleanup, dict) else {}
+    host = result.host_credential
+    diff = result.daemon_diff
     lines = [
         "",
         f"collection agent run: {result.subject_name} revision={result.revision} client={result.client}",
         f"  agent_network={result.agent_network}",
-        f"  disposition={result.record.get('disposition')}",
-        f"  prompt_delivered={obs.get('prompt_delivered')}",
-        f"  canary_satisfied={obs.get('canary_satisfied')}",
-        f"  skill_invocations={obs.get('skill_invocations')} (detection={obs.get('skill_invocation_detection')})",
-        f"  refresh_observed_in_container={obs.get('refresh_observed_in_container')}",
-        f"  graded.status={graded_status}",
-        f"  grading_blocked_reason={result.record.get('grading_blocked_reason')}",
+        f"  attempt_id={record.get('attempt_id')}",
+        "  [prompt delivery]",
+        f"    prompt_delivered={obs.get('prompt_delivered')}",
+        f"    prompt_delivery_reason={obs.get('prompt_delivery_reason')}",
+        f"    transcript_files_found={obs.get('transcript_files_found')}",
+        "  [canary]",
+        f"    canary_satisfied={obs.get('canary_satisfied')}",
+        f"    canary_reason={obs.get('canary_reason')}",
+        f"    liveness_method={record.get('liveness_method')}",
+        "  [credential]",
+        f"    credential_delivered={obs.get('credential_delivered')} source={obs.get('credential_source')}",
+        f"    remaining_at_launch={_fmt_seconds(obs.get('credential_remaining_seconds_at_launch'))}",
+        f"    refresh_observed_in_container={obs.get('credential_refresh_observed_in_container')}",
+        f"    host_credential_unchanged={host.unchanged if host else None}",
+        f"    host_remaining_after={_fmt_seconds(host.after.remaining_seconds) if host else 'None'}",
+        "  [outcome]",
+        f"    disposition={record.get('disposition')}",
+        (
+            f"    stop.reason={stop_d.get('reason')} stop.exit_code={stop_d.get('exit_code')} "
+            f"stop.confirmed={stop_d.get('confirmed')}"
+        ),
+        f"    skill_invocations={obs.get('skill_invocations')} (detection={obs.get('skill_invocation_detection')})",
+        f"    graded.status={graded_d.get('status') if graded_d else None}",
+        f"    graded.criteria={criteria_text}",
+        f"    grading_blocked_reason={record.get('grading_blocked_reason')}",
+        "  [cleanup]",
+        f"    workspace_cleanup={cleanup_d.get('status')} failures={cleanup_d.get('failures')}",
+        f"    backend_teardown={record.get('backend_teardown')}",
+        f"    backend_teardown_error={record.get('backend_teardown_error')}",
+        (
+            f"    daemon_comparable={diff.comparable if diff else None} "
+            f"leaked_owned_containers={len(diff.leaked) if diff and diff.comparable else None} "
+            f"foreign_vanished={len(diff.foreign_vanished) if diff and diff.comparable else None}"
+        ),
+        f"    store_kept={result.store_display} record_written={result.record_written}",
+        "  [transcript format]",
+        f"    client_version={obs.get('transcript_client_version')} model={obs.get('transcript_model')}",
+        f"    unrecognized_types={obs.get('transcript_unrecognized_types')}",
+        f"    line_types={obs.get('transcript_line_types')}",
     ]
     return "\n".join(lines)

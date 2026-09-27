@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 from skillc import collection_conformance as cc
-from skillc import demo, materialize, trial
+from skillc import demo, materialize, reap, trial
 from skillc import docker_backend as d
 
 FAKE_DOCKER = Path(__file__).resolve().parent / "fixtures" / "docker-backend" / "fake_docker.py"
@@ -353,20 +353,115 @@ def test_paste_back_is_leak_clean_and_names_every_planned_field() -> None:
         "observation": {
             "prompt_delivered": True, "canary_satisfied": True,
             "skill_invocations": ["tdd"], "skill_invocation_detection": "heuristic",
-            "refresh_observed_in_container": False,
+            # The record's REAL key (credential.CredentialUsage.to_record_fields).
+            "credential_refresh_observed_in_container": False,
+            "credential_delivered": True, "credential_source": "subscription",
+            "credential_remaining_seconds_at_launch": 7200,
+            "transcript_client_version": "0.157.1", "transcript_model": "some-model",
+            "transcript_unrecognized_types": [],
         },
-        "graded": {"status": "PASS"},
+        "stop": {"reason": "exited", "exit_code": 0, "confirmed": True},
+        "cleanup": {"status": "cleaned", "failures": []},
+        "backend_teardown": "confirmed",
+        "liveness_method": "canary",
+        "graded": {"status": "PASS", "criteria": [{"id": "slug-fixed", "outcome": "SATISFIED"}]},
         "grading_blocked_reason": None,
     }
-    result = cc.CollectionAgentResult("whatever", "v1", "codex", record)
+    state = cc.HostCredentialState(digest="d", remaining_seconds=3600)
+    result = cc.CollectionAgentResult(
+        "whatever", "v1", "codex", record,
+        host_credential=cc.HostCredentialCheck(before=state, after=state),
+        daemon_diff=reap.SnapshotDiff(comparable=True, leaked=frozenset(), foreign_vanished=frozenset()),
+    )
     text = cc.build_collection_paste_back(result)
     assert demo.leak_check_text(text) == []
     for field in (
         "disposition=captured", "prompt_delivered=True", "canary_satisfied=True",
         "skill_invocations=['tdd']", "detection=heuristic", "refresh_observed_in_container=False",
-        "graded.status=PASS",
+        "graded.status=PASS", "graded.criteria=slug-fixed=SATISFIED", "liveness_method=canary",
+        "credential_delivered=True source=subscription", "remaining_at_launch=120m",
+        "host_credential_unchanged=True", "host_remaining_after=60m",
+        "stop.reason=exited stop.exit_code=0 stop.confirmed=True",
+        "workspace_cleanup=cleaned", "backend_teardown=confirmed", "leaked_owned_containers=0",
+        "client_version=0.157.1 model=some-model", "unrecognized_types=[]",
     ):
         assert field in text
+
+
+def test_paste_back_refresh_line_reads_a_real_driver_record(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Red on #11's paste-back (issue #106): it read `refresh_observed_in_container`
+    from the observation while the driver writes
+    `credential_refresh_observed_in_container`, so the live paste-back printed
+    `None` on every run. The earlier test above hand-built its record with the
+    paste-back's OWN wrong key, so it agreed with the bug by construction. This
+    one takes the record from a real `run_one_attempt` (fake docker, scripted
+    client), where the credential is delivered and read back unchanged."""
+    repo = _fixture_collection(tmp_path, {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd"]))
+    acquired = cc.acquire_collection("whatever", base, checkout=repo)
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    argv = _codex_argv(
+        home=_mapped_home(docker_state, attempt_id),
+        transcript_relpath=".codex/sessions/2026/01/01/rollout-rf.jsonl", copy_solution=GRADER_ROOT / "reference",
+    )
+    result = cc.run_collection_agent_attempt(
+        subject_name="whatever", acquired=acquired, experiment=experiment, attempt_id=attempt_id,
+        backend=_backend(base, docker_state), grading_backend=_backend(base, docker_state), base=base,
+        base_argv=argv, prompt="Fix the slug helper.", timeout=5,
+        credential_explicit_path=_fresh_codex_credential(tmp_path),
+    )
+    text = cc.build_collection_paste_back(result)
+    assert "refresh_observed_in_container=False" in text
+    assert "backend_teardown=confirmed" in text
+    remaining = result.record["observation"]["credential_remaining_seconds_at_launch"]  # type: ignore[index]
+    assert isinstance(remaining, int) and 3000 <= remaining <= 3600
+
+
+def test_below_threshold_credential_blocks_before_launch_and_leaves_no_container(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#106 acceptance: a credential below the threshold is BLOCKED before
+    launch, and no container remains. The fresh credential has about an hour;
+    a threshold of a day refuses it. The client argv would fail loudly if it
+    ever ran."""
+    repo = _fixture_collection(tmp_path, {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd"]))
+    acquired = cc.acquire_collection("whatever", base, checkout=repo)
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    before = reap.snapshot(_docker_bin(docker_state), timeout=5)
+    result = cc.run_collection_agent_attempt(
+        subject_name="whatever", acquired=acquired, experiment=experiment, attempt_id=attempt_id,
+        backend=_backend(base, docker_state), grading_backend=_backend(base, docker_state), base=base,
+        base_argv=[sys.executable, "-c", "raise SystemExit('must never run')"], prompt="x", timeout=5,
+        credential_explicit_path=_fresh_codex_credential(tmp_path), minimum_credential_seconds=86400,
+    )
+    after = reap.snapshot(_docker_bin(docker_state), timeout=5)
+    assert result.record["disposition"] == "unavailable"
+    assert "below the required" in str(result.record.get("reason", "")) + json.dumps(result.record, default=str)
+    assert result.record["backend_teardown"] == "confirmed"
+    assert after.reachable and not after.owned
+    assert reap.diff(before, after).leaked == frozenset()
+    assert result.record["graded"] is None
+
+
+def test_host_credential_check_reports_a_changed_file(tmp_path: Path) -> None:
+    """Red and green for the host-login evidence: an untouched file compares
+    equal; a rewritten one (what an in-container refresh rotating the host's
+    token would look like from the host) compares unequal; an unreadable one
+    is `None`, never a pass."""
+    path = _fresh_codex_credential(tmp_path)
+    before = cc.read_host_credential("codex", path)
+    assert before.digest is not None and before.remaining_seconds is not None
+    assert cc.HostCredentialCheck(before, cc.read_host_credential("codex", path)).unchanged is True
+    path.write_text(path.read_text() + " ")
+    assert cc.HostCredentialCheck(before, cc.read_host_credential("codex", path)).unchanged is False
+    missing = cc.read_host_credential("codex", tmp_path / "absent.json")
+    assert missing.digest is None
+    assert cc.HostCredentialCheck(before, missing).unchanged is None
 
 
 def test_paste_back_handles_a_blocked_attempt_with_no_observation() -> None:
@@ -516,6 +611,8 @@ def test_cli_wires_the_agent_timeout_backends_and_run_root(
     monkeypatch.setattr(trial, "open_store", lambda path, forbidden: path)
     monkeypatch.setattr(cc, "plan_collection_attempt", lambda *a, **k: (object(), "a-1"))
     monkeypatch.setattr(cc, "run_collection_agent_attempt", fake_run)
+    # Never the host's real daemon from a unit test.
+    monkeypatch.setattr(reap, "snapshot", lambda *a, **k: reap.Snapshot(False, frozenset(), frozenset()))
 
     argv = ["collection-run", "subject-a", "--base", str(base), "--timeout", "7"]
     assert cli.main(argv) == 1  # not captured, not PASS
@@ -570,14 +667,16 @@ def _stub_acquisition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _fake_collection_result(
     subject_name: str, *, disposition: str, graded: dict[str, object] | None,
+    backend_teardown: str = "confirmed",
 ) -> cc.CollectionAgentResult:
     record: dict[str, object] = {
         "disposition": disposition,
+        "backend_teardown": backend_teardown,
         "graded": graded,
         "observation": {
             "prompt_delivered": True, "canary_satisfied": True,
             "skill_invocations": [], "skill_invocation_detection": "none",
-            "refresh_observed_in_container": False,
+            "credential_refresh_observed_in_container": False,
         },
         "grading_blocked_reason": None if graded is not None else "canary not satisfied",
     }
@@ -662,3 +761,80 @@ def test_a_path_like_subject_is_refused_before_any_scratch_path(
     assert cli.main(["collection-run", name, "--base", str(base)]) == 2
     assert "Traceback" not in capsys.readouterr().err
     assert list(base.iterdir()) == []
+
+
+def test_cmd_collection_run_exits_1_when_teardown_is_not_confirmed(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #106: a PASS whose container teardown could not be confirmed is
+    not a clean run. Red against the pre-#106 gate, which read only the
+    disposition and the grade."""
+    from skillc import cli
+
+    _stub_acquisition(tmp_path, monkeypatch)
+
+    def _fake_run(**kwargs: object) -> cc.CollectionAgentResult:
+        return _fake_collection_result(
+            "whatever", disposition="captured", graded={"status": "PASS"}, backend_teardown="unknown",
+        )
+
+    monkeypatch.setattr(cc, "run_collection_agent_attempt", _fake_run)
+    args = _collection_run_args(
+        "whatever", image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base=str(base), timeout=5,
+    )
+    assert cli.cmd_collection_run(args) == 1
+
+
+def test_cmd_collection_run_exits_1_and_reports_a_leaked_container(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Issue #106: a skillc-owned container that appears during the run and
+    is still there afterwards is reported and fails the run, even on PASS."""
+    from skillc import cli
+
+    _stub_acquisition(tmp_path, monkeypatch)
+    snaps = iter([
+        reap.Snapshot(True, frozenset(), frozenset()),
+        reap.Snapshot(True, frozenset({"skillc-left-behind"}), frozenset()),
+    ])
+    monkeypatch.setattr(reap, "snapshot", lambda *a, **k: next(snaps))
+    monkeypatch.setattr(
+        cc, "run_collection_agent_attempt",
+        lambda **kw: _fake_collection_result("whatever", disposition="captured", graded={"status": "PASS"}),
+    )
+    args = _collection_run_args(
+        "whatever", image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base=str(base), timeout=5,
+    )
+    assert cli.cmd_collection_run(args) == 1
+    assert "leaked_owned_containers=1" in capsys.readouterr().out
+
+
+def test_cmd_collection_run_reports_a_host_credential_the_run_changed(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The host-login evidence end to end through the CLI: the attempt (here a
+    stand-in) rewrites the operator's credential file, and the paste-back
+    says so. Also: the full record is written into the kept store."""
+    from skillc import cli
+
+    _stub_acquisition(tmp_path, monkeypatch)
+    cred = _fresh_codex_credential(tmp_path)
+
+    def _fake_run(**kwargs: object) -> cc.CollectionAgentResult:
+        assert kwargs["minimum_credential_seconds"] == 5
+        cred.write_text(cred.read_text() + " ")
+        return _fake_collection_result("whatever", disposition="captured", graded={"status": "PASS"})
+
+    monkeypatch.setattr(cc, "run_collection_agent_attempt", _fake_run)
+    args = _collection_run_args(
+        "whatever", image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base=str(base), timeout=5,
+        credential=str(cred), minimum_credential_seconds=5,
+    )
+    cli.cmd_collection_run(args)
+    out = capsys.readouterr().out
+    assert "host_credential_unchanged=False" in out
+    assert "record_written=True" in out
+    [record_file] = list(base.glob("skillc-collection-run-whatever-*/whatever-store/collection-run-record.json"))
+    assert json.loads(record_file.read_text())["disposition"] == "captured"

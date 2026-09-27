@@ -873,3 +873,46 @@ def test_leak_check_would_catch_a_planted_credential_value_in_the_record(store: 
     findings = list(leak.scan_text(planted, frozenset()))
     assert findings, "leak-check is blind on its own planted credential value"
     assert {kind for _lineno, kind, _detail in findings} == {"credential-token"}
+
+
+# ------------------------------------------------- transcript format census (#106)
+
+_CODEX_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "transcripts" / "codex"
+_CLAUDE_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "transcripts" / "claude-code"
+
+
+def test_census_of_the_committed_codex_fixture_shows_no_drift() -> None:
+    census = at.transcript_census("codex", (_CODEX_FIXTURES / "live-canary.jsonl").read_text())
+    assert census["transcript_unrecognized_types"] == []
+    line_types = census["transcript_line_types"]
+    assert isinstance(line_types, dict) and line_types.get("response_item/custom_tool_call", 0) >= 1
+
+
+def test_census_names_a_drifted_codex_response_item_type() -> None:
+    """Red case: a tool call arriving as a payload type the adapter does not
+    know (the adapter skips it silently, so the canary would read "no tool
+    use" on a live run) must be named, not absorbed into a clean census."""
+    raw = (_CODEX_FIXTURES / "live-canary.jsonl").read_text() + json.dumps(
+        {"type": "response_item", "payload": {"type": "function_call", "name": "shell", "call_id": "x"}},
+    ) + "\n"
+    assert at.transcript_census("codex", raw)["transcript_unrecognized_types"] == ["function_call"]
+
+
+def test_census_reads_version_and_model_and_copies_no_account_ids() -> None:
+    raw = "\n".join(json.dumps(line) for line in (
+        {"type": "session_meta", "payload": {
+            "cli_version": "0.157.1", "creator_account_id": "acct-SHOULD-NOT-APPEAR",
+            "creator_user_id": "user-SHOULD-NOT-APPEAR",
+        }},
+        {"type": "turn_context", "payload": {"model": "model-x"}},
+        {"type": "event_msg", "payload": {"type": "task_started"}},
+    ))
+    census = at.transcript_census("codex", raw)
+    assert census["transcript_client_version"] == "0.157.1"
+    assert census["transcript_model"] == "model-x"
+    assert "SHOULD-NOT-APPEAR" not in json.dumps(census)
+
+
+def test_census_does_not_assess_claude_drift() -> None:
+    census = at.transcript_census("claude", (_CLAUDE_FIXTURES / "live-canary.jsonl").read_text())
+    assert census["transcript_unrecognized_types"] is None  # not assessed, never "no drift"
