@@ -955,6 +955,32 @@ collection) closes.
   parallel step can still be changing (Nit Store, skillc#20; #73). A copy
   that genuinely fails - an unreadable source file - still fails the
   control; that case is now committed alongside the fix.
+- `docker/trial/verify_codex_sidecar.js` resolves `@openai/codex`'s platform
+  optional dependency the way `codex.js`'s own launcher does, not a bare
+  `require.resolve()` from wherever the script happens to run. A real
+  operator build failed at `Dockerfile:80` because the Dockerfile `COPY`s
+  this script to `/tmp` and runs it from there, where a bare
+  `require.resolve("@openai/codex-linux-x64/package.json")` walks up from
+  `/tmp`'s own ancestry and never reaches a real npm global install -
+  `codex.js` never hits this because it lives INSIDE the installed package
+  tree. The fix asks `npm root -g` for the real global root, then resolves
+  the platform package via `createRequire` scoped to `@openai/codex`'s own
+  directory, exactly where npm nests an optional dependency of a globally
+  installed package. #84's own test exercised only the wrong shape
+  (`NODE_PATH` pointed straight at a flat fixture, which the real
+  invocation never sets and no real npm install ever produces) - the
+  rewritten fixture copies the script to a scratch directory unrelated to a
+  correctly-nested fake global root and confirmed red on the pre-fix
+  script for every case but one already covered. Cross-model review then
+  found a second bug in the fix itself: `require.resolve(id, { paths })`
+  does not confine its search to the given directory, it walks UP through
+  every ancestor's own `node_modules` - so an unrelated `@openai/codex`
+  sitting two directories above an otherwise-empty declared global root
+  could still resolve, and this check could certify the wrong installation.
+  Replaced that first hop with a direct path join against the exact
+  directory `npm root -g` names, confirmed the ancestor-contamination case
+  now refuses correctly, and confirmed the same case goes red again when
+  reverted to the `require.resolve` form (#78, #10).
 
 ### CI / process
 
