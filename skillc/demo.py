@@ -27,7 +27,7 @@ made by this module, at any point):
    `evals/level1/slug-small-fix` task: the `reference/` candidate for the
    success path, a `wrong/` candidate for `--control`'s known-bad run.
 
-WHY NOT A REAL AGENT (the canary-adapter gap, w2's issue #81 comment):
+WHY NOT A REAL AGENT (the canary-adapter gap, raised on issue #81):
 `trial_bootstrap.check_canary` requires a `tool_use` event's CONFIRMED
 `output` to literally carry the nonce marker - but a real Claude Code `Write`
 result typically confirms only that a file was written, never echoing its
