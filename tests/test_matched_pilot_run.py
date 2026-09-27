@@ -57,7 +57,13 @@ def _entries(report: dict[str, object]) -> list[dict[str, object]]:
 
 def _run_fake_pilot(
     tmp_path: Path, *, solve_arms: Sequence[str] = (mp.TREATMENT,), total_seconds: float | None = None,
+    client_extra: Sequence[str] = (),
 ) -> tuple[trial.Experiment, list[mp.AttemptOutcome], Path]:
+    """The whole pilot against the fake docker CLI and the scripted client.
+    `run_pilot` appends the declared `-m`/effort to the argv below, and the
+    fake client records them in a codex `turn_context` - so the observed
+    model is whatever REACHED the client. `client_extra` scripts a client
+    that ignores the pin (`--observed-model`) or records none."""
     declaration = mp.load_declaration()
     run_dir = tmp_path / "run"
     run_dir.mkdir()
@@ -76,6 +82,7 @@ def _run_fake_pilot(
         ]
         if scheduled.arm in solve_arms:
             argv.extend(["--copy-solution", str(REFERENCE)])
+        argv.extend(client_extra)
         return argv
 
     experiment, outcomes = mp.run_pilot(
@@ -130,7 +137,7 @@ def test_unmeasured_values_are_unknown_never_invented(tmp_path: Path) -> None:
     """The fake client writes no turn_context or token_count, and no claims
     file was given: the report must say UNKNOWN for all of it - never the
     manifest's assumed model, never a zero cost."""
-    experiment, outcomes, _ = _run_fake_pilot(tmp_path)
+    experiment, outcomes, _ = _run_fake_pilot(tmp_path, client_extra=("--no-turn-context",))
     report = mp.build_report(experiment, outcomes)
     for entry in _entries(report):
         assert entry["model_observed"] == mp.UNKNOWN
@@ -341,7 +348,7 @@ def test_baseline_digest_is_the_empty_surface() -> None:
 
 
 def _manifest_with(tmp_path: Path, **record_overrides: object) -> Path:
-    manifest = json.loads(mp.MANIFEST_PATH.read_text(encoding="utf-8"))
+    manifest = json.loads(mp.CURRENT_MANIFEST_PATH.read_text(encoding="utf-8"))
     record = manifest["predeclared_experiment_record"]
     for dotted, value in record_overrides.items():
         target = record
@@ -635,3 +642,196 @@ def test_a_model_other_than_the_declared_one_is_a_reported_deviation(tmp_path: P
     assert mp.summarize(report)["protocol_deviations"] == [
         f"{schedule[0].attempt_id}: ran model 'some-other-model', declared 'declared-model'",
     ]
+
+
+# ------------------------------------------- #141: the declared model, pinned
+
+
+DECLARED = mp.load_declaration()
+
+
+def test_the_current_declaration_pins_the_ruled_model_and_effort() -> None:
+    assert (DECLARED.model, DECLARED.reasoning_effort) == ("gpt-6-astra", "high")
+
+
+def test_the_launch_argv_is_built_from_the_declaration(tmp_path: Path) -> None:
+    assert mp.launch_argv(DECLARED, cc.DEFAULT_CLIENT_ARGV) == [
+        *cc.DEFAULT_CLIENT_ARGV, "-m", "gpt-6-astra", "-c", 'model_reasoning_effort="high"',
+    ]
+    # Never hardcoded: a different declaration produces a different launch.
+    other = mp.load_declaration(_manifest_with(tmp_path, model__name="some-next-model", model__reasoning_effort="low"))
+    assert mp.launch_argv(other, ["codex", "exec"])[-4:] == ["-m", "some-next-model", "-c", 'model_reasoning_effort="low"']
+
+
+@pytest.mark.parametrize("override", [
+    ["-m", "other"], ["-mother"], ["--model", "other"], ["--model=other"],
+    ["-c", "model=other"], ["-c", 'model_reasoning_effort="low"'], ["--config", "model_provider=oss"],
+    ["--config=model=other"], ["-cmodel=other"], ["-c", "profiles.fast.model=other"],
+    ["-p", "fast"], ["--profile=fast"], ["--oss"], ["--local-provider", "ollama"],
+])
+def test_a_client_argv_that_chooses_its_own_model_is_refused(override: list[str]) -> None:
+    with pytest.raises(mp.ModelOverrideRefused, match="chooses the model itself"):
+        mp.launch_argv(DECLARED, [*cc.DEFAULT_CLIENT_ARGV, *override])
+
+
+@pytest.mark.parametrize("harmless", [
+    ["-c", "sandbox_mode=read-only"], ["--config=shell_environment_policy.inherit=all"],
+    # Counter-model finding: a neighbour's key that merely ENDS in `model`.
+    ["-c", "mcp_servers.helper.env.model=tool-model"],
+])
+def test_config_that_does_not_touch_the_model_is_not_refused(harmless: list[str]) -> None:
+    """The green half: the refusal is by key, not by `-c` itself."""
+    assert mp.launch_argv(DECLARED, [*cc.DEFAULT_CLIENT_ARGV, *harmless])[-4:-2] == ["-m", "gpt-6-astra"]
+
+
+def test_a_declaration_with_no_effort_to_pin_is_refused_before_anything_is_planned(tmp_path: Path) -> None:
+    """#12's own predeclaration names no effort - it predates launch pinning."""
+    old = mp.load_declaration(mp.MANIFEST_PATH)
+    assert old.reasoning_effort is None
+    with pytest.raises(mp.ModelOverrideRefused, match="predates launch pinning"):
+        mp.launch_argv(old, cc.DEFAULT_CLIENT_ARGV)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    with pytest.raises(mp.ModelOverrideRefused):
+        mp.run_pilot(
+            old, run_dir=run_dir, treatment_home_files={}, treatment_digest=TREATMENT_DIGEST,
+            image_digest=None, backends=lambda: (object(), object()), argv_for=lambda _s: [],
+        )
+    assert not (run_dir / "store").exists()
+
+
+def test_pilot_run_refuses_a_model_override_before_any_run_directory(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    code = cli.cmd_pilot_run(_pilot_run_args(tmp_path, client_argv="codex exec -m other-model"))
+    assert code == 2
+    assert "chooses the model itself (-m)" in capsys.readouterr().err
+    assert not (tmp_path / "private").exists()
+
+
+def test_the_declared_model_reaches_the_client_and_every_attempt_is_eligible(tmp_path: Path) -> None:
+    experiment, outcomes, run_dir = _run_fake_pilot(tmp_path, solve_arms=(mp.TREATMENT, mp.BASELINE))
+    report = mp.build_report(experiment, outcomes, declared_model=DECLARED.model, declared_effort=DECLARED.reasoning_effort)
+    for entry in _entries(report):
+        assert entry["model_observed"] == "gpt-6-astra"  # read back from the client's own rollout
+        assert entry["model_eligible"] is True
+        assert entry["reasoning_effort_observed"] == "high"
+        assert entry["reasoning_effort_matches_declaration"] is True
+    summary = mp.summarize(report)
+    assert summary["model_ineligible"] == []
+    assert summary["protocol_deviations"] == []
+    assert [p["repeat"] for p in summary["matched_successful_pairs"]] == [1, 2, 3]  # type: ignore[attr-defined]
+    assert cli._refuse_ineligible(report) == 0
+    assert mp.read_declared(run_dir) == {"model": "gpt-6-astra", "reasoning_effort": "high"}
+
+
+@pytest.mark.parametrize(("client_extra", "why"), [
+    (("--observed-model", "some-other-model"), "ran model 'some-other-model', declared 'gpt-6-astra'"),
+    (("--no-turn-context",), "no model observed in the client's rollout"),
+])
+def test_an_attempt_not_observed_running_the_declared_model_is_ineligible_and_fails_the_run(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], client_extra: tuple[str, ...], why: str,
+) -> None:
+    """Red cases (#141): a client that ignored the pin, and one whose rollout
+    names no model. Both arms passed, so without the check every repeat
+    would be a matched pair."""
+    experiment, outcomes, _ = _run_fake_pilot(
+        tmp_path, solve_arms=(mp.TREATMENT, mp.BASELINE), client_extra=client_extra,
+    )
+    report = mp.build_report(experiment, outcomes, declared_model=DECLARED.model, declared_effort=DECLARED.reasoning_effort)
+    entries = _entries(report)
+    assert all(e["graded_status"] == "PASS" for e in entries)
+    assert all(e["model_eligible"] is False for e in entries)
+    assert all(why in str(e["uncertainty"]) for e in entries)  # recorded, never silent
+    summary = mp.summarize(report)
+    assert summary["matched_successful_pairs"] == []
+    assert summary["median_agent_seconds_difference_treatment_minus_baseline"] == mp.UNKNOWN
+    assert summary["model_ineligible"] == [o.scheduled.attempt_id for o in outcomes]
+    assert len(summary["protocol_deviations"]) == 6  # type: ignore[arg-type]
+    assert cli._refuse_ineligible(report) == 1
+    assert "6 attempt(s) did not run the declared model" in capsys.readouterr().err
+
+
+def test_an_attempt_that_never_launched_is_not_held_to_a_model() -> None:
+    assert mp.model_eligibility("not-run", mp.UNKNOWN, "gpt-6-astra") == "n/a"
+    assert mp.model_eligibility("unavailable", mp.UNKNOWN, "gpt-6-astra") == "n/a"
+    assert mp.model_eligibility("inconclusive", mp.UNKNOWN, "gpt-6-astra") is False
+
+
+def test_pilot_report_scores_a_run_against_the_declaration_it_launched_with(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    _, _, run_dir = _run_fake_pilot(tmp_path)
+    evidence = tmp_path / "evidence"
+    args = {"run_dir": str(run_dir), "claims": None, "evidence": str(evidence)}
+
+    # A --manifest that disagrees with what the run recorded is refused.
+    other = _manifest_with(tmp_path, model__name="some-next-model")
+    assert cli.cmd_pilot_report(argparse.Namespace(**args, manifest=str(other))) == 2
+    assert "declared model 'gpt-6-astra'" in capsys.readouterr().err
+
+    # A run from before #141 recorded nothing: the current declaration is
+    # never assumed for it.
+    outcomes_path = run_dir / mp.OUTCOMES_FILENAME
+    data = json.loads(outcomes_path.read_text())
+    del data["declared"]
+    outcomes_path.write_text(json.dumps(data))
+    assert cli.cmd_pilot_report(argparse.Namespace(**args, manifest=None)) == 2
+    assert "predates #141" in capsys.readouterr().err
+
+    # Named explicitly (#12's own), it is scored against THAT declaration.
+    assert cli.cmd_pilot_report(argparse.Namespace(**args, manifest=str(mp.MANIFEST_PATH))) == 0
+    report = json.loads((evidence / "report.json").read_text())
+    assert {e["model_declared"] for e in report["attempts"]} == {"gpt-5.1-codex"}
+    assert {e["model_matches_declaration"] for e in report["attempts"]} == {False}
+
+
+def test_a_run_with_no_attempt_observed_on_the_declared_model_fails(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Counter-model red case: six unavailable attempts are all `n/a`, so no
+    attempt is INeligible - but nothing was checked, and that is not a pass."""
+    experiment, schedule = _fake_schedule(tmp_path)
+    outcomes = mp.run_schedule(
+        experiment, schedule,
+        lambda s, _b: trial.finalize(experiment, s.attempt_id, disposition="unavailable", reason="fake"),
+        total_seconds=10_000, per_attempt_seconds=900,
+    )
+    report = mp.build_report(experiment, outcomes, declared_model=DECLARED.model)
+    assert mp.ineligible_attempts(report) == []
+    assert cli._refuse_ineligible(report) == 1
+    assert "nothing was compared" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("declared", [{}, {"model": "gpt-6-astra"}, {"model": "", "reasoning_effort": "high"}, None])
+def test_a_malformed_recorded_declaration_is_refused_not_read_as_absent(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], declared: object,
+) -> None:
+    """Counter-model red case: `"declared": {}` used to be accepted, leaving
+    the report with no model to compare - the check silently off."""
+    _, _, run_dir = _run_fake_pilot(tmp_path)
+    outcomes_path = run_dir / mp.OUTCOMES_FILENAME
+    data = json.loads(outcomes_path.read_text())
+    data["declared"] = declared
+    outcomes_path.write_text(json.dumps(data))
+    code = cli.cmd_pilot_report(argparse.Namespace(
+        run_dir=str(run_dir), claims=None, evidence=str(tmp_path / "evidence"), manifest=None,
+    ))
+    assert code == 2
+    assert "names no model and effort" in capsys.readouterr().err
+
+
+def test_an_override_from_the_per_attempt_argv_aborts_the_run_not_one_attempt(tmp_path: Path) -> None:
+    """Counter-model red case: `run_pilot` repeats the refusal per attempt,
+    and it must abort the schedule like a missing opt-in - never be recorded
+    as six ordinary `inconclusive` attempts."""
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    with pytest.raises(mp.ModelOverrideRefused):
+        mp.run_pilot(
+            DECLARED, run_dir=run_dir, treatment_home_files={}, treatment_digest=TREATMENT_DIGEST,
+            image_digest=None, backends=lambda: (object(), object()),
+            argv_for=lambda _s: ["codex", "exec", "-m", "other"],
+        )
+    _, outcomes = mp.read_outcomes(run_dir)
+    assert outcomes == []

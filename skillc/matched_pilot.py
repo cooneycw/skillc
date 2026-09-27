@@ -1,10 +1,22 @@
 """The first bounded matched pilot (issue #12): plan the predeclared schedule,
 run it, and assemble the evidence report.
 
-`evals/matched-pilot/run-manifest.json` is the predeclaration - written and
-merged (#89) before any attempt ran. This module READS it and never widens
-it: the arms, repeats, arm order, subject, task and time caps all come from
-that file, so a run cannot quietly drift from what was declared.
+`evals/matched-pilot/run-manifest.json` is #12's predeclaration - written
+and merged (#89) before any attempt ran, and never edited since.
+`CURRENT_MANIFEST_PATH` names the declaration a new run uses (issue #141: a
+dated file that says which run it supersedes). This module READS a
+declaration and never widens it: the arms, repeats, arm order, subject,
+task, time caps and model all come from that file, so a run cannot quietly
+drift from what was declared.
+
+THE MODEL IS PINNED AT LAUNCH AND CHECKED AFTER (issue #141). #12's run
+declared one model and ran another, because nothing told the client which to
+use. `launch_argv` now builds the client invocation from the declaration
+(`-m <model> -c model_reasoning_effort="<effort>"`) and refuses a caller argv
+that already sets either. After each attempt the model the client's own
+rollout reports must equal the declared one; a mismatch, or no observed model
+at all, makes that attempt ineligible for the comparison and is recorded in
+the report - never silently compared.
 
 ONE ATTEMPT PATH FOR BOTH ARMS. Every attempt goes through
 `collection_conformance.run_level1_agent_attempt` - the same client, prompt,
@@ -60,7 +72,12 @@ from .lifecycle import RealAgentBlocked
 
 ROOT = Path(__file__).resolve().parent.parent
 PILOT_DIR = ROOT / "evals" / "matched-pilot"
+#: #12's own predeclaration. Never edited: its declared model was wrong for
+#: the run it describes, and that deviation stays on the record as it happened.
 MANIFEST_PATH = PILOT_DIR / "run-manifest.json"
+#: The declaration a new run uses. The next change of pin is a new dated file
+#: and a one-line change here, never an edit to a declaration that already ran.
+CURRENT_MANIFEST_PATH = PILOT_DIR / "run-manifest-2026-09-27-gpt-6-astra.json"
 
 TREATMENT = "treatment"
 BASELINE = "baseline"
@@ -83,6 +100,11 @@ class ManifestRefused(ValueError):
     """The run manifest does not declare a schedule this module can run as written."""
 
 
+class ModelOverrideRefused(ValueError):
+    """A client argv that would choose the model (or its effort) itself,
+    instead of running the declared one."""
+
+
 @dataclass(frozen=True)
 class PilotDeclaration:
     """The parts of the run manifest a run needs, validated once."""
@@ -101,9 +123,13 @@ class PilotDeclaration:
     subject_revision: str
     #: The declared image digest; `pilot-run` refuses to run any other.
     image_digest: str
-    #: The declared model. NOT enforced at launch (the client picks its own
-    #: default); every report entry compares it with the observed model.
+    #: The declared model: passed to the client at launch (`launch_argv`)
+    #: and compared with the observed model after every attempt.
     model: str
+    #: The declared reasoning effort, passed at launch beside the model.
+    #: `None` for a declaration that predates launch pinning (#12's), which
+    #: `launch_argv` refuses to run.
+    reasoning_effort: str | None = None
 
 
 def _positive_finite(value: object, name: str) -> float:
@@ -112,7 +138,7 @@ def _positive_finite(value: object, name: str) -> float:
     return float(value)
 
 
-def load_declaration(manifest_path: Path = MANIFEST_PATH) -> PilotDeclaration:
+def load_declaration(manifest_path: Path = CURRENT_MANIFEST_PATH) -> PilotDeclaration:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     record = manifest.get("predeclared_experiment_record")
     if not isinstance(record, dict):
@@ -162,9 +188,13 @@ def load_declaration(manifest_path: Path = MANIFEST_PATH) -> PilotDeclaration:
     image_digest = record.get("image_digest")
     if not isinstance(image_digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", image_digest):
         raise ManifestRefused(f"image_digest {image_digest!r} is not a declared sha256 digest")
-    model = (record.get("model") or {}).get("name")
+    model_record = record.get("model") or {}
+    model = model_record.get("name")
     if not isinstance(model, str) or not model:
         raise ManifestRefused("model.name is not declared")
+    effort = model_record.get("reasoning_effort")
+    if effort is not None and (not isinstance(effort, str) or not effort):
+        raise ManifestRefused(f"model.reasoning_effort {effort!r} is not a declared effort")
     return PilotDeclaration(
         arms=(TREATMENT, BASELINE), repeats_per_arm=repeats, attempts_per_trial=per_trial,
         per_attempt_seconds=_positive_finite(caps.get("per_attempt_seconds"), "per_attempt_seconds"),
@@ -173,8 +203,68 @@ def load_declaration(manifest_path: Path = MANIFEST_PATH) -> PilotDeclaration:
         grader_path=grader_path,
         client_name=str(client["name"]), client_version=str(client["version"]),
         subject_name=subject_name, subject_revision=str(subject.get("revision")),
-        image_digest=image_digest, model=model,
+        image_digest=image_digest, model=model, reasoning_effort=effort,
     )
+
+
+#: codex-cli 0.157.1 options that choose the model, its effort or a config
+#: layer that can: `-m/--model`, a `-p/--profile` config layer, and the
+#: open-source provider switches. `-c/--config` is checked by KEY below.
+_MODEL_FLAGS = ("-m", "--model", "-p", "--profile", "--oss", "--local-provider")
+#: Config keys, top level or inside a profile (`profiles.<name>.<key>`). Never
+#: matched as a bare suffix: `mcp_servers.x.env.model` configures an MCP
+#: server's environment, not the agent's model.
+_MODEL_CONFIG_KEYS = ("model", "model_reasoning_effort", "model_provider", "profile", "oss_provider")
+
+
+def model_overrides(argv: Sequence[str]) -> list[str]:
+    """Every word of `argv` that would choose the model or its effort. A
+    denylist of codex's own forms - `-m x`, `-mx`, `--model=x`, `-c model=x`,
+    `--config=model_reasoning_effort=x`, `-p name` - so a future client flag
+    that sets the model some other way passes here; the post-attempt model
+    check is the backstop for that."""
+    words = list(argv)
+    found: list[str] = []
+    for index, word in enumerate(words):
+        flag, has_value, value = word.partition("=")
+        if flag in _MODEL_FLAGS or (word[:2] in ("-m", "-p") and not word.startswith("--") and len(word) > 2):
+            found.append(word)
+            continue
+        shown = word
+        if flag in ("-c", "--config"):
+            if has_value:
+                setting = value
+            else:
+                setting = words[index + 1] if index + 1 < len(words) else ""
+                shown = f"{word} {setting}"
+        elif word.startswith("-c") and not word.startswith("--") and len(word) > 2:
+            setting = word[2:]
+        else:
+            continue
+        path = setting.partition("=")[0].strip().split(".")
+        key = path[0] if len(path) == 1 else (path[2] if len(path) == 3 and path[0] == "profiles" else None)
+        if key in _MODEL_CONFIG_KEYS:
+            found.append(shown)
+    return found
+
+
+def launch_argv(declaration: PilotDeclaration, base_argv: Sequence[str]) -> list[str]:
+    """The client invocation for one attempt: `base_argv` plus the declared
+    model and effort. Refuses a base that already chooses either, and a
+    declaration with no effort to pin - so the argv is never built from
+    anything but the declaration."""
+    if declaration.reasoning_effort is None:
+        raise ModelOverrideRefused(
+            "the declaration names no model.reasoning_effort, so the run cannot pin it at launch - "
+            f"it predates launch pinning; run the current declaration ({CURRENT_MANIFEST_PATH.name})"
+        )
+    overrides = model_overrides(base_argv)
+    if overrides:
+        raise ModelOverrideRefused(
+            f"the client argv chooses the model itself ({', '.join(overrides)}); the declared model "
+            f"{declaration.model!r} is passed at launch and may not be overridden"
+        )
+    return [*base_argv, "-m", declaration.model, "-c", f'model_reasoning_effort="{declaration.reasoning_effort}"']
 
 
 @dataclass(frozen=True)
@@ -296,10 +386,11 @@ def run_schedule(
                 note = None if budget >= per_attempt_seconds else (
                     f"agent limit cut to {budget:.0f}s by the total time cap"
                 )
-            except RealAgentBlocked:
-                # A missing opt-in is the caller's error, not an attempt's
-                # outcome: recording six "inconclusive" attempts for a run
-                # that was never allowed to start would read as a pilot.
+            except (RealAgentBlocked, ModelOverrideRefused):
+                # A missing opt-in, or an argv that would pick its own model,
+                # is the caller's error, not an attempt's outcome: recording
+                # six "inconclusive" attempts for a run that was never allowed
+                # to start would read as a pilot.
                 raise
             except Exception as exc:  # noqa: BLE001 - one attempt's crash must not drop the rest of the schedule
                 note = f"runner error: {type(exc).__name__}: {exc}"
@@ -501,9 +592,26 @@ def reconcile(experiment: trial.Experiment, outcomes: Sequence[AttemptOutcome]) 
     return reconciled
 
 
+#: Dispositions whose agent was launched, so a model was expected to be
+#: observed. `not-run` and `unavailable` never started one.
+DISPATCHED = ("captured", "inconclusive")
+
+
+def model_eligibility(disposition: object, observed_model: str, declared_model: str | None) -> object:
+    """Whether an attempt may enter the comparison on model grounds (#141):
+    `"n/a"` when no agent was launched, `UNKNOWN` when nothing was declared
+    to compare against, else `True` only when the observed model IS the
+    declared one - an unobserved model is `False`, never assumed."""
+    if disposition not in DISPATCHED:
+        return "n/a"
+    if declared_model is None:
+        return UNKNOWN
+    return observed_model == declared_model
+
+
 def build_report(
     experiment: trial.Experiment, outcomes: Sequence[AttemptOutcome], claims: Mapping[str, str] | None = None,
-    *, declared_model: str | None = None,
+    *, declared_model: str | None = None, declared_effort: str | None = None,
 ) -> dict[str, object]:
     """The `pilot-report` record: one entry per scheduled attempt, in schedule
     order. The keys the `pilot-report` rule checks are exactly its contract;
@@ -527,7 +635,16 @@ def build_report(
             interventions = 1
             clarification = "the agent ended by asking a clarifying question (reviewed), which nobody answered"
             uncertainty = clarification if uncertainty == "none" else f"{uncertainty}; {clarification}"
-        observed_model = meta.get("model") or UNKNOWN
+        observed_model = str(meta.get("model") or UNKNOWN)
+        observed_effort = str(meta.get("reasoning_effort") or UNKNOWN)
+        eligible = model_eligibility(disposition, observed_model, declared_model)
+        if eligible is False:
+            why = (
+                "no model observed in the client's rollout" if observed_model == UNKNOWN
+                else f"ran model {observed_model!r}, declared {declared_model!r}"
+            )
+            ineligible = f"ineligible for the comparison: {why}"
+            uncertainty = ineligible if uncertainty == "none" else f"{uncertainty}; {ineligible}"
         entries.append({
             "attempt_id": attempt_id,
             "trial_id": outcome.scheduled.trial_id,
@@ -556,7 +673,13 @@ def build_report(
                 UNKNOWN if declared_model is None or observed_model == UNKNOWN
                 else observed_model == declared_model
             ),
-            "reasoning_effort_observed": meta.get("reasoning_effort") or UNKNOWN,
+            "model_eligible": eligible,
+            "reasoning_effort_observed": observed_effort,
+            "reasoning_effort_declared": declared_effort or UNKNOWN,
+            "reasoning_effort_matches_declaration": (
+                UNKNOWN if declared_effort is None or observed_effort == UNKNOWN
+                else observed_effort == declared_effort
+            ),
             "cli_version_observed": meta.get("cli_version") or UNKNOWN,
             "prompt_delivered": obs.get("prompt_delivered", UNKNOWN),
             "canary_satisfied": obs.get("canary_satisfied", UNKNOWN),
@@ -609,6 +732,10 @@ def summarize(report: Mapping[str, object]) -> dict[str, object]:
         t, b = pair.get(TREATMENT), pair.get(BASELINE)
         if not t or not b or t.get("graded_status") != "PASS" or b.get("graded_status") != "PASS":
             continue
+        if t.get("model_eligible") is False or b.get("model_eligible") is False:
+            # #141: an attempt that did not run the declared model is not
+            # half of a matched pair, however it was graded.
+            continue
         t_agent, b_agent = _agent_time(t), _agent_time(b)
         if t_agent is not None and b_agent is not None:
             diff = _round(t_agent - b_agent)
@@ -625,13 +752,32 @@ def summarize(report: Mapping[str, object]) -> dict[str, object]:
         "protocol_deviations": [
             f"{e.get('attempt_id')}: ran model {e.get('model_observed')!r}, declared {e.get('model_declared')!r}"
             for e in entries if e.get("model_matches_declaration") is False
+        ] + [
+            f"{e.get('attempt_id')}: no model observed, declared {e.get('model_declared')!r}"
+            for e in entries if e.get("model_eligible") is False and e.get("model_observed") == UNKNOWN
         ],
+        "model_ineligible": ineligible_attempts(report),
         "claim_accuracy": [
             {"attempt_id": e.get("attempt_id"), "claim": e.get("claim"), "accurate": e.get("claim_accurate")}
             for e in entries
         ],
         "scope": "a first bounded canary: no qualification or broad-benefit claim is supported by this sample",
     }
+
+
+def eligible_attempts(report: Mapping[str, object]) -> list[str]:
+    """The attempts observed running the declared model."""
+    attempts = report.get("attempts")
+    entries = [e for e in attempts if isinstance(e, dict)] if isinstance(attempts, list) else []
+    return [str(e.get("attempt_id")) for e in entries if e.get("model_eligible") is True]
+
+
+def ineligible_attempts(report: Mapping[str, object]) -> list[str]:
+    """The attempts #141 excludes from the comparison: dispatched, and not
+    observed running the declared model. Non-empty fails `pilot-run`."""
+    attempts = report.get("attempts")
+    entries = [e for e in attempts if isinstance(e, dict)] if isinstance(attempts, list) else []
+    return [str(e.get("attempt_id")) for e in entries if e.get("model_eligible") is False]
 
 
 def export_bundle(experiment: trial.Experiment, report: Mapping[str, object], into: Path) -> list[Path]:
@@ -674,16 +820,39 @@ def private_observations(outcomes: Sequence[AttemptOutcome]) -> dict[str, object
 OUTCOMES_FILENAME = "outcomes.json"
 
 
-def write_outcomes(run_dir: Path, experiment: trial.Experiment, outcomes: Sequence[AttemptOutcome]) -> Path:
+def write_outcomes(
+    run_dir: Path, experiment: trial.Experiment, outcomes: Sequence[AttemptOutcome],
+    declaration: PilotDeclaration | None = None,
+) -> Path:
     """The private, per-run record `pilot-report` rebuilds a report from.
-    Rewritten after every attempt, so an interrupted run keeps what finished."""
+    Rewritten after every attempt, so an interrupted run keeps what finished.
+    Carries the model and effort the run DECLARED (#141), so a later report
+    is scored against the declaration the run launched with, not whichever
+    one is current when the report is rebuilt."""
     path = run_dir / OUTCOMES_FILENAME
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps({
-        "experiment_root": str(experiment.root), "outcomes": [o.to_json() for o in outcomes],
-    }, indent=1) + "\n", encoding="utf-8")
+    data: dict[str, object] = {"experiment_root": str(experiment.root), "outcomes": [o.to_json() for o in outcomes]}
+    if declaration is not None:
+        data["declared"] = {"model": declaration.model, "reasoning_effort": declaration.reasoning_effort}
+    tmp.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
     tmp.replace(path)
     return path
+
+
+def read_declared(run_dir: Path) -> dict[str, str | None] | None:
+    """The model and effort a run recorded as declared, or `None` for a run
+    that predates #141 and recorded none. A record that is present but does
+    not name both is refused, never read as "nothing declared" - that would
+    quietly turn the model check off."""
+    data = json.loads((run_dir / OUTCOMES_FILENAME).read_text(encoding="utf-8"))
+    if "declared" not in data:
+        return None
+    declared = data["declared"]
+    model = declared.get("model") if isinstance(declared, dict) else None
+    effort = declared.get("reasoning_effort") if isinstance(declared, dict) else None
+    if not isinstance(model, str) or not model or not isinstance(effort, str) or not effort:
+        raise ManifestRefused(f"{run_dir / OUTCOMES_FILENAME}: recorded declaration {declared!r} names no model and effort")
+    return {"model": model, "reasoning_effort": effort}
 
 
 def read_outcomes(run_dir: Path) -> tuple[trial.Experiment, list[AttemptOutcome]]:
@@ -708,10 +877,15 @@ def run_pilot(
 ) -> tuple[trial.Experiment, list[AttemptOutcome]]:
     """Plan and run the whole schedule. `backends()` returns a fresh
     `(agent backend, grading backend)` pair per attempt; `argv_for` gives the
-    client invocation for one attempt (a real run passes the same argv every
-    time; a test's scripted client needs the attempt id). `total_seconds`
+    BASE client invocation for one attempt (a real run passes the same argv
+    every time; a test's scripted client needs the attempt id), to which
+    `launch_argv` adds the declared model and effort. `total_seconds`
     overrides the declared total cap - for tests only; the CLI never sets it."""
     from . import collection_conformance as cc
+
+    # Refuse before anything is planned: a declaration with no effort to pin
+    # never produces a ledger that reads as a started pilot.
+    launch_argv(declaration, [])
 
     store = trial.open_store(run_dir / "store", forbidden=[])
     experiment, schedule = plan_pilot(
@@ -720,14 +894,14 @@ def run_pilot(
     outcomes: list[AttemptOutcome] = []
     # Checkpoint BEFORE the first attempt: an interruption during it must
     # still leave `pilot-report` a store to reconcile against.
-    write_outcomes(run_dir, experiment, outcomes)
+    write_outcomes(run_dir, experiment, outcomes, declaration)
 
     def run_attempt(scheduled: ScheduledAttempt, budget: float) -> dict[str, object]:
         agent_backend, grading_backend = backends()
         return cc.run_level1_agent_attempt(
             experiment=experiment, attempt_id=scheduled.attempt_id,
             backend=agent_backend, grading_backend=grading_backend,  # type: ignore[arg-type]
-            base=run_dir, base_argv=argv_for(scheduled),
+            base=run_dir, base_argv=launch_argv(declaration, argv_for(scheduled)),
             extra_home_files=treatment_home_files if scheduled.arm == TREATMENT else {},
             cli_version=declaration.client_version, timeout=budget,
             credential_explicit_path=credential_explicit_path,
@@ -735,7 +909,7 @@ def run_pilot(
 
     def on_outcome(outcome: AttemptOutcome) -> None:
         outcomes.append(outcome)
-        write_outcomes(run_dir, experiment, outcomes)
+        write_outcomes(run_dir, experiment, outcomes, declaration)
 
     run_schedule(
         experiment, schedule, run_attempt,

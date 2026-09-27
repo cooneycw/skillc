@@ -1,0 +1,81 @@
+{
+  "manifest_schema": 1,
+  "experiment": "matched-pilot",
+  "declared_at": "2026-09-27",
+  "_comment": "A NEW, dated declaration (issue #141), not an edit: run-manifest.json is #12's predeclaration and stays as written, including the model it got wrong. This file repeats #12's predeclared_experiment_record with only the model (now pinned at launch, with its reasoning effort) and the time-cap note changed; tests/test_matched_pilot.py checks that nothing else differs. It is the declaration skillc pilot-run uses by default (skillc.matched_pilot.CURRENT_MANIFEST_PATH). The next change of pin is another dated file and a one-line change of that constant.",
+  "supersedes": {
+    "manifest": "run-manifest.json",
+    "run": "2026-09-27 13:26Z, skillc pilot-run at 3e1e3fb (evidence in evidence/)",
+    "reason": "that run declared gpt-5.1-codex, but nothing passed the model to the client, so all six attempts ran codex's own default, gpt-6-astra (a recorded protocol deviation). That run and its deviation stay on the record; a re-run declares the model here and pins it."
+  },
+  "subscription_login_ruling": {
+    "ruling": "Normal Claude and codex",
+    "date": "2026-09-27",
+    "source": "ADR 0005 rule 6 (docs/decisions/0005-runtime-scope-and-cost-rulings.md)",
+    "scope": "covers agent runs (this pilot's treatment/baseline attempts) only, via the operator's normal Codex subscription login (the normal rotating OAuth login, never a long-lived key) - not judge calls, which use provider API keys and stay dollar-metered. This pilot enables no judge tier, so no dollar-metered spend is estimated below at all.",
+    "client_login": {
+      "codex": "operator's normal Codex CLI subscription login (OAuth), not a pay-per-use API key"
+    },
+    "prerequisite": "the in-container credential path for a subscription-login agent run (skillc/credential.py, docker_backend.DockerBackend.deliver_home_file/read_home_file, issue #98) is now built; this manifest states the ruling and relabels the estimate, it did not itself deliver that prerequisite"
+  },
+  "predeclared_experiment_record": {
+    "model": {
+      "name": "gpt-6-astra",
+      "reasoning_effort": "high",
+      "note": "owner ruling 2026-09-27 (issue #141): pin gpt-6-astra, the model codex-cli 0.157.1 resolves to today and the one all six of #12's attempts actually ran, at the reasoning effort observed on all six. skillc pilot-run passes both at launch (codex exec -m gpt-6-astra -c model_reasoning_effort=\"high\"), refuses a client argv that sets either itself, and makes any attempt whose rollout reports another model - or none - ineligible for the comparison and fails the run."
+    },
+    "client": {
+      "name": "codex",
+      "version": "0.157.1"
+    },
+    "subject": {
+      "name": "cpp-codex",
+      "locator": "github.com/cooneycw/claude-power-pack",
+      "revision": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b"
+    },
+    "image_digest": "sha256:d1b2ced9dc6d25e9e1bc673c1973f032ced50a11da234fcd617ee376ff36eefc",
+    "image_digest_note": "declared 2026-09-27, before the run: the skillc-trial:latest image #10's operator run built and #11's live run used (evals/second-collection-conformance/evidence/README.md). Until then this field said 'owed-to-the-live-build' rather than invent a value (issue #10 lesson D13). skillc pilot-run resolves the digest of the image that actually runs and records THAT in the ledger; tests/test_matched_pilot.py checks the two agree.",
+    "goal_population": {
+      "task": {
+        "id": "slug-small-fix",
+        "revision": "2",
+        "goal": "evals/level1/slug-small-fix/goal.md",
+        "grader": "evals/level1/slug-small-fix/grader.json"
+      },
+      "note": "the SAME already-qualified task and grader #26's selection probe reuses (#5) - #12 measures task-outcome benefit and completion time, not selection behavior, so no case-format prompt addendum is used here"
+    },
+    "treatment_vs_baseline": {
+      "treatment": "the whole CPP pack (74 skills) installed, per subject.json's select: \"all\"",
+      "baseline": "an identical disposable home with no skill installed - the SAME matched-minimal-baseline shape skillc/materialize.py already uses"
+    },
+    "repeat_schedule": {
+      "repeats_per_arm": 3,
+      "arms": 2,
+      "attempts_per_trial": 1,
+      "total_attempts": 6,
+      "rationale": "a bounded first pilot: enough repeats per arm (3) to see attempt-to-attempt variance without ballooning cost or scope; not extended further until this pilot's own evidence justifies it (#12's own text: this is the FIRST bounded matched pilot, not a full-power study)"
+    },
+    "arm_order": "treatment then baseline, per repeat, matching skillc/materialize.py's existing arm ordering",
+    "time_caps": {
+      "per_attempt_seconds": 900,
+      "total_seconds": 5400,
+      "note": "enforced by skillc pilot-run (skillc/matched_pilot.py run_schedule): the per-attempt cap is each attempt's agent limit, and the total cap is a start gate that also cuts the last attempt's limit to what remains"
+    },
+    "monetary_ceiling_usd": 5.0,
+    "monetary_ceiling_source": "operator ruling, 2026-09-26 (ADR 0005 rule 6), carried into #12: the $5 ceiling applies here too, enforced in code by skillc.cost_estimate.authorize. Applies to dollar-metered judge-call spend; this pilot enables no judge tier (judge_estimated_quota_usd_equivalent below is 0), so the ceiling is trivially satisfied and no budget approval is required for it.",
+    "artifact_retention": {
+      "decided": "2026-09-27, before capture (owner approval of the #12 plan)",
+      "private": "the trial store (journals, content-addressed captured objects), each attempt's private outcome record and the agents' closing messages stay in a private run directory outside any git work tree: ~/.local/share/skillc/pilot-runs/<run-id>/ (skillc.trial.open_store refuses a store inside a work tree). Transcripts carry account identifiers, so they are never committed.",
+      "committed": "the ledger, the lifecycle records, the artifact manifests and the assembled pilot-report, exported to evals/matched-pilot/evidence/records/ and leak-checked by skillc pilot-run before they are left in place (a finding removes the exported files again)",
+      "runner": "skillc pilot-run (skillc/matched_pilot.py)"
+    },
+    "clarification_and_approval_behavior": {
+      "clarification": "no interactive clarification is available during a trial - attempts run non-interactively (codex exec / an equivalent non-interactive invocation, matching skillc/trial_bootstrap.py's own 'never auto-answer' rule from #78). If the agent's own output poses a clarifying question instead of proceeding, that attempt's pilot-report entry declares it explicitly under 'uncertainty' and counts it in 'interventions' - it is never auto-answered from outside the attempt.",
+      "approval": "the SAME gate #26 uses: skillc.cost_estimate.authorize() refuses to authorize execution without an approved budget at or above any dollar-metered (judge) spend, and separately refuses any such spend over the $5 ceiling regardless of a larger approved budget. This pilot's agent-attempt quota is not dollar-metered (ADR 0005 rule 6) and needs no such approval by itself."
+    }
+  },
+  "cost_note": "no cost_estimate is declared here. #12's estimate is priced for gpt-5.1-codex, and no gpt-6-astra price has been confirmed, so none is invented. Agent attempts run under the operator's subscription login and are quota, not a dollar charge (ADR 0005 rule 6); no judge tier is enabled, so no dollar-metered spend exists to check against the $5 ceiling. #12's run observed 77,438-102,043 input tokens per attempt on this model.",
+  "monetary_cap_usd": null,
+  "approved_budget_usd": null,
+  "execution": "not run - declared 2026-09-27; a re-run of the pilot under this declaration is the owner's call"
+}
