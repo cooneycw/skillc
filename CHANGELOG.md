@@ -16,6 +16,14 @@ collection) closes.
 
 ### Fixed
 
+- **Every backend attempt's lifecycle record said its workspace was never
+  cleaned up** (#127): `lifecycle.run_through_backend` finalized before
+  cleaning, so the persisted `cleanup` read `partial` even when the journal
+  said `removed`. That included #11's live PASS runs. The workspace is now
+  cleaned first, so the record reports what cleanup did. The container's
+  `destroy()`/`confirm_absent()` outcome is journalled as a `backend-teardown`
+  detail event, even when `execute()` raises. `collection-run`'s paste-back
+  prints `cleanup=` and `backend_teardown=`.
 - **`skillc collection-run` could not complete a real agent attempt: no
   network, a refused workspace, a 30-second agent limit, and colliding
   scratch paths** (Refs #11): all found on the first live runs, none of
