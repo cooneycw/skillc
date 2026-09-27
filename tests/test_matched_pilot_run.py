@@ -104,12 +104,71 @@ def test_the_whole_schedule_runs_interleaved_and_every_attempt_is_reported(tmp_p
     mp.export_bundle(experiment, report, evidence)
     unexpected, known = mp.bundle_findings(evidence)
     assert unexpected == []
-    assert known == 6  # exactly the named gap, once per captured attempt
+    assert known == 0  # #139: every captured attempt now stores its verified-result
     assert len(_entries(report)) == 6
+    results = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(evidence.glob("result-*.json"))]
+    assert len(results) == 6 and len(list(evidence.glob("observation-*.json"))) == 6
+    by_attempt = {r["attempt_id"]: r for r in results}
+    for outcome in outcomes:
+        stored = by_attempt[outcome.scheduled.attempt_id]
+        assert stored["verification"]["readiness_source"] == "agent-observation"
+        # Readiness is UNKNOWN on the agent path (B1): a task PASS stores as
+        # INCONCLUSIVE, a task FAIL still stores as FAIL (VIOLATED wins).
+        want = "INCONCLUSIVE" if mp.graded_status(outcome.record) == "PASS" else "FAIL"
+        assert stored["status"] == want
 
     # Resumable from the private record alone, and identical.
     reloaded_experiment, reloaded = mp.read_outcomes(run_dir)
     assert mp.build_report(reloaded_experiment, reloaded) == report
+
+
+def test_the_known_gap_is_tolerated_only_for_the_pre_fix_run(tmp_path: Path) -> None:
+    """#139: the committed #12 bundle predates stored results, and only its own
+    experiment keeps the tolerance. The same bundle under any other experiment
+    id - a later run that somehow stored no results - refuses publication."""
+    committed = mp.EVIDENCE_DIR
+    unexpected, known = mp.bundle_findings(committed)
+    assert unexpected == [] and known == 6
+
+    copy = tmp_path / "later-run"
+    copy.mkdir()
+    for source in committed.iterdir():
+        (copy / source.name).write_bytes(source.read_bytes())
+    ledger = json.loads((copy / "ledger.json").read_text(encoding="utf-8"))
+    ledger["experiment_id"] = "matched-pilot-later"
+    (copy / "ledger.json").write_text(json.dumps(ledger), encoding="utf-8")
+    unexpected, known = mp.bundle_findings(copy)
+    assert known == 0
+    assert len([u for u in unexpected if mp.KNOWN_GAP_TEXT in u]) == 6
+
+
+def _copy_committed(into: Path, experiment_id: object = None) -> Path:
+    into.mkdir(parents=True)
+    for source in mp.EVIDENCE_DIR.iterdir():
+        (into / source.name).write_bytes(source.read_bytes())
+    if experiment_id is not None:
+        ledger = json.loads((into / "ledger.json").read_text(encoding="utf-8"))
+        ledger["experiment_id"] = experiment_id
+        (into / "ledger.json").write_text(json.dumps(ledger), encoding="utf-8")
+    return into
+
+
+def test_a_clean_neighbouring_bundle_does_not_change_the_pre_fix_reading(tmp_path: Path) -> None:
+    """Codex review, red before the fix: the tolerance was decided over every
+    bundle at once, so adding a clean later bundle beside the historical one
+    turned its six tolerated findings into unexpected ones."""
+    _copy_committed(tmp_path / "root" / "historical")
+    (tmp_path / "fresh").mkdir()
+    experiment, outcomes, _ = _run_fake_pilot(tmp_path / "fresh")
+    mp.export_bundle(experiment, mp.build_report(experiment, outcomes), tmp_path / "root" / "later")
+    unexpected, known = mp.bundle_findings(tmp_path / "root")
+    assert unexpected == [] and known == 6
+
+
+@pytest.mark.parametrize("experiment_id", [["matched-pilot-6ab82dc6"], {"id": "x"}])
+def test_a_malformed_experiment_id_is_a_finding_not_a_crash(experiment_id: object, tmp_path: Path) -> None:
+    unexpected, known = mp.bundle_findings(_copy_committed(tmp_path / "bad", experiment_id))
+    assert known == 0 and unexpected
 
 
 def test_time_split_sums_and_agent_time_comes_from_the_journal(tmp_path: Path) -> None:

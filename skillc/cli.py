@@ -1121,8 +1121,9 @@ def _export_pilot_evidence(experiment: object, report: dict[str, object], eviden
     finally:
         shutil.rmtree(staging, ignore_errors=True)
     print(f"skillc: published {len(written)} record(s) to {evidence.name}/: leak-checked "
-          f"({result.scanned} scanned, 0 found); check-records clean except {known} known "
-          f"'{mp.KNOWN_GAP_TEXT}' finding(s) (no verified-result is stored on the agent-trial path)")
+          f"({result.scanned} scanned, 0 found); check-records clean" + (
+              f" except {known} known '{mp.KNOWN_GAP_TEXT}' finding(s) (a pre-#139 run: it stored "
+              f"no verified-result)" if known else ""))
     return 0
 
 

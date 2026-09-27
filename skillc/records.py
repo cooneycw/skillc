@@ -1366,6 +1366,14 @@ def attempt_accounting(bundle: Bundle) -> Iterator[str]:
     An attempt that was graded (a result declaring no run state) also has its
     installation receipt and artifact manifest: a verdict over an install nobody
     recorded, or bytes nobody captured, is missing mandatory evidence.
+
+    The one stand-in for the receipt (#139): an agent-trial result that declares
+    `verification.readiness_source: agent-observation`. It is accepted in place
+    of a receipt only when the bundle holds that attempt's `agent-observation`,
+    observed and eligible for grading, and when the result's own
+    `installation-ready` criterion is UNKNOWN - the observation shows the
+    attempt ran as planned, never that the subject was installed and
+    discovered, so it may account for the grade but never ready a PASS.
     """
     ledgers = bundle.of_kind(TRIAL_LEDGER)
     if len(ledgers) != 1:
@@ -1379,6 +1387,7 @@ def attempt_accounting(bundle: Bundle) -> Iterator[str]:
     lifecycles = {r.attempt_id: r for r in bundle.of_kind(ATTEMPT_LIFECYCLE)}
     receipts = {r.attempt_id for r in bundle.of_kind(INSTALLATION_RECEIPT)}
     manifests = {r.attempt_id for r in bundle.of_kind(ARTIFACT_MANIFEST)}
+    observations = {r.attempt_id: r for r in bundle.of_kind(AGENT_OBSERVATION)}
     planned = list(_ledger_attempts(ledgers[0]))
     if not planned:
         # Zero planned attempts leaves nothing to account for; reporting 0 errors
@@ -1431,9 +1440,56 @@ def attempt_accounting(bundle: Bundle) -> Iterator[str]:
                             f"declares {declared}; the accounts disagree"
                         )
         if graded:
-            for have, what in ((receipts, "installation receipt"), (manifests, "artifact manifest")):
-                if attempt_id not in have:
-                    yield f"attempt {attempt_id!r} was graded without its {what}"
+            if attempt_id not in manifests:
+                yield f"attempt {attempt_id!r} was graded without its artifact manifest"
+            yield from _receipt_stand_in(attempt_id, graded, observations.get(attempt_id), attempt_id in receipts)
+
+
+#: `verification.readiness_source` on a result graded without a receipt (#139);
+#: `skillc.verify.AGENT_OBSERVATION_READINESS` is this constant.
+OBSERVATION_STAND_IN = "agent-observation"
+_READINESS_CRITERION = "installation-ready"
+
+
+def _receipt_stand_in(
+    attempt_id: str, graded: list[Record], observation: Record | None, has_receipt: bool,
+) -> Iterator[str]:
+    """Why a graded result is not accounted for by its readiness evidence, if
+    it is not. A result declaring the observation stand-in is held to it
+    WHETHER OR NOT a receipt also exists (codex review): a receipt beside it
+    must not let the stand-in claim the readiness it never establishes."""
+    for result in graded:
+        verification = result.data.get("verification")
+        source = verification.get("readiness_source") if isinstance(verification, dict) else None
+        if source != OBSERVATION_STAND_IN:
+            if not has_receipt:
+                yield f"attempt {attempt_id!r} was graded without its installation receipt"
+            continue
+        criteria = result.data.get("criteria")
+        readiness = [
+            c for c in criteria if isinstance(c, dict) and c.get("id") == _READINESS_CRITERION
+        ] if isinstance(criteria, list) else []
+        # MANDATORY and UNKNOWN (codex review): an optional UNKNOWN criterion
+        # drops out of `derive_status`, so a PASS would stand on no readiness.
+        if [(c.get("mandatory"), c.get("outcome")) for c in readiness] != [(True, "UNKNOWN")]:
+            yield (
+                f"attempt {attempt_id!r}: {result.path.name} stands an agent-observation in for its receipt, "
+                f"but its {_READINESS_CRITERION!r} criterion is not exactly one mandatory UNKNOWN; an "
+                f"observation never establishes installation readiness, so it must still gate PASS"
+            )
+        if observation is None:
+            yield (
+                f"attempt {attempt_id!r}: {result.path.name} stands an agent-observation in for its "
+                f"installation receipt, but the bundle holds no agent-observation for this attempt"
+            )
+            continue
+        transcript = observation.data.get("transcript")
+        eligible = isinstance(transcript, dict) and transcript.get("grading_eligible") is True
+        if observation.data.get("status") != "observed" or not eligible:
+            yield (
+                f"attempt {attempt_id!r}: {result.path.name} stands {observation.path.name} in for its "
+                f"receipt, but that observation is not an observed, grading-eligible attempt"
+            )
 
 
 def _chain_root(start: str, links: dict[str, str]) -> tuple[str | None, list[str]]:

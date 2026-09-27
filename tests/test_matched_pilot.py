@@ -229,21 +229,18 @@ _EVIDENCE = PILOT_DIR / "evidence" / "records"
 
 def test_the_committed_evidence_accounts_for_every_scheduled_attempt() -> None:
     """The committed live bundle (#12): every rule is clean except the one
-    named gap - a captured agent-trial attempt stores no `verified-result`
-    (#106's driver grades through `verify.grade_files`). Any OTHER finding,
-    including a report that omits an attempt, fails here."""
-    from skillc import checks, records
+    named gap - that run predates #139 and stored no `verified-result` - and
+    the tolerance for it is `matched_pilot.bundle_findings`' own, scoped to
+    this one experiment. Any OTHER finding, including a report that omits an
+    attempt, fails here."""
+    from skillc import matched_pilot as mp
 
-    findings = []
-    for record in records.discover(_EVIDENCE):
-        findings.extend(checks.run_record(record))
-    [bundle] = records.discover_bundles(_EVIDENCE)
-    findings.extend(checks.run_bundle(bundle))
-    errors = [f for f in findings if f.severity == checks.ERROR]
-    unexpected = [f for f in errors if not (f.rule == "attempt-accounting" and "is captured but has no result" in f.detail)]
+    unexpected, known = mp.bundle_findings(_EVIDENCE)
     assert unexpected == []
+    ledger = json.loads((_EVIDENCE / "ledger.json").read_text(encoding="utf-8"))
+    assert ledger["experiment_id"] in mp.KNOWN_GAP_EXPERIMENTS
     report = json.loads((_EVIDENCE / "report.json").read_text(encoding="utf-8"))
-    assert len(errors) == len(report["attempts"]) == MANIFEST["cost_estimate"]["total_attempts"]
+    assert known == len(report["attempts"]) == MANIFEST["cost_estimate"]["total_attempts"]
     assert [e["arm"] for e in report["attempts"]] == ["treatment", "baseline"] * _REPEATS_PER_ARM
 
 
