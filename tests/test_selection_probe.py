@@ -763,6 +763,51 @@ def test_a_plan_missing_a_declared_case_or_arm_is_refused(tmp_path: Path) -> Non
     assert calls == []
 
 
+
+def test_an_unknown_disposition_is_refused_at_construction() -> None:
+    with pytest.raises(sp.SelectionProbeRefused):
+        sp.AttemptTranscript(disposition="finished")
+    sp.AttemptTranscript(disposition="captured")
+
+
+def test_an_unrelated_invocation_is_not_a_selection_of_an_applicable_skill() -> None:
+    """Deliberately narrow: `selection` answers whether an APPLICABLE skill
+    was invoked. An unrelated invocation stays visible in `observed`, where
+    the case's `disallowed` policy is judged."""
+    transcript = sp.AttemptTranscript(
+        disposition="captured", events=({"type": "skill_invocation", "skill": "unrelated-skill"},),
+    )
+    assert sp.selection_status(transcript, ["qa-test"]) == "not-selected"
+    assert sp.observed_skills(transcript) == frozenset({"unrelated-skill"})
+
+
+def test_a_tampered_config_object_is_refused(tmp_path: Path) -> None:
+    experiment = _plan(tmp_path)
+    trial_dict, _attempt = next(iter(experiment.attempts()))
+    assert sp._resolve_config(experiment, trial_dict)["arm"] in sp.ARMS
+    config_ref = trial_dict["config"]
+    assert isinstance(config_ref, dict)
+    path = experiment.object_path(str(config_ref["digest"]))
+    path.chmod(0o644)
+    path.write_bytes(path.read_bytes().replace(b"treatment", b"baseline_").replace(b"baseline\"", b"treatment\""))
+    with pytest.raises(sp.SelectionProbeRefused, match="modified after it was stored"):
+        sp._resolve_config(experiment, trial_dict)
+
+
+def test_structural_detection_is_not_marked_best_effort(tmp_path: Path) -> None:
+    experiment = _plan(tmp_path)
+    for detection, expected in (("structural", False), ("heuristic", True)):
+        record = {"disposition": "not-run", "observation": {"skill_invocation_detection": detection}}
+        assert sp.transcript_from_record(record, experiment, "unused").codex_best_effort is expected
+
+
+def test_an_unknown_arm_is_refused_by_the_real_runner(tmp_path: Path) -> None:
+    _experiment, runner, _docker_bin = _real_runner_parts(tmp_path)
+    with pytest.raises(sp.SelectionProbeRefused, match="unknown arm"):
+        runner({"config": {"arm": "other", "prompt_addendum": ""}}, {"attempt_id": "a"})
+    assert runner.backend.delivered == {}  # type: ignore[attr-defined]
+
+
 @pytest.mark.skipif(
     os.environ.get("SKILLC_ALLOW_REAL_AGENT") != "1",
     reason="launches a real codex agent for every planned attempt - operator-run only (ADR 0005 rule 5)",
