@@ -9,14 +9,19 @@ adapter path both subjects' existing evidence already proves.
 
 **Prepared, not run**, exactly like [the matched pilot](../matched-pilot/README.md)
 and for the same reason: execution needs a live capability that does not
-exist in this repository yet. Here, that capability is #81's operator demo
-command (`issue-81-operator-demo`, in progress) gaining a `--subject <name>`
-flag - the design the orchestrator ruled on (msg 1474) and relayed to w1:
-materialize the named subject through `materialize.py`, install it via
-`DockerBackend.install()` into the real container #81 already drives, and
-observe client-side discovery with no model call. Once that flag exists,
-these two runs execute in the SAME operator session as #81's own live demo -
-one runbook, not two, per the orchestrator's instruction (msg 1470).
+exist in this repository yet - a `--subject <name>` flag that materializes
+the named subject through `materialize.py`, installs it via
+`DockerBackend.install()` into a real container, and observes client-side
+discovery plus an in-container digest re-verification against the
+installation receipt, with no model call (the design the orchestrator
+ruled on, msg 1474/1479). **As of msg 1488 (`w1`), this flag is being split
+out of #81/#97 into its own follow-up PR under #11**: PR #97 (already
+open) carries an EARLIER, materialize-only `--subject` shape (no container
+install, no discovery, no digest check), built before the fuller design was
+settled, and is not being widened to match it - the fuller design lands
+separately. Once that follow-up PR exists, these two runs execute in the
+SAME operator session as #81's own live demo - one runbook, not two, per
+the orchestrator's instruction (msg 1470).
 
 ## What this delivers, and what it does not
 
@@ -44,6 +49,16 @@ Delivered here:
   covering both subjects). Re-demonstrating either here would be redundant
   work the orchestrator explicitly said to skip (msg 1474).
 - **The bounded compatibility statement**, below.
+- **The acceptance status against #11's four bullets** (`run-manifest.json`'s
+  `acceptance_status`), stated plainly per orchestrator ruling (msg 1479,
+  relayed from the operator): the no-agent demo this manifest prepares -
+  installation plus discovery plus an in-container digest re-verification
+  against the receipt - gives conformance evidence for bullets 1, 3 and
+  part of 4. It does **not** satisfy bullet 2 ("the same client, Level 1
+  fixture, contract and grader"), which needs an agent actually WORKING
+  the Level 1 task with each collection installed - a real model call this
+  no-agent demo deliberately never makes. **#11 stays open after this
+  manifest's own two runs execute**; one item remains, below.
 
 Explicitly NOT delivered here, per #11's own "do not build a second large
 benchmark" and the same discipline the matched pilot follows:
