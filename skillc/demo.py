@@ -55,8 +55,10 @@ from __future__ import annotations
 
 import os
 import secrets
+import shutil
 import stat
 import subprocess
+import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -390,6 +392,25 @@ class SubjectResult:
     discovery_reason: str | None
     host_diff: reap.HostPathDiff
     reap_report: reap.ReapReport
+    #: Set (issue #118) when acquisition or `prepare()` failed before any
+    #: install/digest/discovery work could even start - every acceptance
+    #: item for this leg reports NOT EXERCISED with this text as evidence,
+    #: never a guessed MET/NOT MET for work that never ran. `None` is the
+    #: ordinary case: the leg ran, whatever its own items concluded.
+    not_exercised_reason: str | None = None
+
+
+def _not_exercised_subject_result(subject_name: str, revision: str, reason: str) -> SubjectResult:
+    """Every field a placeholder honestly labeled as such - never a value
+    that could be mistaken for a real observation. `_subject_acceptance_items`
+    checks `not_exercised_reason` FIRST and never reads any of these."""
+    return SubjectResult(
+        subject_name=subject_name, revision=revision, receipt={"skills": [], "skill_count": 0, "file_count": 0, "files": []},
+        digest_status="not-exercised", digest_mismatches=[], discovery={}, discovery_reason=None,
+        host_diff=reap.HostPathDiff(changed=(), unresolved=()),
+        reap_report=reap.ReapReport(daemon_reachable=False, outcomes=()),
+        not_exercised_reason=reason,
+    )
 
 
 def run_subject_demo(
@@ -414,50 +435,97 @@ def run_subject_demo(
 
     Refuses BEFORE any Docker work starts if the subject is unknown,
     malformed, or names a selected skill absent from its surface
-    (`inventory()`'s own check, issue #101's "Install" acceptance item)."""
+    (`inventory()`'s own check, issue #101's "Install" acceptance item).
+
+    ACQUISITION AND BACKEND FAILURES NEVER RAISE (issue #118): a real clone
+    failing, or `prepare()` finding no daemon/image, is reported as a
+    NOT-EXERCISED `SubjectResult` through the normal, leak-checked paste-back
+    path - not a raised exception, and never a raw traceback (an earlier
+    version let `BackendUnavailable` from `prepare()` propagate uncaught,
+    and the traceback printed the operator's own home directory and
+    username). Only the STATIC checks above (an unknown subject name, a
+    `select` naming a skill absent from the surface) still raise
+    `SubjectRefused` synchronously - those are caller/config errors the
+    operator needs to see and fix, not a runtime hazard to report
+    gracefully, and existing callers depend on that distinction.
+
+    Every temporary directory THIS function creates is a fresh
+    `tempfile.mkdtemp`, removed in `finally` - never a fixed path under
+    `base` (issue #118): a fixed scratch path collides between concurrent
+    runs, between operators, and with itself after a crash left a previous
+    run's directory behind. A caller-supplied `checkout` is never touched -
+    it is not this function's to delete."""
     subject = load_demo_subject(subject_name)
-    repo = checkout if checkout is not None else acquire_subject_checkout(subject, base / "subject-checkout")
-    staging = base / "subject-staging"
-    staging.mkdir(parents=True, exist_ok=True)
-    try:
-        source = materialize.acquire_snapshot(subject, repo, staging)
-        entries = materialize.inventory(subject, source)
-    except materialize.Refused as exc:
-        raise SubjectRefused(f"subject {subject_name!r} could not be prepared: {exc}") from exc
-    files = subject_surface_files(source, entries)
-    selected = {e.name for e in entries}
 
-    env = None  # inherit the operator's own ambient environment, like a plain `docker` invocation
-    host_paths = [REPO_ROOT / p for p in HOST_PATHS_TO_WATCH]
-    host_before = reap.snapshot_host_paths(host_paths)
-
-    backend = dbe.DockerBackend(image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=timeout)
-    # A nonce, not just the subject name: two concurrent demo runs (or a
-    # single run's own lifecycle/grading attempt ids, which already carry
-    # their own uniqueness) must never collide on one container name.
-    attempt_id = f"subject-{subject_name}-{secrets.token_hex(4)}"
-    handle = backend.prepare(attempt_id)
+    owned_checkout: Path | None = None
+    staging = Path(tempfile.mkdtemp(prefix="skillc-subject-staging-"))
     try:
-        receipt = install_subject(backend, handle, source, files)
-        digest_status, mismatches = recheck_subject_digests(backend, handle, files)
-        discovery, discovery_reason = run_subject_discovery(
-            backend, handle, client_argv if client_argv is not None else ["codex"],
-            selected, Limits(timeout=timeout), base,
+        if checkout is not None:
+            repo = checkout
+        else:
+            owned_checkout = Path(tempfile.mkdtemp(prefix="skillc-subject-checkout-"))
+            try:
+                acquire_subject_checkout(subject, owned_checkout)
+            except SubjectRefused as exc:
+                return _not_exercised_subject_result(subject_name, subject.revision, f"acquisition failed: {exc}")
+            repo = owned_checkout
+
+        try:
+            source = materialize.acquire_snapshot(subject, repo, staging)
+            entries = materialize.inventory(subject, source)
+        except materialize.Refused as exc:
+            raise SubjectRefused(f"subject {subject_name!r} could not be prepared: {exc}") from exc
+        files = subject_surface_files(source, entries)
+        selected = {e.name for e in entries}
+
+        env = None  # inherit the operator's own ambient environment, like a plain `docker` invocation
+        host_paths = [REPO_ROOT / p for p in HOST_PATHS_TO_WATCH]
+        host_before = reap.snapshot_host_paths(host_paths)
+
+        backend = dbe.DockerBackend(image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=timeout)
+        # A nonce, not just the subject name: two concurrent demo runs (or a
+        # single run's own lifecycle/grading attempt ids, which already carry
+        # their own uniqueness) must never collide on one container name.
+        attempt_id = f"subject-{subject_name}-{secrets.token_hex(4)}"
+        try:
+            handle = backend.prepare(attempt_id)
+        except dbe.BackendUnavailable as exc:
+            return _not_exercised_subject_result(subject_name, subject.revision, f"backend unavailable: {exc}")
+        try:
+            receipt = install_subject(backend, handle, source, files)
+            digest_status, mismatches = recheck_subject_digests(backend, handle, files)
+            discovery, discovery_reason = run_subject_discovery(
+                backend, handle, client_argv if client_argv is not None else ["codex"],
+                selected, Limits(timeout=timeout), base,
+            )
+        finally:
+            backend.destroy(handle)
+            backend.confirm_absent(handle)
+
+        reap_report = reap.reap(docker_bin, [attempt_id], env, timeout)
+        host_after = reap.snapshot_host_paths(host_paths)
+        host_diff = reap.diff_host_paths(host_before, host_after)
+        return SubjectResult(
+            subject_name, subject.revision, receipt, digest_status, mismatches, discovery, discovery_reason,
+            host_diff, reap_report,
         )
     finally:
-        backend.destroy(handle)
-        backend.confirm_absent(handle)
-
-    reap_report = reap.reap(docker_bin, [attempt_id], env, timeout)
-    host_after = reap.snapshot_host_paths(host_paths)
-    host_diff = reap.diff_host_paths(host_before, host_after)
-    return SubjectResult(
-        subject_name, subject.revision, receipt, digest_status, mismatches, discovery, discovery_reason,
-        host_diff, reap_report,
-    )
+        shutil.rmtree(staging, ignore_errors=True)
+        if owned_checkout is not None:
+            shutil.rmtree(owned_checkout, ignore_errors=True)
 
 
 def _subject_acceptance_items(result: SubjectResult) -> list[AcceptanceItem]:
+    if result.not_exercised_reason is not None:
+        names = (
+            f"subject {result.subject_name!r}: installed skills match its declared selection",
+            f"subject {result.subject_name!r}: in-container digests match the installation receipt",
+            f"subject {result.subject_name!r}: every selected skill is discovered by the client",
+            f"subject {result.subject_name!r}: declared host paths unchanged",
+            f"subject {result.subject_name!r}: cleanup sweep confirms no owned container left running",
+        )
+        return [AcceptanceItem(name, False, result.not_exercised_reason, exercised=False) for name in names]
+
     receipt_skills = result.receipt["skills"]
     assert isinstance(receipt_skills, list)
     install_ok = set(receipt_skills) == set(result.discovery)
@@ -491,6 +559,11 @@ def _subject_acceptance_items(result: SubjectResult) -> list[AcceptanceItem]:
 
 
 def build_subject_paste_back(result: SubjectResult) -> str:
+    if result.not_exercised_reason is not None:
+        return (
+            f"\nsubject: {result.subject_name} revision={result.revision}\n"
+            f"  NOT EXERCISED: {result.not_exercised_reason}"
+        )
     lines = [
         "",
         f"subject: {result.subject_name} revision={result.revision}",
@@ -516,6 +589,15 @@ class AcceptanceItem:
     name: str
     met: bool
     evidence: str
+    #: False when the check this item names never ran at all (issue #118:
+    #: "vacuous MET" - when `prepare()` never succeeded, "cleanup sweep
+    #: confirms no owned container left running" and "declared host paths
+    #: unchanged" both read technically true, since NOTHING happened, which
+    #: is a different claim from "this demo actually proved it" and must
+    #: never render the same way. `met` stays `False` for an unexercised
+    #: item regardless of this flag, so `ok = all(item.met for item in items)`
+    #: needs no separate check - a demo where nothing ran is never `ok`.
+    exercised: bool = True
 
 
 def _acceptance_items(
@@ -527,15 +609,30 @@ def _acceptance_items(
     reap_ok = reap_report.daemon_reachable and not reap_report.left_running and not reap_report.unknown
     host_ok = not host_diff.changed and not host_diff.unresolved
     digest_ok = image_digest is not None
+    # Issue #118's own "vacuous MET": when the lifecycle leg's own prepare()
+    # never succeeded ("unavailable" - lifecycle.run_through_backend's own
+    # disposition for exactly that case), nothing ever started, so "no
+    # owned container left running" and "host paths unchanged" are true only
+    # because there was nothing to change - a real claim about a demo that
+    # ran, not this one. Never silently MET.
+    prepare_never_succeeded = lifecycle_record.get("disposition") == "unavailable"
     return [
         AcceptanceItem("full Docker trial lifecycle (prepare..confirm_absent)", lifecycle_ok,
                         f"lifecycle disposition={lifecycle_record.get('disposition')}"),
         AcceptanceItem("grades through the verifier's backend seam (#76)", grading_ok,
                         f"grading status={graded.status}, detail={graded.detail}"),
-        AcceptanceItem("cleanup sweep confirms no owned container left running", reap_ok,
-                        f"reap outcomes={[o.outcome for o in reap_report.outcomes]}"),
-        AcceptanceItem("declared host paths unchanged", host_ok,
-                        f"changed={list(host_diff.changed)}, unresolved={list(host_diff.unresolved)}"),
+        AcceptanceItem(
+            "cleanup sweep confirms no owned container left running",
+            reap_ok and not prepare_never_succeeded,
+            f"reap outcomes={[o.outcome for o in reap_report.outcomes]}",
+            exercised=not prepare_never_succeeded,
+        ),
+        AcceptanceItem(
+            "declared host paths unchanged",
+            host_ok and not prepare_never_succeeded,
+            f"changed={list(host_diff.changed)}, unresolved={list(host_diff.unresolved)}",
+            exercised=not prepare_never_succeeded,
+        ),
         AcceptanceItem("image digest recorded", digest_ok,
                         f"digest={image_digest}"),
     ]
@@ -553,6 +650,21 @@ def leak_check_text(text: str) -> list[str]:
     return [f"{lineno}: {kind}: {detail}" for lineno, kind, detail in leak.scan_text(text, denylist)]
 
 
+def describe_error_safely(exc: BaseException) -> str:
+    """A one-line description of `exc`, scrubbed the same way the paste-back
+    block itself is (issue #118): an uncaught exception's own message can
+    carry an absolute host path just as easily as the block can (a
+    subprocess `CalledProcessError`, an `OSError` naming a real file) - this
+    is the SAME guarantee `print_paste_back` gives that block, applied to
+    the one other place raw text could reach the operator's terminal. A
+    leaky message is replaced with its type name alone; nothing partial is
+    ever printed."""
+    detail = f"{type(exc).__name__}: {exc}"
+    if leak_check_text(detail):
+        return f"{type(exc).__name__} (detail withheld - it failed its own leak-check)"
+    return detail
+
+
 def build_paste_back(
     items: list[AcceptanceItem], image: str, image_digest: str | None, reap_report: reap.ReapReport,
     subject_result: SubjectResult | None = None,
@@ -566,7 +678,8 @@ def build_paste_back(
         "acceptance:",
     ]
     for item in items:
-        lines.append(f"  [{'MET' if item.met else 'NOT MET'}] {item.name} - {item.evidence}")
+        label = "NOT EXERCISED" if not item.exercised else ("MET" if item.met else "NOT MET")
+        lines.append(f"  [{label}] {item.name} - {item.evidence}")
     lines.append("")
     lines.append("cleanup (reap outcomes, four possible values: reaped/already-absent/left-running/unknown):")
     for outcome in reap_report.outcomes:
@@ -721,11 +834,20 @@ def run_control(*, image: str, docker_bin: Sequence[str], base: Path, timeout: f
 
     # 2. A container deliberately left running - reap() must find and
     # remove it (a genuine orphan, teardown never invoked on purpose).
+    # `prepare()` itself failing (issue #118: an uncaught BackendUnavailable
+    # here printed a raw traceback with the operator's own home directory
+    # and username) means the orphan was never even seeded, so this control
+    # cannot certify anything - caught, never raised, and read as NOT caught,
+    # exactly like any other seeded failure this function fails to catch.
     orphan_backend = dbe.DockerBackend(image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=timeout)
     orphan_attempt_id = "control-orphan-000000000001"
-    orphan_backend.prepare(orphan_attempt_id)  # note: never destroy()'d - that is the seeded failure
-    orphan_report = reap.reap(docker_bin, [orphan_attempt_id], env, timeout)
-    left_running_caught = orphan_report.outcome_for(orphan_attempt_id) == "reaped"
+    try:
+        orphan_backend.prepare(orphan_attempt_id)  # note: never destroy()'d - that is the seeded failure
+    except dbe.BackendUnavailable:
+        left_running_caught = False
+    else:
+        orphan_report = reap.reap(docker_bin, [orphan_attempt_id], env, timeout)
+        left_running_caught = orphan_report.outcome_for(orphan_attempt_id) == "reaped"
 
     # 3. A known-bad grading candidate must FAIL, not PASS.
     grading_backend = dbe.DockerBackend(image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=timeout)

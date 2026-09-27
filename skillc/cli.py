@@ -674,37 +674,60 @@ def cmd_demo(args: argparse.Namespace) -> int:
     real daemon - never on this command's own tests passing, never on CI.
 
     `--control` inverts the verdict: it exits 0 only when every SEEDED
-    failure was actually caught, never when the run itself looked clean."""
+    failure was actually caught, never when the run itself looked clean.
+
+    EXIT CODES, pinned to the runbook (issue #118): `0` success (or, under
+    `--control`, every seeded failure was caught); `1` NOT MET, or the run
+    could not even complete (a refused subject, a backend that never came
+    up, or any other failure this command did not anticipate); `2` ONLY a
+    leak-check refusal of the paste-back block itself - never any other
+    meaning. Every branch below returns one of exactly these three, and the
+    top-level `except Exception` is what makes that a structural guarantee
+    rather than a hope: NOTHING this command does not explicitly handle can
+    produce a fourth exit code, or a raw traceback, or unscanned text on
+    stdout/stderr (issue #118's own finding: an uncaught `BackendUnavailable`
+    used to print a traceback carrying the operator's home directory and
+    username - `demo.py`'s own entry points no longer let that kind of
+    failure escape uncaught, and this is the second, independent layer for
+    whatever they still miss)."""
     from . import demo
 
     docker_bin = tuple(args.docker_bin.split()) if args.docker_bin else ("docker",)
     base = Path(args.base) if args.base else Path(tempfile.gettempdir())
 
-    if args.control:
-        ok = demo.run_control(image=args.image or demo.DEFAULT_IMAGE, docker_bin=docker_bin, base=base, timeout=args.timeout)
-        if ok:
-            print("skillc: --control - every seeded failure was caught")
-            return 0
-        print("skillc: --control - at least one seeded failure was NOT caught", file=sys.stderr)
-        return 1
-
-    subject_name = None
-    if args.subject is not None:
-        subject_name = args.subject or demo.DEFAULT_SUBJECT
     try:
+        if args.control:
+            ok = demo.run_control(
+                image=args.image or demo.DEFAULT_IMAGE, docker_bin=docker_bin, base=base, timeout=args.timeout,
+            )
+            if ok:
+                print("skillc: --control - every seeded failure was caught")
+                return 0
+            print("skillc: --control - at least one seeded failure was NOT caught", file=sys.stderr)
+            return 1
+
+        subject_name = None
+        if args.subject is not None:
+            subject_name = args.subject or demo.DEFAULT_SUBJECT
         result = demo.run_demo(
             image=args.image or demo.DEFAULT_IMAGE, docker_bin=docker_bin, base=base, timeout=args.timeout,
             subject_name=subject_name,
         )
-    except demo.SubjectRefused as exc:
-        print(f"skillc: {exc}", file=sys.stderr)
-        return 2
-    try:
         demo.print_paste_back(result.paste_back)
-    except demo.PasteBackRefused as exc:
-        print(f"skillc: {exc}", file=sys.stderr)
+        return 0 if result.ok else 1
+    except demo.PasteBackRefused:
+        # Never print `exc` itself here: its own message is built from
+        # `leak.scan_text`'s findings, which NAME the leaked value found
+        # (issue #118 review) - printing it would be the exact leak this
+        # whole mechanism exists to prevent, one level up.
+        print(
+            "skillc: the paste-back block failed its own leak-check and was refused - nothing was printed",
+            file=sys.stderr,
+        )
         return 2
-    return 0 if result.ok else 1
+    except Exception as exc:  # noqa: BLE001 - the top-level guard (issue #118), deliberately broad: see the docstring above
+        print(f"skillc: demo failed unexpectedly - {demo.describe_error_safely(exc)}", file=sys.stderr)
+        return 1
 
 
 def cmd_rules(args: argparse.Namespace) -> int:

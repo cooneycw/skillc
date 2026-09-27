@@ -14,6 +14,64 @@ release; `0.2.0` is planned when [#10](https://github.com/cooneycw/skillc/issues
 [#11](https://github.com/cooneycw/skillc/issues/11) (a second independent
 collection) closes.
 
+### Fixed
+
+- **`skillc demo` on a real daemon: a traceback leaked host paths, a fixed
+  scratch path collided across runs, the exit-code contract was broken, and
+  two acceptance items were vacuously MET** (Refs #118, Refs #81, Refs #10,
+  Refs #101): found on the operator's first live run of `skillc demo`
+  against a real Docker daemon - the image build failed, and that alone
+  exposed four independent defects.
+  1. `demo --control` and `demo --subject <name>` died with an uncaught
+     `BackendUnavailable` from `DockerBackend.prepare()` in `run_control`
+     and `run_subject_demo`, and the raw traceback printed the operator's
+     own home directory and username - "the paste-back is leak-checked
+     before printing" held only on the happy path. Both call sites now
+     catch the failure and report it through the normal, leak-checked
+     result (a NOT-EXERCISED `SubjectResult` for the subject leg; the
+     seeded orphan read as NOT caught for `--control`, never a raised
+     exception). `skillc/cli.py`'s `cmd_demo` also gained a top-level
+     `except Exception` guard - a second, independent layer - that scrubs
+     ANY unanticipated exception through `demo.describe_error_safely`
+     (replaces the message with the exception's type name alone if the
+     message itself fails its own leak-check) before printing one line to
+     stderr, never a traceback. Also found in review: `PasteBackRefused`'s
+     own message is built from `leak.scan_text`'s findings, which NAME the
+     leaked value found - `cmd_demo` printing `str(exc)` for that specific
+     exception would have been the exact leak this whole mechanism exists
+     to prevent, one level up; it now prints a fixed, generic message
+     instead.
+  2. `--subject` cloned into a FIXED `base / "subject-checkout"` path - a
+     second run against the same `base` (the operator's own sequence: the
+     first crashed before cleanup) could be handed a directory an earlier,
+     hard-crashed process had already touched and never got to clean up.
+     `run_subject_demo` now uses a fresh `tempfile.mkdtemp` per call for
+     both the checkout and the staging directory, removed in `finally` -
+     never a name any other call, past or concurrent, could already hold.
+  3. The exit-code contract (the runbook's own `0`/`1`/`2` meanings) was
+     broken: a refused subject exited `2`, which the runbook reserves
+     exclusively for a leak-check refusal. `SubjectRefused` (along with
+     everything else the top-level guard now catches) exits `1` - "could
+     not run" - never `2`.
+  4. With no image reachable at all, `demo` correctly reported the lifecycle
+     as unavailable and grading as inconclusive, but still reported `[MET]`
+     for "cleanup sweep confirms no owned container left running" and
+     "declared host paths unchanged" - true only because nothing ever
+     started, not a real claim about a demo that ran. `AcceptanceItem`
+     gains an `exercised` flag; both main-demo items read `NOT EXERCISED`
+     (never `MET`) whenever the lifecycle leg's own disposition is
+     `"unavailable"`, and all five of a not-exercised subject leg's items
+     read the same way, with the failure reason as evidence.
+
+  Every item has a mutation-confirmed test reproducing the operator's own
+  symptom before the fix: a raw exception (with a planted home path)
+  propagating uncaught through `cmd_demo`; the seeded orphan step raising
+  instead of reading as not-caught; a second `run_subject_demo` call
+  failing when handed a directory a simulated prior crash left non-empty
+  at the old fixed path; `SubjectRefused` exiting `2`; and both "vacuous
+  MET" items reading `MET` against a trivially-clean (nothing happened)
+  reap report and host diff.
+
 ### Added
 
 - **`tests/conftest.py`: no test can reach a real credential by default**

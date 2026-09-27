@@ -10,9 +10,11 @@ on these tests passing.
 
 from __future__ import annotations
 
+import argparse
 import json
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -589,3 +591,374 @@ def test_build_paste_back_leak_check_still_applies_to_the_subject_block() -> Non
     assert seeded_identity in text
     with pytest.raises(demo.PasteBackRefused):
         demo.print_paste_back(text)
+
+
+# ===================================================================
+# Issue #118: the operator's own live run found four defects, each
+# independent of the docker build failure that exposed them.
+# ===================================================================
+
+
+# --------------- item 1: no unhandled backend/acquisition failure ever
+# --------------- reaches the terminal, and nothing unscanned does either
+
+
+def test_run_subject_demo_reports_backend_unavailable_gracefully_never_raises(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Red case (issue #118, the most serious): an earlier version let
+    `BackendUnavailable` from `prepare()` propagate uncaught, and the
+    traceback printed the operator's own home directory and username.
+    `.down` (the fake docker CLI's own daemon-unreachable sentinel) makes
+    `prepare()` raise exactly that - `run_subject_demo` must return a
+    NOT-EXERCISED result instead, never raise."""
+    docker_state.mkdir(parents=True, exist_ok=True)
+    (docker_state / ".down").touch()
+    collection = _subject_collection(base, {"greet": "greet"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject())
+
+    result = demo.run_subject_demo(
+        subject_name="whatever", image="fake-image:1", docker_bin=_docker_bin(docker_state),
+        base=base / "work", timeout=5, checkout=collection,
+    )
+    assert result.not_exercised_reason is not None
+    assert "backend unavailable" in result.not_exercised_reason
+    items = demo._subject_acceptance_items(result)
+    assert all(not item.exercised and not item.met for item in items)
+
+
+def test_run_control_orphan_prepare_failure_is_not_caught_never_raises(
+    base: Path, docker_state: Path,
+) -> None:
+    """Red case (issue #118): the SAME `BackendUnavailable`-from-`prepare()`
+    shape, in `run_control`'s own seeded orphan step - it must read as a
+    seeded failure that was NOT caught (the control cannot certify a
+    mechanism it could not even seed), never raise a traceback."""
+    docker_state.mkdir(parents=True, exist_ok=True)
+    (docker_state / ".down").touch()
+    ok = demo.run_control(image="fake-image:1", docker_bin=_docker_bin(docker_state), base=base, timeout=5)
+    assert ok is False
+
+
+def test_describe_error_safely_scrubs_a_leaky_message() -> None:
+    seeded_identity = "/home/" + "exampleuser" + "/leaked"
+    exc = RuntimeError(f"could not clone https://example.com: {seeded_identity}")
+    described = demo.describe_error_safely(exc)
+    assert seeded_identity not in described
+    assert "RuntimeError" in described
+
+
+def test_describe_error_safely_keeps_a_clean_message() -> None:
+    exc = RuntimeError("no subject declaration at evals/subjects/whatever/subject.json")
+    described = demo.describe_error_safely(exc)
+    assert "no subject declaration" in described
+
+
+def test_cmd_demo_scrubs_an_unexpected_exception_never_prints_a_raw_traceback(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Red case (issue #118): the top-level CLI guard, exercised directly.
+    Remove the guard (revert `cmd_demo` to a bare call with no
+    `except Exception`) and this test fails with the planted home path
+    printed to stderr, or an uncaught exception escaping the test itself."""
+    from skillc import cli
+
+    seeded_identity = "/home/" + "exampleuser" + "/leaked"
+
+    def _boom(**kwargs: object) -> None:
+        raise RuntimeError(f"acquisition failed: could not clone https://x: {seeded_identity}")
+
+    monkeypatch.setattr(demo, "run_demo", _boom)
+    parser = cli.build_parser()
+    args = parser.parse_args(["demo"])
+
+    exit_code = cli.cmd_demo(args)
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert seeded_identity not in captured.out
+    assert seeded_identity not in captured.err
+    assert "RuntimeError" in captured.err
+
+
+def test_cmd_demo_paste_back_refusal_never_prints_the_finding_text(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Red case (issue #118 review): `PasteBackRefused`'s own message is
+    built from `leak.scan_text`'s findings, which NAME the leaked value
+    found - printing `str(exc)` for this specific exception would be the
+    exact leak `print_paste_back` exists to prevent, one level up."""
+    from skillc import cli
+
+    seeded_identity = "/home/" + "exampleuser" + "/leaked"
+
+    class _FakeResult:
+        paste_back = f"planted: {seeded_identity}\n"
+        ok = True
+
+    monkeypatch.setattr(demo, "run_demo", lambda **kwargs: _FakeResult())
+    parser = cli.build_parser()
+    args = parser.parse_args(["demo"])
+
+    exit_code = cli.cmd_demo(args)
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert seeded_identity not in captured.out
+    assert seeded_identity not in captured.err
+
+
+# --------------- item 2: no fixed scratch path
+
+
+def test_run_subject_demo_does_not_reuse_a_fixed_scratch_path(
+    base: Path, docker_state: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Red case (issue #118): `--subject` used to clone into a FIXED
+    `base / "subject-checkout"` path - a second run against the same `base`
+    (the operator's own scenario: the first crashed before cleanup) then
+    collided with the first's leftover directory. Two consecutive calls
+    with the SAME `base`, forcing the real auto-acquire branch (no explicit
+    `checkout=`), must both succeed - proving each gets its own fresh
+    `tempfile.mkdtemp`, never a name the other could already hold. True
+    concurrent safety follows from the same guarantee (`tempfile.mkdtemp`'s
+    own `O_EXCL`-based atomicity, a stdlib property this test does not need
+    to re-prove)."""
+    collection = _subject_collection(tmp_path, {"greet": "greet"})
+
+    def _fake_acquire(subject: materialize.Subject, into: Path, timeout: float = 300) -> Path:
+        shutil.copytree(collection, into, dirs_exist_ok=True)
+        return into
+
+    monkeypatch.setattr(demo, "acquire_subject_checkout", _fake_acquire)
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject())
+    client = _fake_codex(tmp_path, mode="normal")
+
+    for _ in range(2):
+        result = demo.run_subject_demo(
+            subject_name="whatever", image="fake-image:1", docker_bin=_docker_bin(docker_state),
+            base=base, timeout=5, client_argv=client,
+        )
+        assert result.not_exercised_reason is None
+        assert result.digest_status == "matched"
+
+
+def test_run_subject_demo_survives_a_crash_before_cleanup_on_the_prior_run(
+    base: Path, docker_state: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The operator's own exact sequence: a PRIOR run crashed hard enough
+    that its own `finally` cleanup never ran at all (a killed process, not
+    a caught exception - this function's own `finally` block is a courtesy
+    for the exceptions IT catches, and cannot help against that), leaving a
+    non-empty directory sitting at the OLD fixed scratch path,
+    `base / "subject-checkout"`. A run against the SAME `base` afterward
+    must never be handed that dirty directory to acquire into - it needs a
+    directory of its own, planted content or not. Isolates the
+    fixed-path defect specifically from this function's OWN cleanup (a
+    different, complementary fix): mutate `owned_checkout` back to the
+    fixed path with this test unchanged and the planted assertion inside
+    `_acquire` below fails, because the leftover directory this test
+    creates BEFORE calling `run_subject_demo` at all is exactly what gets
+    handed to it."""
+    leftover = base / "subject-checkout"
+    leftover.mkdir(parents=True)
+    (leftover / "partial-garbage-from-a-killed-process").write_text("never cleaned up")
+
+    collection = _subject_collection(tmp_path, {"greet": "greet"})
+
+    def _acquire(subject: materialize.Subject, into: Path, timeout: float = 300) -> Path:
+        assert not any(into.iterdir()), f"{into} was not empty - handed a directory an earlier run had already touched"
+        shutil.copytree(collection, into, dirs_exist_ok=True)
+        return into
+
+    monkeypatch.setattr(demo, "acquire_subject_checkout", _acquire)
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject())
+    client = _fake_codex(tmp_path, mode="normal")
+
+    result = demo.run_subject_demo(
+        subject_name="whatever", image="fake-image:1", docker_bin=_docker_bin(docker_state),
+        base=base, timeout=5, client_argv=client,
+    )
+    assert result.not_exercised_reason is None
+    # The leftover from the "prior crash" is untouched - this run never
+    # wrote into, or cleaned up, a directory that was never its own.
+    assert (leftover / "partial-garbage-from-a-killed-process").read_text() == "never cleaned up"
+
+
+def test_run_subject_demo_cleans_up_its_temp_dirs(
+    base: Path, docker_state: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The checkout and staging directories this function creates for
+    itself must not persist after it returns - neither on success nor on
+    the not-exercised path - or a long-running operator session would leak
+    a fresh directory per `--subject` invocation forever."""
+    collection = _subject_collection(tmp_path, {"greet": "greet"})
+    created: list[Path] = []
+    real_mkdtemp = tempfile.mkdtemp
+
+    def _tracking_mkdtemp(suffix: str | None = None, prefix: str | None = None, dir: str | None = None) -> str:
+        path = real_mkdtemp(suffix, prefix, dir)
+        created.append(Path(path))
+        return path
+
+    def _fake_acquire(subject: materialize.Subject, into: Path, timeout: float = 300) -> Path:
+        shutil.copytree(collection, into, dirs_exist_ok=True)
+        return into
+
+    monkeypatch.setattr(demo.tempfile, "mkdtemp", _tracking_mkdtemp)
+    monkeypatch.setattr(demo, "acquire_subject_checkout", _fake_acquire)
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject())
+    client = _fake_codex(tmp_path, mode="normal")
+
+    demo.run_subject_demo(
+        subject_name="whatever", image="fake-image:1", docker_bin=_docker_bin(docker_state),
+        base=base, timeout=5, client_argv=client,
+    )
+    assert created, "the tracked tempfile.mkdtemp was never called"
+    assert all(not p.exists() for p in created)
+
+
+# --------------- item 3: the exit-code contract
+
+
+def _demo_args(**overrides: object) -> argparse.Namespace:
+    from skillc import cli
+
+    parser = cli.build_parser()
+    args = parser.parse_args(["demo"])
+    for key, value in overrides.items():
+        setattr(args, key, value)
+    return args
+
+
+def test_cmd_demo_exits_0_on_full_success(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from skillc import cli
+
+    monkeypatch.setattr(demo, "DEFAULT_SUBJECT", "unused-in-tests")
+    args = _demo_args(image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base=str(base))
+    assert cli.cmd_demo(args) == 0
+
+
+def test_cmd_demo_exits_1_when_an_item_is_not_met(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from skillc import cli
+
+    monkeypatch.setattr(demo, "GOOD_CANDIDATE", demo.BAD_CANDIDATE)
+    args = _demo_args(image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base=str(base))
+    assert cli.cmd_demo(args) == 1
+
+
+def test_cmd_demo_exits_1_on_subject_refused_never_2(
+    base: Path, docker_state: Path,
+) -> None:
+    """Red case (issue #118's own exit-code fix): a refused subject used to
+    exit `2`, which the runbook reserves exclusively for a leak-check
+    refusal. `--subject does-not-exist` is a "could not run" failure -
+    exit `1`."""
+    from skillc import cli
+
+    args = _demo_args(
+        image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base=str(base),
+        subject="does-not-exist-at-all",
+    )
+    assert cli.cmd_demo(args) == 1
+
+
+def test_cmd_demo_exits_2_only_on_leak_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from skillc import cli
+
+    class _LeakyResult:
+        paste_back = "planted: " + "/home/" + "exampleuser" + "/leaked\n"
+        ok = True
+
+    monkeypatch.setattr(demo, "run_demo", lambda **kwargs: _LeakyResult())
+    args = _demo_args()
+    assert cli.cmd_demo(args) == 2
+
+
+def test_cmd_demo_control_exits_0_when_every_seeded_failure_caught(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from skillc import cli
+
+    monkeypatch.setattr(demo, "run_control", lambda **kwargs: True)
+    args = _demo_args(image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base=str(base), control=True)
+    assert cli.cmd_demo(args) == 0
+
+
+def test_cmd_demo_control_exits_1_when_a_seeded_failure_is_not_caught(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from skillc import cli
+
+    monkeypatch.setattr(demo, "run_control", lambda **kwargs: False)
+    args = _demo_args(image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base=str(base), control=True)
+    assert cli.cmd_demo(args) == 1
+
+
+# --------------- item 4: NOT EXERCISED, never a vacuous MET
+
+
+def test_acceptance_items_flags_cleanup_and_host_paths_not_exercised_when_prepare_never_succeeded() -> None:
+    """Red case (issue #118): with `disposition="unavailable"` (prepare()
+    itself failed), the reap report and host diff below are BOTH the
+    trivially-clean shape (`daemon_reachable=True`, no outcomes, nothing
+    changed) - the exact "vacuous MET" the operator's live run hit. Without
+    the `prepare_never_succeeded` guard, both would read MET."""
+    from skillc.verify import Graded
+
+    lifecycle_record: dict[str, object] = {"disposition": "unavailable"}
+    graded = Graded(status="INCONCLUSIVE", category="", detail="", criteria=[], containment={})
+    clean_reap = reap.ReapReport(daemon_reachable=True, outcomes=())
+    clean_host_diff = reap.HostPathDiff(changed=(), unresolved=())
+
+    items = demo._acceptance_items(lifecycle_record, graded, clean_reap, clean_host_diff, None)
+    cleanup_item = next(i for i in items if "cleanup sweep" in i.name)
+    host_item = next(i for i in items if "host paths unchanged" in i.name)
+    assert cleanup_item.exercised is False and cleanup_item.met is False
+    assert host_item.exercised is False and host_item.met is False
+
+
+def test_acceptance_items_exercises_cleanup_and_host_paths_when_prepare_did_succeed() -> None:
+    """The other half: a non-`"unavailable"` disposition (prepare() DID
+    succeed, whatever happened after) must NOT be forced NOT EXERCISED -
+    these items still report their own real, computed status."""
+    from skillc.verify import Graded
+
+    lifecycle_record: dict[str, object] = {"disposition": "captured"}
+    graded = Graded(status="PASS", category="", detail="", criteria=[], containment={})
+    clean_reap = reap.ReapReport(daemon_reachable=True, outcomes=())
+    clean_host_diff = reap.HostPathDiff(changed=(), unresolved=())
+
+    items = demo._acceptance_items(lifecycle_record, graded, clean_reap, clean_host_diff, "sha256:x")
+    cleanup_item = next(i for i in items if "cleanup sweep" in i.name)
+    host_item = next(i for i in items if "host paths unchanged" in i.name)
+    assert cleanup_item.exercised is True and cleanup_item.met is True
+    assert host_item.exercised is True and host_item.met is True
+
+
+def test_subject_acceptance_items_all_not_exercised_when_set() -> None:
+    result = _ok_subject_result(not_exercised_reason="backend unavailable: docker daemon unreachable")
+    items = demo._subject_acceptance_items(result)
+    assert len(items) == 5
+    assert all(not item.exercised and not item.met for item in items)
+    assert all("backend unavailable" in item.evidence for item in items)
+
+
+def test_run_demo_with_missing_daemon_reports_not_exercised_for_cleanup_and_host_paths(
+    base: Path, docker_state: Path,
+) -> None:
+    """Integration-level version of the two unit tests above, through the
+    real `run_demo` against the fake docker's own `.down` sentinel - the
+    operator's actual scenario (no image/daemon reachable at all)."""
+    docker_state.mkdir(parents=True, exist_ok=True)
+    (docker_state / ".down").touch()
+    result = demo.run_demo(image="fake-image:1", docker_bin=_docker_bin(docker_state), base=base, timeout=5)
+    assert result.ok is False
+    cleanup_item = next(i for i in demo._acceptance_items(
+        result.lifecycle_record, result.graded, result.reap_report, result.host_diff, result.image_digest,
+    ) if "cleanup sweep" in i.name)
+    assert cleanup_item.exercised is False
