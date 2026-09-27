@@ -24,6 +24,16 @@ and version plan.
   `tests/conftest.py` keeps every test away from a real credential, so it
   could never launch, and it passed on six `unavailable` attempts.
 
+  Cross-model review found two defects, both fixed here. First, the control
+  accepted any baseline that was not `selected`, even one never observed, or
+  one whose failed named canary hid an invocation. A baseline must now be
+  observed with no invocation, and an inconclusive attempt keeps the
+  invocations its transcript recorded. Second, the command printed raw
+  details that the report file's leak check had refused. The console output
+  is now redacted and leak-checked as a whole. Both are confirmed red on the
+  unfixed code. The live runs, the selection run and the detection control,
+  are recorded in `evals/selection-probe/evidence/README.md`.
+
 - **Every real-agent attempt now persists its observation as an
   `agent-observation` record** (Refs #106). `agent_trial.run_one_attempt`
   writes `observation-<attempt>.json` beside `lifecycle-<attempt>.json` on

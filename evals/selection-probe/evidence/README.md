@@ -46,28 +46,37 @@ collection.
 
 ## 2. Detection control
 
-- **When:** 17:20–17:22Z.
 - **Command:** `SKILLC_ALLOW_REAL_AGENT=1 skillc selection-probe
   --detection-control`, exit 0.
-- **Code:** branch commit `8229361`. That commit is where
-  [`detection-control.json`](../detection-control.json) was committed, and it
-  was pushed before the run started.
-- **Experiment:** `selection-probe-detection-control-a5be57db`.
+- **When:** 17:28–17:30Z.
+- **Code:** branch commit `ecee226`.
+- **Declaration:** [`detection-control.json`](../detection-control.json) was
+  committed in `8229361` and pushed before any control ran.
+- **Experiment:** `selection-probe-detection-control-15c54f4f`.
 - **Setup:** the intended-use case only. The canary instruction names
   `qa-test`, so this run tests detection; it is not a selection result.
 
 ```
 selection-probe-intended-use treatment: disposition=captured selection=selected task_success=True invoked=['qa-test'] (heuristic detection)
 selection-probe-intended-use baseline: disposition=inconclusive selection=unknown task_success=None invoked=[] (heuristic detection) - prompt_delivered=True, canary_satisfied=False - neither selection nor outcome is reported for an attempt the transcript did not confirm
-verdict: ok - control detected in treatment, absent in baseline
+verdict: ok - control detected in treatment; baseline observed with no invocation
 ```
 
 - **Treatment arm:** the skill was installed and named. The pipeline reported
   a real invocation of it, through the same client, adapter and recorded
   `skill_invocations` the selection run used.
-- **Baseline arm:** nothing was installed. With no skill to read, the named
-  canary cannot be satisfied, and the attempt reports no invocation. This
-  inconclusive shape was predeclared.
+- **Baseline arm:** nothing was installed. Its transcript was found and read,
+  and it shows no invocation of any skill. With no skill to read, the named
+  canary cannot be satisfied, so the attempt is inconclusive; this shape was
+  predeclared.
+- **Required by the control's verdict:** the baseline must be observed, not
+  merely "not selected". A baseline that never launched, or whose recorded
+  invocations the failed canary would have hidden, now fails the control.
+- **An earlier run under a weaker rule:** at 17:20Z, commit `8229361`,
+  experiment `…-a5be57db`. It gave the same arm results, and its baseline's
+  own observation record shows `files_found=1, skill_invocations=[]`. Its
+  verdict rule did not yet require that observation. Cross-model review
+  caught the gap, and the run above re-checks under the fixed rule.
 
 ## 3. What this does and does not show
 
