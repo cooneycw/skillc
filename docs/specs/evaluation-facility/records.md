@@ -1,7 +1,7 @@
 # Evaluation records, version 2
 
 - Status: Executable. `skillc check-records` refuses records and bundles this document rejects.
-- Date: 2026-09-26 (version 1: 2026-09-21, slice of #4 in #17; `attempt-lifecycle` added in #8)
+- Date: 2026-09-27 (version 1: 2026-09-21, slice of #4 in #17; `attempt-lifecycle` added in #8; `agent-observation` in #106)
 - Governing documents: [interfaces](interfaces.md), [protocol](protocol.md), [specification](spec.md)
 - Decision: [ADR 0001](../../decisions/0001-every-check-ships-a-redcase.md)
 
@@ -20,10 +20,12 @@ executable form** so that something can refuse a malformed instance:
 | Verified result | `kind: verified-result` | `assembler` (the controller's result assembler) |
 | Trial ledger (lifecycle, termination, cleanup) | `kind: attempt-lifecycle` | `controller` |
 | Evidence report (#12's own acceptance, not one of interfaces.md's original four) | `kind: pilot-report` | `assembler` |
+| Artifact and observation bundle: a real agent's transcript conclusions (#106) | `kind: agent-observation` | `controller` |
 
-`attempt-lifecycle` was added to version 2 by #8, and `pilot-report` by #12. Both
-are **additive**: no existing record changes meaning, and no v2 bundle existed
-outside the committed controls when either was added. The one stricter rule is
+`attempt-lifecycle` was added to version 2 by #8, `pilot-report` by #12, and
+`agent-observation` by #106. All three are **additive**: no existing record
+changes meaning. When `agent-observation` was added, no committed bundle held
+one and no rule requires one, so no existing bundle changes verdict. The one stricter rule is
 `attempt-accounting`, below.
 
 A record that passes validation is **well formed and internally consistent**, and a
@@ -282,6 +284,48 @@ Why a separate kind rather than a result: a v2 result cannot say "INCONCLUSIVE,
 nothing was captured". A graded result must cite graded digests, and INCONCLUSIVE
 may not be declared as a run state.
 
+## `agent-observation`
+
+Produced by the controller (`skillc/agent_trial.py`'s `run_one_attempt`), one per
+real-agent attempt, as `observation-<attempt>.json` beside
+`lifecycle-<attempt>.json`. It is written on every path, including an attempt
+blocked before launch. Before #106 these conclusions existed only in memory and a
+printed paste-back, so a misprinted field could not be recovered: #124 repeated
+two live runs for that reason.
+
+| Field | Content |
+|---|---|
+| `client` | whose transcript: `claude` or `codex` |
+| `status` | `observed`, `unknown` (the transcript hook failed) or `not-observed` (nothing ran to read) |
+| `reason` | required unless `observed` |
+| `transcript` | only when `observed`: transcript files found, `prompt_delivered` and its reason, `canary_satisfied` and its reason, `skill_invocations` and whether their detection is `structural` or `heuristic`, `skills_listed` and its source, `grading_eligible`, and a `census` of the transcript's format (client version, model, line types, unrecognized types, response items inspected) |
+| `credential` | `delivered`, `source`, `remaining_seconds_at_launch`, `refresh_observed_in_container`; null where not observed |
+| `grading` | `grader_supplied`, `eligible`, and either `blocked_reason` or `graded_status` with `category` and `criteria` (`id`, `mandatory`, `outcome` only) |
+
+The schema is **closed** at every level. An unknown field is refused, so no field
+exists that a transcript excerpt or credential value could be copied into. A new
+observation field has to be named in `records.py` before it can be recorded,
+which fails loudly. Before writing, the controller redacts the host paths it
+knows, then leak-checks the record twice: each string as it reads once parsed,
+and the serialized text. A record that fails is not written, and the attempt
+says `observation_record: refused-leak`.
+
+Three facts must agree inside the record:
+
+- **Eligibility:** `grading_eligible` is exactly `prompt_delivered AND canary_satisfied`.
+- **Grading account:** a supplied grader either graded or was blocked, never both
+  and never neither.
+- **Grade against criteria:** a `PASS` or `FAIL` agrees with what its own copied
+  criteria derive.
+
+**It is not a verdict.** The grade is an audit copy of what the driver's grader
+returned. It stands in for no `verified-result`, and `attempt-accounting` still
+counts only results. A captured agent attempt therefore still reads as "grading
+still owed" until a result is written for it. That gap predates this kind and is
+recorded in the Nit Store (#20). `agent-observation` is attempt-bound, so
+`ledger-binding` and `unique-ids` apply to it: one per attempt, under the trial
+the ledger planned.
+
 ## `verified-result`
 
 Produced by the assembler.
@@ -495,6 +539,7 @@ bundle cases as well, including against every record rule.
 | `derived-status` | record | a status copied rather than derived |
 | `verdict-tiers` | record | a `verification.verdicts` entry for a tier absent from `verification.tiers_enabled`; an enabled tier with no entry at all; an `UNAVAILABLE` verdict with no stated reason (#69) |
 | `attempt-lifecycle` | record | an unknown stop reason or disposition; a non-result without a reason; captured before a confirmed stop; no cleanup |
+| `agent-observation` | record | an unknown field; eligibility that disagrees with prompt delivery and the canary; a PASS its own criteria do not derive; both a grade and a blocked reason; an unobserved status without a reason (#106) |
 | `pilot-report` | record | empty attempts list; bad disposition or criterion outcome; no uncertainty; a negative intervention count; a cost/time split missing a key or whose parts do not sum to its total; a duplicate attempt ID (#12) |
 | `ledger-binding` | bundle | cross-trial receipt; stale receipt; attempt the ledger never issued; altered artifact; unplanned grader; a `skill-invocations` path the attempt's receipt never installed (#39); a trial declaring `case.observes_selection: true` whose manifest has no `skill-invocations` stream (#26/#39); a `pilot-report` that omits a scheduled attempt or names one the ledger never planned (#12) |
 | `unique-ids` | bundle | duplicate attempt ID; conflicting receipts; duplicate result ID |

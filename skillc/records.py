@@ -60,11 +60,22 @@ ATTEMPT_LIFECYCLE = "attempt-lifecycle"
 #: `TRIAL_LEDGER`, it is ONE record summarizing every attempt an experiment
 #: planned, produced after a run rather than before one.
 PILOT_REPORT = "pilot-report"
-KINDS = (INSTALLATION_RECEIPT, TRIAL_LEDGER, ARTIFACT_MANIFEST, VERIFIED_RESULT, ATTEMPT_LIFECYCLE, PILOT_REPORT)
+#: Additive in version 2 (#106): what the controller concluded from a REAL
+#: agent's transcript for one attempt - prompt delivery, the liveness canary,
+#: skill invocations, the credential's in-container fate, and whether the
+#: attempt was graded. Before it existed these facts lived only in memory and a
+#: printed paste-back, so a misprint was unrecoverable (#124 repeated two live
+#: runs). Not a verdict: a grade it carries is an audit copy, checked against
+#: its own criteria, never a substitute for a `verified-result`.
+AGENT_OBSERVATION = "agent-observation"
+KINDS = (
+    INSTALLATION_RECEIPT, TRIAL_LEDGER, ARTIFACT_MANIFEST, VERIFIED_RESULT, ATTEMPT_LIFECYCLE, PILOT_REPORT,
+    AGENT_OBSERVATION,
+)
 
 #: Records that belong to ONE attempt. The ledger is not one of them: it issues
 #: the attempt identifiers the others cite.
-ATTEMPT_BOUND = (INSTALLATION_RECEIPT, ARTIFACT_MANIFEST, VERIFIED_RESULT, ATTEMPT_LIFECYCLE)
+ATTEMPT_BOUND = (INSTALLATION_RECEIPT, ARTIFACT_MANIFEST, VERIFIED_RESULT, ATTEMPT_LIFECYCLE, AGENT_OBSERVATION)
 
 #: The one role allowed to produce each kind, from interfaces.md's producer column.
 #: The subject adapter writes the receipt, and the controller must have checked it.
@@ -75,6 +86,7 @@ AUTHORIZED_PRODUCER = {
     VERIFIED_RESULT: "assembler",
     ATTEMPT_LIFECYCLE: "controller",
     PILOT_REPORT: "assembler",
+    AGENT_OBSERVATION: "controller",
 }
 RECEIPT_CHECKER = "controller"
 
@@ -828,6 +840,156 @@ def attempt_lifecycle(record: Record) -> Iterator[str]:
         yield "no cleanup failures list; an empty list says none, a missing one says unknown"
 
 
+#: `agent-observation`'s schema is CLOSED at every level (#106): an unknown key
+#: is refused, not ignored. Every field below is a fact the controller derived,
+#: none is a place a credential or transcript text could be copied into - and a
+#: new observation field has to be named here before it can be recorded, which
+#: fails loudly (the finding names the key) rather than silently dropping it.
+AGENT_OBSERVATION_STATUSES = ("observed", "unknown", "not-observed")
+_AO_TOP = {"version", "kind", "producer", "attempt_id", "trial_id", "client", "status", "reason",
+           "transcript", "credential", "grading"}
+_AO_TRANSCRIPT = {"files_found", "prompt_delivered", "prompt_delivery_reason", "canary_satisfied",
+                  "canary_reason", "skill_invocations", "skill_invocation_detection", "skills_listed",
+                  "skills_listed_source", "grading_eligible", "census"}
+_AO_CENSUS = {"client_version", "model", "line_types", "unrecognized_types", "response_items_inspected",
+              "error"}
+_AO_CREDENTIAL = {"delivered", "source", "remaining_seconds_at_launch", "refresh_observed_in_container"}
+_AO_GRADING = {"grader_supplied", "eligible", "blocked_reason", "graded_status", "category", "criteria"}
+_AO_CRITERION = {"id", "mandatory", "outcome"}
+_AO_DETECTION = ("structural", "heuristic")
+#: The graded statuses that ARE verdicts. Only these must follow from the
+#: record's own criteria; the grader reports the others (a backend it could not
+#: reach, say) without criteria that derive to them.
+_AO_VERDICTS = ("PASS", "FAIL")
+
+
+def _closed(value: object, allowed: set[str], where: str) -> Iterator[str]:
+    if not isinstance(value, dict):
+        yield f"{where} is not an object"
+        return
+    for key in sorted(set(value) - allowed):
+        yield f"{where} carries unknown field {key!r}; the schema is closed - name it in records.py first"
+
+
+def agent_observation(record: Record) -> Iterator[str]:
+    """What the controller concluded from a real agent's transcript, for one
+    attempt (#106). Checked for SHAPE and for the three facts that must agree
+    with each other inside the record:
+
+      - `grading_eligible` is exactly `prompt_delivered AND canary_satisfied` -
+        the driver's own gate, so a record cannot claim an attempt was fit to
+        grade when its own observation says it was not;
+      - a grader that was supplied either graded (a status) or was blocked (a
+        reason), never both and never neither - an attempt that silently got
+        neither has lost its grading account;
+      - a PASS or FAIL copied here follows from the criteria copied with it
+        (`derive_status`), so the audit copy cannot say more than its evidence.
+
+    A `status` other than `observed` names its reason, and carries no transcript
+    conclusions: an attempt whose transcript was never read has none to report.
+    """
+    if record.parse_error is not None or record.kind != AGENT_OBSERVATION:
+        return
+    data = record.data
+    yield from _closed(data, _AO_TOP, "the record")
+    if not _nonempty_str(data.get("client")):
+        yield "no client; whose transcript was observed is unknown"
+    status = data.get("status")
+    if status not in AGENT_OBSERVATION_STATUSES:
+        yield f"status {status!r} is not one of {list(AGENT_OBSERVATION_STATUSES)}"
+    elif status != "observed" and not _nonempty_str(data.get("reason")):
+        yield f"status {status!r} gives no reason; an unobserved attempt must say why"
+
+    transcript = data.get("transcript")
+    eligible_observed: bool | None = None
+    if status == "observed":
+        if not isinstance(transcript, dict):
+            yield "status observed, but no transcript conclusions are recorded"
+        else:
+            yield from _closed(transcript, _AO_TRANSCRIPT, "transcript")
+            prompt, canary = transcript.get("prompt_delivered"), transcript.get("canary_satisfied")
+            eligible = transcript.get("grading_eligible")
+            for name, value in (("prompt_delivered", prompt), ("canary_satisfied", canary),
+                                ("grading_eligible", eligible)):
+                if not isinstance(value, bool):
+                    yield f"transcript.{name} is {value!r}, not a boolean"
+            if isinstance(prompt, bool) and isinstance(canary, bool) and isinstance(eligible, bool):
+                if eligible != (prompt and canary):
+                    yield (
+                        f"transcript.grading_eligible is {eligible}, but prompt_delivered={prompt} "
+                        f"and canary_satisfied={canary}; eligibility is exactly both"
+                    )
+                eligible_observed = eligible
+            files = transcript.get("files_found")
+            if not isinstance(files, int) or isinstance(files, bool) or files < 0:
+                yield f"transcript.files_found is {files!r}, not a non-negative integer"
+            invocations = transcript.get("skill_invocations")
+            if _str_list(invocations) is None:
+                yield "transcript.skill_invocations is not a list of skill names"
+            if transcript.get("skill_invocation_detection") not in _AO_DETECTION:
+                yield f"transcript.skill_invocation_detection is not one of {list(_AO_DETECTION)}"
+            listed = transcript.get("skills_listed")
+            if listed is not None and _str_list(listed) is None:
+                yield "transcript.skills_listed is neither null nor a list of skill names"
+            census = transcript.get("census")
+            if census is not None:
+                yield from _closed(census, _AO_CENSUS, "transcript.census")
+    elif transcript is not None:
+        yield f"status {status!r}, but transcript conclusions are recorded; nothing was observed to conclude from"
+
+    credential = data.get("credential")
+    yield from _closed(credential, _AO_CREDENTIAL, "credential")
+    if isinstance(credential, dict):
+        for name in ("delivered", "refresh_observed_in_container"):
+            if not (credential.get(name) is None or isinstance(credential.get(name), bool)):
+                yield f"credential.{name} is {credential.get(name)!r}, not a boolean or null"
+        remaining = credential.get("remaining_seconds_at_launch")
+        if remaining is not None and (not isinstance(remaining, int) or isinstance(remaining, bool) or remaining < 0):
+            yield f"credential.remaining_seconds_at_launch is {remaining!r}, not a non-negative integer or null"
+
+    grading = data.get("grading")
+    yield from _closed(grading, _AO_GRADING, "grading")
+    if not isinstance(grading, dict):
+        return
+    supplied, eligible = grading.get("grader_supplied"), grading.get("eligible")
+    blocked, graded = grading.get("blocked_reason"), grading.get("graded_status")
+    if not isinstance(supplied, bool):
+        yield "grading.grader_supplied is not a boolean"
+    if not isinstance(eligible, bool):
+        yield "grading.eligible is not a boolean"
+    elif eligible != (eligible_observed is True):
+        yield (
+            f"grading.eligible is {eligible}, but the transcript conclusions make it "
+            f"{eligible_observed is True}; an attempt is eligible only when observed prompt and canary both hold"
+        )
+    if supplied is True and (graded is None) == (blocked is None):
+        yield (
+            "a grader was supplied, so the attempt was either graded or blocked from grading - "
+            f"this record says graded_status={graded!r} and blocked_reason={blocked!r}"
+        )
+    if supplied is False and (graded is not None or blocked is not None):
+        yield "no grader was supplied, yet the record carries a grade or a blocked reason"
+    if blocked is not None and not _nonempty_str(blocked):
+        yield "grading.blocked_reason is present but empty"
+    if graded is not None:
+        if graded not in PROTOCOL_STATUSES:
+            yield f"grading.graded_status {graded!r} is not one of {list(PROTOCOL_STATUSES)}"
+        if eligible is not True:
+            yield "a graded status on an attempt that was not eligible for grading"
+        criteria = grading.get("criteria")
+        if not isinstance(criteria, list):
+            yield "a graded status with no criteria; the copy cannot be checked against its evidence"
+        else:
+            for index, criterion in enumerate(criteria):
+                yield from _closed(criterion, _AO_CRITERION, f"grading.criteria[{index}]")
+                if isinstance(criterion, dict) and criterion.get("outcome") not in CRITERION_OUTCOMES:
+                    yield f"grading.criteria[{index}] outcome {criterion.get('outcome')!r} is not one of {list(CRITERION_OUTCOMES)}"
+            if graded in _AO_VERDICTS:
+                derived = derive_status(Record(path=record.path, data={"criteria": criteria}))
+                if derived != graded:
+                    yield f"grading.graded_status is {graded}, but its own criteria derive {derived}"
+
+
 def _pilot_report_split(entry: dict[str, object], where: str, field_name: str) -> Iterator[str]:
     """One cost/time split (`cost_usd` or `time_seconds`): EXACTLY the four
     keys `PILOT_REPORT_SPLIT_KEYS`, each a non-negative number or the literal
@@ -1111,7 +1273,7 @@ def unique_ids(bundle: Bundle) -> Iterator[str]:
             for value, count in sorted(name.items(), key=str):
                 if count > 1:
                     yield f"ledger plans {what} {value!r} {count} times"
-    for kind in (INSTALLATION_RECEIPT, ARTIFACT_MANIFEST, ATTEMPT_LIFECYCLE):
+    for kind in (INSTALLATION_RECEIPT, ARTIFACT_MANIFEST, ATTEMPT_LIFECYCLE, AGENT_OBSERVATION):
         per_attempt = Counter(r.attempt_id for r in bundle.of_kind(kind) if r.attempt_id)
         for attempt, count in sorted(per_attempt.items()):
             if count > 1:

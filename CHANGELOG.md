@@ -10,6 +10,33 @@ and version plan.
 
 ### Added
 
+- **Every real-agent attempt now persists its observation as an
+  `agent-observation` record** (Refs #106). `agent_trial.run_one_attempt`
+  writes `observation-<attempt>.json` beside `lifecycle-<attempt>.json` on
+  every path: `observed`, `unknown` (the transcript hook failed), or
+  `not-observed` (blocked before launch). It holds:
+  - prompt delivery, the canary, skill invocations and listed skills;
+  - the transcript census;
+  - the credential's delivery, remaining life and in-container refresh;
+  - the grading account: eligible, blocked reason, or an audit copy of the
+    grade with its criteria.
+
+  Before this, these facts existed only in memory and a printed paste-back.
+  When a field misprinted, the value was unrecoverable, and #124 repeated two
+  live runs for that reason.
+
+  `skillc check-records` validates the new kind with the `agent-observation`
+  rule:
+  - the schema is closed;
+  - eligibility is exactly prompt AND canary;
+  - a supplied grader either graded or was blocked, never both or neither;
+  - a PASS or FAIL agrees with its own criteria.
+
+  It is attempt-bound, so `ledger-binding` and `unique-ids` cover it. The
+  record is redacted, then leak-checked (strings and serialized text); a
+  failing record is not written, and the attempt reports
+  `observation_record: refused-leak`. Controls: `controls/agent-observation/`.
+
 - **`skillc pilot-run` and `skillc pilot-report`: the first bounded matched
   pilot, run on its predeclared schedule** (Refs #12; one disclosed protocol
   deviation, the model - see `evals/matched-pilot/evidence/README.md`). `skillc/matched_pilot.py` reads

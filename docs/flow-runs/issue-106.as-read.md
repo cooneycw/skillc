@@ -5,10 +5,10 @@ The issue is the authority; read it. This copy exists so a later check can
 report that the source moved. It does not graduate.
 
 - Issue:        #106
-- Read at:      2026-09-27T12:22:46Z
-- updatedAt:    2026-09-27T10:34:26Z   (context only - moves on comments and labels)
-- Body digest:  e98beefcc4511dbc612f95903110d1d265c7af9341bcede457ccf76d63181cb5   (sha256 of the FULL body; the verdict keys on this)
-- Stored bytes: 2863 of 2863 (cap 16384)
+- Read at:      2026-09-27T14:16:07Z
+- updatedAt:    2026-09-27T14:00:03Z   (context only - moves on comments and labels)
+- Body digest:  225f8040b0cd7234705b3dce47c98a6882ec855869cac3f455d612d45744f84b   (sha256 of the FULL body; the verdict keys on this)
+- Stored bytes: 3645 of 3645 (cap 16384)
 
 ## Body as read
 Refs #10, #11, #26, #12. This is what every agent run is still waiting for.
@@ -48,4 +48,9 @@ Every failure path lands in the lifecycle record as BLOCKED or UNKNOWN with its 
 - [ ] **No real model call anywhere in the suite:** a structural test, as #96 did for the judge. A real run requires an explicit opt-in flag and is never the default.
 - [ ] **Leak check on the exported record and transcript,** including the credential-token class from #105.
 - [ ] Owed to the operator's live run, and stated so: a real client, a real login, the host login still working afterwards, and the real transcript format drift.
+
+
+## Folded in from the Nit Store (#20), 2026-09-27
+
+- [ ] **The agent run's observation is never persisted.** `agent_trial.run_one_attempt` returns `prompt_delivered`, `canary_satisfied`, `skill_invocations`, `skills_listed`, `credential_refresh_observed_in_container`, `grading_eligible` and `graded`/`grading_blocked_reason` only in memory. The kept store's `lifecycle-*.json` and journal hold none of them, so the printed paste-back is the only record. When it misprinted a field (#124), the real values were unrecoverable and two live runs had to be repeated. Persist the observation as an evidence file beside `lifecycle-*.json`, checked by `check-records`. This is step 8's "recording refresh_observed". (https://github.com/cooneycw/skillc/issues/20#issuecomment-5856161163)
 

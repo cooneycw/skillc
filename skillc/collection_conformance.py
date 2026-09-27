@@ -649,7 +649,10 @@ def build_collection_paste_back(result: CollectionAgentResult) -> str:
             f"leaked_owned_containers={len(diff.leaked) if diff and diff.comparable else None} "
             f"foreign_vanished={len(diff.foreign_vanished) if diff and diff.comparable else None}"
         ),
-        f"    store_kept={result.store_display} record_written={result.record_written}",
+        (
+            f"    store_kept={result.store_display} record_written={result.record_written} "
+            f"observation_record={record.get('observation_record')}"
+        ),
         "  [discovery]",
         (f"    discovery={dict(sorted((result.discovery or {}).items()))} (source=transcript skill_listing)"
          if result.discovery_reason is None

@@ -418,6 +418,7 @@ def test_paste_back_refresh_line_reads_a_real_driver_record(
     text = cc.build_collection_paste_back(result)
     assert "refresh_observed_in_container=False" in text
     assert "backend_teardown=confirmed" in text
+    assert "observation_record=written" in text  # persisted by the driver itself (#106)
     # The journal's own event says what happened; since #127 the record,
     # finalized after cleanup, agrees with it rather than reading "partial".
     assert result.workspace_cleaned == "removed"
