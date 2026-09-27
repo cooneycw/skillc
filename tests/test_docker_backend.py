@@ -318,6 +318,29 @@ def test_install_reports_discovery_canary_violated_when_nothing_is_declared(
     backend.destroy(handle)
 
 
+def test_install_accepts_raw_bytes_surface_values(
+    base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """Regression (#81): `verify.py`'s own probe-surface convention (#76)
+    declares files as raw `bytes`, never a host path - `install()` used to
+    silently skip every such entry (`_as_existing_path` correctly returns
+    `None` for bytes), so nothing was ever actually copied in, discovered
+    only when #81's demo command tried to grade through this backend for
+    real and every probe failed with "no such file". Fails on the pre-fix
+    code (installed == 0, discovery_canary VIOLATED, and the file is
+    genuinely absent from the container's own filesystem)."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000005b")
+    assert isinstance(handle, d._Handle)
+    readiness = backend.install(handle, {"probe.py": b"print('hello')\n"})
+    assert readiness["installed"] == 1
+    assert readiness["discovery_canary"] == "SATISFIED"
+    dest = tmp_path / "export"
+    backend.export(handle, dest)
+    assert (dest / "probe.py").read_bytes() == b"print('hello')\n"
+    backend.destroy(handle)
+
+
 def test_install_counts_a_non_path_surface_value_without_copying_it(
     base: Path, docker_state: Path,
 ) -> None:
@@ -543,6 +566,22 @@ def test_read_home_file_fails_on_a_dead_container(base: Path, docker_state: Path
         backend.read_home_file(handle, ".claude/.credentials.json")
 
 
+def test_execute_resolves_an_absolute_workspace_path_in_argv(base: Path, docker_state: Path) -> None:
+    """Regression (#81, in the fake CLI fixture itself): the fake's `cwd=`
+    change resolves a RELATIVE path, but does nothing for an absolute one -
+    `verify.py`'s own probe invocation convention passes an absolute path
+    (`/work/probe.py`), which failed with "No such file or directory"
+    against the pre-fix fake even though the file genuinely existed in the
+    container's own simulated filesystem. Fails on the pre-fix fixture."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000008c")
+    backend.install(handle, {"probe.py": b"print('ran via absolute path')\n"})
+    result = backend.execute(handle, [sys.executable, d.CONTAINER_WORKSPACE + "/probe.py"], Limits(timeout=5))
+    assert result.reason == "exited"
+    assert result.exit_code == 0
+    backend.destroy(handle)
+
+
 def test_execute_delivers_stdin_like_a_bare_host_process(base: Path, docker_state: Path) -> None:
     backend = _backend(base, docker_state)
     handle = backend.prepare("a-lc-000000000008")
@@ -556,6 +595,29 @@ def test_execute_delivers_stdin_like_a_bare_host_process(base: Path, docker_stat
     dest = docker_state.parent / "stdin-export"
     backend.export(handle, dest)
     assert (dest / "in.txt").read_bytes() == b"hello from the test"
+    backend.destroy(handle)
+
+
+def test_execute_writes_the_subjects_stdout_back_as_observations(
+    base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """Regression (#81): `verify.py`'s own documented convention (#76,
+    `_probe_via_backend`'s docstring) is that a probe-serving backend
+    captures the exec'd process's stdout to a file named `observations` at
+    the workspace root, so it survives `export()`. This backend threw the
+    exec'd process's stdout away entirely (`stdout=subprocess.DEVNULL`) until
+    #81's demo command tried to grade a real candidate through it and every
+    probe "produced no report" despite exiting 0 with a real report on its
+    own stdout. Fails on the pre-fix code (no `observations` file at all)."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000008b")
+    backend.install(handle, {})
+    result = backend.execute(handle, [sys.executable, "-c", "print('probe report text')"], Limits(timeout=5))
+    assert result.reason == "exited"
+    assert result.exit_code == 0
+    dest = tmp_path / "export"
+    backend.export(handle, dest)
+    assert (dest / "observations").read_text(encoding="utf-8").strip() == "probe report text"
     backend.destroy(handle)
 
 

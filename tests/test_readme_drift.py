@@ -29,6 +29,8 @@ FULL_COMMANDS_BLOCK = (
     "skillc materialize <subject>\n"
     "skillc rules\n"
     "skillc leak-check <path>\n"
+    "skillc exposure <surface>\n"
+    "skillc demo\n"
     "```\n"
     "<!-- commands:end -->\n"
 )
@@ -36,7 +38,9 @@ FULL_COMMANDS_BLOCK = (
 
 def test_real_commands_matches_the_actual_parser() -> None:
     real = rd.real_commands(build_parser())
-    assert real == {"check", "selftest", "check-records", "materialize", "exposure", "rules", "leak-check"}
+    assert real == {
+        "check", "selftest", "check-records", "materialize", "exposure", "rules", "leak-check", "demo",
+    }
 
 
 def test_bad_readme_omits_a_real_command() -> None:
@@ -52,7 +56,9 @@ def test_bad_readme_lists_a_command_that_does_not_exist() -> None:
 
 
 def test_good_readme_lists_exactly_the_real_commands() -> None:
-    real = {"check", "selftest", "check-records", "materialize", "rules", "leak-check"}
+    real = {
+        "check", "selftest", "check-records", "materialize", "exposure", "rules", "leak-check", "demo",
+    }
     assert rd.command_drift(FULL_COMMANDS_BLOCK, real) == []
 
 

@@ -182,6 +182,57 @@ collection) closes.
   outside any list, confirmed the guard caught it unprompted, then removed
   it and confirmed clean again - proving the OPEN-set claim, not just the
   AST scan's own logic (already proven).
+- **The operator demo command** (#81, Refs #10, #10 closes only on the
+  operator's own live run of this command, never on CI green): `skillc demo`
+  drives two independent, real-Docker-backed demonstrations through the
+  merged `DockerBackend` (#77) with no paid model call - a scripted-subject
+  lifecycle proof via `lifecycle.run_through_backend`, and a real grading run
+  via `verify.grade_files(..., backend=...)` against the already-certified
+  `evals/level1/slug-small-fix` task. It snapshots the fleet and a fixed set
+  of host paths before and after, reaps its own attempt(s), and reports the
+  four distinct outcomes (`reaped`/`already-absent`/`left-running`/`unknown`)
+  rather than collapsing them. The paste-back block it prints (skillc
+  version/commit/dirty, per-item acceptance evidence, the image digest that
+  actually ran) is run through `leak-check` before printing and refuses to
+  print if it finds anything. `skillc demo --control` runs four seeded
+  negative controls instead - a reply-only subject, a container deliberately
+  left running, a known-bad grading candidate, and a leaky paste-back - and
+  exits non-zero unless every one was caught. The transcript-based real-agent
+  canary check (`trial_bootstrap.check_canary`, #78) is deliberately not
+  wired into this command: a real `Write` tool result never echoes file
+  contents, so that check cannot pass against a genuine transcript without an
+  adapter that re-reads the file back, which is real follow-up work rather
+  than something this issue's scope covers - `demo.py` uses `lifecycle.py`'s
+  own file-content-based canary instead, which does not have that gap.
+  Building this surfaced two previously-undiscovered integration bugs
+  between already-merged #76 and #77: `DockerBackend.install()` silently
+  dropped `bytes`-valued surface entries (verify.py's own probe-surface
+  convention), and `DockerBackend.execute()` discarded the exec'd subject's
+  stdout entirely instead of writing it back as `observations`
+  (verify.py's documented convention for a probe-serving backend). Both are
+  fixed, each with a regression test confirmed to fail on the pre-fix code.
+  The fake docker CLI test fixture had a third, related bug of its own - it
+  only remapped a `cwd=`-relative argv path into the simulated container
+  filesystem, not an absolute one, and `verify.py`'s own probe-invocation
+  convention always passes an absolute path - also fixed and regression
+  tested. Cross-model review found the recorded image digest wasn't bound to
+  the image either backend actually ran: it used to resolve after both
+  demonstrations, so a mid-run rebuild or retag of the image tag would
+  silently record the replacement instead - now resolved once, before either
+  `DockerBackend` is created. The review also found two of `_acceptance_items`'s
+  three checks were blind: dropping `reap_ok`'s `not reap_report.unknown`
+  clause, or `host_ok`'s `not host_diff.unresolved` clause, or replacing
+  `digest_ok` outright with `True`, left every existing test green. Three new
+  tests, each confirmed red on its own mutation before being added, close all
+  three. An earlier draft of this command also carried a `--subject <name>`
+  flag materializing a second declared skill collection (#11) alongside the
+  lifecycle/grading proofs; pulled back out before merge on review - it only
+  materialized into a local snapshot rather than installing into the real
+  container, which would have misled the operator about what the flag
+  actually proved. The full version (real installation, in-container digest
+  re-verification, client-listing discovery) is real follow-up work for #11,
+  not silently dropped.
+
 - **The failure-path matrix and trustworthy cleanup** (#79, Refs #10):
   [`docs/specs/evaluation-facility/failure-matrix.md`](docs/specs/evaluation-facility/failure-matrix.md)
   states all ten of #10's addendum failure paths through the real driver
