@@ -197,8 +197,13 @@ def transcript_census(client: str, raw: str) -> dict[str, object]:
                 model = model or payload["model"]
             if top == "response_item":
                 response_items += 1
-                if payload_type not in CODEX_KNOWN_RESPONSE_ITEM_TYPES:
-                    unrecognized.add(str(payload_type))
+                # A non-string type (a list, an object) is malformed, not
+                # unhashable-and-fatal (codex review): the adapter skips such
+                # a row, and the census must not be the thing that crashes.
+                if not isinstance(payload_type, str):
+                    unrecognized.add(f"<non-string:{type(payload_type).__name__}>")
+                elif payload_type not in CODEX_KNOWN_RESPONSE_ITEM_TYPES:
+                    unrecognized.add(payload_type)
         else:
             if isinstance(obj.get("version"), str):
                 client_version = client_version or obj["version"]
@@ -378,7 +383,10 @@ def _make_observe_before_teardown(
         else:
             (_, raw), = matches.items()
             text = raw.decode("utf-8", errors="replace")
-            census = transcript_census(spec.name, text)
+            try:
+                census = transcript_census(spec.name, text)
+            except Exception as exc:  # noqa: BLE001 - the census is context; it must never erase the observation
+                census = {**census, "transcript_census_error": f"{type(exc).__name__}: {exc}"}
             events = spec.parse_transcript(text)
             prompt_delivered = True
             prompt_reason = None

@@ -926,3 +926,15 @@ def test_census_with_no_response_items_is_not_assessed(raw: str) -> None:
     census = at.transcript_census("codex", raw)
     assert census["transcript_response_items_inspected"] == 0
     assert census["transcript_unrecognized_types"] is None
+
+
+@pytest.mark.parametrize("bad_type", [[], {}])
+def test_census_names_a_non_string_response_item_type_instead_of_crashing(bad_type: object) -> None:
+    """Codex review pass 2, red on the first fix: an unhashable payload type
+    raised TypeError, and the observation hook's catch-all then replaced the
+    WHOLE observation - prompt, canary, credential - with status=unknown."""
+    raw = (_CODEX_FIXTURES / "live-canary.jsonl").read_text() + json.dumps(
+        {"type": "response_item", "payload": {"type": bad_type}},
+    ) + "\n"
+    census = at.transcript_census("codex", raw)
+    assert census["transcript_unrecognized_types"] == [f"<non-string:{type(bad_type).__name__}>"]
