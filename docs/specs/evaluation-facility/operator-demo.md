@@ -268,10 +268,13 @@ acceptance:
   [MET|NOT MET|NOT EXERCISED] cleanup sweep confirms no owned container left running - reap outcomes=[...]
   [MET|NOT MET|NOT EXERCISED] declared host paths unchanged - changed=[...], unresolved=[...]
   [MET|NOT MET] image digest recorded - digest=<...>
+  [MET|NOT MET|NOT EXERCISED] no container leaked by this run - leaked by this run=[...]
 
 cleanup (reap outcomes, four possible values: reaped/already-absent/left-running/unknown):
-  <attempt_id>: <outcome>
+  <attempt_id>: <outcome>      (the lifecycle attempt, then the grading probe's attempt)
   daemon_reachable=<bool>
+
+[fleet observations (not attributed to this run, never a failure): <N> new skillc-owned container(s), <M> foreign container(s) vanished]
 
 subject: <name> revision=<pinned sha>
   installed: <N> skill(s), <M> file(s)
@@ -282,6 +285,21 @@ subject: <name> revision=<pinned sha>
     <attempt_id>: <outcome>
     daemon_reachable=<bool>
 ```
+
+Three lines above changed under issue #122 (folded in from the nit store):
+
+- **The cleanup sweep covers the grading probe too.** It used to sweep only
+  the lifecycle attempt, so `cleanup ... MET` covered a narrower population
+  than it read as. `verify.grade_files` now reports the probe's attempt id
+  before its container exists.
+- **The fleet line is always present.** When the daemon could not be listed
+  before or after, it reads `NOT EXERCISED` - it is never left out, which
+  used to let the demo pass without it. Only a new container named for one
+  of THIS run's own attempts can make it `NOT MET`.
+- **A neighbour's change is an observation, not a failure.** Another run's
+  new container, or a foreign container vanishing, is counted on the
+  optional `fleet observations` line. Counts only: a foreign container's
+  name is the operator's own data and is never printed.
 
 When acquisition or `prepare()` never even reached the container step
 (issue #118), the `subject:` block instead reads:
@@ -337,11 +355,14 @@ by editing the block before pasting it back.
 skillc demo --control
 ```
 
-Runs four seeded, known-bad scenarios and requires every one to be caught -
+Runs six seeded, known-bad scenarios and requires every one to be caught -
 the OTHER verdict from the success path, on purpose:
 
-1. **A reply-only subject** that never touches the liveness canary - the
-   driver must report it as something other than `captured`.
+1. **A reply-only subject** that never touches the liveness canary. Caught
+   only when the subject genuinely ran (a confirmed stop, exit code 0) and
+   the attempt is `inconclusive` because the canary was never touched - a
+   launch failure or a timeout never exercised the canary, and no longer
+   counts (#122).
 2. **A container deliberately left running** - `prepare()` is called and
    `destroy()`/`confirm_absent()` deliberately never is, standing in for a
    crashed controller. The independent reap sweep (#79) must find and remove
@@ -350,14 +371,74 @@ the OTHER verdict from the success path, on purpose:
    `wrong/` variants) - grading must report `FAIL`, not `PASS`.
 4. **A leaky paste-back** - a planted host-identity value must be refused by
    the same leak-check the real paste-back block goes through, never printed.
+5. **A timeout** (#122) - an attempt whose command sleeps 30s against a 3s
+   limit, through the real driver. Caught only when the stop reason is
+   `timeout`, `confirm_stopped` confirmed the stop from the daemon's own
+   `docker inspect`, the disposition is `inconclusive` (a lifecycle status,
+   never a grading `FAIL` charged to the subject), and the reap sweep finds
+   nothing left for the attempt.
+6. **An operator cancellation** (#122) - `--control` starts a second
+   `skillc demo` process (a hidden `--cancel-target` mode) whose exec sleeps
+   60s. It waits until that subject has written a marker file inside the
+   RUNNING container (read back with a second `docker exec`), which is the
+   evidence the exec is in flight, and only then sends a real SIGINT to the
+   child's whole process group, as Ctrl-C in a terminal does. Beforehand it
+   starts a FOREIGN skillc-owned container that the child never recorded.
+   Caught only when the child prints the fixed interrupt line and exits `1`,
+   its own cleanup reports its attempt `reaped` or `already-absent`, an
+   independent reap afterward finds it `already-absent`, the foreign
+   container is still running, and its own removal of the foreign container
+   is confirmed. An exec never observed live gets no SIGINT: the child is
+   killed and the seed reads `NOT CAUGHT`. The child
+   normally reports `already-absent`: the driver's own teardown removes the
+   container before the interrupt handler sweeps, and the independent reap is
+   what shows nothing was left. The foreign container is removed afterward.
 
-`--control` exits `0` only if all four were caught, and non-zero the moment
-any one was not - a `--control` run that reports success no matter what it
-seeds would be worse than not having a control at all, so
-`tests/test_demo.py` includes its own committed negative controls on
-`run_control()` itself: breaking either the grading-candidate check or the
-orphan-reap check individually flips the overall verdict to `False`, proving
-neither is decorative.
+`--control` prints its own leak-checked paste-back block, one line per seed:
+
+```
+skillc operator demo --control - paste-back block
+skillc_version=... source_commit=... dirty=False
+image=skillc-trial:latest image_digest=sha256:...
+
+seeded failures (each must be CAUGHT for --control to pass):
+  [CAUGHT] reply-only client never touches the canary - lifecycle disposition=inconclusive stop reason=exited exit_code=0 canary_untouched=True
+  [CAUGHT] container left running is found by the reap sweep - reap outcome=reaped
+  [CAUGHT] known-bad grading candidate FAILs - grading status=FAIL
+  [CAUGHT] leaky paste-back block is refused - the planted block was refused and not printed
+  [CAUGHT] timeout: an exec past its limit is stopped, confirmed and cleaned up - limit=3.0s sleep=30.0s stop reason=timeout confirmed=True ...
+  [CAUGHT] operator cancellation: a real SIGINT mid-exec is handled and scoped to this run - interrupt_line=present exit=1 ...
+```
+
+then `skillc: --control - every seeded failure was caught`. It exits `0` only
+if all six were caught, `1` the moment any one was not, and `2` if its own
+block fails the leak-check. The whole run takes well under a minute on a warm
+daemon; seed 5 alone waits out its 3s limit.
+
+A `--control` run that reports success no matter what it seeds would be worse
+than not having a control at all, so `tests/test_demo.py` carries committed
+negative controls on the controls themselves:
+
+- breaking the grading-candidate check or the orphan-reap check individually
+  flips the overall verdict to `False`;
+- disabling timeout enforcement (`execute()` handed a limit longer than the
+  sleep) makes the timeout seed read `NOT CAUGHT` (`stop reason=exited`);
+- an unscoped interrupt sweep
+  (`tests/fixtures/demo-control/unscoped_interrupt_child.py`, #118's
+  pre-fix host-global behaviour) makes the cancellation seed read `NOT
+  CAUGHT`, because the foreign container is gone;
+- a child that never starts its exec, or whose exec never marks itself live
+  (`tests/fixtures/demo-control/never_live_child.py`), is `NOT CAUGHT` after
+  a bounded wait, with no SIGINT sent;
+- an unconfirmed removal of the foreign container is `NOT CAUGHT`;
+- a reply-only subject that fails to run at all (exit 127) is `NOT CAUGHT`;
+- interrupting `--control` itself mid-seed kills the child and leaves its
+  attempt id where the scoped sweep can reach it.
+
+Those tests run against the fake `docker` CLI. Seeds 5 and 6 exist because
+the fake cannot show how a real daemon enforces a kill or delivers a signal
+to a live exec session, so #122 closes only on the operator's own run of this
+command against a real daemon.
 
 ## What is owed to the operator's live run
 

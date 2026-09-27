@@ -183,6 +183,12 @@ using concurrently) to keep that gap small; establishing causation under
 real concurrency needs an isolated test daemon or a controlled execution
 window, which is a separate piece of work from this comparison.
 
+`skillc demo` applies that rule to its own verdict (issue #122): only a new
+container named for one of the run's own recorded attempt ids fails its
+`no container leaked by this run` item. Every other change is counted as an
+unattributed observation and never fails the run, and an incomparable pair
+reads `NOT EXERCISED` rather than being left out.
+
 Similarly, **identity here is by container NAME, not ID** (cross-model
 review, MEDIUM) - unlike `reap()` above, which acts on what it finds and
 therefore needs ID identity to be safe. A container removed and replaced by
