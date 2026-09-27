@@ -308,44 +308,6 @@ def reap(
     return ReapReport(daemon_reachable=daemon_reachable, outcomes=tuple(outcomes))
 
 
-def reap_all_owned(
-    docker_bin: Sequence[str], env: Mapping[str, str] | None = None, timeout: float = DAEMON_TIMEOUT,
-) -> ReapReport:
-    """Remove EVERY container carrying skillc's own `OWNER_LABEL`, regardless
-    of which attempt id it belongs to - `reap()`'s broader, best-effort
-    sibling, for exactly the case that function cannot serve: a caller
-    interrupted (issue #118's own `KeyboardInterrupt` handling in `demo.py`)
-    before it ever learned which specific attempt ids were in flight, so
-    there is no `attempt_ids` list to pass `reap()` at all. Each
-    `ReapOutcome`'s own `attempt_id` field holds a CONTAINER ID here, not an
-    attempt id - the one identifier available before anything else is known
-    about what is being removed. Same act-then-confirm-by-ID discipline as
-    `reap()`; `daemon_reachable=False` and empty outcomes when the daemon
-    cannot even be listed, never a guessed clean sweep."""
-    label_filters = [(OWNER_LABEL_KEY, OWNER_LABEL_VALUE)]
-    ids = _list_ids(docker_bin, env, timeout, label_filters)
-    if ids is None:
-        return ReapReport(daemon_reachable=False, outcomes=())
-    if not ids:
-        return ReapReport(daemon_reachable=True, outcomes=())
-    for container_id in ids:
-        try:
-            subprocess.run(
-                [*docker_bin, "rm", "-f", container_id],
-                capture_output=True, env=env, check=False, timeout=timeout,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            pass  # best-effort; the follow-up list below is what actually confirms it
-    still_there = _list_ids(docker_bin, env, timeout, label_filters)
-    if still_there is None:
-        return ReapReport(daemon_reachable=False, outcomes=tuple(ReapOutcome(cid, "unknown") for cid in ids))
-    outcomes = tuple(
-        ReapOutcome(cid, "left-running" if cid in still_there else "reaped")
-        for cid in ids
-    )
-    return ReapReport(daemon_reachable=True, outcomes=outcomes)
-
-
 # --------------------------------------------------- declared host paths (#79)
 
 #: A sentinel for "this path exists as a regular file but could not be read"

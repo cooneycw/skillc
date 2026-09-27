@@ -37,8 +37,8 @@ def _docker_bin(state_dir: Path) -> list[str]:
 def _run_owned_container(state_dir: Path, name: str, attempt_id: str) -> None:
     """A container the fake docker CLI reports as skillc-owned, carrying
     `attempt_id`'s own label - the same shape `tests/test_reap.py`'s own
-    `_run`/`_owned_labels` build, reused here for the `reap_all_owned`
-    best-effort-cleanup test rather than duplicated as a second fixture."""
+    `_run`/`_owned_labels` build, reused here for the interrupt-sweep
+    best-effort-cleanup tests rather than duplicated as a second fixture."""
     from skillc.docker_backend import ATTEMPT_LABEL_KEY, OWNER_LABEL_KEY, OWNER_LABEL_VALUE
 
     argv = [*_docker_bin(state_dir), "run", "--rm", "-d", "--name", name]
@@ -1030,6 +1030,10 @@ def test_cmd_demo_keyboard_interrupt_from_run_demo_never_prints_a_traceback(
     assert exit_code == 1
     assert "Traceback" not in captured.err
     assert "interrupted" in captured.err
+    # Nothing was recorded before the interrupt (the mock never touched
+    # `recorded_attempt_ids`), so the scoped sweep must say so rather than
+    # calling `reap.reap()` with an empty list (which raises `ValueError`).
+    assert "nothing to sweep" in captured.err
 
 
 def test_cmd_demo_keyboard_interrupt_from_run_control_never_prints_a_traceback(
@@ -1052,16 +1056,30 @@ def test_cmd_demo_keyboard_interrupt_from_run_control_never_prints_a_traceback(
     assert "interrupted" in captured.err
 
 
-def test_cmd_demo_keyboard_interrupt_runs_a_best_effort_cleanup_sweep(
+def test_cmd_demo_keyboard_interrupt_sweeps_only_this_runs_recorded_attempt_ids(
     docker_state: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """The best-effort reap sweep actually runs and reports a real outcome -
-    not merely a fixed line claiming it did."""
+    """Red case (issue #118, second review): the first fix's cleanup sweep
+    was `reap.reap_all_owned()` - host-global, removing every skillc-owned
+    container regardless of which run started it. Reproduced for real under a
+    genuine SIGINT: it reaped a FOREIGN container from an unrelated attempt.
+    Two owned containers exist here - one carrying an attempt id THIS run
+    recorded before the interrupt, one carrying a different, foreign attempt
+    id it never saw. After the interrupt, only the recorded one may be
+    reaped; the foreign one must survive untouched. This fails on the
+    `reap_all_owned()` version: swap the fix's `reap.reap(docker_bin,
+    recorded_attempt_ids, ...)` call back to `reap.reap_all_owned(docker_bin,
+    ...)` and the foreign container is gone too, since that sweep only checks
+    skillc's OWNER label, never a specific attempt id."""
     from skillc import cli
 
-    _run_owned_container(docker_state, "att-1-container", "att-1")
+    _run_owned_container(docker_state, "ours-container", "att-ours")
+    _run_owned_container(docker_state, "foreign-container", "att-foreign")
 
     def _interrupted(**kwargs: object) -> None:
+        recorded = kwargs["recorded_attempt_ids"]
+        assert isinstance(recorded, list)
+        recorded.append("att-ours")  # simulates run_demo having recorded its own attempt id before the interrupt
         raise KeyboardInterrupt
 
     monkeypatch.setattr(demo, "run_demo", _interrupted)
@@ -1072,6 +1090,19 @@ def test_cmd_demo_keyboard_interrupt_runs_a_best_effort_cleanup_sweep(
     assert exit_code == 1
     assert "best-effort cleanup" in captured.err
     assert "reaped" in captured.err
+
+    docker_bin = _docker_bin(docker_state)
+    foreign_ps = subprocess.run(
+        [*docker_bin, "ps", "-a", "--filter", "name=foreign-container", "--format", "{{.Names}}"],
+        capture_output=True, text=True, check=False,
+    )
+    assert "foreign-container" in foreign_ps.stdout  # the foreign attempt's container must survive
+
+    ours_ps = subprocess.run(
+        [*docker_bin, "ps", "-a", "--filter", "name=ours-container", "--format", "{{.Names}}"],
+        capture_output=True, text=True, check=False,
+    )
+    assert "ours-container" not in ours_ps.stdout  # this run's own attempt's container must be gone
 
 
 # --------------- item 4: NOT EXERCISED, never a vacuous MET

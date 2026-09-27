@@ -204,12 +204,21 @@ _LIFECYCLE_SUBJECT = (
 )
 
 
-def run_lifecycle_demo(backend: dbe.DockerBackend, base: Path) -> dict[str, object]:
+def run_lifecycle_demo(
+    backend: dbe.DockerBackend, base: Path, *, recorded_attempt_ids: list[str] | None = None,
+) -> dict[str, object]:
     """One attempt, through the REAL driver (`lifecycle.run_through_backend`),
     against `backend`. Returns the same lifecycle record shape that driver
     always returns - `record["disposition"]` is `"captured"` on a genuine
     success, through a real daemon, with liveness proven by the canary file's
-    content (never a claim from an exit code alone)."""
+    content (never a claim from an exit code alone).
+
+    `recorded_attempt_ids`, when given, gets this attempt's id appended BEFORE
+    the backend ever touches it - so a caller holding that same list already
+    knows this id if a `KeyboardInterrupt` lands anywhere in
+    `lifecycle.run_through_backend` below (issue #118 review: a Ctrl-C sweep
+    scoped to attempt ids, never a host-global one, needs the id recorded
+    before the risk starts, not after it returns)."""
     store = trial.open_store(base / "store", forbidden=[])
     spec: dict[str, object] = {
         "experiment": "demo",
@@ -223,6 +232,8 @@ def run_lifecycle_demo(backend: dbe.DockerBackend, base: Path) -> dict[str, obje
     experiment = trial.plan(spec, store)
     [(_trial, attempt)] = list(experiment.attempts())
     attempt_id = str(attempt["attempt_id"])
+    if recorded_attempt_ids is not None:
+        recorded_attempt_ids.append(attempt_id)
     argv = [verify.PROBE_INTERPRETER, "-c", _LIFECYCLE_SUBJECT]
     record = lifecycle.run_through_backend(
         backend, experiment, attempt_id, argv, {"demo": "x"}, Limits(timeout=30), base,
@@ -416,6 +427,7 @@ def _not_exercised_subject_result(subject_name: str, revision: str, reason: str)
 def run_subject_demo(
     *, subject_name: str, image: str, docker_bin: Sequence[str], base: Path, timeout: float = 30,
     checkout: Path | None = None, client_argv: list[str] | None = None,
+    recorded_attempt_ids: list[str] | None = None,
 ) -> SubjectResult:
     """The `--subject` leg: install the declared collection into a REAL
     container's home, re-read its digests back from the container, and
@@ -488,6 +500,8 @@ def run_subject_demo(
         # single run's own lifecycle/grading attempt ids, which already carry
         # their own uniqueness) must never collide on one container name.
         attempt_id = f"subject-{subject_name}-{secrets.token_hex(4)}"
+        if recorded_attempt_ids is not None:
+            recorded_attempt_ids.append(attempt_id)
         try:
             handle = backend.prepare(attempt_id)
         except dbe.BackendUnavailable as exc:
@@ -769,6 +783,7 @@ def run_demo(
     *, image: str, docker_bin: Sequence[str], base: Path, timeout: float = 30,
     subject_name: str | None = None, subject_checkout: Path | None = None,
     subject_client: list[str] | None = None,
+    recorded_attempt_ids: list[str] | None = None,
 ) -> DemoResult:
     """The command's own normal-mode run: the success path, end to end,
     against a real daemon. Two SEPARATE `DockerBackend` instances are used -
@@ -784,7 +799,19 @@ def run_demo(
     observing the client's own discovery of it. `None` (no `--subject` on
     the CLI) runs exactly the two-leg demo #97 shipped, unchanged - a flag
     that changes nothing when omitted, per the same discipline #97 itself
-    was held to."""
+    was held to.
+
+    `recorded_attempt_ids`, when given, is threaded into `run_lifecycle_demo`
+    and `run_subject_demo` so the caller's own list is populated with each
+    attempt id the instant it exists, before any backend call that could hang
+    - `cmd_demo`'s `KeyboardInterrupt` handler reads it to scope its
+    best-effort cleanup to exactly this run's own containers (issue #118
+    review: a host-global sweep reaped a foreign run's container under a real
+    interrupt). The grading demo's own internal probe attempt id is not
+    threaded through - `verify.grade_files` does not expose it - so an
+    interrupt during grading alone leaves nothing recorded to sweep; that is
+    the accepted, narrower gap this fix leaves in place rather than widening
+    `verify.py`'s own API for it."""
     env = None  # inherit the operator's own ambient environment, like a plain `docker` invocation
     host_paths = [REPO_ROOT / p for p in HOST_PATHS_TO_WATCH]
     host_before = reap.snapshot_host_paths(host_paths)
@@ -799,7 +826,7 @@ def run_demo(
     lifecycle_backend = dbe.DockerBackend(image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=timeout)
     grading_backend = dbe.DockerBackend(image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=timeout)
 
-    lifecycle_record = run_lifecycle_demo(lifecycle_backend, base)
+    lifecycle_record = run_lifecycle_demo(lifecycle_backend, base, recorded_attempt_ids=recorded_attempt_ids)
     graded = run_grading_demo(grading_backend, GOOD_CANDIDATE, base)
 
     subject_result: SubjectResult | None = None
@@ -807,6 +834,7 @@ def run_demo(
         subject_result = run_subject_demo(
             subject_name=subject_name, image=image, docker_bin=docker_bin, base=base, timeout=timeout,
             checkout=subject_checkout, client_argv=subject_client,
+            recorded_attempt_ids=recorded_attempt_ids,
         )
 
     attempt_ids = [str(lifecycle_record["attempt_id"])]
@@ -830,7 +858,10 @@ def run_demo(
     return DemoResult(ok, paste_back, lifecycle_record, graded, reap_report, host_diff, image_digest, subject_result)
 
 
-def run_control(*, image: str, docker_bin: Sequence[str], base: Path, timeout: float = 30) -> bool:
+def run_control(
+    *, image: str, docker_bin: Sequence[str], base: Path, timeout: float = 30,
+    recorded_attempt_ids: list[str] | None = None,
+) -> bool:
     """Runs the seeded negative controls and returns True only if EVERY one
     was actually caught - never that everything came back clean, which would
     be the wrong verdict for a deliberately broken run.
@@ -869,6 +900,8 @@ def run_control(*, image: str, docker_bin: Sequence[str], base: Path, timeout: f
     experiment = trial.plan(spec, store)
     [(_t, attempt)] = list(experiment.attempts())
     attempt_id = str(attempt["attempt_id"])
+    if recorded_attempt_ids is not None:
+        recorded_attempt_ids.append(attempt_id)
     reply_only_argv = [verify.PROBE_INTERPRETER, "-c", "pathlib_unused = 1"]  # does nothing; never touches the canary
     record = lifecycle.run_through_backend(
         backend, experiment, attempt_id, reply_only_argv, {"demo": "x"}, Limits(timeout=30), base,
@@ -884,6 +917,8 @@ def run_control(*, image: str, docker_bin: Sequence[str], base: Path, timeout: f
     # exactly like any other seeded failure this function fails to catch.
     orphan_backend = dbe.DockerBackend(image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=timeout)
     orphan_attempt_id = "control-orphan-000000000001"
+    if recorded_attempt_ids is not None:
+        recorded_attempt_ids.append(orphan_attempt_id)
     try:
         orphan_backend.prepare(orphan_attempt_id)  # note: never destroy()'d - that is the seeded failure
     except dbe.BackendUnavailable:

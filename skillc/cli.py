@@ -699,16 +699,29 @@ def cmd_demo(args: argparse.Namespace) -> int:
     otherwise come back through that one specific route, via Python's own
     default traceback for an uncaught `KeyboardInterrupt`, whose frames name
     the installed `skillc` paths (usually under the operator's home in a
-    `uv`/venv layout)."""
+    `uv`/venv layout).
+
+    THE INTERRUPT SWEEP IS SCOPED TO THIS RUN'S OWN ATTEMPT IDS, NEVER
+    HOST-GLOBAL (issue #118 review, second pass): an earlier version called a
+    `reap_all_owned()` that removed every skillc-owned container on the
+    daemon regardless of which run started it - reproduced for real under a
+    genuine SIGINT, where it reaped a foreign container from another attempt
+    entirely. `recorded_attempt_ids` is built here, before either `run_demo`
+    or `run_control` is called, and handed to them so each records its own
+    attempt id the instant it exists (see `demo.run_demo`'s own docstring) -
+    so if this command has recorded nothing yet when the interrupt lands, it
+    sweeps nothing, rather than guessing at what else might be this run's."""
     from . import demo
 
     docker_bin = tuple(args.docker_bin.split()) if args.docker_bin else ("docker",)
     base = Path(args.base) if args.base else Path(tempfile.gettempdir())
+    recorded_attempt_ids: list[str] = []
 
     try:
         if args.control:
             ok = demo.run_control(
                 image=args.image or demo.DEFAULT_IMAGE, docker_bin=docker_bin, base=base, timeout=args.timeout,
+                recorded_attempt_ids=recorded_attempt_ids,
             )
             if ok:
                 print("skillc: --control - every seeded failure was caught")
@@ -721,7 +734,7 @@ def cmd_demo(args: argparse.Namespace) -> int:
             subject_name = args.subject or demo.DEFAULT_SUBJECT
         result = demo.run_demo(
             image=args.image or demo.DEFAULT_IMAGE, docker_bin=docker_bin, base=base, timeout=args.timeout,
-            subject_name=subject_name,
+            subject_name=subject_name, recorded_attempt_ids=recorded_attempt_ids,
         )
         demo.print_paste_back(result.paste_back)
         return 0 if result.ok else 1
@@ -737,17 +750,20 @@ def cmd_demo(args: argparse.Namespace) -> int:
         return 2
     except KeyboardInterrupt:
         # A fixed line, no exception text at all - never anything to scrub,
-        # by construction, since KeyboardInterrupt carries none. A
-        # best-effort, short-bounded cleanup sweep follows: never by
-        # attempt_ids (this command may have been interrupted before it
-        # ever learned which ones were in flight at all).
+        # by construction, since KeyboardInterrupt carries none.
         print(
             "skillc: demo interrupted - containers labelled for this run may remain; "
             "run the reap sweep or re-run to clean up",
             file=sys.stderr,
         )
+        if not recorded_attempt_ids:
+            print(
+                "skillc: no attempt ids were recorded before the interrupt - nothing to sweep",
+                file=sys.stderr,
+            )
+            return 1
         try:
-            report = demo.reap.reap_all_owned(docker_bin, None, timeout=10)
+            report = demo.reap.reap(docker_bin, recorded_attempt_ids, None, timeout=10)
             outcomes = [(o.attempt_id, o.outcome) for o in report.outcomes]
             print(f"skillc: best-effort cleanup - outcomes={outcomes}, daemon_reachable={report.daemon_reachable}", file=sys.stderr)
         except Exception as exc:  # noqa: BLE001 - best-effort: a cleanup failure must not itself crash this handler

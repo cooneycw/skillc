@@ -80,9 +80,7 @@ collection) closes.
     one route (Python's own default traceback, naming the installed
     `skillc` paths). `cmd_demo` gains its own `except KeyboardInterrupt`:
     a fixed line, no exception text at all, then a best-effort cleanup
-    sweep. `reap.py` gains `reap_all_owned` - a broader sibling to `reap()`
-    for exactly this case, since an interrupted command may never have
-    learned which specific attempt ids were even in flight.
+    sweep.
   - The acquisition-failure catch around `acquire_subject_checkout(...)`
     was itself untested - every existing test either supplied an explicit
     `checkout=` (bypassing acquisition) or monkeypatched the function away
@@ -105,6 +103,21 @@ collection) closes.
     left unwidened, since a bare "any absolute path" rule would
     false-positive on legitimate container paths like `/work` and
     `/home/candidate`.
+
+  A second review pass, against a real SIGINT this time, found the interrupt
+  sweep above still wrong: its first cut used `reap.reap_all_owned` - every
+  skillc-owned container on the daemon, regardless of which run started it -
+  and it reaped a container from an unrelated, concurrent attempt.
+  `reap_all_owned` is removed (nothing else called it); `cmd_demo` now builds
+  a `recorded_attempt_ids` list before calling `run_demo`/`run_control`, and
+  each records its own attempt id the instant it exists - before the backend
+  call that could hang - so the interrupt handler can scope the sweep to
+  `reap.reap(docker_bin, recorded_attempt_ids, ...)`, the existing,
+  already attempt-scoped function, and sweep nothing at all if nothing was
+  recorded yet. Confirmed red against the removed function: two owned
+  containers, one carrying a recorded attempt id and one foreign; after the
+  interrupt the foreign one survives and only the recorded one is reaped,
+  which fails on the host-global sweep (both are gone there).
 
 ### Added
 
