@@ -10,6 +10,27 @@ and version plan.
 
 ### Added
 
+- **`skillc pilot-run` pins the declared model at launch and fails a run
+  that did not use it** (Refs #141). #12's run declared `gpt-5.1-codex`. Nothing
+  passed that to the client, so all six attempts ran codex's own default,
+  `gpt-6-astra`.
+  - A new dated declaration,
+    `evals/matched-pilot/run-manifest-2026-09-27-gpt-6-astra.json`, declares
+    `gpt-6-astra` at effort `high`. It is now the default
+    (`matched_pilot.CURRENT_MANIFEST_PATH`), and it names the run it
+    supersedes. #12's `run-manifest.json` is not edited.
+  - The launch argv is built from the declaration
+    (`-m <model> -c model_reasoning_effort="<effort>"`). A `--client-argv`
+    that chooses the model or its effort itself is refused before any run
+    directory is made. So is a declaration with no effort to pin.
+  - After each attempt, the model in the client's rollout must equal the
+    declared one. A different model, or none, makes the attempt
+    `model_eligible: false`. The attempt is left out of the matched pairs and
+    listed under `model_ineligible`, and the run exits 1 after publishing.
+  - `pilot-report` scores a run against the model the run recorded at
+    launch. A run from before this change recorded nothing, so it needs an
+    explicit `--manifest`.
+
 - **A graded agent-trial attempt now stores its `verified-result`** (Refs
   #139). `agent_trial.run_one_attempt` grades through the verifier's result
   assembler (`verify.grade_agent_attempt`) instead of `verify.grade_files`

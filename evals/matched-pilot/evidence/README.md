@@ -5,6 +5,13 @@ The first bounded matched pilot, run on the
 (the model, below): does installing the whole cpp-codex pack change task
 outcome or completion time on an already-qualified task?
 
+This is the evidence for #12's run under [`run-manifest.json`](../run-manifest.json).
+**Current declaration: [`run-manifest-2026-09-27-gpt-6-astra.json`](../run-manifest-2026-09-27-gpt-6-astra.json)**
+(issue #141). It supersedes this run, pins `gpt-6-astra` at launch, and has
+not been run yet. This bundle stays as it is (owner ruling on #139). The re-run under the new
+declaration is #147, which publishes to its own directory beside this one, so do not run
+`pilot-run` with its default `--evidence` destination until #147 settles it.
+
 **Answer at this size: nothing measurable.** All six attempts passed, three
 per arm. The completion-time differences go both ways and are the size of
 attempt-to-attempt noise. This is a first canary of six attempts. It makes
@@ -26,8 +33,9 @@ nothing below should be quoted as one.
   declared model", and every report entry says so
   (`model_matches_declaration: false`, and the summary's
   `protocol_deviations`). The declaration stays as written; `observed_at_run`
-  in the manifest records what ran. A future pilot should pin the model in
-  the invocation.
+  in the manifest records what ran. The runner now pins the declared model
+  at launch and refuses an attempt that ran another one (#141, the current
+  declaration above).
 - Image `sha256:d1b2ced9...6eefc`. The manifest declared it before the run,
   and the ledger records it for all six trials. The runner now refuses any
   other image and runs by the resolved digest rather than the tag; at run
@@ -93,7 +101,9 @@ Three things are clearer than the timing:
 `claims.json` records the reviewed classification of each closing message.
 The messages themselves are transcript content and stay private. `skillc
 pilot-report <run_dir> --claims claims.json` merged the classifications into
-the report.
+the report. This run predates #141 and recorded no declared model, so
+rebuilding its report now needs the declaration it ran under, named
+explicitly: `--manifest evals/matched-pilot/run-manifest.json`.
 
 ## Records and what `check-records` says
 

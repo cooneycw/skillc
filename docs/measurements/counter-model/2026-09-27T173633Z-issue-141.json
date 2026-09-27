@@ -1,0 +1,20 @@
+{
+  "branch": "issue-141-pin-the-pilot-s-declared-model-at-launch-gpt-6-ast",
+  "counts": {
+    "accepted": 3,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "a0fb533d002d4c1046fe1af1cbf6e9d57a93c36b",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "141",
+  "passes": 2,
+  "recorded_at": "2026-09-27T17:36:33Z",
+  "red_cases": {
+    "already_covered": 8,
+    "proposed": 9
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "schema": 1,
+  "status": "ran"
+}

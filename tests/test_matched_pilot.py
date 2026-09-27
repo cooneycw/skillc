@@ -249,3 +249,59 @@ def test_the_committed_report_carries_the_reviewed_claims() -> None:
     claims = json.loads((PILOT_DIR / "evidence" / "claims.json").read_text(encoding="utf-8"))["claims"]
     assert report["claims_reviewed"] is True
     assert {e["attempt_id"]: e["claim"] for e in report["attempts"]} == claims
+
+
+# -------------------------------------- #141: a new declaration, not an edit
+
+
+def _current() -> dict[str, object]:
+    from skillc import matched_pilot as mp
+
+    data: dict[str, object] = json.loads(mp.CURRENT_MANIFEST_PATH.read_text(encoding="utf-8"))
+    return data
+
+
+def test_the_12_predeclaration_is_not_edited() -> None:
+    """#12's deviation stays on the record as it happened: its declaration
+    still names the model it assumed, not the one that ran."""
+    assert RECORD["model"]["name"] == "gpt-5.1-codex"
+    assert "reasoning_effort" not in RECORD["model"]
+    assert MANIFEST["observed_at_run"]["model"] == "gpt-6-astra"
+
+
+def test_the_current_declaration_is_a_new_dated_file_that_names_what_it_supersedes() -> None:
+    from skillc import matched_pilot as mp
+
+    assert mp.CURRENT_MANIFEST_PATH != mp.MANIFEST_PATH
+    current = _current()
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(current["declared_at"]))
+    assert str(current["declared_at"]) in mp.CURRENT_MANIFEST_PATH.name
+    supersedes = current["supersedes"]
+    assert isinstance(supersedes, dict)
+    assert (PILOT_DIR / supersedes["manifest"]).resolve() == mp.MANIFEST_PATH.resolve()
+    assert "3e1e3fb" in supersedes["run"]
+    assert str(current["execution"]).startswith("not run")
+
+
+def test_the_current_declaration_changes_only_the_model_and_the_cap_note() -> None:
+    """A re-run is a comparison with #12's run only if everything else it
+    declares is the same. Only the model (now pinned, with its effort) and
+    the stale 'caps not yet enforced' note may differ."""
+    new = _current()["predeclared_experiment_record"]
+    assert isinstance(new, dict)
+    assert new["model"]["name"] == "gpt-6-astra"
+    assert new["model"]["reasoning_effort"] == "high"
+    strip = lambda record: {
+        k: ({kk: vv for kk, vv in v.items() if kk != "note"} if k == "time_caps" else v)
+        for k, v in record.items() if k != "model"
+    }
+    assert strip(new) == strip(RECORD)
+
+
+def test_both_readmes_name_the_current_declaration() -> None:
+    from skillc import matched_pilot as mp
+
+    name = mp.CURRENT_MANIFEST_PATH.name
+    for readme in (PILOT_DIR / "README.md", PILOT_DIR / "evidence" / "README.md"):
+        text = readme.read_text(encoding="utf-8")
+        assert f"Current declaration: [`{name}`]" in text, readme

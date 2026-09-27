@@ -1140,14 +1140,16 @@ def _print_pilot_summary(report: dict[str, object]) -> int:
 
 
 def cmd_pilot_run(args: argparse.Namespace) -> int:
-    """Issue #12: run the predeclared matched pilot
-    (`evals/matched-pilot/run-manifest.json`) end to end and export its
+    """Issue #12: run the predeclared matched pilot (the current declaration,
+    `matched_pilot.CURRENT_MANIFEST_PATH`) end to end and export its
     evidence report. Requires `SKILLC_ALLOW_REAL_AGENT=1` (`lifecycle.py`'s
     own guard) and the operator's own Codex subscription login (ADR 0005
     rule 6). The declared pins are CHECKED against what would actually run -
-    the subject revision, the client version, a resolvable image digest -
-    and a mismatch refuses the run rather than recording a pilot of
-    something other than what was declared."""
+    the subject revision, the client version, a resolvable image digest, a
+    client argv that does not choose its own model - and a mismatch refuses
+    the run rather than recording a pilot of something other than what was
+    declared. An attempt observed running a model other than the declared
+    one (#141) is published as ineligible, and the run exits 1."""
     import secrets
     from datetime import UTC, datetime
 
@@ -1156,9 +1158,17 @@ def cmd_pilot_run(args: argparse.Namespace) -> int:
     from . import matched_pilot as mp
 
     try:
-        declaration = mp.load_declaration(Path(args.manifest) if args.manifest else mp.MANIFEST_PATH)
+        declaration = mp.load_declaration(Path(args.manifest) if args.manifest else mp.CURRENT_MANIFEST_PATH)
     except (mp.ManifestRefused, OSError, KeyError, ValueError) as exc:
         print(f"skillc: the run manifest cannot be run as written: {exc}", file=sys.stderr)
+        return 2
+    client_argv = args.client_argv.split() if args.client_argv else list(cc.DEFAULT_CLIENT_ARGV)
+    try:
+        # Checked here, before the image or any run directory: the same
+        # refusal `run_pilot` repeats per attempt.
+        mp.launch_argv(declaration, client_argv)
+    except mp.ModelOverrideRefused as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
         return 2
     pinned = trial_bootstrap.pinned_cli_version("codex")
     if declaration.client_name != "codex" or pinned != declaration.client_version:
@@ -1206,7 +1216,6 @@ def cmd_pilot_run(args: argparse.Namespace) -> int:
     finally:
         cc.discard_acquisition(run_dir, declaration.subject_name)
 
-    client_argv = args.client_argv.split() if args.client_argv else list(cc.DEFAULT_CLIENT_ARGV)
     credential_path = Path(args.credential) if args.credential else None
     experiment, outcomes = mp.run_pilot(
         declaration, run_dir=run_dir, treatment_home_files=home_files,
@@ -1221,9 +1230,35 @@ def cmd_pilot_run(args: argparse.Namespace) -> int:
     (run_dir / mp.PRIVATE_OBSERVATIONS_FILENAME).write_text(
         json.dumps(mp.private_observations(outcomes), indent=1) + "\n", encoding="utf-8",
     )
-    report = mp.build_report(experiment, mp.reconcile(experiment, outcomes), declared_model=declaration.model)
+    report = mp.build_report(
+        experiment, mp.reconcile(experiment, outcomes),
+        declared_model=declaration.model, declared_effort=declaration.reasoning_effort,
+    )
     code = _export_pilot_evidence(experiment, report, Path(args.evidence) if args.evidence else mp.EVIDENCE_DIR)
-    return code or _print_pilot_summary(report)
+    code = code or _print_pilot_summary(report)
+    return code or _refuse_ineligible(report)
+
+
+def _refuse_ineligible(report: dict[str, object]) -> int:
+    """#141: an attempt that did not run the declared model is recorded,
+    published and excluded - and it fails the run. So does a run in which NO
+    attempt was observed running it (every one not-run or unavailable): a
+    model check with nothing to check is not a pass."""
+    from . import matched_pilot as mp
+
+    ineligible = mp.ineligible_attempts(report)
+    if not ineligible:
+        if not mp.eligible_attempts(report):
+            print("skillc: no attempt was launched and observed running the declared model; nothing was compared",
+                  file=sys.stderr)
+            return 1
+        return 0
+    print(
+        f"skillc: {len(ineligible)} attempt(s) did not run the declared model and are excluded from the "
+        f"comparison: {', '.join(ineligible)}",
+        file=sys.stderr,
+    )
+    return 1
 
 
 def cmd_pilot_report(args: argparse.Namespace) -> int:
@@ -1234,14 +1269,40 @@ def cmd_pilot_report(args: argparse.Namespace) -> int:
 
     run_dir = Path(args.run_dir).expanduser()
     try:
-        declaration = mp.load_declaration(Path(args.manifest) if args.manifest else mp.MANIFEST_PATH)
+        recorded = mp.read_declared(run_dir)
+        if recorded is None and not args.manifest:
+            # #141: a run from before launch pinning recorded no declaration.
+            # Defaulting to the CURRENT one would re-score it against a pin it
+            # never ran under, so the operator names the one it did.
+            print(
+                "skillc: this run recorded no declared model (it predates #141); name the declaration it ran "
+                f"under with --manifest (#12's run: {mp.MANIFEST_PATH.relative_to(mp.ROOT)})",
+                file=sys.stderr,
+            )
+            return 2
+        declared_model: str | None = None
+        declared_effort: str | None = None
+        if args.manifest:
+            declaration = mp.load_declaration(Path(args.manifest))
+            declared_model, declared_effort = declaration.model, declaration.reasoning_effort
+        if recorded is not None:
+            if args.manifest and (recorded["model"], recorded["reasoning_effort"]) != (declared_model, declared_effort):
+                print(
+                    f"skillc: this run declared model {recorded['model']!r} (effort {recorded['reasoning_effort']!r}) "
+                    f"at launch, but --manifest declares {declared_model!r} (effort {declared_effort!r}); refusing",
+                    file=sys.stderr,
+                )
+                return 2
+            declared_model, declared_effort = recorded["model"], recorded["reasoning_effort"]
         experiment, outcomes = mp.read_outcomes(run_dir)
         claims = mp.load_claims(Path(args.claims)) if args.claims else None
         reconciled = mp.reconcile(experiment, outcomes)
     except (OSError, KeyError, ValueError) as exc:
         print(f"skillc: {exc}", file=sys.stderr)
         return 2
-    report = mp.build_report(experiment, reconciled, claims, declared_model=declaration.model)
+    report = mp.build_report(
+        experiment, reconciled, claims, declared_model=declared_model, declared_effort=declared_effort,
+    )
     code = _export_pilot_evidence(experiment, report, Path(args.evidence) if args.evidence else mp.EVIDENCE_DIR)
     return code or _print_pilot_summary(report)
 
@@ -1480,17 +1541,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_pilot_run = sub.add_parser(
         "pilot-run",
-        help="issue #12: run the predeclared matched pilot (evals/matched-pilot/run-manifest.json) and "
+        help="issue #12: run the predeclared matched pilot (the current declaration, "
+             "evals/matched-pilot/run-manifest-2026-09-27-gpt-6-astra.json) and "
              "export its leak-checked evidence report (a real agent run, behind SKILLC_ALLOW_REAL_AGENT=1)",
     )
-    p_pilot_run.add_argument("--manifest", help="run manifest (default: evals/matched-pilot/run-manifest.json)")
+    p_pilot_run.add_argument("--manifest", help="run manifest (default: matched_pilot.CURRENT_MANIFEST_PATH)")
     p_pilot_run.add_argument("--image", help="trial image (default: skillc.demo.DEFAULT_IMAGE)")
     p_pilot_run.add_argument("--docker-bin", help="docker executable (space-separated words; default: docker)")
     p_pilot_run.add_argument("--timeout", type=float, default=30, help="per-container-call timeout, seconds")
     p_pilot_run.add_argument("--credential", help="explicit path to the client credential file")
     p_pilot_run.add_argument(
         "--client-argv", default=None,
-        help="the real client invocation (default: collection_conformance.DEFAULT_CLIENT_ARGV)",
+        help="the real client invocation (default: collection_conformance.DEFAULT_CLIENT_ARGV); the declared "
+             "model and effort are appended, and an argv that sets either itself is refused",
     )
     p_pilot_run.add_argument(
         "--private-dir", help="where the private run directory is created (default: ~/.local/share/skillc/pilot-runs)",
@@ -1504,7 +1567,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_pilot_report.add_argument("run_dir", help="the private run directory pilot-run printed")
     p_pilot_report.add_argument("--claims", help='JSON {"claims": {attempt_id: claimed-success|claimed-failure|no-claim}}')
-    p_pilot_report.add_argument("--manifest", help="run manifest (default: evals/matched-pilot/run-manifest.json)")
+    p_pilot_report.add_argument(
+        "--manifest",
+        help="run manifest (default: the declaration the run recorded; required for a run from before #141)",
+    )
     p_pilot_report.add_argument("--evidence", help="where the bundle is exported (default: evals/matched-pilot/evidence/records)")
     p_pilot_report.set_defaults(func=cmd_pilot_report)
 

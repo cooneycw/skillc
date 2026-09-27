@@ -1,5 +1,32 @@
 # Matched pilot: the predeclared experiment (#12)
 
+**Current declaration: [`run-manifest-2026-09-27-gpt-6-astra.json`](run-manifest-2026-09-27-gpt-6-astra.json)**
+(issue #141). `skillc pilot-run` uses it by default
+(`skillc.matched_pilot.CURRENT_MANIFEST_PATH`). It pins the model at launch:
+`gpt-6-astra` at reasoning effort `high`, passed to codex as
+`-m gpt-6-astra -c model_reasoning_effort="high"`. It supersedes
+[`run-manifest.json`](run-manifest.json), #12's own predeclaration, and the
+run made under it. That file is not edited. It declared `gpt-5.1-codex`,
+nothing passed that to the client, and all six attempts ran `gpt-6-astra`.
+The deviation stays on the record as it happened. Everything else the new
+declaration states is #12's, unchanged (`tests/test_matched_pilot.py` checks
+this). It has not been run yet.
+
+How the pin is enforced:
+- `pilot-run` refuses a `--client-argv` that chooses the model or its effort
+  itself (`-m`, `--model`, `-c model=...`, `-p`/`--profile`, `--oss`, ...),
+  before any run directory is made.
+- After each attempt, the model in the client's own rollout must equal the
+  declared one. An attempt with another model, or with no observed model, is
+  recorded as `model_eligible: false`, left out of the matched pairs, and
+  listed under `model_ineligible`. The run exits 1.
+- The run directory records the model it declared. `pilot-report` scores the
+  run against that model, never against whichever declaration is current
+  later.
+
+The next change of pin is a new dated declaration and a one-line change of
+`CURRENT_MANIFEST_PATH`, never an edit to a declaration that has already run.
+
 The first bounded matched pilot skillc's own acceptance requires: does the
 whole CPP pack help on an already-qualified task, and how much does it cost
 in time? See [ADR 0005](../../docs/decisions/0005-runtime-scope-and-cost-rulings.md)
@@ -67,7 +94,7 @@ pins, enforces both time caps, and exports a leak-checked bundle. The live
 run and its results are in [evidence/](evidence/README.md): all 6 attempts
 passed, there's no measurable difference between the arms at this size, and
 the report makes no broad-benefit claim. Two things the planning PR could
-not know are now recorded under `observed_at_run` in the manifest:
+not know are now recorded under `observed_at_run` in `run-manifest.json`:
 - the model is `gpt-6-astra`, not the assumed `gpt-5.1-codex`;
 - input tokens ran 77k-102k per attempt, not the assumed 50k.
 

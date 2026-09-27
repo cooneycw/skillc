@@ -142,6 +142,18 @@ def main() -> int:
     parser.add_argument("--omit-listed", action="append", default=[],
                          help="claude-fake only: leave this installed skill OUT of the skill_listing attachment - "
                               "a client that did not tell the model about a skill it was given (repeatable)")
+    # Issue #141: the real codex's own launch pins. `-m` and `-c
+    # model_reasoning_effort=...` are what `matched_pilot.launch_argv` appends;
+    # the fake writes them back as a codex `turn_context`, exactly where the
+    # real client records the model it actually ran - so a test proves the
+    # declared pin REACHES the client rather than asserting an argv shape.
+    parser.add_argument("-m", "--model", help="codex-fake only: the model to record in a turn_context")
+    parser.add_argument("-c", "--config", action="append", default=[],
+                         help="codex-fake only: key=value; model_reasoning_effort is recorded in the turn_context")
+    parser.add_argument("--observed-model",
+                         help="codex-fake only: record THIS model instead of -m - a client that ignored the pin")
+    parser.add_argument("--no-turn-context", action="store_true",
+                         help="codex-fake only: write no turn_context at all - the model is unobserved")
     parser.add_argument("prompt")
     args = parser.parse_args()
 
@@ -194,6 +206,17 @@ def main() -> int:
     recorded_prompt = "a completely different prompt, never the one delivered" if args.mismatched_prompt else args.prompt
     builder = _claude_transcript if args.format == "claude-fake" else _codex_transcript
     lines = builder(recorded_prompt, skills, nonce, args.fail_canary)
+    recorded_model = args.observed_model or args.model
+    if args.format == "codex-fake" and recorded_model and not args.no_turn_context:
+        effort = None
+        for item in args.config:
+            key, _, value = item.partition("=")
+            if key == "model_reasoning_effort":
+                effort = value.strip('"')
+        context: dict[str, object] = {"model": recorded_model}
+        if effort is not None:
+            context["effort"] = effort
+        lines.insert(0, {"type": "turn_context", "payload": context})
     if args.format == "claude-fake" and not args.no_skill_listing:
         # Issue #124: the real client lists the skills it FOUND under
         # ~/.claude/skills/ - so this reads the installed directories off disk
