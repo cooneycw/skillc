@@ -30,8 +30,22 @@ does not reinvent:
     the whole codebase;
   - `agent_trial.run_one_attempt`'s own `extra_home_files` parameter (issue
     #11) - delivers the collection's selected skill files into the SAME
-    container the agent runs in, at the same `.codex/skills/<dir>/...`
+    container the agent runs in, at the same `<surface skills dir>/<dir>/...`
     layout `demo.install_subject` already uses for the no-agent leg.
+
+ON THE CLIENT THE SUBJECT DECLARES (issue #124): the subject's `surface`
+names its client (`materialize.SURFACES`) - `codex-skills` runs Codex with the
+skills under `~/.codex/skills/`, `claude-code-skills` runs Claude Code with
+them under `~/.claude/skills/`. Nothing here branches on which; the client
+key selects `agent_trial.CLIENT_SPECS` and `DEFAULT_CLIENT_ARGVS` as data.
+
+DISCOVERY, OBSERVED FROM THE REAL TRANSCRIPT AND LABELLED AS SUCH (issue
+#124): Claude Code has no model-free listing, so the only honest discovery
+evidence is what the client itself listed to the model in the agent run's
+own transcript (`agent_trial.TranscriptObservation.skills_listed`). Each
+selected skill is `listed` or `not-listed` against that; when the transcript
+carries no listing (Codex, or a Claude Code transcript without one) every
+skill is `UNMEASURED` with the reason - never a borrowed canary result.
 
 STRUCTURALLY UNABLE TO LAUNCH A REAL AGENT WITHOUT `SKILLC_ALLOW_REAL_AGENT=1`
 - this module adds no gate of its own; every call passes through
@@ -97,12 +111,26 @@ _FIXTURE_SRC_DIRNAME = "src"
 #: did not choose and trust - the ruling's premise is no hostile inputs.
 AGENT_NETWORK = "bridge"
 
-#: The real client invocation when the caller supplies none. `--skip-git-repo-check`
-#: is required, not a convenience: the trial workspace `/work` is not a git
-#: repository, and codex-cli 0.157.1 refuses to start outside one ("Not inside
-#: a trusted directory and --skip-git-repo-check was not specified") - the
-#: first live run exited 1 in 0.4s on exactly that.
-DEFAULT_CLIENT_ARGV = ("codex", "exec", "--sandbox", "danger-full-access", "--skip-git-repo-check")
+#: The real client invocation when the caller supplies none, per client key
+#: (`materialize.SurfaceSpec.client`).
+#:
+#: codex: `--skip-git-repo-check` is required, not a convenience: the trial
+#: workspace `/work` is not a git repository, and codex-cli 0.157.1 refuses to
+#: start outside one ("Not inside a trusted directory and
+#: --skip-git-repo-check was not specified") - the first live run exited 1 in
+#: 0.4s on exactly that.
+#:
+#: claude: `-p` is the non-interactive print mode; the prompt is the final
+#: positional argument `agent_trial` appends. `--dangerously-skip-permissions`
+#: is the same no-prompt decision codex's `danger-full-access` makes - a print
+#: session has no one to approve a tool use, and the liveness canary needs a
+#: confirmed tool write. The trial image runs as the non-root `candidate`
+#: user, which the flag requires.
+DEFAULT_CLIENT_ARGVS: dict[str, tuple[str, ...]] = {
+    "codex": ("codex", "exec", "--sandbox", "danger-full-access", "--skip-git-repo-check"),
+    "claude": ("claude", "-p", "--dangerously-skip-permissions"),
+}
+DEFAULT_CLIENT_ARGV = DEFAULT_CLIENT_ARGVS["codex"]
 
 #: The agent's own wall-clock limit, separate from the per-docker-call
 #: `daemon_timeout`: one `--timeout` used to feed both, so the runbook command
@@ -157,6 +185,17 @@ class CollectionAgentResult:
     #: paste-back so no record implies containment it did not have. `None`
     #: when unknown (a result built outside `run_collection_agent_attempt`).
     agent_network: str | None = None
+    #: `{selected skill: "listed"|"not-listed"|"UNMEASURED"}` from
+    #: `transcript_discovery` (issue #124); empty when not computed.
+    discovery: Mapping[str, str] | None = None
+    discovery_reason: str | None = None
+
+    @property
+    def discovery_failed(self) -> bool:
+        """True when the transcript's own listing MEASURABLY omits a selected
+        skill - an installed skill the client did not tell the model about.
+        UNMEASURED is not a failure (it is stated, not claimed either way)."""
+        return any(v == "not-listed" for v in (self.discovery or {}).values())
 
 
 @dataclass(frozen=True)
@@ -199,7 +238,7 @@ def acquire_collection(subject_name: str, base: Path, *, checkout: Path | None =
         entries = materialize.inventory(subject, source)
     except materialize.Refused as exc:
         raise demo.SubjectRefused(f"subject {subject_name!r} could not be prepared: {exc}") from exc
-    files = demo.subject_surface_files(source, entries)
+    files = demo.subject_surface_files(source, entries, subject.surface_spec.home_skills_relpath)
     return AcquiredCollection(subject, source, files)
 
 
@@ -260,7 +299,7 @@ def plan_collection_attempt(
         "trials": [{
             "label": subject_name, "case": {"id": "slug-small-fix", "revision": "r1"},
             "grader": {"id": "slug-small-fix", "revision": "g1"}, "subject": {"digest": acquired.source.digest},
-            "client": {"name": materialize.CLIENT, "version": acquired.subject.client_version},
+            "client": {"name": acquired.subject.client, "version": acquired.subject.client_version},
             "image": {"digest": image_digest or "UNKNOWN"}, "config": {}, "attempts": 1,
         }],
     }
@@ -314,7 +353,7 @@ def run_collection_agent_attempt(
 
     grader = verify.GraderDef.load(demo.GRADER_ROOT)
     record = agent_trial.run_one_attempt(
-        backend=backend, experiment=experiment, attempt_id=attempt_id, client=materialize.CLIENT,
+        backend=backend, experiment=experiment, attempt_id=attempt_id, client=acquired.subject.client,
         base_argv=base_argv, prompt=resolved_prompt, skill_name=None,
         surface=resolved_surface, limits=Limits(timeout=timeout), base=base,
         credential_explicit_path=credential_explicit_path,
@@ -323,9 +362,28 @@ def run_collection_agent_attempt(
         grader=grader, grading_backend=grading_backend,
         extra_home_files=extra_home_files,
     )
+    discovery, discovery_reason = transcript_discovery(record, {f.skill for f in acquired.files})
     return CollectionAgentResult(
-        subject_name, acquired.subject.revision, materialize.CLIENT, record, agent_network=backend.network,
+        subject_name, acquired.subject.revision, acquired.subject.client, record, agent_network=backend.network,
+        discovery=discovery, discovery_reason=discovery_reason,
     )
+
+
+def transcript_discovery(record: Mapping[str, object], selected: set[str]) -> tuple[dict[str, str], str | None]:
+    """Each selected skill against the listing the client itself gave the
+    model, read from the agent run's real transcript
+    (`observation.skills_listed`, issue #124): `listed` or `not-listed`, with
+    `None` as the reason. When no listing was observable, every selected
+    skill is `UNMEASURED` and the reason says why - a missing listing is
+    never read as "nothing listed"."""
+    observation = record.get("observation")
+    obs = observation if isinstance(observation, Mapping) else {}
+    listed = obs.get("skills_listed")
+    if not isinstance(listed, list):
+        source = obs.get("skills_listed_source") or "no transcript observation"
+        return {name: "UNMEASURED" for name in selected}, str(source)
+    names = {str(n) for n in listed}
+    return {name: ("listed" if name in names else "not-listed") for name in selected}, None
 
 
 def build_collection_paste_back(result: CollectionAgentResult) -> str:
@@ -348,6 +406,9 @@ def build_collection_paste_back(result: CollectionAgentResult) -> str:
         f"  canary_satisfied={obs.get('canary_satisfied')}",
         f"  skill_invocations={obs.get('skill_invocations')} (detection={obs.get('skill_invocation_detection')})",
         f"  refresh_observed_in_container={obs.get('refresh_observed_in_container')}",
+        (f"  discovery={dict(sorted((result.discovery or {}).items()))} (source=transcript skill_listing)"
+         if result.discovery_reason is None
+         else f"  discovery=UNMEASURED ({result.discovery_reason})"),
         f"  graded.status={graded_status}",
         f"  grading_blocked_reason={result.record.get('grading_blocked_reason')}",
     ]

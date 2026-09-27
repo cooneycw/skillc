@@ -19,6 +19,7 @@ import shutil
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -498,10 +499,11 @@ def test_cli_wires_the_agent_timeout_backends_and_run_root(
     from skillc import cli
 
     seen: list[dict[str, object]] = []
+    client = {"name": "codex"}
 
     def fake_acquire(name: str, root: Path) -> object:
         (root / f"{name}-checkout").mkdir()
-        return object()
+        return SimpleNamespace(subject=SimpleNamespace(client=client["name"]))
 
     def fake_run(**kwargs: object) -> cc.CollectionAgentResult:
         seen.append(kwargs)
@@ -537,6 +539,14 @@ def test_cli_wires_the_agent_timeout_backends_and_run_root(
     seen.clear()
     assert cli.main([*argv, "--agent-timeout", "42"]) == 1
     assert seen[0]["timeout"] == 42
+
+    # Issue #124: the default argv follows the client the SUBJECT declares,
+    # never a codex default applied to every subject.
+    seen.clear()
+    client["name"] = "claude"
+    assert cli.main(argv) == 1
+    assert list(seen[0]["base_argv"]) == list(cc.DEFAULT_CLIENT_ARGVS["claude"])  # type: ignore[call-overload]
+    assert list(seen[0]["base_argv"]) != list(cc.DEFAULT_CLIENT_ARGV)  # type: ignore[call-overload]
 
 
 # ------------------------------------------------- cmd_collection_run's own gate
@@ -662,3 +672,176 @@ def test_a_path_like_subject_is_refused_before_any_scratch_path(
     assert cli.main(["collection-run", name, "--base", str(base)]) == 2
     assert "Traceback" not in capsys.readouterr().err
     assert list(base.iterdir()) == []
+
+
+# ------------------------------------------------ the Claude Code arm (#124)
+
+
+def _claude_subject(select: object = "all") -> materialize.Subject:
+    return materialize.Subject.from_dict({
+        "subject_schema": 1, "locator": "test/test", "revision": "v1", "surface": "claude-code-skills",
+        "skills_root": "skills", "select": select, "client": {"name": "claude", "version": "2.1.283"},
+    })
+
+
+def _fresh_claude_credential(tmp_path: Path) -> Path:
+    path = tmp_path / "claude-credential.json"
+    path.write_text(json.dumps({"claudeAiOauth": {"expiresAt": int((time.time() + 3600) * 1000)}}))
+    return path
+
+
+def _claude_run(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+    *, extra: list[str] | None = None, drop_skill: str | None = None,
+) -> cc.CollectionAgentResult:
+    """One scripted Claude Code collection attempt with `tdd` and
+    `diagnosing-bugs` selected. The fake client lists whatever is installed
+    under `<home>/.claude/skills/` (`fake_agent_client.py`), so `drop_skill`
+    - withholding one skill's files from the container - is a genuinely
+    uninstalled skill, not a told-to-omit one."""
+    repo = _fixture_collection(tmp_path, {"tdd": "tdd", "diagnosing-bugs": "diagnosing-bugs"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _claude_subject(select=["tdd", "diagnosing-bugs"]))
+    if drop_skill is not None:
+        real = cc._collection_home_files
+
+        def _withheld(source: materialize.Source, files: list[demo.SubjectFile]) -> dict[str, bytes]:
+            return real(source, [f for f in files if f.skill != drop_skill])
+
+        monkeypatch.setattr(cc, "_collection_home_files", _withheld)
+
+    acquired = cc.acquire_collection("whatever", base, checkout=repo)
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    home = _mapped_home(docker_state, attempt_id)
+    argv = [
+        sys.executable, str(FAKE_CLIENT), "--format", "claude-fake", "--home", str(home),
+        "--transcript-relpath", ".claude/projects/-work/77777777-7777-7777-7777-777777777777.jsonl",
+        "--copy-solution", str(GRADER_ROOT / "reference"), *(extra or []),
+    ]
+    return cc.run_collection_agent_attempt(
+        subject_name="whatever", acquired=acquired, experiment=experiment, attempt_id=attempt_id,
+        backend=_backend(base, docker_state), grading_backend=_backend(base, docker_state), base=base,
+        base_argv=argv, prompt="Fix the slug helper.", timeout=5,
+        credential_explicit_path=_fresh_claude_credential(tmp_path),
+    )
+
+
+def test_claude_subject_installs_under_claude_skills_and_every_skill_is_listed(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = _claude_run(tmp_path, base, docker_state, monkeypatch)
+
+    assert result.client == "claude"
+    assert result.record["disposition"] == "captured"
+    graded = result.record["graded"]
+    assert isinstance(graded, dict) and graded["status"] == "PASS"
+    observation = result.record["observation"]
+    assert isinstance(observation, dict)
+    assert observation["skill_invocation_detection"] == "structural"  # claude's ClientSpec, not codex's
+    assert observation["skills_listed_source"] == "transcript skill_listing attachment"
+    assert result.discovery == {"tdd": "listed", "diagnosing-bugs": "listed"}
+    assert result.discovery_reason is None and not result.discovery_failed
+    paste = cc.build_collection_paste_back(result)
+    assert "client=claude" in paste
+    assert "discovery={'diagnosing-bugs': 'listed', 'tdd': 'listed'} (source=transcript skill_listing)" in paste
+
+
+def test_a_skill_that_was_not_installed_turns_discovery_red(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR 0001's red case for the new check (issue #124's own wording: "a
+    skill not installed must turn the install/discovery check red")."""
+    result = _claude_run(tmp_path, base, docker_state, monkeypatch, drop_skill="tdd")
+
+    assert result.discovery == {"tdd": "not-listed", "diagnosing-bugs": "listed"}
+    assert result.discovery_failed
+
+
+def test_a_skill_the_client_did_not_list_turns_discovery_red(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other shape: installed, but the client's own listing leaves it out."""
+    result = _claude_run(tmp_path, base, docker_state, monkeypatch, extra=["--omit-listed", "diagnosing-bugs"])
+
+    assert result.discovery == {"tdd": "listed", "diagnosing-bugs": "not-listed"}
+    assert result.discovery_failed
+
+
+def test_no_listing_in_the_transcript_is_unmeasured_never_a_pass_or_a_fail(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = _claude_run(tmp_path, base, docker_state, monkeypatch, extra=["--no-skill-listing"])
+
+    assert result.discovery == {"tdd": "UNMEASURED", "diagnosing-bugs": "UNMEASURED"}
+    assert result.discovery_reason is not None and "no skill_listing attachment" in result.discovery_reason
+    assert not result.discovery_failed
+    assert "discovery=UNMEASURED (" in cc.build_collection_paste_back(result)
+
+
+def test_a_codex_run_reports_discovery_unmeasured_not_borrowed(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Codex's transcript carries no listing this adapter reads: its
+    collection-run discovery is UNMEASURED, and says so."""
+    repo = _fixture_collection(tmp_path, {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd"]))
+    acquired = cc.acquire_collection("whatever", base, checkout=repo)
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    argv = _codex_argv(
+        home=_mapped_home(docker_state, attempt_id), transcript_relpath=".codex/sessions/2026/01/01/rollout-d.jsonl",
+    )
+    result = cc.run_collection_agent_attempt(
+        subject_name="whatever", acquired=acquired, experiment=experiment, attempt_id=attempt_id,
+        backend=_backend(base, docker_state), grading_backend=_backend(base, docker_state), base=base,
+        base_argv=argv, prompt="Fix the slug helper.", timeout=5,
+        credential_explicit_path=_fresh_codex_credential(tmp_path),
+    )
+    assert result.discovery == {"tdd": "UNMEASURED"}
+    assert result.discovery_reason is not None and "carries no skill listing" in result.discovery_reason
+
+
+def test_missing_claude_credential_blocks_before_launch(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The planned control, on the Claude arm: no credential, `unavailable`."""
+    repo = _fixture_collection(tmp_path, {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _claude_subject(select=["tdd"]))
+    acquired = cc.acquire_collection("whatever", base, checkout=repo)
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    result = cc.run_collection_agent_attempt(
+        subject_name="whatever", acquired=acquired, experiment=experiment, attempt_id=attempt_id,
+        backend=_backend(base, docker_state), grading_backend=_backend(base, docker_state), base=base,
+        base_argv=[sys.executable, "-c", "import sys; sys.exit(1)"], prompt="Fix the slug helper.", timeout=5,
+        credential_explicit_path=tmp_path / "does-not-exist.json",
+    )
+    assert result.record["disposition"] == "unavailable"
+    assert result.discovery == {"tdd": "UNMEASURED"}
+
+
+@pytest.mark.parametrize(("discovery", "expected"), [
+    ({"greet": "listed"}, 0),
+    ({"greet": "not-listed"}, 1),  # the red case: a PASS does not excuse an unlisted skill
+    ({"greet": "UNMEASURED"}, 0),  # stated in the paste-back, not failed
+])
+def test_cmd_collection_run_exit_follows_measured_discovery(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+    discovery: dict[str, str], expected: int,
+) -> None:
+    from skillc import cli
+
+    _stub_acquisition(tmp_path, monkeypatch)
+
+    def _fake_run(**kwargs: object) -> cc.CollectionAgentResult:
+        passed = _fake_collection_result("whatever", disposition="captured", graded={"status": "PASS", "detail": "ok"})
+        reason = "stated" if "UNMEASURED" in discovery.values() else None
+        return cc.CollectionAgentResult(
+            passed.subject_name, passed.revision, "claude", passed.record, discovery=discovery, discovery_reason=reason,
+        )
+
+    monkeypatch.setattr(cc, "run_collection_agent_attempt", _fake_run)
+    args = _collection_run_args(
+        "whatever", image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base=str(base), timeout=5,
+    )
+    assert cli.cmd_collection_run(args) == expected

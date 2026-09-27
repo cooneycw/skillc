@@ -21,6 +21,16 @@ name creeps into a string literal here. Layouts other than "a directory whose
 children are skill directories" and clients other than Codex are refused by
 name, never guessed.
 
+Two surfaces are declared (issue #124), each bound to exactly one client and
+one home directory the client reads user skills from: `codex-skills` (Codex,
+`~/.codex/skills/`) and `claude-code-skills` (Claude Code, `~/.claude/skills/`).
+The DECLARATION and the INSTALL LAYOUT are generic over both. The host-local
+`materialize()` run below is Codex-only, because its availability fact is the
+client's model-free listing and Claude Code has none (`exposure.py` states the
+same limit): a `claude-code-skills` subject is refused there by name, and its
+discovery is observed from a real agent transcript instead
+(`collection_conformance`), labelled as such.
+
 Stdlib only, like the rest of `skillc/`. The client is an external program, run
 with an empty environment apart from HOME, CODEX_HOME and PATH, against homes
 this module created, and it is never given the host's real home.
@@ -51,10 +61,48 @@ from .spec import FrontmatterError, parse_frontmatter
 
 ADAPTER = {"name": "skillc-codex-skills", "version": "1"}
 
-#: The one surface and the one client this adapter supports. Anything else is
-#: refused by name (spec.md: "unsupported format is named rather than guessed").
+#: The one surface and the one client the host-local `materialize()` run
+#: supports - its discovery canary is Codex's model-free listing. Anything else
+#: is refused by name (spec.md: "unsupported format is named rather than guessed").
 SURFACE = "codex-skills"
 CLIENT = "codex"
+
+
+@dataclass(frozen=True)
+class SurfaceSpec:
+    """One declarable surface: the client it is native to, and where that
+    client reads user skills from, relative to its HOME. `model_free_listing`
+    says whether the client can list what it discovered without a model call -
+    the one route `materialize()`'s discovery canary and `skillc demo
+    --subject`'s discovery leg can use."""
+
+    surface: str
+    client: str  # agent_trial.CLIENT_SPECS' own key
+    #: The client's own state directory under HOME (`.codex`, `.claude`).
+    client_home_relpath: str
+    model_free_listing: bool
+
+    @property
+    def home_skills_relpath(self) -> str:
+        """Where the client reads user skills, relative to HOME. Held as the
+        client's home directory plus `SKILLS_DIRNAME` because that is what it
+        is - and, stated plainly, because the joined literal for Codex would
+        contain `codex/skills`, one subject's own root and a word
+        `tests/test_materialize.py`'s genericity guard refuses anywhere in
+        `skillc/`."""
+        return f"{self.client_home_relpath}/{SKILLS_DIRNAME}"
+
+
+#: The directory under a client's home that holds user skills - the same name
+#: for both clients.
+SKILLS_DIRNAME = "skills"
+
+#: Every surface a subject may declare (issue #124). A surface not in this
+#: table, or a declaration whose client is not the surface's own, is refused.
+SURFACES: dict[str, SurfaceSpec] = {
+    "codex-skills": SurfaceSpec("codex-skills", "codex", ".codex", model_free_listing=True),
+    "claude-code-skills": SurfaceSpec("claude-code-skills", "claude", ".claude", model_free_listing=False),
+}
 
 #: The model-free route by which Codex renders what a session would be given.
 #: It lists every discovered skill with the file it came from. It is a DEBUG
@@ -121,6 +169,12 @@ class Subject:
     required: tuple[ExternalPattern, ...]
     client_version: str
     raw: dict[str, object] = field(compare=False, repr=False)
+    surface: str = SURFACE
+    client: str = CLIENT
+
+    @property
+    def surface_spec(self) -> SurfaceSpec:
+        return SURFACES[self.surface]
 
     @classmethod
     def load(cls, path: Path) -> Subject:
@@ -143,14 +197,19 @@ class Subject:
         for key in ("locator", "revision", "skills_root"):
             if not isinstance(data.get(key), str) or not data[key]:
                 raise Refused(f"subject declaration lacks {key}")
-        if data.get("surface") != SURFACE:
+        surface = data.get("surface")
+        if not isinstance(surface, str) or surface not in SURFACES:
             raise Refused(
-                f"unsupported surface {data.get('surface')!r}: this adapter supports "
-                f"only {SURFACE!r}"
+                f"unsupported surface {surface!r}: this adapter supports "
+                f"only {sorted(SURFACES)}"
             )
+        spec = SURFACES[surface]
         client = data.get("client")
-        if not isinstance(client, dict) or client.get("name") != CLIENT:
-            raise Refused(f"unsupported client {client!r}: this adapter supports only {CLIENT!r}")
+        if not isinstance(client, dict) or client.get("name") != spec.client:
+            raise Refused(
+                f"unsupported client {client!r} for surface {surface!r}: "
+                f"that surface is native to {spec.client!r} only"
+            )
         if not isinstance(client.get("version"), str) or not client["version"]:
             raise Refused("subject declaration pins no client version")
         root = posixpath.normpath(str(data["skills_root"]))
@@ -178,6 +237,8 @@ class Subject:
             required=_patterns(data, "required_references", groups=1),
             client_version=str(client["version"]),
             raw=data,
+            surface=surface,
+            client=spec.client,
         )
 
 
@@ -1050,6 +1111,15 @@ def materialize(
     facts: dict[str, str] = {}
     reasons: dict[str, str] = {}
     try:
+        if subject.surface != SURFACE:
+            # Issue #124: the availability fact below is Codex's model-free
+            # listing. Running it against another client's surface would
+            # borrow a Codex result for a client that never listed anything.
+            raise Refused(
+                f"surface {subject.surface!r} ({subject.client}) has no model-free listing this run "
+                f"can use; its discovery is observed from a real agent transcript "
+                f"(skillc collection-run), not here"
+            )
         staging = root / "staging"
         staging.mkdir()
         source = (acquire_git(subject, origin, staging) if repo is not None

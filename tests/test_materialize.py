@@ -506,10 +506,38 @@ def test_a_selection_installs_only_what_it_names(tmp_path: Path) -> None:
     ({"required_references": [{"pattern": "no group"}]}, "capture group"),
     ({"external_references": [{"pattern": "(grouped)"}]}, "capture group"),
     ({"select": []}, "select must be"),
+    # Issue #124: a surface is bound to ONE client - neither half of a pair
+    # may be borrowed by the other.
+    ({"surface": "claude-code-skills"}, "native to 'claude' only"),
+    ({"client": {"name": "claude", "version": "2.1.283"}}, "native to 'codex' only"),
 ])
 def test_a_malformed_subject_declaration_is_refused(change: dict[str, object], why: str) -> None:
     with pytest.raises(m.Refused, match=why):
         _subject(**change)
+
+
+def test_each_surface_names_its_own_client_and_home_skills_dir() -> None:
+    """Issue #124: the two declarable surfaces, as data - the install target
+    is the surface's own client home, never a codex default for both."""
+    codex = _subject()
+    claude = _subject(surface="claude-code-skills", client={"name": "claude", "version": "2.1.283"})
+    assert (codex.surface, codex.client, codex.surface_spec.home_skills_relpath) == (
+        "codex-skills", "codex", ".codex/skills")
+    assert (claude.surface, claude.client, claude.surface_spec.home_skills_relpath) == (
+        "claude-code-skills", "claude", ".claude/skills")
+    assert codex.surface_spec.model_free_listing and not claude.surface_spec.model_free_listing
+
+
+def test_host_materialize_refuses_a_surface_with_no_model_free_listing(tmp_path: Path) -> None:
+    """Issue #124: the host-local run's availability fact IS Codex's listing.
+    A Claude Code subject is refused by name - never measured with a codex
+    canary and reported as if Claude Code had listed anything."""
+    claude = _subject(surface="claude-code-skills", client={"name": "claude", "version": "2.1.283"})
+    result = _run(tmp_path, _fake(tmp_path), subject=claude)
+    assert result.receipt is None
+    assert "no model-free listing" in str(result.report["refused"])
+    # The control: the SAME collection declared on codex is not refused here.
+    assert _run(tmp_path / "control", _fake(tmp_path), subject=_subject()).receipt is not None
 
 
 # ---------------------------------------------------------- git acquisition

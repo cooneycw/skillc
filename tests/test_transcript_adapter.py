@@ -12,6 +12,7 @@ produces events those functions accept, never re-tests their own logic.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -258,3 +259,47 @@ def test_codex_skill_heuristic_requires_a_real_skill_md_filename_boundary() -> N
     )
     events = ta.parse_codex_transcript(raw)
     assert not any(e.get("type") == "skill_invocation" for e in events)
+
+
+# ------------------------------------------- Claude Code skill listing (#124)
+
+
+def _listing_line(names: object, *, initial: bool = True) -> str:
+    return json.dumps({"type": "attachment", "attachment": {
+        "type": "skill_listing", "names": names, "skillCount": 0, "isInitial": initial, "content": "",
+    }})
+
+
+def test_claude_skill_listing_reads_every_listed_name_in_order() -> None:
+    raw = "\n".join([
+        _listing_line(["tdd", "diagnosing-bugs"]),
+        json.dumps({"type": "user", "message": {"role": "user", "content": "hi"}}),
+        _listing_line(["diagnosing-bugs", "late-skill"], initial=False),
+    ])
+    assert ta.claude_code_skill_listing(raw) == ("tdd", "diagnosing-bugs", "late-skill")
+
+
+def test_claude_skill_listing_absent_is_none_not_empty() -> None:
+    """The distinction the discovery check stands on: no attachment means
+    NOT OBSERVABLE (UNMEASURED downstream), never "the client listed
+    nothing", which would turn every installed skill into a false
+    not-listed."""
+    raw = json.dumps({"type": "user", "message": {"role": "user", "content": "skill_listing mentioned in prose"}})
+    assert ta.claude_code_skill_listing(raw) is None
+    # The control: a real attachment with an empty list IS an observation.
+    assert ta.claude_code_skill_listing(_listing_line([])) == ()
+
+
+def test_claude_skill_listing_ignores_a_malformed_names_field() -> None:
+    assert ta.claude_code_skill_listing(_listing_line("tdd")) is None
+    assert ta.claude_code_skill_listing(_listing_line(["tdd", 7])) == ("tdd",)
+
+
+def test_claude_skill_listing_does_not_disturb_the_event_stream() -> None:
+    """The attachment line is not a message: `verify_first_user_message`
+    must still see the real prompt first."""
+    raw = "\n".join([
+        _listing_line(["tdd"]),
+        json.dumps({"type": "user", "message": {"role": "user", "content": "the prompt"}}),
+    ])
+    assert ta.parse_claude_code_transcript(raw) == [{"role": "user", "content": "the prompt"}]
