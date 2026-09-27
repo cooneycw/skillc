@@ -882,6 +882,11 @@ collection) closes.
   there and requires it reported (#19).
 - The fixture pin is computed without needing a `git` binary at import time
   (#5 follow-up).
+- `ci/typecheck-control.sh`'s scratch-copy `tar` no longer races a parallel
+  gate step's `__pycache__` writes: excluding `__pycache__`, `.pytest_cache`
+  and `*.pyc` from the copy stops the intermittent `file changed as we read
+  it` red on main (Nit Store, skillc#20; #73). None of the three are ever
+  gate input, so excluding them changes nothing the control checks.
 
 ### CI / process
 

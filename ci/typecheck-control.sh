@@ -25,8 +25,17 @@ fail() { echo "typecheck-control: FAIL - $*" >&2; exit 1; }
 
 # The working tree, not `git ls-files`: an untracked test module is still one
 # the gate would read.
+#
+# __pycache__/.pytest_cache/*.pyc are excluded because a parallel CI step
+# writes them while this control runs (#20, comment 5850673964): tar reads
+# a file's size at stat time and again when it finishes reading it, and a
+# .pyc rewritten in between is reported as "file changed as we read it" -
+# a race in the control's own copy, not in mypy's scope. None of the three
+# are ever gate input, so excluding them changes nothing this control checks.
 mkdir "$scratch/tree"
-tar -C "$root" --exclude=./.git --exclude=./.venv --exclude=./.mypy_cache -cf - . \
+tar -C "$root" --exclude=./.git --exclude=./.venv --exclude=./.mypy_cache \
+    --exclude=__pycache__ --exclude=.pytest_cache --exclude='*.pyc' \
+    -cf - . \
     | tar -C "$scratch/tree" -xf - || fail "could not copy the tree"
 
 # Derived, not hardcoded: a renamed test module must not silently empty this case.
