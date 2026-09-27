@@ -8,11 +8,36 @@ and version plan.
 
 ## [Unreleased]
 
-Everything below has landed since `0.1.0` and is not yet part of a tagged
-release; `0.2.0` is planned when [#10](https://github.com/cooneycw/skillc/issues/10)
-(a real Docker trial end to end) closes, `0.3.0` when
-[#11](https://github.com/cooneycw/skillc/issues/11) (a second independent
-collection) closes.
+Nothing yet - see `0.2.0` below for everything that landed since `0.1.0`.
+
+## [0.2.0] - 2026-09-27
+
+Refs [#10](https://github.com/cooneycw/skillc/issues/10) (a real Docker
+trial end to end, now closed) and [#80](https://github.com/cooneycw/skillc/issues/80)
+(the support matrix restated from that run, now closed). The operator ran `skillc demo`,
+`--control` and `--subject` for both collections on a real Docker daemon at
+commit `8e06030`: all four commands exited `0`, every acceptance item read
+`MET`, and the three seeded `--control` failures were all caught (evidence:
+[#10's live-run comment](https://github.com/cooneycw/skillc/issues/10#issuecomment-5855368984),
+restated in [support-matrix.md](docs/specs/evaluation-facility/support-matrix.md)
+and the coverage ruling in
+[ADR 0005 rule 6](docs/decisions/0005-runtime-scope-and-cost-rulings.md)).
+That run covers `skillc demo`'s own scripted lifecycle proof, grading run
+and three seeded negative controls on a real daemon - not an independent live
+re-run of every case in the conformance table or failure-path matrix, most
+of which stay proven against the fake `docker` CLI, per the owner's own
+ruling; the two paths judged most likely to differ on a real daemon
+(timeout, operator cancellation) are tracked for a real-daemon seed under
+[#122](https://github.com/cooneycw/skillc/issues/122). [#11](https://github.com/cooneycw/skillc/issues/11) (a second
+independent collection) also closed in this release: the operator's live
+Level 1 agent run, once per collection with the same codex client, fixture,
+contract and grader, captured and graded `PASS` for both `cpp-codex` and
+`mattpocock-skills` (evidence: [evals/second-collection-conformance/evidence/README.md](evals/second-collection-conformance/evidence/README.md)). By owner ruling recorded
+on #11, the agent container runs on the bridge network; the grading
+container stays `network=none`. Still owed: the Claude Code agent arm under
+[#124](https://github.com/cooneycw/skillc/issues/124), skill-selection measurement
+under [#26](https://github.com/cooneycw/skillc/issues/26), and the judge-call
+cost ceiling under [#12](https://github.com/cooneycw/skillc/issues/12).
 
 ### Fixed
 
