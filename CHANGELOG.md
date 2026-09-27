@@ -31,7 +31,33 @@ and version plan.
   `skillc materialize` refuses a Claude subject by name. New subjects are
   `cpp-claude-code` (CPP's native `.claude/skills`, 18 skills) and
   `mattpocock-skills-claude-code` (`tdd`, `diagnosing-bugs`). Live evidence
-  is in `evals/claude-code-agent-arm/`.
+  is in `evals/claude-code-agent-arm/`; its first runs printed the blind
+  `refresh_observed_in_container=None` fixed under #106 and were repeated on
+  the fixed key (both read `False`).
+
+- **`skillc collection-run` keeps evidence for #106's live run** (Refs #106).
+  The paste-back is grouped into prompt delivery, canary, credential,
+  outcome, cleanup and transcript format:
+  - the credential's remaining life at launch;
+  - the operator's host credential before and after (a digest comparison;
+    the bytes are never read into the record);
+  - a daemon snapshot diff of skillc-owned containers around the whole run;
+  - the stop reason and exit code, per-criterion grades, and the refusal
+    reason;
+  - the journal's own workspace `cleaned` event;
+  - a census of the real transcript: client version, model, line types, and
+    the codex `response_item` types the adapter does not know.
+
+  An evidence envelope is written into the kept store, holding the record and
+  every observation above. It is leak-checked both as its string leaves and
+  as the serialized text, because `json.dumps` escaping hid an embedded
+  OAuth-shaped token from a text-only scan. A PASS now exits 1 if teardown
+  was not confirmed, or if a container labelled with one of this run's own
+  attempt ids (agent or grading probe) remains. The daemon-wide diff is
+  context only, since it cannot attribute. A transcript with no response
+  items reports its drift as not assessed. `--minimum-credential-seconds`
+  runs the below-threshold control.
+  Live evidence: `evals/agent-trial-live/`.
 
 ### Fixed
 
@@ -40,15 +66,22 @@ and version plan.
   reported a client on PATH as not found. A name with no path separator is
   now looked up with `shutil.which`; a path is still a path.
 
-- **`skillc collection-run` printed `refresh_observed_in_container=None` on
-  every run, whatever the record held** (Refs #124). The paste-back read the
-  key `refresh_observed_in_container`; the record stores
-  `credential_refresh_observed_in_container`
-  (`credential.CredentialUsage.to_record_fields`). The paste-back test wrote
-  the same wrong key by hand, so both agreed. It now builds the value with
-  the real producer and was red on the old key. #11's Codex evidence shows
-  this blind `None`. The first #124 Claude runs did too, and were repeated
-  after the fix; both read `False`.
+- **`skillc collection-run`'s paste-back printed `refresh_observed_in_container=None`
+  on every run** (Refs #106). It read `refresh_observed_in_container`, but the
+  driver writes `credential_refresh_observed_in_container`. #11's live
+  evidence therefore showed "not observed" for a comparison that had actually
+  been made. The earlier test hand-built its record with the same wrong key;
+  the new one reads a record produced by the real driver.
+
+- **The mcp-second-opinion judge could block past its write deadline**
+  (#129): `_write` polled `select` and then made a BLOCKING 64 KiB
+  `os.write`. A pipe reads as writable when any space is free, so a child
+  that stopped reading could wedge the write forever, and the deadline was
+  never checked again. This intermittently hung CI's required `gate` step
+  in `test_a_stalled_reader_is_a_write_timeout`. The write loop now runs
+  on a non-blocking fd, and a full pipe goes back to `select` and the
+  clock. A deterministic regression test pre-fills the pipe.
+
 
 ## [0.2.0] - 2026-09-27
 

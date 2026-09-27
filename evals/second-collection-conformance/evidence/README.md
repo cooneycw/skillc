@@ -135,8 +135,8 @@ whatever the record held, and the record held a real `True`/`False` for every
 captured run. The observation is not persisted to the run store, so those
 values cannot be recovered. What this evidence shows about an in-container
 refresh during #11's runs is therefore **nothing**, and the reason is the
-misread key, not the credential being unobservable. #124 fixed the key, with a
-regression test red on the old one; its Claude Code runs read `False`
+misread key, not the credential being unobservable. The key was fixed in
+parallel by #106 (merged first) and #124; #124's Claude Code runs read `False`
 ([evals/claude-code-agent-arm](../../claude-code-agent-arm/evidence/README.md)).
 #98's closing accounting cited this `None` as "not observable"; the correction
 is posted on #98.
