@@ -491,7 +491,8 @@ The controller's account is the lifecycle record (#8):
   (#139) is an agent-trial result that declares
   `verification.readiness_source: agent-observation`. It is accepted only when
   the bundle holds that attempt's `agent-observation`, observed and eligible
-  for grading, and the result's `installation-ready` criterion is UNKNOWN. The
+  for grading, and the result's `installation-ready` criterion is exactly one
+  mandatory UNKNOWN. That holds even when a receipt also exists. The
   observation accounts for the grade. It never readies a PASS
   ([verification.md](verification.md#the-result)).
 

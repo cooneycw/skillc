@@ -537,28 +537,19 @@ def test_an_unconfirmed_observation_stands_in_for_nothing(
     assert not list(experiment.root.glob("result-*.json"))
 
 
-def test_an_agent_result_regrades_on_its_stored_observation(store: Path, base: Path, grading: Path) -> None:
+def test_an_agent_result_is_never_regraded_on_the_bare_host(store: Path, base: Path, grading: Path) -> None:
+    """Codex re-review, red before the fix: an agent result's regrade took the
+    bare-subprocess path, running agent-written code on the host that the
+    original grade ran in a separate backend. With no backend it is refused
+    BEFORE any candidate code runs - no new result is stored."""
     experiment, attempt_id = _captured(store, base, REFERENCE, receipt=False)
     original, _graded = verify.grade_agent_attempt(experiment, attempt_id, GRADER, grading, _CONFIRMED)
-    with pytest.raises(verify.Refused, match="no observation-"):
+    (experiment.root / verify.observation_record_name(attempt_id)).write_text(json.dumps(
+        {**_OBSERVED, "attempt_id": attempt_id, "trial_id": experiment.trial_of(attempt_id)["trial_id"]},
+    ), encoding="utf-8")
+    with pytest.raises(verify.Refused, match="explicit grading backend"):
         verify.regrade(experiment, str(original["result_id"]), GRADER, grading)
-    observation_path = experiment.root / verify.observation_record_name(attempt_id)
-    trial_id = experiment.trial_of(attempt_id)["trial_id"]
-    # Another attempt's valid observation, copied in under this attempt's name,
-    # stands in for nothing (codex review).
-    observation_path.write_text(json.dumps({**_OBSERVED, "attempt_id": "a-someone-else", "trial_id": trial_id}),
-                                encoding="utf-8")
-    with pytest.raises(verify.Refused, match="another attempt"):
-        verify.regrade(experiment, str(original["result_id"]), GRADER, grading)
-    observation_path.write_text(json.dumps({**_OBSERVED, "status": "bogus"}), encoding="utf-8")
-    with pytest.raises(verify.Refused, match="not valid"):
-        verify.regrade(experiment, str(original["result_id"]), GRADER, grading)
-    observation_path.write_text(json.dumps({**_OBSERVED, "attempt_id": attempt_id, "trial_id": trial_id}),
-                                encoding="utf-8")
-    again = verify.regrade(experiment, str(original["result_id"]), GRADER, grading)
-    assert again["regrade_of"] == original["result_id"]
-    assert again["verification"]["readiness_source"] == "agent-observation"  # type: ignore[index]
-    assert _outcomes(again) == _outcomes(original)
+    assert len(list(experiment.root.glob("result-*.json"))) == 1
 
 
 def test_a_regrade_of_nothing_stored_is_refused(store: Path, grading: Path) -> None:

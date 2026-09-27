@@ -1193,7 +1193,7 @@ def _read_frozen(experiment: trial.Experiment, digest: str) -> bytes:
 
 
 def regrade(experiment: trial.Experiment, result_id: str, grader: GraderDef, base: Path,
-            forbidden: list[Path] | None = None) -> dict[str, object]:
+            forbidden: list[Path] | None = None, backend: ExecutionBackend | None = None) -> dict[str, object]:
     """Grade the same frozen bytes again, as a NEW result linked to the original.
 
     The original is retained (protocol.md). The grader must still be the pinned
@@ -1206,12 +1206,18 @@ def regrade(experiment: trial.Experiment, result_id: str, grader: GraderDef, bas
     attempt_id = str(original.get("attempt_id"))
     verification = original.get("verification")
     if isinstance(verification, dict) and verification.get("readiness_source") == AGENT_OBSERVATION_READINESS:
+        # Agent-written candidate code is never run as a bare host process
+        # (codex review): the original grade ran inside a separate backend
+        # instance, and a regrade must not quietly downgrade that boundary.
+        if backend is None:
+            raise Refused(f"result {result_id!r} grades agent-written code; regrading it needs an explicit "
+                          "grading backend, never the bare host subprocess")
         # The same stand-in the original was graded on (#139), read back from
         # the store: an agent attempt has no receipt to regrade against.
         _eligible_observation(attempt_id, _stored_observation(experiment, attempt_id, original))
         return _grade_and_store(experiment, attempt_id, grader, base, forbidden, regrade_of=result_id,
-                                readiness_source=AGENT_OBSERVATION_READINESS)[0]
-    return grade(experiment, attempt_id, grader, base, forbidden, regrade_of=result_id)
+                                backend=backend, readiness_source=AGENT_OBSERVATION_READINESS)[0]
+    return grade(experiment, attempt_id, grader, base, forbidden, regrade_of=result_id, backend=backend)
 
 
 def _stored_observation(experiment: trial.Experiment, attempt_id: str,

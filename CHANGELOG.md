@@ -27,10 +27,17 @@ and version plan.
     task FAIL is still FAIL. The driver's returned `graded.status` stays the
     task grade, with `result_status` beside it.
   - `attempt-accounting` accepts a receiptless graded result only when it
-    declares the stand-in, keeps `installation-ready` UNKNOWN, and the bundle
-    holds that attempt's observed, grading-eligible `agent-observation`. New
-    controls: `good/agent-observation-stands-in`,
-    `bad/stand-in-without-observation` and `bad/stand-in-claims-readiness`.
+    declares the stand-in, keeps `installation-ready` as exactly one MANDATORY
+    UNKNOWN, and the bundle holds that attempt's observed, grading-eligible
+    `agent-observation`. A result declaring the stand-in is held to that even
+    when a receipt also exists. New controls: `good/agent-observation-stands-in`,
+    `bad/stand-in-without-observation`, `bad/stand-in-claims-readiness`,
+    `bad/stand-in-optional-readiness` and
+    `bad/stand-in-with-receipt-claims-readiness`.
+  - `verify.regrade` of an agent-path result reads the stored observation. It
+    must be valid and bound to that attempt and trial. The regrade also needs
+    an explicit grading `backend`, and is refused without one: agent-written
+    code is never regraded as a bare host process.
   - Agent-trial ledgers now pin the grader's digest (`matched_pilot.plan_pilot`,
     `collection_conformance.plan_collection_attempt`), which the verifier
     requires. The collection plan used to pin revision `g1` of a grader at

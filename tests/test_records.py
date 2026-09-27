@@ -1096,3 +1096,15 @@ def test_an_optional_readiness_criterion_cannot_let_a_stand_in_pass(tmp_path: Pa
 
     [finding] = _stand_in_findings(tmp_path, edit_result=optional)
     assert "not exactly one mandatory UNKNOWN" in finding
+
+
+def test_a_receipt_beside_the_stand_in_does_not_let_it_claim_readiness(tmp_path: Path) -> None:
+    """Codex re-review, red before the fix: stand-in checks ran only when no
+    receipt existed, so adding one let a stand-in result claim readiness."""
+    case = tmp_path / "case"
+    shutil.copytree(CONTROLS / "attempt-accounting" / "bad" / "stand-in-claims-readiness", case)
+    shutil.copy(CONTROLS / "attempt-accounting" / "good" / "complete" / "receipt.json", case / "receipt.json")
+    bundle = records.bundle_at(case)
+    assert bundle is not None
+    [finding] = list(records.attempt_accounting(bundle))
+    assert "not exactly one mandatory UNKNOWN" in finding

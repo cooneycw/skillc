@@ -190,7 +190,10 @@ for readiness.** It shows the attempt ran as planned, not that the subject was
 installed and discovered. So on this path `installation-ready` is always
 UNKNOWN, naming `observation-<attempt>.json`, and readiness still gates PASS: a
 task PASS is stored as INCONCLUSIVE, and a task violation is still FAIL. A
-regrade of such a result reads the stored observation instead. A real readiness
+regrade of such a result reads the stored observation instead, refused unless
+it is a valid agent-observation bound to the same attempt and trial. It needs an
+explicit grading backend: agent-written code is never regraded as a bare host
+process. A real readiness
 source for the agent path, such as a client's own skill listing, would have to
 replace this rule rather than widen it.
 

@@ -1054,6 +1054,33 @@ def test_a_graded_attempt_stores_a_verified_result_bound_to_its_manifest_and_pin
     assert not list(experiment.root.glob("receipt-*.json"))
 
 
+def test_an_agent_result_regrades_through_a_backend_on_its_own_observation(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """#139: a regrade reads the stored observation - valid, and bound to THIS
+    attempt and trial (codex review) - and runs through a grading backend."""
+    experiment, attempt_id, _record = _graded_codex_attempt(store, base, docker_state, tmp_path)
+    [path] = experiment.root.glob("result-*.json")
+    original = json.loads(path.read_text(encoding="utf-8"))
+    grader = verify.GraderDef.load(GRADER_ROOT)
+    observation = experiment.root / at.observation_record_name(attempt_id)
+    good = observation.read_text(encoding="utf-8")
+
+    swapped = {**json.loads(good), "attempt_id": "a-someone-else"}
+    observation.write_text(json.dumps(swapped), encoding="utf-8")
+    with pytest.raises(verify.Refused, match="another attempt"):
+        verify.regrade(experiment, original["result_id"], grader, base, backend=_backend(base, docker_state))
+    observation.write_text(json.dumps({**json.loads(good), "status": "bogus"}), encoding="utf-8")
+    with pytest.raises(verify.Refused, match="not valid"):
+        verify.regrade(experiment, original["result_id"], grader, base, backend=_backend(base, docker_state))
+
+    observation.write_text(good, encoding="utf-8")
+    again = verify.regrade(experiment, original["result_id"], grader, base, backend=_backend(base, docker_state))
+    assert again["regrade_of"] == original["result_id"]
+    assert again["verification"]["readiness_source"] == "agent-observation"  # type: ignore[index]
+    assert again["criteria"] == original["criteria"]
+
+
 def test_the_stored_stand_in_needs_its_observation(
     store: Path, base: Path, docker_state: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:

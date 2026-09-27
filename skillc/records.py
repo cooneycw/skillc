@@ -1442,8 +1442,7 @@ def attempt_accounting(bundle: Bundle) -> Iterator[str]:
         if graded:
             if attempt_id not in manifests:
                 yield f"attempt {attempt_id!r} was graded without its artifact manifest"
-            if attempt_id not in receipts:
-                yield from _receipt_stand_in(attempt_id, graded, observations.get(attempt_id))
+            yield from _receipt_stand_in(attempt_id, graded, observations.get(attempt_id), attempt_id in receipts)
 
 
 #: `verification.readiness_source` on a result graded without a receipt (#139);
@@ -1452,13 +1451,19 @@ OBSERVATION_STAND_IN = "agent-observation"
 _READINESS_CRITERION = "installation-ready"
 
 
-def _receipt_stand_in(attempt_id: str, graded: list[Record], observation: Record | None) -> Iterator[str]:
-    """Why a graded attempt with no receipt is still unaccounted, if it is."""
+def _receipt_stand_in(
+    attempt_id: str, graded: list[Record], observation: Record | None, has_receipt: bool,
+) -> Iterator[str]:
+    """Why a graded result is not accounted for by its readiness evidence, if
+    it is not. A result declaring the observation stand-in is held to it
+    WHETHER OR NOT a receipt also exists (codex review): a receipt beside it
+    must not let the stand-in claim the readiness it never establishes."""
     for result in graded:
         verification = result.data.get("verification")
         source = verification.get("readiness_source") if isinstance(verification, dict) else None
         if source != OBSERVATION_STAND_IN:
-            yield f"attempt {attempt_id!r} was graded without its installation receipt"
+            if not has_receipt:
+                yield f"attempt {attempt_id!r} was graded without its installation receipt"
             continue
         criteria = result.data.get("criteria")
         readiness = [
