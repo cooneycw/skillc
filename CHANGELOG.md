@@ -16,6 +16,34 @@ collection) closes.
 
 ### Added
 
+- **Per-client transcript adapters, grounded in real transcripts rather than
+  guessed** (Refs #106, split 1 of 2 - the driver loop itself is a separate
+  PR under the same issue): `skillc/transcript_adapter.py` translates a real
+  Claude Code transcript (`~/.claude/projects/.../*.jsonl`) or a real Codex
+  rollout (`~/.codex/sessions/.../*.jsonl`) into the normalized event shape
+  `skillc/trial_bootstrap.py`'s `verify_first_user_message`/`check_canary`
+  already consume. Every shape implemented was read directly from a real
+  Claude Code transcript and three freshly-run, live `codex exec` transcripts,
+  never invented from documentation alone - the same discipline that caught
+  #98's credential-schema bug. Notable findings folded into the design: a
+  real Codex transcript's first `user`-role message is always a
+  harness-injected `<environment_context>` wrapper, never the real prompt,
+  and must be skipped; a real Codex tool result carries no explicit
+  success/failure field at all, only a doubly-JSON-encoded `exit_code`
+  embedded in one of its own output blocks; and Codex has no distinct
+  "skill invocation" transcript event the way Claude Code's dedicated
+  `Skill` tool call does, so that detection is a named, explicitly
+  best-effort heuristic. An undeterminable result (an unparseable exit code,
+  a non-`exec` tool call with no observed success convention) is always
+  treated as a failure, never assumed successful. Hand-verified negative
+  controls confirm three real regression classes: assuming every Codex
+  `exec` call succeeded, skipping the environment-context filter, and
+  ignoring a Claude Code tool result's `is_error` flag - each sabotaged,
+  confirmed red on the exact test it should break, restored, confirmed
+  green. What this does NOT do, stated in the module's own docstring: pair a
+  tool call's confirmed result with a live file read-back, which needs a
+  running container and is explicitly the driver-loop half's job, not this
+  one's.
 - **A trial container carries the operator's subscription login, never a
   long-lived key, never mounted or exported, with a leak-check for token
   material** (Refs #98, Refs #10): the owner's ruling, quoted verbatim (from

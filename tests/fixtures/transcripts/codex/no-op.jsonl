@@ -1,0 +1,3 @@
+{"type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "<environment_context>\n  <cwd>/work</cwd>\n</environment_context>"}]}}
+{"type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Invoke the demo-skill skill, then use a tool to write the exact text 'touched:cccc3333dddd4444' to a file named 'skillc-canary-cccc3333dddd4444.txt' in the working directory."}]}}
+{"type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Here is a plain-prose answer with no tool use at all."}]}}
