@@ -1,8 +1,10 @@
 # The operator demo (#81, Refs #10)
 
-- Status: the command exists and is proven against the fake `docker` CLI
-  (`tests/fixtures/docker-backend/fake_docker.py`); the real-daemon success
-  path is owed to the operator's own live run.
+- Status: proven against the fake `docker` CLI
+  (`tests/fixtures/docker-backend/fake_docker.py`), and run live by the
+  operator at `8e06030` on 2026-09-27: all four commands exited 0 with every
+  item MET (https://github.com/cooneycw/skillc/issues/10#issuecomment-5855368984). What that run did and did not cover is recorded in
+  [support-matrix.md](support-matrix.md).
 - Governing documents: [support-matrix.md](support-matrix.md) (restated
   after that live run, from its results), [interfaces.md](interfaces.md)
   (the backend seam this command drives through).

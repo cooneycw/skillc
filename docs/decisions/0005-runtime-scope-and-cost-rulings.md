@@ -102,9 +102,9 @@ recorded. Without an approved budget, the run manifest is prepared and
 execution is reported incomplete, never silently skipped or approximated.
 Full acceptance: #12.
 
-### 6. Two rulings, verbatim and dated, that later files cite by section
+### 6. Rulings, verbatim and dated, that later files cite by section
 
-Both quoted here so a later file can cite this section instead of a private
+Each is quoted here so a later file can cite this section instead of a private
 message number - skillc is public, and a message number is a channel no
 outside reader can resolve.
 
@@ -129,6 +129,18 @@ outside reader can resolve.
   in-container credential path (issue #98) is the prerequisite for
   actually running an agent attempt under this ruling; it is not delivered
   by this record.
+
+- **"a plus the follow-up issue"** (owner ruling, 2026-09-27): after the
+  operator's live run of `skillc demo` at `8e06030` (evidence on #10), the
+  owner chose between (a) accepting that run's real-daemon coverage (the
+  success path plus the three seeded `--control` failures), together with
+  the fake-daemon proof of every other failure path, as sufficient to close
+  #10, and (b) extending `--control` with real-daemon seeds and rerunning.
+  The ruling takes (a), amending #79's evidence rule and #81's scope
+  accordingly, and files #122 for real-daemon seeds of the two paths where
+  a real daemon most plausibly differs from the fake: timeout and operator
+  cancellation. The remaining fake-only paths, and why each is hard to seed
+  honestly on a real daemon, are listed in `support-matrix.md` and #122.
 
 ## Consequences
 
