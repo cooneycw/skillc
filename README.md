@@ -75,6 +75,7 @@ skillc leak-check <path>       # refuse a tree or bundle carrying a machine iden
 skillc demo                    # the operator demo: a real Docker trial lifecycle, end to end (#10 closes on this run)
 skillc collection-run <subject> # #11/#106: one real agent attempt per skill collection (run live: evals/second-collection-conformance/evidence/, evals/agent-trial-live/)
 skillc pilot-run               # #12: the predeclared matched pilot, treatment vs baseline (run live: evals/matched-pilot/evidence/)
+skillc selection-probe         # #26: the three selection cases, or --detection-control (run live: evals/selection-probe/evidence/)
 skillc pilot-report <run_dir>  # #12: rebuild a pilot's report from its private run, merging reviewed claims
 ```
 <!-- commands:end -->

@@ -1,0 +1,21 @@
+{
+  "control_schema": 1,
+  "id": "selection-probe-detection-named-skill",
+  "revision": "d1",
+  "experiment": "selection-probe-detection-control",
+  "_comment": "Predeclared detection control for #26, committed before it runs. The first live selection run (2026-09-27, https://github.com/cooneycw/skillc/issues/26#issuecomment-5856746724) observed no skill invocation in any arm; this control asks whether that zero could have been anything else. It is protocol section 2's 'Detection control', kept distinct from the benefit comparison (ADR 0002), and it is NOT a selection result: the prompt names the skill.",
+  "base_case": {"id": "selection-probe-intended-use", "revision": "c1"},
+  "skill_name": "qa-test",
+  "arms": {
+    "treatment": "the collection installed (as in the selection run) and the canary instruction names 'qa-test'",
+    "baseline": "nothing installed, the same named instruction - the skill cannot be read because it is not there"
+  },
+  "expected": {
+    "treatment": "selected - the transcript shows the agent reading .../skills/qa-test/SKILL.md, detected by the codex heuristic",
+    "baseline": "anything except selected - with no skill installed the named canary cannot be satisfied, so an unknown/inconclusive result is the expected shape, not a failure"
+  },
+  "proves": "the installed collection, the codex client, the transcript adapter and the recorded skill_invocations can report a real invocation of an installed skill in this exact configuration, and do not report one where none could happen",
+  "does_not_prove": "that an UNPROMPTED selection would be detected when it happens by a different route (a relative path, another reader tool), or any sensitivity to a subtle description change - that is the degraded-description variant suggested on #26 (2026-09-26), not run here",
+  "attempts_per_arm": 1,
+  "failure_means": "if the treatment arm does not read selected, the first run's zeros are not evidence of non-selection and must be reported as a detector gap"
+}
