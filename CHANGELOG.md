@@ -16,6 +16,41 @@ collection) closes.
 
 ### Added
 
+- **`skillc demo --subject <name>`: install a declared skill collection into
+  a real container's home, re-check its digests in-container, and observe
+  the client's own discovery of it** (Refs #101, Refs #11, Refs #81, Refs
+  #10): a THIRD demonstration, alongside (never replacing) the lifecycle and
+  grading demos - #97's own removed narrower flag only materialized a local
+  snapshot, which would have misled the operator about what `--subject`
+  actually proves. This version acquires the collection from its pinned
+  revision via a real `git` clone (`materialize.acquire_git`, never
+  `materialize`'s own local three-arm host proof), copies every selected
+  skill's files into `/home/candidate/.codex/skills/<dir>/...` one
+  `DockerBackend.deliver_home_file` call per file (never bind-mounted), reads
+  every installed file's bytes back out of the running container and
+  re-hashes them (`matched`/`mismatched`, naming the file), and runs the
+  client's own listing (`codex debug prompt-input`, the same argv convention
+  `skillc.exposure`'s Codex arm already uses) INSIDE the container via
+  `execute()` - never `materialize.run_client`'s host-local subprocess,
+  which never touches a container at all. A listing that cannot complete at
+  all reports every selected skill `UNMEASURED` with the reason, never
+  dropped, and flips the exit non-zero. `materialize.inventory`'s own check
+  refuses a `--subject` whose `select` names a skill absent from the source
+  before any Docker work starts. Every acceptance item has a committed red
+  case that flips it to NOT MET, confirmed against the exact mutation that
+  would otherwise leave it blind - #97 shipped three items no test could
+  fail; this one does not repeat that. The default subject name is read from
+  `evals/subjects/DEFAULT_SUBJECT` (data), never a literal, so the
+  genericity guard (#94) has nothing to flag. Extended the fake `docker` CLI
+  fixture's absolute-path remapping to cover `CONTAINER_HOME`
+  (`/home/candidate`) as well as `CONTAINER_WORKSPACE`, and as a substring
+  inside a larger token (`env CODEX_HOME=/home/candidate/.codex ...`), not
+  only a whole-argv-element match - needed once an exec'd argv referenced the
+  container's home rather than its workspace for the first time. The runbook
+  gains a `--subject` section with the required "what this shows and does
+  NOT show" text verbatim, and a table of each subject's pinned revision and
+  install location.
+
 - **`lifecycle.run_through_backend` gains two generic, optional hooks,
   `observe_before_teardown` and `before_execute`** (Refs #106, split of the
   agent trial driver's own PR): `observe_before_teardown` runs once, after
