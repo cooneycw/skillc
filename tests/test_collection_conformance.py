@@ -377,6 +377,26 @@ def test_paste_back_handles_a_blocked_attempt_with_no_observation() -> None:
     text = cc.build_collection_paste_back(result)
     assert "disposition=unavailable" in text
     assert "prompt_delivered=None" in text
+    assert "cleanup=None failures=None" in text
+    assert "backend_teardown=None error=None" in text
+
+
+def test_paste_back_prints_the_attempts_cleanup_evidence() -> None:
+    """#127: the workspace cleanup and the container teardown are printed, so
+    a paste-back can evidence cleanup - and a failed one reads as failed."""
+    def text_for(cleanup: dict[str, object], teardown: str, error: str | None) -> str:
+        record: dict[str, object] = {
+            "disposition": "captured", "observation": None, "graded": None, "grading_blocked_reason": None,
+            "cleanup": cleanup, "backend_teardown": teardown, "backend_teardown_error": error,
+        }
+        return cc.build_collection_paste_back(cc.CollectionAgentResult("s", "v1", "codex", record))
+
+    clean = text_for({"status": "removed", "failures": []}, "confirmed", None)
+    assert "  cleanup=removed failures=[]" in clean.splitlines()
+    assert "  backend_teardown=confirmed error=None" in clean.splitlines()
+    failed = text_for({"status": "partial", "failures": ["x"]}, "unknown", "boom")
+    assert "  cleanup=partial failures=['x']" in failed.splitlines()
+    assert "  backend_teardown=unknown error=boom" in failed.splitlines()
 
 
 # --------------------------------------------------------- no real model call

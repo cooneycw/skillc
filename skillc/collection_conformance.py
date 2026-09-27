@@ -331,14 +331,17 @@ def run_collection_agent_attempt(
 def build_collection_paste_back(result: CollectionAgentResult) -> str:
     """The planned shape (`docs/specs/evaluation-facility/operator-demo.md`):
     `disposition`, `prompt_delivered`, `canary_satisfied`, `graded.status`,
-    `refresh_observed_in_container`, and (issue #26's own addition to the
-    record) `skill_invocations`/`skill_invocation_detection` - leak-checked by
+    `refresh_observed_in_container`, (issue #26's own addition to the
+    record) `skill_invocations`/`skill_invocation_detection`, and (#127) the
+    attempt's `cleanup` and `backend_teardown` - leak-checked by
     the caller before printing, via `demo.leak_check_text`/
     `demo.print_paste_back` directly, never a second scan convention."""
     observation = result.record.get("observation")
     obs = observation if isinstance(observation, dict) else {}
     graded = result.record.get("graded")
     graded_status = graded.get("status") if isinstance(graded, dict) else None
+    raw_cleanup = result.record.get("cleanup")
+    cleanup = raw_cleanup if isinstance(raw_cleanup, dict) else {}
     lines = [
         "",
         f"collection agent run: {result.subject_name} revision={result.revision} client={result.client}",
@@ -350,5 +353,11 @@ def build_collection_paste_back(result: CollectionAgentResult) -> str:
         f"  refresh_observed_in_container={obs.get('refresh_observed_in_container')}",
         f"  graded.status={graded_status}",
         f"  grading_blocked_reason={result.record.get('grading_blocked_reason')}",
+        # #127: the attempt's own cleanup evidence - the workspace outcome as
+        # persisted in the lifecycle record, and the container's
+        # destroy()/confirm_absent() outcome.
+        f"  cleanup={cleanup.get('status')} failures={cleanup.get('failures')}",
+        (f"  backend_teardown={result.record.get('backend_teardown')}"
+         f" error={result.record.get('backend_teardown_error')}"),
     ]
     return "\n".join(lines)
