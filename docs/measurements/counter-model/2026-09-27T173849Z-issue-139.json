@@ -1,0 +1,20 @@
+{
+  "branch": "issue-139-agent-trial-attempts-are-graded-but-store-no-verif",
+  "counts": {
+    "accepted": 6,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "68977ee094b034ceea094a806c87e7e295078624",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "139",
+  "passes": 2,
+  "recorded_at": "2026-09-27T17:38:49Z",
+  "red_cases": {
+    "already_covered": 6,
+    "proposed": 8
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "schema": 1,
+  "status": "ran"
+}
