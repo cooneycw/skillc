@@ -1,0 +1,20 @@
+{
+  "branch": "issue-12-predeclare-and-run-the-first-bounded-matched-pilot",
+  "counts": {
+    "accepted": 14,
+    "deferred": 3,
+    "rejected": 0
+  },
+  "head": "c697e749c31a1365cdbce7d5853c95dd24e63015",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "12",
+  "passes": 2,
+  "recorded_at": "2026-09-27T13:59:10Z",
+  "red_cases": {
+    "already_covered": 28,
+    "proposed": 38
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "schema": 1,
+  "status": "ran"
+}
