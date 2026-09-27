@@ -132,6 +132,10 @@ def main() -> int:
                               "needs a way to control this directly. Defaults (when omitted) to the prompt's own "
                               "named skill in named-canary mode, and to none at all in skill-free mode - every "
                               "existing named-mode test is unaffected.")
+    parser.add_argument("--plant-none", action="store_true",
+                         help="write no skill_invocation event at all, even in named-canary mode - the agent "
+                              "that was told to invoke a skill which is not installed (#26's detection-control "
+                              "baseline), so the named canary cannot be satisfied")
     parser.add_argument("--no-skill-listing", action="store_true",
                          help="claude-fake only: write no skill_listing attachment at all - a client version "
                               "that stopped emitting one (issue #124: must read as UNMEASURED, never as empty)")
@@ -173,7 +177,7 @@ def main() -> int:
     # existing test's own behaviour, unchanged), nothing at all in
     # skill-free mode - `--plant-skill` overrides either default explicitly.
     default_skills = [skill_match.group(1)] if skill_match is not None else []
-    skills = tuple(args.plant_skill) if args.plant_skill else tuple(default_skills)
+    skills = () if args.plant_none else (tuple(args.plant_skill) if args.plant_skill else tuple(default_skills))
 
     # lifecycle.run_through_backend's OWN backend-planted content canary
     # (independent of the transcript-based one below) reads THIS file back

@@ -1,0 +1,20 @@
+{
+  "branch": "issue-26-probe-native-skill-selection-and-non-selection-on",
+  "counts": {
+    "accepted": 4,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "45d0b083babd3ad1445f71d89ec16f2eb39315dd",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "26",
+  "passes": 2,
+  "recorded_at": "2026-09-27T17:42:58Z",
+  "red_cases": {
+    "already_covered": 6,
+    "proposed": 9
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "schema": 1,
+  "status": "ran"
+}

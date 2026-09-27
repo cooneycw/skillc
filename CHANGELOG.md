@@ -10,6 +10,35 @@ and version plan.
 
 ### Added
 
+- **`skillc selection-probe [--detection-control]`: the operator command for
+  #26's live run** (Refs #26). It runs every predeclared case through
+  `selection_probe.agent_trial_runner`, one attempt per arm, and exits 1
+  unless every attempt was captured. A report of `unknown`s is not a
+  measurement. With `--detection-control` it runs the predeclared control
+  instead (`evals/selection-probe/detection-control.json`): the intended-use
+  case only, with the canary naming `qa-test`. That exits 1 unless the
+  treatment arm reads `selected` and the empty baseline does not. A runner
+  whose canary names a skill is refused for a selection run, and an unnamed
+  one for a control. A non-captured attempt's report now keeps the record's
+  own `reason`. The `SKILLC_ALLOW_REAL_AGENT` pytest harness is removed:
+  `tests/conftest.py` keeps every test away from a real credential, so it
+  could never launch, and it passed on six `unavailable` attempts.
+
+  Cross-model review found two defects, both fixed here. First, the control
+  accepted any baseline that was not `selected`, even one never observed, or
+  one whose failed named canary hid an invocation. A baseline must now be
+  observed with no invocation, and an inconclusive attempt keeps the
+  invocations its transcript recorded. Second, the command printed raw
+  details that the report file's leak check had refused. The console output
+  is now redacted and leak-checked as a whole. Both are confirmed red on the
+  unfixed code. A re-review found two more, also fixed. An empty, malformed
+  or unrelated transcript counted as "observed"; an observation now also
+  requires this attempt's own prompt to have been delivered, which binds the
+  transcript to the attempt. And the leak refusal printed the refused value on
+  stderr; it now names only the finding categories. The live runs, the
+  selection run and the detection control, are recorded in
+  `evals/selection-probe/evidence/README.md`.
+
 - **Every real-agent attempt now persists its observation as an
   `agent-observation` record** (Refs #106). `agent_trial.run_one_attempt`
   writes `observation-<attempt>.json` beside `lifecycle-<attempt>.json` on
