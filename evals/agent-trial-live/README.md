@@ -242,9 +242,10 @@ what these runs showed:
   included, could have left one.
 - **An empty transcript is no longer read as "no drift".** The census now
   reports `response_items_inspected` and prints `unrecognized_types=None`
-  (not assessed) when that count is zero. Both captured runs inspected 11
-  response items: 5 tool calls, 5 outputs, and 8 or 7 messages plus
-  reasoning, per their `line_types`. So their `[]` is a real result.
+  (not assessed) when that count is zero. Per their `line_types`, the
+  captured runs had 19 response items (mattpocock-skills: 5 tool calls,
+  5 outputs, 8 messages, 1 reasoning) and 17 (cpp-codex: 5, 5 and 7). So
+  their `[]` is a real result, not an empty one.
 
 The kept `collection-run-record.json` files from these runs hold the driver
 record only. The saved file is now an envelope that also carries the host
