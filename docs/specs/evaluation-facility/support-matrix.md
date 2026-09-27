@@ -125,6 +125,7 @@ Evidence: the leak-checked paste-back blocks and EXIT lines posted on #10
 | `--subject cpp-codex` (claude-power-pack @ `85e9b03a`) | 74 skills / 273 files installed; in-container digests matched; 74/74 discovered by the client's own listing |
 | `--subject mattpocock-skills` (@ `c55ee460`) | 2 skills / 7 files installed; digests matched; 2/2 discovered |
 | Exit codes | `EXIT=0` for all four commands; no traceback anywhere |
+| `collection-run` on Claude Code 2.1.283 (#124): `cpp-claude-code` (CPP `.claude/skills`, 18 skills) and `mattpocock-skills-claude-code` (2 skills) | both captured, graded PASS; every selected skill `listed` in the transcript's `skill_listing` (discovery observed from the transcript, not a model-free canary: Claude Code has none); missing-credential control `unavailable`; host login unaffected. Evidence: [evals/claude-code-agent-arm](../../../evals/claude-code-agent-arm/README.md) |
 
 **Proven against the fake `docker` CLI and `FakeBackend` only**, by owner
 ruling (2026-09-27; see [ADR 0005](../../decisions/0005-runtime-scope-and-cost-rulings.md)
