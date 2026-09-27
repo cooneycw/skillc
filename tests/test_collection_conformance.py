@@ -12,8 +12,10 @@ file at all.
 
 from __future__ import annotations
 
+import argparse
 import ast
 import json
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -424,3 +426,111 @@ def test_the_binary_name_scan_does_not_fire_on_a_client_keyword() -> None:
     case from a real one; documented here rather than silently accepted."""
     tree = ast.parse('at.run_one_attempt(client="codex")\n', filename="<planted>")
     assert _find_real_binary_names_in_argv_literals(tree) == []
+
+
+# ------------------------------------------------- cmd_collection_run's own gate
+
+
+def _collection_run_args(subject: str, **overrides: object) -> argparse.Namespace:
+    from skillc import cli
+
+    parser = cli.build_parser()
+    args = parser.parse_args(["collection-run", subject])
+    for key, value in overrides.items():
+        setattr(args, key, value)
+    return args
+
+
+def _stub_acquisition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Lets `cli.cmd_collection_run` run its own real `cc.acquire_collection`
+    and `cc.plan_collection_attempt` against a committed fixture collection,
+    without a real git clone - mirrors `tests/test_demo.py`'s own
+    `_fake_acquire` convention. Only `cc.run_collection_agent_attempt` itself
+    (the real-agent leg) is mocked by the tests below."""
+    collection = _fixture_collection(tmp_path, {"greet": "greet"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject())
+
+    def _fake_acquire(subject: materialize.Subject, into: Path, timeout: float = 300) -> Path:
+        shutil.copytree(collection, into, dirs_exist_ok=True)
+        return into
+
+    monkeypatch.setattr(demo, "acquire_subject_checkout", _fake_acquire)
+
+
+def _fake_collection_result(
+    subject_name: str, *, disposition: str, graded: dict[str, object] | None,
+) -> cc.CollectionAgentResult:
+    record: dict[str, object] = {
+        "disposition": disposition,
+        "graded": graded,
+        "observation": {
+            "prompt_delivered": True, "canary_satisfied": True,
+            "skill_invocations": [], "skill_invocation_detection": "none",
+            "refresh_observed_in_container": False,
+        },
+        "grading_blocked_reason": None if graded is not None else "canary not satisfied",
+    }
+    return cc.CollectionAgentResult(subject_name=subject_name, revision="r1", client="codex", record=record)
+
+
+def test_cmd_collection_run_exits_1_when_grading_is_blocked(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Red case (issue #120's review of #121, HIGH): reverting `cli.py`'s
+    `graded_ok` gate back to `return 0 if disposition == "captured" else 1`
+    (the shape a cross-model review already flagged once) leaves the full
+    suite green with no guard. `graded=None` is the grading-BLOCKED shape
+    (`run_collection_agent_attempt`'s own `grading_blocked_reason`) - a
+    captured-but-ungraded attempt must never read as CLI success."""
+    from skillc import cli
+
+    _stub_acquisition(tmp_path, monkeypatch)
+
+    def _fake_run(**kwargs: object) -> cc.CollectionAgentResult:
+        return _fake_collection_result("whatever", disposition="captured", graded=None)
+
+    monkeypatch.setattr(cc, "run_collection_agent_attempt", _fake_run)
+    args = _collection_run_args(
+        "whatever", image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base=str(base), timeout=5,
+    )
+    assert cli.cmd_collection_run(args) == 1
+
+
+def test_cmd_collection_run_exits_1_when_grading_failed(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Red case (issue #120's review of #121, HIGH), the other shape: `graded`
+    IS a dict, but its status is `FAIL`, not `PASS`."""
+    from skillc import cli
+
+    _stub_acquisition(tmp_path, monkeypatch)
+
+    def _fake_run(**kwargs: object) -> cc.CollectionAgentResult:
+        return _fake_collection_result(
+            "whatever", disposition="captured", graded={"status": "FAIL", "detail": "wrong output"},
+        )
+
+    monkeypatch.setattr(cc, "run_collection_agent_attempt", _fake_run)
+    args = _collection_run_args(
+        "whatever", image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base=str(base), timeout=5,
+    )
+    assert cli.cmd_collection_run(args) == 1
+
+
+def test_cmd_collection_run_exits_0_on_full_success(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other side of the same gate: `disposition="captured"` AND an
+    actual PASS verdict is the only case that exits 0."""
+    from skillc import cli
+
+    _stub_acquisition(tmp_path, monkeypatch)
+
+    def _fake_run(**kwargs: object) -> cc.CollectionAgentResult:
+        return _fake_collection_result("whatever", disposition="captured", graded={"status": "PASS", "detail": "ok"})
+
+    monkeypatch.setattr(cc, "run_collection_agent_attempt", _fake_run)
+    args = _collection_run_args(
+        "whatever", image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base=str(base), timeout=5,
+    )
+    assert cli.cmd_collection_run(args) == 0
