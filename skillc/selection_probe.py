@@ -13,12 +13,11 @@ NOTHING RUNS FOR REAL BY DEFAULT. `lifecycle.py`'s own guard
 of it, and every test here uses a FAKE `AttemptRunner` that never calls
 `execute()` at all, so the guard is never even exercised by this file's own
 suite (`tests/test_lifecycle.py` already covers the guard itself). The real
-agent path is `agent_trial.py` (issue #106, its driver-loop half, not yet
-merged as this module lands) - `AttemptRunner` is the seam this module
-depends on rather than that module directly, so everything below it can be
-built, tested and reviewed before that seam has a real implementation on the
-other side, and the real implementation is a one-function adapter once it
-does.
+agent path is `agent_trial.py` (#106): `AttemptRunner` is the seam the
+driver depends on, and `agent_trial_runner` at the bottom of this module is
+its real implementation - skill-free canary mode, the collection installed
+into the treatment arm's home only, the record translated by
+`transcript_from_record`.
 
 SELECTION VOCABULARY, never a fourth ad-hoc word: `"selected"` (an
 applicable skill was invoked, captured disposition), `"not-selected"`
@@ -60,11 +59,13 @@ exists to rule out.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import records, trial, verify
+from . import agent_trial, collection_conformance, credential, records, trial, verify
+from .backend import ExecutionBackend, Limits
+from .docker_backend import DockerBackend
 
 PROBE_ROOT = Path(__file__).resolve().parent.parent / "evals" / "selection-probe"
 GRADER_ROOT = Path(__file__).resolve().parent.parent / "evals" / "level1" / "slug-small-fix"
@@ -185,14 +186,21 @@ def selection_status(transcript: AttemptTranscript, applicable_skills: Sequence[
     return "selected" if observed else "not-selected"
 
 
-def _grade(grader: verify.GraderDef, transcript: AttemptTranscript, base: Path) -> bool | None:
+def _grade(
+    grader: verify.GraderDef, transcript: AttemptTranscript, base: Path,
+    backend: ExecutionBackend | None = None,
+) -> bool | None:
     """The task's own public outcome, graded independently of selection -
     `None` when the attempt's own disposition means nothing was ever
     captured to grade (never a guessed PASS or FAIL for a run that did not
-    happen)."""
+    happen). `backend`, when given, is where the grader's probe executes
+    the candidate (`verify.grade_files`' own parameter) - a real agent's
+    output is untrusted code, so the real-agent path passes a SEPARATE
+    grading backend (interfaces.md step 8) rather than probing it on the
+    host."""
     if transcript.disposition != "captured":
         return None
-    graded = verify.grade_files(grader, list(transcript.candidate_files), base)
+    graded = verify.grade_files(grader, list(transcript.candidate_files), base, backend=backend)
     return graded.status == "PASS"
 
 
@@ -265,14 +273,34 @@ def run_selection_probe(
     cases: dict[str, object], manifest: dict[str, object], runner: AttemptRunner, *,
     treatment_subject_digest: str, baseline_subject_digest: str, image_digest: str,
     store: Path, base: Path, grader: verify.GraderDef | None = None,
+    grading_backend: ExecutionBackend | None = None,
 ) -> SelectionProbeReport:
     """Plans, runs every attempt through `runner`, grades, and assembles the
     report - refusing (`SelectionProbeRefused`) if any planned attempt is
-    missing from the results (the attendance rule)."""
+    missing from the results (the attendance rule).
+
+    A runner that needs the planned experiment itself (the real
+    `agent_trial_runner` does - `agent_trial.run_one_attempt` takes it)
+    plans with `plan_selection_probe` first and calls
+    `run_planned_selection_probe` directly; this is exactly that, in one
+    call, for a runner that does not."""
     experiment = plan_selection_probe(
         cases, manifest, treatment_subject_digest=treatment_subject_digest,
         baseline_subject_digest=baseline_subject_digest, image_digest=image_digest, store=store,
     )
+    return run_planned_selection_probe(
+        experiment, cases, runner, base=base, grader=grader, grading_backend=grading_backend,
+    )
+
+
+def run_planned_selection_probe(
+    experiment: trial.Experiment, cases: dict[str, object], runner: AttemptRunner, *,
+    base: Path, grader: verify.GraderDef | None = None,
+    grading_backend: ExecutionBackend | None = None,
+) -> SelectionProbeReport:
+    """`run_selection_probe` over an ALREADY-planned experiment - the same
+    attendance rule, grading and report assembly, split out so a runner can
+    be built against the experiment before it runs."""
     grader = grader if grader is not None else verify.GraderDef.load(GRADER_ROOT)
 
     planned = [(_resolved_trial(experiment, trial_dict), attempt) for trial_dict, attempt in experiment.attempts()]
@@ -316,7 +344,7 @@ def run_selection_probe(
             arm_results[arm] = ArmResult(
                 disposition=transcript.disposition,
                 selection=selection_status(transcript, arm_applicable),
-                task_success=_grade(grader, transcript, base),
+                task_success=_grade(grader, transcript, base, grading_backend),
                 observed=observed_skills(transcript),
                 codex_best_effort=transcript.codex_best_effort,
                 detail=transcript.detail,
@@ -326,3 +354,126 @@ def run_selection_probe(
             treatment=arm_results["treatment"], baseline=arm_results["baseline"],
         ))
     return SelectionProbeReport(cases=tuple(results))
+
+
+# ------------------------------------------------ the real AttemptRunner (#26)
+
+
+def transcript_from_record(
+    record: Mapping[str, object], experiment: trial.Experiment, attempt_id: str,
+) -> AttemptTranscript:
+    """Translate one `agent_trial.run_one_attempt` record into the driver's
+    own `AttemptTranscript`.
+
+    Selection comes ONLY from the record's own `skill_invocations` (what the
+    transcript showed), never from the canary - in skill-free mode the
+    canary is a delivery/liveness check and names no skill at all.
+
+    A captured attempt whose observation is unknown, or whose prompt
+    delivery or canary was not confirmed (`grading_eligible` false), is
+    reported `"inconclusive"`, never `"captured"`: #106's own rule is that
+    such an attempt is BLOCKED, not graded, and the same unconfirmed
+    transcript is no better evidence of selection than it is of outcome -
+    so both selection and task success come out unknown for it.
+
+    `skill_invocation_detection == "heuristic"` (Codex) sets
+    `codex_best_effort`, so the report can never present a heuristic
+    observation as a structural one."""
+    disposition = str(record.get("disposition"))
+    observation = record.get("observation")
+    obs = observation if isinstance(observation, dict) else {}
+    heuristic = obs.get("skill_invocation_detection") == "heuristic"
+    if disposition != "captured":
+        return AttemptTranscript(
+            disposition=disposition, codex_best_effort=heuristic,
+            detail=f"attempt disposition is {disposition!r}",
+        )
+    if not obs or obs.get("status") == "unknown":
+        return AttemptTranscript(
+            disposition="inconclusive", codex_best_effort=heuristic,
+            detail=f"the transcript observation is unknown: {obs.get('reason', 'no observation recorded')}",
+        )
+    if not obs.get("grading_eligible"):
+        return AttemptTranscript(
+            disposition="inconclusive", codex_best_effort=heuristic,
+            detail=(
+                f"prompt_delivered={obs.get('prompt_delivered')!r}, "
+                f"canary_satisfied={obs.get('canary_satisfied')!r} - neither selection nor "
+                "outcome is reported for an attempt the transcript did not confirm"
+            ),
+        )
+    invocations = obs.get("skill_invocations")
+    skills = [str(name) for name in invocations] if isinstance(invocations, list) else []
+    return AttemptTranscript(
+        disposition="captured",
+        events=tuple({"type": "skill_invocation", "skill": name} for name in skills),
+        candidate_files=tuple(agent_trial._frozen_candidate_files(experiment, attempt_id)),
+        codex_best_effort=heuristic,
+    )
+
+
+def agent_trial_runner(
+    *,
+    experiment: trial.Experiment,
+    backend: DockerBackend,
+    base: Path,
+    client: str,
+    argv_for: Callable[[str], Sequence[str]],
+    treatment_home_files: Mapping[str, bytes],
+    goal: str | None = None,
+    surface: Mapping[str, object] | None = None,
+    timeout: float = 30,
+    cli_version: str | None = None,
+    credential_explicit_path: str | Path | None = None,
+    minimum_credential_seconds: float = credential.MINIMUM_REMAINING_SECONDS,
+) -> AttemptRunner:
+    """The real `AttemptRunner`: each planned attempt becomes one
+    `agent_trial.run_one_attempt` against `experiment`, in SKILL-FREE mode
+    (`skill_name=None`) - a canary that names a skill would supply the very
+    answer this probe exists to observe.
+
+    The treatment arm receives `treatment_home_files` (the declared
+    collection, keyed by container-home path - build it with
+    `collection_conformance.acquire_collection` and its `_collection_home_files`,
+    the one surface-reading convention). The baseline arm receives NOTHING
+    extra, whatever the caller passes: its whole meaning is "no skill
+    installed", and that is enforced here rather than trusted to a caller.
+
+    The prompt is the fixed task's own `goal.md` plus the case's
+    `prompt_addendum` (empty for the near-miss case). `argv_for(attempt_id)`
+    returns the launch argv before the prompt, exactly as
+    `run_one_attempt`'s `base_argv` - a real launch returns the same argv
+    every time; the fake-docker tests need the attempt id to map the home.
+
+    No grading happens here: `run_planned_selection_probe` grades every
+    captured attempt itself, through its own `grading_backend`, so there is
+    ONE grading path whichever runner produced the transcript.
+
+    Launching a real `claude`/`codex` still requires
+    `SKILLC_ALLOW_REAL_AGENT=1` - `lifecycle.py`'s own guard, unchanged."""
+    resolved_goal = goal if goal is not None else (GRADER_ROOT / "goal.md").read_text(encoding="utf-8")
+    resolved_surface = (
+        surface if surface is not None
+        else collection_conformance._fixture_surface(GRADER_ROOT / "fixture")
+    )
+
+    def run(trial_dict: dict[str, object], attempt: dict[str, object]) -> AttemptTranscript | None:
+        config = trial_dict["config"]
+        assert isinstance(config, dict)
+        arm = str(config["arm"])
+        if arm not in ARMS:
+            raise SelectionProbeRefused(f"planned trial names unknown arm {arm!r}")
+        addendum = str(config.get("prompt_addendum") or "")
+        prompt = f"{resolved_goal}\n\n{addendum}" if addendum else resolved_goal
+        attempt_id = str(attempt["attempt_id"])
+        record = agent_trial.run_one_attempt(
+            backend=backend, experiment=experiment, attempt_id=attempt_id, client=client,
+            base_argv=argv_for(attempt_id), prompt=prompt, skill_name=None,
+            surface=resolved_surface, limits=Limits(timeout=timeout), base=base,
+            credential_explicit_path=credential_explicit_path,
+            minimum_credential_seconds=minimum_credential_seconds, cli_version=cli_version,
+            extra_home_files=dict(treatment_home_files) if arm == "treatment" else {},
+        )
+        return transcript_from_record(record, experiment, attempt_id)
+
+    return run

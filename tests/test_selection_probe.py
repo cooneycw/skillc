@@ -415,3 +415,234 @@ def test_selection_status_captured_with_no_applicable_skill_reports_selected_on_
     assert sp.selection_status(transcript, []) == "selected"
     clean = sp.AttemptTranscript(disposition="captured", events=())
     assert sp.selection_status(clean, []) == "not-selected"
+
+
+# --------------------------------------------------------------------------
+# The REAL AttemptRunner (`agent_trial_runner`), end to end on the fake
+# `docker` CLI and the scripted fake client `tests/test_agent_trial.py`
+# already uses - `run_one_attempt` for real, every planned attempt, no real
+# daemon and no real agent binary.
+# --------------------------------------------------------------------------
+
+import sys
+import time
+from base64 import urlsafe_b64encode
+
+from skillc import docker_backend as d
+
+FAKE_DOCKER = ROOT / "tests" / "fixtures" / "docker-backend" / "fake_docker.py"
+FAKE_CLIENT = ROOT / "tests" / "fixtures" / "agent-trial" / "fake_agent_client.py"
+
+#: The collection the treatment arm receives, in the codex skills layout -
+#: the three skills the cases name, plus one no case names.
+_COLLECTION = {
+    f".codex/skills/{name}/SKILL.md": f"---\nname: {name}\ndescription: A test skill.\n---\nBody.\n".encode()
+    for name in ("qa-test", "security-scan", "security-deep", "unrelated-skill")
+}
+
+
+class _HomeRecordingBackend(d.DockerBackend):
+    """Records every `deliver_home_file` path per attempt - the container is
+    destroyed before `run_one_attempt` returns, so this is the only place to
+    see what each arm's home actually received."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+        self.delivered: dict[str, list[str]] = {}
+
+    def deliver_home_file(self, handle: object, container_relpath: str, data: bytes, *, mode: int = 0o600) -> None:
+        super().deliver_home_file(handle, container_relpath, data, mode=mode)
+        self.delivered.setdefault(str(handle.attempt_id), []).append(container_relpath)  # type: ignore[attr-defined]
+
+
+def _codex_credential(tmp_path: Path) -> Path:
+    def seg(data: bytes) -> str:
+        return urlsafe_b64encode(data).rstrip(b"=").decode()
+    token = f"{seg(json.dumps({'alg': 'none'}).encode())}.{seg(json.dumps({'exp': int(time.time() + 3600)}).encode())}.sig"
+    path = tmp_path / "codex-credential.json"
+    path.write_text(json.dumps({"tokens": {"access_token": token}}))
+    return path
+
+
+def _script(
+    *, plant: tuple[str, ...] = (), candidate: Path | None = GOOD_CANDIDATE, fail_canary: bool = False,
+) -> dict[str, object]:
+    return {"plant": plant, "candidate": candidate, "fail_canary": fail_canary}
+
+
+def _argv_for(
+    experiment: t.Experiment, docker_state: Path, scripts: dict[tuple[str, str], dict[str, object]],
+):  # type: ignore[no-untyped-def]
+    """`argv_for(attempt_id)`: the fake client's argv for whichever (case,
+    arm) that attempt belongs to - the fake docker maps CONTAINER_HOME to a
+    host path named after the attempt, which is why the real runner takes a
+    per-attempt argv function at all."""
+    def argv_for(attempt_id: str) -> list[str]:
+        trial_dict = sp._resolved_trial(experiment, experiment.trial_of(attempt_id))
+        key = (str(trial_dict["case"]["id"]), str(trial_dict["config"]["arm"]))  # type: ignore[index]
+        script = scripts.get(key, _script())
+        home = docker_state / f"{d._container_name(attempt_id)}.fsroot" / "home" / "candidate"
+        argv = [
+            sys.executable, str(FAKE_CLIENT), "--format", "codex-fake", "--home", str(home),
+            "--transcript-relpath", f".codex/sessions/2026/01/01/rollout-{attempt_id}.jsonl",
+        ]
+        if script["candidate"] is not None:
+            argv.extend(["--copy-solution", str(script["candidate"])])
+        if script["fail_canary"]:
+            argv.append("--fail-canary")
+        for skill in script["plant"]:  # type: ignore[attr-defined]
+            argv.extend(["--plant-skill", str(skill)])
+        return argv
+    return argv_for
+
+
+def _run_real(
+    tmp_path: Path, scripts: dict[tuple[str, str], dict[str, object]],
+) -> tuple[sp.SelectionProbeReport, t.Experiment, _HomeRecordingBackend]:
+    base = tmp_path / "work"
+    base.mkdir()
+    docker_state = tmp_path / "docker-state"
+    docker_bin = [sys.executable, str(FAKE_DOCKER), "--state", str(docker_state)]
+    backend = _HomeRecordingBackend(image="fake-image:1", base_dir=base, docker_bin=docker_bin)
+    grading_backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=docker_bin)
+    experiment = sp.plan_selection_probe(
+        CASES, MANIFEST, treatment_subject_digest=_TREATMENT_SUBJECT_DIGEST,
+        baseline_subject_digest=_BASELINE_SUBJECT_DIGEST, image_digest=_PLACEHOLDER_IMAGE_DIGEST,
+        store=t.open_store(tmp_path / "store", forbidden=[]),
+    )
+    runner = sp.agent_trial_runner(
+        experiment=experiment, backend=backend, base=base, client="codex",
+        argv_for=_argv_for(experiment, docker_state, scripts), treatment_home_files=_COLLECTION,
+        goal="Fix the slug helper.", timeout=5, credential_explicit_path=_codex_credential(tmp_path),
+    )
+    report = sp.run_planned_selection_probe(
+        experiment, CASES, runner, base=base, grader=GRADER, grading_backend=grading_backend,
+    )
+    return report, experiment, backend
+
+
+def _arm_of(experiment: t.Experiment, attempt_id: str) -> str:
+    return str(sp._resolved_trial(experiment, experiment.trial_of(attempt_id))["config"]["arm"])  # type: ignore[index]
+
+
+def test_agent_trial_runner_end_to_end_reports_selection_and_outcome_separately(tmp_path: Path) -> None:
+    """Every planned attempt through `run_one_attempt`: intended use picks
+    its skill and fixes the task; the near miss picks nothing and fixes it;
+    the overlapping case picks one of its pair but ships a wrong fix - so
+    selection and task success disagree there, and both are reported."""
+    report, _experiment, _backend = _run_real(tmp_path, {
+        (INTENDED_USE, "treatment"): _script(plant=("qa-test",)),
+        (OVERLAPPING, "treatment"): _script(plant=("security-deep",), candidate=BAD_CANDIDATE),
+    })
+
+    intended, near_miss, overlapping = (_case(report, c) for c in (INTENDED_USE, NEAR_MISS, OVERLAPPING))
+    assert (intended.treatment.selection, intended.treatment.task_success) == ("selected", True)
+    assert (near_miss.treatment.selection, near_miss.treatment.task_success) == ("not-selected", True)
+    assert (overlapping.treatment.selection, overlapping.treatment.task_success) == ("selected", False)
+    assert overlapping.treatment.observed == frozenset({"security-deep"})
+    for case in (intended, near_miss, overlapping):
+        assert case.baseline.selection == "not-selected"
+        assert case.baseline.task_success is True
+        assert not case.baseline_contaminated
+        # codex has no structural skill marker - never reported as structural
+        assert case.treatment.codex_best_effort and case.baseline.codex_best_effort
+
+
+def test_agent_trial_runner_installs_the_collection_in_the_treatment_arm_only(tmp_path: Path) -> None:
+    """The baseline arm's meaning is "no skill installed" - enforced by the
+    runner, not trusted to the caller, which passes ONE collection for every
+    attempt. Confirmed red when the runner delivers `treatment_home_files` to
+    both arms: every baseline attempt then receives the four SKILL.md files."""
+    _report, experiment, backend = _run_real(tmp_path, {})
+    skills = {path for path in _COLLECTION}
+    assert len(backend.delivered) == 6  # every planned attempt launched
+    for attempt_id, paths in backend.delivered.items():
+        received = skills & set(paths)
+        if _arm_of(experiment, attempt_id) == "treatment":
+            assert received == skills
+        else:
+            assert received == set()
+
+
+def test_agent_trial_runner_flags_a_baseline_invocation_as_contamination(tmp_path: Path) -> None:
+    """A skill invocation in the baseline arm - nothing installed there to
+    invoke - is the contamination signal, observed through the real record."""
+    report, _experiment, _backend = _run_real(tmp_path, {(NEAR_MISS, "baseline"): _script(plant=("qa-test",))})
+    assert _case(report, NEAR_MISS).baseline_contaminated
+    assert not _case(report, INTENDED_USE).baseline_contaminated
+
+
+def test_agent_trial_runner_an_unconfirmed_transcript_is_unknown_and_ungraded(tmp_path: Path) -> None:
+    """A captured attempt whose canary was not confirmed is BLOCKED (#106):
+    its invocation is not reported as a selection, and its output is not
+    graded - even though the transcript shows the applicable skill and the
+    candidate is the correct fix. Confirmed red when `transcript_from_record`
+    drops its `grading_eligible` check: the attempt reports "selected" and
+    task success True."""
+    report, _experiment, _backend = _run_real(tmp_path, {
+        (INTENDED_USE, "treatment"): _script(plant=("qa-test",), fail_canary=True),
+    })
+    treatment = _case(report, INTENDED_USE).treatment
+    assert treatment.disposition == "inconclusive"
+    assert treatment.selection == "unknown"
+    assert treatment.task_success is None
+
+
+def test_transcript_from_record_never_turns_a_blocked_attempt_into_not_selected(tmp_path: Path) -> None:
+    """Every non-captured disposition, and a captured one with an unknown
+    observation, translates to a transcript whose selection is "unknown" -
+    never "not-selected" (#26: do not substitute for an unavailable
+    observation)."""
+    experiment = _plan(tmp_path)
+    for record in (
+        {"disposition": "unavailable", "observation": None},
+        {"disposition": "not-run"},
+        {"disposition": "inconclusive", "observation": {"skill_invocations": ["qa-test"]}},
+        {"disposition": "captured", "observation": {"status": "unknown", "reason": "hook failed"}},
+        {"disposition": "captured"},
+    ):
+        transcript = sp.transcript_from_record(record, experiment, "unused")
+        assert transcript.disposition != "captured"
+        assert sp.selection_status(transcript, ["qa-test"]) == "unknown"
+
+
+@pytest.mark.skipif(
+    os.environ.get("SKILLC_ALLOW_REAL_AGENT") != "1",
+    reason="launches a real codex agent for every planned attempt - operator-run only (ADR 0005 rule 5)",
+)
+def test_real_agent_selection_probe(tmp_path: Path) -> None:  # pragma: no cover - operator-run only
+    """The live probe, as a runnable harness: the pinned cpp-codex collection,
+    the trial image, the real `codex` client under the operator's subscription
+    login, all six planned attempts. Asserts only what must hold whatever the
+    agent does - every planned attempt reported in both arms, each in the
+    driver's own vocabulary; the findings themselves are the report, printed
+    for the operator to record."""
+    from skillc import collection_conformance as cc
+    from skillc import demo
+
+    base = tmp_path / "run"
+    base.mkdir()
+    acquired = cc.acquire_collection(str(CASES["subject"]), base)
+    docker_bin = ["docker"]
+    image = os.environ.get("SKILLC_TRIAL_IMAGE", demo.DEFAULT_IMAGE)
+    image_digest = demo.resolve_image_digest(docker_bin, image, None, 120) or "UNKNOWN"
+    backend, grading_backend = cc.agent_backends(image=image, base=base, docker_bin=docker_bin, daemon_timeout=120)
+    experiment = sp.plan_selection_probe(
+        CASES, MANIFEST, treatment_subject_digest=acquired.source.digest,
+        baseline_subject_digest=_BASELINE_SUBJECT_DIGEST, image_digest=image_digest,
+        store=t.open_store(tmp_path / "store", forbidden=[]),
+    )
+    runner = sp.agent_trial_runner(
+        experiment=experiment, backend=backend, base=base, client="codex",
+        argv_for=lambda _attempt_id: list(cc.DEFAULT_CLIENT_ARGV),
+        treatment_home_files=cc._collection_home_files(acquired.source, acquired.files),
+        timeout=cc.DEFAULT_AGENT_TIMEOUT, cli_version=acquired.subject.client_version,
+    )
+    report = sp.run_planned_selection_probe(
+        experiment, CASES, runner, base=base, grader=GRADER, grading_backend=grading_backend,
+    )
+    assert len(report.cases) == 3
+    for case in report.cases:
+        for arm in (case.treatment, case.baseline):
+            assert arm.selection in sp.SELECTION_STATUSES
+        print(case)
