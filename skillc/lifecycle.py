@@ -236,10 +236,50 @@ def run_through_backend(
     base: Path,
     forbidden: list[Path] | None = None,
     cancel: Callable[[], bool] | None = None,
+    observe_before_teardown: Callable[[ExecutionBackend, object], Mapping[str, object]] | None = None,
+    before_execute: Callable[[ExecutionBackend, object], None] | None = None,
 ) -> dict[str, object]:
     """Drive `attempt_id` through `backend` from prepare to teardown, and
     finalize it. Returns `trial.finalize`'s lifecycle record, plus
     `backend_teardown` and `signal` (see the module docstring).
+
+    `observe_before_teardown` (issue #106) is a GENERIC extension point -
+    this module stays subject-agnostic and knows nothing about clients,
+    transcripts, or skills. It runs once, after `confirm_stopped()` and
+    before `export()`/`destroy()` (so it can read anything that only exists
+    while the backend's resources are still alive - e.g. a container's home
+    directory, which `export()` structurally cannot reach), and returns a
+    `Mapping` recorded VERBATIM under the returned record's `observation`
+    key. A hook that RAISES never blocks teardown - the record instead gets
+    `{"status": "unknown", "reason": str(exc)}` under that same key, exactly
+    like every other unconfirmable fact in this driver (`backend_teardown`
+    on a `destroy()`/`confirm_absent()` failure, above). Omitting the
+    argument omits the `observation` key from the returned record entirely,
+    so every EXISTING caller's record is byte-identical to before this
+    parameter existed.
+
+    `before_execute` (issue #106) runs on the OTHER side of the attempt from
+    `observe_before_teardown`: once, after `install()` succeeds and before
+    the liveness baseline/`execute()`. Same structural motive -
+    `install()`'s own `surface` argument can only ever reach
+    `CONTAINER_WORKSPACE`, never a backend's home directory, so delivering
+    something there (a credential, #98) has no other seam to run from - but
+    a DIFFERENT failure semantics, deliberately not symmetric with the
+    teardown hook: `observe_before_teardown` failing loses an OBSERVATION,
+    so recording it as unknown and continuing to teardown is right.
+    `before_execute` failing means the attempt's PRECONDITION was never
+    met (the credential was never delivered, say) - letting `execute()` run
+    anyway would start the agent without whatever the hook was meant to
+    provide and record its no-op or garbage transcript as a genuine
+    attempt, exactly the silent failure #78 and #98 both exist to prevent.
+    So a raise here BLOCKS the attempt: `execute()` is never called, and
+    this reuses the exact same path `install()`'s own `BackendUnavailable`
+    already takes - the attempt is finalized `unavailable` with the hook's
+    exception as the reason. Teardown (`destroy()`/`confirm_absent()`)
+    still happens regardless, unconditionally, in the shared `finally`
+    below - cleanup is never contingent on why an attempt was blocked.
+    Omitting the argument changes nothing, for the same reason
+    `observe_before_teardown`'s omission does.
 
     TEARDOWN IS UNCONDITIONAL once `prepare()` has returned a handle
     (found by cross-model review: the first version of this function let an
@@ -282,6 +322,7 @@ def run_through_backend(
     result: object = None
     unavailable_reason: str | None = None
     liveness_method: str | None = None
+    observation: dict[str, object] | None = None
 
     try:
         try:
@@ -293,68 +334,87 @@ def run_through_backend(
             # reported. Teardown still happens, in the shared `finally` below.
             unavailable_reason = str(exc)
         else:
-            canary_path = readiness.get("canary_path") if isinstance(readiness, dict) else None
-            # Recorded whichever path is taken (PR #70 review): a capture
-            # that passed the weaker content-diff fallback
-            # is otherwise indistinguishable in the journal from one proven
-            # by the nonce canary, and the reply-only control shows the
-            # fallback alone is defeatable. A reader must be able to see
-            # which guarantee this attempt actually got.
-            liveness_method = "canary" if canary_path else "content-diff"
-            try:
-                before = None if canary_path else _snapshot_via_export(backend, handle, base)
-            except OSError:
-                # Cannot establish a baseline; fall back to "empty" rather than
-                # crash. This WEAKENS the content-diff check for this one
-                # attempt (any output at all now reads as "live"), but
-                # trial.capture's own empty-capture rule still refuses a
-                # subject that produces nothing, and a genuinely broken
-                # export() will fail again, loudly, at the real export below.
-                before = {}
-
-            experiment.record(attempt_id, "dispatched")
-            experiment.record(attempt_id, "started")
-            result = backend.execute(handle, argv, limits, cancel)
-            assert isinstance(result, ExecuteResult)
-            if result.reason != "exited":
-                experiment.record(attempt_id, "stop-requested", reason=result.reason)
-
-            stop_confirmation = backend.confirm_stopped(handle)
-            confirmed = stop_confirmation is Confirmation.CONFIRMED
-            stop: dict[str, object] = {
-                "reason": result.reason, "confirmed": confirmed, "exit_code": result.exit_code,
-                "liveness_method": liveness_method,
-            }
-            if result.error is not None:
-                stop["error"] = result.error
-            if result.signal is not None:
-                stop["signal"] = result.signal
-            experiment.record(attempt_id, "stopped", **stop)
-            experiment.record(attempt_id, "stop-confirmed" if confirmed else "stop-unconfirmed")
-
-            if confirmed and result.reason != "launch-failed":
+            if before_execute is not None:
                 try:
-                    backend.export(handle, workspace)
-                except OSError as exc:
-                    experiment.record(attempt_id, "capture-failed", reason=f"export failed: {exc}")
-                else:
-                    live = (
-                        _canary_proof(workspace, canary_path, nonce) if canary_path
-                        else _snapshot(workspace) != before
-                    )
-                    if not live:
-                        experiment.record(
-                            attempt_id, "capture-failed",
-                            reason="liveness: no proof the subject actually ran - "
-                                   + ("the canary was never touched" if canary_path else
-                                      "no observable change between install and execute"),
-                        )
+                    before_execute(backend, handle)
+                except Exception as exc:  # noqa: BLE001 - a pre-execute hook failure blocks the attempt, never a guess
+                    # Symmetric to install()'s own BackendUnavailable handling
+                    # right above: nothing has been dispatched yet, so this
+                    # reuses the SAME "unavailable" path rather than inventing
+                    # a second one - teardown still happens, in the shared
+                    # `finally` below, exactly as it does for install()'s
+                    # failure.
+                    unavailable_reason = str(exc)
+
+            if unavailable_reason is None:
+                canary_path = readiness.get("canary_path") if isinstance(readiness, dict) else None
+                # Recorded whichever path is taken (PR #70 review): a capture
+                # that passed the weaker content-diff fallback
+                # is otherwise indistinguishable in the journal from one proven
+                # by the nonce canary, and the reply-only control shows the
+                # fallback alone is defeatable. A reader must be able to see
+                # which guarantee this attempt actually got.
+                liveness_method = "canary" if canary_path else "content-diff"
+                try:
+                    before = None if canary_path else _snapshot_via_export(backend, handle, base)
+                except OSError:
+                    # Cannot establish a baseline; fall back to "empty" rather than
+                    # crash. This WEAKENS the content-diff check for this one
+                    # attempt (any output at all now reads as "live"), but
+                    # trial.capture's own empty-capture rule still refuses a
+                    # subject that produces nothing, and a genuinely broken
+                    # export() will fail again, loudly, at the real export below.
+                    before = {}
+
+                experiment.record(attempt_id, "dispatched")
+                experiment.record(attempt_id, "started")
+                result = backend.execute(handle, argv, limits, cancel)
+                assert isinstance(result, ExecuteResult)
+                if result.reason != "exited":
+                    experiment.record(attempt_id, "stop-requested", reason=result.reason)
+
+                stop_confirmation = backend.confirm_stopped(handle)
+                confirmed = stop_confirmation is Confirmation.CONFIRMED
+                stop: dict[str, object] = {
+                    "reason": result.reason, "confirmed": confirmed, "exit_code": result.exit_code,
+                    "liveness_method": liveness_method,
+                }
+                if result.error is not None:
+                    stop["error"] = result.error
+                if result.signal is not None:
+                    stop["signal"] = result.signal
+                experiment.record(attempt_id, "stopped", **stop)
+                experiment.record(attempt_id, "stop-confirmed" if confirmed else "stop-unconfirmed")
+
+                if observe_before_teardown is not None:
+                    try:
+                        observation = dict(observe_before_teardown(backend, handle))
+                    except Exception as exc:  # noqa: BLE001 - an observation hook must never block teardown
+                        observation = {"status": "unknown", "reason": str(exc)}
+
+                if confirmed and result.reason != "launch-failed":
+                    try:
+                        backend.export(handle, workspace)
+                    except OSError as exc:
+                        experiment.record(attempt_id, "capture-failed", reason=f"export failed: {exc}")
                     else:
-                        _ensure_spool_files(experiment, attempt_id)
-                        try:
-                            trial.capture(experiment, attempt_id)
-                        except trial.Refused:
-                            pass  # capture() already recorded capture-failed; nothing more here
+                        live = (
+                            _canary_proof(workspace, canary_path, nonce) if canary_path
+                            else _snapshot(workspace) != before
+                        )
+                        if not live:
+                            experiment.record(
+                                attempt_id, "capture-failed",
+                                reason="liveness: no proof the subject actually ran - "
+                                       + ("the canary was never touched" if canary_path else
+                                          "no observable change between install and execute"),
+                            )
+                        else:
+                            _ensure_spool_files(experiment, attempt_id)
+                            try:
+                                trial.capture(experiment, attempt_id)
+                            except trial.Refused:
+                                pass  # capture() already recorded capture-failed; nothing more here
     finally:
         # TEARDOWN FAILURE IS ITS OWN FAILURE PATH (#79), never a reason to
         # skip accounting. Before this fix, an exception from `destroy()` or
@@ -388,7 +448,7 @@ def run_through_backend(
         record = trial.finalize(experiment, attempt_id)
     trial.cleanup_workspace(experiment, attempt_id)
     teardown_errors = [e for e in (destroy_error, confirm_absent_error) if e is not None]
-    return {
+    output: dict[str, object] = {
         **record, "backend_teardown": teardown_confirmation.value,
         "backend_teardown_error": "; ".join(teardown_errors) if teardown_errors else None,
         "readiness": readiness,
@@ -404,6 +464,12 @@ def run_through_backend(
         # the attempt never reached execution at all (PR #70 review).
         "liveness_method": liveness_method,
     }
+    # Present ONLY when the caller opted in (this function's own docstring) -
+    # an omitted argument must leave every existing caller's record
+    # byte-identical to before this parameter existed.
+    if observe_before_teardown is not None:
+        output["observation"] = observation
+    return output
 
 
 def _snapshot_via_export(backend: ExecutionBackend, handle: object, base: Path) -> dict[str, str]:

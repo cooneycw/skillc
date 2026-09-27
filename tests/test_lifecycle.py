@@ -243,6 +243,18 @@ def _stop(record: dict[str, object]) -> dict[str, object]:
     return stop
 
 
+def _normalize_timestamps(value: object) -> object:
+    """Strip wall-clock timestamp values (the journal's own `"at"` field)
+    recursively, so two otherwise-identical records from two SEPARATE
+    attempts can be compared for equality without every comparison failing
+    on nothing but when each one happened to run."""
+    if isinstance(value, dict):
+        return {k: ("<at>" if k == "at" else _normalize_timestamps(v)) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_normalize_timestamps(v) for v in value]
+    return value
+
+
 def _journaled_stopped_event(experiment: t.Experiment, attempt_id: str) -> dict[str, object]:
     """The RAW `stopped` journal event, unfiltered - where `signal` and
     `liveness_method` actually live once written (see `_stop` above)."""
@@ -698,3 +710,202 @@ def test_canary_proof_rejects_a_path_that_escapes_the_workspace(tmp_path: Path) 
 def test_canary_proof_rejects_a_non_string_path(tmp_path: Path) -> None:
     assert lifecycle._canary_proof(tmp_path, None, "abc123") is False
     assert lifecycle._canary_proof(tmp_path, "", "abc123") is False
+
+
+# --------------------------------------- observe_before_teardown (#106)
+
+def test_no_hook_leaves_the_record_byte_identical(store: Path, base: Path) -> None:
+    """Control (#106's own acceptance): a hook of `None` (the default -
+    every existing caller) changes nothing. `observation` must be ABSENT
+    from the record, not merely `None`, so an existing caller's record is
+    byte-identical to before this parameter existed."""
+    experiment, attempt_id = _planned(store)
+    backend = FakeBackend(base)
+    record = lifecycle.run_through_backend(
+        backend, experiment, attempt_id, _argv("work"), {"skill": "x"}, Limits(timeout=5), base,
+    )
+    assert "observation" not in record
+
+
+def test_a_successful_hook_result_is_recorded_verbatim(store: Path, base: Path) -> None:
+    """Control (#106's own acceptance): the hook's own returned mapping is
+    recorded under the record's `observation` key, unchanged."""
+    experiment, attempt_id = _planned(store)
+    backend = FakeBackend(base)
+    seen: list[tuple[object, object]] = []
+
+    def hook(be: object, handle: object) -> dict[str, object]:
+        seen.append((be, handle))
+        return {"transcript_found": True, "skill": "demo-skill"}
+
+    record = lifecycle.run_through_backend(
+        backend, experiment, attempt_id, _argv("work"), {"skill": "x"}, Limits(timeout=5), base,
+        observe_before_teardown=hook,
+    )
+    assert record["observation"] == {"transcript_found": True, "skill": "demo-skill"}
+    assert seen and seen[0][0] is backend
+
+
+def test_a_raising_hook_is_recorded_as_unknown_and_teardown_still_runs(store: Path, base: Path) -> None:
+    """Control (#106's own acceptance): a hook that raises must never block
+    teardown - `destroy()`/`confirm_absent()` must still run, and the
+    record must show the observation as unknown with the hook's own
+    reason, never crash the whole attempt."""
+    experiment, attempt_id = _planned(store)
+    backend = FakeBackend(base)
+
+    def hook(be: object, handle: object) -> dict[str, object]:
+        raise RuntimeError("could not read the transcript back")
+
+    record = lifecycle.run_through_backend(
+        backend, experiment, attempt_id, _argv("work"), {"skill": "x"}, Limits(timeout=5), base,
+        observe_before_teardown=hook,
+    )
+    assert record["observation"] == {"status": "unknown", "reason": "could not read the transcript back"}
+    assert record["backend_teardown"] == "confirmed"
+    assert attempt_id in backend.destroyed
+
+
+def test_the_hook_runs_before_destroy_not_after(store: Path, base: Path) -> None:
+    """The hook is meant to read state (e.g. a container's home directory)
+    that only exists while the backend's resources are still alive - it
+    must run BEFORE destroy(), never after."""
+    experiment, attempt_id = _planned(store)
+    backend = FakeBackend(base)
+    order: list[str] = []
+    real_destroy = backend.destroy
+
+    def tracking_destroy(handle: object) -> None:
+        order.append("destroy")
+        real_destroy(handle)
+
+    backend.destroy = tracking_destroy  # type: ignore[method-assign]
+
+    def hook(be: object, handle: object) -> dict[str, object]:
+        order.append("hook")
+        return {}
+
+    lifecycle.run_through_backend(
+        backend, experiment, attempt_id, _argv("work"), {"skill": "x"}, Limits(timeout=5), base,
+        observe_before_teardown=hook,
+    )
+    assert order == ["hook", "destroy"]
+
+
+# ------------------------------------------------- before_execute (#106)
+
+def test_no_before_execute_hook_changes_nothing(store: Path, base: Path) -> None:
+    """Control (#106's own acceptance): a hook of `None` (the default -
+    every existing caller) changes nothing.
+
+    Cross-model review: comparing two calls that BOTH omit `before_execute`
+    only proves the function is deterministic, not that adding the
+    parameter changed nothing - and checking four cherry-picked fields lets
+    a regression in any OTHER field pass silently. This instead compares an
+    omitted argument against an EXPLICIT `before_execute=None` (the two
+    ways an existing caller's code could read after this parameter was
+    added) over the ENTIRE returned record, normalizing only `attempt_id`
+    (the one field that legitimately differs between two separately
+    planned attempts)."""
+    experiment, attempt_id = _planned(store)
+    backend = FakeBackend(base)
+    omitted = lifecycle.run_through_backend(
+        backend, experiment, attempt_id, _argv("work"), {"skill": "x"}, Limits(timeout=5), base,
+    )
+    experiment2, attempt_id2 = _planned(store)
+    backend2 = FakeBackend(base)
+    explicit_none = lifecycle.run_through_backend(
+        backend2, experiment2, attempt_id2, _argv("work"), {"skill": "x"}, Limits(timeout=5), base,
+        before_execute=None,
+    )
+    assert set(omitted) == set(explicit_none)
+    for key in omitted:
+        if key == "attempt_id":
+            continue
+        assert _normalize_timestamps(omitted[key]) == _normalize_timestamps(explicit_none[key]), key
+
+
+def test_before_execute_runs_after_install_and_before_execute_call(store: Path, base: Path) -> None:
+    experiment, attempt_id = _planned(store)
+    backend = FakeBackend(base)
+    order: list[str] = []
+    real_install = backend.install
+    real_execute = backend.execute
+
+    def tracking_install(handle: object, surface: Mapping[str, object]) -> dict[str, object]:
+        order.append("install")
+        return real_install(handle, surface)
+
+    def tracking_execute(
+        handle: object, argv: Sequence[str], limits: Limits,
+        cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,
+    ) -> ExecuteResult:
+        order.append("execute")
+        return real_execute(handle, argv, limits, cancel, stdin)
+
+    backend.install = tracking_install  # type: ignore[method-assign]
+    backend.execute = tracking_execute  # type: ignore[method-assign,assignment]
+
+    def hook(be: object, handle: object) -> None:
+        order.append("before_execute")
+
+    lifecycle.run_through_backend(
+        backend, experiment, attempt_id, _argv("work"), {"skill": "x"}, Limits(timeout=5), base,
+        before_execute=hook,
+    )
+    assert order == ["install", "before_execute", "execute"]
+
+
+def test_a_raising_before_execute_hook_blocks_the_attempt_as_unavailable(store: Path, base: Path) -> None:
+    """Control (#106's own acceptance: "credential below the threshold: the
+    attempt is BLOCKED before launch, and no container remains"). A raising
+    hook must reuse the SAME `unavailable` path install() failure takes -
+    never dispatch, never execute - and teardown must still run."""
+    experiment, attempt_id = _planned(store)
+    backend = FakeBackend(base)
+    executed = False
+    real_execute = backend.execute
+
+    def tracking_execute(
+        handle: object, argv: Sequence[str], limits: Limits,
+        cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,
+    ) -> ExecuteResult:
+        nonlocal executed
+        executed = True
+        return real_execute(handle, argv, limits, cancel, stdin)
+
+    backend.execute = tracking_execute  # type: ignore[method-assign,assignment]
+
+    def hook(be: object, handle: object) -> None:
+        raise RuntimeError("credential has 10s remaining, below the required 300s")
+
+    record = lifecycle.run_through_backend(
+        backend, experiment, attempt_id, _argv("work"), {"skill": "x"}, Limits(timeout=5), base,
+        before_execute=hook,
+    )
+    assert not executed
+    assert record["disposition"] == "unavailable"
+    reason = record["reason"]
+    assert isinstance(reason, str) and "credential has 10s remaining" in reason
+    assert attempt_id in backend.destroyed
+    assert record["backend_teardown"] == "confirmed"
+
+
+def test_before_execute_and_observe_before_teardown_compose(store: Path, base: Path) -> None:
+    """Both hooks are independent extension points - using one must not
+    disturb the other."""
+    experiment, attempt_id = _planned(store)
+    backend = FakeBackend(base)
+
+    def before(be: object, handle: object) -> None:
+        return None
+
+    def after(be: object, handle: object) -> dict[str, object]:
+        return {"read_back": True}
+
+    record = lifecycle.run_through_backend(
+        backend, experiment, attempt_id, _argv("work"), {"skill": "x"}, Limits(timeout=5), base,
+        before_execute=before, observe_before_teardown=after,
+    )
+    assert record["disposition"] == "captured"
+    assert record["observation"] == {"read_back": True}

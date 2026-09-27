@@ -16,6 +16,38 @@ collection) closes.
 
 ### Added
 
+- **`lifecycle.run_through_backend` gains two generic, optional hooks,
+  `observe_before_teardown` and `before_execute`** (Refs #106, split of the
+  agent trial driver's own PR): `observe_before_teardown` runs once, after
+  `confirm_stopped()` and before `export()`/`destroy()` - while the
+  backend's resources are still alive, which matters because `export()`
+  structurally cannot reach a container's home directory. `before_execute`
+  is its symmetric counterpart on the OTHER side of the attempt - after
+  `install()` succeeds and before the liveness baseline/`execute()` - for
+  the same structural reason: `install()`'s own `surface` argument can only
+  ever reach `CONTAINER_WORKSPACE`, never a backend's home directory, so
+  delivering something there (a credential, #98) has no other seam to run
+  from. `lifecycle.py` itself stays subject-agnostic throughout: both hooks
+  are plain callables with no knowledge of clients, transcripts, or skills.
+  `observe_before_teardown`'s result is recorded verbatim under the
+  returned record's `observation` key, and a raise there never blocks
+  teardown - the record instead carries `{"status": "unknown", "reason":
+  str(exc)}` under the same key. `before_execute`'s failure is NOT
+  survivable in the same way: nothing has been dispatched yet, so a raise
+  there reuses the exact same `unavailable` path `install()`'s own
+  `BackendUnavailable` already takes - the attempt is finalized
+  `unavailable` with the hook's exception as the reason, and `execute()`
+  never runs; teardown still happens regardless. Omitting either argument
+  (every existing caller) changes nothing - both records stay
+  byte-identical to before these parameters existed, confirmed by dedicated
+  tests and by four hand-verified negative controls (an unhandled
+  `observe_before_teardown` exception; an always-present `observation` key;
+  an unhandled `before_execute` exception; and the guard that stops
+  `execute()` from running after a `before_execute` failure) - each made
+  the guarantee fail on cue before restoring the real code. The actual
+  client-specific implementation (credential + seed + transcript-adapter +
+  canary via a container read-back) is `skillc/agent_trial.py`, a separate
+  PR still to come under the same issue.
 - **Per-client transcript adapters, grounded in real transcripts rather than
   guessed** (Refs #106, split 1 of 2 - the driver loop itself is a separate
   PR under the same issue): `skillc/transcript_adapter.py` translates a real
