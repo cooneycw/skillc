@@ -1251,6 +1251,23 @@ def test_cancel_target_announces_its_attempt_before_any_container_exists(
     assert f"{demo.CANCEL_READY_MARKER}{recorded[0]}" in capsys.readouterr().err
 
 
+def test_cancellation_seed_rejects_a_malformed_attempt_id(base: Path, docker_state: Path) -> None:
+    """The announced id reaches `docker exec` and the paste-back block, so
+    only the attempt-id character set is accepted: `bad/id` is refused and
+    the seed reads NOT caught, never probing or printing it."""
+    child = (
+        "import sys, time; "
+        f"print({demo.CANCEL_READY_MARKER!r} + 'bad/id', file=sys.stderr, flush=True); time.sleep(30)"
+    )
+    seed = demo.run_cancellation_control(
+        image="fake-image:1", docker_bin=_docker_bin(docker_state), base=base, timeout=5, sleep=4,
+        ready_timeout=5.0, child_command=[sys.executable, "-c", child],
+    )
+    assert seed.caught is False
+    assert "never announced its attempt" in seed.evidence
+    assert "bad/id" not in seed.evidence
+
+
 def test_cancellation_seed_is_not_caught_when_the_daemon_is_down(base: Path, docker_state: Path) -> None:
     docker_state.mkdir(parents=True, exist_ok=True)
     (docker_state / ".down").touch()
