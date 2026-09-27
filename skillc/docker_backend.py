@@ -106,6 +106,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import IO
 
 from .backend import (
     BackendDescription,
@@ -409,6 +410,48 @@ def _owned_tar_bytes(arcname: str, data: bytes, mode: int = 0o644) -> bytes:
     with tarfile.open(fileobj=buf, mode="w") as tar:
         tar.addfile(info, io.BytesIO(data))
     return buf.getvalue()
+
+
+class _BoundedDrain:
+    """Drains `pipe` (stdout or stderr - one instance each) to EOF on its own
+    thread, so the subject can never block on a full pipe buffer - the
+    classic two-pipe deadlock `execute()`'s own docstring documents - while
+    retaining at most `cap` bytes of it (#102: the pre-fix drain for EACH
+    stream appended every chunk to an unbounded `list[bytes]`, so a subject
+    that wrote continuously to either one could exhaust the HOST
+    controller's memory before `limits.timeout` ever fired, a
+    resource-exhaustion path independent of any container-side memory
+    limit).
+
+    `total_bytes` counts every byte read off the pipe, retained or not, so a
+    caller always learns the subject's true output size even when most of it
+    was discarded. Bytes past the cap are read and thrown away, never kept
+    and never re-requested - the point is exactly to stop retaining without
+    ever stopping draining."""
+
+    def __init__(self, pipe: IO[bytes], cap: int) -> None:
+        self._pipe = pipe
+        self._cap = cap
+        self._chunks: list[bytes] = []
+        self._captured_len = 0
+        self.total_bytes = 0
+        self.truncated = False
+
+    def run(self) -> None:
+        while chunk := self._pipe.read(65536):
+            self.total_bytes += len(chunk)
+            if self._captured_len >= self._cap:
+                self.truncated = True
+                continue
+            remaining = self._cap - self._captured_len
+            if len(chunk) > remaining:
+                chunk = chunk[:remaining]
+                self.truncated = True
+            self._chunks.append(chunk)
+            self._captured_len += len(chunk)
+
+    def captured_bytes(self) -> bytes:
+        return b"".join(self._chunks)
 
 
 @dataclass(frozen=True)
@@ -778,7 +821,22 @@ class DockerBackend:
         even starts - and reading `proc.stderr` only after `proc.wait()`
         risks the classic two-pipe deadlock: a subject that writes past the
         stderr pipe's buffer blocks on that write while nothing is draining
-        it, and this method was blocked in `proc.wait()` waiting for exit."""
+        it, and this method was blocked in `proc.wait()` waiting for exit.
+
+        BOTH streams drain through `_BoundedDrain` (#102 - stdout first,
+        stderr by the same review, since it is the identical pattern one
+        screen down): each keeps reading its pipe to EOF regardless of its
+        own `Limits.max_captured_std{out,err}_bytes`, for the pipe-deadlock
+        reason above, but stops RETAINING bytes past that cap - a subject
+        that writes continuously used to grow an unbounded `list[bytes]` for
+        EITHER stream, a host memory-exhaustion path independent of any
+        container-side memory limit. `ExecuteResult.stdout_truncated`/
+        `.stdout_bytes` report stdout's outcome explicitly rather than
+        silently capping what `observations` (below) ends up holding; a
+        truncated stderr is folded into `error` itself as an explicit
+        `"(truncated, N bytes total)"` suffix, since stderr has no field of
+        its own on `ExecuteResult` - `error` is already the only surface it
+        feeds."""
         assert isinstance(handle, _Handle)
         exec_argv = [*self.docker_bin, "exec"]
         if stdin is not None:
@@ -794,26 +852,14 @@ class DockerBackend:
         except OSError as exc:
             return ExecuteResult(reason="launch-failed", exit_code=None, error=str(exc))
 
-        stdout_chunks: list[bytes] = []
         assert proc.stdout is not None
-        stdout_pipe = proc.stdout
-
-        def _drain_stdout() -> None:
-            while chunk := stdout_pipe.read(65536):
-                stdout_chunks.append(chunk)
-
-        stdout_thread = threading.Thread(target=_drain_stdout, daemon=True)
+        stdout_drain = _BoundedDrain(proc.stdout, limits.max_captured_stdout_bytes)
+        stdout_thread = threading.Thread(target=stdout_drain.run, daemon=True)
         stdout_thread.start()
 
-        stderr_chunks: list[bytes] = []
         assert proc.stderr is not None
-        stderr_pipe = proc.stderr
-
-        def _drain_stderr() -> None:
-            while chunk := stderr_pipe.read(65536):
-                stderr_chunks.append(chunk)
-
-        stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
+        stderr_drain = _BoundedDrain(proc.stderr, limits.max_captured_stderr_bytes)
+        stderr_thread = threading.Thread(target=stderr_drain.run, daemon=True)
         stderr_thread.start()
 
         if stdin is not None:
@@ -854,12 +900,17 @@ class DockerBackend:
 
         stdout_thread.join(timeout=limits.grace + self.daemon_timeout)
         stderr_thread.join(timeout=limits.grace + self.daemon_timeout)
-        stdout = b"".join(stdout_chunks)
-        stderr = b"".join(stderr_chunks)
+        stdout = stdout_drain.captured_bytes()
+        stderr = stderr_drain.captured_bytes()
         code = proc.returncode
         error = None
         if reason == "exited" and code not in (0, None) and stderr:
             error = stderr.decode("utf-8", errors="replace").strip() or None
+            if error and stderr_drain.truncated:
+                # Explicit, not a silently shown prefix (orchestrator review
+                # of this PR, #102): a caller reading `error` alone must not
+                # mistake a capped stderr for the subject's whole message.
+                error = f"{error} (truncated, {stderr_drain.total_bytes} bytes total)"
 
         # The exec'd process's stdout is written back into the container at
         # `<workspace>/observations` (`verify.py`'s own documented
@@ -872,7 +923,11 @@ class DockerBackend:
         # convention) always looked like it "produced no report", whatever
         # it actually printed. Best-effort: a failure to write this file is
         # not fatal to execute() itself, matching the canary plant's own
-        # best-effort discipline in install().
+        # best-effort discipline in install(). `stdout` is `stdout_drain`'s
+        # own bounded capture (#102), so an `observations` file this writes
+        # for a chatty subject is itself bounded - `ExecuteResult.
+        # stdout_truncated`/`stdout_bytes` below is what tells a caller this
+        # file is not the subject's whole output.
         try:
             payload = _owned_tar_bytes("observations", stdout)
             subprocess.run(
@@ -883,7 +938,10 @@ class DockerBackend:
         except (OSError, subprocess.TimeoutExpired):
             pass
 
-        return ExecuteResult(reason=reason, exit_code=code, error=error, signal=signal_name)
+        return ExecuteResult(
+            reason=reason, exit_code=code, error=error, signal=signal_name,
+            stdout_truncated=stdout_drain.truncated, stdout_bytes=stdout_drain.total_bytes,
+        )
 
     def _kill_container(self, handle: _Handle, sig: str) -> None:
         """`docker kill --signal SIG` against this attempt's own container,

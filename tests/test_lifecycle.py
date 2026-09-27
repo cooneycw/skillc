@@ -65,6 +65,7 @@ class FakeBackend:
         supports_canary: bool = True,
         destroy_raises: bool = False,
         confirm_absent_raises: bool = False,
+        force_stdout_truncated: int | None = None,
     ) -> None:
         self._base = base
         self._unavailable = unavailable
@@ -77,6 +78,11 @@ class FakeBackend:
         self._force_confirm_stopped = force_confirm_stopped
         self._force_confirm_absent = force_confirm_absent
         self._supports_canary = supports_canary
+        #: When set, `execute()` reports this many TOTAL stdout bytes with
+        #: `stdout_truncated=True` (#102) - a real backend's own bounded
+        #: drain is `DockerBackend`'s to prove; this fake only needs to prove
+        #: `lifecycle.run_through_backend` surfaces the result faithfully.
+        self._force_stdout_truncated = force_stdout_truncated
         self.destroyed: set[str] = set()
         self.export_calls = 0
 
@@ -164,6 +170,11 @@ class FakeBackend:
         # convention or `.State`, but the discipline (name it, never guess) is
         # the same either way.
         signal_name = signal.Signals(-code).name if code is not None and code < 0 else None
+        if self._force_stdout_truncated is not None:
+            return ExecuteResult(
+                reason=reason, exit_code=code, signal=signal_name,
+                stdout_truncated=True, stdout_bytes=self._force_stdout_truncated,
+            )
         return ExecuteResult(reason=reason, exit_code=code, signal=signal_name)
 
     def confirm_stopped(self, handle: object) -> Confirmation:
@@ -582,6 +593,35 @@ def test_a_signal_kill_records_the_signal_name_not_a_guess(store: Path, base: Pa
     # `signal` even though it is written to the raw journal event - this
     # driver surfaces it separately so a caller is never left guessing.
     assert record["signal"] == "SIGTERM"
+
+
+def test_truncated_stdout_is_surfaced_on_the_record_not_only_the_journal(store: Path, base: Path) -> None:
+    """#102: a backend that had to bound its captured stdout must have that
+    fact survive into the RECORD a caller actually reads, not only the raw
+    journal event - the same gap `signal` (above) already closes for a kill
+    cause, now closed for a truncated capture too."""
+    experiment, attempt_id = _planned(store)
+    backend = FakeBackend(base, force_stdout_truncated=200_000)
+    record = lifecycle.run_through_backend(
+        backend, experiment, attempt_id, _argv("work"), {"skill": "x"}, Limits(timeout=5), base,
+    )
+    stop = record["stop"]
+    assert isinstance(stop, dict)
+    # trial.finalize's own fixed key set would drop this too, exactly like
+    # `signal` - surfaced separately for the identical reason.
+    assert record["observations_truncated"] is True
+    assert record["observations_bytes"] == 200_000
+
+
+def test_untruncated_stdout_reports_no_truncation_on_the_record(store: Path, base: Path) -> None:
+    """Green case beside the red one: an ordinary attempt must not report
+    truncation - proves the field is not simply always set."""
+    experiment, attempt_id = _planned(store)
+    backend = FakeBackend(base)
+    record = lifecycle.run_through_backend(
+        backend, experiment, attempt_id, _argv("work"), {"skill": "x"}, Limits(timeout=5), base,
+    )
+    assert record["observations_truncated"] is False
 
 
 def test_real_agent_binaries_are_blocked_without_explicit_opt_in(

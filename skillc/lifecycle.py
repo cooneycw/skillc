@@ -314,6 +314,11 @@ def run_through_backend(
         return {
             **record, "backend_teardown": None, "backend_teardown_error": None,
             "readiness": None, "signal": None, "liveness_method": None,
+            # #102: no execution was ever attempted (prepare() itself failed),
+            # so there is nothing to have truncated - explicit `False`/`None`
+            # keeps this dict's schema the same shape as the normal-path
+            # return below, matching `signal`'s own existing convention here.
+            "observations_truncated": False, "observations_bytes": None,
         }
 
     workspace = trial.allocate_workspace(experiment, attempt_id, base, forbidden or [])
@@ -383,6 +388,13 @@ def run_through_backend(
                     stop["error"] = result.error
                 if result.signal is not None:
                     stop["signal"] = result.signal
+                if result.stdout_truncated:
+                    # #102: the subject wrote more than the backend retained -
+                    # say so explicitly, with the true total, rather than let a
+                    # reader of `observations` (the bounded capture itself)
+                    # mistake it for the subject's whole output.
+                    stop["observations_truncated"] = True
+                    stop["observations_bytes"] = result.stdout_bytes
                 experiment.record(attempt_id, "stopped", **stop)
                 experiment.record(attempt_id, "stop-confirmed" if confirmed else "stop-unconfirmed")
 
@@ -458,6 +470,11 @@ def run_through_backend(
         # is never left guessing a cause from a bare negative exit code (addendum
         # item 12: "exit 137 is SIGKILL, not OOM").
         "signal": result.signal if isinstance(result, ExecuteResult) else None,
+        # #102, surfaced for the identical reason `signal` is: a subject that
+        # wrote more stdout than the backend retained. `observations_bytes`
+        # is only meaningful when `observations_truncated` is True.
+        "observations_truncated": result.stdout_truncated if isinstance(result, ExecuteResult) else False,
+        "observations_bytes": result.stdout_bytes if isinstance(result, ExecuteResult) else None,
         # Which liveness proof this attempt used - "canary" (the nonce
         # convention) or "content-diff" (the weaker fallback) - so a grader
         # or reader can see when only the weaker guarantee applied. None when

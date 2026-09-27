@@ -138,21 +138,54 @@ class ExecuteResult:
     from the signal that actually terminated the process (`SIGKILL`,
     `SIGTERM`, ...), never inferred from a raw exit code alone - a backend
     that cannot determine the signal leaves this `None` rather than guess.
-    """
+
+    `stdout_bytes` is the bytes the subject wrote to stdout that the backend's
+    own drain observed BEFORE it stopped waiting for that drain to finish -
+    not a guarantee the pipe reached EOF (a descendant process inheriting the
+    fd could in principle keep it open past the parent's own exit; #102 does
+    not close that gap, only the unbounded-retention one). Whether or not all
+    observed bytes were captured, a backend must keep draining the pipe past
+    `Limits.max_captured_stdout_bytes` so the subject can never block on a
+    full pipe buffer, so this count can legitimately exceed what was
+    retained. `stdout_truncated` is `True` exactly when it does (#102: a
+    subject that writes continuously used to grow an unbounded in-memory
+    list, a host resource-exhaustion path independent of any container-side
+    memory limit). Never a silent cap - a caller reading only the captured
+    bytes without checking this flag would otherwise read a partial capture
+    as if it were the whole thing."""
 
     reason: str  # "exited" | "timeout" | "operator-cancelled" | "launch-failed"
     exit_code: int | None
     error: str | None = None
     signal: str | None = None
+    stdout_truncated: bool = False
+    stdout_bytes: int = 0
 
 
 @dataclass(frozen=True)
 class Limits:
     """Resource bounds `execute()` must enforce inside its own isolation, not
-    merely pass through to the subject as advice."""
+    merely pass through to the subject as advice.
+
+    `max_captured_stdout_bytes`/`max_captured_stderr_bytes` bound how much of
+    the subject's stdout/stderr a backend RETAINS in memory while it runs
+    (#102: a subject that floods either stream can exhaust the HOST
+    controller's own memory, independent of any container-side limit - found
+    for stdout first, then for stderr by the same review since it is the
+    identical unbounded-list pattern one screen down). Two independent
+    fields, not one shared cap: a probe's real report can legitimately be
+    large on stdout while its errors stay small on stderr, or the reverse.
+    Distinct from `skillc.trial.Limits`, an unrelated dataclass of the same
+    name that bounds a DIFFERENT stage (reading an already-captured file back
+    off disk during export); the two are not interchangeable and importing
+    one to satisfy the other would suggest a shared config surface that does
+    not exist. 8 MiB matches that other `Limits`' own `max_stream_bytes`
+    default for the same class of bound."""
 
     timeout: float
     grace: float = 2.0
+    max_captured_stdout_bytes: int = 8 * 1024 * 1024
+    max_captured_stderr_bytes: int = 8 * 1024 * 1024
 
 
 @runtime_checkable
