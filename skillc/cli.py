@@ -774,6 +774,67 @@ def cmd_demo(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_collection_run(args: argparse.Namespace) -> int:
+    """Issue #11's remaining acceptance bullet ("the same client, Level 1
+    fixture, contract and grader"): one real agent attempt against
+    `evals/level1/slug-small-fix`, with `SUBJECT`'s declared, selected skill
+    files installed into the same container, in skill-free canary mode.
+
+    Requires `SKILLC_ALLOW_REAL_AGENT=1` (`lifecycle.py`'s own structural
+    guard - this command sets no gate of its own) and the operator's own
+    Codex subscription login (`~/.codex/auth.json` by default, or
+    `--credential`), per ADR 0005 rule 6, "Normal Claude and codex" - never
+    metered API spend."""
+    from . import collection_conformance as cc
+    from . import demo, trial
+    from .docker_backend import DockerBackend
+
+    docker_bin = tuple(args.docker_bin.split()) if args.docker_bin else ("docker",)
+    base = Path(args.base) if args.base else Path(tempfile.gettempdir())
+    image = args.image or demo.DEFAULT_IMAGE
+    client_argv = args.client_argv.split()
+    credential_path = Path(args.credential) if args.credential else None
+
+    try:
+        acquired = cc.acquire_collection(args.subject, base)
+    except demo.SubjectRefused as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+
+    # Resolved BEFORE planning, so the plan's own image.digest reflects the
+    # image that actually runs - `demo.run_demo`'s own "resolved before
+    # either backend starts" rule, for the same reason (codex review: a
+    # placeholder digest here left the planned evidence unable to identify
+    # its own inputs).
+    image_digest = demo.resolve_image_digest(docker_bin, image, None, args.timeout)
+    store = trial.open_store(base / f"{args.subject}-store", forbidden=[])
+    experiment, attempt_id = cc.plan_collection_attempt(args.subject, acquired, store, image_digest=image_digest)
+
+    backend = DockerBackend(image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=args.timeout)
+    grading_backend = DockerBackend(image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=args.timeout)
+    result = cc.run_collection_agent_attempt(
+        subject_name=args.subject, acquired=acquired, experiment=experiment, attempt_id=attempt_id,
+        backend=backend, grading_backend=grading_backend, base=base,
+        base_argv=client_argv, timeout=args.timeout, credential_explicit_path=credential_path,
+    )
+
+    paste_back = cc.build_collection_paste_back(result)
+    try:
+        demo.print_paste_back(paste_back)
+    except demo.PasteBackRefused as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+
+    # Codex review: `graded is None` (grading BLOCKED - a prompt-delivery
+    # mismatch or a failed canary, `run_collection_agent_attempt`'s own
+    # `grading_blocked_reason`) must never read as success just because
+    # nothing contradicted it - a captured-but-ungraded attempt is not the
+    # same fact as a passing one. Success requires an ACTUAL PASS verdict.
+    graded = result.record.get("graded")
+    graded_ok = isinstance(graded, dict) and graded.get("status") == "PASS"
+    return 0 if result.record.get("disposition") == "captured" and graded_ok else 1
+
+
 def cmd_rules(args: argparse.Namespace) -> int:
     width = max(len(rule.id) for rule in checks.ALL_RULES)
     for rule in checks.ALL_RULES:
@@ -935,6 +996,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="run the seeded negative controls instead - exits non-zero unless every one was caught",
     )
     p_demo.set_defaults(func=cmd_demo)
+
+    p_collection_run = sub.add_parser(
+        "collection-run",
+        help="issue #11's remaining bullet: one real agent attempt on evals/level1/slug-small-fix "
+             "per declared skill collection, skill-free canary mode (owed to the operator's live run)",
+    )
+    p_collection_run.add_argument("subject", help="a name under evals/subjects/<name>/subject.json")
+    p_collection_run.add_argument("--image", help="trial image (default: skillc.demo.DEFAULT_IMAGE)")
+    p_collection_run.add_argument(
+        "--docker-bin", help="docker executable (repeatable words, space-separated; default: docker)",
+    )
+    p_collection_run.add_argument("--base", help="where the disposable root is created (default: TMPDIR)")
+    p_collection_run.add_argument("--timeout", type=float, default=30, help="per-container-call timeout, seconds")
+    p_collection_run.add_argument(
+        "--credential", help="explicit path to the client credential file (default: the documented standard location)",
+    )
+    p_collection_run.add_argument(
+        "--client-argv", default="codex exec --sandbox danger-full-access",
+        help="the real client invocation, space-separated words (default: the documented no-nested-sandbox "
+             "mechanism, trial_bootstrap.BWRAP_DECISION) - never invented per-run, caller-supplied",
+    )
+    p_collection_run.set_defaults(func=cmd_collection_run)
 
     p_rules = sub.add_parser("rules", help="list the rules")
     p_rules.set_defaults(func=cmd_rules)
