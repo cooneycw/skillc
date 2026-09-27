@@ -250,23 +250,28 @@ def derive_status(record: Record) -> str:
 
     A record with no mandatory criteria is INCONCLUSIVE, never PASS: an empty
     population must not render as a clean one (AGENTS.md).
+
+    A declared run state is honoured only AFTER the violation test (#130).
+    protocol.md section 4 allows UNAVAILABLE only "without an already-established
+    task failure", so a record that declares UNAVAILABLE or NOT_RUN over a
+    VIOLATED mandatory criterion still derives FAIL - otherwise relabelling a
+    failure as a provider outage would take it out of the count.
     """
+    criteria = record.data.get("criteria")
+    mandatory = [
+        c for c in criteria
+        if isinstance(c, dict) and c.get("mandatory") is True
+    ] if isinstance(criteria, list) else []
+    outcomes = [c.get("outcome") for c in mandatory]
+    if "VIOLATED" in outcomes:
+        return "FAIL"
+
     declared = record.data.get("run_state")
     if isinstance(declared, str) and declared in DECLARABLE_RUN_STATES:
         return declared
 
-    criteria = record.data.get("criteria")
-    if not isinstance(criteria, list):
+    if not outcomes:
         return "INCONCLUSIVE"
-    mandatory = [
-        c for c in criteria
-        if isinstance(c, dict) and c.get("mandatory") is True
-    ]
-    if not mandatory:
-        return "INCONCLUSIVE"
-    outcomes = [c.get("outcome") for c in mandatory]
-    if "VIOLATED" in outcomes:
-        return "FAIL"
     if any(o != "SATISFIED" for o in outcomes):
         return "INCONCLUSIVE"
     return "PASS"
@@ -505,6 +510,14 @@ def artifact_digest(record: Record) -> Iterator[str]:
         for required in ("path", "type", "size", "digest"):
             if required not in entry:
                 yield f"artifact {entry.get('path', index)!r} has no {required}"
+        # Present is not enough: `null` for all three with a valid digest names
+        # bytes nobody can locate or re-hash (#130).
+        for key in ("path", "type"):
+            if key in entry and not _nonempty_str(entry[key]):
+                yield f"artifact {index} has {key} {entry[key]!r}"
+        size = entry.get("size")
+        if "size" in entry and (isinstance(size, bool) or not isinstance(size, int) or size < 0):
+            yield f"artifact {index} has size {size!r}, not a non-negative integer"
         if "digest" in entry and not _nonempty_str(entry["digest"]):
             # `null` is not a content identity, and must not become the string
             # "None" that a result could then cite in agreement.
@@ -616,6 +629,11 @@ def criterion_vocabulary(record: Record) -> Iterator[str]:
         if not isinstance(entry, dict):
             yield f"criterion {index} is not an object"
             continue
+        # Evidence and `missing` are cited per criterion id; one without an id
+        # cannot be referred to at all (#130).
+        problem = _bad_id(entry.get("id"), f"criterion {index} id")
+        if problem:
+            yield problem
         outcome = entry.get("outcome")
         if outcome not in CRITERION_OUTCOMES:
             yield (
@@ -652,6 +670,10 @@ def result_evidence(record: Record) -> Iterator[str]:
         yield problem
     yield from _identity(data, "grader", "id", "revision")
     declared = data.get("run_state")
+    if "run_state" in data and declared not in DECLARABLE_RUN_STATES:
+        # Otherwise any other value reads as "no run state" and is silently
+        # dropped, while the record still claims to have declared one (#130).
+        yield f"run state {declared!r} is not one of {list(DECLARABLE_RUN_STATES)}"
     if declared in DECLARABLE_RUN_STATES:
         if not _nonempty_str(data.get("reason")):
             yield f"run state {declared!r} is declared without a reason"
@@ -694,6 +716,14 @@ def derived_status(record: Record) -> Iterator[str]:
             f"status {claimed!r} does not follow from this record's own criteria, "
             f"which derive {derived!r}; a status that does not follow was asserted, "
             f"not established"
+        )
+    declared = record.data.get("run_state")
+    if declared in DECLARABLE_RUN_STATES and declared != derived:
+        # A FAIL status beside a declared UNAVAILABLE still reads as a non-run to
+        # anything that trusts run_state (attempt-accounting does) (#130).
+        yield (
+            f"run state {declared!r} is declared over an established mandatory "
+            f"violation, which derives {derived!r}; a run state cannot relabel a failure"
         )
 
 

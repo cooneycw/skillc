@@ -303,6 +303,24 @@ and version plan.
 
 ### Fixed
 
+- **A declared run state could hide a failed result**
+  ([#130](https://github.com/cooneycw/skillc/issues/130)). `derive_status`
+  honoured a declared `UNAVAILABLE`/`NOT_RUN` before it looked at criteria. So a
+  result with a mandatory `VIOLATED` criterion could be relabelled
+  `UNAVAILABLE` and pass `check-records`. protocol.md section 4 forbids that.
+  The violation is now tested first, so such a record derives FAIL.
+  `derived-status` also refuses a run state its criteria contradict. The
+  records.md Derivation now agrees with the protocol. Three related record-shape
+  gaps from the same reassessment are closed:
+  - a `run_state` outside `UNAVAILABLE`/`NOT_RUN` (`result-evidence`);
+  - a criterion with no `id` (`criterion-vocabulary`);
+  - a null artifact `path`, `type` or `size` beside a valid digest
+    (`artifact-digest`).
+
+  Each has a committed bad case, and every one of those cases was silent on the
+  unfixed code. New good twins cover a legitimate UNAVAILABLE and a legitimate
+  NOT_RUN.
+
 Five honesty gaps in `skillc demo` and `--control`, folded into #122 from the
 Nit Store ([#20](https://github.com/cooneycw/skillc/issues/20)), each with a red case:
 
