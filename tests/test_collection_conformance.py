@@ -19,11 +19,12 @@ import shutil
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from skillc import collection_conformance as cc
-from skillc import demo, materialize, trial
+from skillc import demo, materialize, reap, trial
 from skillc import docker_backend as d
 
 FAKE_DOCKER = Path(__file__).resolve().parent / "fixtures" / "docker-backend" / "fake_docker.py"
@@ -353,20 +354,123 @@ def test_paste_back_is_leak_clean_and_names_every_planned_field() -> None:
         "observation": {
             "prompt_delivered": True, "canary_satisfied": True,
             "skill_invocations": ["tdd"], "skill_invocation_detection": "heuristic",
-            "refresh_observed_in_container": False,
+            # The record's REAL key (credential.CredentialUsage.to_record_fields).
+            "credential_refresh_observed_in_container": False,
+            "credential_delivered": True, "credential_source": "subscription",
+            "credential_remaining_seconds_at_launch": 7200,
+            "transcript_client_version": "0.157.1", "transcript_model": "some-model",
+            "transcript_unrecognized_types": [],
         },
-        "graded": {"status": "PASS"},
+        "stop": {"reason": "exited", "exit_code": 0, "confirmed": True},
+        "cleanup": {"status": "cleaned", "failures": []},
+        "backend_teardown": "confirmed",
+        "liveness_method": "canary",
+        "graded": {"status": "PASS", "criteria": [{"id": "slug-fixed", "outcome": "SATISFIED"}]},
         "grading_blocked_reason": None,
     }
-    result = cc.CollectionAgentResult("whatever", "v1", "codex", record)
+    state = cc.HostCredentialState(digest="d", remaining_seconds=3600)
+    result = cc.CollectionAgentResult(
+        "whatever", "v1", "codex", record,
+        host_credential=cc.HostCredentialCheck(before=state, after=state),
+        daemon_diff=reap.SnapshotDiff(comparable=True, leaked=frozenset(), foreign_vanished=frozenset()),
+    )
     text = cc.build_collection_paste_back(result)
     assert demo.leak_check_text(text) == []
     for field in (
         "disposition=captured", "prompt_delivered=True", "canary_satisfied=True",
         "skill_invocations=['tdd']", "detection=heuristic", "refresh_observed_in_container=False",
-        "graded.status=PASS",
+        "graded.status=PASS", "graded.criteria=slug-fixed=SATISFIED", "liveness_method=canary",
+        "credential_delivered=True source=subscription", "remaining_at_launch=120m",
+        "host_credential_unchanged=True", "host_remaining_after=60m",
+        "stop.reason=exited stop.exit_code=0 stop.confirmed=True",
+        "workspace_cleanup(record, at finalize)=cleaned", "backend_teardown=confirmed", "leaked_owned_containers=0",
+        "attributable_leftover_containers=None",
+        "client_version=0.157.1 model=some-model", "unrecognized_types=[]",
     ):
         assert field in text
+
+
+def test_paste_back_refresh_line_reads_a_real_driver_record(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Red on #11's paste-back (issue #106): it read `refresh_observed_in_container`
+    from the observation while the driver writes
+    `credential_refresh_observed_in_container`, so the live paste-back printed
+    `None` on every run. The earlier test above hand-built its record with the
+    paste-back's OWN wrong key, so it agreed with the bug by construction. This
+    one takes the record from a real `run_one_attempt` (fake docker, scripted
+    client), where the credential is delivered and read back unchanged."""
+    repo = _fixture_collection(tmp_path, {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd"]))
+    acquired = cc.acquire_collection("whatever", base, checkout=repo)
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    argv = _codex_argv(
+        home=_mapped_home(docker_state, attempt_id),
+        transcript_relpath=".codex/sessions/2026/01/01/rollout-rf.jsonl", copy_solution=GRADER_ROOT / "reference",
+    )
+    result = cc.run_collection_agent_attempt(
+        subject_name="whatever", acquired=acquired, experiment=experiment, attempt_id=attempt_id,
+        backend=_backend(base, docker_state), grading_backend=_backend(base, docker_state), base=base,
+        base_argv=argv, prompt="Fix the slug helper.", timeout=5,
+        credential_explicit_path=_fresh_codex_credential(tmp_path),
+    )
+    text = cc.build_collection_paste_back(result)
+    assert "refresh_observed_in_container=False" in text
+    assert "backend_teardown=confirmed" in text
+    # The journal's own event says what happened; since #127 the record,
+    # finalized after cleanup, agrees with it rather than reading "partial".
+    assert result.workspace_cleaned == "removed"
+    assert "workspace_cleaned(journal)=removed" in text
+    assert "workspace_cleanup(record, at finalize)=removed" in text
+    remaining = result.record["observation"]["credential_remaining_seconds_at_launch"]  # type: ignore[index]
+    assert isinstance(remaining, int) and 3000 <= remaining <= 3600
+
+
+def test_below_threshold_credential_blocks_before_launch_and_leaves_no_container(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#106 acceptance: a credential below the threshold is BLOCKED before
+    launch, and no container remains. The fresh credential has about an hour;
+    a threshold of a day refuses it. The client argv would fail loudly if it
+    ever ran."""
+    repo = _fixture_collection(tmp_path, {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd"]))
+    acquired = cc.acquire_collection("whatever", base, checkout=repo)
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    before = reap.snapshot(_docker_bin(docker_state), timeout=5)
+    result = cc.run_collection_agent_attempt(
+        subject_name="whatever", acquired=acquired, experiment=experiment, attempt_id=attempt_id,
+        backend=_backend(base, docker_state), grading_backend=_backend(base, docker_state), base=base,
+        base_argv=[sys.executable, "-c", "raise SystemExit('must never run')"], prompt="x", timeout=5,
+        credential_explicit_path=_fresh_codex_credential(tmp_path), minimum_credential_seconds=86400,
+    )
+    after = reap.snapshot(_docker_bin(docker_state), timeout=5)
+    assert result.record["disposition"] == "unavailable"
+    assert "below the required" in str(result.record.get("reason", "")) + json.dumps(result.record, default=str)
+    assert result.record["backend_teardown"] == "confirmed"
+    assert after.reachable and not after.owned
+    assert reap.diff(before, after).leaked == frozenset()
+    assert result.record["graded"] is None
+    # The control's paste-back names its own cause, not only its disposition.
+    assert "below the required 86400s" in cc.build_collection_paste_back(result)
+
+
+def test_host_credential_check_reports_a_changed_file(tmp_path: Path) -> None:
+    """Red and green for the host-login evidence: an untouched file compares
+    equal; a rewritten one (what an in-container refresh rotating the host's
+    token would look like from the host) compares unequal; an unreadable one
+    is `None`, never a pass."""
+    path = _fresh_codex_credential(tmp_path)
+    before = cc.read_host_credential("codex", path)
+    assert before.digest is not None and before.remaining_seconds is not None
+    assert cc.HostCredentialCheck(before, cc.read_host_credential("codex", path)).unchanged is True
+    path.write_text(path.read_text() + " ")
+    assert cc.HostCredentialCheck(before, cc.read_host_credential("codex", path)).unchanged is False
+    missing = cc.read_host_credential("codex", tmp_path / "absent.json")
+    assert missing.digest is None
+    assert cc.HostCredentialCheck(before, missing).unchanged is None
 
 
 def test_paste_back_handles_a_blocked_attempt_with_no_observation() -> None:
@@ -498,10 +602,11 @@ def test_cli_wires_the_agent_timeout_backends_and_run_root(
     from skillc import cli
 
     seen: list[dict[str, object]] = []
+    client = {"name": "codex"}
 
     def fake_acquire(name: str, root: Path) -> object:
         (root / f"{name}-checkout").mkdir()
-        return object()
+        return SimpleNamespace(subject=SimpleNamespace(client=client["name"]))
 
     def fake_run(**kwargs: object) -> cc.CollectionAgentResult:
         seen.append(kwargs)
@@ -516,6 +621,8 @@ def test_cli_wires_the_agent_timeout_backends_and_run_root(
     monkeypatch.setattr(trial, "open_store", lambda path, forbidden: path)
     monkeypatch.setattr(cc, "plan_collection_attempt", lambda *a, **k: (object(), "a-1"))
     monkeypatch.setattr(cc, "run_collection_agent_attempt", fake_run)
+    # Never the host's real daemon from a unit test.
+    monkeypatch.setattr(reap, "snapshot", lambda *a, **k: reap.Snapshot(False, frozenset(), frozenset()))
 
     argv = ["collection-run", "subject-a", "--base", str(base), "--timeout", "7"]
     assert cli.main(argv) == 1  # not captured, not PASS
@@ -537,6 +644,14 @@ def test_cli_wires_the_agent_timeout_backends_and_run_root(
     seen.clear()
     assert cli.main([*argv, "--agent-timeout", "42"]) == 1
     assert seen[0]["timeout"] == 42
+
+    # Issue #124: the default argv follows the client the SUBJECT declares,
+    # never a codex default applied to every subject.
+    seen.clear()
+    client["name"] = "claude"
+    assert cli.main(argv) == 1
+    assert list(seen[0]["base_argv"]) == list(cc.DEFAULT_CLIENT_ARGVS["claude"])  # type: ignore[call-overload]
+    assert list(seen[0]["base_argv"]) != list(cc.DEFAULT_CLIENT_ARGV)  # type: ignore[call-overload]
 
 
 # ------------------------------------------------- cmd_collection_run's own gate
@@ -568,16 +683,28 @@ def _stub_acquisition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(demo, "acquire_subject_checkout", _fake_acquire)
 
 
+def _prepared(kwargs: dict[str, object]) -> None:
+    """What a real attempt does to the tracking backends: prepare one attempt
+    each. Nothing exists on the fake daemon under these ids, so the
+    attributable-leftover check has real ids to ask about and finds none."""
+    for key, attempt_id in (("backend", "a-fake"), ("grading_backend", "probe-fake")):
+        backend = kwargs[key]
+        assert isinstance(backend, cc.TrackingDockerBackend)
+        backend.prepared_ids.append(attempt_id)
+
+
 def _fake_collection_result(
     subject_name: str, *, disposition: str, graded: dict[str, object] | None,
+    backend_teardown: str = "confirmed",
 ) -> cc.CollectionAgentResult:
     record: dict[str, object] = {
         "disposition": disposition,
+        "backend_teardown": backend_teardown,
         "graded": graded,
         "observation": {
             "prompt_delivered": True, "canary_satisfied": True,
             "skill_invocations": [], "skill_invocation_detection": "none",
-            "refresh_observed_in_container": False,
+            "credential_refresh_observed_in_container": False,
         },
         "grading_blocked_reason": None if graded is not None else "canary not satisfied",
     }
@@ -598,6 +725,7 @@ def test_cmd_collection_run_exits_1_when_grading_is_blocked(
     _stub_acquisition(tmp_path, monkeypatch)
 
     def _fake_run(**kwargs: object) -> cc.CollectionAgentResult:
+        _prepared(kwargs)
         return _fake_collection_result("whatever", disposition="captured", graded=None)
 
     monkeypatch.setattr(cc, "run_collection_agent_attempt", _fake_run)
@@ -617,6 +745,7 @@ def test_cmd_collection_run_exits_1_when_grading_failed(
     _stub_acquisition(tmp_path, monkeypatch)
 
     def _fake_run(**kwargs: object) -> cc.CollectionAgentResult:
+        _prepared(kwargs)
         return _fake_collection_result(
             "whatever", disposition="captured", graded={"status": "FAIL", "detail": "wrong output"},
         )
@@ -638,6 +767,7 @@ def test_cmd_collection_run_exits_0_on_full_success(
     _stub_acquisition(tmp_path, monkeypatch)
 
     def _fake_run(**kwargs: object) -> cc.CollectionAgentResult:
+        _prepared(kwargs)
         return _fake_collection_result("whatever", disposition="captured", graded={"status": "PASS", "detail": "ok"})
 
     monkeypatch.setattr(cc, "run_collection_agent_attempt", _fake_run)
@@ -662,3 +792,346 @@ def test_a_path_like_subject_is_refused_before_any_scratch_path(
     assert cli.main(["collection-run", name, "--base", str(base)]) == 2
     assert "Traceback" not in capsys.readouterr().err
     assert list(base.iterdir()) == []
+
+
+def test_cmd_collection_run_exits_1_when_teardown_is_not_confirmed(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #106: a PASS whose container teardown could not be confirmed is
+    not a clean run. Red against the pre-#106 gate, which read only the
+    disposition and the grade."""
+    from skillc import cli
+
+    _stub_acquisition(tmp_path, monkeypatch)
+
+    def _fake_run(**kwargs: object) -> cc.CollectionAgentResult:
+        _prepared(kwargs)
+        return _fake_collection_result(
+            "whatever", disposition="captured", graded={"status": "PASS"}, backend_teardown="unknown",
+        )
+
+    monkeypatch.setattr(cc, "run_collection_agent_attempt", _fake_run)
+    args = _collection_run_args(
+        "whatever", image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base=str(base), timeout=5,
+    )
+    assert cli.cmd_collection_run(args) == 1
+
+
+def test_cmd_collection_run_exits_1_on_a_container_left_by_this_run(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Issue #106: a container still labelled with one of THIS run's attempt
+    ids fails the run, even on PASS."""
+    from skillc import cli
+
+    _stub_acquisition(tmp_path, monkeypatch)
+    asked: list[list[str]] = []
+
+    def _leftovers(docker_bin: object, attempt_ids: list[str], timeout: float) -> list[str]:
+        asked.append(list(attempt_ids))
+        return ["skillc-a-fake"]
+
+    monkeypatch.setattr(cc, "attributable_leftovers", _leftovers)
+
+    def _fake_run(**kwargs: object) -> cc.CollectionAgentResult:
+        _prepared(kwargs)
+        return _fake_collection_result("whatever", disposition="captured", graded={"status": "PASS"})
+
+    monkeypatch.setattr(cc, "run_collection_agent_attempt", _fake_run)
+    args = _collection_run_args(
+        "whatever", image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base=str(base), timeout=5,
+    )
+    assert cli.cmd_collection_run(args) == 1
+    assert asked == [["a-fake", "probe-fake"]]  # the agent's id AND the grading probe's
+    assert "attributable_leftover_containers=1 (attempts_checked=2)" in capsys.readouterr().out
+
+
+def test_a_concurrent_run_s_container_does_not_fail_a_clean_run(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Codex review: the daemon-wide diff cannot attribute. A skillc-owned
+    container a NEIGHBOUR started during this run is reported as context,
+    and does not flip a clean run's verdict."""
+    from skillc import cli
+
+    _stub_acquisition(tmp_path, monkeypatch)
+    snaps = iter([
+        reap.Snapshot(True, frozenset(), frozenset()),
+        reap.Snapshot(True, frozenset({"skillc-someone-else"}), frozenset()),
+    ])
+    monkeypatch.setattr(reap, "snapshot", lambda *a, **k: next(snaps))
+
+    def _fake_run(**kwargs: object) -> cc.CollectionAgentResult:
+        _prepared(kwargs)
+        return _fake_collection_result("whatever", disposition="captured", graded={"status": "PASS"})
+
+    monkeypatch.setattr(cc, "run_collection_agent_attempt", _fake_run)
+    args = _collection_run_args(
+        "whatever", image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base=str(base), timeout=5,
+    )
+    assert cli.cmd_collection_run(args) == 0
+    out = capsys.readouterr().out
+    assert "attributable_leftover_containers=0 (attempts_checked=2)" in out
+    assert "context: daemon_comparable=True leaked_owned_containers=1" in out
+
+
+def test_no_prepared_attempt_is_not_a_clean_cleanup(docker_state: Path) -> None:
+    """An empty id list means nothing was checked: `None`, never `[]`."""
+    assert cc.attributable_leftovers(_docker_bin(docker_state), [], 5) is None
+    assert cc.attributable_leftovers(_docker_bin(docker_state), ["a-none"], 5) == []
+
+
+def test_attributable_leftovers_finds_a_real_container_on_the_fake_daemon(
+    base: Path, docker_state: Path,
+) -> None:
+    """The check against a daemon that really holds the container: prepared
+    and never destroyed, it is found by its attempt label."""
+    backend = cc.TrackingDockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+    handle = backend.prepare("a-kept")
+    try:
+        found = cc.attributable_leftovers(_docker_bin(docker_state), backend.prepared_ids, 5)
+        assert found is not None and len(found) == 1
+    finally:
+        backend.destroy(handle)
+    assert cc.attributable_leftovers(_docker_bin(docker_state), backend.prepared_ids, 5) == []
+
+
+def test_an_oauth_token_embedded_in_a_record_string_blocks_the_record_file(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Codex review, red on the serialized-text-only check: `json.dumps`
+    escapes the quotes inside a string value, so OAuth-shaped JSON embedded
+    in a grader's detail stopped matching the token pattern. The record file
+    must not be written; the paste-back says `record_written=False`."""
+    from skillc import cli
+
+    _stub_acquisition(tmp_path, monkeypatch)
+    token_json = json.dumps({"access_token": "Zq7" + "x" * 37})
+
+    def _fake_run(**kwargs: object) -> cc.CollectionAgentResult:
+        _prepared(kwargs)
+        return _fake_collection_result(
+            "whatever", disposition="captured", graded={"status": "PASS", "detail": token_json},
+        )
+
+    monkeypatch.setattr(cc, "run_collection_agent_attempt", _fake_run)
+    args = _collection_run_args(
+        "whatever", image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base=str(base), timeout=5,
+    )
+    cli.cmd_collection_run(args)
+    assert "record_written=False" in capsys.readouterr().out
+    assert not list(base.glob("skillc-collection-run-whatever-*/whatever-store/collection-run-record.json"))
+
+
+def test_cmd_collection_run_reports_a_host_credential_the_run_changed(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The host-login evidence end to end through the CLI: the attempt (here a
+    stand-in) rewrites the operator's credential file, and the paste-back
+    says so. Also: the full record is written into the kept store."""
+    from skillc import cli
+
+    _stub_acquisition(tmp_path, monkeypatch)
+    cred = _fresh_codex_credential(tmp_path)
+
+    def _fake_run(**kwargs: object) -> cc.CollectionAgentResult:
+        assert kwargs["minimum_credential_seconds"] == 5
+        _prepared(kwargs)
+        cred.write_text(cred.read_text() + " ")
+        return _fake_collection_result("whatever", disposition="captured", graded={"status": "PASS"})
+
+    monkeypatch.setattr(cc, "run_collection_agent_attempt", _fake_run)
+    args = _collection_run_args(
+        "whatever", image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base=str(base), timeout=5,
+        credential=str(cred), minimum_credential_seconds=5,
+    )
+    cli.cmd_collection_run(args)
+    out = capsys.readouterr().out
+    assert "host_credential_unchanged=False" in out
+    assert "record_written=True" in out
+    [record_file] = list(base.glob("skillc-collection-run-whatever-*/whatever-store/collection-run-record.json"))
+    saved = json.loads(record_file.read_text())
+    # The envelope, not the bare record (codex review): what the paste-back
+    # states about the host and the cleanup is saved too - never the digest.
+    assert saved["record"]["disposition"] == "captured"
+    assert saved["host_credential"]["unchanged"] is False
+    assert saved["attributable_leftovers"] == [] and saved["attempts_checked"] == 2
+    assert "digest" not in json.dumps(saved["host_credential"])
+
+
+# ------------------------------------------------ the Claude Code arm (#124)
+
+
+def _claude_subject(select: object = "all") -> materialize.Subject:
+    return materialize.Subject.from_dict({
+        "subject_schema": 1, "locator": "test/test", "revision": "v1", "surface": "claude-code-skills",
+        "skills_root": "skills", "select": select, "client": {"name": "claude", "version": "2.1.283"},
+    })
+
+
+def _fresh_claude_credential(tmp_path: Path) -> Path:
+    path = tmp_path / "claude-credential.json"
+    path.write_text(json.dumps({"claudeAiOauth": {"expiresAt": int((time.time() + 3600) * 1000)}}))
+    return path
+
+
+def _claude_run(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+    *, extra: list[str] | None = None, drop_skill: str | None = None,
+) -> cc.CollectionAgentResult:
+    """One scripted Claude Code collection attempt with `tdd` and
+    `diagnosing-bugs` selected. The fake client lists whatever is installed
+    under `<home>/.claude/skills/` (`fake_agent_client.py`), so `drop_skill`
+    - withholding one skill's files from the container - is a genuinely
+    uninstalled skill, not a told-to-omit one."""
+    repo = _fixture_collection(tmp_path, {"tdd": "tdd", "diagnosing-bugs": "diagnosing-bugs"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _claude_subject(select=["tdd", "diagnosing-bugs"]))
+    if drop_skill is not None:
+        real = cc._collection_home_files
+
+        def _withheld(source: materialize.Source, files: list[demo.SubjectFile]) -> dict[str, bytes]:
+            return real(source, [f for f in files if f.skill != drop_skill])
+
+        monkeypatch.setattr(cc, "_collection_home_files", _withheld)
+
+    acquired = cc.acquire_collection("whatever", base, checkout=repo)
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    home = _mapped_home(docker_state, attempt_id)
+    argv = [
+        sys.executable, str(FAKE_CLIENT), "--format", "claude-fake", "--home", str(home),
+        "--transcript-relpath", ".claude/projects/-work/77777777-7777-7777-7777-777777777777.jsonl",
+        "--copy-solution", str(GRADER_ROOT / "reference"), *(extra or []),
+    ]
+    return cc.run_collection_agent_attempt(
+        subject_name="whatever", acquired=acquired, experiment=experiment, attempt_id=attempt_id,
+        backend=_backend(base, docker_state), grading_backend=_backend(base, docker_state), base=base,
+        base_argv=argv, prompt="Fix the slug helper.", timeout=5,
+        credential_explicit_path=_fresh_claude_credential(tmp_path),
+    )
+
+
+def test_claude_subject_installs_under_claude_skills_and_every_skill_is_listed(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = _claude_run(tmp_path, base, docker_state, monkeypatch)
+
+    assert result.client == "claude"
+    assert result.record["disposition"] == "captured"
+    graded = result.record["graded"]
+    assert isinstance(graded, dict) and graded["status"] == "PASS"
+    observation = result.record["observation"]
+    assert isinstance(observation, dict)
+    assert observation["skill_invocation_detection"] == "structural"  # claude's ClientSpec, not codex's
+    assert observation["skills_listed_source"] == "transcript skill_listing attachment"
+    assert result.discovery == {"tdd": "listed", "diagnosing-bugs": "listed"}
+    assert result.discovery_reason is None and not result.discovery_failed
+    paste = cc.build_collection_paste_back(result)
+    assert "client=claude" in paste
+    assert "discovery={'diagnosing-bugs': 'listed', 'tdd': 'listed'} (source=transcript skill_listing)" in paste
+
+
+def test_a_skill_that_was_not_installed_turns_discovery_red(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR 0001's red case for the new check (issue #124's own wording: "a
+    skill not installed must turn the install/discovery check red")."""
+    result = _claude_run(tmp_path, base, docker_state, monkeypatch, drop_skill="tdd")
+
+    assert result.discovery == {"tdd": "not-listed", "diagnosing-bugs": "listed"}
+    assert result.discovery_failed
+
+
+def test_a_skill_the_client_did_not_list_turns_discovery_red(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other shape: installed, but the client's own listing leaves it out."""
+    result = _claude_run(tmp_path, base, docker_state, monkeypatch, extra=["--omit-listed", "diagnosing-bugs"])
+
+    assert result.discovery == {"tdd": "listed", "diagnosing-bugs": "not-listed"}
+    assert result.discovery_failed
+
+
+def test_no_listing_in_the_transcript_is_unmeasured_never_a_pass_or_a_fail(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = _claude_run(tmp_path, base, docker_state, monkeypatch, extra=["--no-skill-listing"])
+
+    assert result.discovery == {"tdd": "UNMEASURED", "diagnosing-bugs": "UNMEASURED"}
+    assert result.discovery_reason is not None and "no skill_listing attachment" in result.discovery_reason
+    assert not result.discovery_failed
+    assert "discovery=UNMEASURED (" in cc.build_collection_paste_back(result)
+
+
+def test_a_codex_run_reports_discovery_unmeasured_not_borrowed(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Codex's transcript carries no listing this adapter reads: its
+    collection-run discovery is UNMEASURED, and says so."""
+    repo = _fixture_collection(tmp_path, {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd"]))
+    acquired = cc.acquire_collection("whatever", base, checkout=repo)
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    argv = _codex_argv(
+        home=_mapped_home(docker_state, attempt_id), transcript_relpath=".codex/sessions/2026/01/01/rollout-d.jsonl",
+    )
+    result = cc.run_collection_agent_attempt(
+        subject_name="whatever", acquired=acquired, experiment=experiment, attempt_id=attempt_id,
+        backend=_backend(base, docker_state), grading_backend=_backend(base, docker_state), base=base,
+        base_argv=argv, prompt="Fix the slug helper.", timeout=5,
+        credential_explicit_path=_fresh_codex_credential(tmp_path),
+    )
+    assert result.discovery == {"tdd": "UNMEASURED"}
+    assert result.discovery_reason is not None and "carries no skill listing" in result.discovery_reason
+
+
+def test_missing_claude_credential_blocks_before_launch(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The planned control, on the Claude arm: no credential, `unavailable`."""
+    repo = _fixture_collection(tmp_path, {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _claude_subject(select=["tdd"]))
+    acquired = cc.acquire_collection("whatever", base, checkout=repo)
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    result = cc.run_collection_agent_attempt(
+        subject_name="whatever", acquired=acquired, experiment=experiment, attempt_id=attempt_id,
+        backend=_backend(base, docker_state), grading_backend=_backend(base, docker_state), base=base,
+        base_argv=[sys.executable, "-c", "import sys; sys.exit(1)"], prompt="Fix the slug helper.", timeout=5,
+        credential_explicit_path=tmp_path / "does-not-exist.json",
+    )
+    assert result.record["disposition"] == "unavailable"
+    assert result.discovery == {"tdd": "UNMEASURED"}
+
+
+@pytest.mark.parametrize(("discovery", "expected"), [
+    ({"greet": "listed"}, 0),
+    ({"greet": "not-listed"}, 1),  # the red case: a PASS does not excuse an unlisted skill
+    ({"greet": "UNMEASURED"}, 0),  # stated in the paste-back, not failed
+])
+def test_cmd_collection_run_exit_follows_measured_discovery(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+    discovery: dict[str, str], expected: int,
+) -> None:
+    from skillc import cli
+
+    _stub_acquisition(tmp_path, monkeypatch)
+
+    def _fake_run(**kwargs: object) -> cc.CollectionAgentResult:
+        _prepared(kwargs)  # a clean teardown, so discovery is the only variable
+        passed = _fake_collection_result("whatever", disposition="captured", graded={"status": "PASS", "detail": "ok"})
+        reason = "stated" if "UNMEASURED" in discovery.values() else None
+        return cc.CollectionAgentResult(
+            passed.subject_name, passed.revision, "claude", passed.record, discovery=discovery, discovery_reason=reason,
+        )
+
+    monkeypatch.setattr(cc, "run_collection_agent_attempt", _fake_run)
+    args = _collection_run_args(
+        "whatever", image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base=str(base), timeout=5,
+    )
+    assert cli.cmd_collection_run(args) == expected

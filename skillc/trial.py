@@ -359,7 +359,7 @@ class Experiment:
 
 
 #: Journal entries that carry detail but are not lifecycle events in their own right.
-_DETAIL_EVENTS = ("workspace",)
+_DETAIL_EVENTS = ("workspace", "backend-teardown")
 
 
 def _read_object(root: Path, digest: str) -> bytes:

@@ -22,6 +22,130 @@ and version plan.
 - `--control` now prints a leak-checked paste-back block with one
   `CAUGHT`/`NOT CAUGHT` line per seed, instead of a single aggregate line.
   #122 closes only on the operator's live run of it against a real daemon.
+- **`selection_probe.agent_trial_runner`: the real `AttemptRunner`**
+  (Refs #26): each planned attempt becomes one `agent_trial.run_one_attempt`
+  in skill-free canary mode (`skill_name=None`), with the declared collection
+  delivered through `extra_home_files` into the TREATMENT arm's home only -
+  the baseline arm receives nothing extra whatever the caller passes,
+  enforced by the runner rather than trusted to it. The prompt is the task's
+  own `goal.md` plus the case's `prompt_addendum`. `transcript_from_record`
+  reads selection from the record's `skill_invocations` alone (never the
+  canary), sets `codex_best_effort` when detection is `"heuristic"`, and
+  reports a captured attempt whose prompt delivery or canary was not
+  confirmed as `"inconclusive"` - neither a selection nor a graded outcome.
+  `run_planned_selection_probe` runs an already-planned experiment (the real
+  runner needs it before running), and both entry points take a
+  `grading_backend`, so a real agent's output is probed in a separate
+  container, never on the host. Proven end to end on the fake `docker` CLI
+  and the scripted fake client across all six planned attempts; confirmed
+  red when the collection reaches both arms, when the `grading_eligible`
+  check is dropped, and when `skill_invocations` is ignored. A live run is a
+  `SKILLC_ALLOW_REAL_AGENT=1`-gated test, owed to the operator.
+
+  Cross-model review of this change found four defects in the driver, all
+  fixed here: with no `grading_backend` the candidate ran as a host
+  subprocess (now refused before any attempt unless `allow_host_grading=True`,
+  for trusted fixtures only); a repeated attempt passed attendance and was
+  then dropped from the report (repeats are now refused up front); an
+  `INCONCLUSIVE` grade was reported as task failure (now `None`, with the
+  grader's reason); and selection was judged against the supplied case file
+  rather than the frozen planned configuration (now the plan decides, and a
+  case revision that differs from the plan is refused). A re-review found two
+  more: the agent's own backend could be passed as the grading backend,
+  carrying its network egress into grading (the runner now exposes
+  `.backend`, and reuse or a grading backend with egress is refused), and a
+  plan missing a declared case or arm produced a report that read as
+  complete (the plan must now cover every declared `(case, arm)`). Each is
+  confirmed red on the unfixed code.
+
+- **`skillc.selection_probe`: the run driver for #26's three predeclared
+  cases** (Refs #26): plans both arms of every case
+  (`evals/selection-probe/cases.json`) through the real controller (reusing,
+  never duplicating, the shape `tests/test_selection_probe.py`'s own no-run
+  deliverable already proved), runs every planned attempt through a pluggable
+  `AttemptRunner` seam, grades the same public `slug-small-fix` task outcome
+  independently of what it observed about selection, and reports both side
+  by side. Nothing runs for real: `lifecycle.py`'s own existing guard already
+  refuses to launch `claude`/`codex` without `SKILLC_ALLOW_REAL_AGENT=1`, and
+  every test of the driver's own logic uses a FAKE runner that never calls
+  `execute()` at all.
+
+  Selection vocabulary: `"selected"`, `"not-selected"`, `"unknown"` - a
+  non-`"captured"` disposition (`"unavailable"`, `"not-run"`,
+  `"inconclusive"`) is ALWAYS `"unknown"`, never `"not-selected"`, per #26's
+  own decision-traceability rule ("do not substitute prompted invocation").
+  The baseline arm's `applicable_skills` is always empty by construction, so
+  `"selected"` there is exactly this probe's own contamination signal -
+  `CaseResult.baseline_contaminated` is a named alias of that same result,
+  one mechanism rather than two. `run_selection_probe` refuses
+  (`SelectionProbeRefused`) if any planned attempt is missing from the
+  results - `AttemptRunner` may return `None` for an attempt that could not
+  even be launched, distinct from an `AttemptTranscript` reporting a real,
+  non-captured disposition (which is a result, not an absence). Every
+  acceptance path named above has a committed test confirmed red on its own
+  mutation before being added: dropping the disposition check, disabling the
+  attendance check, and breaking `baseline_contaminated` each turn a
+  passing suite red.
+
+  Building this against the real `trial.plan()` output (not a hand-written
+  fixture) surfaced a real bug before it ever reached a real driver: a
+  planned trial's `config` is stored as a content-addressed digest reference
+  (`trial.py`'s own "the resolved configuration is stored as an object and
+  the ledger binds its digest"), never the literal `arm`/`prompt_addendum`/
+  `applicable_skills` dict - reading `trial_dict["config"]["arm"]` directly,
+  as an early draft did, raised `KeyError` the first time it ran against a
+  real plan. Fixed by resolving each trial's config back through
+  `experiment.object_path(digest)` (the same pattern `verify.py`'s own
+  `_read_frozen` already uses) before handing it to any runner.
+
+- **The Claude Code agent arm: a `claude-code-skills` surface and a
+  per-collection Level 1 run on Claude Code** (Refs #124).
+  `materialize.SURFACES` declares two surfaces, each bound to one client
+  and one install directory: `codex-skills` (codex, `~/.codex/skills/`) and
+  `claude-code-skills` (claude, `~/.claude/skills/`). A surface/client
+  mismatch is refused by name. `skillc collection-run` takes its client and
+  default argv from the subject (`DEFAULT_CLIENT_ARGVS`; claude runs
+  `claude -p --dangerously-skip-permissions` as the non-root trial user).
+  Claude Code has no model-free listing, so discovery is read from the real
+  agent transcript's `skill_listing` attachment
+  (`transcript_adapter.claude_code_skill_listing`, recorded as
+  `observation.skills_listed`). Each selected skill is reported `listed` or
+  `not-listed`, labelled `source=transcript skill_listing`. When no listing
+  was observable, including every codex run, discovery is `UNMEASURED` with
+  the reason; it is never a borrowed canary result. `collection-run` now
+  exits 1 when a selected skill is measurably `not-listed`, even on a PASS.
+  `skillc demo --subject` installs a Claude subject under `.claude/skills/`
+  and reports its discovery NOT EXERCISED. The host-local
+  `skillc materialize` refuses a Claude subject by name. New subjects are
+  `cpp-claude-code` (CPP's native `.claude/skills`, 18 skills) and
+  `mattpocock-skills-claude-code` (`tdd`, `diagnosing-bugs`). Live evidence
+  is in `evals/claude-code-agent-arm/`; its first runs printed the blind
+  `refresh_observed_in_container=None` fixed under #106 and were repeated on
+  the fixed key (both read `False`).
+
+- **`skillc collection-run` keeps evidence for #106's live run** (Refs #106).
+  The paste-back is grouped into prompt delivery, canary, credential,
+  outcome, cleanup and transcript format:
+  - the credential's remaining life at launch;
+  - the operator's host credential before and after (a digest comparison;
+    the bytes are never read into the record);
+  - a daemon snapshot diff of skillc-owned containers around the whole run;
+  - the stop reason and exit code, per-criterion grades, and the refusal
+    reason;
+  - the journal's own workspace `cleaned` event;
+  - a census of the real transcript: client version, model, line types, and
+    the codex `response_item` types the adapter does not know.
+
+  An evidence envelope is written into the kept store, holding the record and
+  every observation above. It is leak-checked both as its string leaves and
+  as the serialized text, because `json.dumps` escaping hid an embedded
+  OAuth-shaped token from a text-only scan. A PASS now exits 1 if teardown
+  was not confirmed, or if a container labelled with one of this run's own
+  attempt ids (agent or grading probe) remains. The daemon-wide diff is
+  context only, since it cannot attribute. A transcript with no response
+  items reports its drift as not assessed. `--minimum-credential-seconds`
+  runs the below-threshold control.
+  Live evidence: `evals/agent-trial-live/`.
 
 ### Fixed
 
@@ -42,6 +166,26 @@ Nit Store ([#20](https://github.com/cooneycw/skillc/issues/20)), each with a red
   The demo sweeps it, and an interrupt during grading can reach it.
 - **A second Ctrl-C during the interrupt sweep escaped** as a raw traceback.
   SIGINT is ignored for the sweep's own bounded duration, then restored.
+- **Every backend attempt's lifecycle record said its workspace was never
+  cleaned up** (#127): `lifecycle.run_through_backend` finalized before
+  cleaning, so the persisted `cleanup` read `partial` even when the journal
+  said `removed`. That included #11's live PASS runs. The workspace is now
+  cleaned first, so the record reports what cleanup did. The container's
+  `destroy()`/`confirm_absent()` outcome is journalled as a `backend-teardown`
+  detail event, even when `execute()` raises. `collection-run`'s
+  `workspace_cleanup(record, at finalize)` line (#136) now agrees with its
+  `workspace_cleaned(journal)` line.
+- **`--client <bare name>` was resolved against the cwd, not PATH** (Refs
+  #124, folded in from the Nit Store). `materialize.find_client("codex")`
+  reported a client on PATH as not found. A name with no path separator is
+  now looked up with `shutil.which`; a path is still a path.
+
+- **`skillc collection-run`'s paste-back printed `refresh_observed_in_container=None`
+  on every run** (Refs #106). It read `refresh_observed_in_container`, but the
+  driver writes `credential_refresh_observed_in_container`. #11's live
+  evidence therefore showed "not observed" for a comparison that had actually
+  been made. The earlier test hand-built its record with the same wrong key;
+  the new one reads a record produced by the real driver.
 
 - **The mcp-second-opinion judge could block past its write deadline**
   (#129): `_write` polled `select` and then made a BLOCKING 64 KiB
@@ -51,6 +195,7 @@ Nit Store ([#20](https://github.com/cooneycw/skillc/issues/20)), each with a red
   in `test_a_stalled_reader_is_a_write_timeout`. The write loop now runs
   on a non-blocking fd, and a full pipe goes back to `select` and the
   clock. A deterministic regression test pre-fills the pipe.
+
 
 ## [0.2.0] - 2026-09-27
 

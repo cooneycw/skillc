@@ -71,6 +71,12 @@ unconditionally. Confirmed to reproduce (both new tests failed with the
 raw exception, not an assertion, before the fix) and confirmed fixed
 afterward; see `skillc/lifecycle.py`'s own docstring for the reasoning.
 
+Since #127 the same outcome is also journalled as a `backend-teardown` detail
+event (`confirmation`, `error`), so it survives beyond the driver's return
+value. The workspace is cleaned BEFORE `trial.finalize()`, so the persisted
+record's `cleanup` reports what cleanup actually did. Before #127, every
+backend attempt was recorded `partial / the workspace was never cleaned up`.
+
 A resource this leaves behind on the real daemon is exactly what
 `skillc/reap.py`'s label-scoped sweep (below) exists to find later - this
 driver's own per-attempt teardown and that independent sweep are two layers,

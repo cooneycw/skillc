@@ -282,11 +282,13 @@ def run_grading_demo(
 # --------------------------------------------------------------- subject demo
 
 
-#: `CODEX_HOME` for the installed collection, relative to `CONTAINER_HOME` -
+#: `CODEX_HOME` for the codex listing, relative to `CONTAINER_HOME` -
 #: `materialize.Arm.codex_home`'s own convention (`<home>/.codex`), aimed at
 #: a real container's home instead of a host arm directory.
 _SUBJECT_CODEX_HOME_RELPATH = ".codex"
-_SUBJECT_SKILLS_PREFIX = f"{_SUBJECT_CODEX_HOME_RELPATH}/skills"
+#: Where a subject's files land when no surface is named - the codex surface's
+#: own skills directory, the only one that existed before issue #124.
+_DEFAULT_SKILLS_RELPATH = materialize.SURFACES[materialize.SURFACE].home_skills_relpath
 
 
 @dataclass(frozen=True)
@@ -295,21 +297,29 @@ class SubjectFile:
     rel: str  # relative to that directory, e.g. "SKILL.md"
     skill: str  # the skill's declared `name`, from its own frontmatter
     digest: str
+    #: The declared surface's own skills directory, relative to the home
+    #: (issue #124): `.codex/skills` or `.claude/skills` - read from
+    #: `materialize.SURFACES`, never from the subject's name.
+    skills_relpath: str = _DEFAULT_SKILLS_RELPATH
 
     @property
     def container_relpath(self) -> str:
-        return f"{_SUBJECT_SKILLS_PREFIX}/{self.directory}/{self.rel}"
+        return f"{self.skills_relpath}/{self.directory}/{self.rel}"
 
 
-def subject_surface_files(source: materialize.Source, entries: list[materialize.SkillEntry]) -> list[SubjectFile]:
+def subject_surface_files(
+    source: materialize.Source, entries: list[materialize.SkillEntry],
+    skills_relpath: str = _DEFAULT_SKILLS_RELPATH,
+) -> list[SubjectFile]:
     """Every file across every selected skill, as a flat list ready to
-    deliver into a container's home - `entries` is `inventory()`'s own
-    output, so a `--subject` whose `select` names a skill absent from the
-    surface never reaches here at all: `inventory()` raises
+    deliver into a container's home under `skills_relpath` (the subject's
+    declared surface's own `home_skills_relpath`) - `entries` is
+    `inventory()`'s own output, so a `--subject` whose `select` names a skill
+    absent from the surface never reaches here at all: `inventory()` raises
     `materialize.Refused` first (translated to `SubjectRefused` by the
     caller), before any Docker work starts."""
     return [
-        SubjectFile(entry.directory, str(f["path"]), entry.name, str(f["digest"]))
+        SubjectFile(entry.directory, str(f["path"]), entry.name, str(f["digest"]), skills_relpath)
         for entry in entries for f in entry.files
     ]
 
@@ -418,6 +428,10 @@ class SubjectResult:
     #: never a guessed MET/NOT MET for work that never ran. `None` is the
     #: ordinary case: the leg ran, whatever its own items concluded.
     not_exercised_reason: str | None = None
+    #: False when the subject's client has no model-free listing (issue
+    #: #124: Claude Code) - discovery was never attempted here, so its item
+    #: reports NOT EXERCISED with `discovery_reason`, never a borrowed result.
+    discovery_exercised: bool = True
 
 
 def _not_exercised_subject_result(subject_name: str, revision: str, reason: str) -> SubjectResult:
@@ -497,7 +511,7 @@ def run_subject_demo(
             entries = materialize.inventory(subject, source)
         except materialize.Refused as exc:
             raise SubjectRefused(f"subject {subject_name!r} could not be prepared: {exc}") from exc
-        files = subject_surface_files(source, entries)
+        files = subject_surface_files(source, entries, subject.surface_spec.home_skills_relpath)
         selected = {e.name for e in entries}
 
         env = None  # inherit the operator's own ambient environment, like a plain `docker` invocation
@@ -519,10 +533,18 @@ def run_subject_demo(
         try:
             receipt = install_subject(backend, handle, source, files)
             digest_status, mismatches = recheck_subject_digests(backend, handle, files)
-            discovery, discovery_reason = run_subject_discovery(
-                backend, handle, client_argv if client_argv is not None else ["codex"],
-                selected, Limits(timeout=timeout), base,
-            )
+            if subject.surface_spec.model_free_listing:
+                discovery, discovery_reason = run_subject_discovery(
+                    backend, handle, client_argv if client_argv is not None else [subject.client],
+                    selected, Limits(timeout=timeout), base,
+                )
+            else:
+                discovery = {name: "UNMEASURED" for name in selected}
+                discovery_reason = (
+                    f"{subject.client} has no model-free listing; discovery for surface "
+                    f"{subject.surface!r} is observed from a real agent transcript by "
+                    f"`skillc collection-run`, never borrowed from another client"
+                )
         finally:
             backend.destroy(handle)
             backend.confirm_absent(handle)
@@ -532,7 +554,7 @@ def run_subject_demo(
         host_diff = reap.diff_host_paths(host_before, host_after)
         return SubjectResult(
             subject_name, subject.revision, receipt, digest_status, mismatches, discovery, discovery_reason,
-            host_diff, reap_report,
+            host_diff, reap_report, discovery_exercised=subject.surface_spec.model_free_listing,
         )
     finally:
         shutil.rmtree(staging, ignore_errors=True)
@@ -571,6 +593,7 @@ def _subject_acceptance_items(result: SubjectResult) -> list[AcceptanceItem]:
             f"subject {result.subject_name!r}: every selected skill is discovered by the client", discovery_ok,
             (f"discovery={result.discovery}" if result.discovery_reason is None
              else f"UNMEASURED: {result.discovery_reason}"),
+            exercised=result.discovery_exercised,
         ),
         AcceptanceItem(
             f"subject {result.subject_name!r}: declared host paths unchanged", host_ok,
