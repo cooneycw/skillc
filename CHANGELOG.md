@@ -23,9 +23,30 @@ collection) closes.
   grading demos - #97's own removed narrower flag only materialized a local
   snapshot, which would have misled the operator about what `--subject`
   actually proves. This version acquires the collection from its pinned
-  revision via a real `git` clone (`materialize.acquire_git`, never
-  `materialize`'s own local three-arm host proof), copies every selected
-  skill's files into `/home/candidate/.codex/skills/<dir>/...` one
+  revision via a real `git` clone forced to that exact commit
+  (`acquire_subject_checkout`), then hands the checkout to
+  `materialize.acquire_snapshot` - never `materialize.acquire_git`, whose own
+  git-archive verification needed a real `git` binary inside `materialize.py`
+  itself and made this module's tests require one too, undetected locally
+  (where `git` is always present) until Woodpecker's own gate image
+  (`python:3.12-slim`, no `git`) turned 7 tests red with `FileNotFoundError:
+  'git'` - cross-model review caught it, and the fix is git-free tests, never
+  a skip: `tests/fixtures/` gained a plain, committed skill-collection
+  fixture the tests materialize from directly, no git repository involved.
+  Known, accepted tradeoff of snapshot mode: the acquired `Source`'s own
+  `revision` reads `snapshot:<digest>`, never the real commit SHA - so the
+  paste-back's `revision` is read from the subject's own DECLARED pin
+  instead, never from acquisition mechanics. Also closes a second review
+  finding: `_subject_acceptance_items`'s discovery check redundantly gated on
+  `discovery_reason is None` alongside its own `all(... == "discovered")`
+  clause - redundant given `run_subject_discovery`'s own invariant, but
+  `SubjectResult` enforces neither by construction, so a directly-constructed
+  input combining "discovered" with a set reason went undetected by every
+  existing test; a mutation-confirmed test now covers it as defense in depth.
+  And a third: `attempt_id` for this leg's container was `subject-<name>`,
+  colliding across concurrent runs of the same subject - now
+  `subject-<name>-<nonce>`. Copies every selected skill's files into
+  `/home/candidate/.codex/skills/<dir>/...` one
   `DockerBackend.deliver_home_file` call per file (never bind-mounted), reads
   every installed file's bytes back out of the running container and
   re-hashes them (`matched`/`mismatched`, naming the file), and runs the

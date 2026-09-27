@@ -54,6 +54,7 @@ convention.
 from __future__ import annotations
 
 import os
+import secrets
 import stat
 import subprocess
 from collections.abc import Sequence
@@ -127,21 +128,38 @@ def load_demo_subject(name: str) -> materialize.Subject:
 
 
 def acquire_subject_checkout(subject: materialize.Subject, into: Path, timeout: float = 300) -> Path:
-    """A fresh, full clone of the subject's own declared `locator` - never a
-    shallow one, since `materialize.acquire_git` archives the pinned
-    `revision` directly from the commit object via `git archive`, which
-    needs that commit reachable in the clone's history but never needs it
-    checked out as `HEAD`. This is #101's own extra network dependency
-    beyond skillc's bare clone, for whichever subject `--subject` selects -
-    stated here plainly, not hidden: installing a second collection needs
-    its own source."""
+    """A fresh clone of the subject's own declared `locator`, forced to its
+    pinned `revision` via `git checkout` - this is #101's own extra network
+    dependency beyond skillc's bare clone, for whichever subject `--subject`
+    selects, stated here plainly, not hidden: installing a second collection
+    needs its own source.
+
+    `run_subject_demo` hands the result to `materialize.acquire_snapshot`,
+    never `acquire_git` - deliberately, the same call this module made for a
+    since-removed, narrower `--subject` under issue #81: `acquire_git` shells
+    out to `git` itself (`git archive` on the pinned commit) to build its
+    `Source`, which is redundant work once this function has ALREADY forced
+    the checkout to that exact commit, and it is what made this module's own
+    tests require a real `git` binary in CI's gate image, where none is
+    installed - the checked-out directory needs no further git verification
+    to be trusted.
+    Known, accepted tradeoff: `materialize.acquire_snapshot`'s own `Source`
+    reports `revision="snapshot:<digest>"`, never the real commit SHA, so
+    `run_subject_demo` reports the paste-back's `revision` from `subject.revision`
+    (the DECLARED pin) directly, never from the acquired `Source` - the
+    operator-meaningful claim either way is "the pin this subject declares",
+    which acquisition mechanics should not be able to change the wording of."""
     url = f"https://{subject.locator}"
     try:
         subprocess.run(
             ["git", "clone", "--quiet", url, str(into)], check=True, timeout=timeout, capture_output=True,
         )
+        subprocess.run(
+            ["git", "-C", str(into), "checkout", "--quiet", subject.revision],
+            check=True, timeout=60, capture_output=True,
+        )
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-        raise SubjectRefused(f"could not clone {subject.locator!r}: {exc}") from exc
+        raise SubjectRefused(f"could not acquire {subject.locator!r} at {subject.revision!r}: {exc}") from exc
     return into
 
 
@@ -384,8 +402,15 @@ def run_subject_demo(
     alongside (never replacing) the lifecycle and grading demos, so #81's
     demo and #11's second-collection evidence share one command and one
     runbook. `checkout`, when given, is an already-acquired local directory
-    (this module's own tests pass a local fixture here, never the network);
-    the real CLI path clones fresh via `acquire_subject_checkout`.
+    holding `subject.skills_root` directly - a plain directory, never a git
+    repository (this module's own tests pass a committed fixture collection
+    here, needing no `git` binary at all); the real CLI path clones fresh via
+    `acquire_subject_checkout`, which forces it to the pinned revision before
+    this function ever sees it.
+
+    Acquired via `materialize.acquire_snapshot`, never `acquire_git` - see
+    `acquire_subject_checkout`'s own docstring for why, and why this reports
+    `subject.revision` in the result rather than the acquired `Source`'s own.
 
     Refuses BEFORE any Docker work starts if the subject is unknown,
     malformed, or names a selected skill absent from its surface
@@ -395,7 +420,7 @@ def run_subject_demo(
     staging = base / "subject-staging"
     staging.mkdir(parents=True, exist_ok=True)
     try:
-        source = materialize.acquire_git(subject, repo, staging)
+        source = materialize.acquire_snapshot(subject, repo, staging)
         entries = materialize.inventory(subject, source)
     except materialize.Refused as exc:
         raise SubjectRefused(f"subject {subject_name!r} could not be prepared: {exc}") from exc
@@ -407,7 +432,10 @@ def run_subject_demo(
     host_before = reap.snapshot_host_paths(host_paths)
 
     backend = dbe.DockerBackend(image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=timeout)
-    attempt_id = f"subject-{subject_name}"
+    # A nonce, not just the subject name: two concurrent demo runs (or a
+    # single run's own lifecycle/grading attempt ids, which already carry
+    # their own uniqueness) must never collide on one container name.
+    attempt_id = f"subject-{subject_name}-{secrets.token_hex(4)}"
     handle = backend.prepare(attempt_id)
     try:
         receipt = install_subject(backend, handle, source, files)
@@ -424,7 +452,7 @@ def run_subject_demo(
     host_after = reap.snapshot_host_paths(host_paths)
     host_diff = reap.diff_host_paths(host_before, host_after)
     return SubjectResult(
-        subject_name, source.revision, receipt, digest_status, mismatches, discovery, discovery_reason,
+        subject_name, subject.revision, receipt, digest_status, mismatches, discovery, discovery_reason,
         host_diff, reap_report,
     )
 

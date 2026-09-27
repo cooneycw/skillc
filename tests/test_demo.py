@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -293,29 +292,27 @@ def _skill_md(name: str) -> str:
     return f"---\nname: {name}\ndescription: A test skill.\n---\nBody text.\n"
 
 
-def _git_subject_repo(tmp_path: Path, skills: dict[str, str]) -> tuple[Path, str]:
-    """A tiny git repo under `tmp_path` with one `SKILL.md` per entry in
-    `skills` (name -> directory), each committed - real `git` acquisition
-    (`materialize.acquire_git`) needs a genuine commit object to archive
-    from, never a bare directory. Returns (repo path, commit SHA)."""
-    repo = tmp_path / "subject-repo"
-    repo.mkdir()
-    skills_root = repo / "skills"
+def _subject_collection(tmp_path: Path, skills: dict[str, str]) -> Path:
+    """A plain directory under `tmp_path` with one `SKILL.md` per entry in
+    `skills` (name -> directory) - a snapshot, never a git repository.
+    `run_subject_demo` acquires through `materialize.acquire_snapshot`
+    (issue #101 cross-model review: the earlier version of this fixture built
+    a real git repo via `git init`/`commit`/`rev-parse`, needing a real `git`
+    binary that CI's own gate image does not have - Woodpecker pipeline 205
+    failed exactly these tests with `FileNotFoundError: 'git'`, undetected
+    locally where `git` is always present). The declared `revision` in a
+    test subject is cosmetic in snapshot mode - `acquire_snapshot` never
+    checks it - so no commit SHA is needed here at all."""
+    collection = tmp_path / "subject-collection"
+    skills_root = collection / "skills"
     for name, directory in skills.items():
         skill_dir = skills_root / directory
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text(_skill_md(name), encoding="utf-8")
-    env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
-    subprocess.run(["git", "init", "--quiet", str(repo)], check=True)
-    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
-    subprocess.run(["git", "-C", str(repo), "commit", "--quiet", "-m", "subject"], check=True, env=env)
-    sha = subprocess.run(
-        ["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True,
-    ).stdout.strip()
-    return repo, sha
+    return collection
 
 
-def _subject(revision: str, select: object = "all") -> materialize.Subject:
+def _subject(select: object = "all", revision: str = "v1") -> materialize.Subject:
     return materialize.Subject.from_dict({
         "subject_schema": 1, "locator": "test/test", "revision": revision, "surface": "codex-skills",
         "skills_root": "skills", "select": select, "client": {"name": "codex", "version": "9.9.9"},
@@ -333,11 +330,11 @@ def _no_network_subject(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_subject_surface_files_flattens_every_selected_skill(tmp_path: Path) -> None:
-    repo, sha = _git_subject_repo(tmp_path, {"greet": "greet", "farewell": "farewell"})
-    subject = _subject(sha)
+    repo = _subject_collection(tmp_path, {"greet": "greet", "farewell": "farewell"})
+    subject = _subject()
     staging = tmp_path / "staging"
     staging.mkdir()
-    source = materialize.acquire_git(subject, repo, staging)
+    source = materialize.acquire_snapshot(subject, repo, staging)
     entries = materialize.inventory(subject, source)
     files = demo.subject_surface_files(source, entries)
     assert {f.skill for f in files} == {"greet", "farewell"}
@@ -351,8 +348,8 @@ def test_run_subject_demo_refuses_an_unknown_selected_skill(
     `select` names a skill absent from the source is refused before any
     Docker work starts - `materialize.inventory`'s own check, translated to
     `SubjectRefused`."""
-    repo, sha = _git_subject_repo(tmp_path, {"greet": "greet"})
-    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(sha, select=["greet", "does-not-exist"]))
+    repo = _subject_collection(tmp_path, {"greet": "greet"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["greet", "does-not-exist"]))
     with pytest.raises(demo.SubjectRefused, match="does-not-exist"):
         demo.run_subject_demo(
             subject_name="whatever", image="fake-image:1", docker_bin=_docker_bin(docker_state),
@@ -363,8 +360,8 @@ def test_run_subject_demo_refuses_an_unknown_selected_skill(
 def test_run_subject_demo_happy_path_installs_matches_and_discovers(
     tmp_path: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch, base: Path,
 ) -> None:
-    repo, sha = _git_subject_repo(tmp_path, {"greet": "greet", "farewell": "farewell"})
-    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(sha))
+    repo = _subject_collection(tmp_path, {"greet": "greet", "farewell": "farewell"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject())
     client = _fake_codex(tmp_path, mode="normal")
 
     result = demo.run_subject_demo(
@@ -385,8 +382,8 @@ def test_run_subject_demo_digest_mismatch_names_the_tampered_file(
     """Issue #101's named red case for "Digest match": a byte of one
     installed file changed in-container after install gives `mismatched`
     naming that file."""
-    repo, sha = _git_subject_repo(tmp_path, {"greet": "greet"})
-    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(sha))
+    repo = _subject_collection(tmp_path, {"greet": "greet"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject())
     client = _fake_codex(tmp_path, mode="normal")
 
     real_install = demo.install_subject
@@ -411,8 +408,8 @@ def test_run_subject_demo_not_discovered_when_the_listing_omits_a_skill(
 ) -> None:
     """Issue #101's named red case for "Discovered": a listing that omits a
     selected skill reports that skill `not-discovered`."""
-    repo, sha = _git_subject_repo(tmp_path, {"greet": "greet"})
-    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(sha))
+    repo = _subject_collection(tmp_path, {"greet": "greet"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject())
     client = _fake_codex(tmp_path, mode="blind")  # lists only the client's own .system skill
 
     result = demo.run_subject_demo(
@@ -428,8 +425,8 @@ def test_run_subject_demo_unmeasured_when_the_listing_crashes(
 ) -> None:
     """Issue #101's named red case for "UNMEASURED": a listing that fails
     reports every selected skill UNMEASURED with a reason, never dropped."""
-    repo, sha = _git_subject_repo(tmp_path, {"greet": "greet", "farewell": "farewell"})
-    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(sha))
+    repo = _subject_collection(tmp_path, {"greet": "greet", "farewell": "farewell"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject())
     client = _fake_codex(tmp_path, mode="crash")
 
     result = demo.run_subject_demo(
@@ -446,8 +443,8 @@ def test_run_demo_with_subject_name_adds_a_third_leg_and_can_fail_it(
     """`run_demo(subject_name=...)` wires the subject leg's acceptance items
     into the overall verdict - a broken subject leg must flip `ok` to False
     even though the lifecycle/grading legs are untouched and still pass."""
-    repo, sha = _git_subject_repo(tmp_path, {"greet": "greet"})
-    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(sha))
+    repo = _subject_collection(tmp_path, {"greet": "greet"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject())
     client = _fake_codex(tmp_path, mode="crash")
 
     result = demo.run_demo(
@@ -512,6 +509,25 @@ def test_subject_acceptance_items_flags_not_discovered_as_not_met() -> None:
 
 def test_subject_acceptance_items_flags_unmeasured_as_not_met() -> None:
     result = _ok_subject_result(discovery={"greet": "UNMEASURED"}, discovery_reason="the listing crashed")
+    items = demo._subject_acceptance_items(result)
+    discovery_item = next(i for i in items if "discovered by the client" in i.name)
+    assert discovery_item.met is False
+
+
+def test_subject_acceptance_items_flags_a_reason_alongside_discovered_as_not_met() -> None:
+    """`discovery_ok`'s `result.discovery_reason is None` clause is
+    redundant given `run_subject_discovery`'s own invariant (a reason is
+    set if and only if every entry reads `UNMEASURED`, never alongside
+    `discovered`) - so a mutation dropping that clause is invisible to
+    `test_subject_acceptance_items_flags_unmeasured_as_not_met` above,
+    which only ever exercises the all-`UNMEASURED` shape. `SubjectResult`
+    is a plain dataclass with no constructor that enforces that invariant,
+    so this directly constructs the combination `run_subject_demo` itself
+    never produces and confirms `_subject_acceptance_items` still refuses
+    it - defense in depth against a future caller that builds one by hand.
+    Confirmed red (all tests green) when `discovery_ok` dropped this clause
+    before this test was added."""
+    result = _ok_subject_result(discovery={"greet": "discovered"}, discovery_reason="should never coexist")
     items = demo._subject_acceptance_items(result)
     discovery_item = next(i for i in items if "discovered by the client" in i.name)
     assert discovery_item.met is False
