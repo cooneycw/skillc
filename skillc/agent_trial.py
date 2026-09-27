@@ -83,7 +83,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from . import credential, trial, trial_bootstrap, verify
+from . import credential, demo, records, trial, trial_bootstrap, verify
 from . import transcript_adapter as ta
 from .backend import ExecutionBackend, Limits
 from .docker_backend import CANARY_RESULT_FILENAME, DockerBackend
@@ -488,6 +488,124 @@ def _frozen_candidate_files(experiment: trial.Experiment, attempt_id: str) -> li
     ]
 
 
+def observation_record_name(attempt_id: str) -> str:
+    """Beside `trial._lifecycle_name(attempt_id)` in the experiment root."""
+    return f"observation-{attempt_id}.json"
+
+
+def _as_list(value: object) -> list[object] | None:
+    return list(value) if isinstance(value, (list, tuple)) else None
+
+
+def build_observation_record(
+    record: Mapping[str, object], *, client: str, grader_supplied: bool,
+) -> dict[str, object]:
+    """The `agent-observation` record (#106, `records.AGENT_OBSERVATION`) for
+    one finished attempt, from `run_one_attempt`'s own returned record - every
+    path, including an attempt blocked before launch (`not-observed`) and one
+    whose transcript hook failed (`unknown`). Copies only the controller's
+    derived facts: no transcript text, no credential bytes, and from the grade
+    only its status, category and each criterion's id/mandatory/outcome (never
+    the grader's free-text detail)."""
+    observation = record.get("observation")
+    obs = observation if isinstance(observation, dict) else None
+    status: str
+    reason: str | None = None
+    transcript: dict[str, object] | None = None
+    if obs is None:
+        status = "not-observed"
+        reason = str(record.get("reason") or f"no transcript was read; disposition {record.get('disposition')!r}")
+    elif obs.get("status") == "unknown":
+        status = "unknown"
+        reason = str(obs.get("reason") or "the observation hook failed without a reason")
+    else:
+        status = "observed"
+        transcript = {
+            "files_found": obs.get("transcript_files_found"),
+            "prompt_delivered": obs.get("prompt_delivered"),
+            "prompt_delivery_reason": obs.get("prompt_delivery_reason"),
+            "canary_satisfied": obs.get("canary_satisfied"),
+            "canary_reason": obs.get("canary_reason"),
+            "skill_invocations": _as_list(obs.get("skill_invocations")),
+            "skill_invocation_detection": obs.get("skill_invocation_detection"),
+            "skills_listed": _as_list(obs.get("skills_listed")),
+            "skills_listed_source": obs.get("skills_listed_source"),
+            "grading_eligible": obs.get("grading_eligible"),
+            "census": {
+                "client_version": obs.get("transcript_client_version"),
+                "model": obs.get("transcript_model"),
+                "line_types": obs.get("transcript_line_types"),
+                "unrecognized_types": obs.get("transcript_unrecognized_types"),
+                "response_items_inspected": obs.get("transcript_response_items_inspected"),
+                "error": obs.get("transcript_census_error"),
+            },
+        }
+    src = obs or {}
+    graded = record.get("graded")
+    graded_d = graded if isinstance(graded, dict) else None
+    criteria = graded_d.get("criteria") if graded_d else None
+    return {
+        "version": 2,
+        "kind": records.AGENT_OBSERVATION,
+        "producer": "controller",
+        "attempt_id": record.get("attempt_id"),
+        "trial_id": record.get("trial_id"),
+        "client": client,
+        "status": status,
+        "reason": reason,
+        "transcript": transcript,
+        "credential": {
+            "delivered": src.get("credential_delivered"),
+            "source": src.get("credential_source"),
+            "remaining_seconds_at_launch": src.get("credential_remaining_seconds_at_launch"),
+            "refresh_observed_in_container": src.get("credential_refresh_observed_in_container"),
+        },
+        "grading": {
+            "grader_supplied": grader_supplied,
+            "eligible": bool(transcript and transcript.get("grading_eligible") is True),
+            "blocked_reason": record.get("grading_blocked_reason"),
+            "graded_status": graded_d.get("status") if graded_d else None,
+            "category": graded_d.get("category") if graded_d else None,
+            "criteria": [
+                {"id": c.get("id"), "mandatory": c.get("mandatory"), "outcome": c.get("outcome")}
+                for c in criteria if isinstance(c, dict)
+            ] if isinstance(criteria, list) else None,
+        },
+    }
+
+
+def _string_leaves(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [leaf for k, v in value.items() for leaf in (*_string_leaves(k), *_string_leaves(v))]
+    if isinstance(value, list):
+        return [leaf for item in value for leaf in _string_leaves(item)]
+    return []
+
+
+def write_observation_record(experiment: trial.Experiment, attempt_id: str, data: Mapping[str, object]) -> str:
+    """Write `data` beside the attempt's lifecycle record. Host paths this
+    process knows (home, temp, the repo) are redacted first, exactly as the
+    paste-back does - a blocked attempt's reason often names the credential
+    path, and refusing THAT record would lose the evidence a blocked attempt
+    most needs. Then leak-checked twice: each string as it will read once
+    parsed, and the serialized text (#136's review: `json.dumps` escaping hides
+    an OAuth-shaped value inside a string from a text-only scan).
+
+    Returns `written`, `refused-leak` (nothing written), or `write-failed`."""
+    text = demo.redact_known_host_paths(json.dumps(data, indent=2, sort_keys=True, default=str))
+    parsed = json.loads(text)
+    findings = [f for leaf in _string_leaves(parsed) for f in demo.leak_check_text(leaf)]
+    if findings or demo.leak_check_text(text):
+        return "refused-leak"
+    try:
+        (experiment.root / observation_record_name(attempt_id)).write_text(text + "\n", encoding="utf-8")
+    except OSError:
+        return "write-failed"
+    return "written"
+
+
 def run_one_attempt(
     *,
     backend: DockerBackend,
@@ -598,31 +716,55 @@ def run_one_attempt(
                 "never graded without both confirmed against the real transcript"
             )
         else:
-            if grading_backend is None:
-                raise ValueError("grading_backend is required when grader is given - never the agent's own backend")
-            if grading_backend is backend:
-                # Cross-model review: the ORIGINAL check only rejected `None`,
-                # so passing the SAME instance the agent already used for
-                # `backend` silently proceeded - interfaces.md's step 8 rule
-                # ("a SEPARATE backend instance") is a structural requirement,
-                # not merely a naming convention, and this is what actually
-                # enforces it rather than trusting a caller to have read the
-                # docstring.
-                raise ValueError(
-                    "grading_backend must be a SEPARATE instance from the agent's own backend - "
-                    "interfaces.md's step 8 rule, reusing the same instance risks carrying the "
-                    "agent attempt's own state into the probe's isolation"
+            try:
+                if grading_backend is None:
+                    raise ValueError("grading_backend is required when grader is given - never the agent's own backend")
+                if grading_backend is backend:
+                    # Cross-model review: the ORIGINAL check only rejected `None`,
+                    # so passing the SAME instance the agent already used for
+                    # `backend` silently proceeded - interfaces.md's step 8 rule
+                    # ("a SEPARATE backend instance") is a structural requirement,
+                    # not merely a naming convention, and this is what actually
+                    # enforces it rather than trusting a caller to have read the
+                    # docstring.
+                    raise ValueError(
+                        "grading_backend must be a SEPARATE instance from the agent's own backend - "
+                        "interfaces.md's step 8 rule, reusing the same instance risks carrying the "
+                        "agent attempt's own state into the probe's isolation"
+                    )
+                files = _frozen_candidate_files(experiment, attempt_id)
+                grading_started = time.monotonic()
+                graded_result = verify.grade_files(grader, files, base, backend=grading_backend)
+            except Exception as exc:
+                # The attempt ran and was observed; a grading failure (a
+                # quarantined verifier, a frozen artifact that no longer
+                # verifies, a missing or reused grading backend) must not take
+                # its observation with it (codex review, both passes). Persist
+                # it with the failure as the blocked reason, then let the
+                # failure propagate exactly as before.
+                failed = {
+                    **record, "graded": None, "grading_seconds": None,
+                    "grading_blocked_reason": f"grading raised {type(exc).__name__}: {exc}",
+                }
+                write_observation_record(
+                    experiment, attempt_id, build_observation_record(failed, client=client, grader_supplied=True),
                 )
-            files = _frozen_candidate_files(experiment, attempt_id)
-            grading_started = time.monotonic()
-            graded_result = verify.grade_files(grader, files, base, backend=grading_backend)
+                raise
             grading_seconds = time.monotonic() - grading_started
             graded = {
                 "status": graded_result.status, "category": graded_result.category,
                 "detail": graded_result.detail, "criteria": graded_result.criteria,
             }
 
-    return {
+    result: dict[str, object] = {
         **record, "graded": graded, "grading_blocked_reason": grading_blocked_reason,
         "grading_seconds": grading_seconds,
     }
+    # Persisted on EVERY path (#106): the observation used to exist only in
+    # this returned dict, so a caller that printed it wrong - or not at all -
+    # lost it for good.
+    result["observation_record"] = write_observation_record(
+        experiment, attempt_id,
+        build_observation_record(result, client=client, grader_supplied=grader is not None),
+    )
+    return result

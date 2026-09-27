@@ -938,3 +938,275 @@ def test_census_names_a_non_string_response_item_type_instead_of_crashing(bad_ty
     ) + "\n"
     census = at.transcript_census("codex", raw)
     assert census["transcript_unrecognized_types"] == [f"<non-string:{type(bad_type).__name__}>"]
+
+
+# ------------------------------------------ the persisted observation (#106)
+
+
+def _check_records(path: Path, rule: str | None = None) -> int:
+    import argparse
+
+    from skillc import cli
+
+    return cli.cmd_check_records(argparse.Namespace(path=str(path), rule=rule))
+
+
+#: The one finding a captured agent store carries today, independent of #106:
+#: `run_one_attempt` grades through `verify.grade_files`, which writes no
+#: `verified-result`, so `attempt-accounting` reports grading as still owed.
+#: Recorded in the Nit Store rather than fixed here.
+_KNOWN_ACCOUNTING_GAP = "is captured but has no result; grading is still owed"
+
+
+def _store_is_clean(path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Every evidence rule passes on the store, except `attempt-accounting`,
+    whose ONLY finding may be the known gap above - any other accounting
+    finding still fails this."""
+    from skillc import checks
+
+    capsys.readouterr()
+    for rule in checks.evidence_rules():
+        if rule.id == "attempt-accounting":
+            continue
+        assert _check_records(path, rule.id) == 0, rule.id
+    capsys.readouterr()
+    _check_records(path, "attempt-accounting")
+    errors = [line for line in capsys.readouterr().out.splitlines() if line.startswith("error")]
+    assert all(_KNOWN_ACCOUNTING_GAP in line for line in errors), errors
+
+
+def _saved_observation(experiment: t.Experiment, attempt_id: str) -> dict[str, object]:
+    path = experiment.root / at.observation_record_name(attempt_id)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert isinstance(data, dict)
+    return data
+
+
+def _graded_codex_attempt(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path,
+) -> tuple[t.Experiment, str, dict[str, object]]:
+    experiment, attempt_id = _planned(store)
+    argv = _fake_argv(
+        fmt="codex-fake", home=_mapped_home(docker_state, attempt_id),
+        transcript_relpath=".codex/sessions/2026/01/01/rollout-obs.jsonl", copy_solution=GRADER_ROOT / "reference",
+    )
+    record = at.run_one_attempt(
+        backend=_backend(base, docker_state), experiment=experiment, attempt_id=attempt_id, client="codex",
+        base_argv=argv, prompt="Fix the slug helper.", skill_name="demo-skill",
+        surface={}, limits=Limits(timeout=5), base=base,
+        credential_explicit_path=_fresh_credential(tmp_path, "codex"),
+        grader=verify.GraderDef.load(GRADER_ROOT), grading_backend=_backend(base, docker_state),
+    )
+    return experiment, attempt_id, record
+
+
+def test_a_graded_attempt_persists_its_observation_and_check_records_accepts_the_store(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """#106's folded-in item: the observation used to live only in the
+    returned dict. The value #124 lost - the in-container credential refresh -
+    must now be readable from the store alone, after the dict is gone."""
+    experiment, attempt_id, record = _graded_codex_attempt(store, base, docker_state, tmp_path)
+    assert record["observation_record"] == "written"
+    del record
+    saved = _saved_observation(experiment, attempt_id)
+    assert saved["kind"] == "agent-observation" and saved["status"] == "observed"
+    transcript = saved["transcript"]
+    assert isinstance(transcript, dict)
+    assert transcript["prompt_delivered"] is True and transcript["canary_satisfied"] is True
+    assert saved["credential"] == {
+        "delivered": True, "source": "subscription",
+        "remaining_seconds_at_launch": saved["credential"]["remaining_seconds_at_launch"],  # type: ignore[index]
+        "refresh_observed_in_container": False,
+    }
+    grading = saved["grading"]
+    assert isinstance(grading, dict) and grading["graded_status"] == "PASS" and grading["eligible"] is True
+    _store_is_clean(experiment.root, capsys)
+
+
+def test_a_blocked_grade_is_persisted_with_its_reason(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    experiment, attempt_id = _planned(store)
+    argv = _fake_argv(
+        fmt="claude-fake", home=_mapped_home(docker_state, attempt_id),
+        transcript_relpath=".claude/projects/test/22222222-2222-2222-2222-222222222222.jsonl",
+        mismatched_prompt=True,
+    )
+    record = at.run_one_attempt(
+        backend=_backend(base, docker_state), experiment=experiment, attempt_id=attempt_id, client="claude",
+        base_argv=argv, prompt="Fix the slug helper.", skill_name="demo-skill",
+        surface={}, limits=Limits(timeout=5), base=base,
+        credential_explicit_path=_fresh_credential(tmp_path, "claude"),
+        grader=verify.GraderDef.load(GRADER_ROOT), grading_backend=_backend(base, docker_state),
+    )
+    assert record["observation_record"] == "written"
+    saved = _saved_observation(experiment, attempt_id)
+    grading = saved["grading"]
+    assert isinstance(grading, dict)
+    assert grading["eligible"] is False and grading["graded_status"] is None
+    assert "prompt_delivered=False" in str(grading["blocked_reason"])
+    _store_is_clean(experiment.root, capsys)
+
+
+def test_an_attempt_blocked_before_launch_persists_a_not_observed_record(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    experiment, attempt_id = _planned(store)
+    record = at.run_one_attempt(
+        backend=_backend(base, docker_state), experiment=experiment, attempt_id=attempt_id, client="claude",
+        base_argv=[sys.executable, "-c", "import sys; sys.exit(1)"], prompt="Fix the slug helper.",
+        skill_name="demo-skill", surface={}, limits=Limits(timeout=5), base=base,
+        credential_explicit_path=_expired_credential(tmp_path), minimum_credential_seconds=300,
+    )
+    assert record["observation_record"] == "written"
+    saved = _saved_observation(experiment, attempt_id)
+    assert saved["status"] == "not-observed" and saved["transcript"] is None
+    assert "below the required" in str(saved["reason"])
+    assert saved["grading"] == {
+        "grader_supplied": False, "eligible": False, "blocked_reason": None,
+        "graded_status": None, "category": None, "criteria": None,
+    }
+    _store_is_clean(experiment.root, capsys)
+
+
+def test_check_records_reads_the_persisted_observation_in_the_store(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """Negative controls for the store check itself: a green above could come
+    from `check-records` never reading the file. A contradiction planted in the
+    saved record, and a second observation for the same attempt, both turn it
+    red."""
+    experiment, attempt_id, _record = _graded_codex_attempt(store, base, docker_state, tmp_path)
+    path = experiment.root / at.observation_record_name(attempt_id)
+    good = path.read_text(encoding="utf-8")
+
+    saved = json.loads(good)
+    assert _check_records(experiment.root, "agent-observation") == 0
+    assert _check_records(experiment.root, "unique-ids") == 0
+    saved["transcript"]["canary_satisfied"] = False
+    path.write_text(json.dumps(saved), encoding="utf-8")
+    assert _check_records(experiment.root, "agent-observation") == 1
+
+    saved = json.loads(good)
+    saved["trial_id"] = "t-someone-else"
+    path.write_text(json.dumps(saved), encoding="utf-8")
+    assert _check_records(experiment.root, "ledger-binding") == 1  # bound to its attempt's trial
+
+    path.write_text(good, encoding="utf-8")
+    assert _check_records(experiment.root, "ledger-binding") == 0
+    (experiment.root / "observation-duplicate.json").write_text(good, encoding="utf-8")
+    assert _check_records(experiment.root, "unique-ids") == 1
+
+
+def test_an_observation_carrying_a_token_is_refused_not_written(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The leak gate on the record: an OAuth-shaped value embedded in a
+    string (where `json.dumps` escaping would hide it from a text-only scan)
+    means nothing is written, and the returned record says so."""
+    real_build = at.build_observation_record
+
+    def _poisoned(record: dict[str, object], **kwargs: object) -> dict[str, object]:
+        data = real_build(record, **kwargs)  # type: ignore[arg-type]
+        data["reason"] = json.dumps({"access_token": "Zq7" + "x" * 37})
+        return data
+
+    monkeypatch.setattr(at, "build_observation_record", _poisoned)
+    experiment, attempt_id, record = _graded_codex_attempt(store, base, docker_state, tmp_path)
+    assert record["observation_record"] == "refused-leak"
+    assert not (experiment.root / at.observation_record_name(attempt_id)).exists()
+
+
+def test_a_reason_naming_the_home_credential_path_is_redacted_and_written(
+    store: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A blocked attempt's reason usually names the credential path, which
+    sits under the operator's home - the leak scan refuses a home path, so
+    without redaction the very record a blocked attempt most needs would be
+    refused. `Path.home()` is pinned so this holds on any host (CI runs as
+    root). The fake home is joined at run time so this file itself carries
+    no home-shaped path for the repository's own leak-check step to flag."""
+    fake_home = Path("/home") / "ci-user"
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+    experiment, attempt_id = _planned(store)
+    data = at.build_observation_record(
+        {"attempt_id": attempt_id, "trial_id": "t", "disposition": "unavailable",
+         "reason": f"no codex credential at {fake_home}/.codex/auth.json", "observation": None},
+        client="codex", grader_supplied=False,
+    )
+    assert at.write_observation_record(experiment, attempt_id, data) == "written"
+    saved = _saved_observation(experiment, attempt_id)
+    assert saved["reason"] == "no codex credential at <home>/.codex/auth.json"
+
+
+def test_a_grading_failure_still_persists_the_observation(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Codex review, red before the fix: persistence ran only after grading,
+    so a verifier refusal (here: quarantined) propagated out and the observed
+    attempt's observation was never written - the loss this record exists to
+    prevent. The failure still propagates; the observation survives it."""
+    def _quarantined(*args: object, **kwargs: object) -> object:
+        raise verify.Refused("this verifier is quarantined: test")
+
+    monkeypatch.setattr(verify, "grade_files", _quarantined)
+    experiment, attempt_id = _planned(store)
+    with pytest.raises(verify.Refused):
+        argv = _fake_argv(
+            fmt="codex-fake", home=_mapped_home(docker_state, attempt_id),
+            transcript_relpath=".codex/sessions/2026/01/01/rollout-q.jsonl", copy_solution=GRADER_ROOT / "reference",
+        )
+        at.run_one_attempt(
+            backend=_backend(base, docker_state), experiment=experiment, attempt_id=attempt_id, client="codex",
+            base_argv=argv, prompt="Fix the slug helper.", skill_name="demo-skill",
+            surface={}, limits=Limits(timeout=5), base=base,
+            credential_explicit_path=_fresh_credential(tmp_path, "codex"),
+            grader=verify.GraderDef.load(GRADER_ROOT), grading_backend=_backend(base, docker_state),
+        )
+    saved = _saved_observation(experiment, attempt_id)
+    assert saved["status"] == "observed"
+    grading = saved["grading"]
+    assert isinstance(grading, dict) and grading["graded_status"] is None
+    assert "grading raised Refused" in str(grading["blocked_reason"])
+    assert _check_records(experiment.root, "agent-observation") == 0
+
+
+def test_an_unwritable_store_reports_write_failed(store: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    experiment, attempt_id = _planned(store)
+    data = at.build_observation_record(
+        {"attempt_id": attempt_id, "trial_id": "t", "disposition": "unavailable", "reason": "x", "observation": None},
+        client="codex", grader_supplied=False,
+    )
+
+    def _refuse(self: Path, *args: object, **kwargs: object) -> int:
+        raise OSError("read-only store")
+
+    monkeypatch.setattr(Path, "write_text", _refuse)
+    assert at.write_observation_record(experiment, attempt_id, data) == "write-failed"
+
+
+@pytest.mark.parametrize("which", ["missing", "reused"])
+def test_a_grading_backend_refusal_still_persists_the_observation(
+    which: str, store: Path, base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """Codex review pass 2, red before the fix: both grading-backend guards
+    raised BEFORE the persistence-protected block, so a missing or reused
+    grading backend discarded an observed attempt's observation."""
+    backend = _backend(base, docker_state)
+    experiment, attempt_id = _planned(store)
+    argv = _fake_argv(
+        fmt="codex-fake", home=_mapped_home(docker_state, attempt_id),
+        transcript_relpath=".codex/sessions/2026/01/01/rollout-gb.jsonl", copy_solution=GRADER_ROOT / "reference",
+    )
+    with pytest.raises(ValueError):
+        at.run_one_attempt(
+            backend=backend, experiment=experiment, attempt_id=attempt_id, client="codex",
+            base_argv=argv, prompt="Fix the slug helper.", skill_name="demo-skill",
+            surface={}, limits=Limits(timeout=5), base=base,
+            credential_explicit_path=_fresh_credential(tmp_path, "codex"),
+            grader=verify.GraderDef.load(GRADER_ROOT), grading_backend=None if which == "missing" else backend,
+        )
+    grading = _saved_observation(experiment, attempt_id)["grading"]
+    assert isinstance(grading, dict) and "grading raised ValueError" in str(grading["blocked_reason"])
+    assert _check_records(experiment.root, "agent-observation") == 0

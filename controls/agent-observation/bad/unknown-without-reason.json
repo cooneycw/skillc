@@ -1,0 +1,25 @@
+{
+ "version": 2,
+ "kind": "agent-observation",
+ "producer": "controller",
+ "attempt_id": "att-1",
+ "trial_id": "t-1",
+ "client": "codex",
+ "status": "unknown",
+ "reason": null,
+ "transcript": null,
+ "credential": {
+  "delivered": null,
+  "source": null,
+  "remaining_seconds_at_launch": null,
+  "refresh_observed_in_container": null
+ },
+ "grading": {
+  "grader_supplied": true,
+  "eligible": false,
+  "blocked_reason": "attempt disposition is 'unavailable', not captured",
+  "graded_status": null,
+  "category": null,
+  "criteria": null
+ }
+}

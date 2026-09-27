@@ -4,34 +4,34 @@ HISTORICAL RECORD of what was agreed BEFORE the code was written, at the base SH
 below. It is not a description of the shipped system, it is not a second
 statement of the issue contract or of a Tier 3 spec, and it does not graduate.
 
-- Issue:             #106
-- Base SHA:          ab04c6c536de8c8ce8df2de261f85ebbb8f93d89
-- Necessity verdict: Partially addressed
+- Issue:             #106 (second run: the item folded in 2026-09-27T13:16Z)
+- Base SHA:          0b91e82f3d57a75daa3c4b1a522da73d3f2d1bff
+- Necessity verdict: Still needed
 - Approval:          granted
 - Approver:          the owner (cooneycw), in the invoking session
-- Recorded at:       2026-09-27T12:55:25Z
+- Recorded at:       2026-09-27T14:24:06Z
 
 ## Section B evidence
-Delivered code bullets: PRs #107, #108, #113, #117. Live run under-evidenced:
-PRs #121, #126 (ab04c6c, closed #11) - prompt/canary/outcome only; the
-paste-back reads `refresh_observed_in_container` while the record key is
-`credential_refresh_observed_in_container`, so it always printed None.
-Also inspected, not addressing this: #125, #123, #120, #119, #116, #115, #111,
-#110, #109, #105, #104, #103, #99, #97, #96. Superseding issues: none (#10
-closed; #124 is the Claude Code arm; #26/#12 not satisfiable by these runs).
+The folded-in item ("the agent run's observation is never persisted", Nit Store
+#20 comment 5856161163). Inspected since: #136 (605d521, collection-run envelope
+only), #137 (972236c, Claude arm, adds skills_listed), #128 (30c593b, lifecycle
+cleans before finalize), #114 (3fed8cc, selection probe), #140 (0b91e82, pilot).
+None persists the observation. Duplicate/superseding issues: none.
 
 ## Section C - the approved plan
-1. `skillc/agent_trial.py` - record `credential_remaining_seconds_at_launch` and a transcript census (client version, model, line-type counts, normalized-event count).
-2. `skillc/collection_conformance.py` - fix the refresh key; paste-back grouped into prompt delivery, canary, credential, outcome, cleanup evidence.
-3. `skillc/cli.py` - host credential digest before/after + remaining life after, label-scoped leftover-container count, leak-checked record JSON in the kept store, `--minimum-credential-seconds`.
-4. `tests/test_collection_conformance.py` - red cases: refresh key via a real `run_one_attempt` record, leftover container, host file changed, teardown UNKNOWN, below-threshold BLOCKED with no container.
-5. `tests/test_agent_trial.py` - census fields from the committed codex fixture; red on drifted line types.
-6. `evals/agent-trial-live/README.md` - verbatim leak-checked paste-backs: both collections, missing-credential and below-threshold controls, host `codex login status` afterwards, limits.
-7. `CHANGELOG.md` - the new evidence fields.
-8. `README.md` - the `collection-run` line.
-9. `docs/flow-runs/issue-106.md` - this record.
+1. `skillc/records.py` - new attempt-bound kind `agent-observation` (v2, producer controller) in KINDS/ATTEMPT_BOUND; rule: closed schema, types, status observed/unknown/not-observed with reason, grading_eligible == prompt_delivered AND canary_satisfied, grade xor blocked reason, graded_status must equal derive_status of its criteria.
+2. `skillc/checks.py` - register RecordRule `agent-observation`.
+3. `skillc/agent_trial.py` - run_one_attempt writes `observation-<attempt>.json` beside `lifecycle-<attempt>.json` on every path, leak-scanned; returned record gains `observation_record`.
+4. `skillc/collection_conformance.py` - paste-back prints `observation_record=`.
+5. `controls/agent-observation/good/` - observed and not-observed bundles.
+6. `controls/agent-observation/bad/` - unknown key, eligibility mismatch, graded status vs criteria, both grade and blocked reason, unknown status without a reason.
+7. `tests/test_agent_trial.py` - every path writes the record and check-records accepts the store; leak refusal; a red run with the record removed.
+8. `tests/test_records.py` - the controls discriminate (selftest coverage).
+9. `docs/specs/evaluation-facility/records.md` - agent-observation section and rules-table row.
+10. `CHANGELOG.md` - entry; `docs/flow-runs/issue-106.md` - this record.
 
-Scope: ~7 files + evidence, ~250-400 lines. Risks: in-container refresh
-rotating the host refresh token (the host check catches it; stop, do not
-re-login); larger leak surface (same leak check incl. #105's token class);
-"host login still working" shown without a host model call, labelled so.
+Scope: ~10 files + controls, ~400-600 lines, hermetic only. Risks: every agent
+store gains a new required-shape file (existing check-records tests see it);
+the closed schema must be updated when an observation field is added (loud
+failure naming the field); graded_status must not read as a verdict (derive
+check + records.md wording).

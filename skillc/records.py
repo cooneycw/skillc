@@ -34,7 +34,7 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -60,11 +60,22 @@ ATTEMPT_LIFECYCLE = "attempt-lifecycle"
 #: `TRIAL_LEDGER`, it is ONE record summarizing every attempt an experiment
 #: planned, produced after a run rather than before one.
 PILOT_REPORT = "pilot-report"
-KINDS = (INSTALLATION_RECEIPT, TRIAL_LEDGER, ARTIFACT_MANIFEST, VERIFIED_RESULT, ATTEMPT_LIFECYCLE, PILOT_REPORT)
+#: Additive in version 2 (#106): what the controller concluded from a REAL
+#: agent's transcript for one attempt - prompt delivery, the liveness canary,
+#: skill invocations, the credential's in-container fate, and whether the
+#: attempt was graded. Before it existed these facts lived only in memory and a
+#: printed paste-back, so a misprint was unrecoverable (#124 repeated two live
+#: runs). Not a verdict: a grade it carries is an audit copy, checked against
+#: its own criteria, never a substitute for a `verified-result`.
+AGENT_OBSERVATION = "agent-observation"
+KINDS = (
+    INSTALLATION_RECEIPT, TRIAL_LEDGER, ARTIFACT_MANIFEST, VERIFIED_RESULT, ATTEMPT_LIFECYCLE, PILOT_REPORT,
+    AGENT_OBSERVATION,
+)
 
 #: Records that belong to ONE attempt. The ledger is not one of them: it issues
 #: the attempt identifiers the others cite.
-ATTEMPT_BOUND = (INSTALLATION_RECEIPT, ARTIFACT_MANIFEST, VERIFIED_RESULT, ATTEMPT_LIFECYCLE)
+ATTEMPT_BOUND = (INSTALLATION_RECEIPT, ARTIFACT_MANIFEST, VERIFIED_RESULT, ATTEMPT_LIFECYCLE, AGENT_OBSERVATION)
 
 #: The one role allowed to produce each kind, from interfaces.md's producer column.
 #: The subject adapter writes the receipt, and the controller must have checked it.
@@ -75,6 +86,7 @@ AUTHORIZED_PRODUCER = {
     VERIFIED_RESULT: "assembler",
     ATTEMPT_LIFECYCLE: "controller",
     PILOT_REPORT: "assembler",
+    AGENT_OBSERVATION: "controller",
 }
 RECEIPT_CHECKER = "controller"
 
@@ -828,6 +840,207 @@ def attempt_lifecycle(record: Record) -> Iterator[str]:
         yield "no cleanup failures list; an empty list says none, a missing one says unknown"
 
 
+#: `agent-observation`'s schema is CLOSED and TYPED at every level (#106): an
+#: unknown key is refused, a missing key is refused (silence is not absence),
+#: and every value must have its declared type - a key-only closure let an
+#: object ride in a scalar field (codex review). Every field below is a fact the
+#: controller derived; none is a place a credential or transcript text could be
+#: copied into. A new observation field has to be named here before it can be
+#: recorded, which fails loudly (the finding names the key).
+AGENT_OBSERVATION_STATUSES = ("observed", "unknown", "not-observed")
+_AO_DETECTION = ("structural", "heuristic")
+#: The graded statuses that ARE verdicts. Only these must follow from the
+#: record's own criteria; the grader reports the others (a backend it could not
+#: reach, say) without criteria that derive to them.
+_AO_VERDICTS = ("PASS", "FAIL")
+
+
+def _is_bool(v: object) -> bool:
+    return isinstance(v, bool)
+
+
+def _is_count(v: object) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool) and v >= 0
+
+
+def _is_opt(check: Callable[[object], bool]) -> Callable[[object], bool]:
+    return lambda v: v is None or check(v)
+
+
+def _is_text(v: object) -> bool:
+    return isinstance(v, str)
+
+
+def _is_names(v: object) -> bool:
+    return _str_list(v) is not None
+
+
+def _is_count_map(v: object) -> bool:
+    return isinstance(v, dict) and all(isinstance(k, str) and _is_count(n) for k, n in v.items())
+
+
+_Spec = dict[str, tuple[Callable[[object], bool], str]]
+_AO_TOP: _Spec = {
+    "version": (lambda v: True, "checked by record-envelope"),
+    "kind": (lambda v: True, "checked by record-envelope"),
+    "producer": (lambda v: True, "checked by producer-authority"),
+    "attempt_id": (lambda v: True, "checked by attempt-binding"),
+    "trial_id": (lambda v: True, "checked by attempt-binding"),
+    "client": (_nonempty_str, "a non-empty client name"),
+    "status": (lambda v: v in AGENT_OBSERVATION_STATUSES, f"one of {list(AGENT_OBSERVATION_STATUSES)}"),
+    "reason": (_is_opt(_is_text), "text or null"),
+    "transcript": (lambda v: v is None or isinstance(v, dict), "an object or null"),
+    "credential": (lambda v: isinstance(v, dict), "an object"),
+    "grading": (lambda v: isinstance(v, dict), "an object"),
+}
+_AO_TRANSCRIPT: _Spec = {
+    "files_found": (_is_count, "a non-negative integer"),
+    "prompt_delivered": (_is_bool, "a boolean"),
+    "prompt_delivery_reason": (_is_opt(_is_text), "text or null"),
+    "canary_satisfied": (_is_bool, "a boolean"),
+    "canary_reason": (_is_opt(_is_text), "text or null"),
+    "skill_invocations": (_is_names, "a list of skill names"),
+    "skill_invocation_detection": (lambda v: v in _AO_DETECTION, f"one of {list(_AO_DETECTION)}"),
+    "skills_listed": (_is_opt(_is_names), "a list of skill names or null"),
+    "skills_listed_source": (_is_text, "text"),
+    "grading_eligible": (_is_bool, "a boolean"),
+    "census": (lambda v: v is None or isinstance(v, dict), "an object or null"),
+}
+_AO_CENSUS: _Spec = {
+    "client_version": (_is_opt(_is_text), "text or null"),
+    "model": (_is_opt(_is_text), "text or null"),
+    "line_types": (_is_opt(_is_count_map), "a map of line type to count, or null"),
+    "unrecognized_types": (_is_opt(_is_names), "a list of type names or null"),
+    "response_items_inspected": (_is_opt(_is_count), "a non-negative integer or null"),
+    "error": (_is_opt(_is_text), "text or null"),
+}
+_AO_CREDENTIAL: _Spec = {
+    "delivered": (_is_opt(_is_bool), "a boolean or null"),
+    "source": (_is_opt(_is_text), "text or null"),
+    "remaining_seconds_at_launch": (_is_opt(_is_count), "a non-negative integer or null"),
+    "refresh_observed_in_container": (_is_opt(_is_bool), "a boolean or null"),
+}
+_AO_GRADING: _Spec = {
+    "grader_supplied": (_is_bool, "a boolean"),
+    "eligible": (_is_bool, "a boolean"),
+    "blocked_reason": (_is_opt(_nonempty_str), "non-empty text or null"),
+    "graded_status": (_is_opt(lambda v: v in PROTOCOL_STATUSES), f"one of {list(PROTOCOL_STATUSES)} or null"),
+    "category": (_is_opt(_is_text), "text or null"),
+    "criteria": (lambda v: v is None or isinstance(v, list), "a list or null"),
+}
+_AO_CRITERION: _Spec = {
+    "id": (_nonempty_str, "a non-empty id"),
+    # Literal booleans only: `derive_status` selects `mandatory is True`, so a
+    # "true" string or a 1 would silently drop a VIOLATED criterion out of the
+    # derivation - the same hole `criterion_vocabulary` closes for results.
+    "mandatory": (_is_bool, "a boolean"),
+    "outcome": (lambda v: v in CRITERION_OUTCOMES, f"one of {list(CRITERION_OUTCOMES)}"),
+}
+
+
+def _typed(value: object, spec: _Spec, where: str) -> Iterator[str]:
+    if not isinstance(value, dict):
+        yield f"{where} is not an object"
+        return
+    for key in sorted(set(value) - set(spec)):
+        yield f"{where} carries unknown field {key!r}; the schema is closed - name it in records.py first"
+    for key, (check, expected) in spec.items():
+        if key not in value:
+            yield f"{where} has no {key!r}; silence is not absence - write null where nothing was observed"
+        elif not check(value[key]):
+            yield f"{where}.{key} is {value[key]!r}, not {expected}"
+
+
+def agent_observation(record: Record) -> Iterator[str]:
+    """What the controller concluded from a real agent's transcript, for one
+    attempt (#106). Checked for SHAPE - closed, complete and typed at every
+    level - and for the facts that must agree inside the record:
+
+      - positive transcript conclusions (prompt delivered, canary satisfied)
+        rest on exactly ONE transcript file - the driver reads nothing
+        otherwise, so a record claiming them from zero or two files concludes
+        more than its own population supports;
+      - `grading_eligible` is exactly `prompt_delivered AND canary_satisfied`;
+      - a grader that was supplied either graded (a status) or was blocked (a
+        reason), never both and never neither;
+      - a PASS or FAIL copied here follows from the criteria copied with it
+        (`derive_status`), so the audit copy cannot say more than its evidence.
+
+    A `status` other than `observed` names its reason and carries no transcript
+    conclusions: an attempt whose transcript was never read has none.
+    """
+    if record.parse_error is not None or record.kind != AGENT_OBSERVATION:
+        return
+    data = record.data
+    yield from _typed(data, _AO_TOP, "the record")
+    status = data.get("status")
+    if status in AGENT_OBSERVATION_STATUSES and status != "observed" and not _nonempty_str(data.get("reason")):
+        yield f"status {status!r} gives no reason; an unobserved attempt must say why"
+
+    transcript = data.get("transcript")
+    eligible_observed = False
+    if status == "observed":
+        if not isinstance(transcript, dict):
+            yield "status observed, but no transcript conclusions are recorded"
+        else:
+            yield from _typed(transcript, _AO_TRANSCRIPT, "transcript")
+            prompt, canary = transcript.get("prompt_delivered"), transcript.get("canary_satisfied")
+            eligible, files = transcript.get("grading_eligible"), transcript.get("files_found")
+            if (prompt is True or canary is True) and files != 1:
+                yield (
+                    f"transcript claims prompt_delivered={prompt} / canary_satisfied={canary} from "
+                    f"{files!r} transcript files; a conclusion needs exactly one transcript to rest on"
+                )
+            if _is_bool(prompt) and _is_bool(canary) and _is_bool(eligible):
+                if eligible != (prompt and canary):
+                    yield (
+                        f"transcript.grading_eligible is {eligible}, but prompt_delivered={prompt} "
+                        f"and canary_satisfied={canary}; eligibility is exactly both"
+                    )
+                eligible_observed = eligible is True
+            census = transcript.get("census")
+            if isinstance(census, dict):
+                yield from _typed(census, _AO_CENSUS, "transcript.census")
+    elif transcript is not None:
+        yield f"status {status!r}, but transcript conclusions are recorded; nothing was observed to conclude from"
+
+    credential = data.get("credential")
+    if isinstance(credential, dict):
+        yield from _typed(credential, _AO_CREDENTIAL, "credential")
+
+    grading = data.get("grading")
+    if not isinstance(grading, dict):
+        return
+    yield from _typed(grading, _AO_GRADING, "grading")
+    supplied, eligible = grading.get("grader_supplied"), grading.get("eligible")
+    blocked, graded = grading.get("blocked_reason"), grading.get("graded_status")
+    if _is_bool(eligible) and eligible != eligible_observed:
+        yield (
+            f"grading.eligible is {eligible}, but the transcript conclusions make it {eligible_observed}; "
+            f"an attempt is eligible only when observed prompt and canary both hold"
+        )
+    if supplied is True and (graded is None) == (blocked is None):
+        yield (
+            "a grader was supplied, so the attempt was either graded or blocked from grading - "
+            f"this record says graded_status={graded!r} and blocked_reason={blocked!r}"
+        )
+    if supplied is False and (graded is not None or blocked is not None):
+        yield "no grader was supplied, yet the record carries a grade or a blocked reason"
+    criteria = grading.get("criteria")
+    if isinstance(criteria, list):
+        for index, criterion in enumerate(criteria):
+            yield from _typed(criterion, _AO_CRITERION, f"grading.criteria[{index}]")
+    if graded is not None:
+        if eligible is not True:
+            yield "a graded status on an attempt that was not eligible for grading"
+        if not isinstance(criteria, list):
+            yield "a graded status with no criteria; the copy cannot be checked against its evidence"
+        elif graded in _AO_VERDICTS:
+            derived = derive_status(Record(path=record.path, data={"criteria": criteria}))
+            if derived != graded:
+                yield f"grading.graded_status is {graded}, but its own criteria derive {derived}"
+
+
 def _pilot_report_split(entry: dict[str, object], where: str, field_name: str) -> Iterator[str]:
     """One cost/time split (`cost_usd` or `time_seconds`): EXACTLY the four
     keys `PILOT_REPORT_SPLIT_KEYS`, each a non-negative number or the literal
@@ -1111,7 +1324,7 @@ def unique_ids(bundle: Bundle) -> Iterator[str]:
             for value, count in sorted(name.items(), key=str):
                 if count > 1:
                     yield f"ledger plans {what} {value!r} {count} times"
-    for kind in (INSTALLATION_RECEIPT, ARTIFACT_MANIFEST, ATTEMPT_LIFECYCLE):
+    for kind in (INSTALLATION_RECEIPT, ARTIFACT_MANIFEST, ATTEMPT_LIFECYCLE, AGENT_OBSERVATION):
         per_attempt = Counter(r.attempt_id for r in bundle.of_kind(kind) if r.attempt_id)
         for attempt, count in sorted(per_attempt.items()):
             if count > 1:
