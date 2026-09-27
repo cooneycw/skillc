@@ -1,0 +1,20 @@
+{
+  "branch": "issue-129-judge-mcp-second-opinion-write-can-block-past-its",
+  "counts": {
+    "accepted": 0,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "4f34f5a101ac01ce3bb3e91480fbb79d4dd7de33",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "129",
+  "passes": 1,
+  "recorded_at": "2026-09-27T13:15:44Z",
+  "red_cases": {
+    "already_covered": 3,
+    "proposed": 3
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "schema": 1,
+  "status": "ran"
+}
