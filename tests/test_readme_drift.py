@@ -57,7 +57,7 @@ def test_bad_readme_lists_a_command_that_does_not_exist() -> None:
 
 def test_good_readme_lists_exactly_the_real_commands() -> None:
     real = {
-        "check", "selftest", "check-records", "materialize", "rules", "leak-check", "demo",
+        "check", "selftest", "check-records", "materialize", "exposure", "rules", "leak-check", "demo",
     }
     assert rd.command_drift(FULL_COMMANDS_BLOCK, real) == []
 
