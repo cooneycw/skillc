@@ -102,6 +102,52 @@ Regenerate this section from `DockerBackend(image=..., base_dir=...).describe()`
 directly rather than hand-editing it out of sync with the code - it is a
 verbatim copy of that call's output, not a paraphrase.
 
+## Demonstrated on a real daemon (operator live run, 2026-09-27)
+
+The operator ran `skillc demo`, `--control` and `--subject` for both
+collections at commit `8e06030`, on native Docker Engine, Linux x86_64.
+Evidence: the leak-checked paste-back blocks and EXIT lines posted on #10
+(https://github.com/cooneycw/skillc/issues/10#issuecomment-5855368984). Each row here is taken from that output, not from intent:
+
+| What | Result on the real daemon |
+|---|---|
+| Trial image build (`docker/trial/`), including pinned CLIs, the `codex-code-mode-host` sidecar check, the no-docker-binary refusal and the interpreter check | succeeded; image `sha256:d1b2ced9dc6d25e9e1bc673c1973f032ced50a11da234fcd617ee376ff36eefc` |
+| Full lifecycle, `prepare` through `confirm_absent` | `disposition=captured` on all three demo runs |
+| Grading through the verifier's backend seam (#76) | `PASS`, all mandatory criteria satisfied |
+| Image digest that ran, recorded | MET: the digest above appears in every block |
+| Cleanup sweep, label-scoped | every reap outcome `already-absent`, `daemon_reachable=True` |
+| Declared host paths unchanged | `changed=[]`, `unresolved=[]` on every run |
+| Seeded control: reply-only client (never touches the canary) | caught: not captured |
+| Seeded control: container deliberately left running | caught: found and removed by the label-scoped reap |
+| Seeded control: leaky composition (known-bad grading candidate, planted host value in a paste-back) | caught |
+| `--subject cpp-codex` (claude-power-pack @ `85e9b03a`) | 74 skills / 273 files installed; in-container digests matched; 74/74 discovered by the client's own listing |
+| `--subject mattpocock-skills` (@ `c55ee460`) | 2 skills / 7 files installed; digests matched; 2/2 discovered |
+| Exit codes | `EXIT=0` for all four commands; no traceback anywhere |
+
+**Proven against the fake `docker` CLI and `FakeBackend` only**, by owner
+ruling (2026-09-27; see [ADR 0005](../../decisions/0005-runtime-scope-and-cost-rulings.md)
+rule 6), which accepts this coverage for #10:
+
+| Failure path | Real-daemon status |
+|---|---|
+| Timeout | fake-only; real-daemon seed tracked in #122 |
+| Operator cancellation | fake-only; real-daemon seed tracked in #122 |
+| Provider unavailable | fake-only (seeding it means stopping the operator's daemon) |
+| Capture failure | fake-only (no portable way to make a live `docker cp` fail) |
+| Empty task selection | fake-only (decided before any container exists; identical driver logic) |
+| Teardown failure | fake-only (a real `docker rm` cannot be forced to fail generically) |
+| Launch failure | fake-only (a missing image is covered by #118's tests) |
+| Kill-by-signal | fake-only (timing-fragile; overlaps the timeout seed) |
+
+**Still not established by any run**, live or fake: network egress
+actually blocked, verified from inside a container; a real client starting,
+completing a turn and satisfying the liveness canary (the demo makes no
+model call; owed to the first agent run under #11 and #26); and anything
+about a skill being selected, changing behaviour or helping (#26, #12).
+The conformance table below keeps its fake-daemon statuses, because it
+mirrors `tests/test_docker_conformance.py`; this section is the live
+evidence alongside it.
+
 ## Conformance cases (interfaces.md), restated with status
 
 Full detail and citations: `tests/test_docker_conformance.py`'s
@@ -148,8 +194,9 @@ Proven in `tests/test_no_docker_required.py`:
 
 ## Gaps, stated plainly
 
-- **The live daemon boundary is entirely untested by this repository's own
-  CI.** Every claim in this matrix marked `demonstrated-here` is proven
+- **The live daemon boundary is untested by this repository's own CI.** The
+  operator's live run crossed it for the rows listed under "Demonstrated on
+  a real daemon" above, and for nothing else. Every claim in this matrix marked `demonstrated-here` is proven
   against a fake CLI that runs the "subject" as an ordinary host subprocess
   with no namespaces, no cgroups and no network restriction of its own - it
   proves the LIFECYCLE state machine and the composed `docker` argv, never a
@@ -160,17 +207,9 @@ Proven in `tests/test_no_docker_required.py`:
   in-container supervisor this backend does not provide; `docker kill`
   reaches the container's own placeholder process, not a separately exec'd
   session (routed to the Nit Store, issue #20).
-- **The image digest that actually ran is not resolved or recorded** -
-  `image` is a configured string, ideally pinned by digest, but nothing
-  currently resolves and records what actually executed for a given attempt
-  (routed to the Nit Store, issue #20).
 - **`baseline_absence` is never independently verified** - always reported
   `SATISFIED`, matching the reference `FakeBackend`'s own scope, not a real
   check of the image's existing contents for an undeclared skill.
-- **`skillc/verify.py`'s own probe does not yet run through an
-  `ExecutionBackend` instance** (interfaces.md step 8's "separate backend
-  instance, same seam") - that join is #10 PR2's delivery, not yet landed at
-  this matrix's writing.
 - **EF-06 (matched comparison) and EF-09 (progressive qualification)** are
   not addressed by this matrix at all - they describe a multi-arm experiment
   and a multi-level reporting boundary respectively, neither of which a
