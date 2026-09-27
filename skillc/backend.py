@@ -167,18 +167,25 @@ class Limits:
     """Resource bounds `execute()` must enforce inside its own isolation, not
     merely pass through to the subject as advice.
 
-    `max_captured_stdout_bytes` bounds how much of the subject's stdout a
-    backend RETAINS in memory while it runs (#102) - distinct from
-    `skillc.trial.Limits`, an unrelated dataclass of the same name that
-    bounds a DIFFERENT stage (reading an already-captured file back off
-    disk during export); the two are not interchangeable and importing one
-    to satisfy the other would suggest a shared config surface that does not
-    exist. 8 MiB matches that other `Limits`' own `max_stream_bytes` default
-    for the same class of bound."""
+    `max_captured_stdout_bytes`/`max_captured_stderr_bytes` bound how much of
+    the subject's stdout/stderr a backend RETAINS in memory while it runs
+    (#102: a subject that floods either stream can exhaust the HOST
+    controller's own memory, independent of any container-side limit - found
+    for stdout first, then for stderr by the same review since it is the
+    identical unbounded-list pattern one screen down). Two independent
+    fields, not one shared cap: a probe's real report can legitimately be
+    large on stdout while its errors stay small on stderr, or the reverse.
+    Distinct from `skillc.trial.Limits`, an unrelated dataclass of the same
+    name that bounds a DIFFERENT stage (reading an already-captured file back
+    off disk during export); the two are not interchangeable and importing
+    one to satisfy the other would suggest a shared config surface that does
+    not exist. 8 MiB matches that other `Limits`' own `max_stream_bytes`
+    default for the same class of bound."""
 
     timeout: float
     grace: float = 2.0
     max_captured_stdout_bytes: int = 8 * 1024 * 1024
+    max_captured_stderr_bytes: int = 8 * 1024 * 1024
 
 
 @runtime_checkable

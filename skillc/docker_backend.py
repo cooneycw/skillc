@@ -413,13 +413,14 @@ def _owned_tar_bytes(arcname: str, data: bytes, mode: int = 0o644) -> bytes:
 
 
 class _BoundedDrain:
-    """Drains `pipe` to EOF on its own thread - so the subject can never
-    block on a full pipe buffer, the same drain-deadlock `execute()`'s own
-    docstring already documents for stderr - while retaining at most `cap`
-    bytes of it (#102: the pre-fix drain appended every chunk to an
-    unbounded `list[bytes]`, so a subject that writes continuously could
-    exhaust the HOST controller's memory before `limits.timeout` ever fires,
-    a resource-exhaustion path independent of any container-side memory
+    """Drains `pipe` (stdout or stderr - one instance each) to EOF on its own
+    thread, so the subject can never block on a full pipe buffer - the
+    classic two-pipe deadlock `execute()`'s own docstring documents - while
+    retaining at most `cap` bytes of it (#102: the pre-fix drain for EACH
+    stream appended every chunk to an unbounded `list[bytes]`, so a subject
+    that wrote continuously to either one could exhaust the HOST
+    controller's memory before `limits.timeout` ever fired, a
+    resource-exhaustion path independent of any container-side memory
     limit).
 
     `total_bytes` counts every byte read off the pipe, retained or not, so a
@@ -822,15 +823,20 @@ class DockerBackend:
         stderr pipe's buffer blocks on that write while nothing is draining
         it, and this method was blocked in `proc.wait()` waiting for exit.
 
-        Stdout is drained on its own thread too, through `_BoundedDrain`
-        (#102): it keeps reading to EOF regardless of `Limits.
-        max_captured_stdout_bytes`, for the identical pipe-deadlock reason
-        stderr's own drain does, but stops RETAINING bytes past that cap - a
-        subject that writes continuously used to grow an unbounded
-        `list[bytes]` here, a host memory-exhaustion path independent of any
+        BOTH streams drain through `_BoundedDrain` (#102 - stdout first,
+        stderr by the same review, since it is the identical pattern one
+        screen down): each keeps reading its pipe to EOF regardless of its
+        own `Limits.max_captured_std{out,err}_bytes`, for the pipe-deadlock
+        reason above, but stops RETAINING bytes past that cap - a subject
+        that writes continuously used to grow an unbounded `list[bytes]` for
+        EITHER stream, a host memory-exhaustion path independent of any
         container-side memory limit. `ExecuteResult.stdout_truncated`/
-        `.stdout_bytes` report the outcome explicitly rather than silently
-        capping what `observations` (below) ends up holding."""
+        `.stdout_bytes` report stdout's outcome explicitly rather than
+        silently capping what `observations` (below) ends up holding; a
+        truncated stderr is folded into `error` itself as an explicit
+        `"(truncated, N bytes total)"` suffix, since stderr has no field of
+        its own on `ExecuteResult` - `error` is already the only surface it
+        feeds."""
         assert isinstance(handle, _Handle)
         exec_argv = [*self.docker_bin, "exec"]
         if stdin is not None:
@@ -851,15 +857,9 @@ class DockerBackend:
         stdout_thread = threading.Thread(target=stdout_drain.run, daemon=True)
         stdout_thread.start()
 
-        stderr_chunks: list[bytes] = []
         assert proc.stderr is not None
-        stderr_pipe = proc.stderr
-
-        def _drain_stderr() -> None:
-            while chunk := stderr_pipe.read(65536):
-                stderr_chunks.append(chunk)
-
-        stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
+        stderr_drain = _BoundedDrain(proc.stderr, limits.max_captured_stderr_bytes)
+        stderr_thread = threading.Thread(target=stderr_drain.run, daemon=True)
         stderr_thread.start()
 
         if stdin is not None:
@@ -901,11 +901,16 @@ class DockerBackend:
         stdout_thread.join(timeout=limits.grace + self.daemon_timeout)
         stderr_thread.join(timeout=limits.grace + self.daemon_timeout)
         stdout = stdout_drain.captured_bytes()
-        stderr = b"".join(stderr_chunks)
+        stderr = stderr_drain.captured_bytes()
         code = proc.returncode
         error = None
         if reason == "exited" and code not in (0, None) and stderr:
             error = stderr.decode("utf-8", errors="replace").strip() or None
+            if error and stderr_drain.truncated:
+                # Explicit, not a silently shown prefix (orchestrator review
+                # of this PR, #102): a caller reading `error` alone must not
+                # mistake a capped stderr for the subject's whole message.
+                error = f"{error} (truncated, {stderr_drain.total_bytes} bytes total)"
 
         # The exec'd process's stdout is written back into the container at
         # `<workspace>/observations` (`verify.py`'s own documented
