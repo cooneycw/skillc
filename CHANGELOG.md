@@ -16,6 +16,31 @@ collection) closes.
 
 ### Fixed
 
+- **`skillc collection-run` could not complete a real agent attempt: no
+  network, a refused workspace, a 30-second agent limit, and colliding
+  scratch paths** (Refs #11): all found on the first live runs, none of
+  which reached a model. The trial machinery reported every one truthfully,
+  as `inconclusive` and never graded.
+  1. The agent container ran `--network none` (the `DockerBackend`
+     default), so codex could not reach its provider. By owner ruling,
+     recorded on #11, the agent container now runs on the bridge network
+     (`collection_conformance.AGENT_NETWORK`, with a reversal trigger). The
+     grading container keeps `network=none`. `DockerBackend.describe()` no
+     longer lists "network egress actually blocked" as a claim for an open
+     network, and the paste-back prints `agent_network=`.
+  2. The default `--client-argv` lacked `--skip-git-repo-check`, and codex
+     refuses the non-git `/work` without it.
+  3. `--timeout` (30 s) bounded both each docker call and the agent. The new
+     `--agent-timeout` (default 900 s) bounds the agent.
+  4. Fixed `<base>/<subject>-checkout|-staging|-store` paths made a re-run
+     of the same subject fail at `git clone`. Each run now gets its own
+     directory, and its checkout and staging copies are removed.
+
+  Each fix has a test that fails without it. The live evidence is in
+  `evals/second-collection-conformance/evidence/README.md`: both collections
+  were captured and graded PASS, and the missing-credential control was
+  `unavailable`.
+
 - **`skillc demo` on a real daemon: a traceback leaked host paths, a fixed
   scratch path collided across runs, the exit-code contract was broken, and
   two acceptance items were vacuously MET** (Refs #118, Refs #81, Refs #10,
