@@ -16,6 +16,56 @@ collection) closes.
 
 ### Added
 
+- **The second-collection conformance manifest states its own scope boundary
+  and the owner's funding ruling explicitly** (Refs #11): review found the
+  manifest needed to say plainly that its own two runs - installation,
+  discovery, an in-container digest check - satisfy acceptance bullets 1
+  and 3 but NOT bullet 2 ("the same client, Level 1 fixture, contract and
+  grader"), which needs an agent actually working Level 1 with each
+  collection installed. Added
+  `acceptance_status` (bullet-by-bullet, plus what remains after this
+  manifest's own runs execute) to `run-manifest.json`, with a test proving
+  it says so. That remaining agent run's funding basis is quoted verbatim,
+  not paraphrased: the operator's ruling ("Normal Claude and codex") puts it
+  on the normal Claude Code/Codex subscription login, inside the normal
+  usage budget - NOT metered spend, and NOT gated by the #12 $5 cost stop
+  (which covers judge calls only). Also corrected: `--subject` is being
+  split out of PR #97 into its own follow-up PR under #11 (PR #97 carries
+  an earlier, materialize-only shape built before the fuller install+
+  discovery+digest design was settled, and is not being widened to match
+  it) - the manifest previously attributed the flag to #81 directly.
+- **The second-collection conformance run, prepared** (Refs #11):
+  [`evals/second-collection-conformance/`](evals/second-collection-conformance/README.md)
+  states the exact command per subject (`skillc demo --subject cpp-codex`,
+  `skillc demo --subject mattpocock-skills`), against the fuller
+  install+discovery+digest-check design for `--subject` (materialize the
+  named subject, install it into the real container via
+  `DockerBackend.install()`, observe client-side discovery with no model
+  call) that a follow-up PR under #11 will deliver - PR #97's own
+  `--subject` is host-materialize-only today, and this manifest states
+  that distinction explicitly rather than conflating the two. The expected
+  paste-back shape per subject (an installation-receipt summary matching
+  each subject's already-recorded host evidence, plus a `discovered` field
+  explicitly marked `owed to the follow-up` rather than invented), and the
+  bounded compatibility statement #11's own text asks for - what is and is
+  not shown compatible between the two collections. Cites, rather than
+  re-proves, two acceptance bullets already closed by existing work: no
+  project-name branch (the genericity guard, #94) and unsupported formats
+  refused before selection (`test_a_malformed_subject_declaration_is_refused`'s
+  10 parametrized cases, generic to both subjects). Prepared, not run - like
+  the matched pilot (#12/#89), execution needs a capability (#81's demo,
+  #10's live daemon) that does not exist yet. Cross-model review found a
+  real overclaim (the compatibility statement blurred "materialize.py was
+  actually run against both subjects" together with "trial.py/verify.py/
+  docker_backend.py carry no subject-name branch" into one "proven end to
+  end" claim - only the first is execution evidence, the second is a static
+  guarantee, and neither shows a full trial has ever run for either
+  subject; rewritten to keep the three kinds of claim separate), an
+  arithmetic error (11 model-invoked skills total, of which 2 are selected,
+  leaves 9 unselected, not 11), and a vacuous-pass bug in the new test
+  (`"" in summary` is `True` unconditionally, so an empty evidence
+  observation would have passed silently - fixed with an explicit
+  non-empty check and its own negative control).
 - **The fake `docker` CLI's state-file writes are now atomic and locked**
   (Refs #77): `test_execute_cancellation_kills_the_container` flaked on
   main at roughly 1 in 25 runs. Root cause: `tests/fixtures/docker-backend/

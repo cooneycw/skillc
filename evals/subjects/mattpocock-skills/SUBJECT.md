@@ -183,5 +183,10 @@ list either, so it reports UNKNOWN rather than a false SATISFIED.
   the declaration + evidence this issue asks for). Whoever picks it up should
   decide between the two options that comment names.
 - **The conformance run of both subjects through one runner and one grader**,
-  and the bounded compatibility statement built on it - #10's runner does
-  not exist yet; this subject's own evidence is Refs #11, not the full close.
+  and the bounded compatibility statement built on it - prepared, not run,
+  in [`evals/second-collection-conformance/`](../../second-collection-conformance/README.md):
+  the exact command per subject, the expected paste-back shape, and the
+  statement itself. Execution needs #81's operator demo command (a
+  `--subject` flag, in progress) and #10's own live Docker run, neither of
+  which exists yet; this subject's own evidence stays Refs #11, not the
+  full close.
