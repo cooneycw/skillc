@@ -290,9 +290,18 @@ def test_claude_skill_listing_absent_is_none_not_empty() -> None:
     assert ta.claude_code_skill_listing(_listing_line([])) == ()
 
 
-def test_claude_skill_listing_ignores_a_malformed_names_field() -> None:
+def test_claude_skill_listing_unreadable_attachment_is_none_not_an_absence() -> None:
+    """Counter-model review (#124): a listing the parser cannot fully read is
+    an incomplete population - never a basis for `not-listed`."""
     assert ta.claude_code_skill_listing(_listing_line("tdd")) is None
-    assert ta.claude_code_skill_listing(_listing_line(["tdd", 7])) == ("tdd",)
+    assert ta.claude_code_skill_listing(_listing_line(["tdd", 7])) is None
+    assert ta.claude_code_skill_listing(_listing_line([{"name": "tdd"}])) is None
+    # A valid initial listing followed by an unreadable delta: still None.
+    raw = "\n".join([_listing_line(["tdd"]), _listing_line([{"name": "x"}], initial=False)])
+    assert ta.claude_code_skill_listing(raw) is None
+    # The control: the same shapes, readable, are an observation.
+    raw_ok = "\n".join([_listing_line(["tdd"]), _listing_line(["x"], initial=False)])
+    assert ta.claude_code_skill_listing(raw_ok) == ("tdd", "x")
 
 
 def test_claude_skill_listing_does_not_disturb_the_event_stream() -> None:

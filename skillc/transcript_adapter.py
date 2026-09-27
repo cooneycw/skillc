@@ -194,9 +194,16 @@ def claude_code_skill_listing(raw_jsonl: str) -> tuple[str, ...] | None:
     nothing". A delta says what was ADDED, not what was never listed, so it
     cannot on its own support a `not-listed` (counter-model review, #124).
     An initial attachment whose `names` is present but empty is a real
-    observation and returns `()`."""
+    observation and returns `()`.
+
+    Also `None` when ANY `skill_listing` attachment cannot be fully read - a
+    `names` that is not a list, or a member that is not a string. A partly
+    read listing is an incomplete population, and an absence inferred from it
+    would be a format change reported as a missing skill (counter-model
+    review, #124)."""
     names: list[str] = []
     seen_listing = False
+    unreadable = False
     for line in raw_jsonl.splitlines():
         line = line.strip()
         if not line or _CLAUDE_SKILL_LISTING_TYPE not in line:
@@ -211,14 +218,15 @@ def claude_code_skill_listing(raw_jsonl: str) -> tuple[str, ...] | None:
         if not isinstance(attachment, Mapping) or attachment.get("type") != _CLAUDE_SKILL_LISTING_TYPE:
             continue
         listed = attachment.get("names")
-        if not isinstance(listed, list):
+        if not isinstance(listed, list) or not all(isinstance(name, str) for name in listed):
+            unreadable = True
             continue
         if attachment.get("isInitial") is True:
             seen_listing = True
         for name in listed:
-            if isinstance(name, str) and name not in names:
+            if name not in names:
                 names.append(name)
-    return tuple(names) if seen_listing else None
+    return tuple(names) if seen_listing and not unreadable else None
 
 
 #: The harness-injected wrapper a real Codex transcript's FIRST `user`-role
