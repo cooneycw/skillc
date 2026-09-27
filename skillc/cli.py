@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -767,12 +768,25 @@ def cmd_demo(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 1
+        # A SECOND Ctrl-C during the sweep would raise KeyboardInterrupt
+        # here, which `except Exception` does not catch - Python's own
+        # traceback, the #118 host-path leak class, would print (issue #122,
+        # from the nit store). SIGINT is ignored for the sweep's own bounded
+        # duration and restored afterwards. `signal.signal` works only on the
+        # main thread; elsewhere the sweep runs unshielded rather than not at all.
+        try:
+            previous_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
+        except ValueError:
+            previous_handler = None
         try:
             report = demo.reap.reap(docker_bin, recorded_attempt_ids, None, timeout=10)
             outcomes = [(o.attempt_id, o.outcome) for o in report.outcomes]
             print(f"skillc: best-effort cleanup - outcomes={outcomes}, daemon_reachable={report.daemon_reachable}", file=sys.stderr)
         except Exception as exc:  # noqa: BLE001 - best-effort: a cleanup failure must not itself crash this handler
             print(f"skillc: best-effort cleanup also failed - {demo.describe_error_safely(exc, base=base)}", file=sys.stderr)
+        finally:
+            if previous_handler is not None:
+                signal.signal(signal.SIGINT, previous_handler)
         return 1
     except Exception as exc:  # noqa: BLE001 - the top-level guard (issue #118), deliberately broad: see the docstring above
         print(f"skillc: demo failed unexpectedly - {demo.describe_error_safely(exc, base=base)}", file=sys.stderr)

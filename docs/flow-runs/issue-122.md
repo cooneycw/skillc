@@ -31,3 +31,15 @@ Scope: 7 files, ~450-550 lines. Risks: the cancelled attempt reads already-absen
 (the driver's finally tears down first), accepted with an independent post-check -
 owner approved; SIGINT timing rests on a 1s settle after the exec marker; fake exec
 leaves a short sleeper; CHANGELOG conflict with #128; live run still owed (Refs, not Closes).
+
+## Revision 1 - owner-approved scope addition (after PR #138 opened)
+
+The issue body gained five items folded in from the Nit Store (#20) after this
+plan was approved (ISSUE_DRIFT at Step 6). The owner chose to add all five to
+this PR. The plan above is unchanged; these are additions:
+
+8. `skillc/demo.py` - reply-only control requires a real exit-0 execution and the missing-canary reason; the fleet item is always emitted (incomparable = NOT EXERCISED); fleet changes not attributable to this run's attempt ids become observations, not failures; the grading probe's attempt id is recorded and swept
+9. `skillc/verify.py` - `grade_files` takes an optional `recorded_attempt_ids` list and appends the probe's attempt id before `prepare()`
+10. `skillc/cli.py` - the interrupt sweep is shielded from a second SIGINT
+11. `tests/test_demo.py` - a red case for each of the five
+12. `tests/fixtures/demo-control/never_live_child.py` - added by the counter-model review (a red case for the live-exec proof), not in the original plan

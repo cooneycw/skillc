@@ -266,14 +266,17 @@ def _candidate_files(candidate_dir: Path) -> list[tuple[str, bytes, bool]]:
     return files
 
 
-def run_grading_demo(backend: dbe.DockerBackend, candidate_dir: Path, base: Path) -> verify.Graded:
+def run_grading_demo(
+    backend: dbe.DockerBackend, candidate_dir: Path, base: Path, *, recorded_attempt_ids: list[str] | None = None,
+) -> verify.Graded:
     """Grade `candidate_dir` against the certified `slug-small-fix` task
     through `backend` - a fresh instance, never the lifecycle demo's own (the
     same "separate backend instance, same seam" interfaces.md step 8
-    requires)."""
+    requires). `recorded_attempt_ids` gets the probe's attempt id before its
+    container exists (issue #122), so the caller's sweep covers it."""
     grader = verify.GraderDef.load(GRADER_ROOT)
     files = _candidate_files(candidate_dir)
-    return verify.grade_files(grader, files, base, backend=backend)
+    return verify.grade_files(grader, files, base, backend=backend, recorded_attempt_ids=recorded_attempt_ids)
 
 
 # --------------------------------------------------------------- subject demo
@@ -660,6 +663,39 @@ def _acceptance_items(
     ]
 
 
+def _fleet_item_and_observation(
+    fleet_diff: reap.SnapshotDiff, own_attempt_ids: Sequence[str],
+) -> tuple[AcceptanceItem, str | None]:
+    """The fleet check, ALWAYS emitted (issue #122, from the nit store): an
+    incomparable pair of snapshots is unverified - `NOT EXERCISED` - never an
+    omitted item that lets the demo pass without it.
+
+    Only a change ATTRIBUTABLE to this run can fail it: a new owned
+    container whose name is one of this run's own attempt containers. Any
+    other change - a neighbour's new container, a foreign container that
+    vanished - is reported as an unattributed OBSERVATION, never a failure
+    (`reap.diff`'s own docstring: attribution is not causation). The
+    observation carries counts, never names: a foreign container's name is
+    the operator's own data, and nothing this block should repeat."""
+    name = "no container leaked by this run"
+    if not fleet_diff.comparable:
+        return AcceptanceItem(
+            name, False, "fleet snapshots incomparable - the daemon could not be listed before or after; unverified",
+            exercised=False,
+        ), None
+    own_names = {dbe._container_name(attempt_id) for attempt_id in own_attempt_ids}
+    ours = sorted(fleet_diff.leaked & own_names)
+    unattributed_new = len(fleet_diff.leaked - own_names)
+    vanished = len(fleet_diff.foreign_vanished)
+    observation = None
+    if unattributed_new or vanished:
+        observation = (
+            f"fleet observations (not attributed to this run, never a failure): "
+            f"{unattributed_new} new skillc-owned container(s), {vanished} foreign container(s) vanished"
+        )
+    return AcceptanceItem(name, not ours, f"leaked by this run={ours}"), observation
+
+
 # --------------------------------------------------------------- paste-back
 
 
@@ -730,7 +766,7 @@ def describe_error_safely(exc: BaseException, *, base: Path | None = None) -> st
 
 def build_paste_back(
     items: list[AcceptanceItem], image: str, image_digest: str | None, reap_report: reap.ReapReport,
-    subject_result: SubjectResult | None = None,
+    subject_result: SubjectResult | None = None, fleet_observation: str | None = None,
 ) -> str:
     prov = provenance.stamp()
     lines = [
@@ -748,6 +784,9 @@ def build_paste_back(
     for outcome in reap_report.outcomes:
         lines.append(f"  {outcome.attempt_id}: {outcome.outcome}")
     lines.append(f"  daemon_reachable={reap_report.daemon_reachable}")
+    if fleet_observation is not None:
+        lines.append("")
+        lines.append(fleet_observation)
     if subject_result is not None:
         lines.append(build_subject_paste_back(subject_result))
     return "\n".join(lines) + "\n"
@@ -813,11 +852,10 @@ def run_demo(
     - `cmd_demo`'s `KeyboardInterrupt` handler reads it to scope its
     best-effort cleanup to exactly this run's own containers (issue #118
     review: a host-global sweep reaped a foreign run's container under a real
-    interrupt). The grading demo's own internal probe attempt id is not
-    threaded through - `verify.grade_files` does not expose it - so an
-    interrupt during grading alone leaves nothing recorded to sweep; that is
-    the accepted, narrower gap this fix leaves in place rather than widening
-    `verify.py`'s own API for it."""
+    interrupt). The grading probe's attempt id is threaded through too
+    (issue #122, via `verify.grade_files(recorded_attempt_ids=...)`), so an
+    interrupt during grading can reach its container, and the normal-path
+    sweep covers it."""
     env = None  # inherit the operator's own ambient environment, like a plain `docker` invocation
     host_paths = [REPO_ROOT / p for p in HOST_PATHS_TO_WATCH]
     host_before = reap.snapshot_host_paths(host_paths)
@@ -832,18 +870,24 @@ def run_demo(
     lifecycle_backend = dbe.DockerBackend(image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=timeout)
     grading_backend = dbe.DockerBackend(image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=timeout)
 
-    lifecycle_record = run_lifecycle_demo(lifecycle_backend, base, recorded_attempt_ids=recorded_attempt_ids)
-    graded = run_grading_demo(grading_backend, GOOD_CANDIDATE, base)
+    own_ids: list[str] = recorded_attempt_ids if recorded_attempt_ids is not None else []
+    lifecycle_record = run_lifecycle_demo(lifecycle_backend, base, recorded_attempt_ids=own_ids)
+    before_grading = len(own_ids)
+    graded = run_grading_demo(grading_backend, GOOD_CANDIDATE, base, recorded_attempt_ids=own_ids)
+    probe_ids = own_ids[before_grading:]
 
     subject_result: SubjectResult | None = None
     if subject_name is not None:
         subject_result = run_subject_demo(
             subject_name=subject_name, image=image, docker_bin=docker_bin, base=base, timeout=timeout,
             checkout=subject_checkout, client_argv=subject_client,
-            recorded_attempt_ids=recorded_attempt_ids,
+            recorded_attempt_ids=own_ids,
         )
 
-    attempt_ids = [str(lifecycle_record["attempt_id"])]
+    # The grading probe's attempt is swept too (issue #122): cleanup MET
+    # used to cover the lifecycle attempt alone, a narrower population than
+    # its wording claimed. The subject leg sweeps its own attempt itself.
+    attempt_ids = [str(lifecycle_record["attempt_id"]), *probe_ids]
     reap_report = reap.reap(docker_bin, attempt_ids, env, timeout)
 
     fleet_after = reap.snapshot(docker_bin, env, timeout)
@@ -854,12 +898,9 @@ def run_demo(
     items = _acceptance_items(lifecycle_record, graded, reap_report, host_diff, image_digest)
     if subject_result is not None:
         items += _subject_acceptance_items(subject_result)
-    if fleet_diff.comparable and (fleet_diff.leaked or fleet_diff.foreign_vanished):
-        items.append(AcceptanceItem(
-            "no unexpected container leak or foreign disappearance", False,
-            f"leaked={list(fleet_diff.leaked)}, foreign_vanished={list(fleet_diff.foreign_vanished)}",
-        ))
-    paste_back = build_paste_back(items, image, image_digest, reap_report, subject_result)
+    fleet_item, fleet_observation = _fleet_item_and_observation(fleet_diff, own_ids)
+    items.append(fleet_item)
+    paste_back = build_paste_back(items, image, image_digest, reap_report, subject_result, fleet_observation)
     ok = all(item.met for item in items)
     return DemoResult(ok, paste_back, lifecycle_record, graded, reap_report, host_diff, image_digest, subject_result)
 
@@ -1201,6 +1242,34 @@ def run_cancellation_control(
             foreign_backend.confirm_absent(foreign)
 
 
+#: The reply-only subject: runs, exits 0, never touches the canary.
+_REPLY_ONLY_ARGV: tuple[str, ...] = (verify.PROBE_INTERPRETER, "-c", "pathlib_unused = 1")
+
+#: The liveness reason `lifecycle.run_through_backend` records when the
+#: canary exists but was never touched - the ONE failure the reply-only
+#: seed exists to provoke.
+_CANARY_UNTOUCHED = "the canary was never touched"
+
+
+def _reply_only_seed(record: dict[str, object]) -> ControlSeed:
+    """CAUGHT only for the specific failure this seed provokes (issue #122,
+    from the nit store): the subject genuinely ran - a confirmed stop,
+    `exited`, exit code 0 - and the attempt is `inconclusive` because the
+    canary was never touched. `!= "captured"` alone accepted ANY failure: a
+    launch failure, an unavailable daemon or a timeout never exercised the
+    liveness check at all, yet read as caught."""
+    stop = record.get("stop")
+    stop = stop if isinstance(stop, dict) else {}
+    ran = stop.get("reason") == "exited" and stop.get("exit_code") == 0 and stop.get("confirmed") is True
+    canary_untouched = _CANARY_UNTOUCHED in str(record.get("reason", ""))
+    caught = ran and record.get("disposition") == "inconclusive" and canary_untouched
+    return ControlSeed(
+        "reply-only client never touches the canary", caught,
+        f"lifecycle disposition={record.get('disposition')} stop reason={stop.get('reason')} "
+        f"exit_code={stop.get('exit_code')} canary_untouched={canary_untouched}",
+    )
+
+
 def build_control_paste_back(seeds: Sequence[ControlSeed], image: str, image_digest: str | None) -> str:
     prov = provenance.stamp()
     lines = [
@@ -1258,14 +1327,10 @@ def run_control(
     experiment, attempt_id = _plan_one_attempt(base, "control", "reply-only")
     if recorded_attempt_ids is not None:
         recorded_attempt_ids.append(attempt_id)
-    reply_only_argv = [verify.PROBE_INTERPRETER, "-c", "pathlib_unused = 1"]  # does nothing; never touches the canary
     record = lifecycle.run_through_backend(
-        backend, experiment, attempt_id, reply_only_argv, {"demo": "x"}, Limits(timeout=30), base,
+        backend, experiment, attempt_id, list(_REPLY_ONLY_ARGV), {"demo": "x"}, Limits(timeout=30), base,
     )
-    seeds.append(ControlSeed(
-        "reply-only client never touches the canary", record.get("disposition") != "captured",
-        f"lifecycle disposition={record.get('disposition')}",
-    ))
+    seeds.append(_reply_only_seed(record))
 
     # 2. A container deliberately left running - reap() must find and
     # remove it (a genuine orphan, teardown never invoked on purpose).

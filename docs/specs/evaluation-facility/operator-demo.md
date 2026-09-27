@@ -268,10 +268,13 @@ acceptance:
   [MET|NOT MET|NOT EXERCISED] cleanup sweep confirms no owned container left running - reap outcomes=[...]
   [MET|NOT MET|NOT EXERCISED] declared host paths unchanged - changed=[...], unresolved=[...]
   [MET|NOT MET] image digest recorded - digest=<...>
+  [MET|NOT MET|NOT EXERCISED] no container leaked by this run - leaked by this run=[...]
 
 cleanup (reap outcomes, four possible values: reaped/already-absent/left-running/unknown):
-  <attempt_id>: <outcome>
+  <attempt_id>: <outcome>      (the lifecycle attempt, then the grading probe's attempt)
   daemon_reachable=<bool>
+
+[fleet observations (not attributed to this run, never a failure): <N> new skillc-owned container(s), <M> foreign container(s) vanished]
 
 subject: <name> revision=<pinned sha>
   installed: <N> skill(s), <M> file(s)
@@ -282,6 +285,21 @@ subject: <name> revision=<pinned sha>
     <attempt_id>: <outcome>
     daemon_reachable=<bool>
 ```
+
+Three lines above changed under issue #122 (folded in from the nit store):
+
+- **The cleanup sweep covers the grading probe too.** It used to sweep only
+  the lifecycle attempt, so `cleanup ... MET` covered a narrower population
+  than it read as. `verify.grade_files` now reports the probe's attempt id
+  before its container exists.
+- **The fleet line is always present.** When the daemon could not be listed
+  before or after, it reads `NOT EXERCISED` - it is never left out, which
+  used to let the demo pass without it. Only a new container named for one
+  of THIS run's own attempts can make it `NOT MET`.
+- **A neighbour's change is an observation, not a failure.** Another run's
+  new container, or a foreign container vanishing, is counted on the
+  optional `fleet observations` line. Counts only: a foreign container's
+  name is the operator's own data and is never printed.
 
 When acquisition or `prepare()` never even reached the container step
 (issue #118), the `subject:` block instead reads:
@@ -340,8 +358,11 @@ skillc demo --control
 Runs six seeded, known-bad scenarios and requires every one to be caught -
 the OTHER verdict from the success path, on purpose:
 
-1. **A reply-only subject** that never touches the liveness canary - the
-   driver must report it as something other than `captured`.
+1. **A reply-only subject** that never touches the liveness canary. Caught
+   only when the subject genuinely ran (a confirmed stop, exit code 0) and
+   the attempt is `inconclusive` because the canary was never touched - a
+   launch failure or a timeout never exercised the canary, and no longer
+   counts (#122).
 2. **A container deliberately left running** - `prepare()` is called and
    `destroy()`/`confirm_absent()` deliberately never is, standing in for a
    crashed controller. The independent reap sweep (#79) must find and remove
@@ -381,7 +402,7 @@ skillc_version=... source_commit=... dirty=False
 image=skillc-trial:latest image_digest=sha256:...
 
 seeded failures (each must be CAUGHT for --control to pass):
-  [CAUGHT] reply-only client never touches the canary - lifecycle disposition=inconclusive
+  [CAUGHT] reply-only client never touches the canary - lifecycle disposition=inconclusive stop reason=exited exit_code=0 canary_untouched=True
   [CAUGHT] container left running is found by the reap sweep - reap outcome=reaped
   [CAUGHT] known-bad grading candidate FAILs - grading status=FAIL
   [CAUGHT] leaky paste-back block is refused - the planted block was refused and not printed
@@ -410,6 +431,7 @@ negative controls on the controls themselves:
   (`tests/fixtures/demo-control/never_live_child.py`), is `NOT CAUGHT` after
   a bounded wait, with no SIGINT sent;
 - an unconfirmed removal of the foreign container is `NOT CAUGHT`;
+- a reply-only subject that fails to run at all (exit 127) is `NOT CAUGHT`;
 - interrupting `--control` itself mid-seed kills the child and leaves its
   attempt id where the scoped sweep can reach it.
 

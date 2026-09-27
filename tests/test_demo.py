@@ -1452,3 +1452,160 @@ def test_run_demo_with_missing_daemon_reports_not_exercised_for_cleanup_and_host
         result.lifecycle_record, result.graded, result.reap_report, result.host_diff, result.image_digest,
     ) if "cleanup sweep" in i.name)
     assert cleanup_item.exercised is False
+
+
+# ------------- issue #122, folded in from the Nit Store (#20): five honesty gaps
+
+
+def test_reply_only_seed_is_not_caught_by_an_unrelated_failure() -> None:
+    """Red case: `disposition != "captured"` accepted ANY failure. A launch
+    failure never exercised the canary, so it must not read as caught."""
+    launch_failed = {"disposition": "unavailable", "stop": {"reason": "launch-failed", "confirmed": True},
+                     "reason": "the subject could not be launched"}
+    timed_out = {"disposition": "inconclusive", "stop": {"reason": "timeout", "confirmed": True, "exit_code": None},
+                 "reason": "capture failed: liveness: no proof the subject actually ran - the canary was never touched"}
+    genuine = {"disposition": "inconclusive", "stop": {"reason": "exited", "confirmed": True, "exit_code": 0},
+               "reason": "capture failed: liveness: no proof the subject actually ran - the canary was never touched"}
+    assert demo._reply_only_seed(launch_failed).caught is False
+    assert demo._reply_only_seed(timed_out).caught is False
+    assert demo._reply_only_seed(genuine).caught is True
+
+
+def test_run_control_is_not_ok_when_the_reply_only_subject_fails_to_run(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The nit store's own red case: the reply-only attempt fails (its
+    command does not exist, exit 127) while every other control succeeds -
+    the overall verdict must be False."""
+    monkeypatch.setattr(demo, "_REPLY_ONLY_ARGV", ("skillc-no-such-binary-122",), raising=False)
+    result = _run_control(base, docker_state)
+    assert result.ok is False
+    assert "[NOT CAUGHT] reply-only client never touches the canary" in result.paste_back
+    assert sum(seed.caught for seed in result.seeds) == 5
+
+
+def test_fleet_item_is_emitted_not_exercised_when_the_snapshots_are_incomparable() -> None:
+    """Red case: an unreachable daemon used to leave NO fleet item at all."""
+    item, observation = demo._fleet_item_and_observation(
+        reap.SnapshotDiff(comparable=False, leaked=frozenset(), foreign_vanished=frozenset()), ["a-1"],
+    )
+    assert item.name == "no container leaked by this run"
+    assert item.exercised is False and item.met is False
+    assert observation is None
+
+
+def test_fleet_item_fails_only_on_a_leak_attributable_to_this_run() -> None:
+    from skillc.docker_backend import _container_name
+
+    ours = _container_name("a-000000000001")
+    neighbour = _container_name("a-00000000fff0")
+    diff = reap.SnapshotDiff(
+        comparable=True, leaked=frozenset({neighbour}), foreign_vanished=frozenset({"operators-own-db"}),
+    )
+    item, observation = demo._fleet_item_and_observation(diff, ["a-000000000001"])
+    assert item.met is True
+    assert observation is not None and "1 new skillc-owned container(s), 1 foreign container(s) vanished" in observation
+    assert "operators-own-db" not in observation and neighbour not in observation  # counts only, never names
+
+    diff = reap.SnapshotDiff(comparable=True, leaked=frozenset({ours}), foreign_vanished=frozenset())
+    item, _ = demo._fleet_item_and_observation(diff, ["a-000000000001"])
+    assert item.met is False
+    assert ours in item.evidence
+
+
+def test_run_demo_with_a_missing_daemon_reports_the_fleet_item_not_exercised(base: Path, docker_state: Path) -> None:
+    docker_state.mkdir(parents=True, exist_ok=True)
+    (docker_state / ".down").touch()
+    result = demo.run_demo(image="fake-image:1", docker_bin=_docker_bin(docker_state), base=base, timeout=5)
+    assert result.ok is False
+    assert "[NOT EXERCISED] no container leaked by this run" in result.paste_back
+
+
+def test_run_demo_is_ok_when_a_neighbour_changes_the_fleet_mid_run(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Red case: a neighbour's new owned container, and a foreign container
+    vanishing, used to fail the demo exactly as this run's own leak does.
+    They are now observations, and the run stays ok."""
+    docker_state.mkdir(parents=True, exist_ok=True)
+    argv = [*_docker_bin(docker_state), "run", "-d", "--name", "someone-elses", "--", "fake-image:1", "sleep", "infinity"]
+    assert subprocess.run(argv, capture_output=True, check=False).returncode == 0
+    real_grading = demo.run_grading_demo
+
+    def _grading_while_the_fleet_changes(*args: object, **kwargs: object) -> Graded:
+        _run_owned_container(docker_state, "skillc-a-neighbour00001", "a-neighbour00001")
+        subprocess.run([*_docker_bin(docker_state), "rm", "-f", "someone-elses"], capture_output=True, check=False)
+        return real_grading(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(demo, "run_grading_demo", _grading_while_the_fleet_changes)
+    result = demo.run_demo(image="fake-image:1", docker_bin=_docker_bin(docker_state), base=base, timeout=5)
+    assert result.ok is True, result.paste_back
+    assert "[MET] no container leaked by this run" in result.paste_back
+    assert "1 new skillc-owned container(s), 1 foreign container(s) vanished" in result.paste_back
+    assert "someone-elses" not in result.paste_back
+    assert demo.leak_check_text(result.paste_back) == []
+
+
+def test_run_demo_sweeps_the_grading_probes_attempt_too(base: Path, docker_state: Path) -> None:
+    """Red case: only the lifecycle attempt used to be swept, so cleanup MET
+    covered a narrower population than its wording claimed."""
+    recorded: list[str] = []
+    result = demo.run_demo(
+        image="fake-image:1", docker_bin=_docker_bin(docker_state), base=base, timeout=5, recorded_attempt_ids=recorded,
+    )
+    probe_ids = [a for a in recorded if a.startswith("probe-")]
+    assert len(probe_ids) == 1
+    assert result.reap_report.outcome_for(probe_ids[0]) == "already-absent"
+    assert f"{probe_ids[0]}: already-absent" in result.paste_back
+
+
+def test_grade_files_records_the_probe_attempt_before_prepare(base: Path, docker_state: Path) -> None:
+    """The id is recorded even when `prepare()` then fails - recorded AFTER
+    it, an interrupt during a hung prepare could not name the container."""
+    from skillc import docker_backend as dbe
+
+    docker_state.mkdir(parents=True, exist_ok=True)
+    (docker_state / ".down").touch()
+    backend = dbe.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=5)
+    recorded: list[str] = []
+    graded = demo.run_grading_demo(backend, demo.GOOD_CANDIDATE, base, recorded_attempt_ids=recorded)
+    assert graded.status != "PASS"
+    assert len(recorded) == 1 and recorded[0].startswith("probe-")
+
+
+def test_cmd_demo_interrupt_sweep_survives_a_second_ctrl_c(
+    docker_state: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Red case: a SECOND SIGINT during the best-effort sweep raised
+    KeyboardInterrupt, which `except Exception` does not catch - a raw
+    traceback. The sweep now ignores SIGINT for its own duration, and the
+    previous handler is restored afterwards."""
+    import os
+    import signal
+
+    from skillc import cli
+
+    _run_owned_container(docker_state, "ours-container", "att-ours")
+    real_reap = demo.reap.reap
+
+    def _reap_with_a_second_ctrl_c(*args: object, **kwargs: object) -> reap.ReapReport:
+        os.kill(os.getpid(), signal.SIGINT)
+        return real_reap(*args, **kwargs)  # type: ignore[arg-type]
+
+    def _interrupted(**kwargs: object) -> None:
+        recorded = kwargs["recorded_attempt_ids"]
+        assert isinstance(recorded, list)
+        recorded.append("att-ours")
+        raise KeyboardInterrupt
+
+    before = signal.getsignal(signal.SIGINT)
+    monkeypatch.setattr(demo, "run_demo", _interrupted)
+    monkeypatch.setattr(demo.reap, "reap", _reap_with_a_second_ctrl_c)
+    args = _demo_args(image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base="/tmp")
+    try:
+        exit_code = cli.cmd_demo(args)
+    except KeyboardInterrupt:  # caught here so the red case is a FAILED, not an aborted pytest session
+        pytest.fail("a second Ctrl-C during the sweep escaped cmd_demo's interrupt handler")
+    assert exit_code == 1
+    assert "best-effort cleanup - outcomes=[('att-ours', 'reaped')]" in capsys.readouterr().err
+    assert signal.getsignal(signal.SIGINT) is before

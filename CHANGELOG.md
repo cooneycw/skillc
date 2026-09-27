@@ -25,6 +25,24 @@ and version plan.
 
 ### Fixed
 
+Five honesty gaps in `skillc demo` and `--control`, folded into #122 from the
+Nit Store ([#20](https://github.com/cooneycw/skillc/issues/20)), each with a red case:
+
+- **The reply-only control accepted any failure.** A launch failure or a
+  timeout that never exercised the canary counted as caught. It now requires
+  an exit-0 run whose canary was never touched.
+- **The fleet check could be silently omitted.** With the daemon unreachable
+  the item was left out and the demo could pass without it. It is now always
+  emitted, `NOT EXERCISED` when the snapshots are incomparable.
+- **A neighbour's change failed the run.** Only a new container named for one
+  of this run's own attempts now fails it. Other fleet changes are counted
+  as observations, with no container names printed.
+- **The reap sweep missed the grading probe's attempt.** `verify.grade_files`
+  takes `recorded_attempt_ids` and reports the probe's id before `prepare()`.
+  The demo sweeps it, and an interrupt during grading can reach it.
+- **A second Ctrl-C during the interrupt sweep escaped** as a raw traceback.
+  SIGINT is ignored for the sweep's own bounded duration, then restored.
+
 - **The mcp-second-opinion judge could block past its write deadline**
   (#129): `_write` polled `select` and then made a BLOCKING 64 KiB
   `os.write`. A pipe reads as writable when any space is free, so a child
