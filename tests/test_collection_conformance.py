@@ -24,7 +24,7 @@ from types import SimpleNamespace
 import pytest
 
 from skillc import collection_conformance as cc
-from skillc import demo, materialize, trial
+from skillc import credential, demo, materialize, trial
 from skillc import docker_backend as d
 
 FAKE_DOCKER = Path(__file__).resolve().parent / "fixtures" / "docker-backend" / "fake_docker.py"
@@ -354,7 +354,14 @@ def test_paste_back_is_leak_clean_and_names_every_planned_field() -> None:
         "observation": {
             "prompt_delivered": True, "canary_satisfied": True,
             "skill_invocations": ["tdd"], "skill_invocation_detection": "heuristic",
-            "refresh_observed_in_container": False,
+            # Built by the REAL producer, never a hand-typed key (issue #124):
+            # this test used to write `refresh_observed_in_container` itself,
+            # the same wrong key the paste-back read, so both agreed while
+            # every live paste-back printed None for a value the record held
+            # under `credential_refresh_observed_in_container`.
+            **credential.CredentialUsage(
+                client="codex", delivered=True, refresh_observed_in_container=False,
+            ).to_record_fields(),
         },
         "graded": {"status": "PASS"},
         "grading_blocked_reason": None,

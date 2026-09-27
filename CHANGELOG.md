@@ -146,6 +146,29 @@ collection) closes.
 
 ### Added
 
+- **The Claude Code agent arm: a `claude-code-skills` surface and a
+  per-collection Level 1 run on Claude Code** (Refs #124).
+  `materialize.SURFACES` declares two surfaces, each bound to one client
+  and one install directory: `codex-skills` (codex, `~/.codex/skills/`) and
+  `claude-code-skills` (claude, `~/.claude/skills/`). A surface/client
+  mismatch is refused by name. `skillc collection-run` takes its client and
+  default argv from the subject (`DEFAULT_CLIENT_ARGVS`; claude runs
+  `claude -p --dangerously-skip-permissions` as the non-root trial user).
+  Claude Code has no model-free listing, so discovery is read from the real
+  agent transcript's `skill_listing` attachment
+  (`transcript_adapter.claude_code_skill_listing`, recorded as
+  `observation.skills_listed`). Each selected skill is reported `listed` or
+  `not-listed`, labelled `source=transcript skill_listing`. When no listing
+  was observable, including every codex run, discovery is `UNMEASURED` with
+  the reason; it is never a borrowed canary result. `collection-run` now
+  exits 1 when a selected skill is measurably `not-listed`, even on a PASS.
+  `skillc demo --subject` installs a Claude subject under `.claude/skills/`
+  and reports its discovery NOT EXERCISED. The host-local
+  `skillc materialize` refuses a Claude subject by name. New subjects are
+  `cpp-claude-code` (CPP's native `.claude/skills`, 18 skills) and
+  `mattpocock-skills-claude-code` (`tdd`, `diagnosing-bugs`). Live evidence
+  is in `evals/claude-code-agent-arm/`.
+
 - **`skillc collection-run <subject>` (issue #11's remaining acceptance
   bullet, "the same client, Level 1 fixture, contract and grader")**: one
   real agent attempt against `evals/level1/slug-small-fix`, per declared

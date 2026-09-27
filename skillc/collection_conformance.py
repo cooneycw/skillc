@@ -405,7 +405,10 @@ def build_collection_paste_back(result: CollectionAgentResult) -> str:
         f"  prompt_delivered={obs.get('prompt_delivered')}",
         f"  canary_satisfied={obs.get('canary_satisfied')}",
         f"  skill_invocations={obs.get('skill_invocations')} (detection={obs.get('skill_invocation_detection')})",
-        f"  refresh_observed_in_container={obs.get('refresh_observed_in_container')}",
+        # The record's own key (`credential.CredentialUsage.to_record_fields`)
+        # - reading a bare `refresh_observed_in_container` here printed None on
+        # every live run, #11's and #124's first ones included (issue #124).
+        f"  refresh_observed_in_container={obs.get('credential_refresh_observed_in_container')}",
         (f"  discovery={dict(sorted((result.discovery or {}).items()))} (source=transcript skill_listing)"
          if result.discovery_reason is None
          else f"  discovery=UNMEASURED ({result.discovery_reason})"),
