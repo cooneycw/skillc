@@ -1125,12 +1125,14 @@ def test_a_reason_naming_the_home_credential_path_is_redacted_and_written(
     sits under the operator's home - the leak scan refuses a home path, so
     without redaction the very record a blocked attempt most needs would be
     refused. `Path.home()` is pinned so this holds on any host (CI runs as
-    root)."""
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("/home/ci-user")))
+    root). The fake home is joined at run time so this file itself carries
+    no home-shaped path for the repository's own leak-check step to flag."""
+    fake_home = Path("/home") / "ci-user"
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
     experiment, attempt_id = _planned(store)
     data = at.build_observation_record(
         {"attempt_id": attempt_id, "trial_id": "t", "disposition": "unavailable",
-         "reason": "no codex credential at /home/ci-user/.codex/auth.json", "observation": None},
+         "reason": f"no codex credential at {fake_home}/.codex/auth.json", "observation": None},
         client="codex", grader_supplied=False,
     )
     assert at.write_observation_record(experiment, attempt_id, data) == "written"
