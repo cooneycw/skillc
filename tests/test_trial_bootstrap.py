@@ -212,7 +212,9 @@ def _run_sidecar_check(tmp_path: Path, npm_root: Path) -> subprocess.CompletedPr
     """Copy the script to a scratch directory unrelated to `npm_root` and run
     it from there with no NODE_PATH - the real Dockerfile invocation shape
     (COPY to /tmp, run from /tmp), never the script's own repo location and
-    never a directory above or beside the fixture."""
+    never a directory above or beside the fixture. Uses the CODEX_NPM_ROOT
+    test override, so it never exercises the `npm root -g` branch the real
+    Docker build actually runs - see `_run_sidecar_check_via_real_npm_root`."""
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     script_copy = scratch / SIDECAR_SCRIPT.name
@@ -227,11 +229,72 @@ def _run_sidecar_check(tmp_path: Path, npm_root: Path) -> subprocess.CompletedPr
     )
 
 
+def _fake_npm(tmp_path: Path, root_output: Path) -> Path:
+    """A fake `npm` on PATH whose `root -g` subcommand prints `root_output` -
+    exercises the script's REAL (non-override) global-root discovery without
+    a real npm install. Returns the directory to prepend to PATH."""
+    npm_dir = tmp_path / "fake-npm-bin"
+    npm_dir.mkdir()
+    npm_script = npm_dir / "npm"
+    npm_script.write_text(
+        "#!/usr/bin/env bash\n"
+        "if [ \"$1\" = 'root' ] && [ \"$2\" = '-g' ]; then\n"
+        f'  echo "{root_output}"\n'
+        "  exit 0\n"
+        "fi\n"
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    npm_script.chmod(0o755)
+    return npm_dir
+
+
+def _run_sidecar_check_via_real_npm_root(tmp_path: Path, npm_root: Path) -> subprocess.CompletedProcess:
+    """Same real invocation shape as `_run_sidecar_check`, but with NO
+    CODEX_NPM_ROOT set - exercises `npmGlobalRoot()`'s `npm root -g`
+    subprocess branch, the one every CODEX_NPM_ROOT-based test above
+    bypasses and the one the real Docker build actually runs."""
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    script_copy = scratch / SIDECAR_SCRIPT.name
+    shutil.copy(SIDECAR_SCRIPT, script_copy)
+    fake_npm_dir = _fake_npm(tmp_path, npm_root)
+    return subprocess.run(
+        ["node", str(script_copy)],
+        cwd=scratch,
+        env={"PATH": f"{fake_npm_dir}:/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
 @needs_node
 def test_verify_codex_sidecar_accepts_a_valid_layout(tmp_path):
     npm_root = _fake_global_install(tmp_path)
     result = _run_sidecar_check(tmp_path, npm_root)
     assert result.returncode == 0, result.stderr
+
+
+@needs_node
+def test_verify_codex_sidecar_uses_npm_root_dash_g_when_no_override_is_set(tmp_path):
+    """The real invocation path (issue #78 review): no CODEX_NPM_ROOT is set
+    in the Dockerfile, so `npm root -g` is asked directly. Every
+    CODEX_NPM_ROOT-based test above bypasses this branch entirely."""
+    npm_root = _fake_global_install(tmp_path)
+    result = _run_sidecar_check_via_real_npm_root(tmp_path, npm_root)
+    assert result.returncode == 0, result.stderr
+
+
+@needs_node
+def test_verify_codex_sidecar_refuses_when_npm_root_dash_g_names_an_empty_directory(tmp_path):
+    """Red case for the same branch: `npm root -g` succeeds but names a
+    directory with no @openai/codex in it."""
+    empty_root = tmp_path / "empty" / "node_modules"
+    empty_root.mkdir(parents=True)
+    result = _run_sidecar_check_via_real_npm_root(tmp_path, empty_root)
+    assert result.returncode != 0
+    assert "cannot resolve @openai/codex from the npm global root" in result.stderr
 
 
 @needs_node
