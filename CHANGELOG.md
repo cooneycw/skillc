@@ -9,8 +9,6 @@ and version plan.
 ## [Unreleased]
 
 Nothing yet - see `0.2.0` below for everything that landed since `0.1.0`.
-`0.3.0` is planned when [#11](https://github.com/cooneycw/skillc/issues/11)
-(a second independent collection) closes.
 
 ## [0.2.0] - 2026-09-27
 
@@ -30,11 +28,14 @@ re-run of every case in the conformance table or failure-path matrix, most
 of which stay proven against the fake `docker` CLI, per the owner's own
 ruling; the two paths judged most likely to differ on a real daemon
 (timeout, operator cancellation) are tracked for a real-daemon seed under
-[#122](https://github.com/cooneycw/skillc/issues/122). Still owed: the
-per-collection agent run under [#11](https://github.com/cooneycw/skillc/issues/11)
-and the Claude Code agent arm under
-[#124](https://github.com/cooneycw/skillc/issues/124) (neither makes a
-model call yet in this repository's own tests), skill-selection measurement
+[#122](https://github.com/cooneycw/skillc/issues/122). [#11](https://github.com/cooneycw/skillc/issues/11) (a second
+independent collection) also closed in this release: the operator's live
+Level 1 agent run, once per collection with the same codex client, fixture,
+contract and grader, captured and graded `PASS` for both `cpp-codex` and
+`mattpocock-skills` (evidence: [evals/second-collection-conformance/evidence/README.md](evals/second-collection-conformance/evidence/README.md)). By owner ruling recorded
+on #11, the agent container runs on the bridge network; the grading
+container stays `network=none`. Still owed: the Claude Code agent arm under
+[#124](https://github.com/cooneycw/skillc/issues/124), skill-selection measurement
 under [#26](https://github.com/cooneycw/skillc/issues/26), and the judge-call
 cost ceiling under [#12](https://github.com/cooneycw/skillc/issues/12).
 

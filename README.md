@@ -58,8 +58,7 @@ README remain a documentation-only proposal. See the
 | Milestone | State |
 |---|---|
 | 0.1.0 - static checker | closed |
-| 0.2.0 - real Docker trial end to end (#10) | closed |
-| 0.3.0 - second independent collection (#11) | open |
+| 0.2.0 - real Docker trial end to end (#10) and a second independent collection (#11) | closed |
 <!-- milestones:end -->
 
 **Version:** `0.2.0` (checked in CI against the package version, #73)
