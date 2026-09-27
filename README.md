@@ -239,11 +239,20 @@ and `uv run skillc leak-check . --exclude controls/leak-check/bad --exclude
 tests/test_leak.py --exclude ci/leak-check-control.sh --exclude
 tests/fixtures/leak_seeds` (the excludes skip this repo's own seeded-bad
 fixtures, which a bare scan would otherwise report as findings - see CI's
-`leak-check` step for the authoritative list); a PR that
+`leak-check` step for the authoritative list); `uv run pytest
+tests/test_private_citations.py` guards tracked files against a private
+fleet message number or worker name (issue #100) - and a PR that
 changes `skillc/` also needs a new entry under `CHANGELOG.md`'s `[Unreleased]`
 section, or a `Changelog-exempt: <reason>` trailer on its last commit. See
 #73's CI steps (`changelog-check`, `readme-drift`) for what else is checked
 automatically.
+
+**PR bodies and commit messages cite issues, PRs, or ADR sections - never a
+private message number or a worker name** (issue #100): a squash merge
+copies the PR body verbatim into `main`'s commit message, which cannot be
+rewritten afterward, and `tests/test_private_citations.py` cannot see that
+text at all - it only ever sees tracked files. The PR template
+(`.github/PULL_REQUEST_TEMPLATE.md`) carries this as a checklist item.
 
 ## Exit codes
 

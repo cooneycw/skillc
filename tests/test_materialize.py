@@ -712,9 +712,9 @@ SUBJECT_WORDS = ("power-pack", "cpp", "sha256sums", ".claude/scripts", "codex/sk
 #: only for a module whose actual job is to hold a subject-facing DEFAULT
 #: (a bare command's fallback subject, say) - and even then, prefer reading
 #: that default from a declared `evals/subjects/*/subject.json` over a
-#: literal, so the exemption is never needed at all. `w1` was mailed a
-#: heads-up (#81's `demo.py` is imminent and will be scanned the moment it
-#: lands) precisely so this stays empty rather than growing by surprise.
+#: literal, so the exemption is never needed at all. A heads-up was given
+#: (#81's `demo.py` is imminent and will be scanned the moment it lands)
+#: precisely so this stays empty rather than growing by surprise.
 GENERICITY_EXEMPT: dict[str, str] = {}
 
 

@@ -990,8 +990,9 @@ def grade(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base
 
     This is a reshape of the single `verification.grading_tier` field #76
     shipped, not a new envelope version: nothing outside this build's own
-    tests has ever produced or read that field on a real trial (#69's msg
-    1368), so there is no consumer for record-envelope versioning to protect.
+    tests has ever produced or read that field on a real trial (PR #88's
+    own ruling, Refs #69), so there is no consumer for record-envelope
+    versioning to protect.
     """
     if judges:
         unknown_tiers = set(judges) - set(judge_seam.JUDGE_TIERS)

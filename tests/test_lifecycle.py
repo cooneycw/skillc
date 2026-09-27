@@ -265,7 +265,7 @@ def test_success_is_captured_and_teardown_confirmed(store: Path, base: Path) -> 
 
 
 def test_liveness_method_is_recorded_on_the_content_diff_path_too(store: Path, base: Path) -> None:
-    """Orchestrator review (msg 1331): a capture that passed the weaker
+    """PR #70 review: a capture that passed the weaker
     content-diff fallback must not be indistinguishable, in the record, from
     one the nonce canary proved."""
     experiment, attempt_id = _planned(store)

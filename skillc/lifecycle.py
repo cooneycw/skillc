@@ -294,8 +294,8 @@ def run_through_backend(
             unavailable_reason = str(exc)
         else:
             canary_path = readiness.get("canary_path") if isinstance(readiness, dict) else None
-            # Recorded whichever path is taken (orchestrator review, msg
-            # 1331): a capture that passed the weaker content-diff fallback
+            # Recorded whichever path is taken (PR #70 review): a capture
+            # that passed the weaker content-diff fallback
             # is otherwise indistinguishable in the journal from one proven
             # by the nonce canary, and the reply-only control shows the
             # fallback alone is defeatable. A reader must be able to see
@@ -401,8 +401,7 @@ def run_through_backend(
         # Which liveness proof this attempt used - "canary" (the nonce
         # convention) or "content-diff" (the weaker fallback) - so a grader
         # or reader can see when only the weaker guarantee applied. None when
-        # the attempt never reached execution at all (orchestrator review,
-        # msg 1331).
+        # the attempt never reached execution at all (PR #70 review).
         "liveness_method": liveness_method,
     }
 
