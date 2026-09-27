@@ -232,6 +232,34 @@ def test_a_declared_run_state_is_honoured(declared: str) -> None:
     assert records.derive_status(_record(run_state=declared, criteria=[])) == declared
 
 
+@pytest.mark.parametrize("declared", records.DECLARABLE_RUN_STATES)
+def test_a_declared_run_state_cannot_mask_an_established_violation(declared: str) -> None:
+    """protocol.md section 4: UNAVAILABLE only "without an already-established task
+    failure". A run state declared over a VIOLATED mandatory criterion stays FAIL (#130)."""
+    rec = _record(run_state=declared, reason="provider unavailable", criteria=[
+        {"id": "a", "mandatory": True, "outcome": "VIOLATED"},
+        {"id": "b", "mandatory": True, "outcome": "UNKNOWN"},
+    ])
+    assert records.derive_status(rec) == "FAIL"
+
+
+@pytest.mark.parametrize("declared", records.DECLARABLE_RUN_STATES)
+def test_a_declared_run_state_over_UNKNOWN_criteria_is_still_honoured(declared: str) -> None:
+    rec = _record(run_state=declared, criteria=[
+        {"id": "a", "mandatory": True, "outcome": "UNKNOWN"},
+    ])
+    assert records.derive_status(rec) == declared
+
+
+def test_a_FAIL_status_beside_a_declared_run_state_is_refused() -> None:
+    """The status is right, but run_state still reads as a non-run to anything that
+    trusts it (attempt-accounting does). derived-status must refuse the pair (#130)."""
+    rec = _record(kind=records.VERIFIED_RESULT, status="FAIL", run_state="UNAVAILABLE", reason="provider unavailable",
+                  criteria=[{"id": "a", "mandatory": True, "outcome": "VIOLATED", "evidence": ["x"]}])
+    problems = list(records.derived_status(rec))
+    assert len(problems) == 1 and "cannot relabel a failure" in problems[0]
+
+
 def test_a_derived_status_may_not_be_declared_as_a_run_state() -> None:
     """PASS is DERIVED. Letting a record declare it would reopen the forged verdict
     through the run_state field instead of the status field."""

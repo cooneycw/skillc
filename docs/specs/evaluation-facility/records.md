@@ -358,15 +358,22 @@ Without this rule it would derive PASS.
 
 ### Derivation
 
-Unchanged from version 1. From interfaces.md, in the order the sentences bind:
+From interfaces.md, in the order the sentences bind:
 
-1. A declared `UNAVAILABLE` or `NOT_RUN` run state is honoured.
-2. "An established mandatory violation remains FAIL when another criterion is
+1. "An established mandatory violation remains FAIL when another criterion is
    unknown" - so any `VIOLATED` mandatory criterion yields `FAIL`, tested **before**
-   unknowns.
+   unknowns **and before any declared run state**.
+2. A declared `UNAVAILABLE` or `NOT_RUN` run state is honoured.
 3. "missing mandatory evidence prevents PASS" - so any non-`SATISFIED` mandatory
    criterion yields `INCONCLUSIVE`.
 4. Otherwise `PASS`.
+
+Step 1 moved ahead of the run state in #130. Version 1 honoured a declared run
+state first, which contradicted protocol.md section 4: UNAVAILABLE applies only
+"without an already-established task failure". Honouring it first let a FAIL be
+relabelled UNAVAILABLE and validate clean. A record that declares a run state
+its criteria contradict is refused by `derived-status`, even when its `status`
+already says FAIL.
 
 Optional criteria never enter this computation. **No mandatory criteria yields
 `INCONCLUSIVE`, never `PASS`.** The other three statuses may not be declared as a
@@ -543,11 +550,11 @@ bundle cases as well, including against every record rule.
 | `attempt-binding` | record | no attempt; malformed attempt ID; no trial |
 | `installation-receipt` | record | empty install; no readiness; subject without digest |
 | `trial-ledger` | record | no trials; a trial with no attempts; missing grader identity; malformed attempt ID; `case.observes_selection` present but not a boolean (#26) |
-| `artifact-digest` | record | an artifact without a digest; an empty manifest |
+| `artifact-digest` | record | an artifact without a digest; an empty manifest; a null `path`, `type` or `size` beside a valid digest (#130) |
 | `observation-coverage` | record | a silent required stream; an unknown origin; no `capture_failures`; a `skill-invocations` count that is not `UNKNOWN` under incomplete coverage, or not a real integer under complete coverage; complete coverage naming no skills; a duplicate skill path with conflicting counts (#39) |
-| `criterion-vocabulary` | record | an outcome outside the vocabulary; a non-boolean `mandatory` (`"true"` would drop a violation out of the derivation) |
-| `result-evidence` | record | SATISFIED without evidence; UNKNOWN without `missing`; no graded digests; no grader; a run state without reason |
-| `derived-status` | record | a status copied rather than derived |
+| `criterion-vocabulary` | record | an outcome outside the vocabulary; a non-boolean `mandatory` (`"true"` would drop a violation out of the derivation); a criterion with no `id` (#130) |
+| `result-evidence` | record | SATISFIED without evidence; UNKNOWN without `missing`; no graded digests; no grader; a run state without reason; a `run_state` other than `UNAVAILABLE`/`NOT_RUN` (#130) |
+| `derived-status` | record | a status copied rather than derived; an `UNAVAILABLE` or `NOT_RUN` run state declared over an established mandatory `VIOLATED` (#130) |
 | `verdict-tiers` | record | a `verification.verdicts` entry for a tier absent from `verification.tiers_enabled`; an enabled tier with no entry at all; an `UNAVAILABLE` verdict with no stated reason (#69) |
 | `attempt-lifecycle` | record | an unknown stop reason or disposition; a non-result without a reason; captured before a confirmed stop; no cleanup |
 | `agent-observation` | record | an unknown field; a missing field; an object in a scalar field or a census map; a `mandatory` flag that is a string, an integer or absent (each would drop a VIOLATED criterion out of the derivation); positive conclusions from zero or two transcript files; eligibility that disagrees with prompt delivery and the canary; a PASS its own criteria do not derive; both a grade and a blocked reason; an unobserved status without a reason (#106) |
