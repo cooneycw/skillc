@@ -22,18 +22,28 @@ exited 0 and would have been graded.
   looks like a version pin (`*_VERSION`) - an unrelated build argument is
   none of this check's business.
 - `verify_codex_sidecar.js` - run inside the image build (`node
-  verify_codex_sidecar.js`) right after the pinned npm installs. Resolves
-  the REAL native `codex` executable and its `codex-code-mode-host` sidecar
-  through Node's own module resolution against the platform-specific
-  `@openai/codex-<platform>-<arch>` package - the same way the npm
-  package's own `bin/codex.js` launcher does - rather than searching beside
-  the launcher script itself, which is a different package entirely.
-  Confirmed by extracting the pinned 0.157.1 tarballs directly: the sidecar
-  ships at `vendor/x86_64-unknown-linux-musl/bin/codex-code-mode-host`,
-  beside the native `codex` binary, not beside `bin/codex.js`. Requires the
-  sidecar to be a regular, executable file - a same-named directory or a
-  non-executable placeholder both fail the build. Testable without Docker,
-  against a synthetic `NODE_PATH` layout
+  /tmp/verify_codex_sidecar.js`, copied there by the Dockerfile) right
+  after the pinned npm installs. Resolves the REAL native `codex`
+  executable and its `codex-code-mode-host` sidecar the same TWO-HOP way
+  the npm package's own `bin/codex.js` launcher does: `npm root -g` for the
+  real global root, then `@openai/codex`'s platform-specific
+  `@openai/codex-<platform>-<arch>` optional dependency via `createRequire`
+  scoped to `@openai/codex`'s own directory - never a bare
+  `require.resolve()` from wherever this script happens to run, which is
+  the earlier bug: the Dockerfile copies it to `/tmp`, and a bare resolve
+  from there walks up `/tmp`'s own ancestry, nowhere near where npm puts a
+  global install (a real operator build failed on exactly this,
+  `Dockerfile:80`). Confirmed by extracting the pinned 0.157.1 tarballs
+  directly: the sidecar ships at
+  `vendor/x86_64-unknown-linux-musl/bin/codex-code-mode-host`, beside the
+  native `codex` binary, not beside `bin/codex.js`, and nested under
+  `@openai/codex/node_modules/`, not the shared global root beside it.
+  Requires the sidecar to be a regular, executable file - a same-named
+  directory or a non-executable placeholder both fail the build. Testable
+  without Docker or a real npm, against a fake global root laid out the
+  way a real `npm install -g` nests it, with the script copied to a
+  scratch directory unrelated to the fixture and no `NODE_PATH` set - the
+  real invocation shape, via the test-only `CODEX_NPM_ROOT` override
   (`tests/test_trial_bootstrap.py`).
 
 ## What is proven here vs. owed to the live run

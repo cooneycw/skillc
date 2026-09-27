@@ -154,14 +154,39 @@ def test_check_interpreters_reports_an_unparseable_dockerfile():
 # never the npm wrapper's own directory (Codex code-review finding on #78:
 # an earlier version searched beside bin/codex.js, which is the wrong
 # directory - confirmed by extracting the real 0.157.1 tarballs).
+#
+# A second bug shipped past that fix and reached a real operator build
+# (Dockerfile:80, "Cannot find module '@openai/codex-linux-x64/package.json'"):
+# the Dockerfile COPYs this script to /tmp and runs it from there, so a bare
+# require.resolve() walks up from /tmp's own ancestry - nowhere near a real
+# npm global install. The FIXTURE below matches the REAL shape two ways the
+# old one didn't: the script runs from a scratch directory with no relation
+# to the fixture (never beside it, never above it), and CODEX_NPM_ROOT is
+# the only override (never NODE_PATH, which the real Dockerfile invocation
+# never sets and which resolves completely differently) - it stands in for
+# what `npm root -g` prints for a real global install, and the platform
+# package is nested under @openai/codex/node_modules/, exactly where npm
+# puts an optional dependency of a globally-installed package, never at the
+# shared global root beside it.
 # --------------------------------------------------------------------------
 
 
-def _fake_platform_package(root: Path, *, native_exists=True, sidecar=("file", "executable")):
-    """A minimal fake `@openai/codex-linux-x64` layout under `root`, for
-    `NODE_PATH` to resolve. `sidecar` is `(kind, mode)`: kind is 'file',
-    'dir' or 'missing'; mode is 'executable' or 'not-executable'."""
-    pkg_dir = root / "@openai" / "codex-linux-x64"
+def _fake_global_install(root: Path, *, codex_exists=True, platform_package_exists=True, native_exists=True, sidecar=("file", "executable")):
+    """A fake npm global root under `root` (i.e. what `npm root -g` would
+    print), laid out the way a real `npm install -g @openai/codex` actually
+    nests its platform-specific optional dependency: under codex's OWN
+    node_modules, never beside it. `sidecar` is `(kind, mode)`: kind is
+    'file', 'dir' or 'missing'; mode is 'executable' or 'not-executable'."""
+    global_root = root / "node_modules"
+    if not codex_exists:
+        global_root.mkdir(parents=True)
+        return global_root
+    codex_dir = global_root / "@openai" / "codex"
+    (codex_dir / "bin").mkdir(parents=True)
+    (codex_dir / "package.json").write_text('{"name": "@openai/codex", "type": "module"}', encoding="utf-8")
+    if not platform_package_exists:
+        return global_root
+    pkg_dir = codex_dir / "node_modules" / "@openai" / "codex-linux-x64"
     vendor_bin = pkg_dir / "vendor" / "x86_64-unknown-linux-musl" / "bin"
     vendor_bin.mkdir(parents=True)
     (pkg_dir / "package.json").write_text('{"name": "@openai/codex-linux-x64"}', encoding="utf-8")
@@ -180,13 +205,22 @@ def _fake_platform_package(root: Path, *, native_exists=True, sidecar=("file", "
     elif kind == "dir":
         sidecar_path.mkdir()
     # kind == "missing": create nothing
-    return root
+    return global_root
 
 
-def _run_sidecar_check(node_path: Path) -> subprocess.CompletedProcess:
+def _run_sidecar_check(tmp_path: Path, npm_root: Path) -> subprocess.CompletedProcess:
+    """Copy the script to a scratch directory unrelated to `npm_root` and run
+    it from there with no NODE_PATH - the real Dockerfile invocation shape
+    (COPY to /tmp, run from /tmp), never the script's own repo location and
+    never a directory above or beside the fixture."""
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    script_copy = scratch / SIDECAR_SCRIPT.name
+    shutil.copy(SIDECAR_SCRIPT, script_copy)
     return subprocess.run(
-        ["node", str(SIDECAR_SCRIPT)],
-        env={"NODE_PATH": str(node_path), "PATH": "/usr/bin:/bin"},
+        ["node", str(script_copy)],
+        cwd=scratch,
+        env={"CODEX_NPM_ROOT": str(npm_root), "PATH": "/usr/bin:/bin"},
         capture_output=True,
         text=True,
         check=False,
@@ -195,17 +229,36 @@ def _run_sidecar_check(node_path: Path) -> subprocess.CompletedProcess:
 
 @needs_node
 def test_verify_codex_sidecar_accepts_a_valid_layout(tmp_path):
-    _fake_platform_package(tmp_path)
-    result = _run_sidecar_check(tmp_path)
+    npm_root = _fake_global_install(tmp_path)
+    result = _run_sidecar_check(tmp_path, npm_root)
     assert result.returncode == 0, result.stderr
+
+
+@needs_node
+def test_verify_codex_sidecar_refuses_when_codex_itself_is_absent(tmp_path):
+    """Red case: the real operator failure (Dockerfile:80) - a bare
+    require.resolve() from a script copied to /tmp can't see a real global
+    install at all, however correctly npm installed it."""
+    npm_root = _fake_global_install(tmp_path, codex_exists=False)
+    result = _run_sidecar_check(tmp_path, npm_root)
+    assert result.returncode != 0
+    assert "cannot resolve @openai/codex from the npm global root" in result.stderr
+
+
+@needs_node
+def test_verify_codex_sidecar_refuses_when_the_platform_package_is_absent(tmp_path):
+    npm_root = _fake_global_install(tmp_path, platform_package_exists=False)
+    result = _run_sidecar_check(tmp_path, npm_root)
+    assert result.returncode != 0
+    assert "cannot resolve @openai/codex-linux-x64" in result.stderr
 
 
 @needs_node
 def test_verify_codex_sidecar_refuses_a_missing_sidecar(tmp_path):
     """Red case: the exact issue #10 lesson A2 failure - codex installed,
     sidecar absent."""
-    _fake_platform_package(tmp_path, sidecar=("missing", ""))
-    result = _run_sidecar_check(tmp_path)
+    npm_root = _fake_global_install(tmp_path, sidecar=("missing", ""))
+    result = _run_sidecar_check(tmp_path, npm_root)
     assert result.returncode != 0
     assert "missing" in result.stderr
 
@@ -214,25 +267,18 @@ def test_verify_codex_sidecar_refuses_a_missing_sidecar(tmp_path):
 def test_verify_codex_sidecar_refuses_a_directory_posing_as_the_sidecar(tmp_path):
     """Red case from the Codex review: a directory or non-executable file
     matching the name must not satisfy the check."""
-    _fake_platform_package(tmp_path, sidecar=("dir", ""))
-    result = _run_sidecar_check(tmp_path)
+    npm_root = _fake_global_install(tmp_path, sidecar=("dir", ""))
+    result = _run_sidecar_check(tmp_path, npm_root)
     assert result.returncode != 0
     assert "not a regular file" in result.stderr
 
 
 @needs_node
 def test_verify_codex_sidecar_refuses_a_non_executable_sidecar(tmp_path):
-    _fake_platform_package(tmp_path, sidecar=("file", "not-executable"))
-    result = _run_sidecar_check(tmp_path)
+    npm_root = _fake_global_install(tmp_path, sidecar=("file", "not-executable"))
+    result = _run_sidecar_check(tmp_path, npm_root)
     assert result.returncode != 0
     assert "not executable" in result.stderr
-
-
-@needs_node
-def test_verify_codex_sidecar_refuses_when_the_platform_package_is_absent(tmp_path):
-    result = _run_sidecar_check(tmp_path)  # empty NODE_PATH root
-    assert result.returncode != 0
-    assert "cannot resolve" in result.stderr
 
 
 def test_dockerfile_creates_a_fixed_candidate_user_and_matching_group():
