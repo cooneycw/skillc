@@ -1,0 +1,20 @@
+{
+  "branch": "issue-26-selection-probe-driver",
+  "counts": {
+    "accepted": 6,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "25664408307d149cdf11274fff8558733e142bf2",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "26",
+  "passes": 2,
+  "recorded_at": "2026-09-27T13:24:08Z",
+  "red_cases": {
+    "already_covered": 8,
+    "proposed": 14
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "schema": 1,
+  "status": "ran"
+}
