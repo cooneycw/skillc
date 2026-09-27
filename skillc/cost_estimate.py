@@ -88,6 +88,13 @@ class RunCostEstimate:
     estimated_output_tokens_per_attempt: int
     estimated_usd: float
     assumptions: dict[str, str] = field(default_factory=dict)
+    #: 0 (deterministic tier only, the default - #69's own tiers 2/3 cost
+    #: nothing extra unless explicitly enabled), 1 or 2 judge tiers enabled.
+    #: Each enabled tier makes its own paid call per attempt (#69 ADR 0005:
+    #: "two paid judge calls per trial when both are enabled").
+    judge_tiers_enabled: int = 0
+    judge_calls_total: int = 0
+    judge_price: ModelPrice | None = None
 
 
 def estimate(
@@ -97,31 +104,58 @@ def estimate(
     estimated_output_tokens_per_attempt: int,
     price: ModelPrice,
     assumptions: dict[str, str] | None = None,
+    judge_tiers_enabled: int = 0,
+    judge_price: ModelPrice | None = None,
+    estimated_judge_input_tokens_per_call: int = 0,
+    estimated_judge_output_tokens_per_call: int = 0,
 ) -> RunCostEstimate:
-    """A pure projection: `trials * attempts_per_trial` paid model
+    """A pure projection: `trials * attempts_per_trial` paid AGENT
     invocations, each estimated at the given input/output token counts,
-    priced at `price`. No judge-tier cost is added here - ADR 0005's tiers 2
-    and 3 are "not yet delivered" (the ADR's own wording), so a selection
-    probe using today's deterministic grader only pays for the one agent
-    invocation per attempt. A caller running this once tiers exist must add
-    their cost explicitly; this function does not guess at a feature that
-    does not exist yet.
+    priced at `price` - plus, when `judge_tiers_enabled` is 1 or 2 (#69's
+    same-model and independent tiers), one paid JUDGE call per enabled tier
+    PER ATTEMPT, each estimated separately at `judge_price` and its own
+    token assumptions. `judge_tiers_enabled=0` (the default) reproduces this
+    function's pre-#69-follow-up behavior exactly: no judge cost is added
+    unless a caller explicitly enables it, matching ADR 0005's "tiers 2 and 3
+    make paid model calls... a run manifest's cost estimate must count both"
+    only when they are actually requested, never speculatively.
 
-    Refuses non-positive trial/attempt counts or token estimates - a "free"
-    estimate from a zero is the same silent-empty-population defect this
-    codebase refuses elsewhere (`skillc/leak.py`, `skillc/records.py`'s
+    Refuses non-positive trial/attempt counts or AGENT token estimates - a
+    "free" estimate from a zero is the same silent-empty-population defect
+    this codebase refuses elsewhere (`skillc/leak.py`, `skillc/records.py`'s
     empty-capture rule): an estimate of $0 must mean "priced at zero
-    attempts", never "nothing to estimate"."""
+    attempts", never "nothing to estimate". `judge_tiers_enabled` outside
+    `{0, 1, 2}`, or judges enabled without a `judge_price` and positive judge
+    token assumptions, are refused the same way - a cost enabled but not
+    priced is exactly the silent gap ADR 0005 exists to close."""
     if trials < 1:
         raise ValueError(f"trials must be a positive integer, not {trials!r}")
     if attempts_per_trial < 1:
         raise ValueError(f"attempts_per_trial must be a positive integer, not {attempts_per_trial!r}")
     if estimated_input_tokens_per_attempt < 1 or estimated_output_tokens_per_attempt < 1:
         raise ValueError("estimated token counts must be positive - an attempt that spends nothing was not modeled")
+    if judge_tiers_enabled not in (0, 1, 2):
+        raise ValueError(f"judge_tiers_enabled must be 0, 1 or 2 (#69 has exactly two judge tiers), not {judge_tiers_enabled!r}")
 
     total_attempts = trials * attempts_per_trial
     input_cost = total_attempts * estimated_input_tokens_per_attempt / 1_000_000 * price.input_usd_per_million
     output_cost = total_attempts * estimated_output_tokens_per_attempt / 1_000_000 * price.output_usd_per_million
+
+    judge_calls_total = 0
+    judge_cost = 0.0
+    if judge_tiers_enabled > 0:
+        if judge_price is None:
+            raise ValueError("judge_tiers_enabled > 0 requires judge_price - a cost enabled but not priced is refused")
+        if estimated_judge_input_tokens_per_call < 1 or estimated_judge_output_tokens_per_call < 1:
+            raise ValueError(
+                "judge_tiers_enabled > 0 requires positive estimated_judge_input_tokens_per_call and "
+                "estimated_judge_output_tokens_per_call - a judge call estimated to cost nothing was not modeled"
+            )
+        judge_calls_total = total_attempts * judge_tiers_enabled
+        judge_input_cost = judge_calls_total * estimated_judge_input_tokens_per_call / 1_000_000 * judge_price.input_usd_per_million
+        judge_output_cost = judge_calls_total * estimated_judge_output_tokens_per_call / 1_000_000 * judge_price.output_usd_per_million
+        judge_cost = judge_input_cost + judge_output_cost
+
     return RunCostEstimate(
         trials=trials,
         attempts_per_trial=attempts_per_trial,
@@ -133,8 +167,11 @@ def estimate(
         # and the $5 ceiling, and rounding a tiny positive cost down to
         # 0.0000 would let it authorize against a budget of $0 (Codex
         # code-review finding on #26). Round only for DISPLAY, never here.
-        estimated_usd=input_cost + output_cost,
+        estimated_usd=input_cost + output_cost + judge_cost,
         assumptions=dict(assumptions or {}),
+        judge_tiers_enabled=judge_tiers_enabled,
+        judge_calls_total=judge_calls_total,
+        judge_price=judge_price if judge_tiers_enabled > 0 else None,
     )
 
 

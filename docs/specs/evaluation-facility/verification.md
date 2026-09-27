@@ -386,26 +386,33 @@ limitation are recorded in [ADR 0006](../../decisions/0006-grading-tiers.md)):
 
 1. **Deterministic** (built, this is `GRADING_TIER`). Structural/outcome
    checks, no model call. Everything above this section describes it.
-2. **Same-model** (the seam is built - `skillc/judge.py`, this PR; no real
-   adapter yet). A model call added on top. If that model is the same one
-   that produced the candidate's work, this is the weaker, "generic" case: it
-   reintroduces the self-assessment bias independent grading exists to avoid.
-   A verdict record from this tier MUST say so in the record itself, not only
-   in documentation, so a same-model grade is never read as an independent one.
-3. **Independent** (the seam is built; no real adapter yet). The judge call is
+2. **Same-model** (the seam - `skillc/judge.py` - and a real adapter -
+   `skillc/judge_mcp_second_opinion.py` - are both built). A model call added
+   on top. If that model is the same one that produced the candidate's work,
+   this is the weaker, "generic" case: it reintroduces the self-assessment
+   bias independent grading exists to avoid. A verdict record from this tier
+   MUST say so in the record itself, not only in documentation, so a
+   same-model grade is never read as an independent one.
+3. **Independent** (seam and real adapter both built). The judge call is
    routed to a DIFFERENT, independently configured model -
    [`mcp-second-opinion`](https://github.com/cooneycw/mcp-second-opinion) is
-   the owner-named planned mechanism (#69), a standalone public tool with no
-   coupling to this project; skillc does not vendor or depend on it (ADR 0003).
+   the owner-named mechanism (#69), a standalone public tool with no
+   coupling to this project; skillc does not vendor or depend on it (ADR 0003) -
+   `skillc/judge_mcp_second_opinion.py` talks MCP to it as an external
+   process (stdlib `subprocess` plus stdio JSON-RPC, no SDK).
 
 **The seam vs. the real adapter, precisely.** `skillc.judge.Judge` is a
 stdlib-only Protocol (`describe`/`evaluate`), `skillc.judge.run_tier` is what
 `verify.grade`'s `judges` parameter calls per tier, and `skillc.judge.FakeJudge`
-is the ONLY implementation this build ships - #69's own acceptance forbids a
-real model call in the test suite. An `mcp-second-opinion` adapter that
-implements this same Protocol, the cost-estimate extension for its paid calls,
-and the calling convention that speaks MCP to the server as an external
-process are a follow-up PR (ADR 0006), kept separate to stay reviewable.
+is what every test in the seam's OWN pull request uses - #69's own acceptance
+forbids a real model call in the test suite. `skillc.judge_mcp_second_opinion.
+McpSecondOpinionJudge` (a follow-up PR, ADR 0006) implements the same
+Protocol against a real server; its OWN tests drive a committed fake MCP
+server instead (`tests/fixtures/mcp-second-opinion/fake_server.py`), so the
+"no real model call" rule holds for both PRs, enforced by an AST-walk
+structural test over every test file, not merely by convention. What
+remains owed: running the judge inside #10's grading boundary (a separate
+backend instance) rather than as a bare host subprocess.
 
 ### Verdicts are a keyed collection, never a single value (owner ruling on #69)
 
@@ -441,7 +448,9 @@ So the shape is a collection keyed by tier name, not one value:
   fewer than two REAL (non-`UNAVAILABLE`) verdicts exist to compare -
   including the common case today, where no `judges` argument is given at
   all. This build never fabricates a comparison to fill the field, and a
-  real (non-fake) judge call is still owed to the follow-up adapter PR.
+  real (non-fake) judge call is still owed - not to the adapter, which is now
+  delivered (`skillc.judge_mcp_second_opinion.McpSecondOpinionJudge`), but to
+  an authorised budget and an installed server, neither of which exists yet.
 - **The top-level `status`/`criteria` are unchanged, and today are exactly the
   deterministic tier's own** - the same values as
   `verification.verdicts.deterministic.status`/`.criteria`, literally, not a
@@ -483,7 +492,9 @@ Rules the seam enforces, delivered in this PR:
   cost-stop discipline as `lifecycle.py`'s real-agent guard (addendum item 51):
   nothing in this build's test suite may make one, by construction - every
   `Judge` in this test suite is `skillc.judge.FakeJudge`. The cost-estimate
-  extension for a real judge's paid calls is owed to the follow-up adapter PR.
+  extension for a real judge's paid calls (`skillc.cost_estimate.estimate`'s
+  `judge_tiers_enabled`/`judge_price` parameters) is delivered in the
+  follow-up adapter PR, described below.
 - **Anything sent to an external judge passes the machine-identity leak check
   (#63) first** - `skillc.judge.run_tier` calls `check_judge_input` before
   EITHER `describe()` or `evaluate()`, and a leak is a REFUSAL to grade at all
@@ -491,12 +502,16 @@ Rules the seam enforces, delivered in this PR:
   unreachable judge and a judge that must not receive this input are
   different facts (`test_grade_refuses_and_writes_nothing_when_goal_text_leaks`).
 
-**What this PR does not deliver**, owed to the follow-up adapter PR (ADR
-0006): the real `mcp-second-opinion` MCP client, the cost-estimate extension
-counting its paid calls toward a run's estimate, and any wiring that decides
-WHICH judges a real trial's `config` requests. `verify.grade`'s `judges`
-parameter and `goal_text` are plumbing a caller must supply explicitly; no
-default configuration turns them on.
+**What this PR does not deliver.** The real `mcp-second-opinion` MCP client
+and the cost-estimate extension counting its paid calls toward a run's
+estimate are now delivered, in the follow-up adapter PR (ADR 0006;
+`skillc/judge_mcp_second_opinion.py`, `skillc.cost_estimate`'s
+`judge_tiers_enabled`/`judge_price` parameters) - see the "Grading tiers
+(#69)" section above. Still not delivered by either PR: any wiring that
+decides WHICH judges a real trial's `config` requests, and running the judge
+inside #10's grading boundary rather than as a bare host subprocess.
+`verify.grade`'s `judges` parameter and `goal_text` are plumbing a caller must
+supply explicitly; no default configuration turns them on.
 
 ## Issue #10 addendum items owned by grading (9-13, 57-61)
 

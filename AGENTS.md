@@ -36,8 +36,15 @@ specification rejects, and it proves its own rules can fail before reporting the
   the result; see [verification spec](docs/specs/evaluation-facility/verification.md)
 - `skillc/judge.py` - the grading-tier judge seam (#69): a stdlib-only `Judge` Protocol,
   schema-constrained output validation, per-tier availability, the leak-check on judge
-  input, and the same-model-vs-independent disagreement record; `FakeJudge` is the only
-  implementation shipped - see [ADR 0006](docs/decisions/0006-grading-tiers.md)
+  input, and the same-model-vs-independent disagreement record; `FakeJudge` is what
+  every test in this module's own PR uses - see [ADR 0006](docs/decisions/0006-grading-tiers.md)
+- `skillc/judge_mcp_second_opinion.py` - the real `mcp-second-opinion` `Judge` adapter
+  (#69 follow-up): speaks MCP to the server as an external process (stdlib `subprocess`
+  plus stdio JSON-RPC, no SDK); every one of its own tests drives the committed fake
+  server below instead, enforced by an AST-walk structural test
+- `tests/fixtures/mcp-second-opinion/fake_server.py` - a committed fake MCP stdio server
+  (`happy`/`garbage-handshake`/`hang`/`tool-error`/`unparseable-verdict` modes) that
+  `skillc/judge_mcp_second_opinion.py`'s own tests drive instead of a real judge
 - `skillc/trial_bootstrap.py` - the per-trial home, onboarding seed, MCP config,
   invocation and skill+tool liveness canary a live agent needs to actually start and
   work inside a Docker trial, independent of which `ExecutionBackend` runs it; see
