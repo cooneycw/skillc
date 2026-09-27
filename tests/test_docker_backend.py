@@ -621,6 +621,53 @@ def test_execute_writes_the_subjects_stdout_back_as_observations(
     backend.destroy(handle)
 
 
+def test_execute_bounds_captured_stdout_and_keeps_draining_past_the_cap(
+    base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """Red case (#102): the pre-fix drain appended every chunk to an
+    unbounded `list[bytes]` with no cap at all, so a subject that writes
+    continuously could exhaust the HOST controller's own memory before
+    `limits.timeout` ever fires - a resource-exhaustion path independent of
+    any container-side memory limit.
+
+    This subject writes 200,000 bytes - comfortably more than an OS pipe's
+    buffer (typically 64 KiB) - while `max_captured_stdout_bytes` is set to
+    100: if the drain stopped CONSUMING the pipe once past the cap (rather
+    than only stopping RETENTION), the subject's own `write()` would block on
+    the now-full, undrained pipe, and this call would time out instead of
+    the subject exiting cleanly - the deadlock this fix exists to prevent."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000021")
+    backend.install(handle, {})
+    script = "import sys; sys.stdout.buffer.write(b'x' * 200_000); sys.stdout.flush()"
+    result = backend.execute(
+        handle, [sys.executable, "-c", script], Limits(timeout=5, max_captured_stdout_bytes=100),
+    )
+    assert result.reason == "exited", "a full undrained pipe would time out the subject instead - it must not"
+    assert result.exit_code == 0
+    assert result.stdout_truncated is True
+    assert result.stdout_bytes == 200_000
+    dest = tmp_path / "export"
+    backend.export(handle, dest)
+    assert len((dest / "observations").read_bytes()) == 100
+    backend.destroy(handle)
+
+
+def test_execute_does_not_report_truncation_under_the_cap(base: Path, docker_state: Path) -> None:
+    """Green case beside the red one: a subject that stays under the cap
+    must report `stdout_truncated=False` and its own true byte count -
+    proves the flag is not simply always set."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000022")
+    backend.install(handle, {})
+    result = backend.execute(
+        handle, [sys.executable, "-c", "print('short')"], Limits(timeout=5, max_captured_stdout_bytes=100),
+    )
+    assert result.stdout_truncated is False
+    assert result.stdout_bytes == len(b"short\n")
+    backend.destroy(handle)
+
+
 def test_execute_timeout_kills_the_container_and_confirm_stopped_agrees(
     base: Path, docker_state: Path,
 ) -> None:

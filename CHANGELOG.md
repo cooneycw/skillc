@@ -720,6 +720,38 @@ collection) closes.
   needs no skip and none remains. Reproduced the reviewer's own manual proof
   with `git` unresolvable on `PATH`: a planted message-number citation in
   `skillc/reap.py` fails the guard, cleanly reverted, all nine tests green.
+- **`DockerBackend.execute()` bounds captured stdout instead of buffering it
+  unboundedly** (#102, Refs #77): found by cross-model review of PR #97 (the
+  operator demo command) - the stdout drain it added appended every chunk to
+  an unbounded `list[bytes]`, so a subject writing continuously could exhaust
+  the HOST controller's own memory before `Limits.timeout` ever fired, a
+  resource-exhaustion path independent of any container-side memory limit.
+  `Limits` gains `max_captured_stdout_bytes` (default 8 MiB, matching
+  `skillc.trial.Limits.max_stream_bytes`'s own default for the same class of
+  bound - a different dataclass of the same name for a different stage, not
+  a shared config surface); `ExecuteResult` gains `stdout_truncated`/
+  `stdout_bytes`, the latter the subject's bytes observed by the time the
+  drain stopped waiting - not a guaranteed-EOF total (see "still owed"
+  below). The new `_BoundedDrain` keeps reading the pipe to EOF past the cap
+  - discarding, never retaining - so the subject can never block on a full,
+  undrained pipe: a committed red case writes 200,000 bytes against a
+  100-byte cap and asserts `reason == "exited"`, not `"timeout"`, confirmed
+  to actually deadlock (`reason == "timeout"`) when the drain is mutated to
+  stop reading at the cap instead of only stopping retention.
+  `skillc/lifecycle.py` surfaces `observations_truncated`/`observations_bytes`
+  on the record itself, not only the raw journal event - the same gap
+  `signal` already had to be surfaced past `trial.finalize`'s fixed-key
+  filter, closed here for a truncated capture too. All five new tests
+  (two in `docker_backend`, two in `lifecycle`, plus one for the deadlock
+  mutation) confirmed to fail on the pre-fix code first. Still owed
+  (Nit Store, skillc#20): the timed thread join before reading the drain's
+  own state can't distinguish "the pipe reached EOF" from "we stopped
+  waiting for it" - a descendant process holding the fd open past the
+  parent's exit could understate `stdout_bytes`. Pre-existing and symmetric
+  with stderr's own drain, untouched by this fix; not introduced or
+  worsened here.
+
+### Fixed
 
 - A non-boolean criterion `mandatory` flag is refused, not silently dropped
   from the derivation (#37).
