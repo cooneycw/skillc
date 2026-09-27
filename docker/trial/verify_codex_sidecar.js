@@ -80,19 +80,22 @@ function npmGlobalRoot() {
   }
 }
 
-// require.resolve's `paths` option does not treat a given directory as a
-// node_modules folder itself - it walks UP from each entry looking for one,
-// exactly like ordinary module resolution from a file at that location. The
-// value `npm root -g` prints (e.g. ".../lib/node_modules") already IS that
-// node_modules folder, so the walk has to start one level above it - its
-// parent - or the search looks for ".../lib/node_modules/node_modules/...".
-let codexPackageJsonPath;
-try {
-  codexPackageJsonPath = require.resolve("@openai/codex/package.json", {
-    paths: [path.dirname(npmGlobalRoot())],
-  });
-} catch (err) {
-  fail("cannot resolve @openai/codex from the npm global root (" + err.message + ")");
+// A direct path join, never require.resolve() here (a Codex code-review
+// finding on this same PR): `require.resolve(id, { paths })` does not
+// confine the search to the given directory - it treats each path as a
+// STARTING point and then walks UP through every ancestor's own
+// node_modules, exactly like ordinary resolution from a file there. `npm
+// root -g` already gives the exact directory npm would use, so there is
+// nothing to search for - an unrelated @openai/codex sitting in some
+// ancestor directory (a stray dev dependency, a different global prefix
+// layered on PATH) must never let this check pass for the WRONG
+// installation. Confirmed: with an empty declared global root but a real
+// @openai/codex two directories up, require.resolve(..., { paths }) silently
+// resolved to the ancestor copy instead of refusing.
+const npmRoot = npmGlobalRoot();
+const codexPackageJsonPath = path.join(npmRoot, "@openai", "codex", "package.json");
+if (!existsSync(codexPackageJsonPath)) {
+  fail("cannot resolve @openai/codex from the npm global root " + npmRoot);
 }
 
 const codexRequire = createRequire(codexPackageJsonPath);

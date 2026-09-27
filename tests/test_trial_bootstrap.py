@@ -246,6 +246,23 @@ def test_verify_codex_sidecar_refuses_when_codex_itself_is_absent(tmp_path):
 
 
 @needs_node
+def test_verify_codex_sidecar_ignores_an_unrelated_codex_in_an_ancestor_directory(tmp_path):
+    """Red case from a Codex code-review finding on this same fix:
+    require.resolve(id, {paths}) does not confine its search to the given
+    directory - it walks UP through every ancestor's own node_modules, so an
+    unrelated @openai/codex two directories above the DECLARED (empty) npm
+    root must not let this pass for the wrong installation."""
+    ancestor_codex = tmp_path / "node_modules" / "@openai" / "codex"
+    ancestor_codex.mkdir(parents=True)
+    (ancestor_codex / "package.json").write_text('{"name": "@openai/codex", "type": "module"}', encoding="utf-8")
+    declared_root = tmp_path / "empty-prefix" / "lib" / "node_modules"
+    declared_root.mkdir(parents=True)
+    result = _run_sidecar_check(tmp_path, declared_root)
+    assert result.returncode != 0
+    assert "cannot resolve @openai/codex from the npm global root" in result.stderr
+
+
+@needs_node
 def test_verify_codex_sidecar_refuses_when_the_platform_package_is_absent(tmp_path):
     npm_root = _fake_global_install(tmp_path, platform_package_exists=False)
     result = _run_sidecar_check(tmp_path, npm_root)

@@ -971,7 +971,16 @@ collection) closes.
   invocation never sets and no real npm install ever produces) - the
   rewritten fixture copies the script to a scratch directory unrelated to a
   correctly-nested fake global root and confirmed red on the pre-fix
-  script for every case but one already covered (#78, #10).
+  script for every case but one already covered. Cross-model review then
+  found a second bug in the fix itself: `require.resolve(id, { paths })`
+  does not confine its search to the given directory, it walks UP through
+  every ancestor's own `node_modules` - so an unrelated `@openai/codex`
+  sitting two directories above an otherwise-empty declared global root
+  could still resolve, and this check could certify the wrong installation.
+  Replaced that first hop with a direct path join against the exact
+  directory `npm root -g` names, confirmed the ancestor-contamination case
+  now refuses correctly, and confirmed the same case goes red again when
+  reverted to the `require.resolve` form (#78, #10).
 
 ### CI / process
 
