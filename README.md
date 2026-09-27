@@ -30,13 +30,24 @@ the trial controller, the independent verifier, the execution-backend seam,
 and the exposure check (`skillc exposure`, #55) all exist and are exercised
 by real evidence (see the machine-readable table below, checked in CI
 against [`docs/milestones.json`](docs/milestones.json), #73). The
-Docker-backed implementation of that seam also exists, but **#10 is not
-closed**: every Docker-backend claim - the composed argv, resource limits,
-ownership labels, conformance cases, the failure-path matrix and
-label-scoped reaping - is proven here only against a fake `docker` CLI, not
-real evidence; the real daemon boundary remains owed to the operator's live
-run. See ["First milestone"](#first-milestone-the-docker-backend-is-built-and-tested-against-a-fake-daemon-the-live-run-and-level-2-remain-proposed)
-below for exactly what that does and does not establish. The task levels
+Docker-backed implementation of that seam also exists, and **#10 is now
+closed**: the operator ran `skillc demo`, `--control` and `--subject` for
+both collections on a real Docker daemon - every command exited `0`, every
+acceptance item read `MET`, and the three seeded `--control` failures were
+all caught (evidence:
+[the live-run comment on #10](https://github.com/cooneycw/skillc/issues/10#issuecomment-5855368984),
+restated in
+[support-matrix.md](docs/specs/evaluation-facility/support-matrix.md)). That
+run covers `skillc demo`'s own scripted lifecycle proof, grading run and
+four negative controls - most of the wider conformance table and
+failure-path matrix stay proven only against a fake `docker` CLI, by the
+owner's own ruling
+([ADR 0005 rule 6](docs/decisions/0005-runtime-scope-and-cost-rulings.md)),
+with the two paths judged likeliest to differ on a real daemon (timeout,
+operator cancellation) tracked under
+[#122](https://github.com/cooneycw/skillc/issues/122). See ["First
+milestone"](#first-milestone-the-docker-backend-is-built-and-proven-live-level-2-remains-proposed)
+below for exactly what that run does and does not establish. The task levels
 beyond Level 1 and the full behavioral comparisons described later in this
 README remain a documentation-only proposal. See the
 [specification](docs/specs/evaluation-facility/spec.md),
@@ -47,11 +58,11 @@ README remain a documentation-only proposal. See the
 | Milestone | State |
 |---|---|
 | 0.1.0 - static checker | closed |
-| 0.2.0 - real Docker trial end to end (#10) | open |
+| 0.2.0 - real Docker trial end to end (#10) | closed |
 | 0.3.0 - second independent collection (#11) | open |
 <!-- milestones:end -->
 
-**Version:** `0.1.0` (checked in CI against the package version, #73)
+**Version:** `0.2.0` (checked in CI against the package version, #73)
 
 <!-- commands:start (checked against the real argparse parser, #73) -->
 ```bash
@@ -407,7 +418,7 @@ Progress will be reported as a profile: qualified levels, success by scenario,
 honesty of completion claims, human interventions, time and cost. A hard task
 passed once does not erase failures on easier tasks or establish a reliable level.
 
-## First milestone: the Docker backend is built and tested against a fake daemon; the live run and Level 2+ remain proposed
+## First milestone: the Docker backend is built and proven live; Level 2+ remains proposed
 
 The static-checker trust gaps are repaired (#2, #3), the CPP small-fix pilot
 proved an independent grader with known-good/bad controls (#5, #9), and the
@@ -439,14 +450,24 @@ an owned container, or an unexpected disappearance of a foreign one), and
 declared-host-path checks on top of the per-attempt teardown the driver
 already does.
 
-**None of that closes #10.** Every one of those claims - the composed argv,
-the resource limits, the labels, the conformance cases, the reaping and
-snapshot behavior - is proven here only against a fake `docker` CLI
-(`tests/fixtures/docker-backend/fake_docker.py`), which proves the DRIVER's
-own sequencing and never a real daemon's containment boundary. #10 closes
-only when this same code runs against a real Docker daemon, on the
-operator's own machine, and that live run is still owed - see the milestone
-table near the top of this README, which stays `open` until then.
+**The operator's own live run closes #10.** Every one of those claims - the
+composed argv, the resource limits, the labels, the conformance cases, the
+reaping and snapshot behavior - was originally proven only against a fake
+`docker` CLI (`tests/fixtures/docker-backend/fake_docker.py`), which proves
+the DRIVER's own sequencing but never a real daemon's containment boundary
+by itself. The operator then ran `skillc demo`, `--control` and
+`--subject` for both collections on native Docker Engine: the image build
+succeeded, all four commands exited `0`, every acceptance item read `MET`,
+and all three seeded `--control` failures were caught - see the [live-run
+comment on #10](https://github.com/cooneycw/skillc/issues/10#issuecomment-5855368984)
+and [support-matrix.md](docs/specs/evaluation-facility/support-matrix.md)
+for the full evidence and exactly which rows it covers. That run does not
+re-prove the whole conformance table or failure-path matrix, which stay
+proven against the fake CLI by the owner's own ruling
+([ADR 0005 rule 6](docs/decisions/0005-runtime-scope-and-cost-rulings.md));
+the timeout and operator-cancellation paths are tracked for a real-daemon
+seed under [#122](https://github.com/cooneycw/skillc/issues/122). See the
+milestone table near the top of this README, now `closed`.
 
 The verified-result record now carries per-tier verdicts as a keyed
 collection (#69/#88) - `verification.verdicts`, one entry per enabled
