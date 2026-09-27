@@ -1,0 +1,20 @@
+{
+  "branch": "issue-11-prove-the-same-interfaces-with-a-second-independen",
+  "counts": {
+    "accepted": 3,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "e6503aa556e95a86bc81f633383c09cea1000cf1",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "11",
+  "passes": 2,
+  "recorded_at": "2026-09-27T11:53:10Z",
+  "red_cases": {
+    "already_covered": 12,
+    "proposed": 12
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "schema": 1,
+  "status": "ran"
+}

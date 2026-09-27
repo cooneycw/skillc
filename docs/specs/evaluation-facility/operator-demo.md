@@ -165,9 +165,28 @@ it landed.
 
 ## The Level 1 agent run per collection (#11's remaining acceptance bullet)
 
-**Built and proven against the fake `docker` CLI; the real run itself is
-owed to the operator's own live session** - the same evidence rule as every
-other real-Docker leg on this page (see "Evidence rule" above).
+**Run live on 2026-09-27, once per collection: both captured, both graded
+PASS, and the missing-credential control `unavailable`.** The output is in
+[`evals/second-collection-conformance/evidence/README.md`](../../../evals/second-collection-conformance/evidence/README.md).
+A re-run on a later commit is new evidence, not a replay of that run.
+
+Three defaults changed after the first live attempts, which never reached a
+model:
+
+- **Network.** The agent container now runs on Docker's bridge network, so the
+  client can reach its provider. This follows the owner's ruling recorded on
+  #11: "i'm fine for a container (controlled by what we place into it) to have
+  network access. i'm not going to submit hostile repos". The grading
+  container keeps `network=none`. The paste-back prints `agent_network=`.
+- **Git check.** The default client argv adds `--skip-git-repo-check`. codex
+  refuses to start in the non-git `/work` without it.
+- **Timeouts.** `--agent-timeout` (default 900 s) bounds the agent.
+  `--timeout` bounds each docker call only; it used to bound both, which would
+  have stopped a real agent after 30 s.
+
+Each run also works in its own `skillc-collection-run-<subject>-*` directory
+under `--base`. The checkout and staging copies are removed afterwards and the
+store, which is the evidence, is kept.
 
 `--subject`'s own three legs above (install, digest re-check, discovery)
 prove the collection lands intact and the client can see it - explicitly

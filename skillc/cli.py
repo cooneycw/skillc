@@ -787,36 +787,45 @@ def cmd_collection_run(args: argparse.Namespace) -> int:
     metered API spend."""
     from . import collection_conformance as cc
     from . import demo, trial
-    from .docker_backend import DockerBackend
 
     docker_bin = tuple(args.docker_bin.split()) if args.docker_bin else ("docker",)
     base = Path(args.base) if args.base else Path(tempfile.gettempdir())
     image = args.image or demo.DEFAULT_IMAGE
-    client_argv = args.client_argv.split()
+    client_argv = args.client_argv.split() if args.client_argv else list(cc.DEFAULT_CLIENT_ARGV)
     credential_path = Path(args.credential) if args.credential else None
-
+    agent_timeout = args.agent_timeout if args.agent_timeout is not None else cc.DEFAULT_AGENT_TIMEOUT
     try:
-        acquired = cc.acquire_collection(args.subject, base)
+        run_root = cc.new_run_root(base, args.subject)
     except demo.SubjectRefused as exc:
         print(f"skillc: {exc}", file=sys.stderr)
         return 2
 
-    # Resolved BEFORE planning, so the plan's own image.digest reflects the
-    # image that actually runs - `demo.run_demo`'s own "resolved before
-    # either backend starts" rule, for the same reason (codex review: a
-    # placeholder digest here left the planned evidence unable to identify
-    # its own inputs).
-    image_digest = demo.resolve_image_digest(docker_bin, image, None, args.timeout)
-    store = trial.open_store(base / f"{args.subject}-store", forbidden=[])
-    experiment, attempt_id = cc.plan_collection_attempt(args.subject, acquired, store, image_digest=image_digest)
+    try:
+        try:
+            acquired = cc.acquire_collection(args.subject, run_root)
+        except demo.SubjectRefused as exc:
+            print(f"skillc: {exc}", file=sys.stderr)
+            return 2
 
-    backend = DockerBackend(image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=args.timeout)
-    grading_backend = DockerBackend(image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=args.timeout)
-    result = cc.run_collection_agent_attempt(
-        subject_name=args.subject, acquired=acquired, experiment=experiment, attempt_id=attempt_id,
-        backend=backend, grading_backend=grading_backend, base=base,
-        base_argv=client_argv, timeout=args.timeout, credential_explicit_path=credential_path,
-    )
+        # Resolved BEFORE planning, so the plan's own image.digest reflects the
+        # image that actually runs - `demo.run_demo`'s own "resolved before
+        # either backend starts" rule, for the same reason (codex review: a
+        # placeholder digest here left the planned evidence unable to identify
+        # its own inputs).
+        image_digest = demo.resolve_image_digest(docker_bin, image, None, args.timeout)
+        store = trial.open_store(run_root / f"{args.subject}-store", forbidden=[])
+        experiment, attempt_id = cc.plan_collection_attempt(args.subject, acquired, store, image_digest=image_digest)
+
+        backend, grading_backend = cc.agent_backends(
+            image=image, base=run_root, docker_bin=docker_bin, daemon_timeout=args.timeout,
+        )
+        result = cc.run_collection_agent_attempt(
+            subject_name=args.subject, acquired=acquired, experiment=experiment, attempt_id=attempt_id,
+            backend=backend, grading_backend=grading_backend, base=run_root,
+            base_argv=client_argv, timeout=agent_timeout, credential_explicit_path=credential_path,
+        )
+    finally:
+        cc.discard_acquisition(run_root, args.subject)
 
     paste_back = cc.build_collection_paste_back(result)
     try:
@@ -1010,12 +1019,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_collection_run.add_argument("--base", help="where the disposable root is created (default: TMPDIR)")
     p_collection_run.add_argument("--timeout", type=float, default=30, help="per-container-call timeout, seconds")
     p_collection_run.add_argument(
+        "--agent-timeout", type=float, default=None,
+        help="the agent's own wall-clock limit, seconds (default: collection_conformance.DEFAULT_AGENT_TIMEOUT)",
+    )
+    p_collection_run.add_argument(
         "--credential", help="explicit path to the client credential file (default: the documented standard location)",
     )
     p_collection_run.add_argument(
-        "--client-argv", default="codex exec --sandbox danger-full-access",
-        help="the real client invocation, space-separated words (default: the documented no-nested-sandbox "
-             "mechanism, trial_bootstrap.BWRAP_DECISION) - never invented per-run, caller-supplied",
+        "--client-argv", default=None,
+        help="the real client invocation, space-separated words (default: "
+             "collection_conformance.DEFAULT_CLIENT_ARGV - the documented no-nested-sandbox mechanism, "
+             "trial_bootstrap.BWRAP_DECISION, plus --skip-git-repo-check) - never invented per-run",
     )
     p_collection_run.set_defaults(func=cmd_collection_run)
 

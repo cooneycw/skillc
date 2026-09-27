@@ -519,7 +519,8 @@ class DockerBackend:
             version=version or "unreachable",
             isolation=(
                 "container (pid/mount/network namespaces)",
-                f"network={self.network} by default",
+                (f"network={self.network} by default" if self.network == "none"
+                 else f"network={self.network}: egress OPEN (owner ruling on issue #11; agent containers only)"),
                 f"fixed non-root user {_container_user()} ({CANDIDATE_USER_NAME}), independent of the host caller",
                 "resource limits enforced: memory, memory-swap (equal), pids, cpus, shm-size",
                 (f"disk: --storage-opt size={self.disk_limit}" if self.disk_limit is not None
@@ -532,7 +533,8 @@ class DockerBackend:
                  "no shared volume, no second container"),
             ),
             unobserved=(
-                "network egress actually blocked - not verified from inside the container",
+                *(("network egress actually blocked - not verified from inside the container",)
+                  if self.network == "none" else ()),
                 "file reads by candidate code",
                 ("credential confidentiality against an ancestor's /proc/<pid>/environ - "
                  "the verifier's own boundary (verify.py's probe through this same seam)"),
