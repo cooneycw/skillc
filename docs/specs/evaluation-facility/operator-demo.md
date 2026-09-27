@@ -18,6 +18,28 @@ happens, its paste-back block is what gets recorded in
 [support-matrix.md](support-matrix.md) - never a description of what the
 code is expected to do.
 
+## Before you run
+
+From a clean clone:
+
+```bash
+git clone https://github.com/cooneycw/skillc.git
+cd skillc
+uv sync --extra dev            # or: uv tool install .
+docker build -t skillc-trial:latest docker/trial/
+```
+
+The image build is one of issue #78's own live checks, not a formality:
+`verify_codex_sidecar.js` runs inside it, right after the pinned npm
+installs, and fails the BUILD (never a later trial) if the real Codex CLI's
+`codex-code-mode-host` sidecar is missing - a `docker build` that exits
+non-zero here has already found a real problem, before `skillc demo` is ever
+invoked. `docker/trial/check_interpreters.py` is the equivalent no-daemon
+control for the interpreters the demo and verifier run inside the container
+(issue #78, Refs #81): it is exercised by this repository's own test suite
+against the committed Dockerfile, so a missing interpreter is caught without
+building anything at all.
+
 ## What to run
 
 ```bash
@@ -67,15 +89,19 @@ claim from the `--image` string alone, which could be a floating tag).
 
 ### Why no real agent
 
-A real Claude Code `Write` tool result typically confirms only that a file
-was written, never echoing its content back - so `trial_bootstrap.py`'s own
-transcript-based liveness check (`check_canary`, which requires a `tool_use`
-event's output to literally carry the nonce) is always red against an
-unmodified real transcript. Wiring a real agent through `trial_bootstrap.py`
-with an adapter that re-reads the actual written file back is real follow-up
-work, not built here. This command sidesteps the gap entirely by using the
-driver's own file-content-based canary with a scripted subject instead, which
-has no such gap - a deliberate, bounded scope decision, not an oversight.
+A real Claude Code `Write` tool result, and a real Codex `exec` result alike,
+typically confirm only that a file was written, never echoing its content
+back - so a transcript-based liveness check that requires a `tool_use`
+event's output to literally carry a nonce is red against an unmodified real
+transcript from either client. Per-client transcript adapters that translate
+a real transcript into the normalized event shape such a check consumes now
+exist (issue #106, its first split PR). The driver loop that would run a
+real agent through this command, consume those adapters, and resolve the
+write-doesn't-echo-content gap end to end is the second half of #106, still
+not built. This
+command sidesteps the whole gap for now by using the driver's own
+file-content-based canary with a scripted subject instead, which has no such
+gap - a deliberate, bounded scope decision, not an oversight.
 
 ## How long it takes
 
