@@ -42,14 +42,22 @@ run covers `skillc demo`'s own scripted lifecycle proof, grading run and
 three seeded negative controls - most of the wider conformance table and
 failure-path matrix stay proven only against a fake `docker` CLI, by the
 owner's own ruling
-([ADR 0005 rule 6](docs/decisions/0005-runtime-scope-and-cost-rulings.md)),
-with the two paths judged likeliest to differ on a real daemon (timeout,
-operator cancellation) tracked under
-[#122](https://github.com/cooneycw/skillc/issues/122). See ["First
-milestone"](#first-milestone-the-docker-backend-is-built-and-proven-live-level-2-remains-proposed)
-below for exactly what that run does and does not establish. The task levels
-beyond Level 1 and the full behavioral comparisons described later in this
-README remain a documentation-only proposal. See the
+([ADR 0005 rule 6](docs/decisions/0005-runtime-scope-and-cost-rulings.md)).
+The two paths judged likeliest to differ on a real daemon - timeout and
+operator cancellation - are also now closed
+([#122](https://github.com/cooneycw/skillc/issues/122)): both seeds were
+caught on a real daemon (evidence:
+[the live-run comment on #122](https://github.com/cooneycw/skillc/issues/122#issuecomment-5858000276)).
+The first predeclared matched pilot ([#12](https://github.com/cooneycw/skillc/issues/12))
+and the Claude Code agent arm ([#124](https://github.com/cooneycw/skillc/issues/124))
+are also closed, both with real live-run evidence. See ["Second
+milestone"](#second-milestone-a-matched-pilot-a-second-client-arm-and-real-daemon-seeds)
+below for exactly what those runs establish and what they do not. `skillc`
+now also ships Level 2 and Level 3 task fixtures
+([#13](https://github.com/cooneycw/skillc/issues/13)) that self-certify
+locally; neither level has run through a live agent yet. The full behavioral
+comparisons described later in this README remain a documentation-only
+proposal. See the
 [specification](docs/specs/evaluation-facility/spec.md),
 [architecture decision](docs/decisions/0002-independent-goal-driven-evaluation.md) and
 [PLAN.md](PLAN.md) for the design and delivery sequence.
@@ -59,9 +67,10 @@ README remain a documentation-only proposal. See the
 |---|---|
 | 0.1.0 - static checker | closed |
 | 0.2.0 - real Docker trial end to end (#10) and a second independent collection (#11) | closed |
+| 0.3.0 - the first predeclared matched pilot (#12), the Claude Code agent arm (#124), and real-daemon timeout/cancellation seeds (#122) | closed |
 <!-- milestones:end -->
 
-**Version:** `0.2.0` (checked in CI against the package version, #73)
+**Version:** `0.3.0` (checked in CI against the package version, #73)
 
 <!-- commands:start (checked against the real argparse parser, #73) -->
 ```bash
@@ -421,7 +430,7 @@ Progress will be reported as a profile: qualified levels, success by scenario,
 honesty of completion claims, human interventions, time and cost. A hard task
 passed once does not erase failures on easier tasks or establish a reliable level.
 
-## First milestone: the Docker backend is built and proven live; Level 2+ remains proposed
+## First milestone (0.2.0): the Docker backend is built and proven live
 
 The static-checker trust gaps are repaired (#2, #3), the CPP small-fix pilot
 proved an independent grader with known-good/bad controls (#5, #9), and the
@@ -468,9 +477,10 @@ for the full evidence and exactly which rows it covers. That run does not
 re-prove the whole conformance table or failure-path matrix, which stay
 proven against the fake CLI by the owner's own ruling
 ([ADR 0005 rule 6](docs/decisions/0005-runtime-scope-and-cost-rulings.md));
-the timeout and operator-cancellation paths are tracked for a real-daemon
-seed under [#122](https://github.com/cooneycw/skillc/issues/122). See the
-milestone table near the top of this README, now `closed`.
+the timeout and operator-cancellation paths were tracked for a real-daemon
+seed under [#122](https://github.com/cooneycw/skillc/issues/122), closed in
+0.3.0 - see ["Second milestone"](#second-milestone-a-matched-pilot-a-second-client-arm-and-real-daemon-seeds)
+below. See the milestone table near the top of this README, now `closed`.
 
 The verified-result record now carries per-tier verdicts as a keyed
 collection (#69/#88) - `verification.verdicts`, one entry per enabled
@@ -479,16 +489,18 @@ exists too (#69/#92): schema-constrained judge output, a per-tier
 `UNAVAILABLE` outcome, a pre-send leak check, and the disagreement record -
 but exercised only against a `FakeJudge`; the `mcp-second-opinion` adapter
 and its cost wiring exist (#96) but are tested only against a fake server,
-and no real judge call has been made. The trial ledger's case format gained an optional
+and no real judge call has been made, and none is authorized by anything in
+this repository. The trial ledger's case format gained an optional
 `case.observes_selection` declaration and a pre-spend cost projection
 (#26/#39, #86), and a matched-pilot experiment record and evidence-report
 schema exist (#12, #89) - prepared for a treatment-vs-baseline comparison
 (the whole CPP pack installed vs. an identical disposable home with nothing
-installed, on the same Level 1 task, 3 repeats across 2 arms), not yet a
-second-collection comparison - still no paid trial has been run. Expanding
-to Level 2 and beyond, and running any paid trial or judge call, remain
-proposed work: no model call has been made against any subject yet, and
-none is authorized by anything in this repository (#12).
+installed, on the same Level 1 task, 3 repeats across 2 arms). **That pilot
+has since run, under the operator's own subscription login (never metered
+spend, ADR 0005 rule 6) - see ["Second milestone"](#second-milestone-a-matched-pilot-a-second-client-arm-and-real-daemon-seeds)
+below.** Level 2 and Level 3 task fixtures now exist too (#13), self-certified
+locally; no agent has attempted either yet, and no paid model trial or real
+judge call has been made against any subject.
 
 The [implementation plan](PLAN.md) sequences delivery against the specification;
 the [review agenda](docs/specs/evaluation-facility/review.md) identifies open choices. No
@@ -502,6 +514,54 @@ first behavioral milestone.
 The [eval entrypoint](evals/README.md) links to the current contracts. Earlier
 runner commands and example schemas were unverified research and have been
 retired from the active instructions.
+
+## Second milestone: a matched pilot, a second client arm, and real-daemon seeds
+
+Three issues closed in 0.3.0, each with the operator's own live evidence.
+Full detail: [`docs/release-notes/0.3.0.md`](docs/release-notes/0.3.0.md).
+
+**[#12](https://github.com/cooneycw/skillc/issues/12): the first predeclared
+matched pilot.** `skillc pilot-run`/`pilot-report` ran the predeclared
+schedule (codex on the Level 1 `slug-small-fix` task, the whole `cpp-codex`
+pack installed versus nothing, 3 repeats interleaved) twice: the first run
+disclosed a protocol deviation (the declared model was never pinned at
+launch, so every attempt ran codex's own default instead), and the pinned
+re-run under the corrected declaration
+(`evals/matched-pilot/evidence-2026-09-27-gpt-6-astra/`) captured and graded
+all 6 attempts PASS, every attempt on the declared model, no deviation, 6 of
+6 reviewed claims accurate. **This establishes one bounded pilot's own
+mechanism working end to end and honestly** - it is not a claim that the
+collection helped: one task, one client, no baseline beyond "nothing
+installed."
+
+**[#124](https://github.com/cooneycw/skillc/issues/124): the Claude Code
+agent arm.** A second client arm alongside codex, proven the same way #11
+proved a second collection: `collection-run` now takes its client and argv
+from the subject, two new Claude Code subjects exist, and discovery reads
+the real transcript's own skill-listing attachment (Claude Code has no
+model-free listing the way codex does). Both new subjects were run live in
+`evals/claude-code-agent-arm/`.
+
+**[#122](https://github.com/cooneycw/skillc/issues/122): real-daemon
+timeout and cancellation seeds.** The two failure paths judged likeliest to
+differ between the fake `docker` CLI and a real daemon - a timeout, and a
+real operator `SIGINT` mid-exec - now have committed red cases and were
+both run live on native Docker Engine, both `CAUGHT` (evidence:
+[the live-run comment on #122](https://github.com/cooneycw/skillc/issues/122#issuecomment-5858000276)).
+The rest of the conformance table and failure-path matrix stay proven only
+against the fake CLI, unchanged from 0.2.0's own scope ruling.
+
+Also in this cycle, still open: Level 2 and Level 3 task fixtures
+([#13](https://github.com/cooneycw/skillc/issues/13), self-certified
+locally, no live agent run yet), an optional managed-container backend with
+a published protocol but no implementing platform yet
+([#64](https://github.com/cooneycw/skillc/issues/64)), operator-expressible
+degraded CPP subjects and a behavioral-eval export path
+([#150](https://github.com/cooneycw/skillc/issues/150)), and a live
+selection-probe run with its detection control
+([#26](https://github.com/cooneycw/skillc/issues/26)). None of these claims
+to be finished; see [`docs/release-notes/0.3.0.md`](docs/release-notes/0.3.0.md)
+for exactly what each one still owes.
 
 ## Prior art
 
