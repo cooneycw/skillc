@@ -871,6 +871,72 @@ def test_an_invoked_skill_the_receipt_installed_is_accepted(tmp_path: Path) -> N
     assert list(records.ledger_binding(bundle)) == []
 
 
+def test_complete_coverage_missing_a_row_for_an_installed_skill_is_refused(tmp_path: Path) -> None:
+    """Issue #26, folded in from the Nit Store: a `coverage: "complete"`
+    stream that omits a row for one of TWO installed skills used to pass
+    clean (reproduced at 70ead2c - exit 0, 0 errors). `_skill_invocations`
+    (the per-record check) only refuses complete coverage naming NO skills
+    at all; only the bundle rule can cross-check against the receipt's own
+    installed set."""
+    installed_path = GOOD_RECEIPT["installed"][0]["path"]  # type: ignore[index]
+    receipt = {**GOOD_RECEIPT, "installed": [
+        *GOOD_RECEIPT["installed"],  # type: ignore[misc]
+        {"path": ".codex/skills/other/SKILL.md", "digest": "sha256:i2"},
+    ]}
+    manifest = {**GOOD_MANIFEST, "observations": [
+        *GOOD_MANIFEST["observations"],  # type: ignore[misc]
+        {
+            "stream": "skill-invocations", "origin": "observed", "coverage": "complete",
+            "skills": [{"path": installed_path, "count": 1}],  # the second installed skill has no row
+        },
+    ]}
+    bundle = _write_bundle(tmp_path, GOOD_LEDGER, receipt, manifest)
+    findings = list(records.ledger_binding(bundle))
+    assert findings and "other/SKILL.md" in findings[0] and "complete coverage" in findings[0]
+
+
+def test_complete_coverage_naming_every_installed_skill_is_accepted(tmp_path: Path) -> None:
+    """The green twin: same two installed skills, both rows present."""
+    installed_path = GOOD_RECEIPT["installed"][0]["path"]  # type: ignore[index]
+    receipt = {**GOOD_RECEIPT, "installed": [
+        *GOOD_RECEIPT["installed"],  # type: ignore[misc]
+        {"path": ".codex/skills/other/SKILL.md", "digest": "sha256:i2"},
+    ]}
+    manifest = {**GOOD_MANIFEST, "observations": [
+        *GOOD_MANIFEST["observations"],  # type: ignore[misc]
+        {
+            "stream": "skill-invocations", "origin": "observed", "coverage": "complete",
+            "skills": [
+                {"path": installed_path, "count": 1},
+                {"path": ".codex/skills/other/SKILL.md", "count": 0},
+            ],
+        },
+    ]}
+    bundle = _write_bundle(tmp_path, GOOD_LEDGER, receipt, manifest)
+    assert list(records.ledger_binding(bundle)) == []
+
+
+def test_incomplete_coverage_missing_a_row_is_not_this_rules_finding(tmp_path: Path) -> None:
+    """The new check is scoped to `coverage: "complete"` only - a `"partial"`
+    stream is already allowed to name a subset (`_skill_invocations`'s own
+    UNKNOWN-count rule), so missing a row under partial coverage is not a
+    binding defect."""
+    installed_path = GOOD_RECEIPT["installed"][0]["path"]  # type: ignore[index]
+    receipt = {**GOOD_RECEIPT, "installed": [
+        *GOOD_RECEIPT["installed"],  # type: ignore[misc]
+        {"path": ".codex/skills/other/SKILL.md", "digest": "sha256:i2"},
+    ]}
+    manifest = {**GOOD_MANIFEST, "observations": [
+        *GOOD_MANIFEST["observations"],  # type: ignore[misc]
+        {
+            "stream": "skill-invocations", "origin": "observed", "coverage": "partial",
+            "skills": [{"path": installed_path, "count": "UNKNOWN"}],
+        },
+    ]}
+    bundle = _write_bundle(tmp_path, GOOD_LEDGER, receipt, manifest)
+    assert list(records.ledger_binding(bundle)) == []
+
+
 # ------------------------------------------------- case.observes_selection (#26)
 
 

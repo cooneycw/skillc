@@ -64,6 +64,34 @@ and version plan.
   pinned revision, and the `skillc degrade-subject` invocation it prints,
   is a runbook step owed to the operator.
 
+- **Selection-probe attempts retain their raw transcript, leak-checked
+  before it is kept** (Refs #26). Before this, a real attempt's transcript
+  existed only in memory during `run_one_attempt` and was discarded with the
+  workspace, so a live selection run's zeros could never be re-scanned - the
+  first live run (2026-09-27) had exactly this gap. `agent_trial.run_one_attempt`
+  gains an opt-in `retain_transcript=True` (default `False`; every existing
+  caller is unaffected) that attaches the ORIGINAL transcript bytes to its
+  returned record; `selection_probe.AgentTrialRunner` uses it, leak-checks
+  the bytes with `leak.default_host_paths()` (#134 item 5) before writing
+  anything, and records the outcome on `AttemptTranscript`/`ArmResult` either
+  way - `transcript_retained_digest` on success, `transcript_retention_reason`
+  on a leak (never a silent drop, never a silent keep). Retained files live
+  under `<base>/retained-transcripts/<attempt_id>.jsonl`.
+
+### Fixed
+
+- **A `coverage: "complete"` skill-invocations stream could omit an
+  installed skill's row and still pass clean** (Refs #26, folded in from the
+  Nit Store). `records.ledger_binding`'s `_skill_invocation_binding` checked
+  that every REPORTED row named an installed path, but never the reverse -
+  that every installed path had a row under complete coverage. Reproduced at
+  `70ead2c`: a second installed skill with no invocation row gave exit 0, 0
+  errors. Fixed by cross-checking the row set against the same installed-path
+  set the rule already reads for the other direction; a two-skill committed
+  red/green pair (`controls/ledger-binding/{bad,good}/skill-invocations-*-coverage`)
+  is confirmed missed on the pre-fix code (`skillc check-records`: 0 errors)
+  and caught after (1 error, naming the missing path).
+
 - **`make verify` and a real `## Verify` command, covering every
   `.woodpecker/ci.yml` step** (Refs #134, items 1 and 2). Nothing ran
   `skillc selftest` or `ci/negative-control.sh` locally without a Makefile,

@@ -1175,6 +1175,15 @@ def _skill_invocation_binding(
     that gap is `attempt-accounting`'s finding, not a mismatch this rule can call.
     A malformed `skills` list is `observation_coverage`'s finding; this rule only
     checks well-formed rows against the receipt.
+
+    The REVERSE direction too (issue #26, folded in from the Nit Store):
+    under `coverage: "complete"`, every path the receipt installed must have
+    a row - `_skill_invocations` (the per-record check) only refuses a
+    `"complete"` stream that names NO skills at all, never one that is
+    missing some of them, so a second installed skill with no invocation row
+    passed clean (reproduced at `70ead2c`, exit 0, 0 errors). "Complete"
+    means every installed path was seen, not merely that the stream is
+    non-empty - a silent skill is not an accounted-for one.
     """
     if installed is None:
         return
@@ -1187,12 +1196,23 @@ def _skill_invocation_binding(
         skills = entry.get("skills")
         if not isinstance(skills, list):
             continue
+        named: set[str] = set()
         for row in skills:
             path = row.get("path") if isinstance(row, dict) else None
-            if isinstance(path, str) and path and path not in installed:
+            if not isinstance(path, str) or not path:
+                continue
+            named.add(path)
+            if path not in installed:
                 yield (
                     f"{where}: skill-invocations names {path!r}, which this "
                     f"attempt's installation receipt never installed"
+                )
+        if entry.get("coverage") == "complete":
+            missing = sorted(installed - named)
+            if missing:
+                yield (
+                    f"{where}: skill-invocations declares complete coverage but names no row "
+                    f"for installed path(s) {missing} - a silent skill is not an uninvoked one"
                 )
 
 
