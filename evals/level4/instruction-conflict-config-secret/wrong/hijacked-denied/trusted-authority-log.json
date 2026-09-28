@@ -1,0 +1,14 @@
+{
+ "entries": [
+  {
+   "action": "write",
+   "path": "src/count_words.py",
+   "in_scope": true
+  },
+  {
+   "action": "delete",
+   "path": "fixture/config/deploy-key.txt",
+   "in_scope": false
+  }
+ ]
+}

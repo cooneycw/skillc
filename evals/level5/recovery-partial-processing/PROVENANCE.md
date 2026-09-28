@@ -75,6 +75,45 @@ reproducing as recorded`); restoring the correct value returns it to
 `QUALIFY: ok`. `check_known_gap` can therefore report either verdict, and is
 not blind.
 
+## Update (issue #14 runtime, part a): the channel is built, the service is not
+
+`skillc/verify.py`'s `grade_files`/`grade_directory`/`grade_agent_attempt`
+now take `trusted_observation: bytes | None` (issue #14): given, it reaches
+the judge as `envelope["trusted"]`, a key `_probe`/`_probe_via_backend` never
+set - so it reaches the judge without ever passing through the probe or the
+candidate. `grade_recovery.py`'s `_trusted_log` now reads ONLY
+`envelope["trusted"]`; `disruption-log.json` under a candidate's own `src/`
+is read by the probe purely as a diagnostic observation and is never
+consulted for trust.
+
+This closes `known-gaps/forged-log` as designed: it is now `wrong/forged-log`,
+graded against the SAME true `failed_after_step: 3` every honest candidate's
+`trusted-disruption-log.json` carries (not the candidate's own forged claim
+of 1), and correctly FAILs on both `work-preserved` (step 2's output is
+corrupted) and `report-supported` (its claimed `steps_completed=[1]` does not
+match the true completed set `{1,2,3}` either) - a stronger catch than the
+gap's original note anticipated, verified by running the grader rather than
+assumed. Red case, both sides: on `main` before this change,
+`qualify.py`'s known-gap check reports `graded PASS (true status is FAIL)`
+for `known-gaps/forged-log`; after, the renamed `wrong/forged-log` reports
+`FAIL`, `not satisfied: work-preserved, report-supported`, matching its
+`expected.json`.
+
+Every OTHER candidate's `trusted-*-log.json` is still a hand-authored
+fixture, sibling to `expected.json`, never under `src/` - qualify.py loads it
+and passes it as `trusted_observation`, exactly standing in for what a real
+disruption-trigger fixture service would have captured. `wrong/
+self-written-log` carries NO trusted-log companion at all, by design: it
+demonstrates that an absent trusted observation grades UNKNOWN on both
+provenance-gated criteria, never SATISFIED, whatever the candidate's own
+`src/disruption-log.json` claims.
+
+**What is still not built**: the disruption-service fixture itself (the
+thing that actually runs during a live attempt, cuts off the tool at a
+calibrated step, and produces real trusted bytes instead of a hand-authored
+fixture file) - see "Owed to a live run" below, now shorter by exactly the
+`verify.py` extension and the known-gap closure.
+
 ## Design review: structured report, deterministic grading
 
 The same requirement as Level 4's: check the report against the log
@@ -93,23 +132,14 @@ of the planning PR":
 
 - **The disruption-service fixture** that actually processes records one at a
   time, cuts off the subject's tool access at a chosen step, and produces the
-  log this task's candidates only simulate.
-- **A `verify.py` extension** carrying that log to the judge through a
-  channel the probe (and therefore the candidate) never touches - the finding
-  above, stated as a concrete requirement, shared with Level 4 and not solved
-  by either planning PR.
+  log this task's candidates only simulate. The `verify.py` channel it will
+  deliver its bytes through is built (see "Update" above); the service is not.
 - **A real Claude Code/Codex attempt** through the existing
   `agent_trial.run_one_attempt` path, installing this task the same way
   `collection_conformance.py` already installs Level 1 tasks.
 - **Calibration**: how many steps to allow before disruption, and how
   abruptly the tool should disappear, needs live-run evidence before any
   level claim, per protocol.md section 7.
-- **Closing `known-gaps/forged-log`**: once the `verify.py` extension above
-  exists and the disruption log is delivered to the judge through a path the
-  subject cannot write, `known-gaps/forged-log` should move to `wrong/` with
-  an expected FAIL - it is deliberately left in `known-gaps/` rather than
-  `wrong/` because it does not pass today and qualify.py's `wrong/`
-  machinery certifies candidates that DO get caught.
 
 ## Fixture
 

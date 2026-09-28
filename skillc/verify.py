@@ -820,7 +820,8 @@ def _status(criteria: list[dict[str, object]]) -> str:
 def grade_files(grader: GraderDef, files: list[tuple[str, bytes, bool]], base: Path,
                 forbidden: list[Path] | None = None, loaded: dict[str, bytes] | None = None,
                 backend: ExecutionBackend | None = None,
-                recorded_attempt_ids: list[str] | None = None) -> Graded:
+                recorded_attempt_ids: list[str] | None = None,
+                trusted_observation: bytes | None = None) -> Graded:
     """Grade candidate files through the three stages, in a disposable owned root.
 
     `files` are (relative path, bytes, executable). The root is removed afterwards,
@@ -836,6 +837,18 @@ def grade_files(grader: GraderDef, files: list[tuple[str, bytes, bool]], base: P
     attempt id appended before `prepare()` (issue #122): a caller's
     label-scoped reap sweep can then cover the probe's container too, not
     only the attempts it created itself. Omitted, nothing changes.
+
+    `trusted_observation` (issue #14) is bytes the CALLER already holds and
+    that neither the probe nor candidate code produced - a controller-owned
+    fixture-service log, captured no earlier than a confirmed stop. Given,
+    it is added to the judge's envelope as `"trusted"`, a key `_probe`/
+    `_probe_via_backend` never set, so it reaches the judge without ever
+    passing through candidate-shared code. Omitted, the envelope carries no
+    `"trusted"` key at all - a judge must read that absence as UNKNOWN, never
+    as an empty-but-present log. Its sha256 is recorded in `containment` as
+    `trusted_observation_digest`, alongside `backend`, for the same reason
+    that field is: so a reader of the stored result never has to infer which
+    boundary applied.
     """
     if _quarantine is not None:
         raise Refused(f"this verifier is quarantined: {_quarantine}; an operator must check the host "
@@ -864,6 +877,13 @@ def grade_files(grader: GraderDef, files: list[tuple[str, bytes, bool]], base: P
             envelope, containment = _probe_via_backend(
                 grader, loaded, files, probe_dir, backend, recorded_attempt_ids,
             )
+        if trusted_observation is not None:
+            # Set after the probe returns and BEFORE the judge runs, never
+            # earlier: this key must never be reachable from `_probe`/
+            # `_probe_via_backend`, which build `envelope` from candidate-
+            # shared state alone.
+            envelope["trusted"] = trusted_observation.decode("utf-8", errors="replace")
+            containment["trusted_observation_digest"] = trial.sha256_bytes(trusted_observation)
         if not containment["confirmed"]:
             category, detail = "containment", f"the probe was not contained: {containment['reason']}"
             criteria = _unknown(grader, detail)
@@ -883,10 +903,16 @@ def grade_files(grader: GraderDef, files: list[tuple[str, bytes, bool]], base: P
     return Graded(status=status, category=category, detail=detail, criteria=criteria, containment=containment)
 
 
-def grade_directory(grader: GraderDef, candidate: Path, base: Path | None = None) -> Graded:
+def grade_directory(grader: GraderDef, candidate: Path, base: Path | None = None,
+                    trusted_observation: bytes | None = None) -> Graded:
     """Grade a committed candidate directory, as `qualify.py` does to certify a grader.
 
     Only regular files are copied; links and special files are not followed.
+
+    `trusted_observation`, given, is NOT read from `candidate` - a fixture's
+    trusted-log companion lives beside it (e.g. a sibling `trusted/` or
+    `expected.json`, task-specific), never inside the directory being frozen
+    and graded as the candidate's own files. See `grade_files`.
     """
     files: list[tuple[str, bytes, bool]] = []
     for dirpath, dirnames, filenames in os.walk(candidate, followlinks=False):
@@ -897,7 +923,8 @@ def grade_directory(grader: GraderDef, candidate: Path, base: Path | None = None
             if stat.S_ISREG(info.st_mode):
                 rel = path.relative_to(candidate).as_posix()
                 files.append((rel, path.read_bytes(), bool(info.st_mode & stat.S_IXUSR)))
-    return grade_files(grader, files, base if base is not None else Path(tempfile.gettempdir()))
+    return grade_files(grader, files, base if base is not None else Path(tempfile.gettempdir()),
+                       trusted_observation=trusted_observation)
 
 
 # ------------------------------------------------------------ grading an attempt
@@ -1040,7 +1067,8 @@ def _eligible_observation(attempt_id: str, observation: Mapping[str, object]) ->
 
 def grade_agent_attempt(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base: Path,
                         observation: Mapping[str, object], backend: ExecutionBackend | None = None,
-                        forbidden: list[Path] | None = None) -> tuple[dict[str, object], Graded]:
+                        forbidden: list[Path] | None = None,
+                        trusted_observation: bytes | None = None) -> tuple[dict[str, object], Graded]:
     """Grade one captured agent-trial attempt and store its `verified-result`
     (#139), exactly as `grade` does - the same pin, capture, snapshot, ledger
     and frozen-digest checks - except that the controller's transcript
@@ -1048,12 +1076,19 @@ def grade_agent_attempt(experiment: trial.Experiment, attempt_id: str, grader: G
     the installation receipt. Refused, nothing written, unless it confirms
     both prompt delivery and the canary.
 
+    `trusted_observation` (issue #14) is forwarded to `grade_files` - see
+    there. On this path it is a runtime fixture service's own log (an
+    authority-boundary interceptor's or a disruption trigger's), captured by
+    the caller no earlier than the backend's confirmed stop, never anything
+    the subject's own process produced.
+
     Returns the stored result and the task grade (`Graded`, without the
     verifier's readiness criterion), which is what the agent driver reports
     as the attempt's own grade."""
     _eligible_observation(attempt_id, observation)
     return _grade_and_store(experiment, attempt_id, grader, base, forbidden, backend=backend,
-                            readiness_source=AGENT_OBSERVATION_READINESS)
+                            readiness_source=AGENT_OBSERVATION_READINESS,
+                            trusted_observation=trusted_observation)
 
 
 def grade(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base: Path,
@@ -1109,7 +1144,8 @@ def _grade_and_store(experiment: trial.Experiment, attempt_id: str, grader: Grad
                      forbidden: list[Path] | None = None, regrade_of: str | None = None,
                      backend: ExecutionBackend | None = None,
                      judges: Mapping[str, judge_seam.Judge] | None = None, goal_text: str = "",
-                     readiness_source: str = records.INSTALLATION_RECEIPT) -> tuple[dict[str, object], Graded]:
+                     readiness_source: str = records.INSTALLATION_RECEIPT,
+                     trusted_observation: bytes | None = None) -> tuple[dict[str, object], Graded]:
     """Holds the experiment lock (#12) from the first read to the stored
     result, so a sibling attempt's capture, finalize or stored result waits
     for this grade instead of reading to its snapshot as tampering.
@@ -1122,14 +1158,15 @@ def _grade_and_store(experiment: trial.Experiment, attempt_id: str, grader: Grad
     with trial.experiment_lock(experiment.root):
         current = trial.Experiment.open(experiment.root)
         return _grade_and_store_held(current, attempt_id, grader, base, forbidden, regrade_of,
-                                     backend, judges, goal_text, readiness_source)
+                                     backend, judges, goal_text, readiness_source, trusted_observation)
 
 
 def _grade_and_store_held(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base: Path,
                           forbidden: list[Path] | None, regrade_of: str | None,
                           backend: ExecutionBackend | None,
                           judges: Mapping[str, judge_seam.Judge] | None, goal_text: str,
-                          readiness_source: str) -> tuple[dict[str, object], Graded]:
+                          readiness_source: str,
+                          trusted_observation: bytes | None = None) -> tuple[dict[str, object], Graded]:
     if judges:
         unknown_tiers = set(judges) - set(judge_seam.JUDGE_TIERS)
         if unknown_tiers:
@@ -1172,7 +1209,7 @@ def _grade_and_store_held(experiment: trial.Experiment, attempt_id: str, grader:
     in_flight = _in_flight_scratch(experiment, attempt_id)
     before = _snapshot(experiment.root, in_flight)
     graded = grade_files(grader, files, base, [*(forbidden or []), experiment.root.parent.resolve()],
-                          loaded, backend=backend)
+                          loaded, backend=backend, trusted_observation=trusted_observation)
 
     # Everything candidate code could have reached is checked again. A change here
     # is not a verdict on the candidate: the measurement itself is compromised.
@@ -1194,6 +1231,7 @@ def _grade_and_store_held(experiment: trial.Experiment, attempt_id: str, grader:
             "status": status,
             "criteria": criteria,
             "backend": graded.containment.get("backend"),
+            "trusted_observation_digest": graded.containment.get("trusted_observation_digest"),
         },
     }
     if judges:

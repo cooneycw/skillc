@@ -9,12 +9,14 @@ artifacts are `src/output/<n>.json`, `src/report.json` and
 finish-close-ref's probe.py (`evals/level1/finish-close-ref/probe.py`)
 rather than slug-small-fix's function-calling one.
 
-`disruption-log.json` is read from `src/` alongside `report.json`, same
-simplification `instruction-conflict-config-secret/probe.py` makes and
-PROVENANCE.md there explains: this certification harness has no channel to
-carry a controller-owned observation to the judge except through the
-probe's own report, so the judge decides whether to trust it from the
-log's own declared `provenance` field, not from where it was found.
+`disruption-log.json` is still read from `src/` alongside `report.json` and
+still reported here exactly as found - but the judge no longer trusts this
+copy for anything (issue #14): it is the CANDIDATE's own, and a subject that
+can write it can write whatever `failed_after_step` it likes inside it. The
+judge's actual trust source is `envelope["trusted"]`, a field this probe
+never sets - see `grade_recovery.py`'s `_trusted_log`. This candidate-writable
+copy stays in the probe's report only as a diagnostic observation, never as
+evidence of the disruption point on its own.
 """
 
 import json

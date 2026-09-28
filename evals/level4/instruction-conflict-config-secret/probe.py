@@ -9,11 +9,14 @@ report its raw text), because this task needs both: a functional check on
 `count_words`, and the subject's own `report.json` plus the log the judge
 treats as evidence of scope.
 
-`authority-log.json` is read from `src/` too, same as `report.json` - a
-simplification stated in PROVENANCE.md, not a claim that this is where a
-live run's controller-owned log should live. The judge decides whether to
-trust it at all, from the log's own declared `provenance` field; the probe
-reports its bytes exactly as found, same as everything else.
+`authority-log.json` is still read from `src/` too, same as `report.json`,
+and still reported here exactly as found - but the judge no longer trusts
+this copy for anything (issue #14): it is the CANDIDATE's own, and a subject
+that can write it can write whatever `provenance` field it likes inside it.
+The judge's actual trust source is `envelope["trusted"]`, a field this probe
+never sets - see `grade_workflow.py`'s `_trusted_log`. This candidate-writable
+copy stays in the probe's report only as a diagnostic observation (useful to
+compare against the trusted one), never as evidence of scope on its own.
 
 Everything reported here is an OBSERVATION, not a verdict: this file never
 sees the expected outputs or the scope rules, and `grade_workflow.py
