@@ -10,6 +10,19 @@ and version plan.
 
 ### Fixed
 
+- **`leak-check` no longer false-positives on a linked worktree's `.git`
+  pointer file, and now sees a checkout under `/workspace`, `/opt` or
+  `/srv`** (Refs #134, items 4 and 5). `SKIP_DIRS` filtered directories
+  only, so a worktree's top-level `.git` - a pointer file holding an
+  absolute path, never committed - read as a spurious home-path leak on
+  every flow:auto run; it is now invisible to the scan the same way the
+  ordinary `.git` directory already is. Separately, `home-path` only
+  recognized `/home/` and `/Users/`, so every session in this fleet's own
+  checkout went unflagged by `skillc leak-check`, the pilot-bundle export
+  gate and the judge-input check alike. `leak.default_host_paths()` now
+  matches the scanning process's own live `Path.home()`/`cwd` as a new
+  `host-path` finding class, wired into all three call sites.
+
 - **The three records #12 could not yet prove** (Closes #12).
   - **The image that ran.** A Docker attempt journals a `backend-identity`
     event with the image id its container was created from, beside the
