@@ -433,12 +433,34 @@ def test_a_host_path_fires_on_an_explicit_match_never_on_an_unrelated_line() -> 
     assert miss == [], f"a DIFFERENT worktree path must not match: {miss}"
 
 
-def test_scan_path_does_not_check_host_paths_unless_given_them(tmp_path: Path) -> None:
+def test_scan_path_does_not_check_host_paths_unless_given_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The default stays empty (#134 item 5 docstring): scan_text/scan_path
     remain pure and reproducible given explicit inputs, exactly like
     load_denylist's environment fallback is read once at the CLI boundary
     rather than inside the scanner. Confirmed real on the pre-fix code (no
-    `host_paths` parameter existed at all): see the PR for the TypeError."""
+    `host_paths` parameter existed at all): see the PR for the TypeError.
+
+    Chdir to a deterministic path outside `/home` and `/Users`, with at
+    least two segments below root (Nit Store, issue #20, found while
+    working #174: https://github.com/cooneycw/skillc/issues/20#issuecomment-5870416444).
+    The previous version wrote the ambient, unmodified `os.getcwd()`, so
+    this test's own two assertions disagreed depending on where the
+    repository happened to be checked out: from a `/home/<user>/...`
+    checkout, `HOME_PATH_RE` (`scan_text`'s own always-on rule, independent
+    of `host_paths`) already matches that text, so the FIRST assertion
+    (no findings with no `host_paths`) failed; from a bare, one-segment cwd
+    like `/tmp`, `default_host_paths()`'s own `_is_specific_enough` guard
+    (see `test_default_host_paths_drops_a_bare_mount_point` just below)
+    drops it, so the SECOND assertion (a finding once `host_paths` names it)
+    failed instead. This mirrors `test_cli_leak_check_flags_a_checkout_
+    under_the_running_hosts_own_cwd`'s own fixture shape for the same
+    reason: neither failure mode can reproduce from a value that is both
+    outside `/home`/`/Users` and at least two segments deep."""
+    checkout = tmp_path / "srv-like" / "checkout"
+    checkout.mkdir(parents=True)
+    monkeypatch.chdir(checkout)
     (tmp_path / "f.txt").write_text(f"{os.getcwd()}\n", encoding="utf-8")
     assert leak.scan_path(tmp_path, frozenset()).findings == []
     assert leak.scan_path(
