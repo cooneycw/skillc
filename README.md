@@ -551,16 +551,21 @@ both run live on native Docker Engine, both `CAUGHT` (evidence:
 The rest of the conformance table and failure-path matrix stay proven only
 against the fake CLI, unchanged from 0.2.0's own scope ruling.
 
-Also in this cycle, still open: Level 2 and Level 3 task fixtures
-([#13](https://github.com/cooneycw/skillc/issues/13), self-certified
-locally, no live agent run yet), an optional managed-container backend with
-a published protocol but no implementing platform yet
-([#64](https://github.com/cooneycw/skillc/issues/64)), operator-expressible
-degraded CPP subjects and a behavioral-eval export path
-([#150](https://github.com/cooneycw/skillc/issues/150)), and a live
-selection-probe run with its detection control
-([#26](https://github.com/cooneycw/skillc/issues/26)). None of these claims
-to be finished; see [`docs/release-notes/0.3.0.md`](docs/release-notes/0.3.0.md)
+Also in this cycle, still open: Level 2, Level 3, Level 4 and Level 5 task
+fixtures ([#13](https://github.com/cooneycw/skillc/issues/13),
+[#14](https://github.com/cooneycw/skillc/issues/14), self-certified locally,
+no live agent run yet), four Nit Store fixes against the exposure check's
+own acceptance criteria ([#55](https://github.com/cooneycw/skillc/issues/55),
+whose own live-evidence acceptance items are untouched by this cycle), an
+optional managed-container backend with a published protocol but no
+implementing platform yet ([#64](https://github.com/cooneycw/skillc/issues/64)),
+operator-expressible degraded CPP subjects and a behavioral-eval export path
+([#150](https://github.com/cooneycw/skillc/issues/150) - its discriminating
+run is not yet possible, blocked on an operator decision, not on anything
+this release could deliver), and a live selection-probe run with its
+detection control ([#26](https://github.com/cooneycw/skillc/issues/26)).
+None of these claims to be finished; see
+[`docs/release-notes/0.3.0.md`](docs/release-notes/0.3.0.md)
 for exactly what each one still owes.
 
 ## Prior art
