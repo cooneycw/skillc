@@ -615,6 +615,114 @@ def write_observation_record(experiment: trial.Experiment, attempt_id: str, data
     return "written"
 
 
+#: `demo.run_subject_discovery`'s own per-name outcomes - re-exported here
+#: rather than re-literalled, so this module and demo.py cannot silently
+#: drift on the strings that mean "discovered".
+_DISCOVERED, _NOT_DISCOVERED, _UNMEASURED = "discovered", "not-discovered", "UNMEASURED"
+
+
+def readiness_from_discovery_listings(
+    declared: frozenset[str],
+    before: tuple[dict[str, str], frozenset[str], str | None],
+    after: tuple[dict[str, str], frozenset[str], str | None],
+) -> dict[str, object]:
+    """Build the agent-trial path's two installation-readiness facts
+    (`verify.READINESS_FACTS`) from a codex model-free listing taken before
+    and after `extra_home_files` delivery (#150-D, ADR 0005's "yes, narrow
+    B1" ruling narrowing #139's own B1: an agent-trial arm that installs a
+    declared collection now writes a real installation receipt, built from
+    an in-container discovery canary, instead of staying on the
+    `AGENT_OBSERVATION_READINESS` stand-in that arms installing nothing
+    still use unchanged).
+
+    `before`/`after` are `demo.run_subject_discovery`'s own return shape -
+    `({name: "discovered"|"not-discovered"|"UNMEASURED"}, unexpected,
+    reason)` for every name in `declared` - taken by calling it once before
+    `extra_home_files` is delivered into the container and once after, with
+    the SAME `declared` name set both times. `reason` is non-`None` only
+    when the listing could not be obtained at all (a launch failure, a
+    nonzero exit, or output the shared parser could not read), in which
+    case every declared name maps to `"UNMEASURED"` there too and
+    `unexpected` is empty - never treated as absence.
+
+    `discovery_canary` (from `after`): `SATISFIED` only if every declared
+    skill is `"discovered"` after delivery. `UNKNOWN` if the listing could
+    not be obtained, or maps any declared name to `"UNMEASURED"`.
+    `VIOLATED` if the listing succeeded but a declared skill is
+    `"not-discovered"` - the file copy or the client's own discovery
+    failed, whichever it was. `after`'s own `unexpected` plays no part
+    here - an undeclared skill appearing alongside a freshly-delivered one
+    says nothing about whether delivery worked.
+
+    `baseline_absence` (from `before`): `SATISFIED` only if every declared
+    skill was `"not-discovered"` BEFORE delivery AND `before`'s own
+    `unexpected` is empty. `UNKNOWN` follows `discovery_canary`'s rule over
+    the earlier listing. `VIOLATED` either way round: a declared skill
+    already `"discovered"` before delivery is contamination (an earlier
+    attempt's leftover state, or a container that did not start clean);
+    an UNDECLARED skill already listed is the same hazard from the other
+    direction (cross-model review, PR #154's own predecessor: an
+    image-shipped or leftover skill unrelated to this trial could make a
+    degraded arm pass for the wrong reason - the trial would credit its
+    own instructions for behaviour the baseline environment already
+    supplied). Both are checked; either alone VIOLATES.
+
+    A degraded arm that mutates a skill's content but leaves the file
+    itself in place is STILL discovered after delivery - readiness cannot
+    and must not distinguish a mutated skill from an intact one; that is
+    the grader's job, not this criterion's. #133 item 4 (per-entry install
+    readiness, replacing `DockerBackend.install()`'s current all-or-nothing
+    canary) is moot for this path for the same reason: this readiness is
+    already per-entry, one listing lookup per declared name, independent
+    of whatever `install()` itself reports.
+
+    Only `codex` has a model-free listing (`materialize.SURFACES
+    ["codex-skills"].model_free_listing`); a Claude Code arm has no way to
+    obtain either listing at all, so a caller must not call this for one -
+    `AGENT_OBSERVATION_READINESS` is what a Claude Code arm keeps, exactly
+    like an empty baseline arm."""
+
+    after_listed, _after_unexpected, after_reason = after
+    if after_reason is not None or any(after_listed.get(name) == _UNMEASURED for name in declared):
+        discovery = {
+            "outcome": "UNKNOWN",
+            "detail": after_reason or "the listing named an UNMEASURED skill",
+        }
+    elif all(after_listed.get(name) == _DISCOVERED for name in declared):
+        discovery = {"outcome": "SATISFIED", "detail": "every declared skill discovered after delivery"}
+    else:
+        discovery = {
+            "outcome": "VIOLATED",
+            "detail": f"not every declared skill was discovered after delivery: {after_listed}",
+        }
+
+    before_listed, before_unexpected, before_reason = before
+    if before_reason is not None or any(before_listed.get(name) == _UNMEASURED for name in declared):
+        absence = {
+            "outcome": "UNKNOWN",
+            "detail": before_reason or "the listing named an UNMEASURED skill",
+        }
+    elif any(before_listed.get(name) == _DISCOVERED for name in declared):
+        absence = {
+            "outcome": "VIOLATED",
+            "detail": f"a declared skill was already listed before delivery: {before_listed}",
+        }
+    elif before_unexpected:
+        absence = {
+            "outcome": "VIOLATED",
+            "detail": f"undeclared skill(s) already listed before delivery: {sorted(before_unexpected)}",
+        }
+    else:
+        absence = {"outcome": "SATISFIED", "detail": "no declared or undeclared skill listed before delivery"}
+
+    return {
+        "discovery_canary": discovery["outcome"],
+        "baseline_absence": absence["outcome"],
+        "discovery_canary_detail": discovery["detail"],
+        "baseline_absence_detail": absence["detail"],
+    }
+
+
 def run_one_attempt(
     *,
     backend: DockerBackend,

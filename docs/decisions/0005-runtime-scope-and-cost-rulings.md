@@ -130,6 +130,22 @@ outside reader can resolve.
   actually running an agent attempt under this ruling; it is not delivered
   by this record.
 
+- **"yes, narrow B1"** (owner ruling, 2026-09-28): narrows #139's own ruling
+  B1 (the agent-trial path's `installation-ready` criterion stays a
+  mandatory UNKNOWN, because the transcript observation that stands in for
+  an installation receipt shows the prompt arrived and the agent was live,
+  not that the declared subject was installed and discovered). B1's UNKNOWN
+  stand-in still applies, unchanged, to an agent-trial arm that installs
+  nothing (an empty baseline). An arm that DOES install a declared
+  collection now writes a real installation receipt instead, built from an
+  in-container discovery canary - the client's own model-free listing, run
+  inside the same container, before and after delivery - so that arm can
+  reach `installation-ready: SATISFIED` and the trial can PASS on it. This
+  is a narrowing of B1's scope, not a reversal: an agent-trial arm that
+  installs nothing is exactly as ungraded on readiness as before; only an
+  installing arm's readiness now has real evidence behind it. Tracked as
+  #150-D (Refs #139, #150).
+
 - **"a plus the follow-up issue"** (owner ruling, 2026-09-27): after the
   operator's live run of `skillc demo` at `8e06030` (evidence on #10), the
   owner chose between (a) accepting that run's real-daemon coverage (the
