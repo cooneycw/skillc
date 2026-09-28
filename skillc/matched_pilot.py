@@ -983,3 +983,19 @@ def is_bundle_file(path: Path) -> bool:
     """Whether `path` is a regular file of the shape `export_bundle` writes.
     Anything else in a destination makes the destination not ours to replace."""
     return path.is_file() and not path.is_symlink() and _BUNDLE_FILE_RE.fullmatch(path.name) is not None
+
+
+def bundle_experiment_id(directory: Path) -> str | None:
+    """The experiment a published bundle belongs to, read from its own
+    `ledger.json` (#147). `None` when there is no ledger, it is not a regular
+    file, it does not parse, or it names no string experiment id - the caller
+    decides what an unidentifiable bundle means, never this reader."""
+    ledger = directory / trial.LEDGER
+    if ledger.is_symlink() or not ledger.is_file():
+        return None
+    try:
+        data = json.loads(ledger.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    experiment_id = data.get("experiment_id") if isinstance(data, dict) else None
+    return experiment_id if isinstance(experiment_id, str) and experiment_id else None

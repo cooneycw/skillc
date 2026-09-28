@@ -1099,6 +1099,22 @@ def _export_pilot_evidence(experiment: object, report: dict[str, object], eviden
                 file=sys.stderr,
             )
             return 2
+        # A bundle is a published experiment's record. Replacing it is only a
+        # re-export of the SAME experiment (merging reviewed claims, say);
+        # another experiment's bundle, or one whose ledger cannot say whose it
+        # is, is never ours to replace (#147: a default run would otherwise
+        # have deleted #12's first-run bundle). An empty directory holds no
+        # record and may be written.
+        if any(evidence.iterdir()):
+            existing = mp.bundle_experiment_id(evidence)
+            if existing != report.get("experiment_id"):
+                print(
+                    f"skillc: refusing to replace {evidence}: it holds the bundle of experiment "
+                    f"{existing or '<unidentifiable: no readable ledger>'}, not {report.get('experiment_id')}; "
+                    f"publish a new experiment to its own --evidence directory",
+                    file=sys.stderr,
+                )
+                return 2
     evidence.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f".{evidence.name}.staging-", dir=evidence.parent))
     try:

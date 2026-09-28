@@ -285,14 +285,21 @@ def test_the_current_declaration_is_a_new_dated_file_that_names_what_it_supersed
 
 def test_the_current_declaration_changes_only_the_model_and_the_cap_note() -> None:
     """A re-run is a comparison with #12's run only if everything else it
-    declares is the same. Only the model (now pinned, with its effort) and
-    the stale 'caps not yet enforced' note may differ."""
+    declares is the same. Only the model (now pinned, with its effort), the
+    stale 'caps not yet enforced' note, and WHERE the committed evidence goes
+    (#147: its own directory, so the first run's bundle is not replaced) may
+    differ - nothing about what runs or how it is measured."""
     new = _current()["predeclared_experiment_record"]
     assert isinstance(new, dict)
     assert new["model"]["name"] == "gpt-6-astra"
     assert new["model"]["reasoning_effort"] == "high"
+    assert "evidence-2026-09-27-gpt-6-astra/records/" in new["artifact_retention"]["committed"]
     strip = lambda record: {
-        k: ({kk: vv for kk, vv in v.items() if kk != "note"} if k == "time_caps" else v)
+        k: (
+            {kk: vv for kk, vv in v.items() if kk != "note"} if k == "time_caps"
+            else {kk: vv for kk, vv in v.items() if kk != "committed"} if k == "artifact_retention"
+            else v
+        )
         for k, v in record.items() if k != "model"
     }
     assert strip(new) == strip(RECORD)
