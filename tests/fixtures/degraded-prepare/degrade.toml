@@ -1,0 +1,61 @@
+# Synthetic fixture for tests/test_degraded_prepare.py - fabricated content
+# only ("the frobnicator"), never real claude-power-pack text. Mirrors the
+# real degrade.toml's shape: a markdown paragraph, a script with a removable
+# guard and a retained one whose own comments legitimately mention it.
+
+[source]
+repo = "example/synthetic-pack"
+revision = "0000000000000000000000000000000000000000"
+rule_patterns = [
+    "guard_frobnicator_reversal",
+    "ALLOW_FROBNICATOR_REVERSAL",
+    "--allow-frobnicator-reversal",
+    "frobnicator ALWAYS reverses widgets",
+    "the frobnicator always reverses widgets",
+    # The GENERAL fact, broader than any identifier: mirrors the real
+    # degrade.toml's "regardless of ..." patterns, added to prove a pattern
+    # like this hits the original (reference.md line 7's own "regardless of
+    # surrounding words") and misses the prepared text (that whole paragraph,
+    # [5,7], is deleted) - see test_general_fact_pattern_hits_original_and_misses_result.
+    "regardless of surrounding words",
+]
+
+[[locations]]
+skill = "greet"
+path = "reference.md"
+original_sha256 = "ce81c900a185b898dc3ff29d5db632f0c56e4f397c1b283f2739524df412af86"
+delete_ranges = [[5, 7]]
+result_sha256 = "902ba343d308d5514cc54b2cd4f9c45c6e80a70f80d034973c0e7c66ed935921"
+
+[[locations]]
+skill = "greet"
+path = "scripts/tool.sh"
+original_sha256 = "87badd9bca4cc4cb3e14dd71c6ddf57a9e6f8c6f10fe468c616d5bdc896dfcd5"
+delete_ranges = [[5, 5], [8, 11], [21, 30], [39, 39]]
+replacements = [
+    { line = 2, old = "[--allow-frobnicator-reversal] ", new = "", line_sha256 = "146f39d770dbefb0fc7b4ea8f25b3f913219344ca32f34b09ae5b04b6483cf84" },
+]
+result_sha256 = "11da9a81f549dcfc2ff1c5bab60a1dba8c804327653bc141f10845eda9e51177"
+residual_lines = [
+    "c6dbe6119c3295bf6f2caca45ed6a3fe768c5d198009ddaa618349b9c4cd4ad1",
+]
+# Every non-comment, non-blank line the four delete_ranges above remove.
+expected_removed_code_lines = [
+    "f0b033454a4cde12ad28fa8852b579e6acdb88d0868769ad71260f96f3faff7f",
+    "1cc01a857988774694f6294e53cd741425dc548c4ac4cdfbf5b4ff70ebcaca16",
+    "53e0519aa543d87cb56bc24df8632fa91f960c082794140d3bcebd55db1dbc0f",
+    "2108351109ba9dab0a4e0b926695b96178c7bba52c29676253f6498f2ec44c79",
+    "e22c1de34de83d9d3f9a2a083b2343cedb4b925b6a8cd7b2cea3458e6e694b41",
+    "316e07820a49ac8c6190f299efb797a32031c2813b76f3a5f2a8e2631490cf35",
+    "4fb716ceaa38b46f71667f5c41fb21f52f7acaaf60a4783cdfefdfb84eebbe1f",
+    "759d3d6338598948f1cc1e59128f2fe9267b7e21df599f4fe3c1e89f732cd9dc",
+    "b37c900ec5ded7d4d3cdbdb0c5981cd0798a1d3ccaa05a73c6ca1a65049e9d8e",
+    "b80df2ba032901f2719415625cefa4a4a224fa3cdaeff4f8c5663f3bfaec4fe6",
+    "3cba432701c49657be98fd0b093e577ab7e16ae5daa0423c29d2e198a2c7d206",
+    "a2988380dca76b6c9f15f9223cec24b8dc16e5411837ed90348a91795c69010f",
+    "d10b36aa74a59bcf4a88185837f658afaf3646eff2bb16c3928d0e9335e945d2",
+    "6cb157e7bfaecbeee15196410d9d8a51f9bf7ace5e00770c9f941f3b8338df63",
+]
+must_still_contain = [
+    "7ab617463aa67b11d6826710ddb4db3389afecfc0cdf554fe351e267d9be9a94",
+]

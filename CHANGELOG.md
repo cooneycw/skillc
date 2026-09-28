@@ -28,6 +28,42 @@ and version plan.
   its pinned collection tree at run time (a network fetch, an unpinned
   host tool) moves none of the six recorded identities.
 
+- **`finish-close-ref` gains a degraded arm: `evals/level1/finish-close-ref/degraded/`**
+  (Refs #150). The baseline arm installs `cpp-codex` unmodified - its
+  `flow-finish` skill already teaches the negated/incidental
+  closing-keyword rule this eval grades, so the discriminating run needs a
+  SAME-otherwise subject with only that teaching removed, isolating the
+  skill collection under test rather than the underlying agent. CPP's
+  LICENSE `## Scope` does not cover `codex/skills/`, so no CPP text is
+  vendored: `degrade.toml` commits only facts about five files at the pinned
+  revision (sha256 hashes, exact line ranges to delete, and exact
+  hash-checked substring replacements for lines shared with retained flags),
+  and `prepare.py` turns those facts into the five real files given a real
+  checkout, refusing on a stale original, a range that deletes an undeclared
+  CODE line (checked independently of the delete ranges themselves, `.sh`
+  locations only - PROSE is removed everywhere the rule is stated, even
+  inside the retained guard's own region, but every line of its actual
+  control flow is kept, since a comment change is not a behaviour change and
+  a code change is), an insufficient deletion (a content-hashed residual
+  allowlist covers only two remaining harmless lines - an honesty pass found
+  the first version of this list too permissive, since three of its seven
+  entries and two whole header comments were real, undocumented statements
+  of the rule hiding behind "cites an identifier" reasoning; DEGRADATION.md
+  says plainly what a reader of the retained guard's raw control flow could
+  still infer), a result that fails `bash -n`, an ambiguous replacement (the
+  target substring not occurring exactly once), a range that swallowed a
+  line that should have survived, or the rule - including a GENERAL pattern
+  for "regardless of grammatical context", not only the removed guard's own
+  identifiers - still being stated anywhere else under `codex/skills/`.
+  `tests/test_degraded_prepare.py` runs the whole checker against a
+  synthetic, fabricated-content mini-checkout
+  (`tests/fixtures/degraded-prepare/`), never real CPP text - one test per
+  refusal, each confirmed to fail for the specific reason it claims, plus
+  the green path and its own positive control for the whole-tree scan and
+  for the general-fact pattern. Running `prepare.py` against the real
+  pinned revision, and the `skillc degrade-subject` invocation it prints,
+  is a runbook step owed to the operator.
+
 - **`make verify` and a real `## Verify` command, covering every
   `.woodpecker/ci.yml` step** (Refs #134, items 1 and 2). Nothing ran
   `skillc selftest` or `ci/negative-control.sh` locally without a Makefile,
@@ -52,6 +88,48 @@ and version plan.
   `dev` extra).
 
 ### Fixed
+
+- **`degrade.load_persisted_degraded` now refuses a persisted degraded tree
+  built for a different subject or pinned to a different revision** (Refs
+  #150). Found reviewing #160: the receipt records both `"subject"` and
+  `"pinned_revision"`, but neither was ever compared against the caller's
+  own subject/pin - a degraded tree built from `cpp-codex` and loaded via
+  `collection-run cpp-claude-code --degraded DIR` installed silently under
+  the wrong subject and client, and a tree pinned to a stale revision
+  installed as if it were still the subject's current pin. Now refuses
+  (`DegradationRefused`) before reading anything else in the receipt when
+  `receipt["subject"] != subject_name` or
+  `receipt["pinned_revision"] != subject.revision`. Two new red cases,
+  reproduced directly against the pre-fix code (not merely asserted): a
+  subject-name mismatch and a pin mismatch each loaded successfully with no
+  refusal at all before this fix, returning a `Source` as if nothing were
+  wrong.
+
+- **`collection-run` can now target a Level 1 task other than
+  `slug-small-fix`, via `--task DIR`** (Refs #150). Nothing read `--task`
+  before this: `run_level1_agent_attempt` always read `demo.GRADER_ROOT`
+  (slug-small-fix's own `goal.md`/`fixture/`/`grader.json`) and
+  `plan_collection_attempt` ledgered every run with the literal
+  `{"id": "slug-small-fix", "revision": "r1"}` - itself already stale,
+  since `slug-small-fix/grader.json` declares revision `"2"`. So the
+  operator's own discriminating run against a different Level 1 task (e.g.
+  `finish-close-ref`) could not actually run that task at all: it would
+  install and prompt for the wrong fixture, get graded by the wrong grader,
+  and have the ledger record it as `slug-small-fix` regardless. `--task DIR`
+  (default unchanged) is threaded through `plan_collection_attempt` and
+  `run_level1_agent_attempt`/`run_collection_agent_attempt`; the plan's
+  `case.id`/`case.revision` are now read from `DIR`'s own `grader.json`,
+  never a literal. A `DIR` that is not a Level 1 task layout (missing
+  `goal.md`, `fixture/` or `grader.json`) is refused up front, before
+  `new_run_root` creates anything. Three groups of new tests, each verified
+  to fail on the pre-fix code: the plan for `--task finish-close-ref` carries
+  that task's case id and a grader digest that differs from slug-small-fix's;
+  the DEFAULT path's own case now records slug-small-fix's real `"2"`, not
+  `"r1"`; and a fake-docker run against `--task finish-close-ref` grades a
+  candidate writing the reference answer PASS, and the committed
+  `wrong/negated-close` candidate (a negated closing disclaimer that still
+  matches the closing grammar) FAIL on `no-closing-match` - proving
+  `finish-close-ref/grade_ref.py` itself ran, not slug-small-fix's.
 
 - **`leak-check` no longer false-positives on a linked worktree's `.git`
   pointer file, and now sees a checkout under `/workspace`, `/opt` or

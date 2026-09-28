@@ -206,6 +206,24 @@ def new_run_root(base: Path, subject_name: str) -> Path:
     return Path(tempfile.mkdtemp(prefix=f"skillc-collection-run-{subject_name}-", dir=base))
 
 
+def resolve_task_root(task: str | None) -> Path:
+    """`--task DIR` (default `demo.GRADER_ROOT`, `evals/level1/slug-small-fix`
+    - unchanged behaviour without the flag): the Level 1 task whose `goal.md`,
+    `fixture/` and `grader.json` this run's agent attempt is graded against.
+
+    Refused (`demo.SubjectRefused`, the same shape `new_run_root` already
+    raises for a malformed subject name) up front, before `new_run_root`
+    creates anything, when DIR is not a Level 1 task layout - one of the three
+    missing. This is a structural check only; a present-but-malformed
+    `grader.json` is still `verify.GraderDef.load`'s own `Refused` to raise,
+    later, once the caller actually reads it."""
+    root = Path(task).resolve() if task is not None else demo.GRADER_ROOT
+    missing = [name for name in ("goal.md", "fixture", "grader.json") if not (root / name).exists()]
+    if missing:
+        raise demo.SubjectRefused(f"--task {root} is not a Level 1 task layout: missing {', '.join(missing)}")
+    return root
+
+
 def discard_acquisition(run_root: Path, subject_name: str) -> None:
     """Remove the run's checkout and staging copies - inputs re-derivable from
     the subject's pinned revision. The store, the run's evidence, is kept."""
@@ -369,7 +387,7 @@ def acquire_degraded_collection(subject_name: str, degraded_dir: Path) -> Acquir
     `plan_collection_attempt` and every stored record reads."""
     subject = demo.load_demo_subject(subject_name)
     try:
-        source = degrade.load_persisted_degraded(degraded_dir, subject)
+        source = degrade.load_persisted_degraded(degraded_dir, subject, subject_name=subject_name)
         install_subject = replace(subject, select=None)
         entries = materialize.inventory(install_subject, source)
     except (degrade.DegradationRefused, materialize.Refused) as exc:
@@ -406,7 +424,8 @@ def _fixture_surface(fixture_dir: Path) -> dict[str, bytes]:
 
 
 def plan_collection_attempt(
-    subject_name: str, acquired: AcquiredCollection, store: Path, *, image_digest: str | None = None,
+    subject_name: str, acquired: AcquiredCollection, store: Path, *,
+    image_digest: str | None = None, task_root: Path | None = None,
 ) -> tuple[trial.Experiment, str]:
     """Plan one attempt, labeled by `subject_name`, before any Docker work or
     argv is built - split out from `run_collection_agent_attempt` so a caller
@@ -431,14 +450,24 @@ def plan_collection_attempt(
     becomes `image.digest`; `None` (an unreachable daemon, or a caller that
     has not resolved one yet) renders as the honest `"UNKNOWN"` marker
     `demo.py`'s own paste-back already uses for the same fact - never a
-    fabricated hash standing in for missing knowledge."""
+    fabricated hash standing in for missing knowledge.
+
+    `task_root` (default `demo.GRADER_ROOT`) is the Level 1 task
+    (`resolve_task_root`'s own contract) this attempt will be graded against.
+    `case.id`/`case.revision` are read from ITS `grader.json`
+    (`verify.GraderDef.load(task_root)`), never a literal: the previous
+    hardcoded `{"id": "slug-small-fix", "revision": "r1"}` both named one
+    specific task regardless of which ran, and had gone stale even for that
+    one - `slug-small-fix/grader.json` itself declares revision `"2"`."""
+    resolved_task_root = task_root if task_root is not None else demo.GRADER_ROOT
+    grader = verify.GraderDef.load(resolved_task_root)
     spec: dict[str, object] = {
         "experiment": "collection-conformance",
         "trials": [{
-            "label": subject_name, "case": {"id": "slug-small-fix", "revision": "r1"},
+            "label": subject_name, "case": {"id": grader.id, "revision": grader.revision},
             # The grader this attempt is actually graded by, digest included
             # (#139): the verifier stores no result against any other pin.
-            "grader": verify.GraderDef.load(demo.GRADER_ROOT).identity(), "subject": {"digest": acquired.source.digest},
+            "grader": grader.identity(), "subject": {"digest": acquired.source.digest},
             "client": {"name": acquired.subject.client, "version": acquired.subject.client_version},
             "image": {"digest": image_digest or "UNKNOWN"}, "config": {}, "attempts": 1,
         }],
@@ -461,20 +490,23 @@ def run_level1_agent_attempt(
     client: str = materialize.CLIENT,
     prompt: str | None = None,
     surface: Mapping[str, object] | None = None,
+    task_root: Path | None = None,
     timeout: float = 30,
     credential_explicit_path: str | Path | None = None,
     minimum_credential_seconds: float = credential.MINIMUM_REMAINING_SECONDS,
 ) -> dict[str, object]:
-    """One real (or, in tests, scripted-fake) codex attempt against the Level 1
-    task, in skill-free canary mode, graded by the fixture's own grader -
-    whatever `extra_home_files` installs. `run_collection_agent_attempt`
-    passes a collection's selected skills; the matched pilot's baseline arm
-    (issue #12) passes `{}`, so both arms go through this one path and differ
-    ONLY in what is installed - never a second copy of the prompt, fixture
-    or grader wiring that could drift from the first."""
-    resolved_prompt = prompt if prompt is not None else (demo.GRADER_ROOT / "goal.md").read_text(encoding="utf-8")
-    resolved_surface = surface if surface is not None else _fixture_surface(demo.GRADER_ROOT / "fixture")
-    grader = verify.GraderDef.load(demo.GRADER_ROOT)
+    """One real (or, in tests, scripted-fake) codex attempt against a Level 1
+    task (`task_root`, default `demo.GRADER_ROOT`), in skill-free canary mode,
+    graded by THAT task's own grader - whatever `extra_home_files` installs.
+    `run_collection_agent_attempt` passes a collection's selected skills; the
+    matched pilot's baseline arm (issue #12) passes `{}`, so both arms go
+    through this one path and differ ONLY in what is installed - never a
+    second copy of the prompt, fixture or grader wiring that could drift from
+    the first."""
+    resolved_task_root = task_root if task_root is not None else demo.GRADER_ROOT
+    resolved_prompt = prompt if prompt is not None else (resolved_task_root / "goal.md").read_text(encoding="utf-8")
+    resolved_surface = surface if surface is not None else _fixture_surface(resolved_task_root / "fixture")
+    grader = verify.GraderDef.load(resolved_task_root)
     return agent_trial.run_one_attempt(
         backend=backend, experiment=experiment, attempt_id=attempt_id, client=client,
         base_argv=base_argv, prompt=resolved_prompt, skill_name=None,
@@ -499,14 +531,16 @@ def run_collection_agent_attempt(
     base_argv: Sequence[str],
     prompt: str | None = None,
     surface: Mapping[str, object] | None = None,
+    task_root: Path | None = None,
     timeout: float = 30,
     credential_explicit_path: str | Path | None = None,
     minimum_credential_seconds: float = credential.MINIMUM_REMAINING_SECONDS,
 ) -> CollectionAgentResult:
     """Install `acquired`'s declared, selected skill files into the same
     container as one real (or, in this module's own tests, scripted-fake)
-    agent attempt against `evals/level1/slug-small-fix`, in skill-free canary
-    mode, on the client the subject itself declares.
+    agent attempt against `task_root` (default `demo.GRADER_ROOT`,
+    `evals/level1/slug-small-fix`), in skill-free canary mode, on the client
+    the subject itself declares.
 
     `acquired`/`experiment`/`attempt_id` are caller-supplied -
     `acquire_collection`/`plan_collection_attempt` above, exactly as
@@ -514,22 +548,25 @@ def run_collection_agent_attempt(
     `attempt_id` caller-supplied (never built implicitly per call, since a
     real trial matrix plans once and dispatches many attempts); `acquired`
     the SAME acquisition `plan_collection_attempt` used, never re-acquired
-    here (see that function's own docstring for why).
+    here (see that function's own docstring for why). `task_root` must be the
+    SAME one `plan_collection_attempt` was given - this function does not
+    check that, since nothing here reads the plan back to compare.
 
     `base_argv` is caller-supplied, exactly as `agent_trial.run_one_attempt`
     itself requires - this module never invents the real launch argv (see
-    that function's own docstring for why). `prompt` and `surface` default
-    to the FIXED Level 1 task's own data - `goal.md` (#5's own "agent-facing
-    request, identical for every arm") and `fixture/src/` (never the sibling
+    that function's own docstring for why). `prompt` and `surface` default to
+    `task_root`'s own data - `goal.md` (#5's own "agent-facing request,
+    identical for every arm") and `fixture/src/` (never the sibling
     `fixture/expected.json`, the grader's ground truth for it - see
     `_fixture_surface`'s own comment) - reading them is not inventing a
-    prompt, since bullet 2 fixes this task for every collection; a caller
-    that needs a different one (this module's own tests, a red case) may
-    still override either."""
+    prompt, since bullet 2 fixes one task per run for every collection; a
+    caller that needs a different one (this module's own tests, a red case)
+    may still override either."""
     record = run_level1_agent_attempt(
         experiment=experiment, attempt_id=attempt_id, backend=backend, grading_backend=grading_backend,
         base=base, base_argv=base_argv, extra_home_files=_collection_home_files(acquired.source, acquired.files),
-        client=acquired.subject.client, cli_version=acquired.subject.client_version, prompt=prompt, surface=surface, timeout=timeout,
+        client=acquired.subject.client, cli_version=acquired.subject.client_version, prompt=prompt, surface=surface,
+        task_root=task_root, timeout=timeout,
         credential_explicit_path=credential_explicit_path, minimum_credential_seconds=minimum_credential_seconds,
     )
     discovery, discovery_reason = transcript_discovery(record, {f.skill for f in acquired.files})
