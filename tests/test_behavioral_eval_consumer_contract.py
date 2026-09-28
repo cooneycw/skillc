@@ -141,21 +141,27 @@ def _run_captured_attempt(
     return experiment, cc.evidence_envelope(result)
 
 
-def test_a_normal_arm_export_is_read_as_inconclusive_pending_139(
+def test_a_normal_arm_export_is_read_as_inconclusive_pending_150_d(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """This is NOT the intended end state - it is what running the REAL
     consumer against a REAL captured, task-PASS collection-run export
-    actually does TODAY, and it is `INCONCLUSIVE`, not `PASS`. #150's own
-    acceptance item 5 names this exact gap: `verify.py`'s `installation-ready`
-    stays a mandatory UNKNOWN when `readiness_source` is `agent-observation`
-    (issue #139), so a mandatory criterion is never `SATISFIED` on the agent
-    path and the consumer's own derivation (`derive_status`: any non-
-    SATISFIED mandatory criterion yields `INCONCLUSIVE`) can never reach
-    `PASS` through this path until #139 lands. Once it does, this test's
-    assertion should change to `consumer.VERDICTS["pass"]` - leaving it
-    asserting `INCONCLUSIVE` past that point would hide the fix rather than
-    prove it."""
+    actually does TODAY, and it is `INCONCLUSIVE`, not `PASS`. #139 (agent-
+    path readiness) is CLOSED: the owner's ruling was that
+    `installation-ready` stays a mandatory UNKNOWN on the agent-observation
+    path, full stop. What turns a normal arm into `PASS` is #150's own
+    acceptance item 5, tracked as 150-D (an arm that installs a collection
+    gets a real installation receipt from codex's in-container discovery
+    listing, not an agent-observation one) - so a mandatory criterion is
+    never `SATISFIED` here today, and the consumer's own derivation
+    (`derive_status`: any non-SATISFIED mandatory criterion yields
+    `INCONCLUSIVE`) can never reach `PASS` through this path until 150-D
+    lands. This subject is CODEX-shaped deliberately (`_subject`'s own
+    `surface="codex-skills"`): 150-D's design still leaves a Claude Code arm
+    reading `INCONCLUSIVE` (no model-free listing), so only a codex arm has
+    anything for 150-D to flip. Once 150-D lands, this test's assertion
+    should change to `consumer.VERDICTS["pass"]` - leaving it asserting
+    `INCONCLUSIVE` past that point would hide the fix rather than prove it."""
     experiment, envelope = _run_captured_attempt(tmp_path, monkeypatch, pass_task=True)
     evidence = tmp_path / "evidence"
     assert cli._export_collection_evidence(experiment, envelope, evidence) == 0
