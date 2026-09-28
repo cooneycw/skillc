@@ -8,6 +8,8 @@ and version plan.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-28
+
 ### Added
 
 - **Level 2 and Level 3 calibrated task families: constraint-handling and
