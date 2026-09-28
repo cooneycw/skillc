@@ -22,4 +22,6 @@ reports/
 *.key
 *.p12
 secrets.*
+# .claude/security.yml is tracked on purpose (#159): it holds only planted
+# canary values. The ignore stays because CPP's gate flags its absence.
 .claude/security.yml

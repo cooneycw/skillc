@@ -1,0 +1,11 @@
+# .claude/security.yml - read by claude-power-pack's finish-gate security scan
+# (python3 -m lib.security). NOT read by gitleaks; .gitleaks.toml stays as is.
+suppressions:
+  - id: AWS_ACCESS_KEY
+    path: '^(\.gitleaks\.toml|ci/secret-scan-control\.sh)$'
+    secret: 'AKIAABCDEFGHIJKLMNOP'
+    reason: 'trial-capture canary (#8), also allowlisted in .gitleaks.toml'
+  - id: ANTHROPIC_API_KEY
+    path: '^tests/test_leak\.py$'
+    secret: 'sk\-ant\-api03\-abcdefghijklmnopqrstuvwxyz0123456789'
+    reason: 'planted leak-detector fixture'
