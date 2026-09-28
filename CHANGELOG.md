@@ -324,6 +324,68 @@ and version plan.
   `controls/required-fields/bad/`, shown silently missed on the pre-fix code
   (`BLIND required-fields silent on 3 of 8 known-bad input(s)`).
 
+- **`materialize`'s discovery canary no longer fails a correctly-installed
+  policy-hidden skill, and its planted negative control no longer picks
+  one** (Refs #55, folded-in Nit Store item 4). A skill whose own
+  `agents/openai.yaml` sets `policy.allow_implicit_invocation: false` is
+  correctly absent from Codex's own skill listing by design (verified
+  codex-cli 0.157.1, 2026-09-26) - not a discovery failure. The pre-fix
+  `discovery_canary` expected every INSTALLED skill to be listed, so this
+  exact, correctly-behaving skill read as `installed but not listed`,
+  VIOLATED. Separately, `baseline_absence`'s planted negative control used
+  `entries[:1]` unconditionally; if that first entry happened to be
+  policy-hidden, it was correctly absent from the control arm's own listing
+  too, misreporting "negative control failed" for an unrelated reason. The
+  policy read (`spec.policy_hidden_cause`, moved out of `exposure.py` so
+  both modules share one reading of `agents/openai.yaml` rather than two
+  that could drift) now excludes policy-hidden skills from the discovery
+  expectation and steers the planted control away from one. Three new
+  tests, two verified to fail on the pre-fix code.
+
+- **`exposure._plant_always_loaded` no longer plants a marker past the
+  boundary it claims to test** (Refs #55, folded-in Nit Store item 1).
+  `room = limit - len(base) - len(inside) - 1` could go negative when the
+  real declared file left barely enough space for the inside marker -
+  `b"." * room` on a negative `room` silently produces `b""` (never an
+  error), so the marker still landed immediately after the real content,
+  ending PAST `limit`, while its own note unconditionally claimed it ended
+  AT `limit` and should be `EXPOSED`. A conforming client that correctly
+  truncates at `limit` then reports the marker `HIDDEN` - a real boundary
+  misread as an exposure failure, not a defect in the client under test.
+  Now reported the same honest way the already-over-the-limit case already
+  was: the note says the boundary is untestable, and makes no `EXPOSED`
+  claim. Three new tests at exact real offsets (just enough room, one byte
+  too little, already over), each asserting the precise byte positions;
+  the one-byte-too-little case verified to fail on the pre-fix code.
+
+- **`exposure.classify_marker`'s `cut_point_bytes` is now a true UTF-8 byte
+  offset** (Refs #55, folded-in Nit Store item 3). The truncation search cut
+  at a `str` (code point) index, identical to a byte index only while every
+  character is ASCII - true of every marker this module plants today, so
+  the bug was dormant. Now searches `marker.text.encode("utf-8")` against
+  the rendered text's own UTF-8 bytes, never re-decoded; a real client's
+  truncation operates on bytes and can legitimately split a multi-byte
+  character in half, which a `str` slice cannot even represent. New red
+  case with a non-ASCII marker, verified to report a wrong offset on the
+  pre-fix code.
+
+- **`exposure` can now model a manifest that declares more skills than a run
+  actually found** (Refs #55, folded-in Nit Store item 2). Nothing previously
+  compared what `.claude-plugin/plugin.json` DECLARES against what
+  `materialize.inventory()` actually found for this run - `subject.select`'s
+  own validation only proves every SELECTED name resolves, a claim about a
+  smaller population than the manifest as a whole (the ADR 0004 "38 skill
+  directories, 25 installed" specimen, issue #53). `ExposureSurface` gained an
+  optional `manifest_path`; when set, `check_exposure` reads the manifest and
+  reports `declared`/`found`/`missing` skill counts and names alongside the
+  existing per-skill verdicts, `None` when no manifest is declared - never
+  conflated with "checked, found nothing missing". New tests cover the schema
+  (optional, parsed, path-escape refused, non-string type refused) and the
+  coverage comparison itself (a declared-but-not-found skill reported by name;
+  a fully-covered manifest reporting zero missing); the coverage-gap and
+  schema tests verified to fail on the pre-fix code (missing attribute /
+  `unknown keys: ['manifest_path']`).
+
 - **`leak-check` no longer false-positives on a linked worktree's `.git`
   pointer file, and now sees a checkout under `/workspace`, `/opt` or
   `/srv`** (Refs #134, items 4 and 5). `SKIP_DIRS` filtered directories

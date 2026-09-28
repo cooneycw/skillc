@@ -119,6 +119,26 @@ def test_surface_refuses_index_with_a_non_string_target() -> None:
         _surface(index={"path": "docs/idx.md", "targets": [1]})
 
 
+def test_surface_manifest_path_is_optional() -> None:
+    assert _surface().manifest_path is None
+
+
+def test_surface_parses_manifest_path() -> None:
+    surface = _surface(manifest_path=".claude-plugin/plugin.json")
+    assert surface.manifest_path == ".claude-plugin/plugin.json"
+
+
+def test_surface_refuses_an_escaping_manifest_path() -> None:
+    with pytest.raises(m.Refused, match="escapes"):
+        _surface(manifest_path="../outside/plugin.json")
+
+
+@pytest.mark.parametrize("bad", ["", 1, True, ["a"]])
+def test_surface_refuses_a_non_string_manifest_path(bad: object) -> None:
+    with pytest.raises(m.Refused, match="manifest_path"):
+        _surface(manifest_path=bad)
+
+
 # --------------------------------------------------------------- classification
 
 
@@ -150,6 +170,26 @@ def test_classify_marker_truncated_on_a_tail_prefix_and_names_the_cut_point() ->
     assert result["cut_point_bytes"] == cut
 
 
+def test_classify_marker_reports_a_true_byte_offset_for_non_ascii_text() -> None:
+    """Red case for issue #55's folded-in Nit Store item 3: `cut_point_bytes`
+    names itself a byte offset, but the pre-fix search cut at a `str`
+    (code point) index - identical to a byte index only while every
+    character is ASCII, which every marker this module plants today is, so
+    the bug was dormant. 'cafe' with an accent ('e' + U+0301, or the
+    precomposed 'e-acute') encodes to more UTF-8 bytes than characters, so a
+    character-index cut and a byte-index cut diverge as soon as truncation
+    happens anywhere past it - and this fixture asserts that divergence is
+    real, not accidentally ASCII again."""
+    marker = x.Marker("id", f"{x.MARKER_PREFIX}TEST-café-0123456789abcdef", "layer", "note")
+    marker_bytes = marker.text.encode("utf-8")
+    assert len(marker.text) != len(marker_bytes), "fixture must be genuinely non-ASCII"
+    byte_cut = len(marker_bytes) - 4  # drop the last 4 BYTES, not 4 characters
+    rendered = "leading content " + marker_bytes[:byte_cut].decode("utf-8")
+    result = x.classify_marker(marker, rendered)
+    assert result["verdict"] == x.TRUNCATED
+    assert result["cut_point_bytes"] == byte_cut
+
+
 def test_marker_planted_just_beyond_a_limit_classifies_truncated_when_cut_mid_marker() -> None:
     """Regression-shaped proof for `_plant_always_loaded`'s own boundary
     construction: cutting NEAR THE END of the "outside" marker's own text
@@ -176,6 +216,93 @@ def test_marker_planted_just_inside_a_limit_is_exposed_when_cut_exactly_at_the_l
     content, (inside, _outside) = x._plant_always_loaded(Path("/nonexistent"), entry)
     rendered = content[:200].decode(errors="replace")
     assert x.classify_marker(inside, rendered)["verdict"] == x.EXPOSED
+
+
+# ---------------------------------------------------- issue #55 folded-in item 1:
+# the room = limit - len(base) - len(inside) - 1 boundary, at exact real offsets.
+# `inside`'s own length is deterministic (MARKER_PREFIX + "INSIDE-" + a 16-hex
+# nonce = 16 + 7 + 16 = 39 bytes, always ASCII), so `room` for a given `base`
+# length and `limit` is exactly computable, not merely bounded.
+_INSIDE_MARKER_LEN = len(x.MARKER_PREFIX) + len("INSIDE-") + 16
+
+
+def test_plant_always_loaded_with_just_enough_room_ends_exactly_at_the_limit(
+    tmp_path: Path,
+) -> None:
+    """Green case: `room == 0` exactly - the narrowest real file that still
+    leaves just enough space for the inside marker to end AT the limit, not
+    past it. Must behave like the ordinary (positive-room) branch, not the
+    new untestable one, and the inside marker must classify EXPOSED when the
+    render is cut exactly at the limit."""
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    limit = 200
+    base_len = limit - _INSIDE_MARKER_LEN - 1  # room == 0
+    (source_dir / "AGENTS.md").write_bytes(b"x" * base_len)
+    entry = x.AlwaysLoadedFile(path="AGENTS.md", claimed_limit_bytes=limit)
+    content, (inside, _outside) = x._plant_always_loaded(source_dir, entry)
+    assert "untestable" not in inside.note
+    # The inside marker's own text ends one byte short of `limit` (the `- 1`
+    # in `room`'s own formula is deliberate slack, not an off-by-one here) -
+    # still safely within `limit`, never past it.
+    end = content.index(inside.text.encode()) + len(inside.text)
+    assert end == limit - 1
+    rendered = content[:limit].decode(errors="replace")
+    assert x.classify_marker(inside, rendered)["verdict"] == x.EXPOSED
+
+
+def test_plant_always_loaded_one_byte_too_little_is_reported_untestable(
+    tmp_path: Path,
+) -> None:
+    """Red case for issue #55 folded-in item 1: `room == -1`, one byte less
+    than `test_..._with_just_enough_room...` above. `b"." * -1` silently
+    produces `b""` (never an error), so the pre-fix code planted the inside
+    marker immediately after the real content anyway, ending PAST `limit`,
+    while its own note still unconditionally claimed it ended AT `limit` and
+    should be `EXPOSED` - a conforming client that truncates exactly at
+    `limit` then reports the marker `HIDDEN`, which reads as an exposure
+    failure that is actually correct client behaviour. Must now say the
+    boundary is untestable rather than claim `EXPOSED`, and must not place
+    the marker as if `limit` bytes were available."""
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    limit = 200
+    base_len = limit - _INSIDE_MARKER_LEN  # room == -1: one byte too little
+    (source_dir / "AGENTS.md").write_bytes(b"x" * base_len)
+    entry = x.AlwaysLoadedFile(path="AGENTS.md", claimed_limit_bytes=limit)
+    content, (inside, outside) = x._plant_always_loaded(source_dir, entry)
+    assert "untestable" in inside.note
+    assert "untestable" in outside.note
+    assert "expect EXPOSED" not in inside.note
+    # The real offset where the inside marker actually lands - `base_len`
+    # bytes of real content, then this branch's own single b"\n" separator,
+    # so the marker itself ends one byte PAST `limit`, proving the pre-fix
+    # silent-b"" behaviour is what is being guarded against, not merely
+    # asserting the note text changed.
+    start = content.index(inside.text.encode())
+    assert start == base_len + 1
+    end = start + len(inside.text)
+    assert end == limit + 1
+
+
+def test_plant_always_loaded_already_over_the_limit_reports_the_real_length(
+    tmp_path: Path,
+) -> None:
+    """The third boundary the issue names: the real file already exceeds
+    `limit` on its own. Existing branch, given its own committed control and
+    real-offset assertion here (previously untested directly)."""
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    limit = 200
+    base_len = limit + 10
+    (source_dir / "AGENTS.md").write_bytes(b"x" * base_len)
+    entry = x.AlwaysLoadedFile(path="AGENTS.md", claimed_limit_bytes=limit)
+    content, (inside, outside) = x._plant_always_loaded(source_dir, entry)
+    assert f"already {base_len} bytes" in inside.note
+    assert f"already {base_len} bytes" in outside.note
+    assert "expect EXPOSED" not in inside.note
+    start = content.index(inside.text.encode())
+    assert start == base_len + 1  # base, then a single b"\n" separator
 
 
 def test_plant_always_loaded_preserves_the_real_file_content(tmp_path: Path) -> None:
@@ -334,6 +461,68 @@ def test_check_exposure_happy_path_all_three_layers(tmp_path: Path) -> None:
     assert skills["greet"]["verdict"] == x.EXPOSED
     assert skills["hidden"]["verdict"] == x.HIDDEN
     assert skills["hidden"]["cause"] and "policy" in str(skills["hidden"]["cause"])
+    # No manifest_path declared - None, never conflated with "checked, no gap".
+    assert report.manifest_coverage is None
+
+
+# -------------------------------------------- issue #55 folded-in item 2:
+# the "38 declared, 25 installed" manifest-coverage specimen (issue #53).
+
+
+def test_check_exposure_manifest_coverage_reports_a_declared_but_not_found_skill(
+    tmp_path: Path,
+) -> None:
+    """Red case: a distributor's manifest DECLARES a skill ('ghost') that
+    this run's own `select`/`inventory()` never found - the ADR 0004
+    specimen ('38 skill directories, 25 installed', issue #53). Nothing
+    previously modelled this: `subject.select`'s own validation only proves
+    every SELECTED name resolves ('greet', 'hidden' here), a claim about a
+    different, smaller population than what the manifest as a whole
+    declares."""
+    snap = _snapshot(tmp_path)
+    manifest_dir = snap / ".claude-plugin"
+    manifest_dir.mkdir()
+    (manifest_dir / "plugin.json").write_text(
+        json.dumps({"name": "fixture-plugin", "skills": ["./greet", "./hidden", "./ghost"]}),
+        encoding="utf-8",
+    )
+    surface = _surface(manifest_path=".claude-plugin/plugin.json")
+    client = _fake(tmp_path, expose_paths=["AGENTS.md"])
+    report = x.check_exposure(
+        surface, base=tmp_path / "base", snapshot=snap, client=client,
+        client_name="codex", timeout=10,
+    )
+    assert report.status == "ok"
+    assert report.manifest_coverage is not None
+    assert report.manifest_coverage["manifest"] == ".claude-plugin/plugin.json"
+    assert report.manifest_coverage["declared"] == 3
+    assert report.manifest_coverage["found"] == 2
+    assert report.manifest_coverage["missing"] == ["ghost"]
+
+
+def test_check_exposure_manifest_coverage_is_clean_when_everything_declared_is_found(
+    tmp_path: Path,
+) -> None:
+    """Green case beside the red one: a manifest declaring exactly what was
+    found reports zero missing, proving the comparison is not simply always
+    flagging a gap."""
+    snap = _snapshot(tmp_path)
+    manifest_dir = snap / ".claude-plugin"
+    manifest_dir.mkdir()
+    (manifest_dir / "plugin.json").write_text(
+        json.dumps({"name": "fixture-plugin", "skills": ["./greet", "./hidden"]}),
+        encoding="utf-8",
+    )
+    surface = _surface(manifest_path=".claude-plugin/plugin.json")
+    client = _fake(tmp_path, expose_paths=["AGENTS.md"])
+    report = x.check_exposure(
+        surface, base=tmp_path / "base", snapshot=snap, client=client,
+        client_name="codex", timeout=10,
+    )
+    assert report.manifest_coverage is not None
+    assert report.manifest_coverage["declared"] == 2
+    assert report.manifest_coverage["found"] == 2
+    assert report.manifest_coverage["missing"] == []
 
 
 def test_check_exposure_index_is_exposed_when_the_client_actually_loads_it(tmp_path: Path) -> None:

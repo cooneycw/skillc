@@ -35,17 +35,21 @@ keys, validated here, then hands the remaining keys to
    carrying that policy is absent from `debug prompt-input`'s listing
    entirely).
 
-   NOT MODELED: a "listing limit" in the ADR's own sense - a manifest that
-   installs fewer skills than it DECLARES (25 of 38) - needs an independent
-   count of what was declared, separate from what `select`/`inventory()`
-   actually found; `materialize.Subject.from_dict` already refuses a
-   `select` naming an unknown skill before this module ever runs, so a
-   "declared but never attempted" entry cannot reach this classification
-   loop as currently wired (found while reviewing this module's own first
-   draft: the `entry is None` branch below is honest defensive code, but
-   unreachable given `select`'s existing validation, not a demonstrated
-   control). Comparing against a manifest's own independently-declared count
-   is real, scoped-out follow-up work, not claimed here.
+   A "listing limit" in the ADR's own sense - a manifest that installs fewer
+   skills than it DECLARES (25 of 38, issue #53) - is modelled SEPARATELY
+   from the `select`/`entries` classification loop above (issue #55,
+   folded-in Nit Store item 2): `materialize.Subject.from_dict` already
+   refuses a `select` naming an unknown skill before this module ever runs,
+   so a "declared but never attempted" entry cannot reach this loop as
+   wired (the `entry is None` branch below is honest defensive code, but
+   unreachable given `select`'s own validation - found while reviewing this
+   module's first draft, not a demonstrated control). The optional
+   `manifest_path` surface field instead compares a distributor's own
+   `.claude-plugin/plugin.json` (`spec.Manifest`, the same format `skillc
+   check --manifest` reads) against what THIS run's `materialize.inventory()`
+   actually found, reported as `ExposureReport.manifest_coverage`
+   (`_manifest_coverage`) - a different population from `select`/`entries`
+   entirely, so it needed its own comparison, not a fix to this one.
 3. An index file with on-demand targets (`index`): the index file itself is
    checked the same way as an always-loaded file with no size limit
    (present or absent, no truncation claim); each declared `targets` entry
@@ -104,7 +108,7 @@ from pathlib import Path
 
 from . import materialize
 from .materialize import Refused
-from .spec import FrontmatterError, parse_frontmatter, parse_yaml_document
+from .spec import FrontmatterError, Manifest, ManifestError, parse_frontmatter, policy_hidden_cause
 
 EXPOSURE_SCHEMA = 1
 
@@ -127,7 +131,7 @@ _BOUNDARY_GAP = 64
 #: review, PR #90).
 _MIN_CLAIMED_LIMIT_BYTES = 64
 
-_EXPOSURE_ONLY_KEYS = {"exposure_schema", "always_loaded", "index"}
+_EXPOSURE_ONLY_KEYS = {"exposure_schema", "always_loaded", "index", "manifest_path"}
 
 
 def _escapes(rel: str) -> bool:
@@ -158,11 +162,25 @@ class ExposureSurface:
     """A surface declaration: `materialize.Subject`'s own schema (the skills
     layer, unchanged) plus `always_loaded` and `index`. One JSON file, one
     `Subject.from_dict` call for the shared fields - never a second,
-    divergent parser for the same subject conventions."""
+    divergent parser for the same subject conventions.
+
+    `manifest_path` is optional (issue #55, folded-in Nit Store item 2): a
+    path to a `.claude-plugin/plugin.json`-shaped manifest (`spec.Manifest`,
+    the same format `skillc check --manifest` reads) within the acquired
+    source, DECLARING which skill directories a distributor's plugin
+    installs. When present, `check_exposure` counts how many of the
+    manifest's declared directories are actually present among what
+    `materialize.inventory()` found for THIS run and reports the gap - the
+    ADR 0004 "38 skill directories, 25 installed" specimen, which nothing
+    previously modelled (`subject.select`'s own validation already refuses
+    an unknown NAME before this module runs, which is a different claim: it
+    proves every selected name resolves, never that the manifest's full
+    declared set does)."""
 
     subject: materialize.Subject
     always_loaded: tuple[AlwaysLoadedFile, ...]
     index: IndexFile | None
+    manifest_path: str | None
 
     @classmethod
     def load(cls, path: Path) -> ExposureSurface:
@@ -184,7 +202,19 @@ class ExposureSurface:
             subject=subject,
             always_loaded=_parse_always_loaded(data.get("always_loaded")),
             index=_parse_index(data.get("index")),
+            manifest_path=_parse_manifest_path(data.get("manifest_path")),
         )
+
+
+def _parse_manifest_path(raw: object) -> str | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or not raw:
+        raise Refused("manifest_path must be a non-empty string")
+    path = posixpath.normpath(raw)
+    if _escapes(path):
+        raise Refused(f"manifest_path {path!r} escapes the subject")
+    return path
 
 
 def _parse_always_loaded(raw: object) -> tuple[AlwaysLoadedFile, ...]:
@@ -269,6 +299,7 @@ def _plant_always_loaded(source_dir: Path, entry: AlwaysLoadedFile) -> tuple[byt
     limit = entry.claimed_limit_bytes
     inside = f"{MARKER_PREFIX}INSIDE-{_nonce()}"
     outside = f"{MARKER_PREFIX}OUTSIDE-{_nonce()}"
+    room = limit - len(base) - len(inside) - 1
     if len(base) >= limit:
         # The real declared file already exceeds the claimed limit on its
         # own - markers appended after it cannot test THIS boundary
@@ -278,8 +309,28 @@ def _plant_always_loaded(source_dir: Path, entry: AlwaysLoadedFile) -> tuple[byt
         caveat = f" - the real file is already {len(base)} bytes, past the {limit}-byte claim on its own"
         inside_note = f"planted after the real content{caveat}"
         outside_note = f"planted after the real content{caveat}"
+    elif room < 0:
+        # Issue #55, folded-in Nit Store item 1: `base` has NOT yet reached
+        # `limit` on its own, but there is not enough room left for the
+        # inside marker to be appended and still END exactly at `limit` -
+        # `b"." * room` on a negative `room` silently produces `b""` (never
+        # an error), so the pre-fix code planted the marker immediately
+        # after `base`, ending PAST `limit`, while `inside_note` still
+        # unconditionally claimed it ended AT `limit`. A conforming client
+        # that correctly truncates at `limit` then reports HIDDEN for a
+        # marker the note claims should be EXPOSED - a real boundary read as
+        # an exposure failure, not a defect in the client under test.
+        # Reported here exactly like the already-over branch above: honest
+        # about what was actually planted, never a false EXPOSED claim.
+        content = base + b"\n" + inside.encode() + b"\n" + outside.encode() + b"\n"
+        caveat = (
+            f" - the real {len(base)}-byte file leaves only {limit - len(base)} bytes "
+            f"before the {limit}-byte claim, not enough room for the inside marker's own "
+            f"{len(inside)}-byte footprint to end exactly at the claim; this boundary is untestable"
+        )
+        inside_note = f"planted after the real content{caveat}"
+        outside_note = f"planted after the real content{caveat}"
     else:
-        room = limit - len(base) - len(inside) - 1
         content = base + (b"." * room) + inside.encode() + b"\n"
         content += (b"." * _BOUNDARY_GAP) + b"\n" + outside.encode() + b"\n"
         inside_note = (
@@ -445,36 +496,31 @@ def classify_marker(marker: Marker, rendered: str) -> dict[str, object]:
     instructions for <cwd>\\n\\n<INSTRUCTIONS>\\n<content>\\n\\n</INSTRUCTIONS>`,
     then more items after it - so a marker cut mid-string almost never ends
     up at the literal tail of the whole rendered blob, and an `endswith`
-    check missed exactly the realistic case it needed to catch)."""
+    check missed exactly the realistic case it needed to catch).
+
+    THE SEARCH ITSELF RUNS ON UTF-8 BYTES, NOT `str` INDICES (issue #55,
+    folded-in Nit Store item 3): `cut_point_bytes` names itself a byte
+    offset, but a `str` slice (`marker.text[:cut]`) cuts at a CODE POINT
+    index - identical to a byte index only while every character involved is
+    ASCII, which every marker planted by this module today is (a fixed
+    prefix plus a hex nonce), so the bug is dormant until a non-ASCII target
+    is ever trusted. A real client's own truncation operates on bytes, and
+    can legitimately split a multi-byte character in half; slicing
+    `marker.text.encode('utf-8')` (never re-decoded) models that faithfully,
+    where a `str` slice cannot even represent it."""
     if marker.text in rendered:
         return {"marker_id": marker.marker_id, "layer": marker.layer, "verdict": EXPOSED, "note": marker.note}
-    floor = max(len(MARKER_PREFIX) + 8, int(len(marker.text) * _MIN_TRUNCATION_FRACTION))
-    for cut in range(len(marker.text) - 1, floor - 1, -1):
-        prefix = marker.text[:cut]
-        if prefix in rendered:
+    marker_bytes = marker.text.encode("utf-8")
+    rendered_bytes = rendered.encode("utf-8")
+    floor = max(len(MARKER_PREFIX) + 8, int(len(marker_bytes) * _MIN_TRUNCATION_FRACTION))
+    for cut in range(len(marker_bytes) - 1, floor - 1, -1):
+        prefix = marker_bytes[:cut]
+        if prefix in rendered_bytes:
             return {
                 "marker_id": marker.marker_id, "layer": marker.layer, "verdict": TRUNCATED,
                 "note": marker.note, "cut_point_bytes": cut,
             }
     return {"marker_id": marker.marker_id, "layer": marker.layer, "verdict": HIDDEN, "note": marker.note}
-
-
-def _policy_hidden_cause(skill_dir: Path) -> str | None:
-    """Why a skill might be legitimately absent from the listing, if known -
-    verified against codex-cli 0.157.1, 2026-09-26: a skill whose
-    `agents/openai.yaml` sets `policy.allow_implicit_invocation: false` is
-    absent from `debug prompt-input`'s listing entirely."""
-    openai_yaml = skill_dir / "agents" / "openai.yaml"
-    if not openai_yaml.is_file():
-        return None
-    try:
-        doc = parse_yaml_document(openai_yaml.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, FrontmatterError):
-        return None
-    policy = doc.get("policy")
-    if isinstance(policy, dict) and policy.get("allow_implicit_invocation") is False:
-        return "policy (agents/openai.yaml policy.allow_implicit_invocation: false)"
-    return None
 
 
 def _skill_description(skill_dir: Path) -> str | None:
@@ -515,13 +561,49 @@ class ExposureReport:
     #: field exists so a future caller passing them has somewhere honest to
     #: record them, rather than silently dropping them from the evidence.
     client_flags: tuple[str, ...] = ()
+    #: The gap between a distributor's manifest and what this run's own
+    #: inventory found (issue #55, folded-in Nit Store item 2) - `None` when
+    #: the surface declared no `manifest_path` at all, never conflated with
+    #: "checked and found no gap" (that case reports `missing: []`).
+    manifest_coverage: dict[str, object] | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
             "kind": "exposure-report", "client": self.client, "client_version": self.client_version,
             "client_flags": list(self.client_flags), "status": self.status,
             "reason": self.reason, "markers": self.markers, "skills": self.skills,
+            "manifest_coverage": self.manifest_coverage,
         }
+
+
+def _manifest_coverage(
+    source_dir: Path, manifest_path: str, entries: list[materialize.SkillEntry],
+) -> dict[str, object]:
+    """The gap between what a distributor's manifest DECLARES and what this
+    run's own inventory FOUND (issue #55, folded-in Nit Store item 2) - the
+    ADR 0004 "38 skill directories, 25 installed" specimen (issue #53),
+    which nothing previously modelled: `subject.select`'s own validation
+    already refuses an unknown NAME before this module ever runs, which
+    proves every SELECTED name resolves, never that the manifest's full
+    declared set does - the two are different populations entirely.
+
+    Reuses `spec.Manifest`, the SAME `.claude-plugin/plugin.json` format
+    `skillc check --manifest` already reads (issue #53's own delivery),
+    rather than a second, divergent parser for one distributor convention."""
+    try:
+        manifest = Manifest.load(source_dir / manifest_path)
+    except ManifestError as exc:
+        raise Refused(f"exposure manifest_path: {exc}") from exc
+    found = {(source_dir / e.directory).resolve() for e in entries}
+    declared = set(manifest.declared)
+    missing = sorted(
+        str(p.relative_to(manifest.plugin_root)) if p.is_relative_to(manifest.plugin_root) else str(p)
+        for p in declared - found
+    )
+    return {
+        "manifest": manifest_path, "declared": len(declared), "found": len(declared & found),
+        "missing": missing,
+    }
 
 
 def check_exposure(
@@ -564,6 +646,10 @@ def check_exposure(
         source = (materialize.acquire_git(subject, origin, staging) if repo is not None
                   else materialize.acquire_snapshot(subject, origin, staging))
         entries = materialize.inventory(subject, source)
+        manifest_coverage = (
+            _manifest_coverage(source.surface_dir, surface.manifest_path, entries)
+            if surface.manifest_path is not None else None
+        )
 
         arm = materialize.prepare_arm(root, "exposure", None)
         materialize.install(arm, source, entries)
@@ -608,7 +694,8 @@ def check_exposure(
             unmeasured_skills: list[dict[str, object]] = [
                 {"skill": name, "verdict": UNMEASURED, "cause": rendering.detail} for name in wanted
             ]
-            return ExposureReport(client_name, "ok", None, unmeasured_markers, unmeasured_skills, client_version=version)
+            return ExposureReport(client_name, "ok", None, unmeasured_markers, unmeasured_skills,
+                                  client_version=version, manifest_coverage=manifest_coverage)
 
         marker_verdicts = [classify_marker(m, rendering.raw_text) for m in markers]
 
@@ -626,10 +713,11 @@ def check_exposure(
             if (name, path) in listed:
                 skill_verdicts.append({"skill": name, "verdict": EXPOSED, "cause": None})
             else:
-                cause = _policy_hidden_cause(source.surface_dir / entry.directory)
+                cause = policy_hidden_cause(source.surface_dir / entry.directory)
                 skill_verdicts.append({"skill": name, "verdict": HIDDEN, "cause": cause})
 
-        return ExposureReport(client_name, "ok", None, marker_verdicts, skill_verdicts, client_version=version)
+        return ExposureReport(client_name, "ok", None, marker_verdicts, skill_verdicts,
+                              client_version=version, manifest_coverage=manifest_coverage)
     except Refused as exc:
         return ExposureReport(client_name, "refused", str(exc), [], [])
     finally:

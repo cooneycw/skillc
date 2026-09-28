@@ -594,3 +594,31 @@ def manifest_entry(manifest: Manifest) -> Iterator[str]:
         skill_md = declared_dir / "SKILL.md"
         if not skill_md.is_file():
             yield f"{skill_md}: declared in the manifest but no SKILL.md exists here"
+
+
+def policy_hidden_cause(skill_dir: Path) -> str | None:
+    """Why a skill might be legitimately absent from a client's own skill
+    listing, if known - verified against codex-cli 0.157.1, 2026-09-26: a
+    skill whose `agents/openai.yaml` sets `policy.allow_implicit_invocation:
+    false` is absent from `debug prompt-input`'s listing entirely, by
+    Codex's own design, not by any failure to install or discover it.
+
+    SHARED between `exposure.py` (which reads it to explain a `HIDDEN`
+    skill-listing verdict) and `materialize.py` (issue #55, folded-in Nit
+    Store item 4: `derive_readiness`'s `discovery_canary` used to expect
+    EVERY installed skill to be listed, so a correctly-installed
+    policy-hidden skill read as "installed but not listed" - a readiness
+    VIOLATION for a skill doing exactly what its own policy asks. One
+    function, read from the SAME `agents/openai.yaml` convention, rather
+    than two independent readings that could drift apart."""
+    openai_yaml = skill_dir / "agents" / "openai.yaml"
+    if not openai_yaml.is_file():
+        return None
+    try:
+        doc = parse_yaml_document(openai_yaml.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, FrontmatterError):
+        return None
+    policy = doc.get("policy")
+    if isinstance(policy, dict) and policy.get("allow_implicit_invocation") is False:
+        return "policy (agents/openai.yaml policy.allow_implicit_invocation: false)"
+    return None
