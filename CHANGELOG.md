@@ -324,6 +324,17 @@ and version plan.
   `controls/required-fields/bad/`, shown silently missed on the pre-fix code
   (`BLIND required-fields silent on 3 of 8 known-bad input(s)`).
 
+- **`exposure.classify_marker`'s `cut_point_bytes` is now a true UTF-8 byte
+  offset** (Refs #55, folded-in Nit Store item 3). The truncation search cut
+  at a `str` (code point) index, identical to a byte index only while every
+  character is ASCII - true of every marker this module plants today, so
+  the bug was dormant. Now searches `marker.text.encode("utf-8")` against
+  the rendered text's own UTF-8 bytes, never re-decoded; a real client's
+  truncation operates on bytes and can legitimately split a multi-byte
+  character in half, which a `str` slice cannot even represent. New red
+  case with a non-ASCII marker, verified to report a wrong offset on the
+  pre-fix code.
+
 - **`leak-check` no longer false-positives on a linked worktree's `.git`
   pointer file, and now sees a checkout under `/workspace`, `/opt` or
   `/srv`** (Refs #134, items 4 and 5). `SKIP_DIRS` filtered directories

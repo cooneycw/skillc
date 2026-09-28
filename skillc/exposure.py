@@ -445,13 +445,26 @@ def classify_marker(marker: Marker, rendered: str) -> dict[str, object]:
     instructions for <cwd>\\n\\n<INSTRUCTIONS>\\n<content>\\n\\n</INSTRUCTIONS>`,
     then more items after it - so a marker cut mid-string almost never ends
     up at the literal tail of the whole rendered blob, and an `endswith`
-    check missed exactly the realistic case it needed to catch)."""
+    check missed exactly the realistic case it needed to catch).
+
+    THE SEARCH ITSELF RUNS ON UTF-8 BYTES, NOT `str` INDICES (issue #55,
+    folded-in Nit Store item 3): `cut_point_bytes` names itself a byte
+    offset, but a `str` slice (`marker.text[:cut]`) cuts at a CODE POINT
+    index - identical to a byte index only while every character involved is
+    ASCII, which every marker planted by this module today is (a fixed
+    prefix plus a hex nonce), so the bug is dormant until a non-ASCII target
+    is ever trusted. A real client's own truncation operates on bytes, and
+    can legitimately split a multi-byte character in half; slicing
+    `marker.text.encode('utf-8')` (never re-decoded) models that faithfully,
+    where a `str` slice cannot even represent it."""
     if marker.text in rendered:
         return {"marker_id": marker.marker_id, "layer": marker.layer, "verdict": EXPOSED, "note": marker.note}
-    floor = max(len(MARKER_PREFIX) + 8, int(len(marker.text) * _MIN_TRUNCATION_FRACTION))
-    for cut in range(len(marker.text) - 1, floor - 1, -1):
-        prefix = marker.text[:cut]
-        if prefix in rendered:
+    marker_bytes = marker.text.encode("utf-8")
+    rendered_bytes = rendered.encode("utf-8")
+    floor = max(len(MARKER_PREFIX) + 8, int(len(marker_bytes) * _MIN_TRUNCATION_FRACTION))
+    for cut in range(len(marker_bytes) - 1, floor - 1, -1):
+        prefix = marker_bytes[:cut]
+        if prefix in rendered_bytes:
             return {
                 "marker_id": marker.marker_id, "layer": marker.layer, "verdict": TRUNCATED,
                 "note": marker.note, "cut_point_bytes": cut,

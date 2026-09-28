@@ -150,6 +150,26 @@ def test_classify_marker_truncated_on_a_tail_prefix_and_names_the_cut_point() ->
     assert result["cut_point_bytes"] == cut
 
 
+def test_classify_marker_reports_a_true_byte_offset_for_non_ascii_text() -> None:
+    """Red case for issue #55's folded-in Nit Store item 3: `cut_point_bytes`
+    names itself a byte offset, but the pre-fix search cut at a `str`
+    (code point) index - identical to a byte index only while every
+    character is ASCII, which every marker this module plants today is, so
+    the bug was dormant. 'cafe' with an accent ('e' + U+0301, or the
+    precomposed 'e-acute') encodes to more UTF-8 bytes than characters, so a
+    character-index cut and a byte-index cut diverge as soon as truncation
+    happens anywhere past it - and this fixture asserts that divergence is
+    real, not accidentally ASCII again."""
+    marker = x.Marker("id", f"{x.MARKER_PREFIX}TEST-café-0123456789abcdef", "layer", "note")
+    marker_bytes = marker.text.encode("utf-8")
+    assert len(marker.text) != len(marker_bytes), "fixture must be genuinely non-ASCII"
+    byte_cut = len(marker_bytes) - 4  # drop the last 4 BYTES, not 4 characters
+    rendered = "leading content " + marker_bytes[:byte_cut].decode("utf-8")
+    result = x.classify_marker(marker, rendered)
+    assert result["verdict"] == x.TRUNCATED
+    assert result["cut_point_bytes"] == byte_cut
+
+
 def test_marker_planted_just_beyond_a_limit_classifies_truncated_when_cut_mid_marker() -> None:
     """Regression-shaped proof for `_plant_always_loaded`'s own boundary
     construction: cutting NEAR THE END of the "outside" marker's own text
