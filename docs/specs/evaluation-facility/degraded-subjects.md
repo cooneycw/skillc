@@ -118,11 +118,26 @@ finding) is the caller's job, checked by comparing the receipt's
 `mutation.locations` against an independently compiled list. It does not
 decide which skill or file to degrade (#150-A).
 
-**It does not yet wire a degraded subject into a live discriminating run**
-(acceptance item 3) - that is a separate PR (150-B2), which will teach
-`collection-run` (and whichever runner the agent-trial path uses) a
-`--degraded DIR` that calls `verify_persisted_skills` before installing that
-tree, and records the degraded identity - the `degraded:` label, the base
-identity, and `mutation.locations` - in the ledger and installation receipt,
-never the pinned revision. Until then, `degrade-subject` produces a
-persisted, digest-verifiable tree and receipt that no runner reads yet.
+**It wires into `collection-run` (150-B2), but does not itself decide when a
+degraded arm is discriminating.** `skillc collection-run --degraded DIR`
+(`skillc/cli.py`) re-verifies `DIR/skills` against its receipt
+(`degrade.load_persisted_degraded`, which calls `verify_persisted_skills`)
+before anything installs, and the resulting attempt reports the degraded
+identity throughout - `CollectionAgentResult.revision`, the exported
+`verified-result`'s `revision` field, everywhere - never the pin. This fixed
+a real, pre-existing bug found while wiring it: `run_collection_agent_attempt`
+read `acquired.subject.revision` (the DECLARED pin) unconditionally, for
+EVERY run, degraded or not - the acquired source's own identity
+(`acquired.source.revision`) was computed and then never read for this. A
+degraded acquisition's `select` is dropped for install purposes
+(`acquire_degraded_collection`): the original subject's `select` was already
+applied once, by `degrade-subject` itself, when it validated a removal or
+edit against the undegraded surface - re-applying it here would refuse the
+very shape a removal produces, since `materialize.inventory` requires every
+selected name still present. What actually installs is whatever the
+degradation left, in full.
+
+Showing that a degraded arm's FAIL and a normal arm's PASS actually
+discriminate (acceptance item 3) is still not this module's job - it needs a
+Level-1 task and grader that make a specific skill necessary (#150-A) and a
+live run this module cannot own.

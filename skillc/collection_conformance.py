@@ -82,10 +82,10 @@ import os
 import shutil
 import tempfile
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from . import agent_trial, credential, demo, materialize, reap, trial, verify
+from . import agent_trial, credential, degrade, demo, materialize, reap, trial, verify
 from .backend import Limits
 from .docker_backend import ATTEMPT_LABEL_KEY, OWNER_LABEL_KEY, OWNER_LABEL_VALUE, DockerBackend
 
@@ -344,6 +344,42 @@ def acquire_collection(subject_name: str, base: Path, *, checkout: Path | None =
     return AcquiredCollection(subject, source, files)
 
 
+def acquire_degraded_collection(subject_name: str, degraded_dir: Path) -> AcquiredCollection:
+    """Issue #150-B2: acquire from a persisted degraded subject
+    (`degrade-subject --out DIR`) instead of the pinned pipeline
+    `acquire_collection` follows. `degrade.load_persisted_degraded` verifies
+    `degraded_dir/skills` against its own receipt's digest before anything
+    here reads it - a tampered or corrupted persisted tree never reaches
+    installation.
+
+    `select` is dropped for inventory purposes (`install_subject`): the
+    ORIGINAL subject's `select` was already applied once, by
+    `degrade-subject` itself, when it validated which skill a removal or
+    edit named against the undegraded surface. Re-applying it here would
+    refuse the very shape a removal produces - `materialize.inventory`
+    requires every `select`-ed name to still be present, and a removed
+    skill's whole point is that it is not. What remains under
+    `degraded_dir/skills` - whatever the degradation left - is installed in
+    full; a caller that removed too much or too little sees that in what
+    actually installs, not a refusal that hides it.
+
+    `AcquiredCollection.subject` is still the ORIGINAL, undegraded `Subject`
+    (client, surface, locator) - only `.source` carries the degraded
+    identity, and it is that identity, never `subject.revision`, that
+    `plan_collection_attempt` and every stored record reads."""
+    subject = demo.load_demo_subject(subject_name)
+    try:
+        source = degrade.load_persisted_degraded(degraded_dir, subject)
+        install_subject = replace(subject, select=None)
+        entries = materialize.inventory(install_subject, source)
+    except (degrade.DegradationRefused, materialize.Refused) as exc:
+        raise demo.SubjectRefused(
+            f"subject {subject_name!r} could not be prepared from degraded tree {degraded_dir}: {exc}"
+        ) from exc
+    files = demo.subject_surface_files(source, entries, subject.surface_spec.home_skills_relpath)
+    return AcquiredCollection(subject, source, files)
+
+
 def _collection_home_files(source: materialize.Source, files: list[demo.SubjectFile]) -> dict[str, bytes]:
     """`demo.install_subject`'s own per-file read, without the Docker call -
     this module delivers the same bytes through `agent_trial.run_one_attempt`'s
@@ -499,7 +535,17 @@ def run_collection_agent_attempt(
     discovery, discovery_reason = transcript_discovery(record, {f.skill for f in acquired.files})
     cleaned = [e for e in experiment.events(attempt_id) if e.get("event") == "cleaned"]
     return CollectionAgentResult(
-        subject_name, acquired.subject.revision, acquired.subject.client, record, agent_network=backend.network,
+        # `acquired.source.revision` - what was ACTUALLY acquired - never
+        # `acquired.subject.revision`, the DECLARED pin. The two already
+        # differ for an ordinary run (`acquire_collection` reports a
+        # "snapshot:<digest>" label, never a bare commit SHA, matching
+        # `plan_collection_attempt`'s own "never a placeholder" rule for
+        # `subject.digest`); for a degraded run
+        # (`acquire_degraded_collection`) they differ by design - a run over
+        # a degraded tree must never be able to report the pin as what it
+        # installed (issue #150-B2). Found as a real, blocking bug while
+        # building #150-B2: this line previously read the pin unconditionally.
+        subject_name, acquired.source.revision, acquired.subject.client, record, agent_network=backend.network,
         workspace_cleaned=str(cleaned[-1].get("status")) if cleaned else None,
         discovery=discovery, discovery_reason=discovery_reason,
     )

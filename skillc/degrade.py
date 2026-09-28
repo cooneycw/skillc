@@ -54,6 +54,7 @@ modules (AGENTS.md).
 from __future__ import annotations
 
 import dataclasses
+import json
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -319,3 +320,41 @@ def verify_persisted_skills(out: Path, expected_digest: str) -> Path:
             f"{expected_digest}; refusing to treat it as that degraded subject"
         )
     return target
+
+
+def load_persisted_degraded(out: Path, subject: materialize.Subject) -> materialize.Source:
+    """The read half of `persist_skills`/`degrade-subject --out DIR`: parse
+    `out/receipt.json`, verify `out/skills` against its own declared digest
+    (`verify_persisted_skills` - refuses a tampered or corrupted tree before
+    anything installs it), and return a `materialize.Source` a runner can
+    acquire from exactly like any other (issue #150-B2: `collection-run
+    --degraded DIR`).
+
+    `subject` supplies `locator` only - the receipt does not carry one, and a
+    degraded acquisition still comes from the same declared repository. The
+    returned `Source.revision` is always the receipt's own `degraded.revision`
+    label (`degraded:...`), never `subject.revision` - a run over a degraded
+    tree must never be able to report the pin as what it installed.
+
+    Refuses (`DegradationRefused`) when `out/receipt.json` is missing,
+    unreadable, or carries no usable `degraded` identity - before
+    `verify_persisted_skills` is even reached, since there is nothing to
+    verify against."""
+    receipt_path = out / "receipt.json"
+    try:
+        payload = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise DegradationRefused(f"no readable receipt.json at {out}: {exc}") from exc
+    except ValueError as exc:
+        raise DegradationRefused(f"{receipt_path} does not parse as JSON: {exc}") from exc
+    degraded_field = payload.get("degraded") if isinstance(payload, dict) else None
+    if not isinstance(degraded_field, dict):
+        raise DegradationRefused(f"{receipt_path} carries no 'degraded' identity")
+    kind, revision, digest = degraded_field.get("kind"), degraded_field.get("revision"), degraded_field.get("digest")
+    if not all(isinstance(v, str) and v for v in (kind, revision, digest)):
+        raise DegradationRefused(f"{receipt_path}'s degraded identity is malformed: {degraded_field!r}")
+    assert isinstance(kind, str) and isinstance(revision, str) and isinstance(digest, str)
+    skills_dir = verify_persisted_skills(out, digest)
+    return materialize.Source(
+        kind=kind, locator=subject.locator, revision=revision, surface_dir=skills_dir, digest=digest, origin=out,
+    )

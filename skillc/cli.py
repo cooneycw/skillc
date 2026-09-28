@@ -828,7 +828,10 @@ def cmd_collection_run(args: argparse.Namespace) -> int:
 
     try:
         try:
-            acquired = cc.acquire_collection(args.subject, run_root)
+            acquired = (
+                cc.acquire_degraded_collection(args.subject, Path(args.degraded))
+                if args.degraded else cc.acquire_collection(args.subject, run_root)
+            )
         except demo.SubjectRefused as exc:
             print(f"skillc: {exc}", file=sys.stderr)
             return 2
@@ -1800,6 +1803,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="what --evidence is for (default: measurement, a normal subject's export destined for a "
              "consumer's real measurements directory); a degraded-arm export is refused unless this is "
              "'control' - explicit opt-in, e.g. for a one-shot negative control against the consumer gate",
+    )
+    p_collection_run.add_argument(
+        "--degraded",
+        help="issue #150-B2: install from a persisted degraded subject (a `degrade-subject --out DIR` "
+             "directory) instead of SUBJECT's own pinned revision; the digest is re-verified against "
+             "its receipt before anything installs, and the run records the degraded identity, never "
+             "the pin",
     )
     p_collection_run.set_defaults(func=cmd_collection_run)
 
