@@ -944,3 +944,29 @@ def test_the_experiment_lock_excludes_another_process(store: Path) -> None:
     finally:
         holder.wait(timeout=10)
     assert not any(p.name.endswith(".lock") for p in store.parent.rglob("*"))  # the lock leaves no file
+
+
+def test_two_independently_opened_controllers_both_keep_their_retry(store: Path, base: Path) -> None:
+    """Counter-model finding (#12): the lock serialized retries, but each
+    controller revised the ledger it had loaded BEFORE taking the lock, so the
+    second retry dropped the first's attempt. Each must build on the stored
+    ledger it finds once it holds the lock."""
+    experiment, first, second = _plan_two(store)
+    _freeze(experiment, first, _run(experiment, first, base, REFERENCE))
+    _freeze(experiment, second, _run(experiment, second, base, REFERENCE))
+    one, two = t.Experiment.open(experiment.root), t.Experiment.open(experiment.root)
+    retried_first = t.retry(one, first)
+    retried_second = t.retry(two, second)
+    planned = {str(a["attempt_id"]) for _trial, a in t.Experiment.open(experiment.root).attempts()}
+    assert {retried_first, retried_second} <= planned
+
+
+def test_a_grade_after_a_siblings_retry_is_not_refused(store: Path, base: Path, grading: Path) -> None:
+    """The grading side of the same finding: a sibling retry committed by
+    another controller before this grade took the lock is the stored ledger,
+    not a change made while candidate code ran."""
+    experiment, first, second = _plan_two(store)
+    _freeze(experiment, first, _run(experiment, first, base, REFERENCE))
+    _freeze(experiment, second, _run(experiment, second, base, REFERENCE))
+    t.retry(t.Experiment.open(experiment.root), second)  # another controller's instance
+    assert verify.grade(experiment, first, GRADER, grading)["status"] == "PASS"

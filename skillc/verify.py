@@ -1101,9 +1101,16 @@ def _grade_and_store(experiment: trial.Experiment, attempt_id: str, grader: Grad
                      readiness_source: str = records.INSTALLATION_RECEIPT) -> tuple[dict[str, object], Graded]:
     """Holds the experiment lock (#12) from the first read to the stored
     result, so a sibling attempt's capture, finalize or stored result waits
-    for this grade instead of reading to its snapshot as tampering."""
+    for this grade instead of reading to its snapshot as tampering.
+
+    Grades against the experiment as STORED once the lock is held - reopened,
+    so its whole ledger history is re-verified - never the ledger the
+    caller's instance loaded earlier: a sibling's retry committed before the
+    lock is the current ledger, not a change made while candidate code ran
+    (counter-model finding)."""
     with trial.experiment_lock(experiment.root):
-        return _grade_and_store_held(experiment, attempt_id, grader, base, forbidden, regrade_of,
+        current = trial.Experiment.open(experiment.root)
+        return _grade_and_store_held(current, attempt_id, grader, base, forbidden, regrade_of,
                                      backend, judges, goal_text, readiness_source)
 
 

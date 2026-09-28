@@ -622,7 +622,14 @@ def retry(experiment: Experiment, attempt_id: str) -> str:
     one trial two live accounts. The ledger gains an attempt and nothing else; the
     previous revision is kept, and `Experiment.open` refuses a revision that
     changed anything already planned.
+
+    Revises the STORED ledger as it stands once the experiment lock is held,
+    never the one `experiment` loaded earlier (#12, counter-model finding): two
+    controllers that each opened the experiment and then retried would
+    otherwise both revise the same stale ledger, and the second commit would
+    drop the first one's attempt. The reopen re-verifies the whole history.
     """
+    experiment.ledger = Experiment.open(experiment.root).ledger
     trial = experiment.trial_of(attempt_id)
     if not (experiment.root / _lifecycle_name(attempt_id)).exists():
         raise Refused(f"attempt {attempt_id!r} is not finalized; retry an attempt only once it is accounted for")
