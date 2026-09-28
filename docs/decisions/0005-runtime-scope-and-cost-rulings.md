@@ -176,6 +176,32 @@ outside reader can resolve.
   native precedent already carries and accepts; #150-D only matches it,
   never widens it.
 
+  **The attestation question, ruled** (operator ruling, relayed via master,
+  2026-09-28): **"accept (a)"**. Option (a), verbatim: "150-D's receipt
+  attests that this delivered tree, delivered by the same method, into a
+  fresh container of the same image digest, was discovered by the client's
+  model-free listing. It is refused for any attempt whose image or tree
+  digest differs. It does NOT attest that the agent's own container had
+  it."
+
+  **The limit this ruling accepts, named rather than left implicit:** the
+  twin container does NOT prove that the agent's OWN container had the
+  delivered tree at the moment the agent actually ran. What the mechanism
+  establishes is narrower - that a container built from the same image
+  digest, given the same tree by the same delivery method, is discovered by
+  the client's listing - and the gap between that and "the agent's own
+  container had it" is closed only by two structural facts, never by direct
+  observation of the agent's own container's contents: the SAME method
+  delivers to both (the agent's container and the twin), and the verifier's
+  digest-equality check refuses the receipt outright if either the image or
+  the tree digest the agent's attempt actually planned against differs from
+  what the twin measured. Any drift between the twin's delivery and the
+  agent's - a delivery-method bug that behaves differently depending on
+  which container receives it, for instance - is excluded only by that
+  same-method-plus-digest-equality argument, never independently observed.
+  This is the accepted shape of the evidence, not a gap to close later
+  within #150-D's own scope.
+
 - **"a plus the follow-up issue"** (owner ruling, 2026-09-27): after the
   operator's live run of `skillc demo` at `8e06030` (evidence on #10), the
   owner chose between (a) accepting that run's real-daemon coverage (the
