@@ -24,9 +24,15 @@ selftest: sync
 # Also teed to a gitignored log: #148's second sighting (flow:auto #12's
 # flaky test) was a LOCAL failure after `uv sync`, never captured - the CI
 # gate's own -rA does not help a run that never reaches CI.
+#
+# PYTEST_ARGS narrows what runs (used by
+# tests/test_makefile_pipefail_control.py's negative control, and by anyone
+# who wants a faster local loop); empty by default, so plain `make test`
+# still runs the whole suite.
+PYTEST_ARGS ?=
 test: sync
 	mkdir -p reports
-	uv run --no-sync pytest -rA | tee reports/pytest.log
+	uv run --no-sync pytest -rA $(PYTEST_ARGS) | tee reports/pytest.log
 
 lint: sync
 	uv run --no-sync ruff check .
