@@ -3,11 +3,14 @@
 skillc is public, and it will soon produce evidence bundles, ledgers and
 receipts from real trial runs (#10). Nothing stops a committed file, a PR body,
 or a produced bundle from carrying the operator's machine identities. This
-module scans text for five classes: an absolute home-directory path, a
+module scans text for six classes: an absolute home-directory path, a
 `uid=`/`gid=` number, a private (RFC 1918) IPv4 address, a hostname from a
-locally-configured deny-list, and credential material (#98: a subscription
+locally-configured deny-list, credential material (#98: a subscription
 login copied into a trial container raises the stakes of a leak well above
-a machine identity - a token is not merely embarrassing, it is usable).
+a machine identity - a token is not merely embarrassing, it is usable), and
+the scanning process's own live home directory or cwd (`default_host_paths`,
+#134 item 5 - catches a checkout under `/workspace`, `/opt`, `/srv` or
+anywhere else the home-path pattern does not recognize).
 Stdlib only, like the rest of `skillc/`.
 
 CREDENTIAL MATERIAL (#98) is matched two ways, both requiring an actual
@@ -37,6 +40,14 @@ not proof of absence:
 - a username or machine name embedded anywhere OTHER than a `/home/<name>` or
   `/Users/<name>` path - a bare username in prose, an email local-part, a
   Windows `C:\\Users\\<name>` path, a WSL `\\\\wsl$\\...` path.
+- a checkout under `/workspace`, `/opt`, `/srv` or elsewhere on a DIFFERENT
+  machine than the one running the scan - `default_host_paths` (#134 item 5)
+  only knows THIS process's own live home/cwd, not a path embedded from
+  somewhere else (a pasted log line, another host's stack trace). It also
+  never reports a bare mount point on its own (`/workspace`, `/root`, `/opt`,
+  `/srv`, `/tmp`) - too generic to identify a machine - and a `host-path`
+  match is a path-boundary one: directly abutted by another character with
+  no `/`, whitespace, quote or line end between them, it stays silent.
 - a public IPv4 address, a loopback or link-local one (127.0.0.0/8,
   169.254.0.0/16 - neither identifies a specific machine; see `_is_private`),
   or any IPv6 address.
@@ -176,12 +187,73 @@ def _is_private(candidate: str) -> bool:
     return any(addr in network for network in _PRIVATE_IPV4_RANGES)
 
 
-def scan_text(text: str, denylist: frozenset[str]) -> Iterator[tuple[int, str, str]]:
+def _is_specific_enough(path: str) -> bool:
+    """A bare mount point - `/workspace`, `/root`, `/opt`, `/srv`, `/tmp` -
+    identifies no machine on its own; what identifies one is a path with
+    something specific under that prefix (#134 item 5, cross-model review on
+    PR #154). Measured: running `skillc leak-check` with cwd=`/workspace` -
+    every container session's default before it `cd`s into a checkout -
+    produced 17 false positives, all `host-path: this host's own path:
+    /workspace`, matching the bare word anywhere it was mentioned in prose
+    (this module's own docstring, AGENTS.md). Require at least two path
+    segments below root."""
+    segments = [p for p in Path(path).parts if p not in ("/", "")]
+    return len(segments) >= 2
+
+
+def default_host_paths() -> frozenset[str]:
+    """This process's OWN home directory and current working directory
+    (#134 item 5).
+
+    `HOME_PATH_RE` only recognizes `/home/` and `/Users/`, so a checkout
+    under `/workspace`, `/opt` or `/srv` - every session in this fleet -
+    goes unflagged by it: the #150 export gate and the judge-input check
+    both leak-check their output, and neither could see its own machine's
+    checkout path. A static prefix list was considered and rejected: the
+    directory right after `/workspace/` is a generic mount or project name
+    (`.claude`, a repo name), not a per-user identity the way `/home/<user>`
+    genuinely is one, and flagging it unconditionally would false-positive
+    on every worktree path this project's own tooling generates (see
+    `test_seeded_values_do_not_collide_with_a_typical_harness_path`).
+    Matching THIS process's actual live home/cwd as literal substrings
+    catches this host's own machine-identifying path wherever it lives,
+    without guessing at a fixed prefix list. `_is_specific_enough` drops a
+    live value that is itself just a bare mount point, for the same reason.
+
+    Deliberately NOT folded into `scan_text`/`scan_path`'s own defaults:
+    those stay pure and reproducible given explicit inputs, exactly like
+    `load_denylist`'s environment fallback is read once at the CLI boundary
+    and passed in explicitly rather than read inside the scanner itself.
+    Every caller that leak-checks output before it leaves this machine
+    (`cmd_leak_check`, the pilot-bundle export gate, the judge-input check)
+    passes this in explicitly.
+    """
+    candidates = {str(Path.home()), os.getcwd()}
+    return frozenset(p for p in candidates if p not in ("", "/") and _is_specific_enough(p))
+
+
+def scan_text(
+    text: str, denylist: frozenset[str], host_paths: frozenset[str] = frozenset()
+) -> Iterator[tuple[int, str, str]]:
     """Yield (1-indexed line, kind, detail) for every leak class found.
 
     The allowlist is checked against each MATCH, not the line it is on - a
     real leak sharing a line with an allowlisted value must still fire.
+
+    `host_paths` (#134 item 5) is normally `default_host_paths()`, passed in
+    by the caller rather than computed here - see that function's docstring.
+    Each is matched at a PATH BOUNDARY - the character right after it must be
+    `/`, whitespace, a quote, or end of line - never as a raw substring
+    (cross-model review on PR #154): a raw substring would let a shorter
+    host path match inside a longer, unrelated one sharing its prefix, the
+    same class of bug `ALLOWLIST`'s exact-match comparison exists to avoid
+    for `HOME_PATH_RE`.
     """
+    host_path_patterns = [
+        (host_path, re.compile(re.escape(host_path) + r"""(?=[/\s'"]|$)"""))
+        for host_path in host_paths
+        if host_path
+    ]
     for lineno, line in enumerate(text.splitlines(), start=1):
         for match in HOME_PATH_RE.finditer(line):
             if match.group(0) in ALLOWLIST:
@@ -203,6 +275,9 @@ def scan_text(text: str, denylist: frozenset[str]) -> Iterator[tuple[int, str, s
         for name in denylist:
             if name in line:
                 yield lineno, "denylisted-hostname", name
+        for host_path, pattern in host_path_patterns:
+            if pattern.search(line):
+                yield lineno, "host-path", f"this host's own path: {host_path}"
         for match in OAUTH_TOKEN_RE.finditer(line):
             if match.group(0) in ALLOWLIST:
                 continue
@@ -220,6 +295,13 @@ def _files(root: Path) -> Iterator[Path]:
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
         for name in sorted(filenames):
+            # A linked worktree's top-level `.git` is a POINTER FILE
+            # ("gitdir: /home/<user>/...", never committed) rather than the
+            # directory SKIP_DIRS already prunes above (#134 item 4) - the
+            # same version-control internal, invisible to the scan the same
+            # way, not merely UTF-8-undecodable-and-counted.
+            if name == ".git" and Path(dirpath) == root:
+                continue
             yield Path(dirpath) / name
 
 
@@ -235,7 +317,10 @@ def _excluded(rel: str, exclude: frozenset[str]) -> bool:
 
 
 def scan_path(
-    root: Path, denylist: frozenset[str], exclude: frozenset[str] = frozenset()
+    root: Path,
+    denylist: frozenset[str],
+    exclude: frozenset[str] = frozenset(),
+    host_paths: frozenset[str] = frozenset(),
 ) -> ScanResult:
     """Scan every file under `root` (or `root` itself if it is a file).
 
@@ -246,6 +331,9 @@ def scan_path(
     else. It is not a general allowlist: prefer `ALLOWLIST` for a specific
     known-safe line, and this only for a whole directory that exists to
     contain fake leaks on purpose.
+
+    `host_paths` (#134 item 5) is normally `default_host_paths()` - see that
+    function's docstring for why this stays an explicit argument.
 
     A file that cannot be decoded as UTF-8 is SKIPPED, counted in `skipped`,
     and never contributes a finding - it is a class this run cannot see, not
@@ -282,6 +370,6 @@ def scan_path(
             skipped += 1
             continue
         scanned += 1
-        for lineno, kind, detail in scan_text(text, denylist):
+        for lineno, kind, detail in scan_text(text, denylist, host_paths):
             findings.append(LeakFinding(path, lineno, kind, detail))
     return ScanResult(findings=findings, scanned=scanned, skipped=skipped)
