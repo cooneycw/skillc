@@ -369,6 +369,23 @@ and version plan.
   case with a non-ASCII marker, verified to report a wrong offset on the
   pre-fix code.
 
+- **`exposure` can now model a manifest that declares more skills than a run
+  actually found** (Refs #55, folded-in Nit Store item 2). Nothing previously
+  compared what `.claude-plugin/plugin.json` DECLARES against what
+  `materialize.inventory()` actually found for this run - `subject.select`'s
+  own validation only proves every SELECTED name resolves, a claim about a
+  smaller population than the manifest as a whole (the ADR 0004 "38 skill
+  directories, 25 installed" specimen, issue #53). `ExposureSurface` gained an
+  optional `manifest_path`; when set, `check_exposure` reads the manifest and
+  reports `declared`/`found`/`missing` skill counts and names alongside the
+  existing per-skill verdicts, `None` when no manifest is declared - never
+  conflated with "checked, found nothing missing". New tests cover the schema
+  (optional, parsed, path-escape refused, non-string type refused) and the
+  coverage comparison itself (a declared-but-not-found skill reported by name;
+  a fully-covered manifest reporting zero missing); the coverage-gap and
+  schema tests verified to fail on the pre-fix code (missing attribute /
+  `unknown keys: ['manifest_path']`).
+
 - **`leak-check` no longer false-positives on a linked worktree's `.git`
   pointer file, and now sees a checkout under `/workspace`, `/opt` or
   `/srv`** (Refs #134, items 4 and 5). `SKIP_DIRS` filtered directories

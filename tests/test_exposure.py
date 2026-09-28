@@ -119,6 +119,26 @@ def test_surface_refuses_index_with_a_non_string_target() -> None:
         _surface(index={"path": "docs/idx.md", "targets": [1]})
 
 
+def test_surface_manifest_path_is_optional() -> None:
+    assert _surface().manifest_path is None
+
+
+def test_surface_parses_manifest_path() -> None:
+    surface = _surface(manifest_path=".claude-plugin/plugin.json")
+    assert surface.manifest_path == ".claude-plugin/plugin.json"
+
+
+def test_surface_refuses_an_escaping_manifest_path() -> None:
+    with pytest.raises(m.Refused, match="escapes"):
+        _surface(manifest_path="../outside/plugin.json")
+
+
+@pytest.mark.parametrize("bad", ["", 1, True, ["a"]])
+def test_surface_refuses_a_non_string_manifest_path(bad: object) -> None:
+    with pytest.raises(m.Refused, match="manifest_path"):
+        _surface(manifest_path=bad)
+
+
 # --------------------------------------------------------------- classification
 
 
@@ -441,6 +461,68 @@ def test_check_exposure_happy_path_all_three_layers(tmp_path: Path) -> None:
     assert skills["greet"]["verdict"] == x.EXPOSED
     assert skills["hidden"]["verdict"] == x.HIDDEN
     assert skills["hidden"]["cause"] and "policy" in str(skills["hidden"]["cause"])
+    # No manifest_path declared - None, never conflated with "checked, no gap".
+    assert report.manifest_coverage is None
+
+
+# -------------------------------------------- issue #55 folded-in item 2:
+# the "38 declared, 25 installed" manifest-coverage specimen (issue #53).
+
+
+def test_check_exposure_manifest_coverage_reports_a_declared_but_not_found_skill(
+    tmp_path: Path,
+) -> None:
+    """Red case: a distributor's manifest DECLARES a skill ('ghost') that
+    this run's own `select`/`inventory()` never found - the ADR 0004
+    specimen ('38 skill directories, 25 installed', issue #53). Nothing
+    previously modelled this: `subject.select`'s own validation only proves
+    every SELECTED name resolves ('greet', 'hidden' here), a claim about a
+    different, smaller population than what the manifest as a whole
+    declares."""
+    snap = _snapshot(tmp_path)
+    manifest_dir = snap / ".claude-plugin"
+    manifest_dir.mkdir()
+    (manifest_dir / "plugin.json").write_text(
+        json.dumps({"name": "fixture-plugin", "skills": ["./greet", "./hidden", "./ghost"]}),
+        encoding="utf-8",
+    )
+    surface = _surface(manifest_path=".claude-plugin/plugin.json")
+    client = _fake(tmp_path, expose_paths=["AGENTS.md"])
+    report = x.check_exposure(
+        surface, base=tmp_path / "base", snapshot=snap, client=client,
+        client_name="codex", timeout=10,
+    )
+    assert report.status == "ok"
+    assert report.manifest_coverage is not None
+    assert report.manifest_coverage["manifest"] == ".claude-plugin/plugin.json"
+    assert report.manifest_coverage["declared"] == 3
+    assert report.manifest_coverage["found"] == 2
+    assert report.manifest_coverage["missing"] == ["ghost"]
+
+
+def test_check_exposure_manifest_coverage_is_clean_when_everything_declared_is_found(
+    tmp_path: Path,
+) -> None:
+    """Green case beside the red one: a manifest declaring exactly what was
+    found reports zero missing, proving the comparison is not simply always
+    flagging a gap."""
+    snap = _snapshot(tmp_path)
+    manifest_dir = snap / ".claude-plugin"
+    manifest_dir.mkdir()
+    (manifest_dir / "plugin.json").write_text(
+        json.dumps({"name": "fixture-plugin", "skills": ["./greet", "./hidden"]}),
+        encoding="utf-8",
+    )
+    surface = _surface(manifest_path=".claude-plugin/plugin.json")
+    client = _fake(tmp_path, expose_paths=["AGENTS.md"])
+    report = x.check_exposure(
+        surface, base=tmp_path / "base", snapshot=snap, client=client,
+        client_name="codex", timeout=10,
+    )
+    assert report.manifest_coverage is not None
+    assert report.manifest_coverage["declared"] == 2
+    assert report.manifest_coverage["found"] == 2
+    assert report.manifest_coverage["missing"] == []
 
 
 def test_check_exposure_index_is_exposed_when_the_client_actually_loads_it(tmp_path: Path) -> None:
