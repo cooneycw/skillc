@@ -551,13 +551,18 @@ class DockerBackend:
                  "cancellation - docker kill reaches this attempt's CONTAINER (its own "
                  "init/placeholder process), never a separately exec'd session, so the "
                  "SIGTERM-then-SIGKILL escalation only bounds when the whole attempt stops, "
-                 "not whether the subject itself got a chance to flush anything"),
+                 "not whether the subject itself got a chance to flush anything (issue #133 "
+                 "item 2, scoped out rather than fixed there; the real fix - an in-container "
+                 "supervisor forwarding the signal - is issue #158)"),
                 ("dependency resolution inside the container - install() copies in any "
                  "declared surface entry naming an existing host path or carrying raw "
                  "bytes; it does not run a package manager or resolve a dependency closure"),
-                ("baseline_absence - always reported SATISFIED without checking the "
-                 "image's own contents for an undeclared skill already present, matching "
-                 "the reference FakeBackend's own scope (tests/test_lifecycle.py)"),
+                ("baseline_absence's own content check - it compares declared entry NAMES "
+                 "against a top-level listing of the container's workspace taken before any "
+                 "copy, so a same-named file whose CONTENT differs from what the image "
+                 "already shipped is not distinguished from one this attempt genuinely "
+                 "installed; only the name-level contamination case is caught (issue #133 "
+                 "item 4)"),
             ),
         )
 
@@ -582,8 +587,8 @@ class DockerBackend:
     def prepare(self, attempt_id: str) -> object:
         """Step 3: start this attempt's one persistent container, detached,
         running the keep-alive placeholder. Raises `BackendUnavailable` -
-        never returns a handle - when the daemon is unreachable or the
-        `docker run` itself fails.
+        never returns a handle - when the daemon is unreachable, the image is
+        not present locally, or the `docker run` itself fails or stalls.
 
         Docker creates a container before it starts it, so a failed START
         (an image missing the placeholder binary, say) can still leave one
@@ -592,28 +597,72 @@ class DockerBackend:
         `prepare()` must not leave a partial resource behind
         (`backend.ExecutionBackend.prepare`'s own stated contract) - found by
         cross-model review, which named the pre-fix code an actual violation
-        of that already-merged contract, not merely a hardening opportunity."""
+        of that already-merged contract, not merely a hardening opportunity.
+
+        BOUNDED, WITH AN EXPLICIT IMAGE PRECHECK (issue #133 item 1): `docker
+        run -d` used to carry no `timeout=` at all, unlike every other daemon
+        call in this module - and unlike those, a missing local image makes it
+        implicitly PULL over the network mid-call, which can run far longer
+        than any reasonable per-call bound before the CLI even attempts to
+        create a container. `docker image inspect` (bounded by
+        `daemon_timeout`, like every other read here) runs FIRST and refuses
+        outright when the image is not already present locally, so `run -d`
+        itself never has a pull to wait on and can safely carry the same
+        bound as the rest of this module. A `run -d` that still exceeds it -
+        daemon overload, not a pull - is read exactly like a nonzero exit: the
+        best-effort `rm -f` cleanup below runs either way, itself bounded, and
+        `prepare()` raises rather than returning a handle for a container this
+        call cannot confirm the state of."""
         env = _docker_env()
         if probe_daemon(self.docker_bin, self.daemon_timeout, env) is None:
             raise BackendUnavailable(f"docker daemon unreachable via {' '.join(self.docker_bin)!r}")
+        if not self._image_present_locally(env):
+            raise BackendUnavailable(
+                f"image {self.image!r} is not present locally; refusing rather than letting "
+                f"'docker run -d' pull it mid-trial with no bound on how long that takes"
+            )
         name = _container_name(attempt_id)
         argv = self._keepalive_run_argv(name, attempt_id)
         try:
-            started = subprocess.run(argv, capture_output=True, text=True, env=env, check=False)
-        except OSError as exc:
+            started = subprocess.run(
+                argv, capture_output=True, text=True, env=env, check=False, timeout=self.daemon_timeout,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            # Best-effort: whether or not a container was actually created,
+            # this makes sure none is left behind under this name. Also
+            # bounded - a cleanup call that itself hangs must not turn a
+            # raising prepare() into a hanging one.
+            subprocess.run(
+                [*self.docker_bin, "rm", "-f", name],
+                capture_output=True, env=env, check=False, timeout=self.daemon_timeout,
+            )
             raise BackendUnavailable(
                 f"docker run failed to start a container for {attempt_id!r}: {exc}"
             ) from exc
         if started.returncode != 0:
-            # Best-effort: whether or not a container was actually created,
-            # this makes sure none is left behind under this name.
             subprocess.run(
-                [*self.docker_bin, "rm", "-f", name], capture_output=True, env=env, check=False,
+                [*self.docker_bin, "rm", "-f", name],
+                capture_output=True, env=env, check=False, timeout=self.daemon_timeout,
             )
             raise BackendUnavailable(
                 f"docker run failed to start a container for {attempt_id!r}: {started.stderr.strip()}"
             )
         return _Handle(attempt_id=attempt_id, name=name, env=env)
+
+    def _image_present_locally(self, env: Mapping[str, str]) -> bool:
+        """Whether `self.image` already exists in the local image store,
+        bounded by `daemon_timeout` like every other read in this module. A
+        timeout, an unreachable daemon, or a nonzero exit are all treated the
+        same as "not present" - `prepare()` refuses either way, rather than
+        risking `docker run -d`'s own implicit pull on an ambiguous answer."""
+        try:
+            proc = subprocess.run(
+                [*self.docker_bin, "image", "inspect", self.image],
+                capture_output=True, env=env, check=False, timeout=self.daemon_timeout,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        return proc.returncode == 0
 
     def install(self, handle: object, surface: Mapping[str, object]) -> dict[str, object]:
         """Step 4: copy every declared surface entry into the running
@@ -643,11 +692,39 @@ class DockerBackend:
         install successfully and then be unreadable to the very identity
         meant to use it. Building the tar ourselves lets every entry's
         ownership be set to the fixed candidate identity regardless of what
-        the host file is actually owned by."""
+        the host file is actually owned by.
+
+        PER-ENTRY READINESS (issue #133 item 4): `discovery_canary` used to
+        be all-or-nothing - VIOLATED only when NOTHING installed, so one
+        missing entry among several was invisible whenever at least one
+        other entry succeeded. `readiness["entries"]` now names every
+        declared entry's own outcome (`installed`, `missing` - a `str`/`Path`
+        value that does not resolve to an existing host file, the real bug
+        this item exists to surface - or `not-a-path` - a value that was
+        never meant to be copied, like `SURFACE_EXECUTABLE_KEY`'s metadata
+        list, and must not be confused with a missing file), and
+        `discovery_canary` is SATISFIED only when something was declared,
+        something was installed, AND no entry is `missing`.
+
+        BASELINE INSPECTION (issue #133 item 4): before any entry is copied,
+        `_workspace_baseline` lists what `CONTAINER_WORKSPACE` already holds
+        - the image's own contents, never this attempt's own installs, since
+        nothing has been copied yet. Any declared key already present there
+        is a pre-seeded skill this run did not actually install, and
+        `baseline_absence` reports it VIOLATED rather than the previous
+        permanent, unverified SATISFIED. The listing itself can fail (an
+        unreachable daemon) independently of every later `docker cp`, in
+        which case `baseline_absence` is UNKNOWN, never a guessed SATISFIED -
+        the same "UNKNOWN never reaps" posture `confirm_stopped()` already
+        holds elsewhere in this module."""
         assert isinstance(handle, _Handle)
         nonce = surface.get(CANARY_NONCE_KEY)
         declared = {k: v for k, v in surface.items() if k != CANARY_NONCE_KEY}
 
+        baseline, baseline_observed = self._workspace_baseline(handle)
+        preexisting = sorted(k for k in declared if k in baseline)
+
+        entries: dict[str, str] = {}
         installed = 0
         for key, value in declared.items():
             if isinstance(value, bytes):
@@ -661,11 +738,15 @@ class DockerBackend:
                 # error, so the probe failed with "no such file" the first
                 # time this combination was actually exercised).
                 payload = _owned_tar_bytes(key, value)
-            else:
+            elif isinstance(value, (str, Path)):
                 host_path = _as_existing_path(value)
                 if host_path is None:
+                    entries[key] = "missing"
                     continue
                 payload = _owned_tar(host_path, key)
+            else:
+                entries[key] = "not-a-path"
+                continue
             try:
                 copied = subprocess.run(
                     [*self.docker_bin, "cp", "-", f"{handle.name}:{CONTAINER_WORKSPACE}"],
@@ -679,25 +760,31 @@ class DockerBackend:
                     f"docker cp failed installing {key!r} for {handle.attempt_id!r}: "
                     f"{copied.stderr.decode('utf-8', errors='replace').strip()}"
                 )
+            entries[key] = "installed"
             installed += 1
 
         # `discovery_canary`/`installed` reflect what was actually copied,
         # never merely what was declared (cross-model review, PR #85): a
         # surface entry naming a missing path, or a non-path value, must not
-        # certify readiness for something that was never materialized.
+        # certify readiness for something that was never materialized. Since
+        # #133 item 4, a missing entry among several successes is no longer
+        # invisible either - see the method docstring's "PER-ENTRY READINESS".
+        missing = [k for k in entries if entries[k] == "missing"]
         readiness: dict[str, object] = {
-            "discovery_canary": "SATISFIED" if installed else "VIOLATED",
-            # Never independently verified - always reported SATISFIED,
-            # matching the reference FakeBackend's own scope
-            # (tests/test_lifecycle.py). See describe()'s `unobserved`.
-            "baseline_absence": "SATISFIED",
+            "discovery_canary": "SATISFIED" if (declared and installed and not missing) else "VIOLATED",
+            "baseline_absence": (
+                "UNKNOWN" if not baseline_observed else "VIOLATED" if preexisting else "SATISFIED"
+            ),
             "declared": len(declared),
             "installed": installed,
+            "entries": entries,
             # What ACTUALLY ran (#12), asked of this attempt's own container -
             # never `self.image`, which may be a floating tag. None when the
             # daemon cannot say, never a guess.
             "image_digest": self._image_id(handle),
         }
+        if preexisting:
+            readiness["preexisting"] = preexisting
         if isinstance(nonce, str) and nonce:
             payload = _owned_tar_bytes(CANARY_HOST_FILENAME, nonce.encode("utf-8"))
             canary_copied: subprocess.CompletedProcess[bytes] | None
@@ -715,6 +802,33 @@ class DockerBackend:
             if canary_copied is not None and canary_copied.returncode == 0:
                 readiness["canary_path"] = CANARY_RESULT_FILENAME
         return readiness
+
+    def _workspace_baseline(self, handle: _Handle) -> tuple[frozenset[str], bool]:
+        """Every top-level entry already present under `CONTAINER_WORKSPACE`
+        before `install()` copies anything - the image's own baseline, never
+        this attempt's own installs, since this is called before the first
+        `docker cp`. `(names, True)` on a successful listing; `(frozenset(),
+        False)` when the daemon could not be asked at all, which callers
+        must read as UNKNOWN, never as a confirmed-empty baseline (issue
+        #133 item 4; the same "UNKNOWN never reaps" posture
+        `confirm_stopped()` already holds for this module).
+
+        `ls -1A` runs relative to `-w CONTAINER_WORKSPACE`'s own working
+        directory rather than naming `CONTAINER_WORKSPACE` in the argv, so
+        no absolute-path remapping is needed against the fake CLI fixture
+        either (`tests/fixtures/docker-backend/fake_docker.py`'s own
+        `cwd=`-only containment)."""
+        try:
+            proc = subprocess.run(
+                [*self.docker_bin, "exec", "-w", CONTAINER_WORKSPACE, "--", handle.name,
+                 "sh", "-c", "ls -1A ."],
+                capture_output=True, text=True, env=handle.env, check=False, timeout=self.daemon_timeout,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return frozenset(), False
+        if proc.returncode != 0:
+            return frozenset(), False
+        return frozenset(line.strip() for line in proc.stdout.splitlines() if line.strip()), True
 
     def _image_id(self, handle: _Handle) -> str | None:
         """The id of the image this attempt's container was created from
@@ -1043,6 +1157,17 @@ class DockerBackend:
 
         stdout_thread.join(timeout=limits.grace + self.daemon_timeout)
         stderr_thread.join(timeout=limits.grace + self.daemon_timeout)
+        # #133 item 3: a join that times out before the drain thread finishes
+        # means the read never reached EOF - some descendant the subject left
+        # running (past every kill this method issued above) still holds the
+        # pipe open. `is_alive()` right after `.join()` is the ONLY way to
+        # tell that apart from "read everything, gave up nothing": reading
+        # `captured_bytes()`/`total_bytes` below regardless would silently
+        # read a still-open pipe as a finished one (the exact gap
+        # ExecuteResult's own docstring already named as unclosed by #102's
+        # retention cap alone).
+        stdout_incomplete = stdout_thread.is_alive()
+        stderr_incomplete = stderr_thread.is_alive()
         stdout = stdout_drain.captured_bytes()
         stderr = stderr_drain.captured_bytes()
         code = proc.returncode
@@ -1054,6 +1179,10 @@ class DockerBackend:
                 # of this PR, #102): a caller reading `error` alone must not
                 # mistake a capped stderr for the subject's whole message.
                 error = f"{error} (truncated, {stderr_drain.total_bytes} bytes total)"
+            if error and stderr_incomplete:
+                # Distinct from truncation (#133 item 3): this is "we stopped
+                # waiting", not "we read it all and discarded past the cap".
+                error = f"{error} (capture incomplete, drain did not reach EOF)"
 
         # The exec'd process's stdout is written back into the container at
         # `<workspace>/observations` (`verify.py`'s own documented
@@ -1084,6 +1213,7 @@ class DockerBackend:
         return ExecuteResult(
             reason=reason, exit_code=code, error=error, signal=signal_name,
             stdout_truncated=stdout_drain.truncated, stdout_bytes=stdout_drain.total_bytes,
+            stdout_incomplete=stdout_incomplete, stderr_incomplete=stderr_incomplete,
         )
 
     def _kill_container(self, handle: _Handle, sig: str) -> None:

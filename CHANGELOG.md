@@ -78,6 +78,30 @@ and version plan.
   on a leak (never a silent drop, never a silent keep). Retained files live
   under `<base>/retained-transcripts/<attempt_id>.jsonl`.
 
+### Changed
+
+- **Documented, not fixed: no non-image workaround delivers TERM to a
+  Docker-lane subject** (Refs #133 item 2). `docker kill` reaches only the
+  container's init/placeholder process, never the sibling `docker exec`
+  session the subject runs as, and neither signaling the local `docker exec`
+  client nor a `docker top` plus targeted `kill` (evaluated, rejected -
+  ambiguous with concurrent sessions or a forking subject, unverifiable
+  against a real daemon from the fake CLI alone) reaches it either. A timed-
+  out or cancelled subject therefore gets no graceful shutdown and simply
+  dies at teardown; `capture.md`, `support-matrix.md` and `describe()`'s
+  unobserved claims now say so explicitly and cross-reference the real fix,
+  filed separately as it needs a pinned trial image change: #158.
+
+- **Documented, not fixed: the unbounded local spool write is the
+  bare-subprocess lane's limit, not the Docker lane's** (Refs #133 item 5,
+  re-checked rather than assumed). `DockerBackend.execute()` never opens a
+  local spool file at all - it drains stdout/stderr into a capped in-memory
+  buffer - so `capture.md`'s existing "the spool is bounded at capture, not
+  during execution" limit only ever applied to `trial.run_attempt`'s
+  host-subprocess path (`matched_pilot.py`, this module's own tests).
+  `capture.md` now says so explicitly instead of reading as a blanket claim
+  about every lane.
+
 ### Fixed
 
 - **A `coverage: "complete"` skill-invocations stream could omit an
@@ -197,6 +221,47 @@ and version plan.
   Every attempt's `CollectionAgentResult.revision`, and every field derived
   from it (the exported `verified-result`'s `revision`, the paste-back), now
   reports what was actually acquired.
+
+- **`ExecuteResult` distinguishes an incomplete capture from a truncated one**
+  (Refs #133). `execute()` read `stdout_drain.captured_bytes()`/`total_bytes`
+  unconditionally after `stdout_thread.join(timeout=...)`, whether or not
+  that join actually confirmed the drain thread had finished - so a subject
+  that exits while leaving a descendant holding its stdout/stderr pipe open
+  (a gap `ExecuteResult`'s own docstring already named) was silently
+  reported as a complete, non-truncated capture. `stdout_incomplete`/
+  `stderr_incomplete` are now set from `thread.is_alive()` right after the
+  join, independent of `stdout_truncated` (capped-and-discarded is a
+  different fact from never-reached-EOF), and propagate through to the
+  journal (`observations_incomplete`/`error_incomplete`) alongside the
+  existing truncation fields. The red case detaches a real grandchild via
+  `setsid` so `os.killpg` cannot reach it, verified to fail on the pre-fix
+  code (`AttributeError`, then a hang past the join bound once the field
+  existed but was never set).
+
+- **`DockerBackend.prepare()`'s `docker run -d` is bounded, with an explicit
+  image precheck** (Refs #133). Every other daemon call in this backend
+  carried a `timeout=daemon_timeout`; `run -d` did not, and unlike the
+  others it can implicitly PULL a missing image mid-call, which has no
+  bound on how long it runs. `docker image inspect` (itself bounded) now
+  runs first and refuses outright when the image is not present locally, so
+  `run -d` never has a pull to wait on and safely carries the same bound as
+  the rest of the module. The best-effort `rm -f` cleanup on a failed or
+  timed-out `run -d` is bounded too. Two red cases (a stalled `run -d`, a
+  missing image) fail on the pre-fix code.
+
+- **`DockerBackend.install()`'s readiness is per-entry, not all-or-nothing, and
+  checks the image's own baseline** (Refs #133). `discovery_canary` used to be
+  VIOLATED only when NOTHING installed, so one missing declared entry among
+  several successful copies was invisible; `readiness["entries"]` now names
+  every declared entry's own outcome (`installed`, `missing`, or
+  `not-a-path` for surface metadata never meant to be copied), and
+  `discovery_canary` is VIOLATED whenever any entry is genuinely missing.
+  `baseline_absence` used to be permanently, unverifiably `SATISFIED`; a
+  top-level listing of the container's workspace, taken before any copy,
+  now catches a declared key the image already shipped (by name; a
+  same-named file whose content differs from the image's own is not yet
+  distinguished, see `describe()`'s `unobserved`). Both red cases (a
+  partial install, a pre-seeded image skill) fail on the pre-fix code.
 
 - **The three records #12 could not yet prove** (Closes #12).
   - **The image that ran.** A Docker attempt journals a `backend-identity`

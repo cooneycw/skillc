@@ -46,7 +46,13 @@ not a docker clone:
         container Docker CREATED but that then failed to START (`-d` only):
         the state file is left behind, a real ORPHAN, so a test can prove
         `prepare()` cleans it up before raising rather than leaving a
-        partial resource behind.
+        partial resource behind. A `.hang-run` sentinel (its content, if
+        any, is the sleep duration in seconds; empty/missing content defaults
+        to 2.0) makes the DETACHED form sleep before returning 0 and writing
+        any state at all - simulating a daemon that never answers `run -d`
+        in time (issue #133 item 1), rather than one that answers quickly
+        with a refusal. Combine with a short `DockerBackend(daemon_timeout=
+        ...)` so a test proving the bound stays fast.
     exec [-i] -w WORKDIR -- NAME ARGV...
         Requires NAME's state to be "running" (else exit 1, "No such
         container" or "is not running"). Runs ARGV as a real subprocess
@@ -137,6 +143,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -642,6 +649,10 @@ def cmd_run(state_dir: Path, rest: list[str]) -> int:
     container_id = uuid.uuid4().hex[:12]
 
     if detached:
+        hang = state_dir / ".hang-run"
+        if hang.exists():
+            duration_text = hang.read_text(encoding="utf-8").strip()
+            time.sleep(float(duration_text) if duration_text else 2.0)
         if (state_dir / ".refuse-start").exists():
             # Simulates a container Docker CREATED but that then failed to
             # actually START (e.g. an image missing the placeholder binary):

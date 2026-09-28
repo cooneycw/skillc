@@ -14,8 +14,10 @@ this session. This proves the lifecycle state machine, argv composition and
 from __future__ import annotations
 
 import io
+import shutil
 import sys
 import tarfile
+import time
 from pathlib import Path
 
 import pytest
@@ -23,6 +25,11 @@ import pytest
 from skillc import docker_backend as d
 from skillc import lifecycle as lc
 from skillc.backend import BackendUnavailable, Confirmation, ExecutionBackend, Limits
+
+needs_setsid = pytest.mark.skipif(
+    shutil.which("setsid") is None or shutil.which("sh") is None,
+    reason="needs setsid and sh to detach a grandchild from this attempt's process group",
+)
 
 FAKE_DOCKER = Path(__file__).resolve().parent / "fixtures" / "docker-backend" / "fake_docker.py"
 
@@ -306,6 +313,50 @@ def test_prepare_raises_when_the_docker_binary_is_missing(base: Path) -> None:
         backend.prepare("a-lc-000000000003")
 
 
+def test_prepare_refuses_a_missing_image_without_attempting_run(
+    base: Path, docker_state: Path,
+) -> None:
+    """Issue #133 item 1: an explicit `docker image inspect` precheck refuses
+    outright when the image is not present locally, rather than letting
+    `docker run -d` discover that itself by implicitly pulling it - which can
+    run far longer than any bound this backend places on `run -d` itself."""
+    _sentinel(docker_state, ".no-image")
+    backend = _backend(base, docker_state)
+    with pytest.raises(BackendUnavailable, match="not present locally"):
+        backend.prepare("a-lc-000000000003b")
+    # No container state was ever created - `run -d` was never even attempted.
+    name = d._container_name("a-lc-000000000003b")
+    assert not (docker_state / f"{name}.json").exists()
+
+
+def test_prepare_raises_within_the_bound_when_docker_run_stalls(
+    base: Path, docker_state: Path,
+) -> None:
+    """Red case for issue #133 item 1: the pre-fix `docker run -d` call in
+    `prepare()` carried no `timeout=` at all, unlike every other daemon call
+    in this module, so a stalled daemon (or an implicit image pull mid-call)
+    hung the trial instead of reporting BLOCKED/UNKNOWN within a bound. This
+    fixture's `.hang-run` sentinel makes `run -d` sleep for 10s before
+    answering; a `daemon_timeout` far shorter than that must still turn it
+    into BackendUnavailable and return well before the full sleep elapses.
+    The 10x margin (and a generous assertion threshold) is deliberate: this
+    spawns several real Python interpreter subprocesses, and a tight bound
+    was measured flaky under load from the rest of the suite running
+    concurrently. Fails on the pre-fix code, which would block for the
+    full 10s (or hang forever against a daemon that never answers at all)."""
+    docker_state.mkdir(parents=True, exist_ok=True)
+    (docker_state / ".hang-run").write_text("10", encoding="utf-8")
+    backend = d.DockerBackend(
+        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state),
+        daemon_timeout=1.0,
+    )
+    started = time.monotonic()
+    with pytest.raises(BackendUnavailable):
+        backend.prepare("a-lc-000000000003c")
+    elapsed = time.monotonic() - started
+    assert elapsed < 6.0, f"prepare() took {elapsed:.2f}s - the daemon_timeout bound was not enforced"
+
+
 def test_install_reports_discovery_canary_violated_when_nothing_is_declared(
     base: Path, docker_state: Path,
 ) -> None:
@@ -356,6 +407,73 @@ def test_install_counts_a_non_path_surface_value_without_copying_it(
     assert readiness["declared"] == 1
     assert readiness["installed"] == 0
     assert readiness["discovery_canary"] == "VIOLATED"
+    assert readiness["entries"] == {"meta": "not-a-path"}
+    backend.destroy(handle)
+
+
+def test_install_reports_a_partial_install_as_violated_not_masked_by_a_success(
+    base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """Red case for issue #133 item 4: the pre-fix `discovery_canary` derivation
+    was `"SATISFIED" if installed else "VIOLATED"` - VIOLATED only when NOTHING
+    installed, so one missing helper among several successes was invisible.
+    Two entries declared, one a real file and one a host path that does not
+    exist: `installed == 1` alone used to read as success. Fails on that
+    pre-fix code (discovery_canary SATISFIED here); the fix requires every
+    declared entry to install, and names which one did not."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000005c")
+    good_file = tmp_path / "good.txt"
+    good_file.write_text("present\n")
+    missing_path = str(tmp_path / "does-not-exist.txt")
+    readiness = backend.install(handle, {"good.txt": good_file, "missing.txt": missing_path})
+    assert readiness["declared"] == 2
+    assert readiness["installed"] == 1
+    assert readiness["entries"] == {"good.txt": "installed", "missing.txt": "missing"}
+    assert readiness["discovery_canary"] == "VIOLATED"
+    backend.destroy(handle)
+
+
+def test_install_reports_baseline_contamination_for_a_preexisting_entry(
+    base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """Red case for issue #133 item 4: an undeclared skill already present in
+    the IMAGE (never installed by this attempt) used to be invisible -
+    `baseline_absence` was hardcoded permanently SATISFIED. Seeds a file at
+    the container's own workspace path before `install()` runs (simulating
+    something baked into the image), declares a REAL host file at that same
+    key, and asserts the pre-existing entry is reported rather than silently
+    accepted as this attempt's own install. Fails on the pre-fix code, which
+    never inspected the container's contents before copying and always
+    reported `baseline_absence: SATISFIED`."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000005d")
+    assert isinstance(handle, d._Handle)
+    container_workspace = docker_state / f"{handle.name}.fsroot" / "work"
+    container_workspace.mkdir(parents=True, exist_ok=True)
+    (container_workspace / "baked-in.txt").write_text("was already here\n")
+
+    surface_file = tmp_path / "baked-in.txt"
+    surface_file.write_text("declared content\n")
+    readiness = backend.install(handle, {"baked-in.txt": surface_file})
+    assert readiness["baseline_absence"] == "VIOLATED"
+    assert readiness["preexisting"] == ["baked-in.txt"]
+    # The install itself still proceeds and is still reported per-entry -
+    # contamination is a distinct fact from whether THIS run's copy worked.
+    assert readiness["entries"] == {"baked-in.txt": "installed"}
+    backend.destroy(handle)
+
+
+def test_install_reports_baseline_absence_satisfied_for_a_clean_workspace(
+    base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000005e")
+    surface_file = tmp_path / "clean.txt"
+    surface_file.write_text("content\n")
+    readiness = backend.install(handle, {"clean.txt": surface_file})
+    assert readiness["baseline_absence"] == "SATISFIED"
+    assert "preexisting" not in readiness
     backend.destroy(handle)
 
 
@@ -811,6 +929,60 @@ def test_execute_does_not_annotate_stderr_truncation_under_the_cap(base: Path, d
         handle, [sys.executable, "-c", script], Limits(timeout=5, max_captured_stderr_bytes=100),
     )
     assert result.error == "a short error"
+    backend.destroy(handle)
+
+
+@needs_setsid
+def test_execute_reports_stdout_incomplete_when_the_drain_never_reaches_eof(
+    base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """Red case for issue #133 item 3: the pre-fix code read
+    `stdout_drain.captured_bytes()` unconditionally after `stdout_thread.join(
+    timeout=...)`, whether or not that join actually confirmed the thread had
+    finished - so a subject that exits while leaving a descendant holding the
+    pipe open (`ExecuteResult`'s own docstring already named this gap) was
+    silently reported as a complete, non-truncated capture.
+
+    The subject uses `setsid` to detach a grandchild `sleep` into its own
+    session before exiting itself - real, not simulated: `os.killpg`
+    (`_stop`'s own kill path) cannot reach a process outside its group, and
+    the shell exits almost immediately, so `reason` is `\"exited\"`, not
+    `\"timeout\"`. The grandchild inherits the write end of stdout/stderr and
+    holds them open for 8s; `grace`/`daemon_timeout` bound the join at well
+    under a second, so `execute()` must give up waiting long before the
+    grandchild ever closes them. Fails on the pre-fix code, which reported
+    `stdout_truncated=False` here - indistinguishable from a clean, complete,
+    empty capture."""
+    backend = d.DockerBackend(
+        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=1.0,
+    )
+    handle = backend.prepare("a-lc-000000000024b")
+    assert isinstance(handle, d._Handle)
+    backend.install(handle, {})
+    argv = ["sh", "-c", "setsid sh -c 'sleep 8' </dev/null & true"]
+    started = time.monotonic()
+    result = backend.execute(handle, argv, Limits(timeout=5, grace=1.0))
+    elapsed = time.monotonic() - started
+    assert result.reason == "exited"
+    assert result.stdout_incomplete is True
+    assert result.stderr_incomplete is True
+    assert result.stdout_truncated is False, "capped-and-discarded is a different fact from never-reached-EOF"
+    assert elapsed < 6.0, f"execute() took {elapsed:.2f}s - it waited for the detached grandchild instead of giving up"
+    backend.destroy(handle)
+
+
+def test_execute_does_not_report_incomplete_for_an_ordinary_subject(base: Path, docker_state: Path) -> None:
+    """Green case beside the red one: a subject with no lingering descendant
+    must report both streams complete - proves the flag is not simply always
+    set once a join carries a timeout at all."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000024c")
+    backend.install(handle, {})
+    result = backend.execute(
+        handle, [sys.executable, "-c", "print('short')"], Limits(timeout=5),
+    )
+    assert result.stdout_incomplete is False
+    assert result.stderr_incomplete is False
     backend.destroy(handle)
 
 
