@@ -974,6 +974,17 @@ def _receipt(experiment: trial.Experiment, attempt_id: str, planned: dict[str, o
         got, want = data.get(ident), planned.get(ident)
         if not isinstance(got, dict) or not isinstance(want, dict) or any(got.get(k) != want.get(k) for k in keys):
             raise Refused(f"{name}: its {ident} is not the trial's planned {ident}; a stale receipt is not graded")
+    # #150-D: a receipt measured in one container image must not be applied to
+    # an attempt planned against another. Only receipts that CLAIM an image
+    # identity are checked - the native install path (materialize.py) predates
+    # Docker and never writes one, and a receipt silent on image says nothing
+    # about it either way, so it is not treated as stale on that account alone.
+    image = data.get("image")
+    if image is not None:
+        want_image = planned.get("image")
+        if (not isinstance(image, dict) or not isinstance(want_image, dict)
+                or image.get("digest") != want_image.get("digest")):
+            raise Refused(f"{name}: its image is not the trial's planned image; a stale receipt is not graded")
     if data.get("attempt_id") != attempt_id or data.get("trial_id") != planned.get("trial_id"):
         raise Refused(f"{name} names another attempt or trial; a stale receipt is not graded")
     return name, data

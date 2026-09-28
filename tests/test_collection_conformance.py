@@ -15,6 +15,8 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import os
+import shlex
 import shutil
 import sys
 import time
@@ -23,13 +25,16 @@ from types import SimpleNamespace
 
 import pytest
 
+from skillc import agent_trial, demo, materialize, reap, trial
 from skillc import collection_conformance as cc
-from skillc import demo, materialize, reap, trial
 from skillc import docker_backend as d
 
 FAKE_DOCKER = Path(__file__).resolve().parent / "fixtures" / "docker-backend" / "fake_docker.py"
 FAKE_CLIENT = Path(__file__).resolve().parent / "fixtures" / "agent-trial" / "fake_agent_client.py"
 GRADER_ROOT = Path(__file__).resolve().parent.parent / "evals" / "level1" / "slug-small-fix"
+#: test_demo.py's own fake codex client (#7) - reused here for #150-D's
+#: in-container discovery listing rather than building a second fixture.
+CODEX_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "codex-subject"
 
 
 def _docker_bin(state_dir: Path) -> list[str]:
@@ -48,8 +53,18 @@ def docker_state(tmp_path: Path) -> Path:
     return tmp_path / "docker-state"
 
 
+#: The fake docker CLI's own deterministic digest for this image tag
+#: (`fake_docker.py`'s `cmd_image`/`cmd_inspect`: `sha256:fake-digest-for-<tag>`
+#: either way it is queried) - #150-D's receipt path cross-checks a measured
+#: image digest against the ledger's PLANNED one, so a test that exercises
+#: that path must plan against this, not the "UNKNOWN" `plan_collection_attempt`
+#: defaults to when no `image_digest` is given.
+_BACKEND_IMAGE = "fake-image:1"
+_BACKEND_IMAGE_DIGEST = f"sha256:fake-digest-for-{_BACKEND_IMAGE}"
+
+
 def _backend(base: Path, docker_state: Path) -> d.DockerBackend:
-    return d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+    return d.DockerBackend(image=_BACKEND_IMAGE, base_dir=base, docker_bin=_docker_bin(docker_state))
 
 
 def _skill_md(name: str) -> str:
@@ -102,6 +117,19 @@ def _codex_argv(
     for skill in plant_skill or ():
         argv.extend(["--plant-skill", skill])
     return argv
+
+
+def _fake_codex_listing(tmp_path: Path, mode: str = "normal", **config: str) -> list[str]:
+    """`tests/fixtures/codex-subject/fake_codex.py`, copied fresh per test
+    (test_demo.py's own pattern) - a bare `"codex"` in `listing_client_argv`
+    would need the real binary on `PATH`, which a real trial image gives it
+    but this fixture never does; this is the scripted stand-in
+    #150-D's `InstallationReceiptContext.listing_client_argv` exists for."""
+    script = tmp_path / "listing-client" / "fake_codex.py"
+    script.parent.mkdir(exist_ok=True)
+    shutil.copy(CODEX_FIXTURE / "fake_codex.py", script)
+    script.with_suffix(".mode").write_text(json.dumps({"mode": mode, **config}), encoding="utf-8")
+    return [sys.executable, str(script)]
 
 
 def _mapped_home(docker_state: Path, attempt_id: str) -> Path:
@@ -191,7 +219,7 @@ def test_happy_path_installs_the_collection_and_grades(
 
     acquired = cc.acquire_collection("whatever", base, checkout=repo)
     store = trial.open_store(tmp_path / "store", forbidden=[])
-    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store, image_digest=_BACKEND_IMAGE_DIGEST)
     backend = _backend(base, docker_state)
     grading_backend = _backend(base, docker_state)
     home = _mapped_home(docker_state, attempt_id)
@@ -236,7 +264,7 @@ def test_the_result_revision_is_what_was_acquired_never_the_declared_pin(
 
     acquired = cc.acquire_collection("whatever", base, checkout=repo)
     store = trial.open_store(tmp_path / "store", forbidden=[])
-    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store, image_digest=_BACKEND_IMAGE_DIGEST)
     backend = _backend(base, docker_state)
     grading_backend = _backend(base, docker_state)
     home = _mapped_home(docker_state, attempt_id)
@@ -267,7 +295,7 @@ def test_skill_invocations_observes_a_spontaneous_selection(
 
     acquired = cc.acquire_collection("whatever", base, checkout=repo)
     store = trial.open_store(tmp_path / "store", forbidden=[])
-    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store, image_digest=_BACKEND_IMAGE_DIGEST)
     backend = _backend(base, docker_state)
     grading_backend = _backend(base, docker_state)
     home = _mapped_home(docker_state, attempt_id)
@@ -302,7 +330,7 @@ def test_missing_credential_blocks_before_launch(
 
     acquired = cc.acquire_collection("whatever", base, checkout=repo)
     store = trial.open_store(tmp_path / "store", forbidden=[])
-    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store, image_digest=_BACKEND_IMAGE_DIGEST)
     backend = _backend(base, docker_state)
     grading_backend = _backend(base, docker_state)
     missing = tmp_path / "does-not-exist.json"
@@ -416,7 +444,7 @@ def _finish_close_ref_run(
     acquired = cc.acquire_collection("whatever", base, checkout=repo)
     store = trial.open_store(tmp_path / "store", forbidden=[])
     experiment, attempt_id = cc.plan_collection_attempt(
-        "whatever", acquired, store, task_root=FINISH_CLOSE_REF_ROOT,
+        "whatever", acquired, store, task_root=FINISH_CLOSE_REF_ROOT, image_digest=_BACKEND_IMAGE_DIGEST,
     )
     argv = _codex_argv(
         home=_mapped_home(docker_state, attempt_id),
@@ -489,7 +517,7 @@ def test_default_prompt_is_the_task_s_own_goal_text(
 
     acquired = cc.acquire_collection("whatever", base, checkout=repo)
     store = trial.open_store(tmp_path / "store", forbidden=[])
-    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store, image_digest=_BACKEND_IMAGE_DIGEST)
     backend = _backend(base, docker_state)
     grading_backend = _backend(base, docker_state)
     home = _mapped_home(docker_state, attempt_id)
@@ -572,7 +600,7 @@ def test_paste_back_refresh_line_reads_a_real_driver_record(
     monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd"]))
     acquired = cc.acquire_collection("whatever", base, checkout=repo)
     store = trial.open_store(tmp_path / "store", forbidden=[])
-    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store, image_digest=_BACKEND_IMAGE_DIGEST)
     argv = _codex_argv(
         home=_mapped_home(docker_state, attempt_id),
         transcript_relpath=".codex/sessions/2026/01/01/rollout-rf.jsonl", copy_solution=GRADER_ROOT / "reference",
@@ -607,7 +635,7 @@ def test_below_threshold_credential_blocks_before_launch_and_leaves_no_container
     monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd"]))
     acquired = cc.acquire_collection("whatever", base, checkout=repo)
     store = trial.open_store(tmp_path / "store", forbidden=[])
-    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store, image_digest=_BACKEND_IMAGE_DIGEST)
     before = reap.snapshot(_docker_bin(docker_state), timeout=5)
     result = cc.run_collection_agent_attempt(
         subject_name="whatever", acquired=acquired, experiment=experiment, attempt_id=attempt_id,
@@ -1169,7 +1197,7 @@ def _claude_run(
 
     acquired = cc.acquire_collection("whatever", base, checkout=repo)
     store = trial.open_store(tmp_path / "store", forbidden=[])
-    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store, image_digest=_BACKEND_IMAGE_DIGEST)
     home = _mapped_home(docker_state, attempt_id)
     argv = [
         sys.executable, str(FAKE_CLIENT), "--format", "claude-fake", "--home", str(home),
@@ -1245,7 +1273,7 @@ def test_a_codex_run_reports_discovery_unmeasured_not_borrowed(
     monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd"]))
     acquired = cc.acquire_collection("whatever", base, checkout=repo)
     store = trial.open_store(tmp_path / "store", forbidden=[])
-    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store, image_digest=_BACKEND_IMAGE_DIGEST)
     argv = _codex_argv(
         home=_mapped_home(docker_state, attempt_id), transcript_relpath=".codex/sessions/2026/01/01/rollout-d.jsonl",
     )
@@ -1267,7 +1295,7 @@ def test_missing_claude_credential_blocks_before_launch(
     monkeypatch.setattr(demo, "load_demo_subject", lambda name: _claude_subject(select=["tdd"]))
     acquired = cc.acquire_collection("whatever", base, checkout=repo)
     store = trial.open_store(tmp_path / "store", forbidden=[])
-    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store, image_digest=_BACKEND_IMAGE_DIGEST)
     result = cc.run_collection_agent_attempt(
         subject_name="whatever", acquired=acquired, experiment=experiment, attempt_id=attempt_id,
         backend=_backend(base, docker_state), grading_backend=_backend(base, docker_state), base=base,
@@ -1304,3 +1332,199 @@ def test_cmd_collection_run_exit_follows_measured_discovery(
         "whatever", image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base=str(base), timeout=5,
     )
     assert cli.cmd_collection_run(args) == expected
+
+
+# --------------------------------------------------------- #150-D: a real installation receipt
+
+
+def _receipt_run(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+    *, listing_mode: str, skills: dict[str, str] | None = None,
+) -> tuple[cc.CollectionAgentResult, trial.Experiment, str]:
+    repo = _fixture_collection(tmp_path, skills if skills is not None else {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=list((skills or {"tdd": "tdd"}).keys())))
+    listing_client = _fake_codex_listing(tmp_path, mode=listing_mode)
+
+    acquired = cc.acquire_collection("whatever", base, checkout=repo)
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    experiment, attempt_id = cc.plan_collection_attempt(
+        "whatever", acquired, store, image_digest=_BACKEND_IMAGE_DIGEST,
+    )
+    argv = _codex_argv(
+        home=_mapped_home(docker_state, attempt_id),
+        transcript_relpath=".codex/sessions/2026/01/01/rollout-receipt.jsonl",
+        copy_solution=GRADER_ROOT / "reference",
+    )
+    result = cc.run_collection_agent_attempt(
+        subject_name="whatever", acquired=acquired, experiment=experiment, attempt_id=attempt_id,
+        backend=_backend(base, docker_state), grading_backend=_backend(base, docker_state), base=base,
+        base_argv=argv, prompt="Fix the slug helper.", timeout=5,
+        credential_explicit_path=_fresh_codex_credential(tmp_path),
+        listing_client_argv=listing_client,
+    )
+    return result, experiment, attempt_id
+
+
+def test_receipt_discovery_satisfied_reaches_pass(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The happy path: a codex arm that installs a declared collection and
+    whose listing correctly discovers it writes a real installation
+    receipt, and the STORED result (not merely the task grade) reaches
+    PASS - #139's B1 no longer applies to this arm."""
+    result, experiment, attempt_id = _receipt_run(tmp_path, base, docker_state, monkeypatch, listing_mode="normal")
+    assert result.record["disposition"] == "captured"
+    graded = result.record["graded"]
+    assert isinstance(graded, dict), result.record.get("grading_blocked_reason")
+    assert graded["result_status"] == "PASS", graded
+
+    receipt_path = experiment.root / f"receipt-{attempt_id}.json"
+    assert receipt_path.is_file()
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert receipt["readiness"]["discovery_canary"] == "SATISFIED", receipt["readiness"]
+    assert receipt["readiness"]["baseline_absence"] == "SATISFIED", receipt["readiness"]
+    assert receipt["readiness"]["evidence"] == agent_trial._DISCOVERY_RECEIPT_CLAIM
+
+
+def test_ruling_red_1_a_canary_failing_installing_arm_is_not_pass(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR 0005's ruling, red case 1: an installing arm whose listing omits
+    the declared skill ("blind" mode: `fake_codex.py` lists only its own
+    `.system` skill) must not reach PASS - a real receipt now backs this
+    arm, and it reads VIOLATED, not SATISFIED."""
+    result, experiment, attempt_id = _receipt_run(tmp_path, base, docker_state, monkeypatch, listing_mode="blind")
+    graded = result.record["graded"]
+    assert isinstance(graded, dict), result.record.get("grading_blocked_reason")
+    assert graded["result_status"] != "PASS", graded
+
+    receipt = json.loads((experiment.root / f"receipt-{attempt_id}.json").read_text(encoding="utf-8"))
+    assert receipt["readiness"]["discovery_canary"] == "VIOLATED", receipt["readiness"]
+
+
+def test_ruling_red_3_an_unobtainable_listing_is_unknown_not_pass(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR 0005's ruling, red case 3: a listing container whose client
+    crashes must read UNKNOWN, never SATISFIED, and the stored result must
+    not reach PASS on it."""
+    result, experiment, attempt_id = _receipt_run(tmp_path, base, docker_state, monkeypatch, listing_mode="crash")
+    graded = result.record["graded"]
+    assert isinstance(graded, dict), result.record.get("grading_blocked_reason")
+    assert graded["result_status"] != "PASS", graded
+
+    receipt = json.loads((experiment.root / f"receipt-{attempt_id}.json").read_text(encoding="utf-8"))
+    assert receipt["readiness"]["discovery_canary"] == "UNKNOWN", receipt["readiness"]
+
+
+def test_receipt_refused_when_the_measured_image_digest_does_not_match_the_ledger(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """verify.py's #150-D image-digest cross-check: a receipt measured
+    against one image must be refused for an attempt whose ledger plans a
+    DIFFERENT image - grading raises rather than silently trusting a stale
+    receipt."""
+    repo = _fixture_collection(tmp_path, {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd"]))
+    listing_client = _fake_codex_listing(tmp_path, mode="normal")
+
+    acquired = cc.acquire_collection("whatever", base, checkout=repo)
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    # A DIFFERENT planned image digest than the one the backend/listing
+    # containers will actually measure (_BACKEND_IMAGE_DIGEST) - simulating
+    # a tag that moved between planning and this run.
+    experiment, attempt_id = cc.plan_collection_attempt(
+        "whatever", acquired, store, image_digest="sha256:some-other-image-entirely",
+    )
+    argv = _codex_argv(
+        home=_mapped_home(docker_state, attempt_id),
+        transcript_relpath=".codex/sessions/2026/01/01/rollout-mismatch.jsonl",
+    )
+    with pytest.raises(trial.Refused, match="image"):
+        cc.run_collection_agent_attempt(
+            subject_name="whatever", acquired=acquired, experiment=experiment, attempt_id=attempt_id,
+            backend=_backend(base, docker_state), grading_backend=_backend(base, docker_state), base=base,
+            base_argv=argv, prompt="Fix the slug helper.", timeout=5,
+            credential_explicit_path=_fresh_codex_credential(tmp_path),
+            listing_client_argv=listing_client,
+        )
+
+
+def test_cli_collection_run_resolves_its_own_image_digest_and_reaches_pass(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every other test in this file hands `plan_collection_attempt` an
+    `image_digest=` by hand. That proves the RECEIPT and VERIFIER agree with
+    each other; it says nothing about whether the real CLI path ever
+    actually supplies one. `cmd_collection_run` (skillc/cli.py) resolves a
+    digest itself, before planning: `demo.resolve_image_digest(docker_bin,
+    image, None, args.timeout)`, threaded straight into
+    `plan_collection_attempt(..., image_digest=image_digest, ...)`. This
+    test drives `cli.main(["collection-run", ...])` directly - the real
+    entry point, with NO test-supplied digest anywhere - and if that
+    production wiring were actually returning `None` (rendered as the
+    planned `"UNKNOWN"` marker `plan_collection_attempt`'s own docstring
+    describes), the #150-D image cross-check would refuse the receipt as an
+    uncaught `trial.Refused`, not a quiet FAIL; this test would show that
+    directly, the same way the pre-existing-regression tests did before
+    they threaded a digest in by hand.
+
+    Discovery listing is also exercised as production actually calls it:
+    `cmd_collection_run` passes no `listing_client_argv` (that parameter has
+    no CLI flag), so the receipt's listing runs the bare client name
+    (`codex`) exactly as a real container resolves it via `PATH` - never
+    `_fake_codex_listing`'s own explicit-argv convention, which production
+    has no flag to request. A scripted `codex` executable (still
+    `fake_codex.py`'s own logic, just reachable under its real name instead
+    of via `sys.executable <path>`) is put on `PATH` for this one test, the
+    same way a real trial image's installed binary already is."""
+    from skillc import cli
+
+    repo = _fixture_collection(tmp_path, {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd"]))
+
+    def fake_checkout(subject: object, into: Path, timeout: float = 300) -> Path:
+        shutil.copytree(repo, into)
+        return into
+
+    monkeypatch.setattr(demo, "acquire_subject_checkout", fake_checkout)
+
+    # cli.main gives no way to learn a randomly-generated attempt_id before
+    # --client-argv must be built (unlike this file's other tests, which
+    # call plan_collection_attempt themselves first) - pinned so --home can
+    # be computed ahead of time, exactly as trial._new_attempt_id already
+    # documents itself as the one place a real attempt id comes from.
+    fixed_attempt_id = "a-cliflipprod"
+    monkeypatch.setattr(trial, "_new_attempt_id", lambda: fixed_attempt_id)
+
+    codex_dir = tmp_path / "fake-path-bin"
+    codex_dir.mkdir()
+    codex_impl = codex_dir / "_fake_codex_impl.py"
+    shutil.copy(CODEX_FIXTURE / "fake_codex.py", codex_impl)
+    codex_impl.with_suffix(".mode").write_text(json.dumps({"mode": "normal"}), encoding="utf-8")
+    codex_wrapper = codex_dir / "codex"
+    codex_wrapper.write_text(
+        f"#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(codex_impl))} \"$@\"\n",
+        encoding="utf-8",
+    )
+    codex_wrapper.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{codex_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    home = _mapped_home(docker_state, fixed_attempt_id)
+    client_argv = _codex_argv(
+        home=home, transcript_relpath=".codex/sessions/2026/01/01/rollout-cli-flip.jsonl",
+        copy_solution=GRADER_ROOT / "reference",
+    )
+    argv = [
+        "collection-run", "whatever",
+        "--base", str(base),
+        "--image", _BACKEND_IMAGE,
+        "--docker-bin", " ".join(_docker_bin(docker_state)),
+        "--client-argv", " ".join(client_argv),
+        "--credential", str(_fresh_codex_credential(tmp_path)),
+        "--timeout", "5",
+    ]
+
+    code = cli.main(argv)
+
+    assert code == 0, "the real CLI path did not reach PASS - receipt refused or discovery not SATISFIED"

@@ -366,7 +366,7 @@ def recheck_subject_digests(
 def run_subject_discovery(
     backend: dbe.DockerBackend, handle: object, client_argv: list[str], selected: set[str],
     limits: Limits, export_root: Path,
-) -> tuple[dict[str, str], str | None]:
+) -> tuple[dict[str, str], frozenset[str], str | None]:
     """Runs the client's own listing (`codex debug prompt-input`, the same
     argv convention `skillc.exposure`'s `render_codex` already uses) INSIDE
     the container via `execute()`, with no model call - never
@@ -379,13 +379,35 @@ def run_subject_discovery(
     host-local runs).
 
     Returns `{skill_name: "discovered"|"not-discovered"}` for every name in
-    `selected`, or every one of them mapped to `"UNMEASURED"` with a reason
-    string when the listing could not run at all (a launch failure, a
-    nonzero exit, no `observations` file, or output the shared parser
-    cannot read) - never dropped, never a silent partial result."""
+    `selected`, plus every OTHER name the listing named (`unexpected` -
+    #150-D: a name outside `selected` is exactly what a contaminated
+    baseline looks like, an image-shipped or leftover skill that could make
+    a degraded arm pass installation-readiness for the wrong reason), or
+    every one of `selected` mapped to `"UNMEASURED"` with a reason string
+    and an empty `unexpected` when the listing could not run at all (a
+    launch failure, a nonzero exit, no `observations` file, or output the
+    shared parser cannot read) - never dropped, never a silent partial
+    result. A non-empty `unexpected` is only meaningful when the reason is
+    `None`; an unmeasured listing cannot say whether anything else is
+    listed either.
 
-    def unmeasured(reason: str) -> tuple[dict[str, str], str | None]:
-        return {name: "UNMEASURED" for name in selected}, reason
+    A listed entry rooted under `materialize.CLIENT_SYSTEM_DIR` is never
+    `unexpected`, mirroring `materialize.derive_readiness`'s own native
+    "foreign" check: the client seeds that skill into every home it is
+    pointed at, so it is not contamination, it is the client existing.
+
+    THE LIMIT THIS CARRIES: this exclusion is by PATH, not by provenance -
+    it cannot tell "the client's own seed" from "anything else placed under
+    that same directory name". An image that shipped a rule-stating or
+    otherwise contaminating skill under `.system` would be just as invisible
+    to this check as the client's real seed is. That is the same limit
+    `materialize.derive_readiness`'s own precedent already carries and
+    accepts (this function only matches it, never widens it), stated here
+    because #150-D's own reviewer asked for it named rather than left
+    implicit in the code alone."""
+
+    def unmeasured(reason: str) -> tuple[dict[str, str], frozenset[str], str | None]:
+        return {name: "UNMEASURED" for name in selected}, frozenset(), reason
 
     codex_home = f"{dbe.CONTAINER_HOME}/{_SUBJECT_CODEX_HOME_RELPATH}"
     argv = ["env", f"CODEX_HOME={codex_home}", *client_argv, *materialize.CANARY_ARGV, materialize.CANARY_PROMPT]
@@ -408,7 +430,13 @@ def run_subject_discovery(
     if listing.status != "ok":
         return unmeasured(f"listing {listing.status}: {listing.detail}")
     listed = {name for name, _ in listing.entries}
-    return {name: ("discovered" if name in listed else "not-discovered") for name in selected}, None
+    per_selected = {name: ("discovered" if name in listed else "not-discovered") for name in selected}
+    system_named = {
+        name for name, path in listing.entries
+        if materialize.CLIENT_SYSTEM_DIR in Path(path).parts
+    }
+    unexpected = frozenset(listed - selected - system_named)
+    return per_selected, unexpected, None
 
 
 @dataclass(frozen=True)
@@ -534,7 +562,12 @@ def run_subject_demo(
             receipt = install_subject(backend, handle, source, files)
             digest_status, mismatches = recheck_subject_digests(backend, handle, files)
             if subject.surface_spec.model_free_listing:
-                discovery, discovery_reason = run_subject_discovery(
+                # `unexpected` (#150-D) is not yet surfaced by this command's
+                # own report - SubjectResult predates it - so it is read and
+                # discarded here rather than silently dropped by an unpacking
+                # mismatch. skillc/agent_trial.py's own caller of this
+                # function is the first consumer.
+                discovery, _unexpected, discovery_reason = run_subject_discovery(
                     backend, handle, client_argv if client_argv is not None else [subject.client],
                     selected, Limits(timeout=timeout), base,
                 )

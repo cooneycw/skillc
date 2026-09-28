@@ -34,8 +34,12 @@ def _docker_bin(state_dir: Path) -> list[str]:
     return [sys.executable, str(FAKE_DOCKER), "--state", str(state_dir)]
 
 
+_BACKEND_IMAGE = "fake-image:1"
+_BACKEND_IMAGE_DIGEST = f"sha256:fake-digest-for-{_BACKEND_IMAGE}"
+
+
 def _backend(base: Path, docker_state: Path) -> d.DockerBackend:
-    return d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+    return d.DockerBackend(image=_BACKEND_IMAGE, base_dir=base, docker_bin=_docker_bin(docker_state))
 
 
 def _skill_md(name: str) -> str:
@@ -104,7 +108,9 @@ def _run_captured_attempt(
 
     acquired = cc.acquire_collection("whatever", base, checkout=repo)
     store = trial.open_store(tmp_path / "store", forbidden=[])
-    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    experiment, attempt_id = cc.plan_collection_attempt(
+        "whatever", acquired, store, image_digest=_BACKEND_IMAGE_DIGEST,
+    )
     backend = _backend(base, docker_state)
     grading_backend = _backend(base, docker_state)
     home = _mapped_home(docker_state, attempt_id)

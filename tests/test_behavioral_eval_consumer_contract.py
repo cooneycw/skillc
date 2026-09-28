@@ -18,9 +18,11 @@ from __future__ import annotations
 import base64
 import importlib.util
 import json
+import shutil
 import sys
 import time
 import types
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -31,7 +33,9 @@ from skillc import docker_backend as d
 
 FAKE_DOCKER = Path(__file__).resolve().parent / "fixtures" / "docker-backend" / "fake_docker.py"
 FAKE_CLIENT = Path(__file__).resolve().parent / "fixtures" / "agent-trial" / "fake_agent_client.py"
+CODEX_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "codex-subject"
 GRADER_ROOT = Path(__file__).resolve().parent.parent / "evals" / "level1" / "slug-small-fix"
+FINISH_CLOSE_REF_ROOT = Path(__file__).resolve().parent.parent / "evals" / "level1" / "finish-close-ref"
 CONSUMER_PATH = Path(__file__).resolve().parent / "fixtures" / "cpp-behavioral-eval-consumer" / "check-behavioral-eval.py"
 
 
@@ -51,12 +55,16 @@ def _load_consumer() -> types.ModuleType:
 consumer = _load_consumer()
 
 
+_BACKEND_IMAGE = "fake-image:1"
+_BACKEND_IMAGE_DIGEST = f"sha256:fake-digest-for-{_BACKEND_IMAGE}"
+
+
 def _docker_bin(state_dir: Path) -> list[str]:
     return [sys.executable, str(FAKE_DOCKER), "--state", str(state_dir)]
 
 
 def _backend(base: Path, docker_state: Path) -> d.DockerBackend:
-    return d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+    return d.DockerBackend(image=_BACKEND_IMAGE, base_dir=base, docker_bin=_docker_bin(docker_state))
 
 
 def _skill_md(name: str) -> str:
@@ -109,11 +117,34 @@ def _codex_argv(*, home: Path, transcript_relpath: str, copy_solution: Path | No
     return argv
 
 
+def _fake_codex_listing(tmp_path: Path, mode: str = "normal", **config: str) -> list[str]:
+    """`tests/fixtures/codex-subject/fake_codex.py`, copied fresh per test -
+    duplicated from `test_collection_conformance.py`'s own helper of the same
+    name, per this file's own stated convention (module docstring). A bare
+    `"codex"` in `listing_client_argv` would need the real binary on `PATH`,
+    which this fixture never provides; this is the scripted stand-in
+    #150-D's `InstallationReceiptContext.listing_client_argv` exists for."""
+    script = tmp_path / "listing-client" / "fake_codex.py"
+    script.parent.mkdir(exist_ok=True)
+    shutil.copy(CODEX_FIXTURE / "fake_codex.py", script)
+    script.with_suffix(".mode").write_text(json.dumps({"mode": mode, **config}), encoding="utf-8")
+    return [sys.executable, str(script)]
+
+
 def _run_captured_attempt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, pass_task: bool,
+    listing_client_argv: Sequence[str] | None = None,
 ) -> tuple[trial.Experiment, dict[str, object]]:
     """A real, captured, graded `collection_conformance` attempt - PASS when
-    `pass_task`, FAIL otherwise (the fake client copies no solution)."""
+    `pass_task`, FAIL otherwise (the fake client copies no solution).
+
+    `listing_client_argv` (#150-D): `None` (the default, used by every test
+    predating 150-D) leaves the receipt's discovery listing pointed at the
+    bare `codex` name, which this sandbox cannot resolve - the receipt is
+    still built (the subject is codex-shaped) but its listing comes back
+    UNMEASURED, so `installation-ready` stays a mandatory UNKNOWN and the
+    consumer reads INCONCLUSIVE whatever `pass_task` says. Passing the fake
+    listing client is what actually exercises 150-D's SATISFIED path."""
     base = tmp_path / "work"
     base.mkdir()
     docker_state = tmp_path / "docker-state"
@@ -122,7 +153,9 @@ def _run_captured_attempt(
 
     acquired = cc.acquire_collection("whatever", base, checkout=repo)
     store = trial.open_store(tmp_path / "store", forbidden=[])
-    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    experiment, attempt_id = cc.plan_collection_attempt(
+        "whatever", acquired, store, image_digest=_BACKEND_IMAGE_DIGEST,
+    )
     backend = _backend(base, docker_state)
     grading_backend = _backend(base, docker_state)
     home = _mapped_home(docker_state, attempt_id)
@@ -136,32 +169,95 @@ def _run_captured_attempt(
         subject_name="whatever", acquired=acquired, experiment=experiment, attempt_id=attempt_id,
         backend=backend, grading_backend=grading_backend, base=base,
         base_argv=argv, prompt="Fix the slug helper.", timeout=5, credential_explicit_path=cred_path,
+        listing_client_argv=listing_client_argv,
     )
     assert result.record["disposition"] == "captured"
     return experiment, cc.evidence_envelope(result)
 
 
+def _run_finish_close_ref_attempt_with_listing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> tuple[trial.Experiment, dict[str, object]]:
+    """The 150-D flip, on the task the operator named: finish-close-ref
+    (never slug-small-fix - #150's own discriminating task), a codex arm
+    that installs a declared collection, a WORKING discovery listing (the
+    scripted `fake_codex.py` stand-in, not the bare unresolvable `codex`
+    name `_run_captured_attempt`'s other callers accept), and a candidate
+    that writes the task's own reference solution so the grade itself is
+    PASS too - both halves have to hold for the consumer to read PASS."""
+    base = tmp_path / "work"
+    base.mkdir()
+    docker_state = tmp_path / "docker-state"
+    repo = _fixture_collection(tmp_path, {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd"]))
+
+    acquired = cc.acquire_collection("whatever", base, checkout=repo)
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    experiment, attempt_id = cc.plan_collection_attempt(
+        "whatever", acquired, store, task_root=FINISH_CLOSE_REF_ROOT, image_digest=_BACKEND_IMAGE_DIGEST,
+    )
+    backend = _backend(base, docker_state)
+    grading_backend = _backend(base, docker_state)
+    home = _mapped_home(docker_state, attempt_id)
+    argv = _codex_argv(
+        home=home, transcript_relpath=".codex/sessions/2026/01/01/rollout-fcr.jsonl",
+        copy_solution=FINISH_CLOSE_REF_ROOT / "reference",
+    )
+    cred_path = _fresh_codex_credential(tmp_path)
+    listing_client_argv = _fake_codex_listing(tmp_path, mode="normal")
+
+    result = cc.run_collection_agent_attempt(
+        subject_name="whatever", acquired=acquired, experiment=experiment, attempt_id=attempt_id,
+        backend=backend, grading_backend=grading_backend, base=base,
+        base_argv=argv, task_root=FINISH_CLOSE_REF_ROOT, timeout=5, credential_explicit_path=cred_path,
+        listing_client_argv=listing_client_argv,
+    )
+    assert result.record["disposition"] == "captured"
+    return experiment, cc.evidence_envelope(result)
+
+
+def test_a_finish_close_ref_codex_arm_with_a_satisfied_listing_flips_the_consumer_to_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The vendored-consumer flip 150-D exists to deliver: once the discovery
+    listing actually runs and comes back SATISFIED (not the UNMEASURED result
+    `test_a_normal_arm_export_is_read_as_inconclusive_pending_150_d` gets from
+    an unresolvable bare `codex`), `installation-ready` is a real mandatory
+    SATISFIED criterion instead of a mandatory UNKNOWN - and CPP's real,
+    vendored `check-behavioral-eval.py`, reading nothing but the exported
+    verified-result artifact, re-derives PASS from it. This is the read side
+    of #150's acceptance item 5; the write side (`readiness_from_discovery_
+    listings`, `_build_discovery_receipt`) is covered directly in
+    `test_agent_trial_readiness.py` and `test_collection_conformance.py`."""
+    experiment, envelope = _run_finish_close_ref_attempt_with_listing(tmp_path, monkeypatch)
+    evidence = tmp_path / "evidence"
+    assert cli._export_collection_evidence(experiment, envelope, evidence) == 0
+
+    code = consumer.main(["--dir", str(evidence)])
+
+    assert code == consumer.VERDICTS["pass"], consumer.VERDICTS
+    assert code == 0
+
+
 def test_a_normal_arm_export_is_read_as_inconclusive_pending_150_d(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """This is NOT the intended end state - it is what running the REAL
-    consumer against a REAL captured, task-PASS collection-run export
-    actually does TODAY, and it is `INCONCLUSIVE`, not `PASS`. #139 (agent-
-    path readiness) is CLOSED: the owner's ruling was that
-    `installation-ready` stays a mandatory UNKNOWN on the agent-observation
-    path, full stop. What turns a normal arm into `PASS` is #150's own
-    acceptance item 5, tracked as 150-D (an arm that installs a collection
-    gets a real installation receipt from codex's in-container discovery
-    listing, not an agent-observation one) - so a mandatory criterion is
-    never `SATISFIED` here today, and the consumer's own derivation
-    (`derive_status`: any non-SATISFIED mandatory criterion yields
-    `INCONCLUSIVE`) can never reach `PASS` through this path until 150-D
-    lands. This subject is CODEX-shaped deliberately (`_subject`'s own
-    `surface="codex-skills"`): 150-D's design still leaves a Claude Code arm
-    reading `INCONCLUSIVE` (no model-free listing), so only a codex arm has
-    anything for 150-D to flip. Once 150-D lands, this test's assertion
-    should change to `consumer.VERDICTS["pass"]` - leaving it asserting
-    `INCONCLUSIVE` past that point would hide the fix rather than prove it."""
+    """150-D has landed, and this test's assertion does NOT change to `PASS`
+    - it turned out to name the wrong lever. `_run_captured_attempt` here
+    passes no `listing_client_argv`, so the receipt's discovery listing is
+    pointed at the bare, unresolvable `codex` name: a receipt IS built (the
+    subject is codex-shaped) but its listing comes back UNMEASURED, so
+    `installation-ready` is a real mandatory criterion now - just an UNKNOWN
+    one, not a SATISFIED one - and the consumer still reads `INCONCLUSIVE`.
+    That is 150-D behaving correctly on an arm whose listing genuinely could
+    not be obtained; it is a *different* fact from #139's closed ruling,
+    which this docstring used to conflate it with. The actual flip - a
+    working discovery listing, SATISFIED, re-derived to `PASS` - is
+    `test_a_finish_close_ref_codex_arm_with_a_satisfied_listing_flips_the_
+    consumer_to_pass` above, which supplies `listing_client_argv` and is why
+    this one still cannot reach `PASS`: leaving both assertions unchanged
+    would say 150-D changed nothing here, and it does - it just changes what
+    `INCONCLUSIVE` means, not whether it appears."""
     experiment, envelope = _run_captured_attempt(tmp_path, monkeypatch, pass_task=True)
     evidence = tmp_path / "evidence"
     assert cli._export_collection_evidence(experiment, envelope, evidence) == 0

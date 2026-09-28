@@ -130,6 +130,78 @@ outside reader can resolve.
   actually running an agent attempt under this ruling; it is not delivered
   by this record.
 
+- **"yes, narrow B1"** (owner ruling, 2026-09-28): narrows #139's own ruling
+  B1 (the agent-trial path's `installation-ready` criterion stays a
+  mandatory UNKNOWN, because the transcript observation that stands in for
+  an installation receipt shows the prompt arrived and the agent was live,
+  not that the declared subject was installed and discovered). B1's UNKNOWN
+  stand-in still applies, unchanged, to an agent-trial arm that installs
+  nothing (an empty baseline). An arm that DOES install a declared
+  collection now writes a real installation receipt instead, built from the
+  client's own model-free listing run before and after delivery - so that
+  arm can reach `installation-ready: SATISFIED` and the trial can PASS on
+  it. This is a narrowing of B1's scope, not a reversal: an agent-trial arm
+  that installs nothing is exactly as ungraded on readiness as before; only
+  an installing arm's readiness now has real evidence behind it. Tracked as
+  #150-D (Refs #139, #150).
+
+  **The mechanism moved during implementation, and the exact claim matters.**
+  `DockerBackend.execute()` is documented to run ONCE per container handle
+  and stops the container before returning, so the listing cannot run
+  before-delivery, after-delivery AND the real agent prompt all inside the
+  agent's own container. The listing instead runs in a **fresh, dedicated,
+  throwaway container of the same image digest** - never the agent's own -
+  once with nothing delivered (baseline) and once with the same tree
+  delivered the same way (discovery), cached per (image digest, tree
+  digest) so a multi-attempt run pays for this once per distinct
+  configuration, not once per attempt. The receipt's evidence states the
+  claim precisely: **"this delivered tree, delivered by the same method,
+  into a fresh container of the same image digest, was discovered by the
+  client's model-free listing"** - never "the agent's own container had
+  it". The receipt carries the image digest it was measured on, and the
+  verifier refuses to apply it to an attempt whose own planned image digest
+  differs.
+
+  **A named limit, not a silent one: the `.system` exclusion is by path,
+  not by provenance.** The discovery listing excludes anything the client
+  lists under `materialize.CLIENT_SYSTEM_DIR` from the contamination check
+  (`demo.run_subject_discovery`'s `unexpected` set), mirroring
+  `materialize.derive_readiness`'s own existing "foreign" precedent for the
+  same problem - without it, the client's own always-present seeded skill
+  reads as an undeclared contaminant on every attempt, never SATISFIED. But
+  the exclusion cannot distinguish "the client's real seed" from "anything
+  else an image placed under that same directory name" - a rule-stating or
+  otherwise contaminating skill shipped under `.system` would be just as
+  invisible to this check as the real seed is. This is the same limit the
+  native precedent already carries and accepts; #150-D only matches it,
+  never widens it.
+
+  **The attestation question, ruled** (operator ruling, relayed via master,
+  2026-09-28): **"accept (a)"**. Option (a), verbatim: "150-D's receipt
+  attests that this delivered tree, delivered by the same method, into a
+  fresh container of the same image digest, was discovered by the client's
+  model-free listing. It is refused for any attempt whose image or tree
+  digest differs. It does NOT attest that the agent's own container had
+  it."
+
+  **The limit this ruling accepts, named rather than left implicit:** the
+  twin container does NOT prove that the agent's OWN container had the
+  delivered tree at the moment the agent actually ran. What the mechanism
+  establishes is narrower - that a container built from the same image
+  digest, given the same tree by the same delivery method, is discovered by
+  the client's listing - and the gap between that and "the agent's own
+  container had it" is closed only by two structural facts, never by direct
+  observation of the agent's own container's contents: the SAME method
+  delivers to both (the agent's container and the twin), and the verifier's
+  digest-equality check refuses the receipt outright if either the image or
+  the tree digest the agent's attempt actually planned against differs from
+  what the twin measured. Any drift between the twin's delivery and the
+  agent's - a delivery-method bug that behaves differently depending on
+  which container receives it, for instance - is excluded only by that
+  same-method-plus-digest-equality argument, never independently observed.
+  This is the accepted shape of the evidence, not a gap to close later
+  within #150-D's own scope.
+
 - **"a plus the follow-up issue"** (owner ruling, 2026-09-27): after the
   operator's live run of `skillc demo` at `8e06030` (evidence on #10), the
   owner chose between (a) accepting that run's real-daemon coverage (the
