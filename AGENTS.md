@@ -119,9 +119,12 @@ gates above, and #27's own scope excludes CI expansion - so run it by hand:
 
 `leak-check` refuses a tree or a produced bundle that carries a machine
 identity - a home-directory path, a `uid=`/`gid=` number, a private (RFC 1918)
-IPv4 address, or a hostname from a locally-configured deny-list (issue #63,
-never committed with real names). `skillc leak-check .` runs in CI over the
-checked-out tree, and `ci/leak-check-control.sh` proves it against the seeded
-fixture in `controls/leak-check/bad/`. What it cannot see is stated in
+IPv4 address, a hostname from a locally-configured deny-list (issue #63,
+never committed with real names), or the scanning process's own live
+home/cwd (`leak.default_host_paths`, issue #134 item 5 - catches a checkout
+under `/workspace`, `/opt`, `/srv` or anywhere else the home-path pattern
+does not recognize). `skillc leak-check .` runs in CI over the checked-out
+tree, and `ci/leak-check-control.sh` proves it against the seeded fixture in
+`controls/leak-check/bad/`. What it cannot see is stated in
 `skillc/leak.py`'s module docstring - absence of a finding is not proof of
 absence.
