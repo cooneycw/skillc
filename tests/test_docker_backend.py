@@ -14,7 +14,9 @@ this session. This proves the lifecycle state machine, argv composition and
 from __future__ import annotations
 
 import io
+import os
 import shutil
+import subprocess
 import sys
 import tarfile
 import time
@@ -1001,6 +1003,104 @@ def test_execute_timeout_kills_the_container_and_confirm_stopped_agrees(
     assert backend.confirm_stopped(handle) is Confirmation.CONFIRMED
     backend.destroy(handle)
     assert backend.confirm_absent(handle) is Confirmation.CONFIRMED
+
+
+def test_a_container_level_kill_does_not_reach_the_execd_subject_but_still_kills_it(
+    base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """Fake-fidelity fix, and #158's own acceptance red case for free: before
+    this fix, `fake_docker.py`'s `cmd_kill` signaled the exec'd subject's
+    real pid with the REQUESTED signal directly (`os.killpg(exec_pid, SIG)`)
+    - no real Docker daemon forwards its own requested signal to a sibling
+    `docker exec` session that way (issue #158's whole premise). Against
+    the pre-fix fake, this test's first assertion FAILS: the fake delivered
+    a graceful TERM to the subject when no real daemon would, so the fake
+    was more capable than the system it stands in for, and #158's own
+    acceptance criterion (a red case proving the pre-fix subject never
+    receives TERM) could not be shown against it at all.
+
+    Fixed, in two passes (see fake_docker.py's own `cmd_kill` docstring for
+    the full reasoning; the first pass here modeled `kill` as a bare status
+    flip touching nothing, which is ALSO wrong - a real container's PID 1
+    dying still triggers a kernel PID-namespace teardown that SIGKILLs
+    every other process in it, exec sessions included, so the subject does
+    not survive a container-level kill either, even though it is never
+    forwarded a graceful signal). `cmd_kill` now flips status to "exited"
+    AND `os.killpg`s the recorded `exec_pid` with SIGKILL always - never
+    the requested `--signal` - modeling the kernel's own teardown rather
+    than a forwarded signal.
+    """
+    backend = d.DockerBackend(
+        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=1.0,
+    )
+    handle = backend.prepare("a-lc-000000000030")
+    backend.install(handle, {})
+    sentinel = tmp_path / "term-received"
+    pidfile = tmp_path / "subject-pid"
+    script = (
+        "import os, signal, sys, time\n"
+        f"open({str(pidfile)!r}, 'w').write(str(os.getpid()))\n"
+        "def handler(signum, frame):\n"
+        f"    open({str(sentinel)!r}, 'w').write('term')\n"
+        "    sys.exit(0)\n"
+        "signal.signal(signal.SIGTERM, handler)\n"
+        "time.sleep(20)\n"
+    )
+    result = backend.execute(
+        handle, [sys.executable, "-c", script], Limits(timeout=0.3, grace=1.0),
+    )
+    assert result.reason == "timeout"
+    assert not sentinel.exists(), (
+        "the exec'd subject received a graceful TERM from a container-level "
+        "kill - no real Docker daemon forwards its own requested signal that way (#158)"
+    )
+    assert pidfile.exists(), "the subject never started - the test proves nothing"
+    pid = int(pidfile.read_text())
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)  # dead - a real container's PID-1 teardown does not spare it either
+
+    backend.destroy(handle)
+    assert backend.confirm_absent(handle) is Confirmation.CONFIRMED
+
+
+def test_removing_a_container_without_a_preceding_kill_still_reaps_a_live_exec_session(
+    base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """Separate test for the remove path (issue #158 fidelity fix, second
+    pass): `DockerBackend` itself always issues a `docker kill` before
+    `docker rm -f` (`execute()`'s own unconditional kill after a normal
+    exit, or `_stop()`'s escalation on timeout/cancellation), so exercising
+    `DockerBackend` alone would never independently prove `cmd_rm`'s own
+    reaping - `cmd_kill`'s new reaping would always get there first. This
+    drives the fake CLI directly, bypassing `DockerBackend`'s own automatic
+    kill entirely, to prove `rm -f` alone - with no preceding `kill` at all
+    - still reaps a live exec'd session, exactly as real container removal
+    does."""
+    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+    handle = backend.prepare("a-lc-000000000031")
+    assert isinstance(handle, d._Handle)
+    backend.install(handle, {})
+
+    pidfile = tmp_path / "subject-pid"
+    script = f"import os, time\nopen({str(pidfile)!r}, 'w').write(str(os.getpid()))\ntime.sleep(20)\n"
+    exec_argv = [*backend.docker_bin, "exec", "-w", d.CONTAINER_WORKSPACE, "--", handle.name, sys.executable, "-c", script]
+    exec_proc = subprocess.Popen(exec_argv, env=handle.env)
+    try:
+        deadline = time.monotonic() + 5
+        while not pidfile.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert pidfile.exists(), "the exec'd subject never started - the test proves nothing"
+        pid = int(pidfile.read_text())
+        os.kill(pid, 0)  # alive - never touched by any docker kill call in this test
+
+        backend.destroy(handle)  # rm -f, with no preceding docker kill at all
+
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
+        assert backend.confirm_absent(handle) is Confirmation.CONFIRMED
+    finally:
+        exec_proc.kill()
+        exec_proc.wait(timeout=5)
 
 
 def test_execute_cancellation_kills_the_container(base: Path, docker_state: Path) -> None:
