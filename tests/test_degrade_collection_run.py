@@ -32,8 +32,12 @@ def _docker_bin(state_dir: Path) -> list[str]:
     return [sys.executable, str(FAKE_DOCKER), "--state", str(state_dir)]
 
 
+_BACKEND_IMAGE = "fake-image:1"
+_BACKEND_IMAGE_DIGEST = f"sha256:fake-digest-for-{_BACKEND_IMAGE}"
+
+
 def _backend(base: Path, docker_state: Path) -> d.DockerBackend:
-    return d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+    return d.DockerBackend(image=_BACKEND_IMAGE, base_dir=base, docker_bin=_docker_bin(docker_state))
 
 
 def _skill_md(name: str) -> str:
@@ -209,7 +213,9 @@ def test_cli_collection_run_degraded_records_the_degraded_identity_never_the_pin
     docker_state = tmp_path / "docker-state"
     acquired = cc.acquire_degraded_collection("whatever", out)
     store = trial.open_store(tmp_path / "store", forbidden=[])
-    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    experiment, attempt_id = cc.plan_collection_attempt(
+        "whatever", acquired, store, image_digest=_BACKEND_IMAGE_DIGEST,
+    )
     backend = _backend(base, docker_state)
     grading_backend = _backend(base, docker_state)
     name = d._container_name(attempt_id)
@@ -307,7 +313,9 @@ def _real_degraded_attempt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> t
     docker_state = tmp_path / "docker-state"
     acquired = cc.acquire_degraded_collection("whatever", out)
     store = trial.open_store(tmp_path / "store", forbidden=[])
-    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    experiment, attempt_id = cc.plan_collection_attempt(
+        "whatever", acquired, store, image_digest=_BACKEND_IMAGE_DIGEST,
+    )
     backend = _backend(base, docker_state)
     grading_backend = _backend(base, docker_state)
     name = d._container_name(attempt_id)
@@ -439,7 +447,7 @@ def test_task_and_degraded_compose(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 
     store = trial.open_store(tmp_path / "store", forbidden=[])
     experiment, attempt_id = cc.plan_collection_attempt(
-        "whatever", acquired, store, task_root=FINISH_CLOSE_REF_ROOT,
+        "whatever", acquired, store, task_root=FINISH_CLOSE_REF_ROOT, image_digest=_BACKEND_IMAGE_DIGEST,
     )
     planned_trial = experiment.trial_of(attempt_id)
     # The task composes: the ledgered case is finish-close-ref's own, never
