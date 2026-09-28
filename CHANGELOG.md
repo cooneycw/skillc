@@ -307,6 +307,53 @@ and version plan.
   distinguished, see `describe()`'s `unobserved`). Both red cases (a
   partial install, a pre-seeded image skill) fail on the pre-fix code.
 
+- **`check-records` sees what it claims to see: a single file path, and the
+  applicable population under `--rule`** (Refs #131).
+  - **A single file path.** `records.discover`'s `root.rglob(...)` treats a
+    FILE `root` as a directory to search within, so it silently matched
+    nothing - `check-records one.json` printed "no record found ... nothing
+    was checked" and exited 2, even though the argparse help says "file or
+    directory of records". A `root` naming a `.json` file directly is now
+    loaded as that one record (`spec.discover`'s own shape, for
+    `SKILL.md`); a single bad record file now exits 1, not 2.
+  - **A rule's applicable population.** Every `RecordRule` now declares the
+    record `kinds` it actually reads - `checks.applicable_population` - so
+    `check-records --rule installation-receipt` over a population with no
+    installation-receipt record refuses (`skillc: no <rule>-applicable
+    record ... - <rule> checked nothing`) instead of running the rule's own
+    no-op `record.kind != ...` guard against every record and reporting
+    "0 error(s)", indistinguishable from a population genuinely examined
+    and found clean. A run scoped by `--rule` now also reports "N of M
+    record(s) were `<rule>`-applicable".
+  - **`manifest-entry` is reachable by `selftest`.** `check --manifest`
+    used to build its `manifest-entry` `Finding` straight in `cli.py`,
+    entirely outside `Rule`/`RecordRule`/`BundleRule` and the registries
+    `selftest` iterates - so `selftest` could report "N/N rules
+    discriminate" while this specific check was never proven able to fail
+    at all, and its committed control (`controls/manifest-entry/{bad,good}`,
+    renamed from `controls/check-manifest/*` to match every other rule's
+    `controls/<rule.id>/` convention) was exercised only by pytest directly.
+    A new `ManifestRule` type (subject: a loaded `Manifest`) sits in the
+    same `ALL_RULES` registry `selftest` and `ci/negative-control.sh`
+    already iterate generically; `cmd_check --manifest` now routes its
+    dangling-entry check through the same `checks.manifest_entry` function
+    rather than a second, ad-hoc inline check.
+
+  Each fix's own red case is committed and verified to fail on the pre-fix
+  code.
+
+  Found running the full suite rather than only the touched files:
+  `test_agent_trial.py`'s own `_store_is_clean` helper iterated every
+  evidence rule expecting exit 0, with no allowance for a rule whose kind
+  genuinely has zero records in a particular store (e.g. an
+  installation-receipt on an attempt blocked before any install
+  happened) - exactly the case item 2's refusal now reports, correctly,
+  as exit 2. Fixed to accept that refusal too, but only when its own
+  message says "checked nothing", never a blanket "exit 2 is fine" that
+  would also swallow a real bug. Confirmed failing on the pre-fix helper
+  (3 tests, the same `AssertionError: installation-receipt` each time)
+  before the fix, passing after.
+
 - **The three records #12 could not yet prove** (Closes #12).
   - **The image that ran.** A Docker attempt journals a `backend-identity`
     event with the image id its container was created from, beside the

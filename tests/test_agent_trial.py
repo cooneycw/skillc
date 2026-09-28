@@ -960,16 +960,28 @@ _GRADING_OWED = "is captured but has no result; grading is still owed"
 
 
 def _store_is_clean(path: Path, capsys: pytest.CaptureFixture[str], *, grading_owed: bool = False) -> None:
-    """Every evidence rule passes on the store. `attempt-accounting` is clean
-    too, unless `grading_owed` - a captured attempt whose grading was blocked -
-    in which case its ONLY finding is that grading is still owed."""
+    """Every evidence rule passes on the store, OR (issue #131 item 2)
+    correctly refuses because this store genuinely has no record of that
+    rule's own kind yet - e.g. a blocked-before-install attempt has no
+    installation-receipt record at all. That is a different fact from "ran
+    and found errors", so it is accepted here too - but only when the
+    refusal's own message says so, never a blanket "exit 2 is fine", which
+    would also silently swallow a real "no such path" or "unknown rule"
+    bug. `attempt-accounting` is clean too, unless `grading_owed` - a
+    captured attempt whose grading was blocked - in which case its ONLY
+    finding is that grading is still owed."""
     from skillc import checks
 
     capsys.readouterr()
     for rule in checks.evidence_rules():
         if rule.id == "attempt-accounting":
             continue
-        assert _check_records(path, rule.id) == 0, rule.id
+        code = _check_records(path, rule.id)
+        out = capsys.readouterr().out
+        if code == 2:
+            assert "checked nothing" in out, (rule.id, out)
+            continue
+        assert code == 0, rule.id
     capsys.readouterr()
     code = _check_records(path, "attempt-accounting")
     errors = [line for line in capsys.readouterr().out.splitlines() if line.startswith("error")]

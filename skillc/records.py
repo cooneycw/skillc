@@ -210,7 +210,16 @@ def load(path: Path) -> Record:
 
 
 def discover(root: Path) -> list[Record]:
-    """Every `*.json` under `root`, in a stable order."""
+    """Every `*.json` under `root`, in a stable order.
+
+    `root` naming a single `.json` file directly (`spec.discover`'s own
+    shape, for `SKILL.md`) loads just that file - issue #131 item 1:
+    `Path.rglob` treats its receiver as a directory to search WITHIN, so on
+    a file path it silently matches nothing, and `check-records one.json`
+    read that as an empty population (`skillc: no record found ...`,
+    exit 2) rather than checking the one record it was given."""
+    if root.is_file() and root.suffix == ".json":
+        return [load(root)]
     return [load(p) for p in sorted(root.rglob("*.json"))]
 
 

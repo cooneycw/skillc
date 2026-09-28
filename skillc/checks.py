@@ -27,7 +27,10 @@ from .spec import (
     SPEC_FIELDS,
     TARGETS,
     FrontmatterError,
+    Manifest,
+    ManifestError,
     Skill,
+    manifest_entry,
     parse_yaml_document,
 )
 
@@ -341,44 +344,55 @@ class RecordRule:
     coverage check, one counter and one exit code over `ALL_RULES`, and dispatches
     only where the subject is loaded. Splitting the guarantee that "a check with no
     control is UNPROVEN" across two arms is how one arm later goes unenforced.
-    """
+
+    `kinds` is the record kinds this rule actually reads (issue #131 item 2):
+    `check.__code__`'s own early-exit guard already decides this internally
+    (`if record.kind != SOME_KIND: return`), but nothing outside the function
+    could see it, so `--rule installation-receipt` over a population with no
+    installation-receipt record ran the check on every record, got silence
+    from every one of its own no-op guards, and reported "0 error(s)" -
+    indistinguishable from a population that WAS examined and found clean.
+    `cmd_check_records` reports how many discovered records are actually
+    `kinds`-applicable under a `--rule` selection, and refuses (rather than
+    reporting a green over zero) when that count is zero."""
 
     id: str
     severity: str
     summary: str
     check: Callable[[records.Record], Iterator[str]]
+    kinds: tuple[str, ...]
     parser: bool = False
 
 
 RECORD_RULES: tuple[RecordRule, ...] = (
     RecordRule("record-envelope", ERROR, "record declares a version this build can read",
-               records.record_envelope, parser=True),
+               records.record_envelope, records.KINDS, parser=True),
     RecordRule("producer-authority", ERROR, "record declares the one producer allowed for its kind",
-               records.producer_authority),
+               records.producer_authority, records.KINDS),
     RecordRule("attempt-binding", ERROR, "record cites a well-formed attempt and trial",
-               records.attempt_binding),
+               records.attempt_binding, records.ATTEMPT_BOUND),
     RecordRule("installation-receipt", ERROR, "receipt records what was installed and whether it was ready",
-               records.installation_receipt),
+               records.installation_receipt, (records.INSTALLATION_RECEIPT,)),
     RecordRule("trial-ledger", ERROR, "ledger plans a non-empty population under full identities",
-               records.trial_ledger),
+               records.trial_ledger, (records.TRIAL_LEDGER,)),
     RecordRule("artifact-digest", ERROR, "every captured artifact carries its identity",
-               records.artifact_digest),
+               records.artifact_digest, (records.ARTIFACT_MANIFEST,)),
     RecordRule("observation-coverage", ERROR, "every required stream declares its origin and coverage",
-               records.observation_coverage),
+               records.observation_coverage, (records.ARTIFACT_MANIFEST,)),
     RecordRule("criterion-vocabulary", ERROR, "criteria use the specified outcomes",
-               records.criterion_vocabulary),
+               records.criterion_vocabulary, (records.VERIFIED_RESULT,)),
     RecordRule("result-evidence", ERROR, "result names its grader, what it graded and each criterion's evidence",
-               records.result_evidence),
+               records.result_evidence, (records.VERIFIED_RESULT,)),
     RecordRule("derived-status", ERROR, "status follows from the criteria, not from a claim",
-               records.derived_status),
+               records.derived_status, (records.VERIFIED_RESULT,)),
     RecordRule("verdict-tiers", ERROR, "a per-tier verdict names a tier this result actually enabled",
-               records.verdict_tiers),
+               records.verdict_tiers, (records.VERIFIED_RESULT,)),
     RecordRule("attempt-lifecycle", ERROR, "controller accounts for how an attempt ended and why",
-               records.attempt_lifecycle),
+               records.attempt_lifecycle, (records.ATTEMPT_LIFECYCLE,)),
     RecordRule("agent-observation", ERROR, "a real agent's observation agrees with itself: eligibility, grading account, grade vs criteria",
-               records.agent_observation),
+               records.agent_observation, (records.AGENT_OBSERVATION,)),
     RecordRule("pilot-report", ERROR, "report gives every attempt a disposition, criteria, uncertainty and a cost/time split",
-               records.pilot_report),
+               records.pilot_report, (records.PILOT_REPORT,)),
 )
 
 
@@ -411,20 +425,96 @@ BUNDLE_RULES: tuple[BundleRule, ...] = (
 )
 
 
+@dataclass(frozen=True)
+class ManifestRule:
+    """A rule whose subject is a plugin manifest (issue #131 item 3).
+
+    `check --manifest` used to build its `manifest-entry` `Finding` straight
+    in `cli.py`, entirely outside `Rule`/`RecordRule`/`BundleRule` and the
+    registries `selftest` iterates - so `selftest` could report "N/N rules
+    discriminate" while this specific check was never proven able to fail at
+    all. Its committed controls (`controls/manifest-entry/{bad,good}`)
+    already existed, exercised only by pytest directly. This is a separate
+    TYPE for the same reason `BundleRule` is: the subject a manifest rule
+    loads (a `Manifest`) is neither a `Skill` nor a `records.Record`, but it
+    sits in the SAME `ALL_RULES` `selftest` already iterates.
+    """
+
+    id: str
+    severity: str
+    summary: str
+    check: Callable[[Manifest], Iterator[str]]
+    parser: bool = False
+
+
+MANIFEST_RULES: tuple[ManifestRule, ...] = (
+    ManifestRule("manifest-entry", ERROR, "every manifest-declared skill directory has a SKILL.md",
+                 manifest_entry),
+)
+
+
+def run_manifest(case: Path, only: str | None = None) -> tuple[list[Finding], str | None]:
+    """Apply every manifest rule (or one) to the manifest at
+    `case/.claude-plugin/plugin.json` - the convention both `cmd_check
+    --manifest` and the committed `controls/manifest-entry/*` fixtures use.
+
+    Returns `(findings, load_error)`: a manifest that fails to load at all is
+    not a `manifest-entry` finding, it is a reason nothing here could be
+    checked - the same distinction `bundle_at` draws for an unreadable trial
+    ledger, kept separate so a load failure is never silently read as "zero
+    dangling entries found"."""
+    require_known(only, MANIFEST_RULES)
+    manifest_path = case / ".claude-plugin" / "plugin.json"
+    try:
+        manifest = Manifest.load(manifest_path)
+    except ManifestError as exc:
+        return [], str(exc)
+    findings: list[Finding] = []
+    for rule in MANIFEST_RULES:
+        if only and rule.id != only:
+            continue
+        findings.extend(
+            Finding(rule.id, rule.severity, manifest_path, detail)
+            for detail in rule.check(manifest)
+        )
+    return findings, None
+
 
 def evidence_rules() -> tuple[RecordRule | BundleRule, ...]:
     """Every rule `check-records` can run, either family - resolved at CALL time,
     so a registry patched in a test is the registry the selector is checked against."""
     return RECORD_RULES + BUNDLE_RULES
 
+
+def record_rule_by_id(rule_id: str) -> RecordRule | None:
+    """The `RecordRule` named `rule_id`, or `None` when it names a `BundleRule`
+    (or nothing) instead - `cmd_check_records`'s own way to ask "does `only`
+    name a record rule, and if so, which kinds does it read?" without
+    re-deriving `evidence_rules()`'s search."""
+    return next((r for r in RECORD_RULES if r.id == rule_id), None)
+
+
+def applicable_population(rule: RecordRule, found: list[records.Record]) -> int:
+    """How many of `found` are `rule.kinds`-applicable (issue #131 item 2) -
+    the population a `--rule <rule.id>` selection actually examines, as
+    opposed to how many records were merely discovered. `0` here means the
+    rule's own `record.kind != ...` guard silently declined every one of
+    them, which a bare "0 error(s)" cannot be told apart from."""
+    return sum(1 for record in found if record.kind in rule.kinds)
+
 #: ONE registry. `selftest` iterates this; the coverage check, the totals and the
 #: exit code never learn which family a rule came from.
-ALL_RULES: tuple[Rule | RecordRule | BundleRule, ...] = RULES + RECORD_RULES + BUNDLE_RULES
+ALL_RULES: tuple[Rule | RecordRule | BundleRule | ManifestRule, ...] = (
+    RULES + RECORD_RULES + BUNDLE_RULES + MANIFEST_RULES
+)
 
 
 def require_known(
     only: str | None,
-    family: tuple[Rule, ...] | tuple[RecordRule, ...] | tuple[RecordRule | BundleRule, ...],
+    family: (
+        tuple[Rule, ...] | tuple[RecordRule, ...] | tuple[ManifestRule, ...]
+        | tuple[RecordRule | BundleRule, ...]
+    ),
 ) -> None:
     """An unknown selector is a caller error, never a request to check nothing.
 

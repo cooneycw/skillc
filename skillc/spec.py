@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -571,3 +572,17 @@ class Manifest:
                 seen.add(resolved)
                 declared.append(resolved)
         return cls(path=path, plugin_root=plugin_root, declared=tuple(declared))
+
+
+def manifest_entry(manifest: Manifest) -> Iterator[str]:
+    """Every manifest-declared skill directory with no `SKILL.md` at that
+    path - a dangling entry, the shape `controls/manifest-entry/bad/
+    dangling-entry` commits. Takes an already-LOADED `Manifest`, the same
+    convention `checks.RecordRule.check` takes an already-loaded `Record`:
+    loading (and refusing a manifest that cannot be trusted at all, per
+    `Manifest.load`'s own `ManifestError`) is a separate, earlier step from
+    this rule's own question."""
+    for declared_dir in manifest.declared:
+        skill_md = declared_dir / "SKILL.md"
+        if not skill_md.is_file():
+            yield f"{skill_md}: declared in the manifest but no SKILL.md exists here"
