@@ -639,9 +639,11 @@ def _retain_transcript(
     empty, `agent_trial.run_one_attempt`'s own contract).
 
     A leak refuses retention entirely - the file is never written, even
-    redacted - and the reason names the finding classes, never the leaked
-    value itself (`leak.Finding`'s own convention: the class is evidence
-    enough, the match text is exactly what must not be echoed)."""
+    redacted - and the reason names each finding's CLASS and LINE only,
+    never the matched value itself (`leak.Finding`'s own convention: the
+    class is evidence enough, the match text is exactly what must not be
+    echoed - into this reason, the report that carries it, or anything
+    exported from either)."""
     if not retained:
         return None, None
     raw = retained.get("bytes")
@@ -650,8 +652,8 @@ def _retain_transcript(
     text = raw.decode("utf-8", errors="replace")
     findings = list(leak.scan_text(text, leak.load_denylist(None), host_paths=leak.default_host_paths()))
     if findings:
-        kinds = sorted({kind for _lineno, kind, _detail in findings})
-        return None, f"transcript leak-check found {', '.join(kinds)}; retention refused"
+        located = sorted({f"{kind} at line {lineno}" for lineno, kind, _detail in findings})
+        return None, f"transcript leak-check found {', '.join(located)}; retention refused"
     target_dir = retain_transcript_dir(base)
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / f"{attempt_id}.jsonl"

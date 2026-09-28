@@ -1173,6 +1173,10 @@ def test_a_leaky_transcript_is_not_retained_and_the_reason_is_recorded(tmp_path:
     assert transcript.transcript_retained_digest is None
     assert transcript.transcript_retention_reason is not None
     assert "host-path" in transcript.transcript_retention_reason
+    assert "at line " in transcript.transcript_retention_reason
+    # The reason must name the finding's class and location only - never
+    # echo the matched value itself into the record (#26 review).
+    assert os.getcwd() not in transcript.transcript_retention_reason
     assert not (sp.retain_transcript_dir(base) / f"{attempt_id}.jsonl").exists()
 
 
