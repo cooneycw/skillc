@@ -10,6 +10,19 @@ and version plan.
 
 ### Added
 
+- **The #12 matched pilot, re-run under the pinned `gpt-6-astra` declaration,
+  as a new experiment with its own evidence** (Refs #147, #12, #139). The
+  run and its results are in `evals/matched-pilot/evidence-2026-09-27-gpt-6-astra/`.
+  The first run's bundle in `evidence/records/` is unchanged. The live run is
+  also the first to prove that codex-cli 0.157.1 honours both
+  `-m gpt-6-astra` and `-c model_reasoning_effort="high"`.
+- **`skillc pilot-run` / `pilot-report` refuse to replace another
+  experiment's published bundle** (Refs #147). Replacing a destination is
+  now only a re-export of the SAME experiment (read from the bundle's own
+  `ledger.json`). A different experiment's bundle, or one whose ledger can't
+  be read, is refused with exit 2 and left byte-identical. Before this, a
+  default `pilot-run` would have deleted #12's first-run bundle.
+
 - **`skillc pilot-run` pins the declared model at launch and fails a run
   that did not use it** (Refs #141). #12's run declared `gpt-5.1-codex`. Nothing
   passed that to the client, so all six attempts ran codex's own default,

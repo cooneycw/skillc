@@ -1,0 +1,47 @@
+{
+ "version": 2,
+ "kind": "attempt-lifecycle",
+ "producer": "controller",
+ "attempt_id": "a-a8f98d93826a",
+ "trial_id": "t5-matched_pilot_treatment_3",
+ "disposition": "captured",
+ "stop": {
+  "reason": "exited",
+  "confirmed": true,
+  "exit_code": 0
+ },
+ "events": [
+  {
+   "event": "planned",
+   "at": "2026-09-28T08:31:34.775888Z"
+  },
+  {
+   "event": "dispatched",
+   "at": "2026-09-28T08:34:46.909402Z"
+  },
+  {
+   "event": "started",
+   "at": "2026-09-28T08:34:46.909551Z"
+  },
+  {
+   "event": "stopped",
+   "at": "2026-09-28T08:35:24.547539Z"
+  },
+  {
+   "event": "stop-confirmed",
+   "at": "2026-09-28T08:35:24.547700Z"
+  },
+  {
+   "event": "captured",
+   "at": "2026-09-28T08:35:24.645093Z"
+  },
+  {
+   "event": "cleaned",
+   "at": "2026-09-28T08:35:24.748868Z"
+  }
+ ],
+ "cleanup": {
+  "status": "removed",
+  "failures": []
+ }
+}

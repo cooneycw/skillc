@@ -1,0 +1,69 @@
+{
+ "version": 2,
+ "kind": "artifact-manifest",
+ "producer": "controller",
+ "attempt_id": "a-9b9c096ebfc2",
+ "trial_id": "t3-matched_pilot_treatment_2",
+ "captured": "2026-09-28T08:33:51.385312Z",
+ "artifacts": [
+  {
+   "path": ".skillc-canary",
+   "type": "file",
+   "size": 32,
+   "digest": "sha256:d9e9f6c87a2f3236874dea87f3ac7788f5d3d76f7c6c6d2ae1bf8ef7e22b4246",
+   "mode": "-"
+  },
+  {
+   "path": ".skillc-canary-result",
+   "type": "file",
+   "size": 40,
+   "digest": "sha256:0d747ba2f5847b90eeea96c047e92934d478153cdc605c06d575c60ab733dc96",
+   "mode": "-"
+  },
+  {
+   "path": "observations",
+   "type": "file",
+   "size": 271,
+   "digest": "sha256:ceec0891ac29d551a71d7df8a8c389b43bf5edd5e889052bc507bd4fd3f046c8",
+   "mode": "-"
+  },
+  {
+   "path": "src/slugify.py",
+   "type": "file",
+   "size": 232,
+   "digest": "sha256:9a17cbe160893f54ccf56dd0595adb9053a8c64d21a0e264c3e1a7d2ea39e309",
+   "mode": "-"
+  }
+ ],
+ "exclusions": [],
+ "observations": [
+  {
+   "stream": "client-events",
+   "origin": "client-reported",
+   "coverage": "complete",
+   "attempt_id": "a-9b9c096ebfc2",
+   "ref": "objects/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "size": 0
+  },
+  {
+   "stream": "client-stderr",
+   "origin": "client-reported",
+   "coverage": "complete",
+   "attempt_id": "a-9b9c096ebfc2",
+   "ref": "objects/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "size": 0
+  },
+  {
+   "stream": "process-lifecycle",
+   "origin": "observed",
+   "coverage": "complete",
+   "attempt_id": "a-9b9c096ebfc2",
+   "ref": "objects/04048aa6b26aac7a907ef255218a4caee6c0538640c86ab37b8a236fcc67025a",
+   "digest": "sha256:04048aa6b26aac7a907ef255218a4caee6c0538640c86ab37b8a236fcc67025a",
+   "size": 598
+  }
+ ],
+ "capture_failures": []
+}

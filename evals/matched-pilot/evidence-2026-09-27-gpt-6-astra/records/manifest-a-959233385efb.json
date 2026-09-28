@@ -1,0 +1,69 @@
+{
+ "version": 2,
+ "kind": "artifact-manifest",
+ "producer": "controller",
+ "attempt_id": "a-959233385efb",
+ "trial_id": "t1-matched_pilot_treatment_1",
+ "captured": "2026-09-28T08:32:23.947959Z",
+ "artifacts": [
+  {
+   "path": ".skillc-canary",
+   "type": "file",
+   "size": 32,
+   "digest": "sha256:a7cde8d1263d29ebad97699e14cb1085529520dce856c2f364d577e6192f46db",
+   "mode": "-"
+  },
+  {
+   "path": ".skillc-canary-result",
+   "type": "file",
+   "size": 40,
+   "digest": "sha256:67f1bf78bde70af7e34f874d309e3230ee832a2e311c679a5981c76ec51a791f",
+   "mode": "-"
+  },
+  {
+   "path": "observations",
+   "type": "file",
+   "size": 319,
+   "digest": "sha256:48df405185f18089a4d4961bb1235d0425c319e7b8e8f58f7aa583623d69d881",
+   "mode": "-"
+  },
+  {
+   "path": "src/slugify.py",
+   "type": "file",
+   "size": 232,
+   "digest": "sha256:9a17cbe160893f54ccf56dd0595adb9053a8c64d21a0e264c3e1a7d2ea39e309",
+   "mode": "-"
+  }
+ ],
+ "exclusions": [],
+ "observations": [
+  {
+   "stream": "client-events",
+   "origin": "client-reported",
+   "coverage": "complete",
+   "attempt_id": "a-959233385efb",
+   "ref": "objects/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "size": 0
+  },
+  {
+   "stream": "client-stderr",
+   "origin": "client-reported",
+   "coverage": "complete",
+   "attempt_id": "a-959233385efb",
+   "ref": "objects/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "size": 0
+  },
+  {
+   "stream": "process-lifecycle",
+   "origin": "observed",
+   "coverage": "complete",
+   "attempt_id": "a-959233385efb",
+   "ref": "objects/e1518d289d40288d8acfa563a8ec9495ab149b21f8f4213292a3922ced4d3c86",
+   "digest": "sha256:e1518d289d40288d8acfa563a8ec9495ab149b21f8f4213292a3922ced4d3c86",
+   "size": 598
+  }
+ ],
+ "capture_failures": []
+}

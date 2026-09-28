@@ -280,7 +280,57 @@ def test_the_current_declaration_is_a_new_dated_file_that_names_what_it_supersed
     assert isinstance(supersedes, dict)
     assert (PILOT_DIR / supersedes["manifest"]).resolve() == mp.MANIFEST_PATH.resolve()
     assert "3e1e3fb" in supersedes["run"]
-    assert str(current["execution"]).startswith("not run")
+
+
+_CURRENT_EVIDENCE = PILOT_DIR / "evidence-2026-09-27-gpt-6-astra" / "records"
+
+
+def test_the_current_declaration_s_execution_agrees_with_its_evidence() -> None:
+    """`execution` says "run" exactly when the current declaration's own
+    bundle is committed - never a run that left no evidence, nor evidence
+    whose declaration still says it never ran."""
+    ran = (_CURRENT_EVIDENCE / "report.json").exists()
+    assert str(_current()["execution"]).startswith("run" if ran else "not run")
+
+
+def test_the_re_run_bundle_checks_fully_clean() -> None:
+    """#147's reason to exist: the re-run's bundle carries NO finding at all,
+    and is not covered by the first run's scoped tolerance. The first run's
+    bundle is unchanged - still exactly its 6 known findings."""
+    from skillc import matched_pilot as mp
+
+    experiment_id = mp.bundle_experiment_id(_CURRENT_EVIDENCE)
+    assert experiment_id is not None
+    assert experiment_id not in mp.KNOWN_GAP_EXPERIMENTS
+    assert mp.bundle_findings(_CURRENT_EVIDENCE) == ([], 0)
+    assert mp.bundle_experiment_id(_EVIDENCE) == "matched-pilot-6ab82dc6"
+    assert mp.bundle_findings(_EVIDENCE) == ([], 6)
+
+
+def test_the_re_run_ran_the_declared_model_effort_and_image_on_every_attempt() -> None:
+    current = _current()
+    record = current["predeclared_experiment_record"]
+    assert isinstance(record, dict)
+    report = json.loads((_CURRENT_EVIDENCE / "report.json").read_text(encoding="utf-8"))
+    attempts = report["attempts"]
+    assert len(attempts) == MANIFEST["cost_estimate"]["total_attempts"]
+    for entry in attempts:
+        assert entry["model_observed"] == record["model"]["name"] == "gpt-6-astra"
+        assert entry["model_matches_declaration"] is True
+        assert entry["reasoning_effort_observed"] == record["model"]["reasoning_effort"] == "high"
+        assert entry["reasoning_effort_matches_declaration"] is True
+    ledger = json.loads((_CURRENT_EVIDENCE / "ledger.json").read_text(encoding="utf-8"))
+    assert {t["image"]["digest"] for t in ledger["trials"]} == {record["image_digest"]}
+    assert [e["arm"] for e in attempts] == ["treatment", "baseline"] * _REPEATS_PER_ARM
+
+
+def test_the_re_run_report_carries_its_reviewed_claims() -> None:
+    report = json.loads((_CURRENT_EVIDENCE / "report.json").read_text(encoding="utf-8"))
+    claims = json.loads(
+        (_CURRENT_EVIDENCE.parent / "claims.json").read_text(encoding="utf-8"),
+    )["claims"]
+    assert report["claims_reviewed"] is True
+    assert {e["attempt_id"]: e["claim"] for e in report["attempts"]} == claims
 
 
 def test_the_current_declaration_changes_only_the_model_and_the_cap_note() -> None:

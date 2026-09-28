@@ -1,7 +1,10 @@
 # Matched pilot: the predeclared experiment (#12)
 
 **Current declaration: [`run-manifest-2026-09-27-gpt-6-astra.json`](run-manifest-2026-09-27-gpt-6-astra.json)**
-(issue #141). `skillc pilot-run` uses it by default
+(issue #141). **Current evidence:
+[`evidence-2026-09-27-gpt-6-astra/`](evidence-2026-09-27-gpt-6-astra/README.md)** (#147,
+run 2026-09-28: six of six passed on the declared model, records check clean). The first
+run's [`evidence/`](evidence/README.md) is superseded but kept as it was. `skillc pilot-run` uses it by default
 (`skillc.matched_pilot.CURRENT_MANIFEST_PATH`). It pins the model at launch:
 `gpt-6-astra` at reasoning effort `high`, passed to codex as
 `-m gpt-6-astra -c model_reasoning_effort="high"`. It supersedes

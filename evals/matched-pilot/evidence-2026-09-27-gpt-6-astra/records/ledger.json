@@ -1,0 +1,189 @@
+{
+ "version": 2,
+ "kind": "trial-ledger",
+ "producer": "controller",
+ "experiment_id": "matched-pilot-64396611",
+ "created": "2026-09-28T08:31:34.771999Z",
+ "trials": [
+  {
+   "trial_id": "t1-matched_pilot_treatment_1",
+   "case": {
+    "id": "slug-small-fix",
+    "revision": "2"
+   },
+   "grader": {
+    "id": "slug-small-fix",
+    "revision": "2",
+    "digest": "sha256:3bb202eb2d274f2c8bb31dc1e618a0d076d9c3bf52e270f290a567fe51e0c5f2"
+   },
+   "subject": {
+    "digest": "sha256:ceba20f15452dff932a5837495ede1b7ea2c48696545e07f7ea9d9476e5b0b52"
+   },
+   "client": {
+    "name": "codex",
+    "version": "0.157.1"
+   },
+   "image": {
+    "digest": "sha256:d1b2ced9dc6d25e9e1bc673c1973f032ced50a11da234fcd617ee376ff36eefc"
+   },
+   "config": {
+    "digest": "sha256:9053a81d177bebf53d422cfe485094d09987ad8fd49f7c3abe174926ccd19a21"
+   },
+   "attempts": [
+    {
+     "attempt_id": "a-959233385efb"
+    }
+   ]
+  },
+  {
+   "trial_id": "t2-matched_pilot_baseline_1",
+   "case": {
+    "id": "slug-small-fix",
+    "revision": "2"
+   },
+   "grader": {
+    "id": "slug-small-fix",
+    "revision": "2",
+    "digest": "sha256:3bb202eb2d274f2c8bb31dc1e618a0d076d9c3bf52e270f290a567fe51e0c5f2"
+   },
+   "subject": {
+    "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   },
+   "client": {
+    "name": "codex",
+    "version": "0.157.1"
+   },
+   "image": {
+    "digest": "sha256:d1b2ced9dc6d25e9e1bc673c1973f032ced50a11da234fcd617ee376ff36eefc"
+   },
+   "config": {
+    "digest": "sha256:dd9b23924adc556c94be45e13707cb2e2e99f170960d264edb04051be799a5c4"
+   },
+   "attempts": [
+    {
+     "attempt_id": "a-a52a00684949"
+    }
+   ]
+  },
+  {
+   "trial_id": "t3-matched_pilot_treatment_2",
+   "case": {
+    "id": "slug-small-fix",
+    "revision": "2"
+   },
+   "grader": {
+    "id": "slug-small-fix",
+    "revision": "2",
+    "digest": "sha256:3bb202eb2d274f2c8bb31dc1e618a0d076d9c3bf52e270f290a567fe51e0c5f2"
+   },
+   "subject": {
+    "digest": "sha256:ceba20f15452dff932a5837495ede1b7ea2c48696545e07f7ea9d9476e5b0b52"
+   },
+   "client": {
+    "name": "codex",
+    "version": "0.157.1"
+   },
+   "image": {
+    "digest": "sha256:d1b2ced9dc6d25e9e1bc673c1973f032ced50a11da234fcd617ee376ff36eefc"
+   },
+   "config": {
+    "digest": "sha256:10b9ddf7fe444018dc2e45a795bb34c7ce8e0a500a1adb1a1d402d41d4f34893"
+   },
+   "attempts": [
+    {
+     "attempt_id": "a-9b9c096ebfc2"
+    }
+   ]
+  },
+  {
+   "trial_id": "t4-matched_pilot_baseline_2",
+   "case": {
+    "id": "slug-small-fix",
+    "revision": "2"
+   },
+   "grader": {
+    "id": "slug-small-fix",
+    "revision": "2",
+    "digest": "sha256:3bb202eb2d274f2c8bb31dc1e618a0d076d9c3bf52e270f290a567fe51e0c5f2"
+   },
+   "subject": {
+    "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   },
+   "client": {
+    "name": "codex",
+    "version": "0.157.1"
+   },
+   "image": {
+    "digest": "sha256:d1b2ced9dc6d25e9e1bc673c1973f032ced50a11da234fcd617ee376ff36eefc"
+   },
+   "config": {
+    "digest": "sha256:faff0fc561d124d7ed662176da5b1d27acccce5c671be1fcdb35aae5c749e19f"
+   },
+   "attempts": [
+    {
+     "attempt_id": "a-ad9443abbaa6"
+    }
+   ]
+  },
+  {
+   "trial_id": "t5-matched_pilot_treatment_3",
+   "case": {
+    "id": "slug-small-fix",
+    "revision": "2"
+   },
+   "grader": {
+    "id": "slug-small-fix",
+    "revision": "2",
+    "digest": "sha256:3bb202eb2d274f2c8bb31dc1e618a0d076d9c3bf52e270f290a567fe51e0c5f2"
+   },
+   "subject": {
+    "digest": "sha256:ceba20f15452dff932a5837495ede1b7ea2c48696545e07f7ea9d9476e5b0b52"
+   },
+   "client": {
+    "name": "codex",
+    "version": "0.157.1"
+   },
+   "image": {
+    "digest": "sha256:d1b2ced9dc6d25e9e1bc673c1973f032ced50a11da234fcd617ee376ff36eefc"
+   },
+   "config": {
+    "digest": "sha256:5e8efdfc0dd64425571ac121eb3483f38d0a35c7b18b76fe7c98132c5ed8eab5"
+   },
+   "attempts": [
+    {
+     "attempt_id": "a-a8f98d93826a"
+    }
+   ]
+  },
+  {
+   "trial_id": "t6-matched_pilot_baseline_3",
+   "case": {
+    "id": "slug-small-fix",
+    "revision": "2"
+   },
+   "grader": {
+    "id": "slug-small-fix",
+    "revision": "2",
+    "digest": "sha256:3bb202eb2d274f2c8bb31dc1e618a0d076d9c3bf52e270f290a567fe51e0c5f2"
+   },
+   "subject": {
+    "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   },
+   "client": {
+    "name": "codex",
+    "version": "0.157.1"
+   },
+   "image": {
+    "digest": "sha256:d1b2ced9dc6d25e9e1bc673c1973f032ced50a11da234fcd617ee376ff36eefc"
+   },
+   "config": {
+    "digest": "sha256:71e34056cd2be8e06fdff6c676b79b62cfa8ddcdf36994f0fc00e0d0d5f16aee"
+   },
+   "attempts": [
+    {
+     "attempt_id": "a-bc6ee604dbab"
+    }
+   ]
+  }
+ ]
+}
