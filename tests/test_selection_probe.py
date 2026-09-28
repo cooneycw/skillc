@@ -1110,3 +1110,78 @@ def test_a_control_naming_a_skill_its_case_does_not_allow_is_refused() -> None:
     missing = {**CONTROL, "base_case": {"id": "missing-case", "revision": "c1"}}
     with pytest.raises(sp.SelectionProbeRefused, match="revision"):
         sp.detection_control_cases(CASES, missing)
+
+
+# ----------------------------------------------------- transcript retention (#26)
+
+
+def _single_attempt_runner(
+    tmp_path: Path, *, goal: str,
+) -> tuple[Path, str, sp.AttemptTranscript]:
+    """Plan a real experiment, run its FIRST attempt through the real
+    `AgentTrialRunner`, and return `(base, attempt_id, transcript)` - the
+    smallest real run that reaches transcript retention."""
+    base = tmp_path / "work"
+    base.mkdir()
+    docker_state = tmp_path / "docker-state"
+    docker_bin = [sys.executable, str(FAKE_DOCKER), "--state", str(docker_state)]
+    experiment = _plan(tmp_path)
+    backend = _HomeRecordingBackend(image="fake-image:1", base_dir=base, docker_bin=docker_bin)
+    trial_dict, attempt = next(iter(experiment.attempts()))
+    attempt_id = str(attempt["attempt_id"])
+    home = docker_state / f"{d._container_name(attempt_id)}.fsroot" / "home" / "candidate"
+    argv = [
+        sys.executable, str(FAKE_CLIENT), "--format", "codex-fake", "--home", str(home),
+        "--transcript-relpath", f".codex/sessions/2026/01/01/rollout-{attempt_id}.jsonl",
+    ]
+    runner = sp.agent_trial_runner(
+        experiment=experiment, backend=backend, base=base, client="codex",
+        argv_for=lambda _a: argv, treatment_home_files=_COLLECTION, goal=goal,
+        timeout=5, credential_explicit_path=_codex_credential(tmp_path),
+    )
+    resolved = sp._resolved_trial(experiment, trial_dict)
+    transcript = runner(resolved, attempt)
+    assert transcript is not None
+    return base, attempt_id, transcript
+
+
+def test_a_clean_transcript_is_retained_with_its_digest(tmp_path: Path) -> None:
+    from skillc import materialize
+
+    base, attempt_id, transcript = _single_attempt_runner(tmp_path, goal="Fix the slug helper.")
+
+    assert transcript.disposition == "captured"
+    assert transcript.transcript_retention_reason is None
+    assert transcript.transcript_retained_digest is not None
+    retained = sp.retain_transcript_dir(base) / f"{attempt_id}.jsonl"
+    assert retained.is_file()
+    assert transcript.transcript_retained_digest == materialize.sha256_bytes(retained.read_bytes())
+
+
+def test_a_leaky_transcript_is_not_retained_and_the_reason_is_recorded(tmp_path: Path) -> None:
+    """The red case named directly for #26: a transcript carrying the
+    exporter's own live cwd (a two-component path outside /home, the
+    `host-path` class `leak.default_host_paths()` adds - #134 item 5) is not
+    retained, and the attempt records why."""
+    import os
+
+    base, attempt_id, transcript = _single_attempt_runner(
+        tmp_path, goal=f"Fix the slug helper. See {os.getcwd()}/notes.txt for context.",
+    )
+
+    assert transcript.disposition == "captured"
+    assert transcript.transcript_retained_digest is None
+    assert transcript.transcript_retention_reason is not None
+    assert "host-path" in transcript.transcript_retention_reason
+    assert not (sp.retain_transcript_dir(base) / f"{attempt_id}.jsonl").exists()
+
+
+def test_no_single_transcript_file_retains_nothing_and_is_not_an_error(tmp_path: Path) -> None:
+    """`retained` is empty when `run_one_attempt` never found exactly one
+    transcript file - nothing to leak-check, and not a refusal either
+    (distinct from the leak case: there is no transcript to have a reason
+    about)."""
+    digest, reason = sp._retain_transcript(None, tmp_path, "a-1")
+    assert digest is None and reason is None
+    digest, reason = sp._retain_transcript({}, tmp_path, "a-1")
+    assert digest is None and reason is None

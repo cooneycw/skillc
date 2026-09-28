@@ -58,12 +58,22 @@ exists to rule out.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import agent_trial, collection_conformance, credential, records, trial, verify
+from . import (
+    agent_trial,
+    collection_conformance,
+    credential,
+    leak,
+    materialize,
+    records,
+    trial,
+    verify,
+)
 from .backend import ExecutionBackend, Limits
 from .docker_backend import DockerBackend
 
@@ -155,6 +165,18 @@ class AttemptTranscript:
     #: an attempt whose named canary failed is inconclusive, yet its
     #: transcript was still read.
     observation_confirmed: bool = False
+    #: issue #26: the retained raw transcript's own digest, so a run can be
+    #: re-scanned - set only when a single transcript file was read AND its
+    #: leak-check found nothing. Mutually exclusive with
+    #: `transcript_retention_reason`, and NEITHER means retention was never
+    #: attempted (no single transcript file existed) - see that field.
+    transcript_retained_digest: str | None = None
+    #: Set when retention was attempted and did NOT happen - a leak-check
+    #: refusal (the transcript itself names the reason) or a write failure -
+    #: so a missing digest is never silently indistinguishable from "nothing
+    #: to retain". `None` alongside `transcript_retained_digest is None` means
+    #: retention was never attempted at all (no single transcript file).
+    transcript_retention_reason: str | None = None
 
     def __post_init__(self) -> None:
         if self.disposition not in records.DISPOSITIONS:
@@ -231,6 +253,11 @@ class ArmResult:
     codex_best_effort: bool = False
     detail: str = ""
     observation_confirmed: bool = False
+    #: issue #26: carried from the attempt's own `AttemptTranscript` so the
+    #: report - not only the transient transcript - says whether this arm's
+    #: transcript can be re-scanned, and why not when it cannot.
+    transcript_retained_digest: str | None = None
+    transcript_retention_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -455,6 +482,8 @@ def run_planned_selection_probe(
                 codex_best_effort=transcript.codex_best_effort,
                 detail="; ".join(part for part in (transcript.detail, grading_detail) if part),
                 observation_confirmed=transcript.observation_confirmed,
+                transcript_retained_digest=transcript.transcript_retained_digest,
+                transcript_retention_reason=transcript.transcript_retention_reason,
             )
         results.append(CaseResult(
             case_id=case_id, kind=str(case["kind"]), applicable_skills=applicable,
@@ -593,6 +622,46 @@ def agent_trial_runner(
     )
 
 
+def retain_transcript_dir(base: Path) -> Path:
+    """Where a run's retained transcripts live - one directory per run's own
+    `base`, so a re-scan of one run never picks up another's files."""
+    return base / "retained-transcripts"
+
+
+def _retain_transcript(
+    retained: Mapping[str, object] | None, base: Path, attempt_id: str,
+) -> tuple[str | None, str | None]:
+    """Leak-check and persist one attempt's raw transcript bytes - never
+    silently dropped and never silently kept (#26). Returns
+    `(digest, refusal_reason)`; exactly one is set when `retained` names a
+    transcript, and both are `None` when there was nothing to retain (no
+    single transcript file existed for this attempt - `retained` is then
+    empty, `agent_trial.run_one_attempt`'s own contract).
+
+    A leak refuses retention entirely - the file is never written, even
+    redacted - and the reason names the finding classes, never the leaked
+    value itself (`leak.Finding`'s own convention: the class is evidence
+    enough, the match text is exactly what must not be echoed)."""
+    if not retained:
+        return None, None
+    raw = retained.get("bytes")
+    if not isinstance(raw, bytes):
+        return None, None
+    text = raw.decode("utf-8", errors="replace")
+    findings = list(leak.scan_text(text, leak.load_denylist(None), host_paths=leak.default_host_paths()))
+    if findings:
+        kinds = sorted({kind for _lineno, kind, _detail in findings})
+        return None, f"transcript leak-check found {', '.join(kinds)}; retention refused"
+    target_dir = retain_transcript_dir(base)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / f"{attempt_id}.jsonl"
+    try:
+        target.write_bytes(raw)
+    except OSError as exc:
+        return None, f"could not write retained transcript: {exc}"
+    return materialize.sha256_bytes(raw), None
+
+
 @dataclass(frozen=True)
 class AgentTrialRunner:
     """`agent_trial_runner`'s result: an `AttemptRunner` that also names the
@@ -628,8 +697,13 @@ class AgentTrialRunner:
             credential_explicit_path=self.credential_explicit_path,
             minimum_credential_seconds=self.minimum_credential_seconds, cli_version=self.cli_version,
             extra_home_files=dict(self.treatment_home_files) if arm == "treatment" else {},
+            retain_transcript=True,
         )
-        return transcript_from_record(record, self.experiment, attempt_id)
+        digest, reason = _retain_transcript(record.get("retained_transcript"), self.base, attempt_id)  # type: ignore[arg-type]
+        transcript = transcript_from_record(record, self.experiment, attempt_id)
+        return dataclasses.replace(
+            transcript, transcript_retained_digest=digest, transcript_retention_reason=reason,
+        )
 
 
 # ------------------------------------------------ detection control and exit rules (#26)

@@ -369,6 +369,7 @@ class TranscriptObservation:
 def _make_observe_before_teardown(
     *, spec: ClientSpec, expected_prompt: str, skill_name: str | None,
     delivered_credential_bytes: dict[str, bytes],
+    retained_transcript: dict[str, object] | None = None,
 ) -> Callable[[ExecutionBackend, object], Mapping[str, object]]:
     def hook(backend: ExecutionBackend, handle: object) -> dict[str, object]:
         assert isinstance(backend, DockerBackend)
@@ -403,7 +404,13 @@ def _make_observe_before_teardown(
                 skill_invocation_detection=spec.skill_invocation_detection,
             )
         else:
-            (_, raw), = matches.items()
+            (matched_path, raw), = matches.items()
+            if retained_transcript is not None:
+                # The ORIGINAL bytes, never a decode/re-encode round trip -
+                # retention exists so a run can be re-scanned against what the
+                # client actually wrote, not a lossy reconstruction of it.
+                retained_transcript["path"] = matched_path
+                retained_transcript["bytes"] = raw
             text = raw.decode("utf-8", errors="replace")
             try:
                 census = transcript_census(spec.name, text)
@@ -628,6 +635,7 @@ def run_one_attempt(
     grader: verify.GraderDef | None = None,
     grading_backend: ExecutionBackend | None = None,
     extra_home_files: Mapping[str, bytes] | None = None,
+    retain_transcript: bool = False,
 ) -> dict[str, object]:
     """Drive one real-agent attempt end to end and, only when the real
     transcript confirms both prompt delivery and the liveness canary, grade
@@ -657,7 +665,19 @@ def run_one_attempt(
     collection's own surface, keyed by container-relative path, exactly the
     shape `demo.install_subject` already builds for the no-agent `--subject`
     leg. `None` (the default) delivers nothing beyond what `spec` already
-    composes, so every existing caller is unaffected."""
+    composes, so every existing caller is unaffected.
+
+    `retain_transcript=True` (issue #26): the ORIGINAL transcript bytes (one
+    file, the same one the observation itself reads - never a second read)
+    are attached to the returned dict as `result["retained_transcript"]`
+    (`{"path": <container-relative path>, "bytes": <raw bytes>}`, or absent
+    when no single transcript file was found). Default `False` leaves every
+    existing caller's returned shape unchanged; this is deliberately NOT part
+    of `build_observation_record` or the stored `agent-observation` record,
+    which that function's own docstring already states carries no transcript
+    text - leak-checking and persisting what this returns is the CALLER's
+    job (`selection_probe.py`'s own retention, not a general capability every
+    caller inherits for free)."""
     if client not in CLIENT_SPECS:
         raise credential.CredentialRefused(f"unknown client {client!r}: expected one of {sorted(CLIENT_SPECS)}")
     spec = CLIENT_SPECS[client]
@@ -690,9 +710,11 @@ def run_one_attempt(
         delivered_credential_bytes=delivered_credential_bytes,
         extra_home_files=extra_home_files or {},
     )
+    retained_transcript: dict[str, object] | None = {} if retain_transcript else None
     observe_before_teardown = _make_observe_before_teardown(
         spec=spec, expected_prompt=full_prompt, skill_name=skill_name,
         delivered_credential_bytes=delivered_credential_bytes,
+        retained_transcript=retained_transcript,
     )
 
     record = run_through_backend(
@@ -773,6 +795,8 @@ def run_one_attempt(
         **record, "graded": graded, "grading_blocked_reason": grading_blocked_reason,
         "grading_seconds": grading_seconds,
     }
+    if retained_transcript:
+        result["retained_transcript"] = retained_transcript
     # Persisted on EVERY path (#106): the observation used to exist only in
     # this returned dict, so a caller that printed it wrong - or not at all -
     # lost it for good.
