@@ -200,7 +200,16 @@ def test_cli_collection_run_degraded_records_the_degraded_identity_never_the_pin
     )
 
     assert result.record["disposition"] == "captured"
-    assert result.revision != "v1"  # never the pin
+    # Equality against the ACTUAL expected value first (orchestrator review:
+    # a bare `!= "v1"` fails identically, printing 'v1' != 'v1', whether the
+    # wrong field was read or some other field happened to differ - both
+    # sides of a failed `!=` between equal strings print the same value, so
+    # that alone cannot show WHICH wrong value leaked in. This equality
+    # check makes the pre-fix failure read `'v1' == 'degraded:...'` -
+    # visibly the pin standing in for the degraded label, not an ambiguous
+    # non-match).
+    assert result.revision == acquired.source.revision
+    assert result.revision != "v1"  # never the pin, named explicitly
     assert result.revision.startswith("degraded:")
     envelope = cc.evidence_envelope(result)
     assert envelope["revision"] == result.revision
