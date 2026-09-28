@@ -152,7 +152,19 @@ class ExecuteResult:
     list, a host resource-exhaustion path independent of any container-side
     memory limit). Never a silent cap - a caller reading only the captured
     bytes without checking this flag would otherwise read a partial capture
-    as if it were the whole thing."""
+    as if it were the whole thing.
+
+    `stdout_incomplete`/`stderr_incomplete` are the #102 gap named above,
+    made explicit rather than left as prose (issue #133 item 3): `True` when
+    the backend stopped WAITING for its drain thread before that thread
+    confirmed EOF - a descendant the subject left running, holding the pipe
+    open past every kill this backend issued. Independent of `truncated`:
+    a drain can reach EOF with room to spare (`incomplete=False`) yet still
+    have been capped (`truncated=True`), or time out waiting before the cap
+    is ever reached (`incomplete=True`, `truncated=False`). A backend that
+    cannot distinguish "read everything, some was discarded" from "gave up
+    reading" must never collapse the second into the first by reporting only
+    `truncated`."""
 
     reason: str  # "exited" | "timeout" | "operator-cancelled" | "launch-failed"
     exit_code: int | None
@@ -160,6 +172,8 @@ class ExecuteResult:
     signal: str | None = None
     stdout_truncated: bool = False
     stdout_bytes: int = 0
+    stdout_incomplete: bool = False
+    stderr_incomplete: bool = False
 
 
 @dataclass(frozen=True)

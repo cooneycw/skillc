@@ -412,6 +412,14 @@ def run_through_backend(
                     # mistake it for the subject's whole output.
                     stop["observations_truncated"] = True
                     stop["observations_bytes"] = result.stdout_bytes
+                if result.stdout_incomplete:
+                    # #133 item 3: distinct from truncation above - the drain
+                    # never reached EOF at all, so `observations` may be
+                    # missing content the retention cap never even saw, not
+                    # only content it discarded past the cap.
+                    stop["observations_incomplete"] = True
+                if result.stderr_incomplete:
+                    stop["error_incomplete"] = True
                 experiment.record(attempt_id, "stopped", **stop)
                 experiment.record(attempt_id, "stop-confirmed" if confirmed else "stop-unconfirmed")
 
@@ -502,6 +510,11 @@ def run_through_backend(
         # is only meaningful when `observations_truncated` is True.
         "observations_truncated": result.stdout_truncated if isinstance(result, ExecuteResult) else False,
         "observations_bytes": result.stdout_bytes if isinstance(result, ExecuteResult) else None,
+        # #133 item 3, surfaced for the same reason: distinct from truncation
+        # above - the drain never reached EOF, so content the retention cap
+        # never even saw may be missing, not only content discarded past it.
+        "observations_incomplete": result.stdout_incomplete if isinstance(result, ExecuteResult) else False,
+        "error_incomplete": result.stderr_incomplete if isinstance(result, ExecuteResult) else False,
         # Which liveness proof this attempt used - "canary" (the nonce
         # convention) or "content-diff" (the weaker fallback) - so a grader
         # or reader can see when only the weaker guarantee applied. None when

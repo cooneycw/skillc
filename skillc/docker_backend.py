@@ -1155,6 +1155,17 @@ class DockerBackend:
 
         stdout_thread.join(timeout=limits.grace + self.daemon_timeout)
         stderr_thread.join(timeout=limits.grace + self.daemon_timeout)
+        # #133 item 3: a join that times out before the drain thread finishes
+        # means the read never reached EOF - some descendant the subject left
+        # running (past every kill this method issued above) still holds the
+        # pipe open. `is_alive()` right after `.join()` is the ONLY way to
+        # tell that apart from "read everything, gave up nothing": reading
+        # `captured_bytes()`/`total_bytes` below regardless would silently
+        # read a still-open pipe as a finished one (the exact gap
+        # ExecuteResult's own docstring already named as unclosed by #102's
+        # retention cap alone).
+        stdout_incomplete = stdout_thread.is_alive()
+        stderr_incomplete = stderr_thread.is_alive()
         stdout = stdout_drain.captured_bytes()
         stderr = stderr_drain.captured_bytes()
         code = proc.returncode
@@ -1166,6 +1177,10 @@ class DockerBackend:
                 # of this PR, #102): a caller reading `error` alone must not
                 # mistake a capped stderr for the subject's whole message.
                 error = f"{error} (truncated, {stderr_drain.total_bytes} bytes total)"
+            if error and stderr_incomplete:
+                # Distinct from truncation (#133 item 3): this is "we stopped
+                # waiting", not "we read it all and discarded past the cap".
+                error = f"{error} (capture incomplete, drain did not reach EOF)"
 
         # The exec'd process's stdout is written back into the container at
         # `<workspace>/observations` (`verify.py`'s own documented
@@ -1196,6 +1211,7 @@ class DockerBackend:
         return ExecuteResult(
             reason=reason, exit_code=code, error=error, signal=signal_name,
             stdout_truncated=stdout_drain.truncated, stdout_bytes=stdout_drain.total_bytes,
+            stdout_incomplete=stdout_incomplete, stderr_incomplete=stderr_incomplete,
         )
 
     def _kill_container(self, handle: _Handle, sig: str) -> None:

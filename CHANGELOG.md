@@ -198,6 +198,22 @@ and version plan.
   from it (the exported `verified-result`'s `revision`, the paste-back), now
   reports what was actually acquired.
 
+- **`ExecuteResult` distinguishes an incomplete capture from a truncated one**
+  (Refs #133). `execute()` read `stdout_drain.captured_bytes()`/`total_bytes`
+  unconditionally after `stdout_thread.join(timeout=...)`, whether or not
+  that join actually confirmed the drain thread had finished - so a subject
+  that exits while leaving a descendant holding its stdout/stderr pipe open
+  (a gap `ExecuteResult`'s own docstring already named) was silently
+  reported as a complete, non-truncated capture. `stdout_incomplete`/
+  `stderr_incomplete` are now set from `thread.is_alive()` right after the
+  join, independent of `stdout_truncated` (capped-and-discarded is a
+  different fact from never-reached-EOF), and propagate through to the
+  journal (`observations_incomplete`/`error_incomplete`) alongside the
+  existing truncation fields. The red case detaches a real grandchild via
+  `setsid` so `os.killpg` cannot reach it, verified to fail on the pre-fix
+  code (`AttributeError`, then a hang past the join bound once the field
+  existed but was never set).
+
 - **`DockerBackend.prepare()`'s `docker run -d` is bounded, with an explicit
   image precheck** (Refs #133). Every other daemon call in this backend
   carried a `timeout=daemon_timeout`; `run -d` did not, and unlike the
