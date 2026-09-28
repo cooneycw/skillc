@@ -10,17 +10,28 @@ and version plan.
 
 ### Added
 
-- **`make verify` and a real `## Verify` command** (Refs #134, items 1 and 2).
-  Nothing ran `skillc selftest` or `ci/negative-control.sh` locally without a
-  Makefile, so CPP's finish-gate fallback silently skipped both - a change
-  that blinds one rule's control went green locally and red only in CI (#37).
+- **`make verify` and a real `## Verify` command, covering every
+  `.woodpecker/ci.yml` step** (Refs #134, items 1 and 2). Nothing ran
+  `skillc selftest` or `ci/negative-control.sh` locally without a Makefile,
+  so CPP's finish-gate fallback silently skipped both - a change that
+  blinds one rule's control went green locally and red only in CI (#37).
   `make verify` runs `uv sync --locked --extra dev` then `skillc selftest`,
   `pytest -rA` (teed to a gitignored `reports/pytest.log`, covering #148's
-  local one-off-red sighting), `ruff check .`, `mypy` and
-  `ci/negative-control.sh`, mirroring Woodpecker's `gate` and
-  `negative-control` steps. AGENTS.md's `## Verify` now names it instead of a
-  bare `uv run` chain that failed in a fresh worktree with `Failed to spawn:
-  ruff` (the dev tools live in the `dev` extra).
+  local one-off-red sighting), `ruff check .`, `mypy`,
+  `ci/negative-control.sh`, `ci/typecheck-control.sh`, `skillc leak-check .`
+  (CI's exact excludes, plus a local-only `reports/` exclude - `test`'s own
+  output would otherwise leak-check as a real finding), `ci/changelog_check.py`,
+  `ci/readme_drift.py` and `gitleaks`/`ci/secret-scan-control.sh` (SKIPPED
+  loudly, never silently, when gitleaks is not installed locally) -
+  every step Woodpecker runs, not only `gate` and `negative-control`.
+  `tests/test_ci_local_gate_coverage.py` maps each CI step to its local
+  target and fails when a new one has no mapping, so this list cannot
+  silently fall behind the workflow file the way the first version did
+  (PR #155 went red on `changelog-check`, which no local gate ran).
+  AGENTS.md's `## Verify` now names every step instead of only four plus
+  `negative-control`, and instead of the bare `uv run` chain that failed in
+  a fresh worktree with `Failed to spawn: ruff` (the dev tools live in the
+  `dev` extra).
 
 ### Fixed
 
