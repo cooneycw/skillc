@@ -10,6 +10,50 @@ and version plan.
 
 ### Added
 
+- **An optional managed-container backend, client-only: `skillc.managed_backend.ManagedBackend`**
+  (Refs #64). A second `ExecutionBackend` implementation (#10's seam) for a
+  platform that already manages its own containers and is willing to run one
+  trial inside a container it creates - never a dependency, never a
+  fallback: an absent or refusing platform is `unavailable`, exactly like
+  `DockerBackend`'s own structural rule. Talks over
+  [a newly published protocol](docs/specs/evaluation-facility/managed-backend-protocol.md)
+  (status "Proposed" - no platform implements it yet; a first intended
+  implementer is tracked as [cooneycw/kyle#1397](https://github.com/cooneycw/kyle/issues/1397),
+  a different project), a single Unix-socket, one-connection-per-request,
+  newline-delimited-JSON contract with a closed schema in both directions -
+  `tests/test_managed_backend.py` parses the protocol page's own field
+  tables and asserts the client's request builder never emits a field
+  outside them, so the doc and the code cannot drift apart unnoticed.
+  Platform-neutral by construction: nothing under `skillc/` names, imports or
+  assumes any particular platform, checked directly
+  (`test_module_names_no_platform_and_docker_backend_does_not_import_it`).
+  Error/unavailable semantics match `skillc/backend.py`'s existing
+  per-method contract exactly, applied to one more kind of failure (a dead
+  socket, a timeout, an out-of-schema response): `describe()` never raises;
+  `prepare()`/`install()` raise `BackendUnavailable`; `execute()` never
+  raises; `confirm_stopped()`/`confirm_absent()` return
+  `Confirmation.UNKNOWN`, never a guessed answer - a committed red case
+  drops the connection mid-`confirm_absent` and proves the result is
+  UNKNOWN, not a guessed CONFIRMED (verified: a mutation mapping that
+  failure to CONFIRMED instead makes the test fail). An optional credential
+  hook (`SKILLC_MANAGED_BACKEND_TOKEN_FILE`) rides the `prepare` request
+  only, held with `field(repr=False)`; a committed red case plants a
+  credential value, runs a full stub lifecycle, and asserts it appears in no
+  record, report or exception text and that a real `skillc leak-check` over
+  the produced output stays clean (verified: removing `repr=False` makes the
+  test fail). The neutral-identity obligation (#63) is checked against a
+  deliberately non-neutral identifier the test stub plants into its own
+  output - proving skillc's own leak-check instrument catches a violation of
+  this shape, never a real platform's compliance, which the protocol page's
+  "Handle rule" states plainly. Tested only against
+  `tests/fixtures/managed-backend/stub_server.py`, a test-only stand-in (the
+  same role `fake_docker.py` plays for `DockerBackend`) - conformance
+  through a real platform-created container and parity with `DockerBackend`
+  on the same trial are owed, not demonstrated
+  (`docs/specs/evaluation-facility/support-matrix.md`'s new "Managed-container
+  backend" section carries both as `owed` explicitly, and is not wired into
+  any CLI command in this PR).
+
 - **A worked configuration-boundary comparison for #28's evidence-refresh
   half** (Refs #28). Step 1's eligibility survey found no reproducible
   subject-behaviour failure in retained evidence (12 of 12 stored/graded

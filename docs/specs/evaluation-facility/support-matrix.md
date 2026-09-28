@@ -48,10 +48,12 @@ selftest` is itself target-aware (`controls/<rule>/targets/<target>/`).
 
 ## Execution backends
 
-skillc ships exactly one backend today: `skillc.docker_backend.DockerBackend`
-(#77). The seam (`skillc/backend.py`) is generic - nothing in skillc names,
-imports or assumes any other backend - but none other exists in this
-repository.
+skillc ships one closing, self-contained backend today,
+`skillc.docker_backend.DockerBackend` (#77), and one optional client-only
+backend with no platform to talk to yet,
+`skillc.managed_backend.ManagedBackend` (#64, its own section below). The
+seam (`skillc/backend.py`) is generic - nothing in skillc names, imports or
+assumes any particular platform for either.
 
 ### `DockerBackend.describe()`'s claims, verbatim (2026-09-26, commit range
 #77/#83/#85)
@@ -206,6 +208,34 @@ Proven in `tests/test_no_docker_required.py`:
   positive control first proves that PATH construction actually makes
   `docker` unreachable, so the green result is not vacuous on a host that
   happens to have Docker installed anyway.
+
+## Managed-container backend (optional, #64)
+
+`skillc.managed_backend.ManagedBackend` implements the same
+`ExecutionBackend` seam over
+[the managed-backend protocol](managed-backend-protocol.md) (status
+"Proposed") - a platform that already manages its own containers runs the
+trial in exchange for skillc never depending on it. **No platform implements
+this protocol yet.** A first intended implementer is tracked as
+[cooneycw/kyle#1397](https://github.com/cooneycw/kyle/issues/1397), a
+different project.
+
+| Row | Status | Where |
+|---|---|---|
+| Client shape, closed-schema request/response, error/UNKNOWN semantics | demonstrated-here | `tests/test_managed_backend.py`, against `tests/fixtures/managed-backend/stub_server.py` (a test-only stand-in, never a real platform - the same role `fake_docker.py` plays for `DockerBackend`) |
+| Platform absent (no fallback, `describe()` never raises, `prepare()` refuses) | demonstrated-here | `tests/test_managed_backend.py::test_describe_never_raises_when_no_socket_is_configured`, `::test_prepare_refuses_rather_than_falling_back_when_no_socket_is_configured` |
+| Neutral-identity leak check (#63) can catch a violation | demonstrated-here, against the stub only | `tests/test_managed_backend.py::test_a_leaking_platform_identity_is_caught_by_leak_check` |
+| Credential never rides more than the `prepare` request, never leaks into a record/report/exception | demonstrated-here | `tests/test_managed_backend.py::test_credential_reaches_only_the_prepare_request_and_never_leaks` |
+| interfaces.md conformance cases through a REAL platform-created container | owed | needs a platform implementing the protocol page - none exists yet |
+| Parity with `DockerBackend` on the same trial | owed | same reason |
+
+**`demonstrated-here` for this backend means "against the stub", never
+"against a real platform"** - a stronger qualifier than the `DockerBackend`
+rows above, which are at least demonstrated against a fake shaped like a real
+CLI's own argv and exit codes. Nothing here has been run against anything a
+platform actually built; the two `owed` rows are not weakened by any test in
+this repository, and can only move once a real platform run's results are
+pasted back here, exactly as this matrix's own evidence rule requires.
 
 ## Gaps, stated plainly
 
