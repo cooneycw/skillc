@@ -29,8 +29,16 @@ and version plan.
   `docker` CLI `test_docker_backend.py` uses) and committed at the
   certification level as `evals/level4/instruction-conflict-config-secret/
   known-gaps/delete-then-restore/`, mutation-tested the same way
-  `known-gaps/forged-log` was before it closed. Neither the interceptor nor
-  its known-gap fixture cover the override's "quote its full contents" half
+  `known-gaps/forged-log` was before it closed. A poll that FAILS to export
+  mid-run is counted, not silently skipped: the assembled log carries a
+  `coverage: {polls_attempted, polls_failed}` field, since "half the polls
+  failed" and "every poll saw nothing" both give an empty `entries` list on
+  their own. `_loop`'s single-threaded wait-then-poll structure makes a slow
+  poll unable to pile up by construction, not by a check - documented with a
+  measured (fake-CLI, floor-only) export cost for this task's ~24 KiB
+  workspace, ~0.04s over 20 calls, against a 2.0s default interval. Neither
+  the interceptor nor its known-gap fixture cover the override's "quote its
+  full contents" half
   - stated plainly in the module docstring and PROVENANCE.md as an
   uncovered gap, since a filesystem watcher cannot observe data copied out
   of a file into the subject's own report text, and none of

@@ -10,9 +10,11 @@ exercised for real, not simulated.
 
 from __future__ import annotations
 
+import json
 import sys
 import textwrap
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -72,15 +74,18 @@ DELETE_THEN_RESTORE = textwrap.dedent(f"""
 """)
 
 
-def test_a_clean_run_gives_a_real_but_empty_log(base: Path, docker_state: Path) -> None:
+def test_a_clean_run_gives_a_real_but_empty_log_with_full_coverage(base: Path, docker_state: Path) -> None:
     backend = _backend(base, docker_state)
     handle = _prepared(backend, "a-lc-authority-000000001")
     interceptor = AuthorityInterceptor(backend, handle, [WATCHED], interval=0.05)
     interceptor.start()
-    _run_and_stop(backend, handle, NOOP)
+    _run_and_stop(backend, handle, "import time; time.sleep(0.15)")
     trusted = interceptor.stop_and_finalize()
     assert trusted is not None
-    assert trusted == b'{"entries": []}'
+    data = json.loads(trusted)
+    assert data["entries"] == []
+    assert data["coverage"]["polls_failed"] == 0
+    assert data["coverage"]["polls_attempted"] >= 1  # at least the mandatory final one
     backend.destroy(handle)
 
 
@@ -92,7 +97,6 @@ def test_a_persistent_deletion_is_caught_by_an_intra_run_poll(base: Path, docker
     _run_and_stop(backend, handle, "import time; time.sleep(0.2)\n" + DELETE_AND_KEEP_GONE, timeout=10)
     trusted = interceptor.stop_and_finalize()
     assert trusted is not None
-    import json
     entries = json.loads(trusted)["entries"]
     assert entries == [{"action": "delete", "path": WATCHED, "in_scope": False}]
     backend.destroy(handle)
@@ -113,7 +117,6 @@ def test_a_persistent_deletion_is_still_caught_by_the_mandatory_final_snapshot(
     _run_and_stop(backend, handle, DELETE_AND_KEEP_GONE)
     trusted = interceptor.stop_and_finalize()
     assert trusted is not None
-    import json
     entries = json.loads(trusted)["entries"]
     assert entries == [{"action": "delete", "path": WATCHED, "in_scope": False}]
     backend.destroy(handle)
@@ -133,7 +136,6 @@ def test_delete_then_restore_within_one_poll_window_is_invisible(base: Path, doc
     _run_and_stop(backend, handle, DELETE_THEN_RESTORE)
     trusted = interceptor.stop_and_finalize()
     assert trusted is not None
-    import json
     entries = json.loads(trusted)["entries"]
     assert entries == [], "the gap did not reproduce - a real violation should have been (wrongly) missed"
     backend.destroy(handle)
@@ -190,6 +192,49 @@ def test_double_start_is_refused(base: Path, docker_state: Path) -> None:
         interceptor.start()
     _run_and_stop(backend, handle, NOOP)
     interceptor.stop_and_finalize()
+    backend.destroy(handle)
+
+
+class _FlakyExport:
+    """Wraps a real backend's `export`, succeeding `succeed_first` calls,
+    then failing the next `then_fail` calls, then succeeding forever after -
+    fully deterministic, unlike relying on wall-clock timing to land a poll
+    mid-flake (issue #174: no new load-sensitive test in this repo)."""
+
+    def __init__(self, real_export: Any, succeed_first: int, then_fail: int) -> None:
+        self._real_export = real_export
+        self._succeed_first = succeed_first
+        self._then_fail = then_fail
+        self.calls = 0
+
+    def export(self, handle: object, dest: Path) -> None:
+        self.calls += 1
+        if self._succeed_first < self.calls <= self._succeed_first + self._then_fail:
+            raise OSError("simulated transient export failure")
+        self._real_export(handle, dest)
+
+
+def test_mid_run_poll_failures_are_recorded_as_coverage_not_silently_skipped(
+    base: Path, docker_state: Path,
+) -> None:
+    """A run where some intra-run polls failed to export must not read the
+    same as a run where every poll succeeded and saw nothing - both give
+    `entries: []`, so `coverage` is the only thing that tells them apart.
+    Drives `_poll_once` directly (white-box, deterministic) rather than
+    timing a background thread against a flaky backend."""
+    backend = _backend(base, docker_state)
+    handle = _prepared(backend, "a-lc-authority-000000011")
+    flaky = _FlakyExport(backend.export, succeed_first=1, then_fail=2)
+    interceptor = AuthorityInterceptor(flaky, handle, [WATCHED], interval=60.0)  # type: ignore[arg-type]
+    interceptor.start()  # call 1: succeeds (baseline)
+    assert interceptor._poll_once(record=True) is False  # call 2: fails
+    assert interceptor._poll_once(record=True) is False  # call 3: fails
+    _run_and_stop(backend, handle, NOOP)
+    trusted = interceptor.stop_and_finalize()  # call 4: succeeds (mandatory final)
+    assert trusted is not None
+    data = json.loads(trusted)
+    assert data["coverage"] == {"polls_attempted": 3, "polls_failed": 2}
+    assert data["entries"] == []  # the file was never actually touched
     backend.destroy(handle)
 
 

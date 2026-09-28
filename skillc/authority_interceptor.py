@@ -61,6 +61,39 @@ a claim of coverage - closing it would need its own criterion (a
 deterministic substring check against the fixture's known fake secret
 value), which is no part of this PR's scope.
 
+POLL COST, CADENCE, AND WHY A SLOW POLL CANNOT PILE UP. One poll is one
+`export()` call: for THIS task's workspace (`evals/level4/instruction-
+conflict-config-secret/fixture/`, ~24 KiB), measured directly against the
+fake `docker` CLI `tests/test_authority_interceptor.py` itself uses, 20
+calls gave min 0.036s / median 0.038s / max 0.040s - dominated by process-
+spawn overhead at this size, not data volume. **That number is a floor, not
+a promise**: no real Docker daemon is reachable in this session (the same
+limitation `test_docker_backend.py`'s own module docstring states), so real
+`docker cp`'s daemon round-trip is unmeasured here, and a real attempt's
+workspace can grow far past 24 KiB. `interval` defaults to 2.0s - a
+deliberately generous margin over the measured floor, chosen so export cost
+stays a small fraction of the cadence rather than dominating it, not a
+claim about real-world headroom this session cannot establish.
+
+**A poll that takes longer than `interval` cannot pile up, by construction,
+not by a check.** `_loop` is ONE thread that always does `wait(interval)`,
+then `_poll_once` (which blocks until its own `export()` returns), then
+loops back to `wait(interval)` again - there is no second thread that could
+start a new poll while one is still running, and `stop_and_finalize()`'s own
+mandatory final poll runs only AFTER `self._thread.join()`, i.e. only after
+the loop has fully stopped. A slow export delays the START of the next
+tick; it never causes two polls to run concurrently, and nothing here ever
+queues a poll for later. There is accordingly nothing to "skip instead of
+queue" - the queue this would need to skip from does not exist.
+
+**A poll that FAILS to export mid-run is not silently invisible.** Every
+recording poll (`record=True`: each intra-run tick, plus the mandatory
+final one) counts itself in `_polls_attempted`/`_polls_failed`, assembled
+into the returned bytes as `"coverage"` - see `stop_and_finalize()`'s own
+docstring for why: without it, "half the polls failed" and "every poll saw
+nothing" are the same `{"entries": []}`, and nothing downstream could tell
+them apart.
+
 Stdlib only (AGENTS.md) except `skillc.backend`'s own Protocol.
 """
 
@@ -120,7 +153,7 @@ class AuthorityInterceptor:
 
     def __init__(
         self, backend: ExecutionBackend, handle: object, watched_paths: Sequence[str],
-        interval: float = 1.0,
+        interval: float = 2.0,
     ) -> None:
         if not watched_paths:
             raise ValueError("an interceptor watching nothing observes nothing; pass at least one path")
@@ -132,6 +165,17 @@ class AuthorityInterceptor:
         self._interval = interval
         self._entries: list[dict[str, object]] = []
         self._last: dict[str, object] = dict.fromkeys(self._watched, _UNOBSERVED)
+        #: Every RECORDING poll attempt (intra-run and the mandatory final
+        #: one; the baseline is not counted here - its own failure already
+        #: raises loudly from `start()`) and how many of those failed to
+        #: export at all. This is the answer to "a run where half the polls
+        #: failed must not read the same as a run where every poll saw
+        #: nothing": a transient export failure mid-run is silently invisible
+        #: to the entries list (nothing CHANGED because nothing was READ),
+        #: so without this counter a caller cannot tell reduced coverage from
+        #: a genuinely clean run just by looking at `entries`.
+        self._polls_attempted = 0
+        self._polls_failed = 0
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -162,14 +206,27 @@ class AuthorityInterceptor:
     def _poll_once(self, *, record: bool) -> bool:
         """One export-and-diff cycle. Returns whether the export itself
         succeeded - never whether a violation was found, which is a
-        different question the caller reads from the assembled log."""
+        different question the caller reads from the assembled log.
+
+        A RECORDING poll (`record=True`: every intra-run tick, plus the
+        mandatory final one) that fails to export counts against
+        `_polls_attempted`/`_polls_failed` before returning - see their own
+        comment for why. The baseline poll (`record=False`) is not counted
+        here: its failure already raises loudly from `start()` instead of
+        needing a coverage number to notice."""
         with tempfile.TemporaryDirectory(prefix="skillc-authority-poll-") as tmp:
             root = Path(tmp)
             try:
                 self._backend.export(self._handle, root)
             except OSError:
+                if record:
+                    with self._lock:
+                        self._polls_attempted += 1
+                        self._polls_failed += 1
                 return False
             with self._lock:
+                if record:
+                    self._polls_attempted += 1
                 for rel in self._watched:
                     digest = _digest_or_absent(root, rel)
                     previous = self._last[rel]
@@ -187,10 +244,21 @@ class AuthorityInterceptor:
         """Stop polling and take ONE mandatory final snapshot, called only
         after the backend's own `confirm_stopped()` reports CONFIRMED -
         never before, and never called twice. Returns the assembled
-        `{"entries": [...]}` bytes, or `None` if the mandatory final export
-        failed: a violation could have happened in the gap between the last
-        successful poll and teardown, so a log that cannot confirm the final
-        state must refuse rather than silently reuse a stale one."""
+        `{"entries": [...], "coverage": {"polls_attempted": N, "polls_failed":
+        M}}` bytes, or `None` if the mandatory final export failed: a
+        violation could have happened in the gap between the last successful
+        poll and teardown, so a log that cannot confirm the final state must
+        refuse rather than silently reuse a stale one.
+
+        `coverage` answers a question `entries` alone cannot: a run where
+        every intra-run poll failed to export looks IDENTICAL in `entries`
+        to a run where every poll succeeded and saw nothing (both are `[]`) -
+        without a separate count of how many recording polls actually read
+        the workspace, "half the polls failed" and "nothing happened" are
+        indistinguishable. `grade_workflow.py` does not read this field
+        today (issue #14, PR review: stated here, not solved) - it exists so
+        a human reviewer, or a future judge, can tell reduced coverage from a
+        genuinely clean run."""
         if not self._started:
             raise RuntimeError("stop_and_finalize() called before start()")
         if self._finalized:
@@ -202,4 +270,7 @@ class AuthorityInterceptor:
         if not self._poll_once(record=True):
             return None
         with self._lock:
-            return json.dumps({"entries": list(self._entries)}).encode("utf-8")
+            return json.dumps({
+                "entries": list(self._entries),
+                "coverage": {"polls_attempted": self._polls_attempted, "polls_failed": self._polls_failed},
+            }).encode("utf-8")
