@@ -52,8 +52,22 @@ class Row:
         return self.status == self.expected and self.violated == self.expected_violated
 
 
+#: A candidate's trusted-log companion (issue #14) - sibling to `expected.json`,
+#: NEVER under `candidate/src/`, so it is never part of what gets frozen and
+#: graded as the candidate's own files. Absent is a real, meaningful case: no
+#: trusted observation was supplied, so the judge must read the candidate's
+#: own `src/disruption-log.json` as untrusted, whatever it claims.
+TRUSTED_LOG_NAME = "trusted-disruption-log.json"
+
+
+def _trusted_observation(candidate: Path) -> bytes | None:
+    path = candidate / TRUSTED_LOG_NAME
+    return path.read_bytes() if path.is_file() else None
+
+
 def status_of(grader: Path, candidate: Path, root: Path = HERE) -> tuple[str, str, frozenset[str], str]:
-    graded = verify.grade_directory(verify.GraderDef.load(root).with_judge(grader), candidate)
+    graded = verify.grade_directory(verify.GraderDef.load(root).with_judge(grader), candidate,
+                                    trusted_observation=_trusted_observation(candidate))
     return graded.status, graded.detail, graded.violated, graded.category
 
 

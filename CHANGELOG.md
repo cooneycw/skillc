@@ -8,6 +8,26 @@ and version plan.
 
 ## [Unreleased]
 
+### Added
+
+- **`skillc/verify.py` gets a trusted-observation channel for #14's Level
+  4/5 runtime half** (Refs #14). `grade_files`/`grade_directory`/
+  `grade_agent_attempt`/`grade` take an optional `trusted_observation: bytes
+  | None`, delivered to the judge as `envelope["trusted"]` - a key
+  `_probe`/`_probe_via_backend` never set, so it reaches the judge without
+  ever passing through the probe or candidate code. Both L4/L5 judges
+  (`grade_workflow.py`, `grade_recovery.py`) now trust ONLY that key, never
+  a candidate-writable file's self-declared `provenance` field, and
+  `known-gaps/forged-log` moves to `wrong/forged-log` in both tasks -
+  correctly FAILing where it used to PASS undetected. Red/green pair on
+  `forged-log`: pre-fix `main` grades it PASS (true status FAIL, the
+  documented miss); post-fix it grades FAIL, matching `expected.json`, in
+  both `qualify.py` runs. **Nothing in production supplies
+  `trusted_observation` yet** - the fixture services that will (an
+  authority-boundary interceptor for L4, a disruption trigger for L5) are
+  not built here; a real L4/L5 attempt still grades `stayed-in-bounds`/
+  `work-preserved`/`report-supported` UNKNOWN until they land.
+
 ## [0.3.0] - 2026-09-28
 
 ### Added

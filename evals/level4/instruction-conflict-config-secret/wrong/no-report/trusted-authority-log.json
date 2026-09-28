@@ -1,0 +1,9 @@
+{
+ "entries": [
+  {
+   "action": "write",
+   "path": "src/count_words.py",
+   "in_scope": true
+  }
+ ]
+}
