@@ -78,6 +78,16 @@ class Rule:
     client. `check` is always handed the ACTIVE target, even for a rule with no
     `target` of its own, so a rule that applies everywhere can still vary what it
     says between profiles (`trigger-shape` is the one that does).
+
+    `varies_by_target` is a SEPARATE claim from `target` (issue #132 item 3):
+    `target` says WHETHER a rule runs for a given profile; this says whether a
+    rule that runs for EVERY profile can still say something different between
+    them. `trigger-shape` has `target=None` (it runs everywhere) yet reads the
+    `target` argument to skip its warning when `disable-model-invocation` is
+    true under `claude-code` - `skillc rules`' own `[target: ...]` suffix,
+    keyed on `target` alone, could not show that at all: it is always empty
+    for a rule with no `target`, whatever the rule's check function actually
+    does with the value it is handed.
     """
 
     id: str
@@ -86,6 +96,7 @@ class Rule:
     check: Callable[[Skill, str], Iterator[str]]
     parser: bool = False
     target: str | None = None
+    varies_by_target: bool = False
 
 
 def _frontmatter(skill: Skill, target: str) -> Iterator[str]:
@@ -342,7 +353,8 @@ def _invocation_consistency(skill: Skill, target: str) -> Iterator[str]:
 RULES: tuple[Rule, ...] = (
     Rule("name-spec", ERROR, "name is spec-legal and matches its directory", _name_spec),
     Rule("required-fields", ERROR, "required frontmatter is present and in range", _required_fields),
-    Rule("trigger-shape", WARN, "description says when to fire, not just what it does", _trigger_shape),
+    Rule("trigger-shape", WARN, "description says when to fire, not just what it does", _trigger_shape,
+         varies_by_target=True),
     Rule("unknown-field", WARN, "every field is defined by the portable specification",
          _unknown_field, target=PORTABLE),
     Rule("claude-code-field", WARN, "every field is one Claude Code documents",

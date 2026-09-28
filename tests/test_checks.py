@@ -910,3 +910,37 @@ def test_invocation_consistency_is_scoped_to_claude_code(tmp_path: Path) -> None
     )
     assert checks.run(skill, target="claude-code") != []
     assert [f for f in checks.run(skill, target="portable") if f.rule == "invocation-consistency"] == []
+
+
+def test_trigger_shape_is_declared_as_varying_by_target() -> None:
+    """Issue #132 item 3: `trigger-shape` has `target=None` (it runs for
+    every profile) yet its own finding depends on the `target` it is handed
+    (it is silent under `claude-code` when `disable-model-invocation` is
+    true). `varies_by_target` is the declared claim that makes that
+    distinguishable from a rule that truly behaves the same everywhere."""
+    rule = checks.RULES_BY_ID["trigger-shape"]
+    assert rule.target is None
+    assert rule.varies_by_target is True
+
+
+def test_rules_command_shows_target_varying_behaviour(capsys: pytest.CaptureFixture[str]) -> None:
+    """Red case for issue #132 item 3: the pre-fix `[target: ...]` suffix was
+    keyed on `rule.target` alone, which is `None` for `trigger-shape` (it
+    runs everywhere), so `skillc rules` showed nothing distinguishing it from
+    a rule whose output truly never varies by target. Must now say so."""
+    rc = cli.cmd_rules(argparse.Namespace())
+    out = capsys.readouterr().out
+    assert rc == 0
+    lines = [line for line in out.splitlines() if line.strip().startswith("warn") and "trigger-shape" in line]
+    assert len(lines) == 1
+    assert "varies by target" in lines[0]
+
+
+def test_rules_command_does_not_tag_a_rule_that_does_not_vary(capsys: pytest.CaptureFixture[str]) -> None:
+    """Green case beside the red one: a rule with no declared `target` and no
+    `varies_by_target` must not carry either tag."""
+    cli.cmd_rules(argparse.Namespace())
+    out = capsys.readouterr().out
+    lines = [line for line in out.splitlines() if "body-budget" in line]
+    assert len(lines) == 1
+    assert "[" not in lines[0]

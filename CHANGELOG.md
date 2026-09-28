@@ -227,6 +227,16 @@ and version plan.
   matches the closing grammar) FAIL on `no-closing-match` - proving
   `finish-close-ref/grade_ref.py` itself ran, not slug-small-fix's.
 
+- **`skillc rules` can now show target-VARYING behaviour, not only
+  target-RESTRICTED rules** (Refs #132 item 3). `trigger-shape` has
+  `target=None` (it runs for every profile) yet its own finding depends on
+  the `target` value it is handed - it is silent under `claude-code` when
+  `disable-model-invocation` is true. The `[target: ...]` suffix, keyed on
+  `rule.target` alone, read the same - empty - for that rule and for one
+  whose output truly never varies. A new, separate `Rule.varies_by_target`
+  field (declared `True` for `trigger-shape`) now prints its own
+  `[varies by target]` tag alongside (or instead of) `[target: ...]`.
+
 - **`ref-depth` no longer double-reports one deep chain under two spellings
   of the same file** (Refs #132 item 4). Deduplication keyed on the
   second-hop link's RAW spelling (`set[tuple[str, str]]`), not its resolved
