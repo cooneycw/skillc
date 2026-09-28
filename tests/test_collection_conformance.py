@@ -329,6 +329,139 @@ def test_unknown_selected_skill_is_refused_before_any_docker_work(
         cc.acquire_collection("whatever", base, checkout=repo)
 
 
+# ------------------------------------------------------------- --task DIR
+# (issue #150-B3: the operator's discriminating run needs finish-close-ref
+# to actually be runnable, not silently graded as slug-small-fix).
+
+FINISH_CLOSE_REF_ROOT = Path(__file__).resolve().parent.parent / "evals" / "level1" / "finish-close-ref"
+
+
+def test_resolve_task_root_defaults_to_the_fixed_level1_task() -> None:
+    assert cc.resolve_task_root(None) == demo.GRADER_ROOT
+
+
+def test_resolve_task_root_accepts_another_level1_task_layout() -> None:
+    assert cc.resolve_task_root(str(FINISH_CLOSE_REF_ROOT)) == FINISH_CLOSE_REF_ROOT.resolve()
+
+
+@pytest.mark.parametrize("missing", ["goal.md", "fixture", "grader.json"])
+def test_resolve_task_root_refuses_a_directory_missing_the_layout(tmp_path: Path, missing: str) -> None:
+    """Red case: a directory carrying every Level 1 file EXCEPT one must be
+    refused, before any Docker work, naming the missing piece - not read as a
+    task whose grader.json merely happens to be absent from the plan."""
+    task_dir = tmp_path / "half-a-task"
+    task_dir.mkdir()
+    for name in ("goal.md", "grader.json"):
+        if name != missing:
+            (task_dir / name).write_text("x", encoding="utf-8")
+    if missing != "fixture":
+        (task_dir / "fixture").mkdir()
+
+    with pytest.raises(demo.SubjectRefused, match=missing):
+        cc.resolve_task_root(str(task_dir))
+
+
+def test_cmd_collection_run_refuses_a_task_dir_missing_the_layout(
+    tmp_path: Path, base: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """CLI-level twin of the above: exit 2, no traceback, before `new_run_root`
+    creates anything - mirrors `test_a_path_like_subject_is_refused_before_any_scratch_path`."""
+    from skillc import cli
+
+    empty = tmp_path / "not-a-task"
+    empty.mkdir()
+    assert cli.main(["collection-run", "whatever", "--task", str(empty), "--base", str(base)]) == 2
+    err = capsys.readouterr().err
+    assert "Traceback" not in err
+    assert "goal.md" in err
+    assert not any(base.iterdir())  # refused before new_run_root created a run root
+
+
+def test_plan_collection_attempt_with_task_records_that_task_s_case_and_a_different_grader_digest(
+    tmp_path: Path, base: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Red case (a): before this fix, EVERY collection's plan carried the
+    literal `{"id": "slug-small-fix", "revision": "r1"}` and
+    `verify.GraderDef.load(demo.GRADER_ROOT).identity()` regardless of
+    `--task` - so the operator's discriminating run against finish-close-ref
+    would have been ledgered, and graded, as slug-small-fix. With `task_root`
+    threaded through, the case id follows the task, and the grader identity
+    (which includes its digest) differs from the default task's."""
+    repo = _fixture_collection(tmp_path, {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd"]))
+    acquired = cc.acquire_collection("whatever", base, checkout=repo)
+
+    store_default = trial.open_store(tmp_path / "store-default", forbidden=[])
+    experiment_default, attempt_default = cc.plan_collection_attempt("whatever", acquired, store_default)
+    default_trial = experiment_default.trial_of(attempt_default)
+    assert default_trial["case"] == {"id": "slug-small-fix", "revision": "2"}
+
+    store_task = trial.open_store(tmp_path / "store-task", forbidden=[])
+    experiment_task, attempt_task = cc.plan_collection_attempt(
+        "whatever", acquired, store_task, task_root=FINISH_CLOSE_REF_ROOT,
+    )
+    task_trial = experiment_task.trial_of(attempt_task)
+    assert task_trial["case"] == {"id": "finish-close-ref", "revision": "1"}
+
+    default_grader, task_grader = default_trial["grader"], task_trial["grader"]
+    assert isinstance(default_grader, dict) and isinstance(task_grader, dict)
+    assert default_grader["digest"] != task_grader["digest"]
+
+
+def _finish_close_ref_run(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch, *, solution: Path,
+) -> cc.CollectionAgentResult:
+    repo = _fixture_collection(tmp_path, {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd"]))
+    acquired = cc.acquire_collection("whatever", base, checkout=repo)
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    experiment, attempt_id = cc.plan_collection_attempt(
+        "whatever", acquired, store, task_root=FINISH_CLOSE_REF_ROOT,
+    )
+    argv = _codex_argv(
+        home=_mapped_home(docker_state, attempt_id),
+        transcript_relpath=".codex/sessions/2026/01/01/rollout-fcr.jsonl", copy_solution=solution,
+    )
+    return cc.run_collection_agent_attempt(
+        subject_name="whatever", acquired=acquired, experiment=experiment, attempt_id=attempt_id,
+        backend=_backend(base, docker_state), grading_backend=_backend(base, docker_state), base=base,
+        base_argv=argv, task_root=FINISH_CLOSE_REF_ROOT, timeout=5,
+        credential_explicit_path=_fresh_codex_credential(tmp_path),
+    )
+
+
+def test_task_dir_run_is_graded_by_that_task_s_own_grader_pass_case(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Red case (c), PASS arm: a candidate writing finish-close-ref's own
+    reference answer must grade PASS. Before this fix, `run_level1_agent_attempt`
+    always read `demo.GRADER_ROOT` (slug-small-fix's goal/fixture/grader), so a
+    `--task finish-close-ref` run would have graded the WRONG task's grader
+    against inputs that grader does not recognise, never this one."""
+    result = _finish_close_ref_run(
+        tmp_path, base, docker_state, monkeypatch, solution=FINISH_CLOSE_REF_ROOT / "reference",
+    )
+    graded = result.record["graded"]
+    assert isinstance(graded, dict)
+    assert graded["status"] == "PASS"
+
+
+def test_task_dir_run_is_graded_by_that_task_s_own_grader_fail_case(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Red case (c), FAIL arm: the committed `wrong/negated-close` candidate
+    (a negated closing disclaimer that still matches the closing grammar)
+    must fail `no-closing-match` - proving `finish-close-ref/grade_ref.py`
+    itself ran, not merely that SOME grader returned a verdict."""
+    result = _finish_close_ref_run(
+        tmp_path, base, docker_state, monkeypatch, solution=FINISH_CLOSE_REF_ROOT / "wrong" / "negated-close",
+    )
+    graded = result.record["graded"]
+    assert isinstance(graded, dict)
+    assert graded["status"] == "FAIL"
+    assert "no-closing-match" in str(graded["detail"])
+
+
 # --------------------------------------------------------- fixture surface
 
 

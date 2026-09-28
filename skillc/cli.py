@@ -821,6 +821,11 @@ def cmd_collection_run(args: argparse.Namespace) -> int:
     credential_path = Path(args.credential) if args.credential else None
     agent_timeout = args.agent_timeout if args.agent_timeout is not None else cc.DEFAULT_AGENT_TIMEOUT
     try:
+        task_root = cc.resolve_task_root(args.task)
+    except demo.SubjectRefused as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+    try:
         run_root = cc.new_run_root(base, args.subject)
     except demo.SubjectRefused as exc:
         print(f"skillc: {exc}", file=sys.stderr)
@@ -848,7 +853,9 @@ def cmd_collection_run(args: argparse.Namespace) -> int:
         image_digest = demo.resolve_image_digest(docker_bin, image, None, args.timeout)
         store_path = run_root / f"{args.subject}-store"
         store = trial.open_store(store_path, forbidden=[])
-        experiment, attempt_id = cc.plan_collection_attempt(args.subject, acquired, store, image_digest=image_digest)
+        experiment, attempt_id = cc.plan_collection_attempt(
+            args.subject, acquired, store, image_digest=image_digest, task_root=task_root,
+        )
 
         backend, grading_backend = cc.agent_backends(
             image=image, base=run_root, docker_bin=docker_bin, daemon_timeout=args.timeout,
@@ -866,8 +873,8 @@ def cmd_collection_run(args: argparse.Namespace) -> int:
         result = cc.run_collection_agent_attempt(
             subject_name=args.subject, acquired=acquired, experiment=experiment, attempt_id=attempt_id,
             backend=backend, grading_backend=grading_backend, base=run_root,
-            base_argv=client_argv, timeout=agent_timeout, credential_explicit_path=credential_path,
-            minimum_credential_seconds=minimum,
+            base_argv=client_argv, task_root=task_root, timeout=agent_timeout,
+            credential_explicit_path=credential_path, minimum_credential_seconds=minimum,
         )
         daemon_after = reap.snapshot(docker_bin, timeout=args.timeout)
         host_after = cc.read_host_credential(acquired.subject.client, credential_path)
@@ -1767,6 +1774,11 @@ def build_parser() -> argparse.ArgumentParser:
              "per declared skill collection, skill-free canary mode (owed to the operator's live run)",
     )
     p_collection_run.add_argument("subject", help="a name under evals/subjects/<name>/subject.json")
+    p_collection_run.add_argument(
+        "--task", default=None,
+        help="a Level 1 task directory (goal.md, fixture/, grader.json) the agent attempt is graded against "
+             "(default: evals/level1/slug-small-fix - behaviour is unchanged without this flag)",
+    )
     p_collection_run.add_argument("--image", help="trial image (default: skillc.demo.DEFAULT_IMAGE)")
     p_collection_run.add_argument(
         "--docker-bin", help="docker executable (repeatable words, space-separated; default: docker)",

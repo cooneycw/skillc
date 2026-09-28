@@ -53,6 +53,32 @@ and version plan.
 
 ### Fixed
 
+- **`collection-run` can now target a Level 1 task other than
+  `slug-small-fix`, via `--task DIR`** (Refs #150). Nothing read `--task`
+  before this: `run_level1_agent_attempt` always read `demo.GRADER_ROOT`
+  (slug-small-fix's own `goal.md`/`fixture/`/`grader.json`) and
+  `plan_collection_attempt` ledgered every run with the literal
+  `{"id": "slug-small-fix", "revision": "r1"}` - itself already stale,
+  since `slug-small-fix/grader.json` declares revision `"2"`. So the
+  operator's own discriminating run against a different Level 1 task (e.g.
+  `finish-close-ref`) could not actually run that task at all: it would
+  install and prompt for the wrong fixture, get graded by the wrong grader,
+  and have the ledger record it as `slug-small-fix` regardless. `--task DIR`
+  (default unchanged) is threaded through `plan_collection_attempt` and
+  `run_level1_agent_attempt`/`run_collection_agent_attempt`; the plan's
+  `case.id`/`case.revision` are now read from `DIR`'s own `grader.json`,
+  never a literal. A `DIR` that is not a Level 1 task layout (missing
+  `goal.md`, `fixture/` or `grader.json`) is refused up front, before
+  `new_run_root` creates anything. Three groups of new tests, each verified
+  to fail on the pre-fix code: the plan for `--task finish-close-ref` carries
+  that task's case id and a grader digest that differs from slug-small-fix's;
+  the DEFAULT path's own case now records slug-small-fix's real `"2"`, not
+  `"r1"`; and a fake-docker run against `--task finish-close-ref` grades a
+  candidate writing the reference answer PASS, and the committed
+  `wrong/negated-close` candidate (a negated closing disclaimer that still
+  matches the closing grammar) FAIL on `no-closing-match` - proving
+  `finish-close-ref/grade_ref.py` itself ran, not slug-small-fix's.
+
 - **`leak-check` no longer false-positives on a linked worktree's `.git`
   pointer file, and now sees a checkout under `/workspace`, `/opt` or
   `/srv`** (Refs #134, items 4 and 5). `SKIP_DIRS` filtered directories
