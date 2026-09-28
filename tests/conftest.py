@@ -51,3 +51,20 @@ def _no_real_credential_defaults(
     monkeypatch.setenv("SKILLC_CLAUDE_CREDENTIAL", str(fake_home / "does-not-exist-claude-credential.json"))
     monkeypatch.setenv("SKILLC_CODEX_CREDENTIAL", str(fake_home / "does-not-exist-codex-credential.json"))
     monkeypatch.setattr(Path, "home", lambda: fake_home)
+
+
+#: A `DockerBackend.daemon_timeout` for tests that construct one against the
+#: fake `docker` CLI (`tests/fixtures/docker-backend/fake_docker.py`), a
+#: real subprocess spawned once per daemon call. Production's own default
+#: (`docker_backend.DAEMON_TIMEOUT`, 5.0s) is unchanged - it bounds a call to
+#: a REAL daemon, and item 1/2's own acceptance criterion (issue #174) is
+#: that a genuinely slow/unreachable daemon must still read as
+#: `Confirmation.UNKNOWN` (never a guess) at whatever bound production uses.
+#: This constant instead widens the TEST-ONLY margin against ordinary host
+#: scheduling contention around the FAKE CLI's own process-spawn overhead,
+#: which is not a containment question at all - see
+#: `tests/test_selection_probe.py`'s and `tests/test_degrade_collection_run.py`'s
+#: own DockerBackend constructions, and the fault-injection tests proving
+#: both sides: a delay under this bound still reports captured/confirmed,
+#: and a delay past it still reports UNKNOWN/inconclusive/quarantined.
+FAKE_DOCKER_DAEMON_TIMEOUT = 30.0

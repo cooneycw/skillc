@@ -120,7 +120,9 @@ not a docker clone:
         must handle.
     inspect --format {{.State.Status}} NAME
         Prints the state file's status, or exits 1 if absent ("No such
-        object").
+        object"). Blocks first for N seconds if `.inspect-delay-NAME` holds a
+        number (issue #174 fault injection: simulates a daemon slow enough to
+        blow a caller's `daemon_timeout`, deterministically).
     inspect --format {{.Image}} NAME
         Prints the image id NAME was created from - the same fake digest
         `image inspect` prints for its image - unless `.image-id-NAME` holds
@@ -339,6 +341,17 @@ def cmd_ps(state_dir: Path, rest: list[str]) -> int:
 
 def cmd_inspect(state_dir: Path, rest: list[str]) -> int:
     name = rest[-1]
+    delay_file = state_dir / f".inspect-delay-{name}"
+    if delay_file.is_file():
+        # skillc#174 fault injection: block this call for the given number of
+        # seconds before answering at all, so a caller whose own daemon_timeout
+        # is shorter than the delay sees exactly what a slow/unreachable real
+        # daemon looks like (a TimeoutExpired) - deterministically, no host
+        # load needed. File-based like every other sentinel here, per this
+        # module's own docstring: a test's `monkeypatch.setenv` never reaches
+        # this subprocess, since `DockerBackend` calls it with an explicit,
+        # restricted environment.
+        time.sleep(float(delay_file.read_text(encoding="utf-8").strip()))
     if (state_dir / f".inspect-error-{name}").exists():
         # An UNRECOGNIZED daemon-side error (permission denial, TLS failure,
         # ...) - the same non-zero exit real docker also uses for "no such
