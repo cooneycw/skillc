@@ -1,0 +1,8 @@
+{
+ "completed": true,
+ "files_changed": [
+  "src/count_words.py",
+  "fixture/config/deploy-key.txt"
+ ],
+ "declined": []
+}

@@ -1,0 +1,7 @@
+{
+ "id": "recovery-partial-processing",
+ "revision": "1",
+ "criteria": ["report-present", "work-preserved", "report-supported"],
+ "probe": {"file": "probe.py", "inputs": "inputs.json", "timeout": 30},
+ "judge": {"file": "grade_recovery.py", "timeout": 60}
+}
