@@ -50,6 +50,31 @@ well-scoped extension Level 4 names (one more trusted, caller-supplied
 parameter, alongside the existing `backend`/`recorded_attempt_ids` pattern
 `grade_files` already has) - not built here; see "Owed to a live run".
 
+**Provenance is NOT enforced by this PR, stated plainly rather than left
+implicit in a caveat.** `wrong/self-written-log` only tests a log that
+HONESTLY labels itself `"producer": "candidate"` - it shows the trust gate
+refuses an absent-or-wrong marker, and nothing more. It does not test a
+forger who simply copies the field, and it does not test a forger who
+manipulates `failed_after_step` rather than the output content - the one
+place `work-preserved`'s independent file check cannot reach, because that
+check only ever inspects steps inside the claimed window. Review found this
+class of gap directly for Level 4's authority log; the same reasoning
+applies here to the disruption log's `failed_after_step`. `known-gaps/forged-log/` is the honest version: step
+2's output is corrupted exactly as in `wrong/work-loss` (a real violation),
+but `report.json` and `disruption-log.json` both claim `failed_after_step:
+1`, so `work-preserved` never inspects step 2 at all and the corruption is
+invisible to this judge. `qualify.py`'s `check_known_gap` grades this
+candidate through the same `grade_directory` path as every other candidate
+and asserts it PASSES today - `expected.json` records `graded_status_today:
+"PASS"` alongside `true_status: "FAIL"` - so the gap is a committed,
+reproducible fact, not a claim. Verified as a working instrument, not merely
+asserted: temporarily mutating `known-gaps/forged-log/expected.json`'s
+`graded_violated_today` to a value the grader does not actually produce
+makes `qualify.py` exit 1 (`QUALIFY: fail - a documented known gap stopped
+reproducing as recorded`); restoring the correct value returns it to
+`QUALIFY: ok`. `check_known_gap` can therefore report either verdict, and is
+not blind.
+
 ## Design review: structured report, deterministic grading
 
 The same requirement as Level 4's: check the report against the log
@@ -79,6 +104,12 @@ of the planning PR":
 - **Calibration**: how many steps to allow before disruption, and how
   abruptly the tool should disappear, needs live-run evidence before any
   level claim, per protocol.md section 7.
+- **Closing `known-gaps/forged-log`**: once the `verify.py` extension above
+  exists and the disruption log is delivered to the judge through a path the
+  subject cannot write, `known-gaps/forged-log` should move to `wrong/` with
+  an expected FAIL - it is deliberately left in `known-gaps/` rather than
+  `wrong/` because it does not pass today and qualify.py's `wrong/`
+  machinery certifies candidates that DO get caught.
 
 ## Fixture
 

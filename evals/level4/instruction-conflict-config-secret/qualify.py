@@ -104,6 +104,34 @@ def candidates(root: Path) -> list[tuple[Path, str, frozenset[str]]]:
     return [(p, *_expectation(p, want)) for p, want in placed]
 
 
+def known_gaps(root: Path = HERE) -> list[Path]:
+    gaps_dir = root / "known-gaps"
+    return sorted(p for p in gaps_dir.iterdir() if p.is_dir()) if gaps_dir.is_dir() else []
+
+
+def check_known_gap(grader: Path, path: Path, root: Path = HERE) -> tuple[bool, str]:
+    """A known-gaps/ candidate is not certified as caught - it is certified
+    as a REPRODUCIBLE, documented miss. `expected.json` here names
+    `graded_status_today`/`graded_violated_today` (what this judge actually
+    produces, and must keep producing) plus `true_status`/`true_violated`
+    (what the scenario actually is, uncaught). ok=True means the recorded
+    miss still reproduces exactly; it does NOT mean the task is fine."""
+    try:
+        data = json.loads((path / "expected.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return False, f"unreadable expected.json: {exc}"
+    want_status, want_violated = data.get("graded_status_today"), data.get("graded_violated_today")
+    true_status = data.get("true_status")
+    if want_status is None or true_status is None or not isinstance(want_violated, list):
+        return False, "expected.json missing graded_status_today/true_status/graded_violated_today"
+    if want_status == true_status:
+        return False, "graded_status_today equals true_status - this is not a documented miss, move it to wrong/"
+    status, detail, violated, _category = status_of(grader, path, root)
+    if status != want_status or violated != frozenset(map(str, want_violated)):
+        return False, f"the miss no longer reproduces as documented: got {status} {sorted(violated)}, {detail}"
+    return True, f"reproduces as documented: graded {status} (true status is {true_status})"
+
+
 def certify(grader: Path, root: Path = HERE) -> tuple[bool, list[Row]]:
     rows = []
     for path, expected, expected_violated in candidates(root):
@@ -143,13 +171,27 @@ def main() -> int:
         _show(f"control {name} ({reason})", False, rows)
         if not held:
             blind.append(f"{name}: {reason}")
+    gaps = known_gaps()
+    drifted = []
+    for path in gaps:
+        ok, detail = check_known_gap(HERE / "grade_workflow.py", path)
+        mark = "ok " if ok else "BAD"
+        print(f"known gap {path.relative_to(HERE)}: {mark} {detail}")
+        if not ok:
+            drifted.append(f"{path.name}: {detail}")
     if not good:
         print("QUALIFY: fail - the grader does not discriminate the committed candidates")
         return 1
     if blind:
         print(f"QUALIFY: fail - broken-grader control(s) did not hold: {'; '.join(blind)}")
         return 1
-    print(f"QUALIFY: ok - grader certified; {len(CONTROLS)} broken graders refused")
+    if drifted:
+        print(f"QUALIFY: fail - a documented known gap stopped reproducing as recorded: {'; '.join(drifted)}")
+        return 1
+    print(
+        f"QUALIFY: ok - grader certified; {len(CONTROLS)} broken graders refused; "
+        f"{len(gaps)} known gap(s) reproduce as documented (NOT caught - see PROVENANCE.md)"
+    )
     return 0
 
 
