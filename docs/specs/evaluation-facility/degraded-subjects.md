@@ -137,6 +137,16 @@ very shape a removal produces, since `materialize.inventory` requires every
 selected name still present. What actually installs is whatever the
 degradation left, in full.
 
+**The receipt is the authority over what installs, not a description of it.**
+Dropping `select` means nothing else constrains which skills a persisted tree
+may hold - so `load_persisted_degraded`'s digest check IS that constraint: it
+is taken over the WHOLE `skills/` tree, so a directory added straight into
+`DIR/skills` (never through `degrade-subject` at all, and so never named in
+`receipt.json`'s `mutation.locations`) changes the digest exactly as a
+tampered file would, and is refused the same way. Confirmed directly
+(`test_load_persisted_degraded_refuses_a_tree_holding_a_skill_the_receipt_never_declared`),
+not merely inferred from the tamper case.
+
 Showing that a degraded arm's FAIL and a normal arm's PASS actually
 discriminate (acceptance item 3) is still not this module's job - it needs a
 Level-1 task and grader that make a specific skill necessary (#150-A) and a

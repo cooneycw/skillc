@@ -114,6 +114,25 @@ def test_load_persisted_degraded_refuses_a_tampered_tree(tmp_path: Path, monkeyp
         degrade.load_persisted_degraded(out, _subject())
 
 
+def test_load_persisted_degraded_refuses_a_tree_holding_a_skill_the_receipt_never_declared(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Orchestrator review: `load_persisted_degraded` must install exactly
+    the skills the receipt says survived, and refuse a persisted tree
+    holding one it doesn't list. The digest check already covers this - it
+    is over the WHOLE tree, so an ADDED directory changes it exactly as a
+    tampered file does - proven directly here rather than merely asserted."""
+    out = _build_degraded_out(tmp_path, monkeypatch, skills={"tdd": "tdd", "other": "other"}, removed="tdd")
+    # A skill the receipt's own mutation never mentions, added straight into
+    # the persisted tree - never through degrade.py at all.
+    smuggled = out / "skills" / "smuggled"
+    smuggled.mkdir()
+    (smuggled / "SKILL.md").write_text(_skill_md("smuggled"), encoding="utf-8")
+
+    with pytest.raises(degrade.DegradationRefused, match="digest"):
+        degrade.load_persisted_degraded(out, _subject())
+
+
 # ------------------------------------------------------ acquire_degraded_collection
 
 
