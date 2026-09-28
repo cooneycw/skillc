@@ -219,6 +219,41 @@ def test_happy_path_installs_the_collection_and_grades(
     assert graded["status"] == "PASS"
 
 
+def test_the_result_revision_is_what_was_acquired_never_the_declared_pin(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#150-B2 review: found while wiring a degraded run's identity that a
+    NORMAL run already misreported this - `CollectionAgentResult.revision`
+    read `acquired.subject.revision` (the DECLARED pin, `"v1"` here)
+    unconditionally, never `acquired.source.revision` (what
+    `acquire_collection` actually acquired - a `snapshot:<digest>` label,
+    matching `plan_collection_attempt`'s own "never a placeholder" rule for
+    `subject.digest`, which reads the same `acquired.source`). Confirmed red
+    on the pre-fix line (temporarily reverted, re-run, restored): asserted
+    `'snapshot:...' != 'v1'` and got `AssertionError: 'v1' != 'v1'`."""
+    repo = _fixture_collection(tmp_path, {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd"]))
+
+    acquired = cc.acquire_collection("whatever", base, checkout=repo)
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    backend = _backend(base, docker_state)
+    grading_backend = _backend(base, docker_state)
+    home = _mapped_home(docker_state, attempt_id)
+    argv = _codex_argv(home=home, transcript_relpath=".codex/sessions/2026/01/01/rollout-cc.jsonl")
+    cred_path = _fresh_codex_credential(tmp_path)
+
+    result = cc.run_collection_agent_attempt(
+        subject_name="whatever", acquired=acquired, experiment=experiment, attempt_id=attempt_id,
+        backend=backend, grading_backend=grading_backend, base=base,
+        base_argv=argv, prompt="Fix the slug helper.", timeout=5, credential_explicit_path=cred_path,
+    )
+
+    assert result.revision == acquired.source.revision
+    assert result.revision != acquired.subject.revision  # != "v1", the declared pin
+    assert result.revision.startswith("snapshot:")
+
+
 def test_skill_invocations_observes_a_spontaneous_selection(
     tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

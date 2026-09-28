@@ -118,11 +118,51 @@ finding) is the caller's job, checked by comparing the receipt's
 `mutation.locations` against an independently compiled list. It does not
 decide which skill or file to degrade (#150-A).
 
-**It does not yet wire a degraded subject into a live discriminating run**
-(acceptance item 3) - that is a separate PR (150-B2), which will teach
-`collection-run` (and whichever runner the agent-trial path uses) a
-`--degraded DIR` that calls `verify_persisted_skills` before installing that
-tree, and records the degraded identity - the `degraded:` label, the base
-identity, and `mutation.locations` - in the ledger and installation receipt,
-never the pinned revision. Until then, `degrade-subject` produces a
-persisted, digest-verifiable tree and receipt that no runner reads yet.
+**It wires into `collection-run` (150-B2), but does not itself decide when a
+degraded arm is discriminating.** `skillc collection-run --degraded DIR`
+(`skillc/cli.py`) re-verifies `DIR/skills` against its receipt
+(`degrade.load_persisted_degraded`, which calls `verify_persisted_skills`)
+before anything installs, and the resulting attempt reports the degraded
+identity throughout - `CollectionAgentResult.revision`, the exported
+`verified-result`'s `revision` field, everywhere - never the pin. This fixed
+a real, pre-existing bug found while wiring it: `run_collection_agent_attempt`
+read `acquired.subject.revision` (the DECLARED pin) unconditionally, for
+EVERY run, degraded or not - the acquired source's own identity
+(`acquired.source.revision`) was computed and then never read for this. A
+degraded acquisition's `select` is dropped for install purposes
+(`acquire_degraded_collection`): the original subject's `select` was already
+applied once, by `degrade-subject` itself, when it validated a removal or
+edit against the undegraded surface - re-applying it here would refuse the
+very shape a removal produces, since `materialize.inventory` requires every
+selected name still present. What actually installs is whatever the
+degradation left, in full.
+
+**The receipt is the authority over what installs, not a description of it.**
+Dropping `select` means nothing else constrains which skills a persisted tree
+may hold - so `load_persisted_degraded`'s digest check IS that constraint: it
+is taken over the WHOLE `skills/` tree, so a directory added straight into
+`DIR/skills` (never through `degrade-subject` at all, and so never named in
+`receipt.json`'s `mutation.locations`) changes the digest exactly as a
+tampered file would, and is refused the same way. Confirmed directly
+(`test_load_persisted_degraded_refuses_a_tree_holding_a_skill_the_receipt_never_declared`),
+not merely inferred from the tamper case.
+
+**The revision fix and #157's `--evidence-role` guard depend on each other,
+and the dependency is tested, not just stated.** The guard
+(`docs/specs/evaluation-facility/behavioral-eval-export.md`) recognises a
+degraded arm by `result.revision` starting with `degraded:` - a fact only
+true because of the fix immediately above. `test_cli_degraded_export_is_
+refused_by_default_role_and_published_with_control` runs a REAL `--degraded`
+attempt (fake docker, fake codex client, `run_collection_agent_attempt`
+unmocked) through `cli.main`'s own gating and export code, twice: the
+default role is refused with nothing written; `--evidence-role control`
+publishes. Confirmed as a red case by reverting the revision fix and
+re-running: the default-role call then wrongly published (exit 0, a
+`result-*.json` actually written) instead of being refused, because
+`result.revision` read back as the bare pin (`"v1"`), which the guard's own
+`.startswith("degraded:")` check does not recognise as anything to restrict.
+
+Showing that a degraded arm's FAIL and a normal arm's PASS actually
+discriminate (acceptance item 3) is still not this module's job - it needs a
+Level-1 task and grader that make a specific skill necessary (#150-A) and a
+live run this module cannot own.

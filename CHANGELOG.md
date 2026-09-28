@@ -64,6 +64,16 @@ and version plan.
   `lifecycle.py`, `agent_trial.py`, `demo` and `collection-run` all exist
   now (#8, #9, #10, #12); the section names them instead.
 
+- **`collection-run` reported the declared pin as an attempt's revision,
+  never what was actually acquired** (Refs #150-B2). Found while wiring
+  `--degraded DIR`: `run_collection_agent_attempt` read
+  `acquired.subject.revision` unconditionally, for every run - the acquired
+  source's own identity (`acquired.source.revision`, already computed and
+  used correctly for `subject.digest` in the plan) was never read for this.
+  Every attempt's `CollectionAgentResult.revision`, and every field derived
+  from it (the exported `verified-result`'s `revision`, the paste-back), now
+  reports what was actually acquired.
+
 - **The three records #12 could not yet prove** (Closes #12).
   - **The image that ran.** A Docker attempt journals a `backend-identity`
     event with the image id its container was created from, beside the
@@ -120,6 +130,17 @@ and version plan.
   consumer (`tests/fixtures/cpp-behavioral-eval-consumer/`) drives a contract
   test against real exported output. Full design:
   `docs/specs/evaluation-facility/behavioral-eval-export.md`.
+
+- **`skillc collection-run --degraded DIR`, installing a persisted degraded
+  subject instead of the pinned one** (Refs #150, acceptance item 3 (wiring
+  half); Refs #150-B2). Before this, `degrade-subject --out DIR` produced a
+  persisted, digest-verifiable tree that nothing read. `--degraded DIR` now
+  re-verifies `DIR/skills` against its own `receipt.json` before installing
+  anything, and the run records the degraded identity throughout - never the
+  pin. Original `select` is dropped for the degraded install
+  (`acquire_degraded_collection`): re-applying it would refuse the very
+  shape a skill removal produces (`materialize.inventory` requires every
+  selected name present); what remains after degradation installs in full.
 
 - **`pytest-timeout`, a 120s per-test default, and a fuller CI log** (#148). A
   stalled test used to hang the `gate` step without limit - Woodpecker
