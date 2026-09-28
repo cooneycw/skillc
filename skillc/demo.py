@@ -394,7 +394,17 @@ def run_subject_discovery(
     A listed entry rooted under `materialize.CLIENT_SYSTEM_DIR` is never
     `unexpected`, mirroring `materialize.derive_readiness`'s own native
     "foreign" check: the client seeds that skill into every home it is
-    pointed at, so it is not contamination, it is the client existing."""
+    pointed at, so it is not contamination, it is the client existing.
+
+    THE LIMIT THIS CARRIES: this exclusion is by PATH, not by provenance -
+    it cannot tell "the client's own seed" from "anything else placed under
+    that same directory name". An image that shipped a rule-stating or
+    otherwise contaminating skill under `.system` would be just as invisible
+    to this check as the client's real seed is. That is the same limit
+    `materialize.derive_readiness`'s own precedent already carries and
+    accepts (this function only matches it, never widens it), stated here
+    because #150-D's own reviewer asked for it named rather than left
+    implicit in the code alone."""
 
     def unmeasured(reason: str) -> tuple[dict[str, str], frozenset[str], str | None]:
         return {name: "UNMEASURED" for name in selected}, frozenset(), reason

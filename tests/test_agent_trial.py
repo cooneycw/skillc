@@ -459,6 +459,61 @@ def test_end_to_end_happy_path_for_codex(store: Path, base: Path, docker_state: 
     assert _graded(record)["status"] == "PASS"
 
 
+def test_a_pilot_shaped_baseline_arm_with_an_installation_receipt_context_still_keeps_b1(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """ADR 0005's "yes, narrow B1" ruling names this case explicitly: an
+    agent-trial arm that installs NOTHING stays on the B1 stand-in, even on
+    a codex client. `test_an_empty_declared_set_never_builds_a_receipt`
+    (test_agent_trial_readiness.py) already proves `_build_discovery_receipt`
+    returns `None` before touching its `backend` argument at all - but that
+    is a pure-function claim against a placeholder backend. This drives the
+    SAME empty-declared case through the real, integration-level
+    `run_one_attempt`, against a REAL fake-docker backend: a codex arm shaped
+    like the matched pilot's own baseline (no `extra_home_files`), but with
+    an actual `InstallationReceiptContext` in hand (`declared=frozenset()`) -
+    not simply omitting the parameter, which
+    `test_a_graded_attempt_stores_a_verified_result_bound_to_its_manifest_and_pin`
+    above already covers for a caller that never builds one at all.
+
+    The container count is the integration-level half of the pure-function
+    claim: `_build_discovery_receipt`'s early return happens before
+    `_measure_discovery` (and so before `backend.prepare`) is ever called,
+    so no `-baseline-`/`-discovery-` suffixed container should exist in the
+    real fake-docker state directory - not merely "the function returned
+    None" but "nothing was ever launched to find that out"."""
+    experiment, attempt_id = _planned(store)
+    argv = _fake_argv(
+        fmt="codex-fake", home=_mapped_home(docker_state, attempt_id),
+        transcript_relpath=".codex/sessions/2026/01/01/rollout-baseline.jsonl",
+        copy_solution=GRADER_ROOT / "reference",
+    )
+    receipt_context = at.InstallationReceiptContext(
+        declared=frozenset(), tree_digest="sha256:empty-surface", subject_locator="pilot/baseline",
+        subject_revision="v1", surface_name="codex-skills", cache={},
+    )
+
+    record = at.run_one_attempt(
+        backend=_backend(base, docker_state), experiment=experiment, attempt_id=attempt_id, client="codex",
+        base_argv=argv, prompt="Fix the slug helper.", skill_name="demo-skill",
+        surface={}, limits=Limits(timeout=5), base=base,
+        credential_explicit_path=_fresh_credential(tmp_path, "codex"),
+        grader=verify.GraderDef.load(GRADER_ROOT), grading_backend=_backend(base, docker_state),
+        receipt_context=receipt_context,
+    )
+
+    assert record["disposition"] == "captured"
+    assert not list(experiment.root.glob("receipt-*.json"))
+    [path] = experiment.root.glob("result-*.json")
+    stored = json.loads(path.read_text(encoding="utf-8"))
+    assert stored["verification"]["readiness_source"] == "agent-observation"
+    [readiness] = [c for c in stored["criteria"] if c["id"] == verify.READINESS_CRITERION]
+    assert readiness["outcome"] == "UNKNOWN"
+
+    launched = sorted(p.name for p in docker_state.glob("*.json"))
+    assert not any("-baseline-" in name or "-discovery-" in name for name in launched), launched
+
+
 # ------------------------------------------------- skill_invocations (issue #26)
 
 

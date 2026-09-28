@@ -162,6 +162,20 @@ outside reader can resolve.
   verifier refuses to apply it to an attempt whose own planned image digest
   differs.
 
+  **A named limit, not a silent one: the `.system` exclusion is by path,
+  not by provenance.** The discovery listing excludes anything the client
+  lists under `materialize.CLIENT_SYSTEM_DIR` from the contamination check
+  (`demo.run_subject_discovery`'s `unexpected` set), mirroring
+  `materialize.derive_readiness`'s own existing "foreign" precedent for the
+  same problem - without it, the client's own always-present seeded skill
+  reads as an undeclared contaminant on every attempt, never SATISFIED. But
+  the exclusion cannot distinguish "the client's real seed" from "anything
+  else an image placed under that same directory name" - a rule-stating or
+  otherwise contaminating skill shipped under `.system` would be just as
+  invisible to this check as the real seed is. This is the same limit the
+  native precedent already carries and accepts; #150-D only matches it,
+  never widens it.
+
 - **"a plus the follow-up issue"** (owner ruling, 2026-09-27): after the
   operator's live run of `skillc demo` at `8e06030` (evidence on #10), the
   owner chose between (a) accepting that run's real-daemon coverage (the
