@@ -85,6 +85,24 @@ and version plan.
 
 ### Added
 
+- **`skillc degrade-subject`, an operator-expressible degraded CPP subject**
+  (Refs #150). Before this, a degraded subject - "the same collection with
+  one or more skills mutated or removed" - was expressible only as a
+  Python/test-only parameter or by hand-editing an untested revision into a
+  `subject.json`. `degrade-subject <subject> (--checkout PATH | --revision
+  SHA) [--remove-skill NAME]... [--remove-file SKILL:PATH]...
+  [--override-file SKILL:PATH=LOCAL_FILE]... --out DIR` now builds one from
+  an alternate source plus zero or more whole-skill removals and single-file
+  removals/overrides across several skills in one declared mutation, and
+  persists BOTH a `receipt.json` (the recorded identity - always a
+  `degraded:` label, never the pin - and every location the mutation
+  touched) and the installable tree itself at `DIR/skills/`, so a future
+  runner can install exactly what the receipt describes and verify it first
+  (`verify_persisted_skills`, a digest check that refuses a tampered or
+  corrupted tree). A degradation whose recorded identity would be
+  indistinguishable from a normal, undegraded acquisition is refused.
+  Full design: `docs/specs/evaluation-facility/degraded-subjects.md`.
+
 - **`pytest-timeout`, a 120s per-test default, and a fuller CI log** (#148). A
   stalled test used to hang the `gate` step without limit - Woodpecker
   pipeline 258 ran 35+ minutes past a blocking write before anyone noticed -
