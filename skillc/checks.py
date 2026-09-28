@@ -230,7 +230,15 @@ def _ref_depth(skill: Skill, target: str) -> Iterator[str]:
     first_hop_paths = {
         resolved for link in first_hop_links if (resolved := (base / link).resolve()).is_file()
     }
-    chains: set[tuple[str, str]] = set()
+    # Keyed on the RESOLVED second-hop path (issue #132 item 4), not its raw
+    # spelling: `A.md` and `./A.md` name the same file, so the pre-fix
+    # `set[tuple[str, str]]` - keyed on spelling - reported the identical deep
+    # chain twice whenever a skill (or two of its own first-hop files) linked
+    # to it under two different spellings. `link` (the first hop) is kept as
+    # its own raw spelling in the key: that is the text a reader must edit to
+    # fix the chain, and two different first-hop spellings pointing at the
+    # same second-hop file are still two distinct edits, not one.
+    chains: dict[tuple[str, Path], str] = {}
     for link in first_hop_links:
         first = (base / link).resolve()
         if first not in first_hop_paths:
@@ -245,8 +253,8 @@ def _ref_depth(skill: Skill, target: str) -> Iterator[str]:
                 continue
             if resolved_second == skill_path or resolved_second in first_hop_paths:
                 continue
-            chains.add((link, second))
-    for link, second in sorted(chains):
+            chains.setdefault((link, resolved_second), second)
+    for (link, _resolved_second), second in sorted(chains.items(), key=lambda item: (item[0][0], item[1])):
         yield (
             f"{link} links on to {second}: references must stay one level "
             f"deep or the agent reads only part of the chain"

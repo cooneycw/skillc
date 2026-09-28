@@ -111,6 +111,45 @@ def test_ref_depth_does_not_double_report_a_repeated_first_hop_link(tmp_path: Pa
     )
 
 
+def test_ref_depth_does_not_double_report_a_second_hop_under_two_spellings(
+    tmp_path: Path,
+) -> None:
+    """Red case for issue #132 item 4: the pre-fix dedup keyed on the second
+    hop's RAW spelling (`set[tuple[str, str]]`), not its resolved path, so
+    `X.md` and `./X.md` - the same file - reported the identical deep chain
+    twice. Fix: key on the resolved second-hop path."""
+    skill_dir = tmp_path / "duplicate-spelling"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: duplicate-spelling\n"
+        "description: Use when the same second-hop file is linked under two spellings.\n"
+        "---\n"
+        "See [guide A](A.md).\n",
+        encoding="utf-8",
+    )
+    (skill_dir / "A.md").write_text(
+        "Extra in [the extra](X.md), also as [the same extra](./X.md).\n", encoding="utf-8",
+    )
+    (skill_dir / "X.md").write_text("Deep content.\n", encoding="utf-8")
+
+    findings = checks.run(Skill.load(skill_dir / "SKILL.md"), only="ref-depth")
+    assert len(findings) == 1
+    assert findings[0].detail == (
+        "A.md links on to X.md: references must stay one level deep or the "
+        "agent reads only part of the chain"
+    )
+
+
+def test_ref_depth_committed_duplicate_spelling_control_is_minimal() -> None:
+    """The committed `bad/duplicate-spelling` control (issue #132 item 4)
+    must itself report exactly one finding, not two - a control that still
+    double-reports would certify nothing about the fix."""
+    path = CONTROLS / "ref-depth" / "bad" / "duplicate-spelling" / "SKILL.md"
+    findings = checks.run(Skill.load(path), only="ref-depth")
+    assert len(findings) == 1
+
+
 def test_ref_depth_ignores_a_back_link_to_skill_md() -> None:
     """A second-hop link that resolves to SKILL.md itself is not a deeper
     chain - it is the entry point (issue #52)."""

@@ -227,6 +227,17 @@ and version plan.
   matches the closing grammar) FAIL on `no-closing-match` - proving
   `finish-close-ref/grade_ref.py` itself ran, not slug-small-fix's.
 
+- **`ref-depth` no longer double-reports one deep chain under two spellings
+  of the same file** (Refs #132 item 4). Deduplication keyed on the
+  second-hop link's RAW spelling (`set[tuple[str, str]]`), not its resolved
+  path, so `X.md` and `./X.md` - the same file - reported the identical
+  chain twice. Now keyed on the resolved second-hop path; the first hop's
+  own spelling is kept as-is in the key, since two different first-hop
+  spellings pointing at the same second-hop file are still two distinct
+  edits, not one. New `controls/ref-depth/bad/duplicate-spelling`, and two
+  new pytest cases, verified to report 2 findings (not 1) on the pre-fix
+  code.
+
 - **`required-fields` now owns the type of the optional fields it reads, not
   only the required ones** (Refs #132 item 1). `Skill.get` returns `None` for
   any non-string value, so `compatibility:` holding a mapping, `metadata:` a
