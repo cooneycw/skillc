@@ -387,7 +387,7 @@ def acquire_degraded_collection(subject_name: str, degraded_dir: Path) -> Acquir
     `plan_collection_attempt` and every stored record reads."""
     subject = demo.load_demo_subject(subject_name)
     try:
-        source = degrade.load_persisted_degraded(degraded_dir, subject)
+        source = degrade.load_persisted_degraded(degraded_dir, subject, subject_name=subject_name)
         install_subject = replace(subject, select=None)
         entries = materialize.inventory(install_subject, source)
     except (degrade.DegradationRefused, materialize.Refused) as exc:

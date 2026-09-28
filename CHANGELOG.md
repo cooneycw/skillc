@@ -89,6 +89,22 @@ and version plan.
 
 ### Fixed
 
+- **`degrade.load_persisted_degraded` now refuses a persisted degraded tree
+  built for a different subject or pinned to a different revision** (Refs
+  #150). Found reviewing #160: the receipt records both `"subject"` and
+  `"pinned_revision"`, but neither was ever compared against the caller's
+  own subject/pin - a degraded tree built from `cpp-codex` and loaded via
+  `collection-run cpp-claude-code --degraded DIR` installed silently under
+  the wrong subject and client, and a tree pinned to a stale revision
+  installed as if it were still the subject's current pin. Now refuses
+  (`DegradationRefused`) before reading anything else in the receipt when
+  `receipt["subject"] != subject_name` or
+  `receipt["pinned_revision"] != subject.revision`. Two new red cases,
+  reproduced directly against the pre-fix code (not merely asserted): a
+  subject-name mismatch and a pin mismatch each loaded successfully with no
+  refusal at all before this fix, returning a `Source` as if nothing were
+  wrong.
+
 - **`collection-run` can now target a Level 1 task other than
   `slug-small-fix`, via `--task DIR`** (Refs #150). Nothing read `--task`
   before this: `run_level1_agent_attempt` always read `demo.GRADER_ROOT`

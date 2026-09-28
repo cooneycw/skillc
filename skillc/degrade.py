@@ -322,9 +322,10 @@ def verify_persisted_skills(out: Path, expected_digest: str) -> Path:
     return target
 
 
-def load_persisted_degraded(out: Path, subject: materialize.Subject) -> materialize.Source:
+def load_persisted_degraded(out: Path, subject: materialize.Subject, *, subject_name: str) -> materialize.Source:
     """The read half of `persist_skills`/`degrade-subject --out DIR`: parse
-    `out/receipt.json`, verify `out/skills` against its own declared digest
+    `out/receipt.json`, verify it was built for THIS subject at THIS pin,
+    verify `out/skills` against its own declared digest
     (`verify_persisted_skills` - refuses a tampered or corrupted tree before
     anything installs it), and return a `materialize.Source` a runner can
     acquire from exactly like any other (issue #150-B2: `collection-run
@@ -339,7 +340,15 @@ def load_persisted_degraded(out: Path, subject: materialize.Subject) -> material
     Refuses (`DegradationRefused`) when `out/receipt.json` is missing,
     unreadable, or carries no usable `degraded` identity - before
     `verify_persisted_skills` is even reached, since there is nothing to
-    verify against."""
+    verify against; and, before that, when the receipt's own `subject` or
+    `pinned_revision` disagrees with the caller's `subject_name`/`subject.
+    revision` (issue #150-B3b review). Neither field was compared before this
+    - a degraded tree built for one subject (e.g. cpp-codex) would install
+    silently under another (e.g. cpp-claude-code, a different client), and a
+    tree pinned to a stale revision would install as if it were still the
+    subject's current pin. `subject_name` is a separate parameter because
+    `materialize.Subject` itself carries no name - the caller's own
+    `evals/subjects/<name>/` lookup key, never re-derived here."""
     receipt_path = out / "receipt.json"
     try:
         payload = json.loads(receipt_path.read_text(encoding="utf-8"))
@@ -347,7 +356,20 @@ def load_persisted_degraded(out: Path, subject: materialize.Subject) -> material
         raise DegradationRefused(f"no readable receipt.json at {out}: {exc}") from exc
     except ValueError as exc:
         raise DegradationRefused(f"{receipt_path} does not parse as JSON: {exc}") from exc
-    degraded_field = payload.get("degraded") if isinstance(payload, dict) else None
+    if not isinstance(payload, dict):
+        raise DegradationRefused(f"{receipt_path} does not parse as a JSON object")
+    receipt_subject = payload.get("subject")
+    if receipt_subject != subject_name:
+        raise DegradationRefused(
+            f"{receipt_path} was built for subject {receipt_subject!r}, not {subject_name!r}"
+        )
+    receipt_pin = payload.get("pinned_revision")
+    if receipt_pin != subject.revision:
+        raise DegradationRefused(
+            f"{receipt_path}'s pinned_revision {receipt_pin!r} does not match "
+            f"{subject_name!r}'s own pin {subject.revision!r}"
+        )
+    degraded_field = payload.get("degraded")
     if not isinstance(degraded_field, dict):
         raise DegradationRefused(f"{receipt_path} carries no 'degraded' identity")
     kind, revision, digest = degraded_field.get("kind"), degraded_field.get("revision"), degraded_field.get("digest")

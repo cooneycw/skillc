@@ -85,7 +85,7 @@ def test_load_persisted_degraded_returns_a_never_pinned_source(
     out = _build_degraded_out(tmp_path, monkeypatch, skills={"tdd": "tdd", "other": "other"}, removed="tdd")
     subject = _subject()
 
-    source = degrade.load_persisted_degraded(out, subject)
+    source = degrade.load_persisted_degraded(out, subject, subject_name="whatever")
 
     assert source.kind == "degraded"
     assert source.revision != subject.revision
@@ -99,7 +99,39 @@ def test_load_persisted_degraded_refuses_a_missing_receipt(tmp_path: Path) -> No
     out = tmp_path / "out"
     out.mkdir()
     with pytest.raises(degrade.DegradationRefused, match="no readable receipt"):
-        degrade.load_persisted_degraded(out, _subject())
+        degrade.load_persisted_degraded(out, _subject(), subject_name="whatever")
+
+
+def test_load_persisted_degraded_refuses_a_tree_built_for_a_different_subject(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Red case (issue #150-B3b review): a degraded tree built for subject A
+    (here "whatever"), loaded for subject B (here "someone-else"), must be
+    refused - before this check neither `receipt["subject"]` nor
+    `receipt["pinned_revision"]` was compared at all, so a degraded tree
+    built from one subject installed silently under any other, including a
+    different client. `_build_degraded_out` always builds under "whatever"
+    (line 68's own `degrade.acquire_degraded("whatever", ...)`), so loading
+    it for any other name is exactly this mismatch."""
+    out = _build_degraded_out(tmp_path, monkeypatch, skills={"tdd": "tdd", "other": "other"}, removed="tdd")
+
+    with pytest.raises(degrade.DegradationRefused, match="not 'someone-else'"):
+        degrade.load_persisted_degraded(out, _subject(), subject_name="someone-else")
+
+
+def test_load_persisted_degraded_refuses_a_tree_pinned_to_a_different_revision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Red case (issue #150-B3b review), the other half: the receipt's own
+    `pinned_revision` must match the CALLER's `subject.revision` - a
+    degraded tree built for the subject's revision "v1" (`_build_degraded_out`
+    always writes `pinned_revision="v1"`) must be refused when the subject
+    passed in now declares a DIFFERENT pin, e.g. because the subject
+    declaration moved on since the degraded tree was built."""
+    out = _build_degraded_out(tmp_path, monkeypatch, skills={"tdd": "tdd", "other": "other"}, removed="tdd")
+
+    with pytest.raises(degrade.DegradationRefused, match="does not match"):
+        degrade.load_persisted_degraded(out, _subject(revision="v2"), subject_name="whatever")
 
 
 def test_load_persisted_degraded_refuses_a_tampered_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -111,7 +143,7 @@ def test_load_persisted_degraded_refuses_a_tampered_tree(tmp_path: Path, monkeyp
     )
 
     with pytest.raises(degrade.DegradationRefused, match="digest"):
-        degrade.load_persisted_degraded(out, _subject())
+        degrade.load_persisted_degraded(out, _subject(), subject_name="whatever")
 
 
 def test_load_persisted_degraded_refuses_a_tree_holding_a_skill_the_receipt_never_declared(
@@ -130,7 +162,7 @@ def test_load_persisted_degraded_refuses_a_tree_holding_a_skill_the_receipt_neve
     (smuggled / "SKILL.md").write_text(_skill_md("smuggled"), encoding="utf-8")
 
     with pytest.raises(degrade.DegradationRefused, match="digest"):
-        degrade.load_persisted_degraded(out, _subject())
+        degrade.load_persisted_degraded(out, _subject(), subject_name="whatever")
 
 
 # ------------------------------------------------------ acquire_degraded_collection
