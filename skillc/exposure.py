@@ -104,7 +104,7 @@ from pathlib import Path
 
 from . import materialize
 from .materialize import Refused
-from .spec import FrontmatterError, parse_frontmatter, parse_yaml_document
+from .spec import FrontmatterError, parse_frontmatter, policy_hidden_cause
 
 EXPOSURE_SCHEMA = 1
 
@@ -493,24 +493,6 @@ def classify_marker(marker: Marker, rendered: str) -> dict[str, object]:
     return {"marker_id": marker.marker_id, "layer": marker.layer, "verdict": HIDDEN, "note": marker.note}
 
 
-def _policy_hidden_cause(skill_dir: Path) -> str | None:
-    """Why a skill might be legitimately absent from the listing, if known -
-    verified against codex-cli 0.157.1, 2026-09-26: a skill whose
-    `agents/openai.yaml` sets `policy.allow_implicit_invocation: false` is
-    absent from `debug prompt-input`'s listing entirely."""
-    openai_yaml = skill_dir / "agents" / "openai.yaml"
-    if not openai_yaml.is_file():
-        return None
-    try:
-        doc = parse_yaml_document(openai_yaml.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, FrontmatterError):
-        return None
-    policy = doc.get("policy")
-    if isinstance(policy, dict) and policy.get("allow_implicit_invocation") is False:
-        return "policy (agents/openai.yaml policy.allow_implicit_invocation: false)"
-    return None
-
-
 def _skill_description(skill_dir: Path) -> str | None:
     """A skill's own declared description - natural-language text that could
     legitimately contain almost anything, including an accidental marker
@@ -660,7 +642,7 @@ def check_exposure(
             if (name, path) in listed:
                 skill_verdicts.append({"skill": name, "verdict": EXPOSED, "cause": None})
             else:
-                cause = _policy_hidden_cause(source.surface_dir / entry.directory)
+                cause = policy_hidden_cause(source.surface_dir / entry.directory)
                 skill_verdicts.append({"skill": name, "verdict": HIDDEN, "cause": cause})
 
         return ExposureReport(client_name, "ok", None, marker_verdicts, skill_verdicts, client_version=version)

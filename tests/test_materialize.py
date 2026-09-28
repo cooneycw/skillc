@@ -845,6 +845,132 @@ def test_the_exempt_staleness_check_catches_a_stale_name() -> None:
     ]
 
 
+# -------------------------------------------------- discovery vs policy-hidden
+
+
+def _entry(directory: str, name: str) -> m.SkillEntry:
+    return m.SkillEntry(
+        directory=directory, name=name, files=[], required_refs=[],
+        static_findings=[], external=[], checksums="not-declared",
+    )
+
+
+def _write_skill(skills_root: Path, entry: m.SkillEntry, *, policy_hidden: bool = False) -> None:
+    skill_dir = skills_root / entry.directory
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(
+        f"---\nname: {entry.name}\ndescription: Use when {entry.name}.\n---\nBody.\n", encoding="utf-8",
+    )
+    if policy_hidden:
+        agents_dir = skill_dir / "agents"
+        agents_dir.mkdir(exist_ok=True)
+        (agents_dir / "openai.yaml").write_text(
+            "policy:\n  allow_implicit_invocation: false\n", encoding="utf-8",
+        )
+
+
+def _ok_listing(skills_root: Path, *entries: m.SkillEntry) -> m.Listing:
+    rows = [
+        (e.name, str((skills_root / e.directory / "SKILL.md").resolve()), f"Use when {e.name}.")
+        for e in entries
+    ]
+    return m.Listing(status="ok", rows=rows)
+
+
+def test_discovery_canary_excludes_a_correctly_installed_policy_hidden_skill(
+    tmp_path: Path,
+) -> None:
+    """Red case for issue #55, folded-in Nit Store item 4: a skill whose own
+    `agents/openai.yaml` sets `policy.allow_implicit_invocation: false` is
+    correctly absent from Codex's own listing by design - not a discovery
+    failure. The pre-fix expectation demanded every INSTALLED skill be
+    listed, so this exact, correctly-behaving skill read as VIOLATED."""
+    subject = _subject()
+    visible = _entry("visible", "visible")
+    hidden = _entry("hidden", "hidden")
+    entries = [visible, hidden]
+
+    treatment = m.Arm("treatment", tmp_path / "treatment")
+    _write_skill(treatment.skills, visible)
+    _write_skill(treatment.skills, hidden, policy_hidden=True)
+    # The listing a correctly-behaving client would produce: `visible` only -
+    # `hidden` is absent by the client's own policy handling, not a bug.
+    t_list = _ok_listing(treatment.skills, visible)
+
+    baseline = m.Arm("baseline", tmp_path / "baseline")
+    control = m.Arm("control", tmp_path / "control")
+    _write_skill(control.skills, visible)
+    c_list = _ok_listing(control.skills, visible)
+    b_list = m.Listing(status="ok", rows=[])
+
+    readiness = m.derive_readiness(
+        subject, subject.client_version, entries, treatment, t_list, baseline, b_list, control, c_list,
+    )
+    assert readiness.discovery_canary == m.SATISFIED, readiness.reasons["discovery_canary"]
+    assert "hidden" in readiness.reasons["discovery_canary"]
+
+
+def test_discovery_canary_still_flags_a_genuinely_missing_skill(tmp_path: Path) -> None:
+    """Green case beside the red one: a skill that is NOT policy-hidden and
+    is genuinely absent from the listing must still be reported VIOLATED -
+    proving the exclusion is scoped to policy-hidden skills, not a general
+    loosening of the discovery check."""
+    subject = _subject()
+    visible = _entry("visible", "visible")
+    missing = _entry("missing", "missing")  # installed, not policy-hidden, not listed
+    entries = [visible, missing]
+
+    treatment = m.Arm("treatment", tmp_path / "treatment")
+    _write_skill(treatment.skills, visible)
+    _write_skill(treatment.skills, missing)
+    t_list = _ok_listing(treatment.skills, visible)  # "missing" genuinely absent
+
+    baseline = m.Arm("baseline", tmp_path / "baseline")
+    control = m.Arm("control", tmp_path / "control")
+    _write_skill(control.skills, visible)
+    c_list = _ok_listing(control.skills, visible)
+    b_list = m.Listing(status="ok", rows=[])
+
+    readiness = m.derive_readiness(
+        subject, subject.client_version, entries, treatment, t_list, baseline, b_list, control, c_list,
+    )
+    assert readiness.discovery_canary == m.VIOLATED
+    assert "missing" in readiness.reasons["discovery_canary"]
+
+
+def test_baseline_control_skips_a_policy_hidden_first_entry(tmp_path: Path) -> None:
+    """Issue #55 item 4's other half: the planted negative control used to
+    be `entries[:1]` unconditionally. If that first entry is policy-hidden,
+    it is correctly absent from the CONTROL arm's own listing too, so
+    `planted <= _resolved(c_list)` fails - not because the negative control
+    is broken, but because the WRONG skill was chosen to plant. Must select
+    the first non-policy-hidden entry instead."""
+    subject = _subject()
+    hidden = _entry("hidden", "hidden")  # first in the list, policy-hidden
+    plantable = _entry("plantable", "plantable")
+    entries = [hidden, plantable]
+
+    treatment = m.Arm("treatment", tmp_path / "treatment")
+    _write_skill(treatment.skills, hidden, policy_hidden=True)
+    _write_skill(treatment.skills, plantable)
+    t_list = _ok_listing(treatment.skills, plantable)
+
+    control = m.Arm("control", tmp_path / "control")
+    # The control arm gets ONLY the plantable skill installed - a real
+    # negative-control setup plants one treatment skill into a baseline-like
+    # home to prove the LISTING mechanism itself can see it.
+    _write_skill(control.skills, plantable)
+    c_list = _ok_listing(control.skills, plantable)
+
+    baseline = m.Arm("baseline", tmp_path / "baseline")
+    b_list = m.Listing(status="ok", rows=[])
+
+    readiness = m.derive_readiness(
+        subject, subject.client_version, entries, treatment, t_list, baseline, b_list, control, c_list,
+    )
+    assert readiness.baseline_absence == m.SATISFIED, readiness.reasons["baseline_absence"]
+
+
 # ----------------------------------------------------------- the real client
 
 

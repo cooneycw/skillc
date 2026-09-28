@@ -57,7 +57,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .spec import FrontmatterError, parse_frontmatter
+from .spec import FrontmatterError, parse_frontmatter, policy_hidden_cause
 
 ADAPTER = {"name": "skillc-codex-skills", "version": "1"}
 
@@ -967,6 +967,19 @@ def derive_readiness(
     reasons: dict[str, str] = {}
     names = {e.name for e in entries}
 
+    # Issue #55, folded-in Nit Store item 4: computed ONCE, from the
+    # INSTALLED copy (`treatment.skills`) - readiness is a claim about what
+    # THIS run installed, never the source - and shared by both sections
+    # below. A skill whose own `agents/openai.yaml` sets
+    # `policy.allow_implicit_invocation: false` is absent from Codex's own
+    # listing by design (verified codex-cli 0.157.1, 2026-09-26 -
+    # `spec.policy_hidden_cause`, shared with `exposure.py`'s identical
+    # reading), not a discovery failure or a broken negative control.
+    policy_hidden = {
+        e.name for e in entries
+        if policy_hidden_cause(treatment.skills / e.directory) is not None
+    }
+
     def unusable(listing: Listing, arm: str) -> str | None:
         if listing.status != "ok":
             return f"{arm} canary {listing.status}: {listing.detail}"
@@ -975,25 +988,48 @@ def derive_readiness(
                     f"{subject.client_version}")
         return None
 
-    # Discovery: every selected skill is listed, from the file this run installed.
+    # Discovery: every selected skill is listed, from the file this run
+    # installed - EXCEPT a policy-hidden one. The pre-fix expectation
+    # demanded every installed skill be listed, so a correctly-installed
+    # policy-hidden skill read as "installed but not listed", VIOLATED for
+    # doing exactly what its own policy asks.
     why = unusable(t_list, "treatment")
     if why:
         discovery, reasons["discovery_canary"] = UNKNOWN, why
     else:
-        missing = sorted(n for n, _ in _expected(treatment, entries) - _resolved(t_list))
+        expected = {(n, p) for n, p in _expected(treatment, entries) if n not in policy_hidden}
+        missing = sorted(n for n, _ in expected - _resolved(t_list))
         if missing:
             discovery = VIOLATED
             reasons["discovery_canary"] = f"installed but not listed: {missing}"
         else:
             discovery = SATISFIED
-            reasons["discovery_canary"] = f"all {len(entries)} installed skill(s) listed"
+            checked = len(entries) - len(policy_hidden)
+            reasons["discovery_canary"] = f"all {checked} installed skill(s) listed"
+            if policy_hidden:
+                reasons["discovery_canary"] += (
+                    f"; {len(policy_hidden)} policy-hidden skill(s) excluded from "
+                    f"the expectation: {sorted(policy_hidden)}"
+                )
 
     # Baseline absence, and the planted control that proves this check can fail.
     why = unusable(b_list, "baseline") or unusable(c_list, "control")
     if why:
         absence, reasons["baseline_absence"] = UNKNOWN, why
+    elif (plantable := next((e for e in entries if e.name not in policy_hidden), None)) is None:
+        # Every entry is policy-hidden (issue #55 item 4's other half): no
+        # skill exists that a working client would list at all, so planting
+        # one into the control arm could never demonstrate the negative
+        # control - not a broken control, an UNTESTABLE one, reported as
+        # such rather than silently picking a policy-hidden skill that was
+        # certain to fail the check for a reason unrelated to what it tests.
+        absence = UNKNOWN
+        reasons["baseline_absence"] = (
+            "every candidate skill is policy-hidden; none can serve as the planted "
+            "control, so absence from the baseline proves nothing"
+        )
     else:
-        planted = _expected(control, entries[:1])
+        planted = _expected(control, [plantable])
         contaminated = sorted(n for n, _ in _resolved(b_list) if n in names)
         # Anything the baseline lists from outside the client's own directory is
         # foreign, wherever it lives and whatever it is called: a skill leaking in

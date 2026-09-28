@@ -324,6 +324,24 @@ and version plan.
   `controls/required-fields/bad/`, shown silently missed on the pre-fix code
   (`BLIND required-fields silent on 3 of 8 known-bad input(s)`).
 
+- **`materialize`'s discovery canary no longer fails a correctly-installed
+  policy-hidden skill, and its planted negative control no longer picks
+  one** (Refs #55, folded-in Nit Store item 4). A skill whose own
+  `agents/openai.yaml` sets `policy.allow_implicit_invocation: false` is
+  correctly absent from Codex's own skill listing by design (verified
+  codex-cli 0.157.1, 2026-09-26) - not a discovery failure. The pre-fix
+  `discovery_canary` expected every INSTALLED skill to be listed, so this
+  exact, correctly-behaving skill read as `installed but not listed`,
+  VIOLATED. Separately, `baseline_absence`'s planted negative control used
+  `entries[:1]` unconditionally; if that first entry happened to be
+  policy-hidden, it was correctly absent from the control arm's own listing
+  too, misreporting "negative control failed" for an unrelated reason. The
+  policy read (`spec.policy_hidden_cause`, moved out of `exposure.py` so
+  both modules share one reading of `agents/openai.yaml` rather than two
+  that could drift) now excludes policy-hidden skills from the discovery
+  expectation and steers the planted control away from one. Three new
+  tests, two verified to fail on the pre-fix code.
+
 - **`exposure._plant_always_loaded` no longer plants a marker past the
   boundary it claims to test** (Refs #55, folded-in Nit Store item 1).
   `room = limit - len(base) - len(inside) - 1` could go negative when the
