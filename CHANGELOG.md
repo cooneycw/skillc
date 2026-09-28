@@ -10,6 +10,24 @@ and version plan.
 
 ### Added
 
+- **A worked configuration-boundary comparison for #28's evidence-refresh
+  half** (Refs #28). Step 1's eligibility survey found no reproducible
+  subject-behaviour failure in retained evidence (12 of 12 stored/graded
+  attempts across both matched-pilot bundles show no task failure - see
+  the issue comment for the precise field-by-field accounting), so case
+  delivery stays incomplete per #28's own stop condition; nothing was
+  invented and no new trial was run to manufacture one.
+  [`docs/specs/evaluation-facility/configuration-boundary-example.md`](docs/specs/evaluation-facility/configuration-boundary-example.md)
+  delivers the issue's other half instead: for each of six identity
+  dimensions (skills, transitive in-tree helpers, client version/config,
+  task, grader, image/environment), whether a deliberately changed
+  configuration still falls inside the `evidence-2026-09-27-gpt-6-astra`
+  bundle's claim, using only the existing `trial-ledger`/`verified-result`
+  identity fields - no new schema, no watcher. Also names the one change
+  those identities cannot see: a skill's own instructions reaching outside
+  its pinned collection tree at run time (a network fetch, an unpinned
+  host tool) moves none of the six recorded identities.
+
 - **`make verify` and a real `## Verify` command, covering every
   `.woodpecker/ci.yml` step** (Refs #134, items 1 and 2). Nothing ran
   `skillc selftest` or `ci/negative-control.sh` locally without a Makefile,
