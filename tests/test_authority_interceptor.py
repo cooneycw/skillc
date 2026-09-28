@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from conftest import FAKE_DOCKER_DAEMON_TIMEOUT
 
 from skillc import docker_backend as d
 from skillc.authority_interceptor import AuthorityInterceptor
@@ -44,7 +45,13 @@ def docker_state(tmp_path: Path) -> Path:
 
 
 def _backend(base: Path, docker_state: Path) -> d.DockerBackend:
-    return d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+    # issue #174: this file polls export() repeatedly per test - a wider
+    # TEST-only daemon_timeout against the fake docker CLI, not production's
+    # own DAEMON_TIMEOUT. See conftest.FAKE_DOCKER_DAEMON_TIMEOUT.
+    return d.DockerBackend(
+        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state),
+        daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT,
+    )
 
 
 def _prepared(backend: d.DockerBackend, attempt_id: str) -> object:
