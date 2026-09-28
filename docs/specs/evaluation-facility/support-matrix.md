@@ -93,8 +93,16 @@ repository.
   cancellation - `docker kill` reaches the container's own init/placeholder
   process, never a separately exec'd session, so the escalation only bounds
   when the whole attempt stops, not whether the subject got a chance to
-  flush anything (a true per-subject signal needs an in-container
-  supervisor - [Nit Store #20](https://github.com/cooneycw/skillc/issues/20))
+  flush anything. Scoped out rather than fixed under issue #133 item 2
+  (originally routed to [Nit Store #20](https://github.com/cooneycw/skillc/issues/20)):
+  no client-side workaround reaches the subject either (signaling the local
+  `docker exec` process only kills that client tool, not the remote
+  session), and a `docker top` plus targeted `docker exec ... kill` mitigation
+  was evaluated and rejected - ambiguous with concurrent exec sessions or a
+  subject that forks, and unverifiable against a real daemon from this
+  repository's fake CLI alone. The real fix - an in-container supervisor
+  that forwards the signal, which likely needs a #78 image change - is
+  issue #158
 - dependency resolution inside the container - `install()` copies in any
   declared surface entry naming an existing host path; it does not run a
   package manager or resolve a dependency closure

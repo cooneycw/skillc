@@ -238,6 +238,17 @@ This is the policy, chosen before any real private or model evidence exists.
   that lane; see `docker_backend.py`'s own module docstring. A Docker attempt's
   local host footprint from execution itself is bounded already, by
   construction, not merely un-audited.
+- **On the Docker lane, a timed-out or cancelled subject gets no graceful
+  TERM** (issue #133 item 2, scoped out rather than fixed - see
+  `support-matrix.md`'s matching unobserved-claims entry for why no
+  client-side workaround reaches it, and issue #158 for the real fix).
+  `docker kill` signals the container's own init/placeholder process, never
+  the sibling `docker exec` session the subject actually runs as, so the
+  subject is not asked to shut down - it simply dies when the container is
+  removed at the `SIGKILL` escalation or at teardown. There is no clean
+  shutdown on this path: any output the subject would have flushed on
+  receiving TERM, any checkpoint it would have written, any lock it would
+  have released, is lost.
 - **POSIX only**: process groups and `O_NOFOLLOW`.
 - **Budgets are recorded, not enforced.** A trial's `budget` is stored in the
   ledger. Only the wall-clock `timeout` passed to `run_attempt` is enforced.

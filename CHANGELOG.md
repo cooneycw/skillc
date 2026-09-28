@@ -80,6 +80,18 @@ and version plan.
 
 ### Changed
 
+- **Documented, not fixed: no non-image workaround delivers TERM to a
+  Docker-lane subject** (Refs #133 item 2). `docker kill` reaches only the
+  container's init/placeholder process, never the sibling `docker exec`
+  session the subject runs as, and neither signaling the local `docker exec`
+  client nor a `docker top` plus targeted `kill` (evaluated, rejected -
+  ambiguous with concurrent sessions or a forking subject, unverifiable
+  against a real daemon from the fake CLI alone) reaches it either. A timed-
+  out or cancelled subject therefore gets no graceful shutdown and simply
+  dies at teardown; `capture.md`, `support-matrix.md` and `describe()`'s
+  unobserved claims now say so explicitly and cross-reference the real fix,
+  filed separately as it needs a pinned trial image change: #158.
+
 - **Documented, not fixed: the unbounded local spool write is the
   bare-subprocess lane's limit, not the Docker lane's** (Refs #133 item 5,
   re-checked rather than assumed). `DockerBackend.execute()` never opens a

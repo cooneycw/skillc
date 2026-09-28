@@ -551,7 +551,9 @@ class DockerBackend:
                  "cancellation - docker kill reaches this attempt's CONTAINER (its own "
                  "init/placeholder process), never a separately exec'd session, so the "
                  "SIGTERM-then-SIGKILL escalation only bounds when the whole attempt stops, "
-                 "not whether the subject itself got a chance to flush anything"),
+                 "not whether the subject itself got a chance to flush anything (issue #133 "
+                 "item 2, scoped out rather than fixed there; the real fix - an in-container "
+                 "supervisor forwarding the signal - is issue #158)"),
                 ("dependency resolution inside the container - install() copies in any "
                  "declared surface entry naming an existing host path or carrying raw "
                  "bytes; it does not run a package manager or resolve a dependency closure"),
