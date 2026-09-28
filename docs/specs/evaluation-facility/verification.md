@@ -212,9 +212,12 @@ replace this rule rather than widen it.
 - the verifier is quarantined after lost containment.
 
 A grade holds the experiment lock (`trial.experiment_lock`, #12) from its first
-read to its stored result. Every other committed write to the experiment takes
-the same lock: `capture`, `finalize`, `retry`, a stored receipt or result, and
-an agent observation record. A sibling attempt's capture therefore waits for
+read to its stored result, and grades the experiment as stored once the lock is
+held (reopened, so a sibling's earlier retry is the current ledger). Every other
+committed write to the experiment takes the same lock: `capture`, `finalize`,
+`cleanup_workspace`, `retry` (which also revises the stored ledger, never a stale
+copy), `Experiment.open`'s recovery of an interrupted ledger commit, a stored
+receipt or result, and an agent observation record. A sibling attempt's capture therefore waits for
 the grade instead of landing mid-grade. The lock is a `flock` on the experiment
 directory's own descriptor, so taking it writes nothing the snapshot could see.
 

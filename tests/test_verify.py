@@ -970,3 +970,75 @@ def test_a_grade_after_a_siblings_retry_is_not_refused(store: Path, base: Path, 
     _freeze(experiment, second, _run(experiment, second, base, REFERENCE))
     t.retry(t.Experiment.open(experiment.root), second)  # another controller's instance
     assert verify.grade(experiment, first, GRADER, grading)["status"] == "PASS"
+
+
+def test_a_repeated_cleanup_of_a_finished_sibling_waits_for_the_grade(
+    store: Path, base: Path, grading: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Counter-model re-review (#12): `cleanup_workspace` is safe to repeat and
+    journals `cleaned` each time; on a FINALIZED sibling that journal is
+    compared, so an unlocked repeat mid-grade refused the grade."""
+    import threading
+
+    experiment, first, second = _plan_two(store)
+    _freeze(experiment, first, _run(experiment, first, base, REFERENCE))
+    _freeze(experiment, second, _run(experiment, second, base, REFERENCE))
+    marks: dict[str, float] = {}
+    real_grade_files = verify.grade_files
+
+    def during_grade(*args: object, **kwargs: object) -> verify.Graded:
+        graded = real_grade_files(*args, **kwargs)  # type: ignore[arg-type]
+
+        def repeat_cleanup() -> None:
+            t.cleanup_workspace(t.Experiment.open(experiment.root), second)
+            marks["cleaned_at"] = time.monotonic()
+
+        thread = threading.Thread(target=repeat_cleanup)
+        thread.start()
+        marks_thread.append(thread)
+        time.sleep(0.5)
+        marks["grade_returning_at"] = time.monotonic()
+        return graded
+
+    marks_thread: list[threading.Thread] = []
+    monkeypatch.setattr(verify, "grade_files", during_grade)
+    assert verify.grade(experiment, first, GRADER, grading)["status"] == "PASS"
+    marks_thread[0].join(timeout=30)
+    assert marks["cleaned_at"] > marks["grade_returning_at"]
+
+
+def test_ledger_recovery_waits_for_the_experiment_lock(
+    store: Path, base: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Counter-model re-review (#12): `Experiment.open` completes an
+    interrupted ledger commit by WRITING the ledger, so it must hold the lock.
+    A child process holds it; recovery here must wait, then still complete."""
+    import subprocess
+
+    experiment, first, _second = _plan_two(store)
+    _freeze(experiment, first, _run(experiment, first, base, REFERENCE))
+    real_replace = t._replace
+
+    def crash(path: Path, data: bytes) -> None:
+        raise OSError("simulated crash after the history entry")
+
+    monkeypatch.setattr(t, "_replace", crash)
+    with pytest.raises(OSError):
+        t.retry(experiment, first)  # history appended, ledger not yet replaced
+    monkeypatch.setattr(t, "_replace", real_replace)
+    holder = subprocess.Popen(
+        [sys.executable, "-c",
+         ("import sys, time\nfrom pathlib import Path\nfrom skillc import trial\n"
+          "with trial.experiment_lock(Path(sys.argv[1])):\n"
+          "    print('held', flush=True)\n    time.sleep(1.5)\n"),
+         str(experiment.root)],
+        stdout=subprocess.PIPE, text=True,
+    )
+    try:
+        assert holder.stdout is not None and holder.stdout.readline().strip() == "held"
+        started = time.monotonic()
+        recovered = t.Experiment.open(experiment.root)
+        assert time.monotonic() - started > 0.7
+    finally:
+        holder.wait(timeout=10)
+    assert len(list(recovered.attempts())) == 3  # the interrupted retry was completed
