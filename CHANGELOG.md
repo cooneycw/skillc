@@ -61,6 +61,30 @@ and version plan.
   branch fires correctly AND that real-pip mode's own install logic still
   excludes `wrong/scratch-copy`'s undeclared fix.
 
+- **A level-qualification method, planning only, worked once against Level
+  1** (Refs #15, #139, #150-D, #12, #147). Restates protocol.md §7's
+  qualification requirement (predefined task population, repeat policy,
+  controlled graders, mandatory acceptance, regression evidence from
+  earlier levels, four-way reporting) as a table naming what the project
+  already has toward each requirement and what it does not, then applies
+  it once against the only real Level 1 dataset that exists - the #12/#147
+  matched pilot (n=3 matched treatment/baseline pairs, all task-PASS, all
+  stored INCONCLUSIVE under #139's B1). The worked example's own result:
+  three-for-three does not support a failure-rate estimate of any kind
+  without a stated sampling plan, which the project does not have yet -
+  the honest report is "no failure observed in three attempts," not a
+  qualification claim. Verdict: Level 1 is `not evaluated` under the
+  method, not `exploratory` and not `qualified`, because the bundle covers
+  one task rather than a declared family - the same gap #13's and #14's
+  own landed tasks (one each for Levels 2-5) currently share, so this is
+  the project's present shape everywhere, not a Level-1-specific finding.
+  No threshold, breadth number, or qualification claim is proposed for any
+  level; #150-D is noted as unmerged and, even once merged, as a mechanism
+  that produces no pilot data by itself - only a live run does. #15 stays
+  open; this is its
+  planning half, not its closing evidence.
+  [`docs/specs/evaluation-facility/level-qualification-method.md`](docs/specs/evaluation-facility/level-qualification-method.md).
+
 - **An optional managed-container backend, client-only: `skillc.managed_backend.ManagedBackend`**
   (Refs #64). A second `ExecutionBackend` implementation (#10's seam) for a
   platform that already manages its own containers and is willing to run one
