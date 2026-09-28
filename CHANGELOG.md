@@ -198,6 +198,20 @@ and version plan.
   from it (the exported `verified-result`'s `revision`, the paste-back), now
   reports what was actually acquired.
 
+- **`DockerBackend.install()`'s readiness is per-entry, not all-or-nothing, and
+  checks the image's own baseline** (Refs #133). `discovery_canary` used to be
+  VIOLATED only when NOTHING installed, so one missing declared entry among
+  several successful copies was invisible; `readiness["entries"]` now names
+  every declared entry's own outcome (`installed`, `missing`, or
+  `not-a-path` for surface metadata never meant to be copied), and
+  `discovery_canary` is VIOLATED whenever any entry is genuinely missing.
+  `baseline_absence` used to be permanently, unverifiably `SATISFIED`; a
+  top-level listing of the container's workspace, taken before any copy,
+  now catches a declared key the image already shipped (by name; a
+  same-named file whose content differs from the image's own is not yet
+  distinguished, see `describe()`'s `unobserved`). Both red cases (a
+  partial install, a pre-seeded image skill) fail on the pre-fix code.
+
 - **The three records #12 could not yet prove** (Closes #12).
   - **The image that ran.** A Docker attempt journals a `backend-identity`
     event with the image id its container was created from, beside the

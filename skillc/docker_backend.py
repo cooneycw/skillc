@@ -555,9 +555,12 @@ class DockerBackend:
                 ("dependency resolution inside the container - install() copies in any "
                  "declared surface entry naming an existing host path or carrying raw "
                  "bytes; it does not run a package manager or resolve a dependency closure"),
-                ("baseline_absence - always reported SATISFIED without checking the "
-                 "image's own contents for an undeclared skill already present, matching "
-                 "the reference FakeBackend's own scope (tests/test_lifecycle.py)"),
+                ("baseline_absence's own content check - it compares declared entry NAMES "
+                 "against a top-level listing of the container's workspace taken before any "
+                 "copy, so a same-named file whose CONTENT differs from what the image "
+                 "already shipped is not distinguished from one this attempt genuinely "
+                 "installed; only the name-level contamination case is caught (issue #133 "
+                 "item 4)"),
             ),
         )
 
@@ -643,11 +646,39 @@ class DockerBackend:
         install successfully and then be unreadable to the very identity
         meant to use it. Building the tar ourselves lets every entry's
         ownership be set to the fixed candidate identity regardless of what
-        the host file is actually owned by."""
+        the host file is actually owned by.
+
+        PER-ENTRY READINESS (issue #133 item 4): `discovery_canary` used to
+        be all-or-nothing - VIOLATED only when NOTHING installed, so one
+        missing entry among several was invisible whenever at least one
+        other entry succeeded. `readiness["entries"]` now names every
+        declared entry's own outcome (`installed`, `missing` - a `str`/`Path`
+        value that does not resolve to an existing host file, the real bug
+        this item exists to surface - or `not-a-path` - a value that was
+        never meant to be copied, like `SURFACE_EXECUTABLE_KEY`'s metadata
+        list, and must not be confused with a missing file), and
+        `discovery_canary` is SATISFIED only when something was declared,
+        something was installed, AND no entry is `missing`.
+
+        BASELINE INSPECTION (issue #133 item 4): before any entry is copied,
+        `_workspace_baseline` lists what `CONTAINER_WORKSPACE` already holds
+        - the image's own contents, never this attempt's own installs, since
+        nothing has been copied yet. Any declared key already present there
+        is a pre-seeded skill this run did not actually install, and
+        `baseline_absence` reports it VIOLATED rather than the previous
+        permanent, unverified SATISFIED. The listing itself can fail (an
+        unreachable daemon) independently of every later `docker cp`, in
+        which case `baseline_absence` is UNKNOWN, never a guessed SATISFIED -
+        the same "UNKNOWN never reaps" posture `confirm_stopped()` already
+        holds elsewhere in this module."""
         assert isinstance(handle, _Handle)
         nonce = surface.get(CANARY_NONCE_KEY)
         declared = {k: v for k, v in surface.items() if k != CANARY_NONCE_KEY}
 
+        baseline, baseline_observed = self._workspace_baseline(handle)
+        preexisting = sorted(k for k in declared if k in baseline)
+
+        entries: dict[str, str] = {}
         installed = 0
         for key, value in declared.items():
             if isinstance(value, bytes):
@@ -661,11 +692,15 @@ class DockerBackend:
                 # error, so the probe failed with "no such file" the first
                 # time this combination was actually exercised).
                 payload = _owned_tar_bytes(key, value)
-            else:
+            elif isinstance(value, (str, Path)):
                 host_path = _as_existing_path(value)
                 if host_path is None:
+                    entries[key] = "missing"
                     continue
                 payload = _owned_tar(host_path, key)
+            else:
+                entries[key] = "not-a-path"
+                continue
             try:
                 copied = subprocess.run(
                     [*self.docker_bin, "cp", "-", f"{handle.name}:{CONTAINER_WORKSPACE}"],
@@ -679,25 +714,31 @@ class DockerBackend:
                     f"docker cp failed installing {key!r} for {handle.attempt_id!r}: "
                     f"{copied.stderr.decode('utf-8', errors='replace').strip()}"
                 )
+            entries[key] = "installed"
             installed += 1
 
         # `discovery_canary`/`installed` reflect what was actually copied,
         # never merely what was declared (cross-model review, PR #85): a
         # surface entry naming a missing path, or a non-path value, must not
-        # certify readiness for something that was never materialized.
+        # certify readiness for something that was never materialized. Since
+        # #133 item 4, a missing entry among several successes is no longer
+        # invisible either - see the method docstring's "PER-ENTRY READINESS".
+        missing = [k for k in entries if entries[k] == "missing"]
         readiness: dict[str, object] = {
-            "discovery_canary": "SATISFIED" if installed else "VIOLATED",
-            # Never independently verified - always reported SATISFIED,
-            # matching the reference FakeBackend's own scope
-            # (tests/test_lifecycle.py). See describe()'s `unobserved`.
-            "baseline_absence": "SATISFIED",
+            "discovery_canary": "SATISFIED" if (declared and installed and not missing) else "VIOLATED",
+            "baseline_absence": (
+                "UNKNOWN" if not baseline_observed else "VIOLATED" if preexisting else "SATISFIED"
+            ),
             "declared": len(declared),
             "installed": installed,
+            "entries": entries,
             # What ACTUALLY ran (#12), asked of this attempt's own container -
             # never `self.image`, which may be a floating tag. None when the
             # daemon cannot say, never a guess.
             "image_digest": self._image_id(handle),
         }
+        if preexisting:
+            readiness["preexisting"] = preexisting
         if isinstance(nonce, str) and nonce:
             payload = _owned_tar_bytes(CANARY_HOST_FILENAME, nonce.encode("utf-8"))
             canary_copied: subprocess.CompletedProcess[bytes] | None
@@ -715,6 +756,33 @@ class DockerBackend:
             if canary_copied is not None and canary_copied.returncode == 0:
                 readiness["canary_path"] = CANARY_RESULT_FILENAME
         return readiness
+
+    def _workspace_baseline(self, handle: _Handle) -> tuple[frozenset[str], bool]:
+        """Every top-level entry already present under `CONTAINER_WORKSPACE`
+        before `install()` copies anything - the image's own baseline, never
+        this attempt's own installs, since this is called before the first
+        `docker cp`. `(names, True)` on a successful listing; `(frozenset(),
+        False)` when the daemon could not be asked at all, which callers
+        must read as UNKNOWN, never as a confirmed-empty baseline (issue
+        #133 item 4; the same "UNKNOWN never reaps" posture
+        `confirm_stopped()` already holds for this module).
+
+        `ls -1A` runs relative to `-w CONTAINER_WORKSPACE`'s own working
+        directory rather than naming `CONTAINER_WORKSPACE` in the argv, so
+        no absolute-path remapping is needed against the fake CLI fixture
+        either (`tests/fixtures/docker-backend/fake_docker.py`'s own
+        `cwd=`-only containment)."""
+        try:
+            proc = subprocess.run(
+                [*self.docker_bin, "exec", "-w", CONTAINER_WORKSPACE, "--", handle.name,
+                 "sh", "-c", "ls -1A ."],
+                capture_output=True, text=True, env=handle.env, check=False, timeout=self.daemon_timeout,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return frozenset(), False
+        if proc.returncode != 0:
+            return frozenset(), False
+        return frozenset(line.strip() for line in proc.stdout.splitlines() if line.strip()), True
 
     def _image_id(self, handle: _Handle) -> str | None:
         """The id of the image this attempt's container was created from

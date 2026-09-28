@@ -98,9 +98,11 @@ repository.
 - dependency resolution inside the container - `install()` copies in any
   declared surface entry naming an existing host path; it does not run a
   package manager or resolve a dependency closure
-- `baseline_absence` - always reported `SATISFIED` without checking the
-  image's own contents for an undeclared skill already present, matching the
-  reference `FakeBackend`'s own scope (`tests/test_lifecycle.py`)
+- `baseline_absence`'s own content check - it compares declared entry NAMES
+  against a top-level listing of the container's workspace taken before any
+  copy (issue #133 item 4), so a same-named file whose CONTENT differs from
+  what the image already shipped is not distinguished from one this attempt
+  genuinely installed; only the name-level contamination case is caught
 
 Regenerate this section from `DockerBackend(image=..., base_dir=...).describe()`
 directly rather than hand-editing it out of sync with the code - it is a
@@ -163,7 +165,7 @@ they drift apart.
 | Case | EF codes | Status | Where |
 |---|---|---|---|
 | CPP and a second collection | EF-01 | demonstrated-elsewhere | `tests/test_materialize.py` |
-| Missing required skill/helper or baseline contamination | EF-03 | demonstrated-here | `tests/test_docker_backend.py::test_install_reports_discovery_canary_violated_when_nothing_is_declared` |
+| Missing required skill/helper or baseline contamination | EF-03 | demonstrated-here | `tests/test_docker_backend.py::test_install_reports_discovery_canary_violated_when_nothing_is_declared`, `::test_install_reports_a_partial_install_as_violated_not_masked_by_a_success`, `::test_install_reports_baseline_contamination_for_a_preexisting_entry` |
 | Out-of-root write, symlink escape or repeated cleanup | EF-02, EF-10 | demonstrated-here (repeated cleanup, host immutability) / owed-to-live-run (escape prevention) | `tests/test_docker_conformance.py` |
 | Incorrect output with forged success prose/JSON | EF-04, EF-08 | demonstrated-elsewhere | `tests/test_verify.py::test_forged_success_claims_do_not_change_the_verdict` |
 | Agent replaces local tests, checker or pass file | EF-05, EF-08 | demonstrated-elsewhere | `tests/test_verify.py::test_replaced_local_tests_and_grader_do_not_change_the_verdict` |

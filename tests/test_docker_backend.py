@@ -356,6 +356,73 @@ def test_install_counts_a_non_path_surface_value_without_copying_it(
     assert readiness["declared"] == 1
     assert readiness["installed"] == 0
     assert readiness["discovery_canary"] == "VIOLATED"
+    assert readiness["entries"] == {"meta": "not-a-path"}
+    backend.destroy(handle)
+
+
+def test_install_reports_a_partial_install_as_violated_not_masked_by_a_success(
+    base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """Red case for issue #133 item 4: the pre-fix `discovery_canary` derivation
+    was `"SATISFIED" if installed else "VIOLATED"` - VIOLATED only when NOTHING
+    installed, so one missing helper among several successes was invisible.
+    Two entries declared, one a real file and one a host path that does not
+    exist: `installed == 1` alone used to read as success. Fails on that
+    pre-fix code (discovery_canary SATISFIED here); the fix requires every
+    declared entry to install, and names which one did not."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000005c")
+    good_file = tmp_path / "good.txt"
+    good_file.write_text("present\n")
+    missing_path = str(tmp_path / "does-not-exist.txt")
+    readiness = backend.install(handle, {"good.txt": good_file, "missing.txt": missing_path})
+    assert readiness["declared"] == 2
+    assert readiness["installed"] == 1
+    assert readiness["entries"] == {"good.txt": "installed", "missing.txt": "missing"}
+    assert readiness["discovery_canary"] == "VIOLATED"
+    backend.destroy(handle)
+
+
+def test_install_reports_baseline_contamination_for_a_preexisting_entry(
+    base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """Red case for issue #133 item 4: an undeclared skill already present in
+    the IMAGE (never installed by this attempt) used to be invisible -
+    `baseline_absence` was hardcoded permanently SATISFIED. Seeds a file at
+    the container's own workspace path before `install()` runs (simulating
+    something baked into the image), declares a REAL host file at that same
+    key, and asserts the pre-existing entry is reported rather than silently
+    accepted as this attempt's own install. Fails on the pre-fix code, which
+    never inspected the container's contents before copying and always
+    reported `baseline_absence: SATISFIED`."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000005d")
+    assert isinstance(handle, d._Handle)
+    container_workspace = docker_state / f"{handle.name}.fsroot" / "work"
+    container_workspace.mkdir(parents=True, exist_ok=True)
+    (container_workspace / "baked-in.txt").write_text("was already here\n")
+
+    surface_file = tmp_path / "baked-in.txt"
+    surface_file.write_text("declared content\n")
+    readiness = backend.install(handle, {"baked-in.txt": surface_file})
+    assert readiness["baseline_absence"] == "VIOLATED"
+    assert readiness["preexisting"] == ["baked-in.txt"]
+    # The install itself still proceeds and is still reported per-entry -
+    # contamination is a distinct fact from whether THIS run's copy worked.
+    assert readiness["entries"] == {"baked-in.txt": "installed"}
+    backend.destroy(handle)
+
+
+def test_install_reports_baseline_absence_satisfied_for_a_clean_workspace(
+    base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000005e")
+    surface_file = tmp_path / "clean.txt"
+    surface_file.write_text("content\n")
+    readiness = backend.install(handle, {"clean.txt": surface_file})
+    assert readiness["baseline_absence"] == "SATISFIED"
+    assert "preexisting" not in readiness
     backend.destroy(handle)
 
 
