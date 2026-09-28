@@ -25,6 +25,7 @@ from skillc import docker_backend as d
 FAKE_DOCKER = Path(__file__).resolve().parent / "fixtures" / "docker-backend" / "fake_docker.py"
 FAKE_CLIENT = Path(__file__).resolve().parent / "fixtures" / "agent-trial" / "fake_agent_client.py"
 GRADER_ROOT = Path(__file__).resolve().parent.parent / "evals" / "level1" / "slug-small-fix"
+FINISH_CLOSE_REF_ROOT = Path(__file__).resolve().parent.parent / "evals" / "level1" / "finish-close-ref"
 
 
 def _docker_bin(state_dir: Path) -> list[str]:
@@ -399,3 +400,76 @@ def test_cli_degraded_export_is_refused_by_default_role_and_published_with_contr
     ])
     assert control_code == 0
     assert list(control_evidence.glob("result-*.json"))
+
+
+# -------------------------------------------------------------- --task + --degraded
+
+
+def test_task_and_degraded_compose(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Issue #150-B3b review: `--task DIR` and `--degraded DIR` must compose
+    - `collection-run cpp-codex --task evals/level1/finish-close-ref
+    --degraded DIR` must run THAT task over THAT degraded tree, not silently
+    fall back to the default slug-small-fix task just because the
+    acquisition came from a degraded tree instead of the pinned pipeline.
+    `task_root` is resolved once in `cmd_collection_run`, before either
+    acquisition branch, and threaded into both `plan_collection_attempt` and
+    `run_collection_agent_attempt` regardless of which ran - this proves
+    that composition end to end with BOTH the degraded acquisition AND a
+    non-default task exercised for real, not merely wired the same way."""
+    collection = _fixture_collection(tmp_path, {"tdd": "tdd", "other": "other"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd", "other"]))
+    degraded = degrade.acquire_degraded(
+        "whatever", tmp_path / "degrade-base", degrade.Mutation(remove_skills=("other",)), checkout=collection,
+    )
+    out = tmp_path / "degraded-out"
+    out.mkdir()
+    (out / "receipt.json").write_text(
+        json.dumps(degrade.receipt(degraded, pinned_revision="v1"), indent=1) + "\n", encoding="utf-8",
+    )
+    degrade.persist_skills(degraded, out)
+
+    base = tmp_path / "work"
+    base.mkdir()
+    docker_state = tmp_path / "docker-state"
+    acquired = cc.acquire_degraded_collection("whatever", out)
+    # The degradation actually took: "other" removed, "tdd" survives -
+    # otherwise this test could pass by accident on an undegraded install.
+    assert not (acquired.source.surface_dir / "other").exists()
+    assert (acquired.source.surface_dir / "tdd").is_dir()
+
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    experiment, attempt_id = cc.plan_collection_attempt(
+        "whatever", acquired, store, task_root=FINISH_CLOSE_REF_ROOT,
+    )
+    planned_trial = experiment.trial_of(attempt_id)
+    # The task composes: the ledgered case is finish-close-ref's own, never
+    # slug-small-fix's (the default task_root's case) - proving --task was
+    # not silently dropped just because this acquisition is degraded.
+    assert planned_trial["case"] == {"id": "finish-close-ref", "revision": "1"}
+
+    backend = _backend(base, docker_state)
+    grading_backend = _backend(base, docker_state)
+    name = d._container_name(attempt_id)
+    home = docker_state / f"{name}.fsroot" / "home" / "candidate"
+    argv = [
+        sys.executable, str(FAKE_CLIENT), "--format", "codex-fake", "--home", str(home),
+        "--transcript-relpath", ".codex/sessions/2026/01/01/rollout-td.jsonl",
+        "--copy-solution", str(FINISH_CLOSE_REF_ROOT / "reference"),
+    ]
+    cred_path = _fresh_codex_credential(tmp_path / "cred.json")
+
+    result = cc.run_collection_agent_attempt(
+        subject_name="whatever", acquired=acquired, experiment=experiment, attempt_id=attempt_id,
+        backend=backend, grading_backend=grading_backend, base=base,
+        base_argv=argv, task_root=FINISH_CLOSE_REF_ROOT, timeout=5, credential_explicit_path=cred_path,
+    )
+
+    # The fixture (candidate writing finish-close-ref's own reference answer)
+    # grades PASS - proving finish-close-ref/grade_ref.py actually ran, not
+    # slug-small-fix's grader, over the degraded tree's install.
+    assert result.record["disposition"] == "captured"
+    graded = result.record.get("graded")
+    assert isinstance(graded, dict) and graded.get("status") == "PASS"
+    # And the #160 invariant still holds through this composition: never the
+    # pin, always the degraded identity.
+    assert result.revision.startswith("degraded:")
