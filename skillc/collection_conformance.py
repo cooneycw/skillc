@@ -494,6 +494,7 @@ def run_level1_agent_attempt(
     timeout: float = 30,
     credential_explicit_path: str | Path | None = None,
     minimum_credential_seconds: float = credential.MINIMUM_REMAINING_SECONDS,
+    receipt_context: agent_trial.InstallationReceiptContext | None = None,
 ) -> dict[str, object]:
     """One real (or, in tests, scripted-fake) codex attempt against a Level 1
     task (`task_root`, default `demo.GRADER_ROOT`), in skill-free canary mode,
@@ -502,7 +503,13 @@ def run_level1_agent_attempt(
     matched pilot's baseline arm (issue #12) passes `{}`, so both arms go
     through this one path and differ ONLY in what is installed - never a
     second copy of the prompt, fixture or grader wiring that could drift from
-    the first."""
+    the first.
+
+    `receipt_context` (#150-D) is caller-supplied and passed straight
+    through to `agent_trial.run_one_attempt` - `None` (the default) for
+    every EXISTING caller (matched pilot's own arms), so nothing here
+    changes their behavior; `run_collection_agent_attempt` below is the one
+    caller that builds and passes one."""
     resolved_task_root = task_root if task_root is not None else demo.GRADER_ROOT
     resolved_prompt = prompt if prompt is not None else (resolved_task_root / "goal.md").read_text(encoding="utf-8")
     resolved_surface = surface if surface is not None else _fixture_surface(resolved_task_root / "fixture")
@@ -516,6 +523,7 @@ def run_level1_agent_attempt(
         cli_version=cli_version,
         grader=grader, grading_backend=grading_backend,
         extra_home_files=extra_home_files,
+        receipt_context=receipt_context,
     )
 
 
@@ -535,6 +543,7 @@ def run_collection_agent_attempt(
     timeout: float = 30,
     credential_explicit_path: str | Path | None = None,
     minimum_credential_seconds: float = credential.MINIMUM_REMAINING_SECONDS,
+    discovery_cache: agent_trial.DiscoveryCache | None = None,
 ) -> CollectionAgentResult:
     """Install `acquired`'s declared, selected skill files into the same
     container as one real (or, in this module's own tests, scripted-fake)
@@ -561,13 +570,31 @@ def run_collection_agent_attempt(
     `_fixture_surface`'s own comment) - reading them is not inventing a
     prompt, since bullet 2 fixes one task per run for every collection; a
     caller that needs a different one (this module's own tests, a red case)
-    may still override either."""
+    may still override either.
+
+    `discovery_cache` (#150-D): a caller-owned cache reused across multiple
+    calls that share `subject.digest`/the ledger's planned image digest -
+    `None` (the default) is a fresh, single-use cache, correct for a lone
+    `skillc collection-run` invocation. `acquired.files` empty means nothing
+    is installed, so no receipt context is built and the B1 stand-in applies,
+    same as a matched-pilot baseline arm."""
+    receipt_context = (
+        agent_trial.InstallationReceiptContext(
+            declared=frozenset(f.skill for f in acquired.files),
+            tree_digest=acquired.source.digest,
+            subject_locator=acquired.subject.locator,
+            subject_revision=acquired.source.revision,
+            surface_name=acquired.subject.surface,
+            cache=discovery_cache if discovery_cache is not None else {},
+        ) if acquired.files else None
+    )
     record = run_level1_agent_attempt(
         experiment=experiment, attempt_id=attempt_id, backend=backend, grading_backend=grading_backend,
         base=base, base_argv=base_argv, extra_home_files=_collection_home_files(acquired.source, acquired.files),
         client=acquired.subject.client, cli_version=acquired.subject.client_version, prompt=prompt, surface=surface,
         task_root=task_root, timeout=timeout,
         credential_explicit_path=credential_explicit_path, minimum_credential_seconds=minimum_credential_seconds,
+        receipt_context=receipt_context,
     )
     discovery, discovery_reason = transcript_discovery(record, {f.skill for f in acquired.files})
     cleaned = [e for e in experiment.events(attempt_id) if e.get("event") == "cleaned"]

@@ -830,6 +830,15 @@ class DockerBackend:
             return frozenset(), False
         return frozenset(line.strip() for line in proc.stdout.splitlines() if line.strip()), True
 
+    def image_id(self, handle: object) -> str | None:
+        """Public entry point for `_image_id` (#150-D): a caller that never
+        calls `install()` at all - the agent-trial discovery-listing
+        containers, which use `deliver_home_file` instead - still needs "the
+        image that ran" (#151's own discipline: never the configured tag) for
+        a container it prepared itself."""
+        assert isinstance(handle, _Handle)
+        return self._image_id(handle)
+
     def _image_id(self, handle: _Handle) -> str | None:
         """The id of the image this attempt's container was created from
         (`docker inspect --format {{.Image}}`), or `None` when the query

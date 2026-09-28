@@ -76,7 +76,9 @@ Stdlib only (AGENTS.md), plus this repository's own modules.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import secrets
 import tempfile
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -85,7 +87,7 @@ from pathlib import Path, PurePosixPath
 
 from . import credential, demo, records, trial, trial_bootstrap, verify
 from . import transcript_adapter as ta
-from .backend import ExecutionBackend, Limits
+from .backend import BackendUnavailable, Confirmation, ExecutionBackend, Limits
 from .docker_backend import CANARY_RESULT_FILENAME, DockerBackend
 from .lifecycle import run_through_backend
 from .trial_bootstrap import CanaryNotSatisfied, MCPServerSpec, PromptDeliveryError
@@ -723,6 +725,236 @@ def readiness_from_discovery_listings(
     }
 
 
+#: (image digest, delivered-tree digest) - review point 1: baseline_absence
+#: is a property of the image alone, and discovery is a property of
+#: (image, tree, delivery method), so caching on this key means a run with
+#: several attempts sharing one image/tree pays for 2 extra containers total,
+#: not 2 per attempt. There is only one delivery method today
+#: (`deliver_home_file`), so it is not itself part of the key; a second
+#: method would need to become one.
+DiscoveryCacheKey = tuple[str, str]
+
+#: A fresh cache dict, one per caller-defined "run" (typically one CLI
+#: invocation) - never a module-level global, so tests (and two concurrent
+#: runs) never share state by accident.
+DiscoveryCache = dict[DiscoveryCacheKey, tuple["_DiscoveryMeasurement", "_DiscoveryMeasurement"]]
+
+
+@dataclass(frozen=True)
+class _DiscoveryMeasurement:
+    listing: dict[str, str]
+    unexpected: frozenset[str]
+    reason: str | None
+    image_digest: str | None
+
+
+def _measure_discovery(
+    backend: DockerBackend, id_prefix: str, client_argv: Sequence[str],
+    extra_home_files: Mapping[str, bytes], selected: frozenset[str],
+    limits: Limits, base: Path,
+) -> _DiscoveryMeasurement:
+    """Prepare a fresh, dedicated, throwaway container - NEVER the agent's
+    own. `DockerBackend.execute()`'s own docstring is explicit: "Intended to
+    be called ONCE per handle"; it stops the container before returning. So
+    a before-delivery listing, an after-delivery listing and the real agent
+    invocation cannot share one container - this mirrors `demo.py`'s own
+    install+list+destroy lifecycle for its non-agent subject-discovery leg
+    (`install_subject` / `run_subject_discovery` / `destroy`), applied to a
+    throwaway container instead.
+
+    Any failure - the container could not be prepared, a file could not be
+    delivered, or its absence after teardown could not be confirmed - maps
+    to the same UNMEASURED shape `demo.run_subject_discovery` uses for its
+    own failures (#150-D review point 3), so it flows into UNKNOWN the same
+    way an unobtainable listing does - never SATISFIED."""
+    unmeasured = {name: "UNMEASURED" for name in selected}
+    attempt_id = f"{id_prefix}-{secrets.token_hex(4)}"
+    try:
+        handle = backend.prepare(attempt_id)
+    except BackendUnavailable as exc:
+        return _DiscoveryMeasurement(unmeasured, frozenset(), f"listing container could not be prepared: {exc}", None)
+
+    result = _DiscoveryMeasurement(unmeasured, frozenset(), "measurement did not complete", None)
+    try:
+        for relpath, data in extra_home_files.items():
+            backend.deliver_home_file(handle, relpath, data)
+        image_digest = backend.image_id(handle)
+        listing, unexpected, reason = demo.run_subject_discovery(
+            backend, handle, list(client_argv), set(selected), limits, base,
+        )
+        result = _DiscoveryMeasurement(listing, unexpected, reason, image_digest)
+    except BackendUnavailable as exc:
+        result = _DiscoveryMeasurement(
+            unmeasured, frozenset(), f"delivery to the listing container failed: {exc}", result.image_digest,
+        )
+    finally:
+        backend.destroy(handle)
+        absent = backend.confirm_absent(handle)
+    if absent != Confirmation.CONFIRMED:
+        # Overrides whatever was measured above (review point 3): an
+        # unconfirmed teardown means this container's own state - and so its
+        # listing - is no longer something this run can vouch for.
+        return _DiscoveryMeasurement(
+            unmeasured, frozenset(),
+            f"the listing container's absence after teardown could not be confirmed ({absent.value})",
+            result.image_digest,
+        )
+    return result
+
+
+@dataclass(frozen=True)
+class InstallationReceiptContext:
+    """Everything `_build_discovery_receipt` needs beyond what
+    `run_one_attempt` already has (#150-D, ADR 0005's "yes, narrow B1"
+    ruling). Passed only by a caller that has a real acquired collection
+    (`collection_conformance.run_collection_agent_attempt`); every other
+    caller (`matched_pilot`'s own arms, `selection_probe`) omits it and
+    keeps `grade_agent_attempt`'s B1 stand-in exactly as before - this
+    receipt path is additive, never a behavior change for an existing
+    caller that does not opt in.
+
+    `cache` is caller-owned and caller-scoped (typically one per CLI
+    invocation / one per `skillc pilot-run` - "a run" in review point 1's
+    sense) - passing the SAME cache across multiple `run_one_attempt` calls
+    that share `subject.digest`/`image.digest` is what makes the caching
+    real; a fresh `{}` per call defeats it, which is the caller's choice to
+    make, not this function's."""
+
+    declared: frozenset[str]
+    tree_digest: str
+    subject_locator: str
+    subject_revision: str
+    surface_name: str
+    cache: DiscoveryCache
+
+
+#: The exact evidence sentence review point 2 requires, verbatim, so a
+#: reader of the receipt (not just this module's docstrings) sees the precise
+#: claim: measured in a FRESH container of the same image, never "the
+#: agent's own container had it".
+_DISCOVERY_RECEIPT_CLAIM = (
+    "this delivered tree, delivered by the same method, into a fresh "
+    "container of the same image digest, was discovered by the client's "
+    "model-free listing"
+)
+
+
+def _build_discovery_receipt(
+    *,
+    backend: DockerBackend,
+    experiment: trial.Experiment,
+    attempt_id: str,
+    client: str,
+    client_version: str,
+    client_argv: Sequence[str],
+    extra_home_files: Mapping[str, bytes],
+    limits: Limits,
+    base: Path,
+    context: InstallationReceiptContext,
+) -> dict[str, object] | None:
+    """Measure (or reuse a cached measurement of) discovery before and after
+    delivering `extra_home_files` into fresh throwaway containers, and build
+    a `records.INSTALLATION_RECEIPT`-shaped dict - the REAL schema
+    (`records.py`), through `verify.grade`'s existing default path, not a
+    new `readiness_source` (review: the schema's `adapter`/`surface`/
+    `layers`/`dependencies`/`allowed_writes` fields are loosely typed enough
+    to state honestly here - an empty list is documented as "none", not
+    "missing" - and inventing a new readiness_source would mean extending
+    `records.py`'s OWN bundle-level validation, the actual "new schema" to
+    avoid).
+
+    Returns `None` - never a receipt claiming readiness it does not have -
+    when `client` has no model-free listing (only codex does today:
+    `materialize.SURFACES["codex-skills"].model_free_listing`); the caller
+    keeps the B1 stand-in for a Claude Code arm exactly as for an empty one.
+    """
+    if client != "codex" or not context.declared:
+        return None
+    planned = experiment.trial_of(attempt_id)
+    trial_id = str(planned["trial_id"])
+    planned_image = planned.get("image")
+    planned_image_digest = planned_image.get("digest") if isinstance(planned_image, dict) else None
+    if not isinstance(planned_image_digest, str) or not planned_image_digest:
+        planned_image_digest = "UNKNOWN"
+    # The CACHE key uses the ledger's PLANNED image digest, known up front -
+    # never a live measurement, which would need a container to already
+    # exist to obtain (review point 1: cache on (image, tree), not per
+    # attempt). The RECEIPT's own `image.digest` field, below, is the
+    # ACTUALLY MEASURED value from the listing container instead - #151's
+    # "the image that ran", never the configured tag - and
+    # `verify._receipt`'s cross-check is what confirms the two agree, the
+    # same discipline `_record_identity`/`backend-identity` already applies
+    # to the agent's own container.
+    key: DiscoveryCacheKey = (planned_image_digest, context.tree_digest)
+    if key not in context.cache:
+        baseline = _measure_discovery(
+            backend, f"{attempt_id}-baseline", client_argv, {}, context.declared, limits, base,
+        )
+        discovery = _measure_discovery(
+            backend, f"{attempt_id}-discovery", client_argv, extra_home_files, context.declared, limits, base,
+        )
+        context.cache[key] = (baseline, discovery)
+    baseline, discovery = context.cache[key]
+
+    readiness = readiness_from_discovery_listings(
+        context.declared,
+        (baseline.listing, baseline.unexpected, baseline.reason),
+        (discovery.listing, discovery.unexpected, discovery.reason),
+    )
+    measured_image_digest = discovery.image_digest or baseline.image_digest
+    readiness["evidence"] = _DISCOVERY_RECEIPT_CLAIM
+    readiness["cache_key"] = {"image_digest": key[0], "tree_digest": key[1]}
+
+    installed = [
+        {"path": relpath, "digest": f"sha256:{hashlib.sha256(data).hexdigest()}"}
+        for relpath, data in extra_home_files.items()
+    ]
+    if not installed:
+        # installation_receipt's own rule: "an empty list says none, a
+        # missing one says unknown" (records.py) - an empty `installed` is
+        # REFUSED outright ("an install that recorded nothing is not a ready
+        # one"). context.declared is non-empty (checked above), so
+        # extra_home_files being empty here would itself be a caller bug;
+        # refuse loudly rather than write an invalid receipt.
+        raise trial.Refused(
+            "declared skill names are non-empty but extra_home_files is empty; "
+            "nothing was actually delivered to build a receipt from"
+        )
+
+    return {
+        "version": 2,
+        "kind": records.INSTALLATION_RECEIPT,
+        # "subject-adapter" is a ROLE (interfaces.md's producer column,
+        # records.AUTHORIZED_PRODUCER), not a module name - the one producer
+        # every installation-receipt must declare, whichever code plays it.
+        "producer": "subject-adapter",
+        "checked_by": records.RECEIPT_CHECKER,
+        "attempt_id": attempt_id,
+        "trial_id": trial_id,
+        "subject": {
+            "locator": context.subject_locator, "revision": context.subject_revision,
+            "digest": context.tree_digest,
+        },
+        # No separate adapter component exists on this path - the client
+        # itself performs the listing - so `adapter` honestly names the
+        # client, matching `client` below exactly.
+        "adapter": {"name": client, "version": client_version},
+        "client": {"name": client, "version": client_version},
+        "surface": context.surface_name,
+        "treatment": "agent-trial-discovery-listing",
+        # These three are native-adapter concepts (materialize.py's own
+        # layering/dependency resolution) that do not apply to this path -
+        # an empty list is the schema's OWN documented spelling of "none",
+        # not "missing" (records.py's installation_receipt docstring).
+        "layers": [],
+        "dependencies": [],
+        "allowed_writes": [],
+        "installed": installed,
+        "readiness": readiness,
+        "image": {"digest": measured_image_digest or "UNKNOWN"},
+    }
+
+
 def run_one_attempt(
     *,
     backend: DockerBackend,
@@ -744,12 +976,21 @@ def run_one_attempt(
     grading_backend: ExecutionBackend | None = None,
     extra_home_files: Mapping[str, bytes] | None = None,
     retain_transcript: bool = False,
+    receipt_context: InstallationReceiptContext | None = None,
 ) -> dict[str, object]:
     """Drive one real-agent attempt end to end and, only when the real
     transcript confirms both prompt delivery and the liveness canary, grade
     the exported output through `grader` (a SEPARATE backend instance,
     interfaces.md's own step-8 rule - never `backend`, which the agent's own
     attempt already used).
+
+    `receipt_context` (#150-D): when given, and `client` has a model-free
+    listing and delivered at least one skill, a REAL installation receipt is
+    measured (in fresh throwaway containers - never the agent's own; see
+    `_build_discovery_receipt`) and graded through `verify.grade`'s normal
+    path. `None` (the default) - or a Claude Code arm, or an empty
+    `extra_home_files` - keeps `grade_agent_attempt`'s B1 stand-in exactly as
+    before; every existing caller that omits this parameter is unaffected.
 
     `client` must name one of `CLIENT_SPECS`. `cli_version`, when omitted,
     is read from `docker/trial/pinned-versions.json` via
@@ -868,12 +1109,41 @@ def run_one_attempt(
                 # Through the verifier's result assembler, never `grade_files`
                 # alone (#139): the grade used to live only in this returned
                 # dict, so every captured attempt read as "grading is still
-                # owed" to attempt-accounting. The observation stands in for
-                # the installation receipt this path never writes, for
-                # accounting only - readiness stays UNKNOWN on the stored result.
-                stored, graded_result = verify.grade_agent_attempt(
-                    experiment, attempt_id, grader, base, observation, backend=grading_backend,
+                # owed" to attempt-accounting.
+                receipt = (
+                    _build_discovery_receipt(
+                        backend=backend, experiment=experiment, attempt_id=attempt_id,
+                        client=client, client_version=resolved_cli_version, client_argv=[client],
+                        extra_home_files=extra_home_files or {}, limits=limits, base=base,
+                        context=receipt_context,
+                    ) if receipt_context is not None else None
                 )
+                if receipt is not None:
+                    # A REAL installation receipt (#150-D, narrowing #139's
+                    # B1): written through trial.add_receipt, which validates
+                    # it against the schema and the bundle before it exists
+                    # at all. `_grade_and_store`'s own DEFAULT
+                    # readiness_source (records.INSTALLATION_RECEIPT, exactly
+                    # what `verify.grade`'s public wrapper also uses) then
+                    # reads it back via `verify._receipt`, whose cross-check
+                    # (subject.digest, client, and #150-D's own image.digest
+                    # addition) refuses it if it does not match this trial's
+                    # own ledger pin. Called through the module directly,
+                    # like `grade_agent_attempt` itself wraps the same
+                    # function - `verify.grade`'s public form discards the
+                    # `Graded` half this caller still needs to report.
+                    trial.add_receipt(experiment, receipt)
+                    stored, graded_result = verify._grade_and_store(
+                        experiment, attempt_id, grader, base, backend=grading_backend,
+                    )
+                else:
+                    # The observation stands in for the installation receipt
+                    # this path did not write (no receipt_context, a Claude
+                    # Code arm, or an empty extra_home_files - B1's stand-in,
+                    # unchanged) - accounting only, readiness stays UNKNOWN.
+                    stored, graded_result = verify.grade_agent_attempt(
+                        experiment, attempt_id, grader, base, observation, backend=grading_backend,
+                    )
             except Exception as exc:
                 # The attempt ran and was observed; a grading failure (a
                 # quarantined verifier, a frozen artifact that no longer

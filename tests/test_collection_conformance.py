@@ -48,8 +48,18 @@ def docker_state(tmp_path: Path) -> Path:
     return tmp_path / "docker-state"
 
 
+#: The fake docker CLI's own deterministic digest for this image tag
+#: (`fake_docker.py`'s `cmd_image`/`cmd_inspect`: `sha256:fake-digest-for-<tag>`
+#: either way it is queried) - #150-D's receipt path cross-checks a measured
+#: image digest against the ledger's PLANNED one, so a test that exercises
+#: that path must plan against this, not the "UNKNOWN" `plan_collection_attempt`
+#: defaults to when no `image_digest` is given.
+_BACKEND_IMAGE = "fake-image:1"
+_BACKEND_IMAGE_DIGEST = f"sha256:fake-digest-for-{_BACKEND_IMAGE}"
+
+
 def _backend(base: Path, docker_state: Path) -> d.DockerBackend:
-    return d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+    return d.DockerBackend(image=_BACKEND_IMAGE, base_dir=base, docker_bin=_docker_bin(docker_state))
 
 
 def _skill_md(name: str) -> str:
@@ -191,7 +201,7 @@ def test_happy_path_installs_the_collection_and_grades(
 
     acquired = cc.acquire_collection("whatever", base, checkout=repo)
     store = trial.open_store(tmp_path / "store", forbidden=[])
-    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store, image_digest=_BACKEND_IMAGE_DIGEST)
     backend = _backend(base, docker_state)
     grading_backend = _backend(base, docker_state)
     home = _mapped_home(docker_state, attempt_id)
@@ -236,7 +246,7 @@ def test_the_result_revision_is_what_was_acquired_never_the_declared_pin(
 
     acquired = cc.acquire_collection("whatever", base, checkout=repo)
     store = trial.open_store(tmp_path / "store", forbidden=[])
-    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store, image_digest=_BACKEND_IMAGE_DIGEST)
     backend = _backend(base, docker_state)
     grading_backend = _backend(base, docker_state)
     home = _mapped_home(docker_state, attempt_id)
@@ -267,7 +277,7 @@ def test_skill_invocations_observes_a_spontaneous_selection(
 
     acquired = cc.acquire_collection("whatever", base, checkout=repo)
     store = trial.open_store(tmp_path / "store", forbidden=[])
-    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store, image_digest=_BACKEND_IMAGE_DIGEST)
     backend = _backend(base, docker_state)
     grading_backend = _backend(base, docker_state)
     home = _mapped_home(docker_state, attempt_id)
@@ -302,7 +312,7 @@ def test_missing_credential_blocks_before_launch(
 
     acquired = cc.acquire_collection("whatever", base, checkout=repo)
     store = trial.open_store(tmp_path / "store", forbidden=[])
-    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store, image_digest=_BACKEND_IMAGE_DIGEST)
     backend = _backend(base, docker_state)
     grading_backend = _backend(base, docker_state)
     missing = tmp_path / "does-not-exist.json"
@@ -416,7 +426,7 @@ def _finish_close_ref_run(
     acquired = cc.acquire_collection("whatever", base, checkout=repo)
     store = trial.open_store(tmp_path / "store", forbidden=[])
     experiment, attempt_id = cc.plan_collection_attempt(
-        "whatever", acquired, store, task_root=FINISH_CLOSE_REF_ROOT,
+        "whatever", acquired, store, task_root=FINISH_CLOSE_REF_ROOT, image_digest=_BACKEND_IMAGE_DIGEST,
     )
     argv = _codex_argv(
         home=_mapped_home(docker_state, attempt_id),
@@ -489,7 +499,7 @@ def test_default_prompt_is_the_task_s_own_goal_text(
 
     acquired = cc.acquire_collection("whatever", base, checkout=repo)
     store = trial.open_store(tmp_path / "store", forbidden=[])
-    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store, image_digest=_BACKEND_IMAGE_DIGEST)
     backend = _backend(base, docker_state)
     grading_backend = _backend(base, docker_state)
     home = _mapped_home(docker_state, attempt_id)
@@ -572,7 +582,7 @@ def test_paste_back_refresh_line_reads_a_real_driver_record(
     monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd"]))
     acquired = cc.acquire_collection("whatever", base, checkout=repo)
     store = trial.open_store(tmp_path / "store", forbidden=[])
-    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store, image_digest=_BACKEND_IMAGE_DIGEST)
     argv = _codex_argv(
         home=_mapped_home(docker_state, attempt_id),
         transcript_relpath=".codex/sessions/2026/01/01/rollout-rf.jsonl", copy_solution=GRADER_ROOT / "reference",
@@ -607,7 +617,7 @@ def test_below_threshold_credential_blocks_before_launch_and_leaves_no_container
     monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd"]))
     acquired = cc.acquire_collection("whatever", base, checkout=repo)
     store = trial.open_store(tmp_path / "store", forbidden=[])
-    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store, image_digest=_BACKEND_IMAGE_DIGEST)
     before = reap.snapshot(_docker_bin(docker_state), timeout=5)
     result = cc.run_collection_agent_attempt(
         subject_name="whatever", acquired=acquired, experiment=experiment, attempt_id=attempt_id,
@@ -1169,7 +1179,7 @@ def _claude_run(
 
     acquired = cc.acquire_collection("whatever", base, checkout=repo)
     store = trial.open_store(tmp_path / "store", forbidden=[])
-    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store, image_digest=_BACKEND_IMAGE_DIGEST)
     home = _mapped_home(docker_state, attempt_id)
     argv = [
         sys.executable, str(FAKE_CLIENT), "--format", "claude-fake", "--home", str(home),
@@ -1245,7 +1255,7 @@ def test_a_codex_run_reports_discovery_unmeasured_not_borrowed(
     monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd"]))
     acquired = cc.acquire_collection("whatever", base, checkout=repo)
     store = trial.open_store(tmp_path / "store", forbidden=[])
-    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store, image_digest=_BACKEND_IMAGE_DIGEST)
     argv = _codex_argv(
         home=_mapped_home(docker_state, attempt_id), transcript_relpath=".codex/sessions/2026/01/01/rollout-d.jsonl",
     )
@@ -1267,7 +1277,7 @@ def test_missing_claude_credential_blocks_before_launch(
     monkeypatch.setattr(demo, "load_demo_subject", lambda name: _claude_subject(select=["tdd"]))
     acquired = cc.acquire_collection("whatever", base, checkout=repo)
     store = trial.open_store(tmp_path / "store", forbidden=[])
-    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store, image_digest=_BACKEND_IMAGE_DIGEST)
     result = cc.run_collection_agent_attempt(
         subject_name="whatever", acquired=acquired, experiment=experiment, attempt_id=attempt_id,
         backend=_backend(base, docker_state), grading_backend=_backend(base, docker_state), base=base,
