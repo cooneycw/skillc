@@ -198,6 +198,93 @@ def test_marker_planted_just_inside_a_limit_is_exposed_when_cut_exactly_at_the_l
     assert x.classify_marker(inside, rendered)["verdict"] == x.EXPOSED
 
 
+# ---------------------------------------------------- issue #55 folded-in item 1:
+# the room = limit - len(base) - len(inside) - 1 boundary, at exact real offsets.
+# `inside`'s own length is deterministic (MARKER_PREFIX + "INSIDE-" + a 16-hex
+# nonce = 16 + 7 + 16 = 39 bytes, always ASCII), so `room` for a given `base`
+# length and `limit` is exactly computable, not merely bounded.
+_INSIDE_MARKER_LEN = len(x.MARKER_PREFIX) + len("INSIDE-") + 16
+
+
+def test_plant_always_loaded_with_just_enough_room_ends_exactly_at_the_limit(
+    tmp_path: Path,
+) -> None:
+    """Green case: `room == 0` exactly - the narrowest real file that still
+    leaves just enough space for the inside marker to end AT the limit, not
+    past it. Must behave like the ordinary (positive-room) branch, not the
+    new untestable one, and the inside marker must classify EXPOSED when the
+    render is cut exactly at the limit."""
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    limit = 200
+    base_len = limit - _INSIDE_MARKER_LEN - 1  # room == 0
+    (source_dir / "AGENTS.md").write_bytes(b"x" * base_len)
+    entry = x.AlwaysLoadedFile(path="AGENTS.md", claimed_limit_bytes=limit)
+    content, (inside, _outside) = x._plant_always_loaded(source_dir, entry)
+    assert "untestable" not in inside.note
+    # The inside marker's own text ends one byte short of `limit` (the `- 1`
+    # in `room`'s own formula is deliberate slack, not an off-by-one here) -
+    # still safely within `limit`, never past it.
+    end = content.index(inside.text.encode()) + len(inside.text)
+    assert end == limit - 1
+    rendered = content[:limit].decode(errors="replace")
+    assert x.classify_marker(inside, rendered)["verdict"] == x.EXPOSED
+
+
+def test_plant_always_loaded_one_byte_too_little_is_reported_untestable(
+    tmp_path: Path,
+) -> None:
+    """Red case for issue #55 folded-in item 1: `room == -1`, one byte less
+    than `test_..._with_just_enough_room...` above. `b"." * -1` silently
+    produces `b""` (never an error), so the pre-fix code planted the inside
+    marker immediately after the real content anyway, ending PAST `limit`,
+    while its own note still unconditionally claimed it ended AT `limit` and
+    should be `EXPOSED` - a conforming client that truncates exactly at
+    `limit` then reports the marker `HIDDEN`, which reads as an exposure
+    failure that is actually correct client behaviour. Must now say the
+    boundary is untestable rather than claim `EXPOSED`, and must not place
+    the marker as if `limit` bytes were available."""
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    limit = 200
+    base_len = limit - _INSIDE_MARKER_LEN  # room == -1: one byte too little
+    (source_dir / "AGENTS.md").write_bytes(b"x" * base_len)
+    entry = x.AlwaysLoadedFile(path="AGENTS.md", claimed_limit_bytes=limit)
+    content, (inside, outside) = x._plant_always_loaded(source_dir, entry)
+    assert "untestable" in inside.note
+    assert "untestable" in outside.note
+    assert "expect EXPOSED" not in inside.note
+    # The real offset where the inside marker actually lands - `base_len`
+    # bytes of real content, then this branch's own single b"\n" separator,
+    # so the marker itself ends one byte PAST `limit`, proving the pre-fix
+    # silent-b"" behaviour is what is being guarded against, not merely
+    # asserting the note text changed.
+    start = content.index(inside.text.encode())
+    assert start == base_len + 1
+    end = start + len(inside.text)
+    assert end == limit + 1
+
+
+def test_plant_always_loaded_already_over_the_limit_reports_the_real_length(
+    tmp_path: Path,
+) -> None:
+    """The third boundary the issue names: the real file already exceeds
+    `limit` on its own. Existing branch, given its own committed control and
+    real-offset assertion here (previously untested directly)."""
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    limit = 200
+    base_len = limit + 10
+    (source_dir / "AGENTS.md").write_bytes(b"x" * base_len)
+    entry = x.AlwaysLoadedFile(path="AGENTS.md", claimed_limit_bytes=limit)
+    content, (inside, outside) = x._plant_always_loaded(source_dir, entry)
+    assert f"already {base_len} bytes" in inside.note
+    assert f"already {base_len} bytes" in outside.note
+    assert "expect EXPOSED" not in inside.note
+    start = content.index(inside.text.encode())
+    assert start == base_len + 1  # base, then a single b"\n" separator
+
+
 def test_plant_always_loaded_preserves_the_real_file_content(tmp_path: Path) -> None:
     """Regression for a cross-model review finding (PR #90): an earlier
     draft discarded the real declared file entirely in the claimed-limit

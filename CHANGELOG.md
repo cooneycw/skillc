@@ -324,6 +324,22 @@ and version plan.
   `controls/required-fields/bad/`, shown silently missed on the pre-fix code
   (`BLIND required-fields silent on 3 of 8 known-bad input(s)`).
 
+- **`exposure._plant_always_loaded` no longer plants a marker past the
+  boundary it claims to test** (Refs #55, folded-in Nit Store item 1).
+  `room = limit - len(base) - len(inside) - 1` could go negative when the
+  real declared file left barely enough space for the inside marker -
+  `b"." * room` on a negative `room` silently produces `b""` (never an
+  error), so the marker still landed immediately after the real content,
+  ending PAST `limit`, while its own note unconditionally claimed it ended
+  AT `limit` and should be `EXPOSED`. A conforming client that correctly
+  truncates at `limit` then reports the marker `HIDDEN` - a real boundary
+  misread as an exposure failure, not a defect in the client under test.
+  Now reported the same honest way the already-over-the-limit case already
+  was: the note says the boundary is untestable, and makes no `EXPOSED`
+  claim. Three new tests at exact real offsets (just enough room, one byte
+  too little, already over), each asserting the precise byte positions;
+  the one-byte-too-little case verified to fail on the pre-fix code.
+
 - **`exposure.classify_marker`'s `cut_point_bytes` is now a true UTF-8 byte
   offset** (Refs #55, folded-in Nit Store item 3). The truncation search cut
   at a `str` (code point) index, identical to a byte index only while every

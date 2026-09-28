@@ -269,6 +269,7 @@ def _plant_always_loaded(source_dir: Path, entry: AlwaysLoadedFile) -> tuple[byt
     limit = entry.claimed_limit_bytes
     inside = f"{MARKER_PREFIX}INSIDE-{_nonce()}"
     outside = f"{MARKER_PREFIX}OUTSIDE-{_nonce()}"
+    room = limit - len(base) - len(inside) - 1
     if len(base) >= limit:
         # The real declared file already exceeds the claimed limit on its
         # own - markers appended after it cannot test THIS boundary
@@ -278,8 +279,28 @@ def _plant_always_loaded(source_dir: Path, entry: AlwaysLoadedFile) -> tuple[byt
         caveat = f" - the real file is already {len(base)} bytes, past the {limit}-byte claim on its own"
         inside_note = f"planted after the real content{caveat}"
         outside_note = f"planted after the real content{caveat}"
+    elif room < 0:
+        # Issue #55, folded-in Nit Store item 1: `base` has NOT yet reached
+        # `limit` on its own, but there is not enough room left for the
+        # inside marker to be appended and still END exactly at `limit` -
+        # `b"." * room` on a negative `room` silently produces `b""` (never
+        # an error), so the pre-fix code planted the marker immediately
+        # after `base`, ending PAST `limit`, while `inside_note` still
+        # unconditionally claimed it ended AT `limit`. A conforming client
+        # that correctly truncates at `limit` then reports HIDDEN for a
+        # marker the note claims should be EXPOSED - a real boundary read as
+        # an exposure failure, not a defect in the client under test.
+        # Reported here exactly like the already-over branch above: honest
+        # about what was actually planted, never a false EXPOSED claim.
+        content = base + b"\n" + inside.encode() + b"\n" + outside.encode() + b"\n"
+        caveat = (
+            f" - the real {len(base)}-byte file leaves only {limit - len(base)} bytes "
+            f"before the {limit}-byte claim, not enough room for the inside marker's own "
+            f"{len(inside)}-byte footprint to end exactly at the claim; this boundary is untestable"
+        )
+        inside_note = f"planted after the real content{caveat}"
+        outside_note = f"planted after the real content{caveat}"
     else:
-        room = limit - len(base) - len(inside) - 1
         content = base + (b"." * room) + inside.encode() + b"\n"
         content += (b"." * _BOUNDARY_GAP) + b"\n" + outside.encode() + b"\n"
         inside_note = (
