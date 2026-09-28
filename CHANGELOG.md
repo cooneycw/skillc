@@ -10,6 +10,31 @@ and version plan.
 
 ### Added
 
+- **Capability-gated in-container TERM forwarding to the exec'd subject**
+  (Refs #158). `docker/trial/skillc-supervisor.py` (a new foreground
+  process, replacing the `sleep infinity` keep-alive placeholder once the
+  held #78 image change lands) and `docker/trial/skillc-wrap.py` (a
+  one-shot registering exec wrapper) let a container-level TERM reach the
+  exec'd subject's process group for real - something no real Docker daemon
+  does on its own (`docker kill` only ever reaches PID 1). Both scripts
+  ship as source files only; the Dockerfile is NOT changed here - that
+  remains HELD pending the operator's #150 discriminating run
+  (`docs/specs/evaluation-facility/signal-forwarding.md`). `DockerBackend.
+  execute()` probes each container for the wrapper before prefixing the
+  exec argv with it (`_forwarding_available`), so this is inert - byte-for-
+  byte the pre-#158 behavior - on every image today. `ExecuteResult` gains
+  `term_forwarding` (`unavailable-in-image` / `not-needed` /
+  `exited-within-grace` / `killed-at-escalation`), naming only what the
+  HOST observed - never a claim sourced from inside the container, which
+  shares the subject's own trust boundary and cannot prove anything about
+  itself the subject could not also fabricate. Three committed cases:
+  `tests/test_docker_backend.py`'s two new end-to-end tests (through
+  `execute()` against the fake docker CLI's new "supervisor present and
+  survives TERM" mode) and `tests/test_skillc_supervisor.py`'s two
+  process-level tests (a real supervisor subprocess under a stand-in
+  `tini`, and - the must-not-exit rule's own red case - a monkeypatched
+  mutant kept entirely in the test tree, never a switch in the production
+  script) all fail against pre-#158 code and pass now.
 - **`skillc/authority_interceptor.py`, the L4 authority-boundary fixture
   service for #14's runtime half** (Refs #14). `AuthorityInterceptor` polls
   a live attempt's WHOLE out-of-scope surface from OUTSIDE the container -

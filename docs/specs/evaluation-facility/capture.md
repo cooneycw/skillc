@@ -239,16 +239,31 @@ This is the policy, chosen before any real private or model evidence exists.
   local host footprint from execution itself is bounded already, by
   construction, not merely un-audited.
 - **On the Docker lane, a timed-out or cancelled subject gets no graceful
-  TERM** (issue #133 item 2, scoped out rather than fixed - see
-  `support-matrix.md`'s matching unobserved-claims entry for why no
-  client-side workaround reaches it, and issue #158 for the real fix).
-  `docker kill` signals the container's own init/placeholder process, never
-  the sibling `docker exec` session the subject actually runs as, so the
-  subject is not asked to shut down - it simply dies when the container is
-  removed at the `SIGKILL` escalation or at teardown. There is no clean
-  shutdown on this path: any output the subject would have flushed on
-  receiving TERM, any checkpoint it would have written, any lock it would
-  have released, is lost.
+  TERM unless the image carries #158's forwarding support - and today, no
+  image does.** `docker kill` signals the container's own init/placeholder
+  process, never the sibling `docker exec` session the subject actually
+  runs as (issue #133 item 2; see `support-matrix.md`'s matching
+  unobserved-claims entry for why no client-side workaround reaches it).
+  Issue #158 built the real fix - an in-container supervisor
+  (`docker/trial/skillc-supervisor.py`) that a registering wrapper
+  (`docker/trial/skillc-wrap.py`) tells the subject's process group to, so a
+  container-level TERM can reach it - but it is capability-gated:
+  `DockerBackend.execute()` probes each container for BOTH the wrapper's
+  executable bit and a running supervisor's control socket before using
+  it, and falls back to today's exact, unprefixed behavior (no graceful
+  TERM, subject dies at the `SIGKILL` escalation or teardown, any
+  output/checkpoint/lock it would have released on receiving TERM is lost)
+  whenever the probe finds either missing. It always finds both missing
+  today: the Dockerfile change that bakes the two scripts into the trial
+  image, AND `_keepalive_run_argv`'s own switch from `sleep infinity` to
+  the supervisor, are BOTH HELD, pending the operator's #150 discriminating
+  run, so this capability exists in the codebase and is tested against the
+  fake docker CLI, but is not yet reachable through any real trial
+  (docs/specs/evaluation-facility/signal-forwarding.md). `ExecuteResult.
+  term_forwarding` reports which of these happened for a given attempt from
+  the HOST's own observation - never a trusted claim sourced from inside
+  the container, which shares the subject's own trust boundary and cannot
+  prove anything about itself the subject could not also fabricate.
 - **POSIX only**: process groups and `O_NOFOLLOW`.
 - **Budgets are recorded, not enforced.** A trial's `budget` is stored in the
   ledger. Only the wall-clock `timeout` passed to `run_attempt` is enforced.

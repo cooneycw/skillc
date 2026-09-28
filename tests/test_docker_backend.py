@@ -1136,6 +1136,101 @@ def test_removing_a_container_without_a_preceding_kill_still_reaps_a_live_exec_s
         exec_proc.wait(timeout=5)
 
 
+def test_execute_never_prefixes_the_argv_when_the_image_lacks_forwarding_support(
+    base: Path, docker_state: Path,
+) -> None:
+    """Red case 3 (issue #158): every image today lacks skillc-wrap - the
+    #78 Dockerfile change is HELD - so `_forwarding_available`'s probe must
+    find nothing, the exec argv must never be prefixed with it, and
+    `ExecuteResult.term_forwarding` must say so explicitly rather than
+    leaving a caller to guess from an ordinary-looking result. Against
+    pre-#158 code this fails outright: `ExecuteResult` has no
+    `term_forwarding` attribute at all."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000034")
+    backend.install(handle, {})
+    result = backend.execute(handle, [sys.executable, "-c", "print('hello')"], Limits(timeout=5))
+    assert result.reason == "exited"
+    assert result.exit_code == 0
+    assert result.term_forwarding == "unavailable-in-image"
+    backend.destroy(handle)
+
+
+def test_execute_never_prefixes_the_argv_when_no_supervisor_is_actually_running(
+    base: Path, docker_state: Path,
+) -> None:
+    """Red case for the capability gate itself (review must-fix, PR #182):
+    an image can carry `skillc-wrap`'s binary WITHOUT a running supervisor
+    - exactly every real image today, since `_keepalive_run_argv` never
+    starts the supervisor in this PR (`prepare()` always starts the plain
+    `sleep infinity` placeholder; that switch belongs with the held image
+    change - see docs/specs/evaluation-facility/signal-forwarding.md
+    section 7). A probe that checked only the wrap binary's executable bit
+    would report "available" here and prefix the argv onto a wrapper that
+    can never reach anything, turning every stop into
+    `killed-at-escalation` - forwarding this backend can never actually
+    produce. Fails against the wrap-binary-only probe (this PR's own first
+    draft): it finds the binary sentinel and stops looking, so it reports
+    something other than `unavailable-in-image` here."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000036")
+    assert isinstance(handle, d._Handle)
+    backend.install(handle, {})
+    (docker_state / f".supervisor-{handle.name}").touch()  # binary present...
+    # ...but no .supervisor-running-{name} sentinel: no live control socket,
+    # exactly like every real image today.
+
+    result = backend.execute(handle, [sys.executable, "-c", "print('hello')"], Limits(timeout=5))
+    assert result.reason == "exited"
+    assert result.term_forwarding == "unavailable-in-image"
+    backend.destroy(handle)
+
+
+def test_execute_forwards_term_through_a_capable_image_and_reports_exited_within_grace(
+    base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """Red case 1 (issue #158): with the fake's "supervisor present and
+    survives TERM" mode fully on (BOTH `.supervisor-NAME` - the binary - AND
+    `.supervisor-running-NAME` - a live control socket, review must-fix on
+    PR #182: the binary alone is not enough, since `_keepalive_run_argv`
+    never starts the supervisor in this PR), the capability probe finds
+    both, `execute()` prefixes the exec argv with `skillc-wrap`, and the
+    container-level TERM `_stop()` sends on timeout reaches the subject for
+    real - its own SIGTERM handler runs and it exits before the SIGKILL
+    escalation. Against pre-#158 code this fails: there is no capability
+    probe, the argv is never prefixed, and the subject - having no
+    supervisor to relay anything - never receives TERM at all (the
+    companion red case
+    `test_a_container_level_kill_does_not_reach_the_execd_subject_but_still_kills_it`,
+    above, is exactly that scenario without either sentinel)."""
+    backend = d.DockerBackend(
+        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=1.0,
+    )
+    handle = backend.prepare("a-lc-000000000035")
+    assert isinstance(handle, d._Handle)
+    backend.install(handle, {})
+    (docker_state / f".supervisor-{handle.name}").touch()
+    (docker_state / f".supervisor-running-{handle.name}").touch()
+
+    sentinel = tmp_path / "term-received"
+    script = (
+        "import signal, sys, time\n"
+        "def handler(signum, frame):\n"
+        f"    open({str(sentinel)!r}, 'w').write('term')\n"
+        "    sys.exit(0)\n"
+        "signal.signal(signal.SIGTERM, handler)\n"
+        "time.sleep(20)\n"
+    )
+    result = backend.execute(
+        handle, [sys.executable, "-c", script], Limits(timeout=0.3, grace=2.0),
+    )
+    assert result.reason == "timeout"
+    assert sentinel.exists(), "the subject should have received a real, forwarded TERM"
+    assert result.signal == "SIGTERM"
+    assert result.term_forwarding == "exited-within-grace"
+    backend.destroy(handle)
+
+
 def test_execute_cancellation_kills_the_container(base: Path, docker_state: Path) -> None:
     backend = _backend(base, docker_state)
     handle = backend.prepare("a-lc-000000000010")
@@ -1162,6 +1257,12 @@ def test_execute_reports_launch_failed_when_the_docker_binary_is_missing(
     assert result.reason == "launch-failed"
     assert result.exit_code is None
     assert result.error is not None
+    # #158: the capability probe fails the same way the exec itself just
+    # did (both go through the same missing binary), so this is the common
+    # real case for a launch-failed term_forwarding, not the residual
+    # genuinely-unmeasured None - see ExecuteResult.term_forwarding's own
+    # docstring.
+    assert result.term_forwarding == "unavailable-in-image"
     backend.destroy(handle)
 
 

@@ -91,20 +91,26 @@ assumes any particular platform for either.
 - a disk bound actually enforced - `--storage-opt size=` is refused outright
   by any storage driver other than `overlay2` on a compatible backing
   filesystem, so a set `disk_limit` is a request, not a guarantee
-- a graceful signal delivered to the exec'd subject itself on timeout or
-  cancellation - `docker kill` reaches the container's own init/placeholder
-  process, never a separately exec'd session, so the escalation only bounds
-  when the whole attempt stops, not whether the subject got a chance to
-  flush anything. Scoped out rather than fixed under issue #133 item 2
-  (originally routed to [Nit Store #20](https://github.com/cooneycw/skillc/issues/20)):
-  no client-side workaround reaches the subject either (signaling the local
-  `docker exec` process only kills that client tool, not the remote
-  session), and a `docker top` plus targeted `docker exec ... kill` mitigation
-  was evaluated and rejected - ambiguous with concurrent exec sessions or a
-  subject that forks, and unverifiable against a real daemon from this
-  repository's fake CLI alone. The real fix - an in-container supervisor
-  that forwards the signal, which likely needs a #78 image change - is
-  issue #158
+- a graceful signal reaching the exec'd subject on timeout or cancellation,
+  on a REAL daemon - `docker kill` reaches the container's own init/
+  placeholder process, never a separately exec'd session, so the escalation
+  alone only bounds when the whole attempt stops, not whether the subject
+  got a chance to flush anything (issue #133 item 2; a client-side
+  `docker top` plus targeted `docker exec ... kill` mitigation was evaluated
+  and rejected - ambiguous with concurrent exec sessions or a subject that
+  forks, and unverifiable against a real daemon from this repository's fake
+  CLI alone). Issue #158 built the real fix - an in-container supervisor
+  (`docker/trial/skillc-supervisor.py`) a registering wrapper
+  (`docker/trial/skillc-wrap.py`) tells the subject's process group to -
+  capability-gated so `DockerBackend.execute()` probes each container for
+  BOTH the wrapper's executable bit and a running supervisor's control
+  socket, falling back to today's unprefixed behavior when either is
+  missing. Both are missing everywhere today: the #78 Dockerfile change
+  that bakes the two scripts in, and `_keepalive_run_argv`'s own switch
+  from `sleep infinity` to the supervisor, are BOTH held pending the
+  operator's #150 discriminating run, so this remains a real-daemon gap in
+  practice even though the capability is implemented and tested against
+  the fake CLI - see `docs/specs/evaluation-facility/signal-forwarding.md`
 - dependency resolution inside the container - `install()` copies in any
   declared surface entry naming an existing host path; it does not run a
   package manager or resolve a dependency closure

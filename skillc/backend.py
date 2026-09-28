@@ -164,7 +164,42 @@ class ExecuteResult:
     is ever reached (`incomplete=True`, `truncated=False`). A backend that
     cannot distinguish "read everything, some was discarded" from "gave up
     reading" must never collapse the second into the first by reporting only
-    `truncated`."""
+    `truncated`.
+
+    `term_forwarding` names what the HOST observed about a container-level
+    TERM reaching the subject (issue #158), never what any in-container
+    component *reports* about itself - the supervisor and wrapper this
+    backend may use both run as the same unprivileged user as the subject
+    they describe, so anything they say about themselves is forgeable by
+    exactly the code under evaluation (the same class of problem as a
+    provenance marker inside an artifact it could also write). Named for
+    what was OBSERVED, not what is inferred to have caused it - a subject
+    observed to exit promptly may have been finishing anyway, not reacting
+    to a forwarded signal, and this field does not claim otherwise:
+    - `"unavailable-in-image"`: the capability probe found no forwarding
+      support in this container's image; the exec argv was never prefixed.
+    - `"not-needed"`: forwarding support was present, but no stop path ran
+      at all (the subject exited on its own; nothing was ever sent).
+    - `"exited-within-grace"`: forwarding support was present, a
+      container-level TERM was sent, and the subject was gone before the
+      SIGKILL escalation - the same host-side wait this module already
+      performs, not a new observation channel.
+    - `"killed-at-escalation"`: forwarding support was present, and the
+      subject was still alive when `grace` expired, requiring the SIGKILL
+      escalation - covers a forward that never reached the subject, one
+      that reached it too late, and one the subject simply ignored; this
+      field cannot and does not distinguish those from the host side.
+    `None` normally means "this backend does not report forwarding at
+    all" - every backend but `DockerBackend` (this field is #158-specific),
+    and a caller reading a stored result should read `None` from any of
+    them that way: nothing to measure, not merely unmeasured. `DockerBackend`
+    itself has exactly one narrow exception, on its `"launch-failed"` path:
+    if the capability probe found forwarding present but the exec still
+    failed to launch for some OTHER reason, `None` there means genuinely
+    UNMEASURED, not inapplicable - `execute()`'s own comment at that return
+    states which case applies. Every other `DockerBackend` result -
+    including every other `"launch-failed"` one - sets one of the four
+    values above; only that one combination leaves it `None`."""
 
     reason: str  # "exited" | "timeout" | "operator-cancelled" | "launch-failed"
     exit_code: int | None
@@ -174,6 +209,7 @@ class ExecuteResult:
     stdout_bytes: int = 0
     stdout_incomplete: bool = False
     stderr_incomplete: bool = False
+    term_forwarding: str | None = None
 
 
 @dataclass(frozen=True)

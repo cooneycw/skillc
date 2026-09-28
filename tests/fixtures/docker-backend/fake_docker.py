@@ -82,6 +82,17 @@ not a docker clone:
         genuinely existed in the simulated container filesystem.
         Exits with ARGV's own exit code, or 127 if ARGV's own binary cannot
         be found (docker's own convention for that case).
+        `sh -c "test -x SKILLC_WRAP_PATH && test -S SKILLC_CONTROL_SOCKET_PATH"`
+        is special-cased (issue #158's capability probe - BOTH the binary
+        AND a running supervisor's socket, never the binary alone):
+        answered from TWO independent sentinels, `.supervisor-NAME` (the
+        binary) and `.supervisor-running-NAME` (the socket), rather than a
+        real subprocess. ARGV prefixed with `SKILLC_WRAP_PATH` is a
+        "wrapped" exec: the prefix is stripped, the real subject argv runs
+        as above, and (only when BOTH sentinels exist) `supervisor_
+        registered` is set alongside `exec_pid` so `kill` can relay a real
+        TERM instead of its default unconditional SIGKILL - see `cmd_exec`/
+        `cmd_kill`'s own docstrings.
     kill [--signal SIG] NAME
         Fidelity-matched to real Docker (issue #158). A real `docker kill`
         reaches only the CONTAINER's own PID-1 (`tini` wrapping
@@ -190,6 +201,20 @@ WORK_CONTAINER_PATH = "/work"
 #: filesystem at all).
 HOME_CONTAINER_PATH = "/home/candidate"
 
+#: Must match docker_backend.SKILLC_WRAP_PATH - same reasoning as
+#: WORK_CONTAINER_PATH above (issue #158). `_forwarding_available`'s probe
+#: and a "wrapped" `exec` (argv[0] == this path) are both special-cased in
+#: `cmd_exec` rather than actually spawning a real `test`/`skillc-wrap`
+#: binary, which this fake's host does not have.
+SKILLC_WRAP_PATH = "/usr/local/bin/skillc-wrap"
+
+#: Must match docker_backend.SKILLC_CONTROL_SOCKET_PATH - same reasoning.
+#: The probe `cmd_exec` special-cases is `sh -c "test -x SKILLC_WRAP_PATH &&
+#: test -S SKILLC_CONTROL_SOCKET_PATH"` (review must-fix, PR #182) - BOTH
+#: conditions, never the binary alone. See `_supervisor_running`'s own
+#: docstring for why the two are independent sentinels here.
+SKILLC_CONTROL_SOCKET_PATH = "/run/skillc/control.sock"
+
 _FLAGS_WITH_VALUE = (
     "--network", "--user", "--hostname", "--memory", "--memory-swap",
     "--pids-limit", "--cpus", "--shm-size", "-w", "--storage-opt",
@@ -211,6 +236,38 @@ def _in_container(state_dir: Path, name: str, container_path: str) -> Path:
 
 def _stuck(state_dir: Path, name: str) -> bool:
     return (state_dir / f".stuck-{name}").exists()
+
+
+def _supervisor_capable(state_dir: Path, name: str) -> bool:
+    """Issue #158: a `.supervisor-NAME` sentinel simulates an image that
+    carries the `skillc-wrap`/`skillc-supervisor` BINARIES. This is only
+    HALF of what `DockerBackend._forwarding_available` actually requires
+    (review must-fix, PR #182) - see `_supervisor_running` for the other
+    half, and why a container can have this without that. Absent (the
+    default, and every image today - the #78 Dockerfile change is HELD)
+    matches every existing test's behavior unchanged: no container is ever
+    supervisor-capable unless a test opts in."""
+    return (state_dir / f".supervisor-{name}").exists()
+
+
+def _supervisor_running(state_dir: Path, name: str) -> bool:
+    """Issue #158: a `.supervisor-running-NAME` sentinel simulates the
+    supervisor ACTUALLY RUNNING as this container's keep-alive placeholder,
+    with a live control socket - what `DockerBackend._forwarding_available`
+    actually probes for (`test -x SKILLC_WRAP_PATH && test -S
+    SKILLC_CONTROL_SOCKET_PATH`), not merely `_supervisor_capable`'s
+    "the binaries exist somewhere in the image" fact. The two are
+    independent on purpose: in the real code as it stands today,
+    `prepare()` always starts the plain `sleep infinity` placeholder
+    (`_keepalive_run_argv`'s own switch to the supervisor is held with the
+    Dockerfile change, docs/specs/evaluation-facility/
+    signal-forwarding.md section 7), so an image can carry both scripts
+    and STILL never have anything listening on the socket - exactly the
+    scenario `_supervisor_capable` alone would get wrong if this fake
+    treated it as sufficient. Absent (the default) matches every image
+    today - a container is never forwarding-capable unless a test sets
+    BOTH sentinels."""
+    return (state_dir / f".supervisor-running-{name}").exists()
 
 
 def _atomic_write_json(path: Path, data: dict) -> None:
@@ -455,7 +512,27 @@ def cmd_kill(state_dir: Path, rest: list[str]) -> int:
     `confirm_stopped()` must not trust) - neither the status nor the
     subject changes. `cmd_rm`'s own docstring covers the separate,
     still-needed removal-time reaping for a `rm -f` a caller issues without
-    a preceding `kill` at all."""
+    a preceding `kill` at all.
+
+    SUPERVISOR-CAPABLE EXCEPTION (issue #158): the above is what a real
+    daemon does when the container's PID 1 has no in-container supervisor
+    at all. `_supervisor_capable(NAME)` plus `exec`'s own
+    `supervisor_registered` state flag (set only by a "wrapped" `exec` -
+    see `cmd_exec`) together simulate a correctly-behaving supervisor that
+    receives the container-level TERM and relays it, WITHOUT itself exiting
+    (docs/specs/evaluation-facility/signal-forwarding.md section 2a item 6 -
+    the must-not-exit rule; this fake models a supervisor that already obeys
+    it, never one that does not - a violating supervisor is tested directly
+    against the real script, not through this fake). In that case, and only
+    for a requested `TERM` (never `KILL`, which stays unblockable and
+    unconditional exactly as above): relay a REAL `SIGTERM` to the exec
+    group, and leave the container's own status as `"running"` - a
+    supervisor that survives does not take PID 1 down with it, so a real
+    daemon would not flip the container to `"exited"` either."""
+    sig = "KILL"
+    if "--signal" in rest:
+        idx = rest.index("--signal")
+        sig = rest[idx + 1]
     name = rest[-1] if rest else ""
     path = _state_file(state_dir, name)
     if not path.is_file():
@@ -465,6 +542,17 @@ def cmd_kill(state_dir: Path, rest: list[str]) -> int:
         return 0  # lies: reports success without actually stopping anything
     data = json.loads(path.read_text(encoding="utf-8"))
     pid = data.get("exec_pid")
+    if (
+        sig.upper() in ("TERM", "SIGTERM")
+        and data.get("supervisor_registered")
+        and _supervisor_capable(state_dir, name)
+    ):
+        if isinstance(pid, int):
+            try:
+                os.killpg(pid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                pass
+        return 0
     if isinstance(pid, int):
         try:
             os.killpg(pid, signal.SIGKILL)
@@ -533,6 +621,40 @@ def cmd_exec(state_dir: Path, rest: list[str]) -> int:
     if data.get("status") != "running":
         print(f"Error: Container {name} is not running", file=sys.stderr)
         return 1
+
+    # Issue #158's capability probe: `_forwarding_available` runs exactly
+    # this argv shape (`sh -c "test -x WRAP && test -S SOCKET"`) against the
+    # real container to ask "can this container actually forward right
+    # now?" - BOTH the wrap binary and a running supervisor's socket, never
+    # the binary alone (review must-fix, PR #182: an image can carry the
+    # binary while still running the plain sleep-infinity placeholder,
+    # since _keepalive_run_argv's own switch to the supervisor is held with
+    # the Dockerfile change - see signal-forwarding.md section 7). This
+    # fake has no image filesystem or real socket to check against, so it
+    # answers from TWO independent sentinels instead of spawning a real
+    # `sh`/`test` - `_supervisor_capable` (the binary) and
+    # `_supervisor_running` (the socket) - matching the two-part fact the
+    # real probe checks, not conflating them into one.
+    if argv == ["sh", "-c", f"test -x {SKILLC_WRAP_PATH} && test -S {SKILLC_CONTROL_SOCKET_PATH}"]:
+        capable = _supervisor_capable(state_dir, name) and _supervisor_running(state_dir, name)
+        return 0 if capable else 1
+
+    # A "wrapped" exec (docker_backend.py prefixed the subject argv with
+    # SKILLC_WRAP_PATH because the probe above said yes): simulate
+    # skillc-wrap registering the subject's pgid with the supervisor, then
+    # running the real subject - this fake has no separate wrapper process
+    # to exec through, so it records the registration directly and runs the
+    # subject argv unprefixed. Registration only actually takes if this
+    # container is BOTH supervisor-capable and supervisor-running (mirrors
+    # skillc-wrap's own fail-open behavior when a real supervisor is
+    # unreachable - see its docstring).
+    wrapped = bool(argv) and argv[0] == SKILLC_WRAP_PATH
+    if wrapped:
+        argv = argv[1:]
+        if not argv:
+            print("fake_docker: exec requires a subject argv after skillc-wrap", file=sys.stderr)
+            return 2
+
     cwd = _in_container(state_dir, name, workdir)
     cwd.mkdir(parents=True, exist_ok=True)
     env = {"PATH": os.environ.get("PATH", "")}
@@ -552,8 +674,16 @@ def cmd_exec(state_dir: Path, rest: list[str]) -> int:
     # (`_rewrite_state`), not a blind write of `data`: a concurrent `kill`
     # could otherwise still be holding an EARLIER read of this same file,
     # and whichever of the two writes lands second would silently discard
-    # the other's update.
-    _rewrite_state(state_dir, name, lambda d: {**d, "exec_pid": proc.pid})
+    # the other's update. `supervisor_registered` is set in the SAME write
+    # only when this was a wrapped exec on a supervisor-capable container -
+    # a plain (unwrapped) exec, or a wrapped one that isn't supervisor-
+    # capable (skillc-wrap's own fail-open case), leaves it unset, and
+    # `cmd_kill` treats unset exactly like today's #176 behavior.
+    registered = wrapped and _supervisor_capable(state_dir, name) and _supervisor_running(state_dir, name)
+    _rewrite_state(
+        state_dir, name,
+        lambda d: {**d, "exec_pid": proc.pid, **({"supervisor_registered": True} if registered else {})},
+    )
     try:
         proc.wait()
     finally:
@@ -561,8 +691,12 @@ def cmd_exec(state_dir: Path, rest: list[str]) -> int:
             # Mutates whatever is CURRENTLY on disk, never the `data` this
             # function read at entry: a concurrent `kill` may have flipped
             # `status` to `"exited"` in between, and that must survive this
-            # write untouched - only `exec_pid` is ever removed here.
-            _rewrite_state(state_dir, name, lambda d: {k: v for k, v in d.items() if k != "exec_pid"})
+            # write untouched - only `exec_pid`/`supervisor_registered` are
+            # ever removed here.
+            _rewrite_state(
+                state_dir, name,
+                lambda d: {k: v for k, v in d.items() if k not in ("exec_pid", "supervisor_registered")},
+            )
     return proc.returncode
 
 
