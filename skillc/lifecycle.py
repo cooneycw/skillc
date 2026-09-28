@@ -34,6 +34,9 @@ is carried in this driver's own return value, under `backend_teardown`, and
 (#127) in the journal as a `backend-teardown` DETAIL event - journal-only,
 like `workspace`, so the lifecycle record's schema is unchanged. A caller who
 reads only the lifecycle record still misses it; the journal beside it has it.
+The image the attempt actually ran in (#12) travels the same way: a
+`backend-identity` DETAIL event, written after `install()`, carrying the
+backend's reported `image_digest` beside the ledger's planned digest.
 
 LIVENESS: A NONCE THE BACKEND NEVER SEES IN ADVANCE (issue #10, comment
 5848522578 lesson A4, and the addendum comment items 1-2). A trivial canary
@@ -352,6 +355,7 @@ def run_through_backend(
             # reported. Teardown still happens, in the shared `finally` below.
             unavailable_reason = str(exc)
         else:
+            _record_identity(experiment, attempt_id, readiness)
             if before_execute is not None:
                 try:
                     before_execute(backend, handle)
@@ -510,6 +514,25 @@ def run_through_backend(
     if observe_before_teardown is not None:
         output["observation"] = observation
     return output
+
+
+def _record_identity(experiment: trial.Experiment, attempt_id: str, readiness: object) -> None:
+    """Journal the image this attempt ACTUALLY ran in (#12), beside the digest
+    the ledger planned, when the backend reports one (`image_digest` in its
+    readiness evidence). `matches_ledger` is `None` whenever either side is
+    unknown - an unresolved digest is never read as a match or a mismatch.
+    A backend that does not report `image_digest` at all writes nothing:
+    absence of the key says this backend makes no such claim."""
+    if not isinstance(readiness, dict) or "image_digest" not in readiness:
+        return
+    ran = readiness["image_digest"]
+    image = experiment.trial_of(attempt_id).get("image")
+    planned = image.get("digest") if isinstance(image, dict) else None
+    known = isinstance(ran, str) and isinstance(planned, str) and planned.startswith("sha256:")
+    experiment.record(
+        attempt_id, "backend-identity", image_digest=ran, ledger_image_digest=planned,
+        matches_ledger=(ran == planned) if known else None,
+    )
 
 
 def _snapshot_via_export(backend: ExecutionBackend, handle: object, base: Path) -> dict[str, str]:

@@ -373,6 +373,36 @@ def test_install_reports_installed_and_discovery_canary_satisfied_for_a_real_cop
     backend.destroy(handle)
 
 
+def test_install_reports_the_image_the_container_was_created_from(base: Path, docker_state: Path) -> None:
+    """#12: the digest that ACTUALLY ran, asked of the container - the same id
+    `image inspect` resolves for the configured image when nothing moved."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-0000000000e01")
+    readiness = backend.install(handle, {})
+    assert readiness["image_digest"] == "sha256:fake-digest-for-fake-image:1"
+    backend.destroy(handle)
+
+
+def test_install_reports_a_republished_image_not_the_configured_tag(base: Path, docker_state: Path) -> None:
+    """The configured string is never echoed back as the digest: when the
+    container was created from a different id, that id is what is reported."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-0000000000e02")
+    assert isinstance(handle, d._Handle)
+    (docker_state / f".image-id-{handle.name}").write_text("sha256:republished\n")
+    assert backend.install(handle, {})["image_digest"] == "sha256:republished"
+    backend.destroy(handle)
+
+
+def test_install_reports_no_image_digest_when_the_daemon_cannot_say(base: Path, docker_state: Path) -> None:
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-0000000000e03")
+    assert isinstance(handle, d._Handle)
+    _sentinel(docker_state, f".no-image-id-{handle.name}")
+    assert backend.install(handle, {})["image_digest"] is None
+    backend.destroy(handle)
+
+
 def test_install_raises_when_the_container_is_already_gone(
     base: Path, docker_state: Path, tmp_path: Path,
 ) -> None:

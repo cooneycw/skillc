@@ -903,13 +903,42 @@ def grade_directory(grader: GraderDef, candidate: Path, base: Path | None = None
 # ------------------------------------------------------------ grading an attempt
 
 
-def _snapshot(root: Path) -> dict[str, str]:
-    """Every entry under the experiment, by content. Links are recorded, not followed."""
+def _in_flight_scratch(experiment: trial.Experiment, attempt_id: str) -> frozenset[str]:
+    """The only paths a grade's snapshot leaves out (#12): the journal and
+    spool files of OTHER attempts the ledger plans and that are not yet
+    finalized. Those are written while a sibling RUNS - by its controller's
+    journal and by the subject's own redirected output - for as long as it
+    runs, so no lock can make them hold still.
+
+    What this gives up, stated: candidate code that wrote into an unfinished
+    sibling's journal or spool would not be caught by THIS grade. It is not
+    what contains candidate code - the grading backend and the forbidden
+    store root are - and that sibling's own capture hashes those bytes when it
+    is frozen. Everything else still refuses: the ledger and its history,
+    every object, every finalized attempt's files, this attempt's own files,
+    and any path naming an attempt the ledger does not plan. The set is fixed
+    before grading; a sibling cannot finalize mid-grade, since `finalize`
+    waits for the experiment lock this grade holds."""
+    skip: set[str] = set()
+    for _trial, attempt in experiment.attempts():
+        other = str(attempt["attempt_id"])
+        if other == attempt_id or (experiment.root / f"lifecycle-{other}.json").exists():
+            continue
+        skip.update((f"{trial.JOURNAL}/{other}.jsonl", f"{trial.SPOOL}/{other}.stdout",
+                     f"{trial.SPOOL}/{other}.stderr"))
+    return frozenset(skip)
+
+
+def _snapshot(root: Path, skip: frozenset[str] = frozenset()) -> dict[str, str]:
+    """Every entry under the experiment, by content, except the relative paths
+    in `skip`. Links are recorded, not followed."""
     seen: dict[str, str] = {}
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
         for name in [*dirnames, *filenames]:
             path = Path(dirpath) / name
             rel = path.relative_to(root).as_posix()
+            if rel in skip:
+                continue
             info = path.lstat()
             if stat.S_ISLNK(info.st_mode):
                 seen[rel] = "link:" + os.readlink(path)
@@ -1070,6 +1099,26 @@ def _grade_and_store(experiment: trial.Experiment, attempt_id: str, grader: Grad
                      backend: ExecutionBackend | None = None,
                      judges: Mapping[str, judge_seam.Judge] | None = None, goal_text: str = "",
                      readiness_source: str = records.INSTALLATION_RECEIPT) -> tuple[dict[str, object], Graded]:
+    """Holds the experiment lock (#12) from the first read to the stored
+    result, so a sibling attempt's capture, finalize or stored result waits
+    for this grade instead of reading to its snapshot as tampering.
+
+    Grades against the experiment as STORED once the lock is held - reopened,
+    so its whole ledger history is re-verified - never the ledger the
+    caller's instance loaded earlier: a sibling's retry committed before the
+    lock is the current ledger, not a change made while candidate code ran
+    (counter-model finding)."""
+    with trial.experiment_lock(experiment.root):
+        current = trial.Experiment.open(experiment.root)
+        return _grade_and_store_held(current, attempt_id, grader, base, forbidden, regrade_of,
+                                     backend, judges, goal_text, readiness_source)
+
+
+def _grade_and_store_held(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base: Path,
+                          forbidden: list[Path] | None, regrade_of: str | None,
+                          backend: ExecutionBackend | None,
+                          judges: Mapping[str, judge_seam.Judge] | None, goal_text: str,
+                          readiness_source: str) -> tuple[dict[str, object], Graded]:
     if judges:
         unknown_tiers = set(judges) - set(judge_seam.JUDGE_TIERS)
         if unknown_tiers:
@@ -1109,7 +1158,8 @@ def _grade_and_store(experiment: trial.Experiment, attempt_id: str, grader: Grad
         for a in frozen
     ]
 
-    before = _snapshot(experiment.root)
+    in_flight = _in_flight_scratch(experiment, attempt_id)
+    before = _snapshot(experiment.root, in_flight)
     graded = grade_files(grader, files, base, [*(forbidden or []), experiment.root.parent.resolve()],
                           loaded, backend=backend)
 
@@ -1117,11 +1167,9 @@ def _grade_and_store(experiment: trial.Experiment, attempt_id: str, grader: Grad
     # is not a verdict on the candidate: the measurement itself is compromised.
     if grader.digest() != pin["digest"]:
         raise Refused("the grader definition changed while it was grading; no result is written")
-    changed = _changed(before, _snapshot(experiment.root))
+    changed = _changed(before, _snapshot(experiment.root, in_flight))
     if changed:
-        raise Refused(f"the evidence store changed while candidate code ran ({changed}); no result is written. "
-                      "A concurrent controller write to this experiment also triggers this: grade an "
-                      "experiment nothing else is writing")
+        raise Refused(f"the evidence store changed while candidate code ran ({changed}); no result is written")
     if trial.Experiment.open(experiment.root).ledger != experiment.ledger:
         raise Refused("the ledger changed while candidate code ran; no result is written")
     trial.frozen_artifacts(experiment, attempt_id)

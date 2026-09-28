@@ -4,36 +4,42 @@ HISTORICAL RECORD of what was agreed BEFORE the code was written, at the base SH
 below. It is not a description of the shipped system, it is not a second
 statement of the issue contract or of a Tier 3 spec, and it does not graduate.
 
+This is the SECOND /flow:auto run on #12. The first run's record (base ab04c6c,
+approved 2026-09-27, delivered by #140/#149) is in git history at 422f9d2.
+
 - Issue:             #12
-- Base SHA:          ab04c6c536de8c8ce8df2de261f85ebbb8f93d89
+- Base SHA:          422f9d22a4489893feaa9106c7204f49a75b2064
 - Necessity verdict: Partially addressed
 - Approval:          granted
-- Approver:          cooneycw (owner), in the /flow:auto session
-- Recorded at:       2026-09-27T13:05:48Z
+- Approver:          cooneycw (owner), in the /flow:auto session ("approved")
+- Recorded at:       2026-09-28T00:00:00Z
 
 ## Section B evidence
-Already merged: #89 (6c67dfe) manifest + pilot-report schema; #103 (39d6ae8)
-subscription-login ruling; #113/#117 (d8089ae, b9d4b44) single-attempt driver;
-#121/#126 (15a7036, ab04c6c) live collection run, both PASS. Related open: #106
-(live verification effectively delivered by #11's run), #114 (selection-probe
-driver PR, not depended on), #26 (sibling experiment). No duplicate issue.
+Commits since 2026-09-27 touching the affected files: f5b9099 (#146), c07960e
+(#138), 30c593b (#128), 33e654f (#135), ab04c6c (#126) - none fixes the three
+folded-in items. PRs #140/#149 met the original acceptance; #89/#103 are
+groundwork. No duplicate or superseding issue (#10/#77/#78 closed, origin of the
+digest finding).
 
 ## Section C - the approved plan
-1. `skillc/matched_pilot.py` - new: plan the 6 interleaved trials from the manifest, run each through agent_trial (treatment = cpp-codex, baseline = none), enforce 900s/5400s caps (cut attempts reported not-run), time split from the journal, assemble pilot-report + summary with UNKNOWN for anything unmeasured
-2. `skillc/collection_conformance.py` - allow an attempt with no collection (baseline) through the same path
-3. `skillc/cli.py` - `skillc pilot-run` subcommand, behind SKILLC_ALLOW_REAL_AGENT=1
-4. `tests/test_matched_pilot_run.py` - new: fake-docker end-to-end, red cases (total cap -> not-run reported; omitted attempt refused by ledger_binding; no real agent without the flag; UNKNOWN never fabricated)
-5. `evals/matched-pilot/run-manifest.json` - real image digest, observed model/client, retention decision, execution status after the run
-6. `evals/matched-pilot/evidence/README.md` - new: leak-checked pilot-report, ledger and results README with an explicit no-broad-claim line
-7. `evals/matched-pilot/README.md` - update what is now delivered
-8. `README.md` - list the new subcommand (drift check)
-9. `CHANGELOG.md` - entry
-10. `docs/flow-runs/issue-12.md` - this record
+1. `skillc/docker_backend.py` - install() records the container's actual image id (`docker inspect --format {{.Image}}`) as readiness `image_digest`, null when inspect fails
+2. `skillc/trial.py` - `backend-identity` detail event; experiment-level flock taken by capture() and _add()
+3. `skillc/lifecycle.py` - journal `backend-identity` with image_digest and matches_ledger (true/false/null) after install()
+4. `skillc/judge.py` - JudgeDescription.server; JudgeAnswer(verdicts, model); run_tier records the answering model separately from the server
+5. `skillc/judge_mcp_second_opinion.py` - describe() reports the server as server, model None; evaluate() parses the real tool's dict reply (analysis, model_used, success)
+6. `tests/fixtures/mcp-second-opinion/fake_server.py` - real-shape modes answering like the real FastMCP server
+7. `skillc/verify.py` - grade() holds the experiment lock across snapshot, grade, re-check and add_result; snapshot excludes only unfinished planned sibling attempts' spool/journal files
+8. `tests/test_docker_backend.py` - image digest recorded, null on inspect failure
+9. `tests/test_lifecycle.py` - backend-identity event, matches_ledger false on mismatch
+10. `tests/test_judge.py` - JudgeAnswer model recorded separately from server
+11. `tests/test_judge_mcp_second_opinion.py` - real-shape reply, fallback model, two tiers one server different models, success false unavailable
+12. `tests/test_verify.py` - red case: A graded while sibling B runs and captures; controls that still refuse
+13. `CHANGELOG.md` - entry
+14. `docs/specs/evaluation-facility/verification.md` - scoped snapshot and lock
+15. `docs/specs/evaluation-facility/capture.md` - backend-identity event and the lock
+16. `docs/flow-runs/issue-12.md` - this record
 
-Live run approved: 6 codex attempts, subscription login, $0 metered. Raw
-artifacts retained privately outside the repo at
-~/.local/share/skillc/pilot-runs/<run-id>/; only leak-checked reports committed.
-
-Scope: ~9 files, ~600-900 lines. Risks: claim accuracy may be only partly
-measurable; subscription cost is UNKNOWN in dollars; 3 per arm is noise-level;
-live infra failures reported as unavailable/inconclusive, never as skill results.
+Scope: ~14 files, 500-700 lines. Risks: item 3 narrows the tamper tripwire for
+unfinished sibling spool/journal files (documented, controls prove the rest
+still refuses); judge.model changes meaning (no live judge result exists yet);
+the lock serializes grading with capture within one experiment.

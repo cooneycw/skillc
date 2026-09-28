@@ -8,6 +8,27 @@ and version plan.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The three records #12 could not yet prove** (Closes #12).
+  - **The image that ran.** A Docker attempt journals a `backend-identity`
+    event with the image id its container was created from, beside the
+    ledger's planned digest and whether they match. A floating or
+    republished tag is no longer assumed to be what ran.
+  - **The judge's model, not its server.** `verdicts.<tier>.judge.model` is
+    now the LLM that answered (the real `mcp-second-opinion` reply's
+    `model_used`, a fallback included), and the MCP server's own identity
+    moves to `judge.server`. Two tiers on one server now record two models.
+    The adapter also reads the real server's reply shape: the verdict array
+    lives inside `analysis`, and before this every criterion from a real
+    server came back UNKNOWN. A reply with `success: false` is the tier
+    being unavailable, not a verdict.
+  - **Concurrent attempts.** Grading holds an experiment lock that capture,
+    finalize, retry and stored records also take, and its tamper snapshot
+    leaves out only unfinished planned siblings' journal and spool. A
+    sibling running and being captured mid-grade no longer refuses the
+    grade; every other write still does.
+
 ### Added
 
 - **The #12 matched pilot, re-run under the pinned `gpt-6-astra` declaration,

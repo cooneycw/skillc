@@ -601,7 +601,8 @@ def write_observation_record(experiment: trial.Experiment, attempt_id: str, data
     if findings or demo.leak_check_text(text):
         return "refused-leak"
     try:
-        (experiment.root / observation_record_name(attempt_id)).write_text(text + "\n", encoding="utf-8")
+        with trial.experiment_lock(experiment.root):
+            (experiment.root / observation_record_name(attempt_id)).write_text(text + "\n", encoding="utf-8")
     except OSError:
         return "write-failed"
     return "written"

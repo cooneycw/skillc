@@ -494,8 +494,11 @@ class _Handle:
 @dataclass(frozen=True)
 class DockerBackend:
     """One `ExecutionBackend` per attempt lifecycle. `image` should be pinned
-    by digest where possible (`name@sha256:...`); resolving and recording the
-    digest that actually ran (D13/D14) is tracked separately, not this PR."""
+    by digest where possible (`name@sha256:...`), but a pin is only declared:
+    `install()` asks the running container which image it was created from
+    and reports that id as readiness `image_digest` (#12), so a tag
+    republished after planning shows up as a different digest, not as the
+    image the ledger names."""
 
     image: str
     base_dir: Path
@@ -690,6 +693,10 @@ class DockerBackend:
             "baseline_absence": "SATISFIED",
             "declared": len(declared),
             "installed": installed,
+            # What ACTUALLY ran (#12), asked of this attempt's own container -
+            # never `self.image`, which may be a floating tag. None when the
+            # daemon cannot say, never a guess.
+            "image_digest": self._image_id(handle),
         }
         if isinstance(nonce, str) and nonce:
             payload = _owned_tar_bytes(CANARY_HOST_FILENAME, nonce.encode("utf-8"))
@@ -708,6 +715,22 @@ class DockerBackend:
             if canary_copied is not None and canary_copied.returncode == 0:
                 readiness["canary_path"] = CANARY_RESULT_FILENAME
         return readiness
+
+    def _image_id(self, handle: _Handle) -> str | None:
+        """The id of the image this attempt's container was created from
+        (`docker inspect --format {{.Image}}`), or `None` when the query
+        fails or answers with anything that is not a `sha256:` id."""
+        try:
+            proc = subprocess.run(
+                [*self.docker_bin, "inspect", "--format", "{{.Image}}", handle.name],
+                capture_output=True, text=True, env=handle.env, check=False, timeout=self.daemon_timeout,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        image_id = proc.stdout.strip()
+        if proc.returncode != 0 or not image_id.startswith("sha256:") or len(image_id) <= len("sha256:"):
+            return None
+        return image_id
 
     def deliver_home_file(self, handle: object, container_relpath: str, data: bytes, *, mode: int = 0o600) -> None:
         """Copy `data` into the container's HOME directory at

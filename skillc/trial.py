@@ -34,7 +34,9 @@ Stdlib only (AGENTS.md).
 
 from __future__ import annotations
 
+import fcntl
 import fnmatch
+import functools
 import hashlib
 import json
 import os
@@ -43,11 +45,14 @@ import secrets
 import signal
 import stat
 import subprocess
+import threading
 import time
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Concatenate, ParamSpec, TypeVar
 
 from . import checks, records
 from .materialize import Refused as NotOwned
@@ -321,6 +326,12 @@ class Experiment:
         if path.is_symlink():
             raise Refused(f"{root} ledger is a link")
         current = sha256_bytes(path.read_bytes()) if path.is_file() else None
+        if current != history[-1] and not _holds_lock(root):
+            # Recovery WRITES the ledger, so it happens under the experiment
+            # lock (#12, counter-model finding): re-read everything once held -
+            # a commit in progress may have finished it meanwhile.
+            with experiment_lock(root):
+                return cls.open(root)
         if current != history[-1]:
             # An interrupted commit: the newest revision is recorded but not in
             # place. Complete it ONLY when the file on disk is exactly the previous
@@ -358,8 +369,78 @@ class Experiment:
         return experiment
 
 
+# ------------------------------------------------------------ experiment lock
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+_LOCK_GUARD = threading.Lock()
+#: Per experiment directory: this process's re-entrant hold, how deep it is,
+#: the fd that carries the cross-process `flock` while the depth is non-zero,
+#: and the thread holding it.
+_LOCKS: dict[str, tuple[threading.RLock, list[int]]] = {}
+
+
+def _holds_lock(root: Path) -> bool:
+    """Whether THIS thread already holds `root`'s experiment lock."""
+    with _LOCK_GUARD:
+        held = _LOCKS.get(str(root.resolve()))
+    return held is not None and held[1][0] > 0 and held[1][2] == threading.get_ident()
+
+
+@contextmanager
+def experiment_lock(root: Path) -> Iterator[None]:
+    """Exclusive hold on one experiment's committed evidence (#12).
+
+    Taken by every controller write that is not an in-flight attempt's own
+    scratch - `capture`, `finalize`, `cleanup_workspace`, `retry`'s ledger
+    revision, `Experiment.open`'s ledger recovery, `_add` (results and
+    receipts), an agent observation record - and by
+    `verify.grade` from its first snapshot to its stored result, so a sibling
+    attempt's commit waits for a grade instead of reading to it as tampering.
+    An attempt's journal and spool are written while it RUNS, for minutes,
+    and are not locked; `verify.grade` scopes them out of its comparison
+    instead.
+
+    The `flock` is on the experiment DIRECTORY's own descriptor (the
+    precedent is `cli._export_pilot_evidence`), so taking it creates no file
+    anywhere - nothing for `verify.grade` to snapshot, nothing left behind.
+    Re-entrant within a process (grade stores its result through `_add`),
+    exclusive across processes."""
+    key = str(root.resolve())
+    with _LOCK_GUARD:
+        held = _LOCKS.setdefault(key, (threading.RLock(), [0, -1, 0]))
+    rlock, state = held
+    with rlock:
+        if state[0] == 0:
+            fd = os.open(key, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX)
+            except BaseException:
+                os.close(fd)
+                raise
+            state[1] = fd
+            state[2] = threading.get_ident()
+        state[0] += 1
+        try:
+            yield
+        finally:
+            state[0] -= 1
+            if state[0] == 0:
+                os.close(state[1])  # closing the descriptor releases the lock
+                state[1] = -1
+                state[2] = 0
+
+
+def _locked(fn: Callable[Concatenate[Experiment, _P], _R]) -> Callable[Concatenate[Experiment, _P], _R]:
+    @functools.wraps(fn)
+    def wrapper(experiment: Experiment, /, *args: _P.args, **kwargs: _P.kwargs) -> _R:
+        with experiment_lock(experiment.root):
+            return fn(experiment, *args, **kwargs)
+    return wrapper
+
+
 #: Journal entries that carry detail but are not lifecycle events in their own right.
-_DETAIL_EVENTS = ("workspace", "backend-teardown")
+_DETAIL_EVENTS = ("workspace", "backend-teardown", "backend-identity")
 
 
 def _read_object(root: Path, digest: str) -> bytes:
@@ -549,6 +630,7 @@ def _commit_ledger(root: Path, ledger: dict[str, object], first: bool = False) -
         _replace(root / LEDGER, data)
 
 
+@_locked
 def retry(experiment: Experiment, attempt_id: str) -> str:
     """Plan a new attempt linked to `attempt_id`, erasing nothing.
 
@@ -557,7 +639,14 @@ def retry(experiment: Experiment, attempt_id: str) -> str:
     one trial two live accounts. The ledger gains an attempt and nothing else; the
     previous revision is kept, and `Experiment.open` refuses a revision that
     changed anything already planned.
+
+    Revises the STORED ledger as it stands once the experiment lock is held,
+    never the one `experiment` loaded earlier (#12, counter-model finding): two
+    controllers that each opened the experiment and then retried would
+    otherwise both revise the same stale ledger, and the second commit would
+    drop the first one's attempt. The reopen re-verifies the whole history.
     """
+    experiment.ledger = Experiment.open(experiment.root).ledger
     trial = experiment.trial_of(attempt_id)
     if not (experiment.root / _lifecycle_name(attempt_id)).exists():
         raise Refused(f"attempt {attempt_id!r} is not finalized; retry an attempt only once it is accounted for")
@@ -599,8 +688,12 @@ def allocate_workspace(experiment: Experiment, attempt_id: str, base: Path, forb
     return work
 
 
+@_locked
 def cleanup_workspace(experiment: Experiment, attempt_id: str) -> dict[str, object]:
-    """Remove only the workspace this attempt was given. Safe to repeat."""
+    """Remove only the workspace this attempt was given. Safe to repeat.
+
+    Locked (#12): a repeat on a FINALIZED attempt still journals `cleaned`, and
+    a finalized attempt's journal is compared by a sibling's grade."""
     owned = [e for e in experiment.events(attempt_id) if e.get("event") == "workspace"]
     if not owned:
         outcome: dict[str, object] = {"status": "not-needed", "errors": []}
@@ -901,6 +994,7 @@ def _import(experiment: Experiment, attempt_id: str, item: Import, failures: lis
     }
 
 
+@_locked
 def capture(
     experiment: Experiment,
     attempt_id: str,
@@ -1032,6 +1126,7 @@ def _lifecycle_name(attempt_id: str) -> str:
     return f"lifecycle-{attempt_id}.json"
 
 
+@_locked
 def finalize(
     experiment: Experiment,
     attempt_id: str,
@@ -1186,6 +1281,7 @@ def add_result(experiment: Experiment, result: dict[str, object]) -> Path:
     return _add(experiment, result, records.VERIFIED_RESULT, f"result-{result.get('result_id')}.json")
 
 
+@_locked
 def _add(experiment: Experiment, record: dict[str, object], kind: str, filename: str) -> Path:
     if record.get("kind") != kind:
         raise Refused(f"expected a {kind}, got {record.get('kind')!r}")

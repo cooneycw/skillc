@@ -211,11 +211,27 @@ replace this rule rather than widen it.
   of every file, link and directory) or the ledger's history differ from before;
 - the verifier is quarantined after lost containment.
 
-The store snapshot covers the whole experiment, so a legitimate concurrent write,
-such as another attempt's capture landing mid-grade, is refused exactly like
-tampering. That is fail-closed: a false refusal, never a false PASS. The
-refusal says so, and grading needs an experiment nothing else is writing. No lock
-enforces that yet.
+A grade holds the experiment lock (`trial.experiment_lock`, #12) from its first
+read to its stored result, and grades the experiment as stored once the lock is
+held (reopened, so a sibling's earlier retry is the current ledger). Every other
+committed write to the experiment takes the same lock: `capture`, `finalize`,
+`cleanup_workspace`, `retry` (which also revises the stored ledger, never a stale
+copy), `Experiment.open`'s recovery of an interrupted ledger commit, a stored
+receipt or result, and an agent observation record. A sibling attempt's capture therefore waits for
+the grade instead of landing mid-grade. The lock is a `flock` on the experiment
+directory's own descriptor, so taking it writes nothing the snapshot could see.
+
+A sibling that is still RUNNING writes its journal and spool for as long as it
+runs, which no lock can hold still. So the snapshot leaves out exactly one
+population: the journal and spool files of other attempts the ledger plans and
+that are not yet finalized. Candidate code that wrote there would not be caught
+by this grade. It is not what contains candidate code (the grading backend and
+the forbidden store root are), and that sibling's own capture hashes those
+bytes. Everything else is still compared and still refuses: the ledger and its
+history, every object, every finalized attempt's files, this attempt's own
+files, and any file naming an attempt the ledger does not plan. The controls
+are `test_every_other_write_still_refuses_the_grade`; the red case is
+`test_a_sibling_that_runs_and_is_captured_mid_grade_does_not_refuse_the_grade`.
 
 A refusal is loud: the attempt stays owed a grade, and `attempt-accounting` says
 so. A grader that gives no verdict is **not** refused. That result is stored as

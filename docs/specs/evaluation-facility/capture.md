@@ -27,6 +27,21 @@ frozen_artifacts ----> re-hashed bytes: the gate before any grading (#9)
 add_receipt / add_result --> records from other producers, never overwritten
 ```
 
+Every step above that commits evidence (`capture`, `cleanup_workspace`,
+`finalize`, `retry`, `add_receipt`/`add_result`, and `Experiment.open` when it
+completes an interrupted ledger commit) holds the experiment lock (#12), a `flock` on the
+experiment directory's own descriptor, so it creates no file. A grade holds the same
+lock, so the two never interleave. The journal and spool an attempt writes
+while it runs are not locked; see verification.md for how grading scopes them.
+
+A backend-driven attempt (`lifecycle.run_through_backend`) also journals a
+`backend-identity` detail event after `install()` when the backend reports
+the image the attempt ran in (`DockerBackend` asks the container:
+`docker inspect --format {{.Image}}`). The event carries `image_digest`, the
+ledger's planned `ledger_image_digest`, and `matches_ledger` - `true`, `false`,
+or `null` when either side is unknown. A tag republished after planning is a
+`false`, never the planned digest restated.
+
 The experiment directory is a **bundle** in records.md's sense. `skillc check-records`
 reads it directly. Objects, the journal, the spool and the ledger history carry no
 `.json` suffix, so a captured `task.json` is never mistaken for a record.
