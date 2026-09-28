@@ -560,9 +560,10 @@ whose own live-evidence acceptance items are untouched by this cycle), an
 optional managed-container backend with a published protocol but no
 implementing platform yet ([#64](https://github.com/cooneycw/skillc/issues/64)),
 operator-expressible degraded CPP subjects and a behavioral-eval export path
-([#150](https://github.com/cooneycw/skillc/issues/150) - its discriminating
-run is not yet possible, blocked on an operator decision, not on anything
-this release could deliver), and a live selection-probe run with its
+([#150](https://github.com/cooneycw/skillc/issues/150) - everything it
+needs to run now exists, including the agent-path installation receipt;
+the operator's own live discriminating run and the export into
+claude-power-pack are what's still owed), and a live selection-probe run with its
 detection control ([#26](https://github.com/cooneycw/skillc/issues/26)).
 None of these claims to be finished; see
 [`docs/release-notes/0.3.0.md`](docs/release-notes/0.3.0.md)
