@@ -10,6 +10,57 @@ and version plan.
 
 ### Added
 
+- **Level 2 and Level 3 calibrated task families: constraint-handling and
+  real installed-path grading** (Refs #13). Two new sibling task families,
+  never touching Level 1's own fixtures.
+
+  `evals/level2/slug-constrained/` extends Level 1's slug bug fix with three
+  PUBLIC constraints (goal.md states all of them; #13's own "keep public
+  requirements"), each its own mandatory criterion, bucket-prefixed
+  (`functional-*`/`constraint-*`, no schema change - `grader.json`'s
+  `criteria` stays a flat list of strings) so a report can group by bucket:
+  interface stability (`inspect.signature`, a structural check), a
+  dependency restriction (`ast.parse` on the source TEXT, never executed -
+  static on purpose, since a dynamic check only ever sees an import a run
+  actually reaches, and `wrong/deferred-import` hides one behind a branch no
+  functional held-out input takes), and data preservation (a hardcoded
+  sha256 of `fixture/NOTES.md`, never re-read at grade time - `wrong/notes-
+  touched` proves the digest isn't lenient about whitespace-only edits).
+  `qualify.py` (Level 1's generic harness, copied) certifies all three: red
+  on each `wrong/*`'s own criterion only, green on `reference/`/
+  `alternatives/char-loop`.
+
+  `evals/level3/slugkit-installed/` reframes "a real installed consuming
+  path" (#13's own wording) as a property of the CANDIDATE's code, not of
+  agent skill consumption (already measured by #26/#150) - a fix that
+  passes a visible unit test must also work through the package's real
+  console entry point. Neither pip nor a build backend is present in this
+  dev venv or the #78 trial/grading container (checked directly:
+  `import pip`/`setuptools`/`hatchling` all fail here; `docker/trial/
+  Dockerfile` installs no `python3-pip`) - a first design making the
+  criterion UNKNOWN everywhere was rejected during review, since a mandatory
+  criterion INCONCLUSIVE on every attempt means `qualify.py` can never
+  certify the task at all. The shipped design instead grades through a
+  stdlib-only install EMULATION (`tomllib` reads the candidate's declared
+  package directories and `[project.scripts]` target; only those
+  directories are copied into an isolated site dir; the entry point runs in
+  a fresh interpreter with only that dir on `sys.path`), honestly named in
+  its own evidence and proven to discriminate SATISFIED/VIOLATED today, in
+  this repository, against three known-bads: a fix applied only to an
+  undeclared `scratch/` copy (`wrong/scratch-copy`), a correct fix shipping
+  a stale package-data file (`wrong/stale-data`, caught on a held-out input
+  a mocked/hardcoded unit test would miss), and a renamed entry function
+  whose `pyproject.toml` target was never updated (`wrong/renamed-entry-
+  point`). An optional, secondary real-pip mode exists behind a capability
+  check and is proven separately, since pip's absence here means it can
+  never fire in a real `qualify.py` run: `check_real_pip_mode.py` uses a
+  committed fake `pip`/`hatchling` module pair
+  (`fixtures/fake-pip/`, the same fault-injection convention `tests/
+  fixtures/docker-backend/fake_docker.py` already establishes, adapted for
+  a module rather than a PATH-resolved CLI) to prove the mode-selection
+  branch fires correctly AND that real-pip mode's own install logic still
+  excludes `wrong/scratch-copy`'s undeclared fix.
+
 - **An optional managed-container backend, client-only: `skillc.managed_backend.ManagedBackend`**
   (Refs #64). A second `ExecutionBackend` implementation (#10's seam) for a
   platform that already manages its own containers and is willing to run one
