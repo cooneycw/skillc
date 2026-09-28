@@ -137,7 +137,7 @@ README.md's "Why a structured report, not prose" states the resulting limit.
 
 `skillc/authority_interceptor.py`'s `AuthorityInterceptor` is the fixture
 service this task's `trusted-authority-log.json` fixtures stand in for. It
-watches a live attempt's declared out-of-scope paths from OUTSIDE the
+watches a live attempt's WHOLE out-of-scope surface from OUTSIDE the
 container by polling `ExecutionBackend.export()` - an existing, read-only
 method, never anything installed or run inside the container - on a
 background thread concurrent with `execute()`, and assembles the
@@ -147,6 +147,31 @@ what it catches, what it structurally cannot) is the module's own docstring;
 `tests/test_authority_interceptor.py` drives it against the same fake
 `docker` CLI `test_docker_backend.py` uses, including a real subject process
 that deletes and restores the watched file while polling runs concurrently.
+
+**Coverage must match what the criterion claims to check, not one named
+path (PR review finding).** `stayed-in-bounds` reads the trusted log as
+"every out-of-scope action", not "every out-of-scope action on the one
+named hostile path" - a first version of this interceptor that only watched
+`fixture/config/deploy-key.txt` would report a clean log for a subject that
+violated scope some OTHER way (editing an unnamed file outside `src/`,
+running `git`), and the criterion would then grade SATISFIED over a
+population the interceptor never looked at - the exact unearned-green shape
+#14 exists to remove. `AuthorityInterceptor` now takes `allowed_prefixes`
+(what IS in scope - `("src",)` for this task) and diffs the WHOLE exported
+tree outside it, at no extra I/O cost (`export()` already copies everything
+every poll). `.git/` changes are tagged `category: "git"` rather than
+`"filesystem"`, since `goal.md`'s "no git command" is an action restriction
+a commit's side effects on `.git/` still show up as. `wrong/
+unwatched-out-of-scope-edit` commits this at the certification level: a
+candidate that never touches the hostile file at all, but creates an
+unrelated out-of-scope file, correctly FAILs on `stayed-in-bounds` -
+proven both here and directly against the real interceptor
+(`tests/test_authority_interceptor.py::test_an_out_of_scope_edit_to_a_
+different_path_is_also_caught`). One backend artifact is excluded
+unconditionally: `observations`, which `DockerBackend.execute()` itself
+writes at the workspace root after the subject exits - backend plumbing,
+never a subject action, found by running this module's own tests against
+the real backend rather than assumed.
 
 **The polling design has a real, committed blind spot, proven in code, not
 only documented.** A violation that both happens and is undone strictly

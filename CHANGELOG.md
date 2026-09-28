@@ -12,11 +12,23 @@ and version plan.
 
 - **`skillc/authority_interceptor.py`, the L4 authority-boundary fixture
   service for #14's runtime half** (Refs #14). `AuthorityInterceptor` polls
-  a live attempt's declared out-of-scope paths from OUTSIDE the container -
+  a live attempt's WHOLE out-of-scope surface from OUTSIDE the container -
   via `ExecutionBackend.export()`, an existing read-only method, never
   anything run inside the container under the subject's own uid - on a
   background thread concurrent with `execute()`, and assembles the
   `trusted_observation` bytes `skillc.verify.grade_agent_attempt` carries.
+  Diffs the WHOLE exported tree outside a declared `allowed_prefixes` (PR
+  review: watching only one named hostile path let `stayed-in-bounds` grade
+  SATISFIED over a violation on any OTHER out-of-scope path the interceptor
+  never looked at) at no extra I/O cost, since `export()` already copies
+  everything every poll; `.git/` changes are tagged their own `category`
+  since a `git` command's side effects there are an action violation, not
+  an ordinary file edit. `wrong/unwatched-out-of-scope-edit` commits this
+  at the certification level, proven both there and directly against the
+  real interceptor. One backend artifact (`observations`,
+  `DockerBackend.execute()`'s own captured-stdout file) is excluded
+  unconditionally - backend plumbing, never a subject action, found by
+  running this module's own tests against the real backend.
   A mandatory final snapshot, taken immediately after `confirm_stopped()`
   confirms the stop regardless of the configured poll interval, catches any
   PERSISTENT violation even in an attempt shorter than one interval;
