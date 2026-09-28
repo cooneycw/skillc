@@ -452,11 +452,69 @@ def test_cli_leak_check_flags_a_checkout_under_the_running_hosts_own_cwd(
     """End-to-end: the real `skillc leak-check` gate, wired to
     `leak.default_host_paths()`, must catch a reference to ITS OWN running
     location - the exact shape of #150's export gate scanning agent output
-    produced from inside a /workspace container. Uses the live cwd rather
-    than a hardcoded /workspace literal, so this passes wherever it runs."""
+    produced from inside a /workspace container.
+
+    Chdir to a path NOT under /home or /Users (cross-model review on PR #154:
+    the first version of this test wrote the real, unmodified os.getcwd() -
+    on a host checkout under /home/<user> that is ALREADY caught by the
+    pre-fix home-path rule, so the test passed on the UNFIXED code there and
+    only ever went red inside a container. Confirmed real on the pre-fix
+    code with this chdir in place: TypeError/AttributeError, same as the
+    other item-5 cases - see the PR). This version is red wherever it runs."""
+    checkout = tmp_path / "srv-like" / "checkout"
+    checkout.mkdir(parents=True)
+    monkeypatch.chdir(checkout)
     monkeypatch.delenv(leak.DENYLIST_ENV, raising=False)
-    (tmp_path / "evidence.txt").write_text(f"produced in {os.getcwd()}\n", encoding="utf-8")
-    rc = cli.main(["leak-check", str(tmp_path)])
+    evidence_dir = tmp_path / "evidence"
+    evidence_dir.mkdir()
+    (evidence_dir / "evidence.txt").write_text(f"produced in {os.getcwd()}\n", encoding="utf-8")
+    rc = cli.main(["leak-check", str(evidence_dir)])
     assert rc == 1
     out = capsys.readouterr().out
     assert "host-path" in out, out
+
+
+def test_default_host_paths_drops_a_bare_mount_point(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#134 item 5, cross-model review on PR #154: running `skillc leak-check`
+    with cwd=/workspace - every container session's default before it `cd`s
+    into a checkout - measured 17 false positives, all `host-path: this
+    host's own path: /workspace`, matching the bare word anywhere it was
+    merely MENTIONED in prose (this module's own docstring, AGENTS.md). A
+    live value with fewer than two path segments below root must not become
+    a host-path candidate at all."""
+    monkeypatch.chdir("/")
+    monkeypatch.setattr(leak.os, "getcwd", lambda: "/workspace")
+    monkeypatch.setattr(leak.Path, "home", staticmethod(lambda: Path("/workspace")))
+    host_paths = leak.default_host_paths()
+    assert host_paths == frozenset(), host_paths
+
+    findings = list(
+        leak.scan_text(
+            "a checkout under /workspace, /opt or /srv\n", frozenset(),
+            frozenset({"/workspace"}),
+        )
+    )
+    assert findings == [], findings
+
+
+def test_a_host_path_only_fires_at_a_path_boundary() -> None:
+    """Cross-model review on PR #154: a raw substring check let a shorter
+    host path match inside a longer, unrelated one sharing its prefix
+    (e.g. /home/al matching inside /home/alice) - the same false-positive
+    shape ALLOWLIST's exact-match comparison exists to avoid elsewhere in
+    this module."""
+    host_paths = frozenset({"/srv/checkout"})
+    same_prefix_but_longer = list(
+        leak.scan_text("under /srv/checkout-extended/evidence\n", frozenset(), host_paths)
+    )
+    assert same_prefix_but_longer == [], same_prefix_but_longer
+
+    at_a_real_boundary = [
+        "produced in /srv/checkout\n",
+        "produced in /srv/checkout/evidence.txt\n",
+        'path: "/srv/checkout"\n',
+        "path /srv/checkout ends here\n",
+    ]
+    for line in at_a_real_boundary:
+        findings = list(leak.scan_text(line, frozenset(), host_paths))
+        assert [k for _, k, _ in findings] == ["host-path"], (line, findings)

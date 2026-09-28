@@ -43,7 +43,11 @@ not proof of absence:
 - a checkout under `/workspace`, `/opt`, `/srv` or elsewhere on a DIFFERENT
   machine than the one running the scan - `default_host_paths` (#134 item 5)
   only knows THIS process's own live home/cwd, not a path embedded from
-  somewhere else (a pasted log line, another host's stack trace).
+  somewhere else (a pasted log line, another host's stack trace). It also
+  never reports a bare mount point on its own (`/workspace`, `/root`, `/opt`,
+  `/srv`, `/tmp`) - too generic to identify a machine - and a `host-path`
+  match is a path-boundary one: directly abutted by another character with
+  no `/`, whitespace, quote or line end between them, it stays silent.
 - a public IPv4 address, a loopback or link-local one (127.0.0.0/8,
   169.254.0.0/16 - neither identifies a specific machine; see `_is_private`),
   or any IPv6 address.
@@ -183,6 +187,20 @@ def _is_private(candidate: str) -> bool:
     return any(addr in network for network in _PRIVATE_IPV4_RANGES)
 
 
+def _is_specific_enough(path: str) -> bool:
+    """A bare mount point - `/workspace`, `/root`, `/opt`, `/srv`, `/tmp` -
+    identifies no machine on its own; what identifies one is a path with
+    something specific under that prefix (#134 item 5, cross-model review on
+    PR #154). Measured: running `skillc leak-check` with cwd=`/workspace` -
+    every container session's default before it `cd`s into a checkout -
+    produced 17 false positives, all `host-path: this host's own path:
+    /workspace`, matching the bare word anywhere it was mentioned in prose
+    (this module's own docstring, AGENTS.md). Require at least two path
+    segments below root."""
+    segments = [p for p in Path(path).parts if p not in ("/", "")]
+    return len(segments) >= 2
+
+
 def default_host_paths() -> frozenset[str]:
     """This process's OWN home directory and current working directory
     (#134 item 5).
@@ -199,7 +217,8 @@ def default_host_paths() -> frozenset[str]:
     `test_seeded_values_do_not_collide_with_a_typical_harness_path`).
     Matching THIS process's actual live home/cwd as literal substrings
     catches this host's own machine-identifying path wherever it lives,
-    without guessing at a fixed prefix list.
+    without guessing at a fixed prefix list. `_is_specific_enough` drops a
+    live value that is itself just a bare mount point, for the same reason.
 
     Deliberately NOT folded into `scan_text`/`scan_path`'s own defaults:
     those stay pure and reproducible given explicit inputs, exactly like
@@ -210,7 +229,7 @@ def default_host_paths() -> frozenset[str]:
     passes this in explicitly.
     """
     candidates = {str(Path.home()), os.getcwd()}
-    return frozenset(p for p in candidates if p not in ("", "/"))
+    return frozenset(p for p in candidates if p not in ("", "/") and _is_specific_enough(p))
 
 
 def scan_text(
@@ -223,7 +242,18 @@ def scan_text(
 
     `host_paths` (#134 item 5) is normally `default_host_paths()`, passed in
     by the caller rather than computed here - see that function's docstring.
+    Each is matched at a PATH BOUNDARY - the character right after it must be
+    `/`, whitespace, a quote, or end of line - never as a raw substring
+    (cross-model review on PR #154): a raw substring would let a shorter
+    host path match inside a longer, unrelated one sharing its prefix, the
+    same class of bug `ALLOWLIST`'s exact-match comparison exists to avoid
+    for `HOME_PATH_RE`.
     """
+    host_path_patterns = [
+        (host_path, re.compile(re.escape(host_path) + r"""(?=[/\s'"]|$)"""))
+        for host_path in host_paths
+        if host_path
+    ]
     for lineno, line in enumerate(text.splitlines(), start=1):
         for match in HOME_PATH_RE.finditer(line):
             if match.group(0) in ALLOWLIST:
@@ -245,8 +275,8 @@ def scan_text(
         for name in denylist:
             if name in line:
                 yield lineno, "denylisted-hostname", name
-        for host_path in host_paths:
-            if host_path and host_path in line:
+        for host_path, pattern in host_path_patterns:
+            if pattern.search(line):
                 yield lineno, "host-path", f"this host's own path: {host_path}"
         for match in OAUTH_TOKEN_RE.finditer(line):
             if match.group(0) in ALLOWLIST:
