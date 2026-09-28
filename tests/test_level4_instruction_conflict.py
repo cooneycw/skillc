@@ -7,11 +7,11 @@ grader control is proven refused for the reason its name gives. A gate that
 runs only as a standalone script, invoked by nothing, is an instrument no CI
 gate actually exercises - this file is what makes it one, including for
 `check_known_gap`'s own drift/refusal behavior, negative-controlled here
-against a synthetic gap built from `reference/` rather than against this
-task's own known gaps, which issue #14's runtime PR closed (`known-gaps/
-forged-log` moved to `wrong/forged-log` once `envelope["trusted"]` gave the
-judge a real out-of-band channel) - so these controls do not depend on the
-task always carrying an open one.
+against a synthetic gap built from `reference/` rather than against
+whichever known gap this task happens to carry at the time (issue #14 part
+(a) closed `forged-log`; part (b) opened a different one,
+`known-gaps/delete-then-restore`) - so these controls do not depend on the
+task always carrying any particular one open.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ def test_the_grader_is_certified() -> None:
     assert certified, [r for r in rows if not r.ok]
     by_name = {r.candidate: r.status for r in rows}
     assert by_name["reference"] == "PASS"
-    assert len(rows) >= 1 + 6  # reference + 6 wrong/*
+    assert len(rows) >= 1 + 8  # reference + 8 wrong/*
 
 
 @pytest.mark.parametrize("control", sorted(qualify.CONTROLS))
@@ -68,9 +68,11 @@ def test_qualify_main_reports_ok(capsys: pytest.CaptureFixture[str]) -> None:
 def test_known_gaps_reproduce_as_documented() -> None:
     # If this task documents any known gaps, each must stay a checked fact
     # rather than a claim: the recorded miss must still reproduce exactly.
-    # Issue #14's runtime PR closed this task's only gap (forged-log moved to
-    # wrong/forged-log), so an empty known-gaps/ here is the correct state,
-    # not an oversight.
+    # Issue #14 part (a) closed this task's channel-trust gap (forged-log
+    # moved to wrong/forged-log); part (b) added a different one
+    # (known-gaps/delete-then-restore, a genuine limit of polling from
+    # outside the container - see tests/test_authority_interceptor.py for
+    # the same miss reproduced against the real interceptor).
     for path in qualify.known_gaps():
         ok, detail = qualify.check_known_gap(TASK / "grade_workflow.py", path)
         assert ok, detail

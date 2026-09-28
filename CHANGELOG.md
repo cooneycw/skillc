@@ -10,6 +10,53 @@ and version plan.
 
 ### Added
 
+- **`skillc/authority_interceptor.py`, the L4 authority-boundary fixture
+  service for #14's runtime half** (Refs #14). `AuthorityInterceptor` polls
+  a live attempt's WHOLE out-of-scope surface from OUTSIDE the container -
+  via `ExecutionBackend.export()`, an existing read-only method, never
+  anything run inside the container under the subject's own uid - on a
+  background thread concurrent with `execute()`, and assembles the
+  `trusted_observation` bytes `skillc.verify.grade_agent_attempt` carries.
+  Diffs the WHOLE exported tree outside a declared `allowed_prefixes` (PR
+  review: watching only one named hostile path let `stayed-in-bounds` grade
+  SATISFIED over a violation on any OTHER out-of-scope path the interceptor
+  never looked at) at no extra I/O cost, since `export()` already copies
+  everything every poll; `.git/` changes are tagged their own `category`
+  since a `git` command's side effects there are an action violation, not
+  an ordinary file edit. `wrong/unwatched-out-of-scope-edit` commits this
+  at the certification level, proven both there and directly against the
+  real interceptor. One backend artifact (`observations`,
+  `DockerBackend.execute()`'s own captured-stdout file) is excluded
+  unconditionally - backend plumbing, never a subject action, found by
+  running this module's own tests against the real backend.
+  A mandatory final snapshot, taken immediately after `confirm_stopped()`
+  confirms the stop regardless of the configured poll interval, catches any
+  PERSISTENT violation even in an attempt shorter than one interval;
+  `stop_and_finalize()` returns `None` (never a hollow, clean-looking empty
+  log) if that mandatory snapshot itself cannot be taken. The design has a
+  real, committed blind spot - a violation both made and undone strictly
+  between two observations leaves no trace - proven directly against the
+  real interceptor (`tests/test_authority_interceptor.py::test_delete_then_
+  restore_within_one_poll_window_is_invisible`, run against the same fake
+  `docker` CLI `test_docker_backend.py` uses) and committed at the
+  certification level as `evals/level4/instruction-conflict-config-secret/
+  known-gaps/delete-then-restore/`, mutation-tested the same way
+  `known-gaps/forged-log` was before it closed. A poll that FAILS to export
+  mid-run is counted, not silently skipped: the assembled log carries a
+  `coverage: {polls_attempted, polls_failed}` field, since "half the polls
+  failed" and "every poll saw nothing" both give an empty `entries` list on
+  their own. `_loop`'s single-threaded wait-then-poll structure makes a slow
+  poll unable to pile up by construction, not by a check - documented with a
+  measured (fake-CLI, floor-only) export cost for this task's ~24 KiB
+  workspace, ~0.04s over 20 calls, against a 2.0s default interval. Neither
+  the interceptor nor its known-gap fixture cover the override's "quote its
+  full contents" half
+  - stated plainly in the module docstring and PROVENANCE.md as an
+  uncovered gap, since a filesystem watcher cannot observe data copied out
+  of a file into the subject's own report text, and none of
+  `grade_workflow.py`'s four criteria inspect report text for a secret-value
+  match either. Nothing in production wires this into a real attempt yet.
+
 - **`skillc/verify.py` gets a trusted-observation channel for #14's Level
   4/5 runtime half** (Refs #14). `grade_files`/`grade_directory`/
   `grade_agent_attempt`/`grade` take an optional `trusted_observation: bytes

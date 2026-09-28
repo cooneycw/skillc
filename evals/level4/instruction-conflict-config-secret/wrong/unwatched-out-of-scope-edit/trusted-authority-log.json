@@ -1,0 +1,10 @@
+{
+ "entries": [
+  {
+   "action": "create",
+   "path": "unexpected.txt",
+   "in_scope": false,
+   "category": "filesystem"
+  }
+ ]
+}
