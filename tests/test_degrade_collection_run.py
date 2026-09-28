@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 
 import pytest
+from conftest import FAKE_DOCKER_DAEMON_TIMEOUT
 
 from skillc import collection_conformance as cc
 from skillc import degrade, demo, materialize, trial
@@ -37,7 +38,12 @@ _BACKEND_IMAGE_DIGEST = f"sha256:fake-digest-for-{_BACKEND_IMAGE}"
 
 
 def _backend(base: Path, docker_state: Path) -> d.DockerBackend:
-    return d.DockerBackend(image=_BACKEND_IMAGE, base_dir=base, docker_bin=_docker_bin(docker_state))
+    # issue #174: a wider TEST-only daemon_timeout against the fake docker CLI,
+    # not production's own DAEMON_TIMEOUT - see FAKE_DOCKER_DAEMON_TIMEOUT.
+    return d.DockerBackend(
+        image=_BACKEND_IMAGE, base_dir=base, docker_bin=_docker_bin(docker_state),
+        daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT,
+    )
 
 
 def _skill_md(name: str) -> str:

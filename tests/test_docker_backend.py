@@ -935,6 +935,7 @@ def test_execute_does_not_annotate_stderr_truncation_under_the_cap(base: Path, d
 
 
 @needs_setsid
+@pytest.mark.skipif(shutil.which("cat") is None, reason="needs cat to block the detached grandchild on a FIFO")
 def test_execute_reports_stdout_incomplete_when_the_drain_never_reaches_eof(
     base: Path, docker_state: Path, tmp_path: Path,
 ) -> None:
@@ -945,31 +946,63 @@ def test_execute_reports_stdout_incomplete_when_the_drain_never_reaches_eof(
     pipe open (`ExecuteResult`'s own docstring already named this gap) was
     silently reported as a complete, non-truncated capture.
 
-    The subject uses `setsid` to detach a grandchild `sleep` into its own
-    session before exiting itself - real, not simulated: `os.killpg`
-    (`_stop`'s own kill path) cannot reach a process outside its group, and
-    the shell exits almost immediately, so `reason` is `\"exited\"`, not
-    `\"timeout\"`. The grandchild inherits the write end of stdout/stderr and
-    holds them open for 8s; `grace`/`daemon_timeout` bound the join at well
-    under a second, so `execute()` must give up waiting long before the
-    grandchild ever closes them. Fails on the pre-fix code, which reported
-    `stdout_truncated=False` here - indistinguishable from a clean, complete,
-    empty capture."""
+    The subject uses `setsid` to detach a grandchild into its own session
+    before exiting itself - real, not simulated: `os.killpg` (`_stop`'s own
+    kill path) cannot reach a process outside its group, and the shell exits
+    almost immediately, so `reason` is `"exited"`, not `"timeout"`. The
+    grandchild blocks in `open()` reading a FIFO nothing has opened for
+    writing yet - a POSIX FIFO open-for-read blocks until a writer shows up,
+    so "never reaches EOF" holds by construction, not by racing a fixed
+    sleep against `grace`/`daemon_timeout` (issue #174: the prior version
+    used a real `sleep 8`, which flaked under host load because the margin
+    between 8s and the join bound was itself timing, not a guarantee). The
+    `finally` block opens the FIFO for writing so the grandchild is released
+    and exits cleanly instead of leaking a process; it runs whether or not
+    the assertions below it pass. Fails on the pre-fix code (pre-#164),
+    which reported `stdout_truncated=False` here - indistinguishable from a
+    clean, complete, empty capture."""
+    grace, daemon_timeout = 1.0, 1.0
     backend = d.DockerBackend(
-        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=1.0,
+        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=daemon_timeout,
     )
     handle = backend.prepare("a-lc-000000000024b")
     assert isinstance(handle, d._Handle)
     backend.install(handle, {})
-    argv = ["sh", "-c", "setsid sh -c 'sleep 8' </dev/null & true"]
+    fifo = tmp_path / "hold-open.fifo"
+    os.mkfifo(fifo)
+    argv = ["sh", "-c", f"setsid sh -c 'exec cat {fifo}' </dev/null & true"]
+    # Nominal worst case for this code path (docker_backend.py's execute()):
+    # _kill_container (daemon_timeout) + stdout_thread.join (grace +
+    # daemon_timeout) + stderr_thread.join (grace + daemon_timeout, called
+    # sequentially after stdout's join returns - see the #20 Nit Store
+    # comment filed against #174) + the observations docker-cp write-back
+    # (daemon_timeout). MARGIN is slack for process-spawn/scheduling
+    # overhead this test does not otherwise account for - it is not a
+    # production bound, so it stays a small, fixed, explicit constant
+    # rather than widening any of the real ones above.
+    join_bound = grace + daemon_timeout
+    MARGIN = 2.0
+    bound = daemon_timeout + 2 * join_bound + daemon_timeout + MARGIN
     started = time.monotonic()
-    result = backend.execute(handle, argv, Limits(timeout=5, grace=1.0))
-    elapsed = time.monotonic() - started
-    assert result.reason == "exited"
-    assert result.stdout_incomplete is True
-    assert result.stderr_incomplete is True
-    assert result.stdout_truncated is False, "capped-and-discarded is a different fact from never-reached-EOF"
-    assert elapsed < 6.0, f"execute() took {elapsed:.2f}s - it waited for the detached grandchild instead of giving up"
+    try:
+        result = backend.execute(handle, argv, Limits(timeout=5, grace=grace))
+        elapsed = time.monotonic() - started
+        assert result.reason == "exited"
+        assert result.stdout_incomplete is True
+        assert result.stderr_incomplete is True
+        assert result.stdout_truncated is False, "capped-and-discarded is a different fact from never-reached-EOF"
+        assert elapsed < bound, (
+            f"execute() took {elapsed:.2f}s, expected under {bound:.2f}s "
+            f"(kill {daemon_timeout}s + stdout join {join_bound}s + stderr join {join_bound}s "
+            f"+ docker-cp {daemon_timeout}s + {MARGIN}s margin) - it waited for the detached "
+            "grandchild instead of giving up"
+        )
+    finally:
+        try:
+            with open(fifo, "wb"):
+                pass
+        except OSError:
+            pass
     backend.destroy(handle)
 
 
@@ -1141,6 +1174,50 @@ def test_confirm_stopped_is_unknown_when_the_daemon_is_unreachable(
     _sentinel(docker_state, ".down")
     assert backend.confirm_stopped(handle) is Confirmation.UNKNOWN
     assert backend.confirm_absent(handle) is Confirmation.UNKNOWN
+
+
+def test_confirm_stopped_is_unknown_only_once_the_inspect_delay_exceeds_daemon_timeout(
+    base: Path, docker_state: Path,
+) -> None:
+    """Two-sided negative control for issue #174 (items 1 and 2's shared root
+    cause, see the #20 Nit Store comment filed against this issue): every
+    `docker inspect` call in `_inspect()` is bounded by `daemon_timeout`, and
+    every caller downstream of `confirm_stopped()` (`trial.finalize()`'s
+    disposition, `verify.py`'s quarantine) trusts UNKNOWN over a guess. Fault
+    injection is via fake_docker.py's own `.inspect-delay-NAME` sentinel
+    (file-based, not env-based - see that module's docstring), so this is
+    reproduced deterministically, with no host load needed.
+
+    (a) a delay UNDER daemon_timeout still reports the real, CONFIRMED status
+    - proves the bound is not simply "always green", i.e. that this check
+    actually exercises a live inspect call rather than one that never runs.
+    (b) a delay OVER daemon_timeout reports UNKNOWN - proves the fail-closed
+    path still works and a wider TEST-only bound elsewhere (see
+    conftest.FAKE_DOCKER_DAEMON_TIMEOUT) did not quietly make the timeout
+    itself unreachable."""
+    daemon_timeout = 2.0
+    backend = d.DockerBackend(
+        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=daemon_timeout,
+    )
+    handle = backend.prepare("a-lc-000000000012b")
+    assert isinstance(handle, d._Handle)
+    backend.install(handle, {})
+    backend.execute(handle, [sys.executable, "-c", "print('done')"], Limits(timeout=5))
+    # The container must already be genuinely stopped before either side
+    # below - otherwise side (a)'s CONFIRMED would not distinguish "read
+    # correctly" from "nothing was checked".
+    assert backend.confirm_stopped(handle) is Confirmation.CONFIRMED
+
+    delay_file = docker_state / f".inspect-delay-{handle.name}"
+    try:
+        delay_file.write_text(str(daemon_timeout - 1.0), encoding="utf-8")
+        assert backend.confirm_stopped(handle) is Confirmation.CONFIRMED
+
+        delay_file.write_text(str(daemon_timeout + 1.0), encoding="utf-8")
+        assert backend.confirm_stopped(handle) is Confirmation.UNKNOWN
+    finally:
+        delay_file.unlink(missing_ok=True)
+    backend.destroy(handle)
 
 
 def test_confirm_absent_is_not_confirmed_when_rm_lies(base: Path, docker_state: Path) -> None:

@@ -527,6 +527,8 @@ import time
 from base64 import urlsafe_b64encode
 from collections.abc import Callable
 
+from conftest import FAKE_DOCKER_DAEMON_TIMEOUT
+
 from skillc import docker_backend as d
 
 FAKE_DOCKER = ROOT / "tests" / "fixtures" / "docker-backend" / "fake_docker.py"
@@ -605,8 +607,14 @@ def _run_real(
     base.mkdir()
     docker_state = tmp_path / "docker-state"
     docker_bin = [sys.executable, str(FAKE_DOCKER), "--state", str(docker_state)]
-    backend = _HomeRecordingBackend(image="fake-image:1", base_dir=base, docker_bin=docker_bin)
-    grading_backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=docker_bin)
+    # issue #174: a wider TEST-only daemon_timeout against the fake docker CLI,
+    # not production's own DAEMON_TIMEOUT - see FAKE_DOCKER_DAEMON_TIMEOUT.
+    backend = _HomeRecordingBackend(
+        image="fake-image:1", base_dir=base, docker_bin=docker_bin, daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT,
+    )
+    grading_backend = d.DockerBackend(
+        image="fake-image:1", base_dir=base, docker_bin=docker_bin, daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT,
+    )
     experiment = sp.plan_selection_probe(
         CASES, MANIFEST, treatment_subject_digest=_TREATMENT_SUBJECT_DIGEST,
         baseline_subject_digest=_BASELINE_SUBJECT_DIGEST, image_digest=_PLACEHOLDER_IMAGE_DIGEST,
@@ -714,7 +722,11 @@ def _real_runner_parts(tmp_path: Path) -> tuple[t.Experiment, sp.AgentTrialRunne
     base.mkdir()
     docker_bin = [sys.executable, str(FAKE_DOCKER), "--state", str(tmp_path / "docker-state")]
     experiment = _plan(tmp_path)
-    backend = _HomeRecordingBackend(image="fake-image:1", base_dir=base, docker_bin=docker_bin)
+    # issue #174: a wider TEST-only daemon_timeout against the fake docker CLI,
+    # not production's own DAEMON_TIMEOUT - see FAKE_DOCKER_DAEMON_TIMEOUT.
+    backend = _HomeRecordingBackend(
+        image="fake-image:1", base_dir=base, docker_bin=docker_bin, daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT,
+    )
     runner = sp.agent_trial_runner(
         experiment=experiment, backend=backend, base=base, client="codex",
         argv_for=lambda _a: [], treatment_home_files=_COLLECTION, goal="x",
@@ -971,8 +983,12 @@ def _run_control(tmp_path: Path, baseline: dict[str, object]) -> tuple[bool, str
         baseline_subject_digest=sp.BASELINE_SUBJECT_DIGEST, image_digest=_PLACEHOLDER_IMAGE_DIGEST,
         store=t.open_store(tmp_path / "store", forbidden=[]), experiment_name=str(CONTROL["experiment"]),
     )
+    # issue #174: a wider TEST-only daemon_timeout against the fake docker CLI,
+    # not production's own DAEMON_TIMEOUT - see FAKE_DOCKER_DAEMON_TIMEOUT.
     runner = sp.agent_trial_runner(
-        experiment=experiment, backend=_HomeRecordingBackend(image="fake-image:1", base_dir=base, docker_bin=docker_bin),
+        experiment=experiment, backend=_HomeRecordingBackend(
+            image="fake-image:1", base_dir=base, docker_bin=docker_bin, daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT,
+        ),
         base=base, client="codex",
         argv_for=_argv_for(experiment, docker_state, {(INTENDED_USE, "baseline"): baseline}),
         treatment_home_files=_COLLECTION, goal="Fix the slug helper.", timeout=5,
@@ -980,7 +996,9 @@ def _run_control(tmp_path: Path, baseline: dict[str, object]) -> tuple[bool, str
     )
     report = sp.run_planned_selection_probe(
         experiment, cases, runner, base=base, grader=GRADER, detection_control=True,
-        grading_backend=d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=docker_bin),
+        grading_backend=d.DockerBackend(
+            image="fake-image:1", base_dir=base, docker_bin=docker_bin, daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT,
+        ),
     )
     return sp.probe_verdict(report, detection_control=True)
 
@@ -1126,7 +1144,11 @@ def _single_attempt_runner(
     docker_state = tmp_path / "docker-state"
     docker_bin = [sys.executable, str(FAKE_DOCKER), "--state", str(docker_state)]
     experiment = _plan(tmp_path)
-    backend = _HomeRecordingBackend(image="fake-image:1", base_dir=base, docker_bin=docker_bin)
+    # issue #174: a wider TEST-only daemon_timeout against the fake docker CLI,
+    # not production's own DAEMON_TIMEOUT - see FAKE_DOCKER_DAEMON_TIMEOUT.
+    backend = _HomeRecordingBackend(
+        image="fake-image:1", base_dir=base, docker_bin=docker_bin, daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT,
+    )
     trial_dict, attempt = next(iter(experiment.attempts()))
     attempt_id = str(attempt["attempt_id"])
     home = docker_state / f"{d._container_name(attempt_id)}.fsroot" / "home" / "candidate"
