@@ -818,7 +818,16 @@ class InstallationReceiptContext:
     sense) - passing the SAME cache across multiple `run_one_attempt` calls
     that share `subject.digest`/`image.digest` is what makes the caching
     real; a fresh `{}` per call defeats it, which is the caller's choice to
-    make, not this function's."""
+    make, not this function's.
+
+    `listing_client_argv` is caller-supplied, exactly as `run_one_attempt`'s
+    own `base_argv` already is (see that parameter's docstring for why): a
+    bare `[client]` (`["codex"]`) is only resolvable when the real binary is
+    on the container's `PATH`, which a real trial image gives it but a test
+    fixture does not - `None` (the default) uses `[client]`, correct for a
+    real container; a test passes a scripted stand-in's own invocation
+    instead (`tests/fixtures/codex-subject/fake_codex.py`'s own `debug
+    prompt-input` handling, already shaped for exactly this)."""
 
     declared: frozenset[str]
     tree_digest: str
@@ -826,6 +835,7 @@ class InstallationReceiptContext:
     subject_revision: str
     surface_name: str
     cache: DiscoveryCache
+    listing_client_argv: Sequence[str] | None = None
 
 
 #: The exact evidence sentence review point 2 requires, verbatim, so a
@@ -1113,7 +1123,8 @@ def run_one_attempt(
                 receipt = (
                     _build_discovery_receipt(
                         backend=backend, experiment=experiment, attempt_id=attempt_id,
-                        client=client, client_version=resolved_cli_version, client_argv=[client],
+                        client=client, client_version=resolved_cli_version,
+                        client_argv=receipt_context.listing_client_argv or [client],
                         extra_home_files=extra_home_files or {}, limits=limits, base=base,
                         context=receipt_context,
                     ) if receipt_context is not None else None

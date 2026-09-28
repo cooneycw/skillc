@@ -544,6 +544,7 @@ def run_collection_agent_attempt(
     credential_explicit_path: str | Path | None = None,
     minimum_credential_seconds: float = credential.MINIMUM_REMAINING_SECONDS,
     discovery_cache: agent_trial.DiscoveryCache | None = None,
+    listing_client_argv: Sequence[str] | None = None,
 ) -> CollectionAgentResult:
     """Install `acquired`'s declared, selected skill files into the same
     container as one real (or, in this module's own tests, scripted-fake)
@@ -577,11 +578,18 @@ def run_collection_agent_attempt(
     `None` (the default) is a fresh, single-use cache, correct for a lone
     `skillc collection-run` invocation. `acquired.files` empty means nothing
     is installed, so no receipt context is built and the B1 stand-in applies,
-    same as a matched-pilot baseline arm."""
+    same as a matched-pilot baseline arm.
+
+    `listing_client_argv` (#150-D): caller-supplied, exactly like
+    `base_argv` above and for the same reason - `None` uses the bare client
+    name, correct for a real container where the pinned binary is on
+    `PATH`; this module's own tests pass a scripted stand-in's invocation
+    instead."""
     receipt_context = (
         agent_trial.InstallationReceiptContext(
             declared=frozenset(f.skill for f in acquired.files),
             tree_digest=acquired.source.digest,
+            listing_client_argv=listing_client_argv,
             subject_locator=acquired.subject.locator,
             subject_revision=acquired.source.revision,
             surface_name=acquired.subject.surface,

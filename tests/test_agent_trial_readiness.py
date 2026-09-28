@@ -1,27 +1,76 @@
-"""Tests for `agent_trial.readiness_from_discovery_listings` (#150-D).
+"""Tests for `agent_trial.readiness_from_discovery_listings` and
+`_build_discovery_receipt`'s early-return paths (#150-D).
 
-Pure-function tests: no fake docker, no backend, no container. This is
-deliberate - `readiness_from_discovery_listings` takes two already-obtained
-listing results (`demo.run_subject_discovery`'s own return shape) and scores
-them; it does not itself talk to a container. `tests/test_agent_trial.py`
-(the fake-docker end-to-end suite) is where the eventual wiring that
-actually calls the listing inside a container belongs, once #150-C and
-#150-B2 land (Refs #150-D).
+Pure/fast tests: no fake docker, no backend, no container - `_build_discovery_receipt`
+never touches its `backend`/`experiment` arguments until AFTER the checks this
+file exercises, so a dummy placeholder is enough. The full end-to-end path
+(a real receipt through a real fake-docker container, all three of ADR 0005's
+named red cases) lives in `tests/test_collection_conformance.py`.
 
 ADR 0005's "yes, narrow B1" ruling names three required red cases; this file
-carries the two that are expressible purely from listing results (the third,
-"an empty baseline arm still yields the B1 stand-in, not a receipt", is a
-CALLER decision - whether to call this function at all - not something this
-function itself can fail on, since it is never given an empty `declared`
-set by a caller that made that decision correctly. It belongs with the
-eventual `run_one_attempt` wiring, not here.).
+carries red case 3's pure-logic half (an unobtainable listing is UNKNOWN) and
+red case 2 (an empty declared set, or a non-codex client, never builds a
+receipt at all - the CALLER decision that keeps the B1 stand-in). Red case 1
+(a canary-failing installing arm is not PASS) and the full re-derivation of
+case 2 and 3 through a real fake-docker attempt are in
+`tests/test_collection_conformance.py`.
 """
 
 from __future__ import annotations
 
-from skillc.agent_trial import readiness_from_discovery_listings
+from pathlib import Path
+
+from skillc import trial
+from skillc.agent_trial import (
+    DiscoveryCache,
+    InstallationReceiptContext,
+    _build_discovery_receipt,
+    readiness_from_discovery_listings,
+)
+from skillc.backend import Limits
+from skillc.docker_backend import DockerBackend
 
 DECLARED = frozenset({"flow-finish"})
+
+
+def _context(*, declared: frozenset[str] = DECLARED, cache: DiscoveryCache | None = None) -> InstallationReceiptContext:
+    return InstallationReceiptContext(
+        declared=declared, tree_digest="sha256:tree", subject_locator="test/test",
+        subject_revision="v1", surface_name="codex-skills", cache=cache if cache is not None else {},
+    )
+
+
+def _unreachable_backend() -> DockerBackend:
+    """Never actually called in the paths this file tests - `_build_discovery_receipt`
+    returns before touching `backend` for a non-codex client or an empty
+    `declared` set. A real (but never-invoked) instance, not a bare `None`,
+    so a bug that DID reach further would fail loudly on a real method call
+    rather than an unrelated `AttributeError` on `None`."""
+    return DockerBackend(image="unused", base_dir=Path("."), docker_bin=["/bin/false"], daemon_timeout=1)
+
+
+def test_a_claude_arm_never_builds_a_receipt() -> None:
+    """Red case 2, half A: only codex has a model-free listing - a Claude
+    Code arm must keep the B1 stand-in, whatever `declared` says."""
+    result = _build_discovery_receipt(
+        backend=_unreachable_backend(), experiment=trial.Experiment(root=Path("/nonexistent"), ledger={"trials": []}),
+        attempt_id="a-x", client="claude", client_version="1.0", client_argv=["claude"],
+        extra_home_files={"whatever": b"x"}, limits=Limits(timeout=1), base=Path("."),
+        context=_context(),
+    )
+    assert result is None
+
+
+def test_an_empty_declared_set_never_builds_a_receipt() -> None:
+    """Red case 2, half B: nothing declared (an empty baseline arm) must
+    keep the B1 stand-in, even on a codex client."""
+    result = _build_discovery_receipt(
+        backend=_unreachable_backend(), experiment=trial.Experiment(root=Path("/nonexistent"), ledger={"trials": []}),
+        attempt_id="a-x", client="codex", client_version="1.0", client_argv=["codex"],
+        extra_home_files={}, limits=Limits(timeout=1), base=Path("."),
+        context=_context(declared=frozenset()),
+    )
+    assert result is None
 
 #: A clean `demo.run_subject_discovery` result: no reason, no undeclared
 #: skill listed alongside it.

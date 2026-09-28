@@ -23,13 +23,16 @@ from types import SimpleNamespace
 
 import pytest
 
+from skillc import agent_trial, demo, materialize, reap, trial
 from skillc import collection_conformance as cc
-from skillc import demo, materialize, reap, trial
 from skillc import docker_backend as d
 
 FAKE_DOCKER = Path(__file__).resolve().parent / "fixtures" / "docker-backend" / "fake_docker.py"
 FAKE_CLIENT = Path(__file__).resolve().parent / "fixtures" / "agent-trial" / "fake_agent_client.py"
 GRADER_ROOT = Path(__file__).resolve().parent.parent / "evals" / "level1" / "slug-small-fix"
+#: test_demo.py's own fake codex client (#7) - reused here for #150-D's
+#: in-container discovery listing rather than building a second fixture.
+CODEX_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "codex-subject"
 
 
 def _docker_bin(state_dir: Path) -> list[str]:
@@ -112,6 +115,19 @@ def _codex_argv(
     for skill in plant_skill or ():
         argv.extend(["--plant-skill", skill])
     return argv
+
+
+def _fake_codex_listing(tmp_path: Path, mode: str = "normal", **config: str) -> list[str]:
+    """`tests/fixtures/codex-subject/fake_codex.py`, copied fresh per test
+    (test_demo.py's own pattern) - a bare `"codex"` in `listing_client_argv`
+    would need the real binary on `PATH`, which a real trial image gives it
+    but this fixture never does; this is the scripted stand-in
+    #150-D's `InstallationReceiptContext.listing_client_argv` exists for."""
+    script = tmp_path / "listing-client" / "fake_codex.py"
+    script.parent.mkdir(exist_ok=True)
+    shutil.copy(CODEX_FIXTURE / "fake_codex.py", script)
+    script.with_suffix(".mode").write_text(json.dumps({"mode": mode, **config}), encoding="utf-8")
+    return [sys.executable, str(script)]
 
 
 def _mapped_home(docker_state: Path, attempt_id: str) -> Path:
@@ -1314,3 +1330,119 @@ def test_cmd_collection_run_exit_follows_measured_discovery(
         "whatever", image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base=str(base), timeout=5,
     )
     assert cli.cmd_collection_run(args) == expected
+
+
+# --------------------------------------------------------- #150-D: a real installation receipt
+
+
+def _receipt_run(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+    *, listing_mode: str, skills: dict[str, str] | None = None,
+) -> tuple[cc.CollectionAgentResult, trial.Experiment, str]:
+    repo = _fixture_collection(tmp_path, skills if skills is not None else {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=list((skills or {"tdd": "tdd"}).keys())))
+    listing_client = _fake_codex_listing(tmp_path, mode=listing_mode)
+
+    acquired = cc.acquire_collection("whatever", base, checkout=repo)
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    experiment, attempt_id = cc.plan_collection_attempt(
+        "whatever", acquired, store, image_digest=_BACKEND_IMAGE_DIGEST,
+    )
+    argv = _codex_argv(
+        home=_mapped_home(docker_state, attempt_id),
+        transcript_relpath=".codex/sessions/2026/01/01/rollout-receipt.jsonl",
+        copy_solution=GRADER_ROOT / "reference",
+    )
+    result = cc.run_collection_agent_attempt(
+        subject_name="whatever", acquired=acquired, experiment=experiment, attempt_id=attempt_id,
+        backend=_backend(base, docker_state), grading_backend=_backend(base, docker_state), base=base,
+        base_argv=argv, prompt="Fix the slug helper.", timeout=5,
+        credential_explicit_path=_fresh_codex_credential(tmp_path),
+        listing_client_argv=listing_client,
+    )
+    return result, experiment, attempt_id
+
+
+def test_receipt_discovery_satisfied_reaches_pass(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The happy path: a codex arm that installs a declared collection and
+    whose listing correctly discovers it writes a real installation
+    receipt, and the STORED result (not merely the task grade) reaches
+    PASS - #139's B1 no longer applies to this arm."""
+    result, experiment, attempt_id = _receipt_run(tmp_path, base, docker_state, monkeypatch, listing_mode="normal")
+    assert result.record["disposition"] == "captured"
+    graded = result.record["graded"]
+    assert isinstance(graded, dict), result.record.get("grading_blocked_reason")
+    assert graded["result_status"] == "PASS", graded
+
+    receipt_path = experiment.root / f"receipt-{attempt_id}.json"
+    assert receipt_path.is_file()
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert receipt["readiness"]["discovery_canary"] == "SATISFIED", receipt["readiness"]
+    assert receipt["readiness"]["baseline_absence"] == "SATISFIED", receipt["readiness"]
+    assert receipt["readiness"]["evidence"] == agent_trial._DISCOVERY_RECEIPT_CLAIM
+
+
+def test_ruling_red_1_a_canary_failing_installing_arm_is_not_pass(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR 0005's ruling, red case 1: an installing arm whose listing omits
+    the declared skill ("blind" mode: `fake_codex.py` lists only its own
+    `.system` skill) must not reach PASS - a real receipt now backs this
+    arm, and it reads VIOLATED, not SATISFIED."""
+    result, experiment, attempt_id = _receipt_run(tmp_path, base, docker_state, monkeypatch, listing_mode="blind")
+    graded = result.record["graded"]
+    assert isinstance(graded, dict), result.record.get("grading_blocked_reason")
+    assert graded["result_status"] != "PASS", graded
+
+    receipt = json.loads((experiment.root / f"receipt-{attempt_id}.json").read_text(encoding="utf-8"))
+    assert receipt["readiness"]["discovery_canary"] == "VIOLATED", receipt["readiness"]
+
+
+def test_ruling_red_3_an_unobtainable_listing_is_unknown_not_pass(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR 0005's ruling, red case 3: a listing container whose client
+    crashes must read UNKNOWN, never SATISFIED, and the stored result must
+    not reach PASS on it."""
+    result, experiment, attempt_id = _receipt_run(tmp_path, base, docker_state, monkeypatch, listing_mode="crash")
+    graded = result.record["graded"]
+    assert isinstance(graded, dict), result.record.get("grading_blocked_reason")
+    assert graded["result_status"] != "PASS", graded
+
+    receipt = json.loads((experiment.root / f"receipt-{attempt_id}.json").read_text(encoding="utf-8"))
+    assert receipt["readiness"]["discovery_canary"] == "UNKNOWN", receipt["readiness"]
+
+
+def test_receipt_refused_when_the_measured_image_digest_does_not_match_the_ledger(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """verify.py's #150-D image-digest cross-check: a receipt measured
+    against one image must be refused for an attempt whose ledger plans a
+    DIFFERENT image - grading raises rather than silently trusting a stale
+    receipt."""
+    repo = _fixture_collection(tmp_path, {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd"]))
+    listing_client = _fake_codex_listing(tmp_path, mode="normal")
+
+    acquired = cc.acquire_collection("whatever", base, checkout=repo)
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    # A DIFFERENT planned image digest than the one the backend/listing
+    # containers will actually measure (_BACKEND_IMAGE_DIGEST) - simulating
+    # a tag that moved between planning and this run.
+    experiment, attempt_id = cc.plan_collection_attempt(
+        "whatever", acquired, store, image_digest="sha256:some-other-image-entirely",
+    )
+    argv = _codex_argv(
+        home=_mapped_home(docker_state, attempt_id),
+        transcript_relpath=".codex/sessions/2026/01/01/rollout-mismatch.jsonl",
+    )
+    with pytest.raises(trial.Refused, match="image"):
+        cc.run_collection_agent_attempt(
+            subject_name="whatever", acquired=acquired, experiment=experiment, attempt_id=attempt_id,
+            backend=_backend(base, docker_state), grading_backend=_backend(base, docker_state), base=base,
+            base_argv=argv, prompt="Fix the slug helper.", timeout=5,
+            credential_explicit_path=_fresh_codex_credential(tmp_path),
+            listing_client_argv=listing_client,
+        )

@@ -389,7 +389,12 @@ def run_subject_discovery(
     shared parser cannot read) - never dropped, never a silent partial
     result. A non-empty `unexpected` is only meaningful when the reason is
     `None`; an unmeasured listing cannot say whether anything else is
-    listed either."""
+    listed either.
+
+    A listed entry rooted under `materialize.CLIENT_SYSTEM_DIR` is never
+    `unexpected`, mirroring `materialize.derive_readiness`'s own native
+    "foreign" check: the client seeds that skill into every home it is
+    pointed at, so it is not contamination, it is the client existing."""
 
     def unmeasured(reason: str) -> tuple[dict[str, str], frozenset[str], str | None]:
         return {name: "UNMEASURED" for name in selected}, frozenset(), reason
@@ -416,7 +421,11 @@ def run_subject_discovery(
         return unmeasured(f"listing {listing.status}: {listing.detail}")
     listed = {name for name, _ in listing.entries}
     per_selected = {name: ("discovered" if name in listed else "not-discovered") for name in selected}
-    unexpected = frozenset(listed - selected)
+    system_named = {
+        name for name, path in listing.entries
+        if materialize.CLIENT_SYSTEM_DIR in Path(path).parts
+    }
+    unexpected = frozenset(listed - selected - system_named)
     return per_selected, unexpected, None
 
 

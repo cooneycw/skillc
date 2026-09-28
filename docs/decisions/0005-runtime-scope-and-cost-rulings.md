@@ -137,14 +137,30 @@ outside reader can resolve.
   not that the declared subject was installed and discovered). B1's UNKNOWN
   stand-in still applies, unchanged, to an agent-trial arm that installs
   nothing (an empty baseline). An arm that DOES install a declared
-  collection now writes a real installation receipt instead, built from an
-  in-container discovery canary - the client's own model-free listing, run
-  inside the same container, before and after delivery - so that arm can
-  reach `installation-ready: SATISFIED` and the trial can PASS on it. This
-  is a narrowing of B1's scope, not a reversal: an agent-trial arm that
-  installs nothing is exactly as ungraded on readiness as before; only an
-  installing arm's readiness now has real evidence behind it. Tracked as
+  collection now writes a real installation receipt instead, built from the
+  client's own model-free listing run before and after delivery - so that
+  arm can reach `installation-ready: SATISFIED` and the trial can PASS on
+  it. This is a narrowing of B1's scope, not a reversal: an agent-trial arm
+  that installs nothing is exactly as ungraded on readiness as before; only
+  an installing arm's readiness now has real evidence behind it. Tracked as
   #150-D (Refs #139, #150).
+
+  **The mechanism moved during implementation, and the exact claim matters.**
+  `DockerBackend.execute()` is documented to run ONCE per container handle
+  and stops the container before returning, so the listing cannot run
+  before-delivery, after-delivery AND the real agent prompt all inside the
+  agent's own container. The listing instead runs in a **fresh, dedicated,
+  throwaway container of the same image digest** - never the agent's own -
+  once with nothing delivered (baseline) and once with the same tree
+  delivered the same way (discovery), cached per (image digest, tree
+  digest) so a multi-attempt run pays for this once per distinct
+  configuration, not once per attempt. The receipt's evidence states the
+  claim precisely: **"this delivered tree, delivered by the same method,
+  into a fresh container of the same image digest, was discovered by the
+  client's model-free listing"** - never "the agent's own container had
+  it". The receipt carries the image digest it was measured on, and the
+  verifier refuses to apply it to an attempt whose own planned image digest
+  differs.
 
 - **"a plus the follow-up issue"** (owner ruling, 2026-09-27): after the
   operator's live run of `skillc demo` at `8e06030` (evidence on #10), the
