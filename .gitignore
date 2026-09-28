@@ -8,6 +8,8 @@ dist/
 build/
 *.egg-info/
 evals/results/
+# Local `make verify` run logs (#134); CI does not produce this directory.
+reports/
 
 # Secrets. Nothing here is tracked; this keeps it that way (#23).
 .env

@@ -12,7 +12,7 @@ dependencies = []
 skillc = "skillc.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11", "pyyaml>=6", "types-PyYAML>=6"]
+dev = ["pytest>=8", "pytest-timeout>=2.3", "ruff>=0.6", "mypy>=1.11", "pyyaml>=6", "types-PyYAML>=6"]
 
 [build-system]
 requires = ["hatchling"]
@@ -27,6 +27,11 @@ target-version = "py311"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# A stalled test hangs CI without limit (#148) - a per-test default so a stall
+# fails in minutes and names the test, instead of running until someone
+# notices. A test that legitimately needs longer raises it with
+# `@pytest.mark.timeout`.
+timeout = 120
 
 [tool.mypy]
 # The typecheck scope, declared once. CI, AGENTS.md and ci/typecheck-control.sh

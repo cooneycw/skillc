@@ -20,7 +20,12 @@ steps:
       # --locked refuses a stale uv.lock; --no-sync stops each run re-locking.
       - uv sync --locked --extra dev
       - uv run --no-sync skillc selftest
-      - uv run --no-sync pytest
+      # -rA (#148): every outcome, not just failures, survives to the CI log
+      # even when the run as a whole passes - the log is what actually
+      # persists past this step; nothing here uploads a separate artifact.
+      # (flow:auto #12's flaky test, never captured, was a LOCAL one-off, not
+      # a CI run - #134's `make verify` covers that sighting; see AGENTS.md.)
+      - uv run --no-sync pytest -rA
       - uv run --no-sync ruff check .
       - uv run --no-sync mypy
     environment:
