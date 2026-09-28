@@ -7,6 +7,14 @@ alone, which is how ten type errors in tests/ went unseen.
 
 Each case runs the script from a copy of the repository, so the scope can be
 narrowed without touching the real pyproject.toml.
+
+`test_an_empty_test_population_turns_the_step_red` and
+`test_a_baseline_that_already_fails_turns_the_step_red` (#134 item 3) cover
+the script's own two precondition guards, which had no committed case at
+all: the empty-population guard (no `tests/test_*.py` to plant a probe in)
+and the baseline guard (mypy already fails before any probe is planted).
+Both guards were already implemented correctly; these are coverage, not a
+behavior fix.
 """
 
 from __future__ import annotations
@@ -82,6 +90,42 @@ def test_a_red_that_names_another_file_turns_the_step_red(tmp_path: Path) -> Non
     result = run_in_copy(tmp_path, mypy=mypy)
     assert result.returncode == 1, f"misattributed red passed\n{result.stdout}"
     assert "mypy exited 1 without reporting tests/" in result.stderr, result.stderr
+
+
+def test_an_empty_test_population_turns_the_step_red(tmp_path: Path) -> None:
+    """#134 item 3: the script's own empty-population guard (line ~52, "no
+    tests/test_*.py to plant an error in") had no committed case - the guard
+    is implemented, but nothing proved it fires, so a future edit could break
+    it silently. Delete every tests/test_*.py from the copy the script makes
+    its OWN internal copy from, leaving nowhere to plant the probe line."""
+    repo = tmp_path / "repo"
+    shutil.copytree(ROOT, repo, ignore=shutil.ignore_patterns(".git", ".venv", ".mypy_cache"))
+    for test_file in (repo / "tests").glob("test_*.py"):
+        test_file.unlink()
+    result = subprocess.run(
+        ["bash", str(repo / "ci" / "typecheck-control.sh")],
+        env={**os.environ, "MYPY": REAL}, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 1, f"empty test population passed\n{result.stdout}"
+    assert "no tests/test_*.py to plant an error in" in result.stderr, result.stderr
+
+
+def test_a_baseline_that_already_fails_turns_the_step_red(tmp_path: Path) -> None:
+    """#134 item 3: the script's own baseline guard (line ~57, "mypy fails on
+    an unmodified copy") had no committed case either - a real type error
+    already present in skillc/ before any probe line is planted must be
+    reported as a broken baseline, not misattributed to the probe."""
+    repo = tmp_path / "repo"
+    shutil.copytree(ROOT, repo, ignore=shutil.ignore_patterns(".git", ".venv", ".mypy_cache"))
+    target = min((repo / "skillc").glob("*.py"))
+    with target.open("a") as fh:
+        fh.write('\n_typecheck_control_baseline_probe: int = "not an int"\n')
+    result = subprocess.run(
+        ["bash", str(repo / "ci" / "typecheck-control.sh")],
+        env={**os.environ, "MYPY": REAL}, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 1, f"broken baseline passed\n{result.stdout}"
+    assert "mypy fails on an unmodified copy" in result.stderr, result.stderr
 
 
 @pytest.mark.skipif(

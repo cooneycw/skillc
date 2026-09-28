@@ -80,13 +80,41 @@ specification rejects, and it proves its own rules can fail before reporting the
 ## Verify
 
 ```bash
-uv run skillc selftest && uv run pytest && uv run ruff check . && uv run mypy
+make verify
 ```
 
-Woodpecker runs the same four checks on every pull request and push to `main`
-(`.woodpecker/ci.yml`), plus `ci/negative-control.sh`, which removes one rule's
-control and requires `selftest` to refuse. A green gate is only evidence while
-that step can still go red.
+Installs the `dev` extra (`ruff`/`mypy`/`pytest-timeout` live there, not in
+the base dependencies - a bare `uv run mypy` in a fresh worktree fails with
+`Failed to spawn: mypy` without this) and then covers EVERY step
+`.woodpecker/ci.yml` runs, not only its `gate` and `negative-control` steps -
+`tests/test_ci_local_gate_coverage.py` fails when a new CI step has no
+target here, so this list cannot silently fall behind the workflow file the
+way it did once (#156: PR #155 went red on `changelog-check`, which no local
+gate ran):
+
+- `skillc selftest`, `pytest -rA`, `ruff check .`, `mypy` (the `gate` step)
+- `ci/negative-control.sh` (the `negative-control` step)
+- `ci/typecheck-control.sh` (the `typecheck-control` step)
+- `skillc leak-check .` with CI's exact `--exclude` set, then
+  `ci/leak-check-control.sh` (the `leak-check` step)
+- `python3 ci/changelog_check.py origin/main`, after fetching it (the
+  `changelog-check` step)
+- `python3 ci/readme_drift.py` (the `readme-drift` step)
+- `gitleaks dir . --config .gitleaks.toml --redact --no-banner`, then
+  `ci/secret-scan-control.sh` (the `secret-scan` step) - **skipped locally**,
+  loudly, when gitleaks is not installed; CI always runs it, a missing local
+  scanner is not evidence of no secret, and the pre-push hook below still
+  catches it before anything reaches GitHub.
+
+A green gate is only evidence while every one of these steps can still go
+red - `ci/negative-control.sh` and `ci/typecheck-control.sh` are two of the
+committed proofs that they can. Equivalent without `make` (the `gate` and
+`negative-control` steps only; see the Makefile for the rest):
+
+```bash
+uv sync --locked --extra dev && uv run skillc selftest && uv run pytest -rA \
+    && uv run ruff check . && uv run mypy && uv run bash ci/negative-control.sh
+```
 
 `mypy` takes its scope from `[tool.mypy] files` in `pyproject.toml` (`skillc` and
 `tests`). `ci/typecheck-control.sh` plants a type error in a test module and

@@ -34,12 +34,18 @@ to EF-01 through EF-11 or to the initial milestone acceptance, which are unchang
 
 ## 2. Status and document ownership
 
-The owner has authorized planning, a documentation PR/merge and issue scaffolding.
-Runtime implementation and paid trials are outside this change. These
-documents specify proposed behavior; they do not claim any evaluation facility
-exists. The implemented surfaces are the static checker, record validation
-(`check-records`, [records.md](records.md)) and native materialization
-(`materialize`, [materialization.md](materialization.md)); no trial runner exists.
+The owner authorized planning, a documentation PR/merge and issue scaffolding
+at the time this document was written; runtime implementation and paid trials
+were outside that first change. Both have since landed (#8, #9, #10, #12):
+the implemented surfaces are the static checker, record validation
+(`check-records`, [records.md](records.md)), native materialization
+(`materialize`, [materialization.md](materialization.md)), and a Docker-backed
+trial runner (`skillc/trial.py`, `verify.py`, `lifecycle.py`,
+`agent_trial.py`) driven by `demo`, `collection-run`, `selection-probe` and
+`pilot-run`/`pilot-report`. A paid trial against a real model still runs only
+when explicitly invoked and authorized (`skillc/cost_estimate.py`'s spend
+gate); this document does not claim a hosted or continuously-running
+evaluation facility exists.
 
 This document owns product scope, capability levels and functional acceptance.
 The protocol owns result semantics and experiment rules. The interface document

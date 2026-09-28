@@ -11,6 +11,10 @@ evals/results/
 # Local `make verify` run logs (#134); CI does not produce this directory.
 reports/
 
+# A flow:auto run's local state, not repository content (#134 item 6): a
+# `git add -A` picked up .claude/runs/finish-<id>.json on #127 / PR #128.
+.claude/runs/
+
 # Secrets. Nothing here is tracked; this keeps it that way (#23).
 .env
 .env.*
