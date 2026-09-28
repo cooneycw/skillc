@@ -187,6 +187,25 @@ def test_a_leak_in_the_report_refuses_the_publish(tmp_path: Path, monkeypatch: p
     assert not evidence.exists()
 
 
+def test_a_staged_host_path_refuses_the_publish(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#134 item 5: the static `home-path` pattern only recognizes `/home/`
+    and `/Users/`, so a checkout under `/workspace`, `/opt` or `/srv` -
+    every session in this fleet - went unflagged without
+    `host_paths=leak.default_host_paths()`. This is a real, reachable input:
+    the exporting PROCESS's own live `os.getcwd()`, embedded in the staged
+    report exactly as an unredacted absolute path would be."""
+    import os
+
+    experiment, envelope = _run_captured_attempt(tmp_path, monkeypatch, pass_task=True)
+    envelope["leaked"] = f"{os.getcwd()}/notes.txt"
+    evidence = tmp_path / "evidence"
+
+    code = cli._export_collection_evidence(experiment, envelope, evidence)
+
+    assert code == 1
+    assert not evidence.exists()
+
+
 def test_refuses_to_replace_a_directory_holding_a_foreign_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -337,3 +356,87 @@ def test_cli_omits_export_entirely_without_evidence_flag(
 
     argv = ["collection-run", "whatever", "--base", str(base)]
     assert cli.main(argv) == 0  # unaffected by the export path existing at all
+
+
+# --------------------------------------------------------------- evidence-role
+
+
+_DEGRADED_REVISION = "degraded:mutated=1-location:git:" + "ab" * 20
+
+
+def _wire_fake_collection_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, experiment: trial.Experiment, envelope: dict[str, object],
+    *, revision: str,
+) -> Path:
+    from types import SimpleNamespace
+
+    from skillc import reap
+
+    base = tmp_path / "base"
+    base.mkdir()
+
+    def fake_acquire(name: str, root: Path) -> object:
+        return SimpleNamespace(subject=SimpleNamespace(client="codex"))
+
+    def fake_run(**kwargs: object) -> cc.CollectionAgentResult:
+        return cc.CollectionAgentResult(
+            str(kwargs["subject_name"]), revision, "codex", envelope["record"],  # type: ignore[arg-type]
+            agent_network="bridge",
+        )
+
+    monkeypatch.setattr(cc, "acquire_collection", fake_acquire)
+    monkeypatch.setattr(demo, "resolve_image_digest", lambda *a, **k: None)
+    monkeypatch.setattr(trial, "open_store", lambda path, forbidden: path)
+    monkeypatch.setattr(cc, "plan_collection_attempt", lambda *a, **k: (experiment, "a-1"))
+    monkeypatch.setattr(cc, "run_collection_agent_attempt", fake_run)
+    monkeypatch.setattr(reap, "snapshot", lambda *a, **k: reap.Snapshot(False, frozenset(), frozenset()))
+    monkeypatch.setattr(cc, "attributable_leftovers", lambda *a, **k: [])
+    return base
+
+
+def test_cli_refuses_a_degraded_arm_export_as_measurement_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#150 review: a degraded arm's expected FAIL must never land in a
+    consumer's real measurements directory by habit - only the normal arm's
+    export is destined there."""
+    experiment, envelope = _run_captured_attempt(tmp_path, monkeypatch, pass_task=True)
+    base = _wire_fake_collection_run(tmp_path, monkeypatch, experiment, envelope, revision=_DEGRADED_REVISION)
+    evidence = tmp_path / "evidence"
+
+    argv = ["collection-run", "whatever", "--base", str(base), "--evidence", str(evidence)]
+    code = cli.main(argv)
+
+    assert code == 2
+    assert not evidence.exists()
+
+
+def test_cli_publishes_a_degraded_arm_export_with_evidence_role_control(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    experiment, envelope = _run_captured_attempt(tmp_path, monkeypatch, pass_task=True)
+    base = _wire_fake_collection_run(tmp_path, monkeypatch, experiment, envelope, revision=_DEGRADED_REVISION)
+    evidence = tmp_path / "evidence"
+
+    argv = [
+        "collection-run", "whatever", "--base", str(base), "--evidence", str(evidence),
+        "--evidence-role", "control",
+    ]
+    code = cli.main(argv)
+
+    assert code == 0
+    assert list(evidence.glob("result-*.json"))
+
+
+def test_cli_a_normal_arm_export_needs_no_evidence_role(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    experiment, envelope = _run_captured_attempt(tmp_path, monkeypatch, pass_task=True)
+    base = _wire_fake_collection_run(tmp_path, monkeypatch, experiment, envelope, revision="v1")
+    evidence = tmp_path / "evidence"
+
+    argv = ["collection-run", "whatever", "--base", str(base), "--evidence", str(evidence)]
+    code = cli.main(argv)
+
+    assert code == 0
+    assert list(evidence.glob("result-*.json"))

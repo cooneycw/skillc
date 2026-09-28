@@ -938,6 +938,27 @@ def cmd_collection_run(args: argparse.Namespace) -> int:
     # means the evidence itself could not be trusted to publish, which is a
     # different and more severe failure than an ungraded or failing attempt.
     if args.evidence:
+        # #150's own discrimination pair is normal-arm PASS + degraded-arm
+        # FAIL, each retained - but only the NORMAL arm belongs in a
+        # consumer's real measurements directory. CPP's own
+        # `check-behavioral-eval.py` reports any declared FAIL as an error
+        # and the flip to blocking is pre-committed, so a degraded arm's
+        # export landed there by habit would turn that gate red for good.
+        # `result.revision` carries the `degraded:` label (`degrade.py`) the
+        # moment a run is over a degraded subject (#150-B2 wires the CLI leg
+        # that produces one); `--evidence-role control` is the explicit,
+        # named opt-in required to publish one - e.g. as a one-shot negative
+        # control for the consumer gate, never the default path.
+        degraded_arm = result.revision.startswith("degraded:")
+        if degraded_arm and args.evidence_role != "control":
+            print(
+                f"skillc: refusing to export a degraded-arm result (revision={result.revision!r}) "
+                f"with --evidence-role {args.evidence_role!r}; pass --evidence-role control to "
+                f"publish a degraded arm's export (e.g. as a negative control), never by habit into "
+                f"a measurements directory",
+                file=sys.stderr,
+            )
+            return 2
         export_code = _export_collection_evidence(experiment, envelope, Path(args.evidence))
         if export_code:
             return export_code
@@ -1268,8 +1289,12 @@ def _publish_collection_evidence(experiment: object, report: dict[str, object], 
         # The leak check scans the WHOLE staged tree, `report.json` included -
         # dropped below, but only after this, so nothing that was briefly
         # staged for publishing can skip the scan by virtue of being removed
-        # first.
-        scan = leak.scan_path(staging, leak.load_denylist(None))
+        # first. `host_paths=leak.default_host_paths()` (#134 item 5): without
+        # it this export is blind to a `/workspace` or `/srv` path on the
+        # exporting machine - exactly the layout every session in this fleet
+        # runs from - because the static `home-path` pattern only recognizes
+        # `/home/` and `/Users/`.
+        scan = leak.scan_path(staging, leak.load_denylist(None), host_paths=leak.default_host_paths())
         if scan.findings or scan.scanned == 0:
             for finding in scan.findings:
                 print(finding.render(staging), file=sys.stderr)
@@ -1769,6 +1794,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="issue #150: export the attempt's verified-result(s), plus the bundle a consumer's bundle "
              "rules need, into this LOCAL directory (never a path inside another repository's checkout - "
              "see docs/specs/evaluation-facility/behavioral-eval-export.md); omit to export nothing",
+    )
+    p_collection_run.add_argument(
+        "--evidence-role", choices=("measurement", "control"), default="measurement",
+        help="what --evidence is for (default: measurement, a normal subject's export destined for a "
+             "consumer's real measurements directory); a degraded-arm export is refused unless this is "
+             "'control' - explicit opt-in, e.g. for a one-shot negative control against the consumer gate",
     )
     p_collection_run.set_defaults(func=cmd_collection_run)
 

@@ -30,8 +30,16 @@ that producer, and the layout decision it makes.
         observation-*.json
         receipt-*.json
         result-*.json          # the SAME records again, alongside their ledger
-        report.json
 ```
+
+No `report.json` anywhere: `matched_pilot.export_bundle` always writes one
+alongside the bundle it copies, and for `pilot-run` that is fine - its
+`report` is itself a schema-legal `pilot-report` record. A collection-run
+envelope (`collection_conformance.evidence_envelope`) carries no `kind`/
+`version` at all, so `check-records` would refuse it as an unversioned
+record. It names nothing the bundle rules need (they read the ledger,
+manifest and receipts, never a report summary), so it is leak-checked (it
+was briefly staged) and then dropped, before `check-records` ever sees it.
 
 **Why split, not one flat bundle.** CPP's consumer reads with
 `directory.glob("*.json")` - flat, never recursive - and refuses the FIRST
@@ -75,13 +83,35 @@ hold files this exporter itself would have written (a `result-*.json` at the
 top level, or the `bundle/` directory) - anything else refuses the publish
 rather than silently deleting an operator's unrelated file on replace.
 
+## A degraded arm must never reach a consumer's real measurements
+
+#150's own discrimination pair is a NORMAL subject grading PASS and a
+DEGRADED subject grading FAIL on the same task, each retained as evidence -
+but only the normal arm's result belongs in a consumer's real measurements
+directory. CPP's `check-behavioral-eval.py` reports ANY declared `FAIL` as
+an error (`evaluate`'s own verdict map), and the flip from advisory to
+blocking is pre-committed to the first real record arriving - so a degraded
+arm's export placed in `docs/measurements/behavioral-eval/` would turn that
+gate red for good, on a failure it was never meant to measure.
+
+A degraded arm's export is a very good one-shot NEGATIVE CONTROL for the
+consumer gate instead (point it at a directory holding one, and it must go
+red) - which is exactly why it is never published by habit. `--evidence-role`
+(default `measurement`) names what an export is for: a `measurement` export
+of a degraded-arm result (`result.revision` carrying the `degraded:` label -
+see `docs/specs/evaluation-facility/degraded-subjects.md`) is refused before
+anything is written; `--evidence-role control` is the explicit, named opt-in
+that publishes one anyway. A normal arm's export needs no role at all - the
+check only fires on a degraded `revision`.
+
 ## What this does not do
 
 It does not write to CPP's checkout, or to any path this repository does not
 control - `--evidence` names a LOCAL directory the operator chooses; wiring
 it to a real CPP clone's `docs/measurements/behavioral-eval/` is an operator
 action, outside skillc entirely. It exports regardless of the run's own
-PASS/FAIL verdict - a degraded arm's expected FAIL still needs to reach the
-consumer - but an export that itself fails its leak check or check-records
+PASS/FAIL verdict - a degraded arm's expected FAIL still needs to reach SOME
+consumer-shaped destination, just never the real measurements one by
+default - but an export that itself fails its leak check or check-records
 takes priority over the run's own exit code, because it means the evidence
 could not be trusted to publish at all.
