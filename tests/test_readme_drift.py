@@ -43,7 +43,7 @@ def test_real_commands_matches_the_actual_parser() -> None:
     real = rd.real_commands(build_parser())
     assert real == {
         "check", "selftest", "check-records", "materialize", "exposure", "rules", "leak-check", "demo",
-        "collection-run", "pilot-run", "pilot-report", "selection-probe",
+        "collection-run", "pilot-run", "pilot-report", "selection-probe", "degrade-subject",
     }
 
 
