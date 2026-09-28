@@ -115,9 +115,9 @@ def test_a_single_defect_violates_only_its_own_rule() -> None:
         "negated-close": {"no-closing-match"},
         "not-yet-negation": {"no-closing-match"},
         "colon-form": {"no-closing-match"},
-        "cross-repo-form": {"no-closing-match"},
         "no-issue-ref": {"issue-ref"},
         "no-remaining-info": {"stays-open"},
+        "summary-no-remaining": {"stays-open"},
     }
     for name, expected in cases.items():
         text = (TASK / "wrong" / name / "src" / "commit_message.txt").read_text(encoding="utf-8")
@@ -145,9 +145,22 @@ def test_gh_shorthand_is_not_modeled_as_a_closing_form() -> None:
     assert outcomes["no-closing-match"] == "SATISFIED"
 
 
-def test_cross_repo_closing_form_is_caught() -> None:
-    text = "closes cooneycw/x#42; two items remain open, see TODO.md."
-    assert _outcomes(text)["no-closing-match"] == "VIOLATED"
+def test_cross_repo_closing_form_is_not_modeled() -> None:
+    # Deliberately out of scope (README.md, "What this task does not grade"):
+    # the fixture never declares its own repository, so a judge cannot tell
+    # whether an OWNER/REPO#42 reference names this issue or a different one.
+    text = "closes some-owner/some-repo#42; two items remain open, see TODO.md."
+    outcomes = _outcomes(text)
+    assert outcomes["no-closing-match"] == "SATISFIED"
+    assert outcomes["issue-ref"] == "VIOLATED"  # not a reference to #42 either
+
+
+def test_stating_the_issue_is_not_enough_without_remaining_work() -> None:
+    text = "Refs #42. Summary report added."
+    outcomes = _outcomes(text)
+    assert outcomes["issue-ref"] == "SATISFIED"
+    assert outcomes["no-closing-match"] == "SATISFIED"
+    assert outcomes["stays-open"] == "VIOLATED"
 
 
 def test_present_participle_is_not_a_closing_keyword() -> None:

@@ -18,7 +18,10 @@ merge to the default branch - even when the surrounding prose negates it.
 fetched 2026-09-28: the same page states the reference forms `#ISSUE-NUMBER`
 (same repo) and `OWNER/REPOSITORY#ISSUE-NUMBER` (cross-repo), and that the
 keyword may carry a colon or be uppercase. It does **not** document a `GH-N`
-shorthand or a full-URL closing form; this task's grader does not model either.
+shorthand or a full-URL closing form at all. This task's grader models only
+the bare `#ISSUE-NUMBER` form - see "What this task does not grade" in
+README.md for why the cross-repo form is deliberately out of scope here, a
+separate reason from `GH-N` simply not being real syntax.
 
 **claude-power-pack's own merge guard is the pinned CPP instance of this
 rule.** At `85e9b03ad2af1c41020ff6d92d36fa257bdacd2b`,
@@ -27,11 +30,12 @@ rule.** At `85e9b03ad2af1c41020ff6d92d36fa257bdacd2b`,
 title, body, or any commit subject carries a keyword-plus-`#N` match,
 regardless of negation or incidental adjacency - because GitHub's matcher does
 not care either. `keyword_re='(?i)\b(?:close(?:s|d)?|fix(?:es|ed)?|resolve(?:s|d)?)\b:?\s*#[[:digit:]]+'`
-is narrower than the documented grammar (bare `#N` only, no `OWNER/REPO#N`);
-`grade_ref.py`'s `KEYWORD_RE` extends it with the cross-repo form so the
-"closes cooneycw/x#42" candidate below grades correctly. That gap is recorded
-as a supplemental finding on claude-power-pack's Nit Store
-(cooneycw/claude-power-pack#864), not fixed here - out of scope for #150.
+is narrower than the documented grammar (bare `#N` only, no `OWNER/REPO#N`).
+That gap is recorded as a supplemental finding on claude-power-pack's Nit
+Store (cooneycw/claude-power-pack#864), not fixed here - out of scope for
+#150. `grade_ref.py`'s own `KEYWORD_RE` matches this guard's bare-`#N` scope
+exactly, for a different, task-specific reason: see "What this task does not
+grade" in README.md.
 
 **The materialized skill teaches the consequence, not the mechanism.**
 `codex/skills/flow-finish/reference.md` (~lines 307-337, "Closing must agree
@@ -71,8 +75,7 @@ listed and discoverable), a degraded arm that mutates only
 `flow-finish/reference.md` leaves the rule reachable through `flow-merge` or
 `flow-auto`. **A real degraded arm must remove every row in the table above**,
 mutating or deleting the stated passage/regex in all five locations, or the
-case does not discriminate. This list, with line ranges, was handed to the
-session building #150-B and to the orchestrator.
+case does not discriminate.
 
 ## Selection is held fixed on purpose
 
@@ -86,13 +89,19 @@ probe measured codex opening no installed skill even when one plainly
 applied); this task does not re-measure it and both arms (#150-A's normal
 subject, #150-B's degraded one) get byte-identical `goal.md` text.
 
-## Corrections made to the initial task sketch
+## Corrections made during design review
 
-The orchestrator's go-ahead proposed certifying against
-a `GH-42` reference form. Checked against GitHub's docs (above) and CPP's own
-guard (neither recognizes it): `GH-42` is not documented closing syntax, so it
-was dropped from the candidate population rather than added as a FAIL case -
-grading it as a violation would itself be wrong, not conservative.
+- A `GH-42` reference form was considered as a certification candidate.
+  Checked against GitHub's docs (above) and CPP's own guard (neither
+  recognizes it): `GH-42` is not documented closing syntax, so it was
+  dropped from the candidate population rather than added as a FAIL case -
+  grading it as a violation would itself be wrong, not conservative.
+- An earlier draft modeled the cross-repo `OWNER/REPOSITORY#N` closing form
+  and certified a `closes some-owner/some-repo#42` candidate as FAIL. That
+  candidate's own repository ("some-owner/some-repo") is undeclared by the
+  fixture, so nothing establishes it is - or is not - this task's own
+  repository; grading it either way rested on a fact the judge cannot know.
+  Dropped; see "What this task does not grade" in README.md.
 
 ## Fixture
 

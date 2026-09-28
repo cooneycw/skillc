@@ -21,17 +21,18 @@ text is read as an interface failure, never as a verdict.
 THE RULE THIS JUDGES (skillc #150, acceptance item 1): GitHub's issue-closing
 matcher recognizes a literal closing keyword (close/closes/closed/fix/fixes/
 fixed/resolve/resolves/resolved), an optional colon, then an issue reference
-(`#N` or `OWNER/REPOSITORY#N`) - case-insensitively, ANYWHERE in the text, with
-no regard for surrounding grammar or negation. "This does not close #42" closes
-#42 exactly as "Closes #42" does. Modeled on GitHub's own docs ("Linking a pull
-request to an issue using a keyword", docs.github.com, read 2026-09-28) and
-cross-checked against claude-power-pack's own merge guard at the pinned
-revision (`scripts/gh-pr-merge.sh`, `guard_negated_close_keywords`'s
-`keyword_re`, commit 85e9b03a) - see PROVENANCE.md for the full citation and
-where this guard's regex is narrower than GitHub's documented grammar (it
-does not recognize the cross-repo `OWNER/REPOSITORY#N` form; this judge does).
-The flow-finish skill states the consequence: never print a closing keyword
-beside an issue number, even to explain that the issue is NOT closed.
+- case-insensitively, ANYWHERE in the text, with no regard for surrounding
+grammar or negation. A negated disclaimer ("this does not close #N") closes
+the issue exactly as a bare closing trailer does. Modeled on GitHub's own
+docs ("Linking a pull request to an issue using a keyword", docs.github.com,
+read 2026-09-28) and cross-checked against claude-power-pack's own merge
+guard at the pinned revision (`scripts/gh-pr-merge.sh`,
+`guard_negated_close_keywords`'s `keyword_re`, commit 85e9b03a) - see
+PROVENANCE.md for the full citation. GitHub's documented grammar also
+accepts a cross-repo `OWNER/REPOSITORY#N` reference; this judge deliberately
+does NOT model it (see KEYWORD_RE's comment below for why). The flow-finish
+skill states the consequence: never print a closing keyword beside an issue
+number, even to explain that the issue is NOT closed.
 """
 
 from __future__ import annotations
@@ -48,26 +49,39 @@ GRADER = {"id": "finish-close-ref", "revision": "1"}
 ISSUE_NUMBER = "42"
 
 #: GitHub's nine closing keywords (case-insensitive), an optional colon, then
-#: optional whitespace, then an optional cross-repo `OWNER/REPOSITORY` prefix,
-#: then `#<digits>`. See the module docstring for the citation. Deliberately
-#: NOT anchored to sentence or clause boundaries - unlike claude-power-pack's
-#: own guard, this judge does not need to separate "negated" from "incidental"
-#: overrides (that split exists there only to pick which escape-hatch flag an
-#: operator consciously passes); it only needs to know whether GitHub's own
-#: matcher would fire, and GitHub's matcher does not parse grammar at all.
-KEYWORD_RE = re.compile(
-    r"(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b:?\s*"
-    r"(?:[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*)?#(\d+)\b"
-)
+#: optional whitespace, then `#<digits>`. See the module docstring for the
+#: citation. Deliberately NOT anchored to sentence or clause boundaries -
+#: unlike claude-power-pack's own guard, this judge does not need to separate
+#: "negated" from "incidental" overrides (that split exists there only to
+#: pick which escape-hatch flag an operator consciously passes); it only
+#: needs to know whether GitHub's own matcher would fire, and GitHub's
+#: matcher does not parse grammar at all.
+#:
+#: Deliberately bare-`#N` only, with no `OWNER/REPOSITORY#N` form, even
+#: though GitHub's documented grammar recognizes that form too (module
+#: docstring). This fixture never declares which repository its own issue
+#: #42 lives in, so a candidate referencing `some-owner/some-repo#42` names
+#: an issue this judge cannot know is - or is not - the fixture's own; a
+#: verdict that depended on that undeclared fact would not be a certified
+#: outcome. Grading only the bare form loses nothing the task needs: the
+#: discriminating case (a negated disclaimer still closes an issue) holds
+#: identically for the bare form. See README.md, "What this task does not
+#: grade".
+KEYWORD_RE = re.compile(r"(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b:?\s*#(\d+)\b")
 
-#: A reference to issue #42 itself, with or without a leading `OWNER/REPO`.
-ISSUE_REF_RE = re.compile(
-    r"(?:[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*)?#" + ISSUE_NUMBER + r"\b"
-)
+#: A bare reference to issue #42 itself - see KEYWORD_RE's comment for why
+#: this deliberately does not also recognize an `OWNER/REPOSITORY#42` form.
+#: The negative lookbehind is load-bearing, not decorative: without it,
+#: "#42" still substring-matches inside "some-owner/some-repo#42", crediting
+#: a reference to a DIFFERENT repository's issue 42 as if it named this
+#: fixture's own #42 - the same undeclared-repository problem KEYWORD_RE's
+#: comment explains, just on the issue-ref criterion instead of
+#: no-closing-match.
+ISSUE_REF_RE = re.compile(r"(?<![\w/])#" + ISSUE_NUMBER + r"\b")
 
-#: Deliberately generous (owner ruling, skillc #150 mail 1740, item 2): any one
-#: of these words is enough to credit the candidate with conveying that the
-#: issue stays open. It must not fail either reference answer.
+#: Deliberately generous (design-review requirement for this task, 2026-09-28):
+#: any one of these words is enough to credit the candidate with conveying
+#: that the issue stays open. It must not fail either reference answer.
 STAYS_OPEN_RE = re.compile(
     r"(?i)\b(open|remains?|remaining|incomplete|unfinished|outstanding|pending|left)\b"
 )

@@ -52,18 +52,18 @@ SATISFIED, VIOLATED or UNKNOWN with evidence.
   `no-closing-match`; both are readable, unremarkable text, not a strawman.
 - **GitHub's actual closing grammar, not an arbitrary window.**
   `no-closing-match` matches a keyword, an optional colon, optional
-  whitespace, then `#42` or `OWNER/REPO#42`, ANYWHERE in the text - no
-  clause-boundary or negation logic, because GitHub's own matcher has none
-  either (`wrong/negated-close`, `wrong/not-yet-negation`,
-  `wrong/cross-repo-form`, `wrong/colon-form` each isolate one shape).
-  `alternatives/stays-open-phrase` ("#42 stays open; closing it waits on
-  items 3-4") PASSes: "closing" is not one of the nine keyword forms, and
-  nothing follows it that looks like an issue reference.
-- **Generous on "stays open".** `stays-open` accepts any of
+  whitespace, then `#42`, ANYWHERE in the text - no clause-boundary or
+  negation logic, because GitHub's own matcher has none either
+  (`wrong/negated-close`, `wrong/not-yet-negation`, `wrong/colon-form` each
+  isolate one shape). `alternatives/stays-open-phrase` ("#42 stays open;
+  closing it waits on items 3-4") PASSes: "closing" is not one of the nine
+  keyword forms, and nothing follows it that looks like an issue reference.
+- **Generous on "stays open", but not vacuous.** `stays-open` accepts any of
   open/remain(s)/remaining/incomplete/unfinished/outstanding/pending/left -
-  deliberately wide (operator ruling on this task's design) so it
-  never fails a reference answer while still catching a message that names
-  #42 and nothing else (`wrong/no-remaining-info`).
+  deliberately wide so it never fails a reference answer - while still
+  catching a message that names #42 and nothing else (`wrong/no-remaining-info`)
+  or names #42 alongside unrelated, finished-sounding text
+  (`wrong/summary-no-remaining`).
 - **Candidate failures versus grader failures.** A missing or empty
   `commit_message.txt` VIOLATES `artifact-present`, and the other three
   criteria report UNKNOWN, never SATISFIED or VIOLATED - the grader did not
@@ -80,9 +80,9 @@ SATISFIED, VIOLATED or UNKNOWN with evidence.
 | `wrong/negated-close` ("does not close #42") | FAIL | FAIL (`no-closing-match`) |
 | `wrong/not-yet-negation` ("does not yet resolve #42") | FAIL | FAIL (`no-closing-match`) |
 | `wrong/colon-form` ("Fixes: #42") | FAIL | FAIL (`no-closing-match`) |
-| `wrong/cross-repo-form` ("closes cooneycw/x#42") | FAIL | FAIL (`no-closing-match`) |
 | `wrong/no-issue-ref` (never mentions #42) | FAIL | FAIL (`issue-ref`) |
 | `wrong/no-remaining-info` ("Refs #42.", nothing else) | FAIL | FAIL (`stays-open`) |
+| `wrong/summary-no-remaining` (names #42, describes finished work only) | FAIL | FAIL (`stays-open`) |
 | `wrong/empty-file` (`commit_message.txt` exists, empty) | FAIL | FAIL (`artifact-present`) |
 | `always_pass` grader | refused, PASS throughout | refused: fixture and every wrong candidate PASS |
 | `always_fail` grader | refused, FAIL throughout | refused: reference and every alternative FAIL |
@@ -106,10 +106,19 @@ its green.
   `gh-pr-merge.sh`. A degraded arm (#150-B) that mutates only
   `flow-finish/reference.md` does not discriminate; PROVENANCE.md lists every
   location the mutation must reach.
-- **`GH-42` is not real GitHub syntax.** The orchestrator's initial sketch
-  proposed it as a FAIL candidate; checked against GitHub's docs and dropped
-  rather than added, because grading it as a violation would itself be a
-  false claim about what closes an issue.
+- **`GH-42` is not real GitHub syntax.** Checked against GitHub's docs and
+  deliberately not used as a FAIL candidate: grading it as a violation would
+  itself be a false claim about what closes an issue.
+- **What this task does not grade: cross-repo issue references.** GitHub's
+  documented grammar also closes an issue via `KEYWORD OWNER/REPOSITORY#N`.
+  This task's fixture never declares which repository its own issue #42 lives
+  in, so a candidate text naming `some-owner/some-repo#42` refers to an issue
+  this judge cannot know is, or is not, the fixture's own - a verdict resting
+  on that undeclared fact would not be a certified outcome. `KEYWORD_RE` and
+  `ISSUE_REF_RE` are deliberately bare-`#N` only; see their comments in
+  `grade_ref.py`. Nothing the task needs depends on the cross-repo form: the
+  discriminating case (a negated disclaimer still closes an issue) holds
+  identically for the bare form.
 - **One line is one line.** Unlike slug-small-fix's held-out-input design (14
   cases probing one function), this task grades one short text file against
   four criteria on one candidate population; there is no per-input held-out

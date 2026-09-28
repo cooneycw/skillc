@@ -1,3 +1,0 @@
-Add the summary report scaffold
-
-closes cooneycw/x#42; but two items remain open, see TODO.md.
