@@ -80,13 +80,23 @@ specification rejects, and it proves its own rules can fail before reporting the
 ## Verify
 
 ```bash
-uv run skillc selftest && uv run pytest && uv run ruff check . && uv run mypy
+make verify
 ```
 
-Woodpecker runs the same four checks on every pull request and push to `main`
-(`.woodpecker/ci.yml`), plus `ci/negative-control.sh`, which removes one rule's
-control and requires `selftest` to refuse. A green gate is only evidence while
-that step can still go red.
+Installs the `dev` extra (`ruff`/`mypy`/`pytest-timeout` live there, not in
+the base dependencies - a bare `uv run mypy` in a fresh worktree fails with
+`Failed to spawn: mypy` without this) and then runs `skillc selftest`,
+`pytest -rA`, `ruff check .`, `mypy` and `ci/negative-control.sh`, in that
+order - the same five checks Woodpecker runs on every pull request and push
+to `main` (`.woodpecker/ci.yml`'s `gate` and `negative-control` steps).
+`ci/negative-control.sh` removes one rule's control and requires `selftest`
+to refuse; a green gate is only evidence while that step can still go red.
+Equivalent without `make`:
+
+```bash
+uv sync --locked --extra dev && uv run skillc selftest && uv run pytest -rA \
+    && uv run ruff check . && uv run mypy && uv run bash ci/negative-control.sh
+```
 
 `mypy` takes its scope from `[tool.mypy] files` in `pyproject.toml` (`skillc` and
 `tests`). `ci/typecheck-control.sh` plants a type error in a test module and

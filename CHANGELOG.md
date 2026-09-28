@@ -8,6 +8,20 @@ and version plan.
 
 ## [Unreleased]
 
+### Added
+
+- **`make verify` and a real `## Verify` command** (Refs #134, items 1 and 2).
+  Nothing ran `skillc selftest` or `ci/negative-control.sh` locally without a
+  Makefile, so CPP's finish-gate fallback silently skipped both - a change
+  that blinds one rule's control went green locally and red only in CI (#37).
+  `make verify` runs `uv sync --locked --extra dev` then `skillc selftest`,
+  `pytest -rA` (teed to a gitignored `reports/pytest.log`, covering #148's
+  local one-off-red sighting), `ruff check .`, `mypy` and
+  `ci/negative-control.sh`, mirroring Woodpecker's `gate` and
+  `negative-control` steps. AGENTS.md's `## Verify` now names it instead of a
+  bare `uv run` chain that failed in a fresh worktree with `Failed to spawn:
+  ruff` (the dev tools live in the `dev` extra).
+
 ### Fixed
 
 - **`leak-check` no longer false-positives on a linked worktree's `.git`
@@ -22,6 +36,22 @@ and version plan.
   gate and the judge-input check alike. `leak.default_host_paths()` now
   matches the scanning process's own live `Path.home()`/`cwd` as a new
   `host-path` finding class, wired into all three call sites.
+
+- **Two untested preconditions in `ci/typecheck-control.sh`** (Refs #134,
+  item 3): the empty-population guard (no `tests/test_*.py` to plant a probe
+  in) and the baseline guard (mypy already fails before any probe is
+  planted) were both implemented but had no committed case proving either
+  fires. `tests/test_typecheck_control.py` now covers both; neither needed a
+  behavior change.
+
+- **`.claude/runs/` is now gitignored** (Refs #134, item 6). A `flow:auto`
+  run's `git add -A` committed `.claude/runs/finish-<id>.json` on #127 / PR
+  #128, carrying local run detail into the tree.
+
+- **`docs/specs/evaluation-facility/spec.md`'s status section no longer says
+  "no trial runner exists"** (Refs #134, item 7). `trial.py`, `verify.py`,
+  `lifecycle.py`, `agent_trial.py`, `demo` and `collection-run` all exist
+  now (#8, #9, #10, #12); the section names them instead.
 
 - **The three records #12 could not yet prove** (Closes #12).
   - **The image that ran.** A Docker attempt journals a `backend-identity`
