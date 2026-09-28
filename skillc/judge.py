@@ -75,11 +75,30 @@ class JudgeInputLeaked(Exception):
 @dataclass(frozen=True)
 class JudgeDescription:
     """A judge's own identity, carried into `verification.verdicts.<tier>.judge`
-    so a reader never has to guess which model produced a verdict."""
+    so a reader never has to guess which model produced a verdict.
+
+    `model` is the LLM, never the program relaying to it (#12). A judge that
+    reaches its model through a server (an MCP server, say) reports that
+    server as `server_name`/`server_version` and leaves `model` `None` here,
+    reporting the model that ANSWERED through `JudgeAnswer` instead - two
+    tiers pointed at one server then still record two different models."""
 
     name: str
     model: str | None
     version: str | None
+    server_name: str | None = None
+    server_version: str | None = None
+
+
+@dataclass(frozen=True)
+class JudgeAnswer:
+    """`Judge.evaluate`'s answer when the judge can say which model produced
+    it (#12): the raw, UNTRUSTED verdict entries plus the model that answered
+    this call, which can differ from any configured one (a provider falling
+    back to another model). `model` is `None` when the reply did not say."""
+
+    verdicts: Sequence[Mapping[str, object]]
+    model: str | None
 
 
 @dataclass(frozen=True)
@@ -107,11 +126,13 @@ class Judge(Protocol):
 
     def evaluate(
         self, criteria: Sequence[str], goal_text: str, candidate_files: Sequence[tuple[str, bytes]]
-    ) -> Sequence[Mapping[str, object]]:
+    ) -> Sequence[Mapping[str, object]] | JudgeAnswer:
         """Judge every id in `criteria` against `goal_text` and
         `candidate_files`. Returns one raw (unvalidated) mapping per
         criterion it answered - a judge that skips a criterion silently is
         handled by `run_tier` as `UNKNOWN`, not as a `Judge` obligation.
+        A judge that learns which model answered returns a `JudgeAnswer`
+        carrying it; a bare sequence leaves `describe()`'s `model` standing.
 
         Raises `JudgeUnavailable` when the judge cannot be reached or used at
         all for this call - never returns a fabricated or partial result to
@@ -236,9 +257,13 @@ def run_tier(
     check_judge_input(goal_text, candidate_files, criteria)
     try:
         description = judge.describe()
-        raw_verdicts = judge.evaluate(criteria, goal_text, candidate_files)
+        answer = judge.evaluate(criteria, goal_text, candidate_files)
     except JudgeUnavailable as exc:
         return {"status": "UNAVAILABLE", "reason": str(exc), "criteria": []}
+    if isinstance(answer, JudgeAnswer):
+        raw_verdicts, model = answer.verdicts, answer.model
+    else:
+        raw_verdicts, model = answer, description.model
     # A duplicate id is ambiguous, not last-wins: two entries for the same
     # criterion let the RESPONSE ORDER decide the grade (R1 VIOLATED then
     # SATISFIED passes; reversed, it fails) - found by cross-model review.
@@ -271,10 +296,13 @@ def run_tier(
             resolved.append({"id": criterion_id, "outcome": "UNKNOWN", "missing": f"malformed judge response: {exc}"})
             continue
         resolved.append(_criterion_dict(verdict))
+    identity: dict[str, object] = {"name": description.name, "model": model, "version": description.version}
+    if description.server_name is not None:
+        identity["server"] = {"name": description.server_name, "version": description.server_version}
     return {
         "status": _derive_tier_status(resolved),
         "criteria": resolved,
-        "judge": {"name": description.name, "model": description.model, "version": description.version},
+        "judge": identity,
     }
 
 

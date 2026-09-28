@@ -26,10 +26,12 @@ def _judge(mode: str, **kwargs: object) -> McpSecondOpinionJudge:
     return McpSecondOpinionJudge(command=(sys.executable, str(FAKE), mode), **kwargs)  # type: ignore[arg-type]
 
 
-def test_describe_reads_the_servers_own_identity() -> None:
+def test_describe_reports_the_server_as_the_server_never_as_the_model() -> None:
+    """#12: `serverInfo` names the MCP server, not the LLM behind it."""
     description = _judge("happy").describe()
-    assert description.model == "fake-mcp-second-opinion"
-    assert description.version == "0.0.1-fake"
+    assert description.server_name == "fake-mcp-second-opinion"
+    assert description.server_version == "0.0.1-fake"
+    assert description.model is None
     assert description.name == "mcp-second-opinion:independent"
 
 
@@ -40,7 +42,7 @@ def test_describe_names_the_configured_tier() -> None:
 
 def test_evaluate_returns_a_verdict_per_criterion() -> None:
     j = _judge("happy")
-    raw = j.evaluate(["R1", "R2"], "fix the bug", [("out.txt", b"print(1)")])
+    raw = j.evaluate(["R1", "R2"], "fix the bug", [("out.txt", b"print(1)")]).verdicts
     assert {r["id"] for r in raw} == {"R1", "R2"}
     assert all(r["outcome"] == "SATISFIED" for r in raw)
 
@@ -49,7 +51,7 @@ def test_evaluate_output_survives_parse_judge_verdict() -> None:
     """The adapter's raw output must actually satisfy the seam's own schema
     validation - not merely look plausible to a human reader."""
     j = _judge("happy")
-    raw = j.evaluate(["R1"], "goal", [("out.txt", b"x")])
+    raw = j.evaluate(["R1"], "goal", [("out.txt", b"x")]).verdicts
     verdict = judge.parse_judge_verdict(raw[0], "R1")
     assert verdict.outcome == "SATISFIED"
 
@@ -88,7 +90,7 @@ def test_an_unparseable_verdict_is_an_empty_list_not_a_crash() -> None:
     not a reachability failure - `run_tier` turns an empty answer into
     per-criterion UNKNOWN, an honest reflection of what happened."""
     j = _judge("unparseable-verdict")
-    assert j.evaluate(["R1"], "goal", [("out.txt", b"x")]) == []
+    assert j.evaluate(["R1"], "goal", [("out.txt", b"x")]) == judge.JudgeAnswer(verdicts=[], model=None)
 
 
 def test_a_stalled_reader_is_a_write_timeout() -> None:
@@ -155,7 +157,7 @@ def test_a_notification_before_the_result_is_not_mistaken_for_it() -> None:
     "the next line" as "the response" would misread that notification as a
     malformed reply and fail a call the server actually completed."""
     j = _judge("notify-before-result")
-    raw = j.evaluate(["R1"], "goal", [("out.txt", b"x")])
+    raw = j.evaluate(["R1"], "goal", [("out.txt", b"x")]).verdicts
     assert {r["id"] for r in raw} == {"R1"}
 
 
@@ -190,6 +192,56 @@ def test_run_tier_reports_unavailable_for_a_hung_real_adapter() -> None:
 def test_run_tier_accepts_a_healthy_real_adapter() -> None:
     result = judge.run_tier(judge.SAME_MODEL_TIER, _judge("happy"), ["R1"], "goal text", [("out.txt", b"x")])
     assert result["status"] == "PASS"
+
+
+# ---------------------------------------------------- the real server's reply (#12)
+
+
+def _real(mode: str, *args: str, **kwargs: object) -> McpSecondOpinionJudge:
+    return McpSecondOpinionJudge(command=(sys.executable, str(FAKE), mode, *args), **kwargs)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("mode", ["real-shape", "real-shape-text-only"])
+def test_the_real_reply_yields_its_verdicts_and_the_model_that_answered(mode: str) -> None:
+    """The real server wraps the verdict array inside `analysis` of a returned
+    object. Read as raw text it is JSON-escaped and never parses: before #12
+    every criterion came back UNKNOWN against the real server."""
+    answer = _real(mode, "llm-primary-7").evaluate(["R1", "R2"], "goal", [("out.txt", b"x")])
+    assert {r["id"] for r in answer.verdicts} == {"R1", "R2"}
+    assert answer.model == "llm-primary-7"
+
+
+def test_a_fallback_model_is_the_one_recorded() -> None:
+    """`model_used` is whoever answered, and a provider fallback answers too."""
+    result = judge.run_tier(
+        judge.INDEPENDENT_TIER, _real("real-shape", "llm-fallback-2"), ["R1"], "goal", [("out.txt", b"x")]
+    )
+    assert result["status"] == "PASS"
+    assert result["judge"] == {
+        "name": "mcp-second-opinion:independent", "model": "llm-fallback-2", "version": None,
+        "server": {"name": "fake-mcp-second-opinion", "version": "0.0.1-fake"},
+    }
+
+
+def test_two_tiers_on_one_server_record_two_different_models() -> None:
+    """ADR 0006's tier separation, checkable from the record: one server, two
+    configured LLMs, two different `model` values - not the server's name twice."""
+    files = [("out.txt", b"x")]
+    same = judge.run_tier(judge.SAME_MODEL_TIER, _real("real-shape", "llm-a", tier_name="same-model"),
+                          ["R1"], "goal", files)
+    independent = judge.run_tier(judge.INDEPENDENT_TIER, _real("real-shape", "llm-b"), ["R1"], "goal", files)
+    same_judge, independent_judge = same["judge"], independent["judge"]
+    assert isinstance(same_judge, dict) and isinstance(independent_judge, dict)
+    assert same_judge["server"] == independent_judge["server"]
+    assert (same_judge["model"], independent_judge["model"]) == ("llm-a", "llm-b")
+
+
+def test_a_reply_that_failed_upstream_is_unavailable_not_a_verdict() -> None:
+    result = judge.run_tier(
+        judge.INDEPENDENT_TIER, _real("real-shape-failed"), ["R1"], "goal", [("out.txt", b"x")]
+    )
+    assert result["status"] == "UNAVAILABLE"
+    assert "quota exhausted" in str(result["reason"])
 
 
 # --------------------------------------------------------------- _extract_json_array

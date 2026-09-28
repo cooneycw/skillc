@@ -18,6 +18,14 @@ network:
                            fills the OS pipe because nothing drains it)
   notify-before-result   - handshake succeeds; the tools/call response is
                            preceded by a notification carrying no "id"
+  real-shape [MODEL]      - answers the way the REAL server does (#12): FastMCP
+                           sends the tool's returned object as structuredContent
+                           AND as its JSON in the text content, with the verdict
+                           array inside `analysis` and the answering model in
+                           `model_used` (default "fake-llm-primary")
+  real-shape-text-only [MODEL] - the same object as JSON text only, with no
+                           structuredContent (an older FastMCP)
+  real-shape-failed      - the real object with success: false, model_used "none"
 
 Stdlib only, matching every other fake subprocess fixture in this repo
 (`fake_docker.py`, `fake_subject.py`).
@@ -49,6 +57,16 @@ def _read_request() -> dict[str, object] | None:
 def _write(message: dict[str, object]) -> None:
     sys.stdout.write(json.dumps(message) + "\n")
     sys.stdout.flush()
+
+
+def _verdicts(call: dict[str, object]) -> list[dict[str, object]]:
+    """SATISFIED for exactly the criteria ids the request embedded."""
+    params = call.get("params")
+    arguments = params.get("arguments") if isinstance(params, dict) else None
+    issue_description = arguments.get("issue_description") if isinstance(arguments, dict) else None
+    match = _CRITERIA_ARRAY_RE.search(issue_description) if isinstance(issue_description, str) else None
+    criteria = json.loads(match.group(0)) if match else []
+    return [{"id": cid, "outcome": "SATISFIED", "evidence": [f"fake-mcp:{cid}"]} for cid in criteria]
 
 
 def main() -> int:
@@ -116,6 +134,26 @@ def main() -> int:
             "jsonrpc": "2.0", "id": call_id,
             "result": {"content": [{"type": "text", "text": "Looks fine to me, no notes."}], "isError": False},
         })
+    elif mode.startswith("real-shape"):
+        model = sys.argv[2] if len(sys.argv) > 2 else "fake-llm-primary"
+        if mode == "real-shape-failed":
+            reply: dict[str, object] = {
+                "analysis": "", "model_used": "none", "success": False,
+                "tokens_used": {"input": 0, "output": 0, "total": 0}, "cost_estimate": 0.0,
+                "error": "Failed to get second opinion: provider quota exhausted",
+            }
+        else:
+            reply = {
+                "analysis": "Review follows.\n" + json.dumps(_verdicts(call)), "model_used": model,
+                "success": True, "tokens_used": {"input": 10, "output": 10, "total": 20},
+                "cost_estimate": 0.0, "error": None,
+            }
+        result: dict[str, object] = {
+            "content": [{"type": "text", "text": json.dumps(reply, separators=(",", ":"))}], "isError": False,
+        }
+        if mode != "real-shape-text-only":
+            result["structuredContent"] = reply
+        _write({"jsonrpc": "2.0", "id": call_id, "result": result})
     else:  # happy
         params = call.get("params")
         arguments = params.get("arguments") if isinstance(params, dict) else None

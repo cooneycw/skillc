@@ -75,7 +75,7 @@ from dataclasses import dataclass
 from typing import IO
 
 from . import __version__
-from .judge import JudgeDescription, JudgeUnavailable
+from .judge import JudgeAnswer, JudgeDescription, JudgeUnavailable
 
 #: The real server's own published name (README, `cooneycw/mcp-second-opinion`).
 #: A caller with it on PATH gets it by default; every test overrides this.
@@ -189,13 +189,10 @@ class McpSecondOpinionJudge:
     call_timeout: float = 120.0
 
     def describe(self) -> JudgeDescription:
-        """`model`/`version` here are the MCP `initialize` handshake's own
-        `serverInfo` fields - the SERVER's self-reported identity, not
-        necessarily the underlying LLM's. The MCP spec guarantees nothing
-        more at handshake time, so this is the most specific fact this
-        adapter can state without an unverified assumption about a real
-        server's own `serverInfo` contents (stated limitation, cross-model
-        review, this PR - see the Nit Store)."""
+        """The MCP `initialize` handshake's `serverInfo` names the SERVER,
+        never the LLM behind it, so it is reported as `server_name`/
+        `server_version` and `model` stays `None` (#12). The model is only
+        known once a call is answered: `evaluate()` reports it."""
         proc = self._spawn()
         try:
             reader = _LineReader(self._stdout(proc))
@@ -204,22 +201,24 @@ class McpSecondOpinionJudge:
             self._terminate(proc)
         return JudgeDescription(
             name=f"mcp-second-opinion:{self.tier_name}",
-            model=str(server_info.get("name")) if server_info else None,
-            version=str(server_info.get("version")) if server_info else None,
+            model=None,
+            version=None,
+            server_name=str(server_info.get("name")) if server_info else None,
+            server_version=str(server_info.get("version")) if server_info else None,
         )
 
     def evaluate(
         self, criteria: Sequence[str], goal_text: str, candidate_files: Sequence[tuple[str, bytes]]
-    ) -> Sequence[Mapping[str, object]]:
+    ) -> JudgeAnswer:
         proc = self._spawn()
         try:
             reader = _LineReader(self._stdout(proc))
             self._handshake(proc, reader)
             self._notify_initialized(proc)
-            text = self._call_tool(proc, reader, criteria, goal_text, candidate_files)
+            text, model = self._call_tool(proc, reader, criteria, goal_text, candidate_files)
         finally:
             self._terminate(proc)
-        return _extract_json_array(text)
+        return JudgeAnswer(verdicts=_extract_json_array(text), model=model)
 
     # ---------------------------------------------------------- MCP wire protocol
 
@@ -325,7 +324,7 @@ class McpSecondOpinionJudge:
     def _call_tool(
         self, proc: subprocess.Popen[bytes], reader: _LineReader, criteria: Sequence[str], goal_text: str,
         candidate_files: Sequence[tuple[str, bytes]],
-    ) -> str:
+    ) -> tuple[str, str | None]:
         code = "\n\n".join(
             f"# {name}\n{content.decode('utf-8', errors='replace')}" for name, content in candidate_files
         )
@@ -345,10 +344,39 @@ class McpSecondOpinionJudge:
             detail = content[0].get("text") if isinstance(content, list) and content and isinstance(content[0], dict) else content
             raise JudgeUnavailable(f"{self.command[0]!r} reported a tool error: {detail!r}")
         content = result.get("content")
-        if not isinstance(content, list):
-            return ""
-        parts = [item.get("text", "") for item in content if isinstance(item, dict) and item.get("type") == "text"]
-        return "\n".join(str(p) for p in parts)
+        parts = [item.get("text", "") for item in content if isinstance(item, dict) and item.get("type") == "text"] \
+            if isinstance(content, list) else []
+        return self._reply(result.get("structuredContent"), "\n".join(str(p) for p in parts))
+
+    def _reply(self, structured: object, text: str) -> tuple[str, str | None]:
+        """The verdict text and the model that answered, from one tool result.
+
+        The real `get_code_second_opinion` returns an object - `analysis`,
+        `model_used`, `success`, `error` (cooneycw/mcp-second-opinion
+        `src/server.py`, `get_code_second_opinion`, at eb90aec) - which
+        FastMCP sends as `structuredContent` AND as that object's JSON in the
+        text content. The verdict array lives INSIDE `analysis`; read from the
+        raw text it is JSON-escaped and never parses, so every criterion came
+        back UNKNOWN (#12). `model_used` is the model that actually answered,
+        a fallback included. `success: false` is the provider failing, which
+        is this tier being unavailable, not a verdict. Any other shape is read
+        as verdict text with no model stated."""
+        payload = structured
+        if not isinstance(payload, dict):
+            try:
+                payload = json.loads(text)
+            except json.JSONDecodeError:
+                payload = None
+        if not isinstance(payload, dict) or "analysis" not in payload:
+            return text, None
+        if payload.get("success") is False:
+            raise JudgeUnavailable(f"{self.command[0]!r} could not reach its model: {payload.get('error')!r}")
+        model = payload.get("model_used")
+        analysis = payload.get("analysis")
+        return (
+            analysis if isinstance(analysis, str) else "",
+            model if isinstance(model, str) and model and model != "none" else None,
+        )
 
     def _terminate(self, proc: subprocess.Popen[bytes]) -> None:
         if proc.poll() is not None:

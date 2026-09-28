@@ -96,6 +96,10 @@ not a docker clone:
     inspect --format {{.State.Status}} NAME
         Prints the state file's status, or exits 1 if absent ("No such
         object").
+    inspect --format {{.Image}} NAME
+        Prints the image id NAME was created from - the same fake digest
+        `image inspect` prints for its image - unless `.image-id-NAME` holds
+        another id, or `.no-image-id-NAME` makes the query exit 1.
     image inspect IMAGE --format {{.Id}}
         Prints a deterministic fake digest for IMAGE, unless a `.no-image`
         sentinel exists in the state dir, in which case it exits 1
@@ -314,6 +318,19 @@ def cmd_inspect(state_dir: Path, rest: list[str]) -> int:
         print("Error: No such object: " + name, file=sys.stderr)
         return 1
     data = json.loads(path.read_text(encoding="utf-8"))
+    if "{{.Image}}" in rest:
+        # The image id the container was CREATED from (#12): the same
+        # deterministic fake digest `image inspect` prints for that image, so
+        # a ledger digest resolved through `image inspect` matches it. A
+        # `.image-id-NAME` sentinel overrides it (a tag republished between
+        # planning and the run); `.no-image-id-NAME` makes this one query fail.
+        if (state_dir / f".no-image-id-{name}").exists():
+            print("Error: permission denied while trying to inspect", file=sys.stderr)
+            return 1
+        override = state_dir / f".image-id-{name}"
+        print(override.read_text(encoding="utf-8").strip() if override.is_file()
+              else f"sha256:fake-digest-for-{data.get('image', '')}")
+        return 0
     print(data.get("status", "unknown"))
     return 0
 

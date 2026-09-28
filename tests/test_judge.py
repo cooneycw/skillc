@@ -13,6 +13,8 @@ Every acceptance item names its own case:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import pytest
 from fixtures.leak_seeds.judge_seeds import HOME_PATH_LEAK, PRIVATE_IP_LEAK, PRIVATE_IP_LEAK_2
 
@@ -110,6 +112,36 @@ def test_run_tier_accepts_a_well_formed_pass() -> None:
     judge_info = result["judge"]
     assert isinstance(judge_info, dict)
     assert judge_info["name"] == "fake-judge"
+
+
+def test_a_plain_answer_keeps_the_described_model_and_names_no_server() -> None:
+    result = judge.run_tier(judge.SAME_MODEL_TIER, judge.FakeJudge(), ["R1"], "goal", [("out.txt", b"ok")])
+    assert result["judge"] == {"name": "fake-judge", "model": "fake-model-1", "version": "1"}
+
+
+class _RelayJudge:
+    """A judge behind a server: describe() knows only the server, and each
+    answer names the model that produced it (#12)."""
+
+    def describe(self) -> judge.JudgeDescription:
+        return judge.JudgeDescription(name="relay", model=None, version=None,
+                                      server_name="relay-server", server_version="2")
+
+    def evaluate(self, criteria: Sequence[str], goal_text: str,
+                 candidate_files: Sequence[tuple[str, bytes]]) -> judge.JudgeAnswer:
+        return judge.JudgeAnswer(
+            verdicts=[{"id": c, "outcome": "SATISFIED", "evidence": ["relay"]} for c in criteria],
+            model="answering-llm",
+        )
+
+
+def test_the_answering_model_is_recorded_apart_from_the_server() -> None:
+    result = judge.run_tier(judge.INDEPENDENT_TIER, _RelayJudge(), ["R1"], "goal", [("out.txt", b"ok")])
+    assert result["status"] == "PASS"
+    assert result["judge"] == {
+        "name": "relay", "model": "answering-llm", "version": None,
+        "server": {"name": "relay-server", "version": "2"},
+    }
 
 
 def test_run_tier_reports_fail_on_a_violation() -> None:

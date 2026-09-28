@@ -787,3 +787,160 @@ def test_a_judge_that_hangs_or_prints_no_object_is_INCONCLUSIVE(tmp_path: Path, 
         (root / "grade_slug.py").write_text(body)
     graded = verify.grade_directory(_task_copy(tmp_path, edit), TASK / "wrong" / "no-collapse", grading)
     assert (graded.status, graded.category) == ("INCONCLUSIVE", category)
+
+
+# ----------------------------------------------- concurrent attempts (#12)
+
+
+def _plan_two(store: Path) -> tuple[t.Experiment, str, str]:
+    spec: dict[str, object] = {"experiment": "verify", "trials": [{
+        "label": "slug", "case": {"id": "slug-small-fix", "revision": "1"}, "grader": GRADER.identity(),
+        "subject": {"digest": "sha256:5a"}, "client": {"name": "fake", "version": "1"},
+        "image": {"digest": "sha256:1a"}, "config": {"model": "fake-1"}, "attempts": 2,
+    }]}
+    experiment = t.plan(spec, store)
+    first, second = (str(a["attempt_id"]) for _trial, a in experiment.attempts())
+    return experiment, first, second
+
+
+def _run(experiment: t.Experiment, attempt_id: str, base: Path, source: Path) -> Path:
+    t.add_receipt(experiment, _receipt(experiment, attempt_id))
+    workspace = t.allocate_workspace(experiment, attempt_id, base, forbidden=[])
+    stop = t.run_attempt(experiment, attempt_id, [sys.executable, str(FAKE), "slug-from", str(source)],
+                         cwd=workspace, timeout=20, grace=0.5)
+    assert stop["confirmed"] is True
+    return workspace
+
+
+def _freeze(experiment: t.Experiment, attempt_id: str, workspace: Path) -> None:
+    t.capture(experiment, attempt_id, workspace)
+    t.cleanup_workspace(experiment, attempt_id)
+    assert t.finalize(experiment, attempt_id)["disposition"] == "captured"
+
+
+def test_a_sibling_that_runs_and_is_captured_mid_grade_does_not_refuse_the_grade(
+    store: Path, base: Path, grading: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The red case #12 names: attempt A is graded while sibling B runs (its
+    journal and spool grow) and is then captured. Before #12 A's grade was
+    refused as tampering; now B's run is scoped out of A's snapshot and B's
+    capture waits for the experiment lock A's grade holds."""
+    import threading
+
+    experiment, first, second = _plan_two(store)
+    _freeze(experiment, first, _run(experiment, first, base, REFERENCE))
+    t.add_receipt(experiment, _receipt(experiment, second))
+    sibling: dict[str, object] = {}
+    ran = threading.Event()
+    real_grade_files = verify.grade_files
+
+    def sibling_b() -> None:
+        # A separate thread, as a real sibling controller is: nothing it does
+        # shares the grading thread's hold on the lock.
+        workspace = t.allocate_workspace(experiment, second, base, forbidden=[])
+        t.run_attempt(experiment, second, [sys.executable, str(FAKE), "slug-from", str(REFERENCE)],
+                      cwd=workspace, timeout=20, grace=0.5)
+        ran.set()  # B's journal and spool changed mid-grade
+        _freeze(experiment, second, workspace)
+        sibling["done_at"] = time.monotonic()
+
+    def during_grade(*args: object, **kwargs: object) -> verify.Graded:
+        graded = real_grade_files(*args, **kwargs)  # type: ignore[arg-type]
+        thread = threading.Thread(target=sibling_b)
+        thread.start()
+        sibling["thread"] = thread
+        assert ran.wait(timeout=30)
+        time.sleep(0.5)  # long enough for an unlocked capture to land mid-grade
+        sibling["grade_returning_at"] = time.monotonic()
+        return graded
+
+    monkeypatch.setattr(verify, "grade_files", during_grade)
+    result = verify.grade(experiment, first, GRADER, grading)
+    thread = sibling["thread"]
+    assert isinstance(thread, threading.Thread)
+    thread.join(timeout=30)
+    assert result["status"] == "PASS"
+    # B waited for A's grade to store its result, and was then captured normally.
+    assert isinstance(sibling.get("done_at"), float)
+    assert sibling["done_at"] > sibling["grade_returning_at"]  # type: ignore[operator]
+    assert (experiment.root / f"lifecycle-{second}.json").exists()
+
+
+def _graded_with_write(store: Path, base: Path, grading: Path, tmp_path: Path,
+                       target: Callable[[t.Experiment, str, str], Path],
+                       finish_sibling: bool) -> tuple[t.Experiment, str]:
+    """Attempt A's candidate appends to `target` while it is graded. B is
+    captured first when `finish_sibling`, otherwise left planned and unrun."""
+    experiment, first, second = _plan_two(store)
+    if finish_sibling:
+        _freeze(experiment, second, _run(experiment, second, base, REFERENCE))
+    path = target(experiment, first, second)
+    writer = (f"import os\np = {str(path)!r}\n"
+              "if os.path.exists(p): os.chmod(p, 0o600)\n"
+              "open(p, 'a').write('x')\n" + CORRECT)
+    _freeze(experiment, first, _run(experiment, first, base, _source(tmp_path, writer)))
+    return experiment, first
+
+
+def test_a_write_into_an_unfinished_siblings_spool_is_the_one_thing_scoped_out(
+    store: Path, base: Path, grading: Path, tmp_path: Path,
+) -> None:
+    """The stated narrowing, pinned so it cannot silently grow: an unfinished
+    planned sibling's spool is not compared by this grade."""
+    experiment, first = _graded_with_write(
+        store, base, grading, tmp_path,
+        lambda e, _a, b: e.root / t.SPOOL / f"{b}.stdout", finish_sibling=False)
+    assert verify.grade(experiment, first, GRADER, grading)["status"] == "PASS"
+
+
+@pytest.mark.parametrize(("where", "finish_sibling"), [
+    ("finished-sibling-journal", True),
+    ("own-journal", False),
+    ("unplanned-journal", False),
+    ("object", False),
+])
+def test_every_other_write_still_refuses_the_grade(
+    store: Path, base: Path, grading: Path, tmp_path: Path, where: str, finish_sibling: bool,
+) -> None:
+    """The negative controls for the narrowing: a finalized sibling, this
+    attempt's own journal, an attempt the ledger does not plan, and the object
+    store are all still compared."""
+    targets: dict[str, Callable[[t.Experiment, str, str], Path]] = {
+        "finished-sibling-journal": lambda e, _a, b: e.root / t.JOURNAL / f"{b}.jsonl",
+        "own-journal": lambda e, a, _b: e.root / t.JOURNAL / f"{a}.jsonl",
+        "unplanned-journal": lambda e, _a, _b: e.root / t.JOURNAL / "a-000000000000beef.jsonl",
+        "object": lambda e, _a, _b: e.root / t.OBJECTS / "planted",
+    }
+    experiment, first = _graded_with_write(store, base, grading, tmp_path, targets[where], finish_sibling)
+    with pytest.raises(t.Refused, match="evidence store changed"):
+        verify.grade(experiment, first, GRADER, grading)
+
+
+def test_the_experiment_lock_excludes_another_process(store: Path) -> None:
+    """`flock` across processes, not only the in-process re-entrant hold: a
+    child holding the lock makes this process wait; a different experiment's
+    lock does not."""
+    import subprocess
+
+    experiment, _attempt = _plan(store)
+    other, _other_attempt = _plan(t.open_store(store.parent / "other-store", forbidden=[]))
+    holder = subprocess.Popen(
+        [sys.executable, "-c",
+         ("import sys, time\nfrom pathlib import Path\nfrom skillc import trial\n"
+          "with trial.experiment_lock(Path(sys.argv[1])):\n"
+          "    print('held', flush=True)\n    time.sleep(1.5)\n"),
+         str(experiment.root)],
+        stdout=subprocess.PIPE, text=True,
+    )
+    try:
+        assert holder.stdout is not None and holder.stdout.readline().strip() == "held"
+        started = time.monotonic()
+        with t.experiment_lock(other.root):
+            assert time.monotonic() - started < 0.5  # the control: an unrelated lock is free
+        started = time.monotonic()
+        with t.experiment_lock(experiment.root):
+            waited = time.monotonic() - started
+        assert waited > 0.7
+    finally:
+        holder.wait(timeout=10)
+    assert not any(p.name.endswith(".lock") for p in store.parent.rglob("*"))  # the lock leaves no file

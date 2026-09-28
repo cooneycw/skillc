@@ -66,8 +66,15 @@ class FakeBackend:
         destroy_raises: bool = False,
         confirm_absent_raises: bool = False,
         force_stdout_truncated: int | None = None,
+        image_digest: object = None,
+        reports_image: bool = False,
     ) -> None:
         self._base = base
+        #: `reports_image` adds `image_digest` to install()'s readiness (#12),
+        #: as DockerBackend does; off, the key is absent - a backend making no
+        #: claim about its image at all.
+        self._image_digest = image_digest
+        self._reports_image = reports_image
         self._unavailable = unavailable
         self._install_unavailable = install_unavailable
         self._export_fails = export_fails
@@ -120,6 +127,8 @@ class FakeBackend:
         if self._supports_canary and isinstance(nonce, str):
             (handle.root / ".skillc-canary").write_text(nonce)
             readiness["canary_path"] = ".skillc-canary-result"
+        if self._reports_image:
+            readiness["image_digest"] = self._image_digest
         return readiness
 
     def execute(
@@ -239,6 +248,10 @@ def _planned(store: Path) -> tuple[t.Experiment, str]:
     experiment = t.plan(spec, store)
     [(_trial, attempt)] = list(experiment.attempts())
     return experiment, str(attempt["attempt_id"])
+
+
+def _identity_events(experiment: t.Experiment, attempt_id: str) -> list[dict[str, object]]:
+    return [e for e in experiment.events(attempt_id) if e.get("event") == "backend-identity"]
 
 
 def _argv(mode: str) -> list[str]:
@@ -1020,3 +1033,34 @@ def test_before_execute_and_observe_before_teardown_compose(store: Path, base: P
     )
     assert record["disposition"] == "captured"
     assert record["observation"] == {"read_back": True}
+
+
+# ------------------------------------------------------ backend identity (#12)
+
+
+@pytest.mark.parametrize(("ran", "matches"), [
+    ("sha256:01", True),       # the image the ledger planned
+    ("sha256:ff", False),      # a tag republished between planning and the run
+    (None, None),              # the backend could not say - never read as a match
+])
+def test_the_image_that_ran_is_journaled_beside_the_planned_one(
+    store: Path, base: Path, ran: str | None, matches: bool | None,
+) -> None:
+    experiment, attempt_id = _planned(store)
+    lifecycle.run_through_backend(
+        FakeBackend(base, reports_image=True, image_digest=ran), experiment, attempt_id,
+        _argv("work"), {"skill": "x"}, Limits(timeout=5), base,
+    )
+    [event] = _identity_events(experiment, attempt_id)
+    assert event["image_digest"] == ran
+    assert event["ledger_image_digest"] == "sha256:01"
+    assert event["matches_ledger"] is matches
+
+
+def test_a_backend_that_reports_no_image_journals_no_identity(store: Path, base: Path) -> None:
+    """Absence of the key is a backend making no claim, not an unknown image."""
+    experiment, attempt_id = _planned(store)
+    lifecycle.run_through_backend(
+        FakeBackend(base), experiment, attempt_id, _argv("work"), {"skill": "x"}, Limits(timeout=5), base,
+    )
+    assert _identity_events(experiment, attempt_id) == []
