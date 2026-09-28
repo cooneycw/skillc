@@ -1555,7 +1555,18 @@ def cmd_rules(args: argparse.Namespace) -> int:
     width = max(len(rule.id) for rule in checks.ALL_RULES)
     for rule in checks.ALL_RULES:
         scope = getattr(rule, "target", None)
-        suffix = f"  [target: {scope}]" if scope else ""
+        # Two SEPARATE claims (issue #132 item 3): `target` says whether a
+        # rule runs for a given profile at all; `varies_by_target` says
+        # whether a rule that runs for EVERY profile still says something
+        # different between them (trigger-shape: target=None, yet its own
+        # finding depends on the target it is handed). A `[target: ...]`
+        # suffix alone reads the same - empty - for both "does not vary" and
+        # "varies but was never declared as scoped", which is exactly what
+        # made trigger-shape's own target-dependence invisible here.
+        tags = [f"target: {scope}"] if scope else []
+        if getattr(rule, "varies_by_target", False):
+            tags.append("varies by target")
+        suffix = f"  [{', '.join(tags)}]" if tags else ""
         print(f"{rule.severity:5}  {rule.id:{width}}  {rule.summary}{suffix}")
     return 0
 

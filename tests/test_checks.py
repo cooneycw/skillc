@@ -111,6 +111,45 @@ def test_ref_depth_does_not_double_report_a_repeated_first_hop_link(tmp_path: Pa
     )
 
 
+def test_ref_depth_does_not_double_report_a_second_hop_under_two_spellings(
+    tmp_path: Path,
+) -> None:
+    """Red case for issue #132 item 4: the pre-fix dedup keyed on the second
+    hop's RAW spelling (`set[tuple[str, str]]`), not its resolved path, so
+    `X.md` and `./X.md` - the same file - reported the identical deep chain
+    twice. Fix: key on the resolved second-hop path."""
+    skill_dir = tmp_path / "duplicate-spelling"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: duplicate-spelling\n"
+        "description: Use when the same second-hop file is linked under two spellings.\n"
+        "---\n"
+        "See [guide A](A.md).\n",
+        encoding="utf-8",
+    )
+    (skill_dir / "A.md").write_text(
+        "Extra in [the extra](X.md), also as [the same extra](./X.md).\n", encoding="utf-8",
+    )
+    (skill_dir / "X.md").write_text("Deep content.\n", encoding="utf-8")
+
+    findings = checks.run(Skill.load(skill_dir / "SKILL.md"), only="ref-depth")
+    assert len(findings) == 1
+    assert findings[0].detail == (
+        "A.md links on to X.md: references must stay one level deep or the "
+        "agent reads only part of the chain"
+    )
+
+
+def test_ref_depth_committed_duplicate_spelling_control_is_minimal() -> None:
+    """The committed `bad/duplicate-spelling` control (issue #132 item 4)
+    must itself report exactly one finding, not two - a control that still
+    double-reports would certify nothing about the fix."""
+    path = CONTROLS / "ref-depth" / "bad" / "duplicate-spelling" / "SKILL.md"
+    findings = checks.run(Skill.load(path), only="ref-depth")
+    assert len(findings) == 1
+
+
 def test_ref_depth_ignores_a_back_link_to_skill_md() -> None:
     """A second-hop link that resolves to SKILL.md itself is not a deeper
     chain - it is the entry point (issue #52)."""
@@ -871,3 +910,87 @@ def test_invocation_consistency_is_scoped_to_claude_code(tmp_path: Path) -> None
     )
     assert checks.run(skill, target="claude-code") != []
     assert [f for f in checks.run(skill, target="portable") if f.rule == "invocation-consistency"] == []
+
+
+def test_trigger_shape_is_declared_as_varying_by_target() -> None:
+    """Issue #132 item 3: `trigger-shape` has `target=None` (it runs for
+    every profile) yet its own finding depends on the `target` it is handed
+    (it is silent under `claude-code` when `disable-model-invocation` is
+    true). `varies_by_target` is the declared claim that makes that
+    distinguishable from a rule that truly behaves the same everywhere."""
+    rule = checks.RULES_BY_ID["trigger-shape"]
+    assert rule.target is None
+    assert rule.varies_by_target is True
+
+
+def test_rules_command_shows_target_varying_behaviour(capsys: pytest.CaptureFixture[str]) -> None:
+    """Red case for issue #132 item 3: the pre-fix `[target: ...]` suffix was
+    keyed on `rule.target` alone, which is `None` for `trigger-shape` (it
+    runs everywhere), so `skillc rules` showed nothing distinguishing it from
+    a rule whose output truly never varies by target. Must now say so."""
+    rc = cli.cmd_rules(argparse.Namespace())
+    out = capsys.readouterr().out
+    assert rc == 0
+    lines = [line for line in out.splitlines() if line.strip().startswith("warn") and "trigger-shape" in line]
+    assert len(lines) == 1
+    assert "varies by target" in lines[0]
+
+
+def test_rules_command_does_not_tag_a_rule_that_does_not_vary(capsys: pytest.CaptureFixture[str]) -> None:
+    """Green case beside the red one: a rule with no declared `target` and no
+    `varies_by_target` must not carry either tag."""
+    cli.cmd_rules(argparse.Namespace())
+    out = capsys.readouterr().out
+    lines = [line for line in out.splitlines() if "body-budget" in line]
+    assert len(lines) == 1
+    assert "[" not in lines[0]
+
+
+def test_claude_code_listing_cap_fires_on_the_combined_length(tmp_path: Path) -> None:
+    """Red case for issue #132 item 2: `required-fields`' own check reads
+    only `description` against the PORTABLE 1024-character limit, so a skill
+    whose `description` alone stays under 1024 but whose `description` +
+    `when_to_use` together exceed Claude Code's real, larger 1536-character
+    listing cap produced zero findings under `--target claude-code`."""
+    skill_dir = tmp_path / "over-cap"
+    skill_dir.mkdir()
+    description = "d" * 800
+    when_to_use = "w" * 800
+    (skill_dir / "SKILL.md").write_text(
+        f"---\nname: over-cap\ndescription: {description}\nwhen_to_use: {when_to_use}\n---\nBody.\n",
+        encoding="utf-8",
+    )
+    skill = Skill.load(skill_dir / "SKILL.md")
+    assert len(skill.get("description") or "") < checks.DESCRIPTION_MAX, (
+        "fixture must stay under the portable limit alone, to isolate this rule's own finding"
+    )
+    findings = checks.run(skill, only="claude-code-listing-cap", target="claude-code")
+    assert findings and "1536" in findings[0].detail
+
+
+def test_claude_code_listing_cap_is_silent_under_the_portable_target(tmp_path: Path) -> None:
+    """Item 2's other half: portable runs unchanged - the rule is scoped to
+    `claude-code` and must not fire (or even run) under `--target portable`,
+    whatever the combined length is."""
+    skill_dir = tmp_path / "over-cap-portable"
+    skill_dir.mkdir()
+    description = "d" * 800
+    when_to_use = "w" * 800
+    (skill_dir / "SKILL.md").write_text(
+        f"---\nname: over-cap-portable\ndescription: {description}\nwhen_to_use: {when_to_use}\n---\nBody.\n",
+        encoding="utf-8",
+    )
+    skill = Skill.load(skill_dir / "SKILL.md")
+    findings = checks.run(skill, target="portable")
+    assert [f for f in findings if f.rule == "claude-code-listing-cap"] == []
+
+
+def test_claude_code_listing_cap_stays_silent_under_the_cap(tmp_path: Path) -> None:
+    skill_dir = tmp_path / "under-cap"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: under-cap\ndescription: Use when short.\nwhen_to_use: Also short.\n---\nBody.\n",
+        encoding="utf-8",
+    )
+    findings = checks.run(Skill.load(skill_dir / "SKILL.md"), only="claude-code-listing-cap", target="claude-code")
+    assert findings == []

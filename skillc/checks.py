@@ -17,6 +17,7 @@ from . import records
 from .spec import (
     BODY_LINE_BUDGET,
     CLAUDE_CODE,
+    CLAUDE_CODE_LISTING_CAP,
     COMPATIBILITY_MAX,
     DEFAULT_TARGET,
     DESCRIPTION_MAX,
@@ -78,6 +79,16 @@ class Rule:
     client. `check` is always handed the ACTIVE target, even for a rule with no
     `target` of its own, so a rule that applies everywhere can still vary what it
     says between profiles (`trigger-shape` is the one that does).
+
+    `varies_by_target` is a SEPARATE claim from `target` (issue #132 item 3):
+    `target` says WHETHER a rule runs for a given profile; this says whether a
+    rule that runs for EVERY profile can still say something different between
+    them. `trigger-shape` has `target=None` (it runs everywhere) yet reads the
+    `target` argument to skip its warning when `disable-model-invocation` is
+    true under `claude-code` - `skillc rules`' own `[target: ...]` suffix,
+    keyed on `target` alone, could not show that at all: it is always empty
+    for a rule with no `target`, whatever the rule's check function actually
+    does with the value it is handed.
     """
 
     id: str
@@ -86,6 +97,7 @@ class Rule:
     check: Callable[[Skill, str], Iterator[str]]
     parser: bool = False
     target: str | None = None
+    varies_by_target: bool = False
 
 
 def _frontmatter(skill: Skill, target: str) -> Iterator[str]:
@@ -138,9 +150,28 @@ def _required_fields(skill: Skill, target: str) -> Iterator[str]:
     description = skill.get("description")
     if description and len(description) > DESCRIPTION_MAX:
         yield f"description is {len(description)} characters, over the {DESCRIPTION_MAX} limit"
-    compatibility = skill.get("compatibility")
-    if compatibility and len(compatibility) > COMPATIBILITY_MAX:
-        yield f"compatibility is {len(compatibility)} characters, over {COMPATIBILITY_MAX}"
+
+    # This rule OWNS the type of the OPTIONAL fields it reads too (issue #132
+    # item 1), for the identical reason it owns required ones: `Skill.get`
+    # returns None for any non-string value, so `compatibility: {a: mapping}`
+    # or `metadata: a-bare-string` produced zero findings anywhere - not this
+    # rule's own length check, and not any rule that reads `metadata` later.
+    if "compatibility" in skill.frontmatter:
+        compatibility = skill.frontmatter["compatibility"]
+        if not isinstance(compatibility, str):
+            yield f"compatibility must be a string, got {_kind(compatibility)}"
+        elif len(compatibility) > COMPATIBILITY_MAX:
+            yield f"compatibility is {len(compatibility)} characters, over {COMPATIBILITY_MAX}"
+    if "metadata" in skill.frontmatter:
+        metadata = skill.frontmatter["metadata"]
+        if not isinstance(metadata, dict):
+            # Claude Code drops a value that is not a map, so a bare string or
+            # list here is not merely malformed - it is silently discarded.
+            yield f"metadata must be a mapping, got {_kind(metadata)}"
+        else:
+            for mkey, mvalue in metadata.items():
+                if not isinstance(mvalue, str):
+                    yield f"metadata.{mkey} must be a string, got {_kind(mvalue)}"
 
 
 def _trigger_shape(skill: Skill, target: str) -> Iterator[str]:
@@ -190,6 +221,30 @@ def _claude_code_field(skill: Skill, target: str) -> Iterator[str]:
         )
 
 
+def _claude_code_listing_cap(skill: Skill, target: str) -> Iterator[str]:
+    """Target `claude-code` (issue #132 item 2): `required-fields`' own
+    `description` check is the PORTABLE specification's 1024-character limit
+    on `description` alone - not this client's actual constraint. Claude
+    Code truncates the COMBINED `description` + `when_to_use` text at
+    `CLAUDE_CODE_LISTING_CAP` characters in the skill listing (source and
+    read date: `CLAUDE_CODE.source`/`.verified`), so a skill within the
+    portable limit on `description` alone can still be truncated here once
+    `when_to_use` is added, and a `description` slightly over 1024 is not
+    itself a problem for this client if `when_to_use` is absent or short.
+    Portable's own check is unaffected - this is a separate rule, scoped to
+    this one target, not a replacement for it."""
+    description = skill.get("description") or ""
+    when_to_use = skill.get("when_to_use") or ""
+    combined = len(description) + len(when_to_use)
+    if combined > CLAUDE_CODE_LISTING_CAP:
+        yield (
+            f"description + when_to_use is {combined} characters, over "
+            f"{CLAUDE_CODE.label}'s {CLAUDE_CODE_LISTING_CAP}-character listing cap "
+            f"(profile read from {CLAUDE_CODE.source} on {CLAUDE_CODE.verified}) - "
+            f"put the key use case first, since that is what survives truncation"
+        )
+
+
 def _body_budget(skill: Skill, target: str) -> Iterator[str]:
     if skill.body_lines > BODY_LINE_BUDGET:
         yield (
@@ -211,7 +266,15 @@ def _ref_depth(skill: Skill, target: str) -> Iterator[str]:
     first_hop_paths = {
         resolved for link in first_hop_links if (resolved := (base / link).resolve()).is_file()
     }
-    chains: set[tuple[str, str]] = set()
+    # Keyed on the RESOLVED second-hop path (issue #132 item 4), not its raw
+    # spelling: `A.md` and `./A.md` name the same file, so the pre-fix
+    # `set[tuple[str, str]]` - keyed on spelling - reported the identical deep
+    # chain twice whenever a skill (or two of its own first-hop files) linked
+    # to it under two different spellings. `link` (the first hop) is kept as
+    # its own raw spelling in the key: that is the text a reader must edit to
+    # fix the chain, and two different first-hop spellings pointing at the
+    # same second-hop file are still two distinct edits, not one.
+    chains: dict[tuple[str, Path], str] = {}
     for link in first_hop_links:
         first = (base / link).resolve()
         if first not in first_hop_paths:
@@ -226,8 +289,8 @@ def _ref_depth(skill: Skill, target: str) -> Iterator[str]:
                 continue
             if resolved_second == skill_path or resolved_second in first_hop_paths:
                 continue
-            chains.add((link, second))
-    for link, second in sorted(chains):
+            chains.setdefault((link, resolved_second), second)
+    for (link, _resolved_second), second in sorted(chains.items(), key=lambda item: (item[0][0], item[1])):
         yield (
             f"{link} links on to {second}: references must stay one level "
             f"deep or the agent reads only part of the chain"
@@ -315,11 +378,15 @@ def _invocation_consistency(skill: Skill, target: str) -> Iterator[str]:
 RULES: tuple[Rule, ...] = (
     Rule("name-spec", ERROR, "name is spec-legal and matches its directory", _name_spec),
     Rule("required-fields", ERROR, "required frontmatter is present and in range", _required_fields),
-    Rule("trigger-shape", WARN, "description says when to fire, not just what it does", _trigger_shape),
+    Rule("trigger-shape", WARN, "description says when to fire, not just what it does", _trigger_shape,
+         varies_by_target=True),
     Rule("unknown-field", WARN, "every field is defined by the portable specification",
          _unknown_field, target=PORTABLE),
     Rule("claude-code-field", WARN, "every field is one Claude Code documents",
          _claude_code_field, target=CLAUDE_CODE.id),
+    Rule("claude-code-listing-cap", WARN,
+         "description + when_to_use stays inside Claude Code's listing cap",
+         _claude_code_listing_cap, target=CLAUDE_CODE.id),
     Rule("body-budget", WARN, "SKILL.md body stays inside the line budget", _body_budget),
     Rule("ref-depth", WARN, "references stay one level deep", _ref_depth),
     Rule("invocation-consistency", ERROR,

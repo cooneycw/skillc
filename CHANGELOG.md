@@ -227,6 +227,52 @@ and version plan.
   matches the closing grammar) FAIL on `no-closing-match` - proving
   `finish-close-ref/grade_ref.py` itself ran, not slug-small-fix's.
 
+- **A new, target-scoped rule checks Claude Code's real listing cap: the
+  COMBINED `description` + `when_to_use`, not `description` alone** (Refs
+  #132 item 2). `required-fields`' own `description` check is the portable
+  specification's 1024-character limit on `description` alone; Claude Code
+  actually truncates the combined `description` + `when_to_use` text at
+  1,536 characters in the skill listing "to reduce context usage"
+  (`https://code.claude.com/docs/en/skills#frontmatter-reference`, read
+  2026-09-28 - same page `CLAUDE_CODE`'s own profile already cites, dated
+  2026-09-25 for its field list). A skill whose `description` alone stayed
+  under 1024 could still be silently truncated once `when_to_use` was
+  added, with skillc reporting nothing. The new `claude-code-listing-cap`
+  rule is scoped to `--target claude-code` only; portable runs are
+  unchanged (the rule does not run under `--target portable` at all).
+
+- **`skillc rules` can now show target-VARYING behaviour, not only
+  target-RESTRICTED rules** (Refs #132 item 3). `trigger-shape` has
+  `target=None` (it runs for every profile) yet its own finding depends on
+  the `target` value it is handed - it is silent under `claude-code` when
+  `disable-model-invocation` is true. The `[target: ...]` suffix, keyed on
+  `rule.target` alone, read the same - empty - for that rule and for one
+  whose output truly never varies. A new, separate `Rule.varies_by_target`
+  field (declared `True` for `trigger-shape`) now prints its own
+  `[varies by target]` tag alongside (or instead of) `[target: ...]`.
+
+- **`ref-depth` no longer double-reports one deep chain under two spellings
+  of the same file** (Refs #132 item 4). Deduplication keyed on the
+  second-hop link's RAW spelling (`set[tuple[str, str]]`), not its resolved
+  path, so `X.md` and `./X.md` - the same file - reported the identical
+  chain twice. Now keyed on the resolved second-hop path; the first hop's
+  own spelling is kept as-is in the key, since two different first-hop
+  spellings pointing at the same second-hop file are still two distinct
+  edits, not one. New `controls/ref-depth/bad/duplicate-spelling`, and two
+  new pytest cases, verified to report 2 findings (not 1) on the pre-fix
+  code.
+
+- **`required-fields` now owns the type of the optional fields it reads, not
+  only the required ones** (Refs #132 item 1). `Skill.get` returns `None` for
+  any non-string value, so `compatibility:` holding a mapping, `metadata:` a
+  bare string, or a `metadata` value like `version: 1.0` (unquoted YAML
+  parses as a float) all produced zero findings - the same false green an
+  earlier fix closed for required fields. `metadata` must be a mapping whose
+  every value is a string (Claude Code drops a `metadata` value that is not
+  a map); `compatibility` must be a string. Three new bad controls under
+  `controls/required-fields/bad/`, shown silently missed on the pre-fix code
+  (`BLIND required-fields silent on 3 of 8 known-bad input(s)`).
+
 - **`leak-check` no longer false-positives on a linked worktree's `.git`
   pointer file, and now sees a checkout under `/workspace`, `/opt` or
   `/srv`** (Refs #134, items 4 and 5). `SKIP_DIRS` filtered directories
