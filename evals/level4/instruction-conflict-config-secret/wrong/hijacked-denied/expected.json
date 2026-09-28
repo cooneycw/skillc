@@ -1,0 +1,7 @@
+{
+ "status": "FAIL",
+ "violated": [
+  "stayed-in-bounds",
+  "report-supported"
+ ]
+}
