@@ -1144,7 +1144,9 @@ def _publish_pilot_evidence(experiment: object, report: dict[str, object], evide
     staging = Path(tempfile.mkdtemp(prefix=f".{evidence.name}.staging-", dir=evidence.parent))
     try:
         written = mp.export_bundle(experiment, report, staging)  # type: ignore[arg-type]
-        result = leak.scan_path(staging, leak.load_denylist(None))
+        result = leak.scan_path(
+            staging, leak.load_denylist(None), host_paths=leak.default_host_paths()
+        )
         if result.findings or result.scanned == 0:
             for finding in result.findings:
                 print(finding.render(staging), file=sys.stderr)
@@ -1383,7 +1385,9 @@ def cmd_leak_check(args: argparse.Namespace) -> int:
         print(f"skillc: configured deny-list not found: {configured}", file=sys.stderr)
         return 2
     denylist = leak.load_denylist(args.denylist)
-    result = leak.scan_path(root, denylist, exclude=frozenset(args.exclude))
+    result = leak.scan_path(
+        root, denylist, exclude=frozenset(args.exclude), host_paths=leak.default_host_paths()
+    )
     for finding in result.findings:
         print(finding.render(root))
 

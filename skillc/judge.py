@@ -222,8 +222,10 @@ def check_judge_input(
     transmitted just as much as the other two). No hostname denylist is
     applied here (an empty one, matching `skillc leak-check`'s own
     unconfigured default): this checks the built-in pattern classes (home
-    paths, uid/gid, private IPv4), the same ones any committed judge-input
-    control can seed without a local denylist file. Candidate bytes are
+    paths, uid/gid, private IPv4) plus this host's own live home/cwd
+    (`leak.default_host_paths`, #134 item 5), the same ones any committed
+    judge-input control can seed without a local denylist file. Candidate
+    bytes are
     decoded permissively (`errors="replace"`), matching `skillc/leak.py`'s
     own tolerance for undecodable content: a candidate file skillc's own
     scanner cannot read is not thereby exempt from being scanned before an
@@ -234,7 +236,7 @@ def check_judge_input(
         sources.append((name, content.decode("utf-8", errors="replace")))
     sources.extend((f"criterion id {c!r}", c) for c in criteria)
     for name, text in sources:
-        findings = list(leak.scan_text(text, frozenset()))
+        findings = list(leak.scan_text(text, frozenset(), leak.default_host_paths()))
         if findings:
             lineno, kind, detail = findings[0]
             raise JudgeInputLeaked(

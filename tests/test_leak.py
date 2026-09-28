@@ -11,6 +11,7 @@ proves the check is not simply refusing everything.
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -268,6 +269,36 @@ def test_a_binary_file_is_skipped_and_counted_not_scanned_clean(tmp_path: Path) 
     assert result.findings == []
 
 
+def test_a_linked_worktree_git_pointer_file_is_not_a_leak(tmp_path: Path) -> None:
+    """#134 item 4: `SKIP_DIRS` filters DIRECTORIES only, so a linked
+    worktree's top-level `.git` - a pointer FILE holding an absolute path
+    like `gitdir: /home/exampleuser/repo/.git/worktrees/foo` - went unfiltered
+    and every scan of a worktree checkout reported a spurious home-path leak.
+    Confirmed real on the pre-fix code: this fixture reported exactly that
+    finding before `_files` learned to skip it (see PR)."""
+    (tmp_path / ".git").write_text(
+        "gitdir: /home/exampleuser/repo/.git/worktrees/foo\n", encoding="utf-8"
+    )
+    (tmp_path / "clean.txt").write_text("nothing here\n", encoding="utf-8")
+
+    result = leak.scan_path(tmp_path, frozenset())
+    assert result.findings == []
+    assert result.scanned == 1  # clean.txt only - the pointer file is invisible
+    assert result.skipped == 0  # not merely skipped-and-counted; never yielded
+
+
+def test_a_nested_git_named_file_is_still_scanned(tmp_path: Path) -> None:
+    """The skip is for the TOP-LEVEL `.git` pointer only - a same-named file
+    elsewhere in the tree is ordinary content and must still be read."""
+    nested = tmp_path / "fixtures"
+    nested.mkdir()
+    (nested / ".git").write_text("/home/exampleuser\n", encoding="utf-8")
+
+    result = leak.scan_path(tmp_path, frozenset())
+    assert [f.kind for f in result.findings] == ["home-path"]
+    assert result.scanned == 1
+
+
 def test_a_symlink_outside_the_scanned_tree_is_skipped_not_followed(tmp_path: Path) -> None:
     """Cross-model review [MEDIUM]: following an out-of-tree symlink reads host
     state this run was never asked to look at, and the verdict could then
@@ -365,3 +396,67 @@ def test_check_leak_check_is_refused_on_the_current_tree_before_the_scrub() -> N
     result = leak.scan_path(ROOT / "docs" / "research", frozenset())
     home_paths = [f for f in result.findings if f.kind == "home-path"]
     assert home_paths == [], f"docs/research still leaks a home-directory path: {home_paths}"
+
+
+# #134 item 5: home-path only recognizes /home/ and /Users/, so a checkout
+# under /workspace, /opt or /srv - every session in this fleet - went
+# unflagged. `default_host_paths` catches this SCANNING PROCESS's own live
+# home/cwd instead of guessing at a fixed prefix list (see its docstring for
+# why a blind /workspace|/opt|/srv regex was rejected: it would misread a
+# generic mount's project name as a leaked username, exactly the false
+# positive `test_seeded_values_do_not_collide_with_a_typical_harness_path`
+# above exists to catch).
+
+
+def test_default_host_paths_reports_this_processs_live_home_and_cwd() -> None:
+    host_paths = leak.default_host_paths()
+    assert str(Path.home()) in host_paths
+    assert os.getcwd() in host_paths
+    assert "" not in host_paths
+    assert "/" not in host_paths
+
+
+def test_a_host_path_fires_on_an_explicit_match_never_on_an_unrelated_line() -> None:
+    host_paths = frozenset({"/workspace/.claude/skillc-148"})
+    hit = list(
+        leak.scan_text(
+            "evidence exported to /workspace/.claude/skillc-148/reports\n", frozenset(),
+            host_paths,
+        )
+    )
+    assert [k for _, k, _ in hit] == ["host-path"]
+
+    miss = list(
+        leak.scan_text("evidence exported to /workspace/.claude/skillc-63/reports\n",
+                        frozenset(), host_paths)
+    )
+    assert miss == [], f"a DIFFERENT worktree path must not match: {miss}"
+
+
+def test_scan_path_does_not_check_host_paths_unless_given_them(tmp_path: Path) -> None:
+    """The default stays empty (#134 item 5 docstring): scan_text/scan_path
+    remain pure and reproducible given explicit inputs, exactly like
+    load_denylist's environment fallback is read once at the CLI boundary
+    rather than inside the scanner. Confirmed real on the pre-fix code (no
+    `host_paths` parameter existed at all): see the PR for the TypeError."""
+    (tmp_path / "f.txt").write_text(f"{os.getcwd()}\n", encoding="utf-8")
+    assert leak.scan_path(tmp_path, frozenset()).findings == []
+    assert leak.scan_path(
+        tmp_path, frozenset(), host_paths=leak.default_host_paths()
+    ).findings != []
+
+
+def test_cli_leak_check_flags_a_checkout_under_the_running_hosts_own_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """End-to-end: the real `skillc leak-check` gate, wired to
+    `leak.default_host_paths()`, must catch a reference to ITS OWN running
+    location - the exact shape of #150's export gate scanning agent output
+    produced from inside a /workspace container. Uses the live cwd rather
+    than a hardcoded /workspace literal, so this passes wherever it runs."""
+    monkeypatch.delenv(leak.DENYLIST_ENV, raising=False)
+    (tmp_path / "evidence.txt").write_text(f"produced in {os.getcwd()}\n", encoding="utf-8")
+    rc = cli.main(["leak-check", str(tmp_path)])
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "host-path" in out, out
