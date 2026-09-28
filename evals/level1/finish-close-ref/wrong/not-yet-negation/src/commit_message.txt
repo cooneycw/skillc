@@ -1,0 +1,3 @@
+Add the summary report scaffold
+
+This commit does not yet resolve #42 - two items remain open, see TODO.md.

@@ -1,0 +1,3 @@
+Write the summary report and wire it into the CLI
+
+Refs #42: two acceptance items remain open, see TODO.md for what's left.

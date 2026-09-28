@@ -1,0 +1,5 @@
+Add the summary report scaffold
+
+Two of four acceptance items for #42 remain open; TODO.md lists what's left.
+
+Closes #42
