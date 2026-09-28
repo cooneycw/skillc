@@ -227,6 +227,17 @@ and version plan.
   matches the closing grammar) FAIL on `no-closing-match` - proving
   `finish-close-ref/grade_ref.py` itself ran, not slug-small-fix's.
 
+- **`required-fields` now owns the type of the optional fields it reads, not
+  only the required ones** (Refs #132 item 1). `Skill.get` returns `None` for
+  any non-string value, so `compatibility:` holding a mapping, `metadata:` a
+  bare string, or a `metadata` value like `version: 1.0` (unquoted YAML
+  parses as a float) all produced zero findings - the same false green an
+  earlier fix closed for required fields. `metadata` must be a mapping whose
+  every value is a string (Claude Code drops a `metadata` value that is not
+  a map); `compatibility` must be a string. Three new bad controls under
+  `controls/required-fields/bad/`, shown silently missed on the pre-fix code
+  (`BLIND required-fields silent on 3 of 8 known-bad input(s)`).
+
 - **`leak-check` no longer false-positives on a linked worktree's `.git`
   pointer file, and now sees a checkout under `/workspace`, `/opt` or
   `/srv`** (Refs #134, items 4 and 5). `SKIP_DIRS` filtered directories

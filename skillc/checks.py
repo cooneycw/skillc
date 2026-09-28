@@ -138,9 +138,28 @@ def _required_fields(skill: Skill, target: str) -> Iterator[str]:
     description = skill.get("description")
     if description and len(description) > DESCRIPTION_MAX:
         yield f"description is {len(description)} characters, over the {DESCRIPTION_MAX} limit"
-    compatibility = skill.get("compatibility")
-    if compatibility and len(compatibility) > COMPATIBILITY_MAX:
-        yield f"compatibility is {len(compatibility)} characters, over {COMPATIBILITY_MAX}"
+
+    # This rule OWNS the type of the OPTIONAL fields it reads too (issue #132
+    # item 1), for the identical reason it owns required ones: `Skill.get`
+    # returns None for any non-string value, so `compatibility: {a: mapping}`
+    # or `metadata: a-bare-string` produced zero findings anywhere - not this
+    # rule's own length check, and not any rule that reads `metadata` later.
+    if "compatibility" in skill.frontmatter:
+        compatibility = skill.frontmatter["compatibility"]
+        if not isinstance(compatibility, str):
+            yield f"compatibility must be a string, got {_kind(compatibility)}"
+        elif len(compatibility) > COMPATIBILITY_MAX:
+            yield f"compatibility is {len(compatibility)} characters, over {COMPATIBILITY_MAX}"
+    if "metadata" in skill.frontmatter:
+        metadata = skill.frontmatter["metadata"]
+        if not isinstance(metadata, dict):
+            # Claude Code drops a value that is not a map, so a bare string or
+            # list here is not merely malformed - it is silently discarded.
+            yield f"metadata must be a mapping, got {_kind(metadata)}"
+        else:
+            for mkey, mvalue in metadata.items():
+                if not isinstance(mvalue, str):
+                    yield f"metadata.{mkey} must be a string, got {_kind(mvalue)}"
 
 
 def _trigger_shape(skill: Skill, target: str) -> Iterator[str]:
