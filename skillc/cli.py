@@ -16,6 +16,7 @@ import argparse
 import dataclasses
 import json
 import os
+import re
 import signal
 import sys
 import tempfile
@@ -927,7 +928,41 @@ def cmd_collection_run(args: argparse.Namespace) -> int:
     # Issue #124: a selected skill the transcript's own listing measurably
     # omits fails the run too; UNMEASURED discovery is printed, not failed.
     captured = result.record.get("disposition") == "captured"
-    return 0 if captured and graded_ok and cleanup_ok and not result.discovery_failed else 1
+    run_ok = captured and graded_ok and cleanup_ok and not result.discovery_failed
+
+    # Issue #150 acceptance item 4: exported regardless of `run_ok` - the
+    # DEGRADED arm's own expected verdict is FAIL, and its verified-result
+    # still needs to reach the consumer for the discrimination this exists to
+    # show. An export refusal (leak check or check-records) is reported
+    # distinctly and takes priority over the run's own verdict, because it
+    # means the evidence itself could not be trusted to publish, which is a
+    # different and more severe failure than an ungraded or failing attempt.
+    if args.evidence:
+        # #150's own discrimination pair is normal-arm PASS + degraded-arm
+        # FAIL, each retained - but only the NORMAL arm belongs in a
+        # consumer's real measurements directory. CPP's own
+        # `check-behavioral-eval.py` reports any declared FAIL as an error
+        # and the flip to blocking is pre-committed, so a degraded arm's
+        # export landed there by habit would turn that gate red for good.
+        # `result.revision` carries the `degraded:` label (`degrade.py`) the
+        # moment a run is over a degraded subject (#150-B2 wires the CLI leg
+        # that produces one); `--evidence-role control` is the explicit,
+        # named opt-in required to publish one - e.g. as a one-shot negative
+        # control for the consumer gate, never the default path.
+        degraded_arm = result.revision.startswith("degraded:")
+        if degraded_arm and args.evidence_role != "control":
+            print(
+                f"skillc: refusing to export a degraded-arm result (revision={result.revision!r}) "
+                f"with --evidence-role {args.evidence_role!r}; pass --evidence-role control to "
+                f"publish a degraded arm's export (e.g. as a negative control), never by habit into "
+                f"a measurements directory",
+                file=sys.stderr,
+            )
+            return 2
+        export_code = _export_collection_evidence(experiment, envelope, Path(args.evidence))
+        if export_code:
+            return export_code
+    return 0 if run_ok else 1
 
 
 def cmd_selection_probe(args: argparse.Namespace) -> int:
@@ -1167,6 +1202,130 @@ def _publish_pilot_evidence(experiment: object, report: dict[str, object], evide
           f"({result.scanned} scanned, 0 found); check-records clean" + (
               f" except {known} known '{mp.KNOWN_GAP_TEXT}' finding(s) (a pre-#139 run: it stored "
               f"no verified-result)" if known else ""))
+    return 0
+
+
+def _export_collection_evidence(experiment: object, report: dict[str, object], evidence: Path) -> int:
+    """Issue #150 acceptance item 4: publish one collection-run attempt's
+    evidence into `evidence`, under the SAME lock-and-atomic-replace discipline
+    `_export_pilot_evidence` already uses for its bundle - held on the
+    destination's parent directory for the same reason (#147): two exporters
+    racing into one destination must not both pass the gate and have the
+    later one delete the earlier bundle."""
+    import fcntl
+
+    if evidence.is_symlink():
+        print(f"skillc: refusing to publish through a symlink: {evidence}", file=sys.stderr)
+        return 2
+    parent = evidence.resolve().parent
+    parent.mkdir(parents=True, exist_ok=True)
+    lock = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return _publish_collection_evidence(experiment, report, evidence)
+    finally:
+        os.close(lock)
+
+
+#: The two things a published behavioral-eval directory may ever hold (issue
+#: #150; layout documented in
+#: docs/specs/evaluation-facility/behavioral-eval-export.md): a flat
+#: `result-*.json` - the verified-result(s) CPP's `check-behavioral-eval.py`
+#: reads with an un-recursive `glob("*.json")`, so nothing else may share that
+#: level - and the `bundle/` directory beside it, holding the full skillc
+#: bundle (ledger, receipts, manifests, the results again) a FUTURE bundle-rule
+#: reader needs. `bundle/` itself is not a `*.json` file, so today's consumer
+#: never sees it.
+_RESULT_FILE_RE = re.compile(r"result-[A-Za-z0-9_.-]+\.json")
+
+
+def _is_behavioral_eval_export_file(path: Path) -> bool:
+    if path.name == "bundle" and path.is_dir():
+        return True
+    return path.is_file() and not path.is_symlink() and _RESULT_FILE_RE.fullmatch(path.name) is not None
+
+
+def _publish_collection_evidence(experiment: object, report: dict[str, object], evidence: Path) -> int:
+    """Stage the full skillc bundle under `staging/bundle/` (`matched_pilot
+    .export_bundle` - the SAME writer `pilot-run` already uses, "as pilot-run
+    already does for its bundle"), copy its `result-*.json` file(s) up to
+    `staging/` itself, leak-check the WHOLE staging tree, then run
+    `check-records`' bundle rules over `staging/bundle/` alone (they need the
+    ledger and manifest beside a result; the flat top-level copies are not a
+    bundle `records.discover_bundles` would recognise, so they are never given
+    to it). Only when both pass does it replace `evidence` wholesale, and only
+    when `evidence`, if it already exists, holds nothing this exporter would
+    not itself have written."""
+    import shutil
+
+    from . import matched_pilot as mp
+
+    if evidence.is_symlink():
+        print(f"skillc: refusing to publish through a symlink: {evidence}", file=sys.stderr)
+        return 2
+    evidence = evidence.resolve()
+    if evidence.exists():
+        foreign = sorted(p.name for p in evidence.iterdir() if not _is_behavioral_eval_export_file(p))
+        if foreign or not evidence.is_dir():
+            print(
+                f"skillc: refusing to replace {evidence}: it holds file(s) this exporter does not own "
+                f"({', '.join(foreign) or 'not a directory'}); point --evidence at an export-only directory",
+                file=sys.stderr,
+            )
+            return 2
+
+    evidence.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=f".{evidence.name}.staging-", dir=evidence.parent))
+    try:
+        bundle_dir = staging / "bundle"
+        mp.export_bundle(experiment, report, bundle_dir)  # type: ignore[arg-type]
+        result_files = sorted(bundle_dir.glob("result-*.json"))
+        if not result_files:
+            print("skillc: no verified-result was stored for this attempt; nothing was published", file=sys.stderr)
+            return 1
+        for source in result_files:
+            (staging / source.name).write_bytes(source.read_bytes())
+
+        # The leak check scans the WHOLE staged tree, `report.json` included -
+        # dropped below, but only after this, so nothing that was briefly
+        # staged for publishing can skip the scan by virtue of being removed
+        # first. `host_paths=leak.default_host_paths()` (#134 item 5): without
+        # it this export is blind to a `/workspace` or `/srv` path on the
+        # exporting machine - exactly the layout every session in this fleet
+        # runs from - because the static `home-path` pattern only recognizes
+        # `/home/` and `/Users/`.
+        scan = leak.scan_path(staging, leak.load_denylist(None), host_paths=leak.default_host_paths())
+        if scan.findings or scan.scanned == 0:
+            for finding in scan.findings:
+                print(finding.render(staging), file=sys.stderr)
+            print("skillc: the exported evidence failed its leak check; nothing was published", file=sys.stderr)
+            return 1
+        # `export_bundle` always writes a `report.json` alongside the bundle
+        # it copies - fine for pilot-run, whose `report` is itself a
+        # schema-legal `pilot-report` record, but a collection-run envelope
+        # (`collection_conformance.evidence_envelope`) carries no `kind`/
+        # `version` at all, so `check-records` would refuse it as an
+        # unversioned record. It names nothing the bundle rules need (they
+        # read the ledger, manifest and receipts, never a report summary), so
+        # it is dropped here, after the leak check, rather than validated
+        # against a schema it was never meant to satisfy.
+        (bundle_dir / "report.json").unlink(missing_ok=True)
+        unexpected, _known = mp.bundle_findings(bundle_dir)
+        if unexpected:
+            for line in unexpected:
+                print(f"skillc: {line}", file=sys.stderr)
+            print("skillc: the exported bundle failed check-records; nothing was published", file=sys.stderr)
+            return 1
+
+        if evidence.exists():
+            shutil.rmtree(evidence)
+        staging.rename(evidence)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+    print(
+        f"skillc: published {len(result_files)} verified-result(s) to {evidence.name}/: leak-checked "
+        f"({scan.scanned} scanned, 0 found); check-records clean; full bundle in {evidence.name}/bundle/"
+    )
     return 0
 
 
@@ -1629,6 +1788,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--minimum-credential-seconds", type=float, default=None,
         help="refuse to launch below this remaining credential life "
              "(default: credential.MINIMUM_REMAINING_SECONDS; raise it to run the below-threshold control)",
+    )
+    p_collection_run.add_argument(
+        "--evidence",
+        help="issue #150: export the attempt's verified-result(s), plus the bundle a consumer's bundle "
+             "rules need, into this LOCAL directory (never a path inside another repository's checkout - "
+             "see docs/specs/evaluation-facility/behavioral-eval-export.md); omit to export nothing",
+    )
+    p_collection_run.add_argument(
+        "--evidence-role", choices=("measurement", "control"), default="measurement",
+        help="what --evidence is for (default: measurement, a normal subject's export destined for a "
+             "consumer's real measurements directory); a degraded-arm export is refused unless this is "
+             "'control' - explicit opt-in, e.g. for a one-shot negative control against the consumer gate",
     )
     p_collection_run.set_defaults(func=cmd_collection_run)
 

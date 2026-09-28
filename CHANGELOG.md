@@ -103,6 +103,24 @@ and version plan.
   indistinguishable from a normal, undegraded acquisition is refused.
   Full design: `docs/specs/evaluation-facility/degraded-subjects.md`.
 
+- **`skillc collection-run --evidence DIR`, publishing a verified-result to a
+  behavioral-eval consumer** (Refs #150). CPP's `scripts/check-behavioral-
+  eval.py` had a producer half but nothing that wrote to it -
+  `collection-run` already stored a `verified-result` per graded attempt
+  (#139) with nowhere to publish it. `--evidence DIR` now exports it into a
+  named, operator-chosen LOCAL directory: the verified-result(s) flat at
+  `DIR`'s top level (what the consumer's non-recursive glob reads) and the
+  full skillc bundle (ledger, manifest, receipts) under `DIR/bundle/` for a
+  future bundle-rule reader, gated by the same leak-check-then-check-records
+  discipline and lock-and-atomic-replace `pilot-run`'s own evidence export
+  already uses. A degraded-arm export is refused unless `--evidence-role
+  control` is given explicitly - CPP's gate reports any declared FAIL as an
+  error, so a degraded arm's expected failure must never land in a real
+  measurements directory by habit. A vendored, pinned copy of the real
+  consumer (`tests/fixtures/cpp-behavioral-eval-consumer/`) drives a contract
+  test against real exported output. Full design:
+  `docs/specs/evaluation-facility/behavioral-eval-export.md`.
+
 - **`pytest-timeout`, a 120s per-test default, and a fuller CI log** (#148). A
   stalled test used to hang the `gate` step without limit - Woodpecker
   pipeline 258 ran 35+ minutes past a blocking write before anyone noticed -
