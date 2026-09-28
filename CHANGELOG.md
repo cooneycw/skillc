@@ -31,17 +31,24 @@ and version plan.
 
 ### Added
 
-- **`pytest-timeout`, a 120s per-test default, and kept CI output** (#148). A
+- **`pytest-timeout`, a 120s per-test default, and a fuller CI log** (#148). A
   stalled test used to hang the `gate` step without limit - Woodpecker
   pipeline 258 ran 35+ minutes past a blocking write before anyone noticed -
-  and a one-off red left nothing to diagnose after the fact. A stall now
-  fails in minutes and names the test (`@pytest.mark.timeout` raises it for a
-  test that legitimately needs longer); the gate step now also runs
-  `pytest -rA --junitxml=reports/pytest-junit.xml`, so every outcome and a
-  machine-readable record both survive a run that otherwise passed overall.
-  `tests/test_pytest_timeout_control.py` is the committed negative control: a
-  test that sleeps past its timeout, skipped in the normal suite, shown to be
-  reported as a timeout failure when run.
+  and a one-off red left nothing to diagnose after the fact (CI sighting). A
+  stall now fails in minutes and names the test (`@pytest.mark.timeout`
+  raises it for a test that legitimately needs longer); the gate step now
+  also runs `pytest -rA`, so every outcome survives in the CI log even when
+  the run as a whole passes - the log is what actually persists, there is no
+  separate uploaded artifact. `tests/test_pytest_timeout_control.py` is the
+  committed negative control: a test that sleeps past its timeout, skipped in
+  the normal suite, shown to be reported as a timeout failure when run; a
+  second assertion reads pytest-timeout's own session header to prove the
+  *configured* default is what is applied, not just that the plugin can fail
+  a test when told to per-test (a marker-only control cannot tell a
+  misconfigured key from a working one - confirmed by breaking the key and
+  re-running, see the PR). #134's `make verify` covers this issue's other,
+  LOCAL sighting (flow:auto #12's flaky test, never captured after a `uv
+  sync`).
 
 - **The #12 matched pilot, re-run under the pinned `gpt-6-astra` declaration,
   as a new experiment with its own evidence** (Refs #147, #12, #139). The
