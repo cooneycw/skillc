@@ -46,6 +46,26 @@ builds one, from two independent knobs:
 Generic over which subject, skill or file: #150-A chooses what the Level-1
 task actually needs; this module never branches on a name.
 
+## The output is installable, not only descriptive
+
+`--out DIR` writes TWO things, both required, never a receipt alone: `DIR/
+receipt.json` and `DIR/skills/`, the degraded surface tree itself
+(`persist_skills`). An earlier version wrote only the receipt - the degraded
+tree lived under the disposable `--base` staging root and was discarded with
+it, so the receipt described a tree nothing kept and nothing could ever run
+(orchestrator review of #155). `DIR` must be empty or absent; a non-empty
+`--out` is refused before anything is acquired, the same "do not build on
+top of a partial or stale prior write" rule `pilot-run`'s own evidence export
+applies.
+
+`verify_persisted_skills(out, expected_digest)` is the check a runner MUST
+make before installing a persisted tree: it re-derives `DIR/skills`' own
+tree digest and refuses (`DegradationRefused`) unless it matches the
+receipt's own `degraded.digest`. `persist_skills` writes plain files with no
+integrity mechanism of their own, so nothing else stands between a tampered
+or corrupted `skills/` directory and being silently installed as though it
+were exactly what the receipt described.
+
 ## The recorded identity is never the pin
 
 The result's `Source.revision` is always a
@@ -96,7 +116,13 @@ caller DID declare is real, non-redundant, and listed in the receipt; showing
 that a set of locations is complete (e.g. against #150-A's own five-location
 finding) is the caller's job, checked by comparing the receipt's
 `mutation.locations` against an independently compiled list. It does not
-decide which skill or file to degrade (#150-A) or wire a degraded subject
-into a live discriminating run (acceptance item 3) - it only makes one
-buildable and recorded, from the command line, with a receipt an operator or
-a later step can read.
+decide which skill or file to degrade (#150-A).
+
+**It does not yet wire a degraded subject into a live discriminating run**
+(acceptance item 3) - that is a separate PR (150-B2), which will teach
+`collection-run` (and whichever runner the agent-trial path uses) a
+`--degraded DIR` that calls `verify_persisted_skills` before installing that
+tree, and records the degraded identity - the `degraded:` label, the base
+identity, and `mutation.locations` - in the ledger and installation receipt,
+never the pinned revision. Until then, `degrade-subject` produces a
+persisted, digest-verifiable tree and receipt that no runner reads yet.

@@ -287,3 +287,35 @@ def receipt(degraded: DegradedSource, *, pinned_revision: str) -> dict[str, obje
         "base": {"kind": degraded.base.kind, "revision": degraded.base.revision, "digest": degraded.base.digest},
         "degraded": {"kind": degraded.source.kind, "revision": degraded.source.revision, "digest": degraded.source.digest},
     }
+
+
+def persist_skills(degraded: DegradedSource, out: Path) -> Path:
+    """Copy the degraded surface tree to `out/skills` - the tree a runner
+    will later install. Before this, `degrade-subject --out DIR` wrote only
+    `receipt.json`: the degraded tree itself lived under the disposable
+    staging root and was discarded with it, so the receipt described a tree
+    nothing kept and nothing could ever run (orchestrator review of #155).
+    Returns the copied directory."""
+    target = out / "skills"
+    shutil.copytree(degraded.source.surface_dir, target)
+    return target
+
+
+def verify_persisted_skills(out: Path, expected_digest: str) -> Path:
+    """Re-derive `out/skills`' own tree digest and refuse (`DegradationRefused`)
+    unless it matches `expected_digest` (a receipt's own `degraded.digest`).
+    This is the check a runner MUST make before installing a persisted
+    degraded tree - `persist_skills` writes plain files with no integrity
+    mechanism of their own, so nothing else stands between a tampered or
+    corrupted `skills/` directory and being installed as though it were
+    exactly what the receipt described. Returns the verified directory."""
+    target = out / "skills"
+    if not target.is_dir():
+        raise DegradationRefused(f"no persisted skills tree at {target}")
+    actual = materialize.tree_digest(target)
+    if actual != expected_digest:
+        raise DegradationRefused(
+            f"persisted skills tree at {target} has digest {actual}, its own receipt declares "
+            f"{expected_digest}; refusing to treat it as that degraded subject"
+        )
+    return target

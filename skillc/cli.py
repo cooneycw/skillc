@@ -1435,17 +1435,20 @@ def cmd_degrade_subject(args: argparse.Namespace) -> int:
     declared mutation - expressible from the operator command line, with its
     identity recorded and never passed off as the subject's real pin.
 
-    Writes `receipt.json` only on success; a refusal (an unknown subject, a
-    malformed `--remove-file`/`--override-file` spec, a mutation naming an
-    absent skill or file, or a degradation that would be indistinguishable
-    from a normal acquisition) writes nothing and exits 2 - the same "no
-    receipt when there is nothing ready to report" contract `cmd_materialize`
-    uses."""
+    Writes `receipt.json` AND `skills/` (the degraded tree itself, so a
+    runner has something installable - a receipt describing a tree that was
+    then discarded from the disposable staging root could never be run;
+    orchestrator review of #155) only on success. A refusal (an unknown
+    subject, a malformed `--remove-file`/`--override-file` spec, a mutation
+    naming an absent skill or file, or a degradation that would be
+    indistinguishable from a normal acquisition) writes nothing and exits 2 -
+    the same "no receipt when there is nothing ready to report" contract
+    `cmd_materialize` uses."""
     from . import degrade, demo, materialize
 
     out = Path(args.out).resolve()
-    if (out / "receipt.json").exists():
-        print(f"skillc: {out} already holds a receipt; refusing to overwrite it", file=sys.stderr)
+    if out.exists() and any(out.iterdir()):
+        print(f"skillc: {out} is not empty; refusing to write into it", file=sys.stderr)
         return 2
     base = Path(args.base) if args.base else Path(tempfile.gettempdir())
 
@@ -1479,6 +1482,7 @@ def cmd_degrade_subject(args: argparse.Namespace) -> int:
     payload = degrade.receipt(degraded, pinned_revision=subject.revision)
     out.mkdir(parents=True, exist_ok=True)
     (out / "receipt.json").write_text(json.dumps(payload, indent=1) + "\n", encoding="utf-8")
+    skills_dir = degrade.persist_skills(degraded, out)
 
     locations = mutation.locations() if mutation is not None else ()
     print(f"subject       {degraded.subject_name}")
@@ -1488,7 +1492,7 @@ def cmd_degrade_subject(args: argparse.Namespace) -> int:
     for location in locations:
         print(f"  - {location}")
     print(f"degraded      {degraded.source.kind} {degraded.source.revision} {degraded.source.digest}")
-    print(f"\nskillc: degraded subject built - evidence in {out}")
+    print(f"\nskillc: degraded subject built - receipt and {skills_dir.name}/ in {out}")
     return 0
 
 

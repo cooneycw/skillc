@@ -367,6 +367,11 @@ def test_cli_writes_a_receipt_and_exits_zero(tmp_path: Path, monkeypatch: pytest
     payload = json.loads((out / "receipt.json").read_text(encoding="utf-8"))
     assert payload["mutation"]["locations"] == ["tdd (whole skill removed)"]
     assert payload["degraded"]["kind"] == "degraded"
+    # The degraded tree itself is persisted, not only described - #155
+    # review: a receipt describing a tree that was then discarded from the
+    # disposable staging root could never be installed by a runner.
+    assert not (out / "skills" / "tdd").exists()
+    assert degrade.materialize.tree_digest(out / "skills") == payload["degraded"]["digest"]
 
 
 def test_cli_supports_repeatable_remove_skill_remove_file_and_override_file(
@@ -429,7 +434,9 @@ def test_cli_exits_two_and_writes_nothing_when_the_mutation_names_an_absent_skil
     assert not (out / "receipt.json").exists()
 
 
-def test_cli_refuses_to_overwrite_an_existing_receipt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cli_refuses_a_non_empty_out_holding_a_stale_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     collection = _fixture_collection(tmp_path, {"tdd": "tdd"})
     monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject())
     out = tmp_path / "out"
@@ -444,6 +451,89 @@ def test_cli_refuses_to_overwrite_an_existing_receipt(tmp_path: Path, monkeypatc
     assert code == 2
 
 
+def test_cli_refuses_a_non_empty_out_holding_anything_else(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Not just a stale receipt - ANY existing content, since `--out` now
+    also receives the `skills/` tree and a partial prior write must not be
+    silently built on top of."""
+    collection = _fixture_collection(tmp_path, {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject())
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "unrelated.txt").write_text("hello\n", encoding="utf-8")
+
+    code = cli.main([
+        "degrade-subject", "whatever", "--checkout", str(collection), "--remove-skill", "tdd",
+        "--out", str(out), "--base", str(tmp_path / "base"),
+    ])
+
+    assert code == 2
+    assert not (out / "receipt.json").exists()
+
+
 def test_cli_requires_exactly_one_of_checkout_or_revision(tmp_path: Path) -> None:
     with pytest.raises(SystemExit):
         cli.main(["degrade-subject", "whatever", "--remove-skill", "tdd", "--out", str(tmp_path / "out")])
+
+
+# ------------------------------------------------------------ persisted tree
+
+
+def test_persist_skills_writes_the_installable_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    collection = _fixture_collection(tmp_path, {"tdd": "tdd", "other": "other"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject())
+    degraded = degrade.acquire_degraded(
+        "whatever", tmp_path / "base", degrade.Mutation(remove_skills=("tdd",)), checkout=collection,
+    )
+    out = tmp_path / "out"
+    out.mkdir()
+
+    target = degrade.persist_skills(degraded, out)
+
+    assert target == out / "skills"
+    assert not (target / "tdd").exists()
+    assert (target / "other").is_dir()
+    assert degrade.materialize.tree_digest(target) == degraded.source.digest
+
+
+def test_verify_persisted_skills_accepts_a_matching_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    collection = _fixture_collection(tmp_path, {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject())
+    degraded = degrade.acquire_degraded(
+        "whatever", tmp_path / "base", degrade.Mutation(remove_skills=("tdd",)), checkout=collection,
+    )
+    out = tmp_path / "out"
+    out.mkdir()
+    degrade.persist_skills(degraded, out)
+
+    verified = degrade.verify_persisted_skills(out, degraded.source.digest)
+
+    assert verified == out / "skills"
+
+
+def test_verify_persisted_skills_refuses_a_tampered_byte(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The red case the orchestrator's review named directly: tamper with one
+    byte of the persisted tree after it was built, and whatever reads it must
+    refuse on a digest mismatch."""
+    collection = _fixture_collection(tmp_path, {"tdd": "tdd", "other": "other"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject())
+    degraded = degrade.acquire_degraded(
+        "whatever", tmp_path / "base", degrade.Mutation(remove_skills=("tdd",)), checkout=collection,
+    )
+    out = tmp_path / "out"
+    out.mkdir()
+    degrade.persist_skills(degraded, out)
+
+    tampered = out / "skills" / "other" / "SKILL.md"
+    tampered.write_text(tampered.read_text(encoding="utf-8") + "tampered\n", encoding="utf-8")
+
+    with pytest.raises(degrade.DegradationRefused, match="digest"):
+        degrade.verify_persisted_skills(out, degraded.source.digest)
+
+
+def test_verify_persisted_skills_refuses_a_missing_tree(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    out.mkdir()
+    with pytest.raises(degrade.DegradationRefused, match="no persisted skills tree"):
+        degrade.verify_persisted_skills(out, "sha256:" + "00" * 32)
