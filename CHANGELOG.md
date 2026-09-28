@@ -85,6 +85,39 @@ and version plan.
   planning half, not its closing evidence.
   [`docs/specs/evaluation-facility/level-qualification-method.md`](docs/specs/evaluation-facility/level-qualification-method.md).
 
+- **A real installation receipt for an agent-trial arm that installs a
+  declared skill collection, narrowing #139's own B1 ruling** (Refs #150-D,
+  #139, #150). Before this, EVERY agent-trial arm - installing or not -
+  stayed on the agent-observation stand-in, so `installation-ready` was a
+  mandatory UNKNOWN and the trial could never PASS on readiness alone, even
+  when a declared collection genuinely installed and the client's own
+  listing would have shown it. An installing arm now writes a real
+  `installation-receipt`, built from the client's own model-free listing run
+  before and after delivery inside a fresh, dedicated, throwaway container
+  of the same image digest as the agent's own - never the agent's own
+  container, since `DockerBackend.execute()` runs once per handle and stops
+  it before returning. The receipt's evidence states the claim precisely
+  ("this delivered tree, delivered by the same method, into a fresh
+  container of the same image digest, was discovered by the client's
+  model-free listing"), carries the image digest it was measured on, and
+  `verify.py`'s cross-check refuses it for any attempt whose own planned
+  image digest differs. An arm that installs nothing (an empty baseline, the
+  matched pilot's own shape) keeps the B1 stand-in exactly as before - this
+  is a narrowing of B1's scope, not a reversal. Only `codex` has a
+  model-free listing; a Claude Code arm is unaffected. Committed red cases:
+  a canary-failing installing arm reads VIOLATED, never SATISFIED; an empty
+  baseline arm keeps the stand-in at both the pure-function and the
+  integration level (the latter verified with a negative control: removing
+  the empty-declared short-circuit turns it red with a real `Refused`); an
+  unobtainable listing reads UNKNOWN, never SATISFIED; a receipt measured
+  against one image is refused for an attempt planned against another; and
+  production's own digest resolution (`skillc/cli.py`'s `cmd_collection_run`,
+  never a test-supplied value) is driven end to end through `cli.main`, also
+  verified with a negative control (forcing the resolved digest to `None`
+  reproduces the exact refusal a real production gap would produce). The
+  operator's attestation ruling ("accept (a)", 2026-09-28, ADR 0005) is
+  quoted there in full, including what the receipt does NOT attest.
+
 - **An optional managed-container backend, client-only: `skillc.managed_backend.ManagedBackend`**
   (Refs #64). A second `ExecutionBackend` implementation (#10's seam) for a
   platform that already manages its own containers and is willing to run one
