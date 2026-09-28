@@ -1073,6 +1073,31 @@ def cmd_selection_probe(args: argparse.Namespace) -> int:
 
 
 def _export_pilot_evidence(experiment: object, report: dict[str, object], evidence: Path) -> int:
+    """Publish under an exclusive lock on the destination's PARENT DIRECTORY,
+    held from the ownership check through the replacement (#147 counter-model
+    review): two exporters racing into one destination would otherwise both
+    pass the check, and the later replacement would delete the earlier one's
+    bundle. The parent is the one location every publisher of that
+    destination shares whatever its environment - a lock file under the temp
+    directory was not (a different TMPDIR, a different lock) - and it leaves
+    no lock file in the work tree. The second publisher waits, then sees the
+    first bundle and refuses."""
+    import fcntl
+
+    if evidence.is_symlink():
+        print(f"skillc: refusing to publish through a symlink: {evidence}", file=sys.stderr)
+        return 2
+    parent = evidence.resolve().parent
+    parent.mkdir(parents=True, exist_ok=True)
+    lock = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return _publish_pilot_evidence(experiment, report, evidence)
+    finally:
+        os.close(lock)  # closing the descriptor releases the lock
+
+
+def _publish_pilot_evidence(experiment: object, report: dict[str, object], evidence: Path) -> int:
     """Publish the bundle as ONE unit. It is exported into a fresh staging
     directory beside `evidence`, and only that staging copy is leak-checked
     and record-checked - never a neighbouring file already in `evidence`.
@@ -1099,6 +1124,22 @@ def _export_pilot_evidence(experiment: object, report: dict[str, object], eviden
                 file=sys.stderr,
             )
             return 2
+        # A bundle is a published experiment's record. Replacing it is only a
+        # re-export of the SAME experiment (merging reviewed claims, say);
+        # another experiment's bundle, or one whose ledger cannot say whose it
+        # is, is never ours to replace (#147: a default run would otherwise
+        # have deleted #12's first-run bundle). An empty directory holds no
+        # record and may be written.
+        if any(evidence.iterdir()):
+            existing = mp.bundle_experiment_id(evidence)
+            if existing != report.get("experiment_id"):
+                print(
+                    f"skillc: refusing to replace {evidence}: it holds the bundle of experiment "
+                    f"{existing or '<unidentifiable: no readable ledger>'}, not {report.get('experiment_id')}; "
+                    f"publish a new experiment to its own --evidence directory",
+                    file=sys.stderr,
+                )
+                return 2
     evidence.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f".{evidence.name}.staging-", dir=evidence.parent))
     try:

@@ -7,10 +7,12 @@ outcome or completion time on an already-qualified task?
 
 This is the evidence for #12's run under [`run-manifest.json`](../run-manifest.json).
 **Current declaration: [`run-manifest-2026-09-27-gpt-6-astra.json`](../run-manifest-2026-09-27-gpt-6-astra.json)**
-(issue #141). It supersedes this run, pins `gpt-6-astra` at launch, and has
-not been run yet. This bundle stays as it is (owner ruling on #139). The re-run under the new
-declaration is #147, which publishes to its own directory beside this one, so do not run
-`pilot-run` with its default `--evidence` destination until #147 settles it.
+(issue #141). It supersedes this run and pins `gpt-6-astra` at launch. **The re-run under it
+(#147, 2026-09-28) is the current evidence:
+[`../evidence-2026-09-27-gpt-6-astra/`](../evidence-2026-09-27-gpt-6-astra/README.md)**: six of six
+passed on the declared model, and its records check clean. This bundle is superseded but kept
+as it is (owner ruling on #139). `skillc pilot-run` and `pilot-report` now refuse to replace it
+with any other experiment's bundle (#147).
 
 **Answer at this size: nothing measurable.** All six attempts passed, three
 per arm. The completion-time differences go both ways and are the size of
@@ -84,10 +86,11 @@ n = 3 this is a description of the sample, not an inference about the pack.
 
 Three things are clearer than the timing:
 
-- **The pack cost context, and the agent didn't use it.** Treatment attempts
+- **The pack cost context, and no use of it was detected.** Treatment attempts
   read about 12,000-25,000 more input tokens than baseline (the installed
-  skill listing), and no attempt invoked a skill by the codex heuristic. On a
-  task this small, the pack is overhead the agent did not use.
+  skill listing). The codex heuristic detected no skill invocation, which is
+  not proof of non-use (corrected 2026-09-28, #147 review): it only sees a
+  `SKILL.md` read through an `exec` call.
 - **Setup takes longer with the pack installed** (9.8-14.7 s against
   0.6-4.4 s). This is the cost of delivering 273 skill files into the
   container, and it is a harness cost, not an agent cost.

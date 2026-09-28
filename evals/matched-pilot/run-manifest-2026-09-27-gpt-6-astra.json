@@ -66,7 +66,7 @@
     "artifact_retention": {
       "decided": "2026-09-27, before capture (owner approval of the #12 plan)",
       "private": "the trial store (journals, content-addressed captured objects), each attempt's private outcome record and the agents' closing messages stay in a private run directory outside any git work tree: ~/.local/share/skillc/pilot-runs/<run-id>/ (skillc.trial.open_store refuses a store inside a work tree). Transcripts carry account identifiers, so they are never committed.",
-      "committed": "the ledger, the lifecycle records, the artifact manifests and the assembled pilot-report, exported to evals/matched-pilot/evidence/records/ and leak-checked by skillc pilot-run before they are left in place (a finding removes the exported files again)",
+      "committed": "the ledger, the lifecycle records, the artifact manifests and the assembled pilot-report, exported to evals/matched-pilot/evidence-2026-09-27-gpt-6-astra/records/ (its OWN directory: evidence/records/ holds the superseded first run's bundle, which stays as it is and which skillc pilot-run now refuses to replace, #147) and leak-checked and record-checked by skillc pilot-run before they are published",
       "runner": "skillc pilot-run (skillc/matched_pilot.py)"
     },
     "clarification_and_approval_behavior": {
@@ -77,5 +77,13 @@
   "cost_note": "no cost_estimate is declared here. #12's estimate is priced for gpt-5.1-codex, and no gpt-6-astra price has been confirmed, so none is invented. Agent attempts run under the operator's subscription login and are quota, not a dollar charge (ADR 0005 rule 6); no judge tier is enabled, so no dollar-metered spend exists to check against the $5 ceiling. #12's run observed 77,438-102,043 input tokens per attempt on this model.",
   "monetary_cap_usd": null,
   "approved_budget_usd": null,
-  "execution": "not run - declared 2026-09-27; a re-run of the pilot under this declaration is the owner's call"
+  "execution": "run - 2026-09-28 08:31Z, skillc pilot-run at 4eed059 (#147, owner-approved), experiment matched-pilot-64396611: all 6 scheduled attempts captured and graded, exit 0; evidence in evidence-2026-09-27-gpt-6-astra/",
+  "observed_at_run": {
+    "model": "gpt-6-astra",
+    "reasoning_effort": "high",
+    "model_note": "read from every attempt's own codex rollout; matches the declaration on all six (protocol_deviations: [], model_ineligible: []). First live confirmation that codex-cli 0.157.1 honours -m gpt-6-astra and -c model_reasoning_effort=\"high\".",
+    "cli_version": "0.157.1",
+    "image_digest": "sha256:d1b2ced9dc6d25e9e1bc673c1973f032ced50a11da234fcd617ee376ff36eefc",
+    "input_tokens_per_attempt": "75,082-102,388 (see the report)"
+  }
 }

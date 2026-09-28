@@ -555,24 +555,71 @@ def _unavailable_outcomes(tmp_path: Path) -> tuple[trial.Experiment, list[mp.Att
 
 
 def test_a_failed_export_leaves_the_previous_bundle_and_a_rerun_replaces_it_whole(tmp_path: Path) -> None:
-    """Review finding: exports used to write into the destination in place,
-    so a re-run left the previous run's records beside the new ledger."""
+    """Review finding (#12): exports used to write into the destination in
+    place, so a re-export left stale records beside the new ledger. A
+    re-export of the SAME experiment replaces the bundle whole; a failed one
+    leaves the previous bundle untouched."""
     evidence = tmp_path / "evidence"
-    evidence.mkdir()
-    (evidence / "lifecycle-a-oldrun.json").write_text("{}")  # a previous run's record
-
     experiment, outcomes = _unavailable_outcomes(tmp_path)
+    good = mp.build_report(experiment, outcomes)
+    assert cli._export_pilot_evidence(experiment, good, evidence) == 0
+    (evidence / "lifecycle-a-stale.json").write_text("{}")  # left over from an earlier export
+
     bad = mp.build_report(experiment, outcomes)
     _entries(bad)[0]["uncertainty"] = f"read {HOME_PATH_LEAK}/.codex/auth.json"
     assert cli._export_pilot_evidence(experiment, bad, evidence) == 1
-    assert (evidence / "lifecycle-a-oldrun.json").exists()  # previous bundle untouched
-    assert not (evidence / "report.json").exists()
+    assert (evidence / "lifecycle-a-stale.json").exists()  # previous bundle untouched
 
-    good = mp.build_report(experiment, outcomes)
     assert cli._export_pilot_evidence(experiment, good, evidence) == 0
-    assert not (evidence / "lifecycle-a-oldrun.json").exists()  # replaced whole, no mixing
+    assert not (evidence / "lifecycle-a-stale.json").exists()  # replaced whole, no mixing
     assert mp.bundle_findings(evidence) == ([], 0)
     assert not list(tmp_path.glob(".evidence.staging-*"))
+
+
+def _snapshot(directory: Path) -> dict[str, bytes]:
+    return {p.name: p.read_bytes() for p in sorted(directory.iterdir())}
+
+
+def test_export_refuses_to_replace_another_experiment_s_bundle(tmp_path: Path) -> None:
+    """#147: `pilot-run`'s default destination held #12's first-run bundle, and
+    a default re-run would have replaced it wholesale. Another experiment's
+    published bundle is refused and left byte-identical."""
+    evidence = tmp_path / "evidence"
+    first, first_outcomes = _unavailable_outcomes(tmp_path / "first")
+    assert cli._export_pilot_evidence(first, mp.build_report(first, first_outcomes), evidence) == 0
+    before = _snapshot(evidence)
+
+    second, second_outcomes = _unavailable_outcomes(tmp_path / "second")
+    assert second.id != first.id
+    assert cli._export_pilot_evidence(second, mp.build_report(second, second_outcomes), evidence) == 2
+    assert _snapshot(evidence) == before
+    assert mp.bundle_experiment_id(evidence) == first.id
+
+    other = tmp_path / "other-evidence"  # its own directory: published normally
+    assert cli._export_pilot_evidence(second, mp.build_report(second, second_outcomes), other) == 0
+    assert mp.bundle_experiment_id(other) == second.id
+
+
+@pytest.mark.parametrize("ledger", [None, "not json", '{"experiment_id": 7}', '["a list"]'])
+def test_export_refuses_a_bundle_whose_owner_cannot_be_read(tmp_path: Path, ledger: str | None) -> None:
+    """A bundle-shaped directory that cannot say which experiment it records
+    is never assumed to be ours."""
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    (evidence / "report.json").write_text("{}")
+    if ledger is not None:
+        (evidence / "ledger.json").write_text(ledger)
+    before = _snapshot(evidence)
+    experiment, outcomes = _unavailable_outcomes(tmp_path)
+    assert cli._export_pilot_evidence(experiment, mp.build_report(experiment, outcomes), evidence) == 2
+    assert _snapshot(evidence) == before
+
+
+def test_export_may_write_into_an_empty_existing_directory(tmp_path: Path) -> None:
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    experiment, outcomes = _unavailable_outcomes(tmp_path)
+    assert cli._export_pilot_evidence(experiment, mp.build_report(experiment, outcomes), evidence) == 0
 
 
 @pytest.mark.parametrize("foreign", ["README.md", "claims.json", "notes.txt"])
@@ -894,3 +941,44 @@ def test_an_override_from_the_per_attempt_argv_aborts_the_run_not_one_attempt(tm
         )
     _, outcomes = mp.read_outcomes(run_dir)
     assert outcomes == []
+
+
+def test_publication_holds_a_per_destination_lock_through_the_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#147 counter-model findings: two exporters racing into one destination
+    could both pass the ownership check, and the second replacement deleted
+    the first bundle; and a lock keyed on TMPDIR was not shared by publishers
+    with different TMPDIRs. The lock is on the destination's parent directory,
+    so a competitor probing it while the bundle is built - with a DIFFERENT
+    TMPDIR - finds it held."""
+    import fcntl
+    import os
+
+    evidence = tmp_path / "evidence"
+    observed: list[str] = []
+    real_export = mp.export_bundle
+
+    def export_while_probing(experiment: trial.Experiment, report: dict[str, object], into: Path) -> list[Path]:
+        monkeypatch.setenv("TMPDIR", str(tmp_path / "some-other-tmp"))  # the competitor's environment
+        competitor = os.open(evidence.resolve().parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            fcntl.flock(competitor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            observed.append("held")
+        else:
+            observed.append("free")
+        finally:
+            os.close(competitor)
+        return real_export(experiment, report, into)
+
+    monkeypatch.setattr(mp, "export_bundle", export_while_probing)
+    experiment, outcomes = _unavailable_outcomes(tmp_path)
+    assert cli._export_pilot_evidence(experiment, mp.build_report(experiment, outcomes), evidence) == 0
+    assert observed == ["held"]
+    after = os.open(evidence.resolve().parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        fcntl.flock(after, fcntl.LOCK_EX | fcntl.LOCK_NB)  # released on return
+    finally:
+        os.close(after)
+    assert not any(p.name.endswith(".lock") for p in tmp_path.rglob("*"))  # nothing left in the tree

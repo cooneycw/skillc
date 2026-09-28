@@ -1,0 +1,196 @@
+{
+ "version": 2,
+ "kind": "verified-result",
+ "producer": "assembler",
+ "attempt_id": "a-ad9443abbaa6",
+ "trial_id": "t4-matched_pilot_baseline_2",
+ "result_id": "r-0e0364b0a487",
+ "grader": {
+  "id": "slug-small-fix",
+  "revision": "2",
+  "digest": "sha256:3bb202eb2d274f2c8bb31dc1e618a0d076d9c3bf52e270f290a567fe51e0c5f2"
+ },
+ "graded_digests": [
+  "sha256:25436cb934649dacb51353283af749242f6ba4fa1d01c12acf693703a66743ca",
+  "sha256:75ce16359b3875bc2981ffce845b586b4cf904f68b525960befe9d4eb7333eff",
+  "sha256:9a17cbe160893f54ccf56dd0595adb9053a8c64d21a0e264c3e1a7d2ea39e309",
+  "sha256:d64b9b6503d9cd035d938a8fa1bf93ebafa40bd05075c41e48fca61351f33875"
+ ],
+ "criteria": [
+  {
+   "id": "R4-interface",
+   "mandatory": true,
+   "outcome": "SATISFIED",
+   "evidence": [
+    "imported with site-packages disabled; slugify returned a str for all 15 inputs"
+   ]
+  },
+  {
+   "id": "reported-example",
+   "mandatory": true,
+   "outcome": "SATISFIED",
+   "evidence": [
+    "slugify('Hello, World!') == 'hello-world'"
+   ]
+  },
+  {
+   "id": "R1",
+   "mandatory": true,
+   "outcome": "SATISFIED",
+   "evidence": [
+    "3 held-out R1 cases matched"
+   ]
+  },
+  {
+   "id": "R2",
+   "mandatory": true,
+   "outcome": "SATISFIED",
+   "evidence": [
+    "5 held-out R2 cases matched"
+   ]
+  },
+  {
+   "id": "R3",
+   "mandatory": true,
+   "outcome": "SATISFIED",
+   "evidence": [
+    "6 held-out R3 cases matched"
+   ]
+  },
+  {
+   "id": "installation-ready",
+   "mandatory": true,
+   "outcome": "UNKNOWN",
+   "missing": "no installation receipt on the agent-trial path; observation-a-ad9443abbaa6.json stands in for it in attempt accounting but does not establish that the subject was installed and discovered"
+  }
+ ],
+ "status": "INCONCLUSIVE",
+ "verification": {
+  "category": "verdict",
+  "detail": "all mandatory criteria satisfied",
+  "containment": {
+   "backend": {
+    "name": "docker",
+    "version": "29.8.1",
+    "isolation": [
+     "container (pid/mount/network namespaces)",
+     "network=none by default",
+     "fixed non-root user 10001:10001 (candidate), independent of the host caller",
+     "resource limits enforced: memory, memory-swap (equal), pids, cpus, shm-size",
+     "disk: no per-container bound set (disk_limit is None)",
+     "every container labeled skillc.managed=true and skillc.attempt-id=<attempt id>",
+     "sandbox: unsandboxed-container-is-the-fence",
+     "no docker socket, no docker binary, no passthrough flags in the composed argv",
+     "one persistent container per attempt (docker run -d at prepare()); install()/execute() act on it via docker cp/docker exec - no bind mount, no shared volume, no second container"
+    ],
+    "unobserved": [
+     "network egress actually blocked - not verified from inside the container",
+     "file reads by candidate code",
+     "credential confidentiality against an ancestor's /proc/<pid>/environ - the verifier's own boundary (verify.py's probe through this same seam)",
+     "the live daemon boundary itself - tested here only against a fake docker CLI (tests/fixtures/docker-backend/fake_docker.py), never a real daemon; that remains owed to the operator's live run (#10)",
+     "a disk bound actually enforced - --storage-opt size= is refused outright by any storage driver other than overlay2 on a compatible backing filesystem, so a set disk_limit is a request, not a guarantee",
+     "a graceful signal delivered to the exec'd subject itself on timeout or cancellation - docker kill reaches this attempt's CONTAINER (its own init/placeholder process), never a separately exec'd session, so the SIGTERM-then-SIGKILL escalation only bounds when the whole attempt stops, not whether the subject itself got a chance to flush anything",
+     "dependency resolution inside the container - install() copies in any declared surface entry naming an existing host path or carrying raw bytes; it does not run a package manager or resolve a dependency closure",
+     "baseline_absence - always reported SATISFIED without checking the image's own contents for an undeclared skill already present, matching the reference FakeBackend's own scope (tests/test_lifecycle.py)"
+    ]
+   },
+   "confirmed": true,
+   "timed_out": false,
+   "exit_code": 0,
+   "teardown": "confirmed",
+   "cleanup": "removed"
+  },
+  "ptrace_scope": "1",
+  "provenance": {
+   "skillc_version": "0.2.0",
+   "source_commit": "4eed0599c7240f43c7c11fc7bcf954e9030d2881",
+   "dirty": true
+  },
+  "tiers_enabled": [
+   "deterministic"
+  ],
+  "verdicts": {
+   "deterministic": {
+    "status": "INCONCLUSIVE",
+    "criteria": [
+     {
+      "id": "R4-interface",
+      "mandatory": true,
+      "outcome": "SATISFIED",
+      "evidence": [
+       "imported with site-packages disabled; slugify returned a str for all 15 inputs"
+      ]
+     },
+     {
+      "id": "reported-example",
+      "mandatory": true,
+      "outcome": "SATISFIED",
+      "evidence": [
+       "slugify('Hello, World!') == 'hello-world'"
+      ]
+     },
+     {
+      "id": "R1",
+      "mandatory": true,
+      "outcome": "SATISFIED",
+      "evidence": [
+       "3 held-out R1 cases matched"
+      ]
+     },
+     {
+      "id": "R2",
+      "mandatory": true,
+      "outcome": "SATISFIED",
+      "evidence": [
+       "5 held-out R2 cases matched"
+      ]
+     },
+     {
+      "id": "R3",
+      "mandatory": true,
+      "outcome": "SATISFIED",
+      "evidence": [
+       "6 held-out R3 cases matched"
+      ]
+     },
+     {
+      "id": "installation-ready",
+      "mandatory": true,
+      "outcome": "UNKNOWN",
+      "missing": "no installation receipt on the agent-trial path; observation-a-ad9443abbaa6.json stands in for it in attempt accounting but does not establish that the subject was installed and discovered"
+     }
+    ],
+    "backend": {
+     "name": "docker",
+     "version": "29.8.1",
+     "isolation": [
+      "container (pid/mount/network namespaces)",
+      "network=none by default",
+      "fixed non-root user 10001:10001 (candidate), independent of the host caller",
+      "resource limits enforced: memory, memory-swap (equal), pids, cpus, shm-size",
+      "disk: no per-container bound set (disk_limit is None)",
+      "every container labeled skillc.managed=true and skillc.attempt-id=<attempt id>",
+      "sandbox: unsandboxed-container-is-the-fence",
+      "no docker socket, no docker binary, no passthrough flags in the composed argv",
+      "one persistent container per attempt (docker run -d at prepare()); install()/execute() act on it via docker cp/docker exec - no bind mount, no shared volume, no second container"
+     ],
+     "unobserved": [
+      "network egress actually blocked - not verified from inside the container",
+      "file reads by candidate code",
+      "credential confidentiality against an ancestor's /proc/<pid>/environ - the verifier's own boundary (verify.py's probe through this same seam)",
+      "the live daemon boundary itself - tested here only against a fake docker CLI (tests/fixtures/docker-backend/fake_docker.py), never a real daemon; that remains owed to the operator's live run (#10)",
+      "a disk bound actually enforced - --storage-opt size= is refused outright by any storage driver other than overlay2 on a compatible backing filesystem, so a set disk_limit is a request, not a guarantee",
+      "a graceful signal delivered to the exec'd subject itself on timeout or cancellation - docker kill reaches this attempt's CONTAINER (its own init/placeholder process), never a separately exec'd session, so the SIGTERM-then-SIGKILL escalation only bounds when the whole attempt stops, not whether the subject itself got a chance to flush anything",
+      "dependency resolution inside the container - install() copies in any declared surface entry naming an existing host path or carrying raw bytes; it does not run a package manager or resolve a dependency closure",
+      "baseline_absence - always reported SATISFIED without checking the image's own contents for an undeclared skill already present, matching the reference FakeBackend's own scope (tests/test_lifecycle.py)"
+     ]
+    }
+   }
+  },
+  "disagreement": {
+   "available": false,
+   "reason": "fewer than two judge tiers"
+  },
+  "readiness_source": "agent-observation"
+ }
+}

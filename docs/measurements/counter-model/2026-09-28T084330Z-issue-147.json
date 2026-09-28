@@ -1,0 +1,20 @@
+{
+  "branch": "issue-147-re-run-12-s-matched-pilot-with-gpt-6-astra-pinned",
+  "counts": {
+    "accepted": 3,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "f0435b82774b4e33853e5b96b8f2408bad056834",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "147",
+  "passes": 2,
+  "recorded_at": "2026-09-28T08:43:30Z",
+  "red_cases": {
+    "already_covered": 9,
+    "proposed": 12
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "schema": 1,
+  "status": "ran"
+}
