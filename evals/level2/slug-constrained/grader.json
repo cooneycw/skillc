@@ -1,0 +1,16 @@
+{
+ "id": "slug-constrained",
+ "revision": "1",
+ "criteria": [
+  "functional-interface",
+  "functional-reported-example",
+  "functional-R1",
+  "functional-R2",
+  "functional-R3",
+  "constraint-interface-stability",
+  "constraint-dependency",
+  "constraint-data-preservation"
+ ],
+ "probe": {"file": "probe.py", "inputs": "inputs.json", "timeout": 30},
+ "judge": {"file": "grade_constrained.py", "timeout": 60}
+}
