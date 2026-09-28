@@ -17,6 +17,7 @@ from . import records
 from .spec import (
     BODY_LINE_BUDGET,
     CLAUDE_CODE,
+    CLAUDE_CODE_LISTING_CAP,
     COMPATIBILITY_MAX,
     DEFAULT_TARGET,
     DESCRIPTION_MAX,
@@ -220,6 +221,30 @@ def _claude_code_field(skill: Skill, target: str) -> Iterator[str]:
         )
 
 
+def _claude_code_listing_cap(skill: Skill, target: str) -> Iterator[str]:
+    """Target `claude-code` (issue #132 item 2): `required-fields`' own
+    `description` check is the PORTABLE specification's 1024-character limit
+    on `description` alone - not this client's actual constraint. Claude
+    Code truncates the COMBINED `description` + `when_to_use` text at
+    `CLAUDE_CODE_LISTING_CAP` characters in the skill listing (source and
+    read date: `CLAUDE_CODE.source`/`.verified`), so a skill within the
+    portable limit on `description` alone can still be truncated here once
+    `when_to_use` is added, and a `description` slightly over 1024 is not
+    itself a problem for this client if `when_to_use` is absent or short.
+    Portable's own check is unaffected - this is a separate rule, scoped to
+    this one target, not a replacement for it."""
+    description = skill.get("description") or ""
+    when_to_use = skill.get("when_to_use") or ""
+    combined = len(description) + len(when_to_use)
+    if combined > CLAUDE_CODE_LISTING_CAP:
+        yield (
+            f"description + when_to_use is {combined} characters, over "
+            f"{CLAUDE_CODE.label}'s {CLAUDE_CODE_LISTING_CAP}-character listing cap "
+            f"(profile read from {CLAUDE_CODE.source} on {CLAUDE_CODE.verified}) - "
+            f"put the key use case first, since that is what survives truncation"
+        )
+
+
 def _body_budget(skill: Skill, target: str) -> Iterator[str]:
     if skill.body_lines > BODY_LINE_BUDGET:
         yield (
@@ -359,6 +384,9 @@ RULES: tuple[Rule, ...] = (
          _unknown_field, target=PORTABLE),
     Rule("claude-code-field", WARN, "every field is one Claude Code documents",
          _claude_code_field, target=CLAUDE_CODE.id),
+    Rule("claude-code-listing-cap", WARN,
+         "description + when_to_use stays inside Claude Code's listing cap",
+         _claude_code_listing_cap, target=CLAUDE_CODE.id),
     Rule("body-budget", WARN, "SKILL.md body stays inside the line budget", _body_budget),
     Rule("ref-depth", WARN, "references stay one level deep", _ref_depth),
     Rule("invocation-consistency", ERROR,

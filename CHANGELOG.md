@@ -227,6 +227,20 @@ and version plan.
   matches the closing grammar) FAIL on `no-closing-match` - proving
   `finish-close-ref/grade_ref.py` itself ran, not slug-small-fix's.
 
+- **A new, target-scoped rule checks Claude Code's real listing cap: the
+  COMBINED `description` + `when_to_use`, not `description` alone** (Refs
+  #132 item 2). `required-fields`' own `description` check is the portable
+  specification's 1024-character limit on `description` alone; Claude Code
+  actually truncates the combined `description` + `when_to_use` text at
+  1,536 characters in the skill listing "to reduce context usage"
+  (`https://code.claude.com/docs/en/skills#frontmatter-reference`, read
+  2026-09-28 - same page `CLAUDE_CODE`'s own profile already cites, dated
+  2026-09-25 for its field list). A skill whose `description` alone stayed
+  under 1024 could still be silently truncated once `when_to_use` was
+  added, with skillc reporting nothing. The new `claude-code-listing-cap`
+  rule is scoped to `--target claude-code` only; portable runs are
+  unchanged (the rule does not run under `--target portable` at all).
+
 - **`skillc rules` can now show target-VARYING behaviour, not only
   target-RESTRICTED rules** (Refs #132 item 3). `trigger-shape` has
   `target=None` (it runs for every profile) yet its own finding depends on

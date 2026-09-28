@@ -68,6 +68,14 @@ NAME_MAX = 64
 DESCRIPTION_MAX = 1024
 COMPATIBILITY_MAX = 500
 
+#: Claude Code's own listing cap (issue #132 item 2), distinct from the
+#: portable `DESCRIPTION_MAX` above: it truncates the COMBINED `description`
+#: + `when_to_use` text at this many characters in the skill listing, "to
+#: reduce context usage" - not `description` alone. Source and read date
+#: match `CLAUDE_CODE.source`/`.verified` above (same page, same reading);
+#: re-verify this number if that date is ever bumped for an unrelated field.
+CLAUDE_CODE_LISTING_CAP = 1536
+
 # Body-length guidance: keep SKILL.md under 500 lines, disclose the rest.
 BODY_LINE_BUDGET = 500
 

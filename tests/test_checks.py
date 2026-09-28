@@ -944,3 +944,53 @@ def test_rules_command_does_not_tag_a_rule_that_does_not_vary(capsys: pytest.Cap
     lines = [line for line in out.splitlines() if "body-budget" in line]
     assert len(lines) == 1
     assert "[" not in lines[0]
+
+
+def test_claude_code_listing_cap_fires_on_the_combined_length(tmp_path: Path) -> None:
+    """Red case for issue #132 item 2: `required-fields`' own check reads
+    only `description` against the PORTABLE 1024-character limit, so a skill
+    whose `description` alone stays under 1024 but whose `description` +
+    `when_to_use` together exceed Claude Code's real, larger 1536-character
+    listing cap produced zero findings under `--target claude-code`."""
+    skill_dir = tmp_path / "over-cap"
+    skill_dir.mkdir()
+    description = "d" * 800
+    when_to_use = "w" * 800
+    (skill_dir / "SKILL.md").write_text(
+        f"---\nname: over-cap\ndescription: {description}\nwhen_to_use: {when_to_use}\n---\nBody.\n",
+        encoding="utf-8",
+    )
+    skill = Skill.load(skill_dir / "SKILL.md")
+    assert len(skill.get("description") or "") < checks.DESCRIPTION_MAX, (
+        "fixture must stay under the portable limit alone, to isolate this rule's own finding"
+    )
+    findings = checks.run(skill, only="claude-code-listing-cap", target="claude-code")
+    assert findings and "1536" in findings[0].detail
+
+
+def test_claude_code_listing_cap_is_silent_under_the_portable_target(tmp_path: Path) -> None:
+    """Item 2's other half: portable runs unchanged - the rule is scoped to
+    `claude-code` and must not fire (or even run) under `--target portable`,
+    whatever the combined length is."""
+    skill_dir = tmp_path / "over-cap-portable"
+    skill_dir.mkdir()
+    description = "d" * 800
+    when_to_use = "w" * 800
+    (skill_dir / "SKILL.md").write_text(
+        f"---\nname: over-cap-portable\ndescription: {description}\nwhen_to_use: {when_to_use}\n---\nBody.\n",
+        encoding="utf-8",
+    )
+    skill = Skill.load(skill_dir / "SKILL.md")
+    findings = checks.run(skill, target="portable")
+    assert [f for f in findings if f.rule == "claude-code-listing-cap"] == []
+
+
+def test_claude_code_listing_cap_stays_silent_under_the_cap(tmp_path: Path) -> None:
+    skill_dir = tmp_path / "under-cap"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: under-cap\ndescription: Use when short.\nwhen_to_use: Also short.\n---\nBody.\n",
+        encoding="utf-8",
+    )
+    findings = checks.run(Skill.load(skill_dir / "SKILL.md"), only="claude-code-listing-cap", target="claude-code")
+    assert findings == []
