@@ -1072,30 +1072,29 @@ def cmd_selection_probe(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
-def _publish_lock_path(target: Path) -> Path:
-    """One lock per resolved destination, in the temp directory - never beside
-    the destination, where a lock file would sit in the work tree."""
-    import hashlib
-
-    digest = hashlib.sha256(str(target).encode("utf-8")).hexdigest()[:16]
-    return Path(tempfile.gettempdir()) / f"skillc-publish-{digest}.lock"
-
-
 def _export_pilot_evidence(experiment: object, report: dict[str, object], evidence: Path) -> int:
-    """Publish under an exclusive per-destination lock held from the
-    ownership check through the replacement (#147 counter-model review): two
-    exporters racing into one destination would otherwise both pass the
-    check, and the later replacement would delete the earlier one's bundle.
-    The second publisher waits, then sees the first bundle and refuses."""
+    """Publish under an exclusive lock on the destination's PARENT DIRECTORY,
+    held from the ownership check through the replacement (#147 counter-model
+    review): two exporters racing into one destination would otherwise both
+    pass the check, and the later replacement would delete the earlier one's
+    bundle. The parent is the one location every publisher of that
+    destination shares whatever its environment - a lock file under the temp
+    directory was not (a different TMPDIR, a different lock) - and it leaves
+    no lock file in the work tree. The second publisher waits, then sees the
+    first bundle and refuses."""
     import fcntl
 
     if evidence.is_symlink():
         print(f"skillc: refusing to publish through a symlink: {evidence}", file=sys.stderr)
         return 2
-    lock_path = _publish_lock_path(evidence.resolve())
-    with open(lock_path, "a", encoding="utf-8") as lock:
+    parent = evidence.resolve().parent
+    parent.mkdir(parents=True, exist_ok=True)
+    lock = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
         fcntl.flock(lock, fcntl.LOCK_EX)
         return _publish_pilot_evidence(experiment, report, evidence)
+    finally:
+        os.close(lock)  # closing the descriptor releases the lock
 
 
 def _publish_pilot_evidence(experiment: object, report: dict[str, object], evidence: Path) -> int:

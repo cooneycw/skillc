@@ -946,33 +946,39 @@ def test_an_override_from_the_per_attempt_argv_aborts_the_run_not_one_attempt(tm
 def test_publication_holds_a_per_destination_lock_through_the_replacement(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """#147 counter-model finding: two exporters racing into one initially
-    absent destination could both pass the ownership check, and the second
-    replacement deleted the first bundle. The lock is held while the bundle
-    is being built, so a competing publisher cannot get between the check and
-    the replacement: a non-blocking attempt from outside fails."""
+    """#147 counter-model findings: two exporters racing into one destination
+    could both pass the ownership check, and the second replacement deleted
+    the first bundle; and a lock keyed on TMPDIR was not shared by publishers
+    with different TMPDIRs. The lock is on the destination's parent directory,
+    so a competitor probing it while the bundle is built - with a DIFFERENT
+    TMPDIR - finds it held."""
     import fcntl
+    import os
 
     evidence = tmp_path / "evidence"
-    lock_path = cli._publish_lock_path(evidence.resolve())
     observed: list[str] = []
     real_export = mp.export_bundle
 
     def export_while_probing(experiment: trial.Experiment, report: dict[str, object], into: Path) -> list[Path]:
-        with open(lock_path, "a", encoding="utf-8") as competitor:
-            try:
-                fcntl.flock(competitor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                observed.append("held")
-            else:
-                observed.append("free")
-                fcntl.flock(competitor, fcntl.LOCK_UN)
+        monkeypatch.setenv("TMPDIR", str(tmp_path / "some-other-tmp"))  # the competitor's environment
+        competitor = os.open(evidence.resolve().parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            fcntl.flock(competitor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            observed.append("held")
+        else:
+            observed.append("free")
+        finally:
+            os.close(competitor)
         return real_export(experiment, report, into)
 
     monkeypatch.setattr(mp, "export_bundle", export_while_probing)
     experiment, outcomes = _unavailable_outcomes(tmp_path)
     assert cli._export_pilot_evidence(experiment, mp.build_report(experiment, outcomes), evidence) == 0
     assert observed == ["held"]
-    with open(lock_path, "a", encoding="utf-8") as after:  # released on return
-        fcntl.flock(after, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    after = os.open(evidence.resolve().parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        fcntl.flock(after, fcntl.LOCK_EX | fcntl.LOCK_NB)  # released on return
+    finally:
+        os.close(after)
     assert not any(p.name.endswith(".lock") for p in tmp_path.rglob("*"))  # nothing left in the tree
