@@ -78,6 +78,18 @@ and version plan.
   on a leak (never a silent drop, never a silent keep). Retained files live
   under `<base>/retained-transcripts/<attempt_id>.jsonl`.
 
+### Changed
+
+- **Documented, not fixed: the unbounded local spool write is the
+  bare-subprocess lane's limit, not the Docker lane's** (Refs #133 item 5,
+  re-checked rather than assumed). `DockerBackend.execute()` never opens a
+  local spool file at all - it drains stdout/stderr into a capped in-memory
+  buffer - so `capture.md`'s existing "the spool is bounded at capture, not
+  during execution" limit only ever applied to `trial.run_attempt`'s
+  host-subprocess path (`matched_pilot.py`, this module's own tests).
+  `capture.md` now says so explicitly instead of reading as a blanket claim
+  about every lane.
+
 ### Fixed
 
 - **A `coverage: "complete"` skill-invocations stream could omit an

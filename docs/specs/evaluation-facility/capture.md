@@ -222,10 +222,22 @@ This is the policy, chosen before any real private or model evidence exists.
 - **The secret filter is a list, not a census.** A credential in an unlisted name
   and an unrecognized shape is exported. The patterns reduce accidents. They do not
   certify that the output is clean.
-- **The spool is bounded at capture, not during execution.** Only
-  `max_stream_bytes` of each stream is read and retained as evidence. The spool
-  file itself grows as the subject writes, so disk use during a run is bounded by
-  the environment (#10), not here.
+- **The spool is bounded at capture, not during execution - and only on the
+  bare-subprocess lane** (issue #133 item 5, re-checked rather than assumed).
+  `trial.run_attempt` (the host-subprocess path `matched_pilot.py` and this
+  module's own tests use) opens `<experiment>/spool/<attempt-id>.{stdout,stderr}`
+  and hands the file descriptors straight to `subprocess.Popen` - the OS writes
+  every byte the subject produces to local disk as it runs, and only
+  `max_stream_bytes` of each is read back and retained as evidence afterward.
+  Disk use during such a run is bounded by the environment (#10), not here.
+  **`DockerBackend.execute()` (the Docker lane) never opens a spool file at
+  all** - it drains the subject's stdout/stderr on its own threads
+  (`_BoundedDrain`) straight into a capped IN-MEMORY buffer
+  (`Limits.max_captured_stdout_bytes`/`max_captured_stderr_bytes`, 8 MiB each
+  by default), so there is no local-disk write for this bound to apply to on
+  that lane; see `docker_backend.py`'s own module docstring. A Docker attempt's
+  local host footprint from execution itself is bounded already, by
+  construction, not merely un-audited.
 - **POSIX only**: process groups and `O_NOFOLLOW`.
 - **Budgets are recorded, not enforced.** A trial's `budget` is stored in the
   ledger. Only the wall-clock `timeout` passed to `run_attempt` is enforced.
