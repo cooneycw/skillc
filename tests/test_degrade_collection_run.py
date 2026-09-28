@@ -237,3 +237,133 @@ def test_cli_collection_run_refuses_a_tampered_degraded_tree_before_any_docker_w
     ])
 
     assert code == 2
+
+
+# ------------------------------------------------------- --evidence-role, live
+
+
+def _fresh_codex_credential(path: Path) -> Path:
+    def seg(data: bytes) -> str:
+        return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+    token = f"{seg(json.dumps({'alg': 'none'}).encode())}.{seg(json.dumps({'exp': int(time.time() + 3600)}).encode())}.sig"
+    path.write_text(json.dumps({"tokens": {"access_token": token}}))
+    return path
+
+
+def _real_degraded_attempt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[trial.Experiment, cc.CollectionAgentResult]:
+    """A REAL, captured, graded `--degraded` attempt - fake docker, fake
+    codex client, `acquire_degraded_collection`/`run_collection_agent_attempt`
+    both exercised for real, exactly `test_cli_collection_run_degraded_
+    records_the_degraded_identity_never_the_pin`'s own proven setup. This is
+    where the revision fix actually runs; the CLI-level test below wires its
+    real output into a real `cli.main()` call rather than re-deriving it
+    through the CLI's own argv/attempt-id plumbing, which needs no
+    docker-state prediction to be reliable."""
+    collection = _fixture_collection(tmp_path, {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd"]))
+    degraded = degrade.acquire_degraded("whatever", tmp_path / "degrade-base", None, checkout=collection)
+    out = tmp_path / "degraded-out"
+    out.mkdir()
+    (out / "receipt.json").write_text(
+        json.dumps(degrade.receipt(degraded, pinned_revision="v1"), indent=1) + "\n", encoding="utf-8",
+    )
+    degrade.persist_skills(degraded, out)
+
+    base = tmp_path / "work"
+    base.mkdir()
+    docker_state = tmp_path / "docker-state"
+    acquired = cc.acquire_degraded_collection("whatever", out)
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store)
+    backend = _backend(base, docker_state)
+    grading_backend = _backend(base, docker_state)
+    name = d._container_name(attempt_id)
+    home = docker_state / f"{name}.fsroot" / "home" / "candidate"
+    argv = [
+        sys.executable, str(FAKE_CLIENT), "--format", "codex-fake", "--home", str(home),
+        "--transcript-relpath", ".codex/sessions/2026/01/01/rollout-cc.jsonl",
+        "--copy-solution", str(GRADER_ROOT / "reference"),
+    ]
+    cred_path = _fresh_codex_credential(tmp_path / "cred.json")
+
+    result = cc.run_collection_agent_attempt(
+        subject_name="whatever", acquired=acquired, experiment=experiment, attempt_id=attempt_id,
+        backend=backend, grading_backend=grading_backend, base=base,
+        base_argv=argv, prompt="Fix the slug helper.", timeout=5, credential_explicit_path=cred_path,
+    )
+    assert result.record["disposition"] == "captured"
+    graded = result.record.get("graded")
+    assert isinstance(graded, dict) and graded.get("status") == "PASS"
+    return experiment, result
+
+
+def _wire_real_result_into_cli(
+    monkeypatch: pytest.MonkeyPatch, experiment: trial.Experiment, result: cc.CollectionAgentResult,
+) -> None:
+    """Wire a REAL, already-run `(experiment, result)` pair into
+    `cmd_collection_run`'s own acquisition/planning/attempt calls, so
+    `cli.main` exercises its OWN gating and export code for real while
+    skipping a second real docker attempt (attempt ids are random -
+    `trial._new_attempt_id` - so predicting `--client-argv`'s `--home`
+    through a full `cli.main` dispatch is not reliably reproducible; the
+    attempt itself is already proven real and correct by
+    `_real_degraded_attempt`, which this reuses rather than re-deriving)."""
+    from types import SimpleNamespace
+
+    from skillc import reap
+
+    monkeypatch.setattr(cc, "acquire_degraded_collection", lambda *a, **k: SimpleNamespace(subject=SimpleNamespace(client="codex")))
+    monkeypatch.setattr(demo, "resolve_image_digest", lambda *a, **k: None)
+    monkeypatch.setattr(trial, "open_store", lambda path, forbidden: path)
+    monkeypatch.setattr(cc, "plan_collection_attempt", lambda *a, **k: (experiment, "a-1"))
+    monkeypatch.setattr(cc, "run_collection_agent_attempt", lambda **k: result)
+    monkeypatch.setattr(reap, "snapshot", lambda *a, **k: reap.Snapshot(False, frozenset(), frozenset()))
+    monkeypatch.setattr(cc, "attributable_leftovers", lambda *a, **k: [])
+
+
+def test_cli_degraded_export_is_refused_by_default_role_and_published_with_control(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The interdependency the orchestrator named: #157's `--evidence-role`
+    guard recognises a degraded arm by `result.revision` starting with
+    `degraded:` - real only once B2's revision fix (which makes that field
+    report what was actually acquired, not the pin) and B2's `--degraded`
+    (which makes an acquisition degraded at all) both exist. The attempt
+    that PRODUCES `result.revision` is real (`_real_degraded_attempt` - fake
+    docker, fake codex client, `run_collection_agent_attempt` unmocked, the
+    exact function the revision fix touches); `cli.main`'s OWN gating and
+    export code then runs unmocked against that real result, through the
+    actual `collection-run --degraded --evidence` entry point, twice - once
+    per role.
+
+    Confirmed as a red case by temporarily reverting the revision fix
+    (`acquired.source.revision` -> `acquired.subject.revision` in
+    `run_collection_agent_attempt`) and re-running: the default-role call
+    then (wrongly) published instead of being refused - restored afterward.
+    See the commit message for the exact before/after."""
+    experiment, result = _real_degraded_attempt(tmp_path, monkeypatch)
+    assert result.revision.startswith("degraded:")
+
+    from skillc import cli
+
+    # `--degraded` need only be truthy here: `acquire_degraded_collection` is
+    # mocked and never reads it, but an empty/absent flag would send
+    # `cmd_collection_run` down the OTHER (pinned) acquisition branch instead.
+    _wire_real_result_into_cli(monkeypatch, experiment, result)
+    default_evidence = tmp_path / "default-evidence"
+    default_code = cli.main([
+        "collection-run", "whatever", "--degraded", str(tmp_path / "unread-degraded-marker"),
+        "--base", str(tmp_path / "default-base"), "--evidence", str(default_evidence),
+    ])
+    assert default_code == 2
+    assert not default_evidence.exists()
+
+    _wire_real_result_into_cli(monkeypatch, experiment, result)
+    control_evidence = tmp_path / "control-evidence"
+    control_code = cli.main([
+        "collection-run", "whatever", "--degraded", str(tmp_path / "unread-degraded-marker"),
+        "--base", str(tmp_path / "control-base"), "--evidence", str(control_evidence),
+        "--evidence-role", "control",
+    ])
+    assert control_code == 0
+    assert list(control_evidence.glob("result-*.json"))

@@ -147,6 +147,21 @@ tampered file would, and is refused the same way. Confirmed directly
 (`test_load_persisted_degraded_refuses_a_tree_holding_a_skill_the_receipt_never_declared`),
 not merely inferred from the tamper case.
 
+**The revision fix and #157's `--evidence-role` guard depend on each other,
+and the dependency is tested, not just stated.** The guard
+(`docs/specs/evaluation-facility/behavioral-eval-export.md`) recognises a
+degraded arm by `result.revision` starting with `degraded:` - a fact only
+true because of the fix immediately above. `test_cli_degraded_export_is_
+refused_by_default_role_and_published_with_control` runs a REAL `--degraded`
+attempt (fake docker, fake codex client, `run_collection_agent_attempt`
+unmocked) through `cli.main`'s own gating and export code, twice: the
+default role is refused with nothing written; `--evidence-role control`
+publishes. Confirmed as a red case by reverting the revision fix and
+re-running: the default-role call then wrongly published (exit 0, a
+`result-*.json` actually written) instead of being refused, because
+`result.revision` read back as the bare pin (`"v1"`), which the guard's own
+`.startswith("degraded:")` check does not recognise as anything to restrict.
+
 Showing that a degraded arm's FAIL and a normal arm's PASS actually
 discriminate (acceptance item 3) is still not this module's job - it needs a
 Level-1 task and grader that make a specific skill necessary (#150-A) and a
