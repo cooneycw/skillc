@@ -585,8 +585,8 @@ class DockerBackend:
     def prepare(self, attempt_id: str) -> object:
         """Step 3: start this attempt's one persistent container, detached,
         running the keep-alive placeholder. Raises `BackendUnavailable` -
-        never returns a handle - when the daemon is unreachable or the
-        `docker run` itself fails.
+        never returns a handle - when the daemon is unreachable, the image is
+        not present locally, or the `docker run` itself fails or stalls.
 
         Docker creates a container before it starts it, so a failed START
         (an image missing the placeholder binary, say) can still leave one
@@ -595,28 +595,72 @@ class DockerBackend:
         `prepare()` must not leave a partial resource behind
         (`backend.ExecutionBackend.prepare`'s own stated contract) - found by
         cross-model review, which named the pre-fix code an actual violation
-        of that already-merged contract, not merely a hardening opportunity."""
+        of that already-merged contract, not merely a hardening opportunity.
+
+        BOUNDED, WITH AN EXPLICIT IMAGE PRECHECK (issue #133 item 1): `docker
+        run -d` used to carry no `timeout=` at all, unlike every other daemon
+        call in this module - and unlike those, a missing local image makes it
+        implicitly PULL over the network mid-call, which can run far longer
+        than any reasonable per-call bound before the CLI even attempts to
+        create a container. `docker image inspect` (bounded by
+        `daemon_timeout`, like every other read here) runs FIRST and refuses
+        outright when the image is not already present locally, so `run -d`
+        itself never has a pull to wait on and can safely carry the same
+        bound as the rest of this module. A `run -d` that still exceeds it -
+        daemon overload, not a pull - is read exactly like a nonzero exit: the
+        best-effort `rm -f` cleanup below runs either way, itself bounded, and
+        `prepare()` raises rather than returning a handle for a container this
+        call cannot confirm the state of."""
         env = _docker_env()
         if probe_daemon(self.docker_bin, self.daemon_timeout, env) is None:
             raise BackendUnavailable(f"docker daemon unreachable via {' '.join(self.docker_bin)!r}")
+        if not self._image_present_locally(env):
+            raise BackendUnavailable(
+                f"image {self.image!r} is not present locally; refusing rather than letting "
+                f"'docker run -d' pull it mid-trial with no bound on how long that takes"
+            )
         name = _container_name(attempt_id)
         argv = self._keepalive_run_argv(name, attempt_id)
         try:
-            started = subprocess.run(argv, capture_output=True, text=True, env=env, check=False)
-        except OSError as exc:
+            started = subprocess.run(
+                argv, capture_output=True, text=True, env=env, check=False, timeout=self.daemon_timeout,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            # Best-effort: whether or not a container was actually created,
+            # this makes sure none is left behind under this name. Also
+            # bounded - a cleanup call that itself hangs must not turn a
+            # raising prepare() into a hanging one.
+            subprocess.run(
+                [*self.docker_bin, "rm", "-f", name],
+                capture_output=True, env=env, check=False, timeout=self.daemon_timeout,
+            )
             raise BackendUnavailable(
                 f"docker run failed to start a container for {attempt_id!r}: {exc}"
             ) from exc
         if started.returncode != 0:
-            # Best-effort: whether or not a container was actually created,
-            # this makes sure none is left behind under this name.
             subprocess.run(
-                [*self.docker_bin, "rm", "-f", name], capture_output=True, env=env, check=False,
+                [*self.docker_bin, "rm", "-f", name],
+                capture_output=True, env=env, check=False, timeout=self.daemon_timeout,
             )
             raise BackendUnavailable(
                 f"docker run failed to start a container for {attempt_id!r}: {started.stderr.strip()}"
             )
         return _Handle(attempt_id=attempt_id, name=name, env=env)
+
+    def _image_present_locally(self, env: Mapping[str, str]) -> bool:
+        """Whether `self.image` already exists in the local image store,
+        bounded by `daemon_timeout` like every other read in this module. A
+        timeout, an unreachable daemon, or a nonzero exit are all treated the
+        same as "not present" - `prepare()` refuses either way, rather than
+        risking `docker run -d`'s own implicit pull on an ambiguous answer."""
+        try:
+            proc = subprocess.run(
+                [*self.docker_bin, "image", "inspect", self.image],
+                capture_output=True, env=env, check=False, timeout=self.daemon_timeout,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        return proc.returncode == 0
 
     def install(self, handle: object, surface: Mapping[str, object]) -> dict[str, object]:
         """Step 4: copy every declared surface entry into the running

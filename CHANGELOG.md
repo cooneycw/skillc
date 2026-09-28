@@ -198,6 +198,17 @@ and version plan.
   from it (the exported `verified-result`'s `revision`, the paste-back), now
   reports what was actually acquired.
 
+- **`DockerBackend.prepare()`'s `docker run -d` is bounded, with an explicit
+  image precheck** (Refs #133). Every other daemon call in this backend
+  carried a `timeout=daemon_timeout`; `run -d` did not, and unlike the
+  others it can implicitly PULL a missing image mid-call, which has no
+  bound on how long it runs. `docker image inspect` (itself bounded) now
+  runs first and refuses outright when the image is not present locally, so
+  `run -d` never has a pull to wait on and safely carries the same bound as
+  the rest of the module. The best-effort `rm -f` cleanup on a failed or
+  timed-out `run -d` is bounded too. Two red cases (a stalled `run -d`, a
+  missing image) fail on the pre-fix code.
+
 - **`DockerBackend.install()`'s readiness is per-entry, not all-or-nothing, and
   checks the image's own baseline** (Refs #133). `discovery_canary` used to be
   VIOLATED only when NOTHING installed, so one missing declared entry among

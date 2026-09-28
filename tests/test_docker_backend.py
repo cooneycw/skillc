@@ -16,6 +16,7 @@ from __future__ import annotations
 import io
 import sys
 import tarfile
+import time
 from pathlib import Path
 
 import pytest
@@ -304,6 +305,47 @@ def test_prepare_raises_when_the_docker_binary_is_missing(base: Path) -> None:
     )
     with pytest.raises(BackendUnavailable):
         backend.prepare("a-lc-000000000003")
+
+
+def test_prepare_refuses_a_missing_image_without_attempting_run(
+    base: Path, docker_state: Path,
+) -> None:
+    """Issue #133 item 1: an explicit `docker image inspect` precheck refuses
+    outright when the image is not present locally, rather than letting
+    `docker run -d` discover that itself by implicitly pulling it - which can
+    run far longer than any bound this backend places on `run -d` itself."""
+    _sentinel(docker_state, ".no-image")
+    backend = _backend(base, docker_state)
+    with pytest.raises(BackendUnavailable, match="not present locally"):
+        backend.prepare("a-lc-000000000003b")
+    # No container state was ever created - `run -d` was never even attempted.
+    name = d._container_name("a-lc-000000000003b")
+    assert not (docker_state / f"{name}.json").exists()
+
+
+def test_prepare_raises_within_the_bound_when_docker_run_stalls(
+    base: Path, docker_state: Path,
+) -> None:
+    """Red case for issue #133 item 1: the pre-fix `docker run -d` call in
+    `prepare()` carried no `timeout=` at all, unlike every other daemon call
+    in this module, so a stalled daemon (or an implicit image pull mid-call)
+    hung the trial instead of reporting BLOCKED/UNKNOWN within a bound. This
+    fixture's `.hang-run` sentinel makes `run -d` sleep for 2s before
+    answering; a `daemon_timeout` far shorter than that must still turn it
+    into BackendUnavailable and return well before the full sleep elapses.
+    Fails on the pre-fix code, which would block for the full 2s (or hang
+    forever against a daemon that never answers at all)."""
+    docker_state.mkdir(parents=True, exist_ok=True)
+    (docker_state / ".hang-run").write_text("2", encoding="utf-8")
+    backend = d.DockerBackend(
+        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state),
+        daemon_timeout=0.2,
+    )
+    started = time.monotonic()
+    with pytest.raises(BackendUnavailable):
+        backend.prepare("a-lc-000000000003c")
+    elapsed = time.monotonic() - started
+    assert elapsed < 1.5, f"prepare() took {elapsed:.2f}s - the daemon_timeout bound was not enforced"
 
 
 def test_install_reports_discovery_canary_violated_when_nothing_is_declared(
