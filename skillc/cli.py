@@ -145,18 +145,20 @@ def cmd_check(args: argparse.Namespace) -> int:
             skill_md = declared_dir / "SKILL.md"
             if skill_md.is_file():
                 skills.append(Skill.load(skill_md))
-            else:
-                # A dangling entry must never read as a clean skill - it is an
-                # error even though nothing here was checked, not silence.
-                findings.append(
-                    Finding(
-                        rule="manifest-entry",
-                        severity=ERROR,
-                        path=skill_md,
-                        detail="declared in the manifest but no SKILL.md exists here",
-                    )
-                )
         skills.sort(key=lambda s: s.path)
+        # Issue #131 item 3: routed through `checks.manifest_entry` - the
+        # SAME function `checks.ManifestRule`/`selftest` exercise via its
+        # committed control (`controls/manifest-entry/{bad,good}`) - rather
+        # than a second, ad-hoc "declared but no SKILL.md" check built here.
+        # A dangling entry must never read as a clean skill - it is an error
+        # even though nothing here was checked, not silence. The dangling
+        # path itself is named in the detail text (`checks.manifest_entry`'s
+        # own wording); `manifest_path` is the Finding's own path, matching
+        # `checks.run_manifest`'s identical choice for the same rule.
+        findings.extend(
+            Finding("manifest-entry", ERROR, manifest_path, detail)
+            for detail in checks.manifest_entry(manifest)
+        )
         declared_set = set(manifest.declared)
         undeclared = sum(
             1 for s in discover(root) if s.path.parent.resolve() not in declared_set
@@ -278,6 +280,24 @@ def cmd_check_records(args: argparse.Namespace) -> int:
         print(f"skillc: no bundle (a directory holding a trial ledger) under {root} - "
               f"{args.rule} checked nothing")
         return 2
+
+    # Issue #131 item 2: a record rule's own `record.kind != ...` guard is
+    # invisible from here, so a `--rule` selection with nothing of its kind
+    # to read used to run, find every guard silently declining, and report
+    # "0 error(s)" - indistinguishable from a population that WAS examined
+    # and found clean. Declared per-rule `kinds` makes the applicable
+    # population visible and refuses on zero, exactly as the bundle-rule
+    # case above already does for its own family.
+    selected_record_rule = checks.record_rule_by_id(args.rule) if args.rule else None
+    applicable = None
+    if selected_record_rule is not None:
+        applicable = checks.applicable_population(selected_record_rule, found)
+        if applicable == 0:
+            print(f"skillc: no {selected_record_rule.id}-applicable record "
+                  f"(kind in {list(selected_record_rule.kinds)}) under {root} - "
+                  f"{args.rule} checked nothing")
+            return 2
+
     findings: list[Finding] = []
     for record in found:
         findings.extend(checks.run_record(record, only=args.rule))
@@ -295,6 +315,8 @@ def cmd_check_records(args: argparse.Namespace) -> int:
         f"\nskillc: {len(found)} record(s) in {len(bundles)} bundle(s) checked, "
         f"{errors} error(s)"
     )
+    if applicable is not None:
+        print(f"skillc: {applicable} of {len(found)} record(s) were {args.rule}-applicable")
     if loose:
         print(
             f"skillc: {loose} record(s) belong to no bundle and were checked alone - "
@@ -318,7 +340,7 @@ class _Subject:
 
 
 def _population(
-    rule: checks.Rule | checks.RecordRule | checks.BundleRule,
+    rule: checks.Rule | checks.RecordRule | checks.BundleRule | checks.ManifestRule,
     where: Path,
     target: str = DEFAULT_TARGET,
 ) -> list[_Subject]:
@@ -338,6 +360,15 @@ def _population(
             own = sum(f.rule == rule.id for f in checks.run_bundle(bundle, only=rule.id))
             subjects.append(_Subject(case, bundle.parse_error, own))
         return subjects
+    if isinstance(rule, checks.ManifestRule):
+        # Same shape as BundleRule: every CASE DIRECTORY is a subject (issue
+        # #131 item 3), whether or not its manifest loads.
+        subjects = []
+        for case in sorted(p for p in where.iterdir() if p.is_dir()):
+            case_findings, load_error = checks.run_manifest(case, only=rule.id)
+            own = sum(1 for f in case_findings if f.rule == rule.id)
+            subjects.append(_Subject(case, load_error, own))
+        return subjects
     if isinstance(rule, checks.RecordRule):
         return [
             _Subject(r.path, r.parse_error,
@@ -352,7 +383,8 @@ def _population(
 
 
 def _refusal(
-    rule: checks.Rule | checks.RecordRule | checks.BundleRule, bad: list[_Subject], good: list[_Subject]
+    rule: checks.Rule | checks.RecordRule | checks.BundleRule | checks.ManifestRule,
+    bad: list[_Subject], good: list[_Subject],
 ) -> tuple[str, str] | None:
     """Why this rule's control does not prove it, or None when it does.
 

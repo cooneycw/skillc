@@ -80,7 +80,7 @@ def test_EVERY_bundle_bad_case_fires_its_rule(rule: checks.BundleRule) -> None:
 
 @pytest.mark.parametrize("rule", checks.ALL_RULES, ids=lambda r: r.id)
 def test_each_bad_case_fires_ITS_OWN_rule_and_NOTHING_ELSE(
-    rule: checks.Rule | checks.RecordRule | checks.BundleRule,
+    rule: checks.Rule | checks.RecordRule | checks.BundleRule | checks.ManifestRule,
 ) -> None:
     """Every rule in the repository, not only the record family.
 
@@ -127,6 +127,12 @@ def test_each_bad_case_fires_ITS_OWN_rule_and_NOTHING_ELSE(
         recs = records.discover(bad_dir)
         own = [f for r in recs for f in checks.run_record(r, only=rule.id)]
         every = [f for r in recs for f in checks.run_record(r)]
+    elif isinstance(rule, checks.ManifestRule):
+        # Same shape as the BundleRule branch above: every CASE DIRECTORY is
+        # the subject, and `run_manifest` returns `(findings, load_error)`.
+        cases = sorted(p for p in bad_dir.iterdir() if p.is_dir())
+        own = [f for case in cases for f in checks.run_manifest(case, only=rule.id)[0]]
+        every = [f for case in cases for f in checks.run_manifest(case)[0]]
     else:
         skills = discover(bad_dir)
         own = [f for sk in skills for f in checks.run(sk, only=rule.id)]
@@ -159,7 +165,8 @@ def test_an_uncontrolled_record_rule_is_UNPROVEN(monkeypatch: pytest.MonkeyPatch
     control must report UNPROVEN and fail the run, exactly as a SKILL.md rule does.
     """
     uncontrolled = checks.RecordRule(
-        "temp-uncontrolled", checks.ERROR, "no control pair", records.derived_status
+        "temp-uncontrolled", checks.ERROR, "no control pair", records.derived_status,
+        (records.VERIFIED_RESULT,),
     )
     monkeypatch.setattr(checks, "RECORD_RULES", checks.RECORD_RULES + (uncontrolled,))
     monkeypatch.setattr(checks, "ALL_RULES", checks.RULES + checks.RECORD_RULES)
@@ -177,7 +184,7 @@ def test_selftest_reports_a_blinded_record_rule(monkeypatch: pytest.MonkeyPatch)
     OBJECTS the loop iterates.
     """
     blinded = checks.RecordRule(
-        "derived-status", checks.ERROR, "blinded", lambda _r: iter(())
+        "derived-status", checks.ERROR, "blinded", lambda _r: iter(()), (records.VERIFIED_RESULT,),
     )
     monkeypatch.setattr(
         checks,
@@ -420,6 +427,43 @@ def test_check_records_on_a_missing_path_is_not_a_pass(tmp_path: Path) -> None:
     assert rc == 2
 
 
+def test_check_records_checks_a_single_file_path_not_just_a_directory() -> None:
+    """Red case for issue #131 item 1: `records.discover`'s `root.rglob(...)`
+    treats a FILE `root` as a directory to search within, so it silently
+    matched nothing - `check-records one.json` printed "no record found ...
+    nothing was checked" and exited 2, even though the argparse help says
+    "file or directory of records" and `cmd_check_records` already computes
+    `base = root if root.is_dir() else root.parent` for exactly this case.
+    A single bad record file must exit 1 (checked, and found an error), not
+    2 (an empty population)."""
+    rc = cli.cmd_check_records(
+        argparse.Namespace(path=str(CONTROLS / "derived-status" / "bad" / "record.json"), rule=None)
+    )
+    assert rc == 1
+
+
+def test_check_records_accepts_a_single_good_record_file() -> None:
+    """Green case beside the red one: a single file that IS clean must pass,
+    proving the fix checks the file rather than always finding an error."""
+    rc = cli.cmd_check_records(
+        argparse.Namespace(path=str(CONTROLS / "derived-status" / "good" / "record.json"), rule=None)
+    )
+    assert rc == 0
+
+
+def test_discover_loads_a_single_json_file_directly() -> None:
+    target = CONTROLS / "derived-status" / "good" / "record.json"
+    found = records.discover(target)
+    assert [r.path for r in found] == [target]
+
+
+def test_discover_on_a_non_json_file_finds_nothing() -> None:
+    # Not #131's own case - documents the boundary: only a `.json` file is
+    # read directly; anything else falls through to the directory glob,
+    # which a non-directory still yields nothing from.
+    assert records.discover(Path(__file__)) == []
+
+
 def test_check_records_states_what_it_examined_on_a_PASSING_run(capsys: pytest.CaptureFixture[str]) -> None:
     """The line must appear on the green, which is the run nobody reads carefully."""
     cli.cmd_check_records(
@@ -596,6 +640,35 @@ def test_check_records_runs_a_selected_bundle_rule_on_a_bundle() -> None:
     """Negative control for the refusal above: with a bundle present it runs."""
     bad = CONTROLS / "lineage" / "bad"
     assert cli.cmd_check_records(argparse.Namespace(path=str(bad), rule="lineage")) == 1
+
+
+def test_check_records_refuses_a_record_rule_with_no_applicable_kind() -> None:
+    """Red case for issue #131 item 2: `--rule artifact-digest` (reads only
+    `artifact-manifest` records) over a population of ONLY `verified-result`
+    records used to run anyway - `artifact_digest`'s own `record.kind !=
+    ARTIFACT_MANIFEST` guard silently declined every one of them, and
+    `cmd_check_records` reported "0 error(s)", indistinguishable from a
+    population that was genuinely examined and found clean. Must not exit 0."""
+    only_verified_results = CONTROLS / "derived-status" / "good"
+    rc = cli.cmd_check_records(argparse.Namespace(path=str(only_verified_results), rule="artifact-digest"))
+    assert rc != 0, "a record rule with nothing of its own kind to read reported success"
+
+
+def test_check_records_runs_a_selected_record_rule_on_its_own_kind() -> None:
+    """Negative control for the refusal above: with an applicable record
+    present it runs normally, and reports how many records were applicable."""
+    bad = CONTROLS / "derived-status" / "bad"
+    rc = cli.cmd_check_records(argparse.Namespace(path=str(bad), rule="derived-status"))
+    assert rc == 1
+
+
+def test_check_records_reports_the_applicable_population_under_a_rule(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    good = CONTROLS / "derived-status" / "good"
+    cli.cmd_check_records(argparse.Namespace(path=str(good), rule="derived-status"))
+    out = capsys.readouterr().out
+    assert "derived-status-applicable" in out
 
 
 def test_check_records_says_when_records_were_bound_to_no_ledger(

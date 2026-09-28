@@ -314,7 +314,7 @@ def test_check_manifest_control_dangling_entry_reds() -> None:
     """The committed bad/dangling-entry control must still fire (issue #53
     review: /codex:code_review found the committed controls unreferenced by
     any test)."""
-    fixture = CONTROLS / "check-manifest" / "bad" / "dangling-entry"
+    fixture = CONTROLS / "manifest-entry" / "bad" / "dangling-entry"
     manifest_path = fixture / ".claude-plugin" / "plugin.json"
     rc = cli.cmd_check(
         argparse.Namespace(
@@ -326,7 +326,7 @@ def test_check_manifest_control_dangling_entry_reds() -> None:
 
 def test_check_manifest_control_clean_is_green() -> None:
     """The committed good/clean control must stay green."""
-    fixture = CONTROLS / "check-manifest" / "good" / "clean"
+    fixture = CONTROLS / "manifest-entry" / "good" / "clean"
     manifest_path = fixture / ".claude-plugin" / "plugin.json"
     rc = cli.cmd_check(
         argparse.Namespace(
@@ -334,6 +334,58 @@ def test_check_manifest_control_clean_is_green() -> None:
         )
     )
     assert rc == 0
+
+
+def _manifest_findings(rule: checks.ManifestRule, where: Path) -> list[checks.Finding]:
+    out: list[checks.Finding] = []
+    for case in sorted(p for p in where.iterdir() if p.is_dir()):
+        case_findings, _load_error = checks.run_manifest(case, only=rule.id)
+        out.extend(case_findings)
+    return out
+
+
+@pytest.mark.parametrize("rule", checks.MANIFEST_RULES, ids=lambda r: r.id)
+def test_every_manifest_rule_discriminates(rule: checks.ManifestRule) -> None:
+    bad_dir, good_dir = CONTROLS / rule.id / "bad", CONTROLS / rule.id / "good"
+    assert bad_dir.is_dir() and good_dir.is_dir(), f"{rule.id} ships no committed control"
+    bad, good = _manifest_findings(rule, bad_dir), _manifest_findings(rule, good_dir)
+    assert bad, f"{rule.id} is silent on its known-bad input"
+    assert not good, f"{rule.id} fired on its known-good input: {good[0].detail}"
+
+
+def test_manifest_entry_is_reachable_by_selftest() -> None:
+    """Red case for issue #131 item 3: `cmd_check` used to build its
+    `manifest-entry` `Finding` straight in `cli.py`, entirely outside
+    `Rule`/`RecordRule`/`BundleRule` and the registries `cmd_selftest`
+    iterates - so `selftest` could report "N/N rules discriminate" while
+    this specific check was never proven able to fail at all. Its committed
+    control (`controls/manifest-entry/{bad,good}`, renamed from
+    `controls/check-manifest/*` to match every other rule's `controls/
+    <rule.id>/` convention) existed and was exercised only by pytest
+    directly. `manifest-entry` must now be a real member of `ALL_RULES`,
+    reported by `selftest` exactly like every other rule."""
+    assert any(r.id == "manifest-entry" for r in checks.ALL_RULES)
+    rc = cli.cmd_selftest(argparse.Namespace(controls=str(CONTROLS)))
+    assert rc == 0
+
+
+def test_selftest_reports_a_blinded_manifest_rule(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The negative control on the manifest-rule arm's BLIND detection,
+    mirroring `test_selftest_reports_a_blinded_record_rule` - the same
+    guarantee `ci/negative-control.sh` exercises generically via `skillc
+    rules`, pinned here for this specific rule too."""
+    blinded = checks.ManifestRule("manifest-entry", checks.ERROR, "blinded", lambda _m: iter(()))
+    monkeypatch.setattr(
+        checks,
+        "MANIFEST_RULES",
+        tuple(blinded if r.id == "manifest-entry" else r for r in checks.MANIFEST_RULES),
+    )
+    monkeypatch.setattr(checks, "ALL_RULES", checks.RULES + checks.RECORD_RULES
+                         + checks.BUNDLE_RULES + checks.MANIFEST_RULES)
+
+    rc = cli.cmd_selftest(argparse.Namespace(controls=str(CONTROLS)))
+
+    assert rc == 1
 
 
 def test_parse_frontmatter_nested_mapping() -> None:
