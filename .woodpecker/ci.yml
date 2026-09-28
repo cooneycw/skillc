@@ -20,7 +20,12 @@ steps:
       # --locked refuses a stale uv.lock; --no-sync stops each run re-locking.
       - uv sync --locked --extra dev
       - uv run --no-sync skillc selftest
-      - uv run --no-sync pytest
+      # -rA: every outcome, not just failures, survives to the log even when
+      # the run as a whole passes. --junitxml: a machine-readable record of
+      # the same run, kept as a step artifact so a one-off red (#148 - flow:auto
+      # #12's flaky test, never captured) can be read after the fact instead of
+      # only reproduced-or-not.
+      - uv run --no-sync pytest -rA --junitxml=reports/pytest-junit.xml
       - uv run --no-sync ruff check .
       - uv run --no-sync mypy
     environment:
