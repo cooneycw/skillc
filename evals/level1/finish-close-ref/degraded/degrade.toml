@@ -1,0 +1,248 @@
+# Facts about five files in claude-power-pack at the pinned revision, never
+# their text (CPP's LICENSE "## Scope" does not cover codex/skills/ - see
+# DEGRADATION.md). `prepare.py`, given a real checkout, turns this into the
+# degraded arm and verifies every fact below against it before writing
+# anything. Line numbers are 1-indexed and refer to the file AT THE PINNED
+# REVISION; `delete_ranges` are inclusive `[start, end]` pairs.
+
+[source]
+repo = "cooneycw/claude-power-pack"
+revision = "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b"
+# Matches a STATEMENT of the negated/incidental-closing-keyword rule: the
+# removed guard's own identifiers, its issue number, and the specific prose
+# phrasing the three reference.md blocks and the two scripts actually use.
+# Deliberately not a bare "negat.*clos" co-occurrence - that would also fire
+# on the retained incidental-close guard's own, unrelated negation-awareness
+# code (see each script location's `residual_lines`).
+rule_patterns = [
+    "guard_negated_close_keywords",
+    "ALLOW_NEGATED_CLOSE",
+    "--allow-negated-close",
+    "#726",
+    "negated (?:and|or) incidental",
+    "negated or incidental closing keyword",
+    "does not close #",
+    "NEGATED close/fix/resolve",
+    "a negated (?:close|closing)",
+    "negated issue-closing keyword",
+    "Negated close keywords still close issues",
+    "Negated issue-closing keywords",
+    # The GENERAL fact (broader than "negated"): a keyword next to #N closes
+    # regardless of grammatical role. Derived from the classifier's own
+    # header comment and the retained guard's own header paragraph - both
+    # deleted below, so these two patterns hit the ORIGINAL and miss the
+    # PREPARED text.
+    "regardless of what precedes the keyword",
+    "does not care that the keyword",
+]
+
+# --------------------------------------------------------------------------
+# reference.md: one prose block explaining the rule (flow-finish only has
+# this one - it does not invoke the merge itself). flow-merge and flow-auto
+# each ALSO carry a MERGE_RC/exit-code bullet list further down, documenting
+# exits 5 (negated) and 7+8 (incidental) with exit 6 (base-move, unrelated)
+# preserved in between - two non-adjacent range groups.
+
+[[locations]]
+skill = "flow-finish"
+path = "reference.md"
+original_sha256 = "e5e78dd36892b5461aef49734003841be6fedcb82682735c1b8f0a4043cd0ef6"
+delete_ranges = [[307, 352]]
+result_sha256 = "079934985db252f68ddeac84353b9f8b39b359cc1648193b9b11fee5d6d0c977"
+
+[[locations]]
+skill = "flow-merge"
+path = "reference.md"
+original_sha256 = "03078551b0a0823665ab4e46d7619d2d3cfe4c9df0e741450e8cbe760977cb64"
+delete_ranges = [[107, 127], [167, 172], [179, 189]]
+result_sha256 = "7ea6ae1b14ff6a51b72cb9800be1ed8b22b3ed36e0f47c87798d8ea422c750b6"
+# The exit-6 (base-move) bullet, preserved between the deleted exit-5 and
+# exit-7/8 ranges - proves a wider range did not swallow it too.
+must_still_contain = [
+    "bf1103bb37a39d27ff1391989ab11392738f6482bdc58cb516817d7d6f07cf1e",
+]
+
+[[locations]]
+skill = "flow-auto"
+path = "reference.md"
+original_sha256 = "675caeff9c4730920e2be8093348448bfafe67ed5a91db7bacf905c5da8e1408"
+delete_ranges = [[849, 887], [1498, 1503], [1510, 1519]]
+result_sha256 = "15b3133822ad3479dda65026d8773b41c44837f4e97c17e297069347db19da6b"
+must_still_contain = [
+    "32eec5550cac88c38bb252bc27ec3304635d695a94e9e0f5a219b76a4ba737cb",
+]
+
+# --------------------------------------------------------------------------
+# scripts/gh-pr-merge.sh: byte-identical under flow-merge and flow-auto (same
+# original_sha256/result_sha256). Deletes: the two flag-doc paragraphs
+# (negated + incidental, [141,148]) and the two top-of-file header prose
+# blocks ([177,209]) that explain the rule to a reader; the exit-5 and
+# exit-7/8 doc-comment entries ([280,284],[289,299]) with exit 6 preserved
+# between them; the ALLOW_NEGATED_CLOSE variable and its CLI case-parsing
+# block ([333,333],[343,346]); guard_negated_close_keywords itself, header
+# comment and single call site ([979,1061],[1409,1409]); and, in the
+# RETAINED _is_incidental_close_match/guard_incidental_close_keywords
+# region, every PROSE block that states the rule while leaving every CODE
+# line untouched - the classifier's own header comment ([1063,1076]), its
+# "ownership" paragraph ([1100,1104]), and the retained guard's own header
+# paragraph ([1149,1154]). guard_incidental_close_keywords itself, and every
+# line of guard code around these deleted comments, is left fully intact
+# and still called - it is a live, separate control, not documentation, and
+# `expected_removed_code_lines` below is the check that no code line was
+# swallowed alongside the prose.
+#
+# `replacements` strips the removed flag's token from three shared usage
+# strings without touching the two retained flags on the same line.
+#
+[[locations]]
+skill = "flow-merge"
+path = "scripts/gh-pr-merge.sh"
+original_sha256 = "c3d827062604e478f9a4ebca289d26d9185022cb723f67303fe41e93878aa600"
+delete_ranges = [[141, 148], [177, 209], [280, 284], [289, 299], [333, 333], [343, 346], [979, 1061], [1409, 1409], [1063, 1076], [1100, 1104], [1149, 1154]]
+replacements = [
+    { line = 131, old = "[--allow-negated-close] ", new = "", line_sha256 = "604ef17f7986b8e4a6b0a1119d76d7057ab5d0276fa590ccca7bb8cec565d526" },
+    { line = 361, old = "[--allow-negated-close] ", new = "", line_sha256 = "0012b06a308c04e6655c354e472e4ae89072558e3809aae44c3e42e9639c9706" },
+    { line = 375, old = "[--allow-negated-close] ", new = "", line_sha256 = "6a2ca42cba0a52eddaf096ca2af6cdd8cd3206ddb9bdc48239384984da81e94c" },
+]
+result_sha256 = "4e9a4b706beaff6aa62ab7b3d31ccfcc9a42a121fb633e793ea376ef2aeb1292"
+# The two lines rule_patterns still matches after preparation - both
+# (a) harmless per DEGRADATION.md's honesty check: an ownership pointer
+# citing an issue number, never a statement of what either guard does.
+residual_lines = [
+    "084ebfff313a121cc77881e0ad047d2023cbbd9ae028cb7ba82d8358dd0fb339",  # "...passes --allow-negated-close,"
+    "03ae1563d43d422698ff68575146e3bceffb441e1d0ead40ff7ece15dd3b53d9",  # "...belongs to the #726 guard, so"
+]
+# Every non-comment, non-blank line delete_ranges removes - the removed
+# guard's real code, its call site, and its CLI flag/case-parsing lines -
+# named here so a range that swallows anything else is refused even when
+# every other check above would not have noticed.
+expected_removed_code_lines = [
+    "51a990ed101a03b9cd5257436a6a24b1a1949ef485dd363e2a06fc6a75249fab",
+    "48bc6a064b89c439f7a5811c6e4bfa134241e05d722f9cadfb0613716ba771aa",
+    "71fb131e494d6365ab300abdf5c5f01e4b8e22a2f23612a577fb5b43c05211d5",
+    "2108351109ba9dab0a4e0b926695b96178c7bba52c29676253f6498f2ec44c79",
+    "e22c1de34de83d9d3f9a2a083b2343cedb4b925b6a8cd7b2cea3458e6e694b41",
+    "c1f09869975e96ef406730b798434bbf0b58ba6cd92d4780185d441aa2f47182",
+    "a7276a708baba7af333e64c13c300574c50021b87e4d988734cb9aed9a2574dc",
+    "dfeab7eba5d3a3a31a65b2695d0fbecafc6dc8fda9823dbb9c06af0d69b71ade",
+    "a399e4b151bcc9892a3bd75c2bbcaa192d198e6390165e5774e13fbd63c038e1",
+    "24f3d04a302c7235d046465485ac8826884c69e5d497494044c1602d6a404302",
+    "27e5a8960a7da22fdeba08550c3a430d0c6cb8dc750ee34d439bae074c4617e3",
+    "c8ba6069e40169942b1711baaab519e035a5062b09fae65b9e1c077eb4007dd9",
+    "166f298de71d2d673967e44e8986fbcb727037310c5c02462191da1a88cb3b4b",
+    "cdbd5b9cad0a49d70a5b04ca025d12ae5c83bb69d2ead0bef668f5e34429f6ca",
+    "1a54c257f6df6408b07b2535fb70af50acf45db5465a945685a211cf3cc6dc6b",
+    "a5a78db4687b4f9731cc365824c3daf02ae77dd4496a2323d3efc20b30450091",
+    "d934aadfcea83c004b7d2c1712e22f718702e4aa6d259d157b8a3d9097e35294",
+    "33cb50afae860effb117ee9c0b7a70126824f5c0f6a527c5c25f88061e423d26",
+    "4278afb8ed46707de3c36e76dc9591fa2fbc2e3abdce3f81f37633daf4e21f5d",
+    "a0bc127f6e2f80296b123deedd3138c918e69ea33e0e77704c054dd28a8209f1",
+    "4e7d62421f09cdd26a9d7acf1ca206860f18ea8fa726490750d102193560f72d",
+    "28273ce55557cbbf5db3e772a33499b9dac4941f1cb5fca07bff2c84d47cd399",
+    "4dc38404e4df366323ff0549fa065ff050441aa2c4d917ce1303fb1b4ef377fa",
+    "64c5c47a5975f3b8a2753a30b42a496c5c162db9c04f7fdda79d44d586f88e5c",
+    "10b0851bac0b8b2107c5701ce7893418b60901b810011dbcc093147ecf5e5032",
+    "2ef542987665a2170f34d43f3f25e88610c757fc0a01dae22ce38e7ef024a5ae",
+    "de4e0184bf372c50968d2a6cec13106f06cf901e234f9e41c67de1b99111d0cf",
+    "12c7c9368e546c52e7a44176e0f829f54beb8a501afef41c572643c185be33ee",
+    "296934f5039d0eaa259afcae3c0a080be17108f5c6a2855b40dd80cb35c56983",
+    "9b94ad1c4edbafabe569446df741a3a93deccc282e35b46f99abd16e48ff0f8d",
+    "d0abcacc04d61db3ed844753211654532d8857200b5c974b913584132dede222",
+    "35e32c11f65d930ef2fc609447652309a235e56df82970477e9442863fadeb34",
+    "ff6385270c913d0721586563bdf4172b40c4e36ba9d8c5165f8682fc2c08b278",
+    "cdefc9a309f3f2596e446c2035fbd99a930c782295311b3c8115999569786ac6",
+    "39708b5a80f2ff522f58e507b734b071be0422c7826a5a343f88d3d383ae80a0",
+    "570b50199c869013ea3c73d680c13a13516082b5803bf2c481933b484cb963a6",
+    "9f8da3893fec7ab688b5142d3eda82cffc2e78cfd3e958e0983b7a2a4f1afcc2",
+    "9b084bb0deb8103832e60e8d3eb602d02cec95b8eb8acd5c6b9c1277b31d4a24",
+    "93de43f4f2ab1ffceb3e160f034476f7466101a276d8bcb9f1dba5a800dd592c",
+    "0d2c2aede925d156bc18ff486387401a481fa88b425c32e2bd44fc7718514d81",
+    "60faf1ec4dc8712306f7a8cddb284fdaa6ed04da3a7a6a67a32bf47dcf357f70",
+    "974eedd9737af7fea135d79a47655201a08b89eca98bef8c359bde0ccc92cb40",
+    "6a4faccb982e2a577153fc87f4836e302f28024db3252fa3ec44fc47d9aa1a75",
+    "b37c900ec5ded7d4d3cdbdb0c5981cd0798a1d3ccaa05a73c6ca1a65049e9d8e",
+    "b80df2ba032901f2719415625cefa4a4a224fa3cdaeff4f8c5663f3bfaec4fe6",
+    "67a2173d1a270f17bf48b1ede3a1963d8233a29cf585c4fb5c46aa7cbb3fd3ac",
+    "7821ce8e7a7ac3830081d6b52b02a9711235fcc95ab629b1abaf1f971e9f96d7",
+    "baedd354c3140b5c7273513de5f0e1c384a2dc577d6d4da1947a48128a38900b",
+    "a2988380dca76b6c9f15f9223cec24b8dc16e5411837ed90348a91795c69010f",
+    "d10b36aa74a59bcf4a88185837f658afaf3646eff2bb16c3928d0e9335e945d2",
+    "704777ef59564f4a271b140c4f844961a3274e13d649f59cefedfc511bf30f84",
+]
+must_still_contain = [
+    "eae1f1bb570226ac65a881bc067b1b739648827fbee0d76909c2329b72090650",  # guard_incidental_close_keywords() {
+    "496cf6ca2fb32049194026d0b85949bbbed6234c11715c3976ee67573b37cce2",  # its call site
+]
+
+[[locations]]
+skill = "flow-auto"
+path = "scripts/gh-pr-merge.sh"
+original_sha256 = "c3d827062604e478f9a4ebca289d26d9185022cb723f67303fe41e93878aa600"
+delete_ranges = [[141, 148], [177, 209], [280, 284], [289, 299], [333, 333], [343, 346], [979, 1061], [1409, 1409], [1063, 1076], [1100, 1104], [1149, 1154]]
+replacements = [
+    { line = 131, old = "[--allow-negated-close] ", new = "", line_sha256 = "604ef17f7986b8e4a6b0a1119d76d7057ab5d0276fa590ccca7bb8cec565d526" },
+    { line = 361, old = "[--allow-negated-close] ", new = "", line_sha256 = "0012b06a308c04e6655c354e472e4ae89072558e3809aae44c3e42e9639c9706" },
+    { line = 375, old = "[--allow-negated-close] ", new = "", line_sha256 = "6a2ca42cba0a52eddaf096ca2af6cdd8cd3206ddb9bdc48239384984da81e94c" },
+]
+result_sha256 = "4e9a4b706beaff6aa62ab7b3d31ccfcc9a42a121fb633e793ea376ef2aeb1292"
+residual_lines = [
+    "084ebfff313a121cc77881e0ad047d2023cbbd9ae028cb7ba82d8358dd0fb339",  # "...passes --allow-negated-close,"
+    "03ae1563d43d422698ff68575146e3bceffb441e1d0ead40ff7ece15dd3b53d9",  # "...belongs to the #726 guard, so"
+]
+expected_removed_code_lines = [
+    "51a990ed101a03b9cd5257436a6a24b1a1949ef485dd363e2a06fc6a75249fab",
+    "48bc6a064b89c439f7a5811c6e4bfa134241e05d722f9cadfb0613716ba771aa",
+    "71fb131e494d6365ab300abdf5c5f01e4b8e22a2f23612a577fb5b43c05211d5",
+    "2108351109ba9dab0a4e0b926695b96178c7bba52c29676253f6498f2ec44c79",
+    "e22c1de34de83d9d3f9a2a083b2343cedb4b925b6a8cd7b2cea3458e6e694b41",
+    "c1f09869975e96ef406730b798434bbf0b58ba6cd92d4780185d441aa2f47182",
+    "a7276a708baba7af333e64c13c300574c50021b87e4d988734cb9aed9a2574dc",
+    "dfeab7eba5d3a3a31a65b2695d0fbecafc6dc8fda9823dbb9c06af0d69b71ade",
+    "a399e4b151bcc9892a3bd75c2bbcaa192d198e6390165e5774e13fbd63c038e1",
+    "24f3d04a302c7235d046465485ac8826884c69e5d497494044c1602d6a404302",
+    "27e5a8960a7da22fdeba08550c3a430d0c6cb8dc750ee34d439bae074c4617e3",
+    "c8ba6069e40169942b1711baaab519e035a5062b09fae65b9e1c077eb4007dd9",
+    "166f298de71d2d673967e44e8986fbcb727037310c5c02462191da1a88cb3b4b",
+    "cdbd5b9cad0a49d70a5b04ca025d12ae5c83bb69d2ead0bef668f5e34429f6ca",
+    "1a54c257f6df6408b07b2535fb70af50acf45db5465a945685a211cf3cc6dc6b",
+    "a5a78db4687b4f9731cc365824c3daf02ae77dd4496a2323d3efc20b30450091",
+    "d934aadfcea83c004b7d2c1712e22f718702e4aa6d259d157b8a3d9097e35294",
+    "33cb50afae860effb117ee9c0b7a70126824f5c0f6a527c5c25f88061e423d26",
+    "4278afb8ed46707de3c36e76dc9591fa2fbc2e3abdce3f81f37633daf4e21f5d",
+    "a0bc127f6e2f80296b123deedd3138c918e69ea33e0e77704c054dd28a8209f1",
+    "4e7d62421f09cdd26a9d7acf1ca206860f18ea8fa726490750d102193560f72d",
+    "28273ce55557cbbf5db3e772a33499b9dac4941f1cb5fca07bff2c84d47cd399",
+    "4dc38404e4df366323ff0549fa065ff050441aa2c4d917ce1303fb1b4ef377fa",
+    "64c5c47a5975f3b8a2753a30b42a496c5c162db9c04f7fdda79d44d586f88e5c",
+    "10b0851bac0b8b2107c5701ce7893418b60901b810011dbcc093147ecf5e5032",
+    "2ef542987665a2170f34d43f3f25e88610c757fc0a01dae22ce38e7ef024a5ae",
+    "de4e0184bf372c50968d2a6cec13106f06cf901e234f9e41c67de1b99111d0cf",
+    "12c7c9368e546c52e7a44176e0f829f54beb8a501afef41c572643c185be33ee",
+    "296934f5039d0eaa259afcae3c0a080be17108f5c6a2855b40dd80cb35c56983",
+    "9b94ad1c4edbafabe569446df741a3a93deccc282e35b46f99abd16e48ff0f8d",
+    "d0abcacc04d61db3ed844753211654532d8857200b5c974b913584132dede222",
+    "35e32c11f65d930ef2fc609447652309a235e56df82970477e9442863fadeb34",
+    "ff6385270c913d0721586563bdf4172b40c4e36ba9d8c5165f8682fc2c08b278",
+    "cdefc9a309f3f2596e446c2035fbd99a930c782295311b3c8115999569786ac6",
+    "39708b5a80f2ff522f58e507b734b071be0422c7826a5a343f88d3d383ae80a0",
+    "570b50199c869013ea3c73d680c13a13516082b5803bf2c481933b484cb963a6",
+    "9f8da3893fec7ab688b5142d3eda82cffc2e78cfd3e958e0983b7a2a4f1afcc2",
+    "9b084bb0deb8103832e60e8d3eb602d02cec95b8eb8acd5c6b9c1277b31d4a24",
+    "93de43f4f2ab1ffceb3e160f034476f7466101a276d8bcb9f1dba5a800dd592c",
+    "0d2c2aede925d156bc18ff486387401a481fa88b425c32e2bd44fc7718514d81",
+    "60faf1ec4dc8712306f7a8cddb284fdaa6ed04da3a7a6a67a32bf47dcf357f70",
+    "974eedd9737af7fea135d79a47655201a08b89eca98bef8c359bde0ccc92cb40",
+    "6a4faccb982e2a577153fc87f4836e302f28024db3252fa3ec44fc47d9aa1a75",
+    "b37c900ec5ded7d4d3cdbdb0c5981cd0798a1d3ccaa05a73c6ca1a65049e9d8e",
+    "b80df2ba032901f2719415625cefa4a4a224fa3cdaeff4f8c5663f3bfaec4fe6",
+    "67a2173d1a270f17bf48b1ede3a1963d8233a29cf585c4fb5c46aa7cbb3fd3ac",
+    "7821ce8e7a7ac3830081d6b52b02a9711235fcc95ab629b1abaf1f971e9f96d7",
+    "baedd354c3140b5c7273513de5f0e1c384a2dc577d6d4da1947a48128a38900b",
+    "a2988380dca76b6c9f15f9223cec24b8dc16e5411837ed90348a91795c69010f",
+    "d10b36aa74a59bcf4a88185837f658afaf3646eff2bb16c3928d0e9335e945d2",
+    "704777ef59564f4a271b140c4f844961a3274e13d649f59cefedfc511bf30f84",
+]
+must_still_contain = [
+    "eae1f1bb570226ac65a881bc067b1b739648827fbee0d76909c2329b72090650",
+    "496cf6ca2fb32049194026d0b85949bbbed6234c11715c3976ee67573b37cce2",
+]
