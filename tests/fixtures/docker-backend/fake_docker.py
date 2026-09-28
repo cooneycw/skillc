@@ -56,17 +56,23 @@ not a docker clone:
     exec [-i] -w WORKDIR -- NAME ARGV...
         Requires NAME's state to be "running" (else exit 1, "No such
         container" or "is not running"). Runs ARGV as a real subprocess
-        (its own new session, so a `kill` can `os.killpg()` the whole tree)
-        with cwd = NAME's fsroot directory at WORKDIR, and env = PATH plus
-        whatever `-e` pairs `run -d` recorded for NAME - simulating that
-        `docker exec` runs with the CONTAINER's own declared environment,
-        never the `docker exec` CLI client's own ambient environment. Records
-        the child's pid on NAME's state file for the duration of the call -
-        `kill` (a SEPARATE OS process, sharing nothing but this state file)
-        reads it back to signal the right process for real, since a bare
-        status flip would leave a real timed-out subject running forever
-        while the backend believed it had stopped. `-i` passes this fake's
-        own stdin through to ARGV, exactly as a real `docker exec -i` would.
+        (its own new session, so a teardown can `os.killpg()` the whole
+        tree) with cwd = NAME's fsroot directory at WORKDIR, and env = PATH
+        plus whatever `-e` pairs `run -d` recorded for NAME - simulating
+        that `docker exec` runs with the CONTAINER's own declared
+        environment, never the `docker exec` CLI client's own ambient
+        environment. Records the child's pid on NAME's state file for the
+        duration of the call - both `kill` and `rm -f` (each a SEPARATE OS
+        process, sharing nothing but this state file) read it back to
+        signal the right process group for real: `kill` with SIGKILL
+        always, matching a real daemon's kernel-level PID-namespace
+        teardown once the container's own PID 1 dies (issue #158 - a real
+        `docker kill` never forwards its OWN requested signal to a
+        separately exec'd session, but does not leave it running either);
+        `rm -f` the same way, for a caller that removes a container
+        without a preceding `kill` at all (see `kill`/`rm` below). `-i`
+        passes this fake's own stdin through to ARGV, exactly
+        as a real `docker exec -i` would.
         Any ARGV element that is `/work` or starts with `/work/` is rewritten
         to NAME's fsroot equivalent before launching (`_remap_absolute`) -
         `cwd=` alone resolves a RELATIVE path but does nothing for an
@@ -77,12 +83,25 @@ not a docker clone:
         Exits with ARGV's own exit code, or 127 if ARGV's own binary cannot
         be found (docker's own convention for that case).
     kill [--signal SIG] NAME
-        Signals the pid recorded by a still-running `exec` (`os.killpg`,
-        `SIG` or `SIGKILL` if unspecified) and sets NAME's status to
-        "exited", returning 0 - UNLESS a `.stuck-NAME` sentinel exists, in
-        which case it reports success without signaling anything or changing
-        the state (simulating a container that ignores the signal, a daemon
-        lie `confirm_stopped()` must not trust).
+        Fidelity-matched to real Docker (issue #158). A real `docker kill`
+        reaches only the CONTAINER's own PID-1 (`tini` wrapping
+        `sleep infinity`, which this fake has no real subprocess for - see
+        `run -d` above); it never forwards a signal to a separately exec'd
+        session directly. But a real daemon does not leave that session
+        running either: PID 1 dying (from a forwarded TERM, or outright
+        under an unblockable KILL) stops the container, and the KERNEL
+        sigkills every other process left in its PID namespace, exec
+        sessions included. So NAME's status flips to "exited" AND the pid a
+        still-running `exec` recorded is `os.killpg`'d with SIGKILL -
+        always SIGKILL, never the requested `SIG`, since the subject's
+        death here is the kernel's own PID-namespace teardown, not a
+        forwarded signal (the subject genuinely never receives a graceful
+        TERM - that is #158's real bug and stands). UNLESS a `.stuck-NAME`
+        sentinel exists, in which case NEITHER the status nor the subject
+        changes (simulating a container that ignores the signal entirely, a
+        daemon lie `confirm_stopped()` must not trust). `rm -f` (below)
+        performs the same reaping for a caller that removes a container
+        without a preceding `kill` at all.
     cp SRC DEST
         `SRC == "-"` (what `DockerBackend.install()` uses): reads a tar
         stream from stdin and extracts it into DEST (`NAME:PATH`) - this is
@@ -111,10 +130,17 @@ not a docker clone:
         sentinel exists in the state dir, in which case it exits 1
         (simulating an unpullable/unknown image).
     rm -f NAME
-        Deletes the state file and NAME's fsroot directory, and exits 0.
-        EXCEPT: if a `.stuck-NAME` sentinel exists in the state dir, exits 0
-        WITHOUT deleting either - simulating a daemon that reports successful
-        removal while the container is still there. The fixture's own
+        Signals the process GROUP recorded by a still-running `exec`
+        (`os.killpg`, `SIGKILL` - real container removal does not offer a
+        graceful option), same as `kill` (above) already does, then deletes
+        the state file and NAME's fsroot directory, and exits 0. Real
+        container removal reaps everything still inside it too, so this is
+        the backstop for a caller that removes a container without a
+        preceding `kill` at all (issue #158). EXCEPT: if a `.stuck-NAME`
+        sentinel exists in the state dir, exits 0
+        WITHOUT signaling, deleting, or changing anything - simulating a
+        daemon that reports successful removal while the container (and
+        anything still running inside it) is still there. The fixture's own
         negative control: proves a caller's post-rm `inspect` (never trusting
         rm's exit code alone) actually catches this.
     version --format {{.Server.Version}}
@@ -355,6 +381,16 @@ def cmd_image(state_dir: Path, rest: list[str]) -> int:
 
 
 def cmd_rm(state_dir: Path, rest: list[str]) -> int:
+    """Real container removal reaps everything still running inside it,
+    exec'd sessions included - `cmd_kill` (issue #158) already does this
+    same `os.killpg`-with-SIGKILL reaping too, matching a real daemon's own
+    kernel-level PID-namespace teardown once a `kill`'d container's PID 1
+    dies. This is the backstop for a caller that removes a container
+    WITHOUT a preceding `kill` at all (`destroy()` is always called, but
+    not every test path drives a timeout/cancellation through `_stop()`
+    first) - without it, a subject that never received any `kill` call
+    would outlive its "removed" container, the same class of leak `kill`
+    itself exists to prevent."""
     ref = rest[-1]
     name = _resolve_name(state_dir, ref) or ref
     path = _state_file(state_dir, name)
@@ -363,24 +399,50 @@ def cmd_rm(state_dir: Path, rest: list[str]) -> int:
     if not path.is_file():
         print("Error: No such container: " + ref, file=sys.stderr)
         return 1
+    data = json.loads(path.read_text(encoding="utf-8"))
+    pid = data.get("exec_pid")
+    if isinstance(pid, int):
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
     path.unlink()
     shutil.rmtree(_container_root(state_dir, name), ignore_errors=True)
     return 0
 
 
 def cmd_kill(state_dir: Path, rest: list[str]) -> int:
-    """Unlike `run`/`exec`, a `kill` invocation is a SEPARATE OS process from
-    whichever `exec` is still blocked in its own `subprocess.run` - there is
-    no shared memory between them, only the state file. So killing for real
-    means reading the exec'd process's own pid back out of the state file
-    (`cmd_exec` records it there before waiting) and signaling it directly -
-    a status flip alone would leave a real timed-out subject running forever
-    while `DockerBackend.execute()` believed it had stopped."""
-    sig = signal.SIGKILL
-    if "--signal" in rest:
-        idx = rest.index("--signal")
-        raw = rest[idx + 1]
-        sig = getattr(signal, raw if raw.startswith("SIG") else f"SIG{raw}", signal.SIGKILL)
+    """Fidelity-matched to real Docker (issue #158, corrected once - see git
+    history for the intermediate "pure status flip" version this replaces,
+    which was wrong in the other direction). `docker kill` reaches only the
+    CONTAINER's own placeholder/PID-1 process (`tini`, wrapping
+    `sleep infinity` - see `run -d`'s own docstring for why this fake has no
+    real PID-1 subprocess to signal), never a separately exec'd session
+    directly - but a real daemon does NOT leave that exec'd session running
+    either: when PID 1 exits (TERM forwarded to `sleep`, which exits, then
+    `tini` exits - or PID 1 dies outright under an unblockable SIGKILL), the
+    container stops and the KERNEL sigkills every other process left in its
+    PID namespace, exec sessions included. So the subject never receives a
+    graceful TERM (that part of the earlier fix stands - #158's whole
+    premise), but it does not survive `docker kill` either, whatever signal
+    was requested: it dies by SIGKILL, as a side effect of the container's
+    own PID-1 dying, not because anything forwarded a signal to it on
+    purpose. Modeling `kill` as a bare status flip left a fake where the
+    container reads "stopped" while the subject keeps running - a new blind
+    spot a real daemon does not have, and one a caller could not tell apart
+    from #158's actual bug by reading `confirm_stopped()` alone.
+
+    So: flip status to "exited" AND `os.killpg` the recorded `exec_pid` with
+    SIGKILL - never the requested `--signal` value, since the subject's
+    death here is the kernel's PID-namespace teardown, not a forwarded
+    signal. `--signal` is still accepted (argv-shape parity with real
+    `docker kill`) but never changes what signal actually reaches the
+    subject. A `.stuck-NAME` sentinel still short-circuits all of this
+    (simulating a container that ignores the signal entirely, a daemon lie
+    `confirm_stopped()` must not trust) - neither the status nor the
+    subject changes. `cmd_rm`'s own docstring covers the separate,
+    still-needed removal-time reaping for a `rm -f` a caller issues without
+    a preceding `kill` at all."""
     name = rest[-1] if rest else ""
     path = _state_file(state_dir, name)
     if not path.is_file():
@@ -392,7 +454,7 @@ def cmd_kill(state_dir: Path, rest: list[str]) -> int:
     pid = data.get("exec_pid")
     if isinstance(pid, int):
         try:
-            os.killpg(pid, sig)
+            os.killpg(pid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError):
             pass
     _rewrite_state(state_dir, name, lambda d: {**d, "status": "exited"})
