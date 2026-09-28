@@ -1,0 +1,7 @@
+{
+ "id": "finish-close-ref",
+ "revision": "1",
+ "criteria": ["artifact-present", "issue-ref", "stays-open", "no-closing-match"],
+ "probe": {"file": "probe.py", "inputs": "inputs.json", "timeout": 30},
+ "judge": {"file": "grade_ref.py", "timeout": 60}
+}
