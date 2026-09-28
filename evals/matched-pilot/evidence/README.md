@@ -86,10 +86,11 @@ n = 3 this is a description of the sample, not an inference about the pack.
 
 Three things are clearer than the timing:
 
-- **The pack cost context, and the agent didn't use it.** Treatment attempts
+- **The pack cost context, and no use of it was detected.** Treatment attempts
   read about 12,000-25,000 more input tokens than baseline (the installed
-  skill listing), and no attempt invoked a skill by the codex heuristic. On a
-  task this small, the pack is overhead the agent did not use.
+  skill listing). The codex heuristic detected no skill invocation, which is
+  not proof of non-use (corrected 2026-09-28, #147 review): it only sees a
+  `SKILL.md` read through an `exec` call.
 - **Setup takes longer with the pack installed** (9.8-14.7 s against
   0.6-4.4 s). This is the cost of delivering 273 skill files into the
   container, and it is a harness cost, not an agent cost.
