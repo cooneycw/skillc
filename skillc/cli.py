@@ -1414,6 +1414,84 @@ def cmd_leak_check(args: argparse.Namespace) -> int:
     return 1 if result.findings else 0
 
 
+def _parse_remove_file(spec: str) -> tuple[str, str]:
+    skill, sep, path = spec.partition(":")
+    if not sep or not skill or not path:
+        raise ValueError(f"--remove-file wants SKILL:PATH, got {spec!r}")
+    return skill, path
+
+
+def _parse_override_file(spec: str) -> tuple[str, str, str]:
+    location, sep, local_path = spec.partition("=")
+    if not sep or not local_path:
+        raise ValueError(f"--override-file wants SKILL:PATH=LOCAL_FILE, got {spec!r}")
+    skill, path = _parse_remove_file(location)
+    return skill, path, local_path
+
+
+def cmd_degrade_subject(args: argparse.Namespace) -> int:
+    """Issue #150 acceptance item 2: a degraded CPP subject - the same
+    collection with one or more skills or files mutated or removed, in one
+    declared mutation - expressible from the operator command line, with its
+    identity recorded and never passed off as the subject's real pin.
+
+    Writes `receipt.json` only on success; a refusal (an unknown subject, a
+    malformed `--remove-file`/`--override-file` spec, a mutation naming an
+    absent skill or file, or a degradation that would be indistinguishable
+    from a normal acquisition) writes nothing and exits 2 - the same "no
+    receipt when there is nothing ready to report" contract `cmd_materialize`
+    uses."""
+    from . import degrade, demo, materialize
+
+    out = Path(args.out).resolve()
+    if (out / "receipt.json").exists():
+        print(f"skillc: {out} already holds a receipt; refusing to overwrite it", file=sys.stderr)
+        return 2
+    base = Path(args.base) if args.base else Path(tempfile.gettempdir())
+
+    try:
+        edits = []
+        for spec in args.remove_file:
+            skill, path = _parse_remove_file(spec)
+            edits.append(degrade.FileEdit(skill=skill, path=path, content=None))
+        for spec in args.override_file:
+            skill, path, local_path = _parse_override_file(spec)
+            edits.append(degrade.FileEdit(skill=skill, path=path, content=Path(local_path).read_bytes()))
+    except (ValueError, OSError) as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+    mutation = (
+        degrade.Mutation(remove_skills=tuple(args.remove_skill), edits=tuple(edits))
+        if args.remove_skill or edits else None
+    )
+
+    try:
+        subject = demo.load_demo_subject(args.subject)
+        degraded = degrade.acquire_degraded(
+            args.subject, base, mutation,
+            checkout=Path(args.checkout).resolve() if args.checkout else None,
+            revision=args.revision,
+        )
+    except (demo.SubjectRefused, degrade.DegradationRefused, materialize.Refused) as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+
+    payload = degrade.receipt(degraded, pinned_revision=subject.revision)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "receipt.json").write_text(json.dumps(payload, indent=1) + "\n", encoding="utf-8")
+
+    locations = mutation.locations() if mutation is not None else ()
+    print(f"subject       {degraded.subject_name}")
+    print(f"pinned        {subject.revision}")
+    print(f"base          {degraded.base.kind} {degraded.base.revision} {degraded.base.digest}")
+    print(f"mutation      {len(locations)} location(s)" if locations else "mutation      none (source override only)")
+    for location in locations:
+        print(f"  - {location}")
+    print(f"degraded      {degraded.source.kind} {degraded.source.revision} {degraded.source.digest}")
+    print(f"\nskillc: degraded subject built - evidence in {out}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Separate from `main` so #73's README drift check can introspect the
     real subcommand set (`registered_commands` in `ci/readme_drift.py`)
@@ -1635,6 +1713,35 @@ def build_parser() -> argparse.ArgumentParser:
              "for a directory that exists to contain seeded fake leaks on purpose",
     )
     p_leak.set_defaults(func=cmd_leak_check)
+
+    p_degrade = sub.add_parser(
+        "degrade-subject",
+        help="build an operator-expressible degraded subject (issue #150): alternate source, optionally with "
+             "one or more skills or files mutated or removed",
+    )
+    p_degrade.add_argument("subject", help="a name under evals/subjects/<name>/subject.json")
+    degrade_source = p_degrade.add_mutually_exclusive_group(required=True)
+    degrade_source.add_argument("--checkout", help="local directory holding the skills root")
+    degrade_source.add_argument(
+        "--revision", help="an explicitly supported revision on the subject's own locator, other than its pin",
+    )
+    p_degrade.add_argument(
+        "--remove-skill", metavar="NAME", action="append", default=[],
+        help="a declared skill (subject.json's own naming, not its directory) to remove wholesale; "
+             "repeatable; omit entirely, with no --remove-file/--override-file either, for a "
+             "source-override-only degradation",
+    )
+    p_degrade.add_argument(
+        "--remove-file", metavar="SKILL:PATH", action="append", default=[],
+        help="delete one file inside a skill's own directory (PATH relative to it); repeatable",
+    )
+    p_degrade.add_argument(
+        "--override-file", metavar="SKILL:PATH=LOCAL_FILE", action="append", default=[],
+        help="replace one file inside a skill's own directory with LOCAL_FILE's content; repeatable",
+    )
+    p_degrade.add_argument("--out", required=True, help="directory for receipt.json")
+    p_degrade.add_argument("--base", help="where the disposable staging root is created (default: TMPDIR)")
+    p_degrade.set_defaults(func=cmd_degrade_subject)
 
     return parser
 
