@@ -154,6 +154,32 @@ def test_delete_then_restore_within_one_poll_window_is_invisible(base: Path, doc
     backend.destroy(handle)
 
 
+def test_a_directory_symlink_named_observations_is_caught_immediately(tmp_path: Path) -> None:
+    """Red case (issue #186): `BACKEND_ARTIFACTS`'s exclusion of
+    `observations` used to also apply, unconditionally, to the directory-
+    symlink branch - a subject that plants a directory symlink at that
+    reserved name was invisible to the snapshot entirely, on top of making
+    `DockerBackend.execute()`'s own write-back fail silently (see
+    `test_docker_backend.py`'s own red case for that half, and
+    `backend.py`'s `ExecuteResult.observations_capture`). Measured directly
+    (this exact repro, against the pre-fix code): the snapshot was empty;
+    post-fix the symlink is captured immediately, never deferred for
+    settled-value resolution the way a REGULAR FILE at this path would be -
+    the write-back can never produce a directory, so there is no ambiguity
+    to resolve. Direct unit test of `_snapshot_out_of_scope`, for the same
+    reason `test_a_symlink_to_a_directory_outside_scope_is_caught` above
+    is: the fake CLI's own `docker cp` dereferences a directory symlink on
+    export, which would exercise a different bug than this one."""
+    from skillc.authority_interceptor import _normalize_prefixes, _snapshot_out_of_scope
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "ok.py").write_text("x")
+    (tmp_path / "elsewhere").mkdir()
+    (tmp_path / "observations").symlink_to(tmp_path / "elsewhere")
+    snapshot = _snapshot_out_of_scope(tmp_path, _normalize_prefixes(("src",)))
+    assert snapshot == {"observations": f"link:{tmp_path / 'elsewhere'}"}
+
+
 def test_an_out_of_scope_edit_to_a_different_path_is_also_caught(base: Path, docker_state: Path) -> None:
     """The finding this whole-tree redesign exists to fix (PR review, issue
     #14): watching only ONE declared hostile path would miss a violation on

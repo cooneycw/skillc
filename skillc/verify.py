@@ -159,7 +159,10 @@ CONFIRMED = (EXITED, TIMED_OUT)
 
 #: How a grading run ended. `verdict` is the only one where the judge's criteria
 #: stand. Every other category makes each required criterion UNKNOWN.
-CATEGORIES = ("verdict", "containment", "timeout", "exit-nonzero", "no-output",
+#: `capture` (#186) is specific to the backend probe path: the observations
+#: write-back itself failed, so the judge never runs at all - distinct from
+#: `containment` (the probe process itself was not confirmed stopped).
+CATEGORIES = ("verdict", "containment", "capture", "timeout", "exit-nonzero", "no-output",
               "unparseable", "criteria-set", "contract")
 
 # Runs as `python -I -S -B -c SUPERVISOR TIMEOUT SWEEP OBSERVATIONS ARGV...`. It
@@ -437,15 +440,26 @@ def _read_untrusted(path: Path, limit: int, tail: bool = False) -> bytes | None:
 
     Opened non-blocking and without following a link, and read only if it is a
     regular file: a FIFO swapped in for it would otherwise block forever, after
-    every deadline has passed. None when it is not a readable regular file."""
+    every deadline has passed. None when it is not a readable regular file.
+
+    The `S_ISREG` check runs on the bare `fd`, BEFORE `os.fdopen` (issue
+    #186): `os.open()` succeeds on a directory (Linux allows opening one
+    O_RDONLY), so a check made only AFTER wrapping the fd in a buffered
+    reader is too late - `os.fdopen(fd, "rb")` itself raises
+    `IsADirectoryError` for a directory fd, an uncaught exception, not the
+    documented "None when not a readable regular file". Measured directly:
+    a candidate directory named `observations` (exactly what a subject can
+    leave behind by making `DockerBackend.execute()`'s write-back fail,
+    #186) crashed this function instead of reading as absent."""
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except OSError:
         return None
+    info = os.fstat(fd)
+    if not stat.S_ISREG(info.st_mode):
+        os.close(fd)
+        return None
     with os.fdopen(fd, "rb") as handle:
-        info = os.fstat(handle.fileno())
-        if not stat.S_ISREG(info.st_mode):
-            return None
         if tail and info.st_size > limit:
             handle.seek(info.st_size - limit)
         return handle.read(limit)
@@ -715,6 +729,12 @@ def _probe_via_backend(
             containment["confirmed"] = confirmed
             containment["timed_out"] = result.reason == "timeout"
             containment["exit_code"] = result.exit_code
+            # #186: named here, acted on by `grade_files` - a FAILED write-back
+            # means `envelope["observations"]` below is about to read as an
+            # empty report, indistinguishable from a candidate that legitimately
+            # produced nothing. `grade_files` refuses before any judge runs
+            # rather than let that read as this candidate's own doing.
+            containment["observations_capture"] = result.observations_capture
             if result.error is not None:
                 containment["error"] = result.error
             if result.signal is not None:
@@ -926,6 +946,15 @@ def grade_files(grader: GraderDef, files: list[tuple[str, bytes, bool]], base: P
             containment["trusted_observation_digest"] = trial.sha256_bytes(trusted_observation)
         if not containment["confirmed"]:
             category, detail = "containment", f"the probe was not contained: {containment['reason']}"
+            criteria = _unknown(grader, detail)
+        elif containment.get("observations_capture") == "failed":
+            # #186: structural, in this ONE place, covering every grader
+            # including ones not yet written - never per-judge. A failed
+            # write-back means the measurement itself did not complete; that
+            # is INCONCLUSIVE, never a FAIL derived from an empty report that
+            # looks exactly like a candidate which legitimately produced
+            # nothing. The judge never runs on this path at all.
+            category, detail = "capture", "the observations write-back failed; the measurement did not complete"
             criteria = _unknown(grader, detail)
         else:
             category, detail, report = _judge(grader, loaded, root / "judge", envelope)

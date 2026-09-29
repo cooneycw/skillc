@@ -908,6 +908,39 @@ def test_execute_writes_the_subjects_stdout_back_as_observations(
     dest = tmp_path / "export"
     backend.export(handle, dest)
     assert (dest / "observations").read_text(encoding="utf-8").strip() == "probe report text"
+    assert result.observations_capture == "written"
+    backend.destroy(handle)
+
+
+def test_a_directory_symlink_at_observations_makes_the_writeback_fail_visibly(
+    base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """Red case (issue #186): a subject that pre-creates `/work/observations`
+    as a symlink to a directory makes the write-back's tar extraction fail
+    with `IsADirectoryError` - measured directly against the fake CLI
+    (`docker cp -` exits 1, traceback on stderr). Before this fix, that
+    failure was swallowed entirely: `check=False`, the result never
+    inspected, no `ExecuteResult` field existed to report it at all - this
+    assertion fails on pre-#186 code with `AttributeError: 'ExecuteResult'
+    object has no attribute 'observations_capture'`, not merely a wrong
+    value. The subject's own directory survives untouched; the real capture
+    never lands."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000022")
+    backend.install(handle, {})
+    script = (
+        "import os\n"
+        "os.makedirs('elsewhere', exist_ok=True)\n"
+        "os.symlink('elsewhere', 'observations')\n"
+        "print('real capture')\n"
+    )
+    result = backend.execute(handle, [sys.executable, "-c", script], Limits(timeout=5))
+    assert result.reason == "exited"
+    assert result.exit_code == 0
+    assert result.observations_capture == "failed"
+    dest = tmp_path / "export"
+    backend.export(handle, dest)
+    assert not (dest / "observations").is_file()  # the subject's own object, never the real capture
     backend.destroy(handle)
 
 
