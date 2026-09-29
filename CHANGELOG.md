@@ -47,7 +47,12 @@ and version plan.
   `test_a_clean_run_never_flags_the_backends_own_observations_write` is the
   committed red case for that, and
   `test_a_subject_created_observations_that_differs_from_the_backends_is_
-  still_caught` proves genuine tampering is still caught.
+  still_caught` proves genuine tampering is still caught - confirmed against
+  `af51811`'s actual pre-fix code, not assumed: the identical scenario
+  produced `entries: []` after 5 polls pre-fix, one `create` entry post-fix.
+  **This narrows the gap, it does not close it**: the catch is poll-timing-
+  dependent, the same class as `known-gaps/delete-then-restore` - a write
+  both created and overwritten strictly between two polls is still invisible.
 
 - **Capability-gated in-container TERM forwarding to the exec'd subject**
   (Refs #158). `docker/trial/skillc-supervisor.py` (a new foreground

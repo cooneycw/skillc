@@ -248,11 +248,32 @@ legitimate write as a false violation on every attempt -
 `tests/test_authority_interceptor.py::test_a_clean_run_never_flags_the_
 backends_own_observations_write` is the committed red case, and
 `test_a_subject_created_observations_that_differs_from_the_backends_is_
-still_caught` proves the fix still catches genuine tampering. The one
-residual case - the backend's own best-effort write itself failing, leaving
-whatever the subject last left behind as the permanently settled value - is
-the same class of gap `known-gaps/delete-then-restore` already documents,
-not a new one.
+still_caught` proves the fix still catches genuine tampering.
+
+**Measured directly against the pre-fix code, not assumed (PR review asked
+"does this catch anything the old exclusion didn't?").** Checked out
+`af51811`'s `authority_interceptor.py` verbatim and ran the committed
+tampering scenario against it: subject writes `subject-forged-content` to
+`/work/observations`, sleeps, the backend overwrites it with the real
+captured stdout at `execute()`'s end. Pre-fix result:
+`{"entries": [], "coverage": {"polls_attempted": 5, "polls_failed": 0}}` -
+five polls ran and every one of them was blind to the tampering, because the
+path was excluded from every snapshot, not just the settled one. Post-fix:
+one `{"action": "create", "path": "observations", ...}` entry survives,
+because one of those five intra-run polls landed while the subject's forged
+content was still there, before the backend's own overwrite.
+
+**This narrows the gap; it does not close it, and must not be described as
+closing it.** The catch is poll-timing-dependent, exactly like
+`known-gaps/delete-then-restore`: a subject write to `/work/observations`
+that is both created and overwritten by the backend strictly BETWEEN two
+polls is still invisible - no poll ever observes the intermediate state, so
+there is no transition to defer a decision about at all. What changed is
+that a window now EXISTS where the tampering can be caught (any intra-run
+poll landing after the write and before `execute()`'s own end-of-run
+overwrite - realistically open for most of a real attempt's own runtime,
+since that overwrite is the LAST thing `execute()` does), where before there
+was structurally none.
 
 ## Owed to a live run
 
