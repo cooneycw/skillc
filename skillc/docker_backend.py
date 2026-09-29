@@ -463,7 +463,25 @@ class _BoundedDrain:
     caller always learns the subject's true output size even when most of it
     was discarded. Bytes past the cap are read and thrown away, never kept
     and never re-requested - the point is exactly to stop retaining without
-    ever stopping draining."""
+    ever stopping draining.
+
+    `run()` reads with `os.read()` on the raw fd, not `IO.read()` (issue
+    #189): `read(size)` on a non-interactive stream may issue MULTIPLE
+    underlying reads to fill the full requested size, blocking until either
+    that much data arrives or EOF - so a subject that writes some data
+    (under one read's worth) and then leaves the pipe open without writing
+    more or closing it was never captured at all, silently, however long
+    the caller's own join timeout later gives this thread to finish.
+    `os.read(fd, size)` is one raw syscall: it returns whatever is
+    currently available (possibly less than requested), only blocking when
+    truly nothing has arrived yet, and returns `b""` at EOF exactly like
+    `IO.read()` does - a caller whose join times out before EOF still sees
+    whatever was written and delivered so far, matching what
+    `stdout_incomplete`/`stderr_incomplete` already promise: an incomplete,
+    partial capture, never a silently empty one. (`IO[bytes]`, this class's
+    own `pipe` type, declares `read()` but not `read1()` - `fileno()` is
+    the portable way to reach the same one-syscall behavior without
+    narrowing that type.)"""
 
     def __init__(self, pipe: IO[bytes], cap: int) -> None:
         self._pipe = pipe
@@ -474,7 +492,7 @@ class _BoundedDrain:
         self.truncated = False
 
     def run(self) -> None:
-        while chunk := self._pipe.read(65536):
+        while chunk := os.read(self._pipe.fileno(), 65536):
             self.total_bytes += len(chunk)
             if self._captured_len >= self._cap:
                 self.truncated = True
