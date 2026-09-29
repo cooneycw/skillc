@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import threading
 import time
 from pathlib import Path
 
@@ -1560,3 +1561,72 @@ def test_execute_stop_escalation_falls_back_to_killing_the_local_client(
     assert result.reason == "timeout"
     assert result.signal == "SIGKILL"
     backend.destroy(handle)
+
+
+# ------------------------------------------------------- _BoundedDrain (issue #189)
+
+
+def test_bounded_drain_captures_data_written_before_the_pipe_is_held_open(base: Path) -> None:
+    """Red case for issue #189: `run()` used to read with `IO.read(65536)`,
+    which on a non-interactive stream may issue multiple underlying reads to
+    fill the FULL requested size, blocking until either that much data
+    arrives or EOF. A pipe holding fewer than 65536 bytes, kept open
+    without more data or a close, therefore never satisfied that call at
+    all - `captured_bytes()` stayed empty for the whole run, silently
+    discarding data that was genuinely written and available, rather than
+    reporting it as an incomplete partial capture (#102's own bounded-
+    capture rule, and `ExecuteResult`'s `stdout_incomplete`/`stdout_bytes`
+    design, both describe "captured what we could, marked incomplete" -
+    never "wrote 10000 bytes, captured zero, no error"). No docker/
+    subprocess involved - this drives `_BoundedDrain` directly against a
+    real OS pipe, exactly as small as the production case: `execute()`'s
+    and `read_home_tree()`'s own drain threads. Fails on the pre-fix code
+    (`self._pipe.read(65536)`), which reports 0 bytes captured here while
+    the thread is still correctly alive (no EOF yet).
+
+    Both halves of #189's acceptance in ONE assertion (orchestrator
+    review), not two separate ones a partial fix could satisfy piecemeal:
+    `_BoundedDrain` itself carries no `incomplete` attribute of its own -
+    exactly like `execute()`/`read_home_tree()` do it for real,
+    `thread.is_alive()` right after a bounded `.join()` IS the incomplete
+    signal a caller reads. A fix that captured the bytes but somehow also
+    made the thread finish (falsely reading as a COMPLETE capture) would
+    fail this same assertion, not just a separate one next to it."""
+    read_fd, write_fd = os.pipe()
+    reader = os.fdopen(read_fd, "rb")
+    drain = d._BoundedDrain(reader, 1_000_000)
+    thread = threading.Thread(target=drain.run, daemon=True)
+    thread.start()
+    try:
+        os.write(write_fd, b"x" * 10_000)
+        thread.join(timeout=1.5)
+        captured = len(drain.captured_bytes())
+        assert thread.is_alive() and captured == 10_000, (
+            f"both halves of #189's acceptance must hold together: still incomplete "
+            f"(thread.is_alive()={thread.is_alive()}) AND the already-written data captured "
+            f"before EOF (captured {captured} of 10000 bytes) - not only at EOF"
+        )
+    finally:
+        os.close(write_fd)
+        thread.join(timeout=1.0)
+    assert thread.is_alive() is False
+    assert len(drain.captured_bytes()) == 10_000
+
+
+def test_bounded_drain_still_drains_fully_to_eof(base: Path) -> None:
+    """Positive control beside the red case above: the ordinary EOF path -
+    a writer that closes normally - must still capture everything, proving
+    the #189 fix (reading with `os.read()` instead of `IO.read()`) did not
+    trade "captures partial data early" for "stops draining too soon"."""
+    read_fd, write_fd = os.pipe()
+    reader = os.fdopen(read_fd, "rb")
+    drain = d._BoundedDrain(reader, 1_000_000)
+    thread = threading.Thread(target=drain.run, daemon=True)
+    thread.start()
+    os.write(write_fd, b"y" * 200_000)  # several times the 65536 read size
+    os.close(write_fd)
+    thread.join(timeout=2.0)
+    assert thread.is_alive() is False
+    assert len(drain.captured_bytes()) == 200_000
+    assert drain.total_bytes == 200_000
+    assert drain.truncated is False

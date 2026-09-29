@@ -239,6 +239,22 @@ and version plan.
   under a still-open pipe below its read size - `read_home_tree()`'s new
   test is timing-only for that case, citing #189, since content
   verification there hits the other bug.
+- **`_BoundedDrain` silently dropped already-captured data instead of
+  reporting it as an incomplete partial capture** (Refs #189, found while
+  fixing issue #20's drain-joins latency doubling). `run()` read with
+  `IO.read(65536)`, which on a non-interactive stream may issue multiple
+  underlying reads to fill the FULL requested size, blocking until either
+  that much data arrives or EOF - so a subject that wrote some output
+  (under 65536 bytes) and then left the pipe open without writing more or
+  closing it was captured as **nothing**, silently, contradicting #102's
+  own bounded-capture rule and `ExecuteResult`'s `stdout_incomplete`/
+  `stdout_bytes` design (both promise "captured what we could, marked
+  incomplete", never "wrote data, captured zero, no error"). Now reads
+  with `os.read()` on the raw fd - one syscall, returns whatever is
+  currently available rather than blocking to fill the buffer. A committed
+  red case (a 10KB write held open, no docker/subprocess involved) fails
+  on the pre-fix code and passes after; a positive control beside it
+  proves the ordinary EOF-close path still captures everything.
 
 ## [0.3.0] - 2026-09-28
 
