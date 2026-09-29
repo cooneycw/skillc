@@ -144,14 +144,30 @@ docker exec -w WORKSPACE -- NAME /usr/local/bin/skillc-wrap <subject argv...>
    process group for the rest of its life — no separate parent/child
    relationship to track, no second lookup.
 
-**Reporting requirement, with a concrete shape (ruled in review — Q3): a
-NEW `ExecuteResult` field**, not an overload of the existing `signal` field
-(which means the container-level signal and should keep meaning only that).
-Suggested values: `forwarded` / `registration-failed` / `not-registered` /
-`unavailable-in-image` (the last one is §2d's capability-gate outcome). A
-green "TERM forwarded" must never be *inferred* from the fact that a launch
-proceeded normally — that conflates "we don't know" with "it worked," which
-is exactly the posture this module's `_inspect()`/`Confirmation.UNKNOWN`
+**Reporting requirement, with a concrete shape (ruled in review — Q1/Q3,
+superseding this section's own first draft below): a NEW `ExecuteResult`
+field**, not an overload of the existing `signal` field (which means the
+container-level signal and should keep meaning only that). The first draft
+here proposed values named for what was INFERRED to have happened
+(`forwarded` / `registration-failed` / `not-registered`) - rejected in
+review: the host can see that the subject exited within `grace` after a
+container-level TERM, but it cannot see that a FORWARD caused the exit (the
+subject may have been finishing anyway), and it cannot distinguish a
+failed registration from a registration that simply did not help in time
+without trusting an in-container report, which the very next paragraph
+says not to do. So the actual values name only what the HOST observed,
+never what is inferred to have caused it: `unavailable-in-image` (the
+capability probe, §2d, found the wrap binary or the running supervisor's
+socket missing), `not-needed` (capability present, but no stop path ran at
+all), `exited-within-grace` (capability present, a container-level TERM
+was sent, and the subject was gone before the SIGKILL escalation),
+`killed-at-escalation` (capability present, and the subject was still
+alive when `grace` expired - covering a forward that never reached the
+subject, one that reached it too late, and one the subject simply ignored,
+none of which this field can or does distinguish from the host side). A
+green "exited-within-grace" must never be read as *proof* forwarding
+caused it - that conflates "we don't know" with "it worked," which is
+exactly the posture this module's `_inspect()`/`Confirmation.UNKNOWN`
 discipline elsewhere in this same file already refuses to do.
 
 **This evidence is advisory, not trusted (review must-fix — who can forge
@@ -159,14 +175,13 @@ it).** The supervisor and `skillc-wrap` both run as `candidate`, inside the
 SAME container as the subject, with no privilege boundary between them. The
 subject — untrusted code under evaluation — can connect to the same control
 socket itself, register any pgid it chooses (including a decoy), or simply
-kill or replace the supervisor process outright. So ANY `forwarded` (or
-other) outcome reported from inside the container is evidence the SUBJECT
-can shape or fabricate — the same class of problem as the #14 forged-log
-gap: a provenance marker inside an artifact proves nothing, because
-anything that can write the artifact can write the marker. This in-container
-reporting must be read as advisory instrumentation for a human debugging a
-trial, never as trusted evidence anything grading or verification relies
-on. §5 names the one thing the host CAN corroborate independently.
+kill or replace the supervisor process outright. So the host-observed value
+above is the load-bearing signal, precisely BECAUSE anything the container
+itself reported about "forwarded" would be evidence the SUBJECT can shape
+or fabricate — the same class of problem as the #14 forged-log gap: a
+provenance marker inside an artifact proves nothing, because anything that
+can write the artifact can write the marker. §5 names this same
+distinction as an accepted limitation of the chosen, host-only design.
 
 This is the property that keeps the change small: from the host side,
 `execute()`'s `subprocess.Popen(exec_argv, ...)` still directly owns the
@@ -197,8 +212,8 @@ image that lacks the two new binaries.
 
 Resolved as option (a): `execute()` does not assume `skillc-wrap` is
 present. Before composing the exec argv, it probes whether the running
-container's image actually carries the forwarding components — a bounded
-check in the same style `prepare()` already uses before `run -d` (its own
+container can ACTUALLY forward right now — a bounded check in the same
+style `prepare()` already uses before `run -d` (its own
 `_image_present_locally` pre-check refuses to assume and asks first,
 rather than let a later call fail ambiguously). Present: use the
 `skillc-wrap` prefix exactly as §§2a/2b describe. Absent: run today's exact
@@ -209,11 +224,25 @@ handle's whole lifetime (checked once, not per `execute()` call — this
 module's own docstring already establishes `execute()` runs at most once
 per handle), a detail rather than a load-bearing choice.
 
+**The probe checks TWO things, not one (correction from review, PR #182):
+the wrap binary's executable bit AND the running supervisor's control
+socket.** The first draft of this section checked only the binary - wrong,
+because §7 keeps `_keepalive_run_argv` itself out of this PR (see that
+section): even an image that carries both scripts still starts every
+container with `sleep infinity`, never the supervisor, so nothing ever
+listens on the socket. A binary-only probe would report "available" for
+exactly that image, prefix the argv, and get a `skillc-wrap` that can never
+register with anything - every stop would then report
+`killed-at-escalation`, forwarding this backend can never actually
+produce. Requiring the socket too is what makes `unavailable-in-image` the
+correct, honest answer until the SAME held change that bakes the scripts
+in also starts the supervisor as the placeholder.
+
 This is what makes the implementation reviewable, testable against the
-fake CLI (which can declare `skillc-wrap` present or absent per test), and
-mergeable well before the image itself carries the two new binaries — and
-it is INERT, not merely safe, on any container whose image predates this
-work, including #150's.
+fake CLI (which can declare either or both present or absent per test),
+and mergeable well before the image itself carries the two new binaries —
+and it is INERT, not merely safe, on any container whose image predates
+this work, including #150's.
 
 ## 3. Image change (#78 interaction — called out explicitly, per assignment)
 
@@ -295,16 +324,18 @@ See §7 for how this fits the overall landing order.
 
 ## 5. Accepted limitations (stated, not silently solved)
 
-- **The in-container forwarding evidence is forgeable by the subject it
-  describes (review must-fix — full reasoning in §2b).** The supervisor and
-  `skillc-wrap` run as the same unprivileged user, in the same container, as
-  the subject under evaluation — there is no trust boundary between them.
-  The subject can register a pgid of its own choosing, connect to the
-  control socket directly, or kill/replace the supervisor outright, so any
-  `ExecuteResult` value this design reports (`forwarded`, etc.) is advisory,
-  never trusted evidence. **The only host-side corroboration this design
-  provides is indirect and outcome-only, not mechanism-specific**: whether
-  the subject process exited within `grace` after the container-level TERM
+- **An in-container SELF-report would be forgeable by the subject it
+  describes, which is exactly why `ExecuteResult.term_forwarding`'s values
+  are all host-observed, never sourced from the container (review
+  must-fix — full reasoning in §2b).** The supervisor and `skillc-wrap` run
+  as the same unprivileged user, in the same container, as the subject
+  under evaluation — there is no trust boundary between them. The subject
+  can register a pgid of its own choosing, connect to the control socket
+  directly, or kill/replace the supervisor outright, so anything either
+  script might have reported about ITSELF would have been advisory at
+  best. **The only host-side corroboration this design actually provides
+  is indirect and outcome-only, not mechanism-specific**: whether the
+  subject process exited within `grace` after the container-level TERM
   (observed via `_stop()`'s own existing `proc.wait(timeout=grace)`, from
   OUTSIDE the container, through a mechanism already in place today) versus
   surviving to the SIGKILL escalation. That timing fact corroborates that
@@ -360,24 +391,42 @@ See §7 for how this fits the overall landing order.
    always; `cmd_rm` carries the identical reaping as a backstop. Full suite
    clean on that commit: 1860 passed, 3 skipped, 0 failed. See §4.
 2. This design doc, as a doc-only PR (no code) — **in review now**.
-3. Implementation PR(s) for `skillc-supervisor`/`skillc-wrap`, the
-   `execute()`/`_keepalive_run_argv` changes, and §2d's capability gate,
-   using #176's red case as #158's acceptance evidence (criterion 3,
-   already satisfied). **Can land ahead of the image** (§2d): inert,
-   behaviorally identical to today, on any image that lacks the two new
-   binaries — including the one #150's operator run uses. This PR owes two
-   more things, both found in review and neither optional:
+3. Implementation PR(s) for `skillc-supervisor`/`skillc-wrap` and §2d's
+   capability gate, using #176's red case as #158's acceptance evidence
+   (criterion 3, already satisfied). **`_keepalive_run_argv` is NOT part of
+   this PR — correction from an earlier draft of this section, which was
+   wrong.** `_keepalive_run_argv` still starts every container with
+   `_KEEPALIVE_ARGV` (`sleep infinity`); switching it to the supervisor
+   binary belongs with the held image change in step 4, not here, because
+   the placeholder command is only meaningful once an image actually has
+   the supervisor to run - changing it early would either break every
+   current image (nothing to exec) or require a second capability check
+   just to pick the placeholder, duplicating §2d's own gate for no reason.
+   §2d's capability gate itself checks BOTH the wrapper's executable bit
+   AND the supervisor's control socket, not the binary alone (found in
+   review, PR #182: a binary-only check would report "available" on an
+   image that has the scripts but - in THIS PR, on every image, since
+   nothing starts the supervisor yet - has no socket either, prefixing the
+   argv onto a wrapper that can never reach anything and turning every stop
+   into `killed-at-escalation`, forwarding production cannot produce - the
+   same excess-capability shape §4 already named once for the fake CLI).
+   This PR **can land ahead of the image** precisely because the gate
+   requires the socket: inert, behaviorally identical to today, on any
+   image that lacks either the scripts or a running supervisor - which is
+   every image today, including the one #150's operator run uses. This PR
+   owes two more things, both found in review and neither optional:
    - **The fake CLI needs a new capability it does not have yet** (see §4):
      `cmd_kill` (#176) always `os.killpg`s the exec group with SIGKILL,
      unconditionally — correct for the no-supervisor case #176 fixed, but
      it means the fake as it stands **cannot represent a successful
      forward at all**: there is no way to simulate "PID 1 (the supervisor)
      survives a TERM and relays it gracefully" versus "PID 1 dies and the
-     kernel reaps everything." The fake needs to learn the difference —
-     e.g. a state flag meaning "a supervisor is present and stays alive
-     after `kill`," under which the exec'd process receives a real,
-     catchable TERM instead of an unconditional SIGKILL — before any test
-     can show §2a's relay actually working.
+     kernel reaps everything." The fake needs to learn the difference, and
+     needs it as TWO independent facts, not one — a container can have the
+     wrap binary without a running supervisor (every real image, in this
+     PR), so a single "supervisor present" flag would let the fake's own
+     capability probe simulation go permanently out of sync with what the
+     real gate in §2d actually checks.
    - **A committed red case for §2a's must-not-exit rule**: a supervisor
      that relays TERM and then exits (the bug §2a item 6 exists to
      forbid) must be shown making the subject die within `grace` WITHOUT
@@ -386,10 +435,21 @@ See §7 for how this fits the overall landing order.
      no-supervisor case, now self-inflicted. Green is a supervisor that
      relays and keeps running, letting the subject's own handler complete
      within `grace`.
-4. The `docker/trial/Dockerfile` image change (§3) — held, separately,
-   until the operator's #150 discriminating run has completed. Once it
-   activates, step 3's capability gate flips to using the wrap prefix with
-   no further code change.
+   - **A committed red case for §2d's capability gate itself**: an image
+     that has the wrap binary but is still running the plain
+     `sleep infinity` placeholder (no supervisor, no socket - the state of
+     every real image in this PR) must report `unavailable-in-image` and
+     must never have its argv prefixed. Binary-only checks pass this
+     scenario incorrectly; the combined binary-and-socket check in §2d
+     does not.
+4. The `docker/trial/Dockerfile` image change (§3), together with
+   `_keepalive_run_argv`'s switch from `sleep infinity` to the supervisor
+   binary — the two are held as one unit, since the placeholder command is
+   only meaningful once an image actually has something to run in that
+   role. Both stay held until the operator's #150 discriminating run has
+   completed. Once they land together, step 3's capability gate starts
+   finding both checks satisfied on a correctly-built image, with no
+   further code change of its own required.
 
 ## 8. Decisions from review
 

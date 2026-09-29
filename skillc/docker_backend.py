@@ -79,12 +79,24 @@ the CONTAINER's own init/placeholder process, not a separately exec'd
 subject: a real daemon does not forward a container-level signal to an exec
 session the way `docker run --sig-proxy` forwards to its own foreground
 process (cross-model review, PR #85, sharpening an earlier, vaguer claim
-here). So `limits.grace`'s `SIGTERM`-then-`SIGKILL` escalation cannot promise
-the SUBJECT itself gets a graceful signal - only that the whole attempt
-stops within grace of the second kill. A true per-subject graceful signal
-needs an in-container supervisor this backend does not provide; routed to
-the Nit Store (#20) as a supplemental finding rather than built here.
-`install()` materializes a declared surface entry only when its value names
+here). So `limits.grace`'s `SIGTERM`-then-`SIGKILL` escalation alone cannot
+promise the SUBJECT itself gets a graceful signal - only that the whole
+attempt stops within grace of the second kill. Issue #158 closes this when
+the image supports it AND the supervisor is actually running:
+`_forwarding_available` probes for both `skillc-wrap`'s executable bit
+(`docker/trial/skillc-wrap.py`) and the running `skillc-supervisor.py`'s
+control socket before prefixing the exec argv with the wrapper -
+capability-gated so this module's own behavior is unchanged whenever
+either is missing, which is every image today: the #78 Dockerfile change
+that bakes the two scripts in, AND `_keepalive_run_argv`'s own switch from
+`sleep infinity` to the supervisor, are BOTH held pending the operator's
+#150 discriminating run (docs/specs/evaluation-facility/
+signal-forwarding.md sections 3 and 7). `ExecuteResult.term_forwarding`
+reports what THIS module observed from the host side for a given attempt -
+never a trusted claim about what happened inside the container, which the
+supervisor/wrapper cannot themselves prove any more than the subject they
+describe can (same trust boundary, same user, see `term_forwarding`'s own
+docstring). `install()` materializes a declared surface entry only when its value names
 an existing host path, and reports `discovery_canary`/`installed` from what
 was ACTUALLY copied, never merely what was declared; a richer surface
 contract (dependency resolution inside the container) is future work. Fake
@@ -159,6 +171,30 @@ CANDIDATE_USER_NAME = "candidate"
 CONTAINER_HOSTNAME = "skillc-trial"
 CONTAINER_WORKSPACE = "/work"
 CONTAINER_HOME = "/home/candidate"
+
+#: The path `docker/trial/skillc-wrap.py` is baked into the trial image at,
+#: once the #78 image change lands (issue #158; currently HELD - see that
+#: file's own docstring, and docs/specs/evaluation-facility/
+#: signal-forwarding.md section 3). `_forwarding_available` probes for this
+#: exact path; `execute()` prefixes the subject argv with it only when the
+#: probe confirms it is actually there.
+SKILLC_WRAP_PATH = "/usr/local/bin/skillc-wrap"
+
+#: Must match skillc-supervisor.py's own default (`$SKILLC_CONTROL_SOCKET`
+#: unset). `_forwarding_available` requires this socket to exist, not only
+#: `SKILLC_WRAP_PATH`'s executable bit (review must-fix, PR #182): in THIS
+#: PR, `prepare()` still starts every container with `_KEEPALIVE_ARGV`
+#: (`sleep infinity`, never the supervisor) - `_keepalive_run_argv`'s own
+#: switch to the supervisor binary belongs with the held image change
+#: (section 3), not here (section 7's landing order says so explicitly).
+#: So even on an image that carries both scripts, nothing runs the
+#: supervisor yet, and this socket never exists - the wrap-binary check
+#: alone would report "available" for a capability nothing can actually
+#: use, prefixing the argv onto a wrapper that can never reach a
+#: supervisor. Requiring the socket too means the gate reports
+#: `unavailable-in-image` until the SAME held change that starts the
+#: supervisor also makes the socket real.
+SKILLC_CONTROL_SOCKET_PATH = "/run/skillc/control.sock"
 
 #: Resource limits (addendum item C9). --memory-swap MUST equal --memory or
 #: swap silently doubles the effective bound.
@@ -547,13 +583,21 @@ class DockerBackend:
                 ("a disk bound actually enforced - --storage-opt size= is refused outright "
                  "by any storage driver other than overlay2 on a compatible backing "
                  "filesystem, so a set disk_limit is a request, not a guarantee"),
-                ("a graceful signal delivered to the exec'd subject itself on timeout or "
-                 "cancellation - docker kill reaches this attempt's CONTAINER (its own "
-                 "init/placeholder process), never a separately exec'd session, so the "
-                 "SIGTERM-then-SIGKILL escalation only bounds when the whole attempt stops, "
-                 "not whether the subject itself got a chance to flush anything (issue #133 "
-                 "item 2, scoped out rather than fixed there; the real fix - an in-container "
-                 "supervisor forwarding the signal - is issue #158)"),
+                ("whether a live daemon actually delivers a forwarded TERM to the exec'd "
+                 "subject and lets it act on it - issue #158's in-container supervisor "
+                 "(skillc-supervisor/skillc-wrap) and the capability gate that activates it "
+                 "are implemented and tested against the fake docker CLI, but TWO things are "
+                 "held pending the operator's #150 discriminating run: the #78 Dockerfile "
+                 "change that bakes the two scripts in, and _keepalive_run_argv's own switch "
+                 "from sleep infinity to the supervisor - the gate requires BOTH the wrap "
+                 "binary and a running supervisor's control socket, so it reports unavailable "
+                 "until both land, not merely the first. Even once they do, this is owed to a "
+                 "live daemon the same way the rest of this list is (#10) - never simulated "
+                 "here. ExecuteResult.term_forwarding reports what the HOST observed for a "
+                 "given attempt (capability present or not, and whether the subject was gone "
+                 "before escalation), never a trusted claim about what the container itself "
+                 "did - see that field's own docstring for why an in-container report is "
+                 "forgeable by the subject it would describe"),
                 ("dependency resolution inside the container - install() copies in any "
                  "declared surface entry naming an existing host path or carrying raw "
                  "bytes; it does not run a package manager or resolve a dependency closure"),
@@ -659,6 +703,44 @@ class DockerBackend:
             proc = subprocess.run(
                 [*self.docker_bin, "image", "inspect", self.image],
                 capture_output=True, env=env, check=False, timeout=self.daemon_timeout,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        return proc.returncode == 0
+
+    def _forwarding_available(self, handle: _Handle) -> bool:
+        """Whether THIS container can actually forward a TERM right now
+        (issue #158's capability gate, design doc section 2d) - checked
+        against the running container itself, via `docker exec`, never
+        assumed from `self.image`'s name or any label.
+
+        BOTH the wrap binary AND the supervisor's control socket must be
+        present (review must-fix, PR #182) - `test -x` alone is not enough.
+        In this PR, `prepare()` still starts every container with
+        `_KEEPALIVE_ARGV` (`sleep infinity`), never the supervisor - that
+        switch belongs with the held image change (section 3), not here -
+        so even an image that carries `skillc-wrap` has nothing listening
+        on `SKILLC_CONTROL_SOCKET_PATH` yet. Checking only the binary would
+        report "available" for a capability nothing can actually use: the
+        argv gets prefixed, the wrapper's own registration attempt finds no
+        socket, and every stop reports `killed-at-escalation` - forwarding
+        that production can never produce, exactly the excess-capability
+        shape issue #176 already named once for the fake CLI's `cmd_kill`.
+        One `sh -c` call keeps this a single bounded exec rather than two.
+
+        Bounded by `daemon_timeout` like every other read in this module.
+        A timeout, an unreachable daemon, or a nonzero exit (either check
+        genuinely fails, OR any docker-side error this call cannot tell
+        apart from that) are all treated the same as "not available" -
+        `execute()` falls back to today's exact argv either way, rather
+        than risking a 127 on an ambiguous answer. This is the same
+        fail-open posture `skillc-wrap` itself uses if it cannot reach the
+        supervisor - absence of certainty is never treated as presence."""
+        probe = f"test -x {SKILLC_WRAP_PATH} && test -S {SKILLC_CONTROL_SOCKET_PATH}"
+        try:
+            proc = subprocess.run(
+                [*self.docker_bin, "exec", "--", handle.name, "sh", "-c", probe],
+                capture_output=True, env=handle.env, check=False, timeout=self.daemon_timeout,
             )
         except (OSError, subprocess.TimeoutExpired):
             return False
@@ -1102,12 +1184,30 @@ class DockerBackend:
         truncated stderr is folded into `error` itself as an explicit
         `"(truncated, N bytes total)"` suffix, since stderr has no field of
         its own on `ExecuteResult` - `error` is already the only surface it
-        feeds."""
+        feeds.
+
+        CAPABILITY-GATED TERM FORWARDING (issue #158, design doc section
+        2d): `_forwarding_available` probes THIS container for
+        `skillc-wrap` before the argv below is composed. Present: the argv
+        is prefixed with it, so a container-level TERM this method's own
+        `_stop()` sends can reach the subject via the in-container
+        supervisor (docs/specs/evaluation-facility/signal-forwarding.md).
+        Absent (every image before the #78 change lands, HELD separately):
+        today's exact argv, unprefixed - this method's behavior is
+        otherwise byte-for-byte what it was before #158. Either way,
+        `ExecuteResult.term_forwarding` reports what was actually OBSERVED
+        from the host side, never a claim about what happened inside the
+        container - see that field's own docstring for the forgeability
+        reasoning."""
         assert isinstance(handle, _Handle)
+        forwarding_available = self._forwarding_available(handle)
         exec_argv = [*self.docker_bin, "exec"]
         if stdin is not None:
             exec_argv.append("-i")
-        exec_argv += ["-w", CONTAINER_WORKSPACE, "--", handle.name, *argv]
+        exec_argv += ["-w", CONTAINER_WORKSPACE, "--", handle.name]
+        if forwarding_available:
+            exec_argv.append(SKILLC_WRAP_PATH)
+        exec_argv += list(argv)
 
         try:
             proc = subprocess.Popen(
@@ -1116,7 +1216,22 @@ class DockerBackend:
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             )
         except OSError as exc:
-            return ExecuteResult(reason="launch-failed", exit_code=None, error=str(exc))
+            # `forwarding_available` is already known at this point even
+            # though the exec itself never launched - report it when it
+            # explains the absence (the common real case: a missing/
+            # unreachable `docker` binary fails BOTH the probe above and
+            # this Popen the same way). Left `None` only in the residual
+            # case where the probe found the capability present but this
+            # specific exec still failed to launch for some other reason -
+            # genuinely unmeasured, not merely inapplicable, and the one
+            # case within this backend where `None` does NOT mean "this
+            # backend never reports forwarding" (see term_forwarding's own
+            # docstring for that general meaning, and the PR description
+            # for why this one case is called out separately).
+            return ExecuteResult(
+                reason="launch-failed", exit_code=None, error=str(exc),
+                term_forwarding="unavailable-in-image" if not forwarding_available else None,
+            )
 
         assert proc.stdout is not None
         stdout_drain = _BoundedDrain(proc.stdout, limits.max_captured_stdout_bytes)
@@ -1163,6 +1278,21 @@ class DockerBackend:
         else:
             proc.wait()
             self._kill_container(handle, "KILL")
+
+        # term_forwarding names what the HOST observed, never what the
+        # container reports about itself (ExecuteResult's own docstring).
+        # "exited-within-grace" and "killed-at-escalation" read directly off
+        # `signal_name`, which `_stop()` already derives from the same
+        # `proc.wait(timeout=grace)` this module used before #158 - no new
+        # observation channel, just a name for an existing one.
+        if not forwarding_available:
+            term_forwarding = "unavailable-in-image"
+        elif reason == "exited":
+            term_forwarding = "not-needed"
+        elif signal_name == "SIGTERM":
+            term_forwarding = "exited-within-grace"
+        else:
+            term_forwarding = "killed-at-escalation"
 
         stdout_thread.join(timeout=limits.grace + self.daemon_timeout)
         stderr_thread.join(timeout=limits.grace + self.daemon_timeout)
@@ -1223,6 +1353,7 @@ class DockerBackend:
             reason=reason, exit_code=code, error=error, signal=signal_name,
             stdout_truncated=stdout_drain.truncated, stdout_bytes=stdout_drain.total_bytes,
             stdout_incomplete=stdout_incomplete, stderr_incomplete=stderr_incomplete,
+            term_forwarding=term_forwarding,
         )
 
     def _kill_container(self, handle: _Handle, sig: str) -> None:
