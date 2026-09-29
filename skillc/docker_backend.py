@@ -1111,8 +1111,20 @@ class DockerBackend:
                 f"docker cp timed out reading {container_reldir!r} from home for {handle.attempt_id!r}: {exc}"
             ) from exc
         finally:
-            stdout_thread.join(timeout=self.daemon_timeout)
-            stderr_thread.join(timeout=self.daemon_timeout)
+            # ONE shared deadline (issue #20 Nit Store, the same fix
+            # execute()'s own joins just got): both drain threads run
+            # concurrently already, so joining each against its own full
+            # daemon_timeout, sequentially, could cost up to 2x that bound
+            # instead of 1x - measured directly at ~2.02x under a
+            # constructed still-alive-at-join-time case. `proc` itself is
+            # never candidate-controlled code the way execute()'s exec'd
+            # argv is (this is always our own `docker cp` invocation), so
+            # the trigger here is host scheduling delay rather than an
+            # adversarial detached descendant - but the cost, when it
+            # happens, is the same shape.
+            join_deadline = time.monotonic() + self.daemon_timeout
+            stdout_thread.join(timeout=max(0.0, join_deadline - time.monotonic()))
+            stderr_thread.join(timeout=max(0.0, join_deadline - time.monotonic()))
 
         if returncode != 0:
             return {}  # no such directory yet - nothing to find, not a failure
@@ -1294,8 +1306,21 @@ class DockerBackend:
         else:
             term_forwarding = "killed-at-escalation"
 
-        stdout_thread.join(timeout=limits.grace + self.daemon_timeout)
-        stderr_thread.join(timeout=limits.grace + self.daemon_timeout)
+        # ONE shared deadline (issue #20 Nit Store, filed against #174):
+        # joining both threads against their own FULL `grace + daemon_timeout`
+        # each, sequentially, doubled the worst-case wall time a subject that
+        # holds both pipes open costs this method - measured directly (not
+        # merely reasoned about) at ~2.08x the single bound before this fix,
+        # ~1x after. Both threads already run CONCURRENTLY (started well
+        # above); only the two blocking `.join()` calls in the calling thread
+        # were sequential. A shared deadline lets a fast stdout drain leave
+        # the full remaining budget for stderr, and a slow one still cannot
+        # push the total past the one bound - `max(0.0, ...)` because a
+        # `.join(timeout=<negative>)` returns immediately rather than raising,
+        # but negative reads oddly in a trace.
+        join_deadline = time.monotonic() + limits.grace + self.daemon_timeout
+        stdout_thread.join(timeout=max(0.0, join_deadline - time.monotonic()))
+        stderr_thread.join(timeout=max(0.0, join_deadline - time.monotonic()))
         # #133 item 3: a join that times out before the drain thread finishes
         # means the read never reached EOF - some descendant the subject left
         # running (past every kill this method issued above) still holds the

@@ -753,6 +753,72 @@ def test_read_home_tree_finds_multiple_files_under_the_directory(base: Path, doc
     backend.destroy(handle)
 
 
+@needs_setsid
+@pytest.mark.skipif(shutil.which("cat") is None, reason="needs cat to block the detached grandchild on a FIFO")
+def test_read_home_tree_joins_stdout_and_stderr_against_one_shared_deadline(
+    base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """issue #20 Nit Store: read_home_tree's own stdout/stderr drain joins
+    had the identical sequential-join shape execute()'s just got fixed for
+    - measured directly (not merely reasoned about) at ~2.02x the single
+    daemon_timeout bound before this fix, ~1.02x after, using a detached
+    grandchild that holds THIS fake docker process's own stdout open past
+    its exit (`.cp-hold-open-NAME`, fake_docker.py's own fault-injection
+    sentinel for this path - the same construction `.inspect-delay-NAME`
+    and execute()'s drain-EOF test both use). Unlike execute()'s own
+    trigger (a candidate's exec'd argv can adversarially or accidentally
+    detach a descendant), a real `docker cp` invocation never runs
+    caller-supplied code - this proves the MECHANISM no longer costs 2x
+    under a constructed still-alive-at-join-time case, not a claim that
+    this exact scenario arises from an untrusted subject the way
+    execute()'s does; a real trigger here would be host scheduling delay,
+    not an adversarial descendant.
+
+    TIMING ONLY, deliberately: any tar bytes genuinely written before the
+    grandchild holds the pipe open (even an empty directory's own tar
+    header) trip issue #189 (`_BoundedDrain.run()`'s `.read(65536)` blocks
+    to fill the full size rather than returning what is already available,
+    so a still-open pipe under that size reads back EMPTY instead of
+    partial) - a separate, pre-existing bug this test does not attempt to
+    characterize or fix. `read_home_tree()` is expected to raise under that
+    bug; only the ELAPSED TIME is this test's own claim."""
+    daemon_timeout = 1.0
+    backend = d.DockerBackend(
+        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=daemon_timeout,
+    )
+    handle = backend.prepare("a-lc-000000000018b")
+    assert isinstance(handle, d._Handle)
+    backend.deliver_home_file(handle, ".claude/projects/-work/x.jsonl", b"line\n")
+    fifo = tmp_path / "hold-open.fifo"
+    os.mkfifo(fifo)
+    docker_state.mkdir(parents=True, exist_ok=True)
+    sentinel = docker_state / f".cp-hold-open-{handle.name}"
+    sentinel.write_text(str(fifo), encoding="utf-8")
+    started = time.monotonic()
+    try:
+        try:
+            backend.read_home_tree(handle, ".claude/projects")
+        except tarfile.ReadError:
+            pass  # issue #189, not this test's own claim - see the docstring above
+        elapsed = time.monotonic() - started
+    finally:
+        sentinel.unlink(missing_ok=True)
+        try:
+            with open(fifo, "wb"):
+                pass
+        except OSError:
+            pass
+    # ONE shared deadline (~1.3s measured) vs the pre-fix sequential joins
+    # (~2.3s measured) - 0.8s margin is tight enough to actually catch a
+    # regression back to sequential joins (mutation-checked: a bound of
+    # daemon_timeout + 2.0 here passed even with the joins reverted to
+    # sequential, which is not evidence at all), not merely wide enough to
+    # never fail.
+    bound = daemon_timeout + 0.8
+    assert elapsed < bound, f"read_home_tree() took {elapsed:.2f}s, expected under {bound:.2f}s"
+    backend.destroy(handle)
+
+
 def test_read_home_tree_refuses_past_the_file_count_bound(base: Path, docker_state: Path) -> None:
     """Control (#106's own acceptance, in the spirit of #102): never
     silently truncate a population that is too large - refuse instead."""
@@ -971,18 +1037,19 @@ def test_execute_reports_stdout_incomplete_when_the_drain_never_reaches_eof(
     fifo = tmp_path / "hold-open.fifo"
     os.mkfifo(fifo)
     argv = ["sh", "-c", f"setsid sh -c 'exec cat {fifo}' </dev/null & true"]
-    # Nominal worst case for this code path (docker_backend.py's execute()):
-    # _kill_container (daemon_timeout) + stdout_thread.join (grace +
-    # daemon_timeout) + stderr_thread.join (grace + daemon_timeout, called
-    # sequentially after stdout's join returns - see the #20 Nit Store
-    # comment filed against #174) + the observations docker-cp write-back
-    # (daemon_timeout). MARGIN is slack for process-spawn/scheduling
-    # overhead this test does not otherwise account for - it is not a
-    # production bound, so it stays a small, fixed, explicit constant
-    # rather than widening any of the real ones above.
-    join_bound = grace + daemon_timeout
-    MARGIN = 2.0
-    bound = daemon_timeout + 2 * join_bound + daemon_timeout + MARGIN
+    # The nominal-worst-case-sum formula this bound used before overstated
+    # what the fixed path actually costs (kill_container and the
+    # observations docker-cp write-back both finish well under their own
+    # daemon_timeout on a healthy host) - a bound built from it was loose
+    # enough to pass even with the drain joins reverted to sequential
+    # (issue #20, mutation-checked: reverting them here, that formula's own
+    # 6.0s+ bound still passed at the reverted code's ~4.45s). Measured
+    # directly instead, repeatably: ~2.46s with the joins against ONE
+    # shared deadline (grace + daemon_timeout, not each thread against its
+    # own full bound sequentially), ~4.45s reverted to sequential. This
+    # bound sits between the two, mutation-checked to actually catch the
+    # regression.
+    bound = 3.5
     started = time.monotonic()
     try:
         result = backend.execute(handle, argv, Limits(timeout=5, grace=grace))
@@ -992,11 +1059,45 @@ def test_execute_reports_stdout_incomplete_when_the_drain_never_reaches_eof(
         assert result.stderr_incomplete is True
         assert result.stdout_truncated is False, "capped-and-discarded is a different fact from never-reached-EOF"
         assert elapsed < bound, (
-            f"execute() took {elapsed:.2f}s, expected under {bound:.2f}s "
-            f"(kill {daemon_timeout}s + stdout join {join_bound}s + stderr join {join_bound}s "
-            f"+ docker-cp {daemon_timeout}s + {MARGIN}s margin) - it waited for the detached "
-            "grandchild instead of giving up"
+            f"execute() took {elapsed:.2f}s, expected under {bound:.2f}s - it waited for the "
+            "detached grandchild instead of giving up, or the drain joins regressed to sequential"
         )
+    finally:
+        try:
+            with open(fifo, "wb"):
+                pass
+        except OSError:
+            pass
+    backend.destroy(handle)
+
+
+@needs_setsid
+@pytest.mark.skipif(shutil.which("cat") is None, reason="needs cat to block the detached grandchild on a FIFO")
+def test_stdout_and_stderr_incomplete_report_independently_under_the_shared_join_deadline(
+    base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    """issue #20 Nit Store: joining stdout/stderr against ONE shared
+    deadline (instead of each against its own full bound, sequentially)
+    must not collapse `stdout_incomplete`/`stderr_incomplete` into one
+    combined fact - each stream's completeness is still its own,
+    independently observed truth. Only the grandchild's STDOUT stays open
+    here (its own stderr fd is closed, `2>&-`, before it blocks on the
+    FIFO), so only `stdout_incomplete` should read True."""
+    grace, daemon_timeout = 1.0, 1.0
+    backend = d.DockerBackend(
+        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=daemon_timeout,
+    )
+    handle = backend.prepare("a-lc-000000000024c2")
+    assert isinstance(handle, d._Handle)
+    backend.install(handle, {})
+    fifo = tmp_path / "hold-open.fifo"
+    os.mkfifo(fifo)
+    argv = ["sh", "-c", f"setsid sh -c 'exec cat {fifo} 2>&-' </dev/null & true"]
+    try:
+        result = backend.execute(handle, argv, Limits(timeout=5, grace=grace))
+        assert result.reason == "exited"
+        assert result.stdout_incomplete is True
+        assert result.stderr_incomplete is False
     finally:
         try:
             with open(fifo, "wb"):
