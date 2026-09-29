@@ -90,6 +90,80 @@ and version plan.
   operator-owed. Matched-configuration comparison (`#13`'s other acceptance
   bullet) is a separate, later change.
 
+- **`skillc configuration-compare`: matched-configuration comparison**
+  (Refs #13). Pure post-hoc analysis of two ALREADY-CAPTURED evidence
+  records (`--a`/`--b`, JSON - `skillc/configuration_compare.py`'s own
+  docstring states the input shape; no agent or docker call of its own).
+  Refuses (exit 2) unless every identity field (`task_id`, `grader_revision`,
+  `image_digest`, `client`, `model`, `timeout_seconds`, `collection`)
+  matches between the two sides EXCEPT the one named by `--vary` - naming
+  every mismatched field and both values, and stating the alternative
+  `docs/specs/evaluation-facility/protocol.md` itself names: report a
+  compatibility/product comparison instead of a causal claim. A record
+  missing any identity field entirely refuses to load - "absent" is never
+  treated as "matches" (review ruling, with a committed case for every
+  field). The comparison output states its own scope plainly: descriptive
+  only, one attempt per side (n=1 each), no rate or significance claim.
+
+  `from_collection_run` adapts a REAL `collection-run` attempt's two actual
+  saved artifacts (`collection_conformance.evidence_envelope()` and a
+  `--evidence` export's `result-*.json`) into this shape - proven end to
+  end against real fake-backend output, not fixtures written to this
+  module's own schema (review finding: "fixtures written to the tool's
+  own schema prove the tool agrees with itself"). Building it surfaced
+  three real gaps in what `collection-run` persists today, all stated
+  plainly rather than papered over:
+  - `image_digest` and `timeout_seconds` are recorded NOWHERE in either
+    artifact - `from_collection_run` takes both as required keyword
+    arguments instead of reading or defaulting them, and its docstring
+    says so. Filed as [#188](https://github.com/cooneycw/skillc/issues/188);
+    closing it means changing what `collection-run` itself persists, out
+    of scope here. Because of #188, a comparison that shows these two
+    fields as MATCHED would otherwise read as if a real record had proved
+    it - so `load_record` now accepts an optional per-field `provenance`
+    (`"recorded"` or `"asserted"`, unmentioned fields default to
+    `"asserted"` - the WEAKER claim by default, review correction: a
+    generic hand-written record with no `provenance` block must not
+    silently assert every identity field was recorded, which is exactly
+    what this module cannot check from JSON alone). `from_collection_run`
+    marks `recorded` only on the fields it actually read from a real
+    artifact (`task_id`, `grader_revision`, `client`, `model`,
+    `collection`), leaving `image_digest`/`timeout_seconds` on the
+    `asserted` default. `compare` surfaces a `unverified_matched_fields`
+    list (plus an explanatory note) naming any MATCHED field that is
+    asserted on either side - present only when such a field exists, never
+    an empty list, so absence of the key means "nothing was asserted," not
+    "not checked."
+  - the exported VERIFIED_RESULT's own `criteria` field is the WRONG
+    source for `outcome_dimensions` - it mixes the verifier's own
+    `installation-ready` criterion in alongside the grader's, silently
+    turning a genuinely PASSing task grade into an INCONCLUSIVE dimension
+    verdict when bucketed directly. The right source, `record["graded"]
+    ["criteria"]` (task-only), is what `from_collection_run`'s docstring
+    directs a caller to use instead - found by running the adapter against
+    a real attempt and getting a wrong answer, not by reasoning about the
+    schema.
+  - Also collapsed an over-specified `task_revision`/`grader_revision`
+    split from an earlier draft into one `grader_revision` field - this
+    codebase has exactly one `grader.json` per task, one id and one
+    revision covering both, never two independently-versioned things.
+
+  Tests: synthetic fixture records for the comparison/refusal logic itself
+  (`test_configuration_compare.py`, unchanged in spirit), including the
+  provenance loader's own red cases (unknown field name, unknown value,
+  partial-default), a committed case that a generic no-`provenance` record
+  flags every matched field, a committed case that `unverified_matched_fields`
+  actually appears when one specific field is asserted (every other field
+  earning `recorded`), and its negative control (the key is absent
+  entirely, not an empty list, when both sides earn `recorded` on every
+  matched field); plus a real, fake-backend end-to-end test
+  (`test_configuration_compare_real_producer.py`) driving two actual
+  `collection-run` attempts and adapting their real output - one matched
+  pair that compares (and is asserted-labeled on `image_digest`/
+  `timeout_seconds`, per #188), one mismatched pair that refuses. Building
+  the matching adapter for `pilot-report`'s own output is separate, later
+  work, noted as such, not included here.
+
 - **Capability-gated in-container TERM forwarding to the exec'd subject**
   (Refs #158). `docker/trial/skillc-supervisor.py` (a new foreground
   process, replacing the `sleep infinity` keep-alive placeholder once the
