@@ -62,15 +62,36 @@ proposal. See the
 [architecture decision](docs/decisions/0002-independent-goal-driven-evaluation.md) and
 [PLAN.md](PLAN.md) for the design and delivery sequence.
 
+**0.4.0 closes no new capability milestone.** It closes four issues found
+and fixed along the way: two load-sensitive tests made deterministic
+([#174](https://github.com/cooneycw/skillc/issues/174)), a silent
+partial-capture bug in the Docker backend's own output draining
+([#189](https://github.com/cooneycw/skillc/issues/189)), a silent
+failed-write-back bug in the same backend that could let a subject suppress
+its own capture ([#186](https://github.com/cooneycw/skillc/issues/186)),
+and a CPP scan suppression fix
+([#159](https://github.com/cooneycw/skillc/issues/159)). Substantial code
+also landed this cycle for the Level 4/5 evaluation work
+([#14](https://github.com/cooneycw/skillc/issues/14): an authority-boundary
+interceptor, an advisory Level 5 request-count observer, and a
+trusted-observation channel) and declared outcome dimensions plus a
+matched-configuration comparison
+([#13](https://github.com/cooneycw/skillc/issues/13)) - neither issue
+closes yet, since both still owe a real live-agent run. Full detail,
+including everything else that shipped and exactly what each open issue
+still owes:
+[`docs/release-notes/0.4.0.md`](docs/release-notes/0.4.0.md).
+
 <!-- milestones:start (checked against docs/milestones.json, #73) -->
 | Milestone | State |
 |---|---|
 | 0.1.0 - static checker | closed |
 | 0.2.0 - real Docker trial end to end (#10) and a second independent collection (#11) | closed |
 | 0.3.0 - the first predeclared matched pilot (#12), the Claude Code agent arm (#124), and real-daemon timeout/cancellation seeds (#122) | closed |
+| 0.4.0 - determinism and capture-correctness hardening: load-sensitive tests fixed (#174), two silent partial/failed-capture bugs fixed (#189, #186), and CPP scan suppressions (#159) - no new capability milestone closes this cycle | closed |
 <!-- milestones:end -->
 
-**Version:** `0.3.0` (checked in CI against the package version, #73)
+**Version:** `0.4.0` (checked in CI against the package version, #73)
 
 <!-- commands:start (checked against the real argparse parser, #73) -->
 ```bash

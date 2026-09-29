@@ -2,6 +2,7 @@
   "milestones": [
     {"version": "0.1.0", "label": "static checker", "issue": null, "state": "closed"},
     {"version": "0.2.0", "label": "real Docker trial end to end (#10) and a second independent collection (#11)", "issue": 10, "state": "closed"},
-    {"version": "0.3.0", "label": "the first predeclared matched pilot (#12), the Claude Code agent arm (#124), and real-daemon timeout/cancellation seeds (#122)", "issue": 12, "state": "closed"}
+    {"version": "0.3.0", "label": "the first predeclared matched pilot (#12), the Claude Code agent arm (#124), and real-daemon timeout/cancellation seeds (#122)", "issue": 12, "state": "closed"},
+    {"version": "0.4.0", "label": "determinism and capture-correctness hardening: load-sensitive tests fixed (#174), two silent partial/failed-capture bugs fixed (#189, #186), and CPP scan suppressions (#159) - no new capability milestone closes this cycle", "issue": 174, "state": "closed"}
   ]
 }
