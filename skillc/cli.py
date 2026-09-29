@@ -860,7 +860,7 @@ def cmd_collection_run(args: argparse.Namespace) -> int:
     (`CollectionAgentResult.discovery_failed`, issue #124). UNMEASURED
     discovery is printed, not failed."""
     from . import collection_conformance as cc
-    from . import credential, demo, reap, trial
+    from . import credential, demo, reap, trial, verify
 
     docker_bin = tuple(args.docker_bin.split()) if args.docker_bin else ("docker",)
     base = Path(args.base) if args.base else Path(tempfile.gettempdir())
@@ -958,7 +958,23 @@ def cmd_collection_run(args: argparse.Namespace) -> int:
             record_written = True
     result = dataclasses.replace(result, record_written=record_written)
 
-    paste_back = cc.build_collection_paste_back(result)
+    # Issue #13: best-effort only - a dimensions lookup must never turn a
+    # completed run's own paste-back into a crash. The grader already ran
+    # successfully against this exact task_root, so a load failure here
+    # would be surprising, but graded.dimensions degrading to "unavailable"
+    # is a far smaller problem than losing the rest of this report over it.
+    # The exception's own message is never propagated into the printed
+    # paste-back (leak-checked, but a raw grader.json read/parse error could
+    # still name a host path) - only its CLASS, a bounded, path-free reason.
+    dimensions: dict[str, str] = {}
+    dimensions_unavailable_reason: str | None = None
+    try:
+        dimensions = verify.GraderDef.load(task_root).dimensions
+    except (verify.Refused, OSError) as exc:
+        dimensions_unavailable_reason = f"grader load failed ({type(exc).__name__})"
+    paste_back = cc.build_collection_paste_back(
+        result, dimensions, dimensions_unavailable_reason=dimensions_unavailable_reason,
+    )
     try:
         demo.print_paste_back(paste_back)
     except demo.PasteBackRefused as exc:
@@ -1425,7 +1441,7 @@ def cmd_pilot_run(args: argparse.Namespace) -> int:
     from datetime import UTC, datetime
 
     from . import collection_conformance as cc
-    from . import demo, trial_bootstrap
+    from . import demo, trial_bootstrap, verify
     from . import matched_pilot as mp
 
     try:
@@ -1501,9 +1517,21 @@ def cmd_pilot_run(args: argparse.Namespace) -> int:
     (run_dir / mp.PRIVATE_OBSERVATIONS_FILENAME).write_text(
         json.dumps(mp.private_observations(outcomes), indent=1) + "\n", encoding="utf-8",
     )
+    # Issue #13: best-effort, matching cmd_collection_run's own posture - a
+    # dimensions lookup must never turn a completed pilot's report into a
+    # crash. Degrading to "unavailable" (never a guessed "unclassified") is
+    # far smaller than losing the report over it; only the exception's
+    # CLASS is kept, never its message, which could name a host path.
+    pilot_dimensions: dict[str, str] = {}
+    pilot_dimensions_unavailable_reason: str | None = None
+    try:
+        pilot_dimensions = verify.GraderDef.load(demo.GRADER_ROOT).dimensions
+    except (verify.Refused, OSError) as exc:
+        pilot_dimensions_unavailable_reason = f"grader load failed ({type(exc).__name__})"
     report = mp.build_report(
         experiment, mp.reconcile(experiment, outcomes),
         declared_model=declaration.model, declared_effort=declaration.reasoning_effort,
+        dimensions=pilot_dimensions, dimensions_unavailable_reason=pilot_dimensions_unavailable_reason,
     )
     code = _export_pilot_evidence(experiment, report, Path(args.evidence) if args.evidence else mp.EVIDENCE_DIR)
     code = code or _print_pilot_summary(report)
@@ -1536,7 +1564,22 @@ def cmd_pilot_report(args: argparse.Namespace) -> int:
     """Rebuild a pilot run's report from its private run directory - the step
     that merges a REVIEWED claims file (`--claims`) once a person has read the
     private final messages. Makes no agent or docker call."""
+    from . import demo, verify
     from . import matched_pilot as mp
+
+    # Issue #13: this pilot's grader is fixed (demo.GRADER_ROOT) - every
+    # accepted declaration is refused unless its own grader_path resolves to
+    # exactly this same root (plan_pilot's own check), so this needs no
+    # per-declaration lookup, even when --manifest is not given. Best-effort,
+    # matching cmd_pilot_run's own posture - "unavailable" on failure, never
+    # a guessed "unclassified", and only the exception's class, never its
+    # message.
+    pilot_dimensions: dict[str, str] = {}
+    pilot_dimensions_unavailable_reason: str | None = None
+    try:
+        pilot_dimensions = verify.GraderDef.load(demo.GRADER_ROOT).dimensions
+    except (verify.Refused, OSError) as exc:
+        pilot_dimensions_unavailable_reason = f"grader load failed ({type(exc).__name__})"
 
     run_dir = Path(args.run_dir).expanduser()
     try:
@@ -1573,6 +1616,7 @@ def cmd_pilot_report(args: argparse.Namespace) -> int:
         return 2
     report = mp.build_report(
         experiment, reconciled, claims, declared_model=declared_model, declared_effort=declared_effort,
+        dimensions=pilot_dimensions, dimensions_unavailable_reason=pilot_dimensions_unavailable_reason,
     )
     code = _export_pilot_evidence(experiment, report, Path(args.evidence) if args.evidence else mp.EVIDENCE_DIR)
     return code or _print_pilot_summary(report)

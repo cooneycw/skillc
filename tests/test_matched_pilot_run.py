@@ -129,6 +129,49 @@ def test_the_whole_schedule_runs_interleaved_and_every_attempt_is_reported(tmp_p
     assert mp.build_report(reloaded_experiment, reloaded) == report
 
 
+def test_build_report_surfaces_declared_outcome_dimensions_per_attempt(tmp_path: Path) -> None:
+    """Issue #13: `build_report`'s own per-attempt entry carries a bucketed
+    `outcome_dimensions` view when a caller passes `dimensions` - the wiring
+    `cmd_pilot_run`/`cmd_pilot_report` use, exercised here directly against
+    real graded records from the fake pilot (Level 1's actual criterion ids:
+    R4-interface, reported-example, R1, R2, R3 - this pilot's grader.json
+    declares none of them, so the default (no `dimensions` argument) must
+    read everything `unclassified`, and a caller-supplied mapping covering
+    SOME of them must bucket exactly those, leaving the rest unclassified)."""
+    experiment, outcomes, _run_dir = _run_fake_pilot(tmp_path)
+
+    undeclared = mp.build_report(experiment, outcomes)
+    for entry in _entries(undeclared):
+        dims = entry["outcome_dimensions"]
+        assert isinstance(dims, dict)
+        assert dims["functional"]["verdict"] == "not-applicable"
+        assert dims["unclassified"]["criteria"], "every criterion should be unclassified with no declaration"
+
+    declared = mp.build_report(experiment, outcomes, dimensions={"R1": "functional", "R2": "constraint"})
+    for entry in _entries(declared):
+        dims = entry["outcome_dimensions"]
+        assert isinstance(dims, dict)
+        assert [c["id"] for c in dims["functional"]["criteria"]] == ["R1"]
+        assert [c["id"] for c in dims["constraint"]["criteria"]] == ["R2"]
+        unclassified_ids = {c["id"] for c in dims["unclassified"]["criteria"]}
+        assert unclassified_ids == {"R4-interface", "reported-example", "R3"}
+
+
+def test_build_report_reports_outcome_dimensions_unavailable_distinctly(tmp_path: Path) -> None:
+    """Review ruling: `dimensions_unavailable_reason` (a failed lookup) must
+    read differently from a merely empty `dimensions` (a grader that
+    declares nothing) - not the same "unclassified" value either way."""
+    experiment, outcomes, _run_dir = _run_fake_pilot(tmp_path)
+
+    report = mp.build_report(experiment, outcomes, dimensions_unavailable_reason="grader load failed (OSError)")
+    for entry in _entries(report):
+        dims = entry["outcome_dimensions"]
+        assert isinstance(dims, dict)
+        assert dims["functional"]["verdict"] == "unavailable"
+        assert dims["unclassified"]["verdict"] == "unavailable"
+        assert dims["unavailable_reason"] == "grader load failed (OSError)"
+
+
 def test_the_known_gap_is_tolerated_only_for_the_pre_fix_run(tmp_path: Path) -> None:
     """#139: the committed #12 bundle predates stored results, and only its own
     experiment keeps the tolerance. The same bundle under any other experiment

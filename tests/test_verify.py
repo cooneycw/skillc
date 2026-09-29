@@ -578,6 +578,11 @@ def test_the_committed_grader_definition_loads_and_pins(tmp_path: Path) -> None:
     {"probe": {"file": "../probe.py", "inputs": "inputs.json", "timeout": 30}},
     {"probe": {"file": "probe.py", "inputs": "inputs.json", "timeout": True}},
     {"judge": {"file": "grade_slug.py", "timeout": 60, "argv": ["sh"]}},
+    # Issue #13: `dimensions` is optional, but once present must be well-formed.
+    {"dimensions": "functional"},  # not an object at all
+    {"dimensions": {"R1": 1}},  # value not a string
+    {"dimensions": {"not-a-declared-criterion": "functional"}},  # id not in criteria
+    {"dimensions": {"R1": "not-a-real-dimension"}},  # red case: unknown dimension value refused
 ])
 def test_a_loose_grader_definition_is_refused(tmp_path: Path, change: dict[str, object]) -> None:
     def edit(root: Path) -> None:
@@ -585,6 +590,25 @@ def test_a_loose_grader_definition_is_refused(tmp_path: Path, change: dict[str, 
         (root / "grader.json").write_text(json.dumps({**data, **change}))
     with pytest.raises(t.Refused):
         _task_copy(tmp_path, edit)
+
+
+def test_a_grader_with_no_dimensions_key_loads_with_an_empty_mapping(tmp_path: Path) -> None:
+    """Issue #13: `dimensions` is optional (review ruling) - a grader that
+    predates it, or simply never declares it, still loads. Every one of its
+    criteria is then `outcome_report.UNCLASSIFIED`, never guessed."""
+    grader = _task_copy(tmp_path)
+    assert grader.dimensions == {}
+
+
+def test_a_grader_can_declare_a_dimension_for_some_criteria_and_not_others(tmp_path: Path) -> None:
+    """Issue #13: declaration is per-criterion, not all-or-nothing - a
+    grader may dimension some criteria and leave the rest unclassified."""
+    def edit(root: Path) -> None:
+        data = json.loads((root / "grader.json").read_text())
+        data["dimensions"] = {"R1": "functional", "R2": "constraint"}
+        (root / "grader.json").write_text(json.dumps(data))
+    grader = _task_copy(tmp_path, edit)
+    assert grader.dimensions == {"R1": "functional", "R2": "constraint"}
 
 
 def test_a_grader_file_that_is_a_link_is_refused(tmp_path: Path) -> None:

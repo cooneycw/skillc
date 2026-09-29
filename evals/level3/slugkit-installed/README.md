@@ -14,7 +14,7 @@ avoids).
 |---|---|
 | `goal.md` | The agent-facing request. States the bug, the replacements-table requirement and the two-graded-ways rule - every requirement is PUBLIC |
 | `fixture/` | Pinned starting state: a tiny installable-in-name package (`pyproject.toml`, `slugkit/`, `tests/`) carrying the same trailing-hyphen bug |
-| `grader.json` | Grader definition: `functional-trailing-hyphen`, `integration-installed-path` |
+| `grader.json` | Grader definition: `functional-trailing-hyphen`, `integration-installed-path`, each declared under `dimensions` too (#13: `skillc/outcome_report.py` reads that declaration, never the id's own naming) |
 | `probe.py` | Runs the visible unit test AND the installed-path check (via the emulation or real-pip modes below). The only grading code that runs candidate code |
 | `inputs.json` | goal.md's own worked example plus one held-out input, for the installed-path check |
 | `grade_slugkit.py` | The judge: holds every expected value, including the held-out one. Never shown to the agent |

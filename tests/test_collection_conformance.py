@@ -586,6 +586,76 @@ def test_paste_back_is_leak_clean_and_names_every_planned_field() -> None:
         assert field in text
 
 
+def test_paste_back_reports_dimensions_separately_from_the_flat_criteria_line(tmp_path: Path) -> None:
+    """Issue #13: `graded.dimensions=` groups by DECLARED dimension, never
+    inferred from the id, and reports every bucket - including one with no
+    criteria at all (`not-applicable`, never guessed into a PASS/FAIL it
+    never earned)."""
+    record: dict[str, object] = {
+        "disposition": "captured",
+        "observation": {"prompt_delivered": True, "canary_satisfied": True, "skill_invocations": []},
+        "stop": {"reason": "exited", "exit_code": 0, "confirmed": True},
+        "cleanup": {"status": "cleaned", "failures": []},
+        "backend_teardown": "confirmed",
+        "liveness_method": "canary",
+        "graded": {
+            "status": "PASS",
+            "criteria": [
+                {"id": "functional-a", "mandatory": True, "outcome": "SATISFIED"},
+                {"id": "integration-b", "mandatory": True, "outcome": "VIOLATED"},
+            ],
+        },
+        "grading_blocked_reason": None,
+    }
+    result = cc.CollectionAgentResult("whatever", "v1", "codex", record)
+    text = cc.build_collection_paste_back(result, dimensions={"functional-a": "functional", "integration-b": "integration"})
+    assert demo.leak_check_text(text) == []
+    assert "graded.dimensions=functional=PASS, constraint=not-applicable, integration=FAIL, unclassified=not-applicable" in text
+
+
+def test_paste_back_reports_unclassified_when_no_dimensions_are_declared(tmp_path: Path) -> None:
+    """Issue #13: the default (Level 1 today) - no declaration at all means
+    every criterion is `unclassified`, never guessed into `functional`."""
+    record: dict[str, object] = {
+        "disposition": "captured",
+        "observation": {"prompt_delivered": True, "canary_satisfied": True, "skill_invocations": []},
+        "stop": {"reason": "exited", "exit_code": 0, "confirmed": True},
+        "cleanup": {"status": "cleaned", "failures": []},
+        "backend_teardown": "confirmed",
+        "liveness_method": "canary",
+        "graded": {"status": "PASS", "criteria": [{"id": "slug-fixed", "mandatory": True, "outcome": "SATISFIED"}]},
+        "grading_blocked_reason": None,
+    }
+    result = cc.CollectionAgentResult("whatever", "v1", "codex", record)
+    text = cc.build_collection_paste_back(result)
+    assert "graded.dimensions=functional=not-applicable, constraint=not-applicable, integration=not-applicable, unclassified=PASS" in text
+
+
+def test_paste_back_reports_unavailable_distinctly_from_unclassified(tmp_path: Path) -> None:
+    """Review ruling: a FAILED dimensions lookup must never read the same as
+    "the grader declares nothing" - the paste-back must say `unavailable`,
+    with a reason, never silently fall back to `unclassified`."""
+    record: dict[str, object] = {
+        "disposition": "captured",
+        "observation": {"prompt_delivered": True, "canary_satisfied": True, "skill_invocations": []},
+        "stop": {"reason": "exited", "exit_code": 0, "confirmed": True},
+        "cleanup": {"status": "cleaned", "failures": []},
+        "backend_teardown": "confirmed",
+        "liveness_method": "canary",
+        "graded": {"status": "PASS", "criteria": [{"id": "slug-fixed", "mandatory": True, "outcome": "SATISFIED"}]},
+        "grading_blocked_reason": None,
+    }
+    result = cc.CollectionAgentResult("whatever", "v1", "codex", record)
+    text = cc.build_collection_paste_back(
+        result, dimensions_unavailable_reason="grader load failed (Refused)",
+    )
+    assert demo.leak_check_text(text) == []
+    assert (
+        "graded.dimensions=functional=unavailable, constraint=unavailable, integration=unavailable, "
+        "unclassified=unavailable (unavailable_reason=grader load failed (Refused))"
+    ) in text
+
+
 def test_paste_back_refresh_line_reads_a_real_driver_record(
     tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
