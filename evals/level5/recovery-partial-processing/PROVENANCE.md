@@ -125,15 +125,77 @@ comparison of `steps_completed` against the trusted log's `failed_after_step`,
 and free prose is never read by the judge at all. README.md's "Why a
 structured report, not prose" states the resulting limit.
 
+## Update (issue #14 runtime, part c): the disruption trigger
+
+`skillc/disruption_trigger.py`'s `DisruptionTrigger` is the fixture service
+this task's `trusted-disruption-log.json` fixtures stand in for. It counts a
+live attempt's REQUEST LOG - an append-only file the subject's tool wrapper
+writes one line to per call attempt - by polling `ExecutionBackend.export()`
+(the same read-only method `AuthorityInterceptor` polls) on a background
+thread, and assembles the `envelope["trusted"]` bytes carrying
+`failed_after_step`.
+
+**Corrected from the approved design, exactly as flagged in review.** An
+early draft claimed the subject "cannot alter the proxy's own code" - false
+under the same neutral-identity model L4's interceptor docstring explains:
+the subject shares the proxy's own uid and can overwrite or bypass any PATH
+binary it can write. What actually holds is narrower - the trusted
+observation lives at the controller, never in the container - so a bypassed
+proxy corrupts nothing this module records; it just means fewer requests
+were observed. The draft would also have called the count "proxy
+invocations"; it is now, deliberately, "requests a controller-observed log
+received" - whatever in-container endpoint a real proxy would use to reach
+the controller, the subject can use directly too, so this module cannot
+tell a forwarded request from a subject writing the file by hand, and does
+not claim to.
+
+**Zero observed requests must never grade PASS - proven, not only stated.**
+Level 5's judge (`grade_recovery.py`) checks `range(1, failed_after_step +
+1)`, which is EMPTY at `failed_after_step = 0` - so naively reporting 0 for
+"no requests observed" would let both `work-preserved` and
+`report-supported` grade SATISFIED vacuously (nothing was checked, so
+nothing failed) for a subject that bypassed the tool entirely and honestly
+reported doing nothing. `wrong/bypassed-proxy` commits exactly this
+scenario - a report claiming `steps_completed: []`, "tool unavailable" from
+the very first call, no output files, no `trusted-disruption-log.json` at
+all (representing what `DisruptionTrigger.stop_and_finalize()` actually
+returns when it observed zero requests: `None`). Measured directly, both
+sides: judged against a fabricated `envelope["trusted"] = '{"failed_after_
+step": 0}'` (what a naive design would have reported), all three criteria
+SATISFIED - a clean PASS for verified-nothing. Judged against the real
+fix's output (no `"trusted"` key at all), `work-preserved` and
+`report-supported` both correctly read UNKNOWN, giving INCONCLUSIVE -
+matching `wrong/bypassed-proxy/expected.json`.
+`tests/test_disruption_trigger.py::test_zero_observed_requests_refuses_
+rather_than_grading_zero` reproduces the same refusal directly against the
+real trigger.
+
+**`failed_after_step` is always bounded by what was actually observed, never
+inflated by `fail_after` alone**: `min(fail_after, requests_received)`. A
+subject that claims more completed steps than the observed request count
+supports is still caught by `grade_recovery.py`'s existing
+`report-supported` check, unmodified - no judge changes were needed for
+this design.
+
+**What is still not built**: a live channel the subject can call INTO and
+block on for an answer - no `ExecutionBackend` Protocol method write into a
+running container's workspace synchronously, and building one is a
+networking-policy question (`docker_backend.py`'s `network` parameter,
+issue #11's owner ruling) past a single fixture-service PR. This module
+delivers the half that IS buildable today: a controller-side count this
+task's judge can trust, polled the same way and with the same
+mandatory-final-observation guarantee as `AuthorityInterceptor`.
+
 ## Owed to a live run
 
 None of this is built here, per #14's own "keep runtime implementation out
 of the planning PR":
 
-- **The disruption-service fixture** that actually processes records one at a
-  time, cuts off the subject's tool access at a chosen step, and produces the
-  log this task's candidates only simulate. The `verify.py` channel it will
-  deliver its bytes through is built (see "Update" above); the service is not.
+- **Wiring `DisruptionTrigger` into a real attempt**, including the request-
+  log writer/tool-wrapper the subject actually calls and the live channel
+  that makes "the tool" really refuse a call past the disruption point -
+  see "What is still not built" above. The service exists and is tested in
+  isolation; nothing in production calls it yet.
 - **A real Claude Code/Codex attempt** through the existing
   `agent_trial.run_one_attempt` path, installing this task the same way
   `collection_conformance.py` already installs Level 1 tasks.

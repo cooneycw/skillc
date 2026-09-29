@@ -49,7 +49,7 @@ def test_the_grader_is_certified() -> None:
     assert certified, [r for r in rows if not r.ok]
     by_name = {r.candidate: r.status for r in rows}
     assert by_name["reference"] == "PASS"
-    assert len(rows) >= 1 + 4  # reference + 4 wrong/*
+    assert len(rows) >= 1 + 6  # reference + 6 wrong/*
 
 
 @pytest.mark.parametrize("control", sorted(qualify.CONTROLS))

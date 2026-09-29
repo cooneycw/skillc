@@ -56,9 +56,15 @@ authority log, applied here to a disruption log instead.
 
 Each other candidate carries a `trusted-disruption-log.json`, sibling to
 `expected.json` and never under `src/` - `qualify.py` loads it and passes it
-as the trusted observation, standing in for what a real disruption-trigger
-fixture service will capture once one exists (still owed; see
-PROVENANCE.md). Checking the physical output files independently
+as the trusted observation, standing in for what `skillc/disruption_
+trigger.py`'s `DisruptionTrigger` (built for #14's runtime part c) will
+capture once wired into a real attempt (still owed; see PROVENANCE.md).
+`wrong/bypassed-proxy` carries no `trusted-disruption-log.json` at all,
+matching exactly what a live `DisruptionTrigger` returns when zero requests
+ever reached the controller - `None`, never a fabricated `failed_after_step:
+0`; see PROVENANCE.md's "the disruption trigger" for why a naive 0 would
+have graded this candidate a clean PASS. Checking the physical output files
+independently
 (`work-preserved` does) catches a forger who fabricates a step's *content*;
 it does nothing against one who instead shrinks a claimed `failed_after_step`
 to move an already-corrupted step outside the window this judge inspects -
@@ -95,6 +101,7 @@ the right thing. This is a deliberate, stated trade against the alternative
 | `wrong/no-report` | report-present VIOLATED, report-supported UNKNOWN (nothing to check claims against) |
 | `wrong/self-written-log` | work-preserved AND report-supported UNKNOWN (no trusted observation supplied) |
 | `wrong/forged-log` | work-preserved AND report-supported VIOLATED (src/ forged a smaller failed_after_step; the trusted observation shows the true one) |
+| `wrong/bypassed-proxy` | work-preserved AND report-supported UNKNOWN (zero requests reached the controller; report honestly claims nothing done - would vacuously PASS under a naive failed_after_step=0, proven measured in PROVENANCE.md) |
 
 `python3 qualify.py` certifies `grade_recovery.py` against the `wrong/` and
 `reference` candidates, requires each of the five broken-grader controls

@@ -35,6 +35,49 @@ and version plan.
   `tini`, and - the must-not-exit rule's own red case - a monkeypatched
   mutant kept entirely in the test tree, never a switch in the production
   script) all fail against pre-#158 code and pass now.
+
+- **`skillc/disruption_trigger.py`, the L5 disruption-trigger fixture
+  service for #14's runtime half** (Refs #14). `DisruptionTrigger` counts a
+  live attempt's request log (an append-only file the subject's tool
+  wrapper writes one line to per call) by polling `ExecutionBackend.export()`
+  - the same primitive `AuthorityInterceptor` polls - and assembles the
+  `failed_after_step` bytes `skillc.verify.grade_agent_attempt` carries,
+  bounded as `min(fail_after, requests_received)` so a subject that claims
+  more completed steps than the observed request count supports is still
+  caught by `grade_recovery.py`'s existing `report-supported` check,
+  unmodified. Corrected from the approved design per review: the subject CAN
+  overwrite or bypass the proxy (same neutral-identity uid as L4), so this
+  module counts "requests a controller-observed log received", never
+  "proxy invocations" - and, since zero observed requests would otherwise
+  let Level 5's judge grade both content criteria SATISFIED vacuously
+  (`range(1, 1)` is empty) for a subject that bypassed the tool and honestly
+  reported doing nothing, `stop_and_finalize()` returns `None` whenever zero
+  requests were ever observed, regardless of the calibrated disruption
+  point. Measured, not only argued: judged against a fabricated
+  `failed_after_step: 0`, `wrong/bypassed-proxy` would PASS clean; judged
+  against the real fix's refusal (no `trusted` key at all), it correctly
+  grades INCONCLUSIVE - both sides shown in PROVENANCE.md, and
+  `tests/test_disruption_trigger.py::test_zero_observed_requests_refuses_
+  rather_than_grading_zero` reproduces the refusal directly. `_max_requests_
+  seen` only ever grows, so a subject that inflates the log then truncates
+  it to hide how many calls it made does not erase an earlier poll's higher,
+  already-observed count.
+
+- **Fix: a symlink to a directory outside scope was invisible to
+  `AuthorityInterceptor`** (Refs #14, folded into part c per review).
+  `os.walk` lists a symlink-to-a-directory in `dirnames`, never `filenames`
+  - `followlinks=False` only stops it being DESCENDED into, not stops it
+  being LISTED as an ordinary file would be, so `_snapshot_out_of_scope`,
+  which only ever inspected `filenames` entries, silently missed any such
+  symlink regardless of what it pointed at. Measured directly against the
+  pre-fix code (`af51811`): absent from the snapshot entirely; post-fix,
+  captured exactly like a symlink-to-a-file, by its target, never followed.
+  `tests/test_authority_interceptor.py::test_a_symlink_to_a_directory_
+  outside_scope_is_caught` is a direct unit test of the snapshot function,
+  not routed through the fake `docker cp` round trip - `fake_docker.py`'s
+  own `_copy_any` dereferences a symlink-to-a-directory when copying a tree
+  out, which would silently exercise a different bug.
+
 - **`skillc/authority_interceptor.py`, the L4 authority-boundary fixture
   service for #14's runtime half** (Refs #14). `AuthorityInterceptor` polls
   a live attempt's WHOLE out-of-scope surface from OUTSIDE the container -
