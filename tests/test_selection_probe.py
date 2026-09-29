@@ -1069,6 +1069,72 @@ def test_cli_exits_0_when_every_attempt_was_captured(
     assert "verdict: ok" in out and "report_written=True" in out
 
 
+# --------------------------------------------------------------------- --task (#20 Nit Store)
+
+FINISH_CLOSE_REF_ROOT = ROOT / "evals" / "level1" / "finish-close-ref"
+
+
+def test_cli_default_task_records_the_same_identity_as_before(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No `--task` must grade against `slug-small-fix`, byte-identical to
+    before this flag existed - the refactor provably changes nothing by
+    default."""
+    from skillc import cli
+    from skillc import collection_conformance as cc
+
+    seen = _cli_fakes(monkeypatch, tmp_path, _report(*[(_arm(), _arm())] * 3))
+    assert cli.main(["selection-probe", "--base", str(tmp_path)]) == 0
+    [call] = seen
+    grader = call["grader"]
+    assert (grader.id, grader.revision) == ("slug-small-fix", "2")  # type: ignore[attr-defined]
+    runner = call["runner"]
+    assert runner.goal == (sp.GRADER_ROOT / "goal.md").read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert runner.surface == cc._fixture_surface(sp.GRADER_ROOT / "fixture")  # type: ignore[attr-defined]
+
+
+def test_cli_task_flag_grades_against_the_named_task_not_the_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`--task DIR` (issue #20 Nit Store, mirroring collection-run's own
+    --task, #162) must actually redirect which task's grader/goal/fixture
+    this run uses - not merely be accepted and ignored. Green case: on the
+    pre-fix parser (main @ eb0750d), `--task` is not a recognized option at
+    all and `parser.parse_args` raises `SystemExit` before `cli.main` is
+    even reached (hand-verified, not committed as a duplicate test - the
+    flag simply did not exist to be red against)."""
+    from skillc import cli
+    from skillc import collection_conformance as cc
+
+    seen = _cli_fakes(monkeypatch, tmp_path, _report(*[(_arm(), _arm())] * 3))
+    assert cli.main([
+        "selection-probe", "--task", str(FINISH_CLOSE_REF_ROOT), "--base", str(tmp_path),
+    ]) == 0
+    [call] = seen
+    grader = call["grader"]
+    assert (grader.id, grader.revision) == ("finish-close-ref", "1")  # type: ignore[attr-defined]
+    runner = call["runner"]
+    assert runner.goal == (FINISH_CLOSE_REF_ROOT / "goal.md").read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert runner.surface == cc._fixture_surface(FINISH_CLOSE_REF_ROOT / "fixture")  # type: ignore[attr-defined]
+
+
+def test_cli_task_and_detection_control_compose(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`--task` and `--detection-control` are independent axes (unlike
+    demo's `--control`, which #20 refuses together with `--task` for a
+    different reason - see test_demo.py): the control's own canary/skill
+    name comes from detection-control.json, unrelated to which coding task
+    the agent is graded against."""
+    from skillc import cli
+
+    seen = _cli_fakes(monkeypatch, tmp_path, _report((_arm(selection="selected"), _arm())))
+    assert cli.main([
+        "selection-probe", "--detection-control", "--task", str(FINISH_CLOSE_REF_ROOT), "--base", str(tmp_path),
+    ]) == 0
+    [call] = seen
+    assert call["detection_control"] is True
+    assert call["grader"].id == "finish-close-ref"  # type: ignore[attr-defined]
+
+
 def test_cli_detection_control_names_the_declared_skill_on_the_declared_case(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

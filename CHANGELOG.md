@@ -10,6 +10,18 @@ and version plan.
 
 ### Added
 
+- **`--task DIR` on `skillc demo` and `skillc selection-probe`** (Refs #20),
+  mirroring `collection-run`'s own `--task` (#162): both commands hard-coded
+  `evals/level1/slug-small-fix` and could not be pointed at a different
+  Level 1 task without a code change. `selection-probe --task` redirects
+  each attempt's grader, prompt and fixture; the predeclared selection
+  cases themselves are unaffected, since they are a property of the
+  collection being probed, not of which task the agent is asked to fix.
+  `demo --task` redirects the grading leg's candidate and grader; `demo
+  --control` (the seeded negative controls) is refused together with
+  `--task`, since its known-bad candidate is specific to the default
+  task's own `wrong/` fixtures. Both defaults are unchanged without the
+  flag.
 - **Capability-gated in-container TERM forwarding to the exec'd subject**
   (Refs #158). `docker/trial/skillc-supervisor.py` (a new foreground
   process, replacing the `sleep infinity` keep-alive placeholder once the
