@@ -169,10 +169,23 @@ class FakeProbeBackend:
                 real_argv, stdout=(subprocess.DEVNULL if out_file is None else out_file),
                 stderr=subprocess.PIPE, stdin=subprocess.PIPE if stdin is not None else None,
             )
+            # "directory" mirrors the real #186 failure mode (the write-back
+            # itself fails); "missing" is a reader-robustness case with no
+            # real `DockerBackend` equivalent (it always attempts a write),
+            # so it is left unreported here, exactly like every OTHER fake
+            # in this module that does not model `observations_capture` at
+            # all - `ExecuteResult`'s own default (`None`).
+            if self.observations_missing_as == "directory":
+                observations_capture = "failed"
+            elif self.observations_missing_as is None:
+                observations_capture = "written"
+            else:
+                observations_capture = None
             try:
                 _, err = proc.communicate(stdin, timeout=limits.timeout)
                 return ExecuteResult(reason="exited", exit_code=proc.returncode,
-                                      error=err.decode("utf-8", "replace") or None)
+                                      error=err.decode("utf-8", "replace") or None,
+                                      observations_capture=observations_capture)
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait()
@@ -242,29 +255,44 @@ def test_a_wrong_candidate_fails_through_the_backend(
     assert graded.status == "FAIL"
 
 
-@pytest.mark.parametrize("missing_as", ["missing", "directory"])
-def test_a_missing_or_non_file_observations_never_grades_pass(
-    backend: FakeProbeBackend, tmp_path: Path, missing_as: str,
-) -> None:
-    """Acceptance item for issue #186: state what a reader of `observations`
-    does with a missing or non-regular-file `observations`, and prove the
-    answer is never a PASS - the exact state a real subject can force by
-    making `DockerBackend.execute()`'s write-back fail (see
-    `test_docker_backend.py`'s own red case for the write side).
-    `verify._read_observations` opens with `O_NOFOLLOW` and checks
-    `S_ISREG` before ever reading a byte, so a missing path and a directory
-    both read as "no report" to the probe's own envelope - correct
-    candidate content notwithstanding, `grade_slug.py`'s `read_report`
-    turns that into `{"import_error": "the probe produced no report"}`,
-    which the functional-correctness criterion never satisfies. This does
-    not test #186's fix (nothing here exercises the real `DockerBackend`
-    write-back) - it tests the READER half of #186's acceptance, independent
-    of the write-back bug, on the same `_probe_via_backend` path a real
-    attempt uses."""
-    backend.observations_missing_as = missing_as
+def test_a_missing_observations_never_grades_pass(backend: FakeProbeBackend, tmp_path: Path) -> None:
+    """Acceptance item for issue #186 (reader half): a missing
+    `observations`, with no `observations_capture` reported at all (no real
+    `DockerBackend` path leaves it unreported like this - every OTHER fake
+    in this module already does, and this is exactly that same convention),
+    still cannot grade PASS: `verify._read_observations` reads it as an
+    empty report, and `grade_slug.py`'s own `read_report` turns that into
+    `{"import_error": "the probe produced no report"}`, which the
+    functional-correctness criterion never satisfies. This is the pre-#186
+    safety net alone - `observations_capture` plays no part here."""
+    backend.observations_missing_as = "missing"
     files = [("src/slugify.py", REFERENCE.read_bytes(), False)]  # otherwise-correct candidate
     graded = verify.grade_files(GRADER, files, tmp_path / "grading", backend=backend)
     assert graded.status != "PASS"
+
+
+def test_a_failed_observations_capture_refuses_before_any_judge_runs(
+    backend: FakeProbeBackend, tmp_path: Path,
+) -> None:
+    """Red case (issue #186, orchestrator review): reporting
+    `observations_capture` was not enough - acceptance item 3 says UNKNOWN,
+    and nothing consumed the field to make that happen structurally. Before
+    this fix, a failed capture read as an empty report and graded FAIL
+    (`report-present`/`task-complete` VIOLATED) - a measurement that did not
+    complete asserting the candidate did something wrong, which #9's own
+    "derive status, never copy a claim" discipline never intended to permit
+    for the INVERSE case (deriving a violation from an absence of
+    measurement). Fixed in ONE place, `grade_files` itself: `"failed"`
+    is treated the way lost containment already is - `category` becomes
+    `"capture"`, every criterion UNKNOWN, `status` INCONCLUSIVE, the judge
+    never runs at all. Structural: covers every grader, including ones not
+    yet written, no judge change needed. Fails on `2ebb855` (currently
+    FAIL, from the empty-report path, not INCONCLUSIVE)."""
+    backend.observations_missing_as = "directory"
+    files = [("src/slugify.py", REFERENCE.read_bytes(), False)]  # otherwise-correct candidate
+    graded = verify.grade_files(GRADER, files, tmp_path / "grading", backend=backend)
+    assert graded.category == "capture"
+    assert graded.status == "INCONCLUSIVE"
 
 
 def test_grade_records_the_deterministic_tier_and_the_backend_identity(

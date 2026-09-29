@@ -64,6 +64,30 @@ and version plan.
   against pre-fix code: the snapshot was empty, post-fix it captures the
   symlink by its target.
 
+  **A failed capture now grades INCONCLUSIVE, structurally, in one place -
+  not reporting-only (orchestrator review).** Naming
+  `observations_capture` on `ExecuteResult` was not enough by itself:
+  nothing consumed it, so a failed write-back still read as an empty
+  report and graded FAIL (`report-present`/`task-complete` VIOLATED) - a
+  measurement that did not complete asserting the candidate did something
+  wrong. Checked the actual repo-wide convention rather than assuming a
+  fix was needed: all five existing eval tasks (L1 `slug-small-fix` and
+  `finish-close-ref`, L2 `slug-constrained`, L3 `slugkit-installed`, L4,
+  L5) already refuse to read an empty/malformed report as success, which
+  is why this happened to be safe today - but that is a per-judge
+  convention, not a structural guarantee for tasks not yet written.
+  Fixed in `verify.py`'s `_probe_via_backend`/`grade_files` alone, the same
+  way lost containment already is: `result.observations_capture ==
+  "failed"` makes `category = "capture"`, every criterion UNKNOWN via the
+  existing `_unknown()` path, `status` INCONCLUSIVE - the judge never runs
+  at all, for every grader, no judge changes needed.
+  `tests/test_verify_backend.py::test_a_failed_observations_capture_
+  refuses_before_any_judge_runs` is the committed red case, and
+  `tests/test_level4_instruction_conflict.py::test_a_failed_observations_
+  capture_never_grades_the_report_satisfied` independently confirms L4's
+  own judge already refused to read the empty-report case as success (the
+  convention this PR no longer needs to rely on for that task specifically).
+
   Scope limit, stated plainly: fake-CLI-verified only. A real daemon's
   `docker cp` extraction over an existing directory symlink is untested
   here, per the standing no-real-daemon limitation, though it plausibly

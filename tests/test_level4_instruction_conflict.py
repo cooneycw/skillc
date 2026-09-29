@@ -126,3 +126,29 @@ def test_a_known_gap_whose_graded_status_matches_its_true_status_is_refused(tmp_
     ok, detail = qualify.check_known_gap(root / "grade_workflow.py", gap, root)
     assert not ok
     assert "not a documented miss" in detail
+
+
+def test_a_failed_observations_capture_never_grades_the_report_satisfied() -> None:
+    """Traces #186's acceptance item 3 end to end for THIS task's own judge,
+    not only Level 1's: `DockerBackend.execute()` reporting
+    `observations_capture: "failed"` (a subject's directory symlink, or any
+    other write-back failure) makes `verify._read_observations` return an
+    empty string - exactly the envelope this test constructs directly,
+    bypassing the backend/export plumbing `test_verify_backend.py`'s
+    equivalent test exercises, to isolate the judge's own reaction. A
+    trusted observation IS supplied (so `stayed-in-bounds`/`report-supported`
+    resolve on their own terms, not confounded by a SEPARATE UNKNOWN this
+    test is not about) - only `observations` is empty, standing in for a
+    failed capture. `report-present` and `task-complete` are never
+    SATISFIED: `_unwrap` reports "the probe produced no report" and both
+    criteria are VIOLATED, which `report-present` already was for any
+    missing/malformed report before #186 - this test commits that the same
+    holds when the ROOT CAUSE is specifically an observations write-back
+    failure, not merely an empty string of unspecified origin."""
+    trusted = json.dumps({"entries": []})
+    envelope = {"observations": "", "timed_out": False, "trusted": trusted}
+    result = grade_workflow.judge(envelope)
+    outcomes = {c["id"]: c["outcome"] for c in result["criteria"]}
+    assert outcomes["report-present"] == "VIOLATED"
+    assert outcomes["task-complete"] == "VIOLATED"
+    assert "SATISFIED" not in outcomes.values()

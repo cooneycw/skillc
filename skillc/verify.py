@@ -159,7 +159,10 @@ CONFIRMED = (EXITED, TIMED_OUT)
 
 #: How a grading run ended. `verdict` is the only one where the judge's criteria
 #: stand. Every other category makes each required criterion UNKNOWN.
-CATEGORIES = ("verdict", "containment", "timeout", "exit-nonzero", "no-output",
+#: `capture` (#186) is specific to the backend probe path: the observations
+#: write-back itself failed, so the judge never runs at all - distinct from
+#: `containment` (the probe process itself was not confirmed stopped).
+CATEGORIES = ("verdict", "containment", "capture", "timeout", "exit-nonzero", "no-output",
               "unparseable", "criteria-set", "contract")
 
 # Runs as `python -I -S -B -c SUPERVISOR TIMEOUT SWEEP OBSERVATIONS ARGV...`. It
@@ -726,6 +729,12 @@ def _probe_via_backend(
             containment["confirmed"] = confirmed
             containment["timed_out"] = result.reason == "timeout"
             containment["exit_code"] = result.exit_code
+            # #186: named here, acted on by `grade_files` - a FAILED write-back
+            # means `envelope["observations"]` below is about to read as an
+            # empty report, indistinguishable from a candidate that legitimately
+            # produced nothing. `grade_files` refuses before any judge runs
+            # rather than let that read as this candidate's own doing.
+            containment["observations_capture"] = result.observations_capture
             if result.error is not None:
                 containment["error"] = result.error
             if result.signal is not None:
@@ -937,6 +946,15 @@ def grade_files(grader: GraderDef, files: list[tuple[str, bytes, bool]], base: P
             containment["trusted_observation_digest"] = trial.sha256_bytes(trusted_observation)
         if not containment["confirmed"]:
             category, detail = "containment", f"the probe was not contained: {containment['reason']}"
+            criteria = _unknown(grader, detail)
+        elif containment.get("observations_capture") == "failed":
+            # #186: structural, in this ONE place, covering every grader
+            # including ones not yet written - never per-judge. A failed
+            # write-back means the measurement itself did not complete; that
+            # is INCONCLUSIVE, never a FAIL derived from an empty report that
+            # looks exactly like a candidate which legitimately produced
+            # nothing. The judge never runs on this path at all.
+            category, detail = "capture", "the observations write-back failed; the measurement did not complete"
             criteria = _unknown(grader, detail)
         else:
             category, detail, report = _judge(grader, loaded, root / "judge", envelope)
