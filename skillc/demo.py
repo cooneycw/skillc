@@ -267,14 +267,17 @@ def _candidate_files(candidate_dir: Path) -> list[tuple[str, bytes, bool]]:
 
 
 def run_grading_demo(
-    backend: dbe.DockerBackend, candidate_dir: Path, base: Path, *, recorded_attempt_ids: list[str] | None = None,
+    backend: dbe.DockerBackend, candidate_dir: Path, base: Path, *,
+    task_root: Path | None = None, recorded_attempt_ids: list[str] | None = None,
 ) -> verify.Graded:
-    """Grade `candidate_dir` against the certified `slug-small-fix` task
-    through `backend` - a fresh instance, never the lifecycle demo's own (the
-    same "separate backend instance, same seam" interfaces.md step 8
-    requires). `recorded_attempt_ids` gets the probe's attempt id before its
-    container exists (issue #122), so the caller's sweep covers it."""
-    grader = verify.GraderDef.load(GRADER_ROOT)
+    """Grade `candidate_dir` against `task_root`'s (default `GRADER_ROOT`,
+    `evals/level1/slug-small-fix` - unchanged behaviour without `--task`,
+    issue #20 Nit Store) certified task through `backend` - a fresh instance,
+    never the lifecycle demo's own (the same "separate backend instance,
+    same seam" interfaces.md step 8 requires). `recorded_attempt_ids` gets
+    the probe's attempt id before its container exists (issue #122), so the
+    caller's sweep covers it."""
+    grader = verify.GraderDef.load(task_root if task_root is not None else GRADER_ROOT)
     files = _candidate_files(candidate_dir)
     return verify.grade_files(grader, files, base, backend=backend, recorded_attempt_ids=recorded_attempt_ids)
 
@@ -885,6 +888,7 @@ def run_demo(
     subject_name: str | None = None, subject_checkout: Path | None = None,
     subject_client: list[str] | None = None,
     recorded_attempt_ids: list[str] | None = None,
+    task_root: Path | None = None,
 ) -> DemoResult:
     """The command's own normal-mode run: the success path, end to end,
     against a real daemon. Two SEPARATE `DockerBackend` instances are used -
@@ -911,7 +915,12 @@ def run_demo(
     interrupt). The grading probe's attempt id is threaded through too
     (issue #122, via `verify.grade_files(recorded_attempt_ids=...)`), so an
     interrupt during grading can reach its container, and the normal-path
-    sweep covers it."""
+    sweep covers it.
+
+    `task_root` (default `GRADER_ROOT`, `evals/level1/slug-small-fix` -
+    unchanged behaviour without `--task`; issue #20 Nit Store) is the Level 1
+    task the grading leg's candidate (`task_root / "reference"`) is graded
+    against - `run_grading_demo`'s own `task_root` argument, not a literal."""
     env = None  # inherit the operator's own ambient environment, like a plain `docker` invocation
     host_paths = [REPO_ROOT / p for p in HOST_PATHS_TO_WATCH]
     host_before = reap.snapshot_host_paths(host_paths)
@@ -926,10 +935,22 @@ def run_demo(
     lifecycle_backend = dbe.DockerBackend(image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=timeout)
     grading_backend = dbe.DockerBackend(image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=timeout)
 
+    resolved_task_root = task_root if task_root is not None else GRADER_ROOT
+    # `GOOD_CANDIDATE` only for the unmodified default task - tests
+    # monkeypatch this module-level constant to simulate a known-bad
+    # candidate (test_cmd_demo_exits_1_when_an_item_is_not_met), and that
+    # seam must keep working exactly as before when the resolved root is
+    # still the default (whether `task_root` arrived as `None` here, or as
+    # `demo.GRADER_ROOT` itself via the CLI's `resolve_task_root(None)`). A
+    # genuinely different `--task` has no such global to patch, so its own
+    # candidate is derived fresh from the resolved root instead.
+    candidate = GOOD_CANDIDATE if resolved_task_root == GRADER_ROOT else resolved_task_root / "reference"
     own_ids: list[str] = recorded_attempt_ids if recorded_attempt_ids is not None else []
     lifecycle_record = run_lifecycle_demo(lifecycle_backend, base, recorded_attempt_ids=own_ids)
     before_grading = len(own_ids)
-    graded = run_grading_demo(grading_backend, GOOD_CANDIDATE, base, recorded_attempt_ids=own_ids)
+    graded = run_grading_demo(
+        grading_backend, candidate, base, task_root=resolved_task_root, recorded_attempt_ids=own_ids,
+    )
     probe_ids = own_ids[before_grading:]
 
     subject_result: SubjectResult | None = None

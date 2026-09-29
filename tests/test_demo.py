@@ -32,6 +32,9 @@ CODEX_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "codex-subject"
 UNSCOPED_INTERRUPT_CHILD = Path(__file__).resolve().parent / "fixtures" / "demo-control" / "unscoped_interrupt_child.py"
 #: Issue #122's red-case child whose exec never marks itself live.
 NEVER_LIVE_CHILD = Path(__file__).resolve().parent / "fixtures" / "demo-control" / "never_live_child.py"
+#: A second Level 1 task, for --task (#20 Nit Store) - a different grader.json
+#: id/revision and criteria set than GRADER_ROOT's own slug-small-fix.
+FINISH_CLOSE_REF_ROOT = Path(__file__).resolve().parent.parent / "evals" / "level1" / "finish-close-ref"
 
 
 def _docker_bin(state_dir: Path) -> list[str]:
@@ -1032,6 +1035,42 @@ def test_cmd_demo_exits_1_on_subject_refused_never_2(
     assert cli.cmd_demo(args) == 1
 
 
+def test_cmd_demo_refuses_control_and_task_together(
+    base: Path, docker_state: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """issue #20 Nit Store: `--control`'s seeded negative controls grade a
+    known-bad candidate (`demo.BAD_CANDIDATE`) specific to the DEFAULT
+    task's own wrong-answer fixtures - a different task's `wrong/` names
+    its own cases differently, so picking one by an arbitrary rule (e.g.
+    sort order) would make the negative control itself an arbitrary
+    instrument whose choice silently changes whenever someone adds a
+    `wrong/` case. Refused explicitly, before any backend work, exit `1`
+    (never `2` - the runbook reserves that exclusively for the paste-back
+    leak-check refusal, and this is a refused combination of flags, the
+    same class `test_cmd_demo_exits_1_on_subject_refused_never_2` already
+    pins for `--subject`)."""
+    from skillc import cli
+
+    args = _demo_args(
+        image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base=str(base),
+        control=True, task=str(FINISH_CLOSE_REF_ROOT),
+    )
+    assert cli.cmd_demo(args) == 1
+    assert "--control only supports the default task" in capsys.readouterr().err
+
+
+def test_cmd_demo_control_alone_stays_byte_identical_on_the_default_task(
+    base: Path, docker_state: Path,
+) -> None:
+    """`--control` without `--task` must be completely unaffected by this
+    change - `run_control`/`demo.BAD_CANDIDATE` are never touched by the
+    `--task` refactor at all."""
+    from skillc import cli
+
+    args = _demo_args(image="fake-image:1", docker_bin=" ".join(_docker_bin(docker_state)), base=str(base), control=True)
+    assert cli.cmd_demo(args) == 0
+
+
 def test_cmd_demo_exits_2_only_on_leak_refusal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1618,6 +1657,58 @@ def test_grade_files_records_the_probe_attempt_before_prepare(base: Path, docker
     graded = demo.run_grading_demo(backend, demo.GOOD_CANDIDATE, base, recorded_attempt_ids=recorded)
     assert graded.status != "PASS"
     assert len(recorded) == 1 and recorded[0].startswith("probe-")
+
+
+# ------------------------------------------------------------------ --task (#20 Nit Store)
+
+
+def test_run_grading_demo_default_task_root_records_the_same_identity_as_before(
+    base: Path, docker_state: Path,
+) -> None:
+    """No `task_root` must grade against `slug-small-fix`, byte-identical to
+    before this parameter existed - the refactor provably changes nothing
+    by default."""
+    from skillc import docker_backend as dbe
+
+    backend = dbe.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=5)
+    graded = demo.run_grading_demo(backend, demo.GOOD_CANDIDATE, base)
+    assert graded.status == "PASS"
+    assert {c["id"] for c in graded.criteria} == {"R4-interface", "reported-example", "R1", "R2", "R3"}
+
+
+def test_run_grading_demo_task_root_grades_against_the_named_task_not_the_default(
+    base: Path, docker_state: Path,
+) -> None:
+    """`task_root` (issue #20 Nit Store, mirroring collection-run's own
+    `--task`, #162) must actually redirect which task's grader this run
+    uses - not merely be accepted and ignored. Grading finish-close-ref's
+    own reference candidate through `task_root=FINISH_CLOSE_REF_ROOT`
+    passes against ITS OWN criteria, not slug-small-fix's."""
+    from skillc import docker_backend as dbe
+
+    backend = dbe.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=5)
+    graded = demo.run_grading_demo(
+        backend, FINISH_CLOSE_REF_ROOT / "reference", base, task_root=FINISH_CLOSE_REF_ROOT,
+    )
+    assert graded.status == "PASS"
+    assert {c["id"] for c in graded.criteria} == {"artifact-present", "issue-ref", "stays-open", "no-closing-match"}
+
+
+def test_run_demo_task_root_flows_through_to_the_grading_leg(base: Path, docker_state: Path) -> None:
+    """`run_demo`'s own `task_root` (not just `run_grading_demo`'s) must
+    reach the grading leg: full lifecycle+grading run against
+    finish-close-ref, green case for pointing `skillc demo` at a non-default
+    task. On the pre-fix parser (main @ eb0750d), `run_demo` has no
+    `task_root` parameter at all and this call raises `TypeError` (hand-
+    verified, not committed as a duplicate test - the parameter simply did
+    not exist to be red against)."""
+    result = demo.run_demo(
+        image="fake-image:1", docker_bin=_docker_bin(docker_state), base=base, timeout=5,
+        task_root=FINISH_CLOSE_REF_ROOT,
+    )
+    assert result.ok is True
+    assert result.graded.status == "PASS"
+    assert {c["id"] for c in result.graded.criteria} == {"artifact-present", "issue-ref", "stays-open", "no-closing-match"}
 
 
 def test_cmd_demo_interrupt_sweep_survives_a_second_ctrl_c(

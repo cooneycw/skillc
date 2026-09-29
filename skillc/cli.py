@@ -746,13 +746,28 @@ def cmd_demo(args: argparse.Namespace) -> int:
     attempt id the instant it exists (see `demo.run_demo`'s own docstring) -
     so if this command has recorded nothing yet when the interrupt lands, it
     sweeps nothing, rather than guessing at what else might be this run's."""
+    from . import collection_conformance as cc
     from . import demo
 
     docker_bin = tuple(args.docker_bin.split()) if args.docker_bin else ("docker",)
     base = Path(args.base) if args.base else Path(tempfile.gettempdir())
     recorded_attempt_ids: list[str] = []
 
+    if args.control and args.task is not None:
+        # issue #20 Nit Store: --control's seeded negative controls grade a
+        # known-bad candidate (demo.BAD_CANDIDATE) specific to the DEFAULT
+        # task's own wrong-answer fixtures - a different task's `wrong/`
+        # directory names its own cases differently, and picking one by an
+        # arbitrary rule (e.g. sort order) would make the negative control
+        # itself an arbitrary instrument whose choice changes silently
+        # whenever someone adds a `wrong/` case (orchestrator review).
+        # Refused explicitly rather than silently grading the wrong task's
+        # candidate against the default task's grader, or the reverse.
+        print("skillc: --control only supports the default task; see #20", file=sys.stderr)
+        return 1
+
     try:
+        task_root = cc.resolve_task_root(args.task)
         if args.cancel_target is not None:
             # Hidden (issue #122): the child `--control`'s cancellation seed
             # interrupts. Inside this `try` on purpose, so a SIGINT reaches
@@ -778,7 +793,7 @@ def cmd_demo(args: argparse.Namespace) -> int:
             subject_name = args.subject or demo.DEFAULT_SUBJECT
         result = demo.run_demo(
             image=args.image or demo.DEFAULT_IMAGE, docker_bin=docker_bin, base=base, timeout=args.timeout,
-            subject_name=subject_name, recorded_attempt_ids=recorded_attempt_ids,
+            subject_name=subject_name, recorded_attempt_ids=recorded_attempt_ids, task_root=task_root,
         )
         demo.print_paste_back(result.paste_back)
         return 0 if result.ok else 1
@@ -1016,6 +1031,15 @@ def cmd_selection_probe(args: argparse.Namespace) -> int:
     the skill - a check that the pipeline can see an invocation, never a
     selection result.
 
+    `--task DIR` (default `evals/level1/slug-small-fix`, unchanged behaviour
+    without the flag; issue #20 Nit Store, mirroring `collection-run`'s own
+    `--task`, #162) is the Level 1 task each attempt's prompt, fixture and
+    grading come from - `resolve_task_root`'s own contract. The selection
+    CASES themselves (`cases.json`'s `intended-use`/`near-miss`/
+    `overlapping-choice`) are unaffected: they are a property of the
+    collection being probed, not of which coding task the agent is asked to
+    fix.
+
     Requires `SKILLC_ALLOW_REAL_AGENT=1` (`lifecycle.py`'s own guard) and the
     operator's subscription login, per ADR 0005 rule 6. Each attempt's
     observation is persisted by `run_one_attempt` (#142) in the store; the
@@ -1043,6 +1067,7 @@ def cmd_selection_probe(args: argparse.Namespace) -> int:
     subject = str(cases["subject"])
     try:
         planned_cases = sp.detection_control_cases(cases, control) if control is not None else cases
+        task_root = cc.resolve_task_root(args.task)
         run_root = cc.new_run_root(base, experiment_name)
     except (sp.SelectionProbeRefused, demo.SubjectRefused) as exc:
         print(f"skillc: {exc}", file=sys.stderr)
@@ -1072,6 +1097,8 @@ def cmd_selection_probe(args: argparse.Namespace) -> int:
             experiment=experiment, backend=backend, base=run_root, client=acquired.subject.client,
             argv_for=lambda _attempt_id: client_argv,
             treatment_home_files=cc._collection_home_files(acquired.source, acquired.files),
+            goal=(task_root / "goal.md").read_text(encoding="utf-8"),
+            surface=cc._fixture_surface(task_root / "fixture"),
             timeout=agent_timeout, cli_version=acquired.subject.client_version,
             credential_explicit_path=Path(args.credential) if args.credential else None,
             minimum_credential_seconds=minimum,
@@ -1080,7 +1107,7 @@ def cmd_selection_probe(args: argparse.Namespace) -> int:
         try:
             report = sp.run_planned_selection_probe(
                 experiment, planned_cases, runner, base=run_root,
-                grader=verify.GraderDef.load(sp.GRADER_ROOT), grading_backend=grading_backend,
+                grader=verify.GraderDef.load(task_root), grading_backend=grading_backend,
                 detection_control=control is not None,
             )
         except sp.SelectionProbeRefused as exc:
@@ -1804,7 +1831,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_demo.add_argument(
         "--control", action="store_true",
-        help="run the seeded negative controls instead - exits non-zero unless every one was caught",
+        help="run the seeded negative controls instead - exits non-zero unless every one was caught "
+             "(only the default task; refused together with --task, see #20)",
+    )
+    p_demo.add_argument(
+        "--task", default=None,
+        help="a Level 1 task directory (goal.md, fixture/, grader.json) the grading leg's candidate is "
+             "graded against (default: evals/level1/slug-small-fix - behaviour is unchanged without this "
+             "flag). Refused together with --control (issue #20 Nit Store): the seeded negative controls "
+             "grade a known-bad candidate specific to the default task's own wrong-answer fixtures",
     )
     # Issue #122: the child process `--control`'s cancellation seed runs and
     # interrupts. Not an operator-facing mode, so it is kept out of --help.
@@ -1877,6 +1912,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--detection-control", action="store_true",
         help="run evals/selection-probe/detection-control.json instead: the canary names the skill, "
              "so the result shows detection works - it is never a selection result",
+    )
+    p_selection_probe.add_argument(
+        "--task", default=None,
+        help="a Level 1 task directory (goal.md, fixture/, grader.json) each attempt is graded against "
+             "(default: evals/level1/slug-small-fix - behaviour is unchanged without this flag)",
     )
     p_selection_probe.add_argument("--image", help="trial image (default: skillc.demo.DEFAULT_IMAGE)")
     p_selection_probe.add_argument(
