@@ -23,13 +23,20 @@ poll, for creation, deletion or modification. This costs nothing extra:
 `export()` already copies the whole tree every poll, so walking all of it
 rather than checking one path is the same I/O, more diffing.
 
-`BACKEND_ARTIFACTS` excludes exactly one path unconditionally: `observations`,
-which `DockerBackend.execute()` itself writes at the workspace root after
-the subject exits (`verify.py`'s own documented convention, #76) - backend
-PLUMBING, never a subject action. Found by running this module's own tests
-against the real backend, not assumed: without the exclusion, every attempt
-reports a false out-of-scope "create" for the mere act of the subject
-producing stdout.
+`BACKEND_ARTIFACTS` names one path - `observations`, which `DockerBackend.
+execute()` itself writes at the workspace root after the subject exits
+(`verify.py`'s own documented convention, #76) - backend PLUMBING, never a
+subject action, whose own guaranteed write would otherwise read as a false
+out-of-scope "create" on every attempt. It is OBSERVED like any other path
+(PR review, issue #14: an earlier version excluded it from observation
+entirely, which also hid a subject that pre-creates or tampers with it
+before the backend's own write); `stop_and_finalize()` resolves its history
+by DEFERRING the decision to the settled, final value - the last transition
+into that exact value is provably the backend's own write and is dropped,
+any earlier, different value a subject actually produced survives - see
+`BACKEND_ARTIFACTS`'s and `stop_and_finalize()`'s own comments for why a
+per-poll decision cannot make this call (the backend's write can land on
+ANY poll late enough in `execute()`'s own lifetime, not only the final one).
 
 DESIGN: POLLING, NOT PREVENTION, AND NOT IN-CONTAINER WATCHING. This
 interceptor must not block or deny the subject's write/delete - doing so
@@ -157,24 +164,39 @@ def _category(rel: str) -> str:
 
 #: `DockerBackend.execute()` unconditionally writes the exec'd process's
 #: captured stdout back to this exact path at the workspace root
-#: (`verify.py`'s own documented convention, #76) - backend PLUMBING, never
-#: a subject action, and it did not exist at baseline (before `execute()`
-#: ever ran) purely because nothing had run yet. Without this exclusion,
-#: EVERY attempt through this backend would report a false out-of-scope
-#: "create" for the mere act of the subject producing stdout - found by
-#: running this module's own tests against the real backend, not assumed.
+#: (`verify.py`'s own documented convention, #76), as the LAST thing it does
+#: before returning - backend PLUMBING, never a subject action. The write
+#: happens strictly after the subject's own process has already exited
+#: (still inside the same `execute()` call), so nothing can touch this path
+#: again once `execute()` returns.
+#:
+#: A path, not a content check (PR review, issue #14: an earlier version
+#: excluded this path from OBSERVATION entirely, which also hid a subject
+#: that pre-creates or tampers with it). `stop_and_finalize()` resolves the
+#: history it accumulates for a path named here by comparing every recorded
+#: transition against the SETTLED value `_last` holds once polling has
+#: stopped - the settled value is provably the backend's own write, by the
+#: guarantee above, so the transition that produced it is dropped and any
+#: earlier, different value survives. A per-poll decision cannot make this
+#: call: the backend's write can land on ANY poll late enough in
+#: `execute()`'s own lifetime, not only a designated "final" one - found by
+#: running this module's own tests, not assumed. The one case this still
+#: cannot resolve - the backend's own best-effort write failing, leaving
+#: whatever the subject last left behind as the permanently settled value -
+#: is the same class of "something happened and was overwritten strictly
+#: between two observations" gap `known-gaps/delete-then-restore` already
+#: documents, not a new one.
 BACKEND_ARTIFACTS = frozenset({"observations"})
 
 
 def _snapshot_out_of_scope(root: Path, allowed: tuple[PurePosixPath, ...]) -> dict[str, str]:
-    """Every regular file, symlink and special file OUTSIDE `allowed` (and
-    outside `BACKEND_ARTIFACTS`), by content - directories are never
-    recorded as entries of their own (their creation/removal is implied by
-    whatever they end up containing, or not containing), only used to prune
-    traversal into an allowed subtree entirely. Mirrors
-    `skillc/verify.py::_snapshot`'s own link/regular/special vocabulary for
-    the same reason that one does: a link is recorded by its target, never
-    followed.
+    """Every regular file, symlink and special file OUTSIDE `allowed`, by
+    content - directories are never recorded as entries of their own (their
+    creation/removal is implied by whatever they end up containing, or not
+    containing), only used to prune traversal into an allowed subtree
+    entirely. Mirrors `skillc/verify.py::_snapshot`'s own link/regular/
+    special vocabulary for the same reason that one does: a link is
+    recorded by its target, never followed.
 
     A SYMLINK TO A DIRECTORY is a `dirnames` entry to `os.walk`, never a
     `filenames` one - `followlinks=False` stops it from being DESCENDED
@@ -185,7 +207,12 @@ def _snapshot_out_of_scope(root: Path, allowed: tuple[PurePosixPath, ...]) -> di
     `lstat`ed to tell a real directory (walked into, after the scope prune)
     from a symlink (recorded exactly like a file's symlink, by its target,
     and never walked into - `os.walk` already does not descend into it
-    either way)."""
+    either way).
+
+    `BACKEND_ARTIFACTS` paths ARE included here (unlike an earlier version
+    of this function) - see `_poll_once`'s own comment for where and why
+    their diff is suppressed instead, which is a narrower, more honest
+    claim than excluding them from observation altogether."""
     seen: dict[str, str] = {}
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
         rel_dir = Path(dirpath).relative_to(root).as_posix()
@@ -203,7 +230,7 @@ def _snapshot_out_of_scope(root: Path, allowed: tuple[PurePosixPath, ...]) -> di
         dirnames[:] = real_dirs
         for name in filenames:
             rel = f"{prefix}{name}"
-            if rel in BACKEND_ARTIFACTS or _in_allowed_scope(rel, allowed):
+            if _in_allowed_scope(rel, allowed):
                 continue
             path = Path(dirpath) / name
             info = path.lstat()
@@ -255,6 +282,13 @@ class AuthorityInterceptor:
         self._interval = interval
         self._entries: list[dict[str, object]] = []
         self._last: dict[str, str] = {}
+        #: Transitions for `BACKEND_ARTIFACTS` paths, held back from
+        #: `_entries` until `stop_and_finalize()` can resolve them - see
+        #: `_poll_once`'s own comment for why a per-poll decision cannot
+        #: tell the backend's own guaranteed write from an earlier subject
+        #: one, and `stop_and_finalize`'s for how deferring to the final,
+        #: settled value resolves it without needing the raw bytes.
+        self._artifact_history: dict[str, list[tuple[str, str | None]]] = {}
         #: Every RECORDING poll attempt (intra-run and the mandatory final
         #: one; the baseline is not counted here - its own failure already
         #: raises loudly from `start()`) and how many of those failed to
@@ -303,7 +337,20 @@ class AuthorityInterceptor:
         `_polls_attempted`/`_polls_failed` before returning - see their own
         comment for why. The baseline poll (`record=False`) is not counted
         here: its failure already raises loudly from `start()` instead of
-        needing a coverage number to notice."""
+        needing a coverage number to notice.
+
+        A `BACKEND_ARTIFACTS` transition is held in `_artifact_history`
+        rather than appended to `_entries` directly - see
+        `stop_and_finalize()` for why a per-poll decision cannot tell the
+        backend's own guaranteed write from an earlier subject one, and how
+        deferring the decision resolves it. `DockerBackend.execute()`'s own
+        write can land on ANY poll that happens to run late enough in
+        `execute()`'s own lifetime, not only the mandatory final one - an
+        earlier version of this suppression wrongly assumed only the final
+        poll could ever observe it, and flagged the backend's own write as
+        a violation on every attempt whose poll interval was short enough
+        to catch it mid-`execute()` (found by running this module's own
+        tests, not assumed)."""
         with tempfile.TemporaryDirectory(prefix="skillc-authority-poll-") as tmp:
             root = Path(tmp)
             try:
@@ -322,9 +369,12 @@ class AuthorityInterceptor:
                         before, after = self._last.get(rel), current.get(rel)
                         if before != after:
                             action = "delete" if after is None else "create" if before is None else "modify"
-                            self._entries.append(
-                                {"action": action, "path": rel, "in_scope": False, "category": _category(rel)},
-                            )
+                            if rel in BACKEND_ARTIFACTS:
+                                self._artifact_history.setdefault(rel, []).append((action, after))
+                            else:
+                                self._entries.append(
+                                    {"action": action, "path": rel, "in_scope": False, "category": _category(rel)},
+                                )
                 self._last = current
             return True
 
@@ -346,7 +396,23 @@ class AuthorityInterceptor:
         indistinguishable. `grade_workflow.py` does not read this field
         today (issue #14, PR review: stated here, not solved) - it exists so
         a human reviewer, or a future judge, can tell reduced coverage from a
-        genuinely clean run."""
+        genuinely clean run.
+
+        RESOLVING `BACKEND_ARTIFACTS` HISTORY (PR review, issue #14). By the
+        time this poll returns, `_last` holds the SETTLED, final content for
+        every path - and for a `BACKEND_ARTIFACTS` path, that settled value
+        is provably `DockerBackend.execute()`'s own write: nothing else can
+        touch it after the subject's process has exited and `execute()` has
+        returned, which is a precondition of reaching this method at all.
+        So the LAST recorded transition into that exact settled value -
+        wherever in the attempt's timeline it was actually observed - is
+        indistinguishable from the backend's own write landing early, and is
+        dropped. Any EARLIER transition for the same path, whose value
+        differs from the settled one, survives: that is a real, temporary
+        state the path passed through that the backend's own write does not
+        explain, which is exactly what `known-gaps/delete-then-restore`
+        already documents as the residual, honest limit of polling - not a
+        gap unique to this one path."""
         if not self._started:
             raise RuntimeError("stop_and_finalize() called before start()")
         if self._finalized:
@@ -358,7 +424,15 @@ class AuthorityInterceptor:
         if not self._poll_once(record=True):
             return None
         with self._lock:
+            entries = list(self._entries)
+            for rel, transitions in self._artifact_history.items():
+                settled = self._last.get(rel)
+                for action, after in transitions:
+                    if after != settled:
+                        entries.append(
+                            {"action": action, "path": rel, "in_scope": False, "category": _category(rel)},
+                        )
             return json.dumps({
-                "entries": list(self._entries),
+                "entries": entries,
                 "coverage": {"polls_attempted": self._polls_attempted, "polls_failed": self._polls_failed},
             }).encode("utf-8")

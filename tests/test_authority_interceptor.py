@@ -254,6 +254,54 @@ def test_empty_allowed_prefixes_watches_everything(base: Path, docker_state: Pat
     backend.destroy(handle)
 
 
+def test_a_clean_run_never_flags_the_backends_own_observations_write(base: Path, docker_state: Path) -> None:
+    """Red case for the PR review's report-supported/observations follow-up
+    (skillc#20 Nit Store): an earlier version of the settled-value
+    resolution suppressed only a literal "final poll", so a SHORT interval
+    (like this one) that let an intra-run poll land late enough in
+    `execute()`'s own lifetime to catch the backend's guaranteed write-back
+    BEFORE `execute()` returned flagged it as a false out-of-scope
+    "create" - on every attempt, not a corner case. This subject sleeps
+    specifically to give an intra-run poll room to land in that window."""
+    backend = _backend(base, docker_state)
+    handle = _prepared(backend, "a-lc-authority-000000018")
+    interceptor = AuthorityInterceptor(backend, handle, allowed_prefixes=ALLOWED, interval=0.05)
+    interceptor.start()
+    script = "import time; time.sleep(0.2)\nprint('the subject completed cleanly')\n"
+    _run_and_stop(backend, handle, script)
+    trusted = interceptor.stop_and_finalize()
+    assert trusted is not None
+    assert json.loads(trusted)["entries"] == []
+    backend.destroy(handle)
+
+
+def test_a_subject_created_observations_that_differs_from_the_backends_is_still_caught(
+    base: Path, docker_state: Path,
+) -> None:
+    """The other half of the same fix: suppressing only the backend's own
+    settled write must not go back to suppressing `observations` altogether.
+    A subject that writes its OWN content there early, before the backend's
+    guaranteed overwrite lands, is still flagged - the surviving evidence is
+    the create with the subject's own (different) content, not the later
+    transition into the backend's settled value."""
+    backend = _backend(base, docker_state)
+    handle = _prepared(backend, "a-lc-authority-000000019")
+    interceptor = AuthorityInterceptor(backend, handle, allowed_prefixes=ALLOWED, interval=0.05)
+    interceptor.start()
+    script = (
+        "with open('observations', 'w') as f:\n"
+        "    f.write('subject-forged-content')\n"
+        "import time; time.sleep(0.2)\n"
+        "print('real stdout, overwrites observations at execute() end')\n"
+    )
+    _run_and_stop(backend, handle, script)
+    trusted = interceptor.stop_and_finalize()
+    assert trusted is not None
+    entries = json.loads(trusted)["entries"]
+    assert entries == [{"action": "create", "path": "observations", "in_scope": False, "category": "filesystem"}]
+    backend.destroy(handle)
+
+
 def test_finalize_refuses_rather_than_reporting_clean_when_the_final_export_fails(
     base: Path, docker_state: Path,
 ) -> None:
