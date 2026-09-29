@@ -23,7 +23,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import __version__, checks, exposure, leak, materialize, records
+from . import __version__, checks, configuration_compare, exposure, leak, materialize, records
 
 # `demo` is NOT imported here at module load (EF-11, #80's own no-Docker-
 # required proof: `skillc.cli` must not import `skillc.docker_backend` at
@@ -1622,6 +1622,25 @@ def cmd_pilot_report(args: argparse.Namespace) -> int:
     return code or _print_pilot_summary(report)
 
 
+def cmd_configuration_compare(args: argparse.Namespace) -> int:
+    """Issue #13's matched-configuration comparison: pure post-hoc analysis
+    of two ALREADY-CAPTURED evidence records (`skillc/configuration_compare.py`'s
+    own docstring states the input shape) - no agent or docker call of its
+    own. Refuses (exit 2) when the two sides are not a matched pair on
+    every identity field except `--vary`, naming every mismatch."""
+    from .trial import Refused
+
+    try:
+        a = configuration_compare.load_record(Path(args.a))
+        b = configuration_compare.load_record(Path(args.b))
+        result = configuration_compare.compare(a, b, args.vary)
+    except Refused as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps(result, indent=1))
+    return 0
+
+
 def cmd_rules(args: argparse.Namespace) -> int:
     width = max(len(rule.id) for rule in checks.ALL_RULES)
     for rule in checks.ALL_RULES:
@@ -2020,6 +2039,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_pilot_report.add_argument("--evidence", help="where the bundle is exported (default: evals/matched-pilot/evidence/records)")
     p_pilot_report.set_defaults(func=cmd_pilot_report)
+
+    p_config_compare = sub.add_parser(
+        "configuration-compare",
+        help="issue #13: compare two already-captured evidence records, refusing an unmatched-configuration pair",
+    )
+    p_config_compare.add_argument("--a", required=True, help="first side's evidence record (JSON)")
+    p_config_compare.add_argument("--b", required=True, help="second side's evidence record (JSON)")
+    p_config_compare.add_argument(
+        "--vary", required=True, choices=list(configuration_compare.IDENTITY_FIELDS),
+        help="the one identity field allowed to differ between --a and --b; every other one must match",
+    )
+    p_config_compare.set_defaults(func=cmd_configuration_compare)
 
     p_rules = sub.add_parser("rules", help="list the rules")
     p_rules.set_defaults(func=cmd_rules)
