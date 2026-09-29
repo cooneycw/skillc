@@ -8,6 +8,68 @@ and version plan.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`DockerBackend` swallowed a failed `observations` write-back, and a
+  subject could suppress its own capture** (Refs #186, #14, #76, #20).
+  `execute()` writes the exec'd process's captured stdout back into the
+  workspace via `docker cp -` (a tar stream), run with `check=False` and its
+  result never inspected - so a subject that pre-creates `/work/observations`
+  as a symlink to a directory made the tar extraction fail with
+  `IsADirectoryError` (measured against the fake CLI: exit 1, traceback on
+  stderr) completely silently: no exception, no `ExecuteResult` field, the
+  subject's own object left in place, the real capture never landing.
+  `ExecuteResult.observations_capture` now names the checked outcome -
+  `"written"` or `"failed"`, never swallowed; `None` only when this backend
+  doesn't report it (every backend but `DockerBackend`) or the write-back was
+  never attempted (the `"launch-failed"` path, before any capture exists).
+  Red case: `tests/test_docker_backend.py::test_a_directory_symlink_at_
+  observations_makes_the_writeback_fail_visibly` fails on pre-fix code with
+  `AttributeError: 'ExecuteResult' object has no attribute
+  'observations_capture'`, not merely a wrong value.
+
+  Found, and fixed, a second bug while answering "what does each
+  `observations` reader do with this state": `verify.py`'s own
+  `_read_untrusted` claimed "None when not a readable regular file", but
+  actually CRASHED on a directory - `os.open()` succeeds opening a directory
+  O_RDONLY, so the `S_ISREG` check running only AFTER `os.fdopen(fd, "rb")`
+  was too late; `os.fdopen` itself raises `IsADirectoryError` for a
+  directory fd. Fixed by checking `S_ISREG` on the bare fd before wrapping
+  it. `tests/test_verify_backend.py::test_a_missing_or_non_file_
+  observations_never_grades_pass[directory]` is the committed red case,
+  confirmed against pre-fix `verify.py`: the `"missing"` case already
+  correctly read as no report (caught at `os.open()`), the `"directory"`
+  case crashed instead. Both readers of `observations` are now confirmed
+  safe: `verify.py`'s `_probe_via_backend` path treats a missing or
+  non-regular-file `observations` as an empty report (never a false PASS,
+  since every eval judge's own `_unwrap`/`read_report` treats "no report" as
+  a violation or refusal, not success), and `demo.py`'s own explicit
+  `is_file()` check already returned `unmeasured(...)` for the same case
+  without needing a change.
+
+  `AuthorityInterceptor`'s directory-symlink branch no longer excludes
+  `observations` unconditionally either (issue #14's own Nit Store follow-
+  up, folded in here since it's the same root cause): a directory symlink
+  planted at that reserved name is now recorded IMMEDIATELY, never deferred
+  for settled-value resolution the way a REGULAR FILE at that path is - the
+  write-back can never produce a directory, so there is no backend-write
+  ambiguity to resolve for that shape. The settled-value resolution itself
+  is refined to key off the VALUE's shape, not just the path: only a
+  transition into something digest-shaped (what the write-back could
+  plausibly have produced) is deferred; a delete, a symlink, or a special
+  file at a `BACKEND_ARTIFACTS` path is recorded immediately, since the
+  write-back can never produce any of those either.
+  `tests/test_authority_interceptor.py::test_a_directory_symlink_named_
+  observations_is_caught_immediately` is the committed red case, confirmed
+  against pre-fix code: the snapshot was empty, post-fix it captures the
+  symlink by its target.
+
+  Scope limit, stated plainly: fake-CLI-verified only. A real daemon's
+  `docker cp` extraction over an existing directory symlink is untested
+  here, per the standing no-real-daemon limitation, though it plausibly
+  refuses the same way (a real tar extraction generally will not silently
+  write a file over an existing directory either).
+
 ### Added
 
 - **`--task DIR` on `skillc demo` and `skillc selection-probe`** (Refs #20),

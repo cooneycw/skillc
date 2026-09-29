@@ -199,7 +199,26 @@ class ExecuteResult:
     UNMEASURED, not inapplicable - `execute()`'s own comment at that return
     states which case applies. Every other `DockerBackend` result -
     including every other `"launch-failed"` one - sets one of the four
-    values above; only that one combination leaves it `None`."""
+    values above; only that one combination leaves it `None`.
+
+    `observations_capture` (issue #186) names whether the exec'd process's
+    captured stdout was actually written back into the workspace as
+    `observations` (`verify.py`'s own documented convention, #76) - checked,
+    never swallowed. `"written"` means the write-back subprocess exited 0;
+    `"failed"` means it did not, whatever the cause (a non-zero exit - e.g.
+    the subject pre-created `observations` as a directory, which makes the
+    tar extraction fail with `IsADirectoryError` - a raised `OSError`, or a
+    timeout). `None` means this backend does not report it at all (every
+    backend but `DockerBackend`) OR the write-back was never attempted
+    because the subject's own process never ran (the `"launch-failed"`
+    path, before any capture exists to write back) - `execute()`'s own
+    comment at that return states which case applies, mirroring
+    `term_forwarding`'s identical `None` convention. `"written"` is NOT a
+    claim that the file's CONTENT is correct or complete - `stdout_
+    truncated`/`stdout_incomplete` already answer that, orthogonally - only
+    that the write-back subprocess itself reported success. A caller must
+    treat anything but `"written"` as "no captured observations reached the
+    workspace", never assume the file is there and readable."""
 
     reason: str  # "exited" | "timeout" | "operator-cancelled" | "launch-failed"
     exit_code: int | None
@@ -210,6 +229,7 @@ class ExecuteResult:
     stdout_incomplete: bool = False
     stderr_incomplete: bool = False
     term_forwarding: str | None = None
+    observations_capture: str | None = None
 
 
 @dataclass(frozen=True)

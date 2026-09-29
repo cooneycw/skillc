@@ -1375,28 +1375,36 @@ class DockerBackend:
         # exec'd process's own stdout was thrown away (`DEVNULL`), so a
         # probe that reports its verdict on stdout (skillc's own probe
         # convention) always looked like it "produced no report", whatever
-        # it actually printed. Best-effort: a failure to write this file is
-        # not fatal to execute() itself, matching the canary plant's own
-        # best-effort discipline in install(). `stdout` is `stdout_drain`'s
-        # own bounded capture (#102), so an `observations` file this writes
-        # for a chatty subject is itself bounded - `ExecuteResult.
-        # stdout_truncated`/`stdout_bytes` below is what tells a caller this
-        # file is not the subject's whole output.
+        # it actually printed. `stdout` is `stdout_drain`'s own bounded
+        # capture (#102), so an `observations` file this writes for a chatty
+        # subject is itself bounded - `ExecuteResult.stdout_truncated`/
+        # `stdout_bytes` is what tells a caller this file is not the
+        # subject's whole output.
+        #
+        # NOT fatal to execute() itself if the write-back fails (issue #186:
+        # this used to also mean NOT REPORTED - `check=False` and the result
+        # was never inspected, so a subject that pre-creates `observations`
+        # as a directory made the tar extraction fail with `IsADirectoryError`
+        # - measured against the fake CLI - completely silently: no
+        # exception here, no field on the result, the subject's own object
+        # left in place). `observations_capture` now names the checked
+        # outcome instead of swallowing it.
         try:
             payload = _owned_tar_bytes("observations", stdout)
-            subprocess.run(
+            write_back = subprocess.run(
                 [*self.docker_bin, "cp", "-", f"{handle.name}:{CONTAINER_WORKSPACE}"],
                 input=payload, capture_output=True, env=handle.env, check=False,
                 timeout=self.daemon_timeout,
             )
+            observations_capture = "written" if write_back.returncode == 0 else "failed"
         except (OSError, subprocess.TimeoutExpired):
-            pass
+            observations_capture = "failed"
 
         return ExecuteResult(
             reason=reason, exit_code=code, error=error, signal=signal_name,
             stdout_truncated=stdout_drain.truncated, stdout_bytes=stdout_drain.total_bytes,
             stdout_incomplete=stdout_incomplete, stderr_incomplete=stderr_incomplete,
-            term_forwarding=term_forwarding,
+            term_forwarding=term_forwarding, observations_capture=observations_capture,
         )
 
     def _kill_container(self, handle: _Handle, sig: str) -> None:

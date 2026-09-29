@@ -209,9 +209,12 @@ def _snapshot_out_of_scope(root: Path, allowed: tuple[PurePosixPath, ...]) -> di
     and never walked into - `os.walk` already does not descend into it
     either way).
 
-    `BACKEND_ARTIFACTS` paths ARE included here (unlike an earlier version
-    of this function) - see `_poll_once`'s own comment for where and why
-    their diff is suppressed instead, which is a narrower, more honest
+    `BACKEND_ARTIFACTS` paths ARE included here, including as a directory
+    symlink (issue #186: an earlier version excluded them from this branch
+    unconditionally, which left a subject that plants a directory symlink at
+    a reserved name completely invisible) - see `_poll_once`'s own comment
+    for which of their transitions are deferred for settled-value resolution
+    and which are recorded immediately, which is a narrower, more honest
     claim than excluding them from observation altogether."""
     seen: dict[str, str] = {}
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
@@ -222,7 +225,7 @@ def _snapshot_out_of_scope(root: Path, allowed: tuple[PurePosixPath, ...]) -> di
             rel = f"{prefix}{d}"
             dir_path = Path(dirpath) / d
             if dir_path.is_symlink():
-                if rel not in BACKEND_ARTIFACTS and not _in_allowed_scope(rel, allowed):
+                if not _in_allowed_scope(rel, allowed):
                     seen[rel] = "link:" + os.readlink(dir_path)
                 continue
             if not _in_allowed_scope(rel, allowed):
@@ -339,18 +342,32 @@ class AuthorityInterceptor:
         here: its failure already raises loudly from `start()` instead of
         needing a coverage number to notice.
 
-        A `BACKEND_ARTIFACTS` transition is held in `_artifact_history`
-        rather than appended to `_entries` directly - see
-        `stop_and_finalize()` for why a per-poll decision cannot tell the
-        backend's own guaranteed write from an earlier subject one, and how
-        deferring the decision resolves it. `DockerBackend.execute()`'s own
-        write can land on ANY poll that happens to run late enough in
-        `execute()`'s own lifetime, not only the mandatory final one - an
-        earlier version of this suppression wrongly assumed only the final
-        poll could ever observe it, and flagged the backend's own write as
-        a violation on every attempt whose poll interval was short enough
-        to catch it mid-`execute()` (found by running this module's own
-        tests, not assumed)."""
+        A `BACKEND_ARTIFACTS` transition into a state `DockerBackend.
+        execute()`'s own write-back could plausibly have produced - a plain
+        content digest, never `None` (delete) or a `"link:"`/`"special:"`
+        entry, since the write-back only ever creates or overwrites a
+        REGULAR file and never removes one - is held in `_artifact_history`
+        rather than appended to `_entries` directly; see
+        `stop_and_finalize()` for why a per-poll decision cannot tell that
+        AMBIGUOUS case (backend write, or a subject's file that merely
+        happens to look like one) apart, and how deferring the decision
+        resolves it. `DockerBackend.execute()`'s own write can land on ANY
+        poll that happens to run late enough in `execute()`'s own lifetime,
+        not only the mandatory final one - an earlier version of this
+        suppression wrongly assumed only the final poll could ever observe
+        it, and flagged the backend's own write as a violation on every
+        attempt whose poll interval was short enough to catch it mid-
+        `execute()` (found by running this module's own tests, not
+        assumed).
+
+        Every OTHER transition at a `BACKEND_ARTIFACTS` path - a delete, or
+        a symlink, or a special file - is recorded immediately, never
+        deferred (issue #186): the write-back cannot produce any of those,
+        so there is no ambiguity to resolve. A subject that plants a
+        directory symlink at `observations` (measured: this makes
+        `DockerBackend.execute()`'s own write-back fail, per `backend.py`'s
+        `ExecuteResult.observations_capture`) is caught the moment a poll
+        observes it, exactly like any other out-of-scope symlink."""
         with tempfile.TemporaryDirectory(prefix="skillc-authority-poll-") as tmp:
             root = Path(tmp)
             try:
@@ -369,7 +386,12 @@ class AuthorityInterceptor:
                         before, after = self._last.get(rel), current.get(rel)
                         if before != after:
                             action = "delete" if after is None else "create" if before is None else "modify"
-                            if rel in BACKEND_ARTIFACTS:
+                            ambiguous = (
+                                rel in BACKEND_ARTIFACTS
+                                and after is not None
+                                and not after.startswith(("link:", "special:"))
+                            )
+                            if ambiguous:
                                 self._artifact_history.setdefault(rel, []).append((action, after))
                             else:
                                 self._entries.append(
@@ -400,19 +422,24 @@ class AuthorityInterceptor:
 
         RESOLVING `BACKEND_ARTIFACTS` HISTORY (PR review, issue #14). By the
         time this poll returns, `_last` holds the SETTLED, final content for
-        every path - and for a `BACKEND_ARTIFACTS` path, that settled value
-        is provably `DockerBackend.execute()`'s own write: nothing else can
-        touch it after the subject's process has exited and `execute()` has
+        every path - and for a `BACKEND_ARTIFACTS` path, an AMBIGUOUS
+        (digest-shaped, see `_poll_once`) settled value is provably
+        `DockerBackend.execute()`'s own write: nothing else can touch it
+        after the subject's process has exited and `execute()` has
         returned, which is a precondition of reaching this method at all.
-        So the LAST recorded transition into that exact settled value -
-        wherever in the attempt's timeline it was actually observed - is
-        indistinguishable from the backend's own write landing early, and is
-        dropped. Any EARLIER transition for the same path, whose value
-        differs from the settled one, survives: that is a real, temporary
-        state the path passed through that the backend's own write does not
-        explain, which is exactly what `known-gaps/delete-then-restore`
-        already documents as the residual, honest limit of polling - not a
-        gap unique to this one path."""
+        So the LAST recorded ambiguous transition into that exact settled
+        value - wherever in the attempt's timeline it was actually observed
+        - is indistinguishable from the backend's own write landing early,
+        and is dropped. Any EARLIER ambiguous transition for the same path,
+        whose value differs from the settled one, survives: that is a real,
+        temporary state the path passed through that the backend's own
+        write does not explain, which is exactly what `known-gaps/delete-
+        then-restore` already documents as the residual, honest limit of
+        polling - not a gap unique to this one path. An UNAMBIGUOUS
+        transition (delete, symlink, special file) never reaches this
+        history at all - `_poll_once` already recorded it immediately,
+        because the write-back could never have produced it either way
+        (issue #186)."""
         if not self._started:
             raise RuntimeError("stop_and_finalize() called before start()")
         if self._finalized:

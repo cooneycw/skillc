@@ -13,6 +13,7 @@ once it exists.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import shutil
 import subprocess
@@ -96,6 +97,15 @@ class FakeProbeBackend:
     export_fails: bool = False
     destroy_raises: bool = False
     confirm_absent_raises: bool = False
+    #: Simulates issue #186's DockerBackend write-back failure at the
+    #: reader's end: "missing" never writes `observations` at all (the
+    #: subject exited fine, but the capture never landed); "directory"
+    #: writes a directory there instead (what a dereferenced or otherwise-
+    #: failed write-back could leave in an exported copy). Neither is what
+    #: THIS fake's own `execute()` naturally produces - real
+    #: `DockerBackend.execute()` never leaves either state reachably by a
+    #: caller before #186, since it never reported the failure at all.
+    observations_missing_as: str | None = None  # "missing" | "directory"
     prepared: list[_Handle] = field(default_factory=list)
 
     def describe(self) -> BackendDescription:
@@ -148,10 +158,16 @@ class FakeProbeBackend:
             for a in argv
         ]
         observations = handle.root / "observations"
-        with open(observations, "wb") as out:
+        if self.observations_missing_as == "directory":
+            observations.mkdir()
+        with contextlib.ExitStack() as stack:
+            out_file = (
+                None if self.observations_missing_as is not None
+                else stack.enter_context(open(observations, "wb"))
+            )
             proc = subprocess.Popen(
-                real_argv, stdout=out, stderr=subprocess.PIPE,
-                stdin=subprocess.PIPE if stdin is not None else None,
+                real_argv, stdout=(subprocess.DEVNULL if out_file is None else out_file),
+                stderr=subprocess.PIPE, stdin=subprocess.PIPE if stdin is not None else None,
             )
             try:
                 _, err = proc.communicate(stdin, timeout=limits.timeout)
@@ -224,6 +240,31 @@ def test_a_wrong_candidate_fails_through_the_backend(
     files = [("src/slugify.py", WRONG.read_bytes(), False)]
     graded = verify.grade_files(GRADER, files, tmp_path / "grading", backend=backend)
     assert graded.status == "FAIL"
+
+
+@pytest.mark.parametrize("missing_as", ["missing", "directory"])
+def test_a_missing_or_non_file_observations_never_grades_pass(
+    backend: FakeProbeBackend, tmp_path: Path, missing_as: str,
+) -> None:
+    """Acceptance item for issue #186: state what a reader of `observations`
+    does with a missing or non-regular-file `observations`, and prove the
+    answer is never a PASS - the exact state a real subject can force by
+    making `DockerBackend.execute()`'s write-back fail (see
+    `test_docker_backend.py`'s own red case for the write side).
+    `verify._read_observations` opens with `O_NOFOLLOW` and checks
+    `S_ISREG` before ever reading a byte, so a missing path and a directory
+    both read as "no report" to the probe's own envelope - correct
+    candidate content notwithstanding, `grade_slug.py`'s `read_report`
+    turns that into `{"import_error": "the probe produced no report"}`,
+    which the functional-correctness criterion never satisfies. This does
+    not test #186's fix (nothing here exercises the real `DockerBackend`
+    write-back) - it tests the READER half of #186's acceptance, independent
+    of the write-back bug, on the same `_probe_via_backend` path a real
+    attempt uses."""
+    backend.observations_missing_as = missing_as
+    files = [("src/slugify.py", REFERENCE.read_bytes(), False)]  # otherwise-correct candidate
+    graded = verify.grade_files(GRADER, files, tmp_path / "grading", backend=backend)
+    assert graded.status != "PASS"
 
 
 def test_grade_records_the_deterministic_tier_and_the_backend_identity(

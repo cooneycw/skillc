@@ -437,15 +437,26 @@ def _read_untrusted(path: Path, limit: int, tail: bool = False) -> bytes | None:
 
     Opened non-blocking and without following a link, and read only if it is a
     regular file: a FIFO swapped in for it would otherwise block forever, after
-    every deadline has passed. None when it is not a readable regular file."""
+    every deadline has passed. None when it is not a readable regular file.
+
+    The `S_ISREG` check runs on the bare `fd`, BEFORE `os.fdopen` (issue
+    #186): `os.open()` succeeds on a directory (Linux allows opening one
+    O_RDONLY), so a check made only AFTER wrapping the fd in a buffered
+    reader is too late - `os.fdopen(fd, "rb")` itself raises
+    `IsADirectoryError` for a directory fd, an uncaught exception, not the
+    documented "None when not a readable regular file". Measured directly:
+    a candidate directory named `observations` (exactly what a subject can
+    leave behind by making `DockerBackend.execute()`'s write-back fail,
+    #186) crashed this function instead of reading as absent."""
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except OSError:
         return None
+    info = os.fstat(fd)
+    if not stat.S_ISREG(info.st_mode):
+        os.close(fd)
+        return None
     with os.fdopen(fd, "rb") as handle:
-        info = os.fstat(handle.fileno())
-        if not stat.S_ISREG(info.st_mode):
-            return None
         if tail and info.st_size > limit:
             handle.seek(info.st_size - limit)
         return handle.read(limit)
