@@ -246,6 +246,86 @@ def test_happy_path_installs_the_collection_and_grades(
     assert isinstance(graded, dict)
     assert graded["status"] == "PASS"
 
+    # #188: the OBSERVED image digest (read back from the journal's own
+    # `backend-identity` event, `install()`'s own measurement of the
+    # running container) matches the ledger's planned one here - the fake
+    # docker CLI resolves both through the same deterministic function - but
+    # the two are DIFFERENT reads, not the same value copied twice; see the
+    # mismatch test below for a case where they diverge. The timeout is the
+    # controller's own input, verbatim.
+    assert result.image_digest == _BACKEND_IMAGE_DIGEST
+    assert result.timeout_seconds == 5
+
+
+def test_image_digest_is_the_observed_value_not_the_merely_planned_one(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#188 review: `result.image_digest` must be what the backend actually
+    OBSERVED after starting the container, never an echo of the ledger's
+    plan - the two are different reads and this test makes them disagree on
+    purpose (the fake docker CLI's own `.image-id-<container>` override
+    sentinel, documented in `fake_docker.py`'s `cmd_inspect`, for "a tag
+    republished between planning and the run"), so a fix that silently read
+    `plan_collection_attempt`'s own `image_digest` argument back instead
+    would pass the happy-path test above and fail only here."""
+    repo = _fixture_collection(tmp_path, {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd"]))
+
+    acquired = cc.acquire_collection("whatever", base, checkout=repo)
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store, image_digest=_BACKEND_IMAGE_DIGEST)
+    docker_state.mkdir(parents=True, exist_ok=True)
+    name = d._container_name(attempt_id)
+    observed = "sha256:" + "cc" * 32
+    (docker_state / f".image-id-{name}").write_text(observed, encoding="utf-8")
+    backend = _backend(base, docker_state)
+    grading_backend = _backend(base, docker_state)
+    home = _mapped_home(docker_state, attempt_id)
+    argv = _codex_argv(home=home, transcript_relpath=".codex/sessions/2026/01/01/rollout-cc.jsonl")
+    cred_path = _fresh_codex_credential(tmp_path)
+
+    result = cc.run_collection_agent_attempt(
+        subject_name="whatever", acquired=acquired, experiment=experiment, attempt_id=attempt_id,
+        backend=backend, grading_backend=grading_backend, base=base,
+        base_argv=argv, prompt="Fix the slug helper.", timeout=5, credential_explicit_path=cred_path,
+    )
+
+    assert result.image_digest == observed
+    assert result.image_digest != _BACKEND_IMAGE_DIGEST
+
+
+def test_image_digest_is_none_when_the_backend_reports_no_identity(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the backend cannot answer the observation at all (the fake
+    docker CLI's own `.no-image-id-<container>` sentinel, mirroring a real
+    daemon's `docker inspect` failing), `result.image_digest` must be `None`
+    - never a guess, and never silently falling back to the planned digest,
+    which is exactly the confusion #188 review flagged."""
+    repo = _fixture_collection(tmp_path, {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd"]))
+
+    acquired = cc.acquire_collection("whatever", base, checkout=repo)
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store, image_digest=_BACKEND_IMAGE_DIGEST)
+    docker_state.mkdir(parents=True, exist_ok=True)
+    name = d._container_name(attempt_id)
+    (docker_state / f".no-image-id-{name}").write_text("", encoding="utf-8")
+    backend = _backend(base, docker_state)
+    grading_backend = _backend(base, docker_state)
+    home = _mapped_home(docker_state, attempt_id)
+    argv = _codex_argv(home=home, transcript_relpath=".codex/sessions/2026/01/01/rollout-cc.jsonl")
+    cred_path = _fresh_codex_credential(tmp_path)
+
+    result = cc.run_collection_agent_attempt(
+        subject_name="whatever", acquired=acquired, experiment=experiment, attempt_id=attempt_id,
+        backend=backend, grading_backend=grading_backend, base=base,
+        base_argv=argv, prompt="Fix the slug helper.", timeout=5, credential_explicit_path=cred_path,
+    )
+
+    assert result.image_digest is None
+    assert result.record["disposition"] == "captured"  # the attempt itself is unaffected
+
 
 def test_the_result_revision_is_what_was_acquired_never_the_declared_pin(
     tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,

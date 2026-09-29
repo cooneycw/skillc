@@ -8,6 +8,44 @@ and version plan.
 
 ## [Unreleased]
 
+- **`collection-run` now records the image digest and timeout it ran with**
+  (Refs #188). `CollectionAgentResult` gains `image_digest`/
+  `timeout_seconds`, surfaced in `evidence_envelope()`'s own dict
+  (`collection-run-record.json`) - `image_digest` read back from the
+  journal's own `backend-identity` event (`lifecycle._record_identity`'s
+  `image_digest`, itself `DockerBackend.install()`'s `docker inspect
+  --format {{.Image}}` on the RUNNING container), never
+  `plan_collection_attempt`'s merely-planned `image.digest` (review
+  requirement: "recorded" must mean what RAN, not what was planned - a
+  tag can be repointed between planning and `docker run`, and nothing
+  before this re-checked it). `timeout_seconds` is the controller's own
+  input to `Limits`, which needs no separate observation to count as
+  recorded. `None` when the backend reported no identity at all - never a
+  guess, and never a silent fallback to the plan (committed cases:
+  `test_image_digest_is_the_observed_value_not_the_merely_planned_one`
+  sets the fake docker CLI's own `.image-id-<container>` override to prove
+  the OBSERVED value is read, not the planned one;
+  `test_image_digest_is_none_when_the_backend_reports_no_identity` proves
+  the no-claim case).
+
+  `configuration_compare.from_collection_run`'s `image_digest`/
+  `timeout_seconds` keyword arguments are now OPTIONAL: when the envelope
+  carries either (every record from now on), that value is used and marked
+  `recorded`; a caller-supplied keyword argument is then a REDUNDANT
+  assertion, and disagreement between the two REFUSES, naming both, rather
+  than silently preferring either (review requirement, second condition -
+  committed as `test_a_caller_asserted_value_disagreeing_with_the_record_
+  is_refused`). A pre-#188 record (the envelope's own fields absent) still
+  falls back to the caller-supplied keyword argument, marked `asserted`,
+  exactly as PR2 shipped it - committed as
+  `test_a_pre_188_record_falls_back_to_the_caller_and_stays_asserted`, this
+  issue's own required red case. The real end-to-end test's matched pair
+  now compares fully `recorded` on both fields (`unverified_matched_fields`
+  absent), and its mismatched-pair test uses a REAL observed-digest
+  divergence (the same `.image-id-<container>` override) rather than a
+  differing keyword argument, since the argument is no longer the source of
+  truth once the record carries a value.
+
 ## [0.4.0] - 2026-09-29
 
 ### Added

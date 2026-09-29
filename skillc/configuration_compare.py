@@ -27,9 +27,14 @@ Each side is a JSON object with:
         was recorded, which is exactly what this module cannot check from
         JSON alone). `RECORDED` must be earned - a caller marks it only for
         a field an adapter actually read from a real, captured artifact;
-        `from_collection_run` does this for every field it reads and leaves
-        `image_digest`/`timeout_seconds` on the `ASSERTED` default, since
-        neither is persisted by `collection-run` today (skillc#188).
+        `from_collection_run` does this for every field a `collection-run`
+        record now carries (skillc#188 closed the `image_digest`/
+        `timeout_seconds` gap this module originally had to work around -
+        see `from_collection_run`'s own docstring for the OBSERVED-not-
+        merely-planned distinction that fix required for `image_digest`
+        specifically), and leaves a field on the `ASSERTED` default only
+        when a caller supplies it as a side-channel value the record itself
+        does not carry (a pre-#188 record, for these two fields).
         `compare` surfaces this per side and flags any MATCHED field that
         is asserted on either side, so a comparison never reads as if a
         real record had proved a match the caller only asserted.
@@ -46,12 +51,13 @@ rather than fixtures written to this module's own schema (review finding).
 
 `from_collection_run` adapts a REAL `collection-run` attempt's actual saved
 artifacts into this shape - see its own docstring for exactly which fields
-collection-run persists today, which two it does not (a real, reported
-finding, not filled in with a default), and why its VERIFIED_RESULT
-record's own `criteria` field is the WRONG source for `outcome_dimensions`
-(a second finding: it mixes in the verifier's own readiness criterion,
-never a grader's). Building the matching adapter for `pilot-report`'s own
-output is separate, later work, noted as such, not included here.
+it reads from each artifact, how `image_digest`/`timeout_seconds` are
+resolved now that `collection-run` records both (skillc#188), and why its
+VERIFIED_RESULT record's own `criteria` field is the WRONG source for
+`outcome_dimensions` (a real finding: it mixes in the verifier's own
+readiness criterion, never a grader's). Building the matching adapter for
+`pilot-report`'s own output is separate, later work, noted as such, not
+included here.
 """
 
 from __future__ import annotations
@@ -250,15 +256,16 @@ def compare(a: ConfigRecord, b: ConfigRecord, vary: str) -> dict[str, object]:
 def from_collection_run(
     envelope: Mapping[str, object], verified_result: Mapping[str, object],
     outcome_dimensions: Mapping[str, object],
-    *, image_digest: str, timeout_seconds: float,
+    *, image_digest: str | None = None, timeout_seconds: float | None = None,
 ) -> dict[str, object]:
     """Builds this module's own input shape from a REAL `collection-run`
     attempt's two actual saved artifacts:
 
     - `envelope`: `collection_conformance.evidence_envelope()`'s own dict
       (equivalently, `collection-run-record.json` read back) - for
-      `client`, `collection` (its own `subject` field) and `model`
-      (`record.observation.transcript_model`).
+      `client`, `collection` (its own `subject` field), `model`
+      (`record.observation.transcript_model`), and - since skillc#188 -
+      `image_digest`/`timeout_seconds` when present.
     - `verified_result`: one entry from a real `--evidence` export's
       `result-*.json` (`verify.py`'s VERIFIED_RESULT shape) - for
       `task_id`/`grader_revision` ONLY (its own `grader.id`/
@@ -281,18 +288,26 @@ def from_collection_run(
       the result here. This function's own job is identity extraction, not
       re-deriving bucketing logic a caller already has in scope.
 
-    `image_digest` and `timeout_seconds` are REQUIRED KEYWORD ARGUMENTS,
-    never read from either input - because NEITHER artifact persists them
-    today. This is a REAL FINDING from building this adapter against actual
-    collection-run output (not a fixture written to this module's own
-    schema), not a design choice: `cmd_collection_run` resolves the image
-    digest before planning and knows its own `--timeout`, but
-    `CollectionAgentResult`/`evidence_envelope()` has no field for either,
-    and the exported `verify.py` VERIFIED_RESULT record does not either.
-    Closing that gap means changing what `collection-run` itself persists -
-    out of scope here; until then, a caller of this adapter must supply
-    both from its own side channel (as `cmd_collection_run` already could,
-    since it resolves both values itself before this function ever runs).
+    `image_digest`/`timeout_seconds` (skillc#188, review-refined): a record
+    produced by a `collection-run` that predates #188 carries neither field
+    in its envelope, so this adapter still accepts both as OPTIONAL
+    keyword arguments, a caller's own side-channel assertion, marked
+    `ASSERTED` (`load_record`'s default - nothing here upgrades it).
+    A record produced AFTER #188 carries `envelope["image_digest"]` -
+    itself the OBSERVED digest `install()` measured on the running
+    container, never a merely-planned one (`collection_conformance.
+    CollectionAgentResult.image_digest`'s own comment) - and
+    `envelope["timeout_seconds"]` - the controller's own input, which
+    needs no separate observation to count as recorded. Either envelope
+    field, when present, is used and marked `RECORDED`; the caller-supplied
+    keyword argument is then only a REDUNDANT assertion, and this function
+    REFUSES if it disagrees with what the record carries, naming both,
+    rather than silently preferring either (review requirement - never let
+    a caller's stale or mistaken side-channel value overrule, or be
+    silently overruled by, what the record itself says). When the envelope
+    carries neither field (a pre-#188 record) and the caller supplies
+    neither either, this function refuses - there is no value to put in
+    this adapter's own required output field.
 
     Refuses (never defaults) when `envelope`/`verified_result` are missing
     a field this function needs, naming which one - the same posture
@@ -321,20 +336,52 @@ def from_collection_run(
             "envelope: record.observation.transcript_model missing - no model was observed for this attempt"
         )
 
+    provenance = {
+        "task_id": RECORDED, "grader_revision": RECORDED,
+        "client": RECORDED, "model": RECORDED, "collection": RECORDED,
+    }
+
+    envelope_image_digest = envelope.get("image_digest")
+    resolved_image_digest: str
+    if isinstance(envelope_image_digest, str) and envelope_image_digest:
+        if image_digest is not None and image_digest != envelope_image_digest:
+            raise Refused(
+                f"image_digest disagreement: the record carries {envelope_image_digest!r}, "
+                f"the caller asserted {image_digest!r} - refusing rather than silently "
+                f"preferring either"
+            )
+        resolved_image_digest = envelope_image_digest
+        provenance["image_digest"] = RECORDED
+    elif image_digest is not None:
+        resolved_image_digest = image_digest
+    else:
+        raise Refused(
+            "image_digest: not present in the record (skillc#188: this attempt predates it, or the "
+            "backend reported no identity) and not supplied by the caller"
+        )
+
+    envelope_timeout_seconds = envelope.get("timeout_seconds")
+    resolved_timeout_seconds: float
+    if isinstance(envelope_timeout_seconds, (int, float)) and not isinstance(envelope_timeout_seconds, bool):
+        if timeout_seconds is not None and timeout_seconds != envelope_timeout_seconds:
+            raise Refused(
+                f"timeout_seconds disagreement: the record carries {envelope_timeout_seconds!r}, "
+                f"the caller asserted {timeout_seconds!r} - refusing rather than silently "
+                f"preferring either"
+            )
+        resolved_timeout_seconds = envelope_timeout_seconds
+        provenance["timeout_seconds"] = RECORDED
+    elif timeout_seconds is not None:
+        resolved_timeout_seconds = timeout_seconds
+    else:
+        raise Refused(
+            "timeout_seconds: not present in the record (skillc#188: this attempt predates it) "
+            "and not supplied by the caller"
+        )
+
     return {
-        "task_id": task_id, "grader_revision": grader_revision, "image_digest": image_digest,
-        "client": client, "model": model, "timeout_seconds": timeout_seconds, "collection": collection,
+        "task_id": task_id, "grader_revision": grader_revision, "image_digest": resolved_image_digest,
+        "client": client, "model": model, "timeout_seconds": resolved_timeout_seconds, "collection": collection,
         "outcome_dimensions": dict(outcome_dimensions),
-        # Every field here EXCEPT image_digest/timeout_seconds was read
-        # from a real artifact (grader.id/revision, client, subject,
-        # transcript_model) and is marked RECORDED to say so explicitly.
-        # image_digest/timeout_seconds are CALLER-SUPPLIED, never read from
-        # either real artifact (skillc#188) - left unmentioned here, which
-        # is `load_record`'s own ASSERTED default, so a comparison built
-        # from this record can never read as if collection-run itself had
-        # recorded and confirmed them.
-        "provenance": {
-            "task_id": RECORDED, "grader_revision": RECORDED,
-            "client": RECORDED, "model": RECORDED, "collection": RECORDED,
-        },
+        "provenance": provenance,
     }

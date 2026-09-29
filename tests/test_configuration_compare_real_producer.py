@@ -7,12 +7,18 @@ rather than duplicated) and adapts their ACTUAL saved output - proving the
 adapter agrees with what `collection-run` really produces, not merely with
 itself.
 
-`image_digest` and `timeout_seconds` are supplied to the adapter as explicit
-keyword arguments in every call below, never read from either real artifact -
-see `from_collection_run`'s own docstring for why: neither
-`collection_conformance.evidence_envelope()` nor the exported VERIFIED_RESULT
-persists them today. That gap is real and reported; it is not filled in with
-a default here.
+`image_digest`/`timeout_seconds` (skillc#188): the normal path below reads
+both from `collection_conformance.evidence_envelope()`'s own new fields -
+`image_digest` OBSERVED post-run (`install()`'s own measurement of the
+running container, `tests/test_collection_conformance.py`'s own
+`test_image_digest_is_the_observed_value_...` proves this end to end at
+the source), `timeout_seconds` the controller's own input - and marks both
+`RECORDED`. The explicit-keyword-argument path this file used before #188
+closed the gap is kept for the two red cases at the bottom: a record that
+predates the fix (the envelope's own fields stripped) still resolves
+through a caller-supplied kwarg, marked `ASSERTED`; and a caller-supplied
+kwarg that DISAGREES with what a real record carries is refused, naming
+both, never silently preferred either way.
 """
 
 from __future__ import annotations
@@ -126,7 +132,8 @@ def _run_real_attempt(
 
 def _adapt(
     result: cc.CollectionAgentResult, experiment: trial.Experiment, tmp_path: Path, name: str,
-    *, image_digest: str, timeout_seconds: float,
+    *, image_digest: str | None = None, timeout_seconds: float | None = None,
+    strip_envelope_fields: bool = False,
 ) -> Path:
     """Reads the REAL VERIFIED_RESULT `collection-run` actually stored (the
     same file a real `--evidence` export would publish as `result-*.json`) -
@@ -135,8 +142,17 @@ def _adapt(
     `from_collection_run`'s own docstring for why `verified_result["criteria"]`
     is the WRONG source: it mixes in the verifier's own `installation-ready`
     criterion, found by running this test against real output and getting a
-    real INCONCLUSIVE where the task's own grade is genuinely PASS)."""
+    real INCONCLUSIVE where the task's own grade is genuinely PASS).
+
+    `image_digest`/`timeout_seconds` are normally omitted - the real
+    envelope already carries both (skillc#188) and `from_collection_run`
+    reads them from there. `strip_envelope_fields=True` simulates a
+    pre-#188 record (the envelope's own fields deleted) so the two kwargs
+    below become this call's only source, exactly as every call in this
+    file had to work before the fix."""
     envelope = cc.evidence_envelope(result)
+    if strip_envelope_fields:
+        envelope = {k: v for k, v in envelope.items() if k not in ("image_digest", "timeout_seconds")}
     graded = result.record.get("graded")
     assert isinstance(graded, dict)
     result_id = graded.get("result_id")
@@ -157,7 +173,7 @@ def _adapt(
     return path
 
 
-def test_a_real_matched_pair_compares_and_a_real_mismatched_pair_refuses(
+def test_a_real_matched_pair_compares_fully_recorded(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     base_a, docker_state_a = tmp_path / "work-a", tmp_path / "docker-state-a"
@@ -174,10 +190,10 @@ def test_a_real_matched_pair_compares_and_a_real_mismatched_pair_refuses(
         collection_name="collection-b", transcript_relpath=".codex/sessions/2026/01/01/rollout-b.jsonl",
     )
 
-    # Same real image digest for both - a genuinely MATCHED pair, varying
-    # only `collection` (exactly what the two real runs actually differ on).
-    path_a = _adapt(result_a, experiment_a, tmp_path, "a.json", image_digest=_BACKEND_IMAGE_DIGEST, timeout_seconds=5)
-    path_b = _adapt(result_b, experiment_b, tmp_path, "b-matched.json", image_digest=_BACKEND_IMAGE_DIGEST, timeout_seconds=5)
+    # No image_digest/timeout_seconds kwargs - both real envelopes already
+    # carry them (skillc#188), so this is the normal path now.
+    path_a = _adapt(result_a, experiment_a, tmp_path, "a.json")
+    path_b = _adapt(result_b, experiment_b, tmp_path, "b-matched.json")
 
     record_a = ccmp.load_record(path_a)
     record_b_matched = ccmp.load_record(path_b)
@@ -185,6 +201,12 @@ def test_a_real_matched_pair_compares_and_a_real_mismatched_pair_refuses(
     assert record_a.client == record_b_matched.client == "codex"
     assert record_a.collection == "collection-a"
     assert record_b_matched.collection == "collection-b"
+    # Both real attempts ran the same fake image and were given the same
+    # timeout, so both fields genuinely match here too.
+    assert record_a.image_digest == record_b_matched.image_digest == _BACKEND_IMAGE_DIGEST
+    assert record_a.timeout_seconds == record_b_matched.timeout_seconds == 5
+    assert record_a.provenance["image_digest"] == ccmp.RECORDED
+    assert record_a.provenance["timeout_seconds"] == ccmp.RECORDED
 
     comparison = ccmp.compare(record_a, record_b_matched, "collection")
     per_dimension = comparison["per_dimension"]
@@ -197,21 +219,123 @@ def test_a_real_matched_pair_compares_and_a_real_mismatched_pair_refuses(
     assert per_dimension["unclassified"] == {"a": "PASS", "b": "PASS"}
     assert per_dimension["functional"] == {"a": "not-applicable", "b": "not-applicable"}
 
-    # `from_collection_run` marks image_digest/timeout_seconds ASSERTED on
-    # both real records (skillc#188: collection-run persists neither today)
-    # - the comparison must say so rather than reading as if a real record
-    # had proved these two genuinely matched.
-    unverified_matched_fields = comparison["unverified_matched_fields"]
-    assert isinstance(unverified_matched_fields, list)
-    assert sorted(unverified_matched_fields) == ["image_digest", "timeout_seconds"]
-    assert "image_digest" in str(comparison["unverified_matched_fields_note"])
+    # #188 closed: both real records now carry image_digest/timeout_seconds
+    # as RECORDED, so this comparison must not read as if either were only
+    # asserted - the key is absent entirely, not an empty list.
+    assert "unverified_matched_fields" not in comparison
+    assert "unverified_matched_fields_note" not in comparison
 
-    # A DIFFERENT image_digest for b - the identical real attempt, but a
-    # genuinely MISMATCHED configuration on a field --vary does not name.
-    path_b_mismatched = _adapt(
-        result_b, experiment_b, tmp_path, "b-mismatched.json",
-        image_digest="sha256:" + "ff" * 32, timeout_seconds=5,
+
+def test_a_real_mismatched_observed_digest_refuses_the_comparison(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The mismatch is REAL this time, not a differing kwarg: `collection-b`'s
+    container reports a different OBSERVED digest (the fake docker CLI's
+    own `.image-id-<container>` override, exactly
+    `tests/test_collection_conformance.py`'s own
+    `test_image_digest_is_the_observed_value_...` uses), so the adapted
+    record genuinely disagrees with `collection-a`'s - `compare()` must
+    still refuse and name `image_digest`, now over two RECORDED values."""
+    base_a, docker_state_a = tmp_path / "work-a", tmp_path / "docker-state-a"
+    base_a.mkdir()
+    base_b, docker_state_b = tmp_path / "work-b", tmp_path / "docker-state-b"
+    base_b.mkdir()
+
+    result_a, experiment_a = _run_real_attempt(
+        tmp_path, base_a, docker_state_a, monkeypatch,
+        collection_name="collection-a", transcript_relpath=".codex/sessions/2026/01/01/rollout-a.jsonl",
     )
-    record_b_mismatched = ccmp.load_record(path_b_mismatched)
+
+    repo = _fixture_collection(tmp_path, "collection-b")
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: cc.materialize.Subject.from_dict({
+        "subject_schema": 1, "locator": "test/test", "revision": "v1", "surface": "codex-skills",
+        "skills_root": "skills", "select": ["tdd"], "client": {"name": "codex", "version": "0.157.1"},
+    }))
+    acquired = cc.acquire_collection("collection-b", base_b, checkout=repo)
+    store = trial.open_store(tmp_path / "collection-b-store", forbidden=[])
+    experiment_b, attempt_id_b = cc.plan_collection_attempt(
+        "collection-b", acquired, store, image_digest=_BACKEND_IMAGE_DIGEST,
+    )
+    docker_state_b.mkdir(parents=True, exist_ok=True)
+    container_name = d._container_name(attempt_id_b)
+    (docker_state_b / f".image-id-{container_name}").write_text("sha256:" + "ff" * 32, encoding="utf-8")
+    home = _mapped_home(docker_state_b, attempt_id_b)
+    result_b = cc.run_collection_agent_attempt(
+        subject_name="collection-b", acquired=acquired, experiment=experiment_b, attempt_id=attempt_id_b,
+        backend=_backend(base_b, docker_state_b), grading_backend=_backend(base_b, docker_state_b), base=base_b,
+        base_argv=_codex_argv(home=home, transcript_relpath=".codex/sessions/2026/01/01/rollout-b.jsonl"),
+        prompt="Fix the slug helper.", timeout=5, credential_explicit_path=_fresh_codex_credential(tmp_path),
+    )
+    graded_b = result_b.record.get("graded")
+    assert isinstance(graded_b, dict) and graded_b.get("status") == "PASS"
+    assert result_b.image_digest == "sha256:" + "ff" * 32  # the override, not the plan
+
+    path_a = _adapt(result_a, experiment_a, tmp_path, "a.json")
+    path_b = _adapt(result_b, experiment_b, tmp_path, "b-mismatched.json")
+    record_a = ccmp.load_record(path_a)
+    record_b = ccmp.load_record(path_b)
+    assert record_a.provenance["image_digest"] == record_b.provenance["image_digest"] == ccmp.RECORDED
+
     with pytest.raises(trial.Refused, match="image_digest"):
-        ccmp.compare(record_a, record_b_mismatched, "collection")
+        ccmp.compare(record_a, record_b, "collection")
+
+
+def test_a_pre_188_record_falls_back_to_the_caller_and_stays_asserted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Red case (#188 acceptance): a record produced BEFORE this change -
+    simulated by stripping the envelope's own `image_digest`/
+    `timeout_seconds` keys, exactly what a pre-#188 `collection-run` record
+    looked like - falls back to the caller-supplied keyword arguments and
+    stays `asserted`, never silently upgraded."""
+    base_a, docker_state_a = tmp_path / "work-a", tmp_path / "docker-state-a"
+    base_a.mkdir()
+    result_a, experiment_a = _run_real_attempt(
+        tmp_path, base_a, docker_state_a, monkeypatch,
+        collection_name="collection-a", transcript_relpath=".codex/sessions/2026/01/01/rollout-a.jsonl",
+    )
+
+    path = _adapt(
+        result_a, experiment_a, tmp_path, "pre-188.json", strip_envelope_fields=True,
+        image_digest=_BACKEND_IMAGE_DIGEST, timeout_seconds=5,
+    )
+    record = ccmp.load_record(path)
+    assert record.image_digest == _BACKEND_IMAGE_DIGEST
+    assert record.timeout_seconds == 5
+    assert record.provenance["image_digest"] == ccmp.ASSERTED
+    assert record.provenance["timeout_seconds"] == ccmp.ASSERTED
+
+
+def test_a_caller_asserted_value_disagreeing_with_the_record_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Review requirement (condition 2): a record CARRIES a value and the
+    caller ALSO supplies one, and they differ - `from_collection_run` must
+    refuse and name both, never silently prefer either."""
+    base_a, docker_state_a = tmp_path / "work-a", tmp_path / "docker-state-a"
+    base_a.mkdir()
+    result_a, experiment_a = _run_real_attempt(
+        tmp_path, base_a, docker_state_a, monkeypatch,
+        collection_name="collection-a", transcript_relpath=".codex/sessions/2026/01/01/rollout-a.jsonl",
+    )
+
+    envelope = cc.evidence_envelope(result_a)
+    graded = result_a.record.get("graded")
+    assert isinstance(graded, dict)
+    result_id = graded.get("result_id")
+    assert isinstance(result_id, str)
+    verified_result = json.loads((experiment_a.root / f"result-{result_id}.json").read_text(encoding="utf-8"))
+    dimensions = verify.GraderDef.load(GRADER_ROOT).dimensions
+    task_criteria = [c for c in graded["criteria"] if isinstance(c, dict)]
+    outcome_dimensions = orpt.build(task_criteria, dimensions).as_dict()
+
+    with pytest.raises(trial.Refused, match="image_digest"):
+        ccmp.from_collection_run(
+            envelope, verified_result, outcome_dimensions,
+            image_digest="sha256:" + "ee" * 32,  # disagrees with the real observed digest
+        )
+    with pytest.raises(trial.Refused, match="timeout_seconds"):
+        ccmp.from_collection_run(
+            envelope, verified_result, outcome_dimensions,
+            timeout_seconds=999,  # disagrees with the real timeout (5)
+        )
