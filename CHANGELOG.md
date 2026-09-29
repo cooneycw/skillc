@@ -36,32 +36,29 @@ and version plan.
   mutant kept entirely in the test tree, never a switch in the production
   script) all fail against pre-#158 code and pass now.
 
-- **`skillc/disruption_trigger.py`, the L5 disruption-trigger fixture
-  service for #14's runtime half** (Refs #14). `DisruptionTrigger` counts a
-  live attempt's request log (an append-only file the subject's tool
-  wrapper writes one line to per call) by polling `ExecutionBackend.export()`
-  - the same primitive `AuthorityInterceptor` polls - and assembles the
-  `failed_after_step` bytes `skillc.verify.grade_agent_attempt` carries,
-  bounded as `min(fail_after, requests_received)` so a subject that claims
-  more completed steps than the observed request count supports is still
-  caught by `grade_recovery.py`'s existing `report-supported` check,
-  unmodified. Corrected from the approved design per review: the subject CAN
-  overwrite or bypass the proxy (same neutral-identity uid as L4), so this
-  module counts "requests a controller-observed log received", never
-  "proxy invocations" - and, since zero observed requests would otherwise
-  let Level 5's judge grade both content criteria SATISFIED vacuously
-  (`range(1, 1)` is empty) for a subject that bypassed the tool and honestly
-  reported doing nothing, `stop_and_finalize()` returns `None` whenever zero
-  requests were ever observed, regardless of the calibrated disruption
-  point. Measured, not only argued: judged against a fabricated
-  `failed_after_step: 0`, `wrong/bypassed-proxy` would PASS clean; judged
-  against the real fix's refusal (no `trusted` key at all), it correctly
-  grades INCONCLUSIVE - both sides shown in PROVENANCE.md, and
-  `tests/test_disruption_trigger.py::test_zero_observed_requests_refuses_
-  rather_than_grading_zero` reproduces the refusal directly. `_max_requests_
-  seen` only ever grows, so a subject that inflates the log then truncates
-  it to hide how many calls it made does not erase an earlier poll's higher,
-  already-observed count.
+- **`skillc/disruption_trigger.py`, an ADVISORY request-count observer for
+  Level 5** (Refs #14). `DisruptionTrigger` counts a live attempt's request
+  log (an append-only file the subject's tool wrapper writes one line to per
+  call) by polling `ExecutionBackend.export()` - the same primitive
+  `AuthorityInterceptor` polls. **Its output is never passed as
+  `trusted_observation`, and Level 5's trusted channel remains unsolved.**
+  Caught by review after an initial version wired it in as one: the request
+  log lives inside the same subject-writable workspace tree `export()` reads
+  for L4, and unlike L4's own diff (which only asks whether bytes at a
+  CONTROLLER-decided path changed), this module would have trusted the
+  CONTENT of a subject-writable file - a line count - as evidence, which the
+  subject can fabricate with zero real work behind it, on every attempt,
+  unconditionally. Not a scoped "known gap" like `known-gaps/delete-then-
+  restore` - there the mechanism is sound except for a narrow timing window;
+  here the count itself IS the unenforced claim, so the whole value stays
+  advisory. `_max_requests_seen` only ever grows (a subject that inflates
+  the log then truncates it does not erase an earlier poll's higher count),
+  which defeats shrinking after the fact but nothing about inflating in the
+  first place - exactly why this stays advisory rather than trusted. A real
+  fix needs a controller-owned decide-and-reply channel (a host-owned Unix
+  socket bind-mounted into the container is one candidate, raised in review
+  and tracked separately) - architecture and policy work past a single
+  fixture-service PR.
 
 - **Fix: a symlink to a directory outside scope was invisible to
   `AuthorityInterceptor`** (Refs #14, folded into part c per review).

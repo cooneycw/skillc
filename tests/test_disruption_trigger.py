@@ -1,4 +1,10 @@
-"""Tests for the L5 disruption-trigger fixture service (#14, runtime part c).
+"""Tests for the ADVISORY L5 request-count observer (#14, runtime part c).
+
+`DisruptionTrigger`'s output is never a `trusted_observation` - see the
+module's own docstring for why a poll-based count of a subject-writable
+file cannot honestly be one, unlike `AuthorityInterceptor`'s whole-tree
+diff. These tests prove what an advisory counter can still honestly claim:
+what it observed, including zero, and when it could not observe at all.
 
 Driven against the same fake `docker` CLI `test_docker_backend.py` and
 `test_authority_interceptor.py` use (`tests/fixtures/docker-backend/
@@ -69,111 +75,97 @@ def _append_n_requests(n: int) -> str:
     )
 
 
-def test_requests_under_the_disruption_point_bound_failed_after_step(base: Path, docker_state: Path) -> None:
+def test_a_count_is_reported_and_fail_after_is_only_echoed(base: Path, docker_state: Path) -> None:
+    """`fail_after` is context for a reader, never a bound this class
+    computes from - unlike the removed `failed_after_step` framing, a
+    count past `fail_after` is reported exactly as observed, not clamped."""
     backend = _backend(base, docker_state)
     handle = _prepared(backend, "a-lc-disruption-000000001")
-    trigger = DisruptionTrigger(backend, handle, fail_after=3, interval=0.05)
-    trigger.start()
-    _run_and_stop(backend, handle, _append_n_requests(2))
-    trusted = trigger.stop_and_finalize()
-    assert trusted is not None
-    data = json.loads(trusted)
-    assert data["requests_received"] == 2
-    assert data["failed_after_step"] == 2  # bounded by what was actually observed
-    backend.destroy(handle)
-
-
-def test_requests_over_the_disruption_point_are_bounded_by_fail_after(base: Path, docker_state: Path) -> None:
-    """A subject that keeps calling past the calibrated disruption point
-    does not inflate `failed_after_step` past `fail_after` - the controller
-    asserts only that disruption was DUE by then, not that the subject
-    stopped complying with it."""
-    backend = _backend(base, docker_state)
-    handle = _prepared(backend, "a-lc-disruption-000000002")
-    trigger = DisruptionTrigger(backend, handle, fail_after=3, interval=0.05)
-    trigger.start()
+    observer = DisruptionTrigger(backend, handle, fail_after=3, interval=0.05)
+    observer.start()
     _run_and_stop(backend, handle, _append_n_requests(5))
-    trusted = trigger.stop_and_finalize()
-    assert trusted is not None
-    data = json.loads(trusted)
+    advisory = observer.stop_and_finalize()
+    assert advisory is not None
+    data = json.loads(advisory)
     assert data["requests_received"] == 5
-    assert data["failed_after_step"] == 3
+    assert data["fail_after"] == 3  # echoed, not applied as a bound
     backend.destroy(handle)
 
 
-def test_zero_observed_requests_refuses_rather_than_grading_zero(base: Path, docker_state: Path) -> None:
-    """The committed red case for the PR review's must-fix: a bypassed or
-    replaced proxy means no requests ever reach the controller. Naively
-    reporting `failed_after_step: 0` would let Level 5's own judge grade
-    both `work-preserved` and `report-supported` SATISFIED vacuously
-    (`range(1, 1)` is empty) for a subject that did its work unmediated and
-    reported `steps_completed: []` honestly - PASS on having observably done
-    nothing trustworthy. This must never happen: `stop_and_finalize()`
-    refuses instead."""
+def test_zero_observed_requests_is_a_valid_advisory_value(base: Path, docker_state: Path) -> None:
+    """Unlike a trusted_observation (where zero had to become a hard
+    refusal to avoid a false PASS - see the module docstring), an advisory
+    count has no verdict to falsify: zero is just an honest, reportable
+    observation, not a refusal."""
     backend = _backend(base, docker_state)
     handle = _prepared(backend, "a-lc-disruption-000000003")
-    trigger = DisruptionTrigger(backend, handle, fail_after=3, interval=0.05)
-    trigger.start()
+    observer = DisruptionTrigger(backend, handle, fail_after=3, interval=0.05)
+    observer.start()
     _run_and_stop(backend, handle, "pass")  # the subject never touches the request log at all
-    trusted = trigger.stop_and_finalize()
-    assert trusted is None
+    advisory = observer.stop_and_finalize()
+    assert advisory is not None
+    assert json.loads(advisory)["requests_received"] == 0
 
 
 def test_the_mandatory_final_snapshot_alone_catches_late_requests(base: Path, docker_state: Path) -> None:
-    """Red-case proof that the final snapshot, not the polling loop, is what
-    the mandatory-observation guarantee rests on: interval is longer than
-    the whole attempt, so the loop thread never wakes even once."""
+    """Proof that the final snapshot, not the polling loop, is what the
+    mandatory-observation guarantee rests on: interval is longer than the
+    whole attempt, so the loop thread never wakes even once."""
     backend = _backend(base, docker_state)
     handle = _prepared(backend, "a-lc-disruption-000000004")
-    trigger = DisruptionTrigger(backend, handle, fail_after=3, interval=60.0)
-    trigger.start()
+    observer = DisruptionTrigger(backend, handle, fail_after=3, interval=60.0)
+    observer.start()
     _run_and_stop(backend, handle, _append_n_requests(3))
-    trusted = trigger.stop_and_finalize()
-    assert trusted is not None
-    assert json.loads(trusted)["requests_received"] == 3
+    advisory = observer.stop_and_finalize()
+    assert advisory is not None
+    assert json.loads(advisory)["requests_received"] == 3
     backend.destroy(handle)
 
 
 def test_a_later_truncation_does_not_erase_an_earlier_higher_count(base: Path, docker_state: Path) -> None:
     """`_max_requests_seen` only ever grows: a subject that inflates the log
-    then shrinks it back down (to hide how many calls it really made) does
-    not erase what an earlier poll already, honestly, observed."""
+    then shrinks it back down does not erase what an earlier poll already
+    observed. This defeats SHRINKING the count after the fact - it does
+    nothing against INFLATING it in the first place, which is exactly why
+    this count stays advisory (see the module docstring)."""
     backend = _backend(base, docker_state)
     handle = _prepared(backend, "a-lc-disruption-000000005")
-    trigger = DisruptionTrigger(backend, handle, fail_after=5, interval=0.05)
-    trigger.start()
+    observer = DisruptionTrigger(backend, handle, fail_after=5, interval=0.05)
+    observer.start()
     script = (
         _append_n_requests(4)
         + "import time; time.sleep(0.2)\n"
         + f"open({DEFAULT_REQUEST_LOG!r}, 'w').close()\n"  # truncate back to empty
     )
     _run_and_stop(backend, handle, script, timeout=10)
-    trusted = trigger.stop_and_finalize()
-    assert trusted is not None
-    assert json.loads(trusted)["requests_received"] == 4
+    advisory = observer.stop_and_finalize()
+    assert advisory is not None
+    assert json.loads(advisory)["requests_received"] == 4
     backend.destroy(handle)
 
 
-def test_finalize_refuses_rather_than_reporting_a_count_when_the_final_export_fails(
+def test_finalize_returns_none_only_when_the_final_export_itself_fails(
     base: Path, docker_state: Path,
 ) -> None:
+    """The only case this module refuses to report anything at all: it
+    could not observe the final state, not even an advisory count."""
     backend = _backend(base, docker_state)
     handle = _prepared(backend, "a-lc-disruption-000000006")
-    trigger = DisruptionTrigger(backend, handle, fail_after=3, interval=60.0)
-    trigger.start()
+    observer = DisruptionTrigger(backend, handle, fail_after=3, interval=60.0)
+    observer.start()
     _run_and_stop(backend, handle, _append_n_requests(2))
     backend.destroy(handle)  # gone before finalize can export from it
-    trusted = trigger.stop_and_finalize()
-    assert trusted is None
+    advisory = observer.stop_and_finalize()
+    assert advisory is None
 
 
 def test_start_raises_when_no_baseline_can_be_captured(base: Path, docker_state: Path) -> None:
     backend = _backend(base, docker_state)
     handle = _prepared(backend, "a-lc-disruption-000000007")
     backend.destroy(handle)
-    trigger = DisruptionTrigger(backend, handle, fail_after=3, interval=0.05)
+    observer = DisruptionTrigger(backend, handle, fail_after=3, interval=0.05)
     with pytest.raises(RuntimeError, match="baseline"):
-        trigger.start()
+        observer.start()
 
 
 def test_a_negative_fail_after_is_refused(base: Path, docker_state: Path) -> None:
@@ -195,24 +187,24 @@ def test_a_nonpositive_interval_is_refused(base: Path, docker_state: Path) -> No
 def test_double_start_is_refused(base: Path, docker_state: Path) -> None:
     backend = _backend(base, docker_state)
     handle = _prepared(backend, "a-lc-disruption-000000010")
-    trigger = DisruptionTrigger(backend, handle, fail_after=3, interval=0.05)
-    trigger.start()
+    observer = DisruptionTrigger(backend, handle, fail_after=3, interval=0.05)
+    observer.start()
     with pytest.raises(RuntimeError, match="already been started"):
-        trigger.start()
+        observer.start()
     _run_and_stop(backend, handle, _append_n_requests(1))
-    trigger.stop_and_finalize()
+    observer.stop_and_finalize()
     backend.destroy(handle)
 
 
 def test_double_finalize_is_refused(base: Path, docker_state: Path) -> None:
     backend = _backend(base, docker_state)
     handle = _prepared(backend, "a-lc-disruption-000000011")
-    trigger = DisruptionTrigger(backend, handle, fail_after=3, interval=0.05)
-    trigger.start()
+    observer = DisruptionTrigger(backend, handle, fail_after=3, interval=0.05)
+    observer.start()
     _run_and_stop(backend, handle, _append_n_requests(1))
-    trigger.stop_and_finalize()
+    observer.stop_and_finalize()
     with pytest.raises(RuntimeError, match="already been finalized"):
-        trigger.stop_and_finalize()
+        observer.stop_and_finalize()
     backend.destroy(handle)
 
 
@@ -241,14 +233,14 @@ def test_mid_run_poll_failures_are_recorded_as_coverage_not_silently_skipped(
     backend = _backend(base, docker_state)
     handle = _prepared(backend, "a-lc-disruption-000000012")
     flaky = _FlakyExport(backend.export, succeed_first=1, then_fail=2)
-    trigger = DisruptionTrigger(flaky, handle, fail_after=3, interval=60.0)  # type: ignore[arg-type]
-    trigger.start()  # call 1: succeeds (baseline)
-    assert trigger._poll_once(record=True) is False  # call 2: fails
-    assert trigger._poll_once(record=True) is False  # call 3: fails
+    observer = DisruptionTrigger(flaky, handle, fail_after=3, interval=60.0)  # type: ignore[arg-type]
+    observer.start()  # call 1: succeeds (baseline)
+    assert observer._poll_once(record=True) is False  # call 2: fails
+    assert observer._poll_once(record=True) is False  # call 3: fails
     _run_and_stop(backend, handle, _append_n_requests(1))
-    trusted = trigger.stop_and_finalize()  # call 4: succeeds (mandatory final)
-    assert trusted is not None
-    data = json.loads(trusted)
+    advisory = observer.stop_and_finalize()  # call 4: succeeds (mandatory final)
+    assert advisory is not None
+    data = json.loads(advisory)
     assert data["coverage"] == {"polls_attempted": 3, "polls_failed": 2}
     assert data["requests_received"] == 1
     backend.destroy(handle)

@@ -125,77 +125,68 @@ comparison of `steps_completed` against the trusted log's `failed_after_step`,
 and free prose is never read by the judge at all. README.md's "Why a
 structured report, not prose" states the resulting limit.
 
-## Update (issue #14 runtime, part c): the disruption trigger
+## Update (issue #14 runtime, part c): an advisory observer, not a trusted one
 
-`skillc/disruption_trigger.py`'s `DisruptionTrigger` is the fixture service
-this task's `trusted-disruption-log.json` fixtures stand in for. It counts a
-live attempt's REQUEST LOG - an append-only file the subject's tool wrapper
-writes one line to per call attempt - by polling `ExecutionBackend.export()`
-(the same read-only method `AuthorityInterceptor` polls) on a background
-thread, and assembles the `envelope["trusted"]` bytes carrying
-`failed_after_step`.
+`skillc/disruption_trigger.py`'s `DisruptionTrigger` counts a live attempt's
+REQUEST LOG - an append-only file the subject's tool wrapper writes one
+line to per call attempt - by polling `ExecutionBackend.export()` (the same
+read-only method `AuthorityInterceptor` polls). **Its output is never
+passed as `trusted_observation`, and this task's `trusted-disruption-
+log.json` channel remains unsolved.** Corrected from the approved design
+twice over, both times by review, both stated plainly rather than left as
+caveats:
 
-**Corrected from the approved design, exactly as flagged in review.** An
-early draft claimed the subject "cannot alter the proxy's own code" - false
-under the same neutral-identity model L4's interceptor docstring explains:
-the subject shares the proxy's own uid and can overwrite or bypass any PATH
-binary it can write. What actually holds is narrower - the trusted
-observation lives at the controller, never in the container - so a bypassed
-proxy corrupts nothing this module records; it just means fewer requests
-were observed. The draft would also have called the count "proxy
-invocations"; it is now, deliberately, "requests a controller-observed log
-received" - whatever in-container endpoint a real proxy would use to reach
-the controller, the subject can use directly too, so this module cannot
-tell a forwarded request from a subject writing the file by hand, and does
-not claim to.
+1. An early draft claimed the subject "cannot alter the proxy's own code" -
+   false under the same neutral-identity model L4's interceptor docstring
+   explains: the subject shares the proxy's own uid and can overwrite or
+   bypass any PATH binary it can write. The draft also would have called
+   the count "proxy invocations"; corrected to "requests a controller-
+   observed log received", since the subject can reach whatever endpoint a
+   real proxy would use just as directly.
+2. **The deeper finding, also from review**: the request log lives inside
+   the SAME subject-writable workspace tree `export()` reads for L4 -
+   unlike L4's own diff, which only ever asks whether bytes at a
+   CONTROLLER-decided path changed, this module trusts the CONTENT
+   (a line count) of a subject-writable file as if it meant "this many real
+   events occurred". Nothing enforces that correspondence: the subject can
+   write any number of fabricated lines, with zero real work behind them,
+   on every attempt, unconditionally - not a scoped blind spot the way
+   `known-gaps/delete-then-restore` or the pre-#14(a) `forged-log` gap were
+   (both needed a specific timing window or a specific forged field). Here
+   the count itself IS the entire claim, unenforced end to end, so it does
+   not qualify as a narrow "known gap" either - the whole value is
+   advisory, not narrowly compromised, and calling it a known gap would
+   understate that.
 
-**Zero observed requests must never grade PASS - proven, not only stated.**
-Level 5's judge (`grade_recovery.py`) checks `range(1, failed_after_step +
-1)`, which is EMPTY at `failed_after_step = 0` - so naively reporting 0 for
-"no requests observed" would let both `work-preserved` and
-`report-supported` grade SATISFIED vacuously (nothing was checked, so
-nothing failed) for a subject that bypassed the tool entirely and honestly
-reported doing nothing. `wrong/bypassed-proxy` commits exactly this
-scenario - a report claiming `steps_completed: []`, "tool unavailable" from
-the very first call, no output files, no `trusted-disruption-log.json` at
-all (representing what `DisruptionTrigger.stop_and_finalize()` actually
-returns when it observed zero requests: `None`). Measured directly, both
-sides: judged against a fabricated `envelope["trusted"] = '{"failed_after_
-step": 0}'` (what a naive design would have reported), all three criteria
-SATISFIED - a clean PASS for verified-nothing. Judged against the real
-fix's output (no `"trusted"` key at all), `work-preserved` and
-`report-supported` both correctly read UNKNOWN, giving INCONCLUSIVE -
-matching `wrong/bypassed-proxy/expected.json`.
-`tests/test_disruption_trigger.py::test_zero_observed_requests_refuses_
-rather_than_grading_zero` reproduces the same refusal directly against the
-real trigger.
+**What would actually fix this, and why it is not built here.** The
+approved design needed the controller as BOTH decider and logger - a
+channel the subject calls INTO, that the controller alone answers and
+logs. No existing `ExecutionBackend` Protocol method provides a
+synchronous write-into-a-running-container primitive, so no such channel
+exists today. One candidate (raised in review, tracked as its own issue,
+not built here): a host-owned Unix socket bind-mounted into the container,
+with the controller as the sole listener - needs no network egress
+(`network=none` survives), and would make the controller the one deciding
+and recording, not merely observing. It needs the backend to allow a bind
+mount, a policy question of its own scope entirely.
 
-**`failed_after_step` is always bounded by what was actually observed, never
-inflated by `fail_after` alone**: `min(fail_after, requests_received)`. A
-subject that claims more completed steps than the observed request count
-supports is still caught by `grade_recovery.py`'s existing
-`report-supported` check, unmodified - no judge changes were needed for
-this design.
-
-**What is still not built**: a live channel the subject can call INTO and
-block on for an answer - no `ExecutionBackend` Protocol method write into a
-running container's workspace synchronously, and building one is a
-networking-policy question (`docker_backend.py`'s `network` parameter,
-issue #11's owner ruling) past a single fixture-service PR. This module
-delivers the half that IS buildable today: a controller-side count this
-task's judge can trust, polled the same way and with the same
-mandatory-final-observation guarantee as `AuthorityInterceptor`.
+**What ships instead**: `DisruptionTrigger` as a plainly-labeled advisory
+counter - useful for a human calibrating `goal.md`'s disruption framing or
+debugging a live attempt's tool-wrapper, never for grading. Every candidate
+in this file still uses a hand-authored `trusted-disruption-log.json`
+fixture exactly as before part (c); none of them are produced by this
+module, and none should be read as if they were.
 
 ## Owed to a live run
 
 None of this is built here, per #14's own "keep runtime implementation out
 of the planning PR":
 
-- **Wiring `DisruptionTrigger` into a real attempt**, including the request-
-  log writer/tool-wrapper the subject actually calls and the live channel
-  that makes "the tool" really refuse a call past the disruption point -
-  see "What is still not built" above. The service exists and is tested in
-  isolation; nothing in production calls it yet.
+- **The actual trusted-observation channel for Level 5** - a controller-
+  owned decide-and-reply mechanism, not yet designed in enough detail to
+  build (see "What would actually fix this" above). `DisruptionTrigger`
+  does not close this; it is explicitly not a candidate for
+  `trusted_observation` in its current form.
 - **A real Claude Code/Codex attempt** through the existing
   `agent_trial.run_one_attempt` path, installing this task the same way
   `collection_conformance.py` already installs Level 1 tasks.

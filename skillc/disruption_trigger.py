@@ -1,91 +1,50 @@
-"""The L5 disruption-trigger fixture service (#14, runtime part c).
+"""An ADVISORY request-count observer for Level 5 (#14, runtime part c).
 
-Assembles the bytes `skillc.verify.grade_agent_attempt`'s
-`trusted_observation` parameter carries for `evals/level5/
-recovery-partial-processing` - the disruption log's `failed_after_step`,
-from a source the subject cannot forge alone. See `skillc/verify.py`'s own
-module docstring for the three-stage grading path this feeds into, and
-`skillc/authority_interceptor.py`'s module docstring for the sibling L4
-service this deliberately does NOT share a base class with (see "Why not a
-shared base with AuthorityInterceptor" below).
+**This module's output must NEVER be passed as `skillc.verify`'s
+`trusted_observation` parameter, and nothing here claims otherwise.** It
+counts a live attempt's request log - an append-only file the subject's
+tool wrapper (or the subject itself) writes one line to per call attempt -
+by polling `ExecutionBackend.export()`, the same read-only method
+`skillc.authority_interceptor.AuthorityInterceptor` polls for Level 4. That
+similarity is exactly what makes the difference between the two worth
+stating precisely, because it is easy to mistake one for the other:
 
-DESIGN: AN ACTIVE COUNTER, NOT A PASSIVE WATCHER - AND WHY THAT CHANGES WHAT
-IT CAN HONESTLY CLAIM (design review, issue #14). Level 4's interceptor only
-ever OBSERVES; Level 5 must eventually DECIDE when "the tool" stops
-answering, which observation alone cannot do. This module does not yet make
-that live decision either (see "What this does not do" below) - but even the
-observation half it DOES do is a narrower claim than L4's, and the design
-review corrected an early draft that got this wrong:
+**Why L4's poll-based design is trustworthy and this one is not (design
+review, issue #14).** `AuthorityInterceptor` also reads from the subject-
+writable workspace via `export()` - but it only ever asks "did the bytes at
+this PATH change", and which paths count as out-of-scope is a fact the
+CONTROLLER supplies (`allowed_prefixes`), never something read from subject
+content. The subject cannot lie about whether a byte sequence changed; it
+can only choose what to change. This module instead trusts the CONTENT of a
+subject-writable file - a line count - as if it meant "this many real,
+tool-mediated events occurred". Nothing enforces that correspondence: the
+subject shares the file-writer's own uid (the same neutral-identity model
+`authority_interceptor.py`'s docstring explains) and can write ANY NUMBER OF
+LINES with zero real work behind them, on every attempt, with no special
+timing or narrow condition required. That is not a scoped blind spot the way
+`known-gaps/delete-then-restore` or the pre-#14(a) `forged-log` gap were -
+those needed a specific timing window or a specific forged field. Here the
+count IS the claim, and the claim is unenforced end to end, unconditionally.
+Labeling this a "known gap" (a narrow, documented miss in an otherwise-sound
+mechanism) would understate it, so it is not one - the whole value is
+advisory, plainly, not narrowly compromised.
 
-  - A first draft claimed the subject "cannot alter the proxy's own code".
-    FALSE, under the same neutral-identity model L4's docstring explains:
-    the subject shares the proxy's own uid and can overwrite or bypass any
-    PATH binary it can write. What actually still holds is narrower - the
-    trusted OBSERVATION lives at the controller, never in the container - so
-    a bypassed or replaced proxy does not corrupt this module's own record;
-    it just means the record shows fewer requests than a live run needed.
-  - A first draft would also have called `request_log`'s line count "proxy
-    invocations". Also wrong for the same reason: whatever in-container
-    endpoint a real proxy would use to reach the controller, the subject can
-    use directly too, proxy or no proxy. So this module counts and reports
-    "requests a controller-observed log received" - never "genuine tool
-    calls" or "proxy invocations" - because it cannot tell a forwarded
-    request from a subject writing the file by hand. A forged request is
-    still something the subject did, so counting it is honest; claiming
-    more than that would not be.
+**What would actually fix this, and why it is not built here.** The
+approved design needed the CONTROLLER to be both decider and logger: a
+channel the subject calls INTO, that the controller alone answers and logs.
+No existing `ExecutionBackend` Protocol method provides a synchronous
+write-into-a-running-container primitive, so no such channel exists today.
+One candidate - a host-owned Unix socket bind-mounted into the container,
+with the controller as the sole listener - would need no network egress
+(`network=none` survives) and would make the controller the one deciding
+and recording, not merely observing. It needs the backend to allow a bind
+mount, which is a policy question or its own issue, not a fixture-service
+PR; tracked separately, not built here.
 
-WHY ZERO OBSERVED REQUESTS MUST NEVER GRADE PASS (design review, issue #14).
-If a subject bypasses the request log entirely and does its work unmediated,
-`requests_received` is 0. Naively setting `failed_after_step = 0` in that
-case is not a refusal - Level 5's own judge (`grade_recovery.py`) checks
-`range(1, failed_after_step + 1)`, which is EMPTY at 0, so both
-`work-preserved` and `report-supported` would grade SATISFIED VACUOUSLY:
-nothing was checked, so nothing failed. A subject that bypassed the tool
-entirely and reported `steps_completed: []` honestly would PASS on having
-observably done nothing worth trusting - the exact unearned-green shape #14
-exists to remove. `stop_and_finalize()` therefore returns `None` - no
-`trusted_observation` at all - whenever zero requests were ever observed,
-regardless of the calibrated `fail_after`: this controller cannot tell "the
-subject correctly stopped after zero legitimate calls, exactly as
-calibrated" from "the subject bypassed the log and this number means
-nothing", and refuses instead of guessing. `envelope["trusted"]` then being
-absent is not new plumbing - `verify.py`'s existing absence-handling (#14
-part a) already turns it into UNKNOWN on both criteria, never SATISFIED.
-
-WHAT THIS DOES NOT DO: decide, in real time, whether "the tool" answers or
-refuses a live subject's call. That needs a channel the subject can call
-INTO and block on for an answer, which no existing `ExecutionBackend`
-Protocol method provides (`export()` is read-only; there is no sanctioned
-"write into a running container's workspace and have it appear before the
-subject's next read" primitive). Building one is a live-wiring and
-networking-policy question (see `docker_backend.py`'s `network` parameter
-and issue #11's owner ruling on container egress) well past a single fixture
--service PR's scope, and #14's own "keep runtime implementation out of the
-planning PR" carries into its runtime PRs too: what a real attempt's tool
-actually does when disrupted, and what carries that disruption to it, stays
-owed to the live-wiring PR that connects the pieces this PR and part (b)
-build. What IS delivered: a controller-side counter that can be trusted
-about ONE fact - how many requests a log outside the subject's exclusive
-control was observed to receive - polled the same way, and with the same
-mandatory-final-snapshot guarantee, as `AuthorityInterceptor`.
-
-WHY NOT A SHARED BASE WITH AuthorityInterceptor: both modules poll
-`ExecutionBackend.export()` on a background thread with a mandatory final
-snapshot and a `polls_attempted`/`polls_failed` coverage count, and the
-duplication between them is real. Not factored out here, deliberately: this
-PR is scoped to the second fixture service's own correctness, and refactoring
-the already-shipped, reviewed `AuthorityInterceptor` (issue #14 part b, #181)
-to share a base is a separate, non-trivial change with its own regression
-surface on a merged module - worth doing, not worth doing inside this diff.
-
-POLL COST AND CADENCE: one poll here is the SAME `export()` call L4's
-interceptor measures (`authority_interceptor.py`'s own docstring carries the
-number); this module reads one additional small file from the export instead
-of walking the whole tree, which is strictly cheaper per poll, not more
-expensive. The same `interval` default (2.0s) and the same "cannot pile up
-by construction" argument (`_loop` is one thread: wait, then poll, then wait
-again) apply unchanged - see `authority_interceptor.py`'s docstring for the
-full argument, not repeated here.
+**What this module IS for**: a rough, subject-influenceable count of how
+many times something wrote to the request log, useful for a human
+calibrating `goal.md`'s disruption framing or debugging why a live attempt's
+tool-wrapper did or did not get called as expected - never for grading.
 
 Stdlib only (AGENTS.md) except `skillc.backend`'s own Protocol.
 """
@@ -100,10 +59,9 @@ from pathlib import Path
 from .backend import ExecutionBackend
 
 #: The request log's default path, relative to the workspace root - a plain
-#: append-only file. Its CONTENT is never interpreted, only its non-empty
-#: LINE COUNT: this module counts "requests a controller-observed log
-#: received", never validates what a line says, because a forged line is
-#: still something the subject did and counting it is the honest claim.
+#: append-only file. Its CONTENT is never validated, only its non-empty LINE
+#: COUNT, and that count is advisory (see module docstring) - it is not, and
+#: must never become, evidence a grader trusts.
 DEFAULT_REQUEST_LOG = ".disruption/requests.log"
 
 
@@ -116,30 +74,32 @@ def _count_requests(root: Path, request_log: str) -> int:
 
 
 class DisruptionTrigger:
-    """Polls one live attempt's request log and assembles a trusted
-    observation log for `skillc.verify`'s `trusted_observation`, carrying
-    Level 5's `failed_after_step`.
+    """Polls one live attempt's request log and reports an ADVISORY count -
+    never a `trusted_observation`; see the module docstring for why this
+    module cannot honestly produce one.
 
     Usage, around one `ExecutionBackend.execute()` call:
 
-        trigger = DisruptionTrigger(backend, handle, fail_after=3)
-        trigger.start()                            # baseline, then polls
+        observer = DisruptionTrigger(backend, handle, fail_after=3)
+        observer.start()                           # baseline, then polls
         result = backend.execute(handle, argv, limits)  # runs concurrently
         if backend.confirm_stopped(handle) is Confirmation.CONFIRMED:
-            trusted = trigger.stop_and_finalize()
+            advisory = observer.stop_and_finalize()
         else:
-            trusted = None  # never finalize against an unconfirmed stop
+            advisory = None  # never finalize against an unconfirmed stop
 
-    `trusted` is `None` whenever this controller cannot honestly assert a
-    `failed_after_step` - either it observed zero requests ever (see the
-    module docstring's "why zero must never grade PASS"), or the mandatory
-    final export failed. Otherwise it carries
-    `{"failed_after_step": min(fail_after, requests_received),
-    "requests_received": N, "coverage": {...}}` - `failed_after_step` is
-    always bounded by what was actually observed, never by what `fail_after`
-    alone would allow, so a subject that claims more completed steps than
-    the observed request count supports is still caught by
-    `grade_recovery.py`'s own existing `report-supported` check, unmodified.
+    `advisory` is `None` only when the mandatory final export itself failed
+    - this module could not observe the final state at all, not even an
+    untrusted one. Otherwise it carries `{"requests_received": N,
+    "fail_after": K, "coverage": {...}}` - `fail_after` is echoed back
+    exactly as given, for a reader comparing the observed count against the
+    intended calibration point, never combined with `requests_received`
+    into any single "disruption happened here" claim.
+
+    `fail_after` is kept as a plain non-negative int for that comparison
+    context; unlike the removed `failed_after_step` framing, this class
+    computes nothing FROM it - it is not a bound, not a decision, just
+    context alongside the count.
     """
 
     def __init__(
@@ -147,7 +107,7 @@ class DisruptionTrigger:
         request_log: str = DEFAULT_REQUEST_LOG, interval: float = 2.0,
     ) -> None:
         if fail_after < 0:
-            raise ValueError("fail_after must be a non-negative number of allowed requests")
+            raise ValueError("fail_after must be a non-negative number")
         if interval <= 0:
             raise ValueError("interval must be positive")
         self._backend = backend
@@ -171,11 +131,11 @@ class DisruptionTrigger:
         makes, for the same reason: silently starting from an unknown
         baseline would under-report for the whole attempt."""
         if self._started:
-            raise RuntimeError("this trigger has already been started")
+            raise RuntimeError("this observer has already been started")
         self._started = True
         if not self._poll_once(record=False):
             raise RuntimeError(
-                "disruption trigger could not capture a baseline export; "
+                "disruption observer could not capture a baseline export; "
                 "the backend must be reachable before an attempt starts"
             )
         self._thread = threading.Thread(target=self._loop, daemon=True, name="disruption-trigger")
@@ -190,10 +150,12 @@ class DisruptionTrigger:
         succeeded. `_max_requests_seen` only ever grows: a subject that
         truncates or deletes the request log after inflating it does not
         erase an earlier poll's higher, already-observed count - the same
-        "an observation, once made, cannot be un-made by later tampering"
         property `AuthorityInterceptor`'s diff gets from comparing
         consecutive snapshots, applied here to a single growing count
-        instead of a set of paths."""
+        instead of a set of paths. This defeats SHRINKING the count after
+        the fact; it does nothing against INFLATING it in the first place -
+        see the module docstring for why that second half is unfixable
+        without a controller-owned channel."""
         with tempfile.TemporaryDirectory(prefix="skillc-disruption-poll-") as tmp:
             root = Path(tmp)
             try:
@@ -216,21 +178,19 @@ class DisruptionTrigger:
         after the backend's own `confirm_stopped()` reports CONFIRMED -
         never before, and never called twice.
 
-        Returns `None` (never a fabricated `failed_after_step`) when:
-        - the mandatory final export failed (the same refusal
-          `AuthorityInterceptor.stop_and_finalize()` makes, for the same
-          reason: a violation could have happened in the unobserved gap
-          before teardown), or
-        - zero requests were ever observed, at any poll including the
-          final one - see the module docstring's "why zero must never
-          grade PASS".
-
-        Otherwise returns `{"failed_after_step": min(fail_after,
-        requests_received), "requests_received": N, "coverage": {...}}`."""
+        Returns `None` only when the mandatory final export itself failed:
+        this module could not observe anything about the final state, not
+        even an advisory count. Otherwise returns `{"requests_received": N,
+        "fail_after": K, "coverage": {"polls_attempted": ..., "polls_failed":
+        ...}}` - ALWAYS, including when `N` is 0, since an advisory count of
+        zero is still an honest, reportable observation (unlike the trusted-
+        observation case this is explicitly not: there, zero had to become a
+        hard refusal to avoid a false PASS; here there is no grading verdict
+        for it to falsify)."""
         if not self._started:
             raise RuntimeError("stop_and_finalize() called before start()")
         if self._finalized:
-            raise RuntimeError("this trigger has already been finalized")
+            raise RuntimeError("this observer has already been finalized")
         self._finalized = True
         self._stop.set()
         if self._thread is not None:
@@ -238,11 +198,8 @@ class DisruptionTrigger:
         if not self._poll_once(record=True):
             return None
         with self._lock:
-            requests_received = self._max_requests_seen
-            if requests_received == 0:
-                return None
             return json.dumps({
-                "failed_after_step": min(self._fail_after, requests_received),
-                "requests_received": requests_received,
+                "requests_received": self._max_requests_seen,
+                "fail_after": self._fail_after,
                 "coverage": {"polls_attempted": self._polls_attempted, "polls_failed": self._polls_failed},
             }).encode("utf-8")
