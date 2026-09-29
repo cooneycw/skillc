@@ -220,6 +220,26 @@ and version plan.
   not built here; a real L4/L5 attempt still grades `stayed-in-bounds`/
   `work-preserved`/`report-supported` UNKNOWN until they land.
 
+### Fixed
+
+- **`DockerBackend.execute()` and `DockerBackend.read_home_tree()`'s
+  stdout/stderr drain joins ran sequentially, doubling worst-case teardown
+  latency** (Refs #20 Nit Store, found while fixing issue #174). Both
+  methods' drain threads run concurrently already, but were each joined
+  against their own full bound, back to back, in the calling thread - a
+  still-open pipe paid that bound twice. Measured directly (not merely
+  reasoned about) for both: `execute()` ~2.08x the single bound before this
+  fix, ~1.08x after; `read_home_tree()` ~2.02x before, ~1.02x after. Both
+  threads in each method now join against ONE shared deadline.
+  `stdout_incomplete`/`stderr_incomplete` stay independently observed per
+  stream in `execute()` (a committed test proves this directly - only
+  stdout held open reports only `stdout_incomplete`). Found while building
+  `read_home_tree()`'s own committed test: `_BoundedDrain` has a separate,
+  pre-existing bug (Refs #189) that silently drops already-captured data
+  under a still-open pipe below its read size - `read_home_tree()`'s new
+  test is timing-only for that case, citing #189, since content
+  verification there hits the other bug.
+
 ## [0.3.0] - 2026-09-28
 
 ### Added

@@ -128,7 +128,12 @@ not a docker clone:
         otherwise PATH itself is copied into DEST as a new entry named after
         PATH's own basename. Exits 1 (no such container/path) or 2 (bad
         usage) on the failure paths `DockerBackend.export()`/`install()`
-        must handle.
+        must handle. `cp NAME:PATH -` (`read_home_file`/`read_home_tree`'s
+        own direction): after writing its stream, detaches a grandchild
+        holding this process's own stdout open if `.cp-hold-open-NAME`
+        holds a FIFO path (issue #20 fault injection: the same construction
+        `.inspect-delay-NAME` and execute()'s drain-EOF test both use,
+        deterministic, no host load needed).
     inspect --format {{.State.Status}} NAME
         Prints the state file's status, or exits 1 if absent ("No such
         object"). Blocks first for N seconds if `.inspect-delay-NAME` holds a
@@ -770,6 +775,19 @@ def cmd_cp(state_dir: Path, rest: list[str]) -> int:
             return 1
         with tarfile.open(fileobj=sys.stdout.buffer, mode="w|") as tar:
             tar.add(mapped, arcname=Path(cpath).name)
+        hold_open_fifo = state_dir / f".cp-hold-open-{name}"
+        if hold_open_fifo.is_file():
+            # skillc#20 fault injection: detach a grandchild that blocks
+            # reading a FIFO nothing has opened for writing yet, inheriting
+            # THIS process's own stdout before it exits - the identical
+            # construction cmd_inspect's `.inspect-delay-NAME` sibling and
+            # execute()'s own drain-EOF test both use, here for the `docker
+            # cp NAME:PATH -` path `read_home_tree()` calls. This process
+            # itself exits immediately after, exactly as a real `docker cp`
+            # client would - only the detached grandchild keeps the pipe
+            # open, deterministically, no host load needed.
+            fifo_path = hold_open_fifo.read_text(encoding="utf-8").strip()
+            os.system(f"setsid sh -c 'exec cat {fifo_path}' </dev/null &")
         return 0
 
     src_ref = _is_container_ref(src)
