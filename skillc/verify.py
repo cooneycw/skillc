@@ -107,8 +107,24 @@ DISAGREEMENT_UNAVAILABLE_REASON = "fewer than two judge tiers"
 
 GRADER_FILE = "grader.json"
 _GRADER_KEYS = {"id", "revision", "criteria", "probe", "judge"}
+#: Optional on top of `_GRADER_KEYS` (issue #13): declares each criterion's
+#: outcome DIMENSION, so a reporter can group functional/constraint/
+#: integration results separately without inferring it from the id's own
+#: naming convention - a convention nobody enforces, so a future
+#: "functional_smoke" or "integration2-x" id would silently mis-bucket or
+#: fall through to "other" (review ruling, PR #13: declare, never infer).
+#: Optional, not required: a grader with no `dimensions` key still loads -
+#: every one of its criteria simply reports "unclassified" (`outcome_report.
+#: py`), which is the honest answer for a task family that predates this
+#: vocabulary or does not use it (Level 1, L4, L5 today).
+_OPTIONAL_GRADER_KEYS = {"dimensions"}
 _PROBE_KEYS = {"file", "inputs", "timeout"}
 _JUDGE_KEYS = {"file", "timeout"}
+#: The fixed, closed vocabulary `dimensions` values must be drawn from -
+#: exactly issue #13's three named outcome dimensions. Anything else is a
+#: LOAD-TIME refusal (never a silent "unclassified" fallback): an unknown
+#: dimension value is a declaration someone got wrong, not an absent one.
+OUTCOME_DIMENSIONS = ("functional", "constraint", "integration")
 
 #: The verifier's own criterion. Candidate outcomes cannot claim it.
 READINESS_CRITERION = "installation-ready"
@@ -272,6 +288,12 @@ class GraderDef:
     judge: Path
     probe_timeout: float
     judge_timeout: float
+    #: `{criterion_id: dimension}` (issue #13), covering as few or as many of
+    #: `criteria` as the grader declares - never guessed for the rest. See
+    #: `_OPTIONAL_GRADER_KEYS`'s own comment for why this is optional, and
+    #: `OUTCOME_DIMENSIONS` for the closed vocabulary each value must be one
+    #: of. Empty for a grader that declares none.
+    dimensions: dict[str, str]
 
     @classmethod
     def load(cls, root: Path) -> GraderDef:
@@ -283,9 +305,14 @@ class GraderDef:
             raise Refused(f"{where}: not JSON: {exc}") from None
         if not isinstance(data, dict):
             raise Refused(f"{where}: not an object")
-        unknown = set(data) - _GRADER_KEYS
-        if unknown or set(data) != _GRADER_KEYS:
-            raise Refused(f"{where}: fields must be exactly {sorted(_GRADER_KEYS)}")
+        allowed = _GRADER_KEYS | _OPTIONAL_GRADER_KEYS
+        missing = _GRADER_KEYS - set(data)
+        unknown = set(data) - allowed
+        if missing or unknown:
+            raise Refused(
+                f"{where}: fields must be exactly {sorted(_GRADER_KEYS)}, "
+                f"plus optionally {sorted(_OPTIONAL_GRADER_KEYS)}"
+            )
         for key in ("id", "revision"):
             if not isinstance(data[key], str) or not records.ID_RE.match(data[key]):
                 raise Refused(f"{where}: {key} is not an identifier")
@@ -301,12 +328,25 @@ class GraderDef:
             raise Refused(f"{where}: probe must carry exactly {sorted(_PROBE_KEYS)}")
         if not isinstance(judge, dict) or set(judge) != _JUDGE_KEYS:
             raise Refused(f"{where}: judge must carry exactly {sorted(_JUDGE_KEYS)}")
+        dimensions = data.get("dimensions", {})
+        if not isinstance(dimensions, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in dimensions.items()):
+            raise Refused(f"{where}: dimensions must be an object of criterion name to dimension name")
+        unknown_ids = set(dimensions) - set(criteria)
+        if unknown_ids:
+            raise Refused(f"{where}: dimensions names {sorted(unknown_ids)} not in criteria")
+        bad_values = {v for v in dimensions.values() if v not in OUTCOME_DIMENSIONS}
+        if bad_values:
+            raise Refused(
+                f"{where}: dimensions has unknown value(s) {sorted(bad_values)}; "
+                f"must be one of {list(OUTCOME_DIMENSIONS)}"
+            )
         return cls(
             root=root, id=data["id"], revision=data["revision"], criteria=tuple(criteria),
             probe=_member(root, probe["file"], where), inputs=_member(root, probe["inputs"], where),
             judge=_member(root, judge["file"], where),
             probe_timeout=_timeout(probe["timeout"], where),
             judge_timeout=_timeout(judge["timeout"], where),
+            dimensions=dict(dimensions),
         )
 
     def with_judge(self, judge: Path) -> GraderDef:

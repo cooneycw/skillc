@@ -11,6 +11,16 @@
   "constraint-dependency",
   "constraint-data-preservation"
  ],
+ "dimensions": {
+  "functional-interface": "functional",
+  "functional-reported-example": "functional",
+  "functional-R1": "functional",
+  "functional-R2": "functional",
+  "functional-R3": "functional",
+  "constraint-interface-stability": "constraint",
+  "constraint-dependency": "constraint",
+  "constraint-data-preservation": "constraint"
+ },
  "probe": {"file": "probe.py", "inputs": "inputs.json", "timeout": 30},
  "judge": {"file": "grade_constrained.py", "timeout": 60}
 }

@@ -85,7 +85,17 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from . import agent_trial, credential, degrade, demo, materialize, reap, trial, verify
+from . import (
+    agent_trial,
+    credential,
+    degrade,
+    demo,
+    materialize,
+    outcome_report,
+    reap,
+    trial,
+    verify,
+)
 from .backend import Limits
 from .docker_backend import ATTEMPT_LABEL_KEY, OWNER_LABEL_KEY, OWNER_LABEL_VALUE, DockerBackend
 
@@ -696,7 +706,10 @@ def _fmt_seconds(value: object) -> str:
     return f"{int(value) // 60}m"
 
 
-def build_collection_paste_back(result: CollectionAgentResult) -> str:
+def build_collection_paste_back(
+    result: CollectionAgentResult, dimensions: Mapping[str, str] | None = None,
+    *, dimensions_unavailable_reason: str | None = None,
+) -> str:
     """The planned shape (`docs/specs/evaluation-facility/operator-demo.md`),
     grouped by the five kinds of evidence issue #106's live run retains:
     prompt delivery, the liveness canary, the credential, the outcome, and
@@ -708,7 +721,21 @@ def build_collection_paste_back(result: CollectionAgentResult) -> str:
     uses. #11's version read `refresh_observed_in_container` from the
     observation, whose real key is `credential_refresh_observed_in_container`
     (`credential.CredentialUsage.to_record_fields`), so the live paste-back
-    always printed `None` - a missing key reads exactly like "not observed"."""
+    always printed `None` - a missing key reads exactly like "not observed".
+
+    `dimensions` (issue #13, `GraderDef.dimensions` - the caller's own
+    concern to load, since it already has `task_root` in scope) feeds
+    `outcome_report.build` so a passing `functional` bucket is never read as
+    implying `constraint`/`integration` success too. `None`/`{}` (a grader
+    that declares no dimensions, e.g. every Level 1 task today) reports
+    every criterion `unclassified` - stated, never guessed.
+
+    `dimensions_unavailable_reason` is a DIFFERENT fact from an empty
+    `dimensions`: it means the caller's own lookup failed (could not load
+    the grader at all), not that the grader declares nothing. Collapsing
+    the two would let a reader mistake "we don't know" for "the grader
+    genuinely has no dimensions" - review ruling, PR #13. When set, every
+    bucket reports `unavailable`, and `dimensions` is ignored."""
     record = result.record
     observation = record.get("observation")
     obs = observation if isinstance(observation, dict) else {}
@@ -717,10 +744,19 @@ def build_collection_paste_back(result: CollectionAgentResult) -> str:
     stop = record.get("stop")
     stop_d = stop if isinstance(stop, dict) else {}
     criteria = graded_d.get("criteria")
+    criteria_list = [c for c in criteria if isinstance(c, dict)] if isinstance(criteria, list) else []
     criteria_text = (
-        ", ".join(f"{c.get('id')}={c.get('outcome')}" for c in criteria if isinstance(c, dict))
+        ", ".join(f"{c.get('id')}={c.get('outcome')}" for c in criteria_list)
         if isinstance(criteria, list) else None
     )
+    outcome_by_dimension = outcome_report.build(
+        criteria_list, dimensions or {}, unavailable_reason=dimensions_unavailable_reason,
+    )
+    dimension_text = ", ".join(
+        f"{dim}={outcome_by_dimension[dim].verdict}" for dim in outcome_report.BUCKETS
+    )
+    if outcome_by_dimension.unavailable_reason is not None:
+        dimension_text += f" (unavailable_reason={outcome_by_dimension.unavailable_reason})"
     cleanup = record.get("cleanup")
     cleanup_d = cleanup if isinstance(cleanup, dict) else {}
     host = result.host_credential
@@ -753,6 +789,7 @@ def build_collection_paste_back(result: CollectionAgentResult) -> str:
         f"    skill_invocations={obs.get('skill_invocations')} (detection={obs.get('skill_invocation_detection')})",
         f"    graded.status={graded_d.get('status') if graded_d else None}",
         f"    graded.criteria={criteria_text}",
+        f"    graded.dimensions={dimension_text}",
         f"    grading_blocked_reason={record.get('grading_blocked_reason')}",
         "  [cleanup]",
         f"    workspace_cleaned(journal)={result.workspace_cleaned}",

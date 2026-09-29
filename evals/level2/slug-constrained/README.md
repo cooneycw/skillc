@@ -6,15 +6,20 @@ top of the same functional bug fix: interface stability, a dependency
 restriction, and data preservation. `#13`'s acceptance line "Report
 functional, constraint and integration outcomes separately" is answered by
 naming every criterion `functional-*` or `constraint-*` (Level 3 adds
-`integration-*`) - a report groups by this prefix. No schema change: a
-grader's `criteria` list is still a flat list of strings
+`integration-*`) AND, separately, `grader.json`'s own optional `dimensions`
+field DECLARES each criterion's outcome dimension explicitly
+(`skillc/outcome_report.py`, `skillc/verify.py`'s `GraderDef.dimensions`) -
+never inferred from the id's own naming convention, which nothing enforces
+and a future id could silently violate. The naming convention above is
+still useful to a human reader; it is not what the reporting code trusts.
+No schema change to `criteria` itself: still a flat list of strings
 (`skillc/verify.py`'s `GraderDef`/`criteria_problem`).
 
 | File | Role |
 |---|---|
 | `goal.md` | The agent-facing request. States R1-R4 (Level 1's rules) and C1-C3 (this task's new constraints) - every constraint is PUBLIC, per #13's own "keep public requirements" |
 | `fixture/src/slugify.py`, `fixture/NOTES.md` | Pinned starting state - same bug as Level 1; `NOTES.md` is the companion file C3 protects |
-| `grader.json` | Grader definition: 8 criteria, functional-* and constraint-* bucket-prefixed |
+| `grader.json` | Grader definition: 8 criteria, functional-*/constraint-* named, and each one's `dimensions` entry declared to match |
 | `probe.py` | Runs the candidate; reports functional outputs AND the three new static/structural observations (imports found by `ast.parse`, `inspect.signature`, `NOTES.md`'s digest). The only grading code that runs candidate code |
 | `inputs.json` | The reported example and held-out inputs for R1-R4, without answers |
 | `grade_constrained.py` | The judge: holds every answer (including the one hardcoded expected `NOTES.md` digest) and emits the criteria. Never shown to the agent |

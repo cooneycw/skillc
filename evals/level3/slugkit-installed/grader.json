@@ -2,6 +2,10 @@
  "id": "slugkit-installed",
  "revision": "1",
  "criteria": ["functional-trailing-hyphen", "integration-installed-path"],
+ "dimensions": {
+  "functional-trailing-hyphen": "functional",
+  "integration-installed-path": "integration"
+ },
  "probe": {"file": "probe.py", "inputs": "inputs.json", "timeout": 60},
  "judge": {"file": "grade_slugkit.py", "timeout": 60}
 }

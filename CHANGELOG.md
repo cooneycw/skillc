@@ -54,6 +54,42 @@ and version plan.
   dependent, the same class as `known-gaps/delete-then-restore` - a write
   both created and overwritten strictly between two polls is still invisible.
 
+- **Declared, per-criterion outcome dimensions and separate functional/
+  constraint/integration reporting** (Refs #13). `grader.json` gains an
+  optional `dimensions` field (`{criterion_id: "functional"|"constraint"|
+  "integration"}`, `skillc/verify.py`'s `GraderDef`) - DECLARED, never
+  inferred from a criterion id's own naming convention, which nothing
+  enforces and a future id could silently violate. An unknown dimension
+  value is refused at load time; an undeclared criterion reports
+  `unclassified`, never guessed into a bucket that looks like the others.
+  New `skillc/outcome_report.py` groups a graded record's criteria by this
+  declaration and derives each bucket's own PASS/FAIL/INCONCLUSIVE verdict
+  (mirroring `records.derive_status`'s exact rule, scoped to one bucket),
+  plus a `not-applicable` verdict for a bucket with no criteria at all -
+  distinct from "we could not determine this," which `INCONCLUSIVE` already
+  means. Surfaced in both real-run reporting paths this issue names:
+  `collection-run`'s paste-back gains a `graded.dimensions=` line, and
+  `pilot-run`/`pilot-report`'s exported per-attempt entries gain an
+  `outcome_dimensions` field - both best-effort, never turning a completed
+  run's own report into a crash over a dimensions lookup - and a lookup
+  FAILURE reports every bucket `unavailable` (with a bounded reason - the
+  exception's class, never its message, which could name a host path),
+  distinct from `unclassified`: "this grader declares nothing" is a fact
+  about the grader, "we could not check" is a fact about the call, and
+  collapsing the two would let a reader mistake one for the other (review
+  ruling). Level 2
+  (`evals/level2/slug-constrained`) and Level 3
+  (`evals/level3/slugkit-installed`) declare dimensions for every one of
+  their criteria; Level 1, L4 and L5 declare none today and report
+  `unclassified` throughout - #13's own acceptance requirement ("a passing
+  unit test must not imply installed-path success") does not depend on
+  every task family adopting the vocabulary at once. Tests exercise the
+  loader, the grouping/verdict logic, and both reporting paths against
+  synthetic fixture criteria and real graded records from the fake pilot
+  and fake docker CLI - never a real live-agent run, which stays
+  operator-owed. Matched-configuration comparison (`#13`'s other acceptance
+  bullet) is a separate, later change.
+
 - **Capability-gated in-container TERM forwarding to the exec'd subject**
   (Refs #158). `docker/trial/skillc-supervisor.py` (a new foreground
   process, replacing the `sleep infinity` keep-alive placeholder once the

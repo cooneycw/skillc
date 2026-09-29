@@ -67,7 +67,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import demo, records, trial, verify
+from . import demo, outcome_report, records, trial, verify
 from .lifecycle import RealAgentBlocked
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -614,15 +614,35 @@ def model_eligibility(disposition: object, observed_model: str, declared_model: 
 def build_report(
     experiment: trial.Experiment, outcomes: Sequence[AttemptOutcome], claims: Mapping[str, str] | None = None,
     *, declared_model: str | None = None, declared_effort: str | None = None,
+    dimensions: Mapping[str, str] | None = None, dimensions_unavailable_reason: str | None = None,
 ) -> dict[str, object]:
     """The `pilot-report` record: one entry per scheduled attempt, in schedule
     order. The keys the `pilot-report` rule checks are exactly its contract;
     the extra keys (`arm`, `graded_status`, `tokens`, `claim`, ...) are this
-    pilot's own reporting and are not read by that rule."""
+    pilot's own reporting and are not read by that rule.
+
+    `dimensions` (issue #13, `GraderDef.dimensions` - the caller's own
+    concern to load) feeds `outcome_report.build`, computed from the RAW
+    record's `graded.criteria` (not `_criteria(record)` below, which drops
+    `mandatory` - a field this pilot's own reporting has never needed, but
+    a per-dimension PASS/FAIL/INCONCLUSIVE verdict does). `None`/`{}` (this
+    pilot's own Level 1 grader declares no dimensions today) reports every
+    criterion `unclassified` - stated, never guessed.
+
+    `dimensions_unavailable_reason` is a DIFFERENT fact from an empty
+    `dimensions`: the caller's own lookup failed, not "the grader declares
+    nothing" - review ruling, PR #13. When set, every bucket reports
+    `unavailable` instead, and `dimensions` is ignored."""
     entries: list[dict[str, object]] = []
     for outcome in outcomes:
         record = outcome.record
         attempt_id = outcome.scheduled.attempt_id
+        graded = record.get("graded")
+        raw_criteria = graded.get("criteria") if isinstance(graded, dict) else None
+        raw_criteria_list = [c for c in raw_criteria if isinstance(c, dict)] if isinstance(raw_criteria, list) else []
+        outcome_dimensions = outcome_report.build(
+            raw_criteria_list, dimensions or {}, unavailable_reason=dimensions_unavailable_reason,
+        ).as_dict()
         agent = agent_seconds(experiment, attempt_id) if record.get("disposition") != "not-run" else None
         meta = _run_metadata(record)
         status = graded_status(record)
@@ -655,6 +675,7 @@ def build_report(
             "disposition": disposition,
             "graded_status": status if status is not None else UNKNOWN,
             "criteria": _criteria(record),
+            "outcome_dimensions": outcome_dimensions,
             "uncertainty": uncertainty,
             # Non-interactive by declaration: nobody answers, redirects or
             # restarts an attempt once it starts. A reviewed clarification
