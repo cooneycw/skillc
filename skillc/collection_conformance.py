@@ -319,6 +319,23 @@ class CollectionAgentResult:
     #: `transcript_discovery` (issue #124); empty when not computed.
     discovery: Mapping[str, str] | None = None
     discovery_reason: str | None = None
+    #: The image this attempt's container was ACTUALLY created from (#188),
+    #: read back from the journal's own `backend-identity` event
+    #: (`lifecycle._record_identity`'s `image_digest`, `docker_backend.py`'s
+    #: `DockerBackend.install()` readiness - `docker inspect --format
+    #: {{.Image}}` on the running container) - never `plan_collection_attempt`'s
+    #: `image.digest`, which is only what the ledger PLANNED before the
+    #: container existed and is never re-checked against it (#188 review: a
+    #: value must be OBSERVED, not merely declared, before this module calls
+    #: it recorded). `None` when the backend reported nothing (no such event
+    #: was ever journaled) or reported an unresolvable digest.
+    image_digest: str | None = None
+    #: The bound actually passed to this attempt's `Limits(timeout=...)` -
+    #: a controller INPUT, not an observation, so (#188 review) recording the
+    #: value the caller passed here already states what governed execution;
+    #: no separate confirmation is needed the way `image_digest` above needs
+    #: one.
+    timeout_seconds: float | None = None
 
     @property
     def discovery_failed(self) -> bool:
@@ -615,7 +632,16 @@ def run_collection_agent_attempt(
         receipt_context=receipt_context,
     )
     discovery, discovery_reason = transcript_discovery(record, {f.skill for f in acquired.files})
-    cleaned = [e for e in experiment.events(attempt_id) if e.get("event") == "cleaned"]
+    events = experiment.events(attempt_id)
+    cleaned = [e for e in events if e.get("event") == "cleaned"]
+    # `backend-identity` (#188): the OBSERVED image digest the journal
+    # recorded after `install()`, never the ledger's merely-planned one - see
+    # `CollectionAgentResult.image_digest`'s own comment for why the
+    # distinction matters. `[-1]` mirrors `cleaned` above: at most one such
+    # event exists per attempt in practice, but reading the last is what
+    # `cleaned` already does for the same "one journal, one fact" reason.
+    identity_events = [e for e in events if e.get("event") == "backend-identity"]
+    observed_image_digest = identity_events[-1].get("image_digest") if identity_events else None
     return CollectionAgentResult(
         # `acquired.source.revision` - what was ACTUALLY acquired - never
         # `acquired.subject.revision`, the DECLARED pin. The two already
@@ -630,6 +656,8 @@ def run_collection_agent_attempt(
         subject_name, acquired.source.revision, acquired.subject.client, record, agent_network=backend.network,
         workspace_cleaned=str(cleaned[-1].get("status")) if cleaned else None,
         discovery=discovery, discovery_reason=discovery_reason,
+        image_digest=observed_image_digest if isinstance(observed_image_digest, str) else None,
+        timeout_seconds=timeout,
     )
 
 
@@ -676,13 +704,19 @@ def evidence_envelope(result: CollectionAgentResult) -> dict[str, object]:
     record AND the observations the CLI made around it (codex review: saving
     only the record left a cleanup exit 1 or a host comparison unexplained
     once the terminal output was gone). The host credential appears as its
-    comparison and remaining life only - never its digest or bytes."""
+    comparison and remaining life only - never its digest or bytes.
+
+    `image_digest`/`timeout_seconds` (#188) are `result`'s own fields
+    verbatim - see `CollectionAgentResult.image_digest`'s comment for why
+    the former is the OBSERVED digest, never the ledger's planned one."""
     host = result.host_credential
     diff = result.daemon_diff
     return {
         "subject": result.subject_name, "revision": result.revision, "client": result.client,
         "agent_network": result.agent_network,
         "record": result.record,
+        "image_digest": result.image_digest,
+        "timeout_seconds": result.timeout_seconds,
         "discovery": dict(result.discovery) if result.discovery is not None else None,
         "discovery_reason": result.discovery_reason,
         "workspace_cleaned_journal": result.workspace_cleaned,
