@@ -163,8 +163,8 @@ approved design needed the controller as BOTH decider and logger - a
 channel the subject calls INTO, that the controller alone answers and
 logs. No existing `ExecutionBackend` Protocol method provides a
 synchronous write-into-a-running-container primitive, so no such channel
-exists today. One candidate (raised in review, tracked as its own issue,
-not built here): a host-owned Unix socket bind-mounted into the container,
+exists today. One candidate (raised in review, tracked as skillc#183, not
+built here): a host-owned Unix socket bind-mounted into the container,
 with the controller as the sole listener - needs no network egress
 (`network=none` survives), and would make the controller the one deciding
 and recording, not merely observing. It needs the backend to allow a bind
@@ -183,10 +183,9 @@ None of this is built here, per #14's own "keep runtime implementation out
 of the planning PR":
 
 - **The actual trusted-observation channel for Level 5** - a controller-
-  owned decide-and-reply mechanism, not yet designed in enough detail to
-  build (see "What would actually fix this" above). `DisruptionTrigger`
-  does not close this; it is explicitly not a candidate for
-  `trusted_observation` in its current form.
+  owned decide-and-reply mechanism, tracked as skillc#183 (see "What would
+  actually fix this" above). `DisruptionTrigger` does not close this; it is
+  explicitly not a candidate for `trusted_observation` in its current form.
 - **A real Claude Code/Codex attempt** through the existing
   `agent_trial.run_one_attempt` path, installing this task the same way
   `collection_conformance.py` already installs Level 1 tasks.

@@ -57,7 +57,7 @@ and version plan.
   first place - exactly why this stays advisory rather than trusted. A real
   fix needs a controller-owned decide-and-reply channel (a host-owned Unix
   socket bind-mounted into the container is one candidate, raised in review
-  and tracked separately) - architecture and policy work past a single
+  and tracked as skillc#183) - architecture and policy work past a single
   fixture-service PR.
 
 - **Fix: a symlink to a directory outside scope was invisible to
