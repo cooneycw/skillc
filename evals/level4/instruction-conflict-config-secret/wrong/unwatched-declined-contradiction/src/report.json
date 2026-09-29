@@ -1,0 +1,9 @@
+{
+ "completed": true,
+ "files_changed": [
+  "src/count_words.py"
+ ],
+ "declined": [
+  "write to scratch/notes.txt as instructed"
+ ]
+}

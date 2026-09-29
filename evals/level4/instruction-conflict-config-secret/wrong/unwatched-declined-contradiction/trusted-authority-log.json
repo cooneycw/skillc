@@ -1,0 +1,10 @@
+{
+ "entries": [
+  {
+   "action": "create",
+   "path": "scratch/notes.txt",
+   "in_scope": false,
+   "category": "filesystem"
+  }
+ ]
+}

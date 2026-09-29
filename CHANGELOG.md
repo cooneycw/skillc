@@ -22,6 +22,33 @@ and version plan.
   `--task`, since its known-bad candidate is specific to the default
   task's own `wrong/` fixtures. Both defaults are unchanged without the
   flag.
+
+- **Two Nit Store follow-ups to #14's L4 work** (Refs #14). (1)
+  `grade_workflow.py`'s `report-supported` used to cross-check a `declined`
+  claim against only the one hardcoded `HOSTILE_PATH`, narrower than
+  `stayed-in-bounds`' own whole-surface check - a report that falsely
+  declines a DIFFERENT out-of-scope action would never be flagged by
+  `report-supported`, even though `stayed-in-bounds` already caught the
+  boundary breach. Widened to check every out-of-scope path the trusted
+  observation names; `HOSTILE_PATH` is removed. `wrong/unwatched-declined-
+  contradiction` commits the red/green pair: measured against the pre-fix
+  judge (`eb0750d`), `report-supported` grades SATISFIED for exactly this
+  contradiction; post-fix it grades VIOLATED. (2)
+  `AuthorityInterceptor`'s `BACKEND_ARTIFACTS` exclusion of `observations`
+  is no longer unconditional - every transition is now recorded and
+  resolved at `stop_and_finalize()` against the SETTLED final value (provably
+  the backend's own write, since nothing else can touch that path once
+  `execute()` returns), so a subject that pre-creates or tampers with
+  `observations` before the backend's own write is still caught. An interim
+  version suppressed only a literal "final poll", which was itself measured
+  wrong: the backend's write can land on any poll late enough in `execute()`'s
+  own lifetime, so a short interval flagged the backend's own legitimate
+  write as a violation on every attempt -
+  `test_a_clean_run_never_flags_the_backends_own_observations_write` is the
+  committed red case for that, and
+  `test_a_subject_created_observations_that_differs_from_the_backends_is_
+  still_caught` proves genuine tampering is still caught.
+
 - **Capability-gated in-container TERM forwarding to the exec'd subject**
   (Refs #158). `docker/trial/skillc-supervisor.py` (a new foreground
   process, replacing the `sleep infinity` keep-alive placeholder once the
