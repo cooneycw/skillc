@@ -56,9 +56,11 @@ authority log, applied here to a disruption log instead.
 
 Each other candidate carries a `trusted-disruption-log.json`, sibling to
 `expected.json` and never under `src/` - `qualify.py` loads it and passes it
-as the trusted observation, standing in for what a real disruption-trigger
-fixture service will capture once one exists (still owed; see
-PROVENANCE.md). Checking the physical output files independently
+as the trusted observation, standing in for a real disruption-trigger
+fixture service, which is still fully owed (see PROVENANCE.md's "the
+advisory request-count observer": `skillc/disruption_trigger.py` exists but
+its output can never honestly serve as this file, so the channel this task
+needs remains unsolved). Checking the physical output files independently
 (`work-preserved` does) catches a forger who fabricates a step's *content*;
 it does nothing against one who instead shrinks a claimed `failed_after_step`
 to move an already-corrupted step outside the window this judge inspects -

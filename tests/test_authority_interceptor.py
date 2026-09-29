@@ -192,7 +192,36 @@ def test_a_change_under_git_is_tagged_its_own_category(base: Path, docker_state:
     assert trusted is not None
     entries = json.loads(trusted)["entries"]
     assert entries == [{"action": "create", "path": ".git/HEAD", "in_scope": False, "category": "git"}]
-    backend.destroy(handle)
+
+
+def test_a_symlink_to_a_directory_outside_scope_is_caught(tmp_path: Path) -> None:
+    """Red case (PR review, issue #14): `os.walk` lists a symlink-to-a-
+    directory in `dirnames`, never `filenames` - `followlinks=False` only
+    stops it being DESCENDED into, not stops it being LISTED as an ordinary
+    file would be. Before the fix, `_snapshot_out_of_scope` only ever
+    `lstat`ed `filenames` entries, so a symlink pointing anywhere - in or out
+    of scope - was silently invisible, whatever it pointed at. Measured
+    directly (this exact repro, against the pre-fix code): the symlink was
+    absent from the snapshot entirely; post-fix it is captured exactly like
+    a symlink-to-a-file, by its target, never followed.
+
+    Direct unit test of `_snapshot_out_of_scope`, not routed through the
+    fake `docker cp` round trip: `fake_docker.py`'s own `_copy_any`
+    dereferences a symlink-to-a-directory when copying a tree out (it never
+    claims otherwise - no committed fidelity claim says it preserves one),
+    which would silently exercise a different bug than this one. This
+    proves the interceptor's own snapshot logic; `test_authority_
+    interceptor.py`'s other tests prove the export-and-diff wiring around it
+    separately, with real files and symlinks-to-files, which the fake CLI
+    does preserve."""
+    from skillc.authority_interceptor import _normalize_prefixes, _snapshot_out_of_scope
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "ok.py").write_text("x")
+    (tmp_path / "elsewhere").mkdir()
+    (tmp_path / "escape-hatch").symlink_to(tmp_path / "elsewhere")
+    snapshot = _snapshot_out_of_scope(tmp_path, _normalize_prefixes(("src",)))
+    assert snapshot == {"escape-hatch": f"link:{tmp_path / 'elsewhere'}"}
 
 
 def test_an_edit_inside_the_allowed_prefix_is_never_recorded(base: Path, docker_state: Path) -> None:

@@ -174,12 +174,33 @@ def _snapshot_out_of_scope(root: Path, allowed: tuple[PurePosixPath, ...]) -> di
     traversal into an allowed subtree entirely. Mirrors
     `skillc/verify.py::_snapshot`'s own link/regular/special vocabulary for
     the same reason that one does: a link is recorded by its target, never
-    followed."""
+    followed.
+
+    A SYMLINK TO A DIRECTORY is a `dirnames` entry to `os.walk`, never a
+    `filenames` one - `followlinks=False` stops it from being DESCENDED
+    INTO, but does not stop it being LISTED there instead of alongside
+    ordinary files (PR review, issue #14: found this way, not assumed - a
+    symlink pointing at an out-of-scope directory was silently invisible
+    before this check, whatever it pointed at). Each `dirnames` entry is
+    `lstat`ed to tell a real directory (walked into, after the scope prune)
+    from a symlink (recorded exactly like a file's symlink, by its target,
+    and never walked into - `os.walk` already does not descend into it
+    either way)."""
     seen: dict[str, str] = {}
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
         rel_dir = Path(dirpath).relative_to(root).as_posix()
         prefix = "" if rel_dir == "." else f"{rel_dir}/"
-        dirnames[:] = [d for d in dirnames if not _in_allowed_scope(f"{prefix}{d}", allowed)]
+        real_dirs = []
+        for d in dirnames:
+            rel = f"{prefix}{d}"
+            dir_path = Path(dirpath) / d
+            if dir_path.is_symlink():
+                if rel not in BACKEND_ARTIFACTS and not _in_allowed_scope(rel, allowed):
+                    seen[rel] = "link:" + os.readlink(dir_path)
+                continue
+            if not _in_allowed_scope(rel, allowed):
+                real_dirs.append(d)
+        dirnames[:] = real_dirs
         for name in filenames:
             rel = f"{prefix}{name}"
             if rel in BACKEND_ARTIFACTS or _in_allowed_scope(rel, allowed):

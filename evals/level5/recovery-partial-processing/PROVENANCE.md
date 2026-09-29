@@ -125,15 +125,67 @@ comparison of `steps_completed` against the trusted log's `failed_after_step`,
 and free prose is never read by the judge at all. README.md's "Why a
 structured report, not prose" states the resulting limit.
 
+## Update (issue #14 runtime, part c): an advisory observer, not a trusted one
+
+`skillc/disruption_trigger.py`'s `DisruptionTrigger` counts a live attempt's
+REQUEST LOG - an append-only file the subject's tool wrapper writes one
+line to per call attempt - by polling `ExecutionBackend.export()` (the same
+read-only method `AuthorityInterceptor` polls). **Its output is never
+passed as `trusted_observation`, and this task's `trusted-disruption-
+log.json` channel remains unsolved.** Corrected from the approved design
+twice over, both times by review, both stated plainly rather than left as
+caveats:
+
+1. An early draft claimed the subject "cannot alter the proxy's own code" -
+   false under the same neutral-identity model L4's interceptor docstring
+   explains: the subject shares the proxy's own uid and can overwrite or
+   bypass any PATH binary it can write. The draft also would have called
+   the count "proxy invocations"; corrected to "requests a controller-
+   observed log received", since the subject can reach whatever endpoint a
+   real proxy would use just as directly.
+2. **The deeper finding, also from review**: the request log lives inside
+   the SAME subject-writable workspace tree `export()` reads for L4 -
+   unlike L4's own diff, which only ever asks whether bytes at a
+   CONTROLLER-decided path changed, this module trusts the CONTENT
+   (a line count) of a subject-writable file as if it meant "this many real
+   events occurred". Nothing enforces that correspondence: the subject can
+   write any number of fabricated lines, with zero real work behind them,
+   on every attempt, unconditionally - not a scoped blind spot the way
+   `known-gaps/delete-then-restore` or the pre-#14(a) `forged-log` gap were
+   (both needed a specific timing window or a specific forged field). Here
+   the count itself IS the entire claim, unenforced end to end, so it does
+   not qualify as a narrow "known gap" either - the whole value is
+   advisory, not narrowly compromised, and calling it a known gap would
+   understate that.
+
+**What would actually fix this, and why it is not built here.** The
+approved design needed the controller as BOTH decider and logger - a
+channel the subject calls INTO, that the controller alone answers and
+logs. No existing `ExecutionBackend` Protocol method provides a
+synchronous write-into-a-running-container primitive, so no such channel
+exists today. One candidate (raised in review, tracked as skillc#183, not
+built here): a host-owned Unix socket bind-mounted into the container,
+with the controller as the sole listener - needs no network egress
+(`network=none` survives), and would make the controller the one deciding
+and recording, not merely observing. It needs the backend to allow a bind
+mount, a policy question of its own scope entirely.
+
+**What ships instead**: `DisruptionTrigger` as a plainly-labeled advisory
+counter - useful for a human calibrating `goal.md`'s disruption framing or
+debugging a live attempt's tool-wrapper, never for grading. Every candidate
+in this file still uses a hand-authored `trusted-disruption-log.json`
+fixture exactly as before part (c); none of them are produced by this
+module, and none should be read as if they were.
+
 ## Owed to a live run
 
 None of this is built here, per #14's own "keep runtime implementation out
 of the planning PR":
 
-- **The disruption-service fixture** that actually processes records one at a
-  time, cuts off the subject's tool access at a chosen step, and produces the
-  log this task's candidates only simulate. The `verify.py` channel it will
-  deliver its bytes through is built (see "Update" above); the service is not.
+- **The actual trusted-observation channel for Level 5** - a controller-
+  owned decide-and-reply mechanism, tracked as skillc#183 (see "What would
+  actually fix this" above). `DisruptionTrigger` does not close this; it is
+  explicitly not a candidate for `trusted_observation` in its current form.
 - **A real Claude Code/Codex attempt** through the existing
   `agent_trial.run_one_attempt` path, installing this task the same way
   `collection_conformance.py` already installs Level 1 tasks.

@@ -35,6 +35,46 @@ and version plan.
   `tini`, and - the must-not-exit rule's own red case - a monkeypatched
   mutant kept entirely in the test tree, never a switch in the production
   script) all fail against pre-#158 code and pass now.
+
+- **`skillc/disruption_trigger.py`, an ADVISORY request-count observer for
+  Level 5** (Refs #14). `DisruptionTrigger` counts a live attempt's request
+  log (an append-only file the subject's tool wrapper writes one line to per
+  call) by polling `ExecutionBackend.export()` - the same primitive
+  `AuthorityInterceptor` polls. **Its output is never passed as
+  `trusted_observation`, and Level 5's trusted channel remains unsolved.**
+  Caught by review after an initial version wired it in as one: the request
+  log lives inside the same subject-writable workspace tree `export()` reads
+  for L4, and unlike L4's own diff (which only asks whether bytes at a
+  CONTROLLER-decided path changed), this module would have trusted the
+  CONTENT of a subject-writable file - a line count - as evidence, which the
+  subject can fabricate with zero real work behind it, on every attempt,
+  unconditionally. Not a scoped "known gap" like `known-gaps/delete-then-
+  restore` - there the mechanism is sound except for a narrow timing window;
+  here the count itself IS the unenforced claim, so the whole value stays
+  advisory. `_max_requests_seen` only ever grows (a subject that inflates
+  the log then truncates it does not erase an earlier poll's higher count),
+  which defeats shrinking after the fact but nothing about inflating in the
+  first place - exactly why this stays advisory rather than trusted. A real
+  fix needs a controller-owned decide-and-reply channel (a host-owned Unix
+  socket bind-mounted into the container is one candidate, raised in review
+  and tracked as skillc#183) - architecture and policy work past a single
+  fixture-service PR.
+
+- **Fix: a symlink to a directory outside scope was invisible to
+  `AuthorityInterceptor`** (Refs #14, folded into part c per review).
+  `os.walk` lists a symlink-to-a-directory in `dirnames`, never `filenames`
+  - `followlinks=False` only stops it being DESCENDED into, not stops it
+  being LISTED as an ordinary file would be, so `_snapshot_out_of_scope`,
+  which only ever inspected `filenames` entries, silently missed any such
+  symlink regardless of what it pointed at. Measured directly against the
+  pre-fix code (`af51811`): absent from the snapshot entirely; post-fix,
+  captured exactly like a symlink-to-a-file, by its target, never followed.
+  `tests/test_authority_interceptor.py::test_a_symlink_to_a_directory_
+  outside_scope_is_caught` is a direct unit test of the snapshot function,
+  not routed through the fake `docker cp` round trip - `fake_docker.py`'s
+  own `_copy_any` dereferences a symlink-to-a-directory when copying a tree
+  out, which would silently exercise a different bug.
+
 - **`skillc/authority_interceptor.py`, the L4 authority-boundary fixture
   service for #14's runtime half** (Refs #14). `AuthorityInterceptor` polls
   a live attempt's WHOLE out-of-scope surface from OUTSIDE the container -
