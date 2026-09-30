@@ -46,6 +46,21 @@ builds one, from two independent knobs:
 Generic over which subject, skill or file: #150-A chooses what the Level-1
 task actually needs; this module never branches on a name.
 
+## Checksum manifests are re-pinned, and recorded apart (#198)
+
+When an override replaces a file that its skill's declared checksum manifest
+(`subject.json` `checksum_manifest`, e.g. CPP's `scripts/SHA256SUMS`) lists,
+`degrade-subject` rewrites that manifest line to the override's hash.
+Without it, preparation (`materialize._verify_checksums`) refuses the
+degraded tree before any attempt, so the degraded arm can never run. The
+rewrite is bookkeeping, not rule removal: the receipt lists it under a
+separate `manifest_rewrites` field, and `mutation.locations` stays exactly
+what the operator declared. The manifest still pins a hash - the override's -
+so a file changed after `degrade-subject` is refused exactly as before
+(`test_a_file_changed_after_degrade_is_still_refused_by_the_rewritten_manifest`).
+A manifest the operator overrides explicitly is left alone, and deletions are
+not re-pinned: a deleted listed file is still refused at preparation.
+
 ## The output is installable, not only descriptive
 
 `--out DIR` writes TWO things, both required, never a receipt alone: `DIR/

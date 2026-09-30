@@ -36,7 +36,7 @@ Each of these must hold before step 2. If any fails, stop.
 An environment fault must never read as discrimination. The CPP #1084 comment of 2026-09-21 records both arms agreeing on a false negative after an IPC fault. So first run the NORMAL subject on the default task, which every prior live run has passed:
 
 ```
-skillc collection-run cpp-codex
+SKILLC_ALLOW_REAL_AGENT=1 skillc collection-run cpp-codex
 ```
 
 This must end with the attempt captured, graded PASS, and the installation receipt's discovery listing SATISFIED. If it doesn't, the environment is broken (image, credential, listing or daemon). Stop and diagnose; nothing from steps 3 to 5 would mean anything.
@@ -56,21 +56,23 @@ skillc degrade-subject cpp-codex --checkout <cpp-checkout-at-pin> \
   --out <runs>/degraded
 ```
 
-Check `<runs>/degraded/receipt.json`: `mutation.locations` must list exactly the five locations in `DEGRADATION.md`, and the revision must be a `degraded:` label, never the pin.
+Check `<runs>/degraded/receipt.json`: `mutation.locations` must list exactly the five locations in `DEGRADATION.md`, and the revision must be a `degraded:` label, never the pin. `manifest_rewrites` must list exactly two lines, `flow-auto/scripts/SHA256SUMS` and `flow-merge/scripts/SHA256SUMS` re-pinning `gh-pr-merge.sh` to its override's hash (#198). That is checksum bookkeeping, not a sixth location.
+
+Every `collection-run` below launches a real agent, which `skillc` refuses (`RealAgentBlocked`) unless `SKILLC_ALLOW_REAL_AGENT=1` is set for that command.
 
 ## 4. The two arms
 
 NORMAL:
 
 ```
-skillc collection-run cpp-codex --task evals/level1/finish-close-ref \
+SKILLC_ALLOW_REAL_AGENT=1 skillc collection-run cpp-codex --task evals/level1/finish-close-ref \
   --evidence <runs>/normal-evidence
 ```
 
 DEGRADED:
 
 ```
-skillc collection-run cpp-codex --task evals/level1/finish-close-ref \
+SKILLC_ALLOW_REAL_AGENT=1 skillc collection-run cpp-codex --task evals/level1/finish-close-ref \
   --degraded <runs>/degraded \
   --evidence <runs>/degraded-evidence --evidence-role control
 ```
