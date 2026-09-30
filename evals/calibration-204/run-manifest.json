@@ -2,8 +2,14 @@
  "kind": "calibration-declaration",
  "issue": 204,
  "declared_at": "2026-09-30",
- "_comment": "A predeclaration, NOT an authorization. skillc.calibration.load_declaration validates its shape; skillc.calibration.require_approved refuses to authorize a run while 'approval' is null or any identity still says UNKNOWN (ADR 0005). No attempt has run.",
- "approval": null,
+ "_comment": "The #204 calibration declaration. Approved by the owner 2026-09-30 (see 'approval'); skillc.calibration.require_approved now authorizes it. NOT YET RUN: no two-arm schedule runner exists (collection-run has no baseline mode and does not pin the model) - see owed_before_run.",
+ "approval": {
+  "by": "owner (cooneycw)",
+  "at": "2026-09-30",
+  "source": "owner instruction in the #204 /flow:auto session: \"approve the calibration run\"",
+  "scope": "the arms, identities, schedule (4 attempts per arm, seed 20260930 order) and caps declared in this file, run under the operator's codex subscription login (ADR 0005 rule 6); no judge tier, no dollar-metered spend",
+  "image_digest_resolved": "2026-09-30: `docker image inspect skillc-trial:latest` -> sha256:d1b2ced9..., the image #12's rerun and #150 ran (built 2026-09-27)"
+ },
  "task": {
   "path": "evals/level3/slugkit-pipeline",
   "grader_id": "slugkit-pipeline",
@@ -12,8 +18,11 @@
  "arms": [
   {
    "name": "full-cpp",
-   "subject": {"name": "cpp-codex", "locator": "github.com/cooneycw/claude-power-pack",
-               "revision": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b"},
+   "subject": {
+    "name": "cpp-codex",
+    "locator": "github.com/cooneycw/claude-power-pack",
+    "revision": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b"
+   },
    "treatment": "the whole CPP codex skill surface installed (evals/subjects/cpp-codex, select: all); a real installation receipt is written"
   },
   {
@@ -23,20 +32,35 @@
   }
  ],
  "shared": {
-  "client": {"name": "codex", "version": "0.157.1"},
+  "client": {
+   "name": "codex",
+   "version": "0.157.1"
+  },
   "model": "gpt-6-astra",
   "reasoning_effort": "high",
   "tools": "the client's defaults inside the trial container; no MCP servers",
   "permissions": "the same non-interactive codex exec sandbox and approval settings for every attempt",
   "public_requirements": "evals/level3/slugkit-pipeline/goal.md, delivered verbatim to both arms",
-  "image": {"tag": "skillc-trial:latest", "digest": "UNKNOWN"},
+  "image": {
+   "tag": "skillc-trial:latest",
+   "digest": "sha256:d1b2ced9dc6d25e9e1bc673c1973f032ced50a11da234fcd617ee376ff36eefc"
+  },
   "per_attempt_seconds": 1200,
   "total_seconds": 10800
  },
  "attempts_per_arm": 4,
  "arm_order": {
   "seed": 20260930,
-  "sequence": ["full-cpp", "baseline", "baseline", "full-cpp", "full-cpp", "baseline", "full-cpp", "baseline"]
+  "sequence": [
+   "full-cpp",
+   "baseline",
+   "baseline",
+   "full-cpp",
+   "full-cpp",
+   "baseline",
+   "full-cpp",
+   "baseline"
+  ]
  },
  "retain_transcripts": true,
  "primary_endpoint": "skillc.calibration.primary_endpoint: the task grader's four criteria (functional-trailing-hyphen, integration-installed-path, pipeline-green, pipeline-honest), status by records.derive_status; installation-ready never enters it",
@@ -48,9 +72,7 @@
   "4. Did the full-cpp arm select and use CPP, from retained transcripts rather than the heuristic alone?",
   "5. What is the per-attempt time and quota cost, to size #203?"
  ],
- "owed_before_approval": [
-  "shared.image.digest: the digest of the image that will actually run, resolved from the built skillc-trial image",
-  "re-confirm the cpp-codex subject revision and the codex client version/model still hold",
-  "a runner for this schedule (collection-run runs one attempt per invocation; no two-arm schedule runner exists for a collection yet)"
+ "owed_before_run": [
+  "#207 - a runner for this two-arm schedule: baseline arm with no skills, full-cpp arm with the cpp-codex surface, model and effort pinned at launch, caps enforced, transcripts retained, primary endpoint and readiness_beside reported per attempt"
  ]
 }
