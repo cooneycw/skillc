@@ -1,0 +1,24 @@
+{
+  "branch": "issue-202-collection-run-retain-the-agent-s-transcript-in-th",
+  "counts": {
+    "accepted": 5,
+    "deferred": 1,
+    "rejected": 0
+  },
+  "head": "16db41685e1e627a79bf46a42b940154405de9ad",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "202",
+  "passes": 2,
+  "recorded_at": "2026-09-30T15:49:55Z",
+  "red_cases": {
+    "already_covered": 9,
+    "proposed": 9
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/09/30/rollout-2026-09-30T11-46-27-01a0f2fe-ebd7-7192-9d2d-e7a69d0485ce.jsonl",
+    "thread_id": "01a0f2fe-ebd7-7192-9d2d-e7a69d0485ce"
+  },
+  "schema": 1,
+  "status": "ran"
+}

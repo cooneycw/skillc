@@ -282,7 +282,13 @@ and `good/transcript-*.json`. A transcript is leak-checked before it is ever
 stored, so a leak never reaches the store, redacted or otherwise.
 `agent_trial.recompute_skill_invocations` re-derives `skill_invocations` from
 the stored object with the same extractor the live observation used, so the
-codex heuristic is checkable after the run.
+codex heuristic is checkable after the run. It refuses rather than answer
+empty when the transcript is missing, only `partial`, or holds no event the
+client's adapter recognizes - each of those would read as "nothing invoked".
+
+The retention leak check (`agent_trial.transcript_leak_findings`) scans the raw
+text, each JSONL line's DECODED strings (an escaped `access_token` pair only
+matches once decoded), and capture's own secret-content filter.
 
 ## `attempt-lifecycle`
 

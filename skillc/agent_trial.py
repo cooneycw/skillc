@@ -423,7 +423,10 @@ def transcript_leak_findings(raw: bytes) -> list[str]:
         located.update(
             f"{kind} at line {lineno}" for _l, kind, _detail in leak.scan_text(leaf, denylist, host_paths)
         )
-        leaf_secret = trial._secret_content(leaf.encode("utf-8"))
+        # `surrogatepass`: a decoded JSON string may hold an unpaired
+        # surrogate (a tool's surrogate-escaped filename), which plain utf-8
+        # refuses to encode (counter-model review, #202).
+        leaf_secret = trial._secret_content(leaf.encode("utf-8", errors="surrogatepass"))
         if leaf_secret is not None:
             located.add(f"{leaf_secret.removesuffix('; never exported')} at line {lineno}")
     return sorted(located)
@@ -434,7 +437,10 @@ def retainable_transcript(raw: bytes) -> trial.TranscriptEvidence:
     3). A finding refuses retention entirely - never a redacted copy - and the
     reason names each finding's class and line only
     (`transcript_leak_findings`)."""
-    findings = transcript_leak_findings(raw)
+    try:
+        findings = transcript_leak_findings(raw)
+    except Exception as exc:  # noqa: BLE001 - retention must never take the transcript observation with it
+        return trial.TranscriptEvidence(None, f"transcript leak-check could not run ({type(exc).__name__}); retention refused")
     if findings:
         return trial.TranscriptEvidence(None, f"transcript leak-check found {', '.join(findings)}; retention refused")
     if not raw:
@@ -493,7 +499,15 @@ def recompute_skill_invocations(experiment: trial.Experiment, attempt_id: str, c
             f"a recomputation from it cannot say what was not invoked"
         )
     data = trial._read_object(experiment.root, str(entry["digest"]))
-    return skill_invocations_from_events(CLIENT_SPECS[client].parse_transcript(data.decode("utf-8", errors="replace")))
+    events = CLIENT_SPECS[client].parse_transcript(data.decode("utf-8", errors="replace"))
+    if not events:
+        # Nothing the adapter recognizes - an empty answer would read as
+        # "inspected, nothing invoked" (counter-model review, #202).
+        raise trial.Refused(
+            f"attempt {attempt_id!r}'s transcript holds no event the {client} adapter recognizes; "
+            f"a recomputation from it cannot say what was not invoked"
+        )
+    return skill_invocations_from_events(events)
 
 
 def _make_observe_before_teardown(

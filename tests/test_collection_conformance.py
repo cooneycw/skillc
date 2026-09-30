@@ -1844,3 +1844,46 @@ def test_recompute_refuses_a_partial_transcript(
     monkeypatch.setattr(agent_trial, "_stored_transcript_entry", lambda _e, _a: entry)
     with pytest.raises(trial.Refused, match="only a partial transcript"):
         agent_trial.recompute_skill_invocations(experiment, attempt_id, "codex")
+
+
+def test_an_unpaired_surrogate_in_a_tool_result_does_not_crash_retention() -> None:
+    raw = _tool_result_line("filename: \udcff")
+    assert agent_trial.retainable_transcript(raw) == trial.TranscriptEvidence(raw)
+
+
+def test_recompute_refuses_a_transcript_the_adapter_cannot_read(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    experiment, attempt_id, _result = _run_codex_attempt(tmp_path, base, docker_state, monkeypatch)
+    unreadable = b'{"type":"new_event_format","payload":{"action":"read_skill","skill":"tdd"}}\n'
+    digest = trial._put_object(experiment.root, unreadable)
+    entry = {**_transcript_entry(experiment, attempt_id), "digest": digest, "size": len(unreadable)}
+    monkeypatch.setattr(agent_trial, "_stored_transcript_entry", lambda _e, _a: entry)
+    with pytest.raises(trial.Refused, match="no event the codex adapter recognizes"):
+        agent_trial.recompute_skill_invocations(experiment, attempt_id, "codex")
+
+
+def test_transcript_evidence_takes_exactly_one_of_data_or_reason() -> None:
+    with pytest.raises(ValueError):
+        trial.TranscriptEvidence(None)
+    with pytest.raises(ValueError):
+        trial.TranscriptEvidence(b"x", "missing")
+    assert trial.TranscriptEvidence(b"x").data == b"x"
+    assert trial.TranscriptEvidence(None, "not found").reason == "not found"
+
+
+def test_a_transcript_over_the_stream_bound_is_partial_with_a_capture_failure(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    Limits = trial.Limits
+    experiment, attempt_id, _result = _run_codex_attempt(tmp_path, base, docker_state, monkeypatch)
+    failures: list[str] = []
+    over = trial._transcript_observation(
+        experiment, attempt_id, trial.TranscriptEvidence(b"12345"), Limits(max_stream_bytes=4), failures,
+    )
+    assert over["coverage"] == "partial" and over["size"] == 4
+    assert failures and "truncated to 4" in failures[0]
+    at_bound = trial._transcript_observation(
+        experiment, attempt_id, trial.TranscriptEvidence(b"1234"), Limits(max_stream_bytes=4), [],
+    )
+    assert at_bound["coverage"] == "complete" and at_bound["size"] == 4
