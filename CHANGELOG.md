@@ -8,6 +8,20 @@ and version plan.
 
 ## [Unreleased]
 
+- **`degrade-subject` re-pins checksum manifests for the files it overrides**
+  (Closes #198). An override of a file listed in the skill's declared
+  `checksum_manifest` (CPP's `scripts/gh-pr-merge.sh` in `flow-auto` and
+  `flow-merge`) left `scripts/SHA256SUMS` pinning the original hash, so
+  `collection-run --degraded` refused every degraded tree with `checksum
+  mismatch` before launch - the #150 degraded arm could never run. The
+  manifest line is now rewritten to the override's hash and recorded in the
+  receipt's new `manifest_rewrites` field, apart from `mutation.locations`,
+  which stays exactly the declared locations. The manifest still pins a hash,
+  so a post-degrade edit is still refused (committed negative control
+  `test_a_file_changed_after_degrade_is_still_refused_by_the_rewritten_manifest`).
+  The #150 runbook now names `SKILLC_ALLOW_REAL_AGENT=1` on its
+  `collection-run` commands, which were refused as written.
+
 - **`collection-run` now records the image digest and timeout it ran with**
   (Refs #188). `CollectionAgentResult` gains `image_digest`/
   `timeout_seconds`, surfaced in `evidence_envelope()`'s own dict

@@ -13,6 +13,7 @@ exists for `test/test`.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import subprocess
@@ -48,11 +49,16 @@ def _fixture_collection(tmp_path: Path, skills: dict[str, str], extra_files: dic
     return collection
 
 
-def _subject(revision: str = "v1", select: object = "all") -> materialize.Subject:
-    return materialize.Subject.from_dict({
+def _subject(
+    revision: str = "v1", select: object = "all", checksum_manifest: str | None = None,
+) -> materialize.Subject:
+    data: dict[str, object] = {
         "subject_schema": 1, "locator": "test/test", "revision": revision, "surface": "codex-skills",
         "skills_root": "skills", "select": select, "client": {"name": "codex", "version": "0.157.1"},
-    })
+    }
+    if checksum_manifest is not None:
+        data["checksum_manifest"] = checksum_manifest
+    return materialize.Subject.from_dict(data)
 
 
 @pytest.fixture(autouse=True)
@@ -335,6 +341,111 @@ def test_receipt_lists_every_location_and_both_identities(tmp_path: Path, monkey
     assert "other/reference.md" in payload["mutation"]["statement"]  # type: ignore[index]
     assert payload["base"]["kind"] == "snapshot"  # type: ignore[index]
     assert payload["degraded"]["revision"] != subject.revision  # type: ignore[index]
+
+
+# ------------------------------------------------------- checksum manifests (#198)
+
+_SCRIPT = "#!/bin/sh\n# guard_negated_close_keywords\n"
+
+
+def _checksummed_collection(tmp_path: Path, *, star: bool = False) -> Path:
+    """One skill whose `scripts/SHA256SUMS` pins `gh-pr-merge.sh` - the shape
+    of CPP's flow-auto/flow-merge that #198 found unrunnable once degraded.
+    `star=True` uses sha256sum's binary-mode `*` marker."""
+    digest = hashlib.sha256(_SCRIPT.encode()).hexdigest()
+    marker = "*" if star else " "
+    return _fixture_collection(
+        tmp_path, {"flow-auto": "flow-auto"},
+        extra_files={"flow-auto": {
+            "reference.md": "the rule\n",
+            "scripts/gh-pr-merge.sh": _SCRIPT,
+            "scripts/SHA256SUMS": f"# pinned\n{digest} {marker}gh-pr-merge.sh\n",
+        }},
+    )
+
+
+def _override_script(tmp_path: Path, collection: Path, *extra: degrade.FileEdit) -> degrade.DegradedSource:
+    mutation = degrade.Mutation(edits=(
+        degrade.FileEdit(skill="flow-auto", path="scripts/gh-pr-merge.sh", content=b"#!/bin/sh\n# rule gone\n"),
+        *extra,
+    ))
+    return degrade.acquire_degraded("whatever", tmp_path / "base", mutation, checkout=collection)
+
+
+@pytest.mark.parametrize("star", [False, True])
+def test_an_override_of_a_manifest_listed_file_leaves_a_tree_that_prepares(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, star: bool,
+) -> None:
+    """Regression for #198: before the fix the manifest kept the original
+    hash and `materialize.inventory` refused the degraded tree with
+    "checksum mismatch", so `collection-run --degraded` could never launch."""
+    subject = _subject(checksum_manifest="scripts/SHA256SUMS")
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: subject)
+
+    degraded = _override_script(tmp_path, _checksummed_collection(tmp_path, star=star))
+
+    entries = materialize.inventory(subject, degraded.source)
+    assert [e.checksums for e in entries] == ["verified"]
+    manifest = (degraded.source.surface_dir / "flow-auto" / "scripts" / "SHA256SUMS").read_text()
+    assert manifest.startswith("# pinned\n")  # comments and layout survive the rewrite
+    assert f" {'*' if star else ' '}gh-pr-merge.sh\n" in manifest
+
+
+def test_a_file_changed_after_degrade_is_still_refused_by_the_rewritten_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Negative control for the #198 rewrite: the manifest now pins the
+    OVERRIDE's hash, not nothing - an edit made after degrade-subject must
+    still fail preparation exactly as it did before."""
+    subject = _subject(checksum_manifest="scripts/SHA256SUMS")
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: subject)
+    degraded = _override_script(tmp_path, _checksummed_collection(tmp_path))
+
+    (degraded.source.surface_dir / "flow-auto" / "scripts" / "gh-pr-merge.sh").write_text("tampered\n")
+
+    with pytest.raises(materialize.Refused, match="checksum mismatch for gh-pr-merge.sh"):
+        materialize.inventory(subject, degraded.source)
+
+
+def test_manifest_rewrites_are_recorded_apart_from_the_declared_locations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The rewrite is bookkeeping, not rule removal: `mutation.locations`
+    stays exactly what the operator declared, and the manifest change is
+    listed separately. An override the manifest does not list (reference.md)
+    produces no rewrite."""
+    subject = _subject(checksum_manifest="scripts/SHA256SUMS")
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: subject)
+    degraded = _override_script(
+        tmp_path, _checksummed_collection(tmp_path),
+        degrade.FileEdit(skill="flow-auto", path="reference.md", content=b"gone\n"),
+    )
+    payload = degrade.receipt(degraded, pinned_revision=subject.revision)
+
+    assert payload["mutation"]["locations"] == [  # type: ignore[index]
+        "flow-auto/scripts/gh-pr-merge.sh (overridden (22 bytes))",
+        "flow-auto/reference.md (overridden (5 bytes))",
+    ]
+    old = hashlib.sha256(_SCRIPT.encode()).hexdigest()
+    new = hashlib.sha256(b"#!/bin/sh\n# rule gone\n").hexdigest()
+    assert payload["manifest_rewrites"] == [
+        f"flow-auto/scripts/SHA256SUMS: gh-pr-merge.sh sha256:{old} -> sha256:{new}",
+    ]
+
+
+def test_no_manifest_rewrite_when_the_subject_declares_no_manifest_or_the_operator_overrides_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    subject = _subject()
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: subject)
+    assert _override_script(tmp_path / "a", _checksummed_collection(tmp_path / "a")).manifest_rewrites == ()
+
+    subject = _subject(checksum_manifest="scripts/SHA256SUMS")
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: subject)
+    own = degrade.FileEdit(skill="flow-auto", path="scripts/SHA256SUMS", content=b"# operator-owned\n")
+    degraded = _override_script(tmp_path / "b", _checksummed_collection(tmp_path / "b"), own)
+    assert degraded.manifest_rewrites == ()
+    assert (degraded.source.surface_dir / "flow-auto" / "scripts" / "SHA256SUMS").read_bytes() == b"# operator-owned\n"
 
 
 def test_receipt_with_no_mutation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

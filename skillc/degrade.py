@@ -54,7 +54,10 @@ modules (AGENTS.md).
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
+import posixpath
+import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -119,6 +122,7 @@ class DegradedSource:
     mutation: Mutation | None
     base: materialize.Source
     source: materialize.Source  # kind="degraded"; revision carries the label below
+    manifest_rewrites: tuple[str, ...] = ()  # see `_rewrite_manifests`
 
 
 def _degraded_revision(base: materialize.Source, mutation: Mutation | None) -> str:
@@ -155,9 +159,61 @@ def _refuse_if_identical_to_normal(
         )
 
 
+def _rewrite_manifests(
+    mutated_dir: Path, acquire_subject: materialize.Subject, skill_dirs: dict[str, str], mutation: Mutation,
+) -> tuple[str, ...]:
+    """Re-pin every overridden file the skill's declared checksum manifest
+    lists (issue #198). Without this, an override of a checksummed script
+    (CPP's `scripts/gh-pr-merge.sh`) leaves the manifest pinning the ORIGINAL
+    hash, and `materialize._verify_checksums` refuses the degraded tree - so
+    the degraded arm could never launch.
+
+    This is bookkeeping, not rule removal: the rewrite is returned (and
+    recorded in the receipt's `manifest_rewrites`) apart from
+    `mutation.locations`, which stays exactly what the operator declared. The
+    manifest still pins a hash - the override's - so a file changed after
+    this point is refused exactly as before. Only a line whose listed path
+    resolves to an overridden file changes; its layout (`*` marker, spacing,
+    line ending) is kept. A skill whose manifest the operator edited
+    explicitly is left alone: the operator owns it. Deletions are not
+    re-pinned; a deleted listed file is still refused at preparation."""
+    manifest_rel = acquire_subject.checksum_manifest
+    if not manifest_rel:
+        return ()
+    owned = {(e.skill, posixpath.normpath(e.path)) for e in mutation.edits}
+    overridden: dict[str, set[Path]] = {}
+    for edit in mutation.edits:
+        if edit.content is not None and (edit.skill, posixpath.normpath(manifest_rel)) not in owned:
+            overridden.setdefault(edit.skill, set()).add((mutated_dir / skill_dirs[edit.skill] / edit.path).resolve())
+    rewrites: list[str] = []
+    for skill, targets in overridden.items():
+        manifest = mutated_dir / skill_dirs[skill] / manifest_rel
+        if not manifest.is_file():
+            continue
+        lines = manifest.read_bytes().decode("utf-8").splitlines(keepends=True)
+        changed = False
+        for i, line in enumerate(lines):
+            parts = line.split(None, 1)
+            if len(parts) != 2 or line.startswith("#") or not re.fullmatch(r"[0-9a-f]{64}", parts[0]):
+                continue  # malformed lines are materialize's to refuse, not this rewrite's to fix
+            listed = parts[1].strip().lstrip("*")
+            target = (manifest.parent / listed).resolve()
+            if target not in targets:
+                continue
+            new = hashlib.sha256(target.read_bytes()).hexdigest()
+            if new == parts[0]:
+                continue
+            lines[i] = new + line[len(parts[0]):]
+            rewrites.append(f"{skill}/{manifest_rel}: {listed} sha256:{parts[0]} -> sha256:{new}")
+            changed = True
+        if changed:
+            manifest.write_bytes("".join(lines).encode("utf-8"))
+    return tuple(rewrites)
+
+
 def _apply_mutation(
     mutated_dir: Path, acquire_subject: materialize.Subject, base_source: materialize.Source, mutation: Mutation,
-) -> None:
+) -> tuple[str, ...]:
     """Apply every removal and edit `mutation` declares, in place, under
     `mutated_dir` (already a fresh copy of `base_source.surface_dir` - see
     `acquire_degraded`). Refuses (never applies partially) when: the mutation
@@ -207,6 +263,8 @@ def _apply_mutation(
                 )
             target.write_bytes(edit.content)
 
+    return _rewrite_manifests(mutated_dir, acquire_subject, names, mutation)
+
 
 def acquire_degraded(
     subject_name: str, base: Path, mutation: Mutation | None, *,
@@ -238,13 +296,14 @@ def acquire_degraded(
         base_source = materialize.acquire_git(acquire_subject, repo, staging / "base")
         source_is_override = revision != subject.revision
 
+    manifest_rewrites: tuple[str, ...] = ()
     if mutation is None:
         mutated_dir = base_source.surface_dir
         mutated_digest = base_source.digest
     else:
         mutated_dir = staging / "degraded"
         shutil.copytree(base_source.surface_dir, mutated_dir)
-        _apply_mutation(mutated_dir, acquire_subject, base_source, mutation)
+        manifest_rewrites = _apply_mutation(mutated_dir, acquire_subject, base_source, mutation)
         mutated_digest = materialize.tree_digest(mutated_dir)
 
     _refuse_if_identical_to_normal(
@@ -258,7 +317,10 @@ def acquire_degraded(
         surface_dir=mutated_dir,
         digest=mutated_digest,
     )
-    return DegradedSource(subject_name=subject_name, mutation=mutation, base=base_source, source=degraded)
+    return DegradedSource(
+        subject_name=subject_name, mutation=mutation, base=base_source, source=degraded,
+        manifest_rewrites=manifest_rewrites,
+    )
 
 
 def receipt(degraded: DegradedSource, *, pinned_revision: str) -> dict[str, object]:
@@ -285,6 +347,9 @@ def receipt(degraded: DegradedSource, *, pinned_revision: str) -> dict[str, obje
         "subject": degraded.subject_name,
         "pinned_revision": pinned_revision,
         "mutation": mutation_field,
+        # Checksum-manifest lines re-pinned to an override's hash (#198) -
+        # bookkeeping kept apart from `mutation.locations`, never rule removal.
+        "manifest_rewrites": list(degraded.manifest_rewrites),
         "base": {"kind": degraded.base.kind, "revision": degraded.base.revision, "digest": degraded.base.digest},
         "degraded": {"kind": degraded.source.kind, "revision": degraded.source.revision, "digest": degraded.source.digest},
     }
