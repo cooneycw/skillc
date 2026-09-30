@@ -1,0 +1,24 @@
+{
+  "branch": "issue-150-a-cpp-dependent-case-with-a-degraded-arm-exported",
+  "counts": {
+    "accepted": 1,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "df12fc182e79b5a004a203653a1b78e404686631",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "150",
+  "passes": 2,
+  "recorded_at": "2026-09-30T13:48:41Z",
+  "red_cases": {
+    "already_covered": 0,
+    "proposed": 0
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/09/30/rollout-2026-09-30T09-46-14-01a0f290-dc14-79e0-a401-6c007d2059bd.jsonl",
+    "thread_id": "01a0f290-dc14-79e0-a401-6c007d2059bd"
+  },
+  "schema": 1,
+  "status": "ran"
+}

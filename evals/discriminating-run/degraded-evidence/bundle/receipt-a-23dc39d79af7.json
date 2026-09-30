@@ -1,0 +1,1134 @@
+{
+ "version": 2,
+ "kind": "installation-receipt",
+ "producer": "subject-adapter",
+ "checked_by": "controller",
+ "attempt_id": "a-23dc39d79af7",
+ "trial_id": "t1-cpp-codex",
+ "subject": {
+  "locator": "github.com/cooneycw/claude-power-pack",
+  "revision": "degraded:mutated=5-location:snapshot:snapshot:sha256:ceba20f15452dff932a5837495ede1b7ea2c48696545e07f7ea9d9476e5b0b52",
+  "digest": "sha256:8c4f7a465c92547ebcde6d54084bcd5a1de48fea316d2ff8cc71b2728b776f14"
+ },
+ "adapter": {
+  "name": "codex",
+  "version": "0.157.1"
+ },
+ "client": {
+  "name": "codex",
+  "version": "0.157.1"
+ },
+ "surface": "codex-skills",
+ "treatment": "agent-trial-discovery-listing",
+ "layers": [],
+ "dependencies": [],
+ "allowed_writes": [],
+ "installed": [
+  {
+   "path": ".codex/skills/browser-help/SKILL.md",
+   "digest": "sha256:9dc207f511b12fd7d5ff45fad126dba38f87b9dc53b28b311ccf986934e1ab60"
+  },
+  {
+   "path": ".codex/skills/browser-session/SKILL.md",
+   "digest": "sha256:84eccea86d06cedcde5dca82b1903a8ff6822609ea565bee779465a37ff55287"
+  },
+  {
+   "path": ".codex/skills/browser-session/reference.md",
+   "digest": "sha256:fbeffd61fa9837fb98b8095cd7f9e4efcf0c874cba5cdd44a819641d027a9077"
+  },
+  {
+   "path": ".codex/skills/browser-session/scripts/SHA256SUMS",
+   "digest": "sha256:517458389e3828d99e126779b942925736f69b0a679879623a219cfc23d360b9"
+  },
+  {
+   "path": ".codex/skills/browser-session/scripts/playwright-desk.py",
+   "digest": "sha256:9e66fa9389d9f270763face7e2947a73ae7e7172de8dc7d60bd21ddd2af43f82"
+  },
+  {
+   "path": ".codex/skills/cicd-check/SKILL.md",
+   "digest": "sha256:9f03b29534d1ef982363d7f17020a3964403f565abdaf4f766650ee6e0ccaae2"
+  },
+  {
+   "path": ".codex/skills/cicd-check/reference.md",
+   "digest": "sha256:25b7c61c56e7c3a6bc7232ca5bcf63bb6155a125f3bcbb56ee47650ddc06b1bd"
+  },
+  {
+   "path": ".codex/skills/cicd-container/SKILL.md",
+   "digest": "sha256:84af8fce5ee0f6fa69a1395b914d894fa823c5af4066e496acb30f00935a2afd"
+  },
+  {
+   "path": ".codex/skills/cicd-health/SKILL.md",
+   "digest": "sha256:abec01f6c9cb5e287b249b7ddd8bbaa727289ef6edd991a7c16b3991b531ca97"
+  },
+  {
+   "path": ".codex/skills/cicd-health/reference.md",
+   "digest": "sha256:6d9a4384d3331df720d57f731c06c374b6784bf83c51924449668c44018d7884"
+  },
+  {
+   "path": ".codex/skills/cicd-help/SKILL.md",
+   "digest": "sha256:6402bec31393828b781898402114e575a4a1811857b4e7125a354661cd327da4"
+  },
+  {
+   "path": ".codex/skills/cicd-help/reference.md",
+   "digest": "sha256:98c08e05a852469d49235c8606d27e8eb9a227d0481e24ac7037b88040a88a53"
+  },
+  {
+   "path": ".codex/skills/cicd-infra-discover/SKILL.md",
+   "digest": "sha256:d29cc8a5c4538de9cdc5f509448777ec4f499bb51cf86e69b29edf79d9a449e0"
+  },
+  {
+   "path": ".codex/skills/cicd-infra-init/SKILL.md",
+   "digest": "sha256:43b2e98df26dd5db61ff08d8694bb08ffff93d430a1a927e7b45f60758cb7930"
+  },
+  {
+   "path": ".codex/skills/cicd-infra-pipeline/SKILL.md",
+   "digest": "sha256:2b6362d63aec2088dcf8b654a6aad65c50c49f766a538e022b9ce434d2b4d08c"
+  },
+  {
+   "path": ".codex/skills/cicd-init/SKILL.md",
+   "digest": "sha256:a256dcb5003f969e1553226bae95aca1d38b20634f06329aac3958e41dd93603"
+  },
+  {
+   "path": ".codex/skills/cicd-init/reference.md",
+   "digest": "sha256:e9125f00ab0184e32c74243b12704377673649b6e77207709f2e378c98354104"
+  },
+  {
+   "path": ".codex/skills/cicd-pipeline/SKILL.md",
+   "digest": "sha256:46138799cde526d063eaafaac179b1bce7609b0db077e77b3c9d93dee9ca91fa"
+  },
+  {
+   "path": ".codex/skills/cicd-smoke/SKILL.md",
+   "digest": "sha256:50e3b7a569474f17bb6361f3bf24ba1d3f92c0d8ee05dfe52292a329372f90b4"
+  },
+  {
+   "path": ".codex/skills/cicd-smoke/reference.md",
+   "digest": "sha256:276c1824100e864920780876d99e0d4e7cbbc35c9777478889c45558ccc76cfb"
+  },
+  {
+   "path": ".codex/skills/cicd-verify/SKILL.md",
+   "digest": "sha256:2b1971591ff29a83459286605a8835c9ee3da071b8116c1da67e4f3b1b3d4f21"
+  },
+  {
+   "path": ".codex/skills/cicd-verify/reference.md",
+   "digest": "sha256:43c01d1ea504708c7cee316b56247e8683fa2678d63f644d19896b0dd1be8e5c"
+  },
+  {
+   "path": ".codex/skills/cicd-woodpecker/SKILL.md",
+   "digest": "sha256:3aa77b43c8d9c5eb457be6c3c0515109d0e431cbe1cb37c37c6ec3bf0c2cdf4f"
+  },
+  {
+   "path": ".codex/skills/cicd-woodpecker/reference.md",
+   "digest": "sha256:ce57cfbdc7d0dda295df854e10ac3bb393a7958a11b03cf420c9c844b90a007a"
+  },
+  {
+   "path": ".codex/skills/claude-md-help/SKILL.md",
+   "digest": "sha256:c7456b9da3e0e017262666833f213a28731e8d5c26c10544a5438dcba16e63b1"
+  },
+  {
+   "path": ".codex/skills/claude-md-lint/SKILL.md",
+   "digest": "sha256:e901c308681dfe87693609dae110d819ae1620a24bb2576d39a575696db1c171"
+  },
+  {
+   "path": ".codex/skills/claude-md-lint/reference.md",
+   "digest": "sha256:2627d839b56502929781803e1c2f425f024f5e65964a805cc70668f59d214570"
+  },
+  {
+   "path": ".codex/skills/cpp-dockers/SKILL.md",
+   "digest": "sha256:40a6a4a39a16691e6bd9c0d10ed07b626499db6a602ddde43d57fbb2683afd95"
+  },
+  {
+   "path": ".codex/skills/cpp-dockers/reference.md",
+   "digest": "sha256:530c61d64943ac27a12b40c7888f6ff03ada1551222c0885f1842b12802595f5"
+  },
+  {
+   "path": ".codex/skills/cpp-happy-check/SKILL.md",
+   "digest": "sha256:c28c3a519df0e49f9d49f4cb480ad34daa7e42691d0da86e77ddff32fdd87ba3"
+  },
+  {
+   "path": ".codex/skills/cpp-help/SKILL.md",
+   "digest": "sha256:87a1ac69fbf70784c602d80d77374f8a8cfcdf9a268c70e0d905c98e5798cfee"
+  },
+  {
+   "path": ".codex/skills/cpp-help/reference.md",
+   "digest": "sha256:f91d053432e77b5035cf34be0552ef1c5f0aa74ba543f608f7fd05210ba55012"
+  },
+  {
+   "path": ".codex/skills/cpp-load-best-practices/SKILL.md",
+   "digest": "sha256:042163e1c36e9a5e3ed53a56fefc45659819e61bd5bbf69bbbbf70340d430522"
+  },
+  {
+   "path": ".codex/skills/cpp-load-mcp-docs/SKILL.md",
+   "digest": "sha256:fba7cd725ead92d2c482b83a2482d2f372073673e664a0c210dfac8e766b0f5c"
+  },
+  {
+   "path": ".codex/skills/documentation-c4/SKILL.md",
+   "digest": "sha256:9448ad7c852e418f9664c80085195eb153847e6b198f494e2c9549534acbf762"
+  },
+  {
+   "path": ".codex/skills/documentation-c4/reference.md",
+   "digest": "sha256:0115f826270bd94d3dbb1406d7bc9c2faa981dd7f943f6cb56e1e7404800862f"
+  },
+  {
+   "path": ".codex/skills/documentation-c4/scripts/SHA256SUMS",
+   "digest": "sha256:422c4e11896e9b93b655e10a77857fb276bec890aa32a53c4e2a7c3148664412"
+  },
+  {
+   "path": ".codex/skills/documentation-c4/scripts/c4-mermaid.py",
+   "digest": "sha256:88eb4700e00db6d4efb78f1de0ace160130e7d5fcb60c7e08a67246bce6bf7a2"
+  },
+  {
+   "path": ".codex/skills/documentation-help/SKILL.md",
+   "digest": "sha256:1a61eab31ffb79e34b687d483f34bd87a8a20615559cb56d06f556c3ae537b6d"
+  },
+  {
+   "path": ".codex/skills/documentation-help/scripts/SHA256SUMS",
+   "digest": "sha256:422c4e11896e9b93b655e10a77857fb276bec890aa32a53c4e2a7c3148664412"
+  },
+  {
+   "path": ".codex/skills/documentation-help/scripts/c4-mermaid.py",
+   "digest": "sha256:88eb4700e00db6d4efb78f1de0ace160130e7d5fcb60c7e08a67246bce6bf7a2"
+  },
+  {
+   "path": ".codex/skills/documentation-pptx/SKILL.md",
+   "digest": "sha256:8d4671f018eea6ecdd9644c091efcfc1853d454596f6cc2359fd2427d6d65620"
+  },
+  {
+   "path": ".codex/skills/documentation-pptx/reference.md",
+   "digest": "sha256:3055d8fc3ecc31e6e88c5a4fd1e03284295e539ec5e32b956104aa4ca032588c"
+  },
+  {
+   "path": ".codex/skills/documentation-pptx/scripts/SHA256SUMS",
+   "digest": "sha256:422c4e11896e9b93b655e10a77857fb276bec890aa32a53c4e2a7c3148664412"
+  },
+  {
+   "path": ".codex/skills/documentation-pptx/scripts/c4-mermaid.py",
+   "digest": "sha256:88eb4700e00db6d4efb78f1de0ace160130e7d5fcb60c7e08a67246bce6bf7a2"
+  },
+  {
+   "path": ".codex/skills/evaluate-help/SKILL.md",
+   "digest": "sha256:c692c6f8be5f970f1f6916eae481c56ee3c0a569c9b26b13dfb77a3fc4381873"
+  },
+  {
+   "path": ".codex/skills/evaluate-help/scripts/SHA256SUMS",
+   "digest": "sha256:bbb6b27c7e35f763c43868f20f657418ef3290b807d06bd3dcad10ee52f4b6a2"
+  },
+  {
+   "path": ".codex/skills/evaluate-help/scripts/speckit-context.py",
+   "digest": "sha256:0909790cc9e29f072c73acc324d85664fd5aee329ec5bd5cfe326d372cb3efe4"
+  },
+  {
+   "path": ".codex/skills/evaluate-help/scripts/speckit-tasks-to-issues.sh",
+   "digest": "sha256:4119ea73b9de94ba65070d229bf9fcae75b7cb48107f27309ceebff2d8f084ec"
+  },
+  {
+   "path": ".codex/skills/evaluate-issue/SKILL.md",
+   "digest": "sha256:87f165efb8bd814a46d7423efdb34c4ed5a9c0bb9f672aa5f94ef743a8e407b3"
+  },
+  {
+   "path": ".codex/skills/evaluate-issue/docs/agents/issue-contract.md",
+   "digest": "sha256:b25d0aca680569e4bb80eb719e3d9342bfb49cc9b1544df313979079bf06d36d"
+  },
+  {
+   "path": ".codex/skills/evaluate-issue/docs/agents/knowledge-lifecycle.md",
+   "digest": "sha256:91862cb685cc9c77602acfe2ead37b843ed7d5a9749b73161d0ff20c1833726d"
+  },
+  {
+   "path": ".codex/skills/evaluate-issue/reference.md",
+   "digest": "sha256:3a31bdd568232403d00aaca76772a73b27f7db74ad838217257ab01b72d3e55e"
+  },
+  {
+   "path": ".codex/skills/evaluate-issue/scripts/SHA256SUMS",
+   "digest": "sha256:bbb6b27c7e35f763c43868f20f657418ef3290b807d06bd3dcad10ee52f4b6a2"
+  },
+  {
+   "path": ".codex/skills/evaluate-issue/scripts/speckit-context.py",
+   "digest": "sha256:0909790cc9e29f072c73acc324d85664fd5aee329ec5bd5cfe326d372cb3efe4"
+  },
+  {
+   "path": ".codex/skills/evaluate-issue/scripts/speckit-tasks-to-issues.sh",
+   "digest": "sha256:4119ea73b9de94ba65070d229bf9fcae75b7cb48107f27309ceebff2d8f084ec"
+  },
+  {
+   "path": ".codex/skills/flow-auto/SKILL.md",
+   "digest": "sha256:3f9bedb2676482ec8190e13b97c723458ce13af7a5d4a2763157a26137148e58"
+  },
+  {
+   "path": ".codex/skills/flow-auto/docs/agents/closing-report-contract.md",
+   "digest": "sha256:ed3ea6128120c22fa82f483110c87470afd198c25b199da8d840528cd2e1ad50"
+  },
+  {
+   "path": ".codex/skills/flow-auto/docs/agents/detector-contracts.md",
+   "digest": "sha256:0970116e8e5e68904f9976b0fcffe34b4736e696fd39f89a48009c6fee98ba13"
+  },
+  {
+   "path": ".codex/skills/flow-auto/docs/agents/flow-plan-record.md",
+   "digest": "sha256:8688adace901ce972697dfb28bc005d6374afc5896e5cefd00a9b11abf13378e"
+  },
+  {
+   "path": ".codex/skills/flow-auto/docs/agents/issue-contract.md",
+   "digest": "sha256:b25d0aca680569e4bb80eb719e3d9342bfb49cc9b1544df313979079bf06d36d"
+  },
+  {
+   "path": ".codex/skills/flow-auto/docs/agents/knowledge-lifecycle.md",
+   "digest": "sha256:91862cb685cc9c77602acfe2ead37b843ed7d5a9749b73161d0ff20c1833726d"
+  },
+  {
+   "path": ".codex/skills/flow-auto/docs/decisions/0007-counter-model-review.md",
+   "digest": "sha256:fbdebeb3db10b45bd7873fde1cd76c0db893c4f26c2f6ec619085bd1be16e842"
+  },
+  {
+   "path": ".codex/skills/flow-auto/docs/decisions/0008-instrument-negative-control-bound.md",
+   "digest": "sha256:5cd066ffc7644eac272d7722eddc11127ccf6a4696022ddbe80f95adf25708be"
+  },
+  {
+   "path": ".codex/skills/flow-auto/docs/decisions/0009-oscillation-control.md",
+   "digest": "sha256:8fb644b69ee093ac619cf22c8911a464b8cb7bdce05ea1e2c526b12ad0604f52"
+  },
+  {
+   "path": ".codex/skills/flow-auto/lib/vendor.py",
+   "digest": "sha256:f0ff18ba3f987a0067e40d01582229d0073544556c866d3a613855f7f733a4a8"
+  },
+  {
+   "path": ".codex/skills/flow-auto/reference.md",
+   "digest": "sha256:15b3133822ad3479dda65026d8773b41c44837f4e97c17e297069347db19da6b"
+  },
+  {
+   "path": ".codex/skills/flow-auto/scripts/SHA256SUMS",
+   "digest": "sha256:968cd8ed35272d55555ebc5a15735af0b552426604189b177dbf6b90d5fb8921"
+  },
+  {
+   "path": ".codex/skills/flow-auto/scripts/check-ignored-additions.sh",
+   "digest": "sha256:6d84bf201725b5de01f184803ac2048fbc3d6aa4e93eca520fa88fea329f8194"
+  },
+  {
+   "path": ".codex/skills/flow-auto/scripts/codex-skill-resync.sh",
+   "digest": "sha256:43f257169f891098fdc205cb3109b1636c055aeedf7f0a6357ff5f81f317df5d"
+  },
+  {
+   "path": ".codex/skills/flow-auto/scripts/codex-skill-sync.py",
+   "digest": "sha256:228436936e7f913218d1ae0433c44d6c4f218274f235c4f14e30f91a3e426cc1"
+  },
+  {
+   "path": ".codex/skills/flow-auto/scripts/counter-model-receipt.py",
+   "digest": "sha256:6ae49b19a3401e870b733439cd762485d96a6cca9fe1ef75e51e87f9f6505a2d"
+  },
+  {
+   "path": ".codex/skills/flow-auto/scripts/counter-model-reviewer-attribution.py",
+   "digest": "sha256:26ffdcbc2a26ac778c1576f868340f70b9f7d9ac4244ba6b60ec38e3edf7eb85"
+  },
+  {
+   "path": ".codex/skills/flow-auto/scripts/eli5-vendor.py",
+   "digest": "sha256:6a4ea2ba5ae9a62381bd521fa3ae3639fbcbb26aa3b263aa34ede6a6c52773e5"
+  },
+  {
+   "path": ".codex/skills/flow-auto/scripts/flow-ci-status.sh",
+   "digest": "sha256:1f753a02030058f0e2311f9878dfdd09587fd012b848313eaa679ea996f7ba98"
+  },
+  {
+   "path": ".codex/skills/flow-auto/scripts/flow-driver-capability.sh",
+   "digest": "sha256:4e8132ddc02ced5c17c2e86cf2031bf2cb9232ee0093dee437af4c430452d82b"
+  },
+  {
+   "path": ".codex/skills/flow-auto/scripts/flow-finish-gate.sh",
+   "digest": "sha256:3d604f4e3d0c38dabd957d6b2c2d552fc1ec76550e3b0c5df00b78a051fb1751"
+  },
+  {
+   "path": ".codex/skills/flow-auto/scripts/flow-live-driver-guard.sh",
+   "digest": "sha256:179cc0b6126859f876c60c8ba5ee6cb462114960996315d6592a35594b6181c2"
+  },
+  {
+   "path": ".codex/skills/flow-auto/scripts/flow-plan-record.py",
+   "digest": "sha256:7cfbd4d0eccde0f49d5202d18fc1c4d60064f661935a75960938fb64ba0ca2d5"
+  },
+  {
+   "path": ".codex/skills/flow-auto/scripts/flow-stale-check.sh",
+   "digest": "sha256:0197b10e564650a895bbfb9809b25e83238ca8d0763d720471f66f4c2296f4c0"
+  },
+  {
+   "path": ".codex/skills/flow-auto/scripts/flow-start-resolve.sh",
+   "digest": "sha256:57744501570e70878ba9958cbcdd3d5969ffb3c2d76094cd3818aaf1d61bf519"
+  },
+  {
+   "path": ".codex/skills/flow-auto/scripts/flow-worktree-claim.sh",
+   "digest": "sha256:28ee941465b2b389c75889e79561bdfff05e3e6ba12f754e41f4f70464834a64"
+  },
+  {
+   "path": ".codex/skills/flow-auto/scripts/flow-worktree-guard.sh",
+   "digest": "sha256:16edebc5ec96685d45b6ad6228fb904f61b12ff6caccf97d667f173ff7370280"
+  },
+  {
+   "path": ".codex/skills/flow-auto/scripts/friction-log.sh",
+   "digest": "sha256:16302cb9f88ce225f2673dc3730667cd9081f8c44f2696b7f5ee732b27555660"
+  },
+  {
+   "path": ".codex/skills/flow-auto/scripts/gate-lib.sh",
+   "digest": "sha256:4095e524bf802a97f48add745e5c64addfe1055eac67c484b5ad81e5c26b38a8"
+  },
+  {
+   "path": ".codex/skills/flow-auto/scripts/gh-pr-merge.sh",
+   "digest": "sha256:4e9a4b706beaff6aa62ab7b3d31ccfcc9a42a121fb633e793ea376ef2aeb1292"
+  },
+  {
+   "path": ".codex/skills/flow-auto/scripts/hook-permission-census.sh",
+   "digest": "sha256:31ff4ea2c863e580c40fa80f3fad66d1b443382140d6e7f397435825809c05e3"
+  },
+  {
+   "path": ".codex/skills/flow-auto/scripts/speckit-context.py",
+   "digest": "sha256:0909790cc9e29f072c73acc324d85664fd5aee329ec5bd5cfe326d372cb3efe4"
+  },
+  {
+   "path": ".codex/skills/flow-auto/scripts/stash-worktree-guard.sh",
+   "digest": "sha256:cc7e9fee8358f959310ee38b221825511065c413386f39e5291a78ca33959745"
+  },
+  {
+   "path": ".codex/skills/flow-auto/scripts/worktree-remove.sh",
+   "digest": "sha256:4cdf7979a1b8e9f430e28a7d3c1c6264f2b11287aeec5c4868362ae8bc8a6403"
+  },
+  {
+   "path": ".codex/skills/flow-check/SKILL.md",
+   "digest": "sha256:8774475c2021f9c9a8ad5a9375ffbd063fefcc908e01899355afadf636af16a7"
+  },
+  {
+   "path": ".codex/skills/flow-check/reference.md",
+   "digest": "sha256:0420925c74de20414efd8918816d7c4a7c595aa39f2d7f795878305bc7a808d4"
+  },
+  {
+   "path": ".codex/skills/flow-check/scripts/SHA256SUMS",
+   "digest": "sha256:86ea3a48d26547ef73ddabb5e23ea012c551c63d8ea798ccb0180ad2cd3ea5a3"
+  },
+  {
+   "path": ".codex/skills/flow-check/scripts/check-ignored-additions.sh",
+   "digest": "sha256:6d84bf201725b5de01f184803ac2048fbc3d6aa4e93eca520fa88fea329f8194"
+  },
+  {
+   "path": ".codex/skills/flow-check/scripts/counter-model-receipt.py",
+   "digest": "sha256:6ae49b19a3401e870b733439cd762485d96a6cca9fe1ef75e51e87f9f6505a2d"
+  },
+  {
+   "path": ".codex/skills/flow-check/scripts/flow-finish-gate.sh",
+   "digest": "sha256:3d604f4e3d0c38dabd957d6b2c2d552fc1ec76550e3b0c5df00b78a051fb1751"
+  },
+  {
+   "path": ".codex/skills/flow-check/scripts/gate-lib.sh",
+   "digest": "sha256:4095e524bf802a97f48add745e5c64addfe1055eac67c484b5ad81e5c26b38a8"
+  },
+  {
+   "path": ".codex/skills/flow-cleanup/SKILL.md",
+   "digest": "sha256:cb27bd14cb7e7c77094d8330cba12227a3600849f7ae89bf83b088fa5ffd4ee2"
+  },
+  {
+   "path": ".codex/skills/flow-cleanup/docs/decisions/0006-worktree-teardown-ownership.md",
+   "digest": "sha256:8c34c74ac7d9135638e05714fcb102437ac7a996e2ec6d82f3a5a8c9b624f8dc"
+  },
+  {
+   "path": ".codex/skills/flow-cleanup/reference.md",
+   "digest": "sha256:562e86a55b032844d016e4d2d1c4ac118807ee526342a02765f7c63a2171878d"
+  },
+  {
+   "path": ".codex/skills/flow-cleanup/scripts/SHA256SUMS",
+   "digest": "sha256:152bc0a408159411a8b10f2b57e4dd286d1199f73920e3fb058adcdf0031191f"
+  },
+  {
+   "path": ".codex/skills/flow-cleanup/scripts/flow-worktree-claim.sh",
+   "digest": "sha256:28ee941465b2b389c75889e79561bdfff05e3e6ba12f754e41f4f70464834a64"
+  },
+  {
+   "path": ".codex/skills/flow-cleanup/scripts/flow-worktree-sweep.sh",
+   "digest": "sha256:cf34a5aa54ee236438ff1575f048d9c938d59879b448b33f838beeda46d5dcc5"
+  },
+  {
+   "path": ".codex/skills/flow-cleanup/scripts/worktree-remove.sh",
+   "digest": "sha256:4cdf7979a1b8e9f430e28a7d3c1c6264f2b11287aeec5c4868362ae8bc8a6403"
+  },
+  {
+   "path": ".codex/skills/flow-deploy/SKILL.md",
+   "digest": "sha256:d2d8b2429d98e34368b984f7c029540920c68a5f0b51035b21bfb5e84b4617c8"
+  },
+  {
+   "path": ".codex/skills/flow-deploy/reference.md",
+   "digest": "sha256:44d6ff5ee88313144a64bbacdc0eeceb67753e8c492c39f7cda37016985c64d1"
+  },
+  {
+   "path": ".codex/skills/flow-doctor/SKILL.md",
+   "digest": "sha256:b1d568f45760ceeaf8c11cf0a6084e88c4d0cee216e5567f302e2813c7b3bd4a"
+  },
+  {
+   "path": ".codex/skills/flow-doctor/reference.md",
+   "digest": "sha256:d5cd1468f4d782fa2d6b7cf9f1afdbaec0265c717adcbe7a9cff4fd443149bd4"
+  },
+  {
+   "path": ".codex/skills/flow-doctor/scripts/SHA256SUMS",
+   "digest": "sha256:7726ee0a0dba8f595cee496d768fd755c9563d6b41b7257be1ff5e38adea25eb"
+  },
+  {
+   "path": ".codex/skills/flow-doctor/scripts/flow-helpers-install.sh",
+   "digest": "sha256:6a26b0ecf6b8ceeb900a34b639b18f1153b16873fab324355b5f9b8c0bedcc52"
+  },
+  {
+   "path": ".codex/skills/flow-doctor/scripts/flow-worktree-claim.sh",
+   "digest": "sha256:28ee941465b2b389c75889e79561bdfff05e3e6ba12f754e41f4f70464834a64"
+  },
+  {
+   "path": ".codex/skills/flow-doctor/scripts/hook-mask-output.sh",
+   "digest": "sha256:b40d7ac1cf93114acc885074267cb6f821fbb294c72030a3146d3d60c8e77a91"
+  },
+  {
+   "path": ".codex/skills/flow-doctor/scripts/worktree-remove.sh",
+   "digest": "sha256:4cdf7979a1b8e9f430e28a7d3c1c6264f2b11287aeec5c4868362ae8bc8a6403"
+  },
+  {
+   "path": ".codex/skills/flow-eli5/SKILL.md",
+   "digest": "sha256:82843fb9c0c4eed1cf694467077ae665ec263b27f2c1ae6ee0d84dc26de81c4d"
+  },
+  {
+   "path": ".codex/skills/flow-eli5/docs/agents/closing-report-contract.md",
+   "digest": "sha256:ed3ea6128120c22fa82f483110c87470afd198c25b199da8d840528cd2e1ad50"
+  },
+  {
+   "path": ".codex/skills/flow-eli5/docs/agents/detector-contracts.md",
+   "digest": "sha256:0970116e8e5e68904f9976b0fcffe34b4736e696fd39f89a48009c6fee98ba13"
+  },
+  {
+   "path": ".codex/skills/flow-eli5/lib/vendor.py",
+   "digest": "sha256:f0ff18ba3f987a0067e40d01582229d0073544556c866d3a613855f7f733a4a8"
+  },
+  {
+   "path": ".codex/skills/flow-eli5/reference.md",
+   "digest": "sha256:8558b43317b392e3b6f9cece4edf85a02d2551efb8c960dd9155288857a5692d"
+  },
+  {
+   "path": ".codex/skills/flow-eli5/scripts/SHA256SUMS",
+   "digest": "sha256:0ff680c35aa0589d186595d531c6a2587a21007edec520b1e424d506cc9c87e9"
+  },
+  {
+   "path": ".codex/skills/flow-eli5/scripts/eli5-core-drift.sh",
+   "digest": "sha256:3d50fddcef06e3babea23fdbbfb0bd58dd0e665aeab44115ecae8601a8095a92"
+  },
+  {
+   "path": ".codex/skills/flow-eli5/scripts/eli5-vendor.py",
+   "digest": "sha256:6a4ea2ba5ae9a62381bd521fa3ae3639fbcbb26aa3b263aa34ede6a6c52773e5"
+  },
+  {
+   "path": ".codex/skills/flow-finish/SKILL.md",
+   "digest": "sha256:3c74ad6d72cfb9c95151b0b38074798edc32b376fa81119304bcf70ff0dc45f7"
+  },
+  {
+   "path": ".codex/skills/flow-finish/docs/agents/closing-report-contract.md",
+   "digest": "sha256:ed3ea6128120c22fa82f483110c87470afd198c25b199da8d840528cd2e1ad50"
+  },
+  {
+   "path": ".codex/skills/flow-finish/docs/agents/detector-contracts.md",
+   "digest": "sha256:0970116e8e5e68904f9976b0fcffe34b4736e696fd39f89a48009c6fee98ba13"
+  },
+  {
+   "path": ".codex/skills/flow-finish/docs/agents/issue-contract.md",
+   "digest": "sha256:b25d0aca680569e4bb80eb719e3d9342bfb49cc9b1544df313979079bf06d36d"
+  },
+  {
+   "path": ".codex/skills/flow-finish/docs/agents/knowledge-lifecycle.md",
+   "digest": "sha256:91862cb685cc9c77602acfe2ead37b843ed7d5a9749b73161d0ff20c1833726d"
+  },
+  {
+   "path": ".codex/skills/flow-finish/lib/vendor.py",
+   "digest": "sha256:f0ff18ba3f987a0067e40d01582229d0073544556c866d3a613855f7f733a4a8"
+  },
+  {
+   "path": ".codex/skills/flow-finish/reference.md",
+   "digest": "sha256:079934985db252f68ddeac84353b9f8b39b359cc1648193b9b11fee5d6d0c977"
+  },
+  {
+   "path": ".codex/skills/flow-finish/scripts/SHA256SUMS",
+   "digest": "sha256:29dabf68445b2ea9564c20ec15f7adff4cb76f4ffa5201c365a866e6e0f4d644"
+  },
+  {
+   "path": ".codex/skills/flow-finish/scripts/check-ignored-additions.sh",
+   "digest": "sha256:6d84bf201725b5de01f184803ac2048fbc3d6aa4e93eca520fa88fea329f8194"
+  },
+  {
+   "path": ".codex/skills/flow-finish/scripts/codex-skill-resync.sh",
+   "digest": "sha256:43f257169f891098fdc205cb3109b1636c055aeedf7f0a6357ff5f81f317df5d"
+  },
+  {
+   "path": ".codex/skills/flow-finish/scripts/codex-skill-sync.py",
+   "digest": "sha256:228436936e7f913218d1ae0433c44d6c4f218274f235c4f14e30f91a3e426cc1"
+  },
+  {
+   "path": ".codex/skills/flow-finish/scripts/counter-model-receipt.py",
+   "digest": "sha256:6ae49b19a3401e870b733439cd762485d96a6cca9fe1ef75e51e87f9f6505a2d"
+  },
+  {
+   "path": ".codex/skills/flow-finish/scripts/eli5-vendor.py",
+   "digest": "sha256:6a4ea2ba5ae9a62381bd521fa3ae3639fbcbb26aa3b263aa34ede6a6c52773e5"
+  },
+  {
+   "path": ".codex/skills/flow-finish/scripts/flow-finish-gate.sh",
+   "digest": "sha256:3d604f4e3d0c38dabd957d6b2c2d552fc1ec76550e3b0c5df00b78a051fb1751"
+  },
+  {
+   "path": ".codex/skills/flow-finish/scripts/flow-stale-check.sh",
+   "digest": "sha256:0197b10e564650a895bbfb9809b25e83238ca8d0763d720471f66f4c2296f4c0"
+  },
+  {
+   "path": ".codex/skills/flow-finish/scripts/gate-lib.sh",
+   "digest": "sha256:4095e524bf802a97f48add745e5c64addfe1055eac67c484b5ad81e5c26b38a8"
+  },
+  {
+   "path": ".codex/skills/flow-finish/scripts/knowledge-graduation-check.py",
+   "digest": "sha256:bc4d29bd303fef14c188442d4c4aa68fc9ce5a6465a79b61d89a9eb4e9610c6f"
+  },
+  {
+   "path": ".codex/skills/flow-finish/scripts/speckit-context.py",
+   "digest": "sha256:0909790cc9e29f072c73acc324d85664fd5aee329ec5bd5cfe326d372cb3efe4"
+  },
+  {
+   "path": ".codex/skills/flow-help/SKILL.md",
+   "digest": "sha256:fb659a78ba63916f8a91ffa3b7edfacf7c61d2211cc1342b786a6f7e72a5d9f0"
+  },
+  {
+   "path": ".codex/skills/flow-help/reference.md",
+   "digest": "sha256:5dca52d00cc6908bca3a9d6b8fc83543ec171daca769a35428026600c9543644"
+  },
+  {
+   "path": ".codex/skills/flow-merge/SKILL.md",
+   "digest": "sha256:8a94abf97d449ba4850d39b50c04d3fa71604af2a4711ccf9284bb1fe1d8e872"
+  },
+  {
+   "path": ".codex/skills/flow-merge/docs/agents/closing-report-contract.md",
+   "digest": "sha256:ed3ea6128120c22fa82f483110c87470afd198c25b199da8d840528cd2e1ad50"
+  },
+  {
+   "path": ".codex/skills/flow-merge/docs/agents/detector-contracts.md",
+   "digest": "sha256:0970116e8e5e68904f9976b0fcffe34b4736e696fd39f89a48009c6fee98ba13"
+  },
+  {
+   "path": ".codex/skills/flow-merge/docs/agents/issue-contract.md",
+   "digest": "sha256:b25d0aca680569e4bb80eb719e3d9342bfb49cc9b1544df313979079bf06d36d"
+  },
+  {
+   "path": ".codex/skills/flow-merge/docs/agents/knowledge-lifecycle.md",
+   "digest": "sha256:91862cb685cc9c77602acfe2ead37b843ed7d5a9749b73161d0ff20c1833726d"
+  },
+  {
+   "path": ".codex/skills/flow-merge/reference.md",
+   "digest": "sha256:7ea6ae1b14ff6a51b72cb9800be1ed8b22b3ed36e0f47c87798d8ea422c750b6"
+  },
+  {
+   "path": ".codex/skills/flow-merge/scripts/SHA256SUMS",
+   "digest": "sha256:9d52170d24411b137a57c08c2b31cd7ffe77a3757107d2b951b8b3e8a88c223c"
+  },
+  {
+   "path": ".codex/skills/flow-merge/scripts/counter-model-receipt.py",
+   "digest": "sha256:6ae49b19a3401e870b733439cd762485d96a6cca9fe1ef75e51e87f9f6505a2d"
+  },
+  {
+   "path": ".codex/skills/flow-merge/scripts/flow-finish-gate.sh",
+   "digest": "sha256:3d604f4e3d0c38dabd957d6b2c2d552fc1ec76550e3b0c5df00b78a051fb1751"
+  },
+  {
+   "path": ".codex/skills/flow-merge/scripts/flow-worktree-claim.sh",
+   "digest": "sha256:28ee941465b2b389c75889e79561bdfff05e3e6ba12f754e41f4f70464834a64"
+  },
+  {
+   "path": ".codex/skills/flow-merge/scripts/friction-log.sh",
+   "digest": "sha256:16302cb9f88ce225f2673dc3730667cd9081f8c44f2696b7f5ee732b27555660"
+  },
+  {
+   "path": ".codex/skills/flow-merge/scripts/gate-lib.sh",
+   "digest": "sha256:4095e524bf802a97f48add745e5c64addfe1055eac67c484b5ad81e5c26b38a8"
+  },
+  {
+   "path": ".codex/skills/flow-merge/scripts/gh-pr-merge.sh",
+   "digest": "sha256:4e9a4b706beaff6aa62ab7b3d31ccfcc9a42a121fb633e793ea376ef2aeb1292"
+  },
+  {
+   "path": ".codex/skills/flow-merge/scripts/worktree-remove.sh",
+   "digest": "sha256:4cdf7979a1b8e9f430e28a7d3c1c6264f2b11287aeec5c4868362ae8bc8a6403"
+  },
+  {
+   "path": ".codex/skills/flow-register/SKILL.md",
+   "digest": "sha256:0c8042688f98f9a1a4015d2be52b9328d685db77157a56d2cafe7eead2fce02f"
+  },
+  {
+   "path": ".codex/skills/flow-register/reference.md",
+   "digest": "sha256:569134040410aca7bfb43ccad61251e32436f66b6b72fe731c202ba0a01c612c"
+  },
+  {
+   "path": ".codex/skills/flow-register/scripts/SHA256SUMS",
+   "digest": "sha256:f4ae5e14e3deb30d59a2aa699192c22240b08818e52e0ad8f8c0344e641e1fb8"
+  },
+  {
+   "path": ".codex/skills/flow-register/scripts/flow-driver-capability.sh",
+   "digest": "sha256:4e8132ddc02ced5c17c2e86cf2031bf2cb9232ee0093dee437af4c430452d82b"
+  },
+  {
+   "path": ".codex/skills/flow-register/scripts/flow-vantage.sh",
+   "digest": "sha256:abf0ef9f5421bb958f4ccdd973c65c33bc2533c4ce2ab91b5447346add197248"
+  },
+  {
+   "path": ".codex/skills/flow-register/scripts/flow-wave-lexicon.sh",
+   "digest": "sha256:f54492dba94f31cf4cbb919b258f564f61b18f313efb57ab06603d44a87233a5"
+  },
+  {
+   "path": ".codex/skills/flow-register/scripts/flow-wave-mailbox.sh",
+   "digest": "sha256:7a52c1c128a6b8553553776e07794e326dccf203b890f544b913db02c95ec09b"
+  },
+  {
+   "path": ".codex/skills/flow-register/scripts/flow-wave-registry.sh",
+   "digest": "sha256:351983edc3dd1ec1894f7a64cfb82f742d0203de62be586587d5b8f6c9bb75d3"
+  },
+  {
+   "path": ".codex/skills/flow-register/scripts/toolchain-provenance.sh",
+   "digest": "sha256:b4e5586104bb0995b4921bae517271a07261ffef64c2ef8c60914241b61796ef"
+  },
+  {
+   "path": ".codex/skills/flow-repair/SKILL.md",
+   "digest": "sha256:0fb5f457a1e1eb17717059fd62dad64c2d4b9f3e23e3fc56e552b4e6b38f4066"
+  },
+  {
+   "path": ".codex/skills/flow-repair/reference.md",
+   "digest": "sha256:e95085aafbc688f90d44b0b4dd41f2685405c651f407092eac8f0fe44275b5d0"
+  },
+  {
+   "path": ".codex/skills/flow-repair/scripts/SHA256SUMS",
+   "digest": "sha256:4b7d5da28d6ba5a1938eb56f3cd22ccd9f447e632ec406cc50c4618177582db8"
+  },
+  {
+   "path": ".codex/skills/flow-repair/scripts/flow-helpers-install.sh",
+   "digest": "sha256:6a26b0ecf6b8ceeb900a34b639b18f1153b16873fab324355b5f9b8c0bedcc52"
+  },
+  {
+   "path": ".codex/skills/flow-repair/scripts/flow-live-driver-guard.sh",
+   "digest": "sha256:179cc0b6126859f876c60c8ba5ee6cb462114960996315d6592a35594b6181c2"
+  },
+  {
+   "path": ".codex/skills/flow-repair/scripts/flow-start-resolve.sh",
+   "digest": "sha256:57744501570e70878ba9958cbcdd3d5969ffb3c2d76094cd3818aaf1d61bf519"
+  },
+  {
+   "path": ".codex/skills/flow-repair/scripts/stash-worktree-guard.sh",
+   "digest": "sha256:cc7e9fee8358f959310ee38b221825511065c413386f39e5291a78ca33959745"
+  },
+  {
+   "path": ".codex/skills/flow-start/SKILL.md",
+   "digest": "sha256:51a4843409961a70e63bc56e89e6f78bcd9494d40b1b4ac9518927159d3df791"
+  },
+  {
+   "path": ".codex/skills/flow-start/reference.md",
+   "digest": "sha256:2733989a3de4513725426d791b12e4a1410883ffe62ffb0f3c65ef0d55935111"
+  },
+  {
+   "path": ".codex/skills/flow-start/scripts/SHA256SUMS",
+   "digest": "sha256:4167b51878343b10ce2a4b3a5563cbd1e1f5f7573e9c45bcb8e51e1abde0e220"
+  },
+  {
+   "path": ".codex/skills/flow-start/scripts/flow-live-driver-guard.sh",
+   "digest": "sha256:179cc0b6126859f876c60c8ba5ee6cb462114960996315d6592a35594b6181c2"
+  },
+  {
+   "path": ".codex/skills/flow-start/scripts/flow-start-resolve.sh",
+   "digest": "sha256:57744501570e70878ba9958cbcdd3d5969ffb3c2d76094cd3818aaf1d61bf519"
+  },
+  {
+   "path": ".codex/skills/flow-start/scripts/flow-worktree-claim.sh",
+   "digest": "sha256:28ee941465b2b389c75889e79561bdfff05e3e6ba12f754e41f4f70464834a64"
+  },
+  {
+   "path": ".codex/skills/flow-start/scripts/flow-worktree-guard.sh",
+   "digest": "sha256:16edebc5ec96685d45b6ad6228fb904f61b12ff6caccf97d667f173ff7370280"
+  },
+  {
+   "path": ".codex/skills/flow-start/scripts/stash-worktree-guard.sh",
+   "digest": "sha256:cc7e9fee8358f959310ee38b221825511065c413386f39e5291a78ca33959745"
+  },
+  {
+   "path": ".codex/skills/flow-start/scripts/worktree-remove.sh",
+   "digest": "sha256:4cdf7979a1b8e9f430e28a7d3c1c6264f2b11287aeec5c4868362ae8bc8a6403"
+  },
+  {
+   "path": ".codex/skills/flow-status/SKILL.md",
+   "digest": "sha256:12379da5258d7df4579fdd09ef9e2962ed13e63474fb84b47d9563e744b637e8"
+  },
+  {
+   "path": ".codex/skills/flow-sync/SKILL.md",
+   "digest": "sha256:f5d5d72b6c0192f3b0a24d594908d0662b92d441219827e7c08f822f26bba9f4"
+  },
+  {
+   "path": ".codex/skills/flow-wave/SKILL.md",
+   "digest": "sha256:4d6a689dc24a01a9d595e3548c12bdc025f7f4d3b4354770fe8fd7df2bb51a7f"
+  },
+  {
+   "path": ".codex/skills/flow-wave/docs/decisions/0006-worktree-teardown-ownership.md",
+   "digest": "sha256:8c34c74ac7d9135638e05714fcb102437ac7a996e2ec6d82f3a5a8c9b624f8dc"
+  },
+  {
+   "path": ".codex/skills/flow-wave/reference.md",
+   "digest": "sha256:0d1df7051c34b7ddb07b172fe5a3154546c9b0c685262d79e6a2270ba2048cc1"
+  },
+  {
+   "path": ".codex/skills/flow-wave/scripts/SHA256SUMS",
+   "digest": "sha256:b14add332bda6e4b23ed2d3c75967f1f6f871b4f035f7dc8461f58a494527d94"
+  },
+  {
+   "path": ".codex/skills/flow-wave/scripts/flow-driver-capability.sh",
+   "digest": "sha256:4e8132ddc02ced5c17c2e86cf2031bf2cb9232ee0093dee437af4c430452d82b"
+  },
+  {
+   "path": ".codex/skills/flow-wave/scripts/flow-pr-watch.sh",
+   "digest": "sha256:b7eba96d9bfe514839970fa3c2708c34913eb217ae0865c3bf2dfb517d438de5"
+  },
+  {
+   "path": ".codex/skills/flow-wave/scripts/flow-vantage.sh",
+   "digest": "sha256:abf0ef9f5421bb958f4ccdd973c65c33bc2533c4ce2ab91b5447346add197248"
+  },
+  {
+   "path": ".codex/skills/flow-wave/scripts/flow-wave-lexicon.sh",
+   "digest": "sha256:f54492dba94f31cf4cbb919b258f564f61b18f313efb57ab06603d44a87233a5"
+  },
+  {
+   "path": ".codex/skills/flow-wave/scripts/flow-wave-mailbox.sh",
+   "digest": "sha256:7a52c1c128a6b8553553776e07794e326dccf203b890f544b913db02c95ec09b"
+  },
+  {
+   "path": ".codex/skills/flow-wave/scripts/flow-wave-plan.py",
+   "digest": "sha256:df2871bce4ac8a6ed36ff122a4bd425cd8087dc736d8dd5b18e141ca0d24eff3"
+  },
+  {
+   "path": ".codex/skills/flow-wave/scripts/flow-wave-registry.sh",
+   "digest": "sha256:351983edc3dd1ec1894f7a64cfb82f742d0203de62be586587d5b8f6c9bb75d3"
+  },
+  {
+   "path": ".codex/skills/flow-wave/scripts/flow-wave-residuals.py",
+   "digest": "sha256:aba5a616aca96a290a1db5046c9667484747afa0211ddb733d695128cfb05f9c"
+  },
+  {
+   "path": ".codex/skills/flow-wave/scripts/flow-worktree-claim.sh",
+   "digest": "sha256:28ee941465b2b389c75889e79561bdfff05e3e6ba12f754e41f4f70464834a64"
+  },
+  {
+   "path": ".codex/skills/flow-wave/scripts/flow-worktree-sweep.sh",
+   "digest": "sha256:cf34a5aa54ee236438ff1575f048d9c938d59879b448b33f838beeda46d5dcc5"
+  },
+  {
+   "path": ".codex/skills/flow-wave/scripts/speckit-context.py",
+   "digest": "sha256:0909790cc9e29f072c73acc324d85664fd5aee329ec5bd5cfe326d372cb3efe4"
+  },
+  {
+   "path": ".codex/skills/flow-wave/scripts/speckit-tasks-to-issues.sh",
+   "digest": "sha256:4119ea73b9de94ba65070d229bf9fcae75b7cb48107f27309ceebff2d8f084ec"
+  },
+  {
+   "path": ".codex/skills/flow-wave/scripts/toolchain-provenance.sh",
+   "digest": "sha256:b4e5586104bb0995b4921bae517271a07261ffef64c2ef8c60914241b61796ef"
+  },
+  {
+   "path": ".codex/skills/flow-wave/scripts/worktree-remove.sh",
+   "digest": "sha256:4cdf7979a1b8e9f430e28a7d3c1c6264f2b11287aeec5c4868362ae8bc8a6403"
+  },
+  {
+   "path": ".codex/skills/github-help/SKILL.md",
+   "digest": "sha256:c73debb9fa1e03062b30402d8befc85f3edb28b0f36813ffe2b874c615e6f710"
+  },
+  {
+   "path": ".codex/skills/github-issue-close/SKILL.md",
+   "digest": "sha256:8cf949f4e817bcb78bea90351bd0eb0dfc59d30a0a37a5e03b53896ca7335cca"
+  },
+  {
+   "path": ".codex/skills/github-issue-close/reference.md",
+   "digest": "sha256:a4ea3430d066b05faf0c22b64f6ec50b9070a228b9cc760f8083804cd70d3908"
+  },
+  {
+   "path": ".codex/skills/github-issue-create/SKILL.md",
+   "digest": "sha256:160799efb2a1cb04bc549975767b39d78d62c573a3810fc8e7c7602e0acf0608"
+  },
+  {
+   "path": ".codex/skills/github-issue-create/docs/agents/issue-contract.md",
+   "digest": "sha256:b25d0aca680569e4bb80eb719e3d9342bfb49cc9b1544df313979079bf06d36d"
+  },
+  {
+   "path": ".codex/skills/github-issue-create/docs/agents/knowledge-lifecycle.md",
+   "digest": "sha256:91862cb685cc9c77602acfe2ead37b843ed7d5a9749b73161d0ff20c1833726d"
+  },
+  {
+   "path": ".codex/skills/github-issue-create/reference.md",
+   "digest": "sha256:85eaa8d1b23b031f1873566b8ddaeba40362ef96f7fa0c1e07be52e7c20e4c50"
+  },
+  {
+   "path": ".codex/skills/github-issue-list/SKILL.md",
+   "digest": "sha256:c8ed1f37f8868506956f79ce4a4bc63e0818ac237a6b3db9069ec731e1550434"
+  },
+  {
+   "path": ".codex/skills/github-issue-update/SKILL.md",
+   "digest": "sha256:d27c721822783c980b64ae9fa572965103c6fcc5f2e35c0465ac15d0d8c1ae97"
+  },
+  {
+   "path": ".codex/skills/github-issue-update/reference.md",
+   "digest": "sha256:b47b11e09526c40b9fb1c9ba601d06547012e961d70f7197aa04cd2d6655e095"
+  },
+  {
+   "path": ".codex/skills/github-issue-view/SKILL.md",
+   "digest": "sha256:c29ed644feef461623c7ecbcdd519185087069a2a9a939bb6d073c6f9456e665"
+  },
+  {
+   "path": ".codex/skills/project-help/SKILL.md",
+   "digest": "sha256:80a7d253836fabe09f360aa9e82e1b1d5b1aa0648f5359687239fe621355c5b9"
+  },
+  {
+   "path": ".codex/skills/project-init/SKILL.md",
+   "digest": "sha256:2a72882215fdf97867ad2242c6ea276bad2a693ab550a7cfcf9a5b6fd8bf69cd"
+  },
+  {
+   "path": ".codex/skills/project-init/docs/agents/knowledge-lifecycle.md",
+   "digest": "sha256:91862cb685cc9c77602acfe2ead37b843ed7d5a9749b73161d0ff20c1833726d"
+  },
+  {
+   "path": ".codex/skills/project-init/reference.md",
+   "digest": "sha256:1fb38b47266ee0c879a50241f311323672ed45cb5d4f779086dd42fcb576d366"
+  },
+  {
+   "path": ".codex/skills/project-init/scripts/SHA256SUMS",
+   "digest": "sha256:6538052e4757b50f0dfdbe4cba9002de26cfaaf6d2b85f5dad2526f3510b2cca"
+  },
+  {
+   "path": ".codex/skills/project-init/scripts/project-init.py",
+   "digest": "sha256:1fef1b892ac4de435d77c0bd31e8b0a3b4aedee8143caf4b0f26cc1ad8589dec"
+  },
+  {
+   "path": ".codex/skills/project-init/scripts/speckit-context.py",
+   "digest": "sha256:0909790cc9e29f072c73acc324d85664fd5aee329ec5bd5cfe326d372cb3efe4"
+  },
+  {
+   "path": ".codex/skills/project-init/scripts/speckit-tasks-to-issues.sh",
+   "digest": "sha256:4119ea73b9de94ba65070d229bf9fcae75b7cb48107f27309ceebff2d8f084ec"
+  },
+  {
+   "path": ".codex/skills/project-lite/SKILL.md",
+   "digest": "sha256:78db9dd813d75051d4185405eac46e6c276282cd1751a9c8c472d00f4d21d8f5"
+  },
+  {
+   "path": ".codex/skills/project-lite/reference.md",
+   "digest": "sha256:647c8baa32b900088a3609828192f30cfff74087e1cf43e826d0579b5a60bd6a"
+  },
+  {
+   "path": ".codex/skills/project-next/.claude/project-next-ownership.json",
+   "digest": "sha256:4613a89458503f8e5090d4e86f7a8c0171efa5e1a0972fad9a1b65133484803f"
+  },
+  {
+   "path": ".codex/skills/project-next/SKILL.md",
+   "digest": "sha256:bbed6a77837a382a82e0c786eee69eec317f860de60d01ece233a472a7064105"
+  },
+  {
+   "path": ".codex/skills/project-next/lib/project_next/__init__.py",
+   "digest": "sha256:0df00452c2ea69de59ca4a528eff28b0b79c1f2b3faedbffa7b2f89f558cf988"
+  },
+  {
+   "path": ".codex/skills/project-next/lib/project_next/classify.py",
+   "digest": "sha256:ff266bf11be02a366dc49c75ddbc8a10f248b9e7df022d71ee0ac170b390c8ef"
+  },
+  {
+   "path": ".codex/skills/project-next/lib/project_next/collect.py",
+   "digest": "sha256:d92f2b2fb83a5a03f23940ea2c72b0d2e4f79b4b83b7604b9adc3e0cc74032e4"
+  },
+  {
+   "path": ".codex/skills/project-next/lib/project_next/config.py",
+   "digest": "sha256:d050b91588390ed869053542309fc2afae4d9f266aa22eda7f642c903b47cea3"
+  },
+  {
+   "path": ".codex/skills/project-next/lib/project_next/models.py",
+   "digest": "sha256:c8da2d0730070008a4a1e27022de6a284c6a1386a88b174bcb737f514dee787f"
+  },
+  {
+   "path": ".codex/skills/project-next/lib/project_next/rank.py",
+   "digest": "sha256:fa27d94de2e3752d96388d5af7b9f209fd631d2649899686aa9ec2a1c940de9d"
+  },
+  {
+   "path": ".codex/skills/project-next/lib/project_next/render.py",
+   "digest": "sha256:3fd2958fa281dc97418697d4fb718b374ea58d334efe8d2fb522920f489340ec"
+  },
+  {
+   "path": ".codex/skills/project-next/reference.md",
+   "digest": "sha256:0cf2abd1fd09389c71afab3201edeb3b5706f34f000bfb924c48fd70b3504594"
+  },
+  {
+   "path": ".codex/skills/project-next/scripts/SHA256SUMS",
+   "digest": "sha256:905492e9357f5256317db844e7e158107884db0f5876dfd01db572fb6db576ec"
+  },
+  {
+   "path": ".codex/skills/project-next/scripts/project-next.py",
+   "digest": "sha256:ebf916841adf7784f859addc5924120351a7566ed8e31875fd35ba044c49b3ff"
+  },
+  {
+   "path": ".codex/skills/qa-help/SKILL.md",
+   "digest": "sha256:2383334a85a426aa33edc5a1c88a6b8d33a24a8e2e99cb5cad8e6930305defe7"
+  },
+  {
+   "path": ".codex/skills/qa-test/SKILL.md",
+   "digest": "sha256:10b5760ffd27d4965e5ff8614b1fac2982970a485cf54b6f02b2999053c5c898"
+  },
+  {
+   "path": ".codex/skills/qa-test/reference.md",
+   "digest": "sha256:25a2ed13320672603cf3a66f42e5ad41ef4e91ec9e4d431a9a3af36bc346423d"
+  },
+  {
+   "path": ".codex/skills/second-opinion-help/SKILL.md",
+   "digest": "sha256:efb57e96ab5cbf42a46470d0be37e36c4ba281774fe07ac4e8590f13d0ac50d4"
+  },
+  {
+   "path": ".codex/skills/second-opinion-models/SKILL.md",
+   "digest": "sha256:fc4f6c20195cb730c0e586c98a59794c9c8d63486dcdaa9b9659ead664e60125"
+  },
+  {
+   "path": ".codex/skills/second-opinion-models/reference.md",
+   "digest": "sha256:1b526389436a6e8a52fd513d7501642c7b1e77edf7440e74243ca2a2297ca40d"
+  },
+  {
+   "path": ".codex/skills/second-opinion-start/SKILL.md",
+   "digest": "sha256:d2189c67ccc560a6007ab2cd541e7358c31634e407c07ee9754a6df997a10950"
+  },
+  {
+   "path": ".codex/skills/second-opinion-start/reference.md",
+   "digest": "sha256:90e8ddfa86af602b7aa9d8adea8f1b42ea286dcd6fe0ce9dcbebc172e7456e6b"
+  },
+  {
+   "path": ".codex/skills/secrets-delete/SKILL.md",
+   "digest": "sha256:7b07d6fa0f08166827aff30d5b24a95faed85f6c23138752b158639a7eaa2a5d"
+  },
+  {
+   "path": ".codex/skills/secrets-get/SKILL.md",
+   "digest": "sha256:6d2ff473e629fdc885f4ab6baf22d3e56dbc976a3dab2a0a23ae5654d79c139f"
+  },
+  {
+   "path": ".codex/skills/secrets-help/SKILL.md",
+   "digest": "sha256:4c9a1b299edb612a2ee44fef1257715340d73871c395e550f2026a9ff6cc393c"
+  },
+  {
+   "path": ".codex/skills/secrets-list/SKILL.md",
+   "digest": "sha256:0ffcf5fcc46b3e93e98b26a68cefcf964baea90b5d717c9cadaaacd392be13a2"
+  },
+  {
+   "path": ".codex/skills/secrets-rotate/SKILL.md",
+   "digest": "sha256:a79e691be6fc6a4384cf8adc2e0e07df92912d01ea3187ff9f1a41396b22cb3e"
+  },
+  {
+   "path": ".codex/skills/secrets-run/SKILL.md",
+   "digest": "sha256:843afef7b66539fd361fe7e6a6c3bfd73ef96b1bc71410e660be4326f336e014"
+  },
+  {
+   "path": ".codex/skills/secrets-set/SKILL.md",
+   "digest": "sha256:1e6f157b437baa16aa3a43bfd7014abc5331d1219c7d1c5e707fb8b5aa9ffd8b"
+  },
+  {
+   "path": ".codex/skills/secrets-ui/SKILL.md",
+   "digest": "sha256:ceb1adad2dd06e503a98592511778f585ad3a5681b2150c14ad233bd14ecd16a"
+  },
+  {
+   "path": ".codex/skills/secrets-validate/SKILL.md",
+   "digest": "sha256:a72b89bb4c03f5c091534410c25372aba8fc55ab858ab4a4ff081bf62949bf7f"
+  },
+  {
+   "path": ".codex/skills/security-deep/SKILL.md",
+   "digest": "sha256:addce83eda56fb9d38085d6be29d9b6d7b8a44f34f22e3717ff6213d7e5b91b2"
+  },
+  {
+   "path": ".codex/skills/security-explain/SKILL.md",
+   "digest": "sha256:23374d8adcbff195d92cb3cf7c4ab8a33541bdb19187f1dfe4434bd9f162595b"
+  },
+  {
+   "path": ".codex/skills/security-help/SKILL.md",
+   "digest": "sha256:0cbe46d068be7465e8424a1c609224fb0dbedec21f239e84583c06b11250dd00"
+  },
+  {
+   "path": ".codex/skills/security-help/reference.md",
+   "digest": "sha256:a66747d9e1fbe7763895331a7ac16487c000029c6e21e2a9861e91e370f1f3a9"
+  },
+  {
+   "path": ".codex/skills/security-help/scripts/SHA256SUMS",
+   "digest": "sha256:250fce185152a7097d0af3d25b5c0c9e38cd16eeadbaee304f2a930ade8c734b"
+  },
+  {
+   "path": ".codex/skills/security-help/scripts/classify-tool-risk.py",
+   "digest": "sha256:6a22f84050aac94ffcd697d2839ece04fbe3e2e9c62c252a150e327ea0895f8d"
+  },
+  {
+   "path": ".codex/skills/security-permissions/SKILL.md",
+   "digest": "sha256:ca009774bb8bb9a93f8a8210da66818c485f4587b8d263bd8578ada92466cf51"
+  },
+  {
+   "path": ".codex/skills/security-permissions/scripts/SHA256SUMS",
+   "digest": "sha256:e297832f675bc44f46850eec9691a7fbaffec9edb41fff659a0148f062f27ea4"
+  },
+  {
+   "path": ".codex/skills/security-permissions/scripts/classify-tool-risk.py",
+   "digest": "sha256:6a22f84050aac94ffcd697d2839ece04fbe3e2e9c62c252a150e327ea0895f8d"
+  },
+  {
+   "path": ".codex/skills/security-permissions/scripts/friction-log.sh",
+   "digest": "sha256:16302cb9f88ce225f2673dc3730667cd9081f8c44f2696b7f5ee732b27555660"
+  },
+  {
+   "path": ".codex/skills/security-permissions/scripts/hook-permission-census.sh",
+   "digest": "sha256:31ff4ea2c863e580c40fa80f3fad66d1b443382140d6e7f397435825809c05e3"
+  },
+  {
+   "path": ".codex/skills/security-permissions/scripts/tool-risk-drift.py",
+   "digest": "sha256:57955a0b38f551bd3dd17bd2c521024bfa683faccc281910f0a83c915ac66562"
+  },
+  {
+   "path": ".codex/skills/security-quick/SKILL.md",
+   "digest": "sha256:f94da2c703b61cb89f720fd611f04dceeb08ccc66e043ec53c68737ec54650cc"
+  },
+  {
+   "path": ".codex/skills/security-scan/SKILL.md",
+   "digest": "sha256:70f836e06beaef6aa4b8e8113e0afdae8d942eea4efe9db069ea32c2d27ce30e"
+  },
+  {
+   "path": ".codex/skills/self-improvement-deployment/SKILL.md",
+   "digest": "sha256:d9b03a612acccda3d7d1a79889dfc810492f40858b2d40415f1688fb333613e9"
+  },
+  {
+   "path": ".codex/skills/self-improvement-deployment/reference.md",
+   "digest": "sha256:2aa771c5aebd0b4cd8eb27eb0769f5290f771b0f235b22bf03e0bbd873d46172"
+  },
+  {
+   "path": ".codex/skills/self-improvement-help/SKILL.md",
+   "digest": "sha256:143761e76b2050a0d53da65fc5a59090c184aac95c27bf7d76b0d644cd1df96a"
+  },
+  {
+   "path": ".codex/skills/self-improvement-retro/SKILL.md",
+   "digest": "sha256:011b4d04574bede15a8f6848bbe753eaec6016fb385b811e4eae55ce065d5ab3"
+  },
+  {
+   "path": ".codex/skills/self-improvement-retro/reference.md",
+   "digest": "sha256:278d8219cf5f75f894585b7974740fe717ff56db860337db4115f310fe289237"
+  },
+  {
+   "path": ".codex/skills/self-improvement-retro/scripts/SHA256SUMS",
+   "digest": "sha256:e22933c950341034f0b462cf4de6a894409935a2615356874d15f7c5d5a0789c"
+  },
+  {
+   "path": ".codex/skills/self-improvement-retro/scripts/friction-log.sh",
+   "digest": "sha256:16302cb9f88ce225f2673dc3730667cd9081f8c44f2696b7f5ee732b27555660"
+  },
+  {
+   "path": ".codex/skills/self-improvement-retro/scripts/hook-permission-census.sh",
+   "digest": "sha256:31ff4ea2c863e580c40fa80f3fad66d1b443382140d6e7f397435825809c05e3"
+  },
+  {
+   "path": ".codex/skills/self-improvement-retro/scripts/measurement-shape-scan.py",
+   "digest": "sha256:c3a1e04186d8985f9b683dce5b10a929e4c1ba98ea91031bc54584e888787cd5"
+  }
+ ],
+ "readiness": {
+  "discovery_canary": "SATISFIED",
+  "baseline_absence": "SATISFIED",
+  "discovery_canary_detail": "every declared skill discovered after delivery",
+  "baseline_absence_detail": "no declared or undeclared skill listed before delivery",
+  "evidence": "this delivered tree, delivered by the same method, into a fresh container of the same image digest, was discovered by the client's model-free listing",
+  "cache_key": {
+   "image_digest": "sha256:d1b2ced9dc6d25e9e1bc673c1973f032ced50a11da234fcd617ee376ff36eefc",
+   "tree_digest": "sha256:8c4f7a465c92547ebcde6d54084bcd5a1de48fea316d2ff8cc71b2728b776f14"
+  }
+ },
+ "image": {
+  "digest": "sha256:d1b2ced9dc6d25e9e1bc673c1973f032ced50a11da234fcd617ee376ff36eefc"
+ }
+}

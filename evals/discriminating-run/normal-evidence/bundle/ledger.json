@@ -1,0 +1,39 @@
+{
+ "version": 2,
+ "kind": "trial-ledger",
+ "producer": "controller",
+ "experiment_id": "collection-conformance-1c83cd7f",
+ "created": "2026-09-29T10:34:39.752974Z",
+ "trials": [
+  {
+   "trial_id": "t1-cpp-codex",
+   "case": {
+    "id": "finish-close-ref",
+    "revision": "1"
+   },
+   "grader": {
+    "id": "finish-close-ref",
+    "revision": "1",
+    "digest": "sha256:dfbba0ceba3d200278051858ec5b8d2aa9c441732d731def6023b87de4b23e67"
+   },
+   "subject": {
+    "digest": "sha256:ceba20f15452dff932a5837495ede1b7ea2c48696545e07f7ea9d9476e5b0b52"
+   },
+   "client": {
+    "name": "codex",
+    "version": "0.157.1"
+   },
+   "image": {
+    "digest": "sha256:d1b2ced9dc6d25e9e1bc673c1973f032ced50a11da234fcd617ee376ff36eefc"
+   },
+   "config": {
+    "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+   },
+   "attempts": [
+    {
+     "attempt_id": "a-02e2a61d240d"
+    }
+   ]
+  }
+ ]
+}

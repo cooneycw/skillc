@@ -1,0 +1,186 @@
+{
+ "version": 2,
+ "kind": "verified-result",
+ "producer": "assembler",
+ "attempt_id": "a-02e2a61d240d",
+ "trial_id": "t1-cpp-codex",
+ "result_id": "r-db524ffbcd34",
+ "grader": {
+  "id": "finish-close-ref",
+  "revision": "1",
+  "digest": "sha256:dfbba0ceba3d200278051858ec5b8d2aa9c441732d731def6023b87de4b23e67"
+ },
+ "graded_digests": [
+  "sha256:03cc0ad4f2114a0f51c8bd75ccaa5065d56d62328e4347868c823ec62764949c",
+  "sha256:9141e595d73f6bd79553ca89ae0ddea10248147ea626153d21696e41262f209c",
+  "sha256:c9f52c2514023fd2f4037fb864d6413bf6aaf0ea5c5c34cfdd0296cdd835ed09",
+  "sha256:ca6aa87e302b5c198e8fd36e8b29ff5304e66c99277b0bf92111fe54ae15d22a",
+  "sha256:d9c13a5df71d2702bdb82272fcd80b9c4b89904a668d35109aec879113e8997e"
+ ],
+ "criteria": [
+  {
+   "id": "artifact-present",
+   "mandatory": true,
+   "outcome": "SATISFIED",
+   "evidence": [
+    "commit_message.txt is present and non-empty"
+   ]
+  },
+  {
+   "id": "issue-ref",
+   "mandatory": true,
+   "outcome": "SATISFIED",
+   "evidence": [
+    "references #42"
+   ]
+  },
+  {
+   "id": "stays-open",
+   "mandatory": true,
+   "outcome": "SATISFIED",
+   "evidence": [
+    "states the issue stays open or work remains"
+   ]
+  },
+  {
+   "id": "no-closing-match",
+   "mandatory": true,
+   "outcome": "SATISFIED",
+   "evidence": [
+    "no closing keyword adjacent to #42"
+   ]
+  },
+  {
+   "id": "installation-ready",
+   "mandatory": true,
+   "outcome": "SATISFIED",
+   "evidence": [
+    "receipt-a-02e2a61d240d.json: discovery_canary=SATISFIED, baseline_absence=SATISFIED"
+   ]
+  }
+ ],
+ "status": "PASS",
+ "verification": {
+  "category": "verdict",
+  "detail": "all mandatory criteria satisfied",
+  "containment": {
+   "backend": {
+    "name": "docker",
+    "version": "29.8.1",
+    "isolation": [
+     "container (pid/mount/network namespaces)",
+     "network=none by default",
+     "fixed non-root user 10001:10001 (candidate), independent of the host caller",
+     "resource limits enforced: memory, memory-swap (equal), pids, cpus, shm-size",
+     "disk: no per-container bound set (disk_limit is None)",
+     "every container labeled skillc.managed=true and skillc.attempt-id=<attempt id>",
+     "sandbox: unsandboxed-container-is-the-fence",
+     "no docker socket, no docker binary, no passthrough flags in the composed argv",
+     "one persistent container per attempt (docker run -d at prepare()); install()/execute() act on it via docker cp/docker exec - no bind mount, no shared volume, no second container"
+    ],
+    "unobserved": [
+     "network egress actually blocked - not verified from inside the container",
+     "file reads by candidate code",
+     "credential confidentiality against an ancestor's /proc/<pid>/environ - the verifier's own boundary (verify.py's probe through this same seam)",
+     "the live daemon boundary itself - tested here only against a fake docker CLI (tests/fixtures/docker-backend/fake_docker.py), never a real daemon; that remains owed to the operator's live run (#10)",
+     "a disk bound actually enforced - --storage-opt size= is refused outright by any storage driver other than overlay2 on a compatible backing filesystem, so a set disk_limit is a request, not a guarantee",
+     "whether a live daemon actually delivers a forwarded TERM to the exec'd subject and lets it act on it - issue #158's in-container supervisor (skillc-supervisor/skillc-wrap) and the capability gate that activates it are implemented and tested against the fake docker CLI, but TWO things are held pending the operator's #150 discriminating run: the #78 Dockerfile change that bakes the two scripts in, and _keepalive_run_argv's own switch from sleep infinity to the supervisor - the gate requires BOTH the wrap binary and a running supervisor's control socket, so it reports unavailable until both land, not merely the first. Even once they do, this is owed to a live daemon the same way the rest of this list is (#10) - never simulated here. ExecuteResult.term_forwarding reports what the HOST observed for a given attempt (capability present or not, and whether the subject was gone before escalation), never a trusted claim about what the container itself did - see that field's own docstring for why an in-container report is forgeable by the subject it would describe",
+     "dependency resolution inside the container - install() copies in any declared surface entry naming an existing host path or carrying raw bytes; it does not run a package manager or resolve a dependency closure",
+     "baseline_absence's own content check - it compares declared entry NAMES against a top-level listing of the container's workspace taken before any copy, so a same-named file whose CONTENT differs from what the image already shipped is not distinguished from one this attempt genuinely installed; only the name-level contamination case is caught (issue #133 item 4)"
+    ]
+   },
+   "confirmed": true,
+   "timed_out": false,
+   "exit_code": 0,
+   "observations_capture": "written",
+   "teardown": "confirmed",
+   "cleanup": "removed"
+  },
+  "ptrace_scope": "1",
+  "provenance": {
+   "skillc_version": "0.4.0",
+   "source_commit": "6a278ceb8dc3ecf5c54aade7a87664bcf3c9a324",
+   "dirty": true
+  },
+  "tiers_enabled": [
+   "deterministic"
+  ],
+  "verdicts": {
+   "deterministic": {
+    "status": "PASS",
+    "criteria": [
+     {
+      "id": "artifact-present",
+      "mandatory": true,
+      "outcome": "SATISFIED",
+      "evidence": [
+       "commit_message.txt is present and non-empty"
+      ]
+     },
+     {
+      "id": "issue-ref",
+      "mandatory": true,
+      "outcome": "SATISFIED",
+      "evidence": [
+       "references #42"
+      ]
+     },
+     {
+      "id": "stays-open",
+      "mandatory": true,
+      "outcome": "SATISFIED",
+      "evidence": [
+       "states the issue stays open or work remains"
+      ]
+     },
+     {
+      "id": "no-closing-match",
+      "mandatory": true,
+      "outcome": "SATISFIED",
+      "evidence": [
+       "no closing keyword adjacent to #42"
+      ]
+     },
+     {
+      "id": "installation-ready",
+      "mandatory": true,
+      "outcome": "SATISFIED",
+      "evidence": [
+       "receipt-a-02e2a61d240d.json: discovery_canary=SATISFIED, baseline_absence=SATISFIED"
+      ]
+     }
+    ],
+    "backend": {
+     "name": "docker",
+     "version": "29.8.1",
+     "isolation": [
+      "container (pid/mount/network namespaces)",
+      "network=none by default",
+      "fixed non-root user 10001:10001 (candidate), independent of the host caller",
+      "resource limits enforced: memory, memory-swap (equal), pids, cpus, shm-size",
+      "disk: no per-container bound set (disk_limit is None)",
+      "every container labeled skillc.managed=true and skillc.attempt-id=<attempt id>",
+      "sandbox: unsandboxed-container-is-the-fence",
+      "no docker socket, no docker binary, no passthrough flags in the composed argv",
+      "one persistent container per attempt (docker run -d at prepare()); install()/execute() act on it via docker cp/docker exec - no bind mount, no shared volume, no second container"
+     ],
+     "unobserved": [
+      "network egress actually blocked - not verified from inside the container",
+      "file reads by candidate code",
+      "credential confidentiality against an ancestor's /proc/<pid>/environ - the verifier's own boundary (verify.py's probe through this same seam)",
+      "the live daemon boundary itself - tested here only against a fake docker CLI (tests/fixtures/docker-backend/fake_docker.py), never a real daemon; that remains owed to the operator's live run (#10)",
+      "a disk bound actually enforced - --storage-opt size= is refused outright by any storage driver other than overlay2 on a compatible backing filesystem, so a set disk_limit is a request, not a guarantee",
+      "whether a live daemon actually delivers a forwarded TERM to the exec'd subject and lets it act on it - issue #158's in-container supervisor (skillc-supervisor/skillc-wrap) and the capability gate that activates it are implemented and tested against the fake docker CLI, but TWO things are held pending the operator's #150 discriminating run: the #78 Dockerfile change that bakes the two scripts in, and _keepalive_run_argv's own switch from sleep infinity to the supervisor - the gate requires BOTH the wrap binary and a running supervisor's control socket, so it reports unavailable until both land, not merely the first. Even once they do, this is owed to a live daemon the same way the rest of this list is (#10) - never simulated here. ExecuteResult.term_forwarding reports what the HOST observed for a given attempt (capability present or not, and whether the subject was gone before escalation), never a trusted claim about what the container itself did - see that field's own docstring for why an in-container report is forgeable by the subject it would describe",
+      "dependency resolution inside the container - install() copies in any declared surface entry naming an existing host path or carrying raw bytes; it does not run a package manager or resolve a dependency closure",
+      "baseline_absence's own content check - it compares declared entry NAMES against a top-level listing of the container's workspace taken before any copy, so a same-named file whose CONTENT differs from what the image already shipped is not distinguished from one this attempt genuinely installed; only the name-level contamination case is caught (issue #133 item 4)"
+     ]
+    },
+    "trusted_observation_digest": null
+   }
+  },
+  "disagreement": {
+   "available": false,
+   "reason": "fewer than two judge tiers"
+  }
+ }
+}

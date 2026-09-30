@@ -1,0 +1,83 @@
+{
+ "version": 2,
+ "kind": "artifact-manifest",
+ "producer": "controller",
+ "attempt_id": "a-02e2a61d240d",
+ "trial_id": "t1-cpp-codex",
+ "captured": "2026-09-29T10:35:48.408825Z",
+ "artifacts": [
+  {
+   "path": ".skillc-canary",
+   "type": "file",
+   "size": 32,
+   "digest": "sha256:03cc0ad4f2114a0f51c8bd75ccaa5065d56d62328e4347868c823ec62764949c",
+   "mode": "-"
+  },
+  {
+   "path": ".skillc-canary-result",
+   "type": "file",
+   "size": 40,
+   "digest": "sha256:9141e595d73f6bd79553ca89ae0ddea10248147ea626153d21696e41262f209c",
+   "mode": "-"
+  },
+  {
+   "path": "observations",
+   "type": "file",
+   "size": 307,
+   "digest": "sha256:ca6aa87e302b5c198e8fd36e8b29ff5304e66c99277b0bf92111fe54ae15d22a",
+   "mode": "-"
+  },
+  {
+   "path": "src/TODO.md",
+   "type": "file",
+   "size": 138,
+   "digest": "sha256:d9c13a5df71d2702bdb82272fcd80b9c4b89904a668d35109aec879113e8997e",
+   "mode": "-"
+  },
+  {
+   "path": "src/commit_message.txt",
+   "type": "file",
+   "size": 168,
+   "digest": "sha256:c9f52c2514023fd2f4037fb864d6413bf6aaf0ea5c5c34cfdd0296cdd835ed09",
+   "mode": "-"
+  },
+  {
+   "path": ".src-original/TODO.md",
+   "type": "file",
+   "size": 138,
+   "digest": "sha256:d9c13a5df71d2702bdb82272fcd80b9c4b89904a668d35109aec879113e8997e",
+   "mode": "-"
+  }
+ ],
+ "exclusions": [],
+ "observations": [
+  {
+   "stream": "client-events",
+   "origin": "client-reported",
+   "coverage": "complete",
+   "attempt_id": "a-02e2a61d240d",
+   "ref": "objects/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "size": 0
+  },
+  {
+   "stream": "client-stderr",
+   "origin": "client-reported",
+   "coverage": "complete",
+   "attempt_id": "a-02e2a61d240d",
+   "ref": "objects/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "size": 0
+  },
+  {
+   "stream": "process-lifecycle",
+   "origin": "observed",
+   "coverage": "complete",
+   "attempt_id": "a-02e2a61d240d",
+   "ref": "objects/82bf83b98caeb134e41cb2b8c831c66283e48ddf23f80ce827663981be6d2da6",
+   "digest": "sha256:82bf83b98caeb134e41cb2b8c831c66283e48ddf23f80ce827663981be6d2da6",
+   "size": 854
+  }
+ ],
+ "capture_failures": []
+}
