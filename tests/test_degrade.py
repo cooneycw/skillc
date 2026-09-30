@@ -348,10 +348,11 @@ def test_receipt_lists_every_location_and_both_identities(tmp_path: Path, monkey
 _SCRIPT = "#!/bin/sh\n# guard_negated_close_keywords\n"
 
 
-def _checksummed_collection(tmp_path: Path, *, star: bool = False) -> Path:
+def _checksummed_collection(tmp_path: Path, *, star: bool = False, indent: str = "") -> Path:
     """One skill whose `scripts/SHA256SUMS` pins `gh-pr-merge.sh` - the shape
     of CPP's flow-auto/flow-merge that #198 found unrunnable once degraded.
-    `star=True` uses sha256sum's binary-mode `*` marker."""
+    `star=True` uses sha256sum's binary-mode `*` marker; `indent` prefixes the
+    line with whitespace the verifier accepts (counter-model finding)."""
     digest = hashlib.sha256(_SCRIPT.encode()).hexdigest()
     marker = "*" if star else " "
     return _fixture_collection(
@@ -359,7 +360,7 @@ def _checksummed_collection(tmp_path: Path, *, star: bool = False) -> Path:
         extra_files={"flow-auto": {
             "reference.md": "the rule\n",
             "scripts/gh-pr-merge.sh": _SCRIPT,
-            "scripts/SHA256SUMS": f"# pinned\n{digest} {marker}gh-pr-merge.sh\n",
+            "scripts/SHA256SUMS": f"# pinned\n{indent}{digest} {marker}gh-pr-merge.sh\n",
         }},
     )
 
@@ -372,9 +373,9 @@ def _override_script(tmp_path: Path, collection: Path, *extra: degrade.FileEdit)
     return degrade.acquire_degraded("whatever", tmp_path / "base", mutation, checkout=collection)
 
 
-@pytest.mark.parametrize("star", [False, True])
+@pytest.mark.parametrize(("star", "indent"), [(False, ""), (True, ""), (False, " "), (False, "\t")])
 def test_an_override_of_a_manifest_listed_file_leaves_a_tree_that_prepares(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, star: bool,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, star: bool, indent: str,
 ) -> None:
     """Regression for #198: before the fix the manifest kept the original
     hash and `materialize.inventory` refused the degraded tree with
@@ -382,7 +383,7 @@ def test_an_override_of_a_manifest_listed_file_leaves_a_tree_that_prepares(
     subject = _subject(checksum_manifest="scripts/SHA256SUMS")
     monkeypatch.setattr(demo, "load_demo_subject", lambda name: subject)
 
-    degraded = _override_script(tmp_path, _checksummed_collection(tmp_path, star=star))
+    degraded = _override_script(tmp_path, _checksummed_collection(tmp_path, star=star, indent=indent))
 
     entries = materialize.inventory(subject, degraded.source)
     assert [e.checksums for e in entries] == ["verified"]

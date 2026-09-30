@@ -203,7 +203,8 @@ def _rewrite_manifests(
             new = hashlib.sha256(target.read_bytes()).hexdigest()
             if new == parts[0]:
                 continue
-            lines[i] = new + line[len(parts[0]):]
+            start = line.index(parts[0])  # the verifier's split() accepts leading whitespace
+            lines[i] = line[:start] + new + line[start + len(parts[0]):]
             rewrites.append(f"{skill}/{manifest_rel}: {listed} sha256:{parts[0]} -> sha256:{new}")
             changed = True
         if changed:
