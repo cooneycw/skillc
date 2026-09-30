@@ -64,7 +64,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import agent_trial, calibration, trial, verify
+from . import agent_trial, calibration, demo, trial, verify
 from . import collection_conformance as cc
 from . import matched_pilot as mp
 
@@ -264,7 +264,10 @@ def run_calibration(
     client_name, client_version = declared_client(declaration)
     mp.pin_model_argv(model, effort, [])
     task_root = root / declaration.task_path
-    surface = cc.task_surface(task_root / "fixture")
+    try:
+        surface = cc.task_surface(task_root / "fixture")
+    except demo.SubjectRefused as exc:
+        raise CalibrationRefused(str(exc)) from exc
     per_attempt = float(str(declaration.shared["per_attempt_seconds"]))
     total = float(str(declaration.shared["total_seconds"])) if total_seconds is None else total_seconds
 

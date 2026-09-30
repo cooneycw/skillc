@@ -440,3 +440,53 @@ def test_cli_refuses_a_subject_other_than_the_declared_one(
                      "--docker-bin", " ".join(_docker_bin(tmp_path / "docker-state"))])
     assert code == 2
     assert "the declaration names ('github.com/cooneycw/claude-power-pack'" in capsys.readouterr().err
+
+
+def _fixture(tmp_path: Path) -> Path:
+    fixture = tmp_path / "fixture"
+    (fixture / "pkg").mkdir(parents=True)
+    (fixture / "pkg" / "code.py").write_text("x = 1\n", encoding="utf-8")
+    (fixture / "expected.json").write_text('{"status": "FAIL"}\n', encoding="utf-8")
+    return fixture
+
+
+def test_task_surface_delivers_a_plain_fixture(tmp_path: Path) -> None:
+    """The green half of the refusals below."""
+    assert cc.task_surface(_fixture(tmp_path)) == {"pkg/code.py": b"x = 1\n"}
+
+
+@pytest.mark.parametrize("damage", ["answer-alias", "outside-link", "dir-link", "missing", "answer-only"])
+def test_red_task_surface_refuses_a_fixture_it_cannot_deliver_honestly(tmp_path: Path, damage: str) -> None:
+    """Counter-model review: a symlink could deliver the answer key under
+    another name or copy a host file in, and a missing or answer-only fixture
+    would start the agent in an empty /work."""
+    fixture = _fixture(tmp_path)
+    if damage == "answer-alias":
+        (fixture / "pkg" / "answer.json").symlink_to(fixture / "expected.json")
+    elif damage == "outside-link":
+        outside = tmp_path / "host-secret.txt"
+        outside.write_text("host\n", encoding="utf-8")
+        (fixture / "notes.txt").symlink_to(outside)
+    elif damage == "dir-link":
+        (fixture / "linked").symlink_to(fixture / "pkg", target_is_directory=True)
+    elif damage == "missing":
+        fixture = tmp_path / "no-such-fixture"
+    else:
+        shutil.rmtree(fixture / "pkg")
+    with pytest.raises(demo.SubjectRefused):
+        cc.task_surface(fixture)
+
+
+def test_a_task_whose_fixture_delivers_nothing_refuses_before_the_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cc, "task_surface", lambda _d: (_ for _ in ()).throw(demo.SubjectRefused("empty")))
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    with pytest.raises(cr.CalibrationRefused, match="empty"):
+        cr.run_calibration(
+            _declaration(), run_dir=run_dir, treatment=cr.Treatment({}, "sha256:" + "ab" * 32, None),
+            image_digest=_IMAGE_DIGEST, backends=lambda: pytest.fail("a container was requested"),
+            argv_for=lambda _s: ["codex"],
+        )
+    assert list(run_dir.iterdir()) == []

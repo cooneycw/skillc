@@ -464,15 +464,35 @@ def task_surface(fixture_dir: Path) -> dict[str, bytes]:
     `pyproject.toml`) has no `src/`, so it would reach the agent as an empty
     `/work`. For a fixture that is `src/` plus `expected.json` the two are
     identical. Used by `calibration_run` (#207); `collection-run` keeps
-    `_fixture_surface`."""
+    `_fixture_surface`.
+
+    Refuses (`demo.SubjectRefused`) rather than delivering less than the
+    task's starting state (counter-model review): a missing or unreadable
+    fixture, a symlink anywhere in it (`answer.json -> expected.json` would
+    deliver the answer key under another name; a link outside would copy a
+    host file into the workspace), and a fixture with nothing to deliver - an
+    empty `/work` is not the declared task."""
+    if fixture_dir.is_symlink() or not fixture_dir.is_dir():
+        raise demo.SubjectRefused(f"task fixture {fixture_dir} is not a directory")
+
+    def walk_error(exc: OSError) -> None:
+        raise demo.SubjectRefused(f"task fixture {fixture_dir} could not be read: {exc}")
+
     surface: dict[str, bytes] = {}
-    for dirpath, dirnames, filenames in os.walk(fixture_dir, followlinks=False):
+    for dirpath, dirnames, filenames in os.walk(fixture_dir, onerror=walk_error, followlinks=False):
         dirnames[:] = sorted(d for d in dirnames if d != "__pycache__")
+        for name in [*dirnames, *sorted(filenames)]:
+            path = Path(dirpath) / name
+            if path.is_symlink():
+                raise demo.SubjectRefused(f"task fixture holds a symlink, {path.relative_to(fixture_dir)}; "
+                                          "a fixture's starting state is regular files only")
         for name in sorted(filenames):
             path = Path(dirpath) / name
             rel = path.relative_to(fixture_dir).as_posix()
             if rel != _FIXTURE_ANSWER_KEY:
                 surface[rel] = path.read_bytes()
+    if not surface:
+        raise demo.SubjectRefused(f"task fixture {fixture_dir} delivers nothing; an empty /work is not the task")
     return surface
 
 
