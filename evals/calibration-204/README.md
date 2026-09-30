@@ -1,13 +1,13 @@
 # Calibration before comparison (#204)
 
-**Status: declared, not approved, not run.** `run-manifest.json` is the
+**Status: approved 2026-09-30, not run.** `run-manifest.json` is the
 predeclaration for #204's two-arm calibration: **full CPP** versus **minimal
 baseline** on [`evals/level3/slugkit-pipeline`](../level3/slugkit-pipeline/README.md),
-4 attempts per arm, in an order derived from a recorded seed. It passes
-`skillc.calibration.load_declaration`; `skillc.calibration.require_approved`
-refuses it until `approval` records who approved it and when, and until no
-identity still reads `UNKNOWN` (the image digest does today). ADR 0005: no
-live run without recorded, approved arms, identities, schedule and caps.
+4 attempts per arm, in an order derived from a recorded seed. The owner
+approved it on 2026-09-30, and its image digest is resolved
+(`sha256:d1b2ced9...`, the image #12's rerun and #150 used), so
+`skillc.calibration.require_approved` now authorizes it (ADR 0005). It has not
+run; `skillc calibration-run` (#207) is the runner that executes it.
 
 ## Why calibrate first
 
@@ -30,11 +30,14 @@ beside the endpoint (`readiness_beside`), never inside it.
 criterion reaching primary-endpoint PASS while its verified status stays
 INCONCLUSIVE.
 
-## Owed before the run is approved
+## Owed before the run
 
-See `owed_before_approval` in the manifest: the image digest, a re-check of
-the subject and client pins, and a runner for the two-arm schedule - now
-`skillc calibration-run evals/calibration-204/run-manifest.json` (#207), which
-refuses this declaration until it is approved. The run,
+`owed_before_run` in the manifest named one thing: a runner for the two-arm
+schedule ([#207](https://github.com/cooneycw/skillc/issues/207)). It is now
+`skillc calibration-run evals/calibration-204/run-manifest.json`, which
+re-checks the approval, the model pin, the client and image pins and the
+subject revision before anything runs. (`collection-run` has no baseline
+mode and does not pin the model; `pilot-run` is bound to the Level 1 pilot's
+own declaration.) What remains is the run itself. The run,
 its calibration report (questions 1-5 in the manifest) and the go / redesign /
 stop recommendation for #203 are separate, later work under #204.

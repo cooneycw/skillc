@@ -154,9 +154,15 @@ def test_the_committed_declaration_validates() -> None:
     assert (ROOT / declaration.task_path / "grader.json").is_file()
 
 
-def test_the_committed_declaration_is_not_an_authorization() -> None:
+def test_the_committed_declaration_is_authorized() -> None:
+    """Approved by the owner 2026-09-30, with every identity recorded."""
+    calibration.require_approved(calibration.load_declaration(MANIFEST), ROOT)
+
+
+def test_red_the_same_declaration_without_its_approval_is_refused() -> None:
+    """The red case for the green above: remove only the approval."""
     with pytest.raises(calibration.DeclarationRefused, match="not approved"):
-        calibration.require_approved(calibration.load_declaration(MANIFEST), ROOT)
+        calibration.require_approved(calibration.parse_declaration(_mutated(approval=None)), ROOT)
 
 
 def _mutated(**changes: object) -> dict[str, object]:
