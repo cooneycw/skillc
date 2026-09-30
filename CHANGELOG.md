@@ -8,6 +8,26 @@ and version plan.
 
 ## [Unreleased]
 
+- **CPP incident catalogue: escaped-failure classes ranked, five candidate
+  tasks designed** (Closes #211). This is research only: no task is built and
+  nothing runs. It answers #204's REDESIGN report (PR #212) by mining
+  claude-power-pack's record for failures that escaped into real work.
+  - **Population.** All 682 issues, the 438 Nit Store comments, and the
+    counter-model review sections of 148 PR bodies.
+  - **Records.** One committed record per item is in
+    `docs/research/cpp-incident-catalogue/`.
+  - **Reliability.** A seeded 10% sample was re-rated independently: defect
+    agreement kappa 0.94, and the exact class matched on 34 of 41.
+  - **Tables.** Every table is rendered by `scripts/cpp_incident_counts.py`.
+    `tests/test_cpp_incident_catalogue.py` fails when a table no longer
+    follows from its records, with red cases for a reclassified record and for
+    a missing block.
+  - **Recommendation.** Build "the gate that ran nothing" (BLIND/EMPTY, the
+    top-ranked and costliest pair) first, then "the helper that answers a
+    different question".
+  - **Prerequisite for the git-graded designs.** They wait on a
+    credential-free git-state export, because capture never exports `.git`.
+
 - **`skillc calibration-run`: execute an approved two-arm calibration
   declaration** (Refs #207, for #204). Nothing could run #204's schedule:
   `collection-run` has no baseline arm and no model pin, and `pilot-run` reads

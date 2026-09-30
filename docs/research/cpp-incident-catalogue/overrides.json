@@ -1,0 +1,20 @@
+{
+  "1014": {
+    "reason": "Named as an instance by CPP docs/agents/detector-contracts.md (a could-not-look answer shared the clean exit); the batch rater read the issue's convention proposal only.",
+    "set": {
+      "defect": true,
+      "cls": "EMPTY",
+      "surfaced": "audit",
+      "stage": "yes"
+    }
+  },
+  "1015": {
+    "reason": "Named as a worked incident in CPP /flow:auto (an empty diff recorded as reviewer unavailable); the batch rater read it as a reason-set refactor.",
+    "set": {
+      "defect": true,
+      "cls": "MISVERDICT",
+      "surfaced": "owner",
+      "stage": "yes"
+    }
+  }
+}
