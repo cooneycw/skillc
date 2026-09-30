@@ -1,13 +1,13 @@
 # Calibration before comparison (#204)
 
-**Status: approved 2026-09-30, not run.** `run-manifest.json` is the
-predeclaration for #204's two-arm calibration: **full CPP** versus **minimal
-baseline** on [`evals/level3/slugkit-pipeline`](../level3/slugkit-pipeline/README.md),
-4 attempts per arm, in an order derived from a recorded seed. The owner
-approved it on 2026-09-30, and its image digest is resolved
-(`sha256:d1b2ced9...`, the image #12's rerun and #150 used), so
-`skillc.calibration.require_approved` now authorizes it (ADR 0005). It has not
-run; `skillc calibration-run` (#207) is the runner that executes it.
+**Status: run 2026-09-30; see [report.md](report.md). Recommendation for #203:
+REDESIGN.** Both arms were at ceiling (4/4 primary PASS each), and the CPP arm
+never opened a CPP skill in any attempt. The measurement itself worked: the
+grader behaved, and the symmetric endpoint scored 4-4 where the verified status
+would have read 4-0. `run-manifest.json` is the approved predeclaration it ran
+under: **full CPP** versus **minimal baseline** on
+[`evals/level3/slugkit-pipeline`](../level3/slugkit-pipeline/README.md), 4
+attempts per arm, in a seed-derived order.
 
 ## Why calibrate first
 
