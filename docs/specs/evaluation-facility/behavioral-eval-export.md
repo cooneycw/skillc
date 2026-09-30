@@ -104,6 +104,21 @@ anything is written; `--evidence-role control` is the explicit, named opt-in
 that publishes one anyway. A normal arm's export needs no role at all - the
 check only fires on a degraded `revision`.
 
+## The transcript is exported only on purpose (#202)
+
+Every attempt's store now retains the agent client's own transcript (the
+`client-transcript` observation, `records.md`). The bundle's manifest names it
+by digest either way, but its bytes are published only with
+`--evidence-transcript`, because a transcript can carry subject content. With
+the flag, each bundled attempt's transcript object is copied (re-hashed on the
+way out) to `bundle/transcripts/<attempt>.jsonl`, which holds no `*.json` and so
+is never read as a bundle. The flag refuses the whole export when an attempt
+retained no transcript (none found, or its retention leak check refused it) -
+an export without the transcript would read as one that had it - and the
+whole-staging leak scan above covers the file too. The flag is independent of
+`--evidence-role`: the normal arm is a `measurement` export, and its transcript
+is exactly the one a diagnosis needs.
+
 ## What this does not do
 
 It does not write to CPP's checkout, or to any path this repository does not

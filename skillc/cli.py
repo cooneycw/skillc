@@ -867,6 +867,9 @@ def cmd_collection_run(args: argparse.Namespace) -> int:
     image = args.image or demo.DEFAULT_IMAGE
     credential_path = Path(args.credential) if args.credential else None
     agent_timeout = args.agent_timeout if args.agent_timeout is not None else cc.DEFAULT_AGENT_TIMEOUT
+    if getattr(args, "evidence_transcript", False) and not args.evidence:
+        print("skillc: --evidence-transcript needs --evidence; there is no export to add it to", file=sys.stderr)
+        return 2
     try:
         task_root = cc.resolve_task_root(args.task)
     except demo.SubjectRefused as exc:
@@ -1032,7 +1035,9 @@ def cmd_collection_run(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 2
-        export_code = _export_collection_evidence(experiment, envelope, Path(args.evidence))
+        export_code = _export_collection_evidence(
+            experiment, envelope, Path(args.evidence), transcript=getattr(args, "evidence_transcript", False),
+        )
         if export_code:
             return export_code
     return 0 if run_ok else 1
@@ -1290,7 +1295,9 @@ def _publish_pilot_evidence(experiment: object, report: dict[str, object], evide
     return 0
 
 
-def _export_collection_evidence(experiment: object, report: dict[str, object], evidence: Path) -> int:
+def _export_collection_evidence(
+    experiment: object, report: dict[str, object], evidence: Path, *, transcript: bool = False,
+) -> int:
     """Issue #150 acceptance item 4: publish one collection-run attempt's
     evidence into `evidence`, under the SAME lock-and-atomic-replace discipline
     `_export_pilot_evidence` already uses for its bundle - held on the
@@ -1307,7 +1314,7 @@ def _export_collection_evidence(experiment: object, report: dict[str, object], e
     lock = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
     try:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        return _publish_collection_evidence(experiment, report, evidence)
+        return _publish_collection_evidence(experiment, report, evidence, transcript=transcript)
     finally:
         os.close(lock)
 
@@ -1330,7 +1337,33 @@ def _is_behavioral_eval_export_file(path: Path) -> bool:
     return path.is_file() and not path.is_symlink() and _RESULT_FILE_RE.fullmatch(path.name) is not None
 
 
-def _publish_collection_evidence(experiment: object, report: dict[str, object], evidence: Path) -> int:
+def _stage_transcripts(experiment: object, bundle_dir: Path) -> str | None:
+    """Issue #202: copy each bundled attempt's retained transcript object to
+    `bundle_dir/transcripts/<attempt>.jsonl`. Returns a refusal reason when an
+    attempt retained none - the operator asked for the transcript, and an
+    export without it would read as one that had it. The object is re-hashed
+    on the way out (`trial._read_object`). `transcripts/` holds no `*.json`,
+    so `records.discover_bundles` never reads it as a bundle."""
+    from . import agent_trial, trial
+
+    assert isinstance(experiment, trial.Experiment)
+    manifests = sorted(bundle_dir.glob("manifest-*.json"))
+    if not manifests:
+        return "no attempt was captured, so no transcript was retained"
+    target_dir = bundle_dir / "transcripts"
+    for manifest_path in manifests:
+        attempt_id = str(json.loads(manifest_path.read_bytes()).get("attempt_id"))
+        retention = agent_trial.transcript_retention(experiment, attempt_id, None)
+        if retention["coverage"] not in ("complete", "partial") or not retention["digest"]:
+            return f"attempt {attempt_id} retained no transcript ({retention['reason']})"
+        target_dir.mkdir(exist_ok=True)
+        (target_dir / f"{attempt_id}.jsonl").write_bytes(trial._read_object(experiment.root, str(retention["digest"])))
+    return None
+
+
+def _publish_collection_evidence(
+    experiment: object, report: dict[str, object], evidence: Path, *, transcript: bool = False,
+) -> int:
     """Stage the full skillc bundle under `staging/bundle/` (`matched_pilot
     .export_bundle` - the SAME writer `pilot-run` already uses, "as pilot-run
     already does for its bundle"), copy its `result-*.json` file(s) up to
@@ -1364,6 +1397,11 @@ def _publish_collection_evidence(experiment: object, report: dict[str, object], 
     try:
         bundle_dir = staging / "bundle"
         mp.export_bundle(experiment, report, bundle_dir)  # type: ignore[arg-type]
+        if transcript:
+            refusal = _stage_transcripts(experiment, bundle_dir)
+            if refusal is not None:
+                print(f"skillc: --evidence-transcript: {refusal}; nothing was published", file=sys.stderr)
+                return 1
         result_files = sorted(bundle_dir.glob("result-*.json"))
         if not result_files:
             print("skillc: no verified-result was stored for this attempt; nothing was published", file=sys.stderr)
@@ -1410,6 +1448,8 @@ def _publish_collection_evidence(experiment: object, report: dict[str, object], 
     print(
         f"skillc: published {len(result_files)} verified-result(s) to {evidence.name}/: leak-checked "
         f"({scan.scanned} scanned, 0 found); check-records clean; full bundle in {evidence.name}/bundle/"
+        + (f"; transcript(s) in {evidence.name}/bundle/transcripts/" if transcript else
+           "; transcript not exported (pass --evidence-transcript to include it)")
     )
     return 0
 
@@ -1960,6 +2000,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="what --evidence is for (default: measurement, a normal subject's export destined for a "
              "consumer's real measurements directory); a degraded-arm export is refused unless this is "
              "'control' - explicit opt-in, e.g. for a one-shot negative control against the consumer gate",
+    )
+    p_collection_run.add_argument(
+        "--evidence-transcript", action="store_true",
+        help="issue #202: also publish the attempt's retained transcript into --evidence (as "
+             "bundle/transcripts/<attempt>.jsonl). Off by default - a transcript can carry subject content, "
+             "so exporting it is a choice made on purpose. The export is refused when no transcript was "
+             "retained (none found, or its leak check refused it), and the transcript is leak-checked again "
+             "with the rest of the bundle",
     )
     p_collection_run.add_argument(
         "--degraded",

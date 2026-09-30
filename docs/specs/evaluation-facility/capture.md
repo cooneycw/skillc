@@ -145,6 +145,14 @@ Each manifest observation carries the attempt ID, its origin, its coverage, and 
   `partial` when the stop was not confirmed.
 - imported records (`Import`): a record a client or collector produced, offered
   with the digest its transport reported.
+- `client-transcript` (#202, optional): the agent client's own transcript,
+  offered as a `TranscriptEvidence` by `agent_trial.run_one_attempt` through
+  `lifecycle.run_through_backend`. It is leak-checked before it is offered; a
+  transcript that is absent or refused is recorded with `coverage: missing` and
+  a reason, never left out. It stays in the private store. `collection-run
+  --evidence-transcript` is the explicit opt-in that also publishes it, as
+  `bundle/transcripts/<attempt>.jsonl`; the export is refused when no
+  transcript was retained, and the bundle's own leak scan covers the file.
 
 An import is **refused**, and listed in `capture_failures`, never silently dropped
 and never trusted, when:

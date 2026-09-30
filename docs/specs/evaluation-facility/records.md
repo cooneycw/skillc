@@ -262,6 +262,28 @@ name such as `run` match unrelated input. A heuristic that _looks_ like
 observation is worse than an honest `unsupported`, because its false positives
 are silent.
 
+### `client-transcript`: the agent client's own transcript (#202)
+
+An optional stream, like `skill-invocations`, so no earlier manifest is
+invalidated. When present it is the client's own transcript (the codex session
+rollout, or the Claude Code session file), origin `client-reported`, stored as a
+content-addressed object. Its coverage vocabulary is its own:
+
+- `complete` (or `partial`, when truncated at the stream bound): the entry names
+  the object with `ref`, `digest` and a non-zero `size`.
+- `missing`: no transcript was retained. The entry carries a `reason` (no single
+  transcript file was found, the file was empty, or the leak check refused it,
+  named by finding class and line only) and names no object.
+
+`missing` is legal on this stream only; the required streams keep `complete`,
+`partial`, `unsupported`. `records.observation_coverage` enforces both halves,
+with committed controls `controls/observation-coverage/bad/transcript-*.json`
+and `good/transcript-*.json`. A transcript is leak-checked before it is ever
+stored, so a leak never reaches the store, redacted or otherwise.
+`agent_trial.recompute_skill_invocations` re-derives `skill_invocations` from
+the stored object with the same extractor the live observation used, so the
+codex heuristic is checkable after the run.
+
 ## `attempt-lifecycle`
 
 Produced by the controller ([capture.md](capture.md)), one per planned attempt: what
