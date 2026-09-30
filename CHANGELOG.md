@@ -8,6 +8,42 @@ and version plan.
 
 ## [Unreleased]
 
+- **Calibrate before comparing: a symmetric primary endpoint, a Level 3
+  pipeline task, and the two-arm calibration declared** (Refs #204). A baseline
+  arm installs nothing, so its `installation-ready` stays UNKNOWN on the #139
+  stand-in and its stored verified status can never be PASS. Comparing that
+  status against a CPP arm with a real receipt would manufacture a CPP
+  advantage. New `skillc/calibration.py`: `primary_endpoint` derives the status
+  from the task grader's own criteria only, and `readiness_beside` reports
+  readiness separately. `load_declaration`/`require_approved` validate
+  `evals/calibration-204/run-manifest.json`: two arms that differ only in
+  treatment, 3-5 attempts each, a seed-derived arm order. The declaration is
+  committed **unapproved**, and `require_approved` refuses it (ADR 0005). New task
+  `evals/level3/slugkit-pipeline`: slugkit-installed plus a local
+  `ci/verify.py` pipeline the agent must keep passing (`pipeline-green`) and
+  honest (`pipeline-honest`). The grader plants a benign change and two
+  defects, proves each took effect against the candidate's own clean installed
+  output, then reads the pipeline's verdict. A malformed mutation, an unproven
+  defect, a no-verdict crash, a timeout or a missing tool is UNKNOWN, never
+  detection, and so is a last line that only resembles the `VERIFY: fail
+  <step>` grammar. `qualify.py` certifies it: 11 candidates, 5 broken graders,
+  14 pipeline-validity controls including step attribution. A defect counts
+  as planted only when its SPECIFIC effect is observed (the clean output plus
+  `-`; an import failure on the missing entry name), never merely a change: a
+  syntax-broken mutation is UNKNOWN. A benign forwarding-wrapper mutation
+  shares the behaviour defect's shape, so a pipeline that rejects redefinition
+  rather than behaviour is VIOLATED. The candidate's
+  pipeline runs with `-E -s -B`, not `-I`, so a pipeline that imports a sibling
+  `ci/` helper works exactly as it does under the public command
+  (`alternatives/helper-module`). `require_approved` also refuses identities
+  that are absent (an empty object, null or blank) - including the shared
+  tools, permissions and public requirements - not only the literal `UNKNOWN`. Caps must be finite. Regression
+  `test_a_baseline_attempt_meeting_the_task_criteria_reaches_primary_pass`
+  fails against the pre-change comparison (`INCONCLUSIVE` != `PASS`). Negative
+  controls for the validity gate itself are in
+  `tests/test_level3_slugkit_pipeline.py`. The live run, its report and the
+  #203 go/redesign/stop call are still owed.
+
 - **Every agent attempt now retains the client's own transcript in its store**
   (Closes #202). The #150 live stores held 0-byte spool streams and no
   transcript, so the NORMAL PASS / DEGRADED PASS pair could not be diagnosed.
