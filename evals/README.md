@@ -25,7 +25,7 @@ The current roadmap is [PLAN.md](../PLAN.md), with the
 | [Selection probe](selection-probe/README.md) | Three predeclared cases plan through the real controller and a cost estimate is committed (#26); no live attempt has run - `run-manifest.json`'s `execution` stays `"incomplete"` pending an approved budget (ADR 0005) |
 | [Matched pilot](matched-pilot/README.md) | The predeclared experiment record, treatment-vs-baseline plan and cost estimate are committed, reusing #26's estimator (#12); the evidence-report schema (`pilot-report`, #12) is defined and its bundle control is committed - no live attempt has run, `execution` stays `"incomplete"` |
 | [#150 discriminating run](discriminating-run/README.md) | Live run 2026-09-29/30 on `finish-close-ref` with a codex arm: positive control PASS, NORMAL PASS, DEGRADED PASS - **non-discriminating**, nothing exported to CPP (#150) |
-| [#204 calibration](calibration-204/README.md) | Two-arm (full CPP vs minimal baseline) calibration **declared, not approved, not run**: 4 attempts per arm on `level3/slugkit-pipeline`, seeded arm order, symmetric primary endpoint (`skillc/calibration.py`) that excludes `installation-ready` |
+| [#204 calibration](calibration-204/README.md) | Two-arm (full CPP vs minimal baseline) calibration **approved 2026-09-30, not run** (no two-arm runner yet): 4 attempts per arm on `level3/slugkit-pipeline`, seeded arm order, symmetric primary endpoint (`skillc/calibration.py`) that excludes `installation-ready` |
 
 No behavioral runner is implemented here yet. The former example plugin command
 and YAML were unverified research, not an executable contract. skillc depends on
