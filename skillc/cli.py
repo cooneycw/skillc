@@ -1356,8 +1356,15 @@ def _stage_transcripts(experiment: object, bundle_dir: Path) -> str | None:
         retention = agent_trial.transcript_retention(experiment, attempt_id, None)
         if retention["coverage"] not in ("complete", "partial") or not retention["digest"]:
             return f"attempt {attempt_id} retained no transcript ({retention['reason']})"
+        data = trial._read_object(experiment.root, str(retention["digest"]))
+        # Re-checked on the way out with the retention check itself: the
+        # staging scan below reads raw text only, and cannot see a credential
+        # a JSONL line escaped (#202, counter-model review).
+        findings = agent_trial.transcript_leak_findings(data)
+        if findings:
+            return f"attempt {attempt_id}'s transcript failed its leak check ({', '.join(findings)})"
         target_dir.mkdir(exist_ok=True)
-        (target_dir / f"{attempt_id}.jsonl").write_bytes(trial._read_object(experiment.root, str(retention["digest"])))
+        (target_dir / f"{attempt_id}.jsonl").write_bytes(data)
     return None
 
 

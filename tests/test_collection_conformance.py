@@ -1801,3 +1801,46 @@ def test_evidence_transcript_without_evidence_is_refused_before_anything_runs(
     assert cli.main(["collection-run", "whatever", "--evidence-transcript", "--base", str(base)]) == 2
     assert "--evidence-transcript needs --evidence" in capsys.readouterr().err
     assert not any(base.iterdir())
+
+
+def _tool_result_line(output: str) -> bytes:
+    """A realistic codex rollout line: the agent's tool output is a JSON
+    string, so any quotes in it arrive escaped."""
+    return (json.dumps({
+        "type": "response_item",
+        "payload": {"type": "function_call_output", "call_id": "c1", "output": output},
+    }) + "\n").encode("utf-8")
+
+
+def test_an_oauth_token_escaped_inside_a_tool_result_is_still_refused() -> None:
+    """Counter-model review: the raw JSONL escapes the quotes the OAuth
+    pattern keys on. Built at runtime so no scanner reads a token here."""
+    credential_file = json.dumps({"tokens": {"access_token": "T" * 32}})
+    raw = _tool_result_line(credential_file)
+    evidence = agent_trial.retainable_transcript(raw)
+    assert evidence.data is None
+    assert "credential-token at line 1" in str(evidence.reason)
+    assert "T" * 32 not in str(evidence.reason)
+
+
+def test_a_secret_capture_excludes_is_refused_from_a_transcript_too() -> None:
+    raw = _tool_result_line("token: " + "gh" + "p_" + "A" * 36)
+    evidence = agent_trial.retainable_transcript(raw)
+    assert evidence.data is None
+    assert "GitHub token" in str(evidence.reason)
+    assert "A" * 36 not in str(evidence.reason)
+
+
+def test_a_clean_transcript_is_retained_byte_for_byte() -> None:
+    raw = _tool_result_line("tests passed")
+    assert agent_trial.retainable_transcript(raw) == trial.TranscriptEvidence(raw)
+
+
+def test_recompute_refuses_a_partial_transcript(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    experiment, attempt_id, _result = _run_codex_attempt(tmp_path, base, docker_state, monkeypatch)
+    entry = {**_transcript_entry(experiment, attempt_id), "coverage": "partial"}
+    monkeypatch.setattr(agent_trial, "_stored_transcript_entry", lambda _e, _a: entry)
+    with pytest.raises(trial.Refused, match="only a partial transcript"):
+        agent_trial.recompute_skill_invocations(experiment, attempt_id, "codex")

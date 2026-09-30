@@ -81,7 +81,7 @@ import json
 import secrets
 import tempfile
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -379,16 +379,64 @@ def skill_invocations_from_events(events: Sequence[Mapping[str, object]]) -> tup
     )
 
 
+def _jsonl_string_leaves(text: str) -> Iterator[tuple[int, str]]:
+    """`(1-indexed line, decoded string)` for every string key and value of
+    every JSONL line that parses. The serialized line escapes the quotes a
+    detector such as the OAuth pattern keys on, so a credential the agent
+    printed inside a tool result is only visible once decoded (counter-model
+    review, #202)."""
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        try:
+            value = json.loads(line)
+        except ValueError:
+            continue
+        stack: list[object] = [value]
+        while stack:
+            item = stack.pop()
+            if isinstance(item, str):
+                yield lineno, item
+            elif isinstance(item, dict):
+                stack.extend(item.keys())
+                stack.extend(item.values())
+            elif isinstance(item, list):
+                stack.extend(item)
+
+
+def transcript_leak_findings(raw: bytes) -> list[str]:
+    """Every reason `raw` may not be retained or published, by CLASS and LINE
+    only - never the matched value. Three passes, because each alone is
+    blind to something (#202, counter-model review):
+
+      - `leak.scan_text` over the raw text (machine identities, credentials);
+      - the same over each JSONL line's DECODED strings, where an escaped
+        `{\"access_token\": ...}` becomes matchable again;
+      - `trial._secret_content`, the filter artifact capture already applies
+        (GitHub/AWS/Slack tokens, private keys), over the raw bytes and each
+        decoded string."""
+    text = raw.decode("utf-8", errors="replace")
+    denylist, host_paths = leak.load_denylist(None), leak.default_host_paths()
+    located = {f"{kind} at line {lineno}" for lineno, kind, _detail in leak.scan_text(text, denylist, host_paths)}
+    secret = trial._secret_content(raw)
+    if secret is not None:
+        located.add(secret.removesuffix("; never exported"))
+    for lineno, leaf in _jsonl_string_leaves(text):
+        located.update(
+            f"{kind} at line {lineno}" for _l, kind, _detail in leak.scan_text(leaf, denylist, host_paths)
+        )
+        leaf_secret = trial._secret_content(leaf.encode("utf-8"))
+        if leaf_secret is not None:
+            located.add(f"{leaf_secret.removesuffix('; never exported')} at line {lineno}")
+    return sorted(located)
+
+
 def retainable_transcript(raw: bytes) -> trial.TranscriptEvidence:
     """Leak-check a transcript before it may be retained (#202, ADR 0005 rule
     3). A finding refuses retention entirely - never a redacted copy - and the
-    reason names each finding's CLASS and LINE only, never the matched value
-    (`selection_probe._retain_transcript`'s own convention)."""
-    text = raw.decode("utf-8", errors="replace")
-    findings = list(leak.scan_text(text, leak.load_denylist(None), host_paths=leak.default_host_paths()))
+    reason names each finding's class and line only
+    (`transcript_leak_findings`)."""
+    findings = transcript_leak_findings(raw)
     if findings:
-        located = sorted({f"{kind} at line {lineno}" for lineno, kind, _detail in findings})
-        return trial.TranscriptEvidence(None, f"transcript leak-check found {', '.join(located)}; retention refused")
+        return trial.TranscriptEvidence(None, f"transcript leak-check found {', '.join(findings)}; retention refused")
     if not raw:
         return trial.TranscriptEvidence(None, "the transcript file was empty")
     return trial.TranscriptEvidence(raw)
@@ -436,6 +484,14 @@ def recompute_skill_invocations(experiment: trial.Experiment, attempt_id: str, c
     if entry is None or entry.get("coverage") not in ("complete", "partial") or not entry.get("digest"):
         reason = entry.get("reason") if entry else "no client-transcript observation"
         raise trial.Refused(f"attempt {attempt_id!r} has no retained transcript ({reason})")
+    if entry.get("coverage") != "complete":
+        # A truncated transcript can drop the output that pairs with a skill
+        # read, so a short answer here would read as "not invoked" (#202,
+        # counter-model review).
+        raise trial.Refused(
+            f"attempt {attempt_id!r} retained only a {entry.get('coverage')} transcript; "
+            f"a recomputation from it cannot say what was not invoked"
+        )
     data = trial._read_object(experiment.root, str(entry["digest"]))
     return skill_invocations_from_events(CLIENT_SPECS[client].parse_transcript(data.decode("utf-8", errors="replace")))
 
