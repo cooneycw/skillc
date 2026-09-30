@@ -47,7 +47,8 @@ instrument - it reads planted defects as evidence about a candidate's pipeline
     by `package` alone - not merely by something;
   - the benign change is proven benign and is accepted;
   - and the paths that must never count as detection do not: a malformed
-    mutation, a "defect" that changes nothing, a pipeline that crashed with no
+    mutation, a "defect" that changes nothing or changes something other than
+    what it declares (a syntax error), a pipeline that crashed with no
     verdict line, one whose last line only LOOKS like a verdict (`VERIFY: failure
     ...`), one that timed out, and one that could not be launched (a
     missing tool) each make `pipeline-honest` UNKNOWN. The first two run the
@@ -243,6 +244,8 @@ def pipeline_validity(root: Path = HERE) -> list[tuple[str, bool, str]]:
          _probe_report(reference, _with_mutation("behaviour-trailing-hyphen", require="def never_defined"))),
         ("defect not proven (the planted text changes nothing)",
          _probe_report(reference, _with_mutation("behaviour-trailing-hyphen", text="\n# inert\n"))),
+        ("defect not proven (the planted text is a syntax error, not the declared defect)",
+         _probe_report(reference, _with_mutation("behaviour-trailing-hyphen", text="\ndef slugify(:\n"))),
         ("pipeline crashed with no verdict line",
          _with_pipeline(report, "behaviour-trailing-hyphen",
                         {"missing": False, "exit": 1, "last_line": "NameError: boom", "timed_out": False,

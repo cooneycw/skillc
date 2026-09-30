@@ -54,6 +54,11 @@ HELD_OUT_INSTALLED: tuple[tuple[str, str], ...] = (("user@host", "user-at-host")
 #: must carry exactly these ids, in this order.
 MUTATION_KINDS: tuple[tuple[str, str], ...] = (
     ("benign-comment", "benign"),
+    # The same redefine-and-forward SHAPE as the behaviour defect, with no
+    # change in behaviour: a pipeline that rejects the shape (an AST rule
+    # against redefinition, say) rather than the behaviour fails here
+    # (counter-model review).
+    ("benign-forwarding-wrapper", "benign"),
     ("behaviour-trailing-hyphen", "defect"),
     ("packaging-entry-point", "defect"),
 )
@@ -62,6 +67,27 @@ MUTATION_KINDS: tuple[tuple[str, str], ...] = (
 #: followed by one or more step names. Anything else - `VERIFY: failure to
 #: launch checker` included - is no verdict, never a rejection.
 FAIL_LINE = re.compile(r"VERIFY: fail( [A-Za-z0-9_.-]+)+")
+
+#: The one missing name the packaging mutation plants (inputs.json's `text`).
+MISSING_ENTRY_SUFFIX = "_skillc_missing"
+
+
+def defect_proven(mid: str, clean: list[object], mutant: list[object]) -> tuple[bool, str]:
+    """Did THIS defect take effect as declared - not merely "something
+    changed"? A syntax error or a timeout also changes the output, and must
+    not be read as the planted defect (counter-model review)."""
+    values = [o.get("value") if isinstance(o, dict) else None for o in clean]
+    if mid == "behaviour-trailing-hyphen":
+        if not all(isinstance(v, str) for v in values):
+            return False, "the clean tree has no working installed output to compare the defect against"
+        want = [{"value": f"{v}-"} for v in values]
+        return mutant == want, f"expected exactly the clean output plus a trailing '-': {want}"
+    if mid == "packaging-entry-point":
+        ok = all(isinstance(o, dict) and "cannot import name" in str(o.get("install_error", ""))
+                 and MISSING_ENTRY_SUFFIX in str(o.get("install_error", "")) for o in mutant)
+        return ok, f"expected every installed call to fail importing the missing *{MISSING_ENTRY_SUFFIX} entry point"
+    return False, f"no proof is defined for defect {mid!r}"
+
 
 CRITERIA = ("functional-trailing-hyphen", "integration-installed-path", "pipeline-green", "pipeline-honest")
 
@@ -202,8 +228,11 @@ def mutation_verdict(kind: str, clean_outputs: list[object], entry: dict[str, ob
         return "unknown", f"{mid}: the probe's report for this mutation is malformed"
     assert isinstance(p, dict)
     changed = outputs != clean_outputs
-    if kind == "defect" and not changed:
-        return "unknown", f"{mid}: not proven to introduce a defect - the installed output did not change"
+    if kind == "defect":
+        proven, expectation = defect_proven(str(mid), clean_outputs, outputs)  # type: ignore[arg-type]
+        if not proven:
+            return "unknown", (f"{mid}: not proven to introduce ITS defect ({expectation}); installed output "
+                               f"was {outputs}")
     if kind == "benign" and changed:
         return "unknown", f"{mid}: not proven benign - the installed output changed ({outputs})"
     effect = f"installed output {'changed' if changed else 'unchanged'} ({outputs})"

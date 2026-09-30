@@ -27,12 +27,17 @@ and version plan.
   defect, a no-verdict crash, a timeout or a missing tool is UNKNOWN, never
   detection, and so is a last line that only resembles the `VERIFY: fail
   <step>` grammar. `qualify.py` certifies it: 11 candidates, 5 broken graders,
-  12 pipeline-validity controls including step attribution. The candidate's
+  14 pipeline-validity controls including step attribution. A defect counts
+  as planted only when its SPECIFIC effect is observed (the clean output plus
+  `-`; an import failure on the missing entry name), never merely a change: a
+  syntax-broken mutation is UNKNOWN. A benign forwarding-wrapper mutation
+  shares the behaviour defect's shape, so a pipeline that rejects redefinition
+  rather than behaviour is VIOLATED. The candidate's
   pipeline runs with `-E -s -B`, not `-I`, so a pipeline that imports a sibling
   `ci/` helper works exactly as it does under the public command
   (`alternatives/helper-module`). `require_approved` also refuses identities
-  that are absent (an empty object, null or blank), not only the literal
-  `UNKNOWN`. Caps must be finite. Regression
+  that are absent (an empty object, null or blank) - including the shared
+  tools, permissions and public requirements - not only the literal `UNKNOWN`. Caps must be finite. Regression
   `test_a_baseline_attempt_meeting_the_task_criteria_reaches_primary_pass`
   fails against the pre-change comparison (`INCONCLUSIVE` != `PASS`). Negative
   controls for the validity gate itself are in

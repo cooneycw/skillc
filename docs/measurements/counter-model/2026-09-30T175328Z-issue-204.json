@@ -1,0 +1,24 @@
+{
+  "branch": "issue-204-calibrate-before-comparing-a-two-arm-l3-pipeline-c",
+  "counts": {
+    "accepted": 8,
+    "deferred": 1,
+    "rejected": 0
+  },
+  "head": "68a1ec1bfb5a7e700728d1157fb941c6a75769c1",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "204",
+  "passes": 2,
+  "recorded_at": "2026-09-30T17:53:28Z",
+  "red_cases": {
+    "already_covered": 20,
+    "proposed": 26
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/09/30/rollout-2026-09-30T13-46-23-01a0f36c-b8d1-7e61-8ada-57667b6c58c3.jsonl",
+    "thread_id": "01a0f36c-b8d1-7e61-8ada-57667b6c58c3"
+  },
+  "schema": 1,
+  "status": "ran"
+}

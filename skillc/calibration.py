@@ -267,6 +267,7 @@ REQUIRED_IDENTITIES: tuple[tuple[str, ...], ...] = (
     ("shared", "client", "name"), ("shared", "client", "version"),
     ("shared", "model"), ("shared", "reasoning_effort"),
     ("shared", "image", "tag"), ("shared", "image", "digest"),
+    ("shared", "tools"), ("shared", "permissions"), ("shared", "public_requirements"),
     ("treatment", "subject", "name"), ("treatment", "subject", "locator"),
     ("treatment", "subject", "revision"),
 )

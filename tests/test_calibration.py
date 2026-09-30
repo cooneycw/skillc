@@ -242,6 +242,9 @@ def test_a_non_finite_cap_is_refused(cap: str, value: float) -> None:
     (("shared", "image"), {}),
     (("shared", "model"), None),
     (("shared", "reasoning_effort"), ""),
+    (("shared", "tools"), None),
+    (("shared", "permissions"), " "),
+    (("shared", "public_requirements"), {}),
 ])
 def test_approval_with_an_identity_absent_rather_than_unknown_is_refused(
         where: tuple[str, str], value: object) -> None:

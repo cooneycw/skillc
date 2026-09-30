@@ -14,7 +14,10 @@ SAMPLE = "Salt & Pepper!"
 
 
 def tests_pass() -> bool:
-    for path in sorted((ROOT / "tests").glob("test_*.py")):
+    paths = sorted((ROOT / "tests").glob("test_*.py"))
+    if not paths:
+        return False
+    for path in paths:
         code = (
             "import importlib.util, sys\n"
             "spec = importlib.util.spec_from_file_location('t', sys.argv[1])\n"

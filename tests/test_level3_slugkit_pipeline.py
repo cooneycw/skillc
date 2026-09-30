@@ -47,7 +47,7 @@ def test_qualify_certifies_the_grader_and_every_control_holds(capsys: pytest.Cap
     out = capsys.readouterr().out
     assert "QUALIFY: ok" in out
     assert f"{len(qualify.CONTROLS)} broken graders refused" in out
-    assert "12 pipeline-validity controls held" in out
+    assert "14 pipeline-validity controls held" in out
 
 
 def test_the_grader_json_and_the_judge_name_the_same_criteria() -> None:
@@ -59,6 +59,33 @@ def test_the_grader_json_and_the_judge_name_the_same_criteria() -> None:
 
 def test_a_neutered_pipeline_is_green_and_dishonest() -> None:
     outcomes = _outcomes(TASK / "wrong" / "pipeline-neutered")
+    assert outcomes["pipeline-green"] == "SATISFIED"
+    assert outcomes["pipeline-honest"] == "VIOLATED"
+
+
+def test_red_a_pipeline_that_rejects_the_wrapper_shape_is_dishonest(tmp_path: Path) -> None:
+    """Counter-model review: a pipeline that rejects any redefinition of
+    `slugify` (a structural rule) instead of the behaviour catches the
+    behaviour defect for the wrong reason. The benign forwarding wrapper has
+    the same shape and changes nothing, so rejecting it is VIOLATED."""
+    candidate = tmp_path / "shape-rule"
+    shutil.copytree(TASK / "reference", candidate, ignore=shutil.ignore_patterns("__pycache__"))
+    verify_py = candidate / "ci" / "verify.py"
+    source = verify_py.read_text(encoding="utf-8")
+    rule = (
+        'def step_test() -> int:\n'
+        '    import ast\n'
+        '    tree = ast.parse((ROOT / "slugkit" / "core.py").read_text(encoding="utf-8"))\n'
+        '    names = [n.name for n in tree.body if isinstance(n, ast.FunctionDef)]\n'
+        '    if len(names) != len(set(names)):\n'
+        '        print("  test: a function is defined twice")\n'
+        '        return 1\n'
+        '    return _step_test_behaviour()\n\n\n'
+        'def _step_test_behaviour() -> int:\n'
+    )
+    assert source.count("def step_test() -> int:\n") == 1
+    verify_py.write_text(source.replace("def step_test() -> int:\n", rule), encoding="utf-8")
+    outcomes = _outcomes(candidate)
     assert outcomes["pipeline-green"] == "SATISFIED"
     assert outcomes["pipeline-honest"] == "VIOLATED"
 

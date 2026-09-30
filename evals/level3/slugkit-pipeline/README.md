@@ -30,11 +30,15 @@ earlier evidence.
 | Id | Kind | Planted change | Proof it took | Caught by (reference) |
 |---|---|---|---|---|
 | `benign-comment` | benign | a comment appended to `slugkit/core.py` | installed output unchanged | accepted: `VERIFY: ok` |
-| `behaviour-trailing-hyphen` | defect | `slugify` re-wrapped to append `-` | installed output changed | step `test` |
-| `packaging-entry-point` | defect | the `[project.scripts]` target renamed to a missing function | installed output changed (entry point fails) | step `package` |
+| `benign-forwarding-wrapper` | benign | `slugify` re-wrapped to forward unchanged - the defect's SHAPE, none of its behaviour | installed output unchanged | accepted: `VERIFY: ok` |
+| `behaviour-trailing-hyphen` | defect | `slugify` re-wrapped to append `-` | installed output is exactly the clean output plus `-` | step `test` |
+| `packaging-entry-point` | defect | the `[project.scripts]` target renamed to a missing function | every installed call fails importing the missing `*_skillc_missing` name | step `package` |
 
 The proof is relative to the candidate's OWN clean installed output, so it is
-subject-independent and holds for any valid solution shape. The kinds live in
+subject-independent and holds for any valid solution shape - and it is SPECIFIC
+to each defect: a syntax error or a timeout also changes the output, and is not
+the planted defect. The forwarding wrapper separates a pipeline that detects
+the behaviour from one that rejects any redefinition of `slugify`. The kinds live in
 the judge, not in `inputs.json`: whether a change was supposed to break
 something is an expected value.
 
