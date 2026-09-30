@@ -793,6 +793,13 @@ def build_collection_paste_back(
         dimension_text += f" (unavailable_reason={outcome_by_dimension.unavailable_reason})"
     cleanup = record.get("cleanup")
     cleanup_d = cleanup if isinstance(cleanup, dict) else {}
+    # #202: what the store holds of the agent's own transcript. A record with
+    # no retention summary at all (built outside `agent_trial.run_one_attempt`)
+    # reads as missing with that reason - never as a blank line.
+    retention = record.get("transcript_retention")
+    retention_d = retention if isinstance(retention, dict) else {
+        "coverage": "missing", "reason": "the record carries no transcript_retention summary",
+    }
     host = result.host_credential
     diff = result.daemon_diff
     lines = [
@@ -848,6 +855,12 @@ def build_collection_paste_back(
         (f"    discovery={dict(sorted((result.discovery or {}).items()))} (source=transcript skill_listing)"
          if result.discovery_reason is None
          else f"    discovery=UNMEASURED ({result.discovery_reason})"),
+        "  [transcript]",
+        (
+            f"    transcript_coverage={retention_d.get('coverage')} digest={retention_d.get('digest')} "
+            f"size={retention_d.get('size')}"
+        ),
+        f"    transcript_reason={retention_d.get('reason')}",
         "  [transcript format]",
         f"    client_version={obs.get('transcript_client_version')} model={obs.get('transcript_model')}",
         (

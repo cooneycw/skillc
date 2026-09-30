@@ -94,6 +94,7 @@ def _codex_argv(*, home: Path, transcript_relpath: str, copy_solution: Path | No
 
 def _run_captured_attempt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, pass_task: bool,
+    transcript_relpath: str = ".codex/sessions/2026/01/01/rollout-cc.jsonl", plant_leak: bool = False,
 ) -> tuple[trial.Experiment, dict[str, object]]:
     """A real, captured, graded `collection_conformance` attempt - PASS when
     `pass_task`, FAIL otherwise (the fake client copies no solution) -
@@ -115,9 +116,11 @@ def _run_captured_attempt(
     grading_backend = _backend(base, docker_state)
     home = _mapped_home(docker_state, attempt_id)
     argv = _codex_argv(
-        home=home, transcript_relpath=".codex/sessions/2026/01/01/rollout-cc.jsonl",
+        home=home, transcript_relpath=transcript_relpath,
         copy_solution=(GRADER_ROOT / "reference") if pass_task else None,
     )
+    if plant_leak:
+        argv.append("--plant-leak")
     cred_path = _fresh_codex_credential(tmp_path)
 
     result = cc.run_collection_agent_attempt(
@@ -446,3 +449,69 @@ def test_cli_a_normal_arm_export_needs_no_evidence_role(
 
     assert code == 0
     assert list(evidence.glob("result-*.json"))
+
+
+# ------------------------------------------------------------ transcript (#202)
+
+
+def test_the_transcript_is_not_exported_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    experiment, envelope = _run_captured_attempt(tmp_path, monkeypatch, pass_task=True)
+    evidence = tmp_path / "evidence"
+    assert cli._export_collection_evidence(experiment, envelope, evidence) == 0
+    assert not (evidence / "bundle" / "transcripts").exists()
+
+
+def test_evidence_transcript_exports_the_retained_transcript_byte_for_byte(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    experiment, envelope = _run_captured_attempt(tmp_path, monkeypatch, pass_task=True)
+    evidence = tmp_path / "evidence"
+    assert cli._export_collection_evidence(experiment, envelope, evidence, transcript=True) == 0
+    [exported] = list((evidence / "bundle" / "transcripts").glob("*.jsonl"))
+    record = envelope["record"]
+    assert isinstance(record, dict)
+    retention = record["transcript_retention"]
+    assert isinstance(retention, dict)
+    assert trial.sha256_bytes(exported.read_bytes()) == retention["digest"]
+    unexpected, _known = mp.bundle_findings(evidence / "bundle")
+    assert unexpected == []  # transcripts/ is never read as a bundle
+
+
+def test_evidence_transcript_refuses_when_no_transcript_was_retained(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    experiment, envelope = _run_captured_attempt(
+        tmp_path, monkeypatch, pass_task=True, transcript_relpath="elsewhere/rollout.jsonl",
+    )
+    evidence = tmp_path / "evidence"
+    assert cli._export_collection_evidence(experiment, envelope, evidence, transcript=True) == 1
+    assert not evidence.exists()
+    assert "retained no transcript" in capsys.readouterr().err
+
+
+def test_a_planted_transcript_leak_refuses_the_transcript_export(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Retention refuses the leaked transcript, so asking to export it
+    refuses the export, and the reason names the leak's class only."""
+    experiment, envelope = _run_captured_attempt(tmp_path, monkeypatch, pass_task=True, plant_leak=True)
+    evidence = tmp_path / "evidence"
+    assert cli._export_collection_evidence(experiment, envelope, evidence, transcript=True) == 1
+    assert not evidence.exists()
+    err = capsys.readouterr().err
+    assert "credential-token" in err and "sk-" not in err
+
+
+def test_the_export_leak_scan_still_covers_a_transcript_retention_let_through(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Defence in depth: were the retention check blind, the export's own
+    whole-staging scan must still refuse the leaked transcript."""
+    from skillc import agent_trial
+
+    monkeypatch.setattr(agent_trial, "retainable_transcript", lambda raw: trial.TranscriptEvidence(raw))
+    experiment, envelope = _run_captured_attempt(tmp_path, monkeypatch, pass_task=True, plant_leak=True)
+    evidence = tmp_path / "evidence"
+    assert cli._export_collection_evidence(experiment, envelope, evidence, transcript=True) == 1
+    assert not evidence.exists()
+    assert "failed its leak check" in capsys.readouterr().err

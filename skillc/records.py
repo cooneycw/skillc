@@ -125,6 +125,16 @@ REQUIRED_OBSERVATIONS = ("client-events", "process-lifecycle")
 #: observation - #26's case format does not exist yet, so that wiring is deferred).
 SKILL_INVOCATIONS = "skill-invocations"
 
+#: The client's own transcript (#202): the codex session rollout or the Claude
+#: Code session file, as a content-addressed object. Optional like
+#: skill-invocations, so no earlier manifest is invalidated. It has its own
+#: coverage vocabulary: `missing` (with a reason) says no transcript was
+#: retained - none was found, or the leak check refused it - which is a
+#: different fact from `unsupported`. `missing` is legal on THIS stream only;
+#: the required streams keep `OBSERVATION_COVERAGE`.
+CLIENT_TRANSCRIPT = "client-transcript"
+CLIENT_TRANSCRIPT_COVERAGE = ("complete", "partial", "missing")
+
 #: What the controller concluded about one attempt. Only `captured` hands the
 #: attempt to grading; the other three are explicit non-results, each with a reason,
 #: and none of them may be dropped (EF-07).
@@ -586,6 +596,38 @@ def _skill_invocations(entry: dict[str, object]) -> Iterator[str]:
             )
 
 
+def _client_transcript(entry: dict[str, object]) -> Iterator[str]:
+    """The `client-transcript` stream (#202). A retained transcript names the
+    object it is (`ref`, `digest`, `size`); a missing one says why and names
+    no object - a `missing` entry pointing at bytes, or a `complete` one
+    pointing at none, would each claim the opposite of what the store holds."""
+    coverage = entry.get("coverage")
+    if coverage not in CLIENT_TRANSCRIPT_COVERAGE:
+        yield (
+            f"observation {CLIENT_TRANSCRIPT!r} has coverage {coverage!r}, not one of "
+            f"{list(CLIENT_TRANSCRIPT_COVERAGE)}"
+        )
+        return
+    if coverage == "missing":
+        if not _nonempty_str(entry.get("reason")):
+            yield (
+                f"observation {CLIENT_TRANSCRIPT!r} is missing but gives no reason; "
+                f"an absent transcript must say why it is absent"
+            )
+        if any(key in entry for key in ("ref", "digest", "size")):
+            yield f"observation {CLIENT_TRANSCRIPT!r} is missing but names an object"
+        return
+    size = entry.get("size")
+    if (
+        not _nonempty_str(entry.get("ref")) or not _nonempty_str(entry.get("digest"))
+        or isinstance(size, bool) or not isinstance(size, int) or size <= 0
+    ):
+        yield (
+            f"observation {CLIENT_TRANSCRIPT!r} has coverage {coverage!r} but no ref, digest "
+            f"and non-empty size; a retained transcript names the object it is"
+        )
+
+
 def observation_coverage(record: Record) -> Iterator[str]:
     """Each required stream declares its origin and coverage; failures are listed.
 
@@ -610,7 +652,9 @@ def observation_coverage(record: Record) -> Iterator[str]:
                 f"observation {stream!r} has origin {entry.get('origin')!r}, not one "
                 f"of {list(OBSERVATION_ORIGINS)}"
             )
-        if entry.get("coverage") not in OBSERVATION_COVERAGE:
+        if stream == CLIENT_TRANSCRIPT:
+            yield from _client_transcript(entry)
+        elif entry.get("coverage") not in OBSERVATION_COVERAGE:
             yield (
                 f"observation {stream!r} has coverage {entry.get('coverage')!r}, not "
                 f"one of {list(OBSERVATION_COVERAGE)}"

@@ -243,6 +243,7 @@ def run_through_backend(
     observe_before_teardown: Callable[[ExecutionBackend, object], Mapping[str, object]] | None = None,
     before_execute: Callable[[ExecutionBackend, object], None] | None = None,
     nonce: str | None = None,
+    transcript_for_capture: Callable[[], trial.TranscriptEvidence | None] | None = None,
 ) -> dict[str, object]:
     """Drive `attempt_id` through `backend` from prepare to teardown, and
     finalize it. Returns `trial.finalize`'s lifecycle record, plus
@@ -296,6 +297,13 @@ def run_through_backend(
     minimizes prompt contamination in the very behaviour being measured
     (cross-model review). Omitted (the default, every pre-#106 caller),
     a fresh nonce is minted exactly as before.
+
+    `transcript_for_capture` (#202) is read once, right before
+    `trial.capture()`, and what it returns is captured as the attempt's
+    `client-transcript` observation. It is a callable rather than a value
+    because the transcript only exists after `observe_before_teardown` has
+    read it out of the container. Omitted, the manifest declares no
+    transcript stream, exactly as before.
 
     TEARDOWN IS UNCONDITIONAL once `prepare()` has returned a handle
     (found by cross-model review: the first version of this function let an
@@ -449,7 +457,10 @@ def run_through_backend(
                         else:
                             _ensure_spool_files(experiment, attempt_id)
                             try:
-                                trial.capture(experiment, attempt_id)
+                                trial.capture(
+                                    experiment, attempt_id,
+                                    transcript=transcript_for_capture() if transcript_for_capture else None,
+                                )
                             except trial.Refused:
                                 pass  # capture() already recorded capture-failed; nothing more here
     finally:

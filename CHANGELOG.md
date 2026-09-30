@@ -8,6 +8,25 @@ and version plan.
 
 ## [Unreleased]
 
+- **Every agent attempt now retains the client's own transcript in its store**
+  (Closes #202). The #150 live stores held 0-byte spool streams and no
+  transcript, so the NORMAL PASS / DEGRADED PASS pair could not be diagnosed.
+  `agent_trial.run_one_attempt` now offers the transcript it already reads (the
+  codex rollout, the Claude Code session file) to `trial.capture` as a new
+  optional `client-transcript` observation: a content-addressed object with
+  `coverage: complete`, or `coverage: missing` plus a reason when none was
+  found or the leak check refused it (reported by class and line, never the
+  value; the leaked bytes never reach the store). `records.observation_coverage`
+  enforces the shape (new controls `controls/observation-coverage/*/transcript-*`).
+  The `collection-run` paste-back gains a `[transcript]` section, and
+  `agent_trial.recompute_skill_invocations` re-derives `skill_invocations` from
+  the stored object. `collection-run --evidence-transcript` is the explicit
+  opt-in that also publishes it as `bundle/transcripts/<attempt>.jsonl`; the
+  export is refused when no transcript was retained. Regression
+  `test_a_codex_attempt_s_store_retains_its_transcript_referenced_from_the_manifest`
+  fails on the previous code; negative control
+  `test_an_attempt_with_no_transcript_records_coverage_missing_never_silence`.
+
 - **`degrade-subject` re-pins checksum manifests for the files it overrides**
   (Closes #198). An override of a file listed in the skill's declared
   `checksum_manifest` (CPP's `scripts/gh-pr-merge.sh` in `flow-auto` and

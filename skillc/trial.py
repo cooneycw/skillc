@@ -147,6 +147,23 @@ class Import:
     digest: str | None
 
 
+@dataclass(frozen=True)
+class TranscriptEvidence:
+    """The client's own transcript, offered for capture (#202), or the reason
+    there is none. Exactly one of `data`/`reason` is set: bytes become a
+    `client-transcript` observation with `coverage: complete`, a reason one
+    with `coverage: missing` - never a stream the manifest is silent about.
+
+    The caller has already leak-checked `data`; this module only stores it."""
+
+    data: bytes | None
+    reason: str | None = None
+
+    def __post_init__(self) -> None:
+        if (self.data is None) == (self.reason is None):
+            raise ValueError("TranscriptEvidence takes exactly one of data or reason")
+
+
 # ------------------------------------------------------------------ helpers
 
 
@@ -942,6 +959,27 @@ def _stream(experiment: Experiment, attempt_id: str, path: Path, stream: str, or
     }
 
 
+def _transcript_observation(
+    experiment: Experiment, attempt_id: str, transcript: TranscriptEvidence, limits: Limits, failures: list[str],
+) -> dict[str, object]:
+    entry: dict[str, object] = {
+        "stream": records.CLIENT_TRANSCRIPT, "origin": "client-reported", "attempt_id": attempt_id,
+    }
+    if transcript.data is None:
+        return {**entry, "coverage": "missing", "reason": transcript.reason}
+    data = transcript.data[:limits.max_stream_bytes]
+    coverage = "complete"
+    if len(transcript.data) > limits.max_stream_bytes:
+        failures.append(
+            f"{records.CLIENT_TRANSCRIPT}: {len(transcript.data)} bytes, truncated to {limits.max_stream_bytes}"
+        )
+        coverage = "partial"
+    return {
+        **entry, "coverage": coverage, "ref": f"{OBJECTS}/{sha256_bytes(data).removeprefix('sha256:')}",
+        "digest": _put_object(experiment.root, data), "size": len(data),
+    }
+
+
 def _claimed_attempts(value: object) -> Iterator[str]:
     """Every attempt identity a JSON payload claims, top level or per JSONL line."""
     if isinstance(value, dict):
@@ -1002,6 +1040,7 @@ def capture(
     include: tuple[str, ...] = ("*",),
     imports: tuple[Import, ...] = (),
     limits: Limits | None = None,
+    transcript: TranscriptEvidence | None = None,
 ) -> dict[str, object]:
     """Freeze what the subject left, after its stop was confirmed.
 
@@ -1011,6 +1050,11 @@ def capture(
     each exclusion that was in scope is recorded with its reason. A breach of the
     bound is a capture failure and makes the capture partial - never a silent
     truncation. Returns the manifest, which is written once.
+
+    `transcript` (#202), when given, adds a `client-transcript` observation:
+    the client's own transcript as a content-addressed object, or `coverage:
+    missing` with the reason none was retained. `None` declares nothing, as
+    for a subject that is not an agent client at all.
     """
     events = experiment.events(attempt_id)
     names = [e.get("event") for e in events]
@@ -1053,6 +1097,8 @@ def capture(
         bound = _import(experiment, attempt_id, item, got.failures)
         if bound is not None:
             observations.append(bound)
+    if transcript is not None:
+        observations.append(_transcript_observation(experiment, attempt_id, transcript, limits, got.failures))
     journal = experiment.journal(attempt_id).read_bytes()
     observations.append({
         "stream": "process-lifecycle", "origin": "observed",

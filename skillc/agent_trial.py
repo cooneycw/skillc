@@ -81,11 +81,11 @@ import json
 import secrets
 import tempfile
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from . import credential, demo, records, trial, trial_bootstrap, verify
+from . import credential, demo, leak, records, trial, trial_bootstrap, verify
 from . import transcript_adapter as ta
 from .backend import BackendUnavailable, Confirmation, ExecutionBackend, Limits
 from .docker_backend import CANARY_RESULT_FILENAME, DockerBackend
@@ -368,10 +368,153 @@ class TranscriptObservation:
         return self.prompt_delivered and self.canary_satisfied
 
 
+def skill_invocations_from_events(events: Sequence[Mapping[str, object]]) -> tuple[str, ...]:
+    """Every `skill_invocation` event's skill, in transcript order - the ONE
+    definition both the live observation and `recompute_skill_invocations`
+    use, so a recomputation checks the heuristic rather than a second copy
+    of it."""
+    return tuple(
+        str(event["skill"]) for event in events
+        if event.get("type") == "skill_invocation" and "skill" in event
+    )
+
+
+def _jsonl_string_leaves(text: str) -> Iterator[tuple[int, str]]:
+    """`(1-indexed line, decoded string)` for every string key and value of
+    every JSONL line that parses. The serialized line escapes the quotes a
+    detector such as the OAuth pattern keys on, so a credential the agent
+    printed inside a tool result is only visible once decoded (counter-model
+    review, #202)."""
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        try:
+            value = json.loads(line)
+        except ValueError:
+            continue
+        stack: list[object] = [value]
+        while stack:
+            item = stack.pop()
+            if isinstance(item, str):
+                yield lineno, item
+            elif isinstance(item, dict):
+                stack.extend(item.keys())
+                stack.extend(item.values())
+            elif isinstance(item, list):
+                stack.extend(item)
+
+
+def transcript_leak_findings(raw: bytes) -> list[str]:
+    """Every reason `raw` may not be retained or published, by CLASS and LINE
+    only - never the matched value. Three passes, because each alone is
+    blind to something (#202, counter-model review):
+
+      - `leak.scan_text` over the raw text (machine identities, credentials);
+      - the same over each JSONL line's DECODED strings, where an escaped
+        `{\"access_token\": ...}` becomes matchable again;
+      - `trial._secret_content`, the filter artifact capture already applies
+        (GitHub/AWS/Slack tokens, private keys), over the raw bytes and each
+        decoded string."""
+    text = raw.decode("utf-8", errors="replace")
+    denylist, host_paths = leak.load_denylist(None), leak.default_host_paths()
+    located = {f"{kind} at line {lineno}" for lineno, kind, _detail in leak.scan_text(text, denylist, host_paths)}
+    secret = trial._secret_content(raw)
+    if secret is not None:
+        located.add(secret.removesuffix("; never exported"))
+    for lineno, leaf in _jsonl_string_leaves(text):
+        located.update(
+            f"{kind} at line {lineno}" for _l, kind, _detail in leak.scan_text(leaf, denylist, host_paths)
+        )
+        # `surrogatepass`: a decoded JSON string may hold an unpaired
+        # surrogate (a tool's surrogate-escaped filename), which plain utf-8
+        # refuses to encode (counter-model review, #202).
+        leaf_secret = trial._secret_content(leaf.encode("utf-8", errors="surrogatepass"))
+        if leaf_secret is not None:
+            located.add(f"{leaf_secret.removesuffix('; never exported')} at line {lineno}")
+    return sorted(located)
+
+
+def retainable_transcript(raw: bytes) -> trial.TranscriptEvidence:
+    """Leak-check a transcript before it may be retained (#202, ADR 0005 rule
+    3). A finding refuses retention entirely - never a redacted copy - and the
+    reason names each finding's class and line only
+    (`transcript_leak_findings`)."""
+    try:
+        findings = transcript_leak_findings(raw)
+    except Exception as exc:  # noqa: BLE001 - retention must never take the transcript observation with it
+        return trial.TranscriptEvidence(None, f"transcript leak-check could not run ({type(exc).__name__}); retention refused")
+    if findings:
+        return trial.TranscriptEvidence(None, f"transcript leak-check found {', '.join(findings)}; retention refused")
+    if not raw:
+        return trial.TranscriptEvidence(None, "the transcript file was empty")
+    return trial.TranscriptEvidence(raw)
+
+
+def _stored_transcript_entry(experiment: trial.Experiment, attempt_id: str) -> dict[str, object] | None:
+    path = experiment.root / f"manifest-{attempt_id}.json"
+    if path.is_symlink() or not path.is_file():
+        return None
+    manifest = json.loads(path.read_bytes())
+    for entry in manifest.get("observations") or ():
+        if isinstance(entry, dict) and entry.get("stream") == records.CLIENT_TRANSCRIPT:
+            return entry
+    return None
+
+
+def transcript_retention(experiment: trial.Experiment, attempt_id: str, disposition: object) -> dict[str, object]:
+    """What the store holds of this attempt's transcript, read back from its
+    manifest - never from what the hook intended to store. No manifest (the
+    attempt was not captured) and no entry are both `missing`, each with its
+    own reason, never an absent key."""
+    entry = _stored_transcript_entry(experiment, attempt_id)
+    if entry is None:
+        reason = (
+            f"no manifest: the attempt was not captured (disposition {disposition!r})"
+            if not (experiment.root / f"manifest-{attempt_id}.json").is_file()
+            else "the manifest declares no client-transcript stream"
+        )
+        return {"coverage": "missing", "digest": None, "size": None, "reason": reason}
+    return {
+        "coverage": entry.get("coverage"), "digest": entry.get("digest"), "size": entry.get("size"),
+        "reason": entry.get("reason"),
+    }
+
+
+def recompute_skill_invocations(experiment: trial.Experiment, attempt_id: str, client: str) -> tuple[str, ...]:
+    """`skill_invocations` re-derived from the RETAINED transcript (#202), so
+    the heuristic is checkable after the run. The object is re-hashed before
+    it is parsed (`trial._read_object`); refused when no transcript was
+    retained - there is nothing to recompute from, and an empty tuple would
+    read as "nothing was invoked"."""
+    if client not in CLIENT_SPECS:
+        raise credential.CredentialRefused(f"unknown client {client!r}: expected one of {sorted(CLIENT_SPECS)}")
+    entry = _stored_transcript_entry(experiment, attempt_id)
+    if entry is None or entry.get("coverage") not in ("complete", "partial") or not entry.get("digest"):
+        reason = entry.get("reason") if entry else "no client-transcript observation"
+        raise trial.Refused(f"attempt {attempt_id!r} has no retained transcript ({reason})")
+    if entry.get("coverage") != "complete":
+        # A truncated transcript can drop the output that pairs with a skill
+        # read, so a short answer here would read as "not invoked" (#202,
+        # counter-model review).
+        raise trial.Refused(
+            f"attempt {attempt_id!r} retained only a {entry.get('coverage')} transcript; "
+            f"a recomputation from it cannot say what was not invoked"
+        )
+    data = trial._read_object(experiment.root, str(entry["digest"]))
+    events = CLIENT_SPECS[client].parse_transcript(data.decode("utf-8", errors="replace"))
+    if not events:
+        # Nothing the adapter recognizes - an empty answer would read as
+        # "inspected, nothing invoked" (counter-model review, #202).
+        raise trial.Refused(
+            f"attempt {attempt_id!r}'s transcript holds no event the {client} adapter recognizes; "
+            f"a recomputation from it cannot say what was not invoked"
+        )
+    return skill_invocations_from_events(events)
+
+
 def _make_observe_before_teardown(
     *, spec: ClientSpec, expected_prompt: str, skill_name: str | None,
     delivered_credential_bytes: dict[str, bytes],
     retained_transcript: dict[str, object] | None = None,
+    stored_transcript: dict[str, trial.TranscriptEvidence] | None = None,
 ) -> Callable[[ExecutionBackend, object], Mapping[str, object]]:
     def hook(backend: ExecutionBackend, handle: object) -> dict[str, object]:
         assert isinstance(backend, DockerBackend)
@@ -398,6 +541,10 @@ def _make_observe_before_teardown(
             skill_invocation_detection=spec.skill_invocation_detection,
         )
         if len(matches) != 1:
+            if stored_transcript is not None:
+                stored_transcript["evidence"] = trial.TranscriptEvidence(
+                    None, f"expected exactly one transcript file, found {len(matches)}",
+                )
             observation = TranscriptObservation(
                 files_found=len(matches), prompt_delivered=False,
                 prompt_delivery_reason=f"expected exactly one transcript file, found {len(matches)}",
@@ -407,6 +554,8 @@ def _make_observe_before_teardown(
             )
         else:
             (matched_path, raw), = matches.items()
+            if stored_transcript is not None:
+                stored_transcript["evidence"] = retainable_transcript(raw)
             if retained_transcript is not None:
                 # The ORIGINAL bytes, never a decode/re-encode round trip -
                 # retention exists so a run can be re-scanned against what the
@@ -439,10 +588,7 @@ def _make_observe_before_teardown(
             # only `skill_name`'s own (issue #26 review): `check_agent_canary`
             # above answers "was THIS skill invoked", a different, narrower
             # question than "which skill(s), if any, were invoked at all".
-            invocations = tuple(
-                str(event["skill"]) for event in events
-                if event.get("type") == "skill_invocation" and "skill" in event
-            )
+            invocations = skill_invocations_from_events(events)
             if spec.read_skill_listing is None:
                 listed, listed_source = None, f"not available: the {spec.name} transcript carries no skill listing"
             else:
@@ -1070,15 +1216,25 @@ def run_one_attempt(
         extra_home_files=extra_home_files or {},
     )
     retained_transcript: dict[str, object] | None = {} if retain_transcript else None
+    # #202: the transcript goes into the attempt's OWN store for every caller,
+    # leak-checked first. Empty only when the hook itself failed before it
+    # reached the transcript - which the fallback below states as such.
+    stored_transcript: dict[str, trial.TranscriptEvidence] = {}
     observe_before_teardown = _make_observe_before_teardown(
         spec=spec, expected_prompt=full_prompt, skill_name=skill_name,
         delivered_credential_bytes=delivered_credential_bytes,
-        retained_transcript=retained_transcript,
+        retained_transcript=retained_transcript, stored_transcript=stored_transcript,
     )
+
+    def transcript_for_capture() -> trial.TranscriptEvidence:
+        return stored_transcript.get("evidence") or trial.TranscriptEvidence(
+            None, "the transcript observation hook did not complete; no transcript was read",
+        )
 
     record = run_through_backend(
         backend, experiment, attempt_id, argv, surface, limits, base,
         before_execute=before_execute, observe_before_teardown=observe_before_teardown, nonce=nonce,
+        transcript_for_capture=transcript_for_capture,
     )
 
     graded: dict[str, object] | None = None
@@ -1186,6 +1342,7 @@ def run_one_attempt(
     }
     if retained_transcript:
         result["retained_transcript"] = retained_transcript
+    result["transcript_retention"] = transcript_retention(experiment, attempt_id, record.get("disposition"))
     # Persisted on EVERY path (#106): the observation used to exist only in
     # this returned dict, so a caller that printed it wrong - or not at all -
     # lost it for good.

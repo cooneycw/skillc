@@ -1678,3 +1678,212 @@ def test_cli_collection_run_resolves_its_own_image_digest_and_reaches_pass(
     code = cli.main(argv)
 
     assert code == 0, "the real CLI path did not reach PASS - receipt refused or discovery not SATISFIED"
+
+
+# ------------------------------------------------ transcript retention (#202)
+
+
+def _run_codex_attempt(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch, *,
+    transcript_relpath: str = ".codex/sessions/2026/01/01/rollout-tr.jsonl",
+    plant_skill: list[str] | None = None, plant_leak: bool = False,
+) -> tuple[trial.Experiment, str, cc.CollectionAgentResult]:
+    repo = _fixture_collection(tmp_path, {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd"]))
+    acquired = cc.acquire_collection("whatever", base, checkout=repo)
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    experiment, attempt_id = cc.plan_collection_attempt("whatever", acquired, store, image_digest=_BACKEND_IMAGE_DIGEST)
+    argv = _codex_argv(
+        home=_mapped_home(docker_state, attempt_id), transcript_relpath=transcript_relpath,
+        copy_solution=GRADER_ROOT / "reference", plant_skill=plant_skill,
+    )
+    if plant_leak:
+        argv.append("--plant-leak")
+    result = cc.run_collection_agent_attempt(
+        subject_name="whatever", acquired=acquired, experiment=experiment, attempt_id=attempt_id,
+        backend=_backend(base, docker_state), grading_backend=_backend(base, docker_state), base=base,
+        base_argv=argv, prompt="Fix the slug helper.", timeout=5,
+        credential_explicit_path=_fresh_codex_credential(tmp_path),
+    )
+    return experiment, attempt_id, result
+
+
+def _transcript_entry(experiment: trial.Experiment, attempt_id: str) -> dict[str, object]:
+    manifest = json.loads((experiment.root / f"manifest-{attempt_id}.json").read_text(encoding="utf-8"))
+    entries = [o for o in manifest["observations"] if o.get("stream") == "client-transcript"]
+    assert len(entries) == 1, f"expected one client-transcript observation, got {manifest['observations']!r}"
+    entry = entries[0]
+    assert isinstance(entry, dict)
+    return entry
+
+
+def test_a_codex_attempt_s_store_retains_its_transcript_referenced_from_the_manifest(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#202 regression: before the fix the manifest held only client-events,
+    client-stderr and process-lifecycle, and no object in the store was the
+    agent's transcript."""
+    experiment, attempt_id, result = _run_codex_attempt(tmp_path, base, docker_state, monkeypatch)
+    assert result.record["disposition"] == "captured"
+    entry = _transcript_entry(experiment, attempt_id)
+    assert entry["coverage"] == "complete"
+    assert entry["origin"] == "client-reported"
+    data = trial._read_object(experiment.root, str(entry["digest"]))
+    assert data and len(data) == entry["size"]
+    assert b"session_meta" in data or b"response_item" in data  # the rollout itself, not a spool file
+    retention = result.record["transcript_retention"]
+    assert isinstance(retention, dict)
+    assert retention["coverage"] == "complete" and retention["digest"] == entry["digest"]
+
+
+def test_an_attempt_with_no_transcript_records_coverage_missing_never_silence(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Negative control: the client wrote its transcript outside the sessions
+    directory, so none was found - the store says `missing` with a reason,
+    and the paste-back says so too."""
+    experiment, attempt_id, result = _run_codex_attempt(
+        tmp_path, base, docker_state, monkeypatch, transcript_relpath="elsewhere/rollout.jsonl",
+    )
+    assert result.record["disposition"] == "captured"
+    entry = _transcript_entry(experiment, attempt_id)
+    assert entry["coverage"] == "missing"
+    assert "ref" not in entry and "digest" not in entry
+    assert "found 0" in str(entry["reason"])
+    paste_back = cc.build_collection_paste_back(result)
+    assert "transcript_coverage=missing" in paste_back
+
+
+def test_a_planted_leak_in_a_transcript_refuses_retention_and_names_only_its_class(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    experiment, attempt_id, result = _run_codex_attempt(tmp_path, base, docker_state, monkeypatch, plant_leak=True)
+    entry = _transcript_entry(experiment, attempt_id)
+    assert entry["coverage"] == "missing"
+    reason = str(entry["reason"])
+    assert "credential-token" in reason and "retention refused" in reason
+    assert "sk-" not in reason  # the class, never the matched value
+    # The planted value reached no object in the store.
+    for obj in (experiment.root / trial.OBJECTS).iterdir():
+        assert b"sk-" not in obj.read_bytes(), obj.name
+    assert result.record["transcript_retention"] == {
+        "coverage": "missing", "digest": None, "size": None, "reason": entry["reason"],
+    }
+
+
+def test_skill_invocations_recompute_from_the_retained_transcript(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    experiment, attempt_id, result = _run_codex_attempt(
+        tmp_path, base, docker_state, monkeypatch, plant_skill=["tdd"],
+    )
+    observation = result.record["observation"]
+    assert isinstance(observation, dict)
+    assert observation["skill_invocations"] == ["tdd"]
+    assert agent_trial.recompute_skill_invocations(experiment, attempt_id, "codex") == ("tdd",)
+
+
+def test_recompute_refuses_when_no_transcript_was_retained(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    experiment, attempt_id, _result = _run_codex_attempt(
+        tmp_path, base, docker_state, monkeypatch, transcript_relpath="elsewhere/rollout.jsonl",
+    )
+    with pytest.raises(trial.Refused, match="no retained transcript"):
+        agent_trial.recompute_skill_invocations(experiment, attempt_id, "codex")
+
+
+def test_evidence_transcript_without_evidence_is_refused_before_anything_runs(
+    base: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from skillc import cli
+
+    assert cli.main(["collection-run", "whatever", "--evidence-transcript", "--base", str(base)]) == 2
+    assert "--evidence-transcript needs --evidence" in capsys.readouterr().err
+    assert not any(base.iterdir())
+
+
+def _tool_result_line(output: str) -> bytes:
+    """A realistic codex rollout line: the agent's tool output is a JSON
+    string, so any quotes in it arrive escaped."""
+    return (json.dumps({
+        "type": "response_item",
+        "payload": {"type": "function_call_output", "call_id": "c1", "output": output},
+    }) + "\n").encode("utf-8")
+
+
+def test_an_oauth_token_escaped_inside_a_tool_result_is_still_refused() -> None:
+    """Counter-model review: the raw JSONL escapes the quotes the OAuth
+    pattern keys on. Built at runtime so no scanner reads a token here."""
+    credential_file = json.dumps({"tokens": {"access_token": "T" * 32}})
+    raw = _tool_result_line(credential_file)
+    evidence = agent_trial.retainable_transcript(raw)
+    assert evidence.data is None
+    assert "credential-token at line 1" in str(evidence.reason)
+    assert "T" * 32 not in str(evidence.reason)
+
+
+def test_a_secret_capture_excludes_is_refused_from_a_transcript_too() -> None:
+    raw = _tool_result_line("token: " + "gh" + "p_" + "A" * 36)
+    evidence = agent_trial.retainable_transcript(raw)
+    assert evidence.data is None
+    assert "GitHub token" in str(evidence.reason)
+    assert "A" * 36 not in str(evidence.reason)
+
+
+def test_a_clean_transcript_is_retained_byte_for_byte() -> None:
+    raw = _tool_result_line("tests passed")
+    assert agent_trial.retainable_transcript(raw) == trial.TranscriptEvidence(raw)
+
+
+def test_recompute_refuses_a_partial_transcript(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    experiment, attempt_id, _result = _run_codex_attempt(tmp_path, base, docker_state, monkeypatch)
+    entry = {**_transcript_entry(experiment, attempt_id), "coverage": "partial"}
+    monkeypatch.setattr(agent_trial, "_stored_transcript_entry", lambda _e, _a: entry)
+    with pytest.raises(trial.Refused, match="only a partial transcript"):
+        agent_trial.recompute_skill_invocations(experiment, attempt_id, "codex")
+
+
+def test_an_unpaired_surrogate_in_a_tool_result_does_not_crash_retention() -> None:
+    raw = _tool_result_line("filename: \udcff")
+    assert agent_trial.retainable_transcript(raw) == trial.TranscriptEvidence(raw)
+
+
+def test_recompute_refuses_a_transcript_the_adapter_cannot_read(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    experiment, attempt_id, _result = _run_codex_attempt(tmp_path, base, docker_state, monkeypatch)
+    unreadable = b'{"type":"new_event_format","payload":{"action":"read_skill","skill":"tdd"}}\n'
+    digest = trial._put_object(experiment.root, unreadable)
+    entry = {**_transcript_entry(experiment, attempt_id), "digest": digest, "size": len(unreadable)}
+    monkeypatch.setattr(agent_trial, "_stored_transcript_entry", lambda _e, _a: entry)
+    with pytest.raises(trial.Refused, match="no event the codex adapter recognizes"):
+        agent_trial.recompute_skill_invocations(experiment, attempt_id, "codex")
+
+
+def test_transcript_evidence_takes_exactly_one_of_data_or_reason() -> None:
+    with pytest.raises(ValueError):
+        trial.TranscriptEvidence(None)
+    with pytest.raises(ValueError):
+        trial.TranscriptEvidence(b"x", "missing")
+    assert trial.TranscriptEvidence(b"x").data == b"x"
+    assert trial.TranscriptEvidence(None, "not found").reason == "not found"
+
+
+def test_a_transcript_over_the_stream_bound_is_partial_with_a_capture_failure(
+    tmp_path: Path, base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    Limits = trial.Limits
+    experiment, attempt_id, _result = _run_codex_attempt(tmp_path, base, docker_state, monkeypatch)
+    failures: list[str] = []
+    over = trial._transcript_observation(
+        experiment, attempt_id, trial.TranscriptEvidence(b"12345"), Limits(max_stream_bytes=4), failures,
+    )
+    assert over["coverage"] == "partial" and over["size"] == 4
+    assert failures and "truncated to 4" in failures[0]
+    at_bound = trial._transcript_observation(
+        experiment, attempt_id, trial.TranscriptEvidence(b"1234"), Limits(max_stream_bytes=4), [],
+    )
+    assert at_bound["coverage"] == "complete" and at_bound["size"] == 4
