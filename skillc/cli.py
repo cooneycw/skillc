@@ -1793,6 +1793,10 @@ def cmd_degrade_subject(args: argparse.Namespace) -> int:
     print(f"mutation      {len(locations)} location(s)" if locations else "mutation      none (source override only)")
     for location in locations:
         print(f"  - {location}")
+    if degraded.manifest_rewrites:
+        print(f"manifests     {len(degraded.manifest_rewrites)} checksum line(s) re-pinned (bookkeeping, #198)")
+        for rewrite in degraded.manifest_rewrites:
+            print(f"  - {rewrite}")
     print(f"degraded      {degraded.source.kind} {degraded.source.revision} {degraded.source.digest}")
     print(f"\nskillc: degraded subject built - receipt and {skills_dir.name}/ in {out}")
     return 0

@@ -1,0 +1,24 @@
+{
+  "branch": "issue-198-degrade-subject-overrides-a-checksummed-script-wit",
+  "counts": {
+    "accepted": 1,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "a3e052eaa750c638614d3f1bf0a929ce446e0032",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "198",
+  "passes": 2,
+  "recorded_at": "2026-09-30T12:44:56Z",
+  "red_cases": {
+    "already_covered": 3,
+    "proposed": 7
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/09/30/rollout-2026-09-30T08-43-31-01a0f257-7031-7da3-8d65-58e02fdd4517.jsonl",
+    "thread_id": "01a0f257-7031-7da3-8d65-58e02fdd4517"
+  },
+  "schema": 1,
+  "status": "ran"
+}
