@@ -16,6 +16,11 @@
   [mattpocock/skills](https://github.com/mattpocock/skills) at `c55ee46` (MIT),
   plus the static scan baseline at that commit and which warnings are skillc
   false positives. Static reading and one `skillc check` execution.
+- [CPP incident catalogue, September 30, 2026](cpp-incident-catalogue.md):
+  claude-power-pack's escaped-failure record, classified item by item. It
+  ranks the classes and shortlists five candidate task designs for #203, in
+  answer to #204's calibration report (#211). Counts are re-derivable from
+  `cpp-incident-catalogue/` with `scripts/cpp_incident_counts.py`.
 
 ## Provenance and limits
 
