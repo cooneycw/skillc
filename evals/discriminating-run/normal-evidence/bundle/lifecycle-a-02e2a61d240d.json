@@ -1,0 +1,47 @@
+{
+ "version": 2,
+ "kind": "attempt-lifecycle",
+ "producer": "controller",
+ "attempt_id": "a-02e2a61d240d",
+ "trial_id": "t1-cpp-codex",
+ "disposition": "captured",
+ "stop": {
+  "reason": "exited",
+  "confirmed": true,
+  "exit_code": 0
+ },
+ "events": [
+  {
+   "event": "planned",
+   "at": "2026-09-29T10:34:39.756039Z"
+  },
+  {
+   "event": "dispatched",
+   "at": "2026-09-29T10:34:49.055201Z"
+  },
+  {
+   "event": "started",
+   "at": "2026-09-29T10:34:49.055353Z"
+  },
+  {
+   "event": "stopped",
+   "at": "2026-09-29T10:35:48.230849Z"
+  },
+  {
+   "event": "stop-confirmed",
+   "at": "2026-09-29T10:35:48.231022Z"
+  },
+  {
+   "event": "captured",
+   "at": "2026-09-29T10:35:48.414189Z"
+  },
+  {
+   "event": "cleaned",
+   "at": "2026-09-29T10:35:48.582018Z"
+  }
+ ],
+ "cleanup": {
+  "status": "removed",
+  "failures": []
+ }
+}

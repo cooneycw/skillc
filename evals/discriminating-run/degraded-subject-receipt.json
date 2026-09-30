@@ -1,0 +1,30 @@
+{
+ "version": 1,
+ "kind": "degraded-subject-receipt",
+ "subject": "cpp-codex",
+ "pinned_revision": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b",
+ "mutation": {
+  "locations": [
+   "flow-finish/reference.md (overridden (23548 bytes))",
+   "flow-merge/reference.md (overridden (19516 bytes))",
+   "flow-auto/reference.md (overridden (110386 bytes))",
+   "flow-merge/scripts/gh-pr-merge.sh (overridden (77038 bytes))",
+   "flow-auto/scripts/gh-pr-merge.sh (overridden (77038 bytes))"
+  ],
+  "statement": "removed/overrode: flow-finish/reference.md (overridden (23548 bytes)); flow-merge/reference.md (overridden (19516 bytes)); flow-auto/reference.md (overridden (110386 bytes)); flow-merge/scripts/gh-pr-merge.sh (overridden (77038 bytes)); flow-auto/scripts/gh-pr-merge.sh (overridden (77038 bytes))"
+ },
+ "manifest_rewrites": [
+  "flow-merge/scripts/SHA256SUMS: gh-pr-merge.sh sha256:c3d827062604e478f9a4ebca289d26d9185022cb723f67303fe41e93878aa600 -> sha256:4e9a4b706beaff6aa62ab7b3d31ccfcc9a42a121fb633e793ea376ef2aeb1292",
+  "flow-auto/scripts/SHA256SUMS: gh-pr-merge.sh sha256:c3d827062604e478f9a4ebca289d26d9185022cb723f67303fe41e93878aa600 -> sha256:4e9a4b706beaff6aa62ab7b3d31ccfcc9a42a121fb633e793ea376ef2aeb1292"
+ ],
+ "base": {
+  "kind": "snapshot",
+  "revision": "snapshot:sha256:ceba20f15452dff932a5837495ede1b7ea2c48696545e07f7ea9d9476e5b0b52",
+  "digest": "sha256:ceba20f15452dff932a5837495ede1b7ea2c48696545e07f7ea9d9476e5b0b52"
+ },
+ "degraded": {
+  "kind": "degraded",
+  "revision": "degraded:mutated=5-location:snapshot:snapshot:sha256:ceba20f15452dff932a5837495ede1b7ea2c48696545e07f7ea9d9476e5b0b52",
+  "digest": "sha256:8c4f7a465c92547ebcde6d54084bcd5a1de48fea316d2ff8cc71b2728b776f14"
+ }
+}

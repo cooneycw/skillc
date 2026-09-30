@@ -1,0 +1,20 @@
+{
+  "manifest_schema": 1,
+  "experiment": "discriminating-run",
+  "issue": "cooneycw/skillc#150",
+  "runbook": "docs/runbooks/150-discriminating-run.md",
+  "authorization": "owner approval in the /flow:auto #150 session, 2026-09-29: live run on the operator's codex subscription login (ADR 0005 section 6, 'Normal Claude and codex'), 1200s per-attempt agent cap; no judge calls",
+  "subject": {"name": "cpp-codex", "locator": "github.com/cooneycw/claude-power-pack", "revision": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b"},
+  "client": {"name": "codex", "version": "0.157.1", "model": "gpt-6-astra"},
+  "image": {"tag": "skillc-trial:latest", "id": "sha256:d1b2ced9dc6d25e9e1bc673c1973f032ced50a11da234fcd617ee376ff36eefc"},
+  "task": {"path": "evals/level1/finish-close-ref", "id": "finish-close-ref", "revision": "1"},
+  "agent_timeout_seconds": 1200,
+  "attempts": [
+    {"arm": "positive-control", "task": "evals/level1/slug-small-fix", "skillc_revision": "6a278ceb8dc3ecf5c54aade7a87664bcf3c9a324", "started": "2026-09-29T10:33:02Z", "attempt_id": "a-9a29c3c217bb", "graded": "PASS", "installation_ready": "SATISFIED", "retained": false},
+    {"arm": "normal", "skillc_revision": "6a278ceb8dc3ecf5c54aade7a87664bcf3c9a324", "started": "2026-09-29T10:34:35Z", "attempt_id": "a-02e2a61d240d", "graded": "PASS", "skill_invocations_heuristic": ["flow-finish"], "evidence": "normal-evidence/"},
+    {"arm": "degraded", "skillc_revision": "df12fc182e79b5a004a203653a1b78e404686631", "started": "2026-09-30T13:43:03Z", "attempt_id": "a-23dc39d79af7", "graded": "PASS", "skill_invocations_heuristic": [], "subject_revision": "degraded:mutated=5-location:snapshot:snapshot:sha256:ceba20f15452dff932a5837495ede1b7ea2c48696545e07f7ea9d9476e5b0b52", "subject_receipt": "degraded-subject-receipt.json", "evidence": "degraded-evidence/", "evidence_role": "control"}
+  ],
+  "verdict": "non-discriminating",
+  "consumer_check": {"script": "claude-power-pack scripts/check-behavioral-eval.py", "cpp_revision": "72cb00c5", "normal_exit": 0, "degraded_exit": 0},
+  "exported_to_consumer": false
+}
