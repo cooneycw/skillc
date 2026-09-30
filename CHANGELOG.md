@@ -8,6 +8,20 @@ and version plan.
 
 ## [Unreleased]
 
+- **SWE-bench-style import: research on #210's six open problems** (Refs
+  #210). This is research only, per the owner's ruling recorded on #210: no
+  importer, no instances and no runs.
+  - **The note.** `docs/research/swe-bench-import-research.md` checks
+    per-instance images, contamination dating, certification with mechanical
+    wrong candidates, hidden-test integrity, cost on paper and licences against
+    skillc's contracts.
+  - **Gaps it names.** An import would need a per-instance image map, a
+    declared model cutoff, a capture scope beyond the 1,000-file cap and
+    `.git`, an agent egress allowlist, and a container backend for
+    `qualify.py`.
+  - **Pins.** The upstream HEADs were re-pinned, and none moved.
+  - **Gate.** #210's gate stays closed: #212 recommends REDESIGN.
+
 - **CPP incident catalogue: escaped-failure classes ranked, five candidate
   tasks designed** (Closes #211). This is research only: no task is built and
   nothing runs. It answers #204's REDESIGN report (PR #212) by mining
