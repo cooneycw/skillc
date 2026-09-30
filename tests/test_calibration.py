@@ -224,3 +224,37 @@ def test_approval_of_another_grader_revision_is_refused() -> None:
     data["task"]["grader_revision"] = "2"  # type: ignore[index]
     with pytest.raises(calibration.DeclarationRefused, match="not the declared"):
         calibration.require_approved(calibration.parse_declaration(data), ROOT)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+@pytest.mark.parametrize("cap", ["per_attempt_seconds", "total_seconds"])
+def test_a_non_finite_cap_is_refused(cap: str, value: float) -> None:
+    """Counter-model review, red before the fix: `json` accepts NaN and
+    Infinity, and a NaN total also slipped past the schedule-coverage check."""
+    data = _mutated()
+    data["shared"][cap] = value  # type: ignore[index]
+    with pytest.raises(calibration.DeclarationRefused, match="finite"):
+        calibration.parse_declaration(data)
+
+
+@pytest.mark.parametrize(("where", "value"), [
+    (("shared", "client"), {}),
+    (("shared", "image"), {}),
+    (("shared", "model"), None),
+    (("shared", "reasoning_effort"), ""),
+])
+def test_approval_with_an_identity_absent_rather_than_unknown_is_refused(
+        where: tuple[str, str], value: object) -> None:
+    """Counter-model review, red before the fix: only the literal UNKNOWN was
+    refused, so an empty object or a null - no identity at all - passed."""
+    data = _approved()
+    data[where[0]][where[1]] = value  # type: ignore[index]
+    with pytest.raises(calibration.DeclarationRefused, match="not recorded"):
+        calibration.require_approved(calibration.parse_declaration(data), ROOT)
+
+
+def test_approval_with_an_empty_treatment_subject_is_refused() -> None:
+    data = _approved()
+    data["arms"][0]["subject"] = {}  # type: ignore[index]
+    with pytest.raises(calibration.DeclarationRefused, match="treatment.subject"):
+        calibration.require_approved(calibration.parse_declaration(data), ROOT)

@@ -46,6 +46,7 @@ Stdlib only (AGENTS.md), plus this repository's own modules.
 from __future__ import annotations
 
 import json
+import math
 import random
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -161,8 +162,9 @@ def _refuse(message: str) -> DeclarationRefused:
 
 
 def _positive_number(value: object, what: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
-        raise _refuse(f"{what} must be a positive number of seconds, not {value!r}")
+    if isinstance(value, bool) or not isinstance(value, (int, float)) \
+            or not math.isfinite(value) or value <= 0:
+        raise _refuse(f"{what} must be a positive, finite number of seconds, not {value!r}")
     return float(value)
 
 
@@ -256,15 +258,47 @@ def _unknown_leaves(value: object, where: str) -> list[str]:
     return []
 
 
+#: The identity fields that must hold a real, non-empty value before a run is
+#: authorized - each a path into the declaration ("treatment" is the
+#: non-baseline arm). Checked by presence, not only by the absence of the
+#: literal `UNKNOWN`: an empty object or a null carries no identity either
+#: (counter-model review).
+REQUIRED_IDENTITIES: tuple[tuple[str, ...], ...] = (
+    ("shared", "client", "name"), ("shared", "client", "version"),
+    ("shared", "model"), ("shared", "reasoning_effort"),
+    ("shared", "image", "tag"), ("shared", "image", "digest"),
+    ("treatment", "subject", "name"), ("treatment", "subject", "locator"),
+    ("treatment", "subject", "revision"),
+)
+
+
+def _identity_at(declaration: CalibrationDeclaration, path: tuple[str, ...]) -> object:
+    node: object
+    if path[0] == "treatment":
+        arms = declaration.data.get("arms")
+        node = next((a for a in arms if isinstance(a, dict) and a.get("name") != BASELINE_ARM),
+                    None) if isinstance(arms, list) else None
+    else:
+        node = declaration.data.get(path[0])
+    for key in path[1:]:
+        node = node.get(key) if isinstance(node, dict) else None
+    return node
+
+
 def require_approved(declaration: CalibrationDeclaration, root: Path) -> None:
     """Refuse to authorize a run of this declaration unless its approval is
-    recorded (who and when), no identity still says `UNKNOWN`, and the
-    declared task's grader is the one on disk. A declaration that validates
-    is still only a plan (ADR 0005)."""
+    recorded (who and when), every `REQUIRED_IDENTITIES` field holds a real
+    value, no identity anywhere still says `UNKNOWN`, and the declared task's
+    grader is the one on disk. A declaration that validates is still only a
+    plan (ADR 0005)."""
     approval = declaration.approval
     if not approval or not all(isinstance(approval.get(k), str) and approval.get(k) for k in ("by", "at")):
         raise _refuse("not approved: 'approval' must record who approved it ('by') and when ('at') "
                       "before any attempt runs (ADR 0005)")
+    absent = [".".join(path) for path in REQUIRED_IDENTITIES
+              if not (isinstance(v := _identity_at(declaration, path), str) and v.strip() and v != UNKNOWN)]
+    if absent:
+        raise _refuse(f"identities not recorded: {absent}; record them before approving a run")
     arms = declaration.data.get("arms")
     unknown = _unknown_leaves(declaration.shared, "shared") + _unknown_leaves(
         arms if isinstance(arms, list) else [], "arms")

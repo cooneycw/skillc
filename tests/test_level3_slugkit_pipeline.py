@@ -47,7 +47,7 @@ def test_qualify_certifies_the_grader_and_every_control_holds(capsys: pytest.Cap
     out = capsys.readouterr().out
     assert "QUALIFY: ok" in out
     assert f"{len(qualify.CONTROLS)} broken graders refused" in out
-    assert "11 pipeline-validity controls held" in out
+    assert "12 pipeline-validity controls held" in out
 
 
 def test_the_grader_json_and_the_judge_name_the_same_criteria() -> None:

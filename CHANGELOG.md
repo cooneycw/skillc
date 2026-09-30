@@ -25,8 +25,14 @@ and version plan.
   defects, proves each took effect against the candidate's own clean installed
   output, then reads the pipeline's verdict. A malformed mutation, an unproven
   defect, a no-verdict crash, a timeout or a missing tool is UNKNOWN, never
-  detection. `qualify.py` certifies it: 10 candidates, 5 broken graders, 11
-  pipeline-validity controls including step attribution. Regression
+  detection, and so is a last line that only resembles the `VERIFY: fail
+  <step>` grammar. `qualify.py` certifies it: 11 candidates, 5 broken graders,
+  12 pipeline-validity controls including step attribution. The candidate's
+  pipeline runs with `-E -s -B`, not `-I`, so a pipeline that imports a sibling
+  `ci/` helper works exactly as it does under the public command
+  (`alternatives/helper-module`). `require_approved` also refuses identities
+  that are absent (an empty object, null or blank), not only the literal
+  `UNKNOWN`. Caps must be finite. Regression
   `test_a_baseline_attempt_meeting_the_task_criteria_reaches_primary_pass`
   fails against the pre-change comparison (`INCONCLUSIVE` != `PASS`). Negative
   controls for the validity gate itself are in

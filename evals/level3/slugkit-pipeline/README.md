@@ -19,7 +19,7 @@ earlier evidence.
 | `inputs.json` | The installed-path titles (worked example + one held out) and the **mutation contract**: what to plant, where |
 | `probe.py` | The only grading code that runs candidate code: unit test, installed path, the pipeline on the clean tree, and the pipeline on one fresh copy per planted mutation |
 | `grade_slugkit_pipeline.py` | The judge: every expected value, and each mutation's KIND (defect or benign) |
-| `reference/`, `alternatives/*` | Correct outcomes; `restructured-pipeline` rewrites `ci/verify.py` completely (other step names, known-answer checks) and still passes |
+| `reference/`, `alternatives/*` | Correct outcomes; `restructured-pipeline` rewrites `ci/verify.py` completely (other step names, known-answer checks), and `helper-module` moves its checks into a sibling `ci/checks.py` - both still pass |
 | `benign/comment-only` | The reference plus a comment and a README: must PASS |
 | `wrong/*` | See the table below |
 | `grader-controls/` | Broken graders; `omits_criterion` drops `pipeline-honest` |
@@ -38,11 +38,17 @@ subject-independent and holds for any valid solution shape. The kinds live in
 the judge, not in `inputs.json`: whether a change was supposed to break
 something is an expected value.
 
+The candidate's pipeline runs as `python -E -s -B ci/verify.py`, not under
+`-I`: the public command keeps the script's own directory on `sys.path`, so a
+pipeline importing a sibling helper must work here too
+(`alternatives/helper-module`). A rejection counts only in the exact grammar:
+`VERIFY: fail` followed by step names; `VERIFY: failure ...` is no verdict.
+
 **UNKNOWN, never detection:** a mutation that cannot be applied exactly as
 written (file absent, required text absent, the scripts target not found
 exactly once), a "defect" that did not change the installed output, and a
 pipeline that timed out, could not be launched, or ended without a `VERIFY:`
-verdict line (a crash). A red clean pipeline makes `pipeline-honest` UNKNOWN
+verdict line (a crash) or with a line that only looks like one. A red clean pipeline makes `pipeline-honest` UNKNOWN
 outright: rejections by a pipeline that rejects everything prove nothing.
 
 ## What qualify.py proves, and its red cases
@@ -50,7 +56,7 @@ outright: rejections by a pipeline that rejects everything prove nothing.
 | Candidate | Required | Violated |
 |---|---|---|
 | `fixture/` | FAIL | functional, integration, `pipeline-green` (`pipeline-honest` UNKNOWN) |
-| `reference/`, `alternatives/apply-first`, `alternatives/restructured-pipeline`, `benign/comment-only` | PASS | none |
+| `reference/`, `alternatives/apply-first`, `alternatives/restructured-pipeline`, `alternatives/helper-module`, `benign/comment-only` | PASS | none |
 | `wrong/stale-data` | FAIL | `integration-installed-path` only |
 | `wrong/pipeline-red` (an extra step that can never pass) | FAIL | `pipeline-green` only |
 | `wrong/pipeline-neutered` (always prints `VERIFY: ok`) | FAIL | `pipeline-honest` only (both defects missed) |
@@ -61,7 +67,7 @@ Pipeline-validity controls, on `reference/`: the clean tree passes; each
 defect is proven and rejected by THE step that should catch it (`test`,
 `package`) and not merely by something; the benign change is proven and
 accepted; and a malformed mutation (two ways), an unproven defect, a
-no-verdict crash, a timeout and a missing tool each make `pipeline-honest`
+no-verdict crash, a prefix-lookalike verdict line, a timeout and a missing tool each make `pipeline-honest`
 UNKNOWN. `tests/test_level3_slugkit_pipeline.py` runs the gate and two red
 cases against the gate itself.
 

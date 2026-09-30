@@ -37,6 +37,7 @@ expected value, and expected values belong to the judge.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -56,6 +57,11 @@ MUTATION_KINDS: tuple[tuple[str, str], ...] = (
     ("behaviour-trailing-hyphen", "defect"),
     ("packaging-entry-point", "defect"),
 )
+
+#: goal.md's public verdict grammar: exactly `VERIFY: ok`, or `VERIFY: fail`
+#: followed by one or more step names. Anything else - `VERIFY: failure to
+#: launch checker` included - is no verdict, never a rejection.
+FAIL_LINE = re.compile(r"VERIFY: fail( [A-Za-z0-9_.-]+)+")
 
 CRITERIA = ("functional-trailing-hyphen", "integration-installed-path", "pipeline-green", "pipeline-honest")
 
@@ -163,7 +169,7 @@ def pipeline_verdict(p: dict[str, object]) -> str:
     last, code = str(p["last_line"]), p["exit"]
     if code == 0 and last == "VERIFY: ok":
         return "ok"
-    if isinstance(code, int) and code != 0 and last.startswith("VERIFY: fail"):
+    if isinstance(code, int) and code != 0 and FAIL_LINE.fullmatch(last):
         return "fail"
     return "no-verdict-line"
 

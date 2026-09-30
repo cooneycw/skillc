@@ -32,7 +32,9 @@ why pip is absent everywhere this runs); this task adds nothing to that
 question.
 
 Runs under `python -I -S -B` (skillc.verify). The candidate's pipeline is
-launched with the same flags, cwd set to the tree copy it verifies.
+launched with `-E -s -B`, cwd set to the tree copy it verifies: the public
+command's import semantics (its own directory on `sys.path`) without the
+evaluator's environment or user site.
 """
 
 import importlib.util
@@ -131,7 +133,11 @@ def run_pipeline(tree: str) -> dict:
     if not os.path.isfile(script):
         return {"missing": True, "exit": None, "last_line": "", "timed_out": False, "error": None}
     try:
-        proc = subprocess.run([sys.executable, "-I", "-S", "-B", script], cwd=tree,
+        # `-E -s -B`, not `-I -S`: `-I` drops the script's own directory from
+        # sys.path, so a pipeline importing a sibling helper (`ci/checks.py`)
+        # would fail here and pass under the public `python3 ci/verify.py`
+        # (counter-model review). The environment and user site stay ignored.
+        proc = subprocess.run([sys.executable, "-E", "-s", "-B", script], cwd=tree,
                               capture_output=True, text=True, timeout=PIPELINE_TIMEOUT, check=False)
     except subprocess.TimeoutExpired:
         return {"missing": False, "exit": None, "last_line": "", "timed_out": True, "error": None}

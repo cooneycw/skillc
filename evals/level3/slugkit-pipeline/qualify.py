@@ -48,7 +48,8 @@ instrument - it reads planted defects as evidence about a candidate's pipeline
   - the benign change is proven benign and is accepted;
   - and the paths that must never count as detection do not: a malformed
     mutation, a "defect" that changes nothing, a pipeline that crashed with no
-    verdict line, one that timed out, and one that could not be launched (a
+    verdict line, one whose last line only LOOKS like a verdict (`VERIFY: failure
+    ...`), one that timed out, and one that could not be launched (a
     missing tool) each make `pipeline-honest` UNKNOWN. The first two run the
     real probe with altered inputs; the last three alter a real report, since
     the probe cannot be made to lose its own interpreter from inside a test.
@@ -246,6 +247,10 @@ def pipeline_validity(root: Path = HERE) -> list[tuple[str, bool, str]]:
          _with_pipeline(report, "behaviour-trailing-hyphen",
                         {"missing": False, "exit": 1, "last_line": "NameError: boom", "timed_out": False,
                          "error": None})),
+        ("a 'VERIFY: fail'-prefixed line outside the grammar",
+         _with_pipeline(report, "behaviour-trailing-hyphen",
+                        {"missing": False, "exit": 1, "last_line": "VERIFY: failure to launch checker",
+                         "timed_out": False, "error": None})),
         ("pipeline timed out",
          _with_pipeline(report, "packaging-entry-point",
                         {"missing": False, "exit": None, "last_line": "", "timed_out": True, "error": None})),
