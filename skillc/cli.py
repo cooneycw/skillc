@@ -1669,6 +1669,110 @@ def cmd_pilot_report(args: argparse.Namespace) -> int:
     return code or _print_pilot_summary(report)
 
 
+def cmd_calibration_run(args: argparse.Namespace) -> int:
+    """Issue #207: run an APPROVED two-arm calibration declaration (#204's
+    `evals/calibration-204/run-manifest.json`) end to end. Refuses (exit 2),
+    before any run directory or container exists, a declaration that is not
+    approved or still carries an unrecorded identity, a client argv that
+    chooses its own model, a trial image whose pinned client or resolved
+    digest is not the declared one, and a subject whose locator or revision
+    is not the declared one. Requires `SKILLC_ALLOW_REAL_AGENT=1` and the
+    operator's own subscription login (ADR 0005 rule 6). Everything stays in
+    a private run directory; only a leak-checked summary is printed. Exits 1
+    when any attempt was not observed running the declared model, or none
+    was."""
+    import secrets
+    from datetime import UTC, datetime
+
+    from . import calibration, demo, trial_bootstrap
+    from . import calibration_run as cr
+    from . import collection_conformance as cc
+    from . import matched_pilot as mp
+
+    try:
+        declaration = calibration.load_declaration(Path(args.declaration))
+        calibration.require_approved(declaration, cr.ROOT)
+        model, effort = cr.declared_model(declaration)
+        client_name, client_version = cr.declared_client(declaration)
+        subject = cr.treatment_subject(declaration)
+    except (calibration.DeclarationRefused, cr.CalibrationRefused, OSError, ValueError) as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+    try:
+        client_argv = args.client_argv.split() if args.client_argv else list(cc.DEFAULT_CLIENT_ARGVS[client_name])
+        mp.pin_model_argv(model, effort, client_argv)
+    except KeyError:
+        print(f"skillc: the declared client {client_name!r} has no default invocation; pass --client-argv",
+              file=sys.stderr)
+        return 2
+    except mp.ModelOverrideRefused as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+    try:
+        pinned = trial_bootstrap.pinned_cli_version(client_name)
+    except trial_bootstrap.PinnedVersionError as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+    if pinned != client_version:
+        print(f"skillc: the declaration names {client_name} {client_version}, but the trial image pins "
+              f"{pinned}; refusing a run of a client other than the declared one", file=sys.stderr)
+        return 2
+    docker_bin = tuple(args.docker_bin.split()) if args.docker_bin else ("docker",)
+    image = args.image or demo.DEFAULT_IMAGE
+    declared_digest = cr._shared_str(declaration, "image", "digest")
+    image_digest = demo.resolve_image_digest(docker_bin, image, None, args.timeout)
+    if image_digest != declared_digest:
+        print(f"skillc: image {image!r} resolves to {image_digest or 'nothing'}, but the declaration names "
+              f"{declared_digest}; refusing a run on an image other than the declared one", file=sys.stderr)
+        return 2
+
+    private_root = Path(args.private_dir).expanduser() if args.private_dir else cr.DEFAULT_PRIVATE_ROOT
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    run_dir = private_root / f"{stamp}-{secrets.token_hex(3)}"
+    run_dir.mkdir(parents=True, mode=0o700)
+    print(f"skillc: private run directory: {run_dir}", file=sys.stderr)
+
+    subject_name = str(subject.get("name"))
+    try:
+        acquired = cc.acquire_collection(subject_name, run_dir)
+    except demo.SubjectRefused as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+    try:
+        found = (acquired.subject.locator, acquired.subject.revision, acquired.subject.client)
+        wanted = (subject.get("locator"), subject.get("revision"), client_name)
+        if found != wanted:
+            print(f"skillc: subject {subject_name!r} is (locator, revision, client) {found}, but the "
+                  f"declaration names {wanted}; refusing", file=sys.stderr)
+            return 2
+        treatment = cr.build_treatment(acquired)
+    except cr.CalibrationRefused as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        cc.discard_acquisition(run_dir, subject_name)
+
+    experiment, outcomes = cr.run_calibration(
+        declaration, run_dir=run_dir, treatment=treatment, image_digest=image_digest,
+        # By the resolved immutable digest, never the tag (pilot-run's rule).
+        backends=lambda: cc.agent_backends(
+            image=image_digest, base=run_dir, docker_bin=docker_bin, daemon_timeout=args.timeout,
+        ),
+        argv_for=lambda _scheduled: client_argv,
+        credential_explicit_path=Path(args.credential) if args.credential else None,
+    )
+    report = cr.build_report(
+        experiment, cr.reconcile(experiment, outcomes), declared_model=model, declared_effort=effort,
+    )
+    (run_dir / cr.REPORT_FILENAME).write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8")
+    try:
+        demo.print_paste_back(demo.redact_known_host_paths(cr.paste_back(report), base=run_dir))
+    except demo.PasteBackRefused as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+    return _refuse_ineligible(report)
+
+
 def cmd_configuration_compare(args: argparse.Namespace) -> int:
     """Issue #13's matched-configuration comparison: pure post-hoc analysis
     of two ALREADY-CAPTURED evidence records (`skillc/configuration_compare.py`'s
@@ -2063,6 +2167,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="refuse to launch below this remaining credential life (default: credential.MINIMUM_REMAINING_SECONDS)",
     )
     p_selection_probe.set_defaults(func=cmd_selection_probe)
+
+    p_calibration_run = sub.add_parser(
+        "calibration-run",
+        help="issue #207: run an APPROVED two-arm calibration declaration (e.g. "
+             "evals/calibration-204/run-manifest.json); evidence stays private, a leak-checked summary is "
+             "printed (a real agent run, behind SKILLC_ALLOW_REAL_AGENT=1)",
+    )
+    p_calibration_run.add_argument("declaration", help="the calibration-declaration JSON to run")
+    p_calibration_run.add_argument("--image", help="trial image (default: skillc.demo.DEFAULT_IMAGE)")
+    p_calibration_run.add_argument("--docker-bin", help="docker executable (space-separated words; default: docker)")
+    p_calibration_run.add_argument("--timeout", type=float, default=30, help="per-container-call timeout, seconds")
+    p_calibration_run.add_argument("--credential", help="explicit path to the client credential file")
+    p_calibration_run.add_argument(
+        "--client-argv", default=None,
+        help="the client invocation, space-separated words, WITHOUT a model or effort (the declared ones are "
+             "added; default: collection_conformance.DEFAULT_CLIENT_ARGVS for the declared client)",
+    )
+    p_calibration_run.add_argument(
+        "--private-dir",
+        help="where the private run directory is created (default: ~/.local/share/skillc/calibration-runs)",
+    )
+    p_calibration_run.set_defaults(func=cmd_calibration_run)
 
     p_pilot_run = sub.add_parser(
         "pilot-run",

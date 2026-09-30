@@ -450,6 +450,32 @@ def _fixture_surface(fixture_dir: Path) -> dict[str, bytes]:
     return surface
 
 
+#: The grader's own ground truth for a fixture ("this starting state should
+#: FAIL, violating ..."): never delivered to the agent, whatever the layout.
+_FIXTURE_ANSWER_KEY = "expected.json"
+
+
+def task_surface(fixture_dir: Path) -> dict[str, bytes]:
+    """Every file of a task's starting state, keyed by its path under
+    `fixture_dir` - the whole fixture except its top-level `expected.json`
+    answer key (and `__pycache__`). `_fixture_surface` delivers only
+    `fixture/src/`, the Level 1 layout; a Level 3 fixture
+    (`evals/level3/slugkit-pipeline/fixture`: `slugkit/`, `tests/`, `ci/`,
+    `pyproject.toml`) has no `src/`, so it would reach the agent as an empty
+    `/work`. For a fixture that is `src/` plus `expected.json` the two are
+    identical. Used by `calibration_run` (#207); `collection-run` keeps
+    `_fixture_surface`."""
+    surface: dict[str, bytes] = {}
+    for dirpath, dirnames, filenames in os.walk(fixture_dir, followlinks=False):
+        dirnames[:] = sorted(d for d in dirnames if d != "__pycache__")
+        for name in sorted(filenames):
+            path = Path(dirpath) / name
+            rel = path.relative_to(fixture_dir).as_posix()
+            if rel != _FIXTURE_ANSWER_KEY:
+                surface[rel] = path.read_bytes()
+    return surface
+
+
 def plan_collection_attempt(
     subject_name: str, acquired: AcquiredCollection, store: Path, *,
     image_digest: str | None = None, task_root: Path | None = None,

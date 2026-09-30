@@ -33,6 +33,8 @@ INCONCLUSIVE.
 ## Owed before the run is approved
 
 See `owed_before_approval` in the manifest: the image digest, a re-check of
-the subject and client pins, and a runner for the two-arm schedule. The run,
+the subject and client pins, and a runner for the two-arm schedule - now
+`skillc calibration-run evals/calibration-204/run-manifest.json` (#207), which
+refuses this declaration until it is approved. The run,
 its calibration report (questions 1-5 in the manifest) and the go / redesign /
 stop recommendation for #203 are separate, later work under #204.

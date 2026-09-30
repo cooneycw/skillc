@@ -8,6 +8,26 @@ and version plan.
 
 ## [Unreleased]
 
+- **`skillc calibration-run`: execute an approved two-arm calibration
+  declaration** (Refs #207, for #204). Nothing could run #204's schedule:
+  `collection-run` has no baseline arm and no model pin, and `pilot-run` reads
+  only the Level 1 pilot's declaration. New `skillc/calibration_run.py` refuses
+  an unapproved declaration before any store, plan or container exists, plans
+  one trial per attempt in the declared `arm_order.sequence`, and runs every
+  attempt through `collection_conformance.run_level1_agent_attempt` against the
+  declared task. The arms differ only in what is installed: the treatment gets
+  the subject's skill files and the #150-D receipt context, the baseline `{}`.
+  The model and effort are pinned at launch through
+  `matched_pilot.pin_model_argv` (extracted from `launch_argv`, no behaviour
+  change), and an attempt observed on another model, or none, fails the run.
+  Caps and reconciliation reuse `matched_pilot.run_schedule`/`reconcile`
+  (which now takes a schedule). Each attempt reports `primary_endpoint` with
+  `readiness_beside` beside it. New `collection_conformance.task_surface`
+  delivers a whole fixture minus its `expected.json`: a Level 3 fixture has no
+  `src/`, so the Level 1 surface would have started the agent in an empty
+  `/work`. Evidence stays in a private run directory; publishing it belongs to
+  the calibration report.
+
 - **Calibrate before comparing: a symmetric primary endpoint, a Level 3
   pipeline task, and the two-arm calibration declared** (Refs #204). A baseline
   arm installs nothing, so its `installation-ready` stays UNKNOWN on the #139
