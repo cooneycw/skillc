@@ -37,7 +37,6 @@ _IMAGE = "fake-image:1"
 #: `fake_docker.py`'s deterministic digest for `_IMAGE`: the receipt path
 #: cross-checks the measured image against the planned one.
 _IMAGE_DIGEST = f"sha256:fake-digest-for-{_IMAGE}"
-_APPROVAL = {"by": "test-owner", "at": "2026-09-30T00:00:00Z"}
 TREATMENT_ARM = "full-cpp"
 
 
@@ -45,11 +44,13 @@ TREATMENT_ARM = "full-cpp"
 
 
 def _declaration_data(*, attempts: int | None = None, approved: bool = True) -> dict[str, object]:
-    """The COMMITTED #204 declaration, approved (or not) and pointed at the
-    fake image - independent of whether #208 has recorded the real approval
-    yet. `attempts` re-derives the seeded order for a smaller schedule."""
+    """The COMMITTED #204 declaration - approved by the owner (#208) - pointed
+    at the fake image, or with ONLY its approval removed (the red case).
+    `attempts` re-derives the seeded order for a smaller schedule."""
     data = json.loads(MANIFEST.read_text(encoding="utf-8"))
-    data["approval"] = dict(_APPROVAL) if approved else None
+    assert isinstance(data["approval"], dict), "the committed declaration is expected to carry its approval"
+    if not approved:
+        data["approval"] = None
     data["shared"]["image"]["digest"] = _IMAGE_DIGEST
     if attempts is not None:
         names = [a["name"] for a in data["arms"]]
@@ -406,3 +407,36 @@ def test_a_treatment_that_installs_nothing_is_refused() -> None:
     )
     with pytest.raises(cr.CalibrationRefused, match="second baseline"):
         cr.build_treatment(acquired)
+
+
+def test_cli_refuses_an_image_other_than_the_declared_one(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The COMMITTED declaration names the real trial image's digest; the fake
+    docker resolves `fake-image:1` to another. Refused before any run directory."""
+    private = tmp_path / "private"
+    code = cli.main(["calibration-run", str(MANIFEST), "--private-dir", str(private), "--image", _IMAGE,
+                     "--docker-bin", " ".join(_docker_bin(tmp_path / "docker-state"))])
+    assert code == 2
+    assert "refusing a run on an image other than the declared one" in capsys.readouterr().err
+    assert not private.exists()
+
+
+def test_cli_refuses_a_subject_other_than_the_declared_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The image matches; the acquired subject (`test/test` at `v1`) is not
+    the declared `claude-power-pack` revision. Refused before any attempt."""
+    path = tmp_path / "declaration.json"
+    path.write_text(json.dumps(_declaration_data()), encoding="utf-8")
+    treatment_source = tmp_path / "treatment"
+    treatment_source.mkdir()
+    _treatment(treatment_source, monkeypatch)  # installs the fake subject loader
+    collection = treatment_source / "subject-collection"
+    real_acquire = cc.acquire_collection
+    monkeypatch.setattr(cc, "acquire_collection", lambda name, base: real_acquire(name, base, checkout=collection))
+    monkeypatch.setattr(cr, "run_calibration", lambda *a, **k: pytest.fail("an attempt ran for the wrong subject"))
+    code = cli.main(["calibration-run", str(path), "--private-dir", str(tmp_path / "private"), "--image", _IMAGE,
+                     "--docker-bin", " ".join(_docker_bin(tmp_path / "docker-state"))])
+    assert code == 2
+    assert "the declaration names ('github.com/cooneycw/claude-power-pack'" in capsys.readouterr().err
