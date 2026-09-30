@@ -44,7 +44,7 @@ def test_real_commands_matches_the_actual_parser() -> None:
     assert real == {
         "check", "selftest", "check-records", "materialize", "exposure", "rules", "leak-check", "demo",
         "collection-run", "pilot-run", "pilot-report", "selection-probe", "degrade-subject",
-        "configuration-compare",
+        "configuration-compare", "calibration-run",
     }
 
 

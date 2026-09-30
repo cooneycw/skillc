@@ -258,13 +258,21 @@ def launch_argv(declaration: PilotDeclaration, base_argv: Sequence[str]) -> list
             "the declaration names no model.reasoning_effort, so the run cannot pin it at launch - "
             f"it predates launch pinning; run the current declaration ({CURRENT_MANIFEST_PATH.name})"
         )
+    return pin_model_argv(declaration.model, declaration.reasoning_effort, base_argv)
+
+
+def pin_model_argv(model: str, reasoning_effort: str, base_argv: Sequence[str]) -> list[str]:
+    """`base_argv` plus `-m <model> -c model_reasoning_effort="<effort>"`,
+    refusing a base that already chooses either (`model_overrides`). The one
+    place a declared model reaches a client argv - `launch_argv` here and
+    `calibration_run` (#207) both build through it, never a second copy."""
     overrides = model_overrides(base_argv)
     if overrides:
         raise ModelOverrideRefused(
             f"the client argv chooses the model itself ({', '.join(overrides)}); the declared model "
-            f"{declaration.model!r} is passed at launch and may not be overridden"
+            f"{model!r} is passed at launch and may not be overridden"
         )
-    return [*base_argv, "-m", declaration.model, "-c", f'model_reasoning_effort="{declaration.reasoning_effort}"']
+    return [*base_argv, "-m", model, "-c", f'model_reasoning_effort="{reasoning_effort}"']
 
 
 @dataclass(frozen=True)
@@ -566,14 +574,22 @@ def schedule_from_ledger(experiment: trial.Experiment) -> list[ScheduledAttempt]
     return schedule
 
 
-def reconcile(experiment: trial.Experiment, outcomes: Sequence[AttemptOutcome]) -> list[AttemptOutcome]:
+def reconcile(
+    experiment: trial.Experiment, outcomes: Sequence[AttemptOutcome],
+    schedule: Sequence[ScheduledAttempt] | None = None,
+) -> list[AttemptOutcome]:
     """One outcome per attempt the LEDGER planned, in ledger order. A planned
     attempt with no recorded outcome (the run was interrupted) takes its
     lifecycle record if one was written, else is finalized now - never left
     out, since a report that omits a scheduled attempt is not a report of the
-    pilot. An outcome for an attempt the ledger never planned is refused."""
+    pilot. An outcome for an attempt the ledger never planned is refused.
+
+    `schedule` is the ledger's schedule as another runner reads it
+    (`calibration_run.schedule_from_ledger`, #207); `None` reads this pilot's
+    own `matched_pilot_<arm>_<repeat>` trial ids."""
     by_id = {o.scheduled.attempt_id: o for o in outcomes}
-    schedule = schedule_from_ledger(experiment)
+    if schedule is None:
+        schedule = schedule_from_ledger(experiment)
     stray = set(by_id) - {s.attempt_id for s in schedule}
     if stray:
         raise ManifestRefused(f"outcomes name attempt(s) the ledger never planned: {sorted(stray)}")

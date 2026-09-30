@@ -71,6 +71,11 @@ specification rejects, and it proves its own rules can fail before reporting the
   never `installation-ready`, which a baseline arm cannot satisfy) with readiness reported
   beside it, and the two-arm calibration declaration validator (`require_approved` refuses
   an unapproved one)
+- `skillc/calibration_run.py` - `skillc calibration-run` (#207): runs an APPROVED calibration declaration
+  (refused before anything exists otherwise) in its seeded arm order through one attempt path, the
+  arms differing only in what is installed; pins the model via `matched_pilot.pin_model_argv`, enforces
+  the caps and reconciles through `matched_pilot`, and reports `primary_endpoint` with readiness beside it.
+  Evidence stays private; nothing is exported
 - `evals/calibration-204/` - the two-arm calibration predeclaration (not approved, not run)
 - `evals/level3/slugkit-pipeline/` - Level 3 task with a local `ci/verify.py` pipeline the
   agent must keep passing and honest; its grader plants mutations and `qualify.py` proves

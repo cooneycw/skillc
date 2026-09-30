@@ -1,0 +1,24 @@
+{
+  "branch": "issue-207-calibration-run-execute-an-approved-two-arm-calibr",
+  "counts": {
+    "accepted": 3,
+    "deferred": 1,
+    "rejected": 0
+  },
+  "head": "a439c52392f2523f539f9a76ac61c82b32c8f271",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "207",
+  "passes": 2,
+  "recorded_at": "2026-09-30T19:12:35Z",
+  "red_cases": {
+    "already_covered": 11,
+    "proposed": 14
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/09/30/rollout-2026-09-30T15-08-49-01a0f3b8-2e11-7370-a490-06c6fc95fbd3.jsonl",
+    "thread_id": "01a0f3b8-2e11-7370-a490-06c6fc95fbd3"
+  },
+  "schema": 1,
+  "status": "ran"
+}

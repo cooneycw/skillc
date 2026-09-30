@@ -7,7 +7,7 @@ baseline** on [`evals/level3/slugkit-pipeline`](../level3/slugkit-pipeline/READM
 approved it on 2026-09-30, and its image digest is resolved
 (`sha256:d1b2ced9...`, the image #12's rerun and #150 used), so
 `skillc.calibration.require_approved` now authorizes it (ADR 0005). It has not
-run: no runner for a two-arm schedule exists yet (`owed_before_run`).
+run; `skillc calibration-run` (#207) is the runner that executes it.
 
 ## Why calibrate first
 
@@ -32,9 +32,12 @@ INCONCLUSIVE.
 
 ## Owed before the run
 
-See `owed_before_run` in the manifest: a runner for the two-arm schedule
-([#207](https://github.com/cooneycw/skillc/issues/207)).
-`collection-run` has no baseline (no-skill) mode and does not pin the model;
-`pilot-run` is bound to the Level 1 pilot's own declaration. The run,
+`owed_before_run` in the manifest named one thing: a runner for the two-arm
+schedule ([#207](https://github.com/cooneycw/skillc/issues/207)). It is now
+`skillc calibration-run evals/calibration-204/run-manifest.json`, which
+re-checks the approval, the model pin, the client and image pins and the
+subject revision before anything runs. (`collection-run` has no baseline
+mode and does not pin the model; `pilot-run` is bound to the Level 1 pilot's
+own declaration.) What remains is the run itself. The run,
 its calibration report (questions 1-5 in the manifest) and the go / redesign /
 stop recommendation for #203 are separate, later work under #204.
