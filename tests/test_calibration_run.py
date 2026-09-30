@@ -15,12 +15,12 @@ import json
 import shutil
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 
 import pytest
 
-from skillc import calibration, cli, demo, materialize, trial
+from skillc import calibration, cli, demo, materialize, trial, verify
 from skillc import calibration_run as cr
 from skillc import collection_conformance as cc
 from skillc import docker_backend as d
@@ -38,6 +38,24 @@ _IMAGE = "fake-image:1"
 #: cross-checks the measured image against the planned one.
 _IMAGE_DIGEST = f"sha256:fake-digest-for-{_IMAGE}"
 TREATMENT_ARM = "full-cpp"
+#: Every fake-docker call is a fresh Python process. The default 5s daemon
+#: timeout was exceeded on the loaded CI runner while grading the Level 3 task
+#: (pipeline 454): `confirm_stopped` read UNKNOWN, and "UNKNOWN never reaps"
+#: quarantined the verifier for the rest of the process. The fake daemon is
+#: local, so a generous bound costs nothing and says nothing about a real one.
+_FAKE_DAEMON_TIMEOUT = 120.0
+
+
+@pytest.fixture(autouse=True)
+def _no_quarantine_escapes() -> Iterator[None]:
+    """A test here that trips the verifier's process-wide quarantine fails
+    ITSELF, and the quarantine is cleared - never inherited by every later
+    test in the session, which is how one timeout above became 153 failures."""
+    yield
+    reason = verify._quarantine
+    if reason is not None:
+        verify.clear_quarantine()
+        pytest.fail(f"this test quarantined the verifier: {reason}")
 
 
 # ------------------------------------------------------------------ helpers
@@ -113,7 +131,9 @@ def _run(
 
     def backends() -> tuple[object, object]:
         now[0] += tick
-        make = lambda: d.DockerBackend(image=_IMAGE, base_dir=run_dir, docker_bin=_docker_bin(docker_state))
+        make = lambda: d.DockerBackend(
+            image=_IMAGE, base_dir=run_dir, docker_bin=_docker_bin(docker_state), daemon_timeout=_FAKE_DAEMON_TIMEOUT,
+        )
         return make(), make()
 
     def argv_for(scheduled: mp.ScheduledAttempt) -> list[str]:
