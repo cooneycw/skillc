@@ -490,3 +490,34 @@ def test_a_task_whose_fixture_delivers_nothing_refuses_before_the_store(
             argv_for=lambda _s: ["codex"],
         )
     assert list(run_dir.iterdir()) == []
+
+
+def test_red_an_interrupted_runner_still_accounts_for_every_planned_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Counter-model review: an operator's interrupt used to escape with the
+    unrun attempts undisposed. Interrupt the third of six attempts THROUGH the
+    runner: the private record must still hold one finalized outcome for each."""
+    declaration = _declaration(attempts=3)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    calls: list[str] = []
+
+    def fake_attempt(**kwargs: object) -> dict[str, object]:
+        calls.append(str(kwargs["attempt_id"]))
+        if len(calls) == 3:
+            raise KeyboardInterrupt
+        experiment = kwargs["experiment"]
+        return trial.finalize(experiment, str(kwargs["attempt_id"]), disposition="unavailable",  # type: ignore[arg-type]
+                              reason="fake attempt")
+
+    monkeypatch.setattr(cc, "run_level1_agent_attempt", fake_attempt)
+    with pytest.raises(KeyboardInterrupt):
+        cr.run_calibration(
+            declaration, run_dir=run_dir, treatment=cr.Treatment({}, "sha256:" + "ab" * 32, None),
+            image_digest=_IMAGE_DIGEST, backends=lambda: (None, None), argv_for=lambda _s: ["codex"],
+        )
+    experiment, recorded = mp.read_outcomes(run_dir)
+    assert [o.scheduled.arm for o in recorded] == list(declaration.arm_order)
+    assert [o.record["disposition"] for o in recorded] == ["unavailable", "unavailable"] + ["not-run"] * 4
+    assert all(o.record["disposition"] for o in cr.reconcile(experiment, recorded))

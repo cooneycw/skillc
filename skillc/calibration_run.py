@@ -295,10 +295,20 @@ def run_calibration(
         outcomes.append(outcome)
         write_outcomes(run_dir, experiment, outcomes, declaration)
 
-    mp.run_schedule(
-        experiment, schedule, run_attempt, total_seconds=total, per_attempt_seconds=per_attempt,
-        clock=clock, on_outcome=on_outcome,
-    )
+    try:
+        mp.run_schedule(
+            experiment, schedule, run_attempt, total_seconds=total, per_attempt_seconds=per_attempt,
+            clock=clock, on_outcome=on_outcome,
+        )
+    except KeyboardInterrupt:
+        # An operator's interrupt still accounts for every planned attempt
+        # (counter-model review): the ones that never ran are finalized from
+        # the ledger and the private record is rewritten whole, so the report
+        # the CLI then writes covers the declared schedule, not a prefix of it.
+        # A kill that cannot be caught leaves `outcomes.json` as the last
+        # checkpoint; `reconcile` over it gives the same accounting.
+        write_outcomes(run_dir, experiment, reconcile(experiment, outcomes), declaration)
+        raise
     return experiment, outcomes
 
 

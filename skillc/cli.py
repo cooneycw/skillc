@@ -1752,15 +1752,22 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
     finally:
         cc.discard_acquisition(run_dir, subject_name)
 
-    experiment, outcomes = cr.run_calibration(
-        declaration, run_dir=run_dir, treatment=treatment, image_digest=image_digest,
-        # By the resolved immutable digest, never the tag (pilot-run's rule).
-        backends=lambda: cc.agent_backends(
-            image=image_digest, base=run_dir, docker_bin=docker_bin, daemon_timeout=args.timeout,
-        ),
-        argv_for=lambda _scheduled: client_argv,
-        credential_explicit_path=Path(args.credential) if args.credential else None,
-    )
+    interrupted = False
+    try:
+        experiment, outcomes = cr.run_calibration(
+            declaration, run_dir=run_dir, treatment=treatment, image_digest=image_digest,
+            # By the resolved immutable digest, never the tag (pilot-run's rule).
+            backends=lambda: cc.agent_backends(
+                image=image_digest, base=run_dir, docker_bin=docker_bin, daemon_timeout=args.timeout,
+            ),
+            argv_for=lambda _scheduled: client_argv,
+            credential_explicit_path=Path(args.credential) if args.credential else None,
+        )
+    except KeyboardInterrupt:
+        # The runner already reconciled and persisted every planned attempt.
+        print("skillc: interrupted; reporting every planned attempt from the private record", file=sys.stderr)
+        interrupted = True
+        experiment, outcomes = mp.read_outcomes(run_dir)
     report = cr.build_report(
         experiment, cr.reconcile(experiment, outcomes), declared_model=model, declared_effort=effort,
     )
@@ -1770,7 +1777,7 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
     except demo.PasteBackRefused as exc:
         print(f"skillc: {exc}", file=sys.stderr)
         return 2
-    return _refuse_ineligible(report)
+    return 130 if interrupted else _refuse_ineligible(report)
 
 
 def cmd_configuration_compare(args: argparse.Namespace) -> int:
