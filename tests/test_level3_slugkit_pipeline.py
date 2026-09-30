@@ -42,6 +42,12 @@ def _outcomes(candidate: Path) -> dict[str, str]:
     return {c["id"]: c["outcome"] for c in judge.grade(candidate)["criteria"]}
 
 
+# The whole qualify gate, run for real, takes ~107s on a lightly loaded host - 11% under
+# the 120s default (pyproject.toml). Added by #206 without a budget of its own,
+# it timed out on main's own CI under load (120.00s at load average ~14, 107s at
+# ~5, identical code). A budget for this one test tolerates load; it does not
+# make the test faster, and the global default stays 120s everywhere else.
+@pytest.mark.timeout(600)
 def test_qualify_certifies_the_grader_and_every_control_holds(capsys: pytest.CaptureFixture[str]) -> None:
     assert qualify.main() == 0
     out = capsys.readouterr().out
