@@ -67,6 +67,14 @@ specification rejects, and it proves its own rules can fail before reporting the
 - `skillc/matched_pilot.py` - `skillc pilot-run`/`pilot-report`: runs the predeclared
   pilot schedule (pins checked, caps enforced), reconciles every planned attempt, and
   publishes a leak-checked, record-checked `pilot-report` bundle
+- `skillc/calibration.py` - #204's symmetric primary endpoint (the task grader's criteria,
+  never `installation-ready`, which a baseline arm cannot satisfy) with readiness reported
+  beside it, and the two-arm calibration declaration validator (`require_approved` refuses
+  an unapproved one)
+- `evals/calibration-204/` - the two-arm calibration predeclaration (not approved, not run)
+- `evals/level3/slugkit-pipeline/` - Level 3 task with a local `ci/verify.py` pipeline the
+  agent must keep passing and honest; its grader plants mutations and `qualify.py` proves
+  them valid
 - `evals/level1/<task>/` - a goal-based task: pinned fixture, public `goal.md`, a grader
   (`grader.json`: probe, inputs, judge), reference/alternative/wrong candidates and a
   `qualify.py` gate that must refuse broken graders

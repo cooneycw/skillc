@@ -1,0 +1,11 @@
+{
+ "titles": ["Rock & Roll!", "user@host"],
+ "mutations": [
+  {"id": "benign-comment", "file": "slugkit/core.py", "op": "append",
+   "text": "\n# skillc benign-change control: a comment changes no behaviour.\n"},
+  {"id": "behaviour-trailing-hyphen", "file": "slugkit/core.py", "op": "append", "require": "def slugify",
+   "text": "\n\n_skillc_mutant_slugify = slugify\n\n\ndef slugify(title):\n    return _skillc_mutant_slugify(title) + \"-\"\n"},
+  {"id": "packaging-entry-point", "file": "pyproject.toml", "op": "scripts-target-suffix",
+   "text": "_skillc_missing"}
+ ]
+}
