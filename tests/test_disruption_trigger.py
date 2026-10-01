@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -122,23 +124,59 @@ def test_the_mandatory_final_snapshot_alone_catches_late_requests(base: Path, do
     backend.destroy(handle)
 
 
-def test_a_later_truncation_does_not_erase_an_earlier_higher_count(base: Path, docker_state: Path) -> None:
+def test_a_later_truncation_does_not_erase_an_earlier_higher_count(
+    base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
     """`_max_requests_seen` only ever grows: a subject that inflates the log
     then shrinks it back down does not erase what an earlier poll already
     observed. This defeats SHRINKING the count after the fact - it does
     nothing against INFLATING it in the first place, which is exactly why
-    this count stays advisory (see the module docstring)."""
+    this count stays advisory (see the module docstring).
+
+    The mid-run poll is driven by hand between two sentinel files, never
+    raced against a sleep (issue #174's rule for this file). The prior
+    version slept 0.2s and relied on the 0.05s loop landing a poll inside
+    that window; one poll is a `docker cp` subprocess, so on a loaded host no
+    poll completed in time, the final snapshot saw the truncated log, and
+    the test reported `0 == 4` - a red that said nothing about the code.
+    Here the subject holds the inflated log until the test has polled it,
+    so the earlier, higher count is observed by construction."""
     backend = _backend(base, docker_state)
     handle = _prepared(backend, "a-lc-disruption-000000005")
-    observer = DisruptionTrigger(backend, handle, fail_after=5, interval=0.05)
+    observer = DisruptionTrigger(backend, handle, fail_after=5, interval=60.0)  # the loop never wakes
     observer.start()
+    inflated, release = tmp_path / "inflated", tmp_path / "release"
     script = (
         _append_n_requests(4)
-        + "import time; time.sleep(0.2)\n"
+        + "import pathlib, time\n"
+        + f"pathlib.Path({str(inflated)!r}).touch()\n"
+        + f"while not pathlib.Path({str(release)!r}).exists():\n"
+        + "    time.sleep(0.01)\n"
         + f"open({DEFAULT_REQUEST_LOG!r}, 'w').close()\n"  # truncate back to empty
     )
-    _run_and_stop(backend, handle, script, timeout=10)
-    advisory = observer.stop_and_finalize()
+    errors: list[Exception] = []
+
+    def run_subject() -> None:
+        try:
+            _run_and_stop(backend, handle, script, timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
+        except Exception as exc:  # noqa: BLE001 - re-raised below; a thread would otherwise swallow it
+            errors.append(exc)
+
+    subject = threading.Thread(target=run_subject)
+    subject.start()
+    try:
+        deadline = time.monotonic() + FAKE_DOCKER_DAEMON_TIMEOUT
+        while not inflated.exists():
+            assert subject.is_alive(), "the subject exited before inflating the request log"
+            assert time.monotonic() < deadline, "the subject never inflated the request log"
+            time.sleep(0.01)
+        assert observer._poll_once(record=True) is True  # observes 4, mid-run
+    finally:
+        release.touch()
+        subject.join()
+    if errors:
+        raise errors[0]
+    advisory = observer.stop_and_finalize()  # the final snapshot observes 0
     assert advisory is not None
     assert json.loads(advisory)["requests_received"] == 4
     backend.destroy(handle)
