@@ -22,19 +22,24 @@ DECLARED_SHA="<the exact commit named in the ready message for this run>"
 git clone https://github.com/cooneycw/skillc.git skillc-run && cd skillc-run
 git checkout --quiet "$DECLARED_SHA"
 [ "$(git rev-parse HEAD)" = "$DECLARED_SHA" ] || { echo "HEAD != declared commit, refusing"; exit 1; }
-uv sync --extra dev --quiet
-docker build -q -t skillc-trial:latest docker/trial/ >/dev/null
-echo "image_digest=$(docker image inspect --format '{{.Id}}' skillc-trial:latest)"
-docker version >/dev/null              # preflight: daemon reachable, or this aborts here
+docker version >/dev/null                                     # preflight: daemon reachable
 [ -f "${CODEX_HOME:-$HOME/.codex}/auth.json" ] \
   && echo "codex login: present" || { echo "codex login: ABSENT, refusing"; exit 1; }
 [ "$(env | grep -c '^KYLE_' || true)" -eq 0 ] || { echo "KYLE_* present in this shell, refusing"; exit 1; }
+uv sync --extra dev --quiet
+docker build -q -t skillc-trial:latest docker/trial/ >/dev/null
+echo "image_digest=$(docker image inspect --format '{{.Id}}' skillc-trial:latest)"
 BASE="$(mktemp -d)"
 # --- the one declared command for this run; a different declaration names its own here ---
 SKILLC_ALLOW_REAL_AGENT=1 uv run skillc selection-probe --detection-control --agent-timeout 900 --base "$BASE"
 # --- end declared command ---
-STORE="$(find "$BASE" -mindepth 1 -maxdepth 1 -type d)/selection-probe-detection-control-store"
-echo "run store: $STORE"
+mapfile -t RUN_DIRS < <(find "$BASE" -mindepth 1 -maxdepth 1 -type d)
+[ "${#RUN_DIRS[@]}" -eq 1 ] || { echo "expected exactly 1 run dir under $BASE, found ${#RUN_DIRS[@]}, refusing"; exit 1; }
+STORE="${RUN_DIRS[0]}/selection-probe-detection-control-store"
+TRANSCRIPTS="${RUN_DIRS[0]}/retained-transcripts"
+mkdir -p "$TRANSCRIPTS"                # created only if any attempt retained one; make it exist for the scan below
+uv run skillc leak-check "$STORE/selection-probe-report.json" "$TRANSCRIPTS"
+echo "hand-back ready: $STORE/selection-probe-report.json  $TRANSCRIPTS"
 ```
 
 - **The commit check is first and literal**, not "whatever `main` is today" -
@@ -52,6 +57,13 @@ echo "run store: $STORE"
 - **A different declaration (e.g. a #203 candidate's own calibration run)**
   swaps only the one marked command line, including its own caps and flags
   from its own declaration - everything above and below it is unchanged.
+- **Every preflight (daemon, codex login, `KYLE_*`) runs before the slow
+  steps** (`uv sync`, the image build), so a failing preflight stops the
+  block before either one is paid for in wall time, not after.
+- **The run-directory count is asserted, not assumed.** `find` finding zero
+  or more than one directory under a freshly-created `$BASE` is refused by
+  name rather than silently picking the wrong one or failing deep inside a
+  path substitution.
 
 ## The hand-back: what returns, how, and who writes it up
 
@@ -61,30 +73,39 @@ a public, dated writeup with a results table, built FROM what the operator
 returns - never the raw run store itself, and never written by the operator
 directly.
 
-**Stays on the operator's machine, always:** the full run store - ledger,
-journal, objects, every retained transcript. Matches existing precedent:
-per-run observation records and ledgers live in the operator's own run
-store, never in the repository.
+**For `selection-probe`, retention needs no separate export step and no
+flag.** `AgentTrialRunner.__call__` (`skillc/selection_probe.py:702`) passes
+`retain_transcript=True` on every attempt, unconditionally - the parameter
+it sets (`agent_trial.run_one_attempt`'s own `retain_transcript: bool =
+False`, `skillc/agent_trial.py:1134`) defaults to off for OTHER callers, but
+this command's one caller always turns it on. Each retained transcript is
+already leak-checked at write time, by the retention code itself
+(`_retain_transcript`, `skillc/selection_probe.py:631`) - a leak there
+refuses that one file's retention, never the run. So by the time the
+command above exits, the files below already exist in plain, unexported
+form; nothing needs to be staged or published out of the store first.
 
-**Returned by the operator, after the run:**
+**Stays on the operator's machine, always:** the full run store - the
+ledger, journal and objects `trial.plan()`/`run_planned_selection_probe`
+write as they go. Matches existing precedent: per-run observation records
+and ledgers live in the operator's own run store, never in the repository.
 
-1. The one report file the command itself writes into the run store (for
-   `selection-probe`, `*-report.json`).
-2. The retained transcripts directory the run store holds
-   (`retained-transcripts/*.jsonl`) - these files only, never the rest of the
-   store (ledger internals, journal, objects).
+**Returned by the operator, after the run** (both under the one run
+directory the block above prints, as siblings - the transcripts are NOT
+nested inside the store):
 
-**The one command that leak-checks both, on the operator's own machine,
-before anything leaves it:**
+1. The report file the command writes directly into the store
+   (`<run-dir>/selection-probe-detection-control-store/selection-probe-report.json`).
+2. The retained-transcripts directory beside it
+   (`<run-dir>/retained-transcripts/*.jsonl`) - these files only, never the
+   store's own ledger/journal/objects.
 
-```bash
-skillc leak-check "$STORE/selection-probe-report.json" "$STORE/retained-transcripts"
-```
-
-This refuses the whole hand-back - prints nothing, copies nothing - the
-moment it finds anything, exactly as `skillc demo`'s own paste-back block
-already does before it prints. A refusal here is itself the finding to
-report; nothing is redacted and resent.
+**The block above already leak-checks both**, on the operator's own
+machine, as its last step, before either file is held out as ready to hand
+back - the same `skillc leak-check` this project's other operator-facing
+commands (`skillc demo`'s own paste-back block) already run before printing
+anything. A refusal there stops the block with nothing copied; it is itself
+the finding to report, never something to redact and resend.
 
 **Where the leak-checked files go, and who writes the results table:**
 
