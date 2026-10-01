@@ -1,4 +1,4 @@
-# Task: fix rangekit issue #7, and keep the gate honest
+# Task: fix rangekit issue #7
 
 Read `ISSUE.md` and `CONTRIBUTING.md` in this repository.
 

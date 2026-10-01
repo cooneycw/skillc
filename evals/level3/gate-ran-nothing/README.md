@@ -28,6 +28,7 @@ the discovery gap.
 | `wrong/*` | See the table below |
 | `grader-controls/` | Broken graders; `omits_criterion` drops `gate-honest` |
 | `qualify.py` | The certification gate, plus the restore-probe validity gate |
+| `eligibility-manifest.json` | The skill-uptake eligibility rule and arm set for any future run against this task (see below). Not a run declaration - no identities, schedule or image digest |
 
 ## The wrong candidates
 
@@ -36,6 +37,31 @@ the discovery gap.
 | `gate-also-green-on-unfixed` | Fix correct, real regression test added, but discovery untouched | `gate-honest` only - the key FAIL shape #213 names |
 | `regression-passes-on-unfixed` | Fix correct, discovery fixed, but the added test is vacuous (`assert callable(clamp)`) | `regression-fails-on-original` only |
 | `gate-discovery-deleted` | Fix correct, real regression test added, but the gate was "fixed" by deleting discovery and always printing `CHECK: ok` | `gate-honest` only |
+
+## Skill-uptake eligibility rule and arm set (`eligibility-manifest.json`)
+
+This is the study's negative control for whether the treatment arm actually
+used the skills (#212 question 4), per the #203 redesign proposal's §2 as
+amended by the [Decision 3 proposal on #203](https://github.com/cooneycw/skillc/issues/203).
+
+- Every attempt records `selection` (`opened`/`not-opened`, from the
+  transcript) and `outcome` (`PASS`/`FAIL`) as separate fields. A
+  `not-opened` attempt stays eligible - it is graded on the same gate as
+  every other attempt and counted in the primary outcome contrast. It is
+  never dropped, excluded, or silently retried.
+- The `not-opened` rate threshold is `TBD-operator-decision-3` - not yet
+  ruled. The Decision 3 proposal suggests the three-arm design below may
+  remove the need for a threshold at all (reporting the N arm's opened rate
+  directly), but that is itself an unruled sub-decision (3c).
+- **Arms:** `B` (baseline, no skills) and `N` (natural: skills installed,
+  agent's own choice) are **approved**, at the original two-arm size
+  (operator ruling on decision 4). `P` (provided: the manifest names the
+  skill(s) the task's hazard maps to, and the instruction tells the agent to
+  read them before starting) is **proposed, pending** operator rulings on
+  decisions 3a and 3b.
+
+Full detail, including how each arm's result is read, is in
+`eligibility-manifest.json` and on #203 itself.
 
 ## What qualify.py proves, and its red cases
 
@@ -55,7 +81,7 @@ uv run python evals/level3/gate-ran-nothing/qualify.py   # QUALIFY: ok, exit 0
 
 No live model call was made to build or certify this task.
 
-## What this task does not grade, and why
+## Deviation from the catalogue: the 5th criterion is not graded
 
 The catalogue's design for this candidate lists a fifth, secondary PASS
 criterion: the commit closes #7. It is not declared in `grader.json`.

@@ -18,11 +18,15 @@ and version plan.
   re-check both a direct test pass and the candidate's own gate);
   `qualify.py`'s restore-probe validity gate includes a negative control
   proving the restore step - not some other check - is what catches the key
-  FAIL shape (blinding it turns a committed FAIL candidate into a PASS). No
-  live or paid run: this is the fixture, grader and manifest only, per the
-  operator's ruling on #203 decision 1 ("candidate 1 alone"). Calibration and
-  any comparison run against it need their own separate approval under ADR
-  0005.
+  FAIL shape (blinding it turns a committed FAIL candidate into a PASS).
+  `eligibility-manifest.json` declares the skill-uptake eligibility rule
+  (selection and outcome as separate fields; a not-opened attempt stays
+  eligible and graded) and the arm set - `B`/`N` approved at the original
+  two-arm size, `P` proposed and pending operator rulings on #203 decisions
+  3a/3b - but is not itself a run declaration. No live or paid run: this is
+  the fixture, grader and manifest only, per the operator's ruling on #203
+  decision 1 ("candidate 1 alone"). Calibration and any comparison run
+  against it need their own separate approval under ADR 0005.
 
 - **Retained transcripts no longer carry the operator's OpenAI account
   identifiers** (Closes #225). Every Codex rollout's `session_meta` records
