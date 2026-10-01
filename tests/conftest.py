@@ -26,9 +26,39 @@ this - the hazard above was a test that had no idea it needed to.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+
+from skillc import verify
+
+
+@pytest.fixture(autouse=True)
+def _no_quarantine_leaks_across_tests() -> Iterator[None]:
+    """Issue #219: `verify._quarantine` is module-level, and nothing reset it
+    between tests. One test whose backend probe containment was lost (a
+    genuinely slow fake-docker daemon call under CI host contention, or a
+    real lost containment) quarantined the verifier for the rest of the
+    pytest PROCESS - every later test that called `verify.grade_files` failed
+    with `Refused: this verifier is quarantined`, whatever it actually
+    exercised. Main's push pipeline 482 read 18 unrelated tests across two
+    files as red from one timing miss.
+
+    Five files already defend themselves with their own identical
+    `autouse=True` fixture (`test_calibration.py`, `test_calibration_run.py`,
+    `test_verify.py`, `test_verify_backend.py`, `test_verify_judge.py`) -
+    checked before adding this one, per the issue's own instruction: none of
+    them relies on a quarantine PERSISTING into a later test, including
+    `test_verify.py`'s own test of quarantine itself
+    (`test_a_candidate_that_kills_the_supervisor_and_stays_alive_is_killed_and_quarantines`),
+    which clears it before returning. This fixture is the same clear-before/
+    clear-after promoted to every test in the suite, not a new policy, so it
+    changes nothing for those five files beyond running a second,
+    idempotent `clear_quarantine()` alongside their own."""
+    verify.clear_quarantine()
+    yield
+    verify.clear_quarantine()
 
 
 @pytest.fixture(autouse=True)
