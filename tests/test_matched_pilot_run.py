@@ -20,6 +20,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
+from conftest import FAKE_DOCKER_DAEMON_TIMEOUT
 from fixtures.leak_seeds.judge_seeds import HOME_PATH_LEAK
 
 from skillc import cli, trial
@@ -71,7 +72,14 @@ def _run_fake_pilot(
     credential_path = _fresh_codex_credential(tmp_path)
 
     def backends() -> tuple[object, object]:
-        make = lambda: d.DockerBackend(image="fake-image:1", base_dir=run_dir, docker_bin=_docker_bin(docker_state))
+        # issue #221: production's own daemon_timeout default (5.0s) is too
+        # tight for the fake CLI's own process-spawn overhead under CI host
+        # contention - #174's widened margin, already used by every other
+        # fake-docker construction in the suite.
+        make = lambda: d.DockerBackend(
+            image="fake-image:1", base_dir=run_dir, docker_bin=_docker_bin(docker_state),
+            daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT,
+        )
         return make(), make()
 
     def argv_for(scheduled: mp.ScheduledAttempt) -> list[str]:

@@ -1456,6 +1456,52 @@ def test_confirm_stopped_is_unknown_only_once_the_inspect_delay_exceeds_daemon_t
     backend.destroy(handle)
 
 
+def test_run_fake_pilots_old_bound_fails_where_the_widened_one_passes(
+    base: Path, docker_state: Path,
+) -> None:
+    """Issue #221, the regression #219 only contained rather than removed:
+    `tests/test_matched_pilot_run.py`'s `_run_fake_pilot` constructed its
+    `DockerBackend` with no `daemon_timeout` override, so it used
+    production's own default (`DAEMON_TIMEOUT`, 5.0s) against the fake CLI -
+    the same bound #174 already widened, for every OTHER fake-docker
+    construction in the suite, to `conftest.FAKE_DOCKER_DAEMON_TIMEOUT`
+    (30.0s), because the fake CLI is a real, host-scheduled subprocess and
+    this margin is not a containment question at all.
+
+    A delay strictly between the two bounds (7.0s) reproduces exactly what
+    tripped main pipeline 482: at the OLD bound, `confirm_stopped` cannot
+    confirm within 5.0s and reads UNKNOWN - the same "not CONFIRMED" outcome
+    `verify.py` quarantines the whole process on. At the WIDENED bound, the
+    same delay resolves comfortably inside 30.0s and reports the real,
+    CONFIRMED status. This is the fix in `_run_fake_pilot` itself, isolated
+    to the one construction choice that differs, without paying for a whole
+    fake pilot run per side."""
+    from conftest import FAKE_DOCKER_DAEMON_TIMEOUT
+
+    delay_seconds = 7.0  # strictly between production's 5.0s default and the widened 30.0s margin
+    assert delay_seconds < FAKE_DOCKER_DAEMON_TIMEOUT
+
+    old_bound = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+    handle = old_bound.prepare("a-lc-000000000221a")
+    assert isinstance(handle, d._Handle)
+    old_bound.install(handle, {})
+    old_bound.execute(handle, [sys.executable, "-c", "print('done')"], Limits(timeout=5))
+
+    delay_file = docker_state / f".inspect-delay-{handle.name}"
+    delay_file.write_text(str(delay_seconds), encoding="utf-8")
+    try:
+        assert old_bound.confirm_stopped(handle) is Confirmation.UNKNOWN
+
+        widened = d.DockerBackend(
+            image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state),
+            daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT,
+        )
+        assert widened.confirm_stopped(handle) is Confirmation.CONFIRMED
+    finally:
+        delay_file.unlink(missing_ok=True)
+    old_bound.destroy(handle)
+
+
 def test_confirm_absent_is_not_confirmed_when_rm_lies(base: Path, docker_state: Path) -> None:
     """Negative control: fake_docker's `.stuck-NAME` sentinel makes `rm -f`
     report success without actually removing the container - confirm_absent()
