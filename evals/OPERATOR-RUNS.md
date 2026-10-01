@@ -30,16 +30,21 @@ uv sync --extra dev --quiet
 docker build -q -t skillc-trial:latest docker/trial/ >/dev/null
 echo "image_digest=$(docker image inspect --format '{{.Id}}' skillc-trial:latest)"
 BASE="$(mktemp -d)"
+{ hostname; hostname -f 2>/dev/null || true; } | sort -u > "$BASE/denylist"
 # --- the one declared command for this run; a different declaration names its own here ---
 SKILLC_ALLOW_REAL_AGENT=1 uv run skillc selection-probe --detection-control --agent-timeout 900 --base "$BASE"
 # --- end declared command ---
-mapfile -t RUN_DIRS < <(find "$BASE" -mindepth 1 -maxdepth 1 -type d)
-[ "${#RUN_DIRS[@]}" -eq 1 ] || { echo "expected exactly 1 run dir under $BASE, found ${#RUN_DIRS[@]}, refusing"; exit 1; }
-STORE="${RUN_DIRS[0]}/selection-probe-detection-control-store"
-TRANSCRIPTS="${RUN_DIRS[0]}/retained-transcripts"
-mkdir -p "$TRANSCRIPTS"                # created only if any attempt retained one; make it exist for the scan below
-uv run skillc leak-check "$STORE/selection-probe-report.json" "$TRANSCRIPTS"
-echo "hand-back ready: $STORE/selection-probe-report.json  $TRANSCRIPTS"
+set -- "$BASE"/*/
+[ "$#" -eq 1 ] && [ -d "$1" ] || { echo "expected exactly 1 run dir under $BASE, found $# match(es), refusing"; exit 1; }
+STORE="${1}selection-probe-detection-control-store"
+TRANSCRIPTS="${1}retained-transcripts"
+uv run skillc leak-check "$STORE/selection-probe-report.json" --denylist "$BASE/denylist"
+if [ -d "$TRANSCRIPTS" ] && [ -n "$(find "$TRANSCRIPTS" -mindepth 1 -maxdepth 1)" ]; then
+  uv run skillc leak-check "$TRANSCRIPTS" --denylist "$BASE/denylist"
+  echo "hand-back ready: $STORE/selection-probe-report.json  $TRANSCRIPTS"
+else
+  echo "NO TRANSCRIPTS RETAINED - hand back the report only, this is a finding"
+fi
 ```
 
 - **The commit check is first and literal**, not "whatever `main` is today" -
@@ -60,10 +65,28 @@ echo "hand-back ready: $STORE/selection-probe-report.json  $TRANSCRIPTS"
 - **Every preflight (daemon, codex login, `KYLE_*`) runs before the slow
   steps** (`uv sync`, the image build), so a failing preflight stops the
   block before either one is paid for in wall time, not after.
-- **The run-directory count is asserted, not assumed.** `find` finding zero
-  or more than one directory under a freshly-created `$BASE` is refused by
-  name rather than silently picking the wrong one or failing deep inside a
-  path substitution.
+- **The run-directory count is asserted, not assumed, and portably.**
+  `set -- "$BASE"/*/` then `[ "$#" -eq 1 ] && [ -d "$1" ]` - not `mapfile`,
+  which needs bash 4+ and is absent from the bash 3.2 macOS ships. An
+  unmatched glob is passed through literally by default, which is exactly
+  why the `-d` test is there too: zero real matches sets `$#` to 1 (the
+  literal, non-existent pattern string), and only the `-d` check catches
+  that. Verified against 0/1/2 real fixture directories: refuses on 0 and
+  2, passes only on 1.
+- **`skillc leak-check` takes exactly one path positionally** - a second
+  path argument is rejected by argparse, which under `set -e` would have
+  killed this block AFTER the paid attempts, at the hand-back step. The
+  block calls it once per path instead.
+- **The hostname deny-list is generated, not assumed configured.** Without
+  one, `skillc leak-check` does no hostname detection at all - exactly the
+  class of thing an operator's own machine name is. `$BASE/denylist` is
+  built from `hostname`/`hostname -f` and passed to both calls.
+- **An empty or missing `retained-transcripts/` is reported, not hidden.**
+  `mkdir -p`-ing it unconditionally would make `leak-check` scan zero files
+  and exit 3 ("nothing scanned"), killing the block with a confusing
+  message instead of the real finding: no transcript was retained for any
+  attempt. The block checks for real content first and names this case
+  explicitly when it's empty, leak-checking the report only.
 
 ## The hand-back: what returns, how, and who writes it up
 
@@ -100,12 +123,15 @@ nested inside the store):
    (`<run-dir>/retained-transcripts/*.jsonl`) - these files only, never the
    store's own ledger/journal/objects.
 
-**The block above already leak-checks both**, on the operator's own
-machine, as its last step, before either file is held out as ready to hand
-back - the same `skillc leak-check` this project's other operator-facing
-commands (`skillc demo`'s own paste-back block) already run before printing
+**The block above already leak-checks the report always, and the
+transcripts whenever any exist**, on the operator's own machine, as its
+last step, before either file is held out as ready to hand back - the same
+`skillc leak-check` this project's other operator-facing commands
+(`skillc demo`'s own paste-back block) already run before printing
 anything. A refusal there stops the block with nothing copied; it is itself
-the finding to report, never something to redact and resend.
+the finding to report, never something to redact and resend. An empty
+`retained-transcripts/` is reported by name instead, and is itself a
+finding - see the note on that above.
 
 **Where the leak-checked files go, and who writes the results table:**
 
