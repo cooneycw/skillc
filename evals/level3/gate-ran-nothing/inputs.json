@@ -1,0 +1,70 @@
+{
+ "oracle_cases": [
+  {
+   "args": [
+    -5,
+    1,
+    10
+   ],
+   "expected": 1
+  },
+  {
+   "args": [
+    15,
+    1,
+    10
+   ],
+   "expected": 10
+  },
+  {
+   "args": [
+    5,
+    1,
+    10
+   ],
+   "expected": 5
+  },
+  {
+   "args": [
+    1,
+    1,
+    10
+   ],
+   "expected": 1
+  },
+  {
+   "args": [
+    10,
+    1,
+    10
+   ],
+   "expected": 10
+  },
+  {
+   "args": [
+    0,
+    1,
+    10
+   ],
+   "expected": 1
+  },
+  {
+   "args": [
+    11,
+    1,
+    10
+   ],
+   "expected": 10
+  }
+ ],
+ "restore": {
+  "file": "rangekit/core.py",
+  "content": "\"\"\"Range utilities for rangekit.\"\"\"\n\n\ndef clamp(value, lo, hi):\n    \"\"\"Return value restricted to the closed interval [lo, hi].\"\"\"\n    if value < lo:\n        return hi\n    if value > hi:\n        return lo\n    return value\n"
+ },
+ "baseline_tests": [
+  [
+   "tests/unit/test_core.py",
+   "test_value_inside_range_is_unchanged"
+  ]
+ ]
+}

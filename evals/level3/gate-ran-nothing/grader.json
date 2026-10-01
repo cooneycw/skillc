@@ -1,0 +1,13 @@
+{
+ "id": "gate-ran-nothing",
+ "revision": "1",
+ "criteria": ["functional-clamp-fix", "regression-fails-on-original", "gate-honest", "gate-green"],
+ "dimensions": {
+  "functional-clamp-fix": "functional",
+  "regression-fails-on-original": "constraint",
+  "gate-honest": "constraint",
+  "gate-green": "integration"
+ },
+ "probe": {"file": "probe.py", "inputs": "inputs.json", "timeout": 90},
+ "judge": {"file": "grade_gate_ran_nothing.py", "timeout": 60}
+}
