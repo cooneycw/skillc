@@ -21,6 +21,11 @@
   ranks the classes and shortlists five candidate task designs for #203, in
   answer to #204's calibration report (#211). Counts are re-derivable from
   `cpp-incident-catalogue/` with `scripts/cpp_incident_counts.py`.
+- [SWE-bench-style import research, September 30, 2026](swe-bench-import-research.md):
+  the six open problems #210 names (environments, contamination, certification,
+  hidden-test integrity, cost on paper, licences), checked against skillc's
+  contracts, with the upstream HEADs re-pinned. This is research only, because
+  #210's build gate has not opened (#212 recommends REDESIGN).
 
 ## Provenance and limits
 
