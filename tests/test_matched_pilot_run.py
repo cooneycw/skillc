@@ -102,6 +102,40 @@ def _run_fake_pilot(
     return experiment, outcomes, run_dir
 
 
+def test_run_fake_pilot_builds_every_docker_backend_with_the_widened_daemon_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #221 regression, pinned to `_run_fake_pilot`'s own construction
+    rather than to `DockerBackend` in the abstract (`tests/test_docker_backend
+    .py`'s own `test_confirm_stopped_is_unknown_only_once_the_inspect_delay_
+    exceeds_daemon_timeout` already covers the general mechanism - under/over
+    the bound - and does not need a second proof of it here). Before this
+    fix, `_run_fake_pilot`'s `backends()` closure constructed its
+    `DockerBackend`s with no `daemon_timeout` override at all, so every one
+    used production's own 5.0s default against the fake CLI - the bound
+    main pipeline 482 tripped (issue #219's incident report).
+
+    Wraps `d.DockerBackend` (the name `_run_fake_pilot` itself calls through)
+    with a recorder that delegates to the real class, drives a full
+    `_run_fake_pilot` run, and asserts every construction it made used
+    `FAKE_DOCKER_DAEMON_TIMEOUT` - no injected delay, no sleep, so this is
+    fast and checks the constructor argument directly rather than behavior
+    under a slow daemon."""
+    recorded: list[float] = []
+    real_docker_backend = d.DockerBackend
+
+    def _recording_docker_backend(*args: object, **kwargs: object) -> object:
+        recorded.append(kwargs.get("daemon_timeout", d.DAEMON_TIMEOUT))  # type: ignore[arg-type]
+        return real_docker_backend(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(d, "DockerBackend", _recording_docker_backend)
+
+    _run_fake_pilot(tmp_path)
+
+    assert recorded, "no DockerBackend was constructed - _run_fake_pilot's own backends() factory never ran"
+    assert all(timeout == FAKE_DOCKER_DAEMON_TIMEOUT for timeout in recorded), recorded
+
+
 # ------------------------------------------------------------ the green
 
 
