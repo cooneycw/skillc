@@ -8,6 +8,23 @@ and version plan.
 
 ## [Unreleased]
 
+- **`degrade-subject` no longer collides with itself on a repeated `--base`**
+  (Closes #199). `acquire_degraded` staged into the fixed path
+  `<base>/<subject>-degraded-staging` and never removed it, so a second run
+  on the same host hit `materialize.acquire_snapshot`'s `shutil.copytree`
+  over the leftover `<staging>/base/surface` and crashed with an uncaught
+  `FileExistsError` instead of the CLI's documented exit 2 - the #150
+  runbook's `degrade-subject` step passes no `--base`, so every re-run after
+  the first failed. Each call now stages into its own
+  `tempfile.mkdtemp(dir=base)` root, removed on every exit: `acquire_degraded`'s
+  own try/except covers a refusal raised mid-build, before the CLI ever sees
+  it; the CLI's own try/finally covers everything from a successful
+  `acquire_degraded` call through `persist_skills` reading the degraded
+  surface out of staging, success or exception alike. Regression test
+  committed failing on the pre-fix code with the issue's own
+  `FileExistsError`; two more tests, added after review, are each committed
+  failing when their matching half of the cleanup is disabled.
+
 - **SWE-bench-style import: research on #210's six open problems** (Refs
   #210). This is research only, per the owner's ruling recorded on #210: no
   importer, no instances and no runs.
