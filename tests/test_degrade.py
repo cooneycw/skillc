@@ -589,6 +589,78 @@ def test_cli_requires_exactly_one_of_checkout_or_revision(tmp_path: Path) -> Non
         cli.main(["degrade-subject", "whatever", "--remove-skill", "tdd", "--out", str(tmp_path / "out")])
 
 
+def test_cli_rerun_with_the_same_base_does_not_collide(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Issue #199: `acquire_degraded` staged into the fixed path
+    `<base>/<subject>-degraded-staging` and never removed it, so a second run
+    against the same `--base` hit `materialize.acquire_snapshot`'s
+    `shutil.copytree` over the leftover `<staging>/base/surface` and died with
+    an uncaught `FileExistsError` - not the CLI's documented exit 2. A fixed
+    CLI gives every run its own staging tree and leaves none behind."""
+    collection = _fixture_collection(tmp_path, {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject())
+    base = tmp_path / "base"
+
+    first = cli.main([
+        "degrade-subject", "whatever", "--checkout", str(collection), "--remove-skill", "tdd",
+        "--out", str(tmp_path / "out1"), "--base", str(base),
+    ])
+    second = cli.main([
+        "degrade-subject", "whatever", "--checkout", str(collection), "--remove-skill", "tdd",
+        "--out", str(tmp_path / "out2"), "--base", str(base),
+    ])
+
+    assert first == 0
+    assert second == 0
+    assert (tmp_path / "out1" / "receipt.json").exists()
+    assert (tmp_path / "out2" / "receipt.json").exists()
+    # Neither run's staging tree is left behind under --base.
+    assert list(base.iterdir()) == []
+
+
+def test_cli_cleans_up_staging_when_the_mutation_is_refused_mid_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """"Every exit path" includes a refusal raised from inside
+    `acquire_degraded` itself (here, `_apply_mutation` naming an absent
+    skill), not only the CLI's own normal-return and top-level except paths -
+    orchestrator review of #199. `acquire_degraded`'s own try/except must
+    remove the staging it created before the refusal propagates."""
+    collection = _fixture_collection(tmp_path, {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject())
+    base = tmp_path / "base"
+
+    code = cli.main([
+        "degrade-subject", "whatever", "--checkout", str(collection), "--remove-skill", "does-not-exist",
+        "--out", str(tmp_path / "out"), "--base", str(base),
+    ])
+
+    assert code == 2
+    assert list(base.iterdir()) == []
+
+
+def test_cli_cleans_up_staging_when_persist_skills_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """"Every exit path" also includes an exception raised by `persist_skills`
+    itself, after `acquire_degraded` already succeeded and handed back a live
+    staging tree - orchestrator review of #199. Cleanup that only ran after
+    `persist_skills` returned would leak here, since it never returns."""
+    collection = _fixture_collection(tmp_path, {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject())
+    base = tmp_path / "base"
+
+    def _boom(degraded: object, out: Path) -> Path:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(degrade, "persist_skills", _boom)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        cli.main([
+            "degrade-subject", "whatever", "--checkout", str(collection), "--remove-skill", "tdd",
+            "--out", str(tmp_path / "out"), "--base", str(base),
+        ])
+
+    assert list(base.iterdir()) == []
+
+
 # ------------------------------------------------------------ persisted tree
 
 

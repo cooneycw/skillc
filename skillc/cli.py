@@ -1939,10 +1939,19 @@ def cmd_degrade_subject(args: argparse.Namespace) -> int:
         print(f"skillc: {exc}", file=sys.stderr)
         return 2
 
-    payload = degrade.receipt(degraded, pinned_revision=subject.revision)
-    out.mkdir(parents=True, exist_ok=True)
-    (out / "receipt.json").write_text(json.dumps(payload, indent=1) + "\n", encoding="utf-8")
-    skills_dir = degrade.persist_skills(degraded, out)
+    # `degraded.staging` (issue #199) holds `degraded.source.surface_dir`,
+    # which `persist_skills` below still has to read - remove it only once
+    # that is done, but on every exit from here, success or not, so a second
+    # run against the same --base never finds this run's staging behind it.
+    import shutil
+
+    try:
+        payload = degrade.receipt(degraded, pinned_revision=subject.revision)
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "receipt.json").write_text(json.dumps(payload, indent=1) + "\n", encoding="utf-8")
+        skills_dir = degrade.persist_skills(degraded, out)
+    finally:
+        shutil.rmtree(degraded.staging, ignore_errors=True)
 
     locations = mutation.locations() if mutation is not None else ()
     print(f"subject       {degraded.subject_name}")

@@ -59,6 +59,7 @@ import json
 import posixpath
 import re
 import shutil
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -116,12 +117,16 @@ class DegradedSource:
     optionally mutated. `base` is the UNDEGRADED acquisition's own identity -
     what this subject's source would have reported before any mutation - kept
     beside the degraded identity so a receipt can show both without
-    re-acquiring."""
+    re-acquiring. `staging` is this run's own disposable root (issue #199):
+    `source.surface_dir` lives under it, so a caller must not remove it until
+    it is done reading the surface (e.g. `persist_skills`) - and must remove
+    it itself afterward, on every exit path, since nothing here does."""
 
     subject_name: str
     mutation: Mutation | None
     base: materialize.Source
     source: materialize.Source  # kind="degraded"; revision carries the label below
+    staging: Path
     manifest_rewrites: tuple[str, ...] = ()  # see `_rewrite_manifests`
 
 
@@ -279,37 +284,48 @@ def acquire_degraded(
     (`demo.SubjectRefused`, allowed to propagate); `mutation` is malformed or
     unsatisfiable (see `_apply_mutation`); or the resulting identity would be
     indistinguishable from a normal, undegraded acquisition (see
-    `_refuse_if_identical_to_normal`)."""
+    `_refuse_if_identical_to_normal`).
+
+    `staging` (issue #199) is a fresh per-call directory under `base`, never
+    the fixed `<base>/<subject_name>-degraded-staging` path a second call
+    used to collide on. On any failure from this point on, the staging this
+    call created is removed before the exception propagates - this function
+    never leaves a half-built staging tree behind. On success the returned
+    `DegradedSource.staging` is still live (`source.surface_dir` lives under
+    it): the caller owns removing it once it is done reading the surface."""
     if (checkout is None) == (revision is None):
         raise DegradationRefused("acquire_degraded needs exactly one of checkout= or revision=")
     subject = demo.load_demo_subject(subject_name)
-    staging = base / f"{subject_name}-degraded-staging"
-    staging.mkdir(parents=True, exist_ok=True)
+    base.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=f"{subject_name}-degraded-", dir=base))
+    try:
+        if checkout is not None:
+            base_source = materialize.acquire_snapshot(subject, checkout, staging / "base")
+            acquire_subject = subject
+            source_is_override = True  # a snapshot is never the subject's own git pin
+        else:
+            assert revision is not None
+            acquire_subject = dataclasses.replace(subject, revision=revision)
+            repo = demo.acquire_subject_checkout(acquire_subject, staging / "base-checkout")
+            base_source = materialize.acquire_git(acquire_subject, repo, staging / "base")
+            source_is_override = revision != subject.revision
 
-    if checkout is not None:
-        base_source = materialize.acquire_snapshot(subject, checkout, staging / "base")
-        acquire_subject = subject
-        source_is_override = True  # a snapshot is never the subject's own git pin
-    else:
-        assert revision is not None
-        acquire_subject = dataclasses.replace(subject, revision=revision)
-        repo = demo.acquire_subject_checkout(acquire_subject, staging / "base-checkout")
-        base_source = materialize.acquire_git(acquire_subject, repo, staging / "base")
-        source_is_override = revision != subject.revision
+        manifest_rewrites: tuple[str, ...] = ()
+        if mutation is None:
+            mutated_dir = base_source.surface_dir
+            mutated_digest = base_source.digest
+        else:
+            mutated_dir = staging / "degraded"
+            shutil.copytree(base_source.surface_dir, mutated_dir)
+            manifest_rewrites = _apply_mutation(mutated_dir, acquire_subject, base_source, mutation)
+            mutated_digest = materialize.tree_digest(mutated_dir)
 
-    manifest_rewrites: tuple[str, ...] = ()
-    if mutation is None:
-        mutated_dir = base_source.surface_dir
-        mutated_digest = base_source.digest
-    else:
-        mutated_dir = staging / "degraded"
-        shutil.copytree(base_source.surface_dir, mutated_dir)
-        manifest_rewrites = _apply_mutation(mutated_dir, acquire_subject, base_source, mutation)
-        mutated_digest = materialize.tree_digest(mutated_dir)
-
-    _refuse_if_identical_to_normal(
-        source_is_override=source_is_override, mutation_changed_tree=mutated_digest != base_source.digest,
-    )
+        _refuse_if_identical_to_normal(
+            source_is_override=source_is_override, mutation_changed_tree=mutated_digest != base_source.digest,
+        )
+    except Exception:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
 
     degraded = dataclasses.replace(
         base_source,
@@ -320,7 +336,7 @@ def acquire_degraded(
     )
     return DegradedSource(
         subject_name=subject_name, mutation=mutation, base=base_source, source=degraded,
-        manifest_rewrites=manifest_rewrites,
+        staging=staging, manifest_rewrites=manifest_rewrites,
     )
 
 
