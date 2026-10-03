@@ -69,7 +69,7 @@ specification rejects, and it proves its own rules can fail before reporting the
   publishes a leak-checked, record-checked `pilot-report` bundle
 - `skillc/calibration.py` - #204's symmetric primary endpoint (the task grader's criteria,
   never `installation-ready`, which a baseline arm cannot satisfy) with readiness reported
-  beside it, and the two-arm calibration declaration validator (`require_approved` refuses
+  beside it, and the two- or three-arm (B/N/P, #231) calibration declaration validator (`require_approved` refuses
   an unapproved one)
 - `skillc/calibration_run.py` - `skillc calibration-run` (#207): runs an APPROVED calibration declaration
   (refused before anything exists otherwise) in its seeded arm order through one attempt path, the

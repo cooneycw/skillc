@@ -179,10 +179,11 @@ def _arms(**treatment_extra: object) -> list[object]:
 
 
 @pytest.mark.parametrize(("change", "match"), [
-    ({"arms": _arms() + [{"name": "ablation", "subject": {"name": "x"}}]}, "exactly two arms"),
+    ({"arms": _arms() + [{"name": "ablation", "subject": {"name": "x"}}]}, "different subjects"),
+    ({"arms": _arms() + [{"name": "p"}, {"name": "q"}]}, "two or three arms"),
     ({"arms": _arms(model="another-model")}, "arms may differ only"),
-    ({"attempts_per_arm": 6}, "3-5"),
-    ({"attempts_per_arm": 2}, "3-5"),
+    ({"attempts_per_arm": 9}, "3-8"),
+    ({"attempts_per_arm": 2}, "3-8"),
     ({"arm_order": {"seed": 20260930, "sequence": ["full-cpp", "baseline"] * 4}}, "chosen by hand"),
     ({"arm_order": {"seed": 1, "sequence": _manifest()["arm_order"]["sequence"]}},  # type: ignore[index]
      "chosen by hand"),
@@ -267,3 +268,75 @@ def test_approval_with_an_empty_treatment_subject_is_refused() -> None:
     data["arms"][0]["subject"] = {}  # type: ignore[index]
     with pytest.raises(calibration.DeclarationRefused, match="treatment.subject"):
         calibration.require_approved(calibration.parse_declaration(data), ROOT)
+
+
+# ------------------------------------------- three arms, B/N/P (#231, for #203)
+
+
+_INSTRUCTION = "Before you start, read the `flow-auto` and `flow-check` skills."
+
+
+def _three_arm(**provided: object) -> dict[str, object]:
+    """The committed #204 declaration with a provided-skill arm added: the
+    same subject as the treatment, plus an instruction naming skills."""
+    data = _mutated()
+    arms = data["arms"]
+    assert isinstance(arms, list)
+    p_arm = {"name": "provided", "subject": copy.deepcopy(arms[0]["subject"]),
+             "treatment": "the same install, told to read the named skills first",
+             "instruction": _INSTRUCTION, "named_skills": ["flow-auto", "flow-check"]}
+    p_arm.update(provided)
+    arms.append({k: v for k, v in p_arm.items() if v is not None})
+    data["attempts_per_arm"] = 6
+    data["shared"]["total_seconds"] = 1200 * 18  # type: ignore[index]
+    names = [a["name"] for a in arms]
+    data["arm_order"] = {"seed": 7, "sequence": calibration.derive_arm_order(7, names, 6)}
+    return data
+
+
+def test_a_three_arm_declaration_at_six_per_arm_validates() -> None:
+    declaration = calibration.parse_declaration(_three_arm())
+    assert declaration.arms == ("full-cpp", "baseline", "provided")
+    assert declaration.attempts_per_arm == 6
+    assert len(declaration.arm_order) == 18
+    assert calibration.arm_spec(declaration, "provided")["named_skills"] == ["flow-auto", "flow-check"]
+
+
+@pytest.mark.parametrize(("provided", "match"), [
+    ({"subject": {"name": "another"}}, "different subjects"),  # an ablation, not P
+    ({"instruction": None}, "declared together"),
+    ({"named_skills": None}, "declared together"),
+    ({"instruction": "  "}, "non-empty text"),
+    ({"named_skills": []}, "non-empty list"),
+    ({"named_skills": ["flow-auto", "flow-auto"]}, "distinct"),
+    ({"named_skills": ["flow-auto", "qa-test"]}, r"does not name \['qa-test'\]"),
+    # A neighbouring name is not the name (counter-model review).
+    ({"instruction": "Read `flow-auto-extra` and `flow-check` first."}, r"does not name \['flow-auto'\]"),
+    ({"instruction": None, "named_skills": None}, "exactly one carries"),  # two natural arms
+])
+def test_a_provided_arm_that_breaks_the_design_is_refused(provided: dict[str, object], match: str) -> None:
+    with pytest.raises(calibration.DeclarationRefused, match=match):
+        calibration.parse_declaration(_three_arm(**provided))
+
+
+def test_a_provided_arm_without_a_natural_arm_is_refused() -> None:
+    """P alone beside the baseline would confound the skills' value with the
+    instruction itself."""
+    data = _mutated(arms=_arms(instruction=_INSTRUCTION, named_skills=["flow-auto", "flow-check"]))
+    with pytest.raises(calibration.DeclarationRefused, match="natural arm beside it"):
+        calibration.parse_declaration(data)
+
+
+def test_a_baseline_naming_skills_is_refused() -> None:
+    data = _three_arm()
+    data["arms"][1]["named_skills"] = ["flow-auto"]  # type: ignore[index]
+    with pytest.raises(calibration.DeclarationRefused, match="can name no skill"):
+        calibration.parse_declaration(data)
+
+
+def test_a_three_arm_total_cap_is_checked_against_all_three_arms() -> None:
+    data = _three_arm()
+    data["shared"]["total_seconds"] = 1200 * 12  # type: ignore[index]  # covers two arms, not three
+    with pytest.raises(calibration.DeclarationRefused, match="cannot cover 18 attempts"):
+        calibration.parse_declaration(data)
+

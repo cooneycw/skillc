@@ -15,7 +15,7 @@ import json
 import shutil
 import sys
 import time
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 
 import pytest
@@ -121,6 +121,7 @@ def _run(
     declaration: calibration.CalibrationDeclaration | None = None,
     solve_arms: Sequence[str] = (TREATMENT_ARM, calibration.BASELINE_ARM),
     client_extra: Sequence[str] = (), total_seconds: float | None = None, tick: float = 0.0,
+    arm_extra: Mapping[str, Sequence[str]] | None = None,
 ) -> tuple[trial.Experiment, list[mp.AttemptOutcome], Path, cr.Treatment]:
     declaration = declaration or _declaration(attempts=3)
     treatment = _treatment(tmp_path, monkeypatch)
@@ -145,6 +146,7 @@ def _run(
         if scheduled.arm in solve_arms:
             argv.extend(["--copy-solution", str(TASK / "reference")])
         argv.extend(client_extra)
+        argv.extend((arm_extra or {}).get(scheduled.arm, ()))
         return argv
 
     experiment, outcomes = cr.run_calibration(
@@ -308,8 +310,8 @@ def test_a_baseline_attempt_meeting_every_criterion_is_primary_pass_beside_unkno
         assert isinstance(retention, dict) and retention.get("coverage") == "complete", retention  # #202
 
     assert report["arms"] == {
-        TREATMENT_ARM: {"scheduled": 3, "primary": {"PASS": 3}, "model_ineligible": 0},
-        calibration.BASELINE_ARM: {"scheduled": 3, "primary": {"PASS": 3}, "model_ineligible": 0},
+        TREATMENT_ARM: {"scheduled": 3, "primary": {"PASS": 3}, "model_ineligible": 0, "opened": 0, "observed": 3},
+        calibration.BASELINE_ARM: {"scheduled": 3, "primary": {"PASS": 3}, "model_ineligible": 0, "opened": 0, "observed": 3},
     }
     assert cli._refuse_ineligible(report) == 0
     assert mp.read_declared(run_dir) == {"model": "gpt-6-astra", "reasoning_effort": "high"}
@@ -541,3 +543,125 @@ def test_red_an_interrupted_runner_still_accounts_for_every_planned_attempt(
     assert [o.scheduled.arm for o in recorded] == list(declaration.arm_order)
     assert [o.record["disposition"] for o in recorded] == ["unavailable", "unavailable"] + ["not-run"] * 4
     assert all(o.record["disposition"] for o in cr.reconcile(experiment, recorded))
+
+
+# ------------------------------------------- three arms, B/N/P (#231, for #203)
+
+
+def _three_arm_declaration() -> calibration.CalibrationDeclaration:
+    """The committed declaration plus a provided-skill arm: the same subject
+    as the treatment, told to read `tdd` (the test collection's one skill)."""
+    data = _declaration_data(attempts=3)
+    arms = data["arms"]
+    assert isinstance(arms, list)
+    arms.append({"name": "provided", "subject": dict(arms[0]["subject"]), "treatment": "told to read tdd",
+                 "instruction": "Before you start, read the `tdd` skill.", "named_skills": ["tdd"]})
+    names = [a["name"] for a in arms]
+    data["arm_order"]["sequence"] = calibration.derive_arm_order(  # type: ignore[index]
+        data["arm_order"]["seed"], names, 3)  # type: ignore[index]
+    return calibration.parse_declaration(data)
+
+
+def test_three_arms_differ_only_by_install_and_the_provided_arm_s_instruction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#231: the provided arm installs exactly what the natural arm does and
+    its prompt is goal.md plus the declared instruction; the other two arms
+    get goal.md verbatim. Uptake is reported per arm as k/n, and the
+    provided arm's named-skill count beside it."""
+    seen: list[dict[str, object]] = []
+    real = cc.run_level1_agent_attempt
+
+    def spy(**kwargs: object) -> dict[str, object]:
+        seen.append(dict(kwargs))
+        return real(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(cc, "run_level1_agent_attempt", spy)
+    declaration = _three_arm_declaration()
+    experiment, outcomes, _, treatment = _run(
+        tmp_path, monkeypatch, declaration=declaration, arm_extra={"provided": ["--plant-skill", "tdd"]},
+        solve_arms=(TREATMENT_ARM, calibration.BASELINE_ARM, "provided"),
+    )
+
+    assert len(seen) == 9
+    arm_of = {o.scheduled.attempt_id: o.scheduled.arm for o in outcomes}
+    goal = (TASK / "goal.md").read_text(encoding="utf-8")
+    for call in seen:
+        arm = arm_of[str(call["attempt_id"])]
+        if arm == "provided":
+            assert call["prompt"] == f"{goal.rstrip()}\n\nBefore you start, read the `tdd` skill.\n"
+            assert call["extra_home_files"] == treatment.home_files
+        else:
+            assert call["prompt"] == goal
+
+    report = cr.build_report(
+        experiment, cr.reconcile(experiment, outcomes), declared_model="gpt-6-astra", declared_effort="high",
+        named_skills=cr.named_skills_by_arm(declaration),
+    )
+    arms = report["arms"]
+    assert isinstance(arms, dict)
+    assert (arms["provided"]["opened"], arms["provided"]["observed"], arms["provided"]["named_opened"]) == (3, 3, 3)
+    assert (arms[TREATMENT_ARM]["opened"], arms[TREATMENT_ARM]["observed"]) == (0, 3)
+    assert "named_opened" not in arms[TREATMENT_ARM]
+    for entry in _entries(report):
+        assert entry["skill_opened"] is (entry["arm"] == "provided")
+        assert ("named_skill_opened" in entry) is (entry["arm"] == "provided")
+    assert "opened=3/3 named_opened=3" in cr.paste_back(report)
+
+
+def test_a_provided_arm_naming_a_skill_the_install_lacks_is_refused_before_any_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Counter-model review on #231: P told to read a skill the treatment
+    does not install would turn its zero uptake into a configuration error."""
+    data = json.loads(json.dumps(_three_arm_declaration().data))
+    data["arms"][2]["named_skills"] = ["not-installed"]
+    data["arms"][2]["instruction"] = "Before you start, read the `not-installed` skill."
+    declaration = calibration.parse_declaration(data)
+    treatment = _treatment(tmp_path, monkeypatch)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    with pytest.raises(cr.CalibrationRefused, match=r"names \['not-installed'\]"):
+        cr.run_calibration(
+            declaration, run_dir=run_dir, treatment=treatment, image_digest=_IMAGE_DIGEST,
+            backends=lambda: (None, None), argv_for=lambda s: [],
+        )
+    assert list(run_dir.iterdir()) == []
+
+
+@pytest.mark.parametrize("obs", [
+    {"status": "unknown", "transcript_files_found": 1, "prompt_delivered": True, "skill_invocations": []},
+    {"transcript_files_found": 0, "prompt_delivered": False, "skill_invocations": []},
+    {"transcript_files_found": 2, "prompt_delivered": False, "skill_invocations": []},
+    {"transcript_files_found": 1, "prompt_delivered": False, "skill_invocations": ["tdd"]},  # another attempt's
+    {},
+])
+def test_an_unconfirmed_observation_is_unknown_uptake_never_false(obs: dict[str, object]) -> None:
+    """Counter-model review on #231, red before the fix: the reader records
+    `skill_invocations=[]` when it found no transcript or several, and that
+    read as 'observed, not opened'."""
+    assert cr.observation_confirmed(obs) is False
+    assert cr._opened(obs.get("skill_invocations"), confirmed=cr.observation_confirmed(obs)) == cr.UNKNOWN
+    assert cr._opened(obs.get("skill_invocations"), ("tdd",), confirmed=cr.observation_confirmed(obs)) == cr.UNKNOWN
+
+
+def test_a_confirmed_observation_with_no_invocation_is_not_opened() -> None:
+    obs = {"status": "captured", "transcript_files_found": 1, "prompt_delivered": True, "skill_invocations": []}
+    assert cr.observation_confirmed(obs) is True
+    assert cr._opened(obs["skill_invocations"], confirmed=True) is False
+
+
+def test_an_unobserved_attempt_is_neither_opened_nor_not_opened() -> None:
+    """The uptake rate's denominator counts only attempts whose invocations
+    were recorded: an attempt that never ran is UNKNOWN, never a 'not opened'."""
+    assert cr._opened(cr.UNKNOWN) == cr.UNKNOWN
+    assert cr._opened(None, ("tdd",)) == cr.UNKNOWN
+    assert cr._opened([]) is False
+    assert cr._opened(["qa-test"], ("tdd",)) is False
+    assert cr._opened(["tdd"], ("tdd",)) is True
+    summary = cr.summarize_arms([
+        {"arm": "n", "skill_opened": True}, {"arm": "n", "skill_opened": False},
+        {"arm": "n", "skill_opened": cr.UNKNOWN},
+    ])["n"]
+    assert (summary["opened"], summary["observed"], summary["scheduled"]) == (1, 2, 3)
+

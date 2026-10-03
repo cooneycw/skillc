@@ -1,4 +1,4 @@
-"""Run an approved two-arm calibration declaration (issue #207, for #204).
+"""Run an approved calibration declaration (issue #207, for #204; three arms, #231).
 
 `skillc.calibration` validates a `calibration-declaration` and refuses to
 authorize an unapproved one; this module is what then EXECUTES it. Before
@@ -18,12 +18,14 @@ planned by `trial.plan` in exactly `arm_order.sequence` - the seeded order
 trial is labelled `calibration_<arm>_<k>` (the arm's k-th attempt), so the
 schedule is recoverable from the ledger alone (`schedule_from_ledger`).
 
-ONE ATTEMPT PATH FOR BOTH ARMS. Every attempt goes through
+ONE ATTEMPT PATH FOR EVERY ARM. Every attempt goes through
 `collection_conformance.run_level1_agent_attempt` with the declared task as
 `task_root` - the same client, prompt (`goal.md`), starting state and grader.
-The arms differ ONLY in what is installed: the treatment gets the subject's
+The arms differ ONLY in what is installed: a treated arm gets the subject's
 selected skill files and the #150-D `InstallationReceiptContext`, the
-baseline gets `{}` and none. The starting state is `task_surface` (the whole
+baseline gets `{}` and none. A provided-skill arm (#231, P in #203's B/N/P)
+installs the same subject as the natural arm and differs from it by one
+thing: its declared `instruction` is appended to `goal.md`. The starting state is `task_surface` (the whole
 fixture but its answer key), because a Level 3 fixture has no `src/`.
 
 THE MODEL IS PINNED AT LAUNCH AND CHECKED AFTER, through
@@ -271,6 +273,15 @@ def run_calibration(
     per_attempt = float(str(declaration.shared["per_attempt_seconds"]))
     total = float(str(declaration.shared["total_seconds"])) if total_seconds is None else total_seconds
 
+    goal = (task_root / "goal.md").read_text(encoding="utf-8")
+    installed = treatment.receipt_context.declared if treatment.receipt_context is not None else frozenset()
+    for arm, skills in named_skills_by_arm(declaration).items():
+        absent = sorted(set(skills) - installed)
+        if absent:
+            # A P arm told to read a skill the install does not hold would
+            # make its zero uptake a configuration error (counter-model review).
+            raise CalibrationRefused(f"arm {arm!r} names {absent}, which the treatment does not install")
+
     store = trial.open_store(run_dir / "store", forbidden=[])
     experiment, schedule = plan_calibration(
         declaration, store, root=root, treatment_digest=treatment.digest, image_digest=image_digest,
@@ -280,13 +291,15 @@ def run_calibration(
 
     def run_attempt(scheduled: mp.ScheduledAttempt, budget: float) -> dict[str, object]:
         treated = scheduled.arm != calibration.BASELINE_ARM
+        instruction = calibration.arm_spec(declaration, scheduled.arm).get("instruction")
+        prompt = f"{goal.rstrip()}\n\n{instruction}\n" if isinstance(instruction, str) else goal
         agent_backend, grading_backend = backends()
         return cc.run_level1_agent_attempt(
             experiment=experiment, attempt_id=scheduled.attempt_id,
             backend=agent_backend, grading_backend=grading_backend,  # type: ignore[arg-type]
             base=run_dir, base_argv=mp.pin_model_argv(model, effort, argv_for(scheduled)),
             extra_home_files=treatment.home_files if treated else {},
-            client=client_name, cli_version=client_version, task_root=task_root, surface=surface,
+            client=client_name, cli_version=client_version, task_root=task_root, surface=surface, prompt=prompt,
             timeout=budget, credential_explicit_path=credential_explicit_path,
             receipt_context=treatment.receipt_context if treated else None,
         )
@@ -326,14 +339,54 @@ def verified_result(experiment: trial.Experiment, record: Mapping[str, object]) 
     return data if isinstance(data, dict) else None
 
 
+def named_skills_by_arm(declaration: calibration.CalibrationDeclaration) -> dict[str, tuple[str, ...]]:
+    """Each provided-skill arm's declared `named_skills` (#231)."""
+    named: dict[str, tuple[str, ...]] = {}
+    for arm in declaration.arms:
+        skills = calibration.arm_spec(declaration, arm).get("named_skills")
+        if isinstance(skills, list):
+            named[arm] = tuple(str(k) for k in skills)
+    return named
+
+
+def observation_confirmed(obs: Mapping[str, object]) -> bool:
+    """The attempt's own transcript was found and read: not an unknown
+    observation, exactly one transcript file, and that file's first user
+    message is this attempt's prompt. The same confirmation
+    `selection_probe` requires (counter-model review on #231): the reader
+    records `skill_invocations=[]` when it found no transcript or several,
+    and that empty list is not evidence that nothing was opened."""
+    return (
+        bool(obs) and obs.get("status") != "unknown" and obs.get("transcript_files_found") == 1
+        and obs.get("prompt_delivered") is True
+    )
+
+
+def _opened(invocations: object, named: Sequence[str] | None = None, *, confirmed: bool = True) -> object:
+    """Whether the attempt's recorded `skill_invocations` show a skill opened
+    (any, or one of `named`): True/False from a recorded list of a confirmed
+    observation, `UNKNOWN` otherwise. Never False for an attempt that was not
+    observed."""
+    if not confirmed or not isinstance(invocations, list):
+        return UNKNOWN
+    names = {str(i) for i in invocations}
+    return bool(names & set(named)) if named is not None else bool(names)
+
+
 def build_report(
     experiment: trial.Experiment, outcomes: Sequence[mp.AttemptOutcome], *,
-    declared_model: str, declared_effort: str,
+    declared_model: str, declared_effort: str, named_skills: Mapping[str, Sequence[str]] | None = None,
 ) -> dict[str, object]:
     """One entry per attempt, in the declared order: the primary endpoint,
     readiness beside it, and the model check. `model_eligible` uses the key
     `matched_pilot.ineligible_attempts` reads, so the CLI's refusal is the
-    pilot's own."""
+    pilot's own.
+
+    Uptake (#231, #203 ruling 3c) is reported beside the endpoint, never
+    inside it: `skill_opened` for every attempt, and for a provided-skill arm
+    (`named_skills`) `named_skill_opened` - which decides whether that attempt
+    counts toward the value comparison."""
+    named_skills = named_skills or {}
     entries: list[dict[str, object]] = []
     for position, outcome in enumerate(outcomes, start=1):
         record = outcome.record
@@ -362,6 +415,10 @@ def build_report(
             "time_seconds": mp._time_split(outcome, agent),
             "tokens": meta.get("token_usage") if meta.get("token_usage") is not None else UNKNOWN,
             "skill_invocations": obs.get("skill_invocations", UNKNOWN),
+            "skill_opened": _opened(obs.get("skill_invocations"), confirmed=observation_confirmed(obs)),
+            **({"named_skill_opened": _opened(obs.get("skill_invocations"), named_skills[outcome.scheduled.arm],
+                                              confirmed=observation_confirmed(obs))}
+               if outcome.scheduled.arm in named_skills else {}),
             "transcript_retention": record.get("transcript_retention", UNKNOWN),
             "runner_note": outcome.runner_note,
         })
@@ -375,12 +432,22 @@ def build_report(
 
 
 def summarize_arms(entries: Sequence[Mapping[str, object]]) -> dict[str, dict[str, object]]:
-    """Per-arm counts of the primary endpoint - description, not inference."""
+    """Per-arm counts of the primary endpoint - description, not inference.
+    `opened` is the uptake rate's numerator and `observed` its denominator
+    (k/n, #203 ruling 3c): an attempt whose invocations were not recorded is
+    in neither. A provided-skill arm also counts `named_opened`, the attempts
+    eligible for the value comparison."""
     arms: dict[str, dict[str, object]] = {}
     for entry in entries:
         arm = str(entry.get("arm"))
-        summary = arms.setdefault(arm, {"scheduled": 0, "primary": {}, "model_ineligible": 0})
+        summary = arms.setdefault(arm, {"scheduled": 0, "primary": {}, "model_ineligible": 0,
+                                        "opened": 0, "observed": 0})
         summary["scheduled"] = int(str(summary["scheduled"])) + 1
+        if entry.get("skill_opened") in (True, False):
+            summary["observed"] = int(str(summary["observed"])) + 1
+            summary["opened"] = int(str(summary["opened"])) + (entry.get("skill_opened") is True)
+        if "named_skill_opened" in entry:
+            summary["named_opened"] = int(str(summary.get("named_opened", 0))) + (entry["named_skill_opened"] is True)
         endpoint = entry.get("primary_endpoint")
         status = str(endpoint.get("status")) if isinstance(endpoint, dict) else calibration.NOT_GRADED
         primary = summary["primary"]
@@ -407,6 +474,8 @@ def paste_back(report: Mapping[str, object]) -> str:
         )
     arms = report.get("arms")
     for arm, summary in (arms.items() if isinstance(arms, dict) else []):
+        named = f" named_opened={summary.get('named_opened')}" if "named_opened" in summary else ""
         lines.append(f"  [{arm}] scheduled={summary.get('scheduled')} primary={summary.get('primary')} "
+                     f"opened={summary.get('opened')}/{summary.get('observed')}{named} "
                      f"model_ineligible={summary.get('model_ineligible')}")
     return "\n".join(lines)

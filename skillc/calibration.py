@@ -29,9 +29,12 @@ by design, and would only ever exist for codex.
 
 THE DECLARATION. `load_declaration` validates a calibration run manifest
 (`evals/calibration-204/run-manifest.json`) BEFORE any attempt exists:
-exactly two arms that differ only in their treatment (every other identity
-lives once, under `shared`), 3-5 attempts per arm, and an arm order derived
-from a recorded seed rather than chosen by hand. A declaration is not an
+two or three arms that differ only in their treatment (every other identity
+lives once, under `shared`), 3-8 attempts per arm, and an arm order derived
+from a recorded seed rather than chosen by hand. A third arm (#231, the #203
+B/N/P design) installs the SAME subject as the other treated arm and differs
+from it only by an `instruction` naming `named_skills` to read first: it
+separates a skill's value from its uptake, and can never be an ablation. A declaration is not an
 authorization: `require_approved` refuses one whose `approval` is not
 recorded, or whose identities still say `UNKNOWN` (ADR 0005: no live run
 without recorded, approved arms, identities, schedule and caps).
@@ -48,6 +51,7 @@ from __future__ import annotations
 import json
 import math
 import random
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -62,13 +66,16 @@ PRIMARY_ENDPOINT_EXCLUDES = frozenset({verify.READINESS_CRITERION})
 NOT_GRADED = "NOT_GRADED"
 
 BASELINE_ARM = "baseline"
-MIN_ATTEMPTS_PER_ARM, MAX_ATTEMPTS_PER_ARM = 3, 5
+MIN_ATTEMPTS_PER_ARM, MAX_ATTEMPTS_PER_ARM = 3, 8
 UNKNOWN = "UNKNOWN"
 
 #: The only keys an arm may carry. Anything else - a model, an effort, a
 #: timeout - would be a second difference between the arms; it belongs under
 #: `shared`, once, for both.
-ARM_KEYS = frozenset({"name", "subject", "treatment"})
+ARM_KEYS = frozenset({"name", "subject", "treatment", "instruction", "named_skills"})
+
+#: The keys only a provided-skill arm carries, always together (#231).
+PROVIDED_KEYS = frozenset({"instruction", "named_skills"})
 
 #: What both arms must share, by construction (issue #204's Scope).
 SHARED_KEYS = frozenset({
@@ -174,9 +181,10 @@ def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
     if data.get("kind") != "calibration-declaration":
         raise _refuse(f"kind is {data.get('kind')!r}, not 'calibration-declaration'")
     arms_raw = data.get("arms")
-    if not isinstance(arms_raw, list) or len(arms_raw) != 2 or not all(isinstance(a, dict) for a in arms_raw):
-        raise _refuse("exactly two arms are declared (full treatment versus minimal baseline); "
-                      "an ablation belongs to #203, not to calibration")
+    if not isinstance(arms_raw, list) or len(arms_raw) not in (2, 3) \
+            or not all(isinstance(a, dict) for a in arms_raw):
+        raise _refuse("two or three arms are declared (baseline, treatment, and optionally a provided-skill "
+                      "arm); an ablation belongs to #203, not to calibration")
     names = []
     for arm in arms_raw:
         extra = set(arm) - ARM_KEYS
@@ -187,14 +195,44 @@ def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
         if not isinstance(name, str) or not name:
             raise _refuse("every arm needs a name")
         names.append(name)
-    if len(set(names)) != 2 or BASELINE_ARM not in names:
-        raise _refuse(f"arms must be two distinct names, one of them {BASELINE_ARM!r}; got {names}")
+    if len(set(names)) != len(names) or names.count(BASELINE_ARM) != 1:
+        raise _refuse(f"arms must be distinct names, exactly one of them {BASELINE_ARM!r}; got {names}")
     baseline = next(a for a in arms_raw if a["name"] == BASELINE_ARM)
-    treatment = next(a for a in arms_raw if a["name"] != BASELINE_ARM)
+    treated = [a for a in arms_raw if a["name"] != BASELINE_ARM]
     if baseline.get("subject") is not None:
         raise _refuse("the baseline arm installs nothing: its subject is null")
-    if not isinstance(treatment.get("subject"), dict):
-        raise _refuse(f"arm {treatment['name']!r} names no subject to install")
+    if PROVIDED_KEYS & set(baseline):
+        raise _refuse("the baseline arm installs nothing, so it can name no skill to read")
+    for arm in treated:
+        if not isinstance(arm.get("subject"), dict):
+            raise _refuse(f"arm {arm['name']!r} names no subject to install")
+        provided = PROVIDED_KEYS & set(arm)
+        if provided and provided != PROVIDED_KEYS:
+            raise _refuse(f"arm {arm['name']!r} carries {sorted(provided)} alone; an instruction and the "
+                          "named_skills it names are declared together")
+        if provided:
+            skills = arm["named_skills"]
+            if not isinstance(arm["instruction"], str) or not arm["instruction"].strip():
+                raise _refuse(f"arm {arm['name']!r}: instruction must be non-empty text")
+            if not isinstance(skills, list) or not skills \
+                    or not all(isinstance(k, str) and k.strip() for k in skills) or len(set(skills)) != len(skills):
+                raise _refuse(f"arm {arm['name']!r}: named_skills must be a non-empty list of distinct names")
+            # A whole name, never a substring: `flow-auto` is not named by
+            # `flow-auto-extra` (counter-model review).
+            missing_names = [k for k in skills
+                             if not re.search(r"(?<![\w-])" + re.escape(k) + r"(?![\w-])", arm["instruction"])]
+            if missing_names:
+                raise _refuse(f"arm {arm['name']!r}: the instruction does not name {missing_names}")
+    if len(treated) == 2:
+        if treated[0]["subject"] != treated[1]["subject"]:
+            raise _refuse("the two treated arms install different subjects; a third arm may differ only by "
+                          "its instruction, never by what is installed (an ablation belongs to #203)")
+        if sum(1 for a in treated if PROVIDED_KEYS <= set(a)) != 1:
+            raise _refuse("of the two treated arms, exactly one carries an instruction and named_skills; "
+                          "otherwise the arms do not differ, or differ in two ways")
+    elif PROVIDED_KEYS & set(treated[0]):
+        raise _refuse("a provided-skill arm needs a natural arm beside it, installing the same subject "
+                      "without the instruction; alone it confounds value with the instruction")
 
     shared = data.get("shared")
     if not isinstance(shared, dict):
@@ -209,8 +247,8 @@ def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
     if isinstance(attempts, bool) or not isinstance(attempts, int) \
             or not MIN_ATTEMPTS_PER_ARM <= attempts <= MAX_ATTEMPTS_PER_ARM:
         raise _refuse(f"attempts_per_arm must be {MIN_ATTEMPTS_PER_ARM}-{MAX_ATTEMPTS_PER_ARM}, not {attempts!r}")
-    if total < per_attempt * attempts * 2:
-        raise _refuse(f"shared.total_seconds {total:g} cannot cover {attempts * 2} attempts of "
+    if total < per_attempt * attempts * len(names):
+        raise _refuse(f"shared.total_seconds {total:g} cannot cover {attempts * len(names)} attempts of "
                       f"{per_attempt:g}s; a total cap that cuts the schedule short is not the declared schedule")
 
     order = data.get("arm_order")
@@ -259,8 +297,9 @@ def _unknown_leaves(value: object, where: str) -> list[str]:
 
 
 #: The identity fields that must hold a real, non-empty value before a run is
-#: authorized - each a path into the declaration ("treatment" is the
-#: non-baseline arm). Checked by presence, not only by the absence of the
+#: authorized - each a path into the declaration ("treatment" is the first
+#: non-baseline arm; a third arm installs the same subject, by
+#: `parse_declaration`). Checked by presence, not only by the absence of the
 #: literal `UNKNOWN`: an empty object or a null carries no identity either
 #: (counter-model review).
 REQUIRED_IDENTITIES: tuple[tuple[str, ...], ...] = (
@@ -309,3 +348,13 @@ def require_approved(declaration: CalibrationDeclaration, root: Path) -> None:
     if (grader.id, grader.revision) != (declaration.grader_id, declaration.grader_revision):
         raise _refuse(f"the task's grader is {grader.id!r} revision {grader.revision!r}, not the declared "
                       f"{declaration.grader_id!r} revision {declaration.grader_revision!r}")
+
+
+def arm_spec(declaration: CalibrationDeclaration, name: str) -> Mapping[str, object]:
+    """The declared arm called `name` (`parse_declaration` proved names are
+    distinct)."""
+    arms = declaration.data.get("arms")
+    for arm in arms if isinstance(arms, list) else []:
+        if isinstance(arm, dict) and arm.get("name") == name:
+            return arm
+    raise _refuse(f"no arm named {name!r}")
