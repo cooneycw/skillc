@@ -1369,6 +1369,65 @@ def test_a_protected_field_redaction_cannot_reach_refuses_retention(line: bytes,
     assert at.retainable_transcript(kept).data is None
 
 
+@pytest.mark.parametrize("template", [
+    # #227: each keeps a populated rate_limits past the redaction. The key is
+    # spliced in, so this file holds no literal of the field with a value for
+    # the repo-wide `leak-check .` gate to flag.
+    '{"payload":{"KEY":{"plan_type":"x"}} truncated',  # a line that does not parse
+    '{"text":"{\\"KEY\\":{\\"plan_type\\":\\"x\\"}}"}',  # JSON printed inside a string
+    '{"text":"saw \\"KEY\\": {\\"plan\\": 1} here"}',  # a fragment inside a string
+    '{"rate_\\u006cimits":{"plan_type":"x"}}',  # an escaped key: KEY is not used
+])
+def test_rate_limits_the_redaction_cannot_reach_refuse_retention(template: str) -> None:
+    line = template.replace("KEY", "rate_" + "limits").encode("utf-8")
+    kept = at.redact_transcript_identities(line + b"\n")
+    assert at.transcript_leak_findings(kept) == ["account-usage at line 1"]
+    assert at.retainable_transcript(kept).data is None
+
+
+def test_a_rewritten_line_keeps_its_escapes() -> None:
+    """Counter-model review on #227: re-serializing a rate_limits line wrote
+    a decoded U+2028 back raw, splitting the record under `splitlines()` so
+    the response_id beside it scanned clean; a lone surrogate crashed the
+    rewrite. Both now stay escaped."""
+    rate_limits, response_id = "rate_" + "limits", "response_" + "id"
+    separator = (
+        '{"' + rate_limits + '":{"plan_type":"x"},"text":"\\u2028 {\\"' + response_id + '\\":\\"resp_fake\\"}"}\n'
+    ).encode("ascii")
+    kept = at.redact_transcript_identities(separator)
+    assert len(kept.splitlines()) == 1
+    assert at.transcript_leak_findings(kept) == ["response-id at line 1"]
+
+    surrogate = ('{"' + rate_limits + '":{"plan_type":"x"},"name":"bad\\udcff.txt"}\n').encode("ascii")
+    kept = at.redact_transcript_identities(surrogate)
+    assert json.loads(kept)["name"] == "bad\udcff.txt"
+    assert at.transcript_leak_findings(kept) == []
+
+
+def test_redaction_replaces_rate_limits_and_response_id_and_nothing_else() -> None:
+    """#227: a token_count's rate_limits object and a token_usage_record's
+    response_id are redacted; untouched lines stay byte-identical."""
+    rate_limits, response_id = "rate_" + "limits", "response_" + "id"
+    lines = [
+        '{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":5}},'
+        '"' + rate_limits + '":{"plan_type":"planfake","credits":{"balance":"9999"},"primary":{"resets_at":17}}}}',
+        '{"type":"token_usage_record","payload":{"' + response_id + '":"resp_fake01","usage":{"input_tokens":5}}}',
+        '{"type":"response_item","payload":{"type":"message","role":"assistant","content":"done \u2019"}}',
+    ]
+    raw = ("\n".join(lines) + "\n").encode("utf-8")
+    kept = at.redact_transcript_identities(raw)
+    out = kept.splitlines()
+    assert out[2] == raw.splitlines()[2]
+    for value in (b"planfake", b"9999", b"resp_fake01"):
+        assert value not in kept
+    token_count = json.loads(out[0])["payload"]
+    assert token_count[rate_limits] == "<redacted>"
+    assert token_count["info"] == {"total_token_usage": {"input_tokens": 5}}  # evidence survives
+    assert json.loads(out[1])["payload"]["usage"] == {"input_tokens": 5}
+    assert at.transcript_leak_findings(kept) == []
+    assert at.transcript_leak_findings(raw) == ["account-usage at line 1", "response-id at line 2"]
+
+
 def test_redaction_replaces_only_the_protected_values() -> None:
     key = "creator_" + "user_id"  # built, so this file is no leak-check literal
     line = ('{"type":"session_meta","payload":{"' + key + '":"user-Example123","cli_version":"0.157.1"}}\n'

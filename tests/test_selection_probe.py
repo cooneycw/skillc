@@ -1283,6 +1283,8 @@ def test_account_identifiers_are_redacted_before_a_transcript_is_retained(tmp_pa
     assert "PlantedFake" not in retained
     assert "00000000-0000" not in retained
     assert "PlantedOpaque" not in retained
+    for value in ("planted-fake-plan", "54321", "resp_plantedfake"):  # #227
+        assert value not in retained
     meta = json.loads(retained.splitlines()[0])
     assert meta["type"] == "session_meta"
     assert meta["payload"]["creator_user_id"] == "<redacted>"

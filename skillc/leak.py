@@ -3,7 +3,7 @@
 skillc is public, and it will soon produce evidence bundles, ledgers and
 receipts from real trial runs (#10). Nothing stops a committed file, a PR body,
 or a produced bundle from carrying the operator's machine identities. This
-module scans text for seven classes: an absolute home-directory path, a
+module scans text for nine classes: an absolute home-directory path, a
 `uid=`/`gid=` number, a private (RFC 1918) IPv4 address, a hostname from a
 locally-configured deny-list, credential material (#98: a subscription
 login copied into a trial container raises the stakes of a leak well above
@@ -13,7 +13,10 @@ the scanning process's own live home directory or cwd (`default_host_paths`,
 anywhere else the home-path pattern does not recognize), and an
 account-scoped identifier field with a value (#225: `creator_user_id`,
 `creator_account_id` and their `user_id`/`account_id`/`chatgpt_*` kin, which
-a Codex rollout's `session_meta` carries for the operator's own account).
+a Codex rollout's `session_meta` carries for the operator's own account),
+and a Codex `token_count`'s `rate_limits` or a `response_id` with a value
+(#227: the operator's plan, credit balance and usage windows, and the
+provider's response handles).
 Stdlib only, like the rest of `skillc/`.
 
 CREDENTIAL MATERIAL (#98) is matched two ways, both requiring an actual
@@ -101,6 +104,13 @@ ACCOUNT_ID_FIELD = r"(?:creator_|chatgpt_)?(?:user|account)_id"
 ACCOUNT_ID_RE = re.compile(
     r'"(' + ACCOUNT_ID_FIELD + r')"\s*:\s*"((?:[^"\\]|\\.)+)"'
 )
+
+#: A Codex `token_count` event's populated `rate_limits` object - the
+#: operator's plan, credit balance and usage windows (#227) - or a
+#: `response_id` with a value: anything but the redaction marker or null.
+#: Keyed on the field name plus a value, like ACCOUNT_ID_RE.
+ACCOUNT_USAGE_RE = re.compile(r'"rate_limits"\s*:\s*(?!"<redacted>"|null\b)\S')
+RESPONSE_ID_RE = re.compile(r'"response_id"\s*:\s*"(?!<redacted>")[^"]+"')
 
 #: What a redacted account identifier reads as (`agent_trial.
 #: redact_transcript_identities`). Exempt by exact value, so a redacted
@@ -319,6 +329,10 @@ def scan_text(
             # The field name only, never the value - the same reason the
             # credential-token findings above withhold theirs.
             yield lineno, "account-id", f"{match.group(1)} value present (redacted)"
+        if ACCOUNT_USAGE_RE.search(line):
+            yield lineno, "account-usage", "rate_limits value present (redacted)"
+        if RESPONSE_ID_RE.search(line):
+            yield lineno, "response-id", "response_id value present (redacted)"
 
 
 def _files(root: Path) -> Iterator[Path]:

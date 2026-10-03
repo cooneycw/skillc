@@ -8,6 +8,33 @@ and version plan.
 
 ## [Unreleased]
 
+- **Retained transcripts no longer carry the operator's plan, credit balance
+  or usage windows** (Closes #227, follow-up to #225). Every Codex
+  `token_count` event has a `rate_limits` object holding the subscription
+  tier, the credit balance and the rate-limit windows. Every
+  `token_usage_record` has a provider `response_id`. After #225 both still
+  scanned clean. Reading the #26 transcripts by hand before publication found
+  them.
+  - `skillc/leak.py` gains two classes, `account-usage` (a populated
+    `rate_limits`) and `response-id`. `skillc leak-check` now reports 28
+    findings on the 2026-10-03 transcripts instead of 4.
+  - `redact_transcript_identities` replaces `response_id` in the text, and
+    re-serializes only the lines carrying a `rate_limits` object, replacing
+    it with `<redacted>`. Every other line stays byte-identical.
+  - Deny-list, not allow-list: an allow-list of evidence fields would drop
+    fields silently on a client upgrade. A new account-scoped field still
+    passes until it is named, so a transcript is read by hand before it is
+    published.
+
+  - A rewritten line is written as ASCII. A cross-model review (Codex) found
+    that writing it as UTF-8 turned an escaped U+2028 into a raw line break,
+    which split the record and let a `response_id` beside it scan clean, and
+    that a lone surrogate crashed the rewrite. Regression test committed; it
+    fails with the UTF-8 encoding.
+
+  Committed controls: `controls/leak-check/{bad,good}/planted-account-usage`.
+  All seven original new tests fail on the pre-fix code.
+
 - **New Level 3 task `gate-ran-nothing`: candidate 1 of the #203 redesign**
   (Refs #203). A small library ships a one-function bug and a local gate
   whose test discovery never reaches a subdirectory lacking `__init__.py`,
