@@ -8,6 +8,27 @@ and version plan.
 
 ## [Unreleased]
 
+- **New Level 3 task `gate-ran-nothing`: candidate 1 of the #203 redesign**
+  (Refs #203). A small library ships a one-function bug and a local gate
+  whose test discovery never reaches a subdirectory lacking `__init__.py`,
+  so it reports green with or without the fix - CPP #621 in miniature. The
+  hazard lives only in the fixture, never in `goal.md`, per #212's own
+  lesson. Four mandatory criteria graded via a restore-and-rerun probe (plant
+  the original, unfixed source back into an otherwise-delivered tree, then
+  re-check both a direct test pass and the candidate's own gate);
+  `qualify.py`'s restore-probe validity gate includes a negative control
+  proving the restore step - not some other check - is what catches the key
+  FAIL shape (blinding it turns a committed FAIL candidate into a PASS).
+  `eligibility-manifest.json` declares the skill-uptake eligibility rule
+  (selection and outcome as separate fields; a not-opened attempt stays
+  eligible and graded) and the arm set. `B`, `N` and `P` are all approved
+  (owner rulings 3a/3b/3c on #203, 2026-10-03): there is no not-opened
+  threshold, and `P` names `flow-auto` and `flow-check` as the skills to
+  read first. It is not itself a run declaration. No live or paid run: this is
+  the fixture, grader and manifest only, per the operator's ruling on #203
+  decision 1 ("candidate 1 alone"). Calibration and any comparison run
+  against it need their own separate approval under ADR 0005.
+
 - **Retained transcripts no longer carry the operator's OpenAI account
   identifiers** (Closes #225). Every Codex rollout's `session_meta` records
   `creator_user_id` and `creator_account_id`, and both the retention-time
