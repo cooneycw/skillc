@@ -6,8 +6,11 @@
   `AGENTS.md`, and an on-demand index (`docs/memory-index.md` naming
   `docs/topic-a.md`)
 - Adapter: `skillc exposure` ([skillc/exposure.py](../../../skillc/exposure.py), #55)
-- Evidence: [evidence/report.json](evidence/report.json), produced 2026-09-26,
-  real `codex-cli 0.157.1`, `--snapshot collection`
+- Evidence: [evidence/report.json](evidence/report.json), first produced
+  2026-09-26 and re-run 2026-10-03 on main `36d9369`, after PR #169's four
+  exposure fixes, with the same verdicts; the only change is the new
+  `manifest_coverage` field. Real `codex-cli 0.157.1` (the re-run used the
+  binary copied from the pinned trial image), `--snapshot collection`
 
 This is #55's synthetic-surface evidence bullet: a fixture built specifically
 to exercise all three declarable layers at once (always-loaded file with a
