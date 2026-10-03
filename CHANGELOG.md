@@ -8,6 +8,34 @@ and version plan.
 
 ## [Unreleased]
 
+- **Calibration declarations can have three arms: B/N/P** (Closes #231, for
+  #203). The owner's rulings on #203 (3a/3b/3c, and Q2 "medium": 6 attempts
+  per arm) need a provided-skill arm and more attempts than the two-arm,
+  3-5 runner allowed.
+  - `skillc.calibration.parse_declaration` accepts two or three arms, exactly
+    one of them `baseline`. A third arm must install the same subject as the
+    natural arm and differ from it only by an `instruction` and the
+    `named_skills` it names, so a third arm can never be an ablation.
+    Attempts per arm are 3-8, and the total cap is checked against every
+    arm.
+  - `calibration-run` appends a provided arm's instruction to `goal.md` for
+    that arm only.
+  - The report adds `skill_opened` per attempt, and `named_skill_opened` for
+    the provided arm. Per arm it shows the uptake rate `opened`/`observed`
+    (k/n, ruling 3c) and the provided arm's `named_opened`, the attempts
+    eligible for the value comparison. Uptake is read only from a confirmed
+    observation (one transcript, this attempt's own prompt), the same
+    confirmation `selection_probe` uses. Anything else is `UNKNOWN`, never
+    "not opened".
+  - A cross-model review (Codex) found three gaps, all fixed with red cases
+    that fail when the fix is disabled:
+    - an unconfirmed observation (no transcript, or several) counted as
+      "observed, not opened";
+    - P's `named_skills` were not checked against what the treatment
+      installs. `run_calibration` now refuses before any store exists;
+    - the instruction check matched substrings, so `flow-auto-extra` counted
+      as naming `flow-auto`.
+
 - **Retained transcripts no longer carry the operator's plan, credit balance
   or usage windows** (Closes #227, follow-up to #225). Every Codex
   `token_count` event has a `rate_limits` object holding the subscription

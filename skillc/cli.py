@@ -1670,7 +1670,7 @@ def cmd_pilot_report(args: argparse.Namespace) -> int:
 
 
 def cmd_calibration_run(args: argparse.Namespace) -> int:
-    """Issue #207: run an APPROVED two-arm calibration declaration (#204's
+    """Issue #207: run an APPROVED two- or three-arm (#231) calibration declaration (#204's
     `evals/calibration-204/run-manifest.json`) end to end. Refuses (exit 2),
     before any run directory or container exists, a declaration that is not
     approved or still carries an unrecorded identity, a client argv that
@@ -1770,6 +1770,7 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
         experiment, outcomes = mp.read_outcomes(run_dir)
     report = cr.build_report(
         experiment, cr.reconcile(experiment, outcomes), declared_model=model, declared_effort=effort,
+        named_skills=cr.named_skills_by_arm(declaration),
     )
     (run_dir / cr.REPORT_FILENAME).write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8")
     try:
@@ -2186,7 +2187,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_calibration_run = sub.add_parser(
         "calibration-run",
-        help="issue #207: run an APPROVED two-arm calibration declaration (e.g. "
+        help="issue #207: run an APPROVED two- or three-arm calibration declaration (e.g. "
              "evals/calibration-204/run-manifest.json); evidence stays private, a leak-checked summary is "
              "printed (a real agent run, behind SKILLC_ALLOW_REAL_AGENT=1)",
     )
