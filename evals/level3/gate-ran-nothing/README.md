@@ -49,16 +49,21 @@ amended by the [Decision 3 proposal on #203](https://github.com/cooneycw/skillc/
   `not-opened` attempt stays eligible - it is graded on the same gate as
   every other attempt and counted in the primary outcome contrast. It is
   never dropped, excluded, or silently retried.
-- The `not-opened` rate threshold is `TBD-operator-decision-3` - not yet
-  ruled. The Decision 3 proposal suggests the three-arm design below may
-  remove the need for a threshold at all (reporting the N arm's opened rate
-  directly), but that is itself an unruled sub-decision (3c).
-- **Arms:** `B` (baseline, no skills) and `N` (natural: skills installed,
-  agent's own choice) are **approved**, at the original two-arm size
-  (operator ruling on decision 4). `P` (provided: the manifest names the
-  skill(s) the task's hazard maps to, and the instruction tells the agent to
-  read them before starting) is **proposed, pending** operator rulings on
-  decisions 3a and 3b.
+- There is no `not-opened` threshold (owner ruling 3c, 2026-10-03, on
+  [#203](https://github.com/cooneycw/skillc/issues/203#issuecomment-5968815648)).
+  The N arm's opened rate is reported with its count (k/n) and never gates
+  crediting P.
+- **Arms, all approved:** `B` (baseline, no skills), `N` (natural: skills
+  installed, the agent's own choice) and `P` (provided: skills installed, and
+  the instruction tells the agent to read `flow-auto` and `flow-check` before
+  starting). P was approved by rulings 3a and 3b, including its extra 3-5
+  calibration attempts. A P attempt counts toward the value comparison only
+  if its transcript shows a named skill opened.
+- **Why those two skills:** `flow-auto` bundles CPP's instrument guidance
+  (ADR 0008 and `detector-contracts.md`: a gate needs an input that makes it
+  report the other verdict), and `flow-check` is the skill for running a
+  project's gate. This choice is proposed here; any calibration declaration
+  restates it for approval.
 
 Full detail, including how each arm's result is read, is in
 `eligibility-manifest.json` and on #203 itself.

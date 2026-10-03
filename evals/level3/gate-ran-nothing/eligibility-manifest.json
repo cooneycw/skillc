@@ -6,15 +6,16 @@
   "grader_id": "gate-ran-nothing",
   "grader_revision": "1"
  },
- "_comment": "NOT a run declaration (contrast evals/calibration-204/run-manifest.json): no identities, schedule, image digest or arm order are pinned here. This states the skill-uptake eligibility rule (#203 redesign proposal §2, as amended by the Decision 3 proposal on #203) that any future run-manifest for this task must conform to. No live or paid run is authorized by this file (ADR 0005).",
+ "_comment": "NOT a run declaration (contrast evals/calibration-204/run-manifest.json): no identities, schedule, image digest or arm order are pinned here. This states the skill-uptake eligibility rule (#203 redesign proposal \u00a72, as amended by the Decision 3 proposal on #203 and ruled by the owner on 2026-10-03) that any future run-manifest for this task must conform to. No live or paid run is authorized by this file (ADR 0005).",
  "eligibility_rule": {
   "fields": [
    "selection: opened | not-opened, read from the attempt's retained transcript, same heuristic method #212 and #26 used",
    "outcome: PASS | FAIL on the task's own symmetric endpoint (grader.json's four mandatory criteria via records.derive_status)"
   ],
   "rule": "selection and outcome are two separate fields on every attempt, never merged into one verdict. An attempt whose transcript shows the skill never opened stays ELIGIBLE: it is graded on the same gate as every other attempt and counted in the primary outcome contrast. It is never dropped, excluded, or silently retried.",
-  "not_opened_threshold": "TBD-operator-decision-3",
-  "not_opened_threshold_status": "NOT RULED. Per the Decision 3 proposal on #203 (https://github.com/cooneycw/skillc/issues/203), a three-arm design (B/N/P below) answers uptake with the N arm's opened rate (k/n) directly, which may remove the need for a threshold at all (proposed sub-decision 3c, not yet ruled). Until 3a/3b/3c are ruled, this field stays the named placeholder above and gates nothing."
+  "not_opened_threshold": null,
+  "not_opened_threshold_status": "NONE, by owner ruling 3c (2026-10-03, https://github.com/cooneycw/skillc/issues/203#issuecomment-5968815648): no threshold. The N arm's opened rate is reported as a measured rate with its count (k/n) and never gates crediting P.",
+  "p_arm_eligibility": "A P attempt is eligible for the value comparison (P vs. B) only if its transcript shows a named skill opened. A P attempt that never opened one is reported with its count as a failed provision, never silently dropped."
  },
  "arms": [
   {
@@ -38,12 +39,18 @@
    "label": "provided",
    "skills": "installed",
    "selection": "named by this task's manifest; the task instruction tells the agent to read the named skill(s) before starting",
-   "status": "proposed-pending",
-   "approval_ref": "operator decision 3a (adopt the three-arm B/N/P design) and 3b (approve P's additional 3-5 calibration attempts), both posed on #203 and not yet ruled"
+   "status": "approved",
+   "approval_ref": "owner rulings 3a (adopt B/N/P) and 3b (P's additional 3-5 calibration attempts), 2026-10-03, https://github.com/cooneycw/skillc/issues/203#issuecomment-5968815648",
+   "named_skills": [
+    "flow-auto",
+    "flow-check"
+   ],
+   "named_skills_rationale": "From the declared subject, cpp-codex @ 85e9b03. flow-auto is the skill that carries CPP's instrument guidance for this hazard: its bundled docs/decisions/0008-instrument-negative-control-bound.md and docs/agents/detector-contracts.md state that a gate needs an input that makes it report the other verdict. flow-check is the skill for running a project's quality gate. Neither SKILL.md names this task or its fixture. Proposed with this change; any calibration declaration restates it for approval.",
+   "instruction": "Before you start, read the `flow-auto` and `flow-check` skills and follow what applies to this task."
   }
  ],
  "notes": [
   "The P arm is a per-run positive control for the opened/not-opened detector: if P registers 'opened' and N registers 'not-opened' in the same run, N's zero is a real zero, not a detector that cannot see a positive.",
-  "#26's approved live attempt provides an independent detector check first, ahead of any arm here."
+  "#26's live attempt (2026-10-03, verdict ok) checked the detector first: treatment detected the named skill, baseline showed no invocation."
  ]
 }
