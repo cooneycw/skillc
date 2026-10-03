@@ -3,14 +3,17 @@
 skillc is public, and it will soon produce evidence bundles, ledgers and
 receipts from real trial runs (#10). Nothing stops a committed file, a PR body,
 or a produced bundle from carrying the operator's machine identities. This
-module scans text for six classes: an absolute home-directory path, a
+module scans text for seven classes: an absolute home-directory path, a
 `uid=`/`gid=` number, a private (RFC 1918) IPv4 address, a hostname from a
 locally-configured deny-list, credential material (#98: a subscription
 login copied into a trial container raises the stakes of a leak well above
 a machine identity - a token is not merely embarrassing, it is usable), and
 the scanning process's own live home directory or cwd (`default_host_paths`,
 #134 item 5 - catches a checkout under `/workspace`, `/opt`, `/srv` or
-anywhere else the home-path pattern does not recognize).
+anywhere else the home-path pattern does not recognize), and an
+account-scoped identifier field with a value (#225: `creator_user_id`,
+`creator_account_id` and their `user_id`/`account_id`/`chatgpt_*` kin, which
+a Codex rollout's `session_meta` carries for the operator's own account).
 Stdlib only, like the rest of `skillc/`.
 
 CREDENTIAL MATERIAL (#98) is matched two ways, both requiring an actual
@@ -87,6 +90,30 @@ OAUTH_TOKEN_RE = re.compile(
 #: `sk-...` shape several providers share) followed by enough opaque
 #: characters that a short, coincidental match is implausible.
 API_KEY_RE = re.compile(r"\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}\b")
+
+#: An account-scoped identifier field with a value (#225): a Codex rollout's
+#: `session_meta` carries the operator's `creator_user_id` and
+#: `creator_account_id`, which are neither a machine identity nor a
+#: credential, so none of the classes above saw them. Like the OAuth pattern
+#: it keys on the field NAME plus a non-empty value, never the name alone.
+#: Group 1 is the field name, group 2 the value.
+ACCOUNT_ID_FIELD = r"(?:creator_|chatgpt_)?(?:user|account)_id"
+ACCOUNT_ID_RE = re.compile(
+    r'"(' + ACCOUNT_ID_FIELD + r')"\s*:\s*"((?:[^"\\]|\\.)+)"'
+)
+
+#: What a redacted account identifier reads as (`agent_trial.
+#: redact_transcript_identities`). Exempt by exact value, so a redacted
+#: transcript scans clean while any other value still fires.
+REDACTED_VALUE = "<redacted>"
+
+#: Obviously-fake account identifiers in committed test fixtures, compared
+#: against the EXACT value: tests/fixtures/transcripts/codex/run-metadata.jsonl
+#: and tests/test_agent_trial.py's census test use them to prove account IDs
+#: are never COPIED into metadata. They are placeholders, not identities.
+ACCOUNT_ID_ALLOWLIST: frozenset[str] = frozenset({
+    REDACTED_VALUE, "user-FAKE", "user-SHOULD-NOT-APPEAR", "acct-SHOULD-NOT-APPEAR",
+})
 
 #: The finding this yields for either pattern NEVER includes the matched
 #: value itself (cross-model review, #98): the whole point of this class is
@@ -286,6 +313,12 @@ def scan_text(
             if match.group(0) in ALLOWLIST:
                 continue
             yield lineno, "credential-token", "API-key-shaped value present (redacted)"
+        for match in ACCOUNT_ID_RE.finditer(line):
+            if match.group(2) in ACCOUNT_ID_ALLOWLIST:
+                continue
+            # The field name only, never the value - the same reason the
+            # credential-token findings above withhold theirs.
+            yield lineno, "account-id", f"{match.group(1)} value present (redacted)"
 
 
 def _files(root: Path) -> Iterator[Path]:

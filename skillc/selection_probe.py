@@ -68,7 +68,6 @@ from . import (
     agent_trial,
     collection_conformance,
     credential,
-    leak,
     materialize,
     records,
     trial,
@@ -649,10 +648,10 @@ def _retain_transcript(
     raw = retained.get("bytes")
     if not isinstance(raw, bytes):
         return None, None
-    text = raw.decode("utf-8", errors="replace")
-    findings = list(leak.scan_text(text, leak.load_denylist(None), host_paths=leak.default_host_paths()))
-    if findings:
-        located = sorted({f"{kind} at line {lineno}" for lineno, kind, _detail in findings})
+    # The same check `retainable_transcript` applies, decoded pass included:
+    # a raw-text scan cannot see an identifier inside an escaped string (#225).
+    located = agent_trial.transcript_leak_findings(raw)
+    if located:
         return None, f"transcript leak-check found {', '.join(located)}; retention refused"
     target_dir = retain_transcript_dir(base)
     target_dir.mkdir(parents=True, exist_ok=True)

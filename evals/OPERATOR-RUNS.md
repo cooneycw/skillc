@@ -77,6 +77,13 @@ fi
   path argument is rejected by argparse, which under `set -e` would have
   killed this block AFTER the paid attempts, at the hand-back step. The
   block calls it once per path instead.
+- **Account identifiers are redacted at retention and caught by the scan
+  (#225).** A Codex rollout records the operator's `creator_user_id` and
+  `creator_account_id`. Retention replaces both with `<redacted>`, and
+  `leak-check` reports any that remain as `account-id`. A transcript
+  retained before #225 carries them, and this block's scan now refuses it.
+  Run it through `agent_trial.redact_transcript_identities` and re-check it
+  before hand-back.
 - **The hostname deny-list is generated, not assumed configured.** Without
   one, `skillc leak-check` does no hostname detection at all - exactly the
   class of thing an operator's own machine name is. `$BASE/denylist` is

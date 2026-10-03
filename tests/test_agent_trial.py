@@ -1348,3 +1348,36 @@ def test_a_grading_backend_refusal_still_persists_the_observation(
     grading = _saved_observation(experiment, attempt_id)["grading"]
     assert isinstance(grading, dict) and "grading raised ValueError" in str(grading["blocked_reason"])
     assert _check_records(experiment.root, "agent-observation") == 0
+
+
+# ------------------------------------------- account identifiers at retention (#225)
+
+
+@pytest.mark.parametrize(("line", "kind"), [
+    # Each survives the serialized-text redaction; the decoded passes refuse it
+    # (counter-model review). No case is a plain `"key": "value"` literal, which
+    # the repo-wide `leak-check .` gate would flag in this file.
+    (b'{"creator_\\u0075ser_id":"user-Example123"}', "account-id"),  # an escaped key
+    (b'{"creator_user_id":123456789}', "account-id"),  # a non-string value
+    (b'{"creator_account_id":["acct-Example123"]}', "account-id"),
+    (b'{"message":"{\\"encrypted_content\\":\\"opaque-example\\"}"}', "encrypted-content"),
+    (b'{"text":"see \\"encrypted_content\\": \\"opaque\\" here"}', "encrypted-content"),
+])
+def test_a_protected_field_redaction_cannot_reach_refuses_retention(line: bytes, kind: str) -> None:
+    kept = at.redact_transcript_identities(line + b"\n")
+    assert at.transcript_leak_findings(kept) == [f"{kind} at line 1"]
+    assert at.retainable_transcript(kept).data is None
+
+
+def test_redaction_replaces_only_the_protected_values() -> None:
+    key = "creator_" + "user_id"  # built, so this file is no leak-check literal
+    line = ('{"type":"session_meta","payload":{"' + key + '":"user-Example123","cli_version":"0.157.1"}}\n'
+            '{"type":"response_item","payload":{"type":"reasoning","encrypted_content":"gAAAAopaque"}}\n'
+            '{"type":"event_msg","payload":{"type":"task_started"}}\n').encode("utf-8")
+    kept = at.redact_transcript_identities(line)
+    assert kept.splitlines()[2] == line.splitlines()[2]  # an untouched line is byte-identical
+    assert b"user-Example123" not in kept and b"gAAAAopaque" not in kept
+    assert json.loads(kept.splitlines()[0])["payload"]["cli_version"] == "0.157.1"
+    assert at.transcript_leak_findings(kept) == []
+    assert at.transcript_leak_findings(line) != []  # the unredacted input is refused
+

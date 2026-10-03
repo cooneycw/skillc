@@ -78,6 +78,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import secrets
 import tempfile
 import time
@@ -402,6 +403,63 @@ def _jsonl_string_leaves(text: str) -> Iterator[tuple[int, str]]:
                 stack.extend(item)
 
 
+#: A field whose JSON string value retention replaces with
+#: `leak.REDACTED_VALUE` before a transcript is kept (#225):
+#:   - the account identifiers `leak.ACCOUNT_ID_RE` detects, which a Codex
+#:     rollout's `session_meta` records for the operator on every attempt -
+#:     refusing them instead would refuse every Codex transcript;
+#:   - `encrypted_content`, the provider-encrypted reasoning blob on Codex
+#:     `reasoning` items. No reader of the evidence can decrypt it, so it is
+#:     not evidence; it is session content held by the provider's key, and
+#:     publishing it gains nothing.
+_REDACTED_FIELD = r"(?:" + leak.ACCOUNT_ID_FIELD + r"|encrypted_content)"
+_REDACTED_FIELD_RE = re.compile(
+    (r'("' + _REDACTED_FIELD + r'"\s*:\s*")((?:[^"\\]|\\.)*)(")').encode("ascii")
+)
+_REDACTED_KEY_RE = re.compile(_REDACTED_FIELD)
+_ENCRYPTED_CONTENT_RE = re.compile(r'"encrypted_content"\s*:\s*"((?:[^"\\]|\\.)+)"')
+
+
+def _unredacted_protected_fields(value: object) -> Iterator[str]:
+    """The finding class of every `_REDACTED_FIELD` key under `value` whose
+    value is populated and not `leak.REDACTED_VALUE` (#225, counter-model
+    review). Walks DECODED JSON, so it sees what the serialized-text
+    redaction cannot: a key spelled with escapes (`"creator_\\u0075ser_id"`),
+    a non-string value (a number, a list), and JSON an agent printed inside
+    a string, which is parsed and walked in turn."""
+    stack: list[object] = [value]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, dict):
+            for key, inner in item.items():
+                if (
+                    isinstance(key, str) and _REDACTED_KEY_RE.fullmatch(key)
+                    and inner not in (None, "", leak.REDACTED_VALUE)
+                ):
+                    yield "encrypted-content" if key == "encrypted_content" else "account-id"
+                stack.append(inner)
+        elif isinstance(item, list):
+            stack.extend(item)
+        elif isinstance(item, str) and item.lstrip()[:1] in ("{", "["):
+            try:
+                stack.append(json.loads(item))
+            except ValueError:
+                pass
+
+
+def redact_transcript_identities(raw: bytes) -> bytes:
+    """`raw` with each `_REDACTED_FIELD_RE` field's value replaced by
+    `leak.REDACTED_VALUE` (#225). A substitution on the serialized text, not a
+    parse and re-serialize, so every byte outside a redacted value - every
+    other line in particular - is exactly what the client wrote.
+
+    Only structural fields are redacted. The same identifier inside an
+    escaped string (an agent printing a rollout, say) is left alone, and
+    `transcript_leak_findings`' decoded pass refuses the transcript on it."""
+    marker = leak.REDACTED_VALUE.encode("utf-8")
+    return _REDACTED_FIELD_RE.sub(lambda m: m.group(1) + marker + m.group(3), raw)
+
+
 def transcript_leak_findings(raw: bytes) -> list[str]:
     """Every reason `raw` may not be retained or published, by CLASS and LINE
     only - never the matched value. Three passes, because each alone is
@@ -412,7 +470,10 @@ def transcript_leak_findings(raw: bytes) -> list[str]:
         `{\"access_token\": ...}` becomes matchable again;
       - `trial._secret_content`, the filter artifact capture already applies
         (GitHub/AWS/Slack tokens, private keys), over the raw bytes and each
-        decoded string."""
+        decoded string;
+      - `_unredacted_protected_fields` over each parsed line, and an
+        `encrypted_content` pattern over each decoded string: what
+        `redact_transcript_identities` left in place (#225)."""
     text = raw.decode("utf-8", errors="replace")
     denylist, host_paths = leak.load_denylist(None), leak.default_host_paths()
     located = {f"{kind} at line {lineno}" for lineno, kind, _detail in leak.scan_text(text, denylist, host_paths)}
@@ -429,6 +490,14 @@ def transcript_leak_findings(raw: bytes) -> list[str]:
         leaf_secret = trial._secret_content(leaf.encode("utf-8", errors="surrogatepass"))
         if leaf_secret is not None:
             located.add(f"{leaf_secret.removesuffix('; never exported')} at line {lineno}")
+        if any(m.group(1) != leak.REDACTED_VALUE for m in _ENCRYPTED_CONTENT_RE.finditer(leaf)):
+            located.add(f"encrypted-content at line {lineno}")
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        try:
+            parsed = json.loads(line)
+        except ValueError:
+            continue
+        located.update(f"{kind} at line {lineno}" for kind in _unredacted_protected_fields(parsed))
     return sorted(located)
 
 
@@ -554,14 +623,17 @@ def _make_observe_before_teardown(
             )
         else:
             (matched_path, raw), = matches.items()
+            # Account identifiers and encrypted reasoning are redacted before
+            # anything is kept (#225); the observation below still reads `raw`.
+            kept = redact_transcript_identities(raw)
             if stored_transcript is not None:
-                stored_transcript["evidence"] = retainable_transcript(raw)
+                stored_transcript["evidence"] = retainable_transcript(kept)
             if retained_transcript is not None:
-                # The ORIGINAL bytes, never a decode/re-encode round trip -
-                # retention exists so a run can be re-scanned against what the
-                # client actually wrote, not a lossy reconstruction of it.
+                # The client's own bytes apart from the redacted values, never
+                # a decode/re-encode round trip - retention exists so a run can
+                # be re-scanned against what the client actually wrote.
                 retained_transcript["path"] = matched_path
-                retained_transcript["bytes"] = raw
+                retained_transcript["bytes"] = kept
             text = raw.decode("utf-8", errors="replace")
             try:
                 census = transcript_census(spec.name, text)

@@ -8,6 +8,33 @@ and version plan.
 
 ## [Unreleased]
 
+- **Retained transcripts no longer carry the operator's OpenAI account
+  identifiers** (Closes #225). Every Codex rollout's `session_meta` records
+  `creator_user_id` and `creator_account_id`, and both the retention-time
+  check and `skillc leak-check` passed them. The #26 live run of 2026-10-03
+  reported "0 leak(s) found" on two transcripts that carried both. The fix
+  has three parts:
+  - `skillc/leak.py` gains a seventh class, `account-id`: an account-scoped
+    `*_id` field with a value. The finding names the field, never the value.
+  - `agent_trial.redact_transcript_identities` replaces those values, and
+    Codex's provider-encrypted `encrypted_content` reasoning blobs, with
+    `<redacted>` before a transcript is kept. It is a substitution on the
+    serialized text, so every other byte is what the client wrote. Refusing
+    instead would have refused every Codex transcript. The encrypted blob is
+    dropped because no reader of the evidence can decrypt it.
+  - `transcript_leak_findings` refuses whatever the redaction cannot reach.
+    It walks the decoded JSON for a populated protected field, which catches
+    an escaped key, a non-string value, or JSON an agent printed inside a
+    string. It also flags `encrypted_content` inside any decoded string.
+    `selection_probe._retain_transcript` now applies this full check; its
+    raw-text-only scan could not see an identifier inside an escaped string.
+
+  Committed controls: `controls/leak-check/{bad,good}/planted-account-id`.
+  The two retention tests and the control test each fail on the pre-fix
+  code. The five cases the redaction cannot reach each fail with the decoded
+  passes disabled. A cross-model review (Codex) found those five, and the
+  missing-twin gap in the control test.
+
 - **`degrade-subject` no longer collides with itself on a repeated `--base`**
   (Closes #199). `acquire_degraded` staged into the fixed path
   `<base>/<subject>-degraded-staging` and never removed it, so a second run

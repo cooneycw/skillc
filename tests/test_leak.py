@@ -32,10 +32,31 @@ def test_the_seeded_bundle_discriminates() -> None:
     # "credential-token" comes from bad/planted-token/ (#98), scanned here
     # too since scan_path walks the whole bad/ tree recursively - not a
     # separate concern from the original four classes, just a fifth one.
-    assert kinds == {"home-path", "uid-gid", "private-ip", "denylisted-hostname", "credential-token"}, kinds
+    assert kinds == {
+        "home-path", "uid-gid", "private-ip", "denylisted-hostname", "credential-token", "account-id",
+    }, kinds
 
     good = leak.scan_path(CONTROLS / "good", denylist)
     assert good.findings == [], f"leak-check is noisy on its clean twin: {good.findings}"
+
+
+def test_the_planted_account_id_control_discriminates() -> None:
+    """#225's committed control: a Codex `session_meta` line carrying fake
+    account identifiers is a finding, by field name only, never the value;
+    its redacted twin is clean. Before #225 the bad file scanned clean."""
+    bad = leak.scan_path(CONTROLS / "bad" / "planted-account-id", frozenset())
+    assert (bad.scanned, bad.skipped) == (1, 0), bad
+    assert {f.kind for f in bad.findings} == {"account-id"}, bad.findings
+    details = {f.detail for f in bad.findings}
+    assert details == {
+        "creator_user_id value present (redacted)", "creator_account_id value present (redacted)",
+    }, details
+    assert not any("PlantedFake" in f.detail or "00000000" in f.detail for f in bad.findings)
+
+    good = leak.scan_path(CONTROLS / "good" / "planted-account-id", frozenset())
+    # A missing twin scans zero files and finds nothing: not a clean verdict.
+    assert (good.scanned, good.skipped) == (1, 0), good
+    assert good.findings == [], good.findings
 
 
 def test_the_planted_token_control_discriminates() -> None:
