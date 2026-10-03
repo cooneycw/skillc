@@ -1,0 +1,99 @@
+{
+ "kind": "calibration-declaration",
+ "issue": 203,
+ "declared_at": "2026-10-03",
+ "_comment": "The #203 calibration declaration: B/N/P on candidate 1 (gate-ran-nothing), per the owner's rulings 3a/3b/3c and Q2 'medium' (6 per arm). Approved by the owner 2026-10-03 (see 'approval'). NOT YET RUN.",
+ "approval": {
+  "by": "owner (cooneycw)",
+  "at": "2026-10-03",
+  "source": "owner reply in the 2026-10-03 skillc session: \"Yes to all three\", answering Q2 \"Approve the calibration plan?\" (B/N/P, 6 per arm, gate-ran-nothing, codex gpt-6-astra on the operator's machine, 20 min per attempt, 6 h total, seeded order); size from Q2 \"medium\"; placement from Q3 \"yes\"",
+  "scope": "the arms, identities, schedule (6 attempts per arm, seed 20261003 order) and caps declared in this file, run under the operator's codex subscription login (ADR 0005 rule 6); no judge tier, no dollar-metered spend"
+ },
+ "task": {
+  "path": "evals/level3/gate-ran-nothing",
+  "grader_id": "gate-ran-nothing",
+  "grader_revision": "1"
+ },
+ "arms": [
+  {
+   "name": "natural",
+   "subject": {
+    "name": "cpp-codex",
+    "locator": "github.com/cooneycw/claude-power-pack",
+    "revision": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b"
+   },
+   "treatment": "N: the whole CPP codex skill surface installed (evals/subjects/cpp-codex, select: all); goal.md verbatim; the agent chooses for itself"
+  },
+  {
+   "name": "baseline",
+   "subject": null,
+   "treatment": "B: an identical disposable home with no skill installed; goal.md verbatim"
+  },
+  {
+   "name": "provided",
+   "subject": {
+    "name": "cpp-codex",
+    "locator": "github.com/cooneycw/claude-power-pack",
+    "revision": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b"
+   },
+   "treatment": "P: the same install as N; goal.md plus the instruction below",
+   "instruction": "Before you start, read the `flow-auto` and `flow-check` skills and follow what applies to this task.",
+   "named_skills": [
+    "flow-auto",
+    "flow-check"
+   ]
+  }
+ ],
+ "shared": {
+  "client": {
+   "name": "codex",
+   "version": "0.157.1"
+  },
+  "model": "gpt-6-astra",
+  "reasoning_effort": "high",
+  "tools": "the client's defaults inside the trial container; no MCP servers",
+  "permissions": "the same non-interactive codex exec sandbox and approval settings for every attempt",
+  "public_requirements": "evals/level3/gate-ran-nothing/goal.md, delivered verbatim to every arm; arm provided appends its declared instruction",
+  "image": {
+   "tag": "skillc-trial:latest",
+   "digest": "sha256:eb17e8c7995f69c4f849d6d8a9165eddfd0ccc8065b5425e0bdc2e3595a86d44"
+  },
+  "per_attempt_seconds": 1200,
+  "total_seconds": 21600
+ },
+ "attempts_per_arm": 6,
+ "arm_order": {
+  "seed": 20261003,
+  "sequence": [
+   "baseline",
+   "provided",
+   "natural",
+   "provided",
+   "natural",
+   "provided",
+   "provided",
+   "baseline",
+   "baseline",
+   "natural",
+   "baseline",
+   "natural",
+   "baseline",
+   "natural",
+   "provided",
+   "baseline",
+   "provided",
+   "natural"
+  ]
+ },
+ "retain_transcripts": true,
+ "primary_endpoint": "skillc.calibration.primary_endpoint: the task grader's four criteria (functional-clamp-fix, regression-fails-on-original, gate-honest, gate-green), status by records.derive_status; installation-ready never enters it",
+ "reported_beside": "readiness_beside per attempt; uptake per attempt (skill_opened, and named_skill_opened for provided) and per arm (opened/observed, named_opened), from confirmed observations only",
+ "eligibility": "evals/level3/gate-ran-nothing/eligibility-manifest.json: selection and outcome are separate; every attempt stays eligible and graded; no not-opened threshold (3c); a provided attempt counts toward the value comparison (P vs B) only if it opened a named skill",
+ "report_questions": [
+  "1. Does the grader behave on live attempts (no INCONCLUSIVE from grading plumbing)?",
+  "2. Is difficulty useful: are B, N and P not all at ceiling and not all at floor?",
+  "3. Uptake: what is N's opened rate (k/n), and does P open its named skills?",
+  "4. Value: among P attempts that opened a named skill, how does the primary endpoint compare with B? Descriptive only at this n.",
+  "5. Go / redesign / stop for #203, and the per-attempt time and quota cost to size it."
+ ]
+}
