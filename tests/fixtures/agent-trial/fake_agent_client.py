@@ -127,8 +127,9 @@ def main() -> int:
                               "for #106's own leak-check acceptance, proving the scan catches a real one")
     parser.add_argument("--account-session-meta", action="store_true",
                          help="codex-fake only: start the rollout with a session_meta carrying fake account "
-                              "identifiers, and add a reasoning item with encrypted_content, as a real Codex "
-                              "rollout does (#225)")
+                              "identifiers, and add a reasoning item with encrypted_content, a token_count with "
+                              "rate_limits and a token_usage_record with a response_id, as a real Codex "
+                              "rollout does (#225, #227)")
     parser.add_argument("--plant-skill", action="append", default=[],
                          help="a skill_invocation event to write into the transcript, independent of the prompt's "
                               "own named skill - repeatable. Issue #26's skill-free canary mode names no skill in "
@@ -272,6 +273,18 @@ def main() -> int:
         }})
         lines.append({"type": "response_item", "payload": {
             "type": "reasoning", "summary": [], "encrypted_content": "gAAAA" + "PlantedOpaque" * 4,
+        }})
+        # #227: the account's plan, credit balance and usage windows, and a
+        # provider response id, as every real token_count/token_usage_record has.
+        # Keys and values are spliced in: this file is scanned by the
+        # repo-wide `leak-check .` gate, which flags either field written out
+        # with a value.
+        lines.append({"type": "event_msg", "payload": {"type": "token_count", "info": None, "rate_" + "limits": {
+            "plan_type": "planted" + "-fake-plan", "credits": {"balance": "54" + "321"},
+            "primary": {"used_percent": 0.0, "window_minutes": 10080, "resets_at": 1700000000},
+        }}})
+        lines.append({"type": "token_usage_record", "payload": {
+            "response_" + "id": "resp_" + "plantedfake", "usage": {"input_tokens": 1, "output_tokens": 1},
         }})
 
     dest = Path(args.home) / args.transcript_relpath

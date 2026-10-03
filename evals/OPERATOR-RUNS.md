@@ -83,7 +83,10 @@ fi
   `leak-check` reports any that remain as `account-id`. A transcript
   retained before #225 carries them, and this block's scan now refuses it.
   Run it through `agent_trial.redact_transcript_identities` and re-check it
-  before hand-back.
+  before hand-back. Since #227 the same applies to each `token_count`'s
+  `rate_limits` (plan, credit balance, usage windows) and each `response_id`.
+  The scan is a deny-list, so whoever publishes a transcript still reads it
+  by hand first.
 - **The hostname deny-list is generated, not assumed configured.** Without
   one, `skillc leak-check` does no hostname detection at all - exactly the
   class of thing an operator's own machine name is. `$BASE/denylist` is

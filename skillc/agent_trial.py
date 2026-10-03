@@ -411,13 +411,37 @@ def _jsonl_string_leaves(text: str) -> Iterator[tuple[int, str]]:
 #:   - `encrypted_content`, the provider-encrypted reasoning blob on Codex
 #:     `reasoning` items. No reader of the evidence can decrypt it, so it is
 #:     not evidence; it is session content held by the provider's key, and
-#:     publishing it gains nothing.
-_REDACTED_FIELD = r"(?:" + leak.ACCOUNT_ID_FIELD + r"|encrypted_content)"
+#:     publishing it gains nothing;
+#:   - `response_id` (#227), the provider-side id of each model response on
+#:     a Codex `token_usage_record`, an account-scoped handle.
+_REDACTED_FIELD = r"(?:" + leak.ACCOUNT_ID_FIELD + r"|encrypted_content|response_id)"
 _REDACTED_FIELD_RE = re.compile(
     (r'("' + _REDACTED_FIELD + r'"\s*:\s*")((?:[^"\\]|\\.)*)(")').encode("ascii")
 )
 _REDACTED_KEY_RE = re.compile(_REDACTED_FIELD)
 _ENCRYPTED_CONTENT_RE = re.compile(r'"encrypted_content"\s*:\s*"((?:[^"\\]|\\.)+)"')
+
+
+#: A field whose whole value, an object, retention replaces with
+#: `leak.REDACTED_VALUE` (#227): `rate_limits` on every Codex `token_count`
+#: event holds the operator's plan, credit balance and usage windows.
+#:
+#: A deny-list, not an allow-list of the fields evidence uses: an allow-list
+#: would have to know every payload a client version writes, and would drop
+#: evidence-bearing fields silently on a client upgrade. The cost is that a
+#: NEW account-scoped field passes until someone names it here, which is why
+#: a transcript is still read by hand before it is published.
+_REDACTED_OBJECT_KEYS = frozenset({"rate_limits"})
+
+
+def _finding_class(key: str) -> str:
+    if key == "encrypted_content":
+        return "encrypted-content"
+    if key in _REDACTED_OBJECT_KEYS:
+        return "account-usage"
+    if key == "response_id":
+        return "response-id"
+    return "account-id"
 
 
 def _unredacted_protected_fields(value: object) -> Iterator[str]:
@@ -433,10 +457,11 @@ def _unredacted_protected_fields(value: object) -> Iterator[str]:
         if isinstance(item, dict):
             for key, inner in item.items():
                 if (
-                    isinstance(key, str) and _REDACTED_KEY_RE.fullmatch(key)
+                    isinstance(key, str)
+                    and (_REDACTED_KEY_RE.fullmatch(key) or key in _REDACTED_OBJECT_KEYS)
                     and inner not in (None, "", leak.REDACTED_VALUE)
                 ):
-                    yield "encrypted-content" if key == "encrypted_content" else "account-id"
+                    yield _finding_class(key)
                 stack.append(inner)
         elif isinstance(item, list):
             stack.extend(item)
@@ -453,11 +478,52 @@ def redact_transcript_identities(raw: bytes) -> bytes:
     parse and re-serialize, so every byte outside a redacted value - every
     other line in particular - is exactly what the client wrote.
 
+    `_REDACTED_OBJECT_KEYS` values are objects, so a line carrying one is
+    parsed and re-serialized instead (#227, `_redact_object_fields`); every
+    other line is still byte-identical.
+
     Only structural fields are redacted. The same identifier inside an
     escaped string (an agent printing a rollout, say) is left alone, and
     `transcript_leak_findings`' decoded pass refuses the transcript on it."""
     marker = leak.REDACTED_VALUE.encode("utf-8")
-    return _REDACTED_FIELD_RE.sub(lambda m: m.group(1) + marker + m.group(3), raw)
+    raw = _REDACTED_FIELD_RE.sub(lambda m: m.group(1) + marker + m.group(3), raw)
+    return b"".join(_redact_object_fields(line) for line in raw.splitlines(keepends=True))
+
+
+def _redact_object_fields(line: bytes) -> bytes:
+    """`line` with every `_REDACTED_OBJECT_KEYS` value replaced (#227). An
+    object value cannot be swapped by a text substitution, so a line naming
+    one is parsed and re-serialized, compactly and as ASCII; a line
+    that names none is returned as is. A line that does not parse is left
+    alone, and the decoded check refuses it if a value is still there."""
+    if not any(b'"' + key.encode("ascii") + b'"' in line for key in _REDACTED_OBJECT_KEYS):
+        return line
+    body = line.rstrip(b"\r\n")
+    try:
+        value = json.loads(body)
+    except ValueError:
+        return line
+    changed = False
+    stack: list[object] = [value]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, dict):
+            for key in item:
+                if key in _REDACTED_OBJECT_KEYS and item[key] not in (None, "", leak.REDACTED_VALUE):
+                    item[key] = leak.REDACTED_VALUE
+                    changed = True
+                else:
+                    stack.append(item[key])
+        elif isinstance(item, list):
+            stack.extend(item)
+    if not changed:
+        return line
+    # ASCII, so every escape stays an escape (counter-model review): a decoded
+    # U+2028 written back raw would split this record under `splitlines()`
+    # and hide the rest of it from the decoded checks, and a lone surrogate
+    # cannot be encoded as UTF-8 at all.
+    rewritten = json.dumps(value, ensure_ascii=True, separators=(",", ":")).encode("ascii")
+    return rewritten + line[len(body):]
 
 
 def transcript_leak_findings(raw: bytes) -> list[str]:
@@ -473,7 +539,10 @@ def transcript_leak_findings(raw: bytes) -> list[str]:
         decoded string;
       - `_unredacted_protected_fields` over each parsed line, and an
         `encrypted_content` pattern over each decoded string: what
-        `redact_transcript_identities` left in place (#225)."""
+        `redact_transcript_identities` left in place (#225, #227). A
+        `rate_limits` or `response_id` in an unparseable line or inside a
+        string is caught by `leak.scan_text`'s own classes in the first two
+        passes."""
     text = raw.decode("utf-8", errors="replace")
     denylist, host_paths = leak.load_denylist(None), leak.default_host_paths()
     located = {f"{kind} at line {lineno}" for lineno, kind, _detail in leak.scan_text(text, denylist, host_paths)}
