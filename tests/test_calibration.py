@@ -340,3 +340,31 @@ def test_a_three_arm_total_cap_is_checked_against_all_three_arms() -> None:
     with pytest.raises(calibration.DeclarationRefused, match="cannot cover 18 attempts"):
         calibration.parse_declaration(data)
 
+
+# ------------------------------------------- the committed #203 declaration (B/N/P)
+
+
+MANIFEST_203 = ROOT / "evals" / "calibration-203" / "run-manifest.json"
+
+
+def test_the_committed_203_declaration_validates_as_b_n_p() -> None:
+    declaration = calibration.load_declaration(MANIFEST_203)
+    assert declaration.arms == ("natural", "baseline", "provided")
+    assert declaration.attempts_per_arm == 6
+    assert sorted(declaration.arm_order) == sorted(["natural", "baseline", "provided"] * 6)
+    provided = calibration.arm_spec(declaration, "provided")
+    assert provided["named_skills"] == ["flow-auto", "flow-check"]
+    assert provided["subject"] == calibration.arm_spec(declaration, "natural")["subject"]
+
+
+def test_the_committed_203_declaration_is_authorized() -> None:
+    """Approved by the owner 2026-10-03, with every identity recorded."""
+    calibration.require_approved(calibration.load_declaration(MANIFEST_203), ROOT)
+
+
+def test_red_the_203_declaration_without_its_approval_is_refused() -> None:
+    data = json.loads(MANIFEST_203.read_text(encoding="utf-8"))
+    data["approval"] = None
+    with pytest.raises(calibration.DeclarationRefused, match="not approved"):
+        calibration.require_approved(calibration.parse_declaration(data), ROOT)
+
