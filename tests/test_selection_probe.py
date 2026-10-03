@@ -525,10 +525,11 @@ import dataclasses
 import sys
 import time
 from base64 import urlsafe_b64encode
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 from conftest import FAKE_DOCKER_DAEMON_TIMEOUT
 
+from skillc import agent_trial
 from skillc import docker_backend as d
 
 FAKE_DOCKER = ROOT / "tests" / "fixtures" / "docker-backend" / "fake_docker.py"
@@ -1200,7 +1201,7 @@ def test_a_control_naming_a_skill_its_case_does_not_allow_is_refused() -> None:
 
 
 def _single_attempt_runner(
-    tmp_path: Path, *, goal: str,
+    tmp_path: Path, *, goal: str, client_flags: Sequence[str] = (),
 ) -> tuple[Path, str, sp.AttemptTranscript]:
     """Plan a real experiment, run its FIRST attempt through the real
     `AgentTrialRunner`, and return `(base, attempt_id, transcript)` - the
@@ -1220,7 +1221,7 @@ def _single_attempt_runner(
     home = docker_state / f"{d._container_name(attempt_id)}.fsroot" / "home" / "candidate"
     argv = [
         sys.executable, str(FAKE_CLIENT), "--format", "codex-fake", "--home", str(home),
-        "--transcript-relpath", f".codex/sessions/2026/01/01/rollout-{attempt_id}.jsonl",
+        "--transcript-relpath", f".codex/sessions/2026/01/01/rollout-{attempt_id}.jsonl", *client_flags,
     ]
     runner = sp.agent_trial_runner(
         experiment=experiment, backend=backend, base=base, client="codex",
@@ -1265,6 +1266,46 @@ def test_a_leaky_transcript_is_not_retained_and_the_reason_is_recorded(tmp_path:
     # The reason must name the finding's class and location only - never
     # echo the matched value itself into the record (#26 review).
     assert os.getcwd() not in transcript.transcript_retention_reason
+    assert not (sp.retain_transcript_dir(base) / f"{attempt_id}.jsonl").exists()
+
+
+def test_account_identifiers_are_redacted_before_a_transcript_is_retained(tmp_path: Path) -> None:
+    """#225: a real Codex rollout's `session_meta` carries the operator's
+    account identifiers, and its reasoning items an encrypted blob. Both are
+    redacted, the transcript is still retained, and the retained file scans
+    clean. On the pre-fix code the file was retained with both values in it."""
+    base, attempt_id, transcript = _single_attempt_runner(
+        tmp_path, goal="Fix the slug helper.", client_flags=["--account-session-meta"],
+    )
+
+    assert transcript.transcript_retention_reason is None
+    retained = (sp.retain_transcript_dir(base) / f"{attempt_id}.jsonl").read_text(encoding="utf-8")
+    assert "PlantedFake" not in retained
+    assert "00000000-0000" not in retained
+    assert "PlantedOpaque" not in retained
+    meta = json.loads(retained.splitlines()[0])
+    assert meta["type"] == "session_meta"
+    assert meta["payload"]["creator_user_id"] == "<redacted>"
+    assert meta["payload"]["creator_account_id"] == "<redacted>"
+    assert meta["payload"]["cli_version"] == "0.157.1"  # the rest of the line survives
+    assert agent_trial.transcript_leak_findings(retained.encode("utf-8")) == []
+
+
+def test_an_escaped_account_identifier_refuses_retention(tmp_path: Path) -> None:
+    """#225: redaction touches structural fields only. The same identifier
+    inside an escaped string - here the prompt, which the transcript records
+    as message text - is caught by the decoded leak-check pass and refuses
+    retention. A raw-text-only scan (the pre-fix `_retain_transcript`) missed it."""
+    key = "creator_" + "user_id"  # built, so this file is no leak-check literal
+    planted = "user-" + "EscapedFake" + "0" * 13
+    base, attempt_id, transcript = _single_attempt_runner(
+        tmp_path, goal=f'Fix the slug helper. Context: {{"{key}": "{planted}"}}',
+    )
+
+    assert transcript.transcript_retained_digest is None
+    assert transcript.transcript_retention_reason is not None
+    assert "account-id" in transcript.transcript_retention_reason
+    assert planted not in transcript.transcript_retention_reason
     assert not (sp.retain_transcript_dir(base) / f"{attempt_id}.jsonl").exists()
 
 

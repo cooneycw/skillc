@@ -125,6 +125,10 @@ def main() -> int:
     parser.add_argument("--plant-leak", action="store_true",
                          help="append an obviously-fake credential-shaped value to the transcript - "
                               "for #106's own leak-check acceptance, proving the scan catches a real one")
+    parser.add_argument("--account-session-meta", action="store_true",
+                         help="codex-fake only: start the rollout with a session_meta carrying fake account "
+                              "identifiers, and add a reasoning item with encrypted_content, as a real Codex "
+                              "rollout does (#225)")
     parser.add_argument("--plant-skill", action="append", default=[],
                          help="a skill_invocation event to write into the transcript, independent of the prompt's "
                               "own named skill - repeatable. Issue #26's skill-free canary mode names no skill in "
@@ -255,6 +259,20 @@ def main() -> int:
              "content": [{"type": "input_text", "text": planted_text}]}}
         )
         lines.append(leak_line)
+
+    if args.account_session_meta:
+        # Fake values held in variables, never as a `"key": "value"` literal:
+        # this file is scanned by the repo-wide `leak-check .` gate, and the
+        # account-id class (#225) keys on exactly that literal shape.
+        planted_user = "user-" + "PlantedFake" + "0" * 13
+        planted_account = "00000000-" + "0000-0000-0000-" + "0" * 12
+        lines.insert(0, {"type": "session_meta", "payload": {
+            "creator_user_id": planted_user, "creator_account_id": planted_account,
+            "cli_version": "0.157.1", "originator": "codex_exec",
+        }})
+        lines.append({"type": "response_item", "payload": {
+            "type": "reasoning", "summary": [], "encrypted_content": "gAAAA" + "PlantedOpaque" * 4,
+        }})
 
     dest = Path(args.home) / args.transcript_relpath
     dest.parent.mkdir(parents=True, exist_ok=True)
