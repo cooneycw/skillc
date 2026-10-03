@@ -24,7 +24,7 @@ collection.
 - **When:** 14:26–14:31Z (289 s wall time).
 - **Code:** main `0b91e82`, driving `selection_probe.agent_trial_runner` and
   `run_planned_selection_probe` from a one-off script. The pytest harness that
-  existed then could not reach a credential (see §3). The `skillc
+  existed then could not reach a credential (see §4). The `skillc
   selection-probe` command added later makes the same calls in the same
   order. Experiment `selection-probe-724e3a76`.
 
@@ -83,7 +83,59 @@ verdict: ok - control detected in treatment; baseline observed with no invocatio
   verdict rule did not yet require that observation. Cross-model review
   caught the gap, and the run above re-checks under the fixed rule.
 
-## 3. What this does and does not show
+## 3. Detection control with transcript retention (2026-10-03)
+
+The item still owed on #26: the detection control (§2) and transcript
+retention (#163) had never run in the same attempt. This run did both.
+
+- **Command:** the paste block in [`OPERATOR-RUNS.md`](../../OPERATOR-RUNS.md),
+  unmodified, exit 0.
+- **When:** 2026-10-03, 11:42-11:44Z.
+- **Code:** `DECLARED_SHA=093e52f`, checked literally by the block before
+  anything ran.
+- **Declaration:** [`retention-run-declaration.md`](../retention-run-declaration.md),
+  approved by the owner on #203 (decisions 2 and 5).
+- **Experiment:** `selection-probe-detection-control-e2f25fca`.
+- **Identities:** codex-cli 0.157.1, model `gpt-6-astra`, subscription
+  login; subject `cpp-codex@85e9b03`; image
+  `sha256:eb17e8c7995f69c4f849d6d8a9165eddfd0ccc8065b5425e0bdc2e3595a86d44`.
+
+```
+selection-probe-intended-use treatment: disposition=captured selection=selected task_success=True invoked=['qa-test'] (heuristic detection)
+selection-probe-intended-use baseline: disposition=inconclusive selection=unknown task_success=None invoked=[] (heuristic detection) - prompt_delivered=True, canary_satisfied=False - neither selection nor outcome is reported for an attempt the transcript did not confirm
+verdict: ok - control detected in treatment; baseline observed with no invocation
+```
+
+The arm results match §2. Both transcripts were retained, and they are
+published in [`2026-10-03-retention-run/`](2026-10-03-retention-run/) with the
+command's own report:
+
+| File | What it is |
+|---|---|
+| `selection-probe-report.json` | the report the command wrote, verbatim |
+| `transcripts/a-81b12f4c886c.jsonl` | treatment: reads `qa-test/SKILL.md`, then fixes the task |
+| `transcripts/a-e26875ff5065.jsonl` | baseline: looks for `qa-test`, finds none, fixes the task |
+
+**The published transcripts are redacted, so their digests differ from the
+report's.** The report's `transcript_retained_digest` values hash the bytes
+as retained on 2026-10-03. Retention then kept the operator's account
+identifiers, plan, credit balance, usage windows and provider response ids,
+and the leak check passed them all. That was found before publication and
+fixed by #225 (PR #226) and #227 (PR #229).
+These files are the retained bytes passed through the merged
+`agent_trial.redact_transcript_identities`. It replaces those values and the
+encrypted reasoning blobs with `<redacted>`; every other line is unchanged.
+Published sha256:
+
+- `a-81b12f4c886c.jsonl`: `babf8402544ed98f132aeabec3c0f6890b0b61ff5d3ff83ed36159d95ba2273a`
+- `a-e26875ff5065.jsonl`: `9edee168e37079a9bc7e7e95081f037dc262039140a94534821e90491ebfe01d`
+
+Before publication, both files passed `transcript_leak_findings` and
+`skillc leak-check` with 0 findings, and they were read by hand. They hold
+only container paths (`/home/candidate`, `/work`), the public cpp-codex
+skill listing and the client's own instructions.
+
+## 4. What this does and does not show
 
 - **Within this one configuration, codex never visibly opened an installed
   skill on its own**, and it fixed the task in all six arms. That includes the
@@ -94,8 +146,8 @@ verdict: ok - control detected in treatment; baseline observed with no invocatio
 - **The overlapping pair was never exercised**, so this says nothing about how
   the agent chooses between two skills.
 - **The zeros in §1 are real observations, not a blind detector.** The control
-  in §2 shows this pipeline reports a real codex invocation of an installed
-  skill.
+  in §2, repeated with retained transcripts in §3, shows this pipeline
+  reports a real codex invocation of an installed skill.
   - **Limit:** the control proves detection of a skill read by the heuristic's
     own path (`…/skills/<name>/SKILL.md`). An unprompted read by a relative
     path or another tool would still be missed.

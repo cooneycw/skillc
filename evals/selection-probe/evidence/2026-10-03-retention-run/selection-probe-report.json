@@ -1,0 +1,50 @@
+{
+  "cases": [
+    {
+      "applicable_skills": [
+        "qa-test"
+      ],
+      "baseline": {
+        "codex_best_effort": true,
+        "detail": "prompt_delivered=True, canary_satisfied=False - neither selection nor outcome is reported for an attempt the transcript did not confirm",
+        "disposition": "inconclusive",
+        "observation_confirmed": true,
+        "observed": [],
+        "selection": "unknown",
+        "task_success": null,
+        "transcript_retained_digest": "sha256:fb331244615b6a304529003c9d81093c02c1ac66bdf77589e44d8ce921869b2d",
+        "transcript_retention_reason": null
+      },
+      "baseline_contaminated": false,
+      "case_id": "selection-probe-intended-use",
+      "kind": "intended-use",
+      "treatment": {
+        "codex_best_effort": true,
+        "detail": "",
+        "disposition": "captured",
+        "observation_confirmed": true,
+        "observed": [
+          "qa-test"
+        ],
+        "selection": "selected",
+        "task_success": true,
+        "transcript_retained_digest": "sha256:7e85413e5eb3969d895fba5a3f87cef7f0b957c291da301c92ed30b62eb97418",
+        "transcript_retention_reason": null
+      }
+    }
+  ],
+  "client": "codex",
+  "client_version": "0.157.1",
+  "control": "selection-probe-detection-named-skill",
+  "experiment": "selection-probe-detection-control-e2f25fca",
+  "image": "skillc-trial:latest",
+  "image_digest": "sha256:eb17e8c7995f69c4f849d6d8a9165eddfd0ccc8065b5425e0bdc2e3595a86d44",
+  "kind": "detection-control",
+  "subject": "cpp-codex",
+  "subject_digest": "sha256:ceba20f15452dff932a5837495ede1b7ea2c48696545e07f7ea9d9476e5b0b52",
+  "subject_revision": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b",
+  "verdict": {
+    "ok": true,
+    "why": "control detected in treatment; baseline observed with no invocation"
+  }
+}
