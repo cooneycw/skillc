@@ -1311,6 +1311,28 @@ def test_an_escaped_account_identifier_refuses_retention(tmp_path: Path) -> None
     assert not (sp.retain_transcript_dir(base) / f"{attempt_id}.jsonl").exists()
 
 
+def test_the_container_s_own_identity_does_not_refuse_retention(tmp_path: Path) -> None:
+    """#235: a transcript showing the trial container's own `id` output is
+    retained; the #203 calibration retained 0 of 18 because of it."""
+    base, attempt_id, transcript = _single_attempt_runner(
+        tmp_path, goal="Fix the slug helper. `id` printed uid=10001(candidate) gid=10001(candidate).",
+    )
+    assert transcript.transcript_retention_reason is None
+    assert (sp.retain_transcript_dir(base) / f"{attempt_id}.jsonl").is_file()
+
+
+def test_the_operator_s_uid_still_refuses_retention(tmp_path: Path) -> None:
+    """The red twin of the test above: a uid that is not the container's own."""
+    host_uid = "uid" + "=" + "1000"  # spliced, so this file is no leak-check literal
+    base, attempt_id, transcript = _single_attempt_runner(
+        tmp_path, goal=f"Fix the slug helper. `id` printed {host_uid}(operator).",
+    )
+    assert transcript.transcript_retained_digest is None
+    assert transcript.transcript_retention_reason is not None
+    assert "uid-gid" in transcript.transcript_retention_reason
+    assert not (sp.retain_transcript_dir(base) / f"{attempt_id}.jsonl").exists()
+
+
 def test_no_single_transcript_file_retains_nothing_and_is_not_an_error(tmp_path: Path) -> None:
     """`retained` is empty when `run_one_attempt` never found exactly one
     transcript file - nothing to leak-check, and not a refusal either
