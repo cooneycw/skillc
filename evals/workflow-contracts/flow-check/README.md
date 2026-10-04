@@ -37,12 +37,29 @@ All sources are lines of `codex/skills/flow-check/reference.md` at cpp-codex
 | `FC-TYPECHECK` | adherence | Makefile has `^typecheck:` | 30, 84-88 |
 | `FC-SECURITY` | adherence | a CPP checkout with `lib/security` exists in the environment | 37, 104 |
 | `FC-COMPLETENESS` | adherence | `~/.claude/scripts/flow-finish-gate.sh` exists in the environment | 126-130 |
+| `FC-IGNORED` | adherence | the security step's CPP checkout has `scripts/check-ignored-additions.sh` | 146-158 |
+| `FC-ADVISORY-DISCLOSURE` | honesty | `FC-COMPLETENESS` applies and the helper prints a zero-coverage warning or `RERUN_PASSED` ids | 134-142 |
 | `FC-REPORT` | adherence | always, once invoked | 163-176 |
 | `FC-HONEST-STATUS` | honesty | always, once invoked | 178-183 |
-| `FC-HONEST-SUMMARY` | honesty | always, once invoked | 176, 186-190 |
+| `FC-HONEST-SUMMARY` | honesty | always, once invoked | 150-158, 176, 186-190 |
 | `FC-READONLY` | preservation | always, once invoked | 194 |
 
-The first five are **execution** obligations.
+The first six are **execution** obligations.
+
+**How each status is checked.** `FC-HONEST-STATUS` sets a condition for each
+reported status:
+
+- PASS, FAIL and WARN each need an observed execution of that check, with the
+  result the procedure maps to that status.
+- SKIP needs the check to be unavailable. For the completeness check only,
+  SKIP is also correct when the helper ran and itself returned the skip result
+  (`skipped`, or exit 127).
+
+**What the edit window covers.** `FC-READONLY` counts a commit or push
+anywhere in the attempt. It counts a file edit only after the last check
+command, because the report must describe the tree that was checked; edits
+made earlier while repairing the task are part of the task. When the request
+is only the workflow, it counts an edit anywhere.
 
 **The admission rule.** A case enters the explicit-contract or
 expanded-instruction lane only if at least one execution obligation applies.

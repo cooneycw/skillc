@@ -26,9 +26,9 @@ VERDICTS = {"SATISFIED", "VIOLATED", "UNKNOWN"}
 CLASSES = {"outcome", "adherence", "preservation", "honesty"}
 SCOPES = {"common", "treatment"}
 LANES = {"explicit-contract", "matched-outcome", "expanded-instruction"}
-EXECUTION = {"FC-LINT", "FC-TEST", "FC-TYPECHECK", "FC-SECURITY", "FC-COMPLETENESS"}
+EXECUTION = {"FC-LINT", "FC-TEST", "FC-TYPECHECK", "FC-SECURITY", "FC-COMPLETENESS", "FC-IGNORED"}
 #: The execution obligations decided by a fixture's Makefile alone; the other
-#: two depend on the declared environment, not on the fixture.
+#: three depend on the declared environment, not on the fixture.
 MAKE_TARGETS = {"FC-LINT": "lint", "FC-TEST": "test", "FC-TYPECHECK": "typecheck"}
 EXPLICIT_LANES = ("explicit-contract", "expanded-instruction")
 
@@ -37,6 +37,11 @@ DOCS = [
     ROOT / "evals" / "README.md",
     ROOT / "docs" / "specs" / "evaluation-facility" / "protocol.md",
 ]
+
+
+def _text(value: object) -> bool:
+    """A real, non-blank string: JSON null, numbers and lists are not a stated rule."""
+    return isinstance(value, str) and bool(value.strip())
 
 
 def contract_problems(contract: dict, root: Path = ROOT) -> list[str]:
@@ -62,10 +67,10 @@ def contract_problems(contract: dict, root: Path = ROOT) -> list[str]:
         if ob.get("scope") not in SCOPES:
             problems.append(f"{oid}: scope {ob.get('scope')!r} not in {sorted(SCOPES)}")
         for field in ("source", "applies_when", "evidence"):
-            if not str(ob.get(field, "")).strip():
-                problems.append(f"{oid}: empty {field}")
+            if not _text(ob.get(field)):
+                problems.append(f"{oid}: {field} must be a non-empty string")
         rule = ob.get("rule")
-        if not isinstance(rule, dict) or set(rule) != VERDICTS or not all(str(v).strip() for v in rule.values()):
+        if not isinstance(rule, dict) or set(rule) != VERDICTS or not all(_text(v) for v in rule.values()):
             problems.append(f"{oid}: rule must state exactly SATISFIED, VIOLATED and UNKNOWN")
     if not ids:
         problems.append("no obligations: an empty contract cannot be checked")
@@ -174,9 +179,16 @@ def _mutations() -> dict:
     def blob_missing(c):
         c["inventory"][0]["git_blob"] = "HEAD"
 
+    def null_definitions(c):
+        ob = c["obligations"][0]
+        for field in ("source", "applies_when", "evidence"):
+            ob[field] = None
+        ob["rule"] = {verdict: None for verdict in VERDICTS}
+
     return {f.__name__: f for f in (
         drop_unknown_rule, bad_class, both_lists, missing_obligation, wrong_revision,
         admitted_without_execution, lint_claimed_applicable, empty_matrix, blob_missing,
+        null_definitions,
     )}
 
 
