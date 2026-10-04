@@ -401,7 +401,7 @@ class Tree:
     def _refuse_links(self, path: str) -> None:
         norm = posixpath.normpath(path)
         if norm == "." and self.links:
-            raise Refused(f"symlink in the closure: {sorted(self.links)[0]}")
+            raise Refused(f"symlink in the closure: {min(self.links)}")
         for link in self.links:
             if norm == link or norm.startswith(link + "/") or link.startswith(norm + "/"):
                 raise Refused(f"symlink in the closure: {link}")
