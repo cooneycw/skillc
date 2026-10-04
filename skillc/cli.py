@@ -1781,6 +1781,121 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
     return 130 if interrupted else _refuse_ineligible(report)
 
 
+def cmd_uptake_study(args: argparse.Namespace) -> int:
+    """Issue #237: run an APPROVED two-arm uptake-study declaration. The
+    `published` arm installs the declared subject as acquired; the
+    `rewritten` arm installs the `degrade-subject --override-file` snapshot
+    at `--rewritten`, which must differ from it in the target SKILL.md's
+    description line only (`uptake_study.check_rewritten_files`). Refuses
+    (exit 2), before any container exists, an unapproved declaration, a
+    client argv that chooses its own model, a client or image other than the
+    declared one, a subject other than the declared one, and a rewritten
+    snapshot with any other difference. Requires `SKILLC_ALLOW_REAL_AGENT=1`.
+    Everything stays in a private run directory; only a leak-checked summary
+    is printed. Exits 1 when an attempt did not run the declared model."""
+    import secrets
+    from datetime import UTC, datetime
+
+    from . import calibration_run as cr
+    from . import collection_conformance as cc
+    from . import degrade, demo, trial_bootstrap
+    from . import matched_pilot as mp
+    from . import uptake_study as us
+
+    try:
+        declaration = us.load_declaration(Path(args.declaration))
+        us.require_approved(declaration, cr.ROOT)
+    except (us.StudyRefused, OSError, ValueError) as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+    model, effort = str(declaration.shared["model"]), str(declaration.shared["reasoning_effort"])
+    client = declaration.shared["client"]
+    assert isinstance(client, dict)
+    client_name, client_version = str(client["name"]), str(client["version"])
+    try:
+        client_argv = args.client_argv.split() if args.client_argv else list(cc.DEFAULT_CLIENT_ARGVS[client_name])
+        mp.pin_model_argv(model, effort, client_argv)
+        pinned = trial_bootstrap.pinned_cli_version(client_name)
+    except KeyError:
+        print(f"skillc: the declared client {client_name!r} has no default invocation; pass --client-argv",
+              file=sys.stderr)
+        return 2
+    except (mp.ModelOverrideRefused, trial_bootstrap.PinnedVersionError) as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+    if pinned != client_version:
+        print(f"skillc: the declaration names {client_name} {client_version}, but the trial image pins {pinned}; "
+              "refusing", file=sys.stderr)
+        return 2
+    docker_bin = tuple(args.docker_bin.split()) if args.docker_bin else ("docker",)
+    image = args.image or demo.DEFAULT_IMAGE
+    image_field = declaration.shared["image"]
+    declared_digest = str(image_field["digest"]) if isinstance(image_field, dict) else ""
+    image_digest = demo.resolve_image_digest(docker_bin, image, None, args.timeout)
+    if image_digest != declared_digest:
+        print(f"skillc: image {image!r} resolves to {image_digest or 'nothing'}, but the declaration names "
+              f"{declared_digest}; refusing a run on an image other than the declared one", file=sys.stderr)
+        return 2
+
+    private_root = Path(args.private_dir).expanduser() if args.private_dir else us.DEFAULT_PRIVATE_ROOT
+    run_dir = private_root / f"{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}-{secrets.token_hex(3)}"
+    run_dir.mkdir(parents=True, mode=0o700)
+    print(f"skillc: private run directory: {run_dir}", file=sys.stderr)
+
+    subject_name = str(declaration.subject.get("name"))
+    try:
+        published = cc.acquire_collection(subject_name, run_dir)
+        rewritten = cc.acquire_degraded_collection(subject_name, Path(args.rewritten))
+        for acquired in (published, rewritten):
+            found = (acquired.subject.locator, acquired.subject.client)
+            wanted = (declaration.subject.get("locator"), client_name)
+            if found != wanted:
+                print(f"skillc: subject {subject_name!r} is (locator, client) {found}, not the declared {wanted}",
+                      file=sys.stderr)
+                return 2
+        if published.subject.revision != declaration.subject.get("revision"):
+            print(f"skillc: the published subject is revision {published.subject.revision!r}, not the declared "
+                  f"{declaration.subject.get('revision')!r}; refusing", file=sys.stderr)
+            return 2
+        treatments = {"published": cr.build_treatment(published), "rewritten": cr.build_treatment(rewritten)}
+        us.check_rewritten_files(treatments["published"].home_files, treatments["rewritten"].home_files,
+                                 declaration.target_skill, declaration.rewritten_description)
+    except (demo.SubjectRefused, degrade.DegradationRefused, cr.CalibrationRefused, us.StudyRefused) as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        cc.discard_acquisition(run_dir, subject_name)
+
+    interrupted = False
+    try:
+        experiment, outcomes = us.run_study(
+            declaration, run_dir=run_dir, treatments=treatments, image_digest=image_digest, root=cr.ROOT,
+            backends=lambda: cc.agent_backends(image=image_digest, base=run_dir, docker_bin=docker_bin,
+                                               daemon_timeout=args.timeout),
+            argv_for=lambda _scheduled: client_argv,
+            credential_explicit_path=Path(args.credential) if args.credential else None,
+        )
+    except KeyboardInterrupt:
+        print("skillc: interrupted; reporting every planned attempt from the private record", file=sys.stderr)
+        interrupted = True
+        experiment, outcomes = mp.read_outcomes(run_dir)
+    report = us.build_report(experiment, us.reconcile(experiment, outcomes), declaration)
+    (run_dir / us.REPORT_FILENAME).write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8")
+    try:
+        demo.print_paste_back(demo.redact_known_host_paths(us.paste_back(report), base=run_dir))
+    except demo.PasteBackRefused as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+    if interrupted:
+        return 130
+    test = report["primary_test"]
+    if isinstance(test, dict) and not test.get("available"):
+        # A failed observation instrument is not a completed negative test.
+        print(f"skillc: no primary result: {test.get('reason')}", file=sys.stderr)
+        return 1
+    return _refuse_ineligible(report)
+
+
 def cmd_configuration_compare(args: argparse.Namespace) -> int:
     """Issue #13's matched-configuration comparison: pure post-hoc analysis
     of two ALREADY-CAPTURED evidence records (`skillc/configuration_compare.py`'s
@@ -2206,6 +2321,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="where the private run directory is created (default: ~/.local/share/skillc/calibration-runs)",
     )
     p_calibration_run.set_defaults(func=cmd_calibration_run)
+
+    p_uptake = sub.add_parser(
+        "uptake-study",
+        help="issue #237: run an APPROVED two-arm uptake-study declaration (published vs a rewritten "
+             "description); evidence stays private, a leak-checked summary is printed (a real agent run, "
+             "behind SKILLC_ALLOW_REAL_AGENT=1)",
+    )
+    p_uptake.add_argument("declaration", help="the uptake-study declaration JSON to run")
+    p_uptake.add_argument("--rewritten", required=True,
+                          help="a degrade-subject --out directory: the subject with only the target's "
+                               "description overridden")
+    p_uptake.add_argument("--image", help="trial image (default: skillc.demo.DEFAULT_IMAGE)")
+    p_uptake.add_argument("--docker-bin", help="docker executable (space-separated words; default: docker)")
+    p_uptake.add_argument("--timeout", type=float, default=30, help="per-container-call timeout, seconds")
+    p_uptake.add_argument("--credential", help="explicit path to the client credential file")
+    p_uptake.add_argument("--client-argv", help="the client invocation, space-separated words, WITHOUT a model "
+                                                "or effort (the declared ones are added)")
+    p_uptake.add_argument("--private-dir", help="where the private run directory is created "
+                                                "(default: ~/.local/share/skillc/uptake-runs)")
+    p_uptake.set_defaults(func=cmd_uptake_study)
 
     p_pilot_run = sub.add_parser(
         "pilot-run",
