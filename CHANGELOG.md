@@ -8,6 +8,40 @@ and version plan.
 
 ## [Unreleased]
 
+- **`skillc uptake-study`: does a rewritten skill description raise natural
+  selection?** (Refs #237, pilot of #238). A new declaration kind,
+  `uptake-study`, has two arms, `published` and `rewritten`. Both install the
+  same subject. They differ only in the target skill's `SKILL.md`
+  description, supplied as a `degrade-subject --override-file` snapshot.
+  - **The snapshot is checked, not trusted.** `check_rewritten_files` refuses
+    unless the installs differ in exactly the target's `SKILL.md`, and in
+    exactly its frontmatter `description` line, which must equal the
+    declared text.
+  - **Cases and order.** There is one or more cases (prompt addenda on one
+    Level 1 task), 3-30 attempts per arm each, and one primary case. The
+    order is seeded over every (case, arm) attempt.
+  - **Selection** is counted only from confirmed observations, as in
+    PR #233. Task outcome is reported beside it.
+  - **The primary test is declared in advance:** a one-sided Fisher's exact
+    test, computed exactly (stdlib), at a declared alpha.
+
+  - **A cross-model review (Codex) found five gaps, all fixed.** Each has a
+    red case that fails with its fix disabled:
+    - a `\r` in the description could smuggle in a second frontmatter
+      field, and an unquoted value with `#` meant something else;
+    - wrong-model attempts were margins of the test;
+    - a nested `flow-check/SKILL.md` inside another skill passed as the
+      target;
+    - zero confirmed observations read as a completed negative result. It
+      is now "no result", and the CLI exits 1;
+    - a whitespace-only or quote-only rewrite passed as a change.
+
+  `evals/uptake-study/flow-check-SKILL.md` is the pinned cpp-codex
+  `flow-check/SKILL.md` with only its description replaced by the owner's
+  approved wording. An offline check against the real pinned pack confirmed
+  that the guard accepts it and refuses a mismatched description or a second
+  changed file. No live run.
+
 - **Transcript retention no longer refuses the trial container's own
   identity** (Closes #235). The #203 calibration retained 0 of 18
   transcripts, so none could be read afterwards. Two sources caused it:
