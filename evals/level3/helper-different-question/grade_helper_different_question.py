@@ -42,7 +42,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-GRADER = {"id": "helper-different-question", "revision": "1"}
+GRADER = {"id": "helper-different-question", "revision": "2"}
 TIMEOUT_SECONDS = 30
 HERE = Path(__file__).resolve().parent
 

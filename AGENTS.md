@@ -79,7 +79,7 @@ specification rejects, and it proves its own rules can fail before reporting the
 - `evals/calibration-204/` - the two-arm calibration predeclaration (not approved, not run)
 - `evals/calibration-203/` - the three-arm B/N/P calibration predeclaration for #203 on `gate-ran-nothing` (approved and run 2026-10-03; report: REDESIGN)
 - `evals/calibration-203-low/` - #203 Q2 step (a): the calibration-203 identities at reasoning effort low, B and N, 3 each (run 2026-10-04: still at ceiling, 6/6)
-- `evals/calibration-203-c3/` - #203 Q2 step (b): B/N/P on `helper-different-question`, 6 each (run 2026-10-04: floor, 0/18)
+- `evals/calibration-203-c3/` - #203 Q2 step (b): B/N/P on `helper-different-question`, 6 each (run 2026-10-04 on task revision 1: floor, 0/18)
 - `evals/level3/helper-different-question/` - #203 candidate 3 (#242): a clean merge left two Step 5
   sections and the shipped helper truthfully prints INTACT; graded from files, certified by `qualify.py`
 - `evals/level3/slugkit-pipeline/` - Level 3 task with a local `ci/verify.py` pipeline the

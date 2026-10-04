@@ -391,17 +391,23 @@ def test_red_the_203_low_effort_declaration_without_its_approval_is_refused() ->
 MANIFEST_203_C3 = ROOT / "evals" / "calibration-203-c3" / "run-manifest.json"
 
 
-def test_the_committed_203_candidate_3_declaration_is_authorized() -> None:
-    """#203 Q2 step (b): B/N/P on helper-different-question."""
+def test_the_committed_203_candidate_3_declaration_is_pinned_to_the_revision_it_ran_on() -> None:
+    """#203 Q2 step (b): B/N/P on helper-different-question, run 2026-10-04 on
+    grader revision 1. The task then moved to revision 2 (the owner's
+    "option 1": the approval names the step's number), so the declaration
+    still validates but no longer authorizes - a run pinned to one task
+    revision is never silently re-run against another."""
     declaration = calibration.load_declaration(MANIFEST_203_C3)
     assert declaration.arms == ("natural", "baseline", "provided")
     assert declaration.attempts_per_arm == 6
-    assert declaration.task_path == "evals/level3/helper-different-question"
-    calibration.require_approved(declaration, ROOT)
+    assert (declaration.task_path, declaration.grader_revision) == ("evals/level3/helper-different-question", "1")
+    with pytest.raises(calibration.DeclarationRefused, match="revision '2', not the declared"):
+        calibration.require_approved(declaration, ROOT)
 
 
 def test_red_the_203_candidate_3_declaration_without_its_approval_is_refused() -> None:
     data = json.loads(MANIFEST_203_C3.read_text(encoding="utf-8"))
+    data["task"]["grader_revision"] = "2"  # isolate the approval check from the revision pin
     data["approval"] = None
     with pytest.raises(calibration.DeclarationRefused, match="not approved"):
         calibration.require_approved(calibration.parse_declaration(data), ROOT)

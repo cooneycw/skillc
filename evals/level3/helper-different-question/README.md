@@ -91,6 +91,23 @@ candidate.
      PASS.
    - A malformed probe report makes every criterion UNKNOWN.
 
+## Revision 2: the approval names the step's number
+
+Revision 1 was calibrated in `evals/calibration-203-c3`: 0/18 PASS, and no
+agent noticed the duplicate. That run raised a construct question. An agent
+that *did* notice could argue the approved change is "intact", because its
+text is exact and the clash is the sibling's. The owner ruled on 2026-10-04
+(#203, "option 1") to settle it in the task's own approval record.
+`APPROVED.md` now states that the approval covers the step's wording, its
+**number** and its position, because operators refer to steps by number. So
+two Step 5 sections mean the approved change is no longer as approved, and
+`changed` is the only correct verdict.
+
+The trap, the helper, the grader's criteria and every candidate's expected
+verdict are unchanged. The revision is bumped because the fixture's text
+changed: a declaration pinned to revision 1 no longer authorizes against
+this task (`require_approved`).
+
 ## Deviation from the catalogue
 
 The catalogue names the helper `tools/verify-change.sh`. It is Python here,
