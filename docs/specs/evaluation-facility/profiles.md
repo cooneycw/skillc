@@ -83,18 +83,25 @@ was disabled in turn to confirm its case goes red.
 | missing library file | a reference resolves inside a dependency that does not carry that file |
 | stale mirror | a generated copy's bytes or mode differ from its declared upstream |
 | conflicting destination | two owners for one installed path, even with identical bytes, or a file overlapping a directory |
-| unresolved reference | a pattern hit nothing satisfies and nothing declares unsupported |
+| unresolved reference | a pattern hit nothing satisfies and nothing declares unsupported - including one inside an unreferenced dependency (a startup file), which is walked after the referenced closure |
+| home reference installed elsewhere | `~/x/y` satisfied by a dependency that installs at a different path under the home; an installer could not honour it |
 | satisfied absolute path | an absolute path cannot be installed into a disposable home; it must be declared unsupported |
 | destination outside allowed roots | an install target the profile did not permit |
-| prose without helper parity | a `prose` question with a `treatment`-scoped dependency |
+| prose without helper parity | a `prose` question with a `treatment`-scoped dependency, or a non-Markdown file bundled in a selected skill with no common-scoped dependency carrying identical bytes (the expanded-instruction arm has no skill directory) |
 | unreferenced dependency without a reason | padding, or a dependency the patterns cannot see, has to say which |
 | untraversed tree without a reason | a hole in the closure may be deliberate, never silent |
 | kind neither declared nor declared empty | "no startup context" is a statement, not an omission |
 | no reference patterns | a walk with nothing to look for finds nothing, and that reads like a closed closure |
 | a non-native client `declared`, or any `ready` status | a manifest cannot establish readiness or parity |
-| a symlink the closure reaches | links are neither installed nor followed; one elsewhere in the source is ignored |
+| a symlink the closure reaches | links are neither installed nor followed; one elsewhere in the source, including inside an unselected neighbour skill, is ignored |
+| a linked skill directory or `SKILL.md` | it hides a skill's name, so discovery fails for every selection |
 
 ## What the inventory establishes, and what it does not
+
+A home-relative reference is checked against where its dependency installs. A
+`variable-rooted` one (`$SOME_DIR/...`) is checked only for the file existing in
+the dependency: which directory the variable names at run time is the procedure's
+probe order, and #266 observes it.
 
 It establishes that, at this revision, the declared closure is closed: every
 reference the patterns can see resolves, every installed file has a digest and

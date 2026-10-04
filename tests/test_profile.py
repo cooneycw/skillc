@@ -19,6 +19,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -137,8 +138,8 @@ PROFILE: dict[str, object] = {
 }
 
 
-def _profile(tmp_path: Path, subject: dict[str, object] | None = None,
-             **changes: object) -> p.Profile:
+def _profile(tmp_path: Path, subject: dict[str, Any] | None = None,
+             **changes: Any) -> p.Profile:
     data = copy.deepcopy(PROFILE)
     data.update(changes)
     tmp_path.mkdir(parents=True, exist_ok=True)
@@ -148,14 +149,14 @@ def _profile(tmp_path: Path, subject: dict[str, object] | None = None,
     return p.Profile.load(path)
 
 
-def _run(tmp_path: Path, **changes: object) -> dict[str, object]:
+def _run(tmp_path: Path, **changes: Any) -> dict[str, Any]:
     src = tmp_path / "src"
     if not src.exists():
         _source(src)
     return p.validate(_profile(tmp_path, **changes), p.DirTree(src))
 
 
-def _deps() -> list[dict[str, object]]:
+def _deps() -> list[dict[str, Any]]:
     deps = copy.deepcopy(PROFILE["dependencies"])
     assert isinstance(deps, list)
     return deps
@@ -169,7 +170,7 @@ def test_a_valid_transitive_profile_yields_a_closed_inventory(tmp_path: Path) ->
     assert inv["treatment"] == "targeted"
     assert inv["treatment_question"] == "product"
     assert inv["selection"] == ["gate-check"]
-    deps = {d["id"]: d for d in inv["dependencies"]}  # type: ignore[union-attr]
+    deps = {d["id"]: d for d in inv["dependencies"]}
     # Transitive: common.sh is named only inside run-gate.sh, never by the skill.
     assert deps["helper-common"]["referenced_by"] == [
         "pack/skills/gate-check/scripts/run-gate.sh", "tools/run-gate.sh",
@@ -184,17 +185,18 @@ def test_a_valid_transitive_profile_yields_a_closed_inventory(tmp_path: Path) ->
     assert all(str(f["digest"]).startswith("sha256:") for f in lib["files"])
     # git's own identity for the same bytes, so a blob-keyed inventory can be cross-checked.
     assert {f["git_blob"] for f in lib["files"]} >= {p.git_blob_id(b"VALUE = 1\n")}
-    assert inv["mirrors"][0]["status"] == "identical"  # type: ignore[index]
+    assert inv["mirrors"][0]["status"] == "identical"
     assert inv["unsupported"] == [
         {"reference": "/opt/kit", "reason": "absolute alternative location outside any home"},
     ]
-    skill = inv["skills"][0]  # type: ignore[index]
+    skill = inv["skills"][0]
     assert skill["required_references"] == ["procedure.md"]
     assert str(skill["description_digest"]).startswith("sha256:")
     assert inv["helper_parity"] == {
         "common": ["tool-bash"], "treatment": ["helper-common", "helper-run-gate", "kit-checkout"],
+        "bundled": [{"path": "pack/skills/gate-check/scripts/run-gate.sh", "supplied_by": None}],
     }
-    assert "installation into any home" in inv["does_not_establish"]  # type: ignore[operator]
+    assert "installation into any home" in inv["does_not_establish"]
 
 
 def test_an_untraversed_library_is_recorded_not_followed(tmp_path: Path) -> None:
@@ -202,7 +204,7 @@ def test_an_untraversed_library_is_recorded_not_followed(tmp_path: Path) -> None
     traverse false that is NOT an unresolved reference - and the inventory says
     the tree was not traversed, so the hole is visible rather than silent."""
     inv = _run(tmp_path)
-    assert not any(r["reference"] == "~/.never/looked-at.sh" for r in inv["references"])  # type: ignore[union-attr]
+    assert not any(r["reference"] == "~/.never/looked-at.sh" for r in inv["references"])
     deps = _deps()
     deps[2]["traverse"] = True
     deps[2].pop("no_traverse_reason")
@@ -284,7 +286,7 @@ def test_an_unresolved_reference_is_refused(tmp_path: Path) -> None:
 
 def test_an_absolute_path_cannot_be_satisfied_by_an_installation(tmp_path: Path) -> None:
     deps = _deps()
-    deps[2]["satisfies"].append({"reference": "/opt/kit", "path": None})  # type: ignore[union-attr]
+    deps[2]["satisfies"].append({"reference": "/opt/kit", "path": None})
     with pytest.raises(p.Refused, match="absolute reference /opt/kit.*declare it unsupported"):
         _run(tmp_path, dependencies=deps, unsupported=[])
 
@@ -301,7 +303,55 @@ def test_prose_requires_helper_parity(tmp_path: Path) -> None:
     for dep in deps:
         dep["scope"] = "common"
     inv = _run(tmp_path / "parity", treatment_question="prose", dependencies=deps)
-    assert inv["helper_parity"]["treatment"] == []  # type: ignore[index]
+    assert inv["helper_parity"]["treatment"] == []
+    # The bundled copy reaches the expanded-instruction arm through the common helper.
+    assert inv["helper_parity"]["bundled"] == [
+        {"path": "pack/skills/gate-check/scripts/run-gate.sh", "supplied_by": "helper-run-gate"},
+    ]
+
+
+def test_prose_refuses_a_bundled_helper_only_the_skill_arm_has(tmp_path: Path) -> None:
+    """Codex review, #265: every explicit dependency common, but a non-Markdown
+    file lives only inside the skill - the expanded-instruction arm never gets it."""
+    src = _source(tmp_path / "src")
+    _write(src / "pack" / "skills" / "gate-check" / "scripts" / "lint.sh", "#!/bin/sh\n", True)
+    deps = _deps()
+    for dep in deps:
+        dep["scope"] = "common"
+    with pytest.raises(p.Refused, match=r"bundled file\(s\) \['pack/skills/gate-check/scripts/lint.sh'\]"):
+        _run(tmp_path, treatment_question="prose", dependencies=deps)
+
+
+def test_an_unreferenced_dependency_is_walked_too(tmp_path: Path) -> None:
+    """Codex review, #265: a startup file the client loads by itself is seeded
+    after the referenced closure - and its own references are still resolved."""
+    src = _source(tmp_path / "src")
+    _write(src / "startup" / "AGENTS.md", "Before anything, run ~/.helpers/missing.sh.\n")
+    deps = _deps()
+    deps.append({"id": "startup", "kind": "startup-context", "scope": "common",
+                 "paths": ["startup/AGENTS.md"], "destination": ".codex",
+                 "unreferenced_reason": "the client loads it at startup"})
+    with pytest.raises(p.Refused, match=r"unresolved reference.*~/.helpers/missing.sh"):
+        _run(tmp_path, dependencies=deps, declared_empty_kinds=[],
+             allowed_destinations=[*PROFILE["allowed_destinations"], ".codex"])  # type: ignore[misc]
+    # A dependency reached ONLY through that startup file is referenced, not padding.
+    _write(src / "tools" / "missing.sh", "#!/bin/sh\n", True)
+    deps.append({"id": "helper-missing", "kind": "helper", "scope": "common",
+                 "source_root": "tools", "paths": ["missing.sh"], "destination": ".helpers",
+                 "satisfies": [{"reference": "~/.helpers/missing.sh", "path": "missing.sh"}]})
+    inv = _run(tmp_path, dependencies=deps, declared_empty_kinds=[],
+               allowed_destinations=[*PROFILE["allowed_destinations"], ".codex"])  # type: ignore[misc]
+    by_id = {d["id"]: d for d in inv["dependencies"]}
+    assert by_id["helper-missing"]["referenced_by"] == ["startup/AGENTS.md"]
+
+
+def test_a_home_reference_must_resolve_to_where_it_is_installed(tmp_path: Path) -> None:
+    """Codex review, #265: `~/.helpers/run-gate.sh` satisfied by a dependency
+    that installs under `.helpers/wrong/` is a path no installer could honour."""
+    deps = _deps()
+    deps[0]["destination"] = ".helpers/wrong"
+    with pytest.raises(p.Refused, match=r"names ~/.helpers/run-gate.sh, but helper-run-gate installs it at ~/.helpers/wrong/run-gate.sh"):
+        _run(tmp_path, dependencies=deps)
 
 
 def test_an_unreferenced_dependency_needs_a_reason(tmp_path: Path) -> None:
@@ -344,10 +394,23 @@ def test_client_profiles_cannot_claim_parity(tmp_path: Path, clients: object, me
 def test_a_symlink_in_the_closure_is_refused_and_one_elsewhere_is_not(tmp_path: Path) -> None:
     src = _source(tmp_path / "src")
     os.symlink("../tools", src / "elsewhere-link")
-    _run(tmp_path)  # unreached link: fine
+    # Codex review, #265: an unselected neighbour's ancillary link is not this
+    # treatment's defect - but selecting that neighbour puts it in the closure.
+    os.symlink("SKILL.md", src / "pack" / "skills" / "other" / "doc-link")
+    _run(tmp_path)  # unreached links: fine
+    with pytest.raises(p.Refused, match="symlink in the closure: pack/skills/other/doc-link"):
+        _run(tmp_path, select="all")
+    (src / "pack" / "skills" / "other" / "doc-link").unlink()
     (src / "tools" / "common.sh").unlink()
     os.symlink("run-gate.sh", src / "tools" / "common.sh")
     with pytest.raises(p.Refused, match="symlink in the closure: tools/common.sh"):
+        _run(tmp_path)
+
+
+def test_a_linked_skill_directory_blocks_discovery_for_any_selection(tmp_path: Path) -> None:
+    src = _source(tmp_path / "src")
+    os.symlink("other", src / "pack" / "skills" / "alias")
+    with pytest.raises(p.Refused, match="blocks name discovery: pack/skills/alias"):
         _run(tmp_path)
 
 
@@ -379,7 +442,7 @@ def test_an_unrelated_collection_validates_without_a_code_branch(tmp_path: Path)
         "dependencies": [
             {"id": "wc-lite", "kind": "helper", "scope": "common", "source_root": "bin",
              "paths": ["wc-lite"], "destination": ".local/bin",
-             "satisfies": ["~/.local/bin/wc-lite"]},
+             "satisfies": [{"reference": "~/.local/bin/wc-lite", "path": "wc-lite"}]},
             {"id": "agents", "kind": "startup-context", "scope": "common",
              "paths": ["AGENTS.fragment.md"], "destination": ".codex",
              "unreferenced_reason": "loaded by the client at startup, not named by any file"},
@@ -393,7 +456,7 @@ def test_an_unrelated_collection_validates_without_a_code_branch(tmp_path: Path)
     inv = p.validate(p.Profile.load(tmp_path / "profile.json"), p.DirTree(src))
     assert inv["treatment"] == "full-pack" and inv["treatment_question"] == "prose"
     assert inv["selection"] == ["summarize"]
-    kinds = {d["id"]: d["kind"] for d in inv["dependencies"]}  # type: ignore[union-attr]
+    kinds = {d["id"]: d["kind"] for d in inv["dependencies"]}
     assert kinds == {"wc-lite": "helper", "agents": "startup-context", "sh": "tool"}
 
 
@@ -416,11 +479,11 @@ def test_a_git_source_matches_the_same_snapshot_and_refuses_a_wrong_pin(tmp_path
     prof = _profile(tmp_path, subject=dict(SUBJECT, revision=sha))
     from_git = p.validate(prof, p.GitTree(src, sha))
     from_dir = p.validate(prof, p.DirTree(src))
-    assert from_git["subject"]["revision"] == sha  # type: ignore[index]
+    assert from_git["subject"]["revision"] == sha
     assert from_git["installed_surface"] == from_dir["installed_surface"]
     assert from_git["references"] == from_dir["references"]
     listed = git("rev-parse", f"{sha}:tools/common.sh")
-    common = next(d for d in from_git["dependencies"] if d["id"] == "helper-common")  # type: ignore[union-attr]
+    common = next(d for d in from_git["dependencies"] if d["id"] == "helper-common")
     assert common["files"][0]["git_blob"] == listed
     with pytest.raises(p.Refused, match="does not resolve"):
         p.GitTree(src, "1" * 40)

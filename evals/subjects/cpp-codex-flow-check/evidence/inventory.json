@@ -1106,6 +1106,28 @@
    "helper-counter-model-receipt",
    "helper-flow-finish-gate",
    "helper-gate-lib"
+  ],
+  "bundled": [
+   {
+    "path": "codex/skills/flow-check/scripts/SHA256SUMS",
+    "supplied_by": null
+   },
+   {
+    "path": "codex/skills/flow-check/scripts/check-ignored-additions.sh",
+    "supplied_by": null
+   },
+   {
+    "path": "codex/skills/flow-check/scripts/counter-model-receipt.py",
+    "supplied_by": null
+   },
+   {
+    "path": "codex/skills/flow-check/scripts/flow-finish-gate.sh",
+    "supplied_by": null
+   },
+   {
+    "path": "codex/skills/flow-check/scripts/gate-lib.sh",
+    "supplied_by": null
+   }
   ]
  },
  "declared_empty_kinds": [

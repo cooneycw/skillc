@@ -23,7 +23,16 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import __version__, checks, configuration_compare, exposure, leak, materialize, profile, records
+from . import (
+    __version__,
+    checks,
+    configuration_compare,
+    exposure,
+    leak,
+    materialize,
+    profile,
+    records,
+)
 
 # `demo` is NOT imported here at module load (EF-11, #80's own no-Docker-
 # required proof: `skillc.cli` must not import `skillc.docker_backend` at

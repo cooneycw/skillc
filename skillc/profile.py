@@ -38,6 +38,7 @@ import subprocess
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from . import materialize as m
 from .spec import FrontmatterError, parse_frontmatter
@@ -510,7 +511,7 @@ class _Walk:
     queue: list[tuple[str, str]] = field(default_factory=list)  # (repo path, owner)
 
 
-def validate(profile: Profile, tree: Tree) -> dict[str, object]:
+def validate(profile: Profile, tree: Tree) -> dict[str, Any]:
     """The content-addressed inventory, or Refused naming the first defect class found."""
     subject = profile.subject
     if tree.kind == "git" and tree.revision != subject.revision:
@@ -526,15 +527,23 @@ def validate(profile: Profile, tree: Tree) -> dict[str, object]:
         surface = Path(staging) / "surface"
         surface.mkdir()
         prefix = "" if root == "." else root + "/"
-        tree._refuse_links(root)  # materialize refuses any link in the surface; so does this
+        # A link that hides a skill's name (a linked skill directory, or a linked
+        # SKILL.md) blocks discovery for EVERY selection, so it is refused here.
+        # Any other link is refused only if the closure reaches it (below): a
+        # neighbour's ancillary link says nothing about this treatment.
+        for link in sorted(tree.links):
+            if link.startswith(prefix) or root == ".":
+                rel = link[len(prefix):]
+                if "/" not in rel or posixpath.basename(rel) == "SKILL.md":
+                    raise Refused(f"symlink in the skills root blocks name discovery: {link}")
         surface_files = [p for p in tree.files() if root == "." or p.startswith(prefix)]
         if not surface_files:
             raise Refused(f"skills root {root!r} is absent from the source")
         for path in surface_files:
-            dest = surface / path[len(prefix):]
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(tree.read(path))
-            dest.chmod(0o755 if tree.files()[path] == "100755" else 0o644)
+            target = surface / path[len(prefix):]
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(tree.read(path))
+            target.chmod(0o755 if tree.files()[path] == "100755" else 0o644)
         source = m.Source(tree.kind, subject.locator, tree.revision, surface,
                           m.tree_digest(surface), Path(staging))
         entries = m.inventory(selected_subject, source)
@@ -548,6 +557,7 @@ def validate(profile: Profile, tree: Tree) -> dict[str, object]:
     home_skills = subject.surface_spec.home_skills_relpath
     for entry in entries:
         skill_dir = f"{prefix}{entry.directory}"
+        tree._refuse_links(skill_dir)  # a link inside a SELECTED skill is in the closure
         body_text = tree.read(f"{skill_dir}/SKILL.md").decode("utf-8", errors="replace")
         try:
             frontmatter, body = parse_frontmatter(body_text)
@@ -575,18 +585,21 @@ def validate(profile: Profile, tree: Tree) -> dict[str, object]:
     # The transitive walk: every text file reached is scanned for declared
     # reference patterns; every hit resolves to a dependency, to an explicit
     # unsupported entry, or the profile is refused.
-    while walk.queue:
-        path, owner = walk.queue.pop(0)
-        if path in walk.scanned:
-            continue
-        walk.scanned.add(path)
-        raw = tree.read(path)
-        if b"\0" in raw:
-            continue
-        text = raw.decode("utf-8", errors="replace")
-        for pattern in profile.patterns:
-            for hit in sorted(set(re.findall(pattern.regex, text))):
-                _resolve(walk, hit, path, pattern, installed)
+    _drain(walk, installed)
+    # Dependencies no reference reaches (a tool, a startup file the client loads
+    # by itself) are seeded only AFTER the referenced closure is complete, so
+    # "referenced" keeps its meaning - and then walked like any other, because
+    # a startup file can name a helper too.
+    for dep in profile.dependencies:
+        if dep.id not in walk.visited and dep.unreferenced_reason:
+            _visit(walk, dep, installed)
+            _drain(walk, installed)
+    for dep in profile.dependencies:
+        if dep.id not in walk.visited:
+            raise Refused(
+                f"dependency {dep.id} is satisfied by no reference in the closure; "
+                f"declare unreferenced_reason or remove it"
+            )
 
     if walk.unresolved:
         shown = sorted(set(walk.unresolved))
@@ -595,17 +608,8 @@ def validate(profile: Profile, tree: Tree) -> dict[str, object]:
             f"each needs a dependency that satisfies it or an unsupported entry with a reason"
         )
 
-    dependencies = []
-    for dep in profile.dependencies:
-        if dep.id not in walk.visited:
-            if not dep.unreferenced_reason:
-                raise Refused(
-                    f"dependency {dep.id} is satisfied by no reference in the closure; "
-                    f"declare unreferenced_reason or remove it"
-                )
-            _visit(walk, dep, installed)
-        dependencies.append(_dep_record(walk, dep, installed))
-
+    dependencies = [_dep_record(walk, dep, installed) for dep in profile.dependencies]
+    bundled_parity = _bundled_parity(profile, skills, installed)
     # Helper parity (protocol.md 10.4): a prose question gives every arm the same
     # helpers, so nothing but the instructions may be treatment-scoped.
     if profile.treatment_question == "prose":
@@ -614,6 +618,15 @@ def validate(profile: Profile, tree: Tree) -> dict[str, object]:
             raise Refused(
                 f"prose treatment question but dependencies {scoped} are treatment-scoped; "
                 f"helper parity requires identical helpers in every arm"
+            )
+        orphans = sorted(str(b["path"]) for b in bundled_parity if b["supplied_by"] is None)
+        if orphans:
+            # Under a prose question the arm given expanded instructions has no
+            # skill directory, so a helper that lives only inside the skill never
+            # reaches it. Only the instructions may differ.
+            raise Refused(
+                f"prose treatment question but bundled file(s) {orphans} reach only the skill "
+                f"arm; declare a common-scoped dependency carrying identical bytes"
             )
 
     # Every destination sits under an allowed root.
@@ -625,7 +638,7 @@ def validate(profile: Profile, tree: Tree) -> dict[str, object]:
     transforms = [_mirror(tree, files, gen, src, exact=False)
                   for gen, src in sorted(profile.generated_from.items())]
 
-    inventory_body: dict[str, object] = {
+    inventory_body: dict[str, Any] = {
         "inventory_schema": INVENTORY_SCHEMA,
         "profile": profile.name,
         "profile_digest": m.sha256_bytes(_canonical(profile.raw)),
@@ -655,6 +668,7 @@ def validate(profile: Profile, tree: Tree) -> dict[str, object]:
         "helper_parity": {
             "common": sorted(d.id for d in profile.dependencies if d.scope == "common"),
             "treatment": sorted(d.id for d in profile.dependencies if d.scope == "treatment"),
+            "bundled": bundled_parity,
         },
         "declared_empty_kinds": list(profile.declared_empty_kinds),
         "client_profiles": profile.client_profiles,
@@ -673,6 +687,57 @@ def validate(profile: Profile, tree: Tree) -> dict[str, object]:
         ],
     }
     return inventory_body
+
+
+def _drain(walk: _Walk, installed: dict[str, dict[str, object]]) -> None:
+    """Scan every queued text file for declared reference patterns; each hit
+    resolves to a dependency, to an explicit unsupported entry, or is recorded
+    as unresolved. Visiting a dependency queues its files, so this reaches the
+    transitive closure."""
+    while walk.queue:
+        path, _owner = walk.queue.pop(0)
+        if path in walk.scanned:
+            continue
+        walk.scanned.add(path)
+        raw = walk.tree.read(path)
+        if b"\0" in raw:
+            continue
+        text = raw.decode("utf-8", errors="replace")
+        for pattern in walk.profile.patterns:
+            for hit in sorted(set(re.findall(pattern.regex, text))):
+                _resolve(walk, hit, path, pattern, installed)
+
+
+def _bundled_parity(profile: Profile, skills: list[dict[str, Any]],
+                    installed: dict[str, dict[str, object]]) -> list[dict[str, object]]:
+    """Every non-Markdown file bundled in a selected skill, and which common-scoped
+    dependency (if any) supplies identical bytes outside the skill. Markdown is
+    the instructions - the one thing a prose question lets differ."""
+    common = {d.id for d in profile.dependencies if d.scope == "common"}
+    by_digest: dict[object, list[str]] = {}
+    for record in installed.values():
+        if record["owner"] in common:
+            by_digest.setdefault(record["digest"], []).append(str(record["owner"]))
+    out: list[dict[str, object]] = []
+    for skill in skills:
+        for f in skill["files"]:
+            if str(f["source"]).endswith(".md"):
+                continue
+            owners = sorted(set(by_digest.get(f["digest"], [])))
+            out.append({"path": f["source"], "supplied_by": owners[0] if owners else None})
+    return out
+
+
+_HOME_PREFIXES = ("~/", "$HOME/", "${HOME}/")
+
+
+def _home_target(reference: str) -> str | None:
+    """The path under HOME a home-relative reference names, or None if it is not
+    spelled relative to HOME."""
+    for prefix in _HOME_PREFIXES:
+        if reference.startswith(prefix):
+            return posixpath.normpath(reference[len(prefix):])
+    return None
 
 
 def _canonical(data: object) -> bytes:
@@ -719,7 +784,7 @@ def _claim(installed: dict[str, dict[str, object]], dest: str, record: dict[str,
 
 def _source_files(walk: _Walk, dep: Dependency) -> list[tuple[str, str]]:
     """(repo path, path relative to source root) for every file the dependency carries."""
-    out = []
+    out: list[tuple[str, str]] = []
     for p in dep.paths:
         full = p if dep.source_root == "." else posixpath.join(dep.source_root, p)
         found = walk.tree.under(full)
@@ -766,9 +831,17 @@ def _resolve(walk: _Walk, hit: str, path: str, pattern: Pattern,
                     f"missing {dep.kind} file: {hit} (in {path}) resolves to {full}, "
                     f"which {dep.id} does not carry"
                 )
-        record.update(status="satisfied", dependency=dep.id,
-                      resolves_to=posixpath.join(dep.destination, sat.path)
-                      if dep.destination and sat.path else dep.destination)
+        resolves_to = (posixpath.join(dep.destination, sat.path)
+                       if dep.destination and sat.path else dep.destination)
+        target = _home_target(hit) if pattern.klass == "home-relative" else None
+        if target is not None and resolves_to is not None and target != resolves_to:
+            # The reference names a place under HOME; the dependency installs
+            # somewhere else. An installer following this inventory could not
+            # supply the path the text actually uses.
+            raise Refused(
+                f"{hit} (in {path}) names ~/{target}, but {dep.id} installs it at ~/{resolves_to}"
+            )
+        record.update(status="satisfied", dependency=dep.id, resolves_to=resolves_to)
     else:
         walk.unresolved.append(f"{hit} (in {path}, {pattern.klass})")
         return
