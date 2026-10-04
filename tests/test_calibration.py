@@ -368,3 +368,22 @@ def test_red_the_203_declaration_without_its_approval_is_refused() -> None:
     with pytest.raises(calibration.DeclarationRefused, match="not approved"):
         calibration.require_approved(calibration.parse_declaration(data), ROOT)
 
+
+MANIFEST_203_LOW = ROOT / "evals" / "calibration-203-low" / "run-manifest.json"
+
+
+def test_the_committed_203_low_effort_declaration_is_authorized() -> None:
+    """Step (a) of #203 Q2: the calibration-203 identities at effort low."""
+    declaration = calibration.load_declaration(MANIFEST_203_LOW)
+    assert declaration.arms == ("natural", "baseline")
+    assert declaration.attempts_per_arm == 3
+    assert declaration.shared["reasoning_effort"] == "low"
+    calibration.require_approved(declaration, ROOT)
+
+
+def test_red_the_203_low_effort_declaration_without_its_approval_is_refused() -> None:
+    data = json.loads(MANIFEST_203_LOW.read_text(encoding="utf-8"))
+    data["approval"] = None
+    with pytest.raises(calibration.DeclarationRefused, match="not approved"):
+        calibration.require_approved(calibration.parse_declaration(data), ROOT)
+
