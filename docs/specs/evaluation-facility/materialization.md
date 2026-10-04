@@ -129,6 +129,10 @@ client is ever asked, and nothing pastes instructions into a prompt instead.
 
 ## Limits
 
+- **Helpers, libraries and tools are not installed here.** A subject records them as
+  `external-not-materialized`. What a given workflow actually needs, transitively, is
+  declared and checked by a profile ([profiles.md](profiles.md), #265); installing it
+  into a disposable home and proving it runs is #266's.
 - **One client, one layout.** Other clients (Claude Code, others) and layouts
   need their own tested adapter; they are refused, not approximated.
 - **CI cannot run the real acquisition or canary.** The CI image has neither git

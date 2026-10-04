@@ -8,6 +8,25 @@ and version plan.
 
 ## [Unreleased]
 
+- **`skillc profile validate`: a transitive installation profile for one
+  workflow** (Refs #265, wave #258, workstream #247). A profile layers on one
+  subject and names every dependency of a selected workflow: helpers,
+  libraries, tools and startup context, transitively. Each comes with its
+  source at the pin, a content digest and its one allowed destination under
+  the client home. The validator walks the closure and emits a
+  content-addressed inventory, or refuses by name: missing reference, helper
+  or library file; stale mirror; conflicting destination; empty selection;
+  unresolved reference; a satisfied absolute path; prose without helper
+  parity; a silent kind, untraversed tree or unreferenced dependency.
+  - **Nothing is installed.** Installation and readiness are #266's. Client
+    profiles other than the subject's own can only be `unsupported`.
+  - **First profile:** `evals/subjects/cpp-codex-flow-check/`, pinned to
+    `85e9b03` like #264's case contract, with its generated inventory (63
+    files, 9 dependencies, 8 declared-unsupported references).
+  - **Controls:** every refusal has a committed red case, and each check was
+    disabled in turn to confirm its case fails. An unrelated-collection
+    control validates a different layout with no code change.
+
 - **`skillc uptake-study`: does a rewritten skill description raise natural
   selection?** (Refs #237, pilot of #238). A new declaration kind,
   `uptake-study`, has two arms, `published` and `rewritten`. Both install the
