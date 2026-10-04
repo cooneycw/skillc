@@ -1,6 +1,6 @@
 {
  "id": "helper-different-question",
- "revision": "1",
+ "revision": "2",
  "criteria": ["report-verdict", "one-section-per-step", "approved-content-present", "other-content-preserved"],
  "dimensions": {
   "report-verdict": "constraint",
