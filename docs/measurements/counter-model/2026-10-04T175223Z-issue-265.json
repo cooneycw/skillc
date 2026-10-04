@@ -1,0 +1,24 @@
+{
+  "branch": "issue-265-declare-and-validate-a-transitive-cpp-flow-check-i",
+  "counts": {
+    "accepted": 8,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "971fd315bb76c43a996a2d29a4c7ea09bea97227",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "265",
+  "passes": 2,
+  "recorded_at": "2026-10-04T17:52:23Z",
+  "red_cases": {
+    "already_covered": 0,
+    "proposed": 8
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/04/rollout-2026-10-04T13-48-46-01a10808-54d9-75b2-a890-88e86311828a.jsonl",
+    "thread_id": "01a10808-54d9-75b2-a890-88e86311828a"
+  },
+  "schema": 1,
+  "status": "ran"
+}
