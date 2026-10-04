@@ -1,6 +1,6 @@
 # Calibration for #203: B/N/P on `gate-ran-nothing`
 
-**Status: approved 2026-10-03, not yet run.** `run-manifest.json` is the
+**Status: run 2026-10-03; see [report.md](report.md). Recommendation for #203: REDESIGN.** All 18 attempts reached primary PASS in every arm (ceiling). N opened a skill 0/6 times, P 6/6. `run-manifest.json` is the
 predeclaration. It runs with
 `SKILLC_ALLOW_REAL_AGENT=1 skillc calibration-run evals/calibration-203/run-manifest.json`.
 
