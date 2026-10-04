@@ -37,6 +37,10 @@ the difference to skills. If required capabilities make matched arms impossible,
 report a compatibility/product comparison rather than a causal benefit claim.
 Additional model calls made by scaffolding count toward the same declared budget.
 
+These arms compare outcomes. Whether an explicitly requested workflow is
+carried out dependably, and whether packaging it as a skill matters, are the
+workflow-contract lanes of section 10.
+
 Client/model drift binds both identities in the ledger. A trial whose client or
 model differs from the declared one is a different comparison, not drift evidence.
 The arm is adapted from
@@ -149,7 +153,8 @@ as well as subject-execution cost.
 Use paired results where tasks and configurations match. Multiple repeats of one
 task do not establish performance across many tasks. Statistical intervals and
 promotion thresholds need a justified sampling plan after pilot calibration;
-none is specified for the first experiment.
+none is specified for the first experiment. Workflow-contract studies use the
+repeat, interval and accounting defaults of section 10.5.
 
 Levels may be explored independently. Qualification requires a predefined task
 population, repeat policy, controlled graders, mandatory acceptance and regression
@@ -182,3 +187,225 @@ an opt-in separate verifier environment. It is a design reference only: skillc
 takes no runtime dependency on it ([ADR 0003](../../decisions/0003-no-external-evaluation-runtime.md)).
 [Task overview](https://docs.harborframework.com/core-concepts/tasks/overview),
 [Separate verifier](https://docs.harborframework.com/core-concepts/tasks/separate-verifier)
+
+## 10. Workflow-contract lanes (#246, #264)
+
+Sections 2 and 7 compare outcomes. They cannot tell whether a workflow a user
+*explicitly requests* is carried out dependably: a baseline that finds the fix is
+compatible with a skill being valuable as a short, repeatable contract. This
+section freezes what an explicit workflow test measures, before any such test is
+built or scored. It specifies; the statistics belong to
+[#273](https://github.com/cooneycw/skillc/issues/273) and the declaration fields
+and instruction assembly to [#274](https://github.com/cooneycw/skillc/issues/274).
+The first worked case is
+[`evals/workflow-contracts/flow-check`](../../../evals/workflow-contracts/flow-check/README.md).
+
+Nothing here revises an existing study. #203's primary endpoint, its approvals
+and its current pause, and #237's approved design, are unchanged. An existing
+declaration does not acquire a lane, an obligation or an authorization through
+this section; every live arm still needs its own approved declaration
+([ADR 0005](../../decisions/0005-runtime-scope-and-cost-rulings.md)).
+
+### 10.1 The three lanes
+
+| Lane | Question | Arms | Scored |
+|---|---|---|---|
+| **Explicit contract** | When a user explicitly invokes a published workflow, is it carried out as published, every time? | One treatment arm is sufficient; a model/client contrast is optional | Adherence, preservation and honesty against the invoked contract; task outcome beside them |
+| **Matched outcome** | Does the treatment change the project outcome under matched conditions? (#203's lane) | Baseline vs treatment, natural discovery or a declared nudge | Common project acceptance only |
+| **Expanded instruction** | Does packaging the workflow as a skill matter, versus giving the same obligations as prose? | Explicit skill invocation (S) vs the equivalent expanded instructions (E) | Adherence, preservation, honesty and outcome on one shared obligation set, plus convenience |
+
+Rules shared by all three:
+
+- **Common project requirements are identical across arms.** They come from
+  the task's public goal and the fixture's own documents (`goal.md`,
+  `CONTRIBUTING.md`), and the task grader scores them.
+- **Treatment-specific obligations are labelled separately.** They come only
+  from the published contract the user explicitly invoked. They are scored only
+  in a lane where that contract was invoked or its equivalent was given: the
+  explicit-contract lane and both arms of the expanded-instruction lane.
+- **No arm fails for lacking the treatment's artifacts.** A baseline or natural
+  arm never fails, in any lane, for not naming a skill, not emitting a CPP
+  artifact (a receipt, a table, a JSON record), or not following a procedure
+  nobody asked it to follow.
+- **The matched-outcome lane scores no adherence.** Treatment-specific
+  observations may be reported beside the outcome there, never as part of it.
+
+The expanded arm E is built from the pinned published contract, obligation by
+obligation. It may restate; it may not add an obligation, a hint about the task
+or a hint about the fixture. Both arms get the same helpers at the same paths
+with the same modes (helper parity), and a reviewer audits E's text against the
+contract before approval. The prompt bytes and startup context of both arms are
+recorded in full, so instruction length is measured, not assumed.
+
+### 10.2 Where obligations come from
+
+An obligation is admissible only if it has a public source:
+
+- the task's public requirements;
+- the fixture's own documents;
+- the explicitly invoked published contract, at its pinned revision, with the
+  line cited.
+
+A grader may observe an obligation but never invent one. A property the contract
+does not state is not a violation, even when it would be good practice. If a
+reviewer thinks it should be one, that is a finding about the contract, routed
+to its owner. Each obligation declares:
+
+| Field | Meaning |
+|---|---|
+| `source` | The public file, revision and line that states it |
+| `class` | `outcome`, `adherence`, `preservation` or `honesty` (10.3) |
+| `scope` | `common` (every arm) or `treatment` (only where the contract was invoked or given) |
+| `evidence` | The observation that decides it: controller-owned events, the delivered tree, or the final message |
+| `rule` | When it is SATISFIED, when VIOLATED, and when UNKNOWN |
+| `applies_when` | A predicate over the **starting fixture**, evaluated before any attempt; false makes it NOT_APPLICABLE for that case |
+
+Verdicts are `SATISFIED`, `VIOLATED` or `UNKNOWN`:
+
+- **UNKNOWN is a measurement gap, never a quiet pass or fail.** The deciding
+  evidence was not captured: a lost transcript, no event stream, or an
+  ambiguous command.
+- **NOT_APPLICABLE is a denominator exclusion, not a verdict.** It is decided
+  from the fixture, never from the attempt, and is listed in the selection
+  ledger like any other exclusion.
+- **An empty case is refused for adherence.** A case whose treatment
+  obligations are all NOT_APPLICABLE contributes nothing to that lane's
+  adherence measure. Counting such a case as compliant is the empty-population
+  green this repository forbids.
+
+### 10.3 Measures kept apart
+
+| Measure | What it counts | Note |
+|---|---|---|
+| Task outcome | The task grader's mandatory criteria, by `records.derive_status` | Unchanged; #203's primary endpoint is this measure |
+| Adherence | Each treatment obligation's verdict | Scored per obligation; a "compliant attempt" is one with every applicable obligation SATISFIED |
+| Preservation | State the workflow promised not to change (a read-only check commits, pushes and edits nothing) and other approved work | A preservation violation is a hard failure of adherence, never offset |
+| Honesty | Whether the final report matches what was observed | A claimed PASS for a check that never ran is VIOLATED even when every other obligation holds |
+| Convenience | Proxies in 10.6 | Reported only; never an obligation and never a score |
+
+Partial progress is diagnostic. It cannot cancel a VIOLATED mandatory
+obligation, and adherence never offsets a task-outcome FAIL, nor the reverse.
+
+Four observation states are recorded per attempt and never merged:
+
+- **skill-present:** the installation receipt shows it listed.
+- **read-observed:** the transcript shows its `SKILL.md` or `reference.md` read.
+- **execution-observed:** controller-owned events show the commands the
+  procedure prescribes.
+- **compliant:** every applicable obligation is SATISFIED.
+
+Each state has its own denominator. A read-observed attempt is not thereby
+compliant, and a compliant attempt need not have read the skill: obligations
+are defined by behaviour, not by which file was opened.
+
+### 10.4 Treatment inventory and identities
+
+A lane's declaration pins, before any attempt:
+
+- **The treatment question.** It is one of two:
+  - *product*: the skill as installed, prose plus bundled helpers;
+  - *prose*: identical helpers in every arm, only the instructions differ.
+
+  The expanded-instruction lane is a prose question by construction.
+- **The inventory.** Every file of the skill, by content identity: `SKILL.md`,
+  references and each bundled script with its mode, plus startup instructions
+  and listing metadata. A residual-content note records where a retained file
+  could teach a removed rule (#203).
+- **Helper parity.** Which helpers each arm can reach, at which paths. An arm
+  that cannot reach a helper the contract names is a different treatment, not
+  a matched arm.
+- **Identities.** Model, reasoning effort, client and version, image digest,
+  tools, permissions and budgets, identical across arms.
+- **Nudges.** The natural-discovery arm gets no covert naming hint. Any text
+  that names or describes a skill is a declared nudge. An explicit invocation
+  is recorded verbatim.
+- **Manual-prompt accounting.** Every byte the user supplies (goal plus any
+  added instruction) and every byte of startup context (instruction files, the
+  client's skill listing) is recorded by digest and length per arm.
+
+### 10.5 Repeats, intervals and accounting
+
+These are the declared defaults. A study declaration may predeclare another
+method with a stated justification, before any attempt; never after.
+
+- **Unit and cluster.** The attempt is the unit. The task instance is the
+  cluster. Repeats of one task are not independent evidence about other tasks.
+- **Reliability.** For one task and arm, with `n` evaluable attempts of which
+  `c` succeed:
+  - all-k = C(c,k)/C(n,k), defined only for n >= k. With n < k the cell
+    reports `insufficient`, never 0.
+  - all-k is not pass@k = 1 - C(n-c,k)/C(n,k), which rewards occasional
+    success. Both may be shown, labelled.
+  - A pooled success rate across heterogeneous tasks is never raised to the
+    k-th power.
+  - A population all-k is the declared-weight mean (equal weights by default)
+    of per-task all-k over the tasks that have n >= k, with the excluded tasks
+    listed.
+  - The estimator assumes attempts within a cell are exchangeable, which
+    seeded interleaving supports and a drifting service may break, so the
+    report states that assumption and the task population.
+  - Method: [tau-bench](https://arxiv.org/html/2406.12045v1) pass^k.
+- **Intervals.** 95% two-sided:
+  - a single cell's rate: Clopper-Pearson exact;
+  - a within-task difference between independent arms: the Newcombe hybrid
+    score interval;
+  - pooled across tasks: a task-cluster percentile bootstrap (seeded, 10000
+    resamples), only with at least 5 tasks. With fewer, only per-task results
+    are reported, because 2 or 3 tasks cannot support a population interval.
+  - An exact McNemar test, where pairing exists, is a hypothesis test, not an
+    interval (#203).
+- **Pairing and order.** Arms are interleaved in a seeded order recorded in the
+  declaration. Attempts are paired only where the design pairs them, such as
+  the same task instance in adjacent slots. Repeat index alone is not a pairing.
+- **All-attempt accounting.** The denominator is the scheduled population.
+  - Every report shows scheduled, started, evaluable (PASS or FAIL) and
+    coverage counts (UNAVAILABLE, INCONCLUSIVE, NOT_RUN) per cell, with
+    infrastructure availability separate.
+  - A timeout or resource limit reached by the agent is a FAIL (section 3),
+    never UNAVAILABLE.
+  - Missing data is never imputed as success or failure.
+- **Retries.**
+  - Only a slot that ended UNAVAILABLE before the agent's first observed turn
+    may be retried, at most the declared number of times.
+  - The retry is a new attempt ID linked to the original, which stays in
+    coverage.
+  - A FAIL, an INCONCLUSIVE, or any attempt where the agent started is never
+    replaced.
+  - Reliability uses the first `n` evaluable attempts per cell in slot order,
+    so a retry can fill a slot but cannot select a better outcome.
+- **Multiple comparisons.** Per-skill or per-obligation contrasts are
+  exploratory unless a confirmatory family and its correction (Holm by
+  default) were predeclared.
+
+### 10.6 Convenience proxies
+
+These are reported per arm beside success, and also conditional on success,
+never folded into a score:
+
+- user-supplied instruction length, in bytes and whitespace-delimited words;
+- clarification and correction turns. These are `not applicable` for a
+  non-interactive run, not 0;
+- approvals requested, split into *necessary* (an authorization the public
+  rules require) and *redundant* (an action that needed none, or one already
+  authorized);
+- wall time per phase, and tokens where observable, otherwise UNKNOWN.
+
+They are proxies. A claim about human time needs a user study. Skipping a
+required authorization lowers the turn count but is a VIOLATED preservation or
+authority obligation, never a convenience gain. A cheap failed run is not a
+cheaper success (section 7).
+
+### 10.7 Development and held-out tasks
+
+- **Development tasks.** Every task whose outcome has already been observed is
+  a development task, and so is every task a contract was worked against.
+  Today that is `gate-ran-nothing`, `helper-different-question` and
+  `slug-small-fix`.
+- **Held-out tasks.** A held-out family is committed, with its graders and
+  contract revision frozen by content identity, before any scored run on it.
+  No held-out outcome may change a contract, a grader or an obligation. A
+  change after scored runs starts a new, separately declared study.
+- **Null results stay.** Null, negative and ceiling results are kept and
+  reported.
+- **No fixture chosen to make a treatment win.** A case is admitted because its
+  obligations apply, never because of the result it is expected to give.

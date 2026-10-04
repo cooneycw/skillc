@@ -27,6 +27,26 @@ The current roadmap is [PLAN.md](../PLAN.md), with the
 | [#150 discriminating run](discriminating-run/README.md) | Live run 2026-09-29/30 on `finish-close-ref` with a codex arm: positive control PASS, NORMAL PASS, DEGRADED PASS - **non-discriminating**, nothing exported to CPP (#150) |
 | [#204 calibration](calibration-204/README.md) | Two-arm calibration run 2026-09-30 on `level3/slugkit-pipeline` (full CPP vs baseline, 4 each): both arms 4/4 primary PASS, the CPP arm never opened a skill - **REDESIGN** recommended for #203 ([report](calibration-204/report.md)) |
 
+## Workflow contracts
+
+| Contract | Status |
+|---|---|
+| [`flow-check` v1](workflow-contracts/flow-check/README.md) | Obligation matrix for [protocol section 10](../docs/specs/evaluation-facility/protocol.md#10-workflow-contract-lanes-246-264)'s lanes (#264): every obligation cites the pinned published procedure. No existing fixture admits it to the explicit lanes, because none has a `lint:`/`test:`/`typecheck:` target (#270). A specification only: no run is declared or authorized |
+
+### Declarations and lanes
+
+These lanes are named in section 10; this is how the existing declarations
+map onto them. The mapping is informational and changes no declaration.
+
+- In `calibration-204` and `calibration-203*`, B vs N is the
+  **matched-outcome** lane with natural discovery.
+- P ("read `flow-auto` and `flow-check` first and follow what applies") is a
+  declared nudge inside that lane. It is not an explicit-contract invocation,
+  because it binds no published contract's obligations.
+- No existing declaration is an **explicit-contract** or
+  **expanded-instruction** study. Those need #274's declaration fields and
+  their own ADR 0005 approval.
+
 No behavioral runner is implemented here yet. The former example plugin command
 and YAML were unverified research, not an executable contract. skillc depends on
 no external evaluation runtime ([ADR 0003](../docs/decisions/0003-no-external-evaluation-runtime.md));
