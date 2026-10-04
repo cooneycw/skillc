@@ -1,0 +1,315 @@
+{
+ "kind": "uptake-study",
+ "issue": 237,
+ "declared_at": "2026-10-04",
+ "_comment": "#237's predeclaration: flow-check's published description vs the owner-approved rewrite (2026-10-04), on slug-small-fix. NOT APPROVED: 'approval' is null until the owner approves this file (run size, caps, test); require_approved refuses it until then (ADR 0005).",
+ "approval": null,
+ "task": {
+  "path": "evals/level1/slug-small-fix",
+  "grader_id": "slug-small-fix",
+  "grader_revision": "2"
+ },
+ "arms": [
+  {
+   "name": "published",
+   "subject": {
+    "name": "cpp-codex",
+    "locator": "github.com/cooneycw/claude-power-pack",
+    "revision": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b"
+   }
+  },
+  {
+   "name": "rewritten",
+   "subject": {
+    "name": "cpp-codex",
+    "locator": "github.com/cooneycw/claude-power-pack",
+    "revision": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b"
+   },
+   "target_skill": "flow-check",
+   "description": "Use before you report a change as done: run this project's quality checks (tests, lint, type checks, security scan) in one step and report what failed, without committing."
+  }
+ ],
+ "rewritten_snapshot": "skillc degrade-subject cpp-codex --checkout <cpp checkout at 85e9b03> --override-file flow-check:SKILL.md=evals/uptake-study/flow-check-SKILL.md --out <runs>/rewritten",
+ "shared": {
+  "client": {
+   "name": "codex",
+   "version": "0.157.1"
+  },
+  "model": "gpt-6-astra",
+  "reasoning_effort": "high",
+  "tools": "the client's defaults inside the trial container; no MCP servers",
+  "permissions": "the same non-interactive codex exec sandbox and approval settings for every attempt",
+  "public_requirements": "evals/level1/slug-small-fix/goal.md plus each case's prompt_addendum, identical in both arms",
+  "image": {
+   "tag": "skillc-trial:latest",
+   "digest": "sha256:eb17e8c7995f69c4f849d6d8a9165eddfd0ccc8065b5425e0bdc2e3595a86d44"
+  },
+  "per_attempt_seconds": 1200,
+  "total_seconds": 72000
+ },
+ "cases": [
+  {
+   "id": "intended-use",
+   "prompt_addendum": "Before finishing, run this project's quality checks (tests, lint, type checks) and report the result.",
+   "attempts_per_arm": 20,
+   "primary": true
+  },
+  {
+   "id": "near-miss",
+   "prompt_addendum": "",
+   "attempts_per_arm": 10,
+   "primary": false
+  }
+ ],
+ "test": {
+  "kind": "fisher-exact-one-sided",
+  "direction": "rewritten > published",
+  "alpha": 0.05
+ },
+ "power_note": "Exact enumeration under this test with the published arm's selection rate taken as 5% (observed natural uptake 0/19 across #204 and #203's runs): power 0.54 / 0.81 / 0.94 at a true rewritten rate of 30% / 40% / 50% with n=20 per arm. A smaller effect may go undetected; the report must say so.",
+ "arm_order": {
+  "seed": 20261006,
+  "sequence": [
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "near-miss",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "near-miss",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "near-miss",
+    "published"
+   ],
+   [
+    "near-miss",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "near-miss",
+    "published"
+   ],
+   [
+    "near-miss",
+    "published"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "near-miss",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "near-miss",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "near-miss",
+    "published"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "near-miss",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "near-miss",
+    "published"
+   ],
+   [
+    "near-miss",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "near-miss",
+    "published"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "near-miss",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "near-miss",
+    "published"
+   ],
+   [
+    "near-miss",
+    "published"
+   ],
+   [
+    "near-miss",
+    "published"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "near-miss",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "near-miss",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "near-miss",
+    "published"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ]
+  ]
+ }
+}

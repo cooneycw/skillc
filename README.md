@@ -107,6 +107,7 @@ skillc collection-run <subject> # #11/#106: one real agent attempt per skill col
 skillc pilot-run               # #12: the predeclared matched pilot, treatment vs baseline (run live: evals/matched-pilot/evidence/)
 skillc selection-probe         # #26: the three selection cases, or --detection-control (run live: evals/selection-probe/evidence/)
 skillc calibration-run <declaration> # #207: run an APPROVED two- or three-arm calibration declaration (#204, #231); evidence stays private
+skillc uptake-study <declaration> --rewritten <dir> # #237: run an APPROVED two-arm uptake study (published vs a rewritten description); evidence stays private
 skillc pilot-report <run_dir>  # #12: rebuild a pilot's report from its private run, merging reviewed claims
 skillc configuration-compare --a <record.json> --b <record.json> --vary <field> # #13: compare two captured evidence records, refusing an unmatched configuration
 skillc degrade-subject <subject> # #150: build an operator-expressible degraded subject (skills/files mutated or removed)
