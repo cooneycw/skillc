@@ -1,0 +1,8 @@
+{
+  "verdict": "changed",
+  "notes": "The approved rollback step and the ops notify step were both numbered 5 after the merge; renumbered the notify step to 6.",
+  "checked_with": "a section-by-section read",
+  "duplicates_found": [
+    "Step 5"
+  ]
+}

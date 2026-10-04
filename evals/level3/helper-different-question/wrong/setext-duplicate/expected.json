@@ -1,0 +1,7 @@
+{
+ "status": "FAIL",
+ "violated": [
+  "one-section-per-step",
+  "approved-content-present"
+ ]
+}
