@@ -1,6 +1,8 @@
 # Calibration for #203, step (b): B/N/P on `helper-different-question`
 
-**Status: approved 2026-10-04, not yet run.**
+**Status: run 2026-10-04; see [report.md](report.md). At the floor: 0/18 PASS in
+every arm.** P read `flow-auto`'s guidance on this exact failure class 6/6
+times and still trusted the helper.
 
 The same design and identities as [`evals/calibration-203`](../calibration-203/README.md):
 - arms `baseline` (B), `natural` (N) and `provided` (P, told to read
