@@ -28,6 +28,10 @@ specification rejects, and it proves its own rules can fail before reporting the
 - `skillc/materialize.py` - installs a declared skill surface into disposable homes and
   proves what the client lists; see [materialization spec](docs/specs/evaluation-facility/materialization.md).
   Generic: subject conventions live in `subject.json`, never in this module
+- `skillc/profile.py` - `skillc profile validate` (#265): a profile layered on one subject names
+  every dependency of a selected workflow, transitively (helpers, libraries, tools, startup
+  context), and is refused or closed into a content-addressed inventory; installs nothing. See
+  [profiles spec](docs/specs/evaluation-facility/profiles.md). Generic: conventions live in `profile.json`
 - `skillc/trial.py` - the controller: plans the expected population, runs and confirms the
   stop of each attempt, captures its output into owned storage and accounts for every
   attempt; see [capture spec](docs/specs/evaluation-facility/capture.md)
