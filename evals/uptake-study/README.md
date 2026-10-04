@@ -1,6 +1,6 @@
 # Uptake study (#237): does a rewritten description raise natural selection?
 
-**Status: predeclared, not approved, not run.** This is the pilot of #238, the
+**Status: approved 2026-10-04, not yet run.** This is the pilot of #238, the
 description optimizer.
 
 ## Design

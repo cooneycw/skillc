@@ -2,8 +2,13 @@
  "kind": "uptake-study",
  "issue": 237,
  "declared_at": "2026-10-04",
- "_comment": "#237's predeclaration: flow-check's published description vs the owner-approved rewrite (2026-10-04), on slug-small-fix. NOT APPROVED: 'approval' is null until the owner approves this file (run size, caps, test); require_approved refuses it until then (ADR 0005).",
- "approval": null,
+ "_comment": "#237's predeclaration: flow-check's published description vs the owner-approved rewrite, on slug-small-fix. Approved by the owner 2026-10-04 (see 'approval'). NOT YET RUN.",
+ "approval": {
+  "by": "owner (cooneycw)",
+  "at": "2026-10-04",
+  "source": "owner reply in the 2026-10-04 skillc session: \"merge it. 2.approved\", answering \"Approve or edit the uptake study plan\" (flow-check published vs the owner-approved rewrite; intended-use 20 per arm, near-miss 10 per arm; gpt-6-astra effort high; one-sided Fisher's exact at alpha 0.05; about 60 attempts on the operator's machine)",
+  "scope": "the arms, cases, identities, schedule (seed 20261006 order), test and caps declared in this file, run under the operator's codex subscription login (ADR 0005 rule 6); no judge tier, no dollar-metered spend"
+ },
  "task": {
   "path": "evals/level1/slug-small-fix",
   "grader_id": "slug-small-fix",
