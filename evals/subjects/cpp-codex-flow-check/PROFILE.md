@@ -74,6 +74,11 @@ every arm.
 - an arm given this profile and an arm without it are different treatments
   (helper parity), never a matched pair.
 
+- admission re-opens: with the CPP checkout present, the gate-ran-nothing
+  case and its two siblings gain applicable execution obligations. They would
+  no longer be excluded from the explicit lanes under this profile, and #274
+  has to declare that explicitly.
+
 Both environments are legitimate. They answer different questions, and the
 declaration has to say which one it asks.
 
