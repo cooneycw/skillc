@@ -1,0 +1,24 @@
+{
+  "branch": "issue-264-specify-the-three-cpp-measurement-lanes-and-one-fl",
+  "counts": {
+    "accepted": 6,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "9d176703bc68fa4bdd344a79041bb8d08849629b",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "264",
+  "passes": 2,
+  "recorded_at": "2026-10-04T17:12:45Z",
+  "red_cases": {
+    "already_covered": 7,
+    "proposed": 14
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/04/rollout-2026-10-04T13-09-54-01a107e4-c000-7113-b5b7-71b2eae8b775.jsonl",
+    "thread_id": "01a107e4-c000-7113-b5b7-71b2eae8b775"
+  },
+  "schema": 1,
+  "status": "ran"
+}
