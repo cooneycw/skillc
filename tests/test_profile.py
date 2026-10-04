@@ -310,6 +310,18 @@ def test_prose_requires_helper_parity(tmp_path: Path) -> None:
     ]
 
 
+def test_prose_parity_needs_the_same_mode_not_only_the_same_bytes(tmp_path: Path) -> None:
+    """Codex re-review, #265: identical bytes, executable in the skill arm only."""
+    src = _source(tmp_path / "src")
+    deps = _deps()
+    for dep in deps:
+        dep["scope"] = "common"
+    deps[0]["source_root"] = "plain"
+    _write(src / "plain" / "run-gate.sh", RUN_GATE, executable=False)
+    with pytest.raises(p.Refused, match=r"bundled file\(s\) \['pack/skills/gate-check/scripts/run-gate.sh'\]"):
+        _run(tmp_path, treatment_question="prose", dependencies=deps)
+
+
 def test_prose_refuses_a_bundled_helper_only_the_skill_arm_has(tmp_path: Path) -> None:
     """Codex review, #265: every explicit dependency common, but a non-Markdown
     file lives only inside the skill - the expanded-instruction arm never gets it."""
@@ -351,6 +363,15 @@ def test_a_home_reference_must_resolve_to_where_it_is_installed(tmp_path: Path) 
     deps = _deps()
     deps[0]["destination"] = ".helpers/wrong"
     with pytest.raises(p.Refused, match=r"names ~/.helpers/run-gate.sh, but helper-run-gate installs it at ~/.helpers/wrong/run-gate.sh"):
+        _run(tmp_path, dependencies=deps)
+
+
+def test_a_tool_cannot_satisfy_a_reference(tmp_path: Path) -> None:
+    """Codex re-review, #265: a tool carries no file, so a home reference it
+    "satisfied" would bypass the install-path check."""
+    deps = _deps()
+    deps[3]["satisfies"] = [{"reference": "~/.helpers/missing.sh", "path": None}]
+    with pytest.raises(p.Refused, match="tool carries no path and cannot satisfy a reference"):
         _run(tmp_path, dependencies=deps)
 
 
@@ -412,6 +433,28 @@ def test_a_linked_skill_directory_blocks_discovery_for_any_selection(tmp_path: P
     os.symlink("other", src / "pack" / "skills" / "alias")
     with pytest.raises(p.Refused, match="blocks name discovery: pack/skills/alias"):
         _run(tmp_path)
+
+
+def test_a_nested_example_skill_link_in_a_neighbour_does_not_block(tmp_path: Path) -> None:
+    """Codex re-review, #265: `other/examples/SKILL.md` as a link does not hide
+    `other`'s name (its own SKILL.md is real), so a targeted profile stays green;
+    selecting `other` puts the link in the closure."""
+    src = _source(tmp_path / "src")
+    (src / "pack" / "skills" / "other" / "examples").mkdir()
+    os.symlink("../SKILL.md", src / "pack" / "skills" / "other" / "examples" / "SKILL.md")
+    _run(tmp_path)
+    with pytest.raises(p.Refused, match="symlink in the closure: pack/skills/other/examples/SKILL.md"):
+        _run(tmp_path, select="all")
+
+
+def test_a_whole_source_dependency_refuses_a_link_anywhere(tmp_path: Path) -> None:
+    """Codex re-review, #265: `paths: ["."]` reaches every entry, links included."""
+    src = _source(tmp_path / "src")
+    os.symlink("tools", src / "vendor-link")
+    deps = _deps()
+    deps[2]["paths"] = ["."]
+    with pytest.raises(p.Refused, match="symlink in the closure: vendor-link"):
+        _run(tmp_path, dependencies=deps)
 
 
 def test_unknown_profile_keys_are_refused(tmp_path: Path) -> None:

@@ -342,6 +342,10 @@ def _dependency(entry: object) -> Dependency:
         for key in ("version", "supply"):
             if not isinstance(entry.get(key), str) or not entry[key]:
                 raise Refused(f"dependency {dep_id}: a tool must declare {key}")
+        if entry.get("satisfies"):
+            # A tool carries no file, so a reference it "satisfied" would point at
+            # nothing this inventory installs.
+            raise Refused(f"dependency {dep_id}: a tool carries no path and cannot satisfy a reference")
     else:
         if not paths:
             raise Refused(f"dependency {dep_id}: names no source path")
@@ -396,6 +400,8 @@ class Tree:
 
     def _refuse_links(self, path: str) -> None:
         norm = posixpath.normpath(path)
+        if norm == "." and self.links:
+            raise Refused(f"symlink in the closure: {sorted(self.links)[0]}")
         for link in self.links:
             if norm == link or norm.startswith(link + "/") or link.startswith(norm + "/"):
                 raise Refused(f"symlink in the closure: {link}")
@@ -534,7 +540,16 @@ def validate(profile: Profile, tree: Tree) -> dict[str, Any]:
         for link in sorted(tree.links):
             if link.startswith(prefix) or root == ".":
                 rel = link[len(prefix):]
-                if "/" not in rel or posixpath.basename(rel) == "SKILL.md":
+                top, _, rest = rel.partition("/")
+                hides = (
+                    not rest  # a linked skill directory
+                    or rest == "SKILL.md"  # a linked entry point
+                    # a deeper SKILL.md decides a nested layout only where the
+                    # directory has no entry point of its own (materialize's rule)
+                    or (posixpath.basename(rest) == "SKILL.md"
+                        and f"{prefix}{top}/SKILL.md" not in tree.files())
+                )
+                if hides:
                     raise Refused(f"symlink in the skills root blocks name discovery: {link}")
         surface_files = [p for p in tree.files() if root == "." or p.startswith(prefix)]
         if not surface_files:
@@ -714,16 +729,18 @@ def _bundled_parity(profile: Profile, skills: list[dict[str, Any]],
     dependency (if any) supplies identical bytes outside the skill. Markdown is
     the instructions - the one thing a prose question lets differ."""
     common = {d.id for d in profile.dependencies if d.scope == "common"}
-    by_digest: dict[object, list[str]] = {}
+    # Bytes AND mode: an identical script that is not executable in the other
+    # arm is not the same helper.
+    by_digest: dict[tuple[object, object], list[str]] = {}
     for record in installed.values():
         if record["owner"] in common:
-            by_digest.setdefault(record["digest"], []).append(str(record["owner"]))
+            by_digest.setdefault((record["digest"], record["mode"]), []).append(str(record["owner"]))
     out: list[dict[str, object]] = []
     for skill in skills:
         for f in skill["files"]:
             if str(f["source"]).endswith(".md"):
                 continue
-            owners = sorted(set(by_digest.get(f["digest"], [])))
+            owners = sorted(set(by_digest.get((f["digest"], f["mode"]), [])))
             out.append({"path": f["source"], "supplied_by": owners[0] if owners else None})
     return out
 
