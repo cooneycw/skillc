@@ -1,0 +1,98 @@
+{
+ "kind": "calibration-declaration",
+ "issue": 203,
+ "declared_at": "2026-10-04",
+ "_comment": "#203 Q2 step (b): the evals/calibration-203 B/N/P design and identities on candidate 3, helper-different-question (#242). Approved by the owner 2026-10-04 (see 'approval'). NOT YET RUN.",
+ "approval": {
+  "by": "owner (cooneycw)",
+  "at": "2026-10-04",
+  "source": "owner reply in the 2026-10-04 skillc session: \"yes to merge both. q2 yes\", answering Q2 \"Should I set up the calibration run for the new task?\" (B/N/P, 6 per group, same model at effort high, P told to read flow-auto and flow-check)",
+  "scope": "the arms, identities, schedule (6 attempts per arm, seed 20261005 order) and caps declared in this file, run under the operator's codex subscription login (ADR 0005 rule 6); no judge tier, no dollar-metered spend"
+ },
+ "task": {
+  "path": "evals/level3/helper-different-question",
+  "grader_id": "helper-different-question",
+  "grader_revision": "1"
+ },
+ "arms": [
+  {
+   "name": "natural",
+   "subject": {
+    "name": "cpp-codex",
+    "locator": "github.com/cooneycw/claude-power-pack",
+    "revision": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b"
+   },
+   "treatment": "N: the whole CPP codex skill surface installed (evals/subjects/cpp-codex, select: all); goal.md verbatim; the agent chooses for itself"
+  },
+  {
+   "name": "baseline",
+   "subject": null,
+   "treatment": "B: an identical disposable home with no skill installed; goal.md verbatim"
+  },
+  {
+   "name": "provided",
+   "subject": {
+    "name": "cpp-codex",
+    "locator": "github.com/cooneycw/claude-power-pack",
+    "revision": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b"
+   },
+   "treatment": "P: the same install as N; goal.md plus the instruction below",
+   "instruction": "Before you start, read the `flow-auto` and `flow-check` skills and follow what applies to this task.",
+   "named_skills": [
+    "flow-auto",
+    "flow-check"
+   ]
+  }
+ ],
+ "shared": {
+  "client": {
+   "name": "codex",
+   "version": "0.157.1"
+  },
+  "model": "gpt-6-astra",
+  "reasoning_effort": "high",
+  "tools": "the client's defaults inside the trial container; no MCP servers",
+  "permissions": "the same non-interactive codex exec sandbox and approval settings for every attempt",
+  "public_requirements": "evals/level3/helper-different-question/goal.md, delivered verbatim to every arm; arm provided appends its declared instruction",
+  "image": {
+   "tag": "skillc-trial:latest",
+   "digest": "sha256:eb17e8c7995f69c4f849d6d8a9165eddfd0ccc8065b5425e0bdc2e3595a86d44"
+  },
+  "per_attempt_seconds": 1200,
+  "total_seconds": 21600
+ },
+ "attempts_per_arm": 6,
+ "arm_order": {
+  "seed": 20261005,
+  "sequence": [
+   "baseline",
+   "baseline",
+   "natural",
+   "baseline",
+   "natural",
+   "provided",
+   "baseline",
+   "natural",
+   "provided",
+   "provided",
+   "natural",
+   "provided",
+   "provided",
+   "natural",
+   "natural",
+   "provided",
+   "baseline",
+   "baseline"
+  ]
+ },
+ "retain_transcripts": true,
+ "primary_endpoint": "skillc.calibration.primary_endpoint: the task grader's four criteria (report-verdict, one-section-per-step, approved-content-present, other-content-preserved), status by records.derive_status; installation-ready never enters it",
+ "reported_beside": "readiness_beside per attempt; uptake per attempt (skill_opened, and named_skill_opened for provided) and per arm (opened/observed, named_opened), from confirmed observations only",
+ "report_questions": [
+  "1. Does the grader behave on live attempts (no INCONCLUSIVE from grading plumbing)?",
+  "2. Is difficulty useful: are B, N and P not all at ceiling and not all at floor?",
+  "3. Uptake: what is N's opened rate (k/n), and does P open its named skills?",
+  "4. Value: among P attempts that opened a named skill, how does the primary endpoint compare with B? Descriptive only at this n.",
+  "5. Go / redesign / stop for #203, and the per-attempt time and quota cost."
+ ]
+}
