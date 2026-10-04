@@ -120,6 +120,8 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import IO
 
+from .backend import CANDIDATE_GID as _CANDIDATE_GID
+from .backend import CANDIDATE_UID as _CANDIDATE_UID
 from .backend import (
     BackendDescription,
     BackendUnavailable,
@@ -152,8 +154,10 @@ DAEMON_TIMEOUT = 5.0
 #: and was rejected: it is either another uid-matching problem in a
 #: different place, or a directory writable beyond what the controller's own
 #: process needs.
-CANDIDATE_UID = 10001
-CANDIDATE_GID = 10001
+# Defined in `backend` (#235) so `leak` can exempt this identity without
+# importing this module at load time (`tests/test_no_docker_required.py`).
+CANDIDATE_UID = _CANDIDATE_UID
+CANDIDATE_GID = _CANDIDATE_GID
 
 
 def _container_user() -> str:

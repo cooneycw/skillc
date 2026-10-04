@@ -577,3 +577,62 @@ def test_a_host_path_only_fires_at_a_path_boundary() -> None:
     for line in at_a_real_boundary:
         findings = list(leak.scan_text(line, frozenset(), host_paths))
         assert [k for _, k, _ in findings] == ["host-path"], (line, findings)
+
+
+# ------------------------------------------- the trial container's own identity (#235)
+
+
+def test_the_container_s_own_uid_gid_is_exempt_by_exact_match() -> None:
+    """#235: an agent running `id` in the trial container prints uid/gid
+    10001, the candidate identity docker_backend fixes. Refusing it refused
+    all 18 transcripts of the #203 calibration. The exemption is exact: the
+    operator's own uid, and a longer number that merely starts with 10001,
+    still fire."""
+    from skillc import docker_backend
+
+    own = f"uid={docker_backend.CANDIDATE_UID}(candidate) gid={docker_backend.CANDIDATE_GID}(candidate)"
+    assert list(leak.scan_text(own, frozenset())) == []
+    assert [k for _l, k, _d in leak.scan_text("uid=1000(operator) gid=1000(operator)", frozenset())] == [
+        "uid-gid", "uid-gid"]
+    assert [d for _l, _k, d in leak.scan_text("uid=100010", frozenset())] == ["uid=100010"]
+
+
+def test_the_generic_example_home_path_is_exempt_and_nothing_longer() -> None:
+    """#235: `/home/user` is the placeholder in third-party skill text the
+    agent reads (cpp-codex flow-auto). Exact match only."""
+    assert list(leak.scan_text("see /home/user/project", frozenset())) == []
+    assert [k for _l, k, _d in leak.scan_text("see /home/users/project", frozenset())] == ["home-path"]
+    assert [k for _l, k, _d in leak.scan_text("see /home/username", frozenset())] == ["home-path"]
+
+
+@pytest.fixture
+def _fresh_exemptions() -> object:
+    leak.conditional_exemptions.cache_clear()
+    yield
+    leak.conditional_exemptions.cache_clear()
+
+
+@pytest.mark.usefixtures("_fresh_exemptions")
+def test_a_host_that_has_uid_10001_keeps_it_a_finding(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Counter-model review on #235: an operator whose own uid/gid is 10001
+    must not be hidden by the container exemption."""
+    monkeypatch.setattr(leak, "_host_has_uid", lambda uid: True)
+    monkeypatch.setattr(leak, "_host_has_gid", lambda gid: True)
+    findings = [d for _l, _k, d in leak.scan_text("uid=10001(operator) gid=10001(operator)", frozenset())]
+    assert findings == ["uid=10001", "gid=10001"]
+
+
+@pytest.mark.usefixtures("_fresh_exemptions")
+def test_a_host_with_an_account_named_user_keeps_its_home_a_finding(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Counter-model review on #235: a real account named `user` is an identity."""
+    monkeypatch.setattr(leak, "_host_has_account", lambda name: True)
+    assert [k for _l, k, _d in leak.scan_text("/home/user/private/report.txt", frozenset())] == ["home-path"]
+
+
+@pytest.mark.usefixtures("_fresh_exemptions")
+def test_with_no_such_host_account_the_container_identity_is_exempt(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(leak, "_host_has_uid", lambda uid: False)
+    monkeypatch.setattr(leak, "_host_has_gid", lambda gid: False)
+    monkeypatch.setattr(leak, "_host_has_account", lambda name: False)
+    assert list(leak.scan_text("uid=10001(candidate) gid=10001(candidate) /home/user/x", frozenset())) == []
+

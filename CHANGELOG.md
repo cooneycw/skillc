@@ -8,6 +8,29 @@ and version plan.
 
 ## [Unreleased]
 
+- **Transcript retention no longer refuses the trial container's own
+  identity** (Closes #235). The #203 calibration retained 0 of 18
+  transcripts, so none could be read afterwards. Two sources caused it:
+  - an agent running `id` prints the candidate uid/gid 10001 that
+    `docker_backend` fixes;
+  - cpp-codex's `flow-auto` skill text uses the placeholder `/home/user`.
+
+  `leak.conditional_exemptions` now exempts both, by exact match only:
+  - the uid/gid via `CANDIDATE_UID`/`CANDIDATE_GID`, never re-literalled,
+    as the twin of the already-exempt `/home/candidate`. The constants now
+    live in `backend`, and `docker_backend` re-exports them, so the CLI
+    still loads without the Docker backend;
+  - the `user` placeholder home path.
+
+  Each exemption applies only while this host has no real account with that
+  uid, gid or name, checked against the host's own account database. A
+  cross-model review (Codex) found that an unconditional exemption would
+  hide an operator whose uid really is 10001, or a real account named
+  `user`. The operator's own uid, a longer number starting 10001, and a
+  longer home name all still fire. The new exemption tests fail on the
+  pre-fix code; their red twins, including a host that has those accounts,
+  pass on both.
+
 - **Calibration declarations can have three arms: B/N/P** (Closes #231, for
   #203). The owner's rulings on #203 (3a/3b/3c, and Q2 "medium": 6 attempts
   per arm) need a provided-skill arm and more attempts than the two-arm,

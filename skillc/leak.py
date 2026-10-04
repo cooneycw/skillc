@@ -66,12 +66,17 @@ not proof of absence:
 
 from __future__ import annotations
 
+import functools
+import grp
 import ipaddress
 import os
+import pwd
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
+
+from .backend import CANDIDATE_GID, CANDIDATE_UID
 
 # The directory name right after /home/ or /Users/ - not the rest of the path -
 # because that name IS the local username being leaked.
@@ -152,6 +157,60 @@ ALLOWLIST: frozenset[str] = frozenset({
     # placeholder in tests/test_lifecycle.py's own docstring ("the account
     # name here is a placeholder, not this host's"), not a real identity.
 })
+
+
+def _host_has_uid(uid: int) -> bool:
+    try:
+        pwd.getpwuid(uid)
+    except KeyError:
+        return False
+    return True
+
+
+def _host_has_gid(gid: int) -> bool:
+    try:
+        grp.getgrgid(gid)
+    except KeyError:
+        return False
+    return True
+
+
+def _host_has_account(name: str) -> bool:
+    try:
+        pwd.getpwnam(name)
+    except KeyError:
+        return False
+    return True
+
+
+@functools.lru_cache(maxsize=1)
+def conditional_exemptions() -> frozenset[str]:
+    """Exact values exempt ONLY while this host holds no real identity they
+    could name (#235, counter-model review). Each is unconditionally
+    harmless text where it comes from, but a host account with the same uid,
+    gid or name would make the same text a real identity, so it is checked
+    against this host's own account database, not assumed:
+
+      - `uid=10001` / `gid=10001`: the trial container's own fixed candidate
+        identity (`backend.CANDIDATE_UID`/`GID`, re-exported by `docker_backend`;
+        never re-literalled),
+        the uid/gid twin of the already-exempt "/home/candidate". An agent
+        running `id` or `ls -ln` prints it; refusing it refused all 18
+        transcripts of the #203 calibration.
+      - `/home/user`: the generic example path in third-party skill text an
+        agent reads (cpp-codex's flow-auto `reference.md`).
+
+    Exact match only: the operator's own uid, a longer number that starts
+    with 10001, and a longer home directory name all still fire. A scan run on a host that HAS such an
+    account keeps the strict behaviour."""
+    exempt = set()
+    if not _host_has_uid(CANDIDATE_UID):
+        exempt.add(f"uid={CANDIDATE_UID}")
+    if not _host_has_gid(CANDIDATE_GID):
+        exempt.add(f"gid={CANDIDATE_GID}")
+    if not _host_has_account("user"):
+        exempt.add("/home/user")
+    return frozenset(exempt)
 
 #: `--denylist`, then this environment variable, then nothing (#63). Real host
 #: names belong in an untracked local file or this variable, never committed.
@@ -291,16 +350,17 @@ def scan_text(
         for host_path in host_paths
         if host_path
     ]
+    conditional = conditional_exemptions()
     for lineno, line in enumerate(text.splitlines(), start=1):
         for match in HOME_PATH_RE.finditer(line):
-            if match.group(0) in ALLOWLIST:
+            if match.group(0) in ALLOWLIST or match.group(0) in conditional:
                 continue
             yield (
                 lineno, "home-path",
                 f"home-directory path for {match.group(1)!r}: {match.group(0)}",
             )
         for match in UID_GID_RE.finditer(line):
-            if match.group(0) in ALLOWLIST:
+            if match.group(0) in ALLOWLIST or match.group(0) in conditional:
                 continue
             yield lineno, "uid-gid", match.group(0)
         for match in IPV4_RE.finditer(line):

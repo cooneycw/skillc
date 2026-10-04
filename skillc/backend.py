@@ -79,6 +79,13 @@ from enum import Enum
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+#: The fixed uid/gid of the trial container's candidate user - the identity
+#: `docker_backend` runs every subject as, and `/home/candidate`'s owner.
+#: Here, in the dependency-free seam, so `leak` can exempt it (#235) without
+#: importing the Docker backend; `docker_backend` re-exports both names.
+CANDIDATE_UID = 10001
+CANDIDATE_GID = 10001
+
 
 class BackendUnavailable(Exception):
     """The backend cannot be used right now (no daemon, no credentials, an
