@@ -1,0 +1,13 @@
+{
+ "id": "helper-different-question",
+ "revision": "1",
+ "criteria": ["report-verdict", "one-section-per-step", "approved-content-present", "other-content-preserved"],
+ "dimensions": {
+  "report-verdict": "constraint",
+  "one-section-per-step": "functional",
+  "approved-content-present": "functional",
+  "other-content-preserved": "constraint"
+ },
+ "probe": {"file": "probe.py", "inputs": "inputs.json", "timeout": 30},
+ "judge": {"file": "grade_helper_different_question.py", "timeout": 30}
+}
