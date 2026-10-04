@@ -257,15 +257,21 @@ def test_red_an_unapproved_declaration_leaves_no_store(tmp_path: Path) -> None:
     assert list(run_dir.iterdir()) == []
 
 
-def test_the_committed_declaration_parses_and_is_not_yet_approved() -> None:
-    """evals/uptake-study/run-manifest.json: flow-check, n=20/10, unapproved
-    until the owner signs off, so require_approved refuses it."""
+def test_the_committed_declaration_is_authorized() -> None:
+    """evals/uptake-study/run-manifest.json: flow-check, n=20/10, approved by
+    the owner 2026-10-04."""
     declaration = us.load_declaration(ROOT / "evals" / "uptake-study" / "run-manifest.json")
     assert declaration.target_skill == "flow-check"
     assert [(c.id, c.attempts_per_arm, c.primary) for c in declaration.cases] == [
         ("intended-use", 20, True), ("near-miss", 10, False)]
+    us.require_approved(declaration, ROOT)
+
+
+def test_red_the_committed_declaration_without_its_approval_is_refused() -> None:
+    data = json.loads((ROOT / "evals" / "uptake-study" / "run-manifest.json").read_text(encoding="utf-8"))
+    data["approval"] = None
     with pytest.raises(us.StudyRefused, match="not approved"):
-        us.require_approved(declaration, ROOT)
+        us.require_approved(us.parse_declaration(data), ROOT)
 
 
 def test_the_committed_rewritten_skill_md_is_the_declared_description() -> None:
