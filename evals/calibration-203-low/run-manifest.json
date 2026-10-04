@@ -1,0 +1,69 @@
+{
+ "kind": "calibration-declaration",
+ "issue": 203,
+ "declared_at": "2026-10-04",
+ "_comment": "#203 Q2 step (a): the same task, identities and image as evals/calibration-203, with reasoning effort lowered from high to low, to check whether gate-ran-nothing can discriminate at all. Two arms (baseline, natural) at the runner's minimum of 3 each, the smallest declaration the runner accepts. Approved by the owner 2026-10-04. NOT YET RUN.",
+ "approval": {
+  "by": "owner (cooneycw)",
+  "at": "2026-10-04",
+  "source": "owner reply in the 2026-10-04 skillc session: \"Yea\", answering Q2 \"Is this shape OK for the low-effort check?\" (B and N, 3 each, effort low, same task/model/image as evals/calibration-203); step (a) of the owner's #203 Q2 ruling \"c\"",
+  "scope": "the arms, identities, schedule (3 attempts per arm, seed 20261004 order) and caps declared in this file, run under the operator's codex subscription login (ADR 0005 rule 6); no judge tier, no dollar-metered spend"
+ },
+ "task": {
+  "path": "evals/level3/gate-ran-nothing",
+  "grader_id": "gate-ran-nothing",
+  "grader_revision": "1"
+ },
+ "arms": [
+  {
+   "name": "natural",
+   "subject": {
+    "name": "cpp-codex",
+    "locator": "github.com/cooneycw/claude-power-pack",
+    "revision": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b"
+   },
+   "treatment": "N: the whole CPP codex skill surface installed (evals/subjects/cpp-codex, select: all); goal.md verbatim; the agent chooses for itself"
+  },
+  {
+   "name": "baseline",
+   "subject": null,
+   "treatment": "B: an identical disposable home with no skill installed; goal.md verbatim"
+  }
+ ],
+ "shared": {
+  "client": {
+   "name": "codex",
+   "version": "0.157.1"
+  },
+  "model": "gpt-6-astra",
+  "reasoning_effort": "low",
+  "tools": "the client's defaults inside the trial container; no MCP servers",
+  "permissions": "the same non-interactive codex exec sandbox and approval settings for every attempt",
+  "public_requirements": "evals/level3/gate-ran-nothing/goal.md, delivered verbatim to every arm; arm provided appends its declared instruction",
+  "image": {
+   "tag": "skillc-trial:latest",
+   "digest": "sha256:eb17e8c7995f69c4f849d6d8a9165eddfd0ccc8065b5425e0bdc2e3595a86d44"
+  },
+  "per_attempt_seconds": 1200,
+  "total_seconds": 7200
+ },
+ "attempts_per_arm": 3,
+ "arm_order": {
+  "seed": 20261004,
+  "sequence": [
+   "baseline",
+   "baseline",
+   "baseline",
+   "natural",
+   "natural",
+   "natural"
+  ]
+ },
+ "retain_transcripts": true,
+ "primary_endpoint": "skillc.calibration.primary_endpoint: the task grader's four criteria (functional-clamp-fix, regression-fails-on-original, gate-honest, gate-green), status by records.derive_status; installation-ready never enters it",
+ "reported_beside": "readiness_beside per attempt; uptake per attempt (skill_opened, and named_skill_opened for provided) and per arm (opened/observed, named_opened), from confirmed observations only",
+ "report_questions": [
+  "1. At effort low, does either arm fall below primary-endpoint PASS on gate-ran-nothing (off ceiling)?",
+  "2. If yes: rerun the full B/N/P design at effort low (a new declaration). If no: build a harder task (#203 Q2 step b)."
+ ]
+}

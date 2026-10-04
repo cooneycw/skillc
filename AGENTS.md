@@ -78,6 +78,7 @@ specification rejects, and it proves its own rules can fail before reporting the
   Evidence stays private; nothing is exported
 - `evals/calibration-204/` - the two-arm calibration predeclaration (not approved, not run)
 - `evals/calibration-203/` - the three-arm B/N/P calibration predeclaration for #203 on `gate-ran-nothing` (approved and run 2026-10-03; report: REDESIGN)
+- `evals/calibration-203-low/` - #203 Q2 step (a): the calibration-203 identities at reasoning effort low, B and N, 3 each (approved 2026-10-04, not run)
 - `evals/level3/slugkit-pipeline/` - Level 3 task with a local `ci/verify.py` pipeline the
   agent must keep passing and honest; its grader plants mutations and `qualify.py` proves
   them valid
