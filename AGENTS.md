@@ -73,7 +73,7 @@ specification rejects, and it proves its own rules can fail before reporting the
   an unapproved one)
 - `skillc/uptake_study.py` - `skillc uptake-study` (#237): two arms that differ only in one skill's
   description (a checked `degrade-subject` override), selection counted from confirmed observations, and a
-  predeclared one-sided Fisher's exact test; `evals/uptake-study/` holds the rewritten SKILL.md and declaration (approved 2026-10-04, not run)
+  predeclared one-sided Fisher's exact test; `evals/uptake-study/` holds the rewritten SKILL.md and declaration (run 2026-10-04: rewritten 20/20 vs published 0/20, p=7e-12; near-miss 9/10 vs 0/10)
 - `skillc/calibration_run.py` - `skillc calibration-run` (#207): runs an APPROVED calibration declaration
   (refused before anything exists otherwise) in its seeded arm order through one attempt path, the
   arms differing only in what is installed; pins the model via `matched_pilot.pin_model_argv`, enforces
