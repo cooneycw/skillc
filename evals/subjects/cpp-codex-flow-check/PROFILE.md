@@ -98,14 +98,44 @@ inventory says nothing about Claude parity.
 
 - **The library is not traversed.** `lib/cicd` and `lib/security` are Python
   packages whose dependencies are imports, not path text. At this pin they
-  import only themselves and PyPI packages; whether they import cleanly in a
-  disposable home is #266's proof.
-- **PyPI resolution is external.** `uv run --project` resolves pydantic and
-  pyyaml from an index on first run, and trials have no network. #266 must
-  pre-supply a filled cache or report that gate step unavailable.
+  import only themselves and PyPI packages. CONFIRMED by #266's real-pin
+  proof (`evidence/install-receipt.json`, host run - not CI): `import
+  lib.cicd; import lib.security` succeeds in a disposable home installed by
+  `skillc profile install`, under `uv run --locked` with no inherited
+  environment.
+- **PyPI resolution is external.** `uv sync --locked` under `env -i` with
+  only `HOME`/`PATH` set still reached the network to resolve pydantic/pyyaml
+  from the lock on first run (no cache was pre-supplied) - this environment
+  had network; a genuinely network-less trial would need a pre-filled cache
+  or must report this step unavailable. #266 does not supply one.
 - **Tool versions are mostly unpinned by the subject.** Only Python's floor is
-  declared at the source. #266 pins the rest in the image.
+  declared at the source. The real profile's tool dependencies are LABELS
+  (`tool-python`, `tool-uv`, `tool-pypi-runtime`, `tool-make-git-bash`), not
+  bare executable names - `skillc profile install`'s literal PATH lookup
+  reports all four `unknown` rather than guessing a mapping; a human
+  confirmed python3/uv/make/git/bash present and adequate by hand for the
+  real run.
 - **Startup context is declared empty.** CPP's Codex installer at this pin
   writes skill directories only (no `AGENTS.md`, no config). The client's
   listing metadata is the skill's own description, recorded as
   `description_digest`.
+- **`flow-finish-gate.sh`'s own CPP-checkout self-detection needs more than
+  this profile installs.** FOUND by #266's real-pin proof: the helper's
+  default search (`$HOME/Projects/claude-power-pack`, `/opt/claude-power-pack`,
+  `$HOME/.claude-power-pack`) additionally requires a `CLAUDE.md` marker file
+  at the checkout root, which this profile does not declare as a dependency -
+  so a disposable home installed from this profile alone is NOT
+  self-discoverable by the helper's default search; it degrades to a
+  Makefile fallback instead (still correct, still never reads the real
+  operator home, but not the `lib.cicd` runner path). The real run instead
+  set the helper's own explicit override, `FLOW_GATE_CPP_DIR`, which is NOT
+  one of the profile's declared `reference_patterns` either - both gaps are
+  left for a future profile revision to close explicitly, filed on skillc#20.
+- **`GitTree` reads a pinned revision's committed blobs, never a working
+  tree.** A "delete this file and re-run against --repo" red case does
+  nothing against a real checkout for this reason - deleting a working-tree
+  file does not change what `git cat-file blob` returns for that commit.
+  #266's real-pin missing-helper red case instead used a plain-directory
+  snapshot of the pinned tree (`git archive <pin> | tar -x`, then delete,
+  then `--snapshot`), which does exercise the same `validate()` refusal
+  against bytes genuinely derived from the real checkout.

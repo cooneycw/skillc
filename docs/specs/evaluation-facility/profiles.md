@@ -174,32 +174,72 @@ operator-home decoy, conflicts, identical files and subsequent drift/deletion.
 Host tests do not contain absolute reads, inherited secrets, PATH binaries or
 external caches. They do not satisfy the cold-container acceptance item.
 
-## Human-only real-pin proof owed (not wired into tests)
+## Human-only real-pin proof (run, not merely documented)
 
-The following is documented intent, not an automated test or an isolation claim.
-Use the already available checkout at the subject's historical pin, a disposable
-home, a tiny project with declared gate inputs, and a separate fake operator
-home. Never seed the operator's actual home. Place distinctive decoys at the
-fake home's `.claude/scripts/flow-finish-gate.sh` and
-`Projects/claude-power-pack` paths. Record observed consuming paths and limits.
+This has been RUN once, by hand, against a real `git clone` of
+`github.com/cooneycw/claude-power-pack` from GitHub at the subject's pin
+(never a host checkout - #266's orchestrator review required that
+distinction). Evidence: `evidence/install-receipt.json` (63 files, scrubbed
+of any absolute host path by `install()`'s own design - `"home": null`).
+Running the sequence is the evidence; this is not a claim about code that
+was only written and never executed.
 
 ```text
 skillc profile install evals/subjects/cpp-codex-flow-check/profile.json \
-    --repo <claude-power-pack checkout> --home <disposable dir> \
-    --out evidence/install-receipt.json
+    --repo <real claude-power-pack checkout, cloned from GitHub> \
+    --home <disposable dir> --out evidence/install-receipt.json
+# -> 63 files installed, 4 tools checked (all `unknown`: the real profile's
+#    tool ids are labels - tool-python, tool-uv, tool-pypi-runtime,
+#    tool-make-git-bash - not bare executable names; literal PATH lookup
+#    correctly finds none of them, see PROFILE.md's Known limits)
 
-env -i HOME=<disposable dir> PATH=<minimal tool PATH> \
+env -i HOME=<disposable dir> PATH=/usr/bin:/bin:/usr/local/bin \
     uv sync --locked --project <disposable dir>/Projects/claude-power-pack
+# -> resolved and installed pydantic/pyyaml; needed network for the first
+#    resolve (no cache was pre-supplied) - a genuinely network-less trial
+#    would need one or must report this step unavailable
 
-env -i HOME=<disposable dir> PATH=<minimal tool PATH> \
-    CPP_DIR=<disposable dir>/Projects/claude-power-pack \
-    bash -c 'cd "<tiny fixture project>" && exec "$HOME/.claude/scripts/flow-finish-gate.sh"'
+env -i HOME=<disposable dir> PATH=/usr/bin:/bin:/usr/local/bin \
+    uv run --locked python -c "import lib.cicd; import lib.security"
+# -> IMPORT OK: the library imports cleanly in the disposable home
+
+env -i HOME=<disposable dir> PATH=/usr/bin:/bin:/usr/local/bin \
+    FLOW_GATE_CPP_DIR=<disposable dir>/Projects/claude-power-pack \
+    bash -c 'cd "<tiny fixture project>" && exec <disposable dir>/.claude/scripts/flow-finish-gate.sh'
+# -> the REAL lib.cicd runner ran (not the Makefile fallback), produced a
+#    structured plan report, reached FLOW_FINISH_GATE: warn, exit 3 (a
+#    fixture this trivial has nothing a test/lint runner recognizes - an
+#    honest qualified result, not a failure of the installed path).
+# NOTE: CPP_DIR (as written in an earlier draft of this section) is not the
+# variable the helper reads - FLOW_GATE_CPP_DIR is, and without it the
+# helper's own default search needs a CLAUDE.md marker this profile does
+# not install, so it silently degrades to the Makefile fallback instead of
+# exercising lib.cicd at all. See PROFILE.md's Known limits.
 ```
 
-Exact gate arguments and project inputs must be confirmed against the pinned
-helper by the human operator. This host procedure, even with `env -i`, cannot
-prove that the helper avoids absolute operator-home reads. strace is unavailable
-in the implementation environment. A separate cold-container run with no
-operator skill, home, MCP, or secret mounts is still required for acceptance item 2.
-Locked package resolution requires external access or a prefilled cache; neither
-is supplied by this installer. No real pinned-revision proof has run here.
+Fake-operator-home ambient control, both directions: a THROWAWAY directory
+(never the real operator $HOME) was seeded with decoys at the profile's
+relative paths (`.claude/scripts/flow-finish-gate.sh` printing a distinctive
+sentinel and exiting 99, and `Projects/claude-power-pack/CLAUDE.md`).
+Negative control: the real sequence above, run with `HOME` at the legitimate
+disposable dir, produced zero occurrences of the sentinel anywhere in its
+output. Positive control: the identical helper invocation, run with `HOME`
+pointed AT the fake operator home instead, produced exactly one occurrence -
+proving the sentinel check itself is not blind.
+
+Missing-helper red case: `GitTree` reads a pinned revision's git-committed
+blobs via `git cat-file`, never a working tree, so deleting a file from a
+checked-out working tree changes nothing it returns for that commit. The red
+case instead used a plain-directory snapshot of the real pinned tree
+(`git archive <pin> | tar -x` into a directory, confirmed to install
+identically to `--repo` first), then deleted `scripts/flow-finish-gate.sh`
+from that snapshot and re-ran `skillc profile install --snapshot`:
+`REFUSED - missing helper helper-flow-finish-gate: scripts/flow-finish-gate.sh
+is absent from the source`, exit 2, nothing written to the home directory.
+
+What this does NOT prove: absolute operator-home reads by the helper's own
+code are unobserved (strace is unavailable in the implementation
+environment, stated as a boundary, never assumed covered), and no container
+isolation was attempted or claimed. A separate cold-container run with no
+operator skill, home, MCP, or secret mounts is still required for acceptance
+item 2.
