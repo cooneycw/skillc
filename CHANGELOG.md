@@ -19,6 +19,19 @@ and version plan.
   dependency reached a second time is marked a cascade (`caused_by`) of the
   one root cause rather than reported again.
 
+- **`uptake-study` screens: published plus 1-3 description variants in one
+  run** (Refs #238). Arms are `published` then `variant-a`..`variant-c`, with
+  the same subject and target, and distinct descriptions.
+  - Every case declares `expect: select | abstain`.
+  - A screen has no primary case and no test. Each arm is scored as its
+    selection rate on `select` cases minus its rate on `abstain` cases, so
+    a description that fires everywhere scores no better than one that
+    never fires. The red case: a recall-only score fails the test.
+  - `--rewritten ARM=DIR` is given once per variant. Each variant's snapshot
+    passes `check_rewritten_files` against `published`.
+  - The two-arm study (`published` + `rewritten`, with its Fisher test) is
+    unchanged.
+
 - **`uptake-study` screening-probe mode** (Refs #238). An optional `probe`
   block declares a cut-off (20-300 s), which must equal
   `shared.per_attempt_seconds`, so the attempt itself stops there.

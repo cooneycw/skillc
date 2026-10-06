@@ -1852,10 +1852,32 @@ def cmd_uptake_study(args: argparse.Namespace) -> int:
     print(f"skillc: private run directory: {run_dir}", file=sys.stderr)
 
     subject_name = str(declaration.subject.get("name"))
+    # `--rewritten DIR` (a two-arm study's one variant) or `--rewritten ARM=DIR`
+    # once per variant arm (a screen, #238).
+    variant_dirs: dict[str, Path] = {}
+    if declaration.tested:
+        # A study's one variant is a literal path (counter-model review: a
+        # directory name containing "=" must not be split into ARM=DIR).
+        if len(args.rewritten) != 1:
+            print("skillc: a two-arm study takes exactly one --rewritten DIR", file=sys.stderr)
+            return 2
+        variant_dirs["rewritten"] = Path(args.rewritten[0])
+    else:
+        for spec in args.rewritten:
+            arm, sep, path = spec.partition("=")
+            if not sep or arm in variant_dirs:
+                print(f"skillc: a screen takes --rewritten ARM=DIR once per variant arm, not {spec!r}",
+                      file=sys.stderr)
+                return 2
+            variant_dirs[arm] = Path(path)
+    if set(variant_dirs) != set(declaration.arms[1:]):
+        print(f"skillc: --rewritten must name exactly the arms {list(declaration.arms[1:])}, got {sorted(variant_dirs)}",
+              file=sys.stderr)
+        return 2
     try:
         published = cc.acquire_collection(subject_name, run_dir)
-        rewritten = cc.acquire_degraded_collection(subject_name, Path(args.rewritten))
-        for acquired in (published, rewritten):
+        rewrites = {arm: cc.acquire_degraded_collection(subject_name, path) for arm, path in variant_dirs.items()}
+        for acquired in (published, *rewrites.values()):
             found = (acquired.subject.locator, acquired.subject.client)
             wanted = (declaration.subject.get("locator"), client_name)
             if found != wanted:
@@ -1866,9 +1888,11 @@ def cmd_uptake_study(args: argparse.Namespace) -> int:
             print(f"skillc: the published subject is revision {published.subject.revision!r}, not the declared "
                   f"{declaration.subject.get('revision')!r}; refusing", file=sys.stderr)
             return 2
-        treatments = {"published": cr.build_treatment(published), "rewritten": cr.build_treatment(rewritten)}
-        us.check_rewritten_files(treatments["published"].home_files, treatments["rewritten"].home_files,
-                                 declaration.target_skill, declaration.rewritten_description)
+        treatments = {"published": cr.build_treatment(published),
+                      **{arm: cr.build_treatment(acq) for arm, acq in rewrites.items()}}
+        for arm in declaration.arms[1:]:
+            us.check_rewritten_files(treatments["published"].home_files, treatments[arm].home_files,
+                                     declaration.target_skill, (declaration.variants or {})[arm])
     except (demo.SubjectRefused, degrade.DegradationRefused, cr.CalibrationRefused, us.StudyRefused) as exc:
         print(f"skillc: {exc}", file=sys.stderr)
         return 2
@@ -1898,7 +1922,13 @@ def cmd_uptake_study(args: argparse.Namespace) -> int:
     if interrupted:
         return 130
     test = report["primary_test"]
-    if isinstance(test, dict) and not test.get("available"):
+    scores = report.get("scores")
+    if not declaration.tested and isinstance(scores, dict) and all(v.get("score") is None for v in scores.values()):
+        # An empty scoring population is not a screen result (counter-model review).
+        print("skillc: no screen result: no arm has confirmed, decided observations on both its select and "
+              "abstain cases", file=sys.stderr)
+        return 1
+    if declaration.tested and isinstance(test, dict) and not test.get("available"):
         # A failed observation instrument is not a completed negative test.
         print(f"skillc: no primary result: {test.get('reason')}", file=sys.stderr)
         return 1
@@ -2499,9 +2529,9 @@ def build_parser() -> argparse.ArgumentParser:
              "behind SKILLC_ALLOW_REAL_AGENT=1)",
     )
     p_uptake.add_argument("declaration", help="the uptake-study declaration JSON to run")
-    p_uptake.add_argument("--rewritten", required=True,
-                          help="a degrade-subject --out directory: the subject with only the target's "
-                               "description overridden")
+    p_uptake.add_argument("--rewritten", required=True, action="append",
+                          help="a degrade-subject --out directory: the subject with only the target's description "
+                               "overridden. A screen (#238) passes ARM=DIR once per variant arm")
     p_uptake.add_argument("--image", help="trial image (default: skillc.demo.DEFAULT_IMAGE)")
     p_uptake.add_argument("--docker-bin", help="docker executable (space-separated words; default: docker)")
     p_uptake.add_argument("--timeout", type=float, default=30, help="per-container-call timeout, seconds")

@@ -94,7 +94,7 @@ def _mutate(path: tuple[object, ...], value: object) -> dict[str, object]:
     (("arms", 1, "description"), "two\nlines", "one non-empty line"),
     (("arms", 1, "description"), "Use checks\rdisable-model-invocation: true", "printable"),
     (("arms", 1, "description"), "Use checks\u2028more", "printable"),
-    (("arms", 1, "target_skill"), "", "no target_skill"),
+    (("arms", 1, "target_skill"), "", "same, non-empty target_skill"),
     (("cases", 0, "attempts_per_arm"), 31, "3-30"),
     (("cases", 0, "attempts_per_arm"), 2, "3-30"),
     (("cases", 1, "primary"), True, "exactly one case is primary"),
@@ -466,4 +466,102 @@ def test_red_an_unrecognized_call_type_makes_a_negative_undecided(probe: bool) -
     cells = report["cells"]["intended-use"]  # type: ignore[index]
     assert cells["rewritten"]["observed"] == 0
     assert cells["published"] == {"scheduled": 1, "observed": 1, "selected": 1}
+
+
+# --------------------------------------------- multi-variant screen (#238)
+
+
+def _screen_data(variants: Sequence[str] = ("variant-a", "variant-b"), **case_extra: object) -> dict[str, object]:
+    grader = verify.GraderDef.load(TASK)
+    cases = [
+        {"id": "asked", "prompt_addendum": "Before finishing, run this project's quality checks.",
+         "attempts_per_arm": 3, "primary": False, "expect": "select"},
+        {"id": "not-asked", "prompt_addendum": "", "attempts_per_arm": 3, "primary": False, "expect": "abstain"},
+    ]
+    for c in cases:
+        c.update(case_extra)
+    arms = [{"name": "published", "subject": dict(SUBJECT)}] + [
+        {"name": v, "subject": dict(SUBJECT), "target_skill": "flow-check", "description": f"{NEW} ({v})"}
+        for v in variants]
+    parsed = [us.Case(c["id"], c["prompt_addendum"], c["attempts_per_arm"], c["primary"], c.get("expect"))  # type: ignore[arg-type]
+              for c in cases]
+    names = ["published", *variants]
+    return {
+        "kind": "uptake-study", "issue": 238, "approval": {"by": "owner", "at": "2026-10-06"},
+        "task": {"path": "evals/level1/slug-small-fix", "grader_id": grader.id, "grader_revision": grader.revision},
+        "arms": arms, "cases": cases, "probe": {"cutoff_seconds": 45},
+        "shared": {**_data()["shared"], "per_attempt_seconds": 45,  # type: ignore[dict-item]
+                   "total_seconds": 45 * len(names) * 6},
+        "arm_order": {"seed": 3, "sequence": [list(x) for x in us.derive_order(3, parsed, names)]},
+    }
+
+
+def test_a_screen_declaration_parses() -> None:
+    declaration = us.parse_declaration(_screen_data(("variant-a", "variant-b", "variant-c")))
+    assert declaration.arms == ("published", "variant-a", "variant-b", "variant-c")
+    assert not declaration.tested
+    assert set(declaration.variants or {}) == {"variant-a", "variant-b", "variant-c"}
+    us.require_approved(declaration, ROOT)
+
+
+@pytest.mark.parametrize(("mutate", "match"), [
+    (lambda d: d["arms"][2].update(description=d["arms"][1]["description"]), "same description"),
+    (lambda d: d["arms"][2].update(name="rewritten"), "arms must be exactly"),
+    (lambda d: d["arms"][2].update(target_skill="qa-test"), "same, non-empty target_skill"),
+    (lambda d: d["cases"][0].pop("expect"), "must declare expect"),
+    (lambda d: d["cases"][0].update(expect="maybe"), "expect must be one of"),
+    (lambda d: d["cases"][0].update(primary=True), "declares no primary"),
+    (lambda d: d["cases"][1].update(expect="select"), "one 'abstain' case"),
+    (lambda d: d.update(test={"kind": "fisher-exact-one-sided"}), "carries no test"),
+])
+def test_a_malformed_screen_is_refused(mutate: object, match: str) -> None:
+    data = copy.deepcopy(_screen_data())
+    mutate(data)  # type: ignore[operator]
+    with pytest.raises(us.StudyRefused, match=match):
+        us.parse_declaration(data)
+
+
+def test_a_screen_scores_selectivity_not_just_recall(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """variant-a selects only when asked (+1.00); variant-b selects everywhere
+    (0.00, no better than published's 0.00). Red case: a recall-only score
+    would rank variant-b level with variant-a."""
+    declaration = us.parse_declaration(_screen_data())
+    treatments = {"published": _treatment(tmp_path, monkeypatch, "published", "Run quality checks"),
+                  "variant-a": _treatment(tmp_path, monkeypatch, "variant-a", f"{NEW} (variant-a)"),
+                  "variant-b": _treatment(tmp_path, monkeypatch, "variant-b", f"{NEW} (variant-b)")}
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    state = tmp_path / "docker-state"
+
+    def backends() -> tuple[object, object]:
+        make = lambda: d.DockerBackend(image=_IMAGE, base_dir=run_dir, docker_bin=_docker_bin(state),
+                                       daemon_timeout=_FAKE_DAEMON_TIMEOUT)
+        return make(), make()
+
+    def argv_for(scheduled: mp.ScheduledAttempt) -> list[str]:
+        home = state / f"{d._container_name(scheduled.attempt_id)}.fsroot" / "home" / "candidate"
+        argv = [sys.executable, str(FAKE_CLIENT), "--format", "codex-fake", "--home", str(home),
+                "--transcript-relpath", f".codex/sessions/2026/01/01/rollout-{scheduled.attempt_id}.jsonl"]
+        if scheduled.arm in ("asked__variant-a", "asked__variant-b", "not-asked__variant-b"):
+            argv += ["--plant-skill", "flow-check"]
+        return argv
+
+    experiment, outcomes = us.run_study(
+        declaration, run_dir=run_dir, treatments=treatments, image_digest=_IMAGE_DIGEST, backends=backends,
+        argv_for=argv_for, root=ROOT, credential_explicit_path=_fresh_codex_credential(tmp_path),
+    )
+    report = us.build_report(experiment, us.reconcile(experiment, outcomes), declaration)
+    scores = report["scores"]
+    assert report["primary_test"] is None and report["screen"] is True
+    assert scores["variant-a"] == {"select": "3/3", "abstain": "0/3", "score": 1.0}  # type: ignore[index]
+    assert scores["variant-b"] == {"select": "3/3", "abstain": "3/3", "score": 0.0}  # type: ignore[index]
+    assert scores["published"] == {"select": "0/3", "abstain": "0/3", "score": 0.0}  # type: ignore[index]
+    assert "score [variant-a] select=3/3 abstain=0/3 score=+1.00" in us.paste_back(report)
+
+
+@pytest.mark.parametrize("value", [[], {}, None])
+def test_red_a_non_string_target_is_refused_not_crashed(value: object) -> None:
+    """Counter-model review: a list or dict target raised TypeError."""
+    with pytest.raises(us.StudyRefused, match="same, non-empty target_skill"):
+        us.parse_declaration(_mutate(("arms", 1, "target_skill"), value))
 
