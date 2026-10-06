@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import os
+import shutil
 import subprocess
 import time
 from datetime import UTC, datetime
@@ -13,6 +14,14 @@ import pytest
 
 from skillc import git_fixture as g
 from skillc import trial
+
+#: Every test here shells out to a real `git` - there is no fake/DirTree mode
+#: for this module, unlike materialize.py/profile.py. The CI image has no git
+#: (AGENTS.md: "the git and real-client tests skip there and run on a host"),
+#: matching tests/test_materialize.py's and tests/test_profile.py's own
+#: `needs_git` convention - applied here at module level since EVERY test
+#: needs it, not a subset.
+pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
 
 
 def file(text: str, executable: bool = False) -> dict[str, Any]:
