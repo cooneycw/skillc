@@ -1,0 +1,83 @@
+{
+ "kind": "calibration-declaration",
+ "status": "DRAFT - NOT YET APPROVED, NOT YET RUNNABLE",
+ "issue": 287,
+ "lane": "matched-outcome",
+ "declared_at": "2026-10-06",
+ "_comment": "The IMPROVEMENT pilot declaration for skillc#287 (orchestrator review, comment 6025311708, decisions P1-P6). Exploratory only: estimates the CPP and baseline pilot pass rates that evals/calibration-287/power_simulation.py's choose_n() needs to size the main study - it draws NO verdict (operator ruling, comment 6021089903: 'No verdicts are drawn from the pilot. Its record must say so.'). This file DOES fit skillc.calibration.parse_declaration's existing matched-outcome shape unmodified - a literal 'baseline' arm with a null subject, one treated arm ('intact', the CPP subject) - so no schema change is needed for THIS declaration. See pilot-discrimination-declaration.json for why its sibling does NOT fit that shape and is therefore a different 'kind'.",
+ "pilot": {
+  "purpose": "exploratory - estimates p_hat_intact and p_hat_baseline for evals/calibration-287/power_simulation.py's choose_n(); draws no verdict",
+  "no_verdict_statement": "This pilot draws no IMPROVED / NO_IMPROVEMENT_SHOWN / UNKNOWN verdict. Its 10 attempts per arm are too few to be the predeclared improvement test itself (that test is the MAIN study's declaration, sized by this pilot's results) and are never pooled into the main study's counts (P1).",
+  "rule_citations": [
+   "P1 (comment 6025311708): pilot attempts never count toward the main study.",
+   "P2 (comment 6025311708): the pilot uses the same two-declaration shape, one pilot declaration per test, each 2-arm at n=10, each separately approved at 10. The intact arm therefore runs in both pilot declarations (see pilot-discrimination-declaration.json's 'intact' arm, same subject).",
+   "P3 (comment 6025311708): this pilot's own raw proportions (passes/evaluable) must never be plugged into the sizing simulation directly - convert with evals/calibration-287/power_simulation.py's jeffreys_estimate() first.",
+   "P5 (comment 6025311708): tolerance is max(1, ceil(0.05*n)) per arm, not a flat 1.",
+   "P6 (comment 6025311708): arm order is calibration's seed-derived interleaving, so the two arms run interleaved in time rather than as two blocks."
+  ]
+ },
+ "task": {
+  "path": "<CASE: pending skillc#270 certification>",
+  "grader_id": "<CASE: pending skillc#270 certification>",
+  "grader_revision": "<CASE: pending skillc#270 certification>",
+  "_comment": "Per the operator's improvement ruling (claude-power-pack#1084 comment 6014163660, cited verbatim in skillc#287 comment 6014179807): 'on the same task, grader and pinned subject revision as the case that #273's pairing record certifies as discriminating'. skillc#270 is open and uncertified as of 2026-10-06 (checked directly); this declaration cannot be finalized until it names a real path/grader_id/grader_revision."
+ },
+ "arms": [
+  {
+   "name": "intact",
+   "subject": {
+    "name": "cpp-codex-flow-check-ea6dbfa",
+    "locator": "github.com/cooneycw/claude-power-pack",
+    "revision": "ea6dbfa45f9308ee6ba60f032d8e7031bd6938a1"
+   },
+   "treatment": "the cpp-codex-flow-check-ea6dbfa profile installed, unmodified (skillc#265/#330, merged 841689b; skillc profile diagnose/validate both report 0 problems at this pin). The SAME subject as pilot-discrimination-declaration.json's 'intact' arm - this is what P2 means by 'the intact arm runs in both pilot declarations': one subject identity, two separate 10-attempt pilot schedules, never shared attempts (attempt-sharing was explicitly declined, comment 6025311708)."
+  },
+  {
+   "name": "baseline",
+   "subject": null,
+   "treatment": "no subject installed; stays on the agent-observation readiness stand-in (ADR 0005 'yes, narrow B1'), unchanged from #204's own baseline arm shape"
+  }
+ ],
+ "shared": {
+  "client": {
+   "name": "PENDING - operator pilot-spend authorization has not yet named a client",
+   "version": "PENDING"
+  },
+  "model": "PENDING - pending the operator's pilot-spend authorization (ADR 0005 rule 6: filing or drafting this declaration does not itself authorize a run); #204/#150 used codex client, model gpt-6-astra, cited only as precedent",
+  "reasoning_effort": "PENDING",
+  "tools": "the client's defaults inside the trial container; no MCP servers (matches every prior calibration run)",
+  "permissions": "the same non-interactive sandbox/approval settings for every attempt, whichever client is chosen",
+  "public_requirements": "PENDING - delivered verbatim to both arms once skillc#270 names the case's goal.md",
+  "image": {
+   "tag": "skillc-trial:latest",
+   "digest": "PENDING - resolved via `docker image inspect skillc-trial:latest` immediately before launch, per #204's 'image_digest_resolved' approval convention"
+  },
+  "per_attempt_seconds": "PENDING - sized from skillc#270's own observed attempt duration once it exists",
+  "total_seconds": "PENDING - attempts_per_arm * 2 arms * per_attempt_seconds, once both are known"
+ },
+ "attempts_per_arm": 10,
+ "arm_order": {
+  "seed": 20261007,
+  "sequence": [
+   "baseline", "baseline", "baseline", "intact", "baseline",
+   "intact", "intact", "baseline", "baseline", "intact",
+   "baseline", "intact", "baseline", "baseline", "intact",
+   "intact", "intact", "intact", "baseline", "intact"
+  ],
+  "_comment": "skillc.calibration.derive_arm_order(20261007, ['intact', 'baseline'], 10) - computed, not hand-chosen (P6). Re-derive and compare before use if this file is edited: a sequence that does not match what the seed produces is refused by parse_declaration."
+ },
+ "retain_transcripts": true,
+ "tolerance": {
+  "non_evaluable_per_arm": 1,
+  "rule": "max(1, ceil(0.05 * attempts_per_arm)) = max(1, ceil(0.5)) = 1 at n=10 (P5)"
+ },
+ "primary_endpoint": "skillc.calibration.primary_endpoint: the task grader's own criteria (excludes installation-ready); status by records.derive_status - PENDING skillc#270's case for the concrete criteria list",
+ "reported_beside": "skillc.calibration.readiness_beside: installation-ready, its readiness source and the verified-result status, per attempt",
+ "approval": null,
+ "owed_before_run": [
+  "skillc#270 - a certified discriminating flow-check case (dependency, in progress by sk-w1 as of 2026-10-06); this declaration's task/grader fields are placeholders until it exists",
+  "operator pilot-spend authorization for THIS pilot (10 attempts, 2 arms = 20 total) - separate from the 'pilot: yes' ruling in comment 6021089903, which authorized the pilot in principle, not this specific schedule (ADR 0005: filing/drafting never authorizes a run)",
+  "live-run inventory re-validation (skillc#274 review, comment 6018530040): before any live attempt, re-run `skillc profile validate` against cpp-codex-flow-check-ea6dbfa's pinned revision and refuse unless the result's digest equals the inventory this declaration references",
+  "shared.client/model/reasoning_effort/image.digest/per_attempt_seconds/total_seconds/public_requirements - all PENDING above"
+ ]
+}
