@@ -593,7 +593,10 @@ controller POSITIVELY observed non-execution, which a silent bypass does not.
 **This is an additive boundary, not a forward reference to undefined behaviour.**
 Every rule above it is fully specified and enforced today: a `CONFIRMED` or
 `NOT_CONFIRMED` `execution_observed` with no witness citation is already refused
-by `skill_evidence()` (`_skill_evidence_lifecycle_fact`, above), whether or not
+by `skill_evidence()` (`_skill_evidence_lifecycle_fact`, above) - committed bad
+cases `controls/skill-evidence/bad/execution-observed-confirmed-no-witness.json`
+and `execution-observed-not-confirmed-no-witness.json`, mutation-checked: both
+go BLIND with the evidence-citation requirement removed - whether or not
 #269 exists yet - until #269 ships, nothing can legally produce a witness
 citation, so `execution_observed` is `UNKNOWN` for every attempt, which is the
 honest state. What is pending is only a NAME: #269's own witness record `kind`
