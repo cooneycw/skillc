@@ -1,0 +1,29 @@
+{
+  "subject_schema": 1,
+  "locator": "github.com/cooneycw/claude-power-pack",
+  "revision": "ea6dbfa45f9308ee6ba60f032d8e7031bd6938a1",
+  "surface": "codex-skills",
+  "skills_root": "codex/skills",
+  "select": "all",
+  "checksum_manifest": "scripts/SHA256SUMS",
+  "external_references": [
+    {
+      "pattern": "~/\\.claude/scripts/[A-Za-z0-9._-]+",
+      "meaning": "host helper installed by the subject's own repair step; not materialized"
+    },
+    {
+      "pattern": "\\$\\{?CLAUDE_PLUGIN_ROOT\\}?/[A-Za-z0-9._/-]+",
+      "meaning": "plugin-bundled helper path of another client; not materialized"
+    }
+  ],
+  "required_references": [
+    {
+      "pattern": "Read `([^`]+)` in this skill directory",
+      "meaning": "the subject's generated entry points defer to a bundled full procedure"
+    }
+  ],
+  "client": {
+    "name": "codex",
+    "version": "0.157.1"
+  }
+}

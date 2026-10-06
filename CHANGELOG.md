@@ -61,6 +61,35 @@ and version plan.
     pass while this one collects only a SKIP must give `FAILURE`, never
     `SUCCESS`.
 
+- **A new `cpp-codex-flow-check-ea6dbfa` profile, at claude-power-pack's
+  current pin** (Refs #265, #287). claude-power-pack#1370 found the existing
+  `cpp-codex-flow-check` profile's pin (`85e9b03`) stale on both content and
+  dependency axes against current CPP main - 21 unresolved references. Per
+  that profile's own stated rule ("a later pin is a new profile with its own
+  inventory, not an edit to this one"), this is a SEPARATE profile directory
+  (`evals/subjects/cpp-codex-flow-check-ea6dbfa/`) at
+  `ea6dbfa45f9308ee6ba60f032d8e7031bd6938a1` (confirmed a descendant of
+  #1380's fix) with its own `subject.json` - the original profile, its
+  evidence, its subject pin, and claude-power-pack#264's case-contract
+  line-number citations against its blobs are all untouched. All 21
+  references read in the real source and classified: 19 are print-help-text,
+  generated-Dockerfile string literals, or code comments/docstrings inside
+  claude-power-pack's `lib/cicd/*.py` (never runtime paths flow-check reads
+  or writes - each given its own `unsupported` entry starting `not a runtime
+  reference:` naming the exact mechanism, per orchestrator review so
+  claude-power-pack#1370's downstream consumer can separate them from real
+  capability gaps); 1 is the same "another client's surface" class the
+  profile already declares unsupported three times for Claude Code's plugin
+  root; 1 extends the `checkout-scripts` dependency to also satisfy
+  `$CPP_DIR/scripts/execution-evidence-verify.py`. `skillc profile diagnose`
+  and `validate` both report zero problems at the new pin. Regression red
+  case (`tests/test_cpp_codex_flow_check_redeclare.py`, with a committed
+  snapshot fixture of the real new-pin source,
+  `tests/fixtures/profile-cpp-codex-flow-check-ea6dbfa/`): the ORIGINAL,
+  untouched profile against this fixture must report the EXACT SET of 20
+  distinct unresolved-reference strings (21 occurrences - one string appears
+  in two files) claude-power-pack#1370 found, not merely a matching count;
+  the new profile against the same fixture reports zero.
 - **The Level 5 subject-side proxy is wired into the trial image** (Refs
   #183, PR B2). `docker/trial/skillc-disrupt-tool.py` - a one-shot client
   for #183's decide-and-reply channel, committed unwired in PR B1 - is now
