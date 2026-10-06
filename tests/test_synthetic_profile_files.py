@@ -181,23 +181,12 @@ def test_bounded_text(source: Path, content: str) -> None:
     {"paths": []},
     {"unreferenced_reason": ""},
     {"role": ""},
+    {"satisfies": ["~/checkout/MARKER.md"]},
 ])
 def test_invalid_schema(source: Path, fields: dict[str, Any]) -> None:
     change(source, **fields)
     with pytest.raises(p.Refused):
         inventory(source)
-
-
-def test_a_synthetic_dependency_may_now_declare_satisfies(source: Path) -> None:
-    """#332: `satisfies` was unconditionally forbidden on `synthetic`
-    before this - a harness-authored file replacing a pinned one at a
-    path reference.md's own TEXT names (a forwarding shim) must be able
-    to resolve that textual reference itself, which #303's own passive
-    marker never needed. A well-formed `satisfies` entry on a synthetic
-    dependency must be ACCEPTED, not refused merely for being there."""
-    change(source, satisfies=["~/checkout/MARKER.md"])
-    inv, _ = inventory(source)  # must not raise
-    assert any(d["id"] == "marker" for d in inv["dependencies"])
 
 
 @pytest.mark.parametrize("text,expected", [
