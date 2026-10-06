@@ -16,6 +16,13 @@ steps:
     image: python:3.12-slim
     depends_on: []
     commands:
+      # #307: git-dependent tests (now all of #275's git fixtures, plus the
+      # pre-existing needs_git-marked tests in test_degrade/test_changelog_check/
+      # test_provenance/test_profile/test_materialize) previously skipped here
+      # silently - AGENTS.md's "the git and real-client tests skip there and
+      # run on a host" was true of this image. Same apt line changelog-check
+      # already uses.
+      - apt-get update -qq && apt-get install -y -qq --no-install-recommends git > /dev/null
       - pip install uv
       # --locked refuses a stale uv.lock; --no-sync stops each run re-locking.
       - uv sync --locked --extra dev
@@ -25,9 +32,24 @@ steps:
       # persists past this step; nothing here uploads a separate artifact.
       # (flow:auto #12's flaky test, never captured, was a LOCAL one-off, not
       # a CI run - #134's `make verify` covers that sighting; see AGENTS.md.)
-      - uv run --no-sync pytest -rA
+      # --junit-xml (#307): read by the git-tests-control step below, from
+      # the shared workspace (steps do not share each other's /tmp).
+      - uv run --no-sync pytest -rA --junit-xml=pytest-report.xml
       - uv run --no-sync ruff check .
       - uv run --no-sync mypy
+
+  # #307: proves the git-dependent population above actually RAN, not just
+  # that `gate` exited 0 - a file whose whole git-gated subset re-skipped
+  # would not turn `gate` red on its own. Depends on `gate` for its report;
+  # if `gate` fails or never writes pytest-report.xml, Woodpecker skips this
+  # step rather than running it - the pipeline is already red in that case,
+  # so a skipped CONTROL here must never be misread as the control passing.
+  - name: git-tests-control
+    image: python:3.12-slim
+    depends_on: [gate]
+    commands:
+      - python3 ci/check_git_tests_ran.py pytest-report.xml
+      - bash ci/git-tests-control.sh
     environment:
       # Parallel steps share one workspace; a shared .venv races.
       UV_PROJECT_ENVIRONMENT: /tmp/skillc-venv
