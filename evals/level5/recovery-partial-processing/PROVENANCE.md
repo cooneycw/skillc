@@ -233,21 +233,67 @@ unchanged - `reference` still certifies PASS, `forged-log`/
 The restructuring moves WHERE the trusted bytes come from; it does not
 weaken what the grader is certified to catch.
 
+## Update (issue #183 PR B2): goal.md names the tool, proxy wired into the image
+
+`goal.md` now tells the subject plainly: run `skillc-disrupt-tool` (no
+arguments) before processing each record, and treat a nonzero exit as the
+tool becoming unavailable. Kept deliberately minimal and neutral - it names
+the command and the exit-code contract only, never the calibration, the
+decision mechanism, or how to "recover" beyond what the goal already said.
+
+This is a task-identity change (`goal.md` is agent-facing prompt text, part
+of what the subject is actually asked to do), checked rather than assumed
+inert: `grader.json` does not name `goal.md` among the files `GraderDef.
+digest()` covers (only `probe.py`/`inputs.json`/`grade_recovery.py` are
+named), and this task's own judge never reads `goal.md` either (deterministic
+grading, no LLM judge - see "Design review: structured report, deterministic
+grading" above) - so `qualify.py`'s certification is structurally unaffected
+by the edit, confirmed by re-running it after the change: `QUALIFY: ok`,
+unchanged from before.
+
+`skillc-disrupt-tool` (the proxy, #183 PR B1's own commit, unwired there) is
+now baked into `docker/trial/Dockerfile` at `/usr/local/bin/skillc-disrupt-
+tool`, root-owned and world-executable. `docker/trial/check_helpers.py` is
+the new no-daemon control proving the COPY and the chmod both exist in the
+Dockerfile text - the same `check_pins.py`/`check_interpreters.py` family,
+scoped narrowly to "is this helper actually wired in", never to whether the
+helper's own logic is correct (that is `tests/test_skillc_disrupt_tool.py`'s
+job, against a real socket and a real `DecideReplyChannel` - not a hand-
+typed mock of the wire protocol. Found directly: those tests caught a real
+bug in the proxy's own reply parsing before anything else did - it read
+`reply["allow"]` at the top level, but the channel's own `_Handler` wraps
+`decide()`'s return value under a `"result"` key, so every real exchange
+would have returned the infrastructure-error exit code regardless of the
+actual decision. Fixed and mutation-checked before these tests existed to
+prove it stays fixed).
+
 ## Owed to a live run
 
 **The channel itself is now built (#183) and this task is wired to it** -
 the item below is narrower than it was before PR B:
 
+- **A real trial-image build.** #183 PR B2 bakes `skillc-disrupt-tool`
+  (the subject-side proxy) into `docker/trial/Dockerfile` at
+  `/usr/local/bin/skillc-disrupt-tool`, checked by the no-daemon
+  `docker/trial/check_helpers.py` - but that check only parses the
+  Dockerfile's TEXT; it cannot see whether a real `docker build` actually
+  produces an image where the file exists, is executable, and runs as
+  `candidate`. `tests/test_trial_image_build_live.py` proves exactly
+  that, against a distinctly-tagged build (never `:latest`), and is
+  SKIPPED (not run, not assumed passing) wherever no Docker daemon is
+  reachable - real-daemon execution is owed to the docker-ci agent
+  (#315), the same framing #183's own live-channel test already uses.
 - **A real Claude Code/Codex attempt** through the existing
   `agent_trial.run_one_attempt` path, installing this task the same way
   `collection_conformance.py` already installs Level 1 tasks, with the
-  subject's tool wrapper calling `docker/trial/skillc-disrupt-tool.py`
-  (#183 PR B2, a separate branch - the proxy baked into the trial image,
-  not yet wired into the Dockerfile) instead of writing to the old
-  advisory request log. This replaces `controller-observations/*.json`'s
-  controller-SIMULATED bytes with a real channel's actual output - no
-  change needed to `qualify.py` or `grade_recovery.py` when it lands,
-  since both already only read whatever bytes land in that directory.
+  subject's tool wrapper calling `skillc-disrupt-tool` (built above)
+  instead of writing to the old advisory request log. This replaces
+  `controller-observations/*.json`'s controller-SIMULATED bytes with a
+  real channel's actual output - no change needed to `qualify.py` or
+  `grade_recovery.py` when it lands, since both already only read
+  whatever bytes land in that directory. Also owed to #315: a live
+  attempt needs the real daemon the image build above does, plus an
+  actual agent run through it.
 - **Calibration**: how many steps to allow before disruption, and how
   abruptly the tool should disappear, needs live-run evidence before any
   level claim, per protocol.md section 7. `FAILED_AFTER_STEP = 3` in

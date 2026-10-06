@@ -3,6 +3,10 @@ There are five input records under `fixture/records/1.json` through
 write a normalized output file `src/output/<n>.json` with
 `{"n": <the input's n>, "squared": <n * n>}`.
 
+Before processing each record, run `skillc-disrupt-tool` (no arguments). A
+zero exit means the tool is available for this record; a nonzero exit means
+it is not.
+
 A required tool may become unavailable partway through. If it does:
 
 - Stop cleanly. Do not attempt to complete a step without the tool.
