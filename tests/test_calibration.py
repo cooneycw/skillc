@@ -412,3 +412,155 @@ def test_red_the_203_candidate_3_declaration_without_its_approval_is_refused() -
     with pytest.raises(calibration.DeclarationRefused, match="not approved"):
         calibration.require_approved(calibration.parse_declaration(data), ROOT)
 
+
+
+# ----------------------------------------------- expanded-instruction lane (#274)
+
+_SKILL_BODY = "Run the gate, then open a PR. Never skip the tests.\n"
+
+
+def _inventory(tmp_path: Path, *, name: str = "flow-check", question: str = "prose",
+               treatment_scoped: tuple[str, ...] = (), body: str = _SKILL_BODY) -> Path:
+    """A hand-written inventory, matching `skillc profile validate`'s real
+    output shape (treatment_question, helper_parity.treatment, skills[].
+    body_digest) closely enough for `validate_expanded_instruction_lane` to
+    read - the producer side (profile.py) has its own tests proving a REAL
+    validate() run produces this shape; this is the consumer side's fixture."""
+    path = tmp_path / "inventory.json"
+    path.write_text(json.dumps({
+        "treatment_question": question,
+        "helper_parity": {"common": ["gate-script"], "treatment": list(treatment_scoped), "bundled": []},
+        "skills": [{"name": name, "body_digest": calibration.m.sha256_bytes(body.encode("utf-8"))}],
+    }), encoding="utf-8")
+    return path
+
+
+def _expanded_instruction_declaration(tmp_path: Path, *, e_instruction: str = _SKILL_BODY,
+                                      inventory_path: Path | None = None,
+                                      s_overrides: dict[str, object] | None = None,
+                                      e_overrides: dict[str, object] | None = None) -> dict[str, object]:
+    """Baseline + S (explicit-skill) + E (expanded-instruction), both
+    referencing the same inventory - protocol.md 10.1's third lane."""
+    data = _mutated(lane=calibration.EXPANDED_INSTRUCTION_LANE)
+    arms = data["arms"]
+    assert isinstance(arms, list)
+    subject = copy.deepcopy(arms[0]["subject"])
+    inventory = str(inventory_path or _inventory(tmp_path))
+    s_arm = {"name": "explicit-skill", "subject": subject, "instruction": "Use `flow-check` first.",
+             "named_skills": ["flow-check"], "inventory": inventory}
+    e_arm = {"name": "expanded-instruction", "subject": subject, "instruction": e_instruction,
+             "inventory": inventory}
+    s_arm.update(s_overrides or {})
+    e_arm.update(e_overrides or {})
+    new_arms: list[object] = [arms[1], s_arm, e_arm]  # baseline, S, E
+    data["arms"] = new_arms
+    data["attempts_per_arm"] = 6
+    data["shared"]["total_seconds"] = 1200 * 18  # type: ignore[index]
+    names = [a["name"] for a in new_arms if isinstance(a, dict)]
+    data["arm_order"] = {"seed": 7, "sequence": calibration.derive_arm_order(7, names, 6)}
+    return data
+
+
+def test_an_expanded_instruction_declaration_validates(tmp_path: Path) -> None:
+    declaration = calibration.parse_declaration(_expanded_instruction_declaration(tmp_path))
+    assert declaration.lane == calibration.EXPANDED_INSTRUCTION_LANE
+    assert declaration.arms == ("baseline", "explicit-skill", "expanded-instruction")
+    calibration.validate_expanded_instruction_lane(declaration, ROOT)
+
+
+def test_a_declaration_with_no_lane_defaults_to_matched_outcome() -> None:
+    """Every pre-#274 declaration - the committed #204/#203 manifests
+    included - is silently the matched-outcome lane; #274 names what was
+    already true rather than changing it."""
+    declaration = calibration.load_declaration(MANIFEST)
+    assert declaration.lane == calibration.DEFAULT_LANE == "matched-outcome"
+    calibration.validate_expanded_instruction_lane(declaration, ROOT)  # a no-op on this lane
+
+
+def test_an_invalid_lane_is_refused() -> None:
+    with pytest.raises(calibration.DeclarationRefused, match="lane must be one of"):
+        calibration.parse_declaration(_mutated(lane="not-a-real-lane"))
+
+
+def test_expanded_instruction_needs_both_treated_arms(tmp_path: Path) -> None:
+    """One arm alone - even a valid S - cannot be the S-vs-E contrast."""
+    data = _mutated(lane=calibration.EXPANDED_INSTRUCTION_LANE,
+                    arms=_arms(instruction="Use `flow-check` first.", named_skills=["flow-check"],
+                              inventory=str(_inventory(tmp_path))))
+    with pytest.raises(calibration.DeclarationRefused, match="needs both treated arms"):
+        calibration.parse_declaration(data)
+
+
+@pytest.mark.parametrize(("s_over", "e_over", "match"), [
+    ({"inventory": None}, {}, "non-empty 'inventory' path"),
+    ({}, {"inventory": None}, "non-empty 'inventory' path"),
+    ({"named_skills": ["flow-check", "flow-auto"]}, {}, "exactly one skill"),
+])
+def test_an_expanded_instruction_arm_that_breaks_the_design_is_refused(
+    tmp_path: Path, s_over: dict[str, object], e_over: dict[str, object], match: str,
+) -> None:
+    data = _expanded_instruction_declaration(tmp_path, s_overrides=s_over, e_overrides=e_over)
+    with pytest.raises(calibration.DeclarationRefused, match=match):
+        calibration.parse_declaration(data)
+
+
+def test_expanded_instruction_arms_must_share_one_inventory(tmp_path: Path) -> None:
+    other_dir = tmp_path / "other"
+    other_dir.mkdir()
+    other = _inventory(other_dir)
+    data = _expanded_instruction_declaration(tmp_path, e_overrides={"inventory": str(other)})
+    with pytest.raises(calibration.DeclarationRefused, match="must reference the SAME"):
+        calibration.parse_declaration(data)
+
+
+def test_matched_outcome_arm_cannot_carry_inventory(tmp_path: Path) -> None:
+    """`inventory`/`obligation` are the expanded-instruction lane's own
+    fields - a B/N/P arm declaring one is refused, not silently ignored."""
+    data = _mutated(arms=_arms(inventory=str(_inventory(tmp_path))))
+    with pytest.raises(calibration.DeclarationRefused, match="belong to the expanded-instruction lane"):
+        calibration.parse_declaration(data)
+
+
+def test_baseline_cannot_carry_inventory(tmp_path: Path) -> None:
+    data = _expanded_instruction_declaration(tmp_path)
+    data["arms"][0]["inventory"] = str(_inventory(tmp_path))  # type: ignore[index]
+    with pytest.raises(calibration.DeclarationRefused, match="no inventory or obligation"):
+        calibration.parse_declaration(data)
+
+
+def test_red_a_product_question_inventory_is_refused(tmp_path: Path) -> None:
+    """Check 1 (orchestrator review): a 'product' question permits
+    treatment-scoped helpers the E arm would lack - exactly the confound
+    helper parity exists to rule out. Mutation-check: this must go red on
+    'product' and stay green on 'prose' (the positive test above)."""
+    bad = _inventory(tmp_path, question="product")
+    declaration = calibration.parse_declaration(_expanded_instruction_declaration(tmp_path, inventory_path=bad))
+    with pytest.raises(calibration.DeclarationRefused, match="not 'prose'"):
+        calibration.validate_expanded_instruction_lane(declaration, ROOT)
+
+
+def test_red_a_stale_prose_inventory_with_a_treatment_scoped_helper_is_refused(tmp_path: Path) -> None:
+    """A second, independent path to the same confound: the question says
+    'prose' but a treatment-scoped helper is present anyway (profile.py's
+    own refusal was bypassed or the file is stale)."""
+    bad = _inventory(tmp_path, treatment_scoped=("sneaky-helper",))
+    declaration = calibration.parse_declaration(_expanded_instruction_declaration(tmp_path, inventory_path=bad))
+    with pytest.raises(calibration.DeclarationRefused, match="treatment-scoped helper"):
+        calibration.validate_expanded_instruction_lane(declaration, ROOT)
+
+
+def test_red_a_changed_word_in_the_inlined_instruction_is_refused(tmp_path: Path) -> None:
+    """Check 2 (orchestrator review): one word changed from the skill's real
+    body must be caught, not just a wholly different text."""
+    declaration = calibration.parse_declaration(
+        _expanded_instruction_declaration(tmp_path, e_instruction=_SKILL_BODY.replace("Never", "Rarely")))
+    with pytest.raises(calibration.DeclarationRefused, match="does not match"):
+        calibration.validate_expanded_instruction_lane(declaration, ROOT)
+
+
+def test_red_an_unknown_skill_name_is_refused(tmp_path: Path) -> None:
+    declaration = calibration.parse_declaration(
+        _expanded_instruction_declaration(
+            tmp_path, s_overrides={"instruction": "Use `no-such-skill` first.", "named_skills": ["no-such-skill"]}))
+    with pytest.raises(calibration.DeclarationRefused, match="no skill named"):
+        calibration.validate_expanded_instruction_lane(declaration, ROOT)

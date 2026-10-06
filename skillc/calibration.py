@@ -56,6 +56,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import materialize as m
 from . import records, verify
 
 #: The criteria the primary endpoint never reads, whatever a record carries.
@@ -69,13 +70,33 @@ BASELINE_ARM = "baseline"
 MIN_ATTEMPTS_PER_ARM, MAX_ATTEMPTS_PER_ARM = 3, 8
 UNKNOWN = "UNKNOWN"
 
+#: protocol.md 10.1: the three lanes a declaration may measure. Absent (every
+#: declaration before #274) means `matched-outcome` - #203/#231's existing
+#: baseline-vs-treatment-vs-provided design, never renamed, just now
+#: nameable. This module only adds validation for `expanded-instruction`;
+#: `explicit-contract` is #273's own statistics, not implemented here.
+LANES = ("explicit-contract", "matched-outcome", "expanded-instruction")
+DEFAULT_LANE = "matched-outcome"
+EXPANDED_INSTRUCTION_LANE = "expanded-instruction"
+
 #: The only keys an arm may carry. Anything else - a model, an effort, a
 #: timeout - would be a second difference between the arms; it belongs under
-#: `shared`, once, for both.
-ARM_KEYS = frozenset({"name", "subject", "treatment", "instruction", "named_skills"})
+#: `shared`, once, for both. `inventory` and `obligation` are #274's addition
+#: for the expanded-instruction lane; harmless (and refused if present) on
+#: every other lane's arms.
+ARM_KEYS = frozenset({"name", "subject", "treatment", "instruction", "named_skills", "inventory", "obligation"})
 
 #: The keys only a provided-skill arm carries, always together (#231).
 PROVIDED_KEYS = frozenset({"instruction", "named_skills"})
+
+#: #274, protocol.md 10.4: the expanded-instruction lane's two treated arms,
+#: both installing the profile at `inventory` (one shared, validated
+#: `skillc profile validate` output, pinned by path and digest). S keeps the
+#: existing PROVIDED_KEYS shape (a short instruction naming the skill); E
+#: carries `instruction` alone - the inlined obligation text - which
+#: `matched-outcome`'s "natural arm stays unnudged" rule would otherwise
+#: refuse (#274 acceptance item 3: unnudged unless the lane says otherwise).
+EXPANDED_INSTRUCTION_KEYS = frozenset({"inventory"})
 
 #: What both arms must share, by construction (issue #204's Scope).
 SHARED_KEYS = frozenset({
@@ -162,6 +183,7 @@ class CalibrationDeclaration:
     retain_transcripts: bool
     approval: Mapping[str, object] | None
     data: Mapping[str, object]
+    lane: str = DEFAULT_LANE
 
 
 def _refuse(message: str) -> DeclarationRefused:
@@ -177,9 +199,17 @@ def _positive_number(value: object, what: str) -> float:
 
 def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
     """Validate a declaration's shape. See the module docstring for what it
-    requires and why; every refusal names the field."""
+    requires and why; every refusal names the field. Shape only - no file is
+    read here, `lane` included: the expanded-instruction lane's inventory
+    content (treatment_question, helper parity, body digests) is checked by
+    `validate_expanded_instruction_lane`, which needs a repository root this
+    function does not take, consistent with `require_approved` doing the
+    grader file-read rather than this function."""
     if data.get("kind") != "calibration-declaration":
         raise _refuse(f"kind is {data.get('kind')!r}, not 'calibration-declaration'")
+    lane = data.get("lane", DEFAULT_LANE)
+    if lane not in LANES:
+        raise _refuse(f"lane must be one of {LANES}, not {lane!r}")
     arms_raw = data.get("arms")
     if not isinstance(arms_raw, list) or len(arms_raw) not in (2, 3) \
             or not all(isinstance(a, dict) for a in arms_raw):
@@ -203,20 +233,42 @@ def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
         raise _refuse("the baseline arm installs nothing: its subject is null")
     if PROVIDED_KEYS & set(baseline):
         raise _refuse("the baseline arm installs nothing, so it can name no skill to read")
+    if "inventory" in baseline or "obligation" in baseline:
+        raise _refuse("the baseline arm installs nothing, so it has no inventory or obligation to declare")
+    expanded = lane == EXPANDED_INSTRUCTION_LANE
     for arm in treated:
         if not isinstance(arm.get("subject"), dict):
             raise _refuse(f"arm {arm['name']!r} names no subject to install")
         provided = PROVIDED_KEYS & set(arm)
-        if provided and provided != PROVIDED_KEYS:
+        # The expanded-instruction lane's E arm carries `instruction` alone
+        # (the inlined obligation text, no skill to name) - every other
+        # lane refuses that combination outright (#274 acceptance item 3:
+        # a natural arm stays unnudged unless the lane says otherwise).
+        is_prose_arm = expanded and provided == {"instruction"}
+        if provided and provided != PROVIDED_KEYS and not is_prose_arm:
             raise _refuse(f"arm {arm['name']!r} carries {sorted(provided)} alone; an instruction and the "
                           "named_skills it names are declared together")
-        if provided:
+        if expanded:
+            inventory = arm.get("inventory")
+            if not isinstance(inventory, str) or not inventory.strip():
+                raise _refuse(f"arm {arm['name']!r}: the expanded-instruction lane requires a non-empty "
+                              "'inventory' path on every treated arm (protocol.md 10.4)")
+        elif "inventory" in arm or "obligation" in arm:
+            raise _refuse(f"arm {arm['name']!r} carries 'inventory'/'obligation'; those belong to the "
+                          "expanded-instruction lane only")
+        if is_prose_arm:
+            if not isinstance(arm["instruction"], str) or not arm["instruction"].strip():
+                raise _refuse(f"arm {arm['name']!r}: instruction must be non-empty text")
+        elif provided:
             skills = arm["named_skills"]
             if not isinstance(arm["instruction"], str) or not arm["instruction"].strip():
                 raise _refuse(f"arm {arm['name']!r}: instruction must be non-empty text")
             if not isinstance(skills, list) or not skills \
                     or not all(isinstance(k, str) and k.strip() for k in skills) or len(set(skills)) != len(skills):
                 raise _refuse(f"arm {arm['name']!r}: named_skills must be a non-empty list of distinct names")
+            if expanded and len(skills) != 1:
+                raise _refuse(f"arm {arm['name']!r}: the expanded-instruction lane names exactly one skill "
+                              f"(the one E's instruction must match byte-for-byte), not {skills}")
             # A whole name, never a substring: `flow-auto` is not named by
             # `flow-auto-extra` (counter-model review).
             missing_names = [k for k in skills
@@ -227,9 +279,19 @@ def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
         if treated[0]["subject"] != treated[1]["subject"]:
             raise _refuse("the two treated arms install different subjects; a third arm may differ only by "
                           "its instruction, never by what is installed (an ablation belongs to #203)")
-        if sum(1 for a in treated if PROVIDED_KEYS <= set(a)) != 1:
+        if expanded:
+            if sum(1 for a in treated if PROVIDED_KEYS <= set(a)) != 1:
+                raise _refuse("of the two expanded-instruction arms, exactly one (S) carries an instruction "
+                              "and named_skills; the other (E) carries instruction alone")
+            if treated[0].get("inventory") != treated[1].get("inventory"):
+                raise _refuse("the expanded-instruction lane's two treated arms must reference the SAME "
+                              "inventory - helper parity is proven once, for the pair, not twice")
+        elif sum(1 for a in treated if PROVIDED_KEYS <= set(a)) != 1:
             raise _refuse("of the two treated arms, exactly one carries an instruction and named_skills; "
                           "otherwise the arms do not differ, or differ in two ways")
+    elif expanded:
+        raise _refuse("the expanded-instruction lane needs both treated arms (S and E) declared; "
+                      "one alone cannot be the contrast protocol.md 10.1 names")
     elif PROVIDED_KEYS & set(treated[0]):
         raise _refuse("a provided-skill arm needs a natural arm beside it, installing the same subject "
                       "without the instruction; alone it confounds value with the instruction")
@@ -278,7 +340,7 @@ def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
         arms=tuple(names), attempts_per_arm=attempts, arm_order=tuple(sequence), seed=seed,
         shared=dict(shared), task_path=str(task["path"]), grader_id=str(task["grader_id"]),
         grader_revision=str(task["grader_revision"]), retain_transcripts=True, approval=approval,
-        data=dict(data),
+        data=dict(data), lane=str(lane),
     )
 
 
@@ -348,6 +410,62 @@ def require_approved(declaration: CalibrationDeclaration, root: Path) -> None:
     if (grader.id, grader.revision) != (declaration.grader_id, declaration.grader_revision):
         raise _refuse(f"the task's grader is {grader.id!r} revision {grader.revision!r}, not the declared "
                       f"{declaration.grader_id!r} revision {declaration.grader_revision!r}")
+
+
+def validate_expanded_instruction_lane(declaration: CalibrationDeclaration, root: Path) -> None:
+    """The expanded-instruction lane's two file-backed checks (protocol.md
+    10.4), neither of which `parse_declaration` can do without reading a
+    file. A no-op on every other lane - nothing here is this lane's business.
+
+    1. HELPER PARITY. The shared `inventory` (one `skillc profile validate`
+    output, read once for the pair) must have validated at
+    `treatment_question == "prose"` - never `product`, which permits
+    treatment-scoped helpers the E arm would then lack, exactly the confound
+    this check exists to rule out (orchestrator review, #274). The existing
+    `skillc.profile` helper-parity refusal already proved
+    `helper_parity.treatment == []` for a "prose" inventory; re-read here
+    rather than trusted blindly, since this function never re-runs
+    `profile.validate` itself.
+
+    2. CONTENT IDENTITY. E's `instruction` (the inlined obligation text)
+    must hash to the SAME `body_digest` the inventory recorded for the one
+    skill S names - `skillc.profile.validate`'s own digest of that skill's
+    `SKILL.md` body. Byte-identical, not merely equivalent: the lane's own
+    "restate, never add" rule (protocol.md 10.1) is satisfied by
+    construction when the bytes do not differ at all."""
+    if declaration.lane != EXPANDED_INSTRUCTION_LANE:
+        return
+    arms_raw = declaration.data.get("arms")
+    treated = [a for a in (arms_raw if isinstance(arms_raw, list) else [])
+              if isinstance(a, dict) and a.get("name") != BASELINE_ARM]
+    s_arm = next(a for a in treated if PROVIDED_KEYS <= set(a))
+    e_arm = next(a for a in treated if a is not s_arm)
+    inventory_path = root / str(s_arm["inventory"])
+    try:
+        inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise _refuse(f"inventory {inventory_path} could not be read: {exc}") from exc
+    question = inventory.get("treatment_question")
+    if question != "prose":
+        raise _refuse(f"inventory {inventory_path} validated at treatment_question {question!r}, not "
+                      f"'prose' - the expanded-instruction lane needs identical helpers in every arm, "
+                      f"which only a prose question proves (protocol.md 10.4)")
+    treatment_scoped = inventory.get("helper_parity", {}).get("treatment")
+    if treatment_scoped:
+        raise _refuse(f"inventory {inventory_path} carries treatment-scoped helper(s) {treatment_scoped} "
+                      f"despite a prose treatment_question - this inventory is stale or was tampered "
+                      f"with after `skillc profile validate` ran")
+    skill_name = s_arm["named_skills"][0]
+    skills = inventory.get("skills", [])
+    matching = next((s for s in skills if isinstance(s, dict) and s.get("name") == skill_name), None)
+    if matching is None:
+        raise _refuse(f"inventory {inventory_path} has no skill named {skill_name!r} (named by arm "
+                      f"{s_arm['name']!r})")
+    actual = m.sha256_bytes(str(e_arm["instruction"]).encode("utf-8"))
+    if actual != matching["body_digest"]:
+        raise _refuse(f"arm {e_arm['name']!r}: instruction digest {actual} does not match {skill_name!r}'s "
+                      f"body_digest {matching['body_digest']!r} - the inlined text must restate the skill's "
+                      f"body byte-for-byte, never a paraphrase (protocol.md 10.1)")
 
 
 def arm_spec(declaration: CalibrationDeclaration, name: str) -> Mapping[str, object]:
