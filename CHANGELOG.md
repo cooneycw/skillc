@@ -125,10 +125,22 @@ and version plan.
     a digest of `$HOME`, plus an argv-dependent exit code) so a dropped
     cwd or a wrong HOME actually changes its output, which a stand-in
     that printed a constant could not detect. One test function,
-    `SKILLC_GATE_SHIM_LIVE_BREAK` selects the mode, `xfail(strict=True)`
-    on every non-`none` value - the same shape `test_gate_witness_live.py`
-    already uses. Mutation-checked by construction: each of the four
-    `gateshim:` break modes is a deliberately-broken shim variant (three)
+    `SKILLC_GATE_SHIM_LIVE_BREAK` selects the mode, `xfail(strict=True,
+    raises=_PropertyHeld)` on every non-`none` value - the same shape
+    `test_gate_witness_live.py` already uses, with a narrower `raises`
+    (counter-model review on #266, adopted here): the two forwarding-
+    fidelity checks (exit code, byte-identical stdout) go through a
+    `_require()` helper that raises the dedicated, non-`AssertionError`
+    `_PropertyHeld` - asserted UNCONDITIONALLY and identically in every
+    mode, never branched by `BREAK_MODE` (which would XPASS by
+    construction). Every other check stays a plain `assert`, so an
+    unrelated infra failure (a Docker flake during a break run) is an
+    ordinary hard FAILURE, never credited as the break working.
+    Confirmed directly (no pytest/Docker): `_PropertyHeld` is not an
+    `AssertionError` subclass, `_require(True, ...)` returns, and
+    `_require(False, ...)` raises it. Mutation-checked by construction:
+    each of the four `gateshim:` break modes is a deliberately-broken
+    shim variant (three)
     or an emptied `declared_env` (`wrong-env`, the fourth) run through
     this same test, and is asserted to fail exactly the property it
     names; no daemon is reachable in this environment to execute it

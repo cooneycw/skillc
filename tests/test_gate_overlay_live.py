@@ -29,9 +29,24 @@ second thing that could itself be wrong, not strengthen the claim.
 
 ONE TEST FUNCTION, SKILLC_GATE_SHIM_LIVE_BREAK SELECTS THE MODE - same
 shape as `test_gate_witness_live.py`'s own `SKILLC_GATE_WITNESS_LIVE_
-BREAK`. `xfail(strict=True, raises=AssertionError)` on every non-`none`
+BREAK`. `xfail(strict=True, raises=_PropertyHeld)` on every non-`none`
 mode: a break that fails to actually break anything surfaces as XPASS,
 not a silent pass.
+
+`_PropertyHeld` is a DEDICATED exception, NOT an `AssertionError`
+subclass (counter-model review on #266, adopted here per orchestrator
+direction, 2026-10-06): the two forwarding-fidelity checks (exit code,
+byte-identical stdout) are asserted via a `_require()` helper that
+raises it, UNCONDITIONALLY and IDENTICALLY in every mode - never
+branched by `BREAK_MODE` to check "the break occurred" instead of "the
+real property held," which would XPASS by construction. Every other
+check in this file (the driver process completing, the result marker
+being readable) stays a plain `assert` (base `AssertionError`), which
+the `xfail` marker does NOT match - so an unrelated infra failure (a
+Docker flake during a break run) is reported as an ordinary hard
+FAILURE, never masked as "the break worked." An earlier draft of this
+file used `raises=AssertionError` for everything, which could not tell
+the two apart.
 
     none                        (default) both prescribed invocations
                                  (`--plan check --evidence flow-check` and
@@ -267,6 +282,11 @@ def _image_available(image: str) -> bool:
 
 
 def _read_result_via_exec(backend: d.DockerBackend, handle: d._Handle, path: str) -> dict[str, object]:
+    """Setup/infra read, not the property under test - a failure here
+    (an unreadable marker, malformed JSON) is a plain `AssertionError`,
+    which `_PropertyHeld`'s narrower `xfail(raises=...)` below does NOT
+    match, so it is reported as an ordinary hard failure rather than
+    credited as a working break."""
     proc = subprocess.run(
         [*backend.docker_bin, "exec", "--", handle.name, "cat", path],
         capture_output=True, text=True, timeout=backend.daemon_timeout, check=False,
@@ -277,8 +297,37 @@ def _read_result_via_exec(backend: d.DockerBackend, handle: d._Handle, path: str
     return result
 
 
+class _PropertyHeld(Exception):
+    """Raised when the ONE property a given `BREAK_MODE` is supposed to
+    violate still held - the opposite of what `xfail(strict=True)` below
+    expects. This is the ONLY exception type that marker's own `raises=`
+    matches - never bare `AssertionError` - so an unrelated infra/setup
+    failure (an unreadable marker, a driver process that never completed)
+    raises plain `AssertionError` instead and is reported as an ordinary
+    hard FAILURE, never masked as "the break worked" (same pattern as
+    `tests/test_profile_install_cold_container_live.py`'s own fix,
+    counter-model review on #266, adopted here per orchestrator
+    direction: an earlier draft of THIS file used `raises=AssertionError`
+    with every check - setup and property alike - raising that same
+    type, so an unrelated Docker flake during any break run would have
+    been indistinguishable from the break firing correctly)."""
+
+
+def _require(condition: bool, message: str) -> None:
+    """The forwarding-fidelity property under test for the current
+    `BREAK_MODE` - asserted UNCONDITIONALLY, the identical check for
+    `none` and every break mode alike (never branched by `BREAK_MODE`),
+    so it fails naturally when, and only when, a break actually changed
+    the real forwarded result - never because the test branched its own
+    expectation. Confirmed directly, no pytest or Docker needed:
+    `_require(True, ...)` returns; `_require(False, ...)` raises
+    `_PropertyHeld`, which is not a subclass of `AssertionError`."""
+    if not condition:
+        raise _PropertyHeld(message)
+
+
 @pytest.mark.xfail(
-    condition=BREAK_MODE != "none", strict=True, raises=AssertionError,
+    condition=BREAK_MODE != "none", strict=True, raises=_PropertyHeld,
     reason=f"SKILLC_GATE_SHIM_LIVE_BREAK={BREAK_MODE} deliberately breaks one forwarding property",
 )
 def test_the_shim_forwards_the_controllers_real_result_against_a_real_daemon() -> None:
@@ -364,11 +413,13 @@ def test_the_shim_forwards_the_controllers_real_result_against_a_real_daemon() -
             assert driver_outcome.reason == "exited", f"the driver process itself never completed for {gate!r}"
 
             result = _read_result_via_exec(backend, handle, result_path)
-            assert result["exit_code"] == _expected_exit_code(argv_tail), (
-                f"{gate}: the shim's forwarded exit code did not match the controller's real result"
+            _require(
+                result["exit_code"] == _expected_exit_code(argv_tail),
+                f"{gate}: the shim's forwarded exit code did not match the controller's real result",
             )
-            assert result["stdout"] == _expected_output(argv_tail, _DECLARED_HOME), (
-                f"{gate}: the shim's forwarded stdout was not byte-identical to the controller's real result"
+            _require(
+                result["stdout"] == _expected_output(argv_tail, _DECLARED_HOME),
+                f"{gate}: the shim's forwarded stdout was not byte-identical to the controller's real result",
             )
     finally:
         backend.destroy(handle)
