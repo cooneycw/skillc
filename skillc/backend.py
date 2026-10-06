@@ -329,6 +329,39 @@ class ExecutionBackend(Protocol):
         say so through `describe()`'s `unobserved`, never silently drop it."""
         ...
 
+    def exec_in_attempt(
+        self, handle: object, argv: Sequence[str], limits: Limits,
+        cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,
+    ) -> ExecuteResult:
+        """Run `argv` inside the SAME running isolation `handle` already
+        identifies, WITHOUT stopping or removing it - added for #269's
+        gate-execution witness, which needs to exec a declared gate
+        (possibly more than once, possibly while the subject's own primary
+        `execute()` is still running) against the attempt's live, evolving
+        state, never a fresh copy of it and never at the cost of the
+        attempt itself. `execute()` cannot be reused for this: it is
+        one-shot per handle by its own contract, and always stops the
+        isolation before returning (skillc #304 tracks that behavior
+        separately; this method does not touch it).
+
+        REFUSED, never folded into a guessed `exited` result, when:
+        - the attempt's own primary process is not reachable to exec into
+          at all (not started, already stopped, or confirmed absent) -
+          `ExecuteResult(reason="attempt-not-running", exit_code=None)`;
+        - this backend does not implement this method at all -
+          `ExecuteResult(reason="unsupported", exit_code=None)`. A caller
+          that receives this must treat the WHOLE mechanism as unavailable
+          for this attempt, not merely this one call - `exit_code=None`
+          here is never retried as if it might succeed differently next
+          time.
+
+        Same `stdin` delivery convention as `execute()`. `limits.timeout`
+        bounds only THIS exec call. A backend that cannot isolate a
+        same-identity, same-network in-place exec from the attempt's own
+        primary process must refuse via `unsupported` rather than attempt
+        a weaker approximation silently."""
+        ...
+
     def confirm_stopped(self, handle: object) -> Confirmation:
         """Step 6: ask the BACKEND, independent of `execute()`'s own return,
         whether every process it started for `handle` is gone. The only fact

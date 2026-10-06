@@ -1,171 +1,488 @@
 """Tests for the controller-owned gate-execution witness (#269).
 
-Exercised directly (calling `decide()`) for the bulk of the logic, plus one
-integration test wiring a real `DecideReplyChannel` (#183) end to end, to
-prove the two modules actually compose - not just that each one's own
-tests pass in isolation.
+Exercised against a `_FakeBackend` test double (fast, in-process, scriptable
+results and blocking) for the bulk of the logic, plus one integration test
+against a REAL `DockerBackend` running the fake `docker` CLI
+(`tests/fixtures/docker-backend/fake_docker.py`) through a REAL
+`DecideReplyChannel` socket - proving the three modules actually compose end
+to end with a real `ExecutionBackend.exec_in_attempt()` call, not a hand-crafted
+dict, and that real OS processes succeed, fail and are interrupted through
+the protected path (#269's own acceptance wording).
 """
 
 from __future__ import annotations
 
 import json
 import socket
-import subprocess
 import sys
 import threading
+import time
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
 
+from skillc import docker_backend as d
+from skillc.backend import BackendDescription, Confirmation, ExecuteResult, Limits
 from skillc.decide_reply_channel import ChannelRefusal, DecideReplyChannel
-from skillc.gate_witness import GateWitness, GateWitnessRecord
+from skillc.gate_witness import GateRecord, GateWitness, GateWitnessRecord
+
+FAKE_DOCKER = Path(__file__).resolve().parent / "fixtures" / "docker-backend" / "fake_docker.py"
 
 
 def _fixed_tree_digest() -> str:
     return "sha256:fixed-for-test"
 
 
+def _limits(timeout: float = 5.0) -> Limits:
+    return Limits(timeout=timeout)
+
+
+# --------------------------------------------------------------- fake backend
+
+
+@dataclass
+class _FakeBackend:
+    """Minimal `ExecutionBackend` test double: scriptable per-argv results,
+    scriptable stdout for the subsequent `export()`, and a `block` set that
+    makes `execute()` sleep well past any test's own timeout - the
+    `interrupted`-by-teardown case needs a call that genuinely never
+    returns before the channel tears down, not merely one that raises."""
+
+    results: dict[tuple[str, ...], ExecuteResult] = field(default_factory=dict)
+    stdout: dict[tuple[str, ...], str] = field(default_factory=dict)
+    block: set[tuple[str, ...]] = field(default_factory=set)
+    calls: list[tuple[str, ...]] = field(default_factory=list)
+    _last_stdout: str = ""
+
+    def exec_in_attempt(
+        self, handle: object, argv: Sequence[str], limits: Limits,
+        cancel: object = None, stdin: object = None,
+    ) -> ExecuteResult:
+        key = tuple(argv)
+        self.calls.append(key)
+        if key in self.block:
+            time.sleep(3600)
+        self._last_stdout = self.stdout.get(key, "")
+        return self.results[key]
+
+    def export(self, handle: object, dest: Path) -> None:
+        dest.mkdir(parents=True, exist_ok=True)
+        (dest / "observations").write_text(self._last_stdout, encoding="utf-8")
+
+    # The rest of `ExecutionBackend` is unused by `GateWitness` and
+    # therefore never exercised through this double - stubbed only so
+    # `_FakeBackend` structurally satisfies the full Protocol `GateWitness`
+    # is typed against.
+    def describe(self) -> BackendDescription:
+        raise NotImplementedError
+
+    def prepare(self, attempt_id: str) -> object:
+        raise NotImplementedError
+
+    def install(self, handle: object, surface: Mapping[str, object]) -> dict[str, object]:
+        raise NotImplementedError
+
+    def execute(
+        self, handle: object, argv: Sequence[str], limits: Limits,
+        cancel: object = None, stdin: object = None,
+    ) -> ExecuteResult:
+        raise NotImplementedError
+
+    def confirm_stopped(self, handle: object) -> Confirmation:
+        raise NotImplementedError
+
+    def confirm_absent(self, handle: object) -> Confirmation:
+        raise NotImplementedError
+
+    def destroy(self, handle: object) -> None:
+        raise NotImplementedError
+
+
+def _exited(exit_code: int) -> ExecuteResult:
+    return ExecuteResult(reason="exited", exit_code=exit_code)
+
+
+# ------------------------------------------------------------------ construction
+
+
 def test_declared_gates_must_be_non_empty() -> None:
     with pytest.raises(ValueError, match="non-empty"):
-        GateWitness(declared_gates=(), tree_digest_fn=_fixed_tree_digest)
+        GateWitness(
+            declared_gates={}, tree_digest_fn=_fixed_tree_digest, backend=_FakeBackend(),
+            handle=None, limits=_limits(), gate_exclusivity=False, exclusivity_basis="",
+        )
+
+
+def test_a_declared_gates_argv_must_be_non_empty() -> None:
+    with pytest.raises(ValueError, match="non-empty argv"):
+        GateWitness(
+            declared_gates={"lint": []}, tree_digest_fn=_fixed_tree_digest, backend=_FakeBackend(),
+            handle=None, limits=_limits(), gate_exclusivity=False, exclusivity_basis="",
+        )
+
+
+# --------------------------------------------------------------- happy paths
 
 
 def test_a_complete_gate_is_confirmed_with_its_own_timestamps_and_tree_digest() -> None:
-    witness = GateWitness(declared_gates=("lint",), tree_digest_fn=_fixed_tree_digest)
-    witness.decide({"op": "gate_start", "gate": "lint", "invocation_id": "inv-1"})
-    witness.decide({"op": "gate_complete", "invocation_id": "inv-1", "exit_code": 0})
+    backend = _FakeBackend(results={("lint",): _exited(0)})
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest, backend=backend,
+        handle=None, limits=_limits(), gate_exclusivity=False, exclusivity_basis="",
+    )
+    reply = witness.decide({"op": "run_gate", "gate": "lint"})
+    assert reply["accepted"] is True
+    assert reply["exit_code"] == 0
+    assert reply["reason"] == "exited"
     record = witness.finalize("a-1")
     gate = record.gates["lint"]
     assert gate.coverage == "complete"
-    assert gate.exit_code == 0
-    assert gate.tree_digest_at_start == "sha256:fixed-for-test"
-    assert gate.started_at is not None and gate.completed_at is not None
-    assert gate.completed_at >= gate.started_at
+    assert len(gate.runs) == 1
+    run = gate.runs[0]
+    assert run.exit_code == 0
+    assert run.tree_digest_at_start == "sha256:fixed-for-test"
+    assert run.completed_at is not None and run.completed_at >= run.requested_at
     assert gate.execution_observed() == ("CONFIRMED", None)
 
 
-def test_a_nonzero_exit_code_is_still_confirmed_execution() -> None:
-    """Exit code is not execution (design doc §5) - a FAILED gate is still
-    a gate the controller watched start and finish."""
-    witness = GateWitness(declared_gates=("lint",), tree_digest_fn=_fixed_tree_digest)
-    witness.decide({"op": "gate_start", "gate": "lint", "invocation_id": "inv-1"})
-    witness.decide({"op": "gate_complete", "invocation_id": "inv-1", "exit_code": 1})
+def test_a_nonzero_exit_code_that_still_exited_is_complete_coverage() -> None:
+    """Exit code is not execution (design doc §5) - a FAILED gate that ran
+    to its own natural end is still `complete`, never `interrupted`."""
+    backend = _FakeBackend(results={("lint",): _exited(1)})
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest, backend=backend,
+        handle=None, limits=_limits(), gate_exclusivity=False, exclusivity_basis="",
+    )
+    reply = witness.decide({"op": "run_gate", "gate": "lint"})
+    assert reply["exit_code"] == 1
     gate = witness.finalize("a-1").gates["lint"]
     assert gate.coverage == "complete"
-    assert gate.exit_code == 1
+    assert gate.runs[0].exit_code == 1
     assert gate.execution_observed() == ("CONFIRMED", None)
 
 
-def test_an_undeclared_gate_start_is_refused() -> None:
+@pytest.mark.parametrize("reason", ["timeout", "operator-cancelled"])
+def test_a_gate_that_started_but_did_not_exit_cleanly_is_interrupted_not_complete(reason: str) -> None:
+    """Orchestrator correction: a gate the controller started and that was
+    cancelled or timed out is `interrupted` with the controller's own
+    reason - NOT `complete` merely because `exec_in_attempt()` returned a
+    result. Both of these `reason`s mean a real process genuinely began."""
+    backend = _FakeBackend(results={("lint",): ExecuteResult(reason=reason, exit_code=None)})
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest, backend=backend,
+        handle=None, limits=_limits(), gate_exclusivity=False, exclusivity_basis="",
+    )
+    reply = witness.decide({"op": "run_gate", "gate": "lint"})
+    assert reply["reason"] == reason
+    gate = witness.finalize("a-1").gates["lint"]
+    assert gate.coverage == "interrupted"
+    assert gate.execution_observed() == ("CONFIRMED", None)
+
+
+@pytest.mark.parametrize("reason", ["launch-failed", "attempt-not-running", "unsupported"])
+def test_a_gate_that_never_started_a_process_is_not_observed_never_confirmed(reason: str) -> None:
+    """Codex `code_review` correction: these three `reason`s mean NO
+    process ever started (never launched, refused before any attempt, or
+    the backend cannot do this at all) - the first draft folded them into
+    `interrupted`/`CONFIRMED`, which let a refused or never-launched exec
+    report positive execution evidence, exactly the subject-authored-claim
+    problem #269 exists to stop."""
+    backend = _FakeBackend(results={("lint",): ExecuteResult(reason=reason, exit_code=None)})
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest, backend=backend,
+        handle=None, limits=_limits(), gate_exclusivity=False, exclusivity_basis="",
+    )
+    reply = witness.decide({"op": "run_gate", "gate": "lint"})
+    assert reply["reason"] == reason
+    gate = witness.finalize("a-1").gates["lint"]
+    if reason == "unsupported":
+        # Sticky and attempt-wide (its own red case) - checked separately.
+        assert gate.coverage == "channel-unavailable"
+        assert gate.execution_observed() == ("UNKNOWN", "channel-unavailable")
+    else:
+        assert gate.coverage == "not-observed"
+        assert gate.execution_observed() == ("UNKNOWN", "no-controller-witness")
+        assert len(gate.runs) == 1  # recorded for transparency, just not counted as started
+
+
+def test_an_undeclared_gate_is_refused() -> None:
     """Red case 1 (design doc §8): the controller's own declared set is
-    the only source of truth for what may be started."""
-    witness = GateWitness(declared_gates=("lint",), tree_digest_fn=_fixed_tree_digest)
+    the only source of truth for what may be run."""
+    backend = _FakeBackend()
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest, backend=backend,
+        handle=None, limits=_limits(), gate_exclusivity=False, exclusivity_basis="",
+    )
     with pytest.raises(ChannelRefusal, match="not a declared gate"):
-        witness.decide({"op": "gate_start", "gate": "typecheck", "invocation_id": "inv-1"})
+        witness.decide({"op": "run_gate", "gate": "typecheck"})
+    assert backend.calls == []  # never even attempted
     gate = witness.finalize("a-1").gates["lint"]
-    assert gate.coverage == "not-observed"  # the refusal left the declared gate untouched
+    assert gate.coverage == "not-observed"
 
 
-def test_a_second_start_for_an_already_started_gate_is_refused() -> None:
-    """Red case 2: one start per declared gate per attempt - a subject
-    cannot paper over an unfavourable first attempt with a second one."""
-    witness = GateWitness(declared_gates=("lint",), tree_digest_fn=_fixed_tree_digest)
-    witness.decide({"op": "gate_start", "gate": "lint", "invocation_id": "inv-1"})
-    with pytest.raises(ChannelRefusal, match="already has a start"):
-        witness.decide({"op": "gate_start", "gate": "lint", "invocation_id": "inv-2"})
+def test_an_unknown_op_is_refused() -> None:
+    backend = _FakeBackend()
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest, backend=backend,
+        handle=None, limits=_limits(), gate_exclusivity=False, exclusivity_basis="",
+    )
+    with pytest.raises(ChannelRefusal, match="unknown op"):
+        witness.decide({"op": "something_else"})
 
 
-def test_a_second_start_after_completion_is_also_refused() -> None:
-    witness = GateWitness(declared_gates=("lint",), tree_digest_fn=_fixed_tree_digest)
-    witness.decide({"op": "gate_start", "gate": "lint", "invocation_id": "inv-1"})
-    witness.decide({"op": "gate_complete", "invocation_id": "inv-1", "exit_code": 0})
-    with pytest.raises(ChannelRefusal, match="already has a start"):
-        witness.decide({"op": "gate_start", "gate": "lint", "invocation_id": "inv-2"})
+# ------------------------------------------------------------ reruns and races
 
 
-def test_an_invocation_id_cannot_be_reused_across_different_gates() -> None:
-    """Red case 6 (codex code_review of #269): `invocation_id` is
-    subject-generated and opaque (design doc §3) - a subject reusing it
-    across two gates (deliberately, or by OS pid reuse, since a
-    subject-generated id is commonly a pid) must not let one gate's
-    completion be credited to another."""
-    witness = GateWitness(declared_gates=("lint", "typecheck"), tree_digest_fn=_fixed_tree_digest)
-    witness.decide({"op": "gate_start", "gate": "lint", "invocation_id": "x"})
-    with pytest.raises(ChannelRefusal, match="already reserved"):
-        witness.decide({"op": "gate_start", "gate": "typecheck", "invocation_id": "x"})
-    # lint's own state is untouched by the refused collision, and typecheck
-    # never started - completing "x" must still resolve to lint alone.
-    witness.decide({"op": "gate_complete", "invocation_id": "x", "exit_code": 0})
-    record = witness.finalize("a-1")
-    assert record.gates["lint"].coverage == "complete"
-    assert record.gates["typecheck"].coverage == "not-observed"
+def test_a_concurrent_duplicate_run_gate_for_the_same_gate_is_refused() -> None:
+    """Red case 2: a CONCURRENT duplicate (same gate, still executing) is
+    refused. Uses a real `DecideReplyChannel` so the second request
+    genuinely arrives while the first is still inside `execute()`."""
+    backend = _FakeBackend(block={("lint",)})
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest, backend=backend,
+        handle=None, limits=_limits(timeout=3600), gate_exclusivity=False, exclusivity_basis="",
+    )
+    first_started = threading.Event()
+
+    def run_first() -> None:
+        first_started.set()
+        witness.decide({"op": "run_gate", "gate": "lint"})
+
+    t = threading.Thread(target=run_first, daemon=True)
+    t.start()
+    first_started.wait(timeout=5.0)
+    time.sleep(0.2)  # let the first call actually enter `execute()` and block
+    with pytest.raises(ChannelRefusal, match="already executing"):
+        witness.decide({"op": "run_gate", "gate": "lint"})
+    # the blocked first call is never joined - it would hang until process exit;
+    # daemon=True keeps it from blocking the test session's own teardown.
 
 
-def test_an_invocation_id_stays_reserved_after_its_gate_completes() -> None:
-    """The reservation in `_decide_start` is for the life of the attempt,
-    never released on completion - a closed gate's id cannot be recycled
-    onto a different gate either."""
-    witness = GateWitness(declared_gates=("lint", "typecheck"), tree_digest_fn=_fixed_tree_digest)
-    witness.decide({"op": "gate_start", "gate": "lint", "invocation_id": "x"})
-    witness.decide({"op": "gate_complete", "invocation_id": "x", "exit_code": 0})
-    with pytest.raises(ChannelRefusal, match="already reserved"):
-        witness.decide({"op": "gate_start", "gate": "typecheck", "invocation_id": "x"})
+def test_a_genuinely_stuck_call_reads_as_interrupted_confirmed_at_finalize() -> None:
+    """Distinct from the exception path (`test_an_execute_exception_leaves_
+    the_run_not_started_and_clears_in_flight`): a call still blocked INSIDE
+    `exec_in_attempt()` when `finalize()` runs (the real teardown-cutoff
+    case) means a process plausibly started and is in limbo - `_in_flight`
+    stays `True` forever for this gate, which is what tells `finalize()`
+    apart from the resolved-exception case where it was already cleared."""
+    backend = _FakeBackend(block={("lint",)})
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest, backend=backend,
+        handle=None, limits=_limits(timeout=3600), gate_exclusivity=False, exclusivity_basis="",
+    )
+    first_started = threading.Event()
+
+    def run_first() -> None:
+        first_started.set()
+        witness.decide({"op": "run_gate", "gate": "lint"})
+
+    t = threading.Thread(target=run_first, daemon=True)
+    t.start()
+    first_started.wait(timeout=5.0)
+    time.sleep(0.2)  # let the call actually enter exec_in_attempt() and block
+    gate = witness.finalize("a-1").gates["lint"]
+    assert gate.coverage == "interrupted"
+    assert gate.execution_observed() == ("CONFIRMED", None)
+    assert gate.runs[0].reason is None
 
 
-def test_a_completion_with_no_matching_open_start_is_refused_unknown_id() -> None:
-    """Red case 3a: a bare completion naming an id nothing ever opened -
-    'a received request alone is not completion' (#269's own wording)."""
-    witness = GateWitness(declared_gates=("lint",), tree_digest_fn=_fixed_tree_digest)
-    with pytest.raises(ChannelRefusal, match="does not match a gate currently open"):
-        witness.decide({"op": "gate_complete", "invocation_id": "never-started", "exit_code": 0})
+def test_sequential_reruns_of_the_same_gate_are_both_recorded() -> None:
+    """A rerun after the prior run resolved is not refused, and nothing
+    already recorded is overwritten - the first run is still in the record
+    even though the second, later run is what a reader would act on."""
+    backend = _FakeBackend(results={("lint",): _exited(1)})
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest, backend=backend,
+        handle=None, limits=_limits(), gate_exclusivity=False, exclusivity_basis="",
+    )
+    witness.decide({"op": "run_gate", "gate": "lint"})
+    backend.results[("lint",)] = _exited(0)  # subject fixed it, rerun gate
+    witness.decide({"op": "run_gate", "gate": "lint"})
+    gate = witness.finalize("a-1").gates["lint"]
+    assert len(gate.runs) == 2
+    assert gate.runs[0].exit_code == 1  # the first, unfavourable run survives
+    assert gate.runs[1].exit_code == 0
+    assert gate.coverage == "complete"  # any run complete is enough
 
 
-def test_a_replayed_completion_for_an_already_closed_invocation_is_refused() -> None:
-    """Red case 3b: a second gate_complete for an invocation already
-    closed by its own, genuine first completion - a replay."""
-    witness = GateWitness(declared_gates=("lint",), tree_digest_fn=_fixed_tree_digest)
-    witness.decide({"op": "gate_start", "gate": "lint", "invocation_id": "inv-1"})
-    witness.decide({"op": "gate_complete", "invocation_id": "inv-1", "exit_code": 0})
-    with pytest.raises(ChannelRefusal, match="does not match a gate currently open"):
-        witness.decide({"op": "gate_complete", "invocation_id": "inv-1", "exit_code": 1})
-    # the first, genuine completion is unaffected by the refused replay
+def test_an_execute_exception_leaves_the_run_not_started_and_clears_in_flight() -> None:
+    """An exception out of `exec_in_attempt()` itself (an infrastructure
+    fault, not a normal launch failure - those return a `reason` normally)
+    must not be silently recorded as success, must not permanently wedge
+    the gate as perpetually in-flight, and - codex `code_review` correction
+    - must NOT report `CONFIRMED` execution: the exception path clears
+    `_in_flight` before re-raising, which is exactly what distinguishes
+    "never started" from a call genuinely still running when the channel
+    tears down (see `test_a_rerun_is_still_possible_after_an_exception`)."""
+    backend = _FakeBackend()
+
+    def boom(handle: object, argv: Sequence[str], limits: Limits, cancel: object = None, stdin: object = None) -> ExecuteResult:
+        raise RuntimeError("simulated backend crash")
+
+    backend.exec_in_attempt = boom  # type: ignore[method-assign]
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest, backend=backend,
+        handle=None, limits=_limits(), gate_exclusivity=False, exclusivity_basis="",
+    )
+    with pytest.raises(RuntimeError, match="simulated backend crash"):
+        witness.decide({"op": "run_gate", "gate": "lint"})
+    gate = witness.finalize("a-1").gates["lint"]
+    assert gate.coverage == "not-observed"
+    assert gate.execution_observed() == ("UNKNOWN", "no-controller-witness")
+    assert gate.runs[0].reason is None
+
+
+def test_a_rerun_is_still_possible_after_an_exception() -> None:
+    """The exception path must clear `_in_flight`, not merely leave the
+    gate permanently refusing - a flow-check retry after an infrastructure
+    hiccup must be able to proceed."""
+    backend = _FakeBackend(results={("lint",): _exited(0)})
+    calls = {"n": 0}
+    real_exec = backend.exec_in_attempt
+
+    def flaky(handle: object, argv: Sequence[str], limits: Limits, cancel: object = None, stdin: object = None) -> ExecuteResult:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("simulated backend crash")
+        return real_exec(handle, argv, limits, cancel, stdin)
+
+    backend.exec_in_attempt = flaky  # type: ignore[method-assign]
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest, backend=backend,
+        handle=None, limits=_limits(), gate_exclusivity=False, exclusivity_basis="",
+    )
+    with pytest.raises(RuntimeError):
+        witness.decide({"op": "run_gate", "gate": "lint"})
+    reply = witness.decide({"op": "run_gate", "gate": "lint"})
+    assert reply["exit_code"] == 0
     gate = witness.finalize("a-1").gates["lint"]
     assert gate.coverage == "complete"
-    assert gate.exit_code == 0
+    assert len(gate.runs) == 2
 
 
-def test_an_interrupted_gate_is_confirmed_but_distinct_from_complete_and_not_observed() -> None:
-    """Red case 4: started, never completed - 'interrupted', never
-    collapsed into either neighbouring state."""
-    witness = GateWitness(declared_gates=("lint", "typecheck"), tree_digest_fn=_fixed_tree_digest)
-    witness.decide({"op": "gate_start", "gate": "lint", "invocation_id": "inv-1"})
-    # typecheck never contacted at all
-    record = witness.finalize("a-1")
-    lint = record.gates["lint"]
-    typecheck = record.gates["typecheck"]
-    assert lint.coverage == "interrupted"
-    assert lint.completed_at is None
-    assert lint.exit_code is None
-    assert lint.execution_observed() == ("CONFIRMED", None)
-    assert typecheck.coverage == "not-observed"
-    assert typecheck.execution_observed() == ("UNKNOWN", "no-controller-witness")
-    assert lint.coverage != typecheck.coverage  # the two must not collapse into one
+def test_a_tree_digest_failure_clears_in_flight_and_records_nothing() -> None:
+    """Codex `code_review` correction: the first draft computed the tree
+    digest INSIDE the same lock that claims `_in_flight`, with no cleanup
+    on failure - a digest that raises once would wedge the gate as
+    perpetually "already executing" forever, refusing every later request
+    including a legitimate retry."""
+    calls = {"n": 0}
+
+    def flaky_digest() -> str:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("simulated export failure")
+        return "sha256:ok"
+
+    backend = _FakeBackend(results={("lint",): _exited(0)})
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"]}, tree_digest_fn=flaky_digest, backend=backend,
+        handle=None, limits=_limits(), gate_exclusivity=False, exclusivity_basis="",
+    )
+    with pytest.raises(RuntimeError, match="simulated export failure"):
+        witness.decide({"op": "run_gate", "gate": "lint"})
+    assert backend.calls == []  # never reached the backend at all
+    reply = witness.decide({"op": "run_gate", "gate": "lint"})  # must not be refused as "already executing"
+    assert reply["exit_code"] == 0
+    gate = witness.finalize("a-1").gates["lint"]
+    assert len(gate.runs) == 1  # the failed digest attempt recorded nothing
+    assert gate.coverage == "complete"
 
 
-def test_a_fully_bypassed_declared_gate_is_unknown_never_not_confirmed() -> None:
-    """Red case 5: the full bypass. A declared gate the subject never
-    contacts the channel about at all."""
-    witness = GateWitness(declared_gates=("lint",), tree_digest_fn=_fixed_tree_digest)
+# -------------------------------------------------------- coverage/UNKNOWN/NOT_CONFIRMED
+
+
+def test_a_fully_bypassed_declared_gate_is_unknown_by_default() -> None:
+    """Red case 5: the full bypass, with the SAFE default
+    (`gate_exclusivity=False`) - `UNKNOWN`, never `NOT_CONFIRMED`."""
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest, backend=_FakeBackend(),
+        handle=None, limits=_limits(), gate_exclusivity=False, exclusivity_basis="",
+    )
     gate = witness.finalize("a-1").gates["lint"]
     assert gate.coverage == "not-observed"
     status, reason = gate.execution_observed()
-    assert status == "UNKNOWN"
-    assert reason == "no-controller-witness"
-    assert status != "NOT_CONFIRMED"
+    assert (status, reason) == ("UNKNOWN", "no-controller-witness")
+
+
+def test_a_fully_bypassed_declared_gate_is_not_confirmed_under_asserted_exclusivity() -> None:
+    """Orchestrator correction: `NOT_CONFIRMED` is reachable ONLY when the
+    caller has asserted `gate_exclusivity=True` - the fixture's own claim
+    that the subject has no other way to run this gate at all."""
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest, backend=_FakeBackend(),
+        handle=None, limits=_limits(), gate_exclusivity=True,
+        exclusivity_basis="fixture installs no lint binary on the subject's PATH",
+    )
+    gate = witness.finalize("a-1").gates["lint"]
+    assert gate.coverage == "not-observed"
+    status, reason = gate.execution_observed()
+    assert (status, reason) == ("NOT_CONFIRMED", "proven-non-execution")
+
+
+def test_exclusivity_is_recorded_on_every_gate_regardless_of_value() -> None:
+    """A `NOT_CONFIRMED` verdict - or its absence - must be legible without
+    trusting an invisible constructor argument (orchestrator review)."""
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest, backend=_FakeBackend(),
+        handle=None, limits=_limits(), gate_exclusivity=True, exclusivity_basis="stated basis",
+    )
+    parsed = json.loads(witness.finalize("a-1").to_json_bytes())
+    assert parsed["gates"]["lint"]["exclusivity"] == {"asserted": True, "basis": "stated basis"}
+
+
+def test_an_unsupported_backend_makes_the_whole_attempt_channel_unavailable() -> None:
+    """Red case 10: `ManagedBackend.exec_in_attempt()` (or any backend not
+    implementing it) always answers `reason="unsupported"` - the witness
+    must read this as the WHOLE mechanism being unavailable for this
+    attempt, not merely the one call that triggered it."""
+    backend = _FakeBackend(results={
+        ("lint",): ExecuteResult(reason="unsupported", exit_code=None),
+    })
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"], "typecheck": ["typecheck"]},
+        tree_digest_fn=_fixed_tree_digest, backend=backend, handle=None,
+        limits=_limits(), gate_exclusivity=False, exclusivity_basis="",
+    )
+    witness.decide({"op": "run_gate", "gate": "lint"})
+    record = witness.finalize("a-1")
+    # Both gates read channel-unavailable, not only "lint" - including
+    # "typecheck", which never even made a request.
+    assert record.gates["lint"].coverage == "channel-unavailable"
+    assert record.gates["typecheck"].coverage == "channel-unavailable"
+    for gate in record.gates.values():
+        assert gate.execution_observed() == ("UNKNOWN", "channel-unavailable")
+
+
+def test_an_unsupported_backend_is_never_called_again(tmp_path: Path) -> None:
+    """Codex `code_review` correction: once `exec_in_attempt()` has
+    answered `unsupported`, a LATER `run_gate` for a different gate must
+    not call the backend again at all - it already told us, once, that it
+    cannot do this."""
+    backend = _FakeBackend(results={
+        ("lint",): ExecuteResult(reason="unsupported", exit_code=None),
+        ("typecheck",): _exited(0),  # would succeed if ever actually called
+    })
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"], "typecheck": ["typecheck"]},
+        tree_digest_fn=_fixed_tree_digest, backend=backend, handle=None,
+        limits=_limits(), gate_exclusivity=False, exclusivity_basis="",
+    )
+    witness.decide({"op": "run_gate", "gate": "lint"})
+    assert backend.calls == [("lint",)]
+    reply = witness.decide({"op": "run_gate", "gate": "typecheck"})
+    assert reply["reason"] == "unsupported"
+    assert backend.calls == [("lint",)]  # typecheck's own argv never called
 
 
 def test_channel_unavailable_covers_every_declared_gate_distinctly_from_not_observed() -> None:
-    witness = GateWitness(declared_gates=("lint", "typecheck"), tree_digest_fn=_fixed_tree_digest)
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"], "typecheck": ["typecheck"]},
+        tree_digest_fn=_fixed_tree_digest, backend=_FakeBackend(), handle=None,
+        limits=_limits(), gate_exclusivity=True, exclusivity_basis="irrelevant here",
+    )
     witness.channel_unavailable = True
     record = witness.finalize("a-1")
     for gate in record.gates.values():
@@ -173,36 +490,84 @@ def test_channel_unavailable_covers_every_declared_gate_distinctly_from_not_obse
         assert gate.execution_observed() == ("UNKNOWN", "channel-unavailable")
 
 
-def test_execution_observed_never_returns_not_confirmed_for_any_coverage() -> None:
-    """Decision (orchestrator ruling): NOT_CONFIRMED is never produced by
-    this witness, for any of its four coverage states."""
-    from skillc.gate_witness import GateRecord
-    for coverage in ("complete", "interrupted", "not-observed", "channel-unavailable"):
-        status, _ = GateRecord(coverage=coverage).execution_observed()
-        assert status != "NOT_CONFIRMED"
+def test_execution_observed_never_returns_not_confirmed_for_complete_or_interrupted() -> None:
+    for coverage in ("complete", "interrupted"):
+        record = GateRecord(coverage=coverage, runs=(), exclusivity_asserted=True, exclusivity_basis="x")
+        status, _ = record.execution_observed()
+        assert status == "CONFIRMED"
+
+
+# ---------------------------------------------------------------- the reply
+
+
+def test_the_reply_carries_the_real_result_and_nothing_else() -> None:
+    """The gate's own exit code and bounded output ARE what the subject
+    would see running the gate itself (orchestrator correction) - but
+    nothing about the witness's internal state (coverage, tree digest,
+    other gates) leaks through the same reply."""
+    backend = _FakeBackend(results={("lint",): _exited(3)}, stdout={("lint",): "some lint output"})
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"], "typecheck": ["typecheck"]},
+        tree_digest_fn=_fixed_tree_digest, backend=backend, handle=None,
+        limits=_limits(), gate_exclusivity=False, exclusivity_basis="",
+    )
+    reply = witness.decide({"op": "run_gate", "gate": "lint"})
+    assert reply == {
+        "accepted": True, "exit_code": 3, "reason": "exited",
+        "stdout": "some lint output", "stderr": "",
+    }
+
+
+def test_the_reply_stdout_is_truncated_to_the_declared_byte_cap() -> None:
+    backend = _FakeBackend(results={("lint",): _exited(0)}, stdout={("lint",): "x" * 100})
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest, backend=backend,
+        handle=None, limits=_limits(), gate_exclusivity=False, exclusivity_basis="",
+        reply_byte_cap=10,
+    )
+    reply = witness.decide({"op": "run_gate", "gate": "lint"})
+    assert reply["stdout"] == "x" * 10
+
+
+def test_the_reply_stderr_comes_from_the_backends_error_field() -> None:
+    backend = _FakeBackend(results={("lint",): ExecuteResult(reason="exited", exit_code=1, error="boom")})
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest, backend=backend,
+        handle=None, limits=_limits(), gate_exclusivity=False, exclusivity_basis="",
+    )
+    reply = witness.decide({"op": "run_gate", "gate": "lint"})
+    assert reply["stderr"] == "boom"
+
+
+# --------------------------------------------------------------- JSON shape
 
 
 def test_gate_witness_record_round_trips_as_json_with_every_declared_gate_present() -> None:
-    witness = GateWitness(declared_gates=("lint", "typecheck"), tree_digest_fn=_fixed_tree_digest)
-    witness.decide({"op": "gate_start", "gate": "lint", "invocation_id": "inv-1"})
-    witness.decide({"op": "gate_complete", "invocation_id": "inv-1", "exit_code": 0})
-    record = witness.finalize("a-1")
-    parsed = json.loads(record.to_json_bytes().decode("utf-8"))
+    backend = _FakeBackend(results={("lint",): _exited(0)})
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"], "typecheck": ["typecheck"]},
+        tree_digest_fn=_fixed_tree_digest, backend=backend, handle=None,
+        limits=_limits(), gate_exclusivity=False, exclusivity_basis="",
+    )
+    witness.decide({"op": "run_gate", "gate": "lint"})
+    parsed = json.loads(witness.finalize("a-1").to_json_bytes())
     assert parsed["kind"] == "gate-witness"
     assert parsed["attempt_id"] == "a-1"
     assert set(parsed["declared_gates"]) == {"lint", "typecheck"}
     assert set(parsed["gates"].keys()) == {"lint", "typecheck"}  # absence is not a record
     assert parsed["gates"]["lint"]["coverage"] == "complete"
+    assert len(parsed["gates"]["lint"]["runs"]) == 1
     assert parsed["gates"]["typecheck"]["coverage"] == "not-observed"
+    assert parsed["gates"]["typecheck"]["runs"] == []
 
 
-def test_an_unknown_op_is_refused() -> None:
-    witness = GateWitness(declared_gates=("lint",), tree_digest_fn=_fixed_tree_digest)
-    with pytest.raises(ChannelRefusal, match="unknown op"):
-        witness.decide({"op": "something_else"})
+def test_gate_witness_record_is_a_frozen_value() -> None:
+    record = GateWitnessRecord(attempt_id="a-1", declared_gates=("lint",), gates={})
+    with pytest.raises(AttributeError):
+        record.attempt_id = "a-2"  # type: ignore[misc]
 
 
-# ------------------------------------------------- real channel integration
+# ------------------------------------------------------- real channel + fake backend
 
 
 def _send(sock_path: Path, payload: dict[str, object]) -> dict[str, object]:
@@ -224,20 +589,30 @@ def _send(sock_path: Path, payload: dict[str, object]) -> dict[str, object]:
     return result
 
 
+def _ok_result(reply: dict[str, object]) -> dict[str, object]:
+    result = reply["result"]
+    assert isinstance(result, dict)
+    return result
+
+
 def test_gate_witness_composes_with_a_real_decide_reply_channel(tmp_path: Path) -> None:
-    """Proves the two modules actually wire together, not just that each
-    passes its own tests in isolation - a real socket, real connections,
-    real DecideReplyChannel.decide dispatch into GateWitness.decide."""
-    witness = GateWitness(declared_gates=("lint", "typecheck"), tree_digest_fn=_fixed_tree_digest)
+    """Proves the modules actually wire together, not just that each passes
+    its own tests in isolation - a real socket, real connections, real
+    `DecideReplyChannel.decide` dispatch into `GateWitness.decide`."""
+    backend = _FakeBackend(results={("lint",): _exited(0)})
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"], "typecheck": ["typecheck"]},
+        tree_digest_fn=_fixed_tree_digest, backend=backend, handle=None,
+        limits=_limits(), gate_exclusivity=False, exclusivity_basis="",
+    )
     sock_path = tmp_path / "trigger.sock"
     channel = DecideReplyChannel(sock_path, witness.decide)
     channel.start()
     try:
-        start_reply = _send(sock_path, {"op": "gate_start", "gate": "lint", "invocation_id": "inv-1"})
-        assert start_reply == {"ok": True, "result": {"accepted": True}}
-        complete_reply = _send(sock_path, {"op": "gate_complete", "invocation_id": "inv-1", "exit_code": 0})
-        assert complete_reply == {"ok": True, "result": {"accepted": True}}
-        bad_reply = _send(sock_path, {"op": "gate_start", "gate": "undeclared", "invocation_id": "inv-2"})
+        reply = _send(sock_path, {"op": "run_gate", "gate": "lint"})
+        assert reply["ok"] is True
+        assert _ok_result(reply)["exit_code"] == 0
+        bad_reply = _send(sock_path, {"op": "run_gate", "gate": "undeclared"})
         assert bad_reply["ok"] is False
     finally:
         channel.stop_and_finalize()
@@ -246,78 +621,163 @@ def test_gate_witness_composes_with_a_real_decide_reply_channel(tmp_path: Path) 
     assert record.gates["typecheck"].coverage == "not-observed"
 
 
-def test_concurrent_starts_for_different_gates_do_not_corrupt_each_others_state(tmp_path: Path) -> None:
-    witness = GateWitness(declared_gates=("lint", "typecheck"), tree_digest_fn=_fixed_tree_digest)
-    sock_path = tmp_path / "trigger.sock"
-    channel = DecideReplyChannel(sock_path, witness.decide)
-    channel.start()
-    try:
-        threads = [
-            threading.Thread(target=_send, args=(sock_path, {"op": "gate_start", "gate": "lint", "invocation_id": "a"})),
-            threading.Thread(target=_send, args=(sock_path, {"op": "gate_start", "gate": "typecheck", "invocation_id": "b"})),
-        ]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=5.0)
-        _send(sock_path, {"op": "gate_complete", "invocation_id": "a", "exit_code": 0})
-        _send(sock_path, {"op": "gate_complete", "invocation_id": "b", "exit_code": 1})
-    finally:
-        channel.stop_and_finalize()
-    record = witness.finalize("a-1")
-    assert record.gates["lint"].coverage == "complete"
-    assert record.gates["lint"].exit_code == 0
-    assert record.gates["typecheck"].coverage == "complete"
-    assert record.gates["typecheck"].exit_code == 1
-
-
-def test_real_deterministic_processes_succeed_fail_and_interrupt_through_the_protected_path(
-    tmp_path: Path,
-) -> None:
-    """#269's own acceptance bar (gate-witness.md §0): "Show real deterministic
-    processes succeeding, failing and being interrupted through the protected
-    path. No live model is required." A hand-crafted dict passed straight to
-    `decide()` cannot show this - it proves the pairing logic, never that an
-    actual OS process ran. This drives three REAL subprocesses (success, a
-    non-zero exit, and one genuinely killed mid-run) through the real socket
-    and real `DecideReplyChannel`, binding each `gate_complete.exit_code` to
-    the process's own real return code - a synthetic process is still a real
-    one, which is what "no live model required" means (raised by cross-model
-    review, codex code_review of #269)."""
+def test_concurrent_run_gate_for_different_gates_do_not_corrupt_each_others_state(tmp_path: Path) -> None:
+    backend = _FakeBackend(results={("lint",): _exited(0), ("typecheck",): _exited(1)})
     witness = GateWitness(
-        declared_gates=("succeeds", "fails", "interrupted"), tree_digest_fn=_fixed_tree_digest
+        declared_gates={"lint": ["lint"], "typecheck": ["typecheck"]},
+        tree_digest_fn=_fixed_tree_digest, backend=backend, handle=None,
+        limits=_limits(), gate_exclusivity=False, exclusivity_basis="",
     )
     sock_path = tmp_path / "trigger.sock"
     channel = DecideReplyChannel(sock_path, witness.decide)
     channel.start()
     try:
-        _send(sock_path, {"op": "gate_start", "gate": "succeeds", "invocation_id": "s-1"})
-        proc = subprocess.run([sys.executable, "-c", "raise SystemExit(0)"], check=False)
-        _send(sock_path, {"op": "gate_complete", "invocation_id": "s-1", "exit_code": proc.returncode})
-
-        _send(sock_path, {"op": "gate_start", "gate": "fails", "invocation_id": "f-1"})
-        proc = subprocess.run([sys.executable, "-c", "raise SystemExit(7)"], check=False)
-        _send(sock_path, {"op": "gate_complete", "invocation_id": "f-1", "exit_code": proc.returncode})
-
-        _send(sock_path, {"op": "gate_start", "gate": "interrupted", "invocation_id": "i-1"})
-        killed = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
-        killed.terminate()
-        killed.wait(timeout=5.0)
-        # Deliberately no gate_complete - the process was cut off, not finished.
+        threads = [
+            threading.Thread(target=_send, args=(sock_path, {"op": "run_gate", "gate": "lint"})),
+            threading.Thread(target=_send, args=(sock_path, {"op": "run_gate", "gate": "typecheck"})),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5.0)
     finally:
         channel.stop_and_finalize()
     record = witness.finalize("a-1")
-    assert record.gates["succeeds"].coverage == "complete"
-    assert record.gates["succeeds"].exit_code == 0
-    assert record.gates["fails"].coverage == "complete"
-    assert record.gates["fails"].exit_code == 7
-    assert record.gates["interrupted"].coverage == "interrupted"
-    for gate in ("succeeds", "fails", "interrupted"):
-        status, reason = record.gates[gate].execution_observed()
-        assert (status, reason) == ("CONFIRMED", None), gate
+    assert record.gates["lint"].coverage == "complete"
+    assert record.gates["lint"].runs[0].exit_code == 0
+    assert record.gates["typecheck"].coverage == "complete"
+    assert record.gates["typecheck"].runs[0].exit_code == 1
 
 
-def test_gate_witness_record_is_a_frozen_value() -> None:
-    record = GateWitnessRecord(attempt_id="a-1", declared_gates=("lint",), gates={})
-    with pytest.raises(AttributeError):
-        record.attempt_id = "a-2"  # type: ignore[misc]
+# ---------------------------------------------- real DockerBackend (fake CLI)
+
+
+def _docker_bin(state_dir: Path) -> list[str]:
+    return [sys.executable, str(FAKE_DOCKER), "--state", str(state_dir)]
+
+
+def test_real_gates_run_with_real_exit_codes_while_the_primary_subject_keeps_running(
+    tmp_path: Path,
+) -> None:
+    """#269's own acceptance bar ("Show real deterministic processes
+    succeeding, failing and being interrupted through the protected path.
+    No live model is required.") PLUS the orchestrator's correction: a gate
+    exec must never touch the attempt's own primary process. Drives TWO
+    gates and a RERUN through a REAL `DockerBackend` (fake CLI) while a
+    REAL, separately-running primary subject process is still inside the
+    SAME container via `execute()` - proving `exec_in_attempt()` never
+    stops it, which was exactly the bug this design found. `python3` (bare,
+    not `sys.executable`) avoids the pre-existing `/work/` substring
+    collision in `fake_docker.py`'s simulated-container path remapping
+    (nit-stored during #183's own work)."""
+    base = tmp_path / "work"
+    base.mkdir()
+    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(tmp_path / "docker-state"))
+    handle = backend.prepare("a-gw-0000000000001")
+    backend.install(handle, {})
+    try:
+        lint_argv = [
+            "python3", "-c",
+            "import pathlib, sys; sys.exit(0 if pathlib.Path('/work/fixed').exists() else 1)",
+        ]
+        witness = GateWitness(
+            declared_gates={
+                "lint": lint_argv,
+                "typecheck": ["python3", "-c", "raise SystemExit(0)"],
+            },
+            tree_digest_fn=_fixed_tree_digest, backend=backend, handle=handle,
+            limits=Limits(timeout=5.0, grace=0.5), gate_exclusivity=False, exclusivity_basis="",
+        )
+        sock_path = tmp_path / "trigger.sock"
+        channel = DecideReplyChannel(sock_path, witness.decide)
+        channel.start()
+
+        primary_result: list[ExecuteResult] = []
+
+        def run_primary() -> None:
+            primary_result.append(
+                backend.execute(handle, ["python3", "-c", "import time; time.sleep(1.5)"], Limits(timeout=10.0))
+            )
+
+        primary_thread = threading.Thread(target=run_primary)
+        primary_thread.start()
+        time.sleep(0.3)  # let the primary genuinely start before gates run against it
+        try:
+            lint_reply = _send(sock_path, {"op": "run_gate", "gate": "lint"})
+            assert _ok_result(lint_reply)["exit_code"] == 1
+
+            typecheck_reply = _send(sock_path, {"op": "run_gate", "gate": "typecheck"})
+            assert _ok_result(typecheck_reply)["exit_code"] == 0
+
+            # Subject "fixes" lint (creates the marker file lint_argv checks
+            # for) via its OWN exec_in_attempt call - the SAME mechanism, a
+            # separate in-place exec against the still-running container -
+            # then reruns the gate: a sequential rerun, not refused.
+            fix = backend.exec_in_attempt(
+                handle, ["python3", "-c", "open('/work/fixed', 'w').close()"], Limits(timeout=5.0),
+            )
+            assert fix.reason == "exited" and fix.exit_code == 0
+            relint_reply = _send(sock_path, {"op": "run_gate", "gate": "lint"})
+            assert _ok_result(relint_reply)["exit_code"] == 0
+        finally:
+            channel.stop_and_finalize()
+        primary_thread.join(timeout=10.0)
+
+        # The primary ran its own full 1.5s and exited cleanly - proof that
+        # no gate exec stopped or killed the container out from under it.
+        assert len(primary_result) == 1
+        assert primary_result[0].reason == "exited"
+        assert primary_result[0].exit_code == 0
+
+        record = witness.finalize("a-1")
+        assert record.gates["typecheck"].coverage == "complete"
+        assert record.gates["typecheck"].runs[0].exit_code == 0
+        assert len(record.gates["lint"].runs) == 2
+        assert record.gates["lint"].runs[0].exit_code == 1
+        assert record.gates["lint"].runs[1].exit_code == 0
+        assert record.gates["lint"].coverage == "complete"
+        for gate in ("lint", "typecheck"):
+            assert record.gates[gate].execution_observed() == ("CONFIRMED", None)
+    finally:
+        backend.destroy(handle)
+
+
+def test_exec_in_attempt_is_refused_once_the_primary_has_already_stopped(tmp_path: Path) -> None:
+    """Red case: `attempt-not-running`, never a guessed `exited` result.
+    `execute()`'s own one-shot contract stops the container when the
+    PRIMARY subject run finishes - a `run_gate` after that must see this
+    refusal, not the misleading "container not running" error path folded
+    into an ordinary exit code that `execute()` itself exhibits (skillc
+    #304, not fixed here)."""
+    base = tmp_path / "work"
+    base.mkdir()
+    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(tmp_path / "docker-state"))
+    handle = backend.prepare("a-gw-0000000000002")
+    backend.install(handle, {})
+    try:
+        backend.execute(handle, ["python3", "-c", "raise SystemExit(0)"], Limits(timeout=5.0))
+        # The container is now stopped (execute()'s own contract).
+        result = backend.exec_in_attempt(handle, ["python3", "-c", "raise SystemExit(0)"], Limits(timeout=5.0))
+        assert result.reason == "attempt-not-running"
+        assert result.exit_code is None
+    finally:
+        backend.destroy(handle)
+
+
+def test_exec_in_attempt_never_stops_the_container_on_its_own_timeout(tmp_path: Path) -> None:
+    """A gate that times out is `exec_in_attempt()`'s own `reason=
+    "timeout"` - and the container must still be running afterward, since
+    this method must never stop it even on its own internal timeout."""
+    base = tmp_path / "work"
+    base.mkdir()
+    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(tmp_path / "docker-state"))
+    handle = backend.prepare("a-gw-0000000000003")
+    backend.install(handle, {})
+    try:
+        result = backend.exec_in_attempt(
+            handle, ["python3", "-c", "import time; time.sleep(30)"], Limits(timeout=0.5, grace=0.3),
+        )
+        assert result.reason == "timeout"
+        assert backend.confirm_stopped(handle) == Confirmation.NOT_CONFIRMED  # still running
+    finally:
+        backend.destroy(handle)

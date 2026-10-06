@@ -121,6 +121,7 @@ import hashlib
 import io
 import os
 import re
+import signal
 import stat
 import subprocess
 import tarfile
@@ -1404,6 +1405,79 @@ class DockerBackend:
                 tree[str(relpath)] = extracted.read()
         return tree
 
+    def _launch_and_wait(
+        self, handle: _Handle, argv: Sequence[str], limits: Limits,
+        cancel: Callable[[], bool] | None, stdin: bytes | None, *, prefix_wrap: bool,
+    ) -> tuple[subprocess.Popen[bytes], _BoundedDrain, _BoundedDrain, threading.Thread, threading.Thread, str] | ExecuteResult:
+        """Shared `docker exec` launch-drain-wait mechanics for `execute()`
+        and `exec_in_attempt()` (#269) - everything up to, but NOT
+        including, what happens to the container afterward, which is the
+        one thing the two callers must do differently (`execute()` always
+        stops it; `exec_in_attempt()` never does). Returns the running
+        pieces a caller needs to finish building its own `ExecuteResult`,
+        or an `ExecuteResult` directly when the exec itself never launched
+        (`reason="launch-failed"`, caller-decorated with its own
+        `term_forwarding` convention since that field means different
+        things to the two callers)."""
+        exec_argv = [*self.docker_bin, "exec"]
+        if stdin is not None:
+            exec_argv.append("-i")
+        exec_argv += ["-w", CONTAINER_WORKSPACE, "--", handle.name]
+        if prefix_wrap:
+            exec_argv.append(SKILLC_WRAP_PATH)
+        exec_argv += list(argv)
+
+        try:
+            proc = subprocess.Popen(
+                exec_argv, env=handle.env,
+                stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                start_new_session=True,
+            )
+        except OSError as exc:
+            return ExecuteResult(reason="launch-failed", exit_code=None, error=str(exc))
+
+        assert proc.stdout is not None
+        stdout_drain = _BoundedDrain(proc.stdout, limits.max_captured_stdout_bytes)
+        stdout_thread = threading.Thread(target=stdout_drain.run, daemon=True)
+        stdout_thread.start()
+
+        assert proc.stderr is not None
+        stderr_drain = _BoundedDrain(proc.stderr, limits.max_captured_stderr_bytes)
+        stderr_thread = threading.Thread(target=stderr_drain.run, daemon=True)
+        stderr_thread.start()
+
+        if stdin is not None:
+            assert proc.stdin is not None
+            stdin_pipe = proc.stdin
+            payload = stdin
+
+            def _feed_stdin() -> None:
+                try:
+                    stdin_pipe.write(payload)
+                except (BrokenPipeError, OSError):
+                    pass
+                finally:
+                    try:
+                        stdin_pipe.close()
+                    except OSError:
+                        pass
+
+            threading.Thread(target=_feed_stdin, daemon=True).start()
+
+        deadline = time.monotonic() + limits.timeout
+        reason = "exited"
+        while proc.poll() is None:
+            if time.monotonic() >= deadline:
+                reason = "timeout"
+                break
+            if cancel is not None and cancel():
+                reason = "operator-cancelled"
+                break
+            time.sleep(0.02)
+
+        return proc, stdout_drain, stderr_drain, stdout_thread, stderr_thread, reason
+
     def execute(
         self, handle: object, argv: Sequence[str], limits: Limits,
         cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,
@@ -1463,76 +1537,19 @@ class DockerBackend:
         reasoning."""
         assert isinstance(handle, _Handle)
         forwarding_available = self._forwarding_available(handle)
-        exec_argv = [*self.docker_bin, "exec"]
-        if stdin is not None:
-            exec_argv.append("-i")
-        exec_argv += ["-w", CONTAINER_WORKSPACE, "--", handle.name]
-        if forwarding_available:
-            exec_argv.append(SKILLC_WRAP_PATH)
-        exec_argv += list(argv)
-
-        try:
-            proc = subprocess.Popen(
-                exec_argv, env=handle.env,
-                stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            )
-        except OSError as exc:
-            # `forwarding_available` is already known at this point even
-            # though the exec itself never launched - report it when it
-            # explains the absence (the common real case: a missing/
-            # unreachable `docker` binary fails BOTH the probe above and
-            # this Popen the same way). Left `None` only in the residual
-            # case where the probe found the capability present but this
-            # specific exec still failed to launch for some other reason -
-            # genuinely unmeasured, not merely inapplicable, and the one
-            # case within this backend where `None` does NOT mean "this
-            # backend never reports forwarding" (see term_forwarding's own
-            # docstring for that general meaning, and the PR description
-            # for why this one case is called out separately).
+        launched = self._launch_and_wait(
+            handle, argv, limits, cancel, stdin, prefix_wrap=forwarding_available,
+        )
+        if isinstance(launched, ExecuteResult):
+            # Launch itself failed (`OSError` from `Popen`) - `_launch_and_wait`
+            # already built the `launch-failed` result; add the one piece of
+            # context only THIS caller has (whether the wrap prefix it asked
+            # for was even available), exactly as before the refactor.
             return ExecuteResult(
-                reason="launch-failed", exit_code=None, error=str(exc),
+                reason=launched.reason, exit_code=launched.exit_code, error=launched.error,
                 term_forwarding="unavailable-in-image" if not forwarding_available else None,
             )
-
-        assert proc.stdout is not None
-        stdout_drain = _BoundedDrain(proc.stdout, limits.max_captured_stdout_bytes)
-        stdout_thread = threading.Thread(target=stdout_drain.run, daemon=True)
-        stdout_thread.start()
-
-        assert proc.stderr is not None
-        stderr_drain = _BoundedDrain(proc.stderr, limits.max_captured_stderr_bytes)
-        stderr_thread = threading.Thread(target=stderr_drain.run, daemon=True)
-        stderr_thread.start()
-
-        if stdin is not None:
-            assert proc.stdin is not None
-            stdin_pipe = proc.stdin
-            payload = stdin
-
-            def _feed_stdin() -> None:
-                try:
-                    stdin_pipe.write(payload)
-                except (BrokenPipeError, OSError):
-                    pass
-                finally:
-                    try:
-                        stdin_pipe.close()
-                    except OSError:
-                        pass
-
-            threading.Thread(target=_feed_stdin, daemon=True).start()
-
-        deadline = time.monotonic() + limits.timeout
-        reason = "exited"
-        while proc.poll() is None:
-            if time.monotonic() >= deadline:
-                reason = "timeout"
-                break
-            if cancel is not None and cancel():
-                reason = "operator-cancelled"
-                break
-            time.sleep(0.02)
+        proc, stdout_drain, stderr_drain, stdout_thread, stderr_thread, reason = launched
 
         signal_name: str | None = None
         if reason != "exited":
@@ -1556,18 +1573,39 @@ class DockerBackend:
         else:
             term_forwarding = "killed-at-escalation"
 
-        # ONE shared deadline (issue #20 Nit Store, filed against #174):
-        # joining both threads against their own FULL `grace + daemon_timeout`
-        # each, sequentially, doubled the worst-case wall time a subject that
-        # holds both pipes open costs this method - measured directly (not
-        # merely reasoned about) at ~2.08x the single bound before this fix,
-        # ~1x after. Both threads already run CONCURRENTLY (started well
-        # above); only the two blocking `.join()` calls in the calling thread
-        # were sequential. A shared deadline lets a fast stdout drain leave
-        # the full remaining budget for stderr, and a slow one still cannot
+        return self._finish_result(
+            handle, proc, stdout_drain, stderr_drain, stdout_thread, stderr_thread,
+            limits, reason, signal_name=signal_name, term_forwarding=term_forwarding,
+        )
+
+    def _finish_result(
+        self, handle: _Handle, proc: subprocess.Popen[bytes],
+        stdout_drain: _BoundedDrain, stderr_drain: _BoundedDrain,
+        stdout_thread: threading.Thread, stderr_thread: threading.Thread,
+        limits: Limits, reason: str, *, signal_name: str | None, term_forwarding: str | None,
+    ) -> ExecuteResult:
+        """Shared join/error/observations-write-back tail for `execute()`
+        and `exec_in_attempt()` (#269) - the delicate part neither caller
+        should duplicate: the shared drain-join deadline (issue #20 Nit
+        Store, filed against #174), the truncated/incomplete distinction on
+        `error` (#102, #133 item 3), and the `observations` write-back
+        (#76, #186). `signal_name`/`term_forwarding` are accepted as
+        parameters rather than computed here because they mean different
+        things to the two callers - `execute()` derives them from stopping
+        the whole container; `exec_in_attempt()` never stops it at all and
+        passes `None` for both."""
+        # ONE shared deadline: joining both threads against their own FULL
+        # `grace + daemon_timeout` each, sequentially, doubled the
+        # worst-case wall time a subject that holds both pipes open costs
+        # this method - measured directly (not merely reasoned about) at
+        # ~2.08x the single bound before this fix, ~1x after. Both threads
+        # already run CONCURRENTLY (started in `_launch_and_wait`); only
+        # the two blocking `.join()` calls in the calling thread were
+        # sequential. A shared deadline lets a fast stdout drain leave the
+        # full remaining budget for stderr, and a slow one still cannot
         # push the total past the one bound - `max(0.0, ...)` because a
-        # `.join(timeout=<negative>)` returns immediately rather than raising,
-        # but negative reads oddly in a trace.
+        # `.join(timeout=<negative>)` returns immediately rather than
+        # raising, but negative reads oddly in a trace.
         join_deadline = time.monotonic() + limits.grace + self.daemon_timeout
         stdout_thread.join(timeout=max(0.0, join_deadline - time.monotonic()))
         stderr_thread.join(timeout=max(0.0, join_deadline - time.monotonic()))
@@ -1613,10 +1651,10 @@ class DockerBackend:
         # `stdout_bytes` is what tells a caller this file is not the
         # subject's whole output.
         #
-        # NOT fatal to execute() itself if the write-back fails (issue #186:
-        # this used to also mean NOT REPORTED - `check=False` and the result
-        # was never inspected, so a subject that pre-creates `observations`
-        # as a directory made the tar extraction fail with `IsADirectoryError`
+        # NOT fatal to this call if the write-back fails (issue #186: this
+        # used to also mean NOT REPORTED - `check=False` and the result was
+        # never inspected, so a subject that pre-creates `observations` as
+        # a directory made the tar extraction fail with `IsADirectoryError`
         # - measured against the fake CLI - completely silently: no
         # exception here, no field on the result, the subject's own object
         # left in place). `observations_capture` now names the checked
@@ -1637,6 +1675,98 @@ class DockerBackend:
             stdout_truncated=stdout_drain.truncated, stdout_bytes=stdout_drain.total_bytes,
             stdout_incomplete=stdout_incomplete, stderr_incomplete=stderr_incomplete,
             term_forwarding=term_forwarding, observations_capture=observations_capture,
+        )
+
+    def exec_in_attempt(
+        self, handle: object, argv: Sequence[str], limits: Limits,
+        cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,
+    ) -> ExecuteResult:
+        """Run `argv` inside the attempt's ALREADY-RUNNING container via a
+        bare `docker exec`, WITHOUT ever stopping or removing it - added for
+        #269's gate-execution witness, which needs to exec a declared gate
+        possibly more than once (and possibly while the subject's own
+        primary `execute()` is still running) against the SAME live,
+        evolving container, never a fresh one. `execute()` itself cannot be
+        reused for this: it is one-shot per handle BY DESIGN (its own
+        docstring: "this attempt's container is always stopped before
+        returning") - calling it for a gate would stop the attempt and, if
+        the subject's own primary process were still inside it, kill that
+        too. skillc #304 tracks `execute()`'s own stop-after-exec behavior
+        separately; this method does not touch it.
+
+        REFUSED (never an "exited" result) when the attempt's own primary
+        process is not reachable to exec into at all: not yet started,
+        already stopped, or the container is simply gone - `reason=
+        "attempt-not-running"`, `exit_code=None`, checked via the SAME
+        `_inspect()` `confirm_stopped()` already uses, so a caller cannot
+        get a different answer from the two. This is a REFUSAL, not a
+        guessed result - the orchestrator ruling this was built to satisfy
+        is explicit that a "container not running" exec must never be
+        folded into a normal exit code (#183's own channel already proved
+        a request arriving, never that work happened; this closes the
+        analogous gap for a gate the attempt itself cannot run).
+
+        Returns the real exit code from THIS exec alone - never the
+        subject's own primary process, never a prior call's result.
+        `term_forwarding` is always `None` here, meaning NOT APPLICABLE
+        rather than "this backend never reports it" (`execute()`'s own
+        convention for that field does not extend to this method): this
+        method never sends a container-level signal, because it must
+        never touch the container at all, so there is no container-level
+        TERM for anything to forward.
+
+        TIMEOUT/CANCEL ESCALATION IS OWED FOR A REAL DAEMON, named
+        precisely rather than silently assumed solved. On timeout or
+        `cancel()`, this method signals ONLY the local `docker exec`
+        client process's own process group (`start_new_session=True` at
+        launch) - against the fake CLI (`tests/fixtures/docker-backend/
+        fake_docker.py`), which runs the simulated subject as that
+        client's own direct child, this genuinely terminates the exec'd
+        process. Against a REAL daemon, killing the local `docker exec`
+        client does NOT reliably terminate the session it started inside
+        the container - `execute()`'s own `_stop()` reaches the subject
+        only by killing the whole CONTAINER, which this method must never
+        do. Closing this for a real daemon needs either `docker exec`'s
+        own signal-forwarding behavior investigated, or a second `docker
+        exec <container> kill <pid>` call using a PID discovered from
+        inside the container - neither implemented here, matching every
+        other real-daemon question this feature already defers (the real
+        `tree_digest_fn`, the #158 forwarding capability check)."""
+        assert isinstance(handle, _Handle)
+        reachable, absent, status = self._inspect(handle)
+        if not reachable or absent or status != "running":
+            return ExecuteResult(reason="attempt-not-running", exit_code=None)
+
+        launched = self._launch_and_wait(handle, argv, limits, cancel, stdin, prefix_wrap=False)
+        if isinstance(launched, ExecuteResult):
+            return launched  # launch-failed, built by _launch_and_wait itself
+        proc, stdout_drain, stderr_drain, stdout_thread, stderr_thread, reason = launched
+
+        if reason != "exited":
+            # Kill ONLY this exec's own local process group - never the
+            # container (see the real-daemon caveat above).
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+            try:
+                proc.wait(timeout=limits.grace)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError, OSError):
+                    pass
+                try:
+                    proc.wait(timeout=self.daemon_timeout)
+                except subprocess.TimeoutExpired:
+                    proc.kill()  # our OWN local client process, final fallback
+                    proc.wait()
+        else:
+            proc.wait()
+
+        return self._finish_result(
+            handle, proc, stdout_drain, stderr_drain, stdout_thread, stderr_thread,
+            limits, reason, signal_name=None, term_forwarding=None,
         )
 
     def _kill_container(self, handle: _Handle, sig: str) -> None:

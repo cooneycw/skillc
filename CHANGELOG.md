@@ -34,16 +34,36 @@ and version plan.
   environment, with a fake-operator-home decoy proven (both directions)
   never read. Cold-container execution (acceptance item 2) remains owed.
 
-- **A controller-owned gate-execution witness** (Refs #269). Reuses #183's
-  `decide_reply_channel` unchanged, adding only its own `gate_start`/
-  `gate_complete` request vocabulary. One record per attempt, covering the
-  full declared gate set - a gate nothing was ever heard about still appears,
-  as `not-observed`, never as a missing entry. Four coverage states
+- **A controller-owned gate-execution witness** (Refs #269). The CONTROLLER
+  executes each declared gate itself (`ExecutionBackend.exec_in_attempt()`,
+  new) - the subject only asks `{"op": "run_gate", "gate": "..."}` over
+  #183's `decide_reply_channel`, reused unchanged. One record per attempt,
+  covering the full declared gate set - a gate nothing was ever heard about
+  still appears, as `not-observed`, never as a missing entry; every run of a
+  gate is recorded, not only the first, so a legitimate flow-check rerun
+  after a fix is never refused or overwritten. Four coverage states
   (`complete`/`interrupted`/`not-observed`/`channel-unavailable`);
-  `execution_observed` derives from coverage alone, never from exit code, and
-  `NOT_CONFIRMED` is never produced (silence cannot be told apart from
-  "skipped" and "ran outside the channel"). Tree identity is computed by the
-  controller itself at `gate_start` time, never claimed by the subject.
+  `execution_observed` derives from coverage alone, never from exit code.
+  `NOT_CONFIRMED` is reachable only when the caller asserts
+  `gate_exclusivity` (the fixture gives the subject no other way to invoke
+  the gate at all) - recorded on every gate's own entry so the verdict is
+  never resting on an invisible constructor argument; without that
+  assertion, silence stays `UNKNOWN`. The reply to the subject carries the
+  gate's real exit code and bounded stdout/stderr - what it would see
+  running the gate itself - never the witness's own coverage state, other
+  gates' status, or tree digests. Tree identity is computed by the
+  controller itself immediately before each exec, never claimed by the
+  subject.
+  - **New `ExecutionBackend.exec_in_attempt()`** (`skillc/backend.py`,
+    `skillc/docker_backend.py`, `skillc/managed_backend.py`): execs into an
+    ALREADY-RUNNING attempt without ever stopping it - `execute()` itself
+    is one-shot per handle and always stops the container
+    (its stop-after-exec behavior is now tracked separately as #304, not
+    changed here). Refused, never folded into a guessed `exited` result,
+    when the attempt's primary process isn't running (`reason=
+    "attempt-not-running"`) or the backend doesn't implement it at all
+    (`reason="unsupported"` - `ManagedBackend`'s protocol-version-1 answer
+    today; the witness reads this as `channel-unavailable` for every gate).
   - **`skill-evidence.external_evidence.reconciliation == "contradicting"`
     now requires a citation** (cpp-eval review of #268,
     https://github.com/cooneycw/skillc/issues/269#issuecomment-6009072750):
