@@ -52,16 +52,6 @@ and version plan.
   is per-gate, declared by the controller exactly like `declared_argv`,
   never read from the subject. Mutation-checked: disabling confinement
   turns 5 tests red; dropping env-forwarding turns 1 red; both restored.
-  - `skillc/profile.py`'s `synthetic` dependency kind may now declare
-    `"mode": "100755"` (default stays `"100644"`, #303's own marker
-    unaffected) - needed because the shim installs at a path the subject
-    invokes directly, not a passive existence marker. The restriction to
-    exactly `100644` was unconditional before this (hardcoded at both the
-    walk and `install()`); a non-`synthetic` dependency declaring `mode`
-    at all is refused, since every other kind derives it from the real
-    pinned file's own bytes. Mutation-checked: reverting the record
-    construction to the old hardcoded value turns the new executable-mode
-    test red; restored, green.
   - `docker/trial/flow-check-gate-shim.py` (new): the forwarding shim
     itself. Recognizes ONLY the two argv shapes `reference.md` prescribes
     (`--plan check --evidence flow-check`, `--check-summary`), maps each
@@ -75,9 +65,19 @@ and version plan.
     mismatch (#581/#1366). `tests/test_flow_check_gate_shim.py` drives it
     as a real subprocess against a real `DecideReplyChannel`, same
     discipline as `test_skillc_disrupt_tool.py`.
-  Profile wiring (installing the shim at the subject-visible path,
-  relocating the real script, regenerating the inventory) and the
-  real-Docker conformance test are not yet built.
+  - **Decided against wiring the shim through `profile.json`** (orchestrator
+    review): the profile declares what the SUBJECT needs; the shim is
+    measurement apparatus the subject must never declare, and three
+    successive `synthetic`-kind widenings (mode, satisfies, the
+    unreferenced-reason requirement) to force it through anyway were each
+    a sign the shim was in the wrong layer, not a sign `synthetic` needed
+    extending - all three are reverted here. The shim instead becomes a
+    harness OVERLAY applied after installation (baked into the trial
+    image, same as #183 PR B2's `skillc-disrupt-tool`), never a profile
+    dependency - the original `cpp-codex-flow-check-ea6dbfa` profile stays
+    untouched at `841689b`.
+  The overlay step, its image wiring, and the real-Docker conformance
+  test are not yet built.
 
 - **The real-Docker runner's `--break` flag generalized to a family:mode
   table** (Refs #315, #269, #183). Found during #269's PR merge review:

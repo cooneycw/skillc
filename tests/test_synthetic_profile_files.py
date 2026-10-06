@@ -126,41 +126,10 @@ def test_shadow_cannot_diverge_from_destination(source: Path, tmp_path: Path) ->
     assert (home / "checkout" / "INSTRUCTIONS.md").exists()
 
 
-def test_an_unrecognized_executable_field_is_refused(source: Path) -> None:
-    change(source, executable=True)
+@pytest.mark.parametrize("field,value", [("mode", "100755"), ("executable", True)])
+def test_executable_refused(source: Path, field: str, value: object) -> None:
+    change(source, **{field: value})
     with pytest.raises(p.Refused, match="unknown keys"):
-        inventory(source)
-
-
-def test_an_invalid_synthetic_mode_is_refused(source: Path) -> None:
-    change(source, mode="100600")
-    with pytest.raises(p.Refused, match="synthetic mode must be 100644 or 100755"):
-        inventory(source)
-
-
-def test_a_declared_executable_mode_installs_with_the_execute_bit(source: Path, tmp_path: Path) -> None:
-    """#332: a synthetic file may opt into 100755 - needed for a forwarding
-    shim installed at a path the subject invokes directly, not merely a
-    passive marker. The default (undeclared) stays 100644, pinned by
-    `test_valid_synthetic_install` above - this is the opt-in case."""
-    change(source, mode="100755")
-    inv, receipt, home = installed(source, tmp_path)
-    target = home / "checkout/MARKER.md"
-    assert target.stat().st_mode & 0o7777 == 0o755
-    record = next(r for r in receipt["files"] if r["origin"] == "synthetic")
-    assert record["mode"] == "100755"
-    assert all(r["status"] == "satisfied" for r in p.verify_installed(inv, home)["files"])
-
-
-def test_a_non_synthetic_dependency_may_not_declare_mode(source: Path) -> None:
-    """`mode` is meaningful only for `synthetic` (every other kind derives
-    it from the real pinned file's own bytes) - declaring it on the
-    ordinary `helper` dependency must refuse, not be silently ignored."""
-    path = source / "profile.json"
-    data = json.loads(path.read_text())
-    data["dependencies"][0]["mode"] = "100755"  # dependencies[0] is "gate", kind helper
-    path.write_text(json.dumps(data))
-    with pytest.raises(p.Refused, match="synthetic fields require kind synthetic"):
         inventory(source)
 
 
