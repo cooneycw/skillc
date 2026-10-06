@@ -433,9 +433,31 @@ result (§2d's table), not yet the test.
 1. "A reviewed design for the channel, answering the three decisions
    above." — this document. Decision 1 (bind mounts): §2c, owner-approved.
    Decision 2 (log claims): §2d. Decision 3 (image): §3, held to PR B.
-2. "A red case..." — shape committed in §5; the test itself lands in PR C.
-3. "L5 wired to `trusted_observation` only through that channel." — PR C,
-   building on §2a/§2b/§2d; not built in this PR.
+2. "A red case: a subject that fabricates requests or bypasses the proxy
+   cannot move the controller-recorded disruption point, or gets graded
+   INCONCLUSIVE." — shape committed in §5; PR C delivers the test itself
+   (`test_disruption_channel_bypass_red_case.py`), run against the
+   pre-#183 mechanism directly (no commit checkout needed, since
+   `disruption_trigger.py` is unmodified by this issue) rather than
+   against a commit checkout.
+3. "L5 wired to `trusted_observation` only through that channel." — THREE
+   separate claims, split across two PRs, decided (orchestrator ruling):
+   - that the channel mechanism itself works, including against a real
+     daemon — PR C (`test_decide_reply_channel_live.py`), with a
+     mutation-checkable live test rather than a checkout-based one (see
+     that file's own docstring for why "the file is new" is not a red).
+   - that a real subject's tool wrapper calls through the channel instead
+     of writing the old subject-writable log, AND that `qualify.py`
+     actually consumes this channel's output as `trusted_observation`
+     while the old advisory path stops feeding grading — BOTH PR B's,
+     deliberately not split: the fixture rewiring and the grading wiring
+     are one L5 change, because splitting them would leave a window
+     where the fixture calls the channel but grading still reads the old
+     log, silently ungraded by the thing it was switched to use. PR B's
+     own red case: the old advisory log ALONE (no channel output at all)
+     must no longer produce a `trusted_observation` - shown failing on
+     pre-PR-B code (where it still does) and passing on PR B (where it
+     no longer can).
 
 ## 8. Landing order
 
@@ -445,14 +467,24 @@ result (§2d's table), not yet the test.
    cases proving every refusal in §2c's last paragraph still holds, each
    shown to go red under a mutation that removes the specific constraint
    it protects. Does not touch `docker/trial/`.
-2. **PR B**: the proxy binary in the trial image (#78) and the L5 fixture's
+2. **PR B**: the proxy binary in the trial image (#78), the L5 fixture's
    tool wrapper calling it instead of writing `.disruption/requests.log`
-   directly. Held until the orchestrator clears the #237 image-tag fence;
-   builds a distinct tag, never `skillc-trial:latest`.
-3. **PR C**: the live conformance test (a real `DockerBackend` attempt,
-   real socket, real proxy, checked against `qualify.py`'s
-   `trusted_observation` shape) and §5's red case, run against pre-channel
-   code first and shown failing there.
+   directly, AND `qualify.py`'s own wiring to this channel's output as
+   `trusted_observation` (§7 item 3's decided split — one L5 change, not
+   two, so there is never a window where the fixture calls the channel
+   while grading still reads the old log). PR B's own red case: the old
+   advisory log alone must no longer produce a `trusted_observation` -
+   shown failing on pre-PR-B code and passing on PR B. Held until the
+   orchestrator clears the #237 image-tag fence; builds a distinct tag,
+   never `skillc-trial:latest`.
+3. **PR C**: the live-Docker conformance test for the channel mechanism
+   itself (`test_decide_reply_channel_live.py` — a real `DockerBackend`
+   attempt, real socket, real identity, with three independently
+   breakable properties so "the file is new" is never mistaken for a red
+   case) and §5's red case (`test_disruption_channel_bypass_red_case.py`,
+   run against `disruption_trigger.py` directly rather than a commit
+   checkout, since that module is #183's own unmodified "before"). Does
+   NOT itself connect to `qualify.py` — that is PR B's, per §7 item 3.
 4. **PR D**: the managed-backend protocol (#64) doc update (§4). Low
    priority, done last, still under #183 per the owner's ruling text.
 
