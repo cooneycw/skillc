@@ -865,7 +865,7 @@ class DockerBackend:
                 f"'docker run -d' pull it mid-trial with no bound on how long that takes"
             )
         name = _container_name(attempt_id)
-        channel, trigger_socket_host_path = self._start_trigger_channel(name)
+        channel, trigger_socket_host_path = self._start_trigger_channel(name, attempt_id)
         argv = self._keepalive_run_argv(name, attempt_id, trigger_socket_host_path)
         try:
             started = subprocess.run(
@@ -900,7 +900,9 @@ class DockerBackend:
             )
         return _Handle(attempt_id=attempt_id, name=name, env=env, trigger_channel=channel)
 
-    def _start_trigger_channel(self, name: str) -> tuple[DecideReplyChannel | None, Path | None]:
+    def _start_trigger_channel(
+        self, name: str, attempt_id: str,
+    ) -> tuple[DecideReplyChannel | None, Path | None]:
         """#183: when `self.trigger_decide` is set, create and BIND the
         attempt's socket on the host BEFORE `docker run -d` ever runs -
         required ordering, not a convenience: a bind mount of a Unix socket
@@ -920,7 +922,9 @@ class DockerBackend:
             return None, None
         trigger_socket_host_path = trigger_socket_host_path_for(self.trigger_socket_dir, name)
         _ensure_private_trigger_dir(trigger_socket_host_path.parent)
-        channel = DecideReplyChannel(trigger_socket_host_path, self.trigger_decide, socket_mode=TRIGGER_SOCKET_MODE)
+        channel = DecideReplyChannel(
+            trigger_socket_host_path, self.trigger_decide, attempt_id, socket_mode=TRIGGER_SOCKET_MODE,
+        )
         channel.start()
         return channel, trigger_socket_host_path
 

@@ -71,7 +71,7 @@ def test_sequential_decisions_get_increasing_controller_assigned_seq_numbers(tmp
     docstring for why completion order, not arrival order, is the only
     claim made about concurrent ones)."""
     sock_path = tmp_path / "trigger.sock"
-    channel = DecideReplyChannel(sock_path, _decide_fixed({3: "fail"}))
+    channel = DecideReplyChannel(sock_path, _decide_fixed({3: "fail"}), "a1")
     channel.start()
     try:
         replies = [_send(sock_path, {"op": "disruption_check", "client_seq": i}) for i in range(1, 5)]
@@ -94,7 +94,7 @@ def test_decision_is_logged_before_any_reply_can_have_been_sent(tmp_path: Path) 
         released.wait(timeout=5.0)
         return {"decision": "pass"}
 
-    channel = DecideReplyChannel(sock_path, decide)
+    channel = DecideReplyChannel(sock_path, decide, "a1")
     channel.start()
     try:
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -125,7 +125,7 @@ def test_a_refused_request_is_never_logged_as_a_decision(tmp_path: Path) -> None
     log must stay empty. If this ever logged refusals, `no-controller-
     witness` would stop meaning what §2d says it means."""
     sock_path = tmp_path / "trigger.sock"
-    channel = DecideReplyChannel(sock_path, _decide_fixed({}))
+    channel = DecideReplyChannel(sock_path, _decide_fixed({}), "a1")
     channel.start()
     try:
         reply = _send(sock_path, {"op": "not-a-real-op"})
@@ -137,7 +137,7 @@ def test_a_refused_request_is_never_logged_as_a_decision(tmp_path: Path) -> None
 
 def test_malformed_json_and_non_dict_requests_are_refused_not_logged(tmp_path: Path) -> None:
     sock_path = tmp_path / "trigger.sock"
-    channel = DecideReplyChannel(sock_path, _decide_fixed({}))
+    channel = DecideReplyChannel(sock_path, _decide_fixed({}), "a1")
     channel.start()
     try:
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -164,7 +164,7 @@ def test_malformed_json_and_non_dict_requests_are_refused_not_logged(tmp_path: P
 
 def test_concurrent_requests_get_strictly_increasing_unique_sequence_numbers(tmp_path: Path) -> None:
     sock_path = tmp_path / "trigger.sock"
-    channel = DecideReplyChannel(sock_path, _decide_fixed({}))
+    channel = DecideReplyChannel(sock_path, _decide_fixed({}), "a1")
     channel.start()
     n = 20
     try:
@@ -198,7 +198,7 @@ def test_sequence_numbers_reflect_completion_order_not_arrival_order(tmp_path: P
             release_first.wait(timeout=5.0)  # arrives first, completes LAST
         return {"decision": "pass"}
 
-    channel = DecideReplyChannel(sock_path, decide)
+    channel = DecideReplyChannel(sock_path, decide, "a1")
     channel.start()
     try:
         first = threading.Thread(target=_send, args=(sock_path, {"op": "disruption_check", "client_seq": 1}))
@@ -217,44 +217,40 @@ def test_sequence_numbers_reflect_completion_order_not_arrival_order(tmp_path: P
 
 def test_a_subject_that_never_connects_is_a_named_case_not_an_error(tmp_path: Path) -> None:
     sock_path = tmp_path / "trigger.sock"
-    channel = DecideReplyChannel(sock_path, _decide_fixed({}))
+    channel = DecideReplyChannel(sock_path, _decide_fixed({}), "a1")
     channel.start()
-    log = channel.stop_and_finalize()
-    assert log == []
-    trusted = TrustedLog.witnessed(log)
+    trusted = channel.trusted_log()
     assert trusted.status == "no-controller-witness"
     assert trusted.decisions == ()
 
 
 def test_a_witnessed_log_is_never_confused_with_a_bypass(tmp_path: Path) -> None:
     sock_path = tmp_path / "trigger.sock"
-    channel = DecideReplyChannel(sock_path, _decide_fixed({}))
+    channel = DecideReplyChannel(sock_path, _decide_fixed({}), "a1")
     channel.start()
     try:
         _send(sock_path, {"op": "disruption_check", "client_seq": 1})
     finally:
-        log = channel.stop_and_finalize()
-    trusted = TrustedLog.witnessed(log)
+        trusted = channel.trusted_log()
     assert trusted.status == "witnessed"
     assert len(trusted.decisions) == 1
 
 
 def test_channel_unavailable_is_its_own_status_distinct_from_both_others() -> None:
-    trusted = TrustedLog.unavailable()
+    trusted = TrustedLog.unavailable("a1")
     assert trusted.status == "channel-unavailable"
     assert trusted.decisions == ()
 
 
 def test_trusted_log_bytes_are_valid_json_naming_the_read_as_rule(tmp_path: Path) -> None:
     sock_path = tmp_path / "trigger.sock"
-    channel = DecideReplyChannel(sock_path, _decide_fixed({2: "fail"}))
+    channel = DecideReplyChannel(sock_path, _decide_fixed({2: "fail"}), "a1")
     channel.start()
     try:
         _send(sock_path, {"op": "disruption_check", "client_seq": 1})
         _send(sock_path, {"op": "disruption_check", "client_seq": 2})
     finally:
-        log = channel.stop_and_finalize()
-    trusted = TrustedLog.witnessed(log)
+        trusted = channel.trusted_log()
     parsed = json.loads(trusted.to_json_bytes().decode("utf-8"))
     assert parsed["status"] == "witnessed"
     assert "tool invocations" in parsed["read_as"]
@@ -266,9 +262,51 @@ def test_trusted_log_bytes_are_valid_json_naming_the_read_as_rule(tmp_path: Path
     assert stamps == sorted(stamps)
 
 
+def test_trusted_log_carries_the_channels_own_attempt_id_not_a_callers_claim(tmp_path: Path) -> None:
+    """#183's provenance review: a caller asserting its own attempt_id
+    alongside the log is exactly the forgeable extra claim that review
+    rejected. `trusted_log()` must bind it from the channel's OWN
+    constructor argument instead - true for every status, including the
+    no-controller-witness/bypass case, where there is still an attempt
+    this log is ABOUT even though nothing was ever logged for it."""
+    sock_path = tmp_path / "trigger.sock"
+    channel = DecideReplyChannel(sock_path, _decide_fixed({}), "attempt-xyz-001")
+    channel.start()
+    trusted = channel.trusted_log()
+    assert trusted.attempt_id == "attempt-xyz-001"
+    assert trusted.status == "no-controller-witness"
+
+    sock_path2 = tmp_path / "trigger2.sock"
+    channel2 = DecideReplyChannel(sock_path2, _decide_fixed({}), "attempt-xyz-002")
+    channel2.start()
+    try:
+        _send(sock_path2, {"op": "disruption_check", "client_seq": 1})
+    finally:
+        trusted2 = channel2.trusted_log()
+    assert trusted2.attempt_id == "attempt-xyz-002"
+    assert trusted2.status == "witnessed"
+    parsed = json.loads(trusted2.to_json_bytes().decode("utf-8"))
+    assert parsed["attempt_id"] == "attempt-xyz-002"
+
+
+def test_to_json_bytes_orders_decisions_by_seq_regardless_of_tuple_order() -> None:
+    """A reader of the raw bytes must never have to trust that whatever
+    handed `TrustedLog` its `decisions` tuple already sorted it - the red
+    case: construct one deliberately OUT of seq order and confirm the
+    emitted bytes are sorted anyway."""
+    out_of_order = (
+        LoggedDecision(seq=3, request={}, result={"allow": True}, logged_at=3.0),
+        LoggedDecision(seq=1, request={}, result={"allow": True}, logged_at=1.0),
+        LoggedDecision(seq=2, request={}, result={"allow": False}, logged_at=2.0),
+    )
+    trusted = TrustedLog(status="witnessed", attempt_id="a1", decisions=out_of_order)
+    parsed = json.loads(trusted.to_json_bytes().decode("utf-8"))
+    assert [d["seq"] for d in parsed["decisions"]] == [1, 2, 3]
+
+
 def test_the_socket_is_created_owner_only(tmp_path: Path) -> None:
     sock_path = tmp_path / "trigger.sock"
-    channel = DecideReplyChannel(sock_path, _decide_fixed({}))
+    channel = DecideReplyChannel(sock_path, _decide_fixed({}), "a1")
     channel.start()
     try:
         mode = sock_path.stat().st_mode & 0o777
@@ -279,7 +317,7 @@ def test_the_socket_is_created_owner_only(tmp_path: Path) -> None:
 
 def test_start_is_refused_a_second_time(tmp_path: Path) -> None:
     sock_path = tmp_path / "trigger.sock"
-    channel = DecideReplyChannel(sock_path, _decide_fixed({}))
+    channel = DecideReplyChannel(sock_path, _decide_fixed({}), "a1")
     channel.start()
     try:
         with pytest.raises(RuntimeError):
@@ -289,14 +327,14 @@ def test_start_is_refused_a_second_time(tmp_path: Path) -> None:
 
 
 def test_finalize_is_refused_before_start(tmp_path: Path) -> None:
-    channel = DecideReplyChannel(tmp_path / "trigger.sock", _decide_fixed({}))
+    channel = DecideReplyChannel(tmp_path / "trigger.sock", _decide_fixed({}), "a1")
     with pytest.raises(RuntimeError):
         channel.stop_and_finalize()
 
 
 def test_finalize_is_refused_a_second_time(tmp_path: Path) -> None:
     sock_path = tmp_path / "trigger.sock"
-    channel = DecideReplyChannel(sock_path, _decide_fixed({}))
+    channel = DecideReplyChannel(sock_path, _decide_fixed({}), "a1")
     channel.start()
     channel.stop_and_finalize()
     with pytest.raises(RuntimeError):
@@ -311,7 +349,7 @@ def test_logged_decision_is_immutable(tmp_path: Path) -> None:
 
 def test_log_or_finalize_is_safe_to_call_more_than_once(tmp_path: Path) -> None:
     sock_path = tmp_path / "trigger.sock"
-    channel = DecideReplyChannel(sock_path, _decide_fixed({}))
+    channel = DecideReplyChannel(sock_path, _decide_fixed({}), "a1")
     channel.start()
     _send(sock_path, {"op": "disruption_check", "client_seq": 1})
     first = channel.log_or_finalize()
@@ -325,7 +363,7 @@ def test_log_or_finalize_is_safe_to_call_more_than_once(tmp_path: Path) -> None:
 
 
 def test_close_is_a_no_op_before_start_and_after_finalize(tmp_path: Path) -> None:
-    channel = DecideReplyChannel(tmp_path / "trigger.sock", _decide_fixed({}))
+    channel = DecideReplyChannel(tmp_path / "trigger.sock", _decide_fixed({}), "a1")
     channel.close()  # never started - no-op, must not raise
     channel.start()
     channel.stop_and_finalize()
@@ -334,7 +372,7 @@ def test_close_is_a_no_op_before_start_and_after_finalize(tmp_path: Path) -> Non
 
 def test_close_after_start_stops_the_listener_without_raising(tmp_path: Path) -> None:
     sock_path = tmp_path / "trigger.sock"
-    channel = DecideReplyChannel(sock_path, _decide_fixed({}))
+    channel = DecideReplyChannel(sock_path, _decide_fixed({}), "a1")
     channel.start()
     channel.close()
     assert not sock_path.exists()
@@ -352,7 +390,7 @@ def test_start_refuses_a_path_too_close_to_the_af_unix_limit(tmp_path: Path) -> 
     blocked by a channel that never actually bound anything."""
     long_name = "x" * 90
     sock_path = tmp_path / f"{long_name}.sock"
-    channel = DecideReplyChannel(sock_path, _decide_fixed({}))
+    channel = DecideReplyChannel(sock_path, _decide_fixed({}), "a1")
     with pytest.raises(OSError, match="sun_path"):
         channel.start()
     channel.close()  # never started - still a safe no-op; must not raise
@@ -370,7 +408,7 @@ def test_a_stale_orphan_socket_is_cleared_and_reused(tmp_path: Path) -> None:
     orphan = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     orphan.bind(str(sock_path))
     orphan.close()  # leaves the inode behind; nothing is listening
-    channel = DecideReplyChannel(sock_path, _decide_fixed({}))
+    channel = DecideReplyChannel(sock_path, _decide_fixed({}), "a1")
     channel.start()  # must not raise
     try:
         reply = _send(sock_path, {"op": "disruption_check", "client_seq": 1})
@@ -384,10 +422,10 @@ def test_a_live_listener_at_the_same_path_is_refused(tmp_path: Path) -> None:
     silently shared - decision 4 of design doc §2f. The first channel is
     left undisturbed; only the second `start()` call fails."""
     sock_path = tmp_path / "trigger.sock"
-    first = DecideReplyChannel(sock_path, _decide_fixed({}))
+    first = DecideReplyChannel(sock_path, _decide_fixed({}), "a1")
     first.start()
     try:
-        second = DecideReplyChannel(sock_path, _decide_fixed({}))
+        second = DecideReplyChannel(sock_path, _decide_fixed({}), "a1")
         with pytest.raises(OSError, match="already listening"):
             second.start()
         # the first channel still works - refusing the second must not
@@ -405,7 +443,7 @@ def test_a_non_socket_at_the_path_is_refused_not_replaced(tmp_path: Path) -> Non
     and this channel does not guess which."""
     sock_path = tmp_path / "trigger.sock"
     sock_path.write_text("not a socket")
-    channel = DecideReplyChannel(sock_path, _decide_fixed({}))
+    channel = DecideReplyChannel(sock_path, _decide_fixed({}), "a1")
     with pytest.raises(OSError, match="non-socket"):
         channel.start()
     assert sock_path.read_text() == "not a socket"  # untouched
@@ -414,7 +452,7 @@ def test_a_non_socket_at_the_path_is_refused_not_replaced(tmp_path: Path) -> Non
 
 def test_custom_socket_mode_is_honored(tmp_path: Path) -> None:
     sock_path = tmp_path / "trigger.sock"
-    channel = DecideReplyChannel(sock_path, _decide_fixed({}), socket_mode=0o666)
+    channel = DecideReplyChannel(sock_path, _decide_fixed({}), "a1", socket_mode=0o666)
     channel.start()
     try:
         mode = sock_path.stat().st_mode & 0o777
@@ -441,7 +479,7 @@ def test_stop_and_finalize_waits_for_an_in_flight_handler_before_returning(tmp_p
         released.wait(timeout=5.0)
         return {"decision": "pass"}
 
-    channel = DecideReplyChannel(sock_path, decide)
+    channel = DecideReplyChannel(sock_path, decide, "a1")
     channel.start()
     client = threading.Thread(target=_send, args=(sock_path, {"op": "disruption_check", "client_seq": 1}))
     client.start()
@@ -465,7 +503,7 @@ def test_stop_and_finalize_raises_if_a_handler_outlives_the_drain_timeout(tmp_pa
         stuck.wait(timeout=5.0)  # never set - simulates a wedged decide()
         return {"decision": "pass"}
 
-    channel = DecideReplyChannel(sock_path, decide, handler_drain_timeout=0.2)
+    channel = DecideReplyChannel(sock_path, decide, "a1", handler_drain_timeout=0.2)
     channel.start()
     client = threading.Thread(target=_send, args=(sock_path, {"op": "disruption_check", "client_seq": 1}))
     client.start()
@@ -488,7 +526,7 @@ def test_an_oversized_request_is_refused_without_a_reply(tmp_path: Path) -> None
     limit. A connection over `max_request_bytes` before any newline is
     simply closed, never logged as a decision."""
     sock_path = tmp_path / "trigger.sock"
-    channel = DecideReplyChannel(sock_path, _decide_fixed({}), max_request_bytes=1024)
+    channel = DecideReplyChannel(sock_path, _decide_fixed({}), "a1", max_request_bytes=1024)
     channel.start()
     try:
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -515,7 +553,7 @@ def test_connections_past_max_concurrent_handlers_are_refused(tmp_path: Path) ->
         released.wait(timeout=5.0)
         return {"decision": "pass"}
 
-    channel = DecideReplyChannel(sock_path, decide, max_concurrent_handlers=1)
+    channel = DecideReplyChannel(sock_path, decide, "a1", max_concurrent_handlers=1)
     channel.start()
     try:
         first = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -556,7 +594,7 @@ def test_an_idle_connection_is_closed_after_the_request_timeout(tmp_path: Path) 
     forever - `max_concurrent_handlers` could otherwise be exhausted by
     connections that never send a byte."""
     sock_path = tmp_path / "trigger.sock"
-    channel = DecideReplyChannel(sock_path, _decide_fixed({}), request_timeout=0.2)
+    channel = DecideReplyChannel(sock_path, _decide_fixed({}), "a1", request_timeout=0.2)
     channel.start()
     try:
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -587,14 +625,14 @@ def test_start_refuses_while_another_channel_holds_the_path_lock(tmp_path: Path)
     held = open(lock_path, "wb")  # noqa: SIM115 - held deliberately across the assertion below
     fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
     try:
-        channel = DecideReplyChannel(sock_path, _decide_fixed({}))
+        channel = DecideReplyChannel(sock_path, _decide_fixed({}), "a1")
         with pytest.raises(OSError, match="already working on this exact path"):
             channel.start()
     finally:
         fcntl.flock(held, fcntl.LOCK_UN)
         held.close()
     # released: a later start() against the same path now succeeds normally
-    channel2 = DecideReplyChannel(sock_path, _decide_fixed({}))
+    channel2 = DecideReplyChannel(sock_path, _decide_fixed({}), "a1")
     channel2.start()
     channel2.stop_and_finalize()
 
@@ -628,11 +666,11 @@ def test_a_chmod_failure_after_a_successful_bind_still_closes_the_listener(
         real_chmod(path, mode)
 
     monkeypatch.setattr(d.os, "chmod", failing_chmod)
-    channel = DecideReplyChannel(sock_path, _decide_fixed({}))
+    channel = DecideReplyChannel(sock_path, _decide_fixed({}), "a1")
     with pytest.raises(OSError, match="simulated chmod failure"):
         channel.start()
     monkeypatch.undo()
-    channel2 = DecideReplyChannel(sock_path, _decide_fixed({}))
+    channel2 = DecideReplyChannel(sock_path, _decide_fixed({}), "a1")
     channel2.start()  # must not raise "already listening" - the first was closed
     channel2.stop_and_finalize()
 
@@ -653,7 +691,7 @@ def test_a_reused_mutable_result_dict_does_not_rewrite_an_earlier_entry(tmp_path
         shared["decision"] = request.get("client_seq") == 2 and "fail" or "pass"
         return shared
 
-    channel = DecideReplyChannel(sock_path, decide)
+    channel = DecideReplyChannel(sock_path, decide, "a1")
     channel.start()
     try:
         _send(sock_path, {"op": "disruption_check", "client_seq": 1})
@@ -675,7 +713,7 @@ def test_mutating_the_original_nested_object_after_logging_does_not_rewrite_the_
     def decide(request: Mapping[str, object]) -> Mapping[str, object]:
         return {"decision": "pass", "detail": original_detail}
 
-    channel = DecideReplyChannel(sock_path, decide)
+    channel = DecideReplyChannel(sock_path, decide, "a1")
     channel.start()
     try:
         _send(sock_path, {"op": "disruption_check", "client_seq": 1})

@@ -25,6 +25,8 @@ from types import ModuleType
 
 import pytest
 
+from skillc.decide_reply_channel import LoggedDecision, TrustedLog
+
 TASK = (
     Path(__file__).resolve().parent.parent
     / "evals" / "level5" / "recovery-partial-processing"
@@ -124,3 +126,104 @@ def test_a_known_gap_whose_graded_status_matches_its_true_status_is_refused(tmp_
     ok, detail = qualify.check_known_gap(root / "grade_recovery.py", gap, root)
     assert not ok
     assert "not a documented miss" in detail
+
+
+# ------------------------------------------------- _trusted_log (#183)
+
+
+def _trusted_log_bytes(*allows: bool, attempt_id: str = "a1", out_of_order: bool = False) -> str:
+    """A REAL `TrustedLog.to_json_bytes()` output, not a hand-typed guess at
+    its shape - proves `grade_recovery._trusted_log` parses what the real
+    producer actually emits, not a mirror of it that could drift
+    independently. `out_of_order` permutes the tuple's own order while
+    keeping `seq` correct and ascending, exercising `to_json_bytes()`'s own
+    seq-sort rather than this helper's."""
+    decisions = [
+        LoggedDecision(seq=i + 1, request={}, result={"allow": allow}, logged_at=float(i))
+        for i, allow in enumerate(allows)
+    ]
+    if out_of_order:
+        decisions = [decisions[-1], *decisions[:-1]] if len(decisions) > 1 else decisions
+    trusted = TrustedLog(status="witnessed", attempt_id=attempt_id, decisions=tuple(decisions))
+    return trusted.to_json_bytes().decode("utf-8")
+
+
+def test_trusted_log_derives_failed_after_step_from_real_channel_bytes() -> None:
+    text = _trusted_log_bytes(True, True, True, False)
+    failed_after, reason = grade_recovery._trusted_log({"trusted": text})
+    assert (failed_after, reason) == (3, "trusted")
+
+
+def test_trusted_log_handles_a_genuinely_out_of_arrival_order_but_clean_log() -> None:
+    # decide_reply_channel.py's own module docstring: seq is assigned in
+    # COMPLETION order, not arrival order - a clean permutation is
+    # legitimate and must still derive correctly, never refused.
+    text = _trusted_log_bytes(True, True, True, False, out_of_order=True)
+    failed_after, reason = grade_recovery._trusted_log({"trusted": text})
+    assert (failed_after, reason) == (3, "trusted")
+
+
+def test_trusted_log_reports_the_full_count_when_nothing_was_ever_refused() -> None:
+    text = _trusted_log_bytes(True, True, True)
+    failed_after, _ = grade_recovery._trusted_log({"trusted": text})
+    assert failed_after == 3
+
+
+def test_trusted_log_refuses_duplicate_seq_numbers() -> None:
+    """THE RED CASE for the seq-validity check: two decisions claiming the
+    same seq cannot come from a real channel (`_next_seq` is a strict
+    per-decision counter) - refused, not silently sorted-and-accepted."""
+    raw = json.loads(_trusted_log_bytes(True, True, False))
+    raw["decisions"][2]["seq"] = raw["decisions"][1]["seq"]  # duplicate, not a clean 1..N set
+    failed_after, reason = grade_recovery._trusted_log({"trusted": json.dumps(raw)})
+    assert failed_after is None
+    assert "not a clean 1..N sequence" in reason
+
+
+def test_trusted_log_refuses_a_gap_in_seq_numbers() -> None:
+    raw = json.loads(_trusted_log_bytes(True, True, False))
+    raw["decisions"][2]["seq"] = 10  # a gap, not a clean 1..N set
+    failed_after, reason = grade_recovery._trusted_log({"trusted": json.dumps(raw)})
+    assert failed_after is None
+    assert "not a clean 1..N sequence" in reason
+
+
+def test_trusted_log_refuses_a_malformed_trusted_observation_not_silently() -> None:
+    """(b) from the orchestrator's red cases: one byte flipped so the JSON
+    breaks - refused with a reason naming it, distinct from "none was
+    supplied" (a different, deliberate case, never folded together)."""
+    text = _trusted_log_bytes(True, True, True, False)
+    corrupted = text[:-1]  # truncate the closing brace - breaks JSON parsing
+    failed_after, reason = grade_recovery._trusted_log({"trusted": corrupted})
+    assert failed_after is None
+    assert "not JSON" in reason
+    # Genuinely absent is a DIFFERENT reason text - the two cases must not
+    # be folded into one message a reader could mistake for the other.
+    absent_after, absent_reason = grade_recovery._trusted_log({})
+    assert absent_after is None
+    assert absent_reason != reason
+    assert "no trusted observation was supplied" in absent_reason
+
+
+def test_trusted_log_refuses_a_bypass_and_an_unavailable_channel_alike() -> None:
+    no_witness = TrustedLog(status="no-controller-witness", attempt_id="a1").to_json_bytes().decode()
+    unavailable = TrustedLog(status="channel-unavailable", attempt_id="a1").to_json_bytes().decode()
+    for text in (no_witness, unavailable):
+        failed_after, reason = grade_recovery._trusted_log({"trusted": text})
+        assert failed_after is None
+        assert "never decided anything" in reason
+
+
+def test_trusted_log_checks_attempt_id_only_when_the_caller_supplies_one() -> None:
+    text = _trusted_log_bytes(True, True, True, False, attempt_id="the-real-attempt")
+    # No expected id -> no check, the one-shot path's own contract.
+    failed_after, reason = grade_recovery._trusted_log({"trusted": text})
+    assert (failed_after, reason) == (3, "trusted")
+    # Matching id -> same result.
+    failed_after, reason = grade_recovery._trusted_log({"trusted": text}, "the-real-attempt")
+    assert (failed_after, reason) == (3, "trusted")
+    # THE RED CASE (b): a log genuinely produced for a DIFFERENT attempt -
+    # refused, never silently graded as if it were this attempt's own.
+    failed_after, reason = grade_recovery._trusted_log({"trusted": text}, "a-different-attempt")
+    assert failed_after is None
+    assert "does not match the attempt being graded" in reason

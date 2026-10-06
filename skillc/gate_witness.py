@@ -266,7 +266,7 @@ class GateWitness:
             tree_digest_fn=real_fn, backend=backend, handle=handle, limits=limits,
             gate_exclusivity=True, exclusivity_basis="fixture installs no lint-script/typecheck-script on PATH",
         )
-        channel = DecideReplyChannel(socket_path, witness.decide)
+        channel = DecideReplyChannel(socket_path, witness.decide, "a-attempt-id")
         channel.start()
         ... run the attempt ...
         channel.stop_and_finalize()
