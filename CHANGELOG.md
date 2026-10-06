@@ -8,6 +8,28 @@ and version plan.
 
 ## [Unreleased]
 
+- **`uptake-study` screening-probe mode** (Refs #238). An optional `probe`
+  block declares a cut-off (20-300 s), which must equal
+  `shared.per_attempt_seconds`, so the attempt itself stops there.
+  - Selection is read from the transcript prefix.
+  - An attempt with **no tool call** before the cut-off is **undecided**,
+    counted neither as selected nor as not selected.
+  - The task grade is reported as not measured.
+
+  The red case: counting undecided attempts as "not selected" would let a
+  probe report zero uptake. The test fails with that rule disabled.
+
+  A cross-model review (Codex) added two more undecided cases, each with a
+  red case that fails when disabled:
+  - a call still pending (no recorded output) at the cut-off, because the
+    parser counts a skill read only once its output arrives;
+  - a transcript with call types the parser does not recognize. This one
+    applies in full runs too, since a skill read there is invisible.
+
+  `evals/description-probe/` holds the owner-approved agreement check:
+  #237's three descriptions, 5 per cell, at 45 s, against the full-run
+  results. No live run yet.
+
 - **Bounded synthetic profile files** (Refs #303). Profiles can declare
   non-executable marker text with explicit pinned-file replacement reasons
   and digests. Inventories and receipts distinguish pinned and synthetic

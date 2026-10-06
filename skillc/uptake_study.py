@@ -20,6 +20,12 @@ not recorded (ADR 0005):
     that the `rewritten` arm selects the target more often on the primary
     case, at a declared alpha.
 
+A SCREENING PROBE (#238) is the same study with a declared `probe` block:
+`probe.cutoff_seconds` must equal `shared.per_attempt_seconds`, so the
+attempt itself is cut off there. Selection is read from the transcript the
+agent wrote before the cut-off; an attempt with no tool call by then is
+UNDECIDED (never "not selected"), and the task grade is not measured.
+
 SELECTION IS COUNTED ONLY FROM CONFIRMED OBSERVATIONS - one transcript,
 carrying the attempt's own prompt (`calibration_run.observation_confirmed`,
 PR #233). An unconfirmed attempt is reported, never counted as "not
@@ -84,6 +90,12 @@ class Case:
     primary: bool
 
 
+#: A screening probe's cut-off bounds (#238): long enough for the agent to
+#: act (selection was observed within 31 s in #237's 49 timed selections),
+#: short enough to be a screen rather than a full attempt.
+MIN_PROBE_SECONDS, MAX_PROBE_SECONDS = 20, 300
+
+
 @dataclass(frozen=True)
 class StudyDeclaration:
     target_skill: str
@@ -99,6 +111,7 @@ class StudyDeclaration:
     grader_revision: str
     approval: Mapping[str, object] | None
     data: Mapping[str, object]
+    probe_seconds: float | None = None
 
     @property
     def primary(self) -> Case:
@@ -192,11 +205,22 @@ def parse_declaration(data: Mapping[str, object]) -> StudyDeclaration:
     approval = data.get("approval")
     if approval is not None and not isinstance(approval, dict):
         raise _refuse("approval is null (not yet approved) or an object recording who approved and when")
+    probe_seconds = None
+    probe = data.get("probe")
+    if probe is not None:
+        cutoff = probe.get("cutoff_seconds") if isinstance(probe, dict) else None
+        if isinstance(cutoff, bool) or not isinstance(cutoff, (int, float)) \
+                or not MIN_PROBE_SECONDS <= cutoff <= MAX_PROBE_SECONDS:
+            raise _refuse(f"probe.cutoff_seconds must be {MIN_PROBE_SECONDS}-{MAX_PROBE_SECONDS}, not {cutoff!r}")
+        if per_attempt != float(cutoff):
+            raise _refuse("a probe's shared.per_attempt_seconds must equal probe.cutoff_seconds: the cut-off is "
+                          "the attempt limit, never a separate number a reader must reconcile")
+        probe_seconds = float(cutoff)
     return StudyDeclaration(
         target_skill=target, rewritten_description=description, subject=dict(subject), cases=tuple(cases),
         arm_order=tuple(expected), seed=int(order["seed"]), alpha=float(alpha), shared=dict(shared),
         task_path=str(task["path"]), grader_id=str(task["grader_id"]), grader_revision=str(task["grader_revision"]),
-        approval=approval, data=dict(data),
+        approval=approval, data=dict(data), probe_seconds=probe_seconds,
     )
 
 
@@ -426,6 +450,55 @@ def run_study(
     return experiment, outcomes
 
 
+def tool_calls(obs: Mapping[str, object]) -> int | None:
+    """How many tool calls the agent made, from the transcript's own line
+    census (`transcript_line_types`): every `response_item/...call` line,
+    never its `..._output`. `None` when no census was recorded."""
+    types = obs.get("transcript_line_types")
+    if not isinstance(types, dict):
+        return None
+    return sum(int(n) for key, n in types.items()
+               if isinstance(key, str) and key.startswith("response_item/") and key.endswith("call")
+               and isinstance(n, int))
+
+
+def _pending_calls(obs: Mapping[str, object]) -> int | None:
+    """Tool calls with no recorded output yet: `<kind>_call` lines minus
+    `<kind>_call_output` lines. `None` when no census was recorded."""
+    types = obs.get("transcript_line_types")
+    if not isinstance(types, dict):
+        return None
+    pending = 0
+    for key, n in types.items():
+        if isinstance(key, str) and key.startswith("response_item/") and key.endswith("call") and isinstance(n, int):
+            out = types.get(f"{key}_output")
+            pending += n - (out if isinstance(out, int) else 0)
+    return pending
+
+
+def _decided(obs: Mapping[str, object], calls: int | None, invocations: object,
+             declaration: StudyDeclaration) -> bool:
+    """Whether an attempt that shows NO target selection may be read as "not
+    selected". A positive selection is always decided. A negative one is not
+    when the detector could have missed it (counter-model review, #238):
+
+      - the transcript holds call types the parser does not recognize
+        (`transcript_unrecognized_types`) - a skill read in such a call is
+        invisible, so an empty invocation list is not a negative;
+      - in a probe: the agent made no tool call before the cut-off, or a call
+        was still pending (no recorded output) - the target's skill read may
+        be that call, which the parser only counts once its output arrives."""
+    if isinstance(invocations, list) and declaration.target_skill in {str(i) for i in invocations}:
+        return True
+    unrecognized = obs.get("transcript_unrecognized_types")
+    if isinstance(unrecognized, list) and unrecognized:
+        return False
+    if declaration.probe_seconds is None:
+        return True
+    pending = _pending_calls(obs)
+    return calls is not None and calls > 0 and pending == 0
+
+
 def model_observed(obs: Mapping[str, object]) -> str:
     meta = obs.get("run_metadata")
     return str(meta.get("model") or UNKNOWN) if isinstance(meta, dict) else UNKNOWN
@@ -446,13 +519,19 @@ def build_report(experiment: trial.Experiment, outcomes: Sequence[mp.AttemptOutc
         confirmed = cr.observation_confirmed(obs)
         invocations = obs.get("skill_invocations")
         graded = record.get("graded")
+        calls = tool_calls(obs)
+        decided = _decided(obs, calls, invocations, declaration)
         entries.append({
             "position": position, "attempt_id": outcome.scheduled.attempt_id, "case": case, "arm": arm,
             "disposition": record.get("disposition"),
-            "target_selected": cr._opened(invocations, (declaration.target_skill,), confirmed=confirmed),
-            "any_skill_selected": cr._opened(invocations, confirmed=confirmed),
+            "target_selected": cr._opened(invocations, (declaration.target_skill,), confirmed=confirmed and decided),
+            "any_skill_selected": cr._opened(invocations, confirmed=confirmed and decided),
+            "tool_calls": calls if calls is not None else UNKNOWN,
+            "decided": decided,
             "skill_invocations": invocations if isinstance(invocations, list) else UNKNOWN,
-            "task_status": graded.get("status") if isinstance(graded, dict) else calibration.NOT_GRADED,
+            # A probe is cut off by design, so its task grade measures nothing.
+            "task_status": ("NOT_MEASURED (probe)" if declaration.probe_seconds is not None
+                            else graded.get("status") if isinstance(graded, dict) else calibration.NOT_GRADED),
             "model_observed": model_observed(obs),
             "model_eligible": mp.model_eligibility(record.get("disposition"), model_observed(obs),
                                                    str(declaration.shared["model"])),
@@ -476,6 +555,8 @@ def build_report(experiment: trial.Experiment, outcomes: Sequence[mp.AttemptOutc
     p_value = fisher_one_sided(r["selected"], r["observed"], p["selected"], p["observed"]) if available else None
     return {
         "version": 1, "kind": REPORT_KIND, "experiment_id": experiment.id,
+        "probe_seconds": declaration.probe_seconds,
+        "undecided": sum(1 for e in entries if e["decided"] is False),
         "target_skill": declaration.target_skill, "attempts": entries, "cells": cells,
         "primary_test": {
             "case": primary, "kind": "fisher-exact-one-sided", "direction": "rewritten > published",
@@ -489,7 +570,9 @@ def build_report(experiment: trial.Experiment, outcomes: Sequence[mp.AttemptOutc
 
 
 def paste_back(report: Mapping[str, object]) -> str:
-    lines = [f"uptake-study: experiment {report.get('experiment_id')} target={report.get('target_skill')}"]
+    probe = report.get("probe_seconds")
+    lines = [f"uptake-study: experiment {report.get('experiment_id')} target={report.get('target_skill')}"
+             + (f" PROBE cut-off {probe:g}s, undecided={report.get('undecided')}" if probe else "")]
     cells = report.get("cells")
     for case, arms in (cells.items() if isinstance(cells, dict) else []):
         for arm, cell in arms.items():
