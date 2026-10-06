@@ -75,6 +75,7 @@ specification rejects, and it proves its own rules can fail before reporting the
   never `installation-ready`, which a baseline arm cannot satisfy) with readiness reported
   beside it, and the two- or three-arm (B/N/P, #231) calibration declaration validator (`require_approved` refuses
   an unapproved one)
+- `evals/description-probe/` - #238's screening-probe agreement check (45 s cut-off; approved 2026-10-06, not run)
 - `skillc/uptake_study.py` - `skillc uptake-study` (#237): two arms that differ only in one skill's
   description (a checked `degrade-subject` override), selection counted from confirmed observations, and a
   predeclared one-sided Fisher's exact test; `evals/uptake-study/` holds the rewritten SKILL.md and declaration (run 2026-10-04: rewritten 20/20 vs published 0/20, p=7e-12; near-miss 9/10 vs 0/10)
