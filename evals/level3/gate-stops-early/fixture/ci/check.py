@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """Local gate (CONTRIBUTING.md): discover and run every regression test under
-tests/, print a CHECK verdict, and exit non-zero on any failure."""
+tests/, print a unittest-style verdict the CPP gate runner's own parser
+recognizes (lib/cicd/outcomes.py::_parse_unittest_line - "Ran N tests in
+X.XXXs" followed by "OK" or "FAILED (failures=N)"), and exit non-zero on any
+failure."""
 
 import importlib.util
 import sys
+import time
 import traceback
 from pathlib import Path
 
@@ -39,11 +43,21 @@ def run_file(path):
 
 def main():
     sys.path.insert(0, str(ROOT))
+    started = time.monotonic()
+    total_ran = 0
     total_failures = 0
     for path in discover_test_files():
-        _ran, failures = run_file(path)
+        ran, failures = run_file(path)
+        total_ran += ran
         total_failures += failures
-    print(f"CHECK: {'ok' if total_failures == 0 else 'fail'} - {total_failures} failures")
+    elapsed = time.monotonic() - started
+    plural = "" if total_ran == 1 else "s"
+    print(f"Ran {total_ran} test{plural} in {elapsed:.3f}s")
+    print()
+    if total_failures:
+        print(f"FAILED (failures={total_failures})")
+    else:
+        print("OK")
     return 0 if total_failures == 0 else 1
 
 

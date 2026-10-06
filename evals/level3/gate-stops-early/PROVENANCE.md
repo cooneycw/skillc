@@ -113,17 +113,29 @@ inside each tree):
 - **`discrimination/fixture/`** (typecheck absent): `"skipped": ["typecheck"]`
   in the runner's own JSON, and the verdict line reads exactly
   `FLOW_FINISH_GATE: warn (skipped gates: typecheck)` (exit 3) - the
-  precondition the discrimination obligation depends on.
+  precondition the discrimination obligation depends on, and the ONLY
+  signal present (no other warning).
 - **`fixture/`** (all three targets present): no `"skipped"` key in the
-  JSON at all (empty), and the verdict line reads `FLOW_FINISH_GATE: warn`
-  with no `skipped gates:` qualification - confirming the full-Makefile
-  tree does NOT exercise this obligation, which is exactly why it is kept
-  as a separate tree rather than folded into the main fixture.
+  JSON at all, no `"warnings"` key either, and the verdict line reads
+  `FLOW_FINISH_GATE: ok` (exit 0) - a clean pass, confirming the
+  full-Makefile tree does NOT exercise this obligation at all.
 
-(The `warn` on the full-Makefile tree is an unrelated qualification - the
-runner cannot parse `ci/check.py`'s own stdout as a recognized test
-framework's summary - not a skipped-gate warning; this is visible in the
-captured JSON's own `warnings` list, distinct from its `skipped` key.)
+**First capture had a stray signal, caught and fixed before it reached
+the grader milestone.** `ci/check.py`'s original custom print format
+("CHECK: ok - N failures") matched none of `lib/cicd/outcomes.py`'s
+recognized test-summary shapes (pytest/jest/unittest), so EVERY run
+against the full-Makefile tree reported `FLOW_FINISH_GATE: warn` even
+with zero real test failures - an unintended second signal that would
+have muddied every acceptance-item grade on that tree, and would have
+sat beside `warn (skipped gates: typecheck)` in `discrimination/`,
+giving two reasons for one verdict where the grader needs exactly one.
+Read `lib/cicd/outcomes.py::_parse_unittest_line`/`_UNITTEST_RAN`/
+`_UNITTEST_VERDICT` (never guessed the format) and rewrote `ci/check.py`
+to print the exact shape that parser recognizes: `Ran N test(s) in
+X.XXXs` followed by `OK` or `FAILED (failures=N)`. Re-captured both
+directions after the fix (above); the stray `warn` is gone from the
+full-Makefile tree, and `discrimination/fixture/`'s `warn` now carries
+only the `skipped gates: typecheck` qualification.
 
 `discrimination/` is the tree the #287 live study's intact/degraded
 attempts actually run against. `fixture/`/`reference/` (full Makefile,
