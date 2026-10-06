@@ -553,38 +553,55 @@ Six named cases, each a committed `controls/skill-evidence/{good,bad}/` fixture:
 | Forged status | Bad case: `criteria_owned[].outcome` disagrees with that criterion's actual outcome on the attempt's own `verified-result` - refused by the `ledger-binding` cross-check this record adds, named in the rule table below |
 | Unknown schema | Bad case: `external_evidence.source` outside the closed vocabulary, or `present: true` with no `artifact_ref` |
 
-### Trust boundary needed by #269 (acceptance item 5) - STUB, pending #269's own record
+### Trust boundary needed by #269 (acceptance item 5)
 
-**Status: deliberately incomplete.** This subsection names the constraint
-`skill-evidence.lifecycle.execution_observed` must satisfy; it does not define
-#269's witness record, which is #269's own deliverable. Per sk-w3 (message 4596,
-sizing #183 for #269): the proposed channel is a host-owned Unix domain socket,
-one per attempt, where the **controller** is the listener - it accepts one
-request, **decides and logs its own decision before replying**, so nothing about
-the decision is reconstructable from the reply alone. The subject never becomes
-the logger; a subject that bypasses the socket produces zero controller-received
-requests for that attempt.
+`skill-evidence.lifecycle.execution_observed` is the one field in this whole
+kind that can assert a skill actually RAN something, as opposed to being
+installed, listed or read. That assertion needs a trusted source, and this
+section is the boundary this document commits `execution_observed` to -
+independent of what #269 eventually builds, and binding on it. Per sk-w3
+(message 4596, sizing #183 for #269's own witness channel): a host-owned Unix
+domain socket, one per attempt, where the **controller** is the listener - it
+accepts one request, **decides and logs its own decision before replying**, so
+nothing about the decision is reconstructable from the reply alone. The subject
+never becomes the logger; a subject that bypasses the socket produces zero
+controller-received requests for that attempt. Agreed with sk-w3 (message 4604)
+as the shape `skill-evidence` is written against.
 
-The constraint this places on `skill-evidence`, agreed with sk-w3 (message 4604):
+**What `execution_observed` may rely on.** A controller-decided, controller-
+LOGGED-before-reply request/reply record for this attempt, produced by #269's
+own witness channel - cited **only** by a `{ref, digest}` pair (the same shape
+records.md already uses for backend raw data, above, "Backend raw data"), never
+inlined or summarized. `CONFIRMED` and `NOT_CONFIRMED` both require this
+citation: `CONFIRMED` when the witness record positively says the gate ran,
+`NOT_CONFIRMED` when it positively says the gate did not.
 
-- `execution_observed: CONFIRMED` is legal **only** when `evidence` cites a
-  ref+digest into a controller-authored witness record for this attempt - the
-  same `{ref, digest}` shape records.md already uses for backend raw data
-  (above, "Backend raw data"). Nothing else may set it `CONFIRMED`: not a
-  subject declaration, not `external_evidence`, not a transcript.
-- No witness record for the attempt (socket bypassed, or #269 not yet wired)
-  means `execution_observed: UNKNOWN`, reason `no-controller-witness` - never
-  `NOT_CONFIRMED`. A bypass is an absence of evidence, not evidence of absence.
-- `NOT_CONFIRMED` is legal only when the controller's own witness record
-  **positively** states the gate did not run - a fact #269's own record must be
-  able to represent, which this stub does not invent.
+**What `execution_observed` may NOT rely on**, under any circumstance:
 
-**To re-pin:** once #269 names its own record kind and field, replace "a
-controller-authored witness record for this attempt" above with the exact
-kind/field, and add #269's record to `ATTEMPT_BOUND`'s cross-check in
-`ledger-binding` if it is attempt-bound there too. Re-pin cpp-eval's spec
-citation (`.specify/specs/per-skill-audit/spec.md`, currently pinned to skillc
-`8c74a88`) to the commit that lands this section.
+- a subject-writable log of any kind, including one the subject calls a receipt;
+- a client's own declaration (prompt, transcript, tool-call record);
+- `external_evidence` (a CPP usage record or any other externally produced
+  evidence) - R7/R8 already establish why: a usage record is never a trusted
+  observation, however internally consistent it reads.
+
+**Bypass is absence of evidence, not evidence of absence.** No witness record
+for the attempt - the socket was bypassed, or #269 is not wired into this
+execution path at all - means `execution_observed: UNKNOWN`, reason
+`no-controller-witness`. It is never `NOT_CONFIRMED`: that value asserts the
+controller POSITIVELY observed non-execution, which a silent bypass does not.
+
+**This is an additive boundary, not a forward reference to undefined behaviour.**
+Every rule above it is fully specified and enforced today: a `CONFIRMED` or
+`NOT_CONFIRMED` `execution_observed` with no witness citation is already refused
+by `skill_evidence()` (`_skill_evidence_lifecycle_fact`, above), whether or not
+#269 exists yet - until #269 ships, nothing can legally produce a witness
+citation, so `execution_observed` is `UNKNOWN` for every attempt, which is the
+honest state. What is pending is only a NAME: #269's own witness record `kind`
+and field, which this document will cite by name once #269 lands (one doc
+edit, no schema change - the `{ref, digest}` shape does not change). Re-pin
+cpp-eval's spec citation (`.specify/specs/per-skill-audit/spec.md`, currently
+pinned to skillc `8c74a88`) to the commit that lands this section, and again
+when #269's naming lands.
 
 ## `pilot-report`
 
