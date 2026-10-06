@@ -1,0 +1,61 @@
+{
+  "profile_schema": 1,
+  "name": "tiny-check",
+  "subject": "subject.json",
+  "select": [
+    "tiny-check"
+  ],
+  "treatment_question": "product",
+  "allowed_destinations": [
+    ".codex/skills",
+    "checkout"
+  ],
+  "reference_patterns": [
+    {
+      "name": "home",
+      "class": "home-relative",
+      "pattern": "~/[A-Za-z0-9._/-]*[A-Za-z0-9_-]"
+    }
+  ],
+  "dependencies": [
+    {
+      "id": "gate",
+      "kind": "helper",
+      "scope": "treatment",
+      "role": "fake consuming gate",
+      "source_root": ".",
+      "paths": [
+        "gate.py"
+      ],
+      "destination": "checkout",
+      "unreferenced_reason": "Invoked by the test"
+    },
+    {
+      "id": "marker",
+      "kind": "synthetic",
+      "scope": "treatment",
+      "role": "existence marker",
+      "source_root": ".",
+      "paths": [
+        "MARKER.md"
+      ],
+      "destination": "checkout",
+      "content": "# Synthetic marker\n",
+      "unreferenced_reason": "Existence-only detection"
+    }
+  ],
+  "unsupported": [],
+  "mirrors": [],
+  "generated_from": [],
+  "declared_empty_kinds": [
+    "library",
+    "startup-context",
+    "tool"
+  ],
+  "client_profiles": {
+    "codex": {
+      "status": "declared",
+      "reason": "synthetic subject"
+    }
+  }
+}

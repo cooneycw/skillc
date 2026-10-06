@@ -8,6 +8,12 @@ and version plan.
 
 ## [Unreleased]
 
+- **Bounded synthetic profile files** (Refs #303). Profiles can declare
+  non-executable marker text with explicit pinned-file replacement reasons
+  and digests. Inventories and receipts distinguish pinned and synthetic
+  origins. The flow-check profile declares its checkout marker and a
+  subject-scoped three-way gate classifier; updated real-pin proof is owed.
+
 - **Disposable git fixtures and attempt-bound facts** (Refs #275). Fresh pinned
   commits, refs, dirty indexes, preserved files, stashes and a linked sibling
   worktree are built under isolated git configuration. Capture records separate

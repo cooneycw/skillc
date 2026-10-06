@@ -90,6 +90,19 @@
    ]
   },
   {
+   "id": "checkout-detection-marker",
+   "kind": "synthetic",
+   "scope": "treatment",
+   "role": "Existence-only checkout detection marker",
+   "source_root": ".",
+   "paths": ["CLAUDE.md"],
+   "destination": "Projects/claude-power-pack",
+   "content": "# Synthetic checkout marker only - not agent instructions.\n# See skillc#303.\n",
+   "unreferenced_reason": "scripts/flow-finish-gate.sh:347 tests directory and CLAUDE.md existence only.",
+   "replaces_pinned": true,
+   "replacement_reason": "The pinned CLAUDE.md is CPP agent instructions. Separately confirmed by the operator: Codex project-doc discovery reads AGENTS.md from cwd, not CLAUDE.md. scripts/flow-finish-gate.sh:347 only tests existence, so a minimal marker preserves detection without installing instructions content."
+  },
+  {
    "id": "checkout-scripts",
    "kind": "helper",
    "scope": "treatment",
