@@ -1,0 +1,441 @@
+{
+ "batch": 1,
+ "issue": 238,
+ "subject": "cpp-codex",
+ "subject_revision": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b",
+ "_comment": "Batch 1 of #238's 74-skill programme (owner ruling 2026-10-06: all skills in priority order, results to CPP 12 at a time; variants may be generated and tested without per-wording approval). Each skill: two development select cases + one development abstain case (screen), one held-out case of each (confirmation). Variants state a trigger condition ('Use when ...'), the principle #237's selective study established.",
+ "skills": [
+  {
+   "skill": "flow-check",
+   "variants": {
+    "variant-a": "Use when you are asked to run a project's quality checks (tests, lint, type checks, security scan): runs them in one step and reports what failed, without committing.",
+    "variant-b": "Use when the user asks for tests, lint, type checks or a security scan before a change is called done: runs them together and reports failures, without committing."
+   },
+   "development": [
+    {
+     "id": "dev-select-1",
+     "prompt_addendum": "Before finishing, run this project's quality checks (tests, lint, type checks) and report the result.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-select-2",
+     "prompt_addendum": "When you are done, verify the change passes the project's lint and test gates, without committing.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-abstain",
+     "prompt_addendum": "",
+     "expect": "abstain"
+    }
+   ],
+   "held_out": [
+    {
+     "id": "held-select",
+     "prompt_addendum": "After the fix, check that tests, linting and type checks all pass before you report back.",
+     "expect": "select"
+    },
+    {
+     "id": "held-abstain",
+     "prompt_addendum": "Also add a one-line note to the README describing the fix.",
+     "expect": "abstain"
+    }
+   ]
+  },
+  {
+   "skill": "flow-finish",
+   "variants": {
+    "variant-a": "Use when you are asked to finish a change for review: runs the quality checks, commits, pushes the branch and opens a pull request.",
+    "variant-b": "Use when the work is done and the user wants it committed, pushed and turned into a pull request; runs the quality gates first."
+   },
+   "development": [
+    {
+     "id": "dev-select-1",
+     "prompt_addendum": "When the fix is done, commit it, push the branch and open a pull request.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-select-2",
+     "prompt_addendum": "Finish up: run the checks, commit, push and create a pull request for review.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-abstain",
+     "prompt_addendum": "Do not commit anything; just make the change in the working tree.",
+     "expect": "abstain"
+    }
+   ],
+   "held_out": [
+    {
+     "id": "held-select",
+     "prompt_addendum": "Ship this change: commit it, push the branch and raise a pull request.",
+     "expect": "select"
+    },
+    {
+     "id": "held-abstain",
+     "prompt_addendum": "Run the tests to confirm the fix, but leave the change uncommitted.",
+     "expect": "abstain"
+    }
+   ]
+  },
+  {
+   "skill": "flow-start",
+   "variants": {
+    "variant-a": "Use when you begin work on a GitHub issue and need its own worktree and branch: creates both from the issue, with no other state.",
+    "variant-b": "Use at the start of work on an issue, when the user wants it isolated: creates a dedicated git worktree and branch named for the issue."
+   },
+   "development": [
+    {
+     "id": "dev-select-1",
+     "prompt_addendum": "Before changing anything, set up a dedicated worktree and branch for GitHub issue #12 and work there.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-select-2",
+     "prompt_addendum": "Start work on issue #12 properly: create its own branch and worktree first.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-abstain",
+     "prompt_addendum": "",
+     "expect": "abstain"
+    }
+   ],
+   "held_out": [
+    {
+     "id": "held-select",
+     "prompt_addendum": "Begin issue #12 on a fresh branch in its own worktree, then make the fix.",
+     "expect": "select"
+    },
+    {
+     "id": "held-abstain",
+     "prompt_addendum": "Make the fix directly on the current branch; no new branch is needed.",
+     "expect": "abstain"
+    }
+   ]
+  },
+  {
+   "skill": "flow-auto",
+   "variants": {
+    "variant-a": "Use when you are asked to take a GitHub issue through its whole lifecycle in one go: worktree, plan, implement, quality checks and pull request.",
+    "variant-b": "Use when the user wants an issue handled end to end without stopping between stages: starts a worktree, plans, implements, verifies and opens a pull request."
+   },
+   "development": [
+    {
+     "id": "dev-select-1",
+     "prompt_addendum": "Handle GitHub issue #12 end to end: plan it, implement the fix, run the checks and open a pull request.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-select-2",
+     "prompt_addendum": "Take issue #12 through the whole lifecycle in one go, from worktree to pull request.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-abstain",
+     "prompt_addendum": "",
+     "expect": "abstain"
+    }
+   ],
+   "held_out": [
+    {
+     "id": "held-select",
+     "prompt_addendum": "Run the full issue workflow for #12: branch, plan, fix, verify and open a pull request.",
+     "expect": "select"
+    },
+    {
+     "id": "held-abstain",
+     "prompt_addendum": "Just make the fix; I will commit and open the pull request myself.",
+     "expect": "abstain"
+    }
+   ]
+  },
+  {
+   "skill": "flow-merge",
+   "variants": {
+    "variant-a": "Use when a branch's pull request is ready to merge: merges it, then removes the worktree and branch.",
+    "variant-b": "Use after a pull request is approved, when the user asks to merge it and clean up the local worktree and branch."
+   },
+   "development": [
+    {
+     "id": "dev-select-1",
+     "prompt_addendum": "This branch's pull request is approved: merge it and clean up the worktree and branch.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-select-2",
+     "prompt_addendum": "Once done, merge the open pull request for this branch and remove the local branch and worktree.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-abstain",
+     "prompt_addendum": "",
+     "expect": "abstain"
+    }
+   ],
+   "held_out": [
+    {
+     "id": "held-select",
+     "prompt_addendum": "Merge the reviewed pull request for this branch, then tidy up the branch and worktree.",
+     "expect": "select"
+    },
+    {
+     "id": "held-abstain",
+     "prompt_addendum": "Open a pull request for this change but do not merge it.",
+     "expect": "abstain"
+    }
+   ]
+  },
+  {
+   "skill": "security-scan",
+   "variants": {
+    "variant-a": "Use when you are asked for a thorough security scan of a project: runs the native checks plus any external scanners available and reports the findings.",
+    "variant-b": "Use for a full security audit of a repository (secrets, dependencies, configuration) when a quick check is not enough."
+   },
+   "development": [
+    {
+     "id": "dev-select-1",
+     "prompt_addendum": "Before finishing, run a full security scan of the project, including any external scanners available.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-select-2",
+     "prompt_addendum": "Check the repository for security issues such as leaked secrets and vulnerable dependencies with a thorough scan.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-abstain",
+     "prompt_addendum": "",
+     "expect": "abstain"
+    }
+   ],
+   "held_out": [
+    {
+     "id": "held-select",
+     "prompt_addendum": "Do a complete security scan of this project and report what it finds.",
+     "expect": "select"
+    },
+    {
+     "id": "held-abstain",
+     "prompt_addendum": "Run only a quick built-in security check; skip external tools.",
+     "expect": "abstain"
+    }
+   ]
+  },
+  {
+   "skill": "security-quick",
+   "variants": {
+    "variant-a": "Use when you are asked for a fast security check that needs no external tools: runs only the built-in native scanners.",
+    "variant-b": "Use for a quick security pass over a change when speed matters more than depth; native scanners only."
+   },
+   "development": [
+    {
+     "id": "dev-select-1",
+     "prompt_addendum": "Before finishing, run a quick built-in security check; no external tools.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-select-2",
+     "prompt_addendum": "Do a fast security pass over the change using only native scanners.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-abstain",
+     "prompt_addendum": "",
+     "expect": "abstain"
+    }
+   ],
+   "held_out": [
+    {
+     "id": "held-select",
+     "prompt_addendum": "Run a quick native security scan and report anything it flags.",
+     "expect": "select"
+    },
+    {
+     "id": "held-abstain",
+     "prompt_addendum": "Run the most thorough security scan available, including external tools.",
+     "expect": "abstain"
+    }
+   ]
+  },
+  {
+   "skill": "github-issue-create",
+   "variants": {
+    "variant-a": "Use when you are asked to open a new GitHub issue for the current repository: drafts a title and body and creates it.",
+    "variant-b": "Use when the user wants work tracked in a new GitHub issue (a bug, task or follow-up) in this project's repository."
+   },
+   "development": [
+    {
+     "id": "dev-select-1",
+     "prompt_addendum": "After the fix, file a GitHub issue for the follow-up work: slugify does not handle accented characters.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-select-2",
+     "prompt_addendum": "Open a new GitHub issue to track adding Unicode support to slugify.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-abstain",
+     "prompt_addendum": "",
+     "expect": "abstain"
+    }
+   ],
+   "held_out": [
+    {
+     "id": "held-select",
+     "prompt_addendum": "Create a GitHub issue describing the remaining Unicode bug, then finish.",
+     "expect": "select"
+    },
+    {
+     "id": "held-abstain",
+     "prompt_addendum": "Note the remaining Unicode bug in a code comment; do not open any issue.",
+     "expect": "abstain"
+    }
+   ]
+  },
+  {
+   "skill": "github-issue-view",
+   "variants": {
+    "variant-a": "Use when you need the details of a specific GitHub issue: shows its title, body, labels and comments by number.",
+    "variant-b": "Use when the user refers to a GitHub issue by number and you need to read it and its discussion."
+   },
+   "development": [
+    {
+     "id": "dev-select-1",
+     "prompt_addendum": "Before fixing, read GitHub issue #12 and its comments for the full bug report.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-select-2",
+     "prompt_addendum": "Look up issue #12 on GitHub and use its details for the fix.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-abstain",
+     "prompt_addendum": "",
+     "expect": "abstain"
+    }
+   ],
+   "held_out": [
+    {
+     "id": "held-select",
+     "prompt_addendum": "Check what GitHub issue #12 and its discussion say before changing the code.",
+     "expect": "select"
+    },
+    {
+     "id": "held-abstain",
+     "prompt_addendum": "List the open GitHub issues to see if this bug is already reported.",
+     "expect": "abstain"
+    }
+   ]
+  },
+  {
+   "skill": "github-issue-list",
+   "variants": {
+    "variant-a": "Use when you are asked to list or search a repository's GitHub issues, by state, label or keyword.",
+    "variant-b": "Use when you need to find existing GitHub issues, for example to check whether a bug is already reported."
+   },
+   "development": [
+    {
+     "id": "dev-select-1",
+     "prompt_addendum": "Before fixing, list the open GitHub issues to see whether this bug is already reported.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-select-2",
+     "prompt_addendum": "Search this repository's GitHub issues for anything about slug hyphens.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-abstain",
+     "prompt_addendum": "",
+     "expect": "abstain"
+    }
+   ],
+   "held_out": [
+    {
+     "id": "held-select",
+     "prompt_addendum": "Find any existing GitHub issues mentioning slugify before you start.",
+     "expect": "select"
+    },
+    {
+     "id": "held-abstain",
+     "prompt_addendum": "Read GitHub issue #12 in full before fixing.",
+     "expect": "abstain"
+    }
+   ]
+  },
+  {
+   "skill": "github-issue-update",
+   "variants": {
+    "variant-a": "Use when you are asked to change an existing GitHub issue: its title, body, labels or assignees, or to add a comment.",
+    "variant-b": "Use when the user wants an existing GitHub issue updated, labelled, reassigned or commented on, short of closing it."
+   },
+   "development": [
+    {
+     "id": "dev-select-1",
+     "prompt_addendum": "After the fix, add a comment to GitHub issue #12 saying it is fixed, and add the 'fixed' label.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-select-2",
+     "prompt_addendum": "Update GitHub issue #12's title to 'slugify leaves trailing hyphens'.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-abstain",
+     "prompt_addendum": "",
+     "expect": "abstain"
+    }
+   ],
+   "held_out": [
+    {
+     "id": "held-select",
+     "prompt_addendum": "Post a progress comment on GitHub issue #12 and assign it to me.",
+     "expect": "select"
+    },
+    {
+     "id": "held-abstain",
+     "prompt_addendum": "Close GitHub issue #12 once the fix is in.",
+     "expect": "abstain"
+    }
+   ]
+  },
+  {
+   "skill": "github-issue-close",
+   "variants": {
+    "variant-a": "Use when you are asked to close a GitHub issue, optionally with a closing comment explaining the resolution.",
+    "variant-b": "Use when an issue's work is done and the user wants it closed on GitHub, with an optional comment."
+   },
+   "development": [
+    {
+     "id": "dev-select-1",
+     "prompt_addendum": "When the fix is done, close GitHub issue #12 with a comment that it is resolved.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-select-2",
+     "prompt_addendum": "Close issue #12 on GitHub; the bug is fixed.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-abstain",
+     "prompt_addendum": "",
+     "expect": "abstain"
+    }
+   ],
+   "held_out": [
+    {
+     "id": "held-select",
+     "prompt_addendum": "Mark GitHub issue #12 as closed and explain the fix in a closing comment.",
+     "expect": "select"
+    },
+    {
+     "id": "held-abstain",
+     "prompt_addendum": "Add a comment to GitHub issue #12 but leave it open.",
+     "expect": "abstain"
+    }
+   ]
+  }
+ ]
+}
