@@ -187,6 +187,24 @@ and version plan.
   change needed. All 11 equivalence cases (6 `_execution_observed` + 5
   `_last_run_is_fresh`) now run and pass.
 
+- **`AcquiredCollection.repo` and `collection_conformance.verify_repo_matches_skills`
+  (Refs #334, in progress)** - a validated profile's dependency closure is
+  declared against the subject's FULL repository root, but
+  `acquire_collection()` only ever materializes the subject's declared
+  `skills_root` subtree, so the closure's files (e.g. `lib/cicd`,
+  `pyproject.toml` at the repo root) are never present in
+  `AcquiredCollection.source.surface_dir`. Rather than widening
+  `acquire_collection()`'s own skills-root-scoped contract (its digest is
+  what every existing calibration declaration binds to), `AcquiredCollection`
+  gains a purely additive `repo: Path | None` field exposing the SAME full
+  checkout the function already builds internally before truncating it -
+  never a second clone. `verify_repo_matches_skills` is the committed
+  consistency check before anything uses `repo`: the checkout's resolved
+  revision (when it is a real git checkout) must match the subject's
+  declared pin, and every skill file must be byte-identical when read from
+  `repo` versus what the skills acquisition already verified - cheap today
+  (one checkout feeds both), and the red case if a second acquisition is
+  ever reintroduced.
 - **`skillc.profile.installed_home_files` (Refs #334, in progress)** - a
   validated profile's install population as an in-memory
   `{destination: bytes}` mapping, for delivery into a live attempt

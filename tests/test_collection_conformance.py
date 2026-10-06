@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import dataclasses
 import json
 import os
 import shlex
@@ -157,6 +158,87 @@ def _planned_digest(experiment: trial.Experiment, attempt_id: str, section: str)
     digest = part["digest"]
     assert isinstance(digest, str)
     return digest
+
+
+def test_the_additive_repo_field_does_not_change_source_digest_or_files(
+    tmp_path: Path, base: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """skillc#334 (orchestrator ruling, mailbox 5833, condition 1): adding
+    `AcquiredCollection.repo` must not change what `source`/`files`/
+    `source.digest` report - the byte-for-byte identity every existing
+    calibration declaration's treatment digest binds to. Checked against a
+    committed expected digest for this exact fixture, not merely "it still
+    runs" - a regression here would silently move every existing
+    declaration's treatment digest."""
+    repo = _fixture_collection(tmp_path, {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd"]))
+    acquired = cc.acquire_collection("whatever", base, checkout=repo)
+    assert acquired.repo == repo
+    assert acquired.source.digest == "sha256:0c1ab53e33f9b07e7c2c4756bfe0e5951510ce0b714d6bcd36a84bd433e9f0b5"
+    assert [f.rel for f in acquired.files] == ["SKILL.md"]
+
+
+def test_verify_repo_matches_skills_passes_on_an_ordinary_acquisition(
+    tmp_path: Path, base: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _fixture_collection(tmp_path, {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd"]))
+    acquired = cc.acquire_collection("whatever", base, checkout=repo)
+    cc.verify_repo_matches_skills(acquired)  # does not raise
+
+
+def test_verify_repo_matches_skills_refuses_when_no_full_checkout_exists(
+    tmp_path: Path, base: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The degraded-acquisition shape: `repo` is `None` because no full
+    checkout was ever made (#334's own stated scope boundary)."""
+    repo = _fixture_collection(tmp_path, {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd"]))
+    acquired = cc.acquire_collection("whatever", base, checkout=repo)
+    degraded_shaped = dataclasses.replace(acquired, repo=None)
+    with pytest.raises(demo.SubjectRefused, match="no full checkout available"):
+        cc.verify_repo_matches_skills(degraded_shaped)
+
+
+def test_red_case_a_resolved_revision_other_than_the_declared_pin_is_refused(
+    tmp_path: Path, base: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mutation check: if the full checkout's HEAD resolves to anything
+    other than the subject's declared pin, this must refuse - simulated by
+    making the checkout LOOK like a git repo (a `.git` directory, so the
+    revision half of the check actually runs) and faking `materialize._git`
+    to report a different resolved SHA, since this environment's test
+    fixtures are plain directories, never real git checkouts (CI has no
+    `git` binary - see `_fixture_collection`'s own docstring)."""
+    repo = _fixture_collection(tmp_path, {"tdd": "tdd"})
+    (repo / ".git").mkdir()
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd"]))
+    acquired = cc.acquire_collection("whatever", base, checkout=repo)
+    assert acquired.subject.revision == "v1"
+
+    class _FakeResolved:
+        returncode = 0
+        stdout = b"deadbeef\n"
+
+    monkeypatch.setattr(materialize, "_git", lambda *a, **k: _FakeResolved())
+    with pytest.raises(demo.SubjectRefused, match="resolves to 'deadbeef', not"):
+        cc.verify_repo_matches_skills(acquired)
+
+
+def test_red_case_a_tampered_skill_byte_in_the_full_checkout_is_refused(
+    tmp_path: Path, base: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mutation check: the skills acquisition's own copy (`source.surface_dir`)
+    is untouched, but the file under the full checkout (`repo`) disagrees -
+    this must be caught by re-reading `repo` directly, never by trusting
+    the skills acquisition's already-verified copy a second time."""
+    repo = _fixture_collection(tmp_path, {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd"]))
+    acquired = cc.acquire_collection("whatever", base, checkout=repo)
+    tampered = repo / "skills" / "tdd" / "SKILL.md"
+    tampered.write_text(tampered.read_text(encoding="utf-8") + "\ntampered\n", encoding="utf-8")
+    with pytest.raises(demo.SubjectRefused, match="disagrees with the skills acquisition's"):
+        cc.verify_repo_matches_skills(acquired)
 
 
 def test_plan_records_the_collection_s_real_content_digest_not_a_placeholder(

@@ -433,7 +433,7 @@ def test_task_surface_matches_the_level1_surface_and_withholds_the_answer_key() 
 
 def test_a_treatment_that_installs_nothing_is_refused() -> None:
     acquired = cc.AcquiredCollection(
-        subject=argparse.Namespace(locator="test/test"), source=None, files=[],  # type: ignore[arg-type]
+        subject=argparse.Namespace(locator="test/test"), source=None, files=[], repo=None,  # type: ignore[arg-type]
     )
     with pytest.raises(cr.CalibrationRefused, match="second baseline"):
         cr.build_treatment(acquired)

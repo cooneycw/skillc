@@ -347,11 +347,26 @@ class AcquiredCollection:
     review flagged - `materialize.acquire_snapshot`'s own `tree_digest`) and
     `run_collection_agent_attempt` (which needs `files` to build
     `extra_home_files`). Splitting acquisition out this way means calling
-    both never doubles a real subject's real git clone."""
+    both never doubles a real subject's real git clone.
+
+    `repo` (#334) is purely additive: the same full checkout `source`/`files`
+    were already built from (see `acquire_collection`'s own body) - never a
+    second clone, never a second acquisition. It exists so a profile-opted-in
+    treated arm's closure (`skillc/profile.py`'s dependencies, declared
+    against the FULL repository root, not `subject.skills_root`) can be
+    installed from the SAME checkout the skills came from, rather than
+    cloning the subject's repository a second time. `source`, `files` and
+    `source.digest` - what every existing calibration declaration binds to -
+    are computed exactly as before this field existed; nothing reads `repo`
+    unless it opts into a profile. `None` for `acquire_degraded_collection`
+    (no full checkout exists there - the degraded tree is a persisted,
+    already-mutated directory, not a git clone); a degraded arm opting into
+    a profile closure is not yet supported and must refuse, not guess."""
 
     subject: materialize.Subject
     source: materialize.Source
     files: list[demo.SubjectFile]
+    repo: Path | None
 
 
 def acquire_collection(subject_name: str, base: Path, *, checkout: Path | None = None) -> AcquiredCollection:
@@ -380,7 +395,7 @@ def acquire_collection(subject_name: str, base: Path, *, checkout: Path | None =
     except materialize.Refused as exc:
         raise demo.SubjectRefused(f"subject {subject_name!r} could not be prepared: {exc}") from exc
     files = demo.subject_surface_files(source, entries, subject.surface_spec.home_skills_relpath)
-    return AcquiredCollection(subject, source, files)
+    return AcquiredCollection(subject, source, files, repo)
 
 
 def acquire_degraded_collection(subject_name: str, degraded_dir: Path) -> AcquiredCollection:
@@ -416,7 +431,62 @@ def acquire_degraded_collection(subject_name: str, degraded_dir: Path) -> Acquir
             f"subject {subject_name!r} could not be prepared from degraded tree {degraded_dir}: {exc}"
         ) from exc
     files = demo.subject_surface_files(source, entries, subject.surface_spec.home_skills_relpath)
-    return AcquiredCollection(subject, source, files)
+    return AcquiredCollection(subject, source, files, None)
+
+
+def verify_repo_matches_skills(acquired: AcquiredCollection) -> None:
+    """skillc#334: before using `acquired.repo` to build a profile's
+    full-tree `Tree`, confirm it and the skills acquisition
+    (`acquired.source`/`acquired.files`) still agree. Cheap today - both
+    come from the ONE checkout `acquire_collection` made (see
+    `AcquiredCollection.repo`'s own docstring) - which is exactly why this
+    is worth having: it is the red case that would catch a future
+    acquisition disagreeing with this one (a different checkout filter, a
+    different line-ending handling, or a second, independent clone
+    reintroduced later).
+
+    Two checks, both refusals (`demo.SubjectRefused`):
+
+    1. SAME REVISION. `acquired.repo` is skipped (not refused) when it is
+       not a git checkout at all (snapshot/test mode, where there is no
+       commit identity to compare) - `(repo / '.git')` absent is read as
+       "nothing to check", never as a mismatch. When it IS a git checkout,
+       its resolved `HEAD` must equal the subject's own declared
+       `revision` - the pin `demo.acquire_subject_checkout` forced both
+       the skills acquisition and this checkout to.
+    2. SAME SKILL BYTES. Every file `acquired.files` declares must be
+       byte-identical, read directly from `acquired.repo` under the
+       subject's `skills_root`, to the digest the skills acquisition
+       already verified (`SubjectFile.digest`) - never re-trusting the
+       skills acquisition's own copy, since the whole point is to check
+       the SECOND path independently.
+    """
+    if acquired.repo is None:
+        raise demo.SubjectRefused(
+            "no full checkout available for this acquisition; a profile closure cannot be verified"
+        )
+    if (acquired.repo / ".git").exists():
+        resolved = materialize._git(acquired.repo, "rev-parse", "--verify", "--quiet", "HEAD")
+        resolved_sha = resolved.stdout.decode().strip()
+        if resolved.returncode != 0 or resolved_sha != acquired.subject.revision:
+            raise demo.SubjectRefused(
+                f"full checkout at {acquired.repo} resolves to {resolved_sha or '<unresolvable>'!r}, not "
+                f"the declared pin {acquired.subject.revision!r} the skills acquisition used"
+            )
+    skills_root = acquired.subject.skills_root
+    for f in acquired.files:
+        repo_path = acquired.repo / skills_root / f.directory / f.rel
+        try:
+            actual = materialize.sha256_bytes(repo_path.read_bytes())
+        except OSError as exc:
+            raise demo.SubjectRefused(
+                f"full checkout is missing {f.directory}/{f.rel}, which the skills acquisition installed: {exc}"
+            ) from exc
+        if actual != f.digest:
+            raise demo.SubjectRefused(
+                f"full checkout's {f.directory}/{f.rel} digest {actual} disagrees with the skills "
+                f"acquisition's {f.digest} - the two acquisitions disagree about this subject"
+            )
 
 
 def _collection_home_files(source: materialize.Source, files: list[demo.SubjectFile]) -> dict[str, bytes]:
