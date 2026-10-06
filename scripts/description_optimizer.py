@@ -15,8 +15,10 @@ For each skill in the batch file, in order:
   2. SCREEN: a probe `uptake-study` with arms published + the variants on the
      skill's development cases; each arm is scored select-rate minus
      abstain-rate (`uptake_study._scores`);
-  3. pick the best-scoring variant. If no variant scores above published, the
-     published description is KEPT and step 4 is skipped;
+  3. pick the best-scoring variant. The published description is KEPT, and
+     step 4 skipped, only when it scores strictly above every variant on a
+     complete screen (every arm decided on every development case); an
+     incomplete screen or a tie goes to confirmation;
   4. CONFIRM: a two-arm probe study, published vs the winner, on the held-out
      cases, with the predeclared one-sided Fisher's exact test on the select
      case;
@@ -111,6 +113,16 @@ def run_study(decl_path: Path, rewritten: dict[str, Path], private: Path) -> dic
     return {"exit": proc.returncode, "report": json.loads(reports[-1].read_text(encoding="utf-8"))}
 
 
+def screen_complete(report: dict[str, object]) -> bool:
+    """Every arm has at least one decided, confirmed observation on every
+    development case."""
+    cells = report.get("cells")
+    if not isinstance(cells, dict) or not cells:
+        return False
+    arms = {arm for case in cells.values() for arm in case}
+    return all(case.get(arm, {}).get("observed", 0) > 0 for case in cells.values() for arm in arms)
+
+
 def degrade(cpp: Path, skill: str, override: Path, out: Path) -> Path:
     if not (out / "receipt.json").is_file():
         subprocess.run(["uv", "run", "--no-sync", "skillc", "degrade-subject", "cpp-codex", "--checkout", str(cpp),
@@ -139,11 +151,19 @@ def optimize(entry: dict[str, object], cpp: Path, work: Path, base: dict[str, ob
     ranked = sorted(variants, key=lambda a: (scores[a]["score"] is not None, scores[a]["score"] or -9), reverse=True)
     best = ranked[0]
     pub = scores["published"]["score"]
+    complete = screen_complete(screen["report"])
     result: dict[str, object] = {"skill": skill, "published": published_desc, "variants": variants,
-                                 "screen": {"experiment": screen["report"]["experiment_id"], "scores": scores},
+                                 "screen": {"experiment": screen["report"]["experiment_id"], "scores": scores,
+                                            "complete": complete},
                                  "winner": None, "confirm": None}
-    if scores[best]["score"] is None or (pub is not None and scores[best]["score"] <= pub):
-        result["verdict"] = "kept: no variant scored above the published description on the development screen"
+    # KEPT only when published strictly beats every variant on a COMPLETE
+    # screen. An incomplete screen (some arm with no decided observation on
+    # some development case) or a tie is not evidence for published: the
+    # best variant goes to the held-out confirmation, which decides
+    # (batch 1, flow-finish: published scored 1.0 on one case because its
+    # other select case was all undecided, tying the variants).
+    if complete and pub is not None and scores[best]["score"] is not None and pub > scores[best]["score"]:
+        result["verdict"] = "kept: the published description scored above every variant on a complete screen"
         return result
     result["winner"] = best
     held = [{**c, "attempts_per_arm": CONFIRM_SELECT_N if c["expect"] == "select" else CONFIRM_ABSTAIN_N,
