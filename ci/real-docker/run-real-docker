@@ -57,8 +57,13 @@ if ! BREAK_RESOLVED="$(resolve_break_spec "$RAW_BREAK_SPEC")"; then
     exit 2
 fi
 BREAK_MODE="$(echo "$BREAK_RESOLVED" | sed -n '1p')"
-BREAK_ENV_VAR="$(echo "$BREAK_RESOLVED" | sed -n '2p')"
-BREAK_ENV_VALUE="$(echo "$BREAK_RESOLVED" | sed -n '3p')"
+# Both always present and both always explicitly set below - never one
+# left at whatever the runner's own process environment happened to carry
+# (codex:code_review finding, #315 follow-up: the previous shape set only
+# the selected family's variable, so a stale inherited value for the
+# OTHER family could silently activate a break during a "none" run).
+CHANNEL_BREAK_VALUE="$(echo "$BREAK_RESOLVED" | sed -n '2p')"
+WITNESS_BREAK_VALUE="$(echo "$BREAK_RESOLVED" | sed -n '3p')"
 
 # VM-local configuration - never committed, never defaulted to a real path.
 # See ci/real-docker/README.md "Setup" for how the operator populates this.
@@ -256,16 +261,17 @@ if ! (cd "$WORK_CHECKOUT" && uv sync --locked --extra dev --quiet); then
 fi
 (
     cd "$WORK_CHECKOUT"
-    # Exactly ONE break env var is set, resolved from the closed family
-    # table above - a channel break never sets SKILLC_GATE_WITNESS_LIVE_
-    # BREAK and vice versa, so the two live files' break modes cannot
-    # cross-contaminate each other in the same pytest invocation.
-    if [ -n "$BREAK_ENV_VAR" ]; then
-        env "$BREAK_ENV_VAR=$BREAK_ENV_VALUE" uv run --no-sync pytest -m real_docker \
-            --junit-xml="$REPORT_PATH"
-    else
+    # BOTH break variables are always set explicitly, never left at
+    # whatever the runner's own process environment happened to carry
+    # (codex:code_review finding, #315 follow-up) - exactly one of
+    # CHANNEL_BREAK_VALUE/WITNESS_BREAK_VALUE is a real mode and the
+    # other is the literal "none", by resolve_break_spec's own contract,
+    # so the two live files' break modes cannot cross-contaminate each
+    # other and a stale inherited value can never silently activate a
+    # break during a "none" (certifying) run.
+    env SKILLC_LIVE_TEST_BREAK="$CHANNEL_BREAK_VALUE" \
+        SKILLC_GATE_WITNESS_LIVE_BREAK="$WITNESS_BREAK_VALUE" \
         uv run --no-sync pytest -m real_docker --junit-xml="$REPORT_PATH"
-    fi
 ) || true  # a test failure is EXPECTED input to the verdict step below
 
 # ----------------------------------------------------- R1: compute + post

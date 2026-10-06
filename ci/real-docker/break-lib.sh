@@ -19,27 +19,42 @@ set -u
 #: prefixes existed (R2 compatibility, orchestrator review: "keep the bare
 #: form working only if the README already documents it").
 _BREAK_CHANNEL_MODES="omit-mount wrong-uid flip-decision"
-_BREAK_CHANNEL_ENV="SKILLC_LIVE_TEST_BREAK"
 
 #: #269's gate-witness break modes - no bare form was ever documented for
 #: these, so (unlike the channel modes) they are refused outside the
 #: `witness:` prefix; see resolve_break_spec's legacy-bare branch below.
 _BREAK_WITNESS_MODES="stale-confirm-lie kill-wrong-pid gate-in-fresh-container"
-_BREAK_WITNESS_ENV="SKILLC_GATE_WITNESS_LIVE_BREAK"
 
-# Resolves a --break argument to three lines on stdout: the NORMALIZED
-# spec ("none", or "<family>:<mode>" - a bare legacy channel mode is
-# normalized to its "channel:<mode>" form here, so every caller downstream
-# has exactly one spelling to compare against "none"), the env var name to
-# set (empty for "none"), and the value to set it to (empty for "none").
-# Prints a reason to STDERR and returns 2 for anything this closed table
-# does not name - an unknown family, an unknown mode inside a known
+# Resolves a --break argument to three lines on stdout: the NORMALIZED spec
+# ("none", or "<family>:<mode>" - a bare legacy channel mode is normalized
+# to its "channel:<mode>" form here, so every caller downstream has exactly
+# one spelling to compare against "none"), the value to export as
+# SKILLC_LIVE_TEST_BREAK, and the value to export as SKILLC_GATE_WITNESS_
+# LIVE_BREAK - BOTH ALWAYS PRESENT, exactly one of them equal to the
+# resolved mode and the other the literal string "none" (never empty,
+# never left for the caller to infer from an empty field).
+#
+# codex:code_review finding (HIGH, this file's own follow-up review): an
+# earlier draft returned only the SELECTED family's env var name and
+# value, so run-real-docker's invocation set just that one variable and
+# left the OTHER family's variable exactly as inherited from the runner's
+# own process environment - a `--break none` run with a stale
+# SKILLC_LIVE_TEST_BREAK=omit-mount already in the environment (left over
+# from a prior by-hand invocation, say) would silently run that break
+# while posting to the CERTIFYING context, the exact failure this whole
+# mechanism exists to prevent. Emitting an explicit value for BOTH
+# families, every time, makes "the non-selected family is always clean"
+# true by construction rather than by a caller remembering to unset it.
+#
+# Prints a reason to STDERR and returns 2 for anything the closed table
+# below does not name - an unknown family, an unknown mode inside a known
 # family, or a bare spelling outside the three legacy channel modes
-# (including every witness mode, which has no bare form).
+# (including every witness mode, which has no bare form) - nothing is
+# printed to stdout on refusal.
 resolve_break_spec() {
     local spec="${1:-}" family mode m
     if [ "$spec" = "none" ]; then
-        printf 'none\n\n\n'
+        printf 'none\nnone\nnone\n'
         return 0
     fi
     case "$spec" in
@@ -56,7 +71,7 @@ resolve_break_spec() {
         channel)
             for m in $_BREAK_CHANNEL_MODES; do
                 if [ "$m" = "$mode" ]; then
-                    printf 'channel:%s\n%s\n%s\n' "$mode" "$_BREAK_CHANNEL_ENV" "$mode"
+                    printf 'channel:%s\n%s\nnone\n' "$mode" "$mode"
                     return 0
                 fi
             done
@@ -66,7 +81,7 @@ resolve_break_spec() {
         witness)
             for m in $_BREAK_WITNESS_MODES; do
                 if [ "$m" = "$mode" ]; then
-                    printf 'witness:%s\n%s\n%s\n' "$mode" "$_BREAK_WITNESS_ENV" "$mode"
+                    printf 'witness:%s\nnone\n%s\n' "$mode" "$mode"
                     return 0
                 fi
             done

@@ -56,38 +56,24 @@ def _run_runner(*args: str) -> subprocess.CompletedProcess[str]:
 
 # --------------------------------------------------------------- resolve_break_spec
 
-def test_none_resolves_to_the_none_sentinel_with_no_env_var() -> None:
+def test_none_resolves_to_none_for_both_families() -> None:
     result = _resolve("none")
     assert result.returncode == 0
-    assert result.stdout.splitlines() == ["none", "", ""]
+    assert result.stdout.splitlines() == ["none", "none", "none"]
 
 
-@pytest.mark.parametrize(
-    ("mode", "expected_env"),
-    [
-        ("omit-mount", "SKILLC_LIVE_TEST_BREAK"),
-        ("wrong-uid", "SKILLC_LIVE_TEST_BREAK"),
-        ("flip-decision", "SKILLC_LIVE_TEST_BREAK"),
-    ],
-)
-def test_namespaced_channel_modes_resolve_to_the_channel_env_var(mode: str, expected_env: str) -> None:
+@pytest.mark.parametrize("mode", ["omit-mount", "wrong-uid", "flip-decision"])
+def test_namespaced_channel_modes_set_only_the_channel_value(mode: str) -> None:
     result = _resolve(f"channel:{mode}")
     assert result.returncode == 0
-    assert result.stdout.splitlines() == [f"channel:{mode}", expected_env, mode]
+    assert result.stdout.splitlines() == [f"channel:{mode}", mode, "none"]
 
 
-@pytest.mark.parametrize(
-    ("mode", "expected_env"),
-    [
-        ("stale-confirm-lie", "SKILLC_GATE_WITNESS_LIVE_BREAK"),
-        ("kill-wrong-pid", "SKILLC_GATE_WITNESS_LIVE_BREAK"),
-        ("gate-in-fresh-container", "SKILLC_GATE_WITNESS_LIVE_BREAK"),
-    ],
-)
-def test_namespaced_witness_modes_resolve_to_the_witness_env_var(mode: str, expected_env: str) -> None:
+@pytest.mark.parametrize("mode", ["stale-confirm-lie", "kill-wrong-pid", "gate-in-fresh-container"])
+def test_namespaced_witness_modes_set_only_the_witness_value(mode: str) -> None:
     result = _resolve(f"witness:{mode}")
     assert result.returncode == 0
-    assert result.stdout.splitlines() == [f"witness:{mode}", expected_env, mode]
+    assert result.stdout.splitlines() == [f"witness:{mode}", "none", mode]
 
 
 @pytest.mark.parametrize("mode", ["omit-mount", "wrong-uid", "flip-decision"])
@@ -100,7 +86,7 @@ def test_bare_legacy_channel_modes_are_still_accepted_and_normalized(mode: str) 
     per mode to deal with."""
     result = _resolve(mode)
     assert result.returncode == 0
-    assert result.stdout.splitlines() == [f"channel:{mode}", "SKILLC_LIVE_TEST_BREAK", mode]
+    assert result.stdout.splitlines() == [f"channel:{mode}", mode, "none"]
 
 
 def test_a_bare_witness_mode_is_refused_not_silently_accepted() -> None:
@@ -110,6 +96,7 @@ def test_a_bare_witness_mode_is_refused_not_silently_accepted() -> None:
     result = _resolve("kill-wrong-pid")
     assert result.returncode == 2
     assert "unknown channel break mode 'kill-wrong-pid'" in result.stderr
+    assert result.stdout == ""
 
 
 def test_an_unknown_mode_in_a_known_family_is_refused() -> None:
@@ -122,6 +109,26 @@ def test_an_unknown_family_is_refused() -> None:
     result = _resolve("bogus:foo")
     assert result.returncode == 2
     assert "unknown break family 'bogus'" in result.stderr
+
+
+def test_an_empty_spec_is_refused_not_misread_as_an_empty_channel_mode() -> None:
+    """codex:code_review red case: acceptance must not claim an empty
+    population was checked - an empty string is not "none" and matches
+    no declared channel mode, so it must be refused like any other
+    unrecognized bare spelling."""
+    result = _resolve("")
+    assert result.returncode == 2
+    assert "unknown channel break mode ''" in result.stderr
+
+
+def test_a_spec_with_an_extra_colon_is_refused_not_truncated() -> None:
+    """codex:code_review red case: `channel:omit-mount:extra` must not be
+    silently truncated to a recognized mode - `${spec#*:}` takes
+    everything after the FIRST colon, so the extracted "mode" is
+    'omit-mount:extra', which matches nothing in the table."""
+    result = _resolve("channel:omit-mount:extra")
+    assert result.returncode == 2
+    assert "unknown channel break mode 'omit-mount:extra'" in result.stderr
 
 
 def test_red_case_a_table_that_accepts_everything_would_miss_both_refusals() -> None:
@@ -203,3 +210,23 @@ def test_the_real_runner_accepts_valid_break_specs_and_reaches_the_config_check(
     assert "config file" in result.stderr
     assert "unknown break" not in result.stderr
     assert "--break must be" not in result.stderr
+
+
+def test_the_real_runner_always_sets_both_break_variables_explicitly() -> None:
+    """Regression guard for the inherited-environment contamination fix
+    (codex:code_review, HIGH): the pytest invocation must set BOTH
+    SKILLC_LIVE_TEST_BREAK and SKILLC_GATE_WITNESS_LIVE_BREAK explicitly
+    on every run, from resolve_break_spec's own always-both-present
+    output - never leaving either to whatever the runner's own process
+    environment happened to inherit, which is what let a stale
+    SKILLC_LIVE_TEST_BREAK survive into a `--break none` (certifying) run
+    before this fix. Checked by reading the script's own text: driving
+    the actual invocation needs a real checkout and docker daemon this
+    environment does not have, so the behavioral guarantee - that
+    resolve_break_spec never emits an empty value for either family - is
+    covered by the triple-shape assertions above instead; this is a
+    narrower guard against reverting the invocation itself to the old
+    single-variable form."""
+    text = RUNNER_PATH.read_text(encoding="utf-8")
+    assert 'SKILLC_LIVE_TEST_BREAK="$CHANNEL_BREAK_VALUE"' in text
+    assert 'SKILLC_GATE_WITNESS_LIVE_BREAK="$WITNESS_BREAK_VALUE"' in text
