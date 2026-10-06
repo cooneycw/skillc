@@ -1736,7 +1736,7 @@ def test_prepare_with_trigger_decide_applies_the_declared_socket_mode(
     candidate uid inside the container is essentially never this
     controller process's own uid, so an owner-only socket would make the
     subject's own `connect()` fail with EACCES. GROUP is granted too, not
-    just OTHER (counter-model review, msg 4685 item 3) - zeroing GROUP
+    just OTHER (cross-model review) - zeroing GROUP
     bought nothing once (a)'s directory is the real boundary. Checked
     directly on the real file `prepare()` created, not merely on the
     constant's value."""

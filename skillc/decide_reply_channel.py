@@ -29,9 +29,9 @@ order `decide` calls RETURN, assigned under the same lock that protects
 the log), not necessarily the order requests ARRIVED - `decide` runs
 concurrently across connections, outside that lock, so a request that
 arrives first but whose `decide` call takes longer can be numbered after
-one that arrived second but returned first (counter-model review finding,
-msg 4685 item 7 - an earlier draft of this paragraph claimed arrival
-order, which was simply wrong). A subject cannot claim an out-of-order or
+one that arrived second but returned first (cross-model review finding -
+an earlier draft of this paragraph claimed arrival order, which was
+simply wrong). A subject cannot claim an out-of-order or
 duplicate position for its own request, whichever order this turns out
 to be.
 
@@ -208,7 +208,7 @@ class DecideReplyChannel:
         self._decide = decide
         self._socket_mode = socket_mode
         self._handler_drain_timeout = handler_drain_timeout
-        #: Counter-model review finding (msg 4685 item 3): the subject's
+        #: Cross-model review finding: the subject's
         #: own resource limits (`--pids-limit`, `--memory`, ...) bound ITS
         #: side of this socket, never the CONTROLLER's. These three bound
         #: what a connecting subject can cost THIS process - concurrent
@@ -236,8 +236,7 @@ class DecideReplyChannel:
         #: daemon threads (`_Threads.append`, stdlib). Without this, a
         #: handler still inside `decide()` when `stop_and_finalize()` is
         #: called could append a decision AFTER the "finalized" log was
-        #: already returned once - found by cross-model review (counter-
-        #: model review, msg 4685's item 3), not reasoned out in advance.
+        #: already returned once - found by cross-model review, not reasoned out in advance.
         self._active_handlers = 0
         self._handlers_idle = threading.Condition(self._lock)
 
@@ -280,7 +279,7 @@ class DecideReplyChannel:
         try:
             # EVERYTHING that decides whether this path is safe to bind,
             # AND the bind-and-listen itself, happens while this lock is
-            # held (counter-model review finding, msg 4685 item 3): a
+            # held (cross-model review finding): a
             # probe-then-unlink-then-bind sequence with no lock has a real
             # window between another channel's `bind()` and its `listen()`
             # during which a socket exists but nothing is accepting yet -
@@ -300,7 +299,7 @@ class DecideReplyChannel:
                 # failure (stdlib `TCPServer.__init__`'s own try/except),
                 # but a chmod failure happens AFTER that succeeds, with
                 # nothing else closing the now-live listener - found by
-                # counter-model review (msg 4685 item 3).
+                # cross-model review.
                 server.server_close()
                 raise
         finally:
@@ -352,7 +351,7 @@ class DecideReplyChannel:
 
     def _handler_started(self) -> bool:
         """Admits a new handler unless `max_concurrent_handlers` is already
-        reached - counter-model review finding (msg 4685 item 3): an
+        reached - cross-model review finding: an
         unbounded thread-per-connection accept had no cap at all, so a
         subject opening many connections (or just many slow ones) could
         exhaust controller-side threads regardless of the CONTAINER's own
@@ -377,8 +376,8 @@ class DecideReplyChannel:
         with self._lock:
             seq = self._next_seq
             self._next_seq += 1
-            # Deep-copied, not stored by reference (counter-model review
-            # finding, msg 4685 item 6): `LoggedDecision` is frozen only at
+            # Deep-copied, not stored by reference (cross-model review
+            # finding): `LoggedDecision` is frozen only at
             # the dataclass's own attribute level - a caller-supplied
             # `decide` that returns the SAME mutable dict across calls (or
             # a consumer mutating a dict retrieved from the log) would
@@ -465,7 +464,7 @@ class TrustedLog:
     generalized in §2e for #269's own reuse) - never a caller-supplied
     `bool`, for the same reason `backend.Confirmation` is a three-valued
     enum and not one: a bypass must never collapse into a guessed
-    `NOT_CONFIRMED` (sk-w1, #268 coordination, msg 4604 - a bypass does not
+    `NOT_CONFIRMED` (matching #268's own framing - a bypass does not
     positively establish non-execution, it only establishes that nothing
     was reported)."""
 

@@ -183,8 +183,8 @@ def test_concurrent_requests_get_strictly_increasing_unique_sequence_numbers(tmp
 
 
 def test_sequence_numbers_reflect_completion_order_not_arrival_order(tmp_path: Path) -> None:
-    """Pins the actual, corrected claim (counter-model review finding,
-    msg 4685 item 7): a request that ARRIVES first but whose `decide`
+    """Pins the actual, corrected claim (cross-model review finding): a
+    request that ARRIVES first but whose `decide`
     call takes longer is numbered AFTER one that arrives second but
     returns first. `decide` runs outside the log's lock, so the only
     ordering this module can honestly promise is completion order."""
@@ -427,7 +427,7 @@ def test_custom_socket_mode_is_honored(tmp_path: Path) -> None:
 
 
 def test_stop_and_finalize_waits_for_an_in_flight_handler_before_returning(tmp_path: Path) -> None:
-    """Counter-model review finding (msg 4685 item 3): `daemon_threads =
+    """Cross-model review finding: `daemon_threads =
     True` means `server_close()` alone does not wait for a handler still
     inside `decide()`. Without the drain, a late append could land AFTER
     this call already returned a "finalized" log. Here `decide()` blocks
@@ -482,7 +482,7 @@ def test_stop_and_finalize_raises_if_a_handler_outlives_the_drain_timeout(tmp_pa
 
 
 def test_an_oversized_request_is_refused_without_a_reply(tmp_path: Path) -> None:
-    """Counter-model review finding (msg 4685 item 3): an unterminated
+    """Cross-model review finding: an unterminated
     line used to be buffered without any size cap - a subject streaming
     an unbounded line could grow this process's own memory without
     limit. A connection over `max_request_bytes` before any newline is
@@ -571,7 +571,7 @@ def test_an_idle_connection_is_closed_after_the_request_timeout(tmp_path: Path) 
 
 
 def test_start_refuses_while_another_channel_holds_the_path_lock(tmp_path: Path) -> None:
-    """Counter-model review finding (msg 4685 item 3): a bare probe-then-
+    """Cross-model review finding: a bare probe-then-
     unlink-then-bind sequence has a real window between another channel's
     `bind()` and its `listen()` where `connect()` fails with the SAME
     `ConnectionRefusedError` a genuine dead orphan produces - a probe
@@ -602,7 +602,7 @@ def test_start_refuses_while_another_channel_holds_the_path_lock(tmp_path: Path)
 def test_a_chmod_failure_after_a_successful_bind_still_closes_the_listener(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Counter-model review finding (msg 4685 item 5): `_Server.__init__`
+    """Cross-model review finding: `_Server.__init__`
     (stdlib `TCPServer.__init__`) already self-closes on a bind/listen
     failure, but `os.chmod()` runs AFTER that succeeds - a chmod failure
     used to leave the already-bound, already-listening socket open with
@@ -641,7 +641,7 @@ def test_a_chmod_failure_after_a_successful_bind_still_closes_the_listener(
 
 
 def test_a_reused_mutable_result_dict_does_not_rewrite_an_earlier_entry(tmp_path: Path) -> None:
-    """Counter-model review finding (msg 4685 item 6): a `decide` function
+    """Cross-model review finding: a `decide` function
     that returns the SAME dict object on every call (mutating it between
     calls, as a careless or adversarial implementation might) must not be
     able to rewrite an already-logged decision through that shared

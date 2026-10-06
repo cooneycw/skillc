@@ -285,8 +285,8 @@ def trigger_socket_host_path_for(trigger_socket_dir: Path, name: str) -> Path:
 #: the host other than this controller process can even resolve the
 #: socket's HOST-side path to open it, because the directory's own 0700
 #: blocks every other host user's traversal regardless of what the file
-#: inside it allows. GROUP is granted too (`0o666`, not `0o606` - counter-
-#: model review, msg 4685 item 3): the socket's actual group is whatever
+#: inside it allows. GROUP is granted too (`0o666`, not `0o606` -
+#: cross-model review): the socket's actual group is whatever
 #: this controller process's own primary group happens to be, essentially
 #: never `CANDIDATE_GID` - changing it to an arbitrary target gid would
 #: need the calling process to either own that gid as a supplementary

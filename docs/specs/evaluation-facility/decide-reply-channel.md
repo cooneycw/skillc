@@ -61,8 +61,8 @@ own copy of the request.
 - **One connection per request**, matching `skillc/managed_backend.py`'s
   existing convention exactly rather than inventing a second shape in one
   repository: open, write one line, read one line, close. No multiplexing,
-  no persistent session. sk-w1 confirmed (#268 coordination, msg 4604) that
-  #269's witness need does not care whether this is one-shot or
+  no persistent session. #268's coordination with this design confirmed
+  that #269's witness need does not care whether this is one-shot or
   multiplexed — one-shot is simpler to implement and mutation-test, so it
   is what ships.
 - **Framing: one JSON object per line** (`\n`-terminated, UTF-8), the same
@@ -162,7 +162,7 @@ A grader may **not** conclude:
   is exactly this: bypass must be visible as an absence, never as a silent
   pass.
 
-This mirrors sk-w1's #268 item 5 framing exactly (msg 4604): the channel
+This mirrors #268's own item 5 framing exactly: the channel
 produces a controller-authored, timestamped-before-reply witness fact. #268
 represents that fact as a tri-state `execution_observed`
 (`CONFIRMED`/`NOT_CONFIRMED`/`UNKNOWN`), kept separate from criterion
@@ -172,7 +172,7 @@ the equivalent three-way read is:
 | Controller observed | Read as |
 |---|---|
 | ≥1 request, decisions logged | the disruption point is the logged `fail` sequence number — trustworthy, because logged before any reply |
-| zero requests (bypass) | `UNKNOWN`, reason `no-controller-witness` — never `NOT_CONFIRMED`, because a bypass does not positively establish non-execution, it only establishes nothing was reported (sk-w1's framing, msg 4604, adopted here) |
+| zero requests (bypass) | `UNKNOWN`, reason `no-controller-witness` — never `NOT_CONFIRMED`, because a bypass does not positively establish non-execution, it only establishes nothing was reported (#268's own framing, adopted here) |
 | socket present but unreachable for the whole attempt (channel construction failed) | `UNKNOWN`, reason `channel-unavailable` — the same `Confirmation.UNKNOWN`-never-guessed discipline `backend.py` already states for `confirm_stopped`/`confirm_absent` |
 
 ### 2e. What #269 may build on
@@ -206,7 +206,7 @@ This channel gives #269, without any change to this module:
 function, request shape, or log schema — only the transport (§2a) and the
 ordering guarantee (§2b). This is what §0's naming choice is for.
 
-### 2f. Socket access control (orchestrator review, msg 4685)
+### 2f. Socket access control (orchestrator review)
 
 A decide-and-reply channel's socket is the one new privilege boundary this
 design adds, and it is the part most likely to go wrong silently — a
@@ -239,8 +239,8 @@ looks wide in isolation; it is not the operative boundary. (a)'s directory
 is: nothing on the host other than this controller process can resolve the
 socket's HOST path to open it at all, so widening the FILE's own
 permission bits changes nothing about who can reach it — only (a) does.
-GROUP is granted too, not zeroed (correction, counter-model review msg
-4685 item 3: an earlier draft granted OTHER only, reasoning that GROUP
+GROUP is granted too, not zeroed (correction, cross-model review: an
+earlier draft granted OTHER only, reasoning that GROUP
 would need `CAP_CHOWN` to set to `CANDIDATE_GID` — true, but irrelevant,
 since the socket's actual group is whatever this process's own primary
 group already is, essentially never `CANDIDATE_GID` either way; zeroing
@@ -252,10 +252,9 @@ it, since a single-FILE bind
 mount exposes only that one file, never its host-side neighbours.
 
 **(c) Can the subject unlink or replace the socket?** Reasoned, not tested
-— no real daemon is available in this container (confirmed to you,
-msg 4664), and this is specifically a live-kernel-and-Docker question
-`describe()`'s `unobserved` already marks this backend's boundary for
-elsewhere. A FILE bind mount's target dentry is pinned by the active mount;
+— no real daemon is available in this container, and this is specifically
+a live-kernel-and-Docker question `describe()`'s `unobserved` already
+marks this backend's boundary for elsewhere. A FILE bind mount's target dentry is pinned by the active mount;
 Linux refuses `unlink()` on a path something has bind-mounted onto, in the
 mount namespace doing the unmounting, with `EBUSY` — the subject cannot
 simply replace the file out from under the mount while it is active. What
@@ -281,7 +280,7 @@ refused outright too — this channel creates nothing but sockets at its own
 path, so anything else is either a different caller's mistake or an
 adversarial pre-creation, and guessing which is not this method's job.
 
-### 2g. Further hardening from cross-model review (counter-model review, msg 4685 item 3)
+### 2g. Further hardening from cross-model review
 
 `/codex:code_review` (reviewing model `gpt-6.1-sol`, diff-only scope — this
 container's sandbox cannot start) found six real issues in the first PR A
@@ -352,8 +351,8 @@ and does not change `_keepalive_run_argv`'s placeholder command. This
 mirrors #158's own landing order exactly (its design doc §7: the supervisor
 design merged well before the image change that activates it), for the same
 reason: the image is pinned and shared (the #237 uptake study is currently
-running real attempts against `skillc-trial:latest`, per the orchestrator's
-msg 4611), so nothing in this PR may require or assume a changed image.
+running real attempts against `skillc-trial:latest`, under an orchestrator-
+imposed image-tag fence), so nothing in this PR may require or assume a changed image.
 `DockerBackend` with `trigger_socket_host_path` set against TODAY's image
 produces a mounted socket nothing inside the container ever connects to —
 inert, not broken, exactly the "fail-open on an old image" shape §2c's
@@ -423,7 +422,7 @@ result (§2d's table), not yet the test.
 
 ## 8. Landing order
 
-1. **PR A** (this doc, bundled — orchestrator direction, msg 4602):
+1. **PR A** (this doc, bundled — orchestrator direction):
    `skillc/decide_reply_channel.py` (§2a, §2b), the `DockerBackend`/
    `compose_run_argv` constrained mount (§2c), and `test_docker_backend.py`
    cases proving every refusal in §2c's last paragraph still holds, each
@@ -431,8 +430,8 @@ result (§2d's table), not yet the test.
    it protects. Does not touch `docker/trial/`.
 2. **PR B**: the proxy binary in the trial image (#78) and the L5 fixture's
    tool wrapper calling it instead of writing `.disruption/requests.log`
-   directly. Held until the orchestrator clears the #237 image-tag fence
-   (msg 4611); builds a distinct tag, never `skillc-trial:latest`.
+   directly. Held until the orchestrator clears the #237 image-tag fence;
+   builds a distinct tag, never `skillc-trial:latest`.
 3. **PR C**: the live conformance test (a real `DockerBackend` attempt,
    real socket, real proxy, checked against `qualify.py`'s
    `trusted_observation` shape) and §5's red case, run against pre-channel
@@ -447,7 +446,7 @@ Only PR D (the last PR) carries "Closes #183"; A/B/C each carry "Refs
 
 1. **One-shot connections, not a persistent session** (§2a) — simplest
    shape that satisfies both this channel's own need and #269's stated
-   indifference to one-shot vs. multiplexed (sk-w1, msg 4604).
+   indifference to one-shot vs. multiplexed (#268's own coordination).
 2. **The mount is a `DockerBackend`-instance-level opt-in, not a per-call
    parameter** (§2c) — matches `disk_limit`'s existing shape, and keeps
    every caller that does not ask for this channel provably unaffected.
