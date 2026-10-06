@@ -44,13 +44,27 @@ and version plan.
     reason (#150-A's job) - only that a trial's claim to be one half of one
     is well-formed, unambiguous, reciprocated and consistent with its own
     receipt.
-  - Mutation-checked: the ambiguity, reciprocity/complementary, and
-    degraded-marker-consistency checks (bundle level) and the shape checks
-    (record level) each go BLIND with their check removed.
+  - **Also checks, after cross-group review (cpp-eval) found a pair could
+    report clean while naming different tasks, different graders, or
+    installing different base subjects:** `case.id` must match between the
+    two sides (same task, different revision only); planned `grader` (id and
+    revision) must match; and the degraded arm's base subject revision,
+    recovered from its `degraded:` marker, must equal the intact arm's own -
+    with an explicit UNRECOVERABLE outcome (never silently treated as a
+    match or a mismatch) when that recovery itself fails.
+  - Mutation-checked: the ambiguity, reciprocity/complementary, same-task,
+    same-grader, same-base-revision, and degraded-marker-consistency checks
+    (bundle level) and the shape checks (record level) each go BLIND with
+    their check removed.
   - Controls: `controls/trial-ledger/{good,bad}/case-*` (1 good, 5 bad) and
-    `controls/case-pairing/{good,bad}/` (1 good, 5 bad bundles, including the
-    reciprocal-and-complementary good case and one bad case per named
-    defect).
+    `controls/case-pairing/{good,bad}/` (2 good, 12 bad bundles - both
+    directions of ambiguity/no-partner, one case per named defect, and a
+    good case demonstrating `case.arm`/`config.arm` orthogonality).
+  - **Per-arm repeats are facts only, no reduction** (operator ruling): this
+    module exposes each arm's scheduled/evaluable/passing counts and its
+    attempts' `verified-result` references by reference; any PASS/FAIL
+    reduction over repeats is the consumer's predeclared rule (CPP #1084),
+    never computed here.
   - Part of #273 (repeat-reliability and convenience summaries); the
     reliability estimator itself is a separate, following commit.
 

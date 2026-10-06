@@ -815,10 +815,12 @@ operation erases the earlier attempt."
   attempt and with the same `graded_digests`.
 
 **`case-pairing`** (#273). Every trial declaring `case.arm` pairs with exactly
-one counterpart, under four checks - the validated record CPP #1084 needs,
+one counterpart, under seven checks - the validated record CPP #1084 needs,
 so that "discriminating" is a checked fact rather than a naming convention
 (skillc #273's own scope note calls inferring it from naming "not
-acceptable"):
+acceptable"). The first three establish that a NAMED pair is real; the next
+three establish that paired trials are actually comparable, not just mutually
+consenting:
 
 - **Unique.** At most one trial in the bundle may carry a given `case`
   identity among those declaring an arm. Two trials both claiming to BE the
@@ -831,6 +833,28 @@ acceptable"):
   values. Both `intact`, or both `degraded`, is refused: a pairing is between
   the two sides of one discriminating design, never a trial naming itself
   twice over under two labels.
+- **Same task.** A and B's `case.id` must be identical - only the `revision`
+  may differ between the two sides. A pairing names two REVISIONS of one
+  task, never two different tasks (found in cpp-eval review: nothing
+  originally required this, so a pair naming unrelated tasks reported clean).
+- **Same grader.** A and B's planned `grader` (`id` AND `revision`) must be
+  identical. `ledger_binding` already ties each trial's own `verified-result`
+  to that trial's own planned grader, so comparing the two trials' planned
+  graders is equivalent to comparing their actual graders, without a second
+  read of either result (found in the same review: a drifted grader between
+  paired arms reported clean).
+- **Same base subject revision, CHECKED.** The degraded arm's
+  `installation-receipt.subject.revision` encodes a BASE revision inside its
+  `degraded:` marker (`DEGRADED_REVISION_RE`, maxsplit-safe against a
+  `kind="snapshot"` base whose own revision is `"snapshot:<digest>"` and so
+  already contains a colon); that recovered base must equal the intact arm's
+  own `subject.revision` exactly. **Boundary, stated rather than worked
+  around:** when the base cannot be recovered - a `degraded:` label in a
+  shape `DEGRADED_REVISION_RE` does not recognize - this is refused as
+  UNRECOVERABLE, a third outcome distinct from both "matches" and
+  "mismatches". It is never silently treated as either (found in the same
+  review: before this, nothing compared the two arms' subjects at all, so a
+  pair discriminating on unrelated base revisions reported clean).
 - **Consistent with the #150 degraded marker.** `case.arm: degraded` requires
   every attempt under that trial to carry an `installation-receipt.subject.
   revision` starting `degraded:` (`skillc/degrade.py`'s own marker, reaching
@@ -843,14 +867,38 @@ acceptable"):
   declared `case.arm` and the receipt's observed acquisition identity) - two
   markers for one fact can disagree, so this is what makes them unable to.
 
+**Orthogonal to the treatment axis, demonstrated not just asserted**
+(`controls/case-pairing/good/orthogonal-to-treatment-axis/`): a trial with
+`config.arm: baseline` can be the `intact` half of a pair and a trial with
+`config.arm: cpp` can be its `degraded` half, validating clean. `case.arm`
+and `config.arm` are read from different objects by different rules, and
+nothing here lets a value on one be mistaken for the other.
+
 **What this does not establish.** `case.arm`/`case.paired_with` says a trial
-CLAIMS to be one half of a discriminating design and agrees with its own
-receipt about it; it does not establish that the design actually
+CLAIMS to be one half of a discriminating design, agrees with its own
+receipt about it, and is comparable to its named counterpart (same task,
+grader, base revision); it does not establish that the design actually
 discriminates (that the degraded arm's grader genuinely fails because of the
 removed capability, rather than for an unrelated reason) - that needs a
 Level-1 task and grader built for the purpose (#150-A), the same boundary
 `degraded-subjects.md` already states for the single-trial degraded marker
 this rule cross-checks against.
+
+**Per-arm repeats: facts only, no reduction (operator ruling, cpp-eval
+review).** An arm's trial may schedule more than one attempt. This rule does
+not reduce them to a single PASS/FAIL for the arm, and no rule in this module
+does: #264 states no such reduction (all-fail? majority? all-k-at-some-
+threshold?), so none is picked here either. What a consumer can read, fully
+by reference and never by name-matching: each arm's scheduled attempt count,
+its evaluable count and its passing count (`attempt-lifecycle` and
+`verified-result`, joined by `attempt_id` - already structurally possible,
+since `case.arm` lives on the trial and every one of its attempts is listed
+there), its `all_k` where #273's reliability module defines one, and the
+list of per-attempt `verified-result` references themselves. Any reduction
+rule a consumer predeclares is then computed by counting records this module
+already certifies - CPP #1084's own predeclared rule is exactly such a
+consumer, cited here as the rule that applies to these facts, never
+implemented by this module.
 
 ## Retention boundary
 
@@ -906,7 +954,7 @@ bundle cases as well, including against every record rule.
 | `unique-ids` | bundle | duplicate attempt ID; conflicting receipts; duplicate result ID; a second `skill-evidence` record for one attempt |
 | `attempt-accounting` | bundle | planned attempt with no lifecycle; captured with no result; graded without receipt; graded without manifest; captured but declared NOT_RUN; graded but not captured; manifest but not captured; receipt stand-in with no agent-observation, or claiming readiness (#139) |
 | `lineage` | bundle | retry reusing its own ID; regrade whose original was erased; regrade of different bytes |
-| `case-pairing` | bundle | two trials declaring one case with an arm (ambiguous); a one-sided pairing; both sides declaring the same arm; a `degraded` arm whose attempts carry no `degraded:` receipt marker, or an `intact` arm whose attempts carry one (#273) |
+| `case-pairing` | bundle | two trials declaring one case with an arm (ambiguous); a one-sided pairing; both sides declaring the same arm; a pair naming different tasks (case ids) or different graders; a pair on different base subject revisions, or one whose base cannot be recovered from its `degraded:` marker; a `degraded` arm whose attempts carry no `degraded:` receipt marker, or an `intact` arm whose attempts carry one (#273) |
 
 Record and bundle rules live in the **same registry and the same selftest loop** as
 the `SKILL.md` rules. Only the subject-loading step knows the family.

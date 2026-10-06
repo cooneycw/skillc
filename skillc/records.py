@@ -155,6 +155,15 @@ CASE_ARM = ("intact", "degraded")
 #: writes `InstallationReceiptContext.subject_revision` there). `case.arm`
 #: must agree with it: "degraded" requires this prefix, "intact" forbids it.
 DEGRADED_REVISION_PREFIX = "degraded:"
+#: `skillc/degrade.py:_degraded_revision` writes exactly
+#: `f"degraded:mutated={tag}:{base.kind}:{base.revision}"`, `tag` one of
+#: `"none"`/`"<N>-location"` (never a colon), `base.kind` exactly `"git"` or
+#: `"snapshot"` (`skillc/materialize.py`'s own closed set). `base.revision`
+#: can itself contain a colon (a `kind="snapshot"` base reports
+#: `"snapshot:<digest>"`), so this is maxsplit-safe rather than a naive
+#: `split(":")`: the captured group is everything after the third colon,
+#: however many colons it holds.
+DEGRADED_REVISION_RE = re.compile(r"^degraded:mutated=[^:]+:(?:git|snapshot):(.+)$")
 
 #: The four cost/time split components a pilot report's own control requires
 #: (#12's acceptance: "Separate setup/agent/grading cost and time"). Closed:
@@ -1832,6 +1841,41 @@ def unique_ids(bundle: Bundle) -> Iterator[str]:
             yield f"result_id {result_id!r} is used by {count} results"
 
 
+def _base_revision(revision: object) -> str | None:
+    """The identity a `case-pairing` comparison must use: for an ordinary
+    (non-degraded) receipt, `revision` already IS the base - returned as is.
+    For a `degraded:` one, the base is the text `degrade.py` embedded in it,
+    recovered by `DEGRADED_REVISION_RE`. Returns `None` when `revision` is
+    not a string, or is `degraded:`-prefixed in a shape this pattern does not
+    recognize - an UNRECOVERABLE base, never silently treated as matching or
+    mismatching (#273, CPP review: "if it isn't recoverable, name it as a
+    boundary rather than skipping the check")."""
+    if not isinstance(revision, str):
+        return None
+    if not revision.startswith(DEGRADED_REVISION_PREFIX):
+        return revision
+    match = DEGRADED_REVISION_RE.fullmatch(revision)
+    return match.group(1) if match else None
+
+
+def _first_receipt(bundle: Bundle, trial: dict[str, object]) -> Record | None:
+    """The first installation-receipt among `trial`'s own planned attempts, in
+    declared order - the one this module reads for a trial-level identity
+    comparison (#273). Not a claim that every attempt under a trial shares one
+    identity; that internal-consistency question is not this function's."""
+    attempts = trial.get("attempts")
+    for attempt in attempts if isinstance(attempts, list) else []:
+        if not isinstance(attempt, dict):
+            continue
+        attempt_id = attempt.get("attempt_id")
+        if not isinstance(attempt_id, str):
+            continue
+        for receipt in bundle.of_kind(INSTALLATION_RECEIPT):
+            if receipt.attempt_id == attempt_id:
+                return receipt
+    return None
+
+
 def case_pairing(bundle: Bundle) -> Iterator[str]:
     """Every trial declaring `case.arm` (#273) pairs reciprocally with exactly
     one counterpart declaring the complementary arm, and agrees with that
@@ -1926,6 +1970,37 @@ def case_pairing(bundle: Bundle) -> Iterator[str]:
                 )
             else:
                 reported_pairs.add(pair_key)
+                if key[0] != target[0]:
+                    yield (
+                        f"trial {name!r} pairs with {c_name!r}, but their case ids differ "
+                        f"({key[0]!r} vs {target[0]!r}) - a pairing is two revisions of the SAME "
+                        f"task, never two different ones"
+                    )
+                grader, c_grader = trial.get("grader"), counterpart.get("grader")
+                g_key = (grader.get("id"), grader.get("revision")) if isinstance(grader, dict) else None
+                c_g_key = (c_grader.get("id"), c_grader.get("revision")) if isinstance(c_grader, dict) else None
+                if g_key != c_g_key or g_key is None:
+                    yield (
+                        f"trial {name!r} pairs with {c_name!r}, but their graders differ "
+                        f"({g_key!r} vs {c_g_key!r}) - a discriminating pair must be graded the same way"
+                    )
+                receipt, c_receipt = _first_receipt(bundle, trial), _first_receipt(bundle, counterpart)
+                if receipt is not None and c_receipt is not None:
+                    subject = receipt.data.get("subject")
+                    c_subject = c_receipt.data.get("subject")
+                    base = _base_revision(subject.get("revision")) if isinstance(subject, dict) else None
+                    c_base = _base_revision(c_subject.get("revision")) if isinstance(c_subject, dict) else None
+                    if base is None or c_base is None:
+                        yield (
+                            f"trial {name!r} and {c_name!r}: the base subject revision behind one or "
+                            f"both receipts could not be recovered - not comparable, not assumed equal"
+                        )
+                    elif base != c_base:
+                        yield (
+                            f"trial {name!r} and {c_name!r} pair on different base subject revisions "
+                            f"({base!r} vs {c_base!r}) - a discriminating pair must share the same "
+                            f"pinned subject underneath the degradation"
+                        )
 
         for key, holders in armed.items():
             if len(holders) != 1:
