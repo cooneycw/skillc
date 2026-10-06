@@ -1,0 +1,51 @@
+{
+ "attempt_id": "wrong-work-loss",
+ "decisions": [
+  {
+   "logged_at": 1791295151.4373515,
+   "request": {
+    "op": "tool-call"
+   },
+   "result": {
+    "allow": true,
+    "ok": true
+   },
+   "seq": 1
+  },
+  {
+   "logged_at": 1791295151.4378917,
+   "request": {
+    "op": "tool-call"
+   },
+   "result": {
+    "allow": true,
+    "ok": true
+   },
+   "seq": 2
+  },
+  {
+   "logged_at": 1791295151.4382687,
+   "request": {
+    "op": "tool-call"
+   },
+   "result": {
+    "allow": true,
+    "ok": true
+   },
+   "seq": 3
+  },
+  {
+   "logged_at": 1791295151.4386044,
+   "request": {
+    "op": "tool-call"
+   },
+   "result": {
+    "allow": false,
+    "ok": true
+   },
+   "seq": 4
+  }
+ ],
+ "read_as": "This log records requests the controller RECEIVED and decisions it MADE, each logged before its reply - never tool invocations, and never a claim that no bypass occurred (see 'no-controller-witness').",
+ "status": "witnessed"
+}

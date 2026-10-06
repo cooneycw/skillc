@@ -177,21 +177,83 @@ in this file still uses a hand-authored `trusted-disruption-log.json`
 fixture exactly as before part (c); none of them are produced by this
 module, and none should be read as if they were.
 
+## Update (issue #183 PR B): the channel is built; trust comes from the CODE PATH, not a file
+
+#183 built the controller-owned decide-and-reply channel the previous
+section named as the fix and did not build (`skillc/decide_reply_channel.
+py`). This PR wires this task to it and, in doing so, removes the
+hand-authored `trusted-disruption-log.json` fixtures this file described
+above - they were always a stand-in for "what a real controller-owned
+channel would have produced", and keeping them once a real channel exists
+would mean certifying this grader against data shaped by hand rather than
+data a real mechanism actually produces.
+
+**Where the trusted observation comes from now.** `grade_recovery.py`'s
+`_trusted_log()` no longer accepts a pre-derived `{"failed_after_step": N}`
+claim at all - review of an earlier draft of this PR found that shape
+forgeable even with a digest and attempt_id attached alongside it (form is
+not proof; see the design doc referenced from skillc#183 for the full
+reasoning). It now parses the RAW decide-reply-channel log
+(`TrustedLog.to_json_bytes()`'s own generic shape) and derives
+`failed_after_step` itself from the controller's own seq-ordered
+decisions - the one computation a forger cannot shortcut without forging
+the whole decisions list, which is exactly as hard as forging the old flat
+value was.
+
+**Where `qualify.py` gets that raw log from, for a candidate that is an
+author-written fixture rather than a real attempt.** `reference/` and four
+of the five `wrong/*` candidates (`no-report`'s failure is independent of
+the trust channel entirely, and `self-written-log`'s whole point is having
+no trusted observation) are graded against `controller-observations/
+<candidate>.json` - bytes from a REAL `DecideReplyChannel` run, driven by
+the committed `generate_controller_observations.py` script, never
+hand-typed and never read from inside any candidate's own tree.
+**Labelled plainly: these are CONTROLLER-SIMULATED observations, pending
+live generation (Docker-owed, see "Owed to a live run" below) - a real
+attempt's own channel output will eventually replace them with no change
+needed to `qualify.py` or `grade_recovery.py`, since both already only
+read whatever bytes land in that directory.**
+
+**The headline red case.** Pre-#183-PR-B, `qualify.py` read
+`trusted-disruption-log.json` from inside the candidate tree and graded
+`reference` SATISFIED on its say-so. Post-PR-B, `qualify.py` refuses
+outright (not silently, not as a weaker "no observation supplied" grade)
+if a `trusted-disruption-log.json` is found planted inside any candidate
+tree at all - `tests/test_level5_recovery.py::
+test_qualify_never_trusts_a_file_planted_inside_the_candidate_tree`.
+A second, related red case refuses a controller observation whose own
+`attempt_id` does not match the candidate it is being supplied for
+(`test_qualify_refuses_a_controller_observation_whose_attempt_id_does_not_
+match`) - a real bug in this harness or its fixtures, never a legitimate
+absence. Both are mutation-checked.
+
+**What this does NOT change.** Every `expected.json` in this directory is
+unchanged - `reference` still certifies PASS, `forged-log`/
+`silent-overclaim`/`work-loss` still FAIL for the reasons they always did.
+The restructuring moves WHERE the trusted bytes come from; it does not
+weaken what the grader is certified to catch.
+
 ## Owed to a live run
 
-None of this is built here, per #14's own "keep runtime implementation out
-of the planning PR":
+**The channel itself is now built (#183) and this task is wired to it** -
+the item below is narrower than it was before PR B:
 
-- **The actual trusted-observation channel for Level 5** - a controller-
-  owned decide-and-reply mechanism, tracked as skillc#183 (see "What would
-  actually fix this" above). `DisruptionTrigger` does not close this; it is
-  explicitly not a candidate for `trusted_observation` in its current form.
 - **A real Claude Code/Codex attempt** through the existing
   `agent_trial.run_one_attempt` path, installing this task the same way
-  `collection_conformance.py` already installs Level 1 tasks.
+  `collection_conformance.py` already installs Level 1 tasks, with the
+  subject's tool wrapper calling `docker/trial/skillc-disrupt-tool.py`
+  (#183 PR B2 - the proxy baked into the trial image; not yet wired into
+  the Dockerfile as of PR B1) instead of writing to the old advisory
+  request log. This replaces `controller-observations/*.json`'s
+  controller-SIMULATED bytes with a real channel's actual output - no
+  change needed to `qualify.py` or `grade_recovery.py` when it lands,
+  since both already only read whatever bytes land in that directory.
 - **Calibration**: how many steps to allow before disruption, and how
   abruptly the tool should disappear, needs live-run evidence before any
-  level claim, per protocol.md section 7.
+  level claim, per protocol.md section 7. `FAILED_AFTER_STEP = 3` in
+  `generate_controller_observations.py` carries forward the same
+  calibration the pre-#183 hand-authored fixtures used, unverified
+  against a real run either before or after this PR.
 
 ## Fixture
 

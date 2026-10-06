@@ -227,3 +227,51 @@ def test_trusted_log_checks_attempt_id_only_when_the_caller_supplies_one() -> No
     failed_after, reason = grade_recovery._trusted_log({"trusted": text}, "a-different-attempt")
     assert failed_after is None
     assert "does not match the attempt being graded" in reason
+
+
+# --------------------------------------------- qualify.py's own harness (#183)
+
+
+def test_qualify_never_trusts_a_file_planted_inside_the_candidate_tree(tmp_path: Path) -> None:
+    """THE HEADLINE RED CASE for #183 PR B. Pre-PR-B, qualify.py read
+    `trusted-disruption-log.json` from inside the candidate tree and
+    graded `reference` SATISFIED on its say-so. Post-PR-B, that file is
+    never read at all - planting one (even a perfectly plausible one,
+    naming the real calibrated value) is refused outright, not silently
+    ignored as "no observation supplied" (which would at least still
+    grade; this must not grade at all, so the refusal cannot be missed)."""
+    root = _copy_task(tmp_path)
+    planted = root / "reference" / qualify.TRUSTED_LOG_NAME
+    planted.write_text(json.dumps({"failed_after_step": 3}), encoding="utf-8")
+    with pytest.raises(SystemExit, match="refuses"):
+        qualify.status_of(root / "grade_recovery.py", root / "reference", root)
+
+
+def test_qualify_refuses_a_controller_observation_whose_attempt_id_does_not_match(tmp_path: Path) -> None:
+    """THE MISMATCH RED CASE. A controller observation genuinely produced
+    for a different candidate (or copy-pasted by mistake) must never be
+    graded as if it belonged to the candidate it is sitting next to -
+    refused, not silently graded against the wrong attempt_id."""
+    root = _copy_task(tmp_path)
+    wrong_log = root / "controller-observations" / "wrong-work-loss.json"
+    reference_log = root / "controller-observations" / "reference.json"
+    reference_log.write_bytes(wrong_log.read_bytes())  # attempt_id now says "wrong-work-loss"
+    with pytest.raises(SystemExit, match="does not match"):
+        qualify.status_of(root / "grade_recovery.py", root / "reference", root)
+
+
+def test_controller_observations_are_reproducible_from_the_committed_generator() -> None:
+    """The committed `controller-observations/*.json` files are not hand-
+    maintained - re-running the generator must produce the SAME decisions
+    (ignoring `logged_at`, a wall-clock timestamp that genuinely differs
+    run to run) for every candidate it covers, so a committed file that
+    has silently drifted from what the generator actually produces is
+    caught here rather than trusted forever."""
+    generate_controller_observations = _load("generate_controller_observations")
+    for candidate in generate_controller_observations.CANDIDATES:
+        attempt_id = generate_controller_observations.attempt_id_for(candidate)
+        committed = json.loads((TASK / "controller-observations" / f"{attempt_id}.json").read_text())
+        fresh = json.loads(generate_controller_observations.generate(attempt_id))
+        for entry in (*committed["decisions"], *fresh["decisions"]):
+            del entry["logged_at"]
+        assert committed == fresh
