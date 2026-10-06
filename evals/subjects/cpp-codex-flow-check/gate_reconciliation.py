@@ -67,17 +67,25 @@ attempt, not that any one claim is false, and `run-count-mismatch` is not
 in `CONTRADICTING_REASONS` - inventing a fifth reason without approval
 would repeat the exact mistake `gate-not-executed` was removed for.
 
-ONLY `exit-code-mismatch` IS IMPLEMENTED. `outcome-disagreement` and
-`stale-identity` are real, named reasons in `skillc/records.py`'s closed
-vocabulary, but mapping them precisely onto CPP's fields (which `outcome`/
-`qualifications` state, or which `observed.repository`/`tree_at_start`
-field constitutes "bound subject/client identity") is an interpretation
-this module does not make without the orchestrator confirming it - an
-invented mapping is exactly what records.md's Q4 boundary and the
-orchestrator's caution 2 (#272) warn against for `tree-mismatch`, and the
-same discipline applies here: a CONFIDENT field-for-field match
-(`checks[].exit_code`, verified against the actual producer code, not
-prose) is implemented; an UNCERTAIN one is left `unknown`, not guessed.
+THREE OF FOUR REASONS ARE IMPLEMENTED, each only once the field mapping was
+confirmed against actual producer code, never guessed:
+- `exit-code-mismatch` (`reconcile_gate_claim`): `checks[].exit_code`
+  against the gate-witness's last run.
+- `outcome-disagreement` (`reconcile_gate_claim`): CPP's `checks[].status
+  == "not-run"` while the witness shows a COMPLETE run of that gate in
+  this attempt - reachable without any attempt/run-count mapping
+  (orchestrator review, #272). The reverse (CPP claims it ran, witness
+  shows no confirmed execution) is `unknown`, never a claim this module can
+  contradict - only a controller-CONFIRMED observation can contradict a
+  claim, never silence standing in for one.
+- `stale-identity` (`reconcile_helper_identity`, record-level, not
+  per-gate): `observed.helper.module_sha256` against the SAME attempt's
+  `installation-receipt.installed` digests - both SHA-256 over raw file
+  bytes (confirmed by reading `lib/cicd/evidence.py::_sha256` and
+  `skillc/materialize.py::sha256_file`/`sha256_bytes`), differing only in
+  a `sha256:` prefix. See that function's own docstring for a found
+  structural gap: `witness_ref` has no existing way to cite an
+  installation-receipt.
 
 `tree-mismatch` IS UNREACHABLE FOR THIS SUBJECT, confirmed, not merely
 unconfigured. CPP's `tree_signature` (`lib/cicd/state.py::
@@ -198,6 +206,15 @@ def reconcile_gate_claim(
         return GateReconciliation("unknown", "claim-carried-from-previous-invocation", None)
     if witness.coverage in NOT_CONFIRMED_EXECUTION_COVERAGE:
         return GateReconciliation("unknown", "witness-did-not-confirm-execution", None)
+    if claim.status == "not-run" and witness.coverage == "complete":
+        # Reachable without any attempt/run-count mapping (orchestrator
+        # review, #272): CPP's own record says this gate never ran, while
+        # the controller confirms a COMPLETE run of it in this attempt.
+        # The reverse - CPP claims it ran, witness shows not-observed -
+        # stays `witness-did-not-confirm-execution` (above), never this:
+        # only the controller's own confirmed observation can contradict a
+        # claim, never silence standing in for one.
+        return GateReconciliation("contradicting", "outcome-disagreement", witness_artifact)
     if claim.attempt != witness.run_count:
         return GateReconciliation("unknown", "run-count-disagreement", None)
     if claim.status not in CPP_SETTLED_STATUSES or claim.claimed_exit_code is None:
@@ -207,3 +224,58 @@ def reconcile_gate_claim(
     if claim.claimed_exit_code != witness.exit_code:
         return GateReconciliation("contradicting", "exit-code-mismatch", witness_artifact)
     return GateReconciliation("matched", None, witness_artifact)
+
+
+def _normalize_hex_digest(value: str) -> str:
+    """CPP's `helper.module_sha256` values are bare hex
+    (`lib/cicd/evidence.py::_sha256`, `hashlib.sha256(data).hexdigest()`).
+    skillc's `installation-receipt.installed[].digest` values carry a
+    `sha256:` prefix (`skillc/materialize.py::sha256_bytes`). Both hash the
+    SAME algorithm over the SAME byte population (raw file content, no path
+    or mode mixed in) - confirmed by reading both implementations, not
+    assumed - so this is a format normalization, never an invented mapping
+    the way a tree-identity comparison would be."""
+    prefix = "sha256:"
+    return value.removeprefix(prefix)
+
+
+def reconcile_helper_identity(
+    claimed_module_sha256: dict[str, str],
+    installed_digests: dict[str, str],
+) -> GateReconciliation:
+    """RECORD-level, not per-gate: CPP's `observed.helper.module_sha256` is
+    one map for the whole usage record, compared against the SAME attempt's
+    `installation-receipt.installed` digests - "stale-identity", "the usage
+    record's own bound ... identity differs from this trial's planned one"
+    (R9, records.md).
+
+    `witness_ref` is always `None` here - a STRUCTURAL GAP found while
+    building this, not resolved: `skill-evidence.external_evidence.
+    witness_ref` is checked by `_skill_evidence_binding` against
+    `artifact-manifest`-captured digests only (the same check `artifact_ref`
+    gets). An `installation-receipt` is a separate record kind, never
+    captured as a manifest artifact, so there is no existing mechanism for
+    a `witness_ref` to cite one. Flagged to the orchestrator rather than
+    invented - using the receipt "as the authority" (as asked) may need a
+    records.py change, or a different field, before this can be written
+    into a real `skill-evidence` record.
+
+    A path present on only one side (CPP reports a module skillc never
+    installed, or vice versa) is `unknown`, not a guessed verdict either
+    way - only a path BOTH sides name, with digests that disagree, is a
+    real contradiction.
+    """
+    disagreeing: list[str] = []
+    comparable = 0
+    for path, claimed_digest in claimed_module_sha256.items():
+        installed_digest = installed_digests.get(path)
+        if installed_digest is None or claimed_digest is None:
+            continue
+        comparable += 1
+        if _normalize_hex_digest(claimed_digest) != _normalize_hex_digest(installed_digest):
+            disagreeing.append(path)
+    if comparable == 0:
+        return GateReconciliation("unknown", "no-comparable-helper-path", None)
+    if disagreeing:
+        return GateReconciliation("contradicting", "stale-identity", None)
+    return GateReconciliation("matched", None, None)

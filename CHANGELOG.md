@@ -54,6 +54,29 @@ and version plan.
   #237's three descriptions, 5 per cell, at 45 s, against the full-run
   results. No live run yet.
 
+- **Gate reconciler: two more reasons made reachable** (Refs #269, #272).
+  `evals/subjects/cpp-codex-flow-check/gate_reconciliation.py` adds
+  `outcome-disagreement` and `stale-identity`, after confirming both field
+  mappings against actual CPP producer code rather than guessing (the same
+  discipline that ruled out `tree-mismatch`):
+  - `outcome-disagreement`: CPP's `checks[].status == "not-run"` while the
+    witness shows a COMPLETE run of that gate in this attempt - reachable
+    without any attempt/run-count mapping. The reverse (CPP claims it ran,
+    witness shows no confirmed execution) stays `unknown`: only a
+    controller-CONFIRMED observation can contradict a claim, never silence.
+  - `stale-identity` (`reconcile_helper_identity`, RECORD-level, not
+    per-gate): CPP's `observed.helper.module_sha256` against the same
+    attempt's `installation-receipt.installed` digests - both confirmed to
+    be SHA-256 over raw file bytes (`lib/cicd/evidence.py::_sha256` and
+    `skillc/materialize.py::sha256_file`), differing only in a `sha256:`
+    prefix skillc adds. A found structural gap, not resolved here:
+    `witness_ref` has no existing mechanism to cite an installation-receipt
+    (`_skill_evidence_binding` checks it only against `artifact-manifest`
+    digests), so this function always returns `witness_ref: None`.
+  - 10 new tests (31 total in the file), two mutation-checked: both new
+    checks disabled, confirmed blind, restored, confirmed correct again,
+    net diff empty.
+
 - **Discrimination and improvement verdicts: declared one-sided Fisher
   rules** (Refs #272, the owner's ruling on claude-power-pack #1084
   comment https://github.com/cooneycw/claude-power-pack/issues/1084#issuecomment-6014163660).

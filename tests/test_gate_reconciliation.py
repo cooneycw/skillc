@@ -93,14 +93,53 @@ def test_witness_that_never_confirmed_execution_is_unknown_not_contradicting(cov
     assert result.reason == "witness-did-not-confirm-execution"
 
 
-@pytest.mark.parametrize("status", ["skipped", "not-run", "pending", "running"])
+@pytest.mark.parametrize("status", ["skipped", "pending", "running"])
 def test_an_unsettled_cpp_claim_status_is_unknown(status: str) -> None:
     """CPP's own producer (lib/cicd/evidence.py::check_entry, pinned
     b8825bd) sets exit_code to None for these statuses - there is no exit
-    code to compare, so this is unknown, not a vacuous match."""
+    code to compare, so this is unknown, not a vacuous match. `not-run` is
+    excluded here: against a COMPLETE witness it is `outcome-disagreement`
+    (below), not merely unsettled."""
     result = gr.reconcile_gate_claim(_claim(status=status, exit_code=None), _witness(), _ref())
     assert result.state == "unknown"
     assert result.reason == "usage-record-claim-not-settled"
+
+
+def test_not_run_claim_against_an_unconfirmed_witness_is_still_unknown() -> None:
+    """`not-run` only becomes `outcome-disagreement` against a CONFIRMED
+    execution (below) - against `not-observed` it stays the ordinary
+    unsettled-claim path, since the witness never confirmed anything to
+    disagree with."""
+    result = gr.reconcile_gate_claim(
+        _claim(status="not-run", exit_code=None),
+        _witness(coverage="not-observed", exit_code=None),
+        _ref(),
+    )
+    assert result.state == "unknown"
+    assert result.reason == "witness-did-not-confirm-execution"
+
+
+def test_cpp_claims_not_run_while_witness_confirms_a_complete_run_is_outcome_disagreement() -> None:
+    """Reachable without any attempt/run-count mapping (orchestrator
+    review, #272): the controller's own CONFIRMED observation says this
+    gate ran to completion, while CPP's own record says it never ran."""
+    result = gr.reconcile_gate_claim(
+        _claim(status="not-run", exit_code=None), _witness(coverage="complete", exit_code=0), _ref()
+    )
+    assert result.state == "contradicting"
+    assert result.reason == "outcome-disagreement"
+    assert result.reason in gr.CONTRADICTING_REASONS
+
+
+def test_cpp_claims_ran_while_witness_shows_not_observed_stays_unknown_not_contradicting() -> None:
+    """The REVERSE of outcome-disagreement never contradicts (orchestrator
+    review, #272): silence or a controller-side gap can never positively
+    contradict a claim that a gate ran, only a confirmed observation can."""
+    result = gr.reconcile_gate_claim(
+        _claim(status="success", exit_code=0), _witness(coverage="not-observed", exit_code=None), _ref()
+    )
+    assert result.state == "unknown"
+    assert result.reason == "witness-did-not-confirm-execution"
 
 
 def test_witness_without_a_settled_exit_code_is_unknown() -> None:
@@ -224,3 +263,79 @@ def test_golden_fixture_claim_mismatched_against_a_different_witness_exit_code()
     result = gr.reconcile_gate_claim(claim, witness, _ref())
     assert result.state == "contradicting"
     assert result.reason == "exit-code-mismatch"
+
+
+# --------------------------------------------------------------- stale-identity (record-level)
+
+def test_helper_identity_matches_reports_matched() -> None:
+    claimed = {"lib/cicd/evidence.py": "abc123", "lib/cicd/state.py": "def456"}
+    installed = {"lib/cicd/evidence.py": "sha256:abc123", "lib/cicd/state.py": "sha256:def456"}
+    result = gr.reconcile_helper_identity(claimed, installed)
+    assert result.state == "matched"
+    assert result.reason is None
+    assert result.witness_ref is None  # structural gap, module docstring - never guessed
+
+
+def test_helper_identity_mismatch_reports_contradicting_stale_identity() -> None:
+    claimed = {"lib/cicd/evidence.py": "abc123"}
+    installed = {"lib/cicd/evidence.py": "sha256:different"}
+    result = gr.reconcile_helper_identity(claimed, installed)
+    assert result.state == "contradicting"
+    assert result.reason == "stale-identity"
+    assert result.reason in gr.CONTRADICTING_REASONS
+
+
+def test_helper_identity_with_no_comparable_path_is_unknown() -> None:
+    result = gr.reconcile_helper_identity({"lib/cicd/evidence.py": "abc123"}, {"some/other/path.py": "sha256:x"})
+    assert result.state == "unknown"
+    assert result.reason == "no-comparable-helper-path"
+
+
+def test_helper_identity_prefix_difference_alone_is_not_a_mismatch() -> None:
+    """CPP's bare hex and skillc's sha256:-prefixed digest are the SAME
+    value, same algorithm over the same bytes - confirmed by reading both
+    implementations (module docstring), not assumed."""
+    result = gr.reconcile_helper_identity(
+        {"lib/cicd/evidence.py": "abc123"}, {"lib/cicd/evidence.py": "sha256:abc123"}
+    )
+    assert result.state == "matched"
+
+
+def test_helper_identity_golden_fixture_matches() -> None:
+    """Anchors against the real (stripped) sample: module_sha256 keys from
+    the committed fixture, treated as if the installation receipt recorded
+    the identical bytes under the same paths."""
+    import json
+    from pathlib import Path
+
+    fixture = json.loads(
+        (Path(__file__).parent / "fixtures/cpp-usage-record/sample-stripped.json").read_text()
+    )
+    claimed = fixture["observed"]["helper"]["module_sha256"]
+    if not claimed:
+        pytest.skip("stripped fixture carries no module_sha256 entries")
+    installed = {path: f"sha256:{digest}" for path, digest in claimed.items()}
+    result = gr.reconcile_helper_identity(claimed, installed)
+    assert result.state == "matched"
+
+
+# --------------------------------------------------------------- mutation checks
+
+def test_outcome_disagreement_check_is_not_a_no_op(monkeypatch: pytest.MonkeyPatch) -> None:
+    def always_unknown(claim: object, witness: object, witness_artifact: object) -> object:
+        return gr.GateReconciliation("unknown", "forced", None)
+
+    monkeypatch.setattr(gr, "reconcile_gate_claim", always_unknown)
+    mutated = gr.reconcile_gate_claim(
+        _claim(status="not-run", exit_code=None), _witness(coverage="complete", exit_code=0), _ref()
+    )
+    assert mutated.state == "unknown"  # the mutation's wrong answer, confirming it would go undetected
+
+
+def test_stale_identity_check_is_not_a_no_op(monkeypatch: pytest.MonkeyPatch) -> None:
+    def always_matched(claimed: object, installed: object) -> object:
+        return gr.GateReconciliation("matched", None, None)
+
+    monkeypatch.setattr(gr, "reconcile_helper_identity", always_matched)
+    mutated = gr.reconcile_helper_identity({"a": "x"}, {"a": "sha256:y"})
+    assert mutated.state == "matched"  # the mutation's wrong answer

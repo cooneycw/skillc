@@ -24,7 +24,7 @@
   },
   "tree_at_start": {"head": "0000000000000000000000000000000000000", "dirty": false, "tree_signature": "0000000000000000000000000000000000000", "taken_at": "2026-01-01T00:00:00Z"},
   "tree_at_end": {"head": "0000000000000000000000000000000000000", "dirty": false, "tree_signature": "0000000000000000000000000000000000000", "taken_at": "2026-01-01T00:05:00Z"},
-  "helper": {"name": "lib.cicd runner", "cpp_commit": "0000000000000000000000000000000000000", "cpp_runner_modified": false, "module_sha256": {}},
+  "helper": {"name": "lib.cicd runner", "cpp_commit": "0000000000000000000000000000000000000", "cpp_runner_modified": false, "module_sha256": {"lib/cicd/evidence.py": "0000000000000000000000000000000000000000000000000000000000000000"}},
   "skill_source": {"path": "redacted", "sha256": "0000000000000000000000000000000000000000000000000000000000000000", "note": "redacted"},
   "gates": ["lint", "test", "typecheck"],
   "checks": [
