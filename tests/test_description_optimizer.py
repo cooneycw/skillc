@@ -65,3 +65,21 @@ def test_the_total_cap_allows_per_attempt_overhead() -> None:
     """Nit Store #20 / PR #311: a cap of exactly attempts x cut-off ran out
     before the schedule finished. The driver budgets overhead per attempt."""
     assert do.OVERHEAD_SECONDS >= 30  # type: ignore[attr-defined]
+
+
+def _report(cells: dict[str, dict[str, dict[str, int]]]) -> dict[str, object]:
+    return {"cells": cells}
+
+
+def test_a_screen_with_an_arm_undecided_on_a_case_is_incomplete() -> None:
+    """Batch 1, flow-finish: published had 0 decided observations on one
+    select case, scored on the other alone, and tied the variants - a tie
+    from missing data must not keep published."""
+    full = {"observed": 3, "selected": 3, "scheduled": 3}
+    empty = {"observed": 0, "selected": 0, "scheduled": 3}
+    complete = {"s1": {"published": full, "variant-a": full}, "a1": {"published": full, "variant-a": full}}
+    incomplete = {"s1": {"published": empty, "variant-a": full}, "a1": {"published": full, "variant-a": full}}
+    assert do.screen_complete(_report(complete)) is True  # type: ignore[attr-defined]
+    assert do.screen_complete(_report(incomplete)) is False  # type: ignore[attr-defined]
+    assert do.screen_complete(_report({})) is False  # type: ignore[attr-defined]
+
