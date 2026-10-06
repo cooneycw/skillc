@@ -1,0 +1,298 @@
+"""A controller-owned decide-and-reply channel (#183).
+
+See `docs/specs/evaluation-facility/decide-reply-channel.md` for the full
+design and the two decisions review settled: what this channel's log may be
+read as (its own `TrustedLog.read_as` docstring below carries the same
+table), and why it is named for the MECHANISM rather than for Level 5's
+disruption trigger, its first caller (#14 part c, `skillc/disruption_trigger.
+py`) - #269 depends on reusing this same mechanism for an unrelated witness.
+
+ONE SOCKET, ONE DECISION FUNCTION, ONE ATTEMPT. The controller is the
+server: it `listen()`s on a Unix domain socket bind-mounted into the trial
+container (`skillc/docker_backend.py`'s `compose_run_argv` /
+`trigger_socket_host_path`) and is the ONLY process that ever writes to this
+channel's log. One connection per request - open, one JSON line in, one JSON
+line out, close - matching `skillc/managed_backend.py`'s existing framing
+convention rather than inventing a second shape in this repository.
+
+DECIDE, THEN LOG, THEN REPLY - in that exact order, enforced by this
+module's own call sequence, never by caller discipline. By the time any byte
+reaches the subject, the decision is already durable in `self._log`: nothing
+about the reply lets a subject reconstruct, predict, or pre-empt a decision
+it has not yet been told.
+
+THE CONTROLLER NUMBERS REQUESTS, NEVER THE SUBJECT. Any `seq`-shaped field
+in an incoming request is part of the request content handed to `decide`,
+never used as this channel's own sequence number - that number is an
+internal counter, incremented once per request IN ARRIVAL ORDER, under the
+same lock that protects the log. A subject cannot claim an out-of-order or
+duplicate position for its own request.
+
+A SUBJECT THAT NEVER CONNECTS IS A REAL, NAMED CASE, NOT A MISSING ONE. See
+`TrustedLog.read_as`.
+
+Stdlib only (`socket`, `socketserver`, `json`, `threading`), per AGENTS.md.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import socketserver
+import threading
+import time
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
+from pathlib import Path
+
+#: What a caller may conclude from a channel's finalized log, and what it
+#: may not - decision 2 from #183's body, settled in the design doc's §2d.
+#: Never read as "the subject invoked a tool this many times"; only as "the
+#: controller received this many well-formed requests on this attempt's
+#: socket, and decided as follows for each, before any reply was sent."
+READ_AS_NOTE = (
+    "This log records requests the controller RECEIVED and decisions it "
+    "MADE, each logged before its reply - never tool invocations, and "
+    "never a claim that no bypass occurred (see 'no-controller-witness')."
+)
+
+
+class ChannelRefusal(Exception):
+    """Raised by a caller-supplied `decide` function to refuse a request as
+    malformed or out of scope for this channel instance - mapped to
+    `{"ok": false, "error": str(exc)}`, never logged as a decision (a
+    refusal is not a decision; see the module docstring's ordering rule).
+    Any OTHER exception from `decide` is a bug in the caller's decision
+    function, not a protocol-level refusal, and is left to propagate."""
+
+
+@dataclass(frozen=True)
+class LoggedDecision:
+    """One entry in a channel's finalized log - immutable once appended,
+    matching `DisruptionTrigger`'s own append-only discipline. `seq` is
+    this channel's own counter (see the module docstring), never anything
+    read from the request. `logged_at` is `time.time()` at the moment this
+    entry was appended - strictly BEFORE the reply for the same request was
+    sent (the module's whole ordering guarantee); a reader cannot use
+    `logged_at` to infer anything about when the REQUEST arrived, only
+    about when the DECISION became durable."""
+
+    seq: int
+    request: Mapping[str, object]
+    result: Mapping[str, object]
+    logged_at: float
+
+
+DecideFn = Callable[[Mapping[str, object]], Mapping[str, object]]
+
+
+class _Handler(socketserver.BaseRequestHandler):
+    def handle(self) -> None:
+        channel: DecideReplyChannel = self.server.channel  # type: ignore[attr-defined]
+        chunks: list[bytes] = []
+        while True:
+            chunk = self.request.recv(65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            if b"\n" in chunk:
+                break
+        line = b"".join(chunks).split(b"\n", 1)[0]
+        try:
+            request = json.loads(line.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self.request.sendall(json.dumps({"ok": False, "error": "malformed request"}).encode("utf-8") + b"\n")
+            return
+        if not isinstance(request, dict):
+            self.request.sendall(json.dumps({"ok": False, "error": "malformed request"}).encode("utf-8") + b"\n")
+            return
+        try:
+            result = channel._decide_and_log(request)
+        except ChannelRefusal as exc:
+            self.request.sendall(json.dumps({"ok": False, "error": str(exc)}).encode("utf-8") + b"\n")
+            return
+        self.request.sendall(json.dumps({"ok": True, "result": result}).encode("utf-8") + b"\n")
+
+
+class _Server(socketserver.ThreadingUnixStreamServer):
+    daemon_threads = True
+    allow_reuse_address = True
+    #: stdlib's default (5) is sized for a slow, occasional caller - a
+    #: subject's tool wrapper can plausibly fire several requests in a
+    #: tight burst, and a backlog this small turns a legitimate burst into
+    #: `ECONNREFUSED`/`EAGAIN` on the caller's own `connect()`, which would
+    #: read as a spurious bypass (`no-controller-witness`) rather than
+    #: what it actually was: this channel refusing a connection it was
+    #: never asked to accept. Found by this module's own concurrency test.
+    request_queue_size = 128
+    channel: DecideReplyChannel
+
+
+class DecideReplyChannel:
+    """Owns one Unix domain socket for one attempt, for this channel's whole
+    lifetime: `start()` once, then `stop_and_finalize()` once, around the
+    `ExecutionBackend.execute()` call whose container has this channel's
+    socket bind-mounted in. Usage:
+
+        channel = DecideReplyChannel(socket_path, decide=my_decide_fn)
+        channel.start()
+        result = backend.execute(handle, argv, limits)  # runs concurrently
+        log = channel.stop_and_finalize()
+
+    `decide` is called with exactly the parsed request dict (including
+    `op`) and must return the `result` mapping to reply with, or raise
+    `ChannelRefusal` to refuse the request. It is called on the server's
+    own worker thread, one at a time per connection but POSSIBLY
+    concurrently across connections (`socketserver.ThreadingUnixStreamServer`)
+    - `decide` must be safe to call from multiple threads, or must do its
+    own locking; this class's own log append is already locked (below),
+    independent of whatever `decide` itself does."""
+
+    def __init__(self, socket_path: Path, decide: DecideFn) -> None:
+        self._socket_path = socket_path
+        self._decide = decide
+        self._lock = threading.Lock()
+        self._log: list[LoggedDecision] = []
+        self._next_seq = 1
+        self._server: _Server | None = None
+        self._thread: threading.Thread | None = None
+        self._started = False
+        self._finalized = False
+
+    def start(self) -> None:
+        """Binds and starts listening. Raises `OSError` if the socket path's
+        parent directory does not exist or the bind itself fails - this
+        channel never silently falls back to not listening at all, which
+        would turn every request into an unexplained bypass.
+
+        Checks the path length FIRST, against a safety margin below the
+        kernel's own `sizeof(sun_path)` bind (108 bytes on Linux, including
+        the terminator) - found running this module's own caller
+        (`docker_backend.py`'s trigger-socket integration test): a
+        `base_dir`-derived path routinely overflows this on its own, before
+        any attempt-specific suffix, and the kernel's own `OSError: AF_UNIX
+        path too long` names neither the limit nor the path, which reads as
+        a mysterious bind failure rather than what it actually is. Raising
+        early, by name, here - once, for every caller of this class -
+        beats every caller discovering the same kernel limit on its own."""
+        if self._started:
+            raise RuntimeError("this channel has already been started")
+        encoded_len = len(os.fsencode(str(self._socket_path)))
+        if encoded_len > 100:
+            raise OSError(
+                f"socket path {len(str(self._socket_path))} chars "
+                f"({encoded_len} bytes encoded) exceeds this channel's 100-byte safety margin "
+                f"below AF_UNIX's sun_path limit (108 bytes on Linux, including the "
+                f"terminator): {self._socket_path}"
+            )
+        self._started = True
+        if self._socket_path.exists():
+            self._socket_path.unlink()
+        server = _Server(str(self._socket_path), _Handler)
+        server.channel = self
+        os.chmod(self._socket_path, 0o600)
+        self._server = server
+        thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05),
+                                   daemon=True, name="decide-reply-channel")
+        thread.start()
+        self._thread = thread
+
+    def _decide_and_log(self, request: Mapping[str, object]) -> Mapping[str, object]:
+        result = self._decide(request)  # may raise ChannelRefusal - never logged, see docstring
+        with self._lock:
+            seq = self._next_seq
+            self._next_seq += 1
+            self._log.append(LoggedDecision(seq=seq, request=request, result=result, logged_at=time.time()))
+        return result
+
+    def stop_and_finalize(self) -> list[LoggedDecision]:
+        """Stops listening and returns the finalized, ordered log. Safe to
+        call only once `execute()`/`confirm_stopped()` has returned for the
+        attempt this channel's socket was mounted into - matching
+        `DisruptionTrigger.stop_and_finalize()`'s own single-call
+        discipline. An empty list is a real, meaningful result: the subject
+        never connected at all (see `TrustedLog.read_as`'s
+        `no-controller-witness` case) - never treated as an error here."""
+        if not self._started:
+            raise RuntimeError("stop_and_finalize() called before start()")
+        if self._finalized:
+            raise RuntimeError("this channel has already been finalized")
+        self._finalized = True
+        assert self._server is not None
+        self._server.shutdown()
+        self._server.server_close()
+        if self._thread is not None:
+            self._thread.join()
+        try:
+            self._socket_path.unlink()
+        except OSError:
+            pass
+        with self._lock:
+            return list(self._log)
+
+    def log_or_finalize(self) -> list[LoggedDecision]:
+        """Idempotent variant of `stop_and_finalize()`, for a caller that
+        may need the log from more than one path - the documented
+        confirm-then-finalize call, and a defensive teardown (e.g.
+        `DockerBackend.destroy()`) that must not crash if the first already
+        ran. Returns the same finalized log on every call after the first,
+        rather than raising. Still raises if called before `start()` - that
+        remains a real misuse, not a case this method papers over."""
+        if self._finalized:
+            with self._lock:
+                return list(self._log)
+        return self.stop_and_finalize()
+
+    def close(self) -> None:
+        """Best-effort, idempotent teardown - safe before `start()` (no-op)
+        and safe after `stop_and_finalize()` (no-op). For a caller that
+        needs to guarantee the listening thread is gone without caring
+        about the log itself (`DockerBackend.prepare()`'s own failure
+        path, `destroy()`'s best-effort contract)."""
+        if not self._started or self._finalized:
+            return
+        self.stop_and_finalize()
+
+
+@dataclass(frozen=True)
+class TrustedLog:
+    """The three-way read of one channel's finalized log (design doc §2d,
+    generalized in §2e for #269's own reuse) - never a caller-supplied
+    `bool`, for the same reason `backend.Confirmation` is a three-valued
+    enum and not one: a bypass must never collapse into a guessed
+    `NOT_CONFIRMED` (sk-w1, #268 coordination, msg 4604 - a bypass does not
+    positively establish non-execution, it only establishes that nothing
+    was reported)."""
+
+    status: str  # "witnessed" | "no-controller-witness" | "channel-unavailable"
+    decisions: tuple[LoggedDecision, ...] = ()
+
+    #: Read as a class attribute so callers (and this module's own tests)
+    #: can cite the exact rule without re-deriving it from prose.
+    read_as: str = field(default=READ_AS_NOTE, repr=False, compare=False)
+
+    @classmethod
+    def witnessed(cls, decisions: list[LoggedDecision]) -> TrustedLog:
+        if not decisions:
+            return cls(status="no-controller-witness")
+        return cls(status="witnessed", decisions=tuple(decisions))
+
+    @classmethod
+    def unavailable(cls) -> TrustedLog:
+        return cls(status="channel-unavailable")
+
+    def to_json_bytes(self) -> bytes:
+        """A retainable, exportable form - the `raw` data a caller may cite
+        by `{ref, digest}` per `docs/specs/evaluation-facility/records.md`'s
+        existing convention for backend raw data (design doc §2e). Shape is
+        deliberately generic (status plus a decisions list), not Level 5's
+        specific `trusted-disruption-log.json` schema - adapting this into
+        that shape is a caller's job (#183's own PR C), not this module's."""
+        return json.dumps({
+            "status": self.status,
+            "read_as": self.read_as,
+            "decisions": [
+                {"seq": d.seq, "request": d.request, "result": d.result, "logged_at": d.logged_at}
+                for d in self.decisions
+            ],
+        }).encode("utf-8")

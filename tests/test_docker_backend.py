@@ -14,13 +14,18 @@ this session. This proves the lifecycle state machine, argv composition and
 from __future__ import annotations
 
 import io
+import json
 import os
 import shutil
+import socket as socket_module
+import stat
 import subprocess
 import sys
 import tarfile
+import tempfile
 import threading
 import time
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 
 import pytest
@@ -222,6 +227,72 @@ def test_composed_argv_never_bind_mounts_the_workspace_or_home() -> None:
     output out instead (the implementation PR's install()/export())."""
     argv = _compose()
     assert "-v" not in argv
+
+
+# ------------------------------------------------- #183 trigger-socket mount
+
+
+def test_composed_argv_omits_the_trigger_mount_by_default() -> None:
+    """Every caller before #183 passes nothing for `trigger_socket_host_path`
+    (it defaults to `None`), and the resulting argv must be byte-for-byte
+    what it was before #183 - no `--mount` flag anywhere."""
+    argv = _compose()
+    assert "--mount" not in argv
+
+
+def test_composed_argv_adds_exactly_one_trigger_socket_mount_when_given(tmp_path: Path) -> None:
+    host_path = tmp_path / "trigger-sockets" / "skillc-a-000000000000.sock"
+    argv = _compose(trigger_socket_host_path=host_path)
+    mount_flags = [i for i, a in enumerate(argv) if a == "--mount"]
+    assert len(mount_flags) == 1
+    value = argv[mount_flags[0] + 1]
+    assert value == f"type=bind,source={host_path},target={d.TRIGGER_SOCKET_PATH}"
+
+
+def test_composed_argv_trigger_mount_target_is_fixed_never_the_callers_choice(tmp_path: Path) -> None:
+    """The design's whole guarantee (decide-reply-channel.md §2c): the
+    SOURCE varies per attempt, but the TARGET never does, and there is no
+    parameter through which a caller could ask for a different one -
+    `compose_run_argv`'s signature has no such parameter at all."""
+    for host_path in (tmp_path / "a.sock", tmp_path / "nested" / "b.sock", Path("/tmp/weird name.sock")):
+        argv = _compose(trigger_socket_host_path=host_path)
+        value = argv[argv.index("--mount") + 1]
+        assert value.endswith(f",target={d.TRIGGER_SOCKET_PATH}")
+        assert d.TRIGGER_SOCKET_PATH not in (d.CONTAINER_WORKSPACE, d.CONTAINER_HOME)  # sanity: distinct constants
+
+
+def test_trigger_socket_host_path_stays_short_even_for_a_long_attempt_id(tmp_path: Path) -> None:
+    """`_container_name` allows up to 128 characters; this must not
+    reintroduce the AF_UNIX overflow `DEFAULT_TRIGGER_SOCKET_DIR`'s
+    comment names - the digest keeps the FILENAME fixed-length regardless
+    of how long the attempt id (and so the container name) is."""
+    long_name = d._container_name("a-" + "x" * 200)
+    assert len(long_name) <= 128
+    path = d.trigger_socket_host_path_for(tmp_path, long_name)
+    assert path.name.endswith(".sock")
+    assert len(path.name) < 32  # hash-derived, independent of long_name's own length
+
+
+def test_composed_argv_has_no_parameter_for_a_second_mount_or_any_other_extra_flag() -> None:
+    """Structural, not a convention: calling `compose_run_argv` with an
+    unrecognized keyword (a second mount, `privileged=True`, a plausibly-
+    named override of the mount TARGET, anything not in its fixed
+    signature) is a `TypeError` from Python itself, not a value this
+    function could silently accept and act on. The target-override names
+    are not hypothetical: a mutation that added exactly such a parameter
+    (defaulting to `TRIGGER_SOCKET_PATH`, so every existing call site stayed
+    unaffected) passed every other test in this file silently - only a test
+    that actively tries the parameter name catches it."""
+    with pytest.raises(TypeError):
+        _compose(extra_mount="/host/other:/container/other")
+    with pytest.raises(TypeError):
+        _compose(privileged=True)
+    with pytest.raises(TypeError):
+        _compose(trigger_socket_target="/evil/path")
+    with pytest.raises(TypeError):
+        _compose(trigger_target="/evil/path")
+    with pytest.raises(TypeError):
+        _compose(mount_target="/evil/path")
 
 
 def test_container_user_is_fixed_and_never_tracks_the_host_callers_uid(
@@ -1534,6 +1605,108 @@ def test_handle_repr_never_leaks_the_connection_environment(
     assert isinstance(handle, d._Handle)
     assert "should-not-appear-in-repr" not in repr(handle)
     backend.destroy(handle)
+
+
+@pytest.fixture
+def trigger_socket_dir() -> Iterator[Path]:
+    """Deliberately NOT nested under pytest's own `tmp_path` - that prefix
+    (`/tmp/pytest-of-<user>/pytest-<n>/<test-name-truncated>/...`) is
+    already 60-90+ characters on its own, which overflows
+    `DecideReplyChannel.start()`'s AF_UNIX safety margin before any
+    socket filename is even added (found running this exact test).
+    `tempfile.mkdtemp()` creates a short directory directly under the
+    system temp root instead, matching `DEFAULT_TRIGGER_SOCKET_DIR`'s own
+    reasoning for production. Not the shared default dir either - each
+    test gets its own, torn down after."""
+    path = Path(tempfile.mkdtemp(prefix="sk-trig-"))
+    yield path
+    shutil.rmtree(path, ignore_errors=True)
+
+
+def _trigger_backend(base: Path, docker_state: Path, trigger_socket_dir: Path) -> d.DockerBackend:
+    def decide(request: Mapping[str, object]) -> Mapping[str, object]:
+        return {"decision": "fail" if request.get("client_seq") == 3 else "pass"}
+    return d.DockerBackend(
+        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), trigger_decide=decide,
+        trigger_socket_dir=trigger_socket_dir,
+    )
+
+
+def _send_trigger_request(sock_path: Path, payload: dict[str, object]) -> dict[str, object]:
+    s = socket_module.socket(socket_module.AF_UNIX, socket_module.SOCK_STREAM)
+    try:
+        s.settimeout(5.0)
+        s.connect(str(sock_path))
+        s.sendall(json.dumps(payload).encode("utf-8") + b"\n")
+        s.shutdown(socket_module.SHUT_WR)
+        chunks: list[bytes] = []
+        while True:
+            chunk = s.recv(65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+    finally:
+        s.close()
+    result: dict[str, object] = json.loads(b"".join(chunks).split(b"\n", 1)[0].decode("utf-8"))
+    return result
+
+
+def test_prepare_without_trigger_decide_has_no_channel_at_all(base: Path, docker_state: Path) -> None:
+    """Every caller before #183: no channel, `trigger_log()` reports `None`
+    (configuration, not an observation) rather than an empty list."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000020")
+    assert isinstance(handle, d._Handle)
+    assert handle.trigger_channel is None
+    assert backend.trigger_log(handle) is None
+    assert "--mount" not in backend._keepalive_run_argv(handle.name, "a-lc-000000000020")
+    backend.destroy(handle)
+
+
+def test_prepare_with_trigger_decide_binds_a_real_socket_before_the_container_starts(
+    base: Path, docker_state: Path, trigger_socket_dir: Path,
+) -> None:
+    """The ordering guarantee `_start_trigger_channel`'s own docstring
+    states: by the time `prepare()` returns, the host-side socket already
+    exists and is a REAL AF_UNIX socket (not a placeholder regular file),
+    at the path `trigger_socket_host_path_for` derives from the attempt's
+    container name - never a caller-supplied path."""
+    backend = _trigger_backend(base, docker_state, trigger_socket_dir)
+    handle = backend.prepare("a-lc-000000000021")
+    try:
+        assert isinstance(handle, d._Handle)
+        assert handle.trigger_channel is not None
+        sock_path = d.trigger_socket_host_path_for(backend.trigger_socket_dir, handle.name)
+        assert sock_path.exists()
+        assert stat.S_ISSOCK(sock_path.stat().st_mode)
+        reply = _send_trigger_request(sock_path, {"op": "disruption_check", "client_seq": 1})
+        assert reply == {"ok": True, "result": {"decision": "pass"}}
+        reply3 = _send_trigger_request(sock_path, {"op": "disruption_check", "client_seq": 3})
+        assert reply3 == {"ok": True, "result": {"decision": "fail"}}
+    finally:
+        log = backend.trigger_log(handle)
+        backend.destroy(handle)
+    assert log is not None
+    assert [entry.result["decision"] for entry in log] == ["pass", "fail"]
+
+
+def test_destroy_closes_the_trigger_channel_even_when_the_caller_never_finalized(
+    base: Path, docker_state: Path, trigger_socket_dir: Path,
+) -> None:
+    """A caller that forgets to call `trigger_log()` before tearing down
+    must not leak a listening thread - `destroy()`'s own best-effort
+    `close()` call (never raises, matching the Protocol's `destroy()`
+    contract) - and a LATER `trigger_log()` call must still return the
+    (now-finalized) log rather than raising, because `log_or_finalize()`
+    is idempotent."""
+    backend = _trigger_backend(base, docker_state, trigger_socket_dir)
+    handle = backend.prepare("a-lc-000000000022")
+    assert isinstance(handle, d._Handle)
+    sock_path = d.trigger_socket_host_path_for(backend.trigger_socket_dir, handle.name)
+    assert sock_path.exists()
+    backend.destroy(handle)  # no trigger_log() call first
+    assert not sock_path.exists()
+    assert backend.trigger_log(handle) == []  # bypass: never connected
 
 
 def test_confirm_stopped_is_unknown_on_an_unrecognized_inspect_error(
