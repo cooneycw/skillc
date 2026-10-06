@@ -1,0 +1,61 @@
+{
+ "schema": "cpp.execution-evidence/v1",
+ "record_kind": "cpp-usage-record",
+ "invocation_id": "00000000000000000000000000000000",
+ "run_id": "check-00000000",
+ "plan": "check",
+ "plan_record_run_id": "00000000000000000000000000000000",
+ "begun_at": "2026-01-01T00:00:00Z",
+ "terminal": true,
+ "terminal_event": {"kind": "completed", "at": "2026-01-01T00:05:00Z", "detail": null},
+ "outcome": "completed",
+ "qualifications": [],
+ "declared": {
+  "skill": "flow-check",
+  "skill_source": null,
+  "parent_invocation_id": null
+ },
+ "observed": {
+  "repository": {
+   "origin": "redacted",
+   "common_dir": "redacted",
+   "worktree": "redacted",
+   "branch": "redacted"
+  },
+  "tree_at_start": {"head": "0000000000000000000000000000000000000", "dirty": false, "tree_signature": "0000000000000000000000000000000000000", "taken_at": "2026-01-01T00:00:00Z"},
+  "tree_at_end": {"head": "0000000000000000000000000000000000000", "dirty": false, "tree_signature": "0000000000000000000000000000000000000", "taken_at": "2026-01-01T00:05:00Z"},
+  "helper": {"name": "lib.cicd runner", "cpp_commit": "0000000000000000000000000000000000000", "cpp_runner_modified": false, "module_sha256": {}},
+  "skill_source": {"path": "redacted", "sha256": "0000000000000000000000000000000000000000000000000000000000000000", "note": "redacted"},
+  "gates": ["lint", "test", "typecheck"],
+  "checks": [
+   {
+    "id": "lint", "gate": true, "status": "success", "exit_code": 0,
+    "attempt": 1, "max_attempts": 1,
+    "attempted_at": "2026-01-01T00:00:01Z", "completed_at": "2026-01-01T00:00:02Z",
+    "executed_in_this_invocation": true,
+    "population": {"kind": "coverage", "measured": false, "count": null, "unit": "unit", "state": "unknown", "tool": "unknown"},
+    "reason": null,
+    "evidence": {"output_sha256": "redacted", "output_bytes": 51}
+   },
+   {
+    "id": "test", "gate": true, "status": "success", "exit_code": 0,
+    "attempt": 1, "max_attempts": 1,
+    "attempted_at": "2026-01-01T00:00:02Z", "completed_at": "2026-01-01T00:04:58Z",
+    "executed_in_this_invocation": true,
+    "population": {"kind": "tests", "measured": true, "count": 100, "unit": "test", "counts": {"passed": 100, "failed": 0, "skipped": 0, "errors": 0}, "framework": "pytest"},
+    "reason": null,
+    "evidence": {"output_sha256": "redacted", "output_bytes": 100}
+   },
+   {
+    "id": "typecheck", "gate": true, "status": "success", "exit_code": 0,
+    "attempt": 1, "max_attempts": 1,
+    "attempted_at": "2026-01-01T00:04:58Z", "completed_at": "2026-01-01T00:04:59Z",
+    "executed_in_this_invocation": true,
+    "population": {"kind": "coverage", "measured": true, "count": 10, "unit": "source file", "state": "covered", "tool": "mypy"},
+    "reason": null,
+    "evidence": {"output_sha256": "redacted", "output_bytes": 50}
+   }
+  ],
+  "runner": {"warnings": [], "carried_from_previous_run": [], "tree_verified": false}
+ }
+}

@@ -54,6 +54,71 @@ and version plan.
   #237's three descriptions, 5 per cell, at 45 s, against the full-run
   results. No live run yet.
 
+- **Discrimination and improvement verdicts: declared one-sided Fisher
+  rules** (Refs #272, the owner's ruling on claude-power-pack #1084
+  comment https://github.com/cooneycw/claude-power-pack/issues/1084#issuecomment-6014163660).
+  `skillc/reliability.py` gains `fisher_exact_one_sided_greater` (exact via
+  `math.comb`/`Fraction`, no scipy, no normal approximation - verified
+  against the owner ruling's own published power table at n=10 and n=20 per
+  arm, all six cases exact) and a shared `evaluate_two_arm_rule` behind
+  `evaluate_discrimination` (DISCRIMINATING/NOT_SHOWN/UNKNOWN, intact vs
+  degraded) and `evaluate_improvement` (IMPROVED/NO_IMPROVEMENT_SHOWN/
+  UNKNOWN, the treatment vs baseline axis) - the same test shape on two
+  different arm pairs, built together since the second was trivial once
+  the first existed.
+  - The rule (`TwoArmRule`: id, alpha, sidedness, tolerance, citation_url)
+    is a DECLARED input, never a constant here - skillc stays
+    subject-agnostic, the same discipline `EXTERNAL_EVIDENCE_SOURCE_RE`
+    already keeps. No rule, no declared tolerance, an uncertified pairing,
+    or evaluable attempts below the declared tolerance all yield UNKNOWN,
+    never a guess - the owner ruling states explicitly that a study whose
+    declaration omits the tolerance "cannot produce a non-UNKNOWN verdict
+    under either rule," and that is its own committed control.
+  - This module never computes the net CPP gate flip (DISCRIMINATING AND
+    IMPROVED on the same certified case and revision) - the ruling is
+    explicit that decision belongs to the consumer, not skillc.
+  - Mutation-checked: the Fisher summation bound (wrong-bound mutation
+    fails 9 of the new tests, including every power-table case) and the
+    no-declared-tolerance guard (disabling it crashes rather than silently
+    computing, confirming the guard is load-bearing) - both restored, net
+    diff empty.
+
+- **A subject-scoped reconciler for `matched`/`contradicting` gate claims**
+  (Refs #269, #272 acceptance item 5). `evals/subjects/cpp-codex-flow-
+  check/gate_reconciliation.py` (loaded by file path, the same pattern
+  `gate_path.py` already uses) compares a CPP usage-record gate claim
+  against the controller's own `gate-witness` record (#269) - the one
+  comparison `skillc/records.py`'s core cannot make without decoding
+  `cpp.execution-evidence/v1`, which records.md's Q4 boundary forbids it
+  from doing.
+  - Field names pinned to `cooneycw/claude-power-pack@5e1de6d848eb29c2b926
+    f2fdf79e8aa375c12c43` (`lib/cicd/evidence.py::check_entry`, the FROZEN
+    `.specify/specs/per-skill-audit/spec.md`, and a stripped golden sample
+    derived from the real committed usage record) - not a guessed mapping.
+  - Only `exit-code-mismatch` is implemented. `outcome-disagreement` and
+    `stale-identity` need an interpretation of CPP's fields this module
+    does not make unilaterally. `tree-mismatch` is CONFIRMED unreachable
+    for this subject: CPP's tree signature is a git `write-tree` content
+    hash, record-level; skillc's own tree digest is a flat SHA-256 over
+    path/mode/content tuples, per-gate-run - two independently authored
+    algorithms with no documented equivalence, never bit-comparable.
+  - A carried-forward claim (resumed from a previous invocation) is always
+    `unknown`, never `contradicting` - this attempt's witness cannot have
+    observed a run from a different invocation. A run-count disagreement
+    between CPP's claimed attempt count and the witness's own run count is
+    likewise `unknown`, never a guessed fifth contradicting reason (`#301`
+    already removed `gate-not-executed` from the vocabulary for the same
+    kind of reason: silence cannot prove non-execution).
+  - A found disagreement, relayed rather than resolved here: CPP's producer
+    code builds a per-check `carried_from_previous_run` boolean, but the
+    real committed sample shows only a record-level
+    `observed.runner.carried_from_previous_run` list - no per-check field
+    at all. This module takes whatever boolean a caller supplies, agnostic
+    to which JSON shape it came from.
+  - 22 tests, two mutation-checked (the carried-forward and run-count
+    guards, each disabled and confirmed blind, restored, confirmed correct
+    again, net diff empty).
+
 - **Bounded synthetic profile files** (Refs #303). Profiles can declare
   non-executable marker text with explicit pinned-file replacement reasons
   and digests. Inventories and receipts distinguish pinned and synthetic
