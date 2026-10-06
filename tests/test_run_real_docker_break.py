@@ -56,24 +56,24 @@ def _run_runner(*args: str) -> subprocess.CompletedProcess[str]:
 
 # --------------------------------------------------------------- resolve_break_spec
 
-def test_none_resolves_to_none_for_all_three_families() -> None:
+def test_none_resolves_to_none_for_all_families() -> None:
     result = _resolve("none")
     assert result.returncode == 0
-    assert result.stdout.splitlines() == ["none", "none", "none", "none"]
+    assert result.stdout.splitlines() == ["none", "none", "none", "none", "none"]
 
 
 @pytest.mark.parametrize("mode", ["omit-mount", "wrong-uid", "flip-decision"])
 def test_namespaced_channel_modes_set_only_the_channel_value(mode: str) -> None:
     result = _resolve(f"channel:{mode}")
     assert result.returncode == 0
-    assert result.stdout.splitlines() == [f"channel:{mode}", mode, "none", "none"]
+    assert result.stdout.splitlines() == [f"channel:{mode}", mode, "none", "none", "none"]
 
 
 @pytest.mark.parametrize("mode", ["stale-confirm-lie", "kill-wrong-pid", "gate-in-fresh-container"])
 def test_namespaced_witness_modes_set_only_the_witness_value(mode: str) -> None:
     result = _resolve(f"witness:{mode}")
     assert result.returncode == 0
-    assert result.stdout.splitlines() == [f"witness:{mode}", "none", mode, "none"]
+    assert result.stdout.splitlines() == [f"witness:{mode}", "none", mode, "none", "none"]
 
 
 @pytest.mark.parametrize(
@@ -82,7 +82,14 @@ def test_namespaced_witness_modes_set_only_the_witness_value(mode: str) -> None:
 def test_namespaced_gateshim_modes_set_only_the_gateshim_value(mode: str) -> None:
     result = _resolve(f"gateshim:{mode}")
     assert result.returncode == 0
-    assert result.stdout.splitlines() == [f"gateshim:{mode}", "none", "none", mode]
+    assert result.stdout.splitlines() == [f"gateshim:{mode}", "none", "none", mode, "none"]
+
+
+@pytest.mark.parametrize("mode", ["skill-mount", "home-mount", "mcp-mount", "secret-mount", "cold-cache"])
+def test_namespaced_coldinstall_modes_set_only_the_coldinstall_value(mode: str) -> None:
+    result = _resolve(f"coldinstall:{mode}")
+    assert result.returncode == 0
+    assert result.stdout.splitlines() == [f"coldinstall:{mode}", "none", "none", "none", mode]
 
 
 @pytest.mark.parametrize("mode", ["omit-mount", "wrong-uid", "flip-decision"])
@@ -95,7 +102,7 @@ def test_bare_legacy_channel_modes_are_still_accepted_and_normalized(mode: str) 
     per mode to deal with."""
     result = _resolve(mode)
     assert result.returncode == 0
-    assert result.stdout.splitlines() == [f"channel:{mode}", mode, "none", "none"]
+    assert result.stdout.splitlines() == [f"channel:{mode}", mode, "none", "none", "none"]
 
 
 def test_a_bare_gateshim_mode_is_refused_not_silently_accepted() -> None:
@@ -117,10 +124,26 @@ def test_a_bare_witness_mode_is_refused_not_silently_accepted() -> None:
     assert result.stdout == ""
 
 
+def test_a_bare_coldinstall_mode_is_refused_not_silently_accepted() -> None:
+    """Same red case, the coldinstall family: no bare form was ever
+    documented for it either, so a bare spelling must be refused rather
+    than silently treated as a channel mode of the same name."""
+    result = _resolve("cold-cache")
+    assert result.returncode == 2
+    assert "unknown channel break mode 'cold-cache'" in result.stderr
+    assert result.stdout == ""
+
+
 def test_an_unknown_mode_in_a_known_family_is_refused() -> None:
     result = _resolve("channel:bogus")
     assert result.returncode == 2
     assert "unknown channel break mode 'bogus'" in result.stderr
+
+
+def test_an_unknown_mode_in_the_coldinstall_family_is_refused() -> None:
+    result = _resolve("coldinstall:bogus")
+    assert result.returncode == 2
+    assert "unknown coldinstall break mode 'bogus'" in result.stderr
 
 
 def test_an_unknown_family_is_refused() -> None:
@@ -190,6 +213,11 @@ def test_none_resolves_to_the_certifying_context() -> None:
         "gateshim:drops-cwd",
         "gateshim:exits-zero-on-channel-failure",
         "gateshim:wrong-env",
+        "coldinstall:skill-mount",
+        "coldinstall:home-mount",
+        "coldinstall:mcp-mount",
+        "coldinstall:secret-mount",
+        "coldinstall:cold-cache",
     ],
 )
 def test_every_break_mode_resolves_to_the_control_context_never_the_certifying_one(normalized_spec: str) -> None:
@@ -219,7 +247,14 @@ def test_the_real_runner_refuses_an_unknown_break_spec_before_touching_any_confi
 
 @pytest.mark.parametrize(
     "break_arg",
-    ["none", "channel:omit-mount", "omit-mount", "witness:kill-wrong-pid", "gateshim:drops-cwd"],
+    [
+        "none",
+        "channel:omit-mount",
+        "omit-mount",
+        "witness:kill-wrong-pid",
+        "gateshim:drops-cwd",
+        "coldinstall:cold-cache",
+    ],
 )
 def test_the_real_runner_accepts_valid_break_specs_and_reaches_the_config_check(break_arg: str) -> None:
     """A VALID --break argument must be accepted by parsing and reach the
@@ -234,22 +269,24 @@ def test_the_real_runner_accepts_valid_break_specs_and_reaches_the_config_check(
     assert "--break must be" not in result.stderr
 
 
-def test_the_real_runner_always_sets_all_three_break_variables_explicitly() -> None:
+def test_the_real_runner_always_sets_all_four_break_variables_explicitly() -> None:
     """Regression guard for the inherited-environment contamination fix
-    (codex:code_review, HIGH): the pytest invocation must set
-    SKILLC_LIVE_TEST_BREAK, SKILLC_GATE_WITNESS_LIVE_BREAK AND
-    SKILLC_GATE_SHIM_LIVE_BREAK explicitly on every run, from
-    resolve_break_spec's own always-all-present output - never leaving
-    any to whatever the runner's own process environment happened to
-    inherit, which is what let a stale SKILLC_LIVE_TEST_BREAK survive
-    into a `--break none` (certifying) run before this fix. Checked by
+    (codex:code_review, HIGH): the pytest invocation must set ALL FOUR of
+    SKILLC_LIVE_TEST_BREAK, SKILLC_GATE_WITNESS_LIVE_BREAK, (#332 follow-up)
+    SKILLC_GATE_SHIM_LIVE_BREAK, and (#266 follow-up)
+    SKILLC_COLDINSTALL_LIVE_BREAK explicitly on every run, from
+    resolve_break_spec's own always-all-present output - never leaving any
+    of them to whatever the runner's own process environment happened to
+    inherit, which is what let a stale SKILLC_LIVE_TEST_BREAK survive into
+    a `--break none` (certifying) run before the original fix. Checked by
     reading the script's own text: driving the actual invocation needs a
-    real checkout and docker daemon this environment does not have, so
-    the behavioral guarantee - that resolve_break_spec never emits an
-    empty value for any family - is covered by the four-line-shape
-    assertions above instead; this is a narrower guard against reverting
-    the invocation itself to a partial form."""
+    real checkout and docker daemon this environment does not have, so the
+    behavioral guarantee - that resolve_break_spec never emits an empty
+    value for any family - is covered by the shape assertions above
+    instead; this is a narrower guard against reverting the invocation
+    itself to a form that drops one of the four variables."""
     text = RUNNER_PATH.read_text(encoding="utf-8")
     assert 'SKILLC_LIVE_TEST_BREAK="$CHANNEL_BREAK_VALUE"' in text
     assert 'SKILLC_GATE_WITNESS_LIVE_BREAK="$WITNESS_BREAK_VALUE"' in text
     assert 'SKILLC_GATE_SHIM_LIVE_BREAK="$GATESHIM_BREAK_VALUE"' in text
+    assert 'SKILLC_COLDINSTALL_LIVE_BREAK="$COLDINSTALL_BREAK_VALUE"' in text
