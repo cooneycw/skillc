@@ -55,6 +55,7 @@ DECLARED_REAL_DOCKER_FILES: tuple[str, ...] = (
     "tests.test_trial_image_build_live",
     "tests.test_gate_witness_live",
     "tests.test_gate_overlay_live",
+    "tests.test_profile_install_cold_container_live",
 )
 
 ERROR = "ERROR"
