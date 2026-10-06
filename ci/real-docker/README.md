@@ -83,16 +83,25 @@ matters is in WHICH commits run at all, not in what R1 covers.
    - **Record both outcomes on this issue**, generically (no addresses) -
      this is the committed evidence that the detector actually detects
      something, on this specific host, not only in the unit tests.
-8. **#183 break-mode verification (R2):**
+8. **#183/#269 break-mode verification (R2):** `--break` takes `none` or
+   `<family>:<mode>`, resolved from a closed table in `break-lib.sh` - an
+   unknown family or mode is refused with exit 2 before any checkout or
+   docker operation. The three bare `channel` spellings below (no
+   `channel:` prefix) also still work, kept for compatibility with runs
+   recorded before family prefixes existed (#315 follow-up); a bare
+   `witness` mode has no such form and is refused.
    ```
-   run-real-docker <post-#300-main-sha> --break none            # expect SUCCESS
-   run-real-docker <post-#300-main-sha> --break omit-mount       # expect FAILURE
-   run-real-docker <post-#300-main-sha> --break wrong-uid        # expect FAILURE
-   run-real-docker <post-#300-main-sha> --break flip-decision    # expect FAILURE
+   run-real-docker <post-#300-main-sha> --break none                           # expect SUCCESS
+   run-real-docker <post-#300-main-sha> --break channel:omit-mount             # expect FAILURE
+   run-real-docker <post-#300-main-sha> --break channel:wrong-uid              # expect FAILURE
+   run-real-docker <post-#300-main-sha> --break channel:flip-decision          # expect FAILURE
+   run-real-docker <post-#300-main-sha> --break witness:stale-confirm-lie      # expect FAILURE
+   run-real-docker <post-#300-main-sha> --break witness:kill-wrong-pid         # expect FAILURE
+   run-real-docker <post-#300-main-sha> --break witness:gate-in-fresh-container # expect FAILURE
    ```
    Break-mode runs post only to `skillc/real-docker-control`
    (never the certifying `skillc/real-docker` context) and are labelled
-   EXPECTED-RED. Record the four results on this issue.
+   EXPECTED-RED. Record all seven results on this issue.
 9. `systemctl enable --now skillc-real-docker.timer`.
 
 ## `config.env` template
