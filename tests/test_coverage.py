@@ -14,6 +14,7 @@ import pytest
 
 from skillc import coverage as cov
 from skillc import records
+from skillc import reliability as rel
 
 CONTROLS = Path(__file__).resolve().parent.parent / "controls"
 SKILL_PATH = ".codex/skills/slug/SKILL.md"
@@ -319,3 +320,98 @@ def test_two_trials_with_different_skill_digests_produce_separate_rows() -> None
     versions = {row.key.skill_version for row in report.rows if row.key.skill_path == SKILL_PATH}
     assert versions == {"sha256:v1", "sha256:v2"}
     assert len(report.rows) == 2
+
+
+# --------------------------------------------------------------- reconciliation_counts
+
+def test_reconciliation_counts_expose_the_recorded_skill_evidence_state() -> None:
+    """Exposes the reconciler's OUTPUT (whatever already decided it),
+    never re-decides it - the fixture's two skill-evidence entries both
+    declare unmatched/duplicate-invocation."""
+    bundle = _bundle(CONTROLS / "ledger-binding/good/skill-evidence-duplicate-invocation")
+    report = cov.assemble_coverage_report(bundle, _inventory())
+    row = report.rows[0]
+    assert row.reconciliation_counts["unmatched"] == 2
+    assert row.reconciliation_counts["matched"] == 0
+    assert row.reconciliation_counts["contradicting"] == 0
+    assert row.reconciliation_counts["absent"] == 0
+    assert sum(row.reconciliation_counts.values()) == row.scheduled
+
+
+def test_reconciliation_counts_absent_when_no_external_evidence() -> None:
+    bundle = _bundle(CONTROLS / "ledger-binding/good/skill-evidence-no-correlating-attempt")
+    report = cov.assemble_coverage_report(bundle)
+    row = report.rows[0]
+    assert row.reconciliation_counts["unmatched"] == 1  # this fixture's own declared reason
+
+
+# --------------------------------------------------------------- case_pairs (discrimination)
+
+def test_case_pairs_wiring_hand_computed_without_a_rule() -> None:
+    """No rule supplied -> UNKNOWN, per-arm facts still present (orchestrator
+    review, #272: facts are never withheld because no verdict could be
+    reached)."""
+    bundle = _bundle(CONTROLS / "case-pairing/good/reciprocal-complementary")
+    report = cov.assemble_coverage_report(bundle)
+    assert len(report.case_pairs) == 1
+    pair = report.case_pairs[0]
+    assert pair.case_id == "slug-fix"
+    assert pair.paired_case_id == "slug-fix"
+    assert pair.case_revision == "r1"
+    assert pair.paired_case_revision == "r1-degraded"
+    assert pair.intact_pass == 1 and pair.intact_evaluable == 1
+    assert pair.degraded_pass == 1 and pair.degraded_evaluable == 1
+    assert pair.verdict == "UNKNOWN"
+    assert pair.p_value is None
+    assert pair.reason == "no predeclared rule"
+
+
+def test_case_pairs_wiring_with_a_rule_computes_a_real_verdict() -> None:
+    bundle = _bundle(CONTROLS / "case-pairing/good/reciprocal-complementary")
+    rule = rel.TwoArmRule(rule_id="fixture", alpha=0.05, sidedness="greater", tolerance=1, citation_url="https://example.invalid")
+    report = cov.assemble_coverage_report(bundle, discrimination_rule=rule)
+    pair = report.case_pairs[0]
+    # 1/1 intact pass vs 1/1 degraded pass: identical arms, cannot discriminate.
+    assert pair.verdict == "NOT_SHOWN"
+    assert pair.p_value is not None
+
+
+def test_case_pairs_absent_when_no_pairing_declared() -> None:
+    bundle = _bundle(CONTROLS / "ledger-binding/good/skill-evidence-duplicate-invocation")
+    report = cov.assemble_coverage_report(bundle, _inventory())
+    assert report.case_pairs == ()
+
+
+def test_report_to_json_includes_case_pairs_and_stays_byte_identical() -> None:
+    forward = _bundle(CONTROLS / "case-pairing/good/reciprocal-complementary")
+    backward = _reversed_bundle(CONTROLS / "case-pairing/good/reciprocal-complementary")
+    assert cov.assemble_coverage_report(forward).to_json() == cov.assemble_coverage_report(backward).to_json()
+    body = json.loads(cov.assemble_coverage_report(forward).to_json())
+    assert "case_pairs" in body
+    assert body["case_pairs"][0]["verdict"] == "UNKNOWN"
+
+
+# --------------------------------------------------------------- compute_improvement passthrough
+
+def test_compute_improvement_is_a_real_passthrough_to_reliability() -> None:
+    rule = rel.TwoArmRule(rule_id="fixture", alpha=0.05, sidedness="greater", tolerance=1, citation_url="https://example.invalid")
+    via_coverage = cov.compute_improvement(rule, 10, 10, 0, 10)
+    via_reliability = rel.evaluate_improvement(rule, 10, 10, 0, 10)
+    assert via_coverage == via_reliability
+    assert via_coverage.verdict == "IMPROVED"
+
+
+def test_compute_improvement_without_a_rule_is_unknown() -> None:
+    assert cov.compute_improvement(None, 10, 10, 0, 10).verdict == "UNKNOWN"
+
+
+# --------------------------------------------------------------- mutation check
+
+def test_case_pair_discovery_check_is_not_a_no_op(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mutation check: force case-pair discovery to find nothing, and
+    confirm the known-good fixture above would wrongly report zero pairs -
+    proving the discovery logic does real work."""
+    monkeypatch.setattr(cov, "_find_case_pairs", lambda cells: [])
+    bundle = _bundle(CONTROLS / "case-pairing/good/reciprocal-complementary")
+    report = cov.assemble_coverage_report(bundle)
+    assert report.case_pairs == ()  # the mutation's wrong answer

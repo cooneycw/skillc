@@ -54,6 +54,33 @@ and version plan.
   #237's three descriptions, 5 per cell, at 45 s, against the full-run
   results. No live run yet.
 
+- **`skillc/coverage.py`: the gate reconciler and discrimination/improvement
+  evaluators wired in** (Refs #269, #272). `coverage.py` never imports
+  `evals/subjects/cpp-codex-flow-check/gate_reconciliation.py` - that would
+  put CPP-specific knowledge back inside `skillc/`, exactly what relocating
+  it there was for.
+  - Every row gains `reconciliation_counts` (`absent`/`unmatched`/
+    `matched`/`contradicting`), exposing whatever a bundle's own
+    `skill-evidence.external_evidence.reconciliation` already records -
+    the reconciler's OUTPUT, never re-decided here.
+  - `CoverageReport.case_pairs`: one `CasePairVerdict` per certified
+    `case.arm` pairing found in the bundle (#273's own `case-pairing`
+    bundle rule already guarantees reciprocity/uniqueness by the time
+    refuse-before-reporting lets a bundle through), computed with
+    `reliability.evaluate_discrimination` - per-arm pass/evaluable counts
+    kept beside the verdict, never replaced by it. No rule supplied still
+    populates every pair, verdict `UNKNOWN`.
+  - `compute_improvement`: a thin passthrough to `reliability.
+    evaluate_improvement` for a caller with its own CPP-vs-baseline
+    (`config.arm`) counts - `config.arm` is not a validated field in
+    `skillc/records.py`, so this module does not invent a discovery
+    convention for it the way it does for `case.arm`.
+  - 9 new tests (28 total in the file), two mutation-checked against the
+    REAL production code (not a stub): disabling the reconciliation-count
+    tally and dropping the intact/degraded arm filter in case-pair
+    discovery each confirmed a known-good fixture's test goes wrong,
+    restored, confirmed correct again, net diff empty.
+
 - **Gate reconciler: two more reasons made reachable** (Refs #269, #272).
   `evals/subjects/cpp-codex-flow-check/gate_reconciliation.py` adds
   `outcome-disagreement` and `stale-identity`, after confirming both field
