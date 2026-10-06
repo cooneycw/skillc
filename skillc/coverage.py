@@ -425,11 +425,16 @@ class CoverageReport:
     def to_text(self) -> str:
         """A concise human view, built from `self.to_dict()` - the SAME
         dict `to_json` serializes, never a second read of `self.rows`/
-        `self.case_pairs` - so the two views cannot drift apart (orchestrator
-        review, #272). Every row and every `UNKNOWN`/`INSUFFICIENT`-shaped
-        state in the JSON appears here too: nothing is summarized away, only
-        formatted for reading. Deterministic - same row/pair order
-        `to_dict()` already sorts into, no wall-clock content anywhere."""
+        `self.case_pairs`/`self.task_clusters` - so the two views cannot
+        drift apart (orchestrator review, #272). Every row, every
+        `case_pairs`/`task_clusters` entry, and every `UNKNOWN`/
+        `insufficient`/`not_declared`/`not_captured`-shaped state in the
+        JSON appears here too: nothing is summarized away, only formatted
+        for reading (`tests/test_coverage.py`'s generic sentinel-coverage
+        test walks `to_dict()` for exactly this and fails if a rendered
+        section is ever dropped). Deterministic - same row/pair/cluster
+        order `to_dict()` already sorts into, no wall-clock content
+        anywhere."""
         body = self.to_dict()
         lines = [f"inventory: {body['inventory']}"]
         if body["profile_digest"] is not None:
@@ -464,6 +469,28 @@ class CoverageReport:
                     for c in row["criteria"]
                 )
                 lines.append(f"    criteria: {criteria_text}")
+            reliability = row["reliability"]
+            cp_lo, cp_hi = reliability["clopper_pearson"]
+            ws_lo, ws_hi = reliability["wilson_score"]
+            lines.append(
+                f"    reliability: all_k={reliability['all_k']} pass_at_k={reliability['pass_at_k']} "
+                f"clopper_pearson=[{cp_lo}, {cp_hi}] wilson_score=[{ws_lo}, {ws_hi}]"
+            )
+            convenience = row["convenience"]
+            phase_wall_times = convenience["phase_wall_times"]
+            if isinstance(phase_wall_times, str):
+                phase_text = phase_wall_times
+            else:
+                phase_text = ", ".join(
+                    f"{p['from_event']}->{p['to_event']}={p['seconds']:.4g}s(n={p['attempts']})"
+                    for p in phase_wall_times
+                ) or "-"
+            lines.append(
+                f"    convenience: phase_wall_times=[{phase_text}] "
+                f"instruction_length={convenience['instruction_length']} "
+                f"clarification_correction_turns={convenience['clarification_correction_turns']} "
+                f"approvals={convenience['approvals']} tokens={convenience['tokens']}"
+            )
         case_pairs = cast("list[dict[str, Any]]", body["case_pairs"])
         if case_pairs:
             lines.append(f"case_pairs: {len(case_pairs)}")
@@ -476,6 +503,17 @@ class CoverageReport:
                     f"{pair['paired_case_id']}@{pair['paired_case_revision']} (degraded "
                     f"{pair['degraded_pass']}/{pair['degraded_evaluable']}): "
                     f"{pair['verdict']}{p_text}{reason_text}"
+                )
+        task_clusters = cast("list[dict[str, Any]]", body["task_clusters"])
+        if task_clusters:
+            lines.append(f"task_clusters: {len(task_clusters)}")
+            for cluster in task_clusters:
+                interval = cluster["all_k_interval"]
+                interval_text = interval if isinstance(interval, str) else f"[{interval[0]:.4g}, {interval[1]:.4g}]"
+                lines.append(
+                    f"- {cluster['skill_path']} @ {cluster['skill_version']} "
+                    f"[{cluster['client_name']}/{cluster['client_version']}, arm={cluster['arm']}] "
+                    f"tasks={cluster['task_count']} seed={cluster['seed']} all_k={interval_text}"
                 )
         return "\n".join(lines)
 

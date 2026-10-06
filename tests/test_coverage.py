@@ -950,3 +950,75 @@ def test_task_cluster_bootstrap_same_seed_is_byte_identical() -> None:
 def test_task_cluster_bootstrap_absent_without_a_declared_seed() -> None:
     report = cov.assemble_coverage_report(_task_cluster_bundle(5), k=1)
     assert report.task_clusters == ()
+
+
+# --------------------------------------------------------------- to_text sentinel coverage (#272)
+
+def _collect_sentinel_values(obj: object, sentinels: set[str], found: set[str]) -> None:
+    """Recursively walk a JSON-shaped structure, collecting every string
+    VALUE (never a dict key - `outcomes`/`execution_observed` key their
+    counts by `UNKNOWN`, which is not itself a reported state) that matches
+    one of `sentinels`."""
+    if isinstance(obj, dict):
+        for value in obj.values():
+            _collect_sentinel_values(value, sentinels, found)
+    elif isinstance(obj, list):
+        for item in obj:
+            _collect_sentinel_values(item, sentinels, found)
+    elif isinstance(obj, str) and obj in sentinels:
+        found.add(obj)
+
+
+#: The closed set of sentinel strings this sweep knows about - every module
+#: that reports an absence via one of its own words, gathered in one place
+#: so a reviewer can see the whole vocabulary this test polices.
+_SENTINELS = {"UNKNOWN", rel.INSUFFICIENT, cov.NOT_DECLARED, conv.NOT_CAPTURED}
+
+
+def test_to_text_renders_every_sentinel_value_present_in_the_json() -> None:
+    """Generic sweep (orchestrator review, #272): walk `to_dict()` for every
+    occurrence of a known sentinel VALUE, and assert each one that appears
+    anywhere in the JSON also appears somewhere in `to_text()`. A new field
+    carrying one of these sentinels then cannot be silently dropped from the
+    human view - this test does not need to know the field exists, only
+    that whatever sentinel it carries is accounted for.
+
+    The fixture is built to exercise all three of reliability, convenience
+    and task_clusters as the UNIQUE source of at least one sentinel each in
+    this particular report, so that dropping any one of the three renderers
+    makes a DIFFERENT sentinel vanish from the text - not just one of them
+    (`k` is left undeclared, so `reliability.all_k`/`pass_at_k` are
+    `cov.NOT_DECLARED` and no row contributes a task value, which in turn
+    makes every `task_clusters` entry `rel.INSUFFICIENT`; each row's own
+    `evaluable` is 1, so `clopper_pearson`/`wilson_score` are real floats,
+    never `rel.INSUFFICIENT` - the only `insufficient` in this report's
+    JSON comes from `task_clusters`. `convenience.tokens` is unconditionally
+    `conv.UNKNOWN`, the only `UNKNOWN` in this report's JSON since there are
+    no case pairs to carry a `DISCRIMINATING`/`NOT_SHOWN`/`UNKNOWN` verdict).
+
+    A DECLARED inventory is passed deliberately: `CoverageReport.inventory`
+    itself reports the unrelated top-level sentinel `cov.INVENTORY_NOT_DECLARED`
+    ("not_declared", the SAME literal string as `cov.NOT_DECLARED` - a real
+    collision) when no inventory is supplied, and `inventory` is always
+    rendered regardless of any row-level renderer. Without a declared
+    inventory that collision would let `not_declared` show up in the text
+    for a reason that has nothing to do with `reliability` ever being
+    rendered, silently defeating the very mutation check this test exists
+    to pass (caught by running the mutation check itself, not by inspection).
+    """
+    bundle = _task_cluster_bundle(2)
+    report = cov.assemble_coverage_report(bundle, _inventory(), bootstrap_seed=42)
+    body = report.to_dict()
+    found: set[str] = set()
+    _collect_sentinel_values(body, _SENTINELS, found)
+
+    # Sanity: the fixture actually exercises all three renderers' own
+    # sentinel, not just one - otherwise this test could pass while leaving
+    # the other two renderers completely unverified.
+    assert cov.NOT_DECLARED in found, "fixture does not exercise reliability's own sentinel"
+    assert rel.INSUFFICIENT in found, "fixture does not exercise task_clusters' own sentinel"
+    assert "UNKNOWN" in found, "fixture does not exercise convenience's own sentinel"
+
+    text = report.to_text()
+    missing = {s for s in found if s not in text}
+    assert not missing, f"sentinel value(s) {missing} appear in the JSON but not in to_text()"

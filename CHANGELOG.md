@@ -32,6 +32,39 @@ and version plan.
   - The two-arm study (`published` + `rewritten`, with its Fisher test) is
     unchanged.
 
+- **`to_text()` renders reliability, convenience and task_clusters; the
+  "nothing hidden" test is now generic** (Refs #272 acceptance item 1,
+  orchestrator review). Not a nit after all: the human view omitting
+  `reliability`, `convenience` and `task_clusters` - including their
+  `insufficient`/`not_declared`/`UNKNOWN` states - failed acceptance item
+  1's own "concise human view" requirement, and its docstring's "nothing is
+  summarized away" claim was false. `to_text()` now renders all three per
+  row (reliability's intervals/all_k/pass_at_k, convenience's per-phase
+  totals or `UNKNOWN`) and at report level (`task_clusters`: an interval or
+  `insufficient`), still derived from the same `to_dict()` `to_json`
+  serializes.
+
+  The "nothing hidden" test is now GENERIC rather than enumerating fields:
+  `test_to_text_renders_every_sentinel_value_present_in_the_json` walks
+  `to_dict()` for every string VALUE matching a known sentinel (`UNKNOWN`,
+  `insufficient`, `not_declared`, `not_captured`) and asserts each one
+  found also appears in `to_text()` - a new field carrying one of these
+  sentinels can no longer be silently dropped, without the test needing to
+  know the field exists. Mutation-checked three times, once per renderer
+  (reliability, convenience, task_clusters removed in turn), each going
+  red on a DIFFERENT sentinel - proving the test genuinely depends on all
+  three, not just the first one found. One real trap found and fixed while
+  building this: `CoverageReport.inventory` reports
+  `INVENTORY_NOT_DECLARED` ("not_declared") when no inventory is supplied -
+  the exact same literal string as `reliability`'s own `NOT_DECLARED`
+  sentinel - and `inventory` is always rendered regardless of any row-level
+  renderer, so an undeclared-inventory fixture would have let that
+  collision silently defeat the reliability mutation check; the fixture
+  declares an inventory specifically to avoid it.
+
+  Withdrew the skillc#20 nit comment (edited to record it was fixed here,
+  not left open as a stale pointer to resolved work).
+
 - **Task-cluster bootstrap: a report-level section alongside `case_pairs`**
   (Refs #272 acceptance item 4, #273). `CoverageReport.task_clusters`
   (`TaskClusterBootstrap`) groups every row by (skill_path, skill_version,
