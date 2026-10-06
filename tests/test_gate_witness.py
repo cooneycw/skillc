@@ -12,6 +12,7 @@ the protected path (#269's own acceptance wording).
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import socket
 import sys
@@ -778,6 +779,58 @@ def test_exec_in_attempt_never_stops_the_container_on_its_own_timeout(tmp_path: 
             handle, ["python3", "-c", "import time; time.sleep(30)"], Limits(timeout=0.5, grace=0.3),
         )
         assert result.reason == "timeout"
-        assert backend.confirm_stopped(handle) == Confirmation.NOT_CONFIRMED  # still running
+        assert result.stop_confirmed is True  # orchestrator ruling on finding 3
+        assert backend.confirm_stopped(handle) == Confirmation.NOT_CONFIRMED  # the ATTEMPT's own container, still running
     finally:
         backend.destroy(handle)
+
+
+def test_confirm_and_kill_in_container_returns_false_when_the_kill_exec_cannot_be_reached(
+    tmp_path: Path,
+) -> None:
+    """Orchestrator ruling on finding 3, the unconfirmed path: 'make the
+    kill exec fail'. A broken `docker_bin` for JUST the kill/confirm calls
+    (sharing the real container a working backend already launched) proves
+    `_confirm_and_kill_in_container` returns `False` rather than guessing
+    `True` when it cannot reach the daemon at all."""
+    base = tmp_path / "work"
+    base.mkdir()
+    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(tmp_path / "docker-state"))
+    handle = backend.prepare("a-gw-0000000000004")
+    backend.install(handle, {})
+    try:
+        broken = dataclasses.replace(backend, docker_bin=[sys.executable, "/nonexistent/fake_docker.py"])
+        assert isinstance(handle, d._Handle)
+        confirmed = broken._confirm_and_kill_in_container(handle, pid=999999, grace=0.1)
+        assert confirmed is False
+    finally:
+        backend.destroy(handle)
+
+
+def test_a_rerun_after_an_unconfirmed_stop_is_refused_workspace_integrity_unknown() -> None:
+    """Orchestrator ruling on finding 3: once a run cannot be confirmed
+    stopped, EVERY later `run_gate` is refused - even for a DIFFERENT
+    gate - because a possibly-still-running zombie could be mutating the
+    tree any later gate would measure. A gate that already completed
+    keeps its own record unchanged (not erased, not downgraded)."""
+    backend = _FakeBackend(results={
+        ("lint",): _exited(0),
+        ("typecheck",): ExecuteResult(reason="timeout", exit_code=None, stop_confirmed=False),
+    })
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"], "typecheck": ["typecheck"]},
+        tree_digest_fn=_fixed_tree_digest, backend=backend, handle=None,
+        limits=_limits(), gate_exclusivity=False, exclusivity_basis="",
+    )
+    witness.decide({"op": "run_gate", "gate": "lint"})
+    reply = witness.decide({"op": "run_gate", "gate": "typecheck"})
+    assert reply["reason"] == "timeout"
+    with pytest.raises(ChannelRefusal, match="workspace-integrity-unknown"):
+        witness.decide({"op": "run_gate", "gate": "lint"})  # a RERUN, not even typecheck again
+    record = witness.finalize("a-1")
+    # lint's own completed run from BEFORE the unconfirmed stop is untouched.
+    assert record.gates["lint"].coverage == "complete"
+    assert len(record.gates["lint"].runs) == 1
+    assert record.gates["lint"].runs[0].exit_code == 0
+    assert record.gates["typecheck"].coverage == "interrupted"
+    assert record.gates["typecheck"].runs[0].stop_confirmed is False

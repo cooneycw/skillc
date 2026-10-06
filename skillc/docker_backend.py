@@ -128,6 +128,7 @@ import tarfile
 import tempfile
 import threading
 import time
+import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -1408,6 +1409,7 @@ class DockerBackend:
     def _launch_and_wait(
         self, handle: _Handle, argv: Sequence[str], limits: Limits,
         cancel: Callable[[], bool] | None, stdin: bytes | None, *, prefix_wrap: bool,
+        after_launch: Callable[[], None] | None = None,
     ) -> tuple[subprocess.Popen[bytes], _BoundedDrain, _BoundedDrain, threading.Thread, threading.Thread, str] | ExecuteResult:
         """Shared `docker exec` launch-drain-wait mechanics for `execute()`
         and `exec_in_attempt()` (#269) - everything up to, but NOT
@@ -1418,7 +1420,13 @@ class DockerBackend:
         or an `ExecuteResult` directly when the exec itself never launched
         (`reason="launch-failed"`, caller-decorated with its own
         `term_forwarding` convention since that field means different
-        things to the two callers)."""
+        things to the two callers).
+
+        `after_launch`, when given, runs once the LOCAL `docker exec`
+        client has launched, before the wait loop begins - `exec_in_
+        attempt()`'s own hook for reading back the in-container PID its
+        wrapped argv just wrote (orchestrator ruling on finding 3), which
+        `execute()` has no need for and leaves `None`."""
         exec_argv = [*self.docker_bin, "exec"]
         if stdin is not None:
             exec_argv.append("-i")
@@ -1436,6 +1444,9 @@ class DockerBackend:
             )
         except OSError as exc:
             return ExecuteResult(reason="launch-failed", exit_code=None, error=str(exc))
+
+        if after_launch is not None:
+            after_launch()
 
         assert proc.stdout is not None
         stdout_drain = _BoundedDrain(proc.stdout, limits.max_captured_stdout_bytes)
@@ -1583,6 +1594,7 @@ class DockerBackend:
         stdout_drain: _BoundedDrain, stderr_drain: _BoundedDrain,
         stdout_thread: threading.Thread, stderr_thread: threading.Thread,
         limits: Limits, reason: str, *, signal_name: str | None, term_forwarding: str | None,
+        stop_confirmed: bool | None = None,
     ) -> ExecuteResult:
         """Shared join/error/observations-write-back tail for `execute()`
         and `exec_in_attempt()` (#269) - the delicate part neither caller
@@ -1675,6 +1687,7 @@ class DockerBackend:
             stdout_truncated=stdout_drain.truncated, stdout_bytes=stdout_drain.total_bytes,
             stdout_incomplete=stdout_incomplete, stderr_incomplete=stderr_incomplete,
             term_forwarding=term_forwarding, observations_capture=observations_capture,
+            stop_confirmed=stop_confirmed,
         )
 
     def exec_in_attempt(
@@ -1715,36 +1728,66 @@ class DockerBackend:
         never touch the container at all, so there is no container-level
         TERM for anything to forward.
 
-        TIMEOUT/CANCEL ESCALATION IS OWED FOR A REAL DAEMON, named
-        precisely rather than silently assumed solved. On timeout or
-        `cancel()`, this method signals ONLY the local `docker exec`
-        client process's own process group (`start_new_session=True` at
-        launch) - against the fake CLI (`tests/fixtures/docker-backend/
-        fake_docker.py`), which runs the simulated subject as that
-        client's own direct child, this genuinely terminates the exec'd
-        process. Against a REAL daemon, killing the local `docker exec`
-        client does NOT reliably terminate the session it started inside
-        the container - `execute()`'s own `_stop()` reaches the subject
-        only by killing the whole CONTAINER, which this method must never
-        do. Closing this for a real daemon needs either `docker exec`'s
-        own signal-forwarding behavior investigated, or a second `docker
-        exec <container> kill <pid>` call using a PID discovered from
-        inside the container - neither implemented here, matching every
-        other real-daemon question this feature already defers (the real
-        `tree_digest_fn`, the #158 forwarding capability check)."""
+        TIMEOUT/CANCEL ESCALATION CONFIRMS THE IN-CONTAINER PROCESS IS DEAD
+        (orchestrator ruling on finding 3, codex `code_review`: leaving a
+        possibly-still-running process free to keep mutating the tree it
+        was measuring would corrupt exactly the facts this witness exists
+        to certify - "a terminal state needs confirmed absence", the same
+        rule `confirm_stopped()`/`confirm_absent()` already apply to the
+        whole attempt). `argv` is wrapped as `sh -c 'echo $$ > MARKER;
+        exec "$@"' sh <argv...>` so the in-container process reports its
+        OWN pid (surviving the `exec` that replaces the shell with it) to
+        a per-call marker path this method reads back via a second `docker
+        exec ... cat MARKER`. On timeout or `cancel()`, a THIRD exec sends
+        `kill -TERM` to that pid inside the container, polls `kill -0`
+        for `limits.grace`, escalates to `kill -KILL` if still alive, and
+        polls again - never touching the container itself, only this one
+        pid. `ExecuteResult.stop_confirmed` reports the outcome: `True`
+        only once `kill -0` is independently observed to fail; `False`
+        when the pid was never learned, the kill exec itself could not be
+        reached, or the process is still alive after escalation. `None`
+        for `reason == "exited"` (no kill was ever needed) and for every
+        `execute()` result (not applicable there).
+
+        A REAL daemon's `docker exec` behavior for this three-exec
+        sequence (marker write-back, in-container kill, in-container
+        `kill -0` confirmation) is exercised here only against the fake
+        CLI (`tests/fixtures/docker-backend/fake_docker.py`) - named as
+        owed, matching every other real-daemon question this feature
+        already defers (the real `tree_digest_fn`, the #158 forwarding
+        capability check). The LOCAL `docker exec` client's own process
+        group is still reaped afterward regardless (`start_new_session=
+        True` at launch), so this method's own call returns promptly
+        rather than waiting on a client whose remote session may outlive
+        it."""
         assert isinstance(handle, _Handle)
         reachable, absent, status = self._inspect(handle)
         if not reachable or absent or status != "running":
             return ExecuteResult(reason="attempt-not-running", exit_code=None)
 
-        launched = self._launch_and_wait(handle, argv, limits, cancel, stdin, prefix_wrap=False)
+        marker_path = f"{CONTAINER_WORKSPACE}/.skillc-exec-pid-{uuid.uuid4().hex}"
+        wrapped_argv = ["sh", "-c", f'echo $$ > {marker_path}; exec "$@"', "sh", *argv]
+        in_container_pid: list[int | None] = [None]
+
+        def _capture_pid() -> None:
+            in_container_pid[0] = self._read_in_container_pid(handle, marker_path)
+
+        launched = self._launch_and_wait(
+            handle, wrapped_argv, limits, cancel, stdin, prefix_wrap=False, after_launch=_capture_pid,
+        )
         if isinstance(launched, ExecuteResult):
             return launched  # launch-failed, built by _launch_and_wait itself
         proc, stdout_drain, stderr_drain, stdout_thread, stderr_thread, reason = launched
 
+        stop_confirmed: bool | None = None
         if reason != "exited":
-            # Kill ONLY this exec's own local process group - never the
-            # container (see the real-daemon caveat above).
+            pid = in_container_pid[0]
+            # `False` when the pid was never learned at all - indistinguishable
+            # from "cannot confirm" either way, per the orchestrator's ruling.
+            stop_confirmed = self._confirm_and_kill_in_container(handle, pid, limits.grace) if pid is not None else False
+            # The LOCAL client's own process group is reaped regardless, so
+            # this call returns promptly - never the container, never a
+            # substitute for the in-container confirmation above.
             try:
                 os.killpg(proc.pid, signal.SIGTERM)
             except (ProcessLookupError, PermissionError, OSError):
@@ -1766,8 +1809,86 @@ class DockerBackend:
 
         return self._finish_result(
             handle, proc, stdout_drain, stderr_drain, stdout_thread, stderr_thread,
-            limits, reason, signal_name=None, term_forwarding=None,
+            limits, reason, signal_name=None, term_forwarding=None, stop_confirmed=stop_confirmed,
         )
+
+    def _read_in_container_pid(self, handle: _Handle, marker_path: str, timeout: float = 2.0) -> int | None:
+        """Polls `docker exec ... cat MARKER` for the pid `exec_in_attempt()`'s
+        wrapped argv writes to its own per-call marker - the marker write
+        happens before the real command even starts, so this should
+        resolve almost immediately; the poll exists only to absorb the
+        unavoidable gap between this process launching and that write
+        landing. `None` on any failure to read a positive integer within
+        `timeout` - never a guess."""
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                proc = subprocess.run(
+                    [*self.docker_bin, "exec", "--", handle.name, "cat", marker_path],
+                    capture_output=True, env=handle.env, timeout=self.daemon_timeout, check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                proc = None
+            if proc is not None and proc.returncode == 0:
+                text = proc.stdout.decode("utf-8", errors="replace").strip()
+                if text.isdigit():
+                    return int(text)
+            if time.monotonic() >= deadline:
+                return None
+            time.sleep(0.02)
+
+    def _confirm_and_kill_in_container(self, handle: _Handle, pid: int, grace: float) -> bool:
+        """`kill -TERM` then `kill -KILL` against `pid` INSIDE the
+        container (never the container itself), confirming death via
+        `kill -0` after each - returns `True` only once that confirmation
+        is independently observed, `False` if the process is still alive
+        after escalation or any exec in this sequence could not be
+        reached. Mirrors `_stop()`'s own escalation shape, one level down
+        (a single in-container pid instead of the whole container)."""
+        def _alive() -> bool | None:
+            # True/False only from an EXPLICIT, recognized signal - kill
+            # -0's own exit 0 (alive) or its own "No such process" text
+            # (confirmed dead). Any other nonzero exit (the exec
+            # infrastructure itself failing to even run `kill` - a bad
+            # docker_bin, a daemon that dropped mid-call, an unparseable
+            # error) is None, UNKNOWN - never guessed as either answer.
+            # Mirrors _inspect()'s own discipline: a nonzero exit code
+            # alone conflates "the process is gone" with "I could not ask".
+            try:
+                proc = subprocess.run(
+                    [*self.docker_bin, "exec", "--", handle.name, "kill", "-0", str(pid)],
+                    capture_output=True, env=handle.env, timeout=self.daemon_timeout, check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                return None
+            if proc.returncode == 0:
+                return True
+            if "no such process" in proc.stderr.decode("utf-8", errors="replace").lower():
+                return False
+            return None
+
+        def _signal(sig: str) -> None:
+            try:
+                subprocess.run(
+                    [*self.docker_bin, "exec", "--", handle.name, "kill", f"-{sig}", str(pid)],
+                    capture_output=True, env=handle.env, timeout=self.daemon_timeout, check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+
+        _signal("TERM")
+        deadline = time.monotonic() + grace
+        while time.monotonic() < deadline:
+            if _alive() is False:
+                return True
+            time.sleep(0.02)
+        _signal("KILL")
+        deadline = time.monotonic() + self.daemon_timeout
+        while time.monotonic() < deadline:
+            if _alive() is False:
+                return True
+            time.sleep(0.02)
+        return False
 
     def _kill_container(self, handle: _Handle, sig: str) -> None:
         """`docker kill --signal SIG` against this attempt's own container,

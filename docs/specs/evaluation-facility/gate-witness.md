@@ -77,39 +77,64 @@ bounds only this one call.
 and its join/error/observations-write-back tail with `execute()` (two
 private helpers, `_launch_and_wait`/`_finish_result`, factored out of the
 pre-existing method rather than duplicated) - the ONE thing the two methods
-do differently is what happens to the container afterward. On timeout or
-`cancel()`, `exec_in_attempt()` signals ONLY its own local `docker exec`
-client process's process group (`start_new_session=True` at launch), never
-the container.
+do differently is what happens to the container afterward.
 
-**Owed, named precisely rather than silently assumed solved**: against the
-fake CLI (`tests/fixtures/docker-backend/fake_docker.py`), which runs the
-simulated subject as that local client's own direct child, killing the
-local process genuinely terminates it. Against a REAL daemon, killing the
-local `docker exec` client does NOT reliably terminate the session it
-started inside the container - `execute()`'s own `_stop()` reaches the
-subject only by killing the whole CONTAINER, which `exec_in_attempt()` must
-never do. Closing this for a real daemon needs either `docker exec`'s own
-signal-forwarding behavior investigated, or a second `docker exec
-<container> kill <pid>` call using a PID discovered from inside the
-container - neither implemented here, matching every other real-daemon
-question this feature already defers. `term_forwarding` is always `None` on
-this method's results - not applicable, since it never sends a
-container-level signal for anything to forward.
+**TIMEOUT/CANCEL CONFIRMS THE IN-CONTAINER PROCESS IS DEAD (orchestrator
+ruling on finding 3, codex `code_review`).** A first pass signaled only
+the LOCAL `docker exec` client's own process group - against a real
+daemon this does NOT reliably terminate the session it started inside the
+container, so a timed-out gate could leave an orphaned process still
+mutating the workspace while a rerun (or a different gate) started against
+the same tree, corrupting exactly the facts this witness exists to
+certify. The orchestrator rejected both obvious half-measures - leaving
+the race (a gate rerun could overlap a still-running zombie) and
+over-silencing (one slow gate killing observation of every later gate) -
+in favor of CONFIRMED absence, the same rule `confirm_stopped()`/
+`confirm_absent()` already apply to the whole attempt:
 
-**OPEN RISK, flagged by codex `code_review`, not yet resolved: a timed-out
-or cancelled exec may leave an orphaned remote process still mutating the
-workspace after `exec_in_attempt()` returns.** Because timeout/cancel
-escalation here signals only the LOCAL client (above), a real daemon's
-in-container process could keep running past the point this method reports
-`reason="timeout"` and `_in_flight` is cleared, allowing a rerun (or a
-different gate) to start while the orphaned process is still writing to the
-same tree. `gate_witness.py` does not currently guard against this - it is
-an open question for the orchestrator whether a timeout/cancellation
-should instead mark `channel_unavailable=True` for the rest of the attempt
-(trading "no further gates observed after one timeout" for "never risk a
-race with an orphaned mutator"), rather than allowing further runs. Not
-decided or implemented in this revision.
+- `argv` is wrapped as `sh -c 'echo $$ > MARKER; exec "$@"' sh <argv...>`,
+  so the in-container process reports its OWN pid (surviving the `exec`
+  that replaces the shell with it) to a per-call marker path
+  (`_read_in_container_pid`, polled via a second `docker exec ... cat
+  MARKER`).
+- On timeout or `cancel()`, a THIRD exec (`_confirm_and_kill_in_container`)
+  sends `kill -TERM` to that pid INSIDE the container, polls `kill -0` for
+  `limits.grace`, escalates to `kill -KILL` if still alive, and polls
+  again - never touching the container itself, only this one pid.
+  `kill -0`'s own exit 0 (alive) or its explicit "No such process" text
+  (confirmed dead) are the only two signals trusted; any other nonzero
+  exit (the exec infrastructure itself failing - a bad `docker_bin`, a
+  dropped daemon) is UNKNOWN, never guessed as either answer (mirrors
+  `_inspect()`'s own discipline).
+- `ExecuteResult.stop_confirmed` reports the outcome: `True` only once
+  death is independently confirmed; `False` when the pid was never
+  learned, the kill exec itself could not be reached, or the process
+  survives escalation; `None` for `reason == "exited"` (no kill needed)
+  and for every `execute()` result (not applicable there).
+- `GateWitness` reads `stop_confirmed is False` as `_workspace_integrity_
+  unknown = True` - sticky, and REFUSES every later `run_gate` for the
+  rest of the attempt (`workspace-integrity-unknown`), for ANY declared
+  gate, because a possibly-still-running zombie could be mutating the tree
+  any later gate would measure. Unlike `channel_unavailable`, this never
+  retroactively changes a gate that already completed - its own record
+  stands.
+
+The LOCAL client's own process group is still reaped afterward regardless
+(`start_new_session=True` at launch), so `exec_in_attempt()` itself returns
+promptly rather than waiting on a client whose remote session may outlive
+it. `term_forwarding` is always `None` on this method's results - not
+applicable, since it never sends a container-level signal for anything to
+forward.
+
+**Owed, named precisely rather than silently assumed solved**: this
+three-exec sequence (marker write-back, in-container kill, in-container
+`kill -0` confirmation) is exercised here only against the fake CLI
+(`tests/fixtures/docker-backend/fake_docker.py`, which runs the simulated
+subject as the local client's own direct child and has a real `kill`
+binary to confirm against). A REAL daemon's behavior for this sequence is
+not demonstrated - named as owed, matching every other real-daemon
+question this feature already defers (the real `tree_digest_fn`, the
+#158 forwarding capability check).
 
 **Closed by this revision: the shared `observations` artifact race
 (codex `code_review`).** `exec_in_attempt()` shares `execute()`'s own
@@ -451,6 +476,24 @@ only the record this one now names, with its revised §2 shape.
     proof for the whole redesign: the first draft's `execute()`-based
     approach would have stopped the container (and the primary subject
     with it) at the FIRST gate exec, let alone a rerun.
+13. **Confirmed kill, demonstrated against the real `DockerBackend`.** A
+    gate that times out reports `stop_confirmed=True`, and the attempt's
+    own container (`confirm_stopped()`) is still `NOT_CONFIRMED`-running
+    afterward - the in-container pid died, never the container. Mutation:
+    confirm `_alive()`'s "any nonzero exit = dead" shortcut (the bug this
+    design found in its own first pass) reports `stop_confirmed=True` for
+    an unreachable kill exec that never actually ran.
+14. **Unconfirmed kill makes the attempt refuse every later `run_gate`,
+    without touching already-completed gates.** `_confirm_and_kill_in_
+    container` returns `False` when the kill exec itself cannot be
+    reached (demonstrated with a broken `docker_bin` sharing a real
+    container a working backend already launched). At the witness level,
+    a `stop_confirmed=False` result on gate B, after gate A already
+    completed, refuses a later request for EITHER gate with
+    `workspace-integrity-unknown`, while gate A's own finalized record is
+    untouched. Mutation: remove the `_workspace_integrity_unknown` check
+    (or the flag-setting on `stop_confirmed is False`), confirm a rerun is
+    admitted while the "zombie" is still alive in the fake.
 
 ## 9. What #270/#271 may build on
 

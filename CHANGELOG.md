@@ -64,6 +64,21 @@ and version plan.
     "attempt-not-running"`) or the backend doesn't implement it at all
     (`reason="unsupported"` - `ManagedBackend`'s protocol-version-1 answer
     today; the witness reads this as `channel-unavailable` for every gate).
+    On timeout/cancellation, the in-container process's own pid (read back
+    via a wrapped `echo $$` marker) is killed and its death independently
+    CONFIRMED (`kill -0`) before the call returns - never the container
+    itself. An unconfirmed kill (`ExecuteResult.stop_confirmed=False`)
+    refuses every later `run_gate` for the rest of the attempt
+    (`workspace-integrity-unknown`) without retroactively changing a gate
+    that already completed - a possibly-still-running process could
+    otherwise mutate the tree a later gate would measure.
+  - **A `reason` of `"launch-failed"`/`"attempt-not-running"`/
+    `"unsupported"` is `not-observed`, never `interrupted`/`CONFIRMED`**
+    (cross-model review correction on this redesign): a refused or
+    never-launched exec must not report positive execution evidence - the
+    exact subject-authored-claim problem this witness exists to stop,
+    moved from the subject to a failed launch. The raw run is still
+    recorded for transparency; only the derived coverage is corrected.
   - **`skill-evidence.external_evidence.reconciliation == "contradicting"`
     now requires a citation** (cpp-eval review of #268,
     https://github.com/cooneycw/skillc/issues/269#issuecomment-6009072750):

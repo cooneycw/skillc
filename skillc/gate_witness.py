@@ -133,6 +133,11 @@ class _Run:
     completed_at: float | None = None
     exit_code: int | None = None
     reason: str | None = None
+    #: Orchestrator ruling on finding 3 (codex `code_review`): `None` unless
+    #: `reason` is `"timeout"`/`"operator-cancelled"`; then `True` only once
+    #: the in-container process was independently confirmed dead, `False`
+    #: otherwise - never a guess either way.
+    stop_confirmed: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -145,6 +150,7 @@ class GateRunRecord:
     exit_code: int | None
     reason: str | None
     tree_digest_at_start: str
+    stop_confirmed: bool | None
 
     def to_json(self) -> dict[str, object]:
         return {
@@ -153,6 +159,7 @@ class GateRunRecord:
             "exit_code": self.exit_code,
             "reason": self.reason,
             "tree_digest_at_start": self.tree_digest_at_start,
+            "stop_confirmed": self.stop_confirmed,
         }
 
 
@@ -298,6 +305,15 @@ class GateWitness:
         #: `run_gate` short-circuits instead of calling a backend already
         #: known incapable again (codex `code_review` correction).
         self._backend_unsupported = False
+        #: Set once a timeout/operator-cancellation could NOT be confirmed
+        #: dead in-container (orchestrator ruling on finding 3) - sticky
+        #: for the rest of the attempt. Unlike `channel_unavailable`, this
+        #: does NOT retroactively change any gate's already-finalized
+        #: coverage (a gate that already completed keeps its own record);
+        #: it only REFUSES every later `run_gate`, because a possibly-still-
+        #: running zombie could be mutating the tree any later gate would
+        #: measure.
+        self._workspace_integrity_unknown = False
         #: Set by a caller whose channel never became reachable at all for
         #: this attempt (design doc §5's `channel-unavailable`, distinct
         #: from `not-observed` - nothing could have been witnessed, not
@@ -317,6 +333,17 @@ class GateWitness:
             # source of truth for what may be run at all.
             raise ChannelRefusal(f"run_gate: {gate!r} is not a declared gate for this attempt")
         with self._lock:
+            if self._workspace_integrity_unknown:
+                # Orchestrator ruling on finding 3: an earlier timeout or
+                # cancellation could not be confirmed dead in-container - a
+                # possibly-still-running zombie could be mutating the tree
+                # ANY further gate would measure. Refuse every later
+                # run_gate for the rest of the attempt; gates that already
+                # completed keep their own records unchanged.
+                raise ChannelRefusal(
+                    f"run_gate: {gate!r} refused - workspace-integrity-unknown "
+                    "(an earlier timeout/cancellation was not confirmed stopped)"
+                )
             if self._in_flight[gate]:
                 # Red case 2: a CONCURRENT duplicate (the same gate, still
                 # executing) is refused. A SEQUENTIAL rerun (the prior run
@@ -381,10 +408,18 @@ class GateWitness:
                     stdout = ""
                 else:
                     stdout = _read_observations(self._backend, self._handle, self._reply_byte_cap)
+                    if result.stop_confirmed is False:
+                        # Orchestrator ruling on finding 3: cannot confirm
+                        # the in-container process is dead - sticky,
+                        # attempt-wide, and NEVER retroactive (see the
+                        # flag's own docstring).
+                        with self._lock:
+                            self._workspace_integrity_unknown = True
         with self._lock:
             run.completed_at = time.time()
             run.exit_code = result.exit_code
             run.reason = result.reason
+            run.stop_confirmed = result.stop_confirmed
             self._in_flight[gate] = False
         return {
             "accepted": True,
@@ -419,6 +454,7 @@ class GateWitness:
                         requested_at=r.requested_at, completed_at=r.completed_at,
                         exit_code=r.exit_code, reason=r.reason,
                         tree_digest_at_start=r.tree_digest_at_start,
+                        stop_confirmed=r.stop_confirmed,
                     )
                     for r in runs
                 )

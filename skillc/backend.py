@@ -237,6 +237,18 @@ class ExecuteResult:
     stderr_incomplete: bool = False
     term_forwarding: str | None = None
     observations_capture: str | None = None
+    #: Set only by `exec_in_attempt()` (#269 orchestrator ruling on finding
+    #: 3), and only when `reason` is `"timeout"` or `"operator-cancelled"` -
+    #: `None` for every other reason, including `execute()`'s own results
+    #: (not applicable: `execute()` stops the whole container, which needs
+    #: no PID-level confirmation). `True` means the in-container process
+    #: this exec started was independently confirmed dead (`kill -0`
+    #: failing) before this call returned. `False` means it could NOT be
+    #: confirmed dead - the process may still be running and mutating the
+    #: tree it was measuring - and a caller must treat this as a terminal,
+    #: attempt-wide integrity loss: kyle's own lifecycle rule applies here
+    #: too, a terminal state needs CONFIRMED absence, never an assumption.
+    stop_confirmed: bool | None = None
 
 
 @dataclass(frozen=True)
