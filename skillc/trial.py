@@ -457,7 +457,13 @@ def _locked(fn: Callable[Concatenate[Experiment, _P], _R]) -> Callable[Concatena
 
 
 #: Journal entries that carry detail but are not lifecycle events in their own right.
-_DETAIL_EVENTS = ("workspace", "backend-teardown", "backend-identity")
+#: "git-fixture-captured" (#275) is its own name, never "workspace": `cleanup_workspace`
+#: and the other two `event == "workspace"` readers below take the LAST such entry and
+#: index straight into `entry["path"]`/`entry["nonce"]` with no guard, so a git-fixture
+#: capture recorded after a real `allocate_workspace` call on the same attempt would be
+#: picked up as the workspace record and crash with KeyError (confirmed) or, for a
+#: path/nonce-shaped forgery, silently misdirect cleanup.
+_DETAIL_EVENTS = ("workspace", "git-fixture-captured", "backend-teardown", "backend-identity")
 
 
 def _read_object(root: Path, digest: str) -> bytes:

@@ -8,6 +8,12 @@ and version plan.
 
 ## [Unreleased]
 
+- **Disposable git fixtures and attempt-bound facts** (Refs #275). Fresh pinned
+  commits, refs, dirty indexes, preserved files, stashes and a linked sibling
+  worktree are built under isolated git configuration. Capture records separate
+  content identities and per-observation statuses without absolute paths.
+  Synthetic mutation controls cover isolation, loss, drift and unavailable reads.
+
 - **Profile installation and drift receipts** (Refs #266). `skillc profile
   install` validates live source, installs exact bytes and executable modes,
   refuses conflicting destinations, checks supplied tools and verifies the
