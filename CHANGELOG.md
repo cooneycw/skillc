@@ -8,6 +8,12 @@ and version plan.
 
 ## [Unreleased]
 
+- **Profile installation and drift receipts** (Refs #266). `skillc profile
+  install` validates live source, installs exact bytes and executable modes,
+  refuses conflicting destinations, checks supplied tools and verifies the
+  installed population. Synthetic controls exercise consuming paths and drift.
+  Real pinned-helper readiness and cold-container execution remain owed.
+
 - **A controller-owned decide-and-reply channel, and `DockerBackend`'s one
   named mount exception** (Refs #183, PR A of a 4-PR split). A new Unix-
   socket channel where the controller decides, logs, and only then replies

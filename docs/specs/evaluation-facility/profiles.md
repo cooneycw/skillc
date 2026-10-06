@@ -4,7 +4,9 @@
 - Builds on: [materialization.md](materialization.md) (the subject declaration)
 - Vocabulary: [protocol.md section 10.4](protocol.md) (#264) - treatment
   question `product`/`prose`, helper parity, `common`/`treatment` scope
-- Next: #266 installs a validated profile into a disposable home and proves it runs
+- #266: host-filesystem installation, digest receipts and installed drift checks
+  delivered with synthetic consuming-path controls. Cold-container execution
+  (acceptance item 2) remains owed to a Docker-capable run.
 
 ## Why a profile exists
 
@@ -101,7 +103,8 @@ was disabled in turn to confirm its case goes red.
 A home-relative reference is checked against where its dependency installs. A
 `variable-rooted` one (`$SOME_DIR/...`) is checked only for the file existing in
 the dependency: which directory the variable names at run time is the procedure's
-probe order, and #266 observes it.
+probe order. The synthetic #266 control observes its installed consuming path;
+the real pinned helper proof remains owed.
 
 It establishes that, at this revision, the declared closure is closed: every
 reference the patterns can see resolves, every installed file has a digest and
@@ -109,7 +112,8 @@ exactly one destination, and declared mirrors are current.
 
 It does not establish:
 
-- **installation**, or that any helper, library or tool runs - #266;
+- **execution readiness**: installation is checked separately below; the real
+  pinned helper, external package resolution and cold-container proof remain owed;
 - **availability, invocation or outcome** for any client;
 - **parity** for any client profile other than the declared one;
 - **completeness beyond the patterns.** A reference no declared pattern
@@ -128,3 +132,74 @@ different layout, helper home and dependency mix with no code change.
 
 - [cpp-codex-flow-check](../../../evals/subjects/cpp-codex-flow-check/PROFILE.md) -
   CPP's generated Codex `flow-check` skill, targeted, product question.
+
+
+## Host installation (#266)
+
+`skillc profile install PROFILE --repo CHECKOUT --home HOME --out RECEIPT`
+revalidates the live pinned source, preflights all destinations, installs exact
+bytes and modes, and re-reads every installed file before emitting a receipt.
+`--snapshot` substitutes a labelled directory snapshot. The home must already
+exist. Different pre-existing bytes are refused; identical bytes are recorded
+in `preexisting` and their mode is normalized. `--overwrite` replaces only the
+output receipt, never permits overwriting conflicting installed bytes.
+
+The receipt binds the inventory's `installed_surface` digest to an exact file
+list and carries its own canonical SHA-256 digest. Unsupported references and
+client declarations remain explicit. Destinations are home-relative. A relative
+caller-supplied home is recorded verbatim; an absolute home is omitted rather
+than leaking host identity. `verify_installed(inventory, home)` re-reads the full
+population: byte or mode drift is `violated`, missing/unreadable is `unknown`.
+
+Tools are supplied, never installed. Their IDs are looked up literally on PATH.
+Numeric operator-plus-dotted-version constraints (optionally followed by a
+parenthesized explanation) are compared as padded numeric tuples. `any` or no
+constraint accepts a found executable. Missing tools, unsupported constraints
+and failed probes report `unknown` with a reason; mismatches report `violated`.
+This uses the project's satisfied/violated/unknown vocabulary rather than
+introducing a fourth `missing` state. Tool problems remain visible in receipts
+and the CLI summary; file verification failure refuses receipt publication.
+
+The historical real profile uses labels such as `tool-python`, grouped tool
+entries, and external package declarations. These are not bare executable
+names. No mappings or package installations are guessed: literal lookup reports
+unknown/missing, and no real readiness claim follows. Historical pins and
+profile declarations are unchanged. Baseline task readiness requires no profile;
+installation readiness is a separate treatment-specific fact.
+
+The committed `tests/fixtures/profile-install` snapshot and
+`tests/test_profile_install.py` exercise executable preservation, installed
+helper-to-library resolution, missing dependencies, version mismatch, a fake
+operator-home decoy, conflicts, identical files and subsequent drift/deletion.
+Host tests do not contain absolute reads, inherited secrets, PATH binaries or
+external caches. They do not satisfy the cold-container acceptance item.
+
+## Human-only real-pin proof owed (not wired into tests)
+
+The following is documented intent, not an automated test or an isolation claim.
+Use the already available checkout at the subject's historical pin, a disposable
+home, a tiny project with declared gate inputs, and a separate fake operator
+home. Never seed the operator's actual home. Place distinctive decoys at the
+fake home's `.claude/scripts/flow-finish-gate.sh` and
+`Projects/claude-power-pack` paths. Record observed consuming paths and limits.
+
+```text
+skillc profile install evals/subjects/cpp-codex-flow-check/profile.json \
+    --repo <claude-power-pack checkout> --home <disposable dir> \
+    --out evidence/install-receipt.json
+
+env -i HOME=<disposable dir> PATH=<minimal tool PATH> \
+    uv sync --locked --project <disposable dir>/Projects/claude-power-pack
+
+env -i HOME=<disposable dir> PATH=<minimal tool PATH> \
+    CPP_DIR=<disposable dir>/Projects/claude-power-pack \
+    bash -c 'cd "<tiny fixture project>" && exec "$HOME/.claude/scripts/flow-finish-gate.sh"'
+```
+
+Exact gate arguments and project inputs must be confirmed against the pinned
+helper by the human operator. This host procedure, even with `env -i`, cannot
+prove that the helper avoids absolute operator-home reads. strace is unavailable
+in the implementation environment. A separate cold-container run with no
+operator skill, home, MCP, or secret mounts is still required for acceptance item 2.
+Locked package resolution requires external access or a prefilled cache; neither
+is supplied by this installer. No real pinned-revision proof has run here.
