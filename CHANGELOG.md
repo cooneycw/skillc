@@ -37,6 +37,15 @@ and version plan.
     from a marker the primary writes itself, never via `ps`/`procps`,
     which `python:3.12-slim` deliberately lacks (a second codex finding
     against the same first draft).
+  - The primary's progress counter is published via a temp-file-then-
+    `os.replace()` swap, not a direct truncating `open(path, "w")` - a
+    second, re-review codex:code_review finding against this test's own
+    fix round: a `docker exec cat` landing between the primary's own
+    truncate and write could read an empty file, and the counter reader
+    turned that into a spurious zero indistinguishable from "never
+    ticked." `os.replace()` on the same filesystem is atomic, so a
+    concurrent reader sees either the whole prior value or the whole new
+    one, never a truncated in-between.
   - Plan reviewed and approved on issue #269 (comment 6023059101) before
     any code was written.
   - Written and reviewed WITHOUT ever running it against a real daemon -

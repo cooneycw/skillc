@@ -158,6 +158,13 @@ def _primary_script() -> str:
     `kill-wrong-pid` setup that depended on `ps` would fail before either
     gate even ran, satisfying `xfail(strict=True)` on a missing tool, not
     on the intended mistargeted-kill behavior)."""
+    # The counter is published via a temp-file-then-os.replace() swap, not a
+    # direct truncating open("w") - codex:code_review finding: a `docker exec
+    # cat` landing between this script's own truncate and write would read
+    # an empty file, and `_read_counter()` turns that into a spurious zero
+    # indistinguishable from "never ticked". `os.replace()` on the same
+    # filesystem is atomic, so a concurrent reader sees either the whole
+    # prior value or the whole new one, never a truncated in-between.
     return (
         "import os, time\n"
         f"with open({PRIMARY_PID_MARKER!r}, 'w') as f:\n"
@@ -165,8 +172,10 @@ def _primary_script() -> str:
         f"with open({PRIMARY_MARKER!r}, 'w') as f:\n"
         "    f.write('primary-is-here')\n"
         f"for i in range(1, {PRIMARY_DURATION_SECONDS} + 1):\n"
-        f"    with open({PRIMARY_COUNTER!r}, 'w') as f:\n"
+        f"    tmp = {PRIMARY_COUNTER!r} + '.tmp'\n"
+        "    with open(tmp, 'w') as f:\n"
         "        f.write(str(i))\n"
+        f"    os.replace(tmp, {PRIMARY_COUNTER!r})\n"
         "    time.sleep(1)\n"
     )
 
