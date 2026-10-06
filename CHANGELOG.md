@@ -8,6 +8,17 @@ and version plan.
 
 ## [Unreleased]
 
+- **Profile installation and drift receipts** (Refs #266). `skillc profile
+  install` validates live source, installs exact bytes and executable modes,
+  refuses conflicting destinations, checks supplied tools and verifies the
+  installed population. Synthetic controls exercise consuming paths and drift.
+  The real pinned flow-check profile was installed by hand from a genuine
+  GitHub clone (evidence: `evals/subjects/cpp-codex-flow-check/evidence/
+  install-receipt.json`): the installed library imports cleanly and the real
+  `flow-finish-gate.sh` runner ran against a tiny project under a scrubbed
+  environment, with a fake-operator-home decoy proven (both directions)
+  never read. Cold-container execution (acceptance item 2) remains owed.
+
 - **A controller-owned decide-and-reply channel, and `DockerBackend`'s one
   named mount exception** (Refs #183, PR A of a 4-PR split). A new Unix-
   socket channel where the controller decides, logs, and only then replies

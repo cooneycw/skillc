@@ -14,8 +14,8 @@ that closure from the pinned source and either returns a content-addressed
 inventory or refuses with a named reason.
 
 What a valid inventory does NOT establish: that anything was installed, that the
-installed helper runs, or that a client can use it. Installation and readiness
-are a later, separate proof (#266); this module never writes into a home.
+installed helper runs, or that a client can use it. Installation is a separate operation (#266); host installation and drift
+checks do not prove cold-container execution or client readiness.
 
 Generic by construction, like materialize.py: nothing here names a subject. The
 reference patterns, the dependency map and the unsupported list are all data in
@@ -919,3 +919,143 @@ def load_tree(profile: Profile, repo: Path | None, snapshot: Path | None) -> Tre
         return GitTree(repo, profile.subject.revision)
     assert snapshot is not None
     return DirTree(snapshot)
+
+
+# ------------------------------------------------------------ installation
+
+
+def _install_records(inventory: dict[str, Any]) -> list[dict[str, Any]]:
+    records = [r for group in ("skills", "dependencies")
+               for entry in inventory[group] for r in entry["files"]]
+    if not records:
+        raise Refused("empty installation population")
+    return sorted(records, key=lambda r: r["destination"])
+
+
+def _installed_target(home: Path, destination: str) -> Path:
+    if m._escapes(destination) or destination in ("", "."):
+        raise Refused(f"unsafe destination: {destination}")
+    target = home / destination
+    # Refuse links even when they happen to resolve inside the home. Installation
+    # must never borrow a linked host file or write through a linked parent.
+    for part in (target, *target.parents):
+        if part == home:
+            break
+        if part.is_symlink():
+            raise Refused(f"symlink at destination: {destination}")
+    return target
+
+
+def _version_matches(actual: tuple[int, ...], constraint: str) -> bool:
+    match = re.fullmatch(r"(>=|<=|==|!=|>|<)\s*(\d+(?:\.\d+)*)(?:\s+\([^\n]*\))?", constraint)
+    if match is None:
+        raise ValueError("unsupported version constraint")
+    expected = tuple(int(n) for n in match[2].split("."))
+    width = max(len(actual), len(expected))
+    actual += (0,) * (width - len(actual))
+    expected += (0,) * (width - len(expected))
+    return {">=": actual >= expected, "<=": actual <= expected,
+            "==": actual == expected, "!=": actual != expected,
+            ">": actual > expected, "<": actual < expected}[match[1]]
+
+
+def _check_tool(dep: dict[str, Any]) -> dict[str, Any]:
+    result = {"id": dep["id"], "constraint": dep["version"], "supply": dep["supply"]}
+    executable = shutil.which(dep["id"])
+    if executable is None:
+        return {**result, "status": "unknown", "reason": "missing on PATH"}
+    constraint = dep["version"]
+    if constraint in (None, "any"):
+        return {**result, "status": "satisfied", "version": None}
+    try:
+        run = subprocess.run([executable, "--version"], capture_output=True,
+                             timeout=10, check=False)
+        match = re.search(rb"\b(\d+(?:\.\d+)+)\b", run.stdout + run.stderr)
+        if run.returncode != 0 or match is None:
+            return {**result, "status": "unknown", "reason": "version probe failed"}
+        version = match[1].decode("ascii")
+        met = _version_matches(tuple(int(n) for n in version.split(".")), constraint)
+        return {**result, "status": "satisfied" if met else "violated", "version": version}
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return {**result, "status": "unknown", "reason": "version probe unavailable or constraint unsupported"}
+
+
+def install(inventory: dict[str, Any], tree: Tree, home: Path) -> dict[str, Any]:
+    """Install a validated closure, preserving bytes and executable modes.
+
+    This host-filesystem operation does not isolate absolute reads, environment,
+    PATH or caches. The cold-container proof remains owed to a Docker-capable
+    environment. Tool IDs are looked up literally, never inferred from labels.
+    Relative caller-supplied home values are recorded verbatim; absolute values
+    are omitted to keep host identities out of receipts. No home is re-derived.
+    """
+    if not home.is_dir() or home.is_symlink():
+        raise Refused("installation home must be an existing directory, not a symlink")
+    staged = []
+    preexisting = []
+    # Preflight the entire population before writing any file.
+    for record in _install_records(inventory):
+        destination = record["destination"]
+        target = _installed_target(home, destination)
+        try:
+            data = tree.read(record["source"])
+            if m.sha256_bytes(data) != record["digest"]:
+                raise Refused(f"source digest changed: {destination}")
+            if record["mode"] not in ("100644", "100755"):
+                raise Refused(f"unsupported mode: {destination}")
+            if target.exists():
+                if not target.is_file() or target.read_bytes() != data:
+                    raise Refused(f"different pre-existing destination: {destination}")
+                preexisting.append(destination)
+            for parent in target.parents:
+                if parent == home:
+                    break
+                if parent.exists() and not parent.is_dir():
+                    raise Refused(f"non-directory parent: {destination}")
+        except OSError as exc:
+            raise Refused(f"installation input unreadable: {destination}") from exc
+        staged.append((record, target, data))
+    for record, target, data in staged:
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if record["destination"] not in preexisting:
+                target.write_bytes(data)
+            target.chmod(0o755 if record["mode"] == "100755" else 0o644)
+        except OSError as exc:
+            raise Refused(f"installation write failed: {record['destination']}") from exc
+    receipt = {
+        "receipt_schema": 1,
+        "home": str(home) if not home.is_absolute() else None,
+        "home_provenance": "caller-supplied; absolute values omitted",
+        "installed_surface": inventory["installed_surface"],
+        "files": [{k: r[k] for k in ("destination", "digest", "mode")} for r, _, _ in staged],
+        "preexisting": preexisting,
+        "tools": [_check_tool(d) for d in inventory["dependencies"] if d["kind"] == "tool"],
+        "unsupported": inventory["unsupported"],
+        "client_profiles": inventory["client_profiles"],
+        "limits": ["host filesystem only; cold-container execution proof owed",
+                   "tool lookup is literal; external packages and grouped labels are not resolved",
+                   "installation does not establish client or baseline task readiness"],
+    }
+    return {**receipt, "digest": m.sha256_bytes(_canonical(receipt))}
+
+
+def verify_installed(inventory: dict[str, Any], home: Path) -> dict[str, Any]:
+    """Re-read the complete installed population; absent files remain UNKNOWN."""
+    results = []
+    for record in _install_records(inventory):
+        destination = record["destination"]
+        result: dict[str, Any] = {"destination": destination}
+        try:
+            target = _installed_target(home, destination)
+            digest = m.sha256_bytes(target.read_bytes())
+            mode = target.stat().st_mode & 0o7777
+            expected_mode = 0o755 if record["mode"] == "100755" else 0o644
+            result.update(digest=digest, mode=oct(mode), status=(
+                "satisfied" if digest == record["digest"] and mode == expected_mode else "violated"))
+        except Refused:
+            result.update(status="violated", reason="unsafe destination")
+        except OSError:
+            result.update(status="unknown", reason="missing or unreadable")
+        results.append(result)
+    return {"installed_surface": inventory["installed_surface"], "files": results}

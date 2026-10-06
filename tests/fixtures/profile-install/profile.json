@@ -1,0 +1,75 @@
+{
+  "profile_schema": 1,
+  "name": "tiny-check",
+  "subject": "subject.json",
+  "select": [
+    "tiny-check"
+  ],
+  "treatment_question": "product",
+  "allowed_destinations": [
+    ".codex/skills",
+    ".helpers",
+    ".library"
+  ],
+  "reference_patterns": [
+    {
+      "name": "home",
+      "class": "home-relative",
+      "pattern": "~/[A-Za-z0-9._/-]*[A-Za-z0-9_-]"
+    }
+  ],
+  "dependencies": [
+    {
+      "id": "tiny-helper",
+      "kind": "helper",
+      "scope": "treatment",
+      "source_root": "helpers",
+      "paths": [
+        "run.sh"
+      ],
+      "destination": ".helpers",
+      "satisfies": [
+        {
+          "reference": "~/.helpers/run.sh",
+          "path": "run.sh"
+        }
+      ]
+    },
+    {
+      "id": "tiny-library",
+      "kind": "library",
+      "scope": "treatment",
+      "source_root": "library",
+      "paths": [
+        "common.sh"
+      ],
+      "destination": ".library",
+      "satisfies": [
+        {
+          "reference": "~/.library/common.sh",
+          "path": "common.sh"
+        }
+      ]
+    },
+    {
+      "id": "python3",
+      "kind": "tool",
+      "scope": "common",
+      "version": ">=3.0",
+      "supply": "environment",
+      "unreferenced_reason": "interpreter command word"
+    }
+  ],
+  "unsupported": [],
+  "mirrors": [],
+  "generated_from": [],
+  "declared_empty_kinds": [
+    "startup-context"
+  ],
+  "client_profiles": {
+    "codex": {
+      "status": "declared",
+      "reason": "synthetic subject"
+    }
+  }
+}
