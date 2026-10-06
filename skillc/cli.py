@@ -2175,11 +2175,16 @@ def cmd_profile_diagnose(args: argparse.Namespace) -> int:
 
     Exit 0 whenever a diagnostic report was produced, REGARDLESS of
     `problem_count` - a diagnostic is not a verdict, so its exit code must
-    not be read as one. `problem_count` is the thing to check, and it is
-    printed on its own line precisely so a caller does not have to infer
-    cleanliness from the process exit status. Nonzero only when the profile
-    or subject declaration itself could not even be loaded (a usage-level
-    failure, not a finding this diagnostic exists to report).
+    not be read as one. Nonzero only when the profile or subject declaration
+    itself could not even be loaded (a usage-level failure, not a finding
+    this diagnostic exists to report).
+
+    Check `complete` BEFORE `problem_count` (counter-model review, issue
+    #295): a structural refusal (the source can't be read, a symlink hides a
+    skill's name) stops the walk before any skill is even examined, and
+    reports `complete: false` with `problem_count: 0` - identical to a
+    genuinely clean walk unless `complete` is read first. `problem_count` is
+    only meaningful once `complete` is true.
     """
     try:
         prof = profile.Profile.load(Path(args.profile))
@@ -2202,8 +2207,9 @@ def cmd_profile_diagnose(args: argparse.Namespace) -> int:
         out.write_text(text, encoding="utf-8")
     else:
         sys.stdout.write(text)
+    completion = "complete" if report["complete"] else "INCOMPLETE (structural refusal - problem_count is not meaningful)"
     print(
-        f"skillc: profile {prof.name}: diagnostic (NOT a certification) - "
+        f"skillc: profile {prof.name}: diagnostic (NOT a certification), {completion} - "
         f"{len(report['selection'])} skill(s) selected, {report['problem_count']} problem(s), "
         f"{len(report['structural'])} structural refusal(s) at {report['revision']}",
         file=sys.stderr,

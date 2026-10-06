@@ -227,6 +227,10 @@ def test_a_fully_intact_profile_reports_zero_problems_and_still_validates(tmp_pa
     diag = _diagnose(tmp_path)
     assert diag["problems"] == []
     assert diag["problem_count"] == 0
+    assert diag["complete"] is True, (
+        "a genuinely clean walk - counter-model review (issue #295): this is "
+        "the ONLY shape a zero problem_count may legitimately mean"
+    )
     assert all(s["status"] == "intact" for s in diag["skills"].values())
     assert diag["skills"].keys() == {"skill-a", "skill-b"}
 
@@ -287,18 +291,18 @@ def test_the_root_cause_short_circuit_is_mutation_checked(tmp_path: Path) -> Non
         s.reference: (d, s) for d in prof.dependencies for s in d.satisfies
     }, problems=[])
     dep = next(d for d in prof.dependencies if d.id == "helper-shared")
-    p._source_files(walk, dep, "skill:skill-a")
+    p._source_files(walk, dep)
     assert len(walk.raw) == 1
     assert walk.raw[0]["category"] == "missing-dependency-source"
     # Correct behaviour: a second call for the SAME still-broken dependency
     # adds nothing further - the root's reach (computed from edges, not from
     # this call) already covers whoever asks.
-    p._source_files(walk, dep, "skill:skill-b")
+    p._source_files(walk, dep)
     assert len(walk.raw) == 1, "a second caller must not duplicate the one root cause"
     # MUTATION: drop the "already broken" memory - what the short-circuit's
     # absence looks like.
     walk.broken.clear()
-    p._source_files(walk, dep, "skill:skill-b")
+    p._source_files(walk, dep)
     assert len(walk.raw) == 2
     assert walk.raw[1]["category"] == "missing-dependency-source", (
         "with walk.broken cleared, the SAME root cause is reported a second "
@@ -333,6 +337,11 @@ def test_structural_refusals_are_not_attributed(tmp_path: Path) -> None:
     bad_subject = {**SUBJECT, "skills_root": "nowhere/at/all"}
     diag = _diagnose(tmp_path, subject=bad_subject)
     assert diag["problems"] == []
+    assert diag["problem_count"] == 0
+    assert diag["complete"] is False, (
+        "counter-model review (issue #295): without this, problem_count: 0 "
+        "here is indistinguishable from the genuinely clean case above"
+    )
     assert diag["skills"] == {}
     assert len(diag["structural"]) == 1
     assert "absent from the source" in diag["structural"][0]["detail"]
@@ -491,4 +500,89 @@ def test_compute_reach_needs_more_than_one_pass(tmp_path: Path) -> None:
     assert reach["C"] == {"skill-a"}, (
         "a single, non-repeated sweep would leave this empty - the edge "
         "that supplies it runs after the edge that reads it"
+    )
+
+
+# -------------------------------------- a source file shared by TWO dependencies
+
+
+def test_a_file_shared_by_two_dependencies_attributes_both_reaching_skills(
+    tmp_path: Path,
+) -> None:
+    """Counter-model review finding (issue #295): two DISTINCT dependencies
+    can legitimately declare the same `source_root`/`paths`, carrying the
+    IDENTICAL file to two different destinations under two different ids.
+    `_drain` scans that content only once (`scanned` dedups on path), but a
+    finding inside it must still be attributed to EVERY skill whose closure
+    reaches it through EITHER dependency - not only whichever dependency's
+    queue entry happened to be scanned first.
+    """
+    src = tmp_path / "src"
+    _source(src)
+    _write(src / "pack" / "skills" / "skill-a" / "SKILL.md",
+           "---\nname: skill-a\ndescription: reaches helper-p\n---\nRun `~/.helpers/via-p.sh`.\n")
+    _write(src / "pack" / "skills" / "skill-b" / "SKILL.md",
+           "---\nname: skill-b\ndescription: reaches helper-q\n---\nRun `~/.other/via-q.sh`.\n")
+    # ONE physical file, carried by TWO dependency declarations.
+    _write(src / "tools" / "shared2.sh",
+           "#!/usr/bin/env bash\n# also needs ~/.helpers/never-declared.sh\n", True)
+
+    changes: dict[str, Any] = {
+        "allowed_destinations": [".codex/skills", ".helpers", ".other"],
+        "dependencies": [
+            {"id": "helper-p", "kind": "helper", "scope": "treatment",
+             "source_root": "tools", "paths": ["shared2.sh"], "destination": ".helpers",
+             "satisfies": [{"reference": "~/.helpers/via-p.sh", "path": "shared2.sh"}]},
+            {"id": "helper-q", "kind": "helper", "scope": "treatment",
+             "source_root": "tools", "paths": ["shared2.sh"], "destination": ".other",
+             "satisfies": [{"reference": "~/.other/via-q.sh", "path": "shared2.sh"}]},
+        ],
+    }
+    diag = p.diagnose(_profile(tmp_path, **changes), p.DirTree(src))
+    unresolved = [pr for pr in diag["problems"] if pr["category"] == "unresolved-reference"]
+    assert len(unresolved) == 1, diag["problems"]
+    assert unresolved[0]["skills"] == ["skill-a", "skill-b"], (
+        "the shared file was scanned once, but BOTH dependencies that carry "
+        f"it (and therefore both reaching skills) must be attributed: {diag['problems']}"
+    )
+    assert diag["skills"]["skill-a"]["status"] == "broken"
+    assert diag["skills"]["skill-b"]["status"] == "broken"
+
+
+def test_a_carried_file_in_a_partially_broken_dependency_has_no_cascade(
+    tmp_path: Path,
+) -> None:
+    """Counter-model review finding (issue #295): a dependency declaring
+    `paths: ["present.sh", "missing.sh"]` is broken (missing.sh is absent),
+    but a reference resolving to `present.sh` specifically must NOT be
+    reported at all - that file genuinely IS carried, so it is not a
+    cascade of the OTHER path's absence, and not a finding of its own.
+    """
+    src = tmp_path / "src"
+    _source(src)
+    _write(src / "pack" / "skills" / "skill-a" / "SKILL.md",
+           "---\nname: skill-a\ndescription: d\n---\nUses `~/.helpers/present.sh`.\n")
+    _write(src / "tools" / "present.sh", "#!/usr/bin/env bash\necho present\n", True)
+    # "missing.sh" is deliberately never created.
+
+    changes: dict[str, Any] = {
+        "select": ["skill-a"],
+        "declared_empty_kinds": ["startup-context", "tool", "synthetic", "library"],
+        "dependencies": [
+            {"id": "helper-multi", "kind": "helper", "scope": "treatment",
+             "source_root": "tools", "paths": ["present.sh", "missing.sh"],
+             "destination": ".helpers",
+             "satisfies": [
+                 {"reference": "~/.helpers/present.sh", "path": "present.sh"},
+             ]},
+        ],
+    }
+    diag = p.diagnose(_profile(tmp_path, **changes), p.DirTree(src))
+    categories = [pr["category"] for pr in diag["problems"]]
+    assert "missing-dependency-source" in categories, diag["problems"]
+    assert "missing-dependency-file-cascade" not in categories, (
+        f"present.sh IS carried - this must not read as a cascade: {diag['problems']}"
+    )
+    assert "missing-dependency-file" not in categories, (
+        f"present.sh IS carried - this must not read as a fresh miss either: {diag['problems']}"
     )

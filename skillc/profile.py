@@ -572,12 +572,8 @@ class _Walk:
     #: the sites below raises Refused exactly as before this issue, and
     #: `validate()`'s behaviour is untouched. `diagnose()` supplies a list.
     problems: list[dict[str, Any]] | None = None
-    #: path -> "skill:<name>" (a selected skill's own bundled file) or a
-    #: dependency id (a file reached through that dependency), recorded by
-    #: `_drain` the first time a path is queued. Diagnostic mode only -
-    #: validate() never reads it, so leaving it populated costs nothing there.
-    owner: dict[str, str] = field(default_factory=dict)
-    #: (referencing owner, dependency id) for every successful resolution,
+    #: (referencing owner, dependency id OR "@<path>" path-node) for every
+    #: successful resolution and every queued file, respectively,
     #: in walk order. Attribution is computed from this AFTER the walk fully
     #: drains (`_compute_reach`), never live during it: the shared queue is
     #: FIFO across every selected skill, so a dependency's own files can be
@@ -682,6 +678,12 @@ def diagnose(profile: Profile, tree: Tree) -> dict[str, Any]:
             "revision": tree.revision,
             "selection": [] if profile.select is None else list(profile.select),
             "structural": structural,
+            # `complete: false` and `problem_count: 0` look identical to a
+            # genuinely clean walk unless a caller also reads `structural` -
+            # counter-model review (issue #295): a zero that cannot tell "I
+            # looked and found nothing" from "there was nothing to look at"
+            # is exactly the ambiguity this field exists to remove.
+            "complete": False,
             "skills": {},
             "problems": [],
             "problem_count": 0,
@@ -703,6 +705,7 @@ def diagnose(profile: Profile, tree: Tree) -> dict[str, Any]:
         "revision": tree.revision,
         "selection": selection,
         "structural": structural,
+        "complete": True,
         "skills": by_skill,
         "problems": problems,
         "problem_count": len(problems),
@@ -847,7 +850,7 @@ def _run_walk(profile: Profile, tree: Tree, problems: list[dict[str, Any]] | Non
                 _fail(walk, "unresolved-reference",
                       f"unresolved reference: {u['hit']} (in {u['path']}, {u['klass']}); "
                       f"each needs a dependency that satisfies it or an unsupported entry with a reason",
-                      walk.owner.get(u["path"], ""), in_path=u["path"])
+                      f"@{u['path']}", in_path=u["path"])
 
     dependencies = [_dep_record(walk, dep, installed) for dep in profile.dependencies]
     bundled_parity = _bundled_parity(profile, skills, installed)
@@ -991,9 +994,17 @@ def _drain(walk: _Walk, installed: dict[str, dict[str, object]]) -> None:
     transitive closure."""
     while walk.queue:
         path, owner = walk.queue.pop(0)
-        # First-queued owner wins, same dedup discipline as `scanned`/`visited`
-        # below - diagnostic mode only, validate() never reads `walk.owner`.
-        walk.owner.setdefault(path, owner)
+        # Record EVERY owner that ever reaches this path, not just the
+        # first (counter-model review, issue #295): two distinct
+        # dependencies can legitimately carry the SAME source path (same
+        # `source_root`/`paths`, different ids/destinations), and the
+        # content is only ever SCANNED once (`scanned` below) - but a
+        # finding inside it must still be attributed to every owner that
+        # reaches it, not only whichever happened to be queued first. The
+        # edge is recorded unconditionally, even on a path already scanned,
+        # since recording costs nothing and the attribution gap this closes
+        # has nothing to do with whether the content needs re-scanning.
+        walk.edges.append((owner, f"@{path}"))
         if path in walk.scanned:
             continue
         walk.scanned.add(path)
@@ -1116,7 +1127,7 @@ def _source_path(root: str, name: str) -> str:
     return name if root == "." else posixpath.join(root, name)
 
 
-def _source_files(walk: _Walk, dep: Dependency, owner: str = "") -> list[tuple[str, str]]:
+def _source_files(walk: _Walk, dep: Dependency) -> list[tuple[str, str]]:
     """(repo path, path relative to source root) for every file the dependency
     carries.
 
@@ -1126,8 +1137,7 @@ def _source_files(walk: _Walk, dep: Dependency, owner: str = "") -> list[tuple[s
     EVERY resolution regardless of order (issue #295). A broken dependency
     found by skill-a's reference, then independently reached by skill-b's,
     must attribute BOTH - not skill-a alone because the FIFO queue happened
-    to drain its file first. `owner` is therefore unused for THIS message;
-    it still attributes `_resolve`'s own cascade check (below).
+    to drain its file first.
 
     A second (or third...) call for an ALREADY-broken dependency records
     NOTHING further here - the root problem's reach already covers every
@@ -1150,8 +1160,7 @@ def _source_files(walk: _Walk, dep: Dependency, owner: str = "") -> list[tuple[s
     return out
 
 
-def _visit(walk: _Walk, dep: Dependency, installed: dict[str, dict[str, object]],
-           owner: str = "") -> None:
+def _visit(walk: _Walk, dep: Dependency, installed: dict[str, dict[str, object]]) -> None:
     if dep.id in walk.visited:
         return
     walk.visited.add(dep.id)
@@ -1191,7 +1200,7 @@ def _visit(walk: _Walk, dep: Dependency, installed: dict[str, dict[str, object]]
             "replacement_reason": dep.replacement_reason or None,
         })
         return
-    for repo_path, rel in _source_files(walk, dep, owner):
+    for repo_path, rel in _source_files(walk, dep):
         dest = posixpath.join(dep.destination, rel)
         _claim(walk, installed, dest, _file_record(walk.tree, repo_path, dest, owner=dep.id))
         if dep.traverse:
@@ -1202,7 +1211,13 @@ def _resolve(walk: _Walk, hit: str, path: str, pattern: Pattern,
              installed: dict[str, dict[str, object]]) -> None:
     record: dict[str, object] = {"reference": hit, "in": path, "pattern": pattern.name,
                                  "class": pattern.klass}
-    owner = walk.owner.get(path, "")
+    # The attribution key for everything found in THIS file is the path-node
+    # "@path", never a resolved owner string (counter-model review, issue
+    # #295): two distinct dependencies can carry the identical source path,
+    # and `_drain` records an edge from EVERY one of their owners into
+    # "@path" - `_compute_reach` unions them all, regardless of which was
+    # queued (and therefore scanned) first.
+    owner = f"@{path}"
     if hit in walk.profile.unsupported:
         record.update(status="unsupported", reason=walk.profile.unsupported[hit])
     elif hit in walk.by_reference:
@@ -1213,28 +1228,38 @@ def _resolve(walk: _Walk, hit: str, path: str, pattern: Pattern,
                    f"unsupported")
             _fail(walk, "absolute-unsatisfiable", msg, owner, in_path=path)
             return  # diagnostic mode: _fail collected it; strict mode already raised.
-        _visit(walk, dep, installed, owner)
+        _visit(walk, dep, installed)
         # Recorded regardless of what the rest of this resolution finds -
         # diagnostic mode's attribution (`_compute_reach`) is computed once,
         # after the whole walk drains, from exactly this edge list.
         walk.edges.append((owner, dep.id))
         if sat.path is not None:
             full = sat.path if dep.source_root == "." else posixpath.join(dep.source_root, sat.path)
-            carried = {rp for rp, _ in _source_files(walk, dep, owner)} if dep.kind != "tool" else set()
-            if dep.id in walk.broken:
-                # issue #295 guard-rail 2: THIS reference also needed a file
-                # from a dependency already known broken (by this call or an
-                # earlier one) - a CASCADE of that one root cause, explicitly
-                # marked rather than silently dropped or re-explained.
-                _fail(walk, "missing-dependency-file-cascade",
-                      f"missing {dep.kind} file: {hit} (in {path}) resolves to {full}, which "
-                      f"{dep.id} does not carry - {dep.id} is already known broken",
-                      owner, in_path=path, caused_by=walk.broken[dep.id])
-                return
-            if not any(c == full or c.startswith(full + "/") for c in carried):
-                msg = (f"missing {dep.kind} file: {hit} (in {path}) resolves to {full}, "
-                       f"which {dep.id} does not carry")
-                _fail(walk, "missing-dependency-file", msg, owner, in_path=path)
+            carried = {rp for rp, _ in _source_files(walk, dep)} if dep.kind != "tool" else set()
+            carries_it = any(c == full or c.startswith(full + "/") for c in carried)
+            if not carries_it:
+                # Counter-model review (issue #295): check carriage BEFORE
+                # consulting `walk.broken` - a dependency with MULTIPLE
+                # `paths` entries can be broken on one of them while still
+                # carrying THIS specific file (`paths: ["present.sh",
+                # "missing.sh"]`, resolving "present.sh"). The first cut
+                # reported a cascade for every reference once any part of
+                # the dependency was broken, including ones that resolve
+                # cleanly - a false positive on an unaffected file.
+                if dep.id in walk.broken:
+                    # issue #295 guard-rail 2: THIS reference ALSO needed a
+                    # file from a dependency already known broken (by this
+                    # call or an earlier one) - a CASCADE of that one root
+                    # cause, explicitly marked rather than silently dropped
+                    # or re-explained.
+                    _fail(walk, "missing-dependency-file-cascade",
+                          f"missing {dep.kind} file: {hit} (in {path}) resolves to {full}, which "
+                          f"{dep.id} does not carry - {dep.id} is already known broken",
+                          owner, in_path=path, caused_by=walk.broken[dep.id])
+                else:
+                    msg = (f"missing {dep.kind} file: {hit} (in {path}) resolves to {full}, "
+                           f"which {dep.id} does not carry")
+                    _fail(walk, "missing-dependency-file", msg, owner, in_path=path)
                 return
         resolves_to = (posixpath.join(dep.destination, sat.path)
                        if dep.destination and sat.path else dep.destination)
