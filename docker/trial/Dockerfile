@@ -125,6 +125,18 @@ RUN groupadd --gid 10001 candidate \
 RUN mkdir -p /home/candidate/.claude /home/candidate/.codex \
     && chown -R candidate:candidate /home/candidate
 
+# #183's subject-side client for the decide-and-reply channel - "the
+# required tool" evals/level5/recovery-partial-processing/goal.md tells
+# the subject may become unavailable. Installed root-owned, world-
+# executable (the same convention a system binary under /usr/local/bin
+# already uses, matching SKILLC_WRAP_PATH's own /usr/local/bin/skillc-wrap
+# for the SAME reason: candidate never needs write access to its own
+# tool). The source's own docstring is the contract; this stanza only
+# places it. docker/trial/check_helpers.py proves this line exists
+# without needing a daemon to build the image and check it.
+COPY skillc-disrupt-tool.py /usr/local/bin/skillc-disrupt-tool
+RUN chmod 755 /usr/local/bin/skillc-disrupt-tool
+
 USER candidate
 WORKDIR /work
 

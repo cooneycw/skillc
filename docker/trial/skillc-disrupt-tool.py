@@ -74,9 +74,20 @@ def _ask() -> bool:
         reply = json.loads(line)
     except json.JSONDecodeError as exc:
         raise ValueError(f"reply is not JSON: {exc}") from exc
-    if not isinstance(reply, dict) or reply.get("ok") is not True or not isinstance(reply.get("allow"), bool):
-        raise ValueError(f"reply is not the expected {{'ok': true, 'allow': bool}} shape: {reply!r}")
-    return bool(reply["allow"])
+    # decide_reply_channel.py's _Handler wraps whatever the configured
+    # decide() function returns under a "result" key - the wire-level "ok"
+    # says only whether the CHANNEL accepted the request at all (refused
+    # if the op is unrecognized or malformed), never the decision itself
+    # (found by reading _Handler._handle_admitted() directly, not assumed -
+    # an earlier version of this method checked reply["allow"] at the top
+    # level, which this protocol never populates, so every real exchange
+    # would have returned exit 2 regardless of the actual decision).
+    if not isinstance(reply, dict) or reply.get("ok") is not True:
+        raise ValueError(f"the channel refused this request: {reply!r}")
+    result = reply.get("result")
+    if not isinstance(result, dict) or result.get("allow") not in (True, False):
+        raise ValueError(f"reply's 'result' is not the expected {{'allow': bool}} shape: {reply!r}")
+    return bool(result["allow"])
 
 
 def main(argv: list[str]) -> int:

@@ -8,6 +8,36 @@ and version plan.
 
 ## [Unreleased]
 
+- **The Level 5 subject-side proxy is wired into the trial image** (Refs
+  #183, PR B2). `docker/trial/skillc-disrupt-tool.py` - a one-shot client
+  for #183's decide-and-reply channel, committed unwired in PR B1 - is now
+  baked into `docker/trial/Dockerfile` at `/usr/local/bin/skillc-disrupt-
+  tool`.
+  - `docker/trial/check_helpers.py` (new, no-daemon, same family as
+    `check_pins.py`/`check_interpreters.py`) proves the Dockerfile's own
+    COPY and chmod lines both exist, without needing a Docker daemon.
+  - The proxy's own tests (`tests/test_skillc_disrupt_tool.py`) run it as a
+    real subprocess against a real `DecideReplyChannel`, never a mock of
+    the wire protocol - they caught a real bug before anything else did:
+    the proxy read `reply["allow"]` at the top level, but the channel's
+    `_Handler` wraps `decide()`'s return value under a `"result"` key, so
+    every real exchange would have returned the infrastructure-error exit
+    code (2) regardless of the actual decision. Fixed and mutation-checked.
+  - `evals/level5/recovery-partial-processing/goal.md` now tells the
+    subject to run `skillc-disrupt-tool` before each record and treat a
+    nonzero exit as the tool becoming unavailable - minimal and neutral,
+    naming only the command and exit-code contract. Checked (not assumed)
+    that this doesn't affect certification: `goal.md` is outside
+    `GraderDef.digest()`'s covered files and is never read by this task's
+    deterministic judge, confirmed by re-running `qualify.py` after the
+    edit (`QUALIFY: ok`, unchanged).
+  - `tests/test_trial_image_build_live.py` (new): a real `docker build`
+    under a distinct tag proving the installed binary is present,
+    executable, and runs as `candidate` - skipped (not silently passing)
+    wherever no Docker daemon is reachable, real-daemon execution owed to
+    the docker-ci agent (#315), same framing as #183's own live-channel
+    test.
+
 - **The expanded-instruction lane for the #204 calibration declaration
   (#274).** `lane` (`explicit-contract | matched-outcome | expanded-
   instruction`) joins the declaration schema, defaulting to

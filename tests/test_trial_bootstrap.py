@@ -46,6 +46,16 @@ def _load_check_interpreters():
     return module
 
 
+def _load_check_helpers():
+    spec = importlib.util.spec_from_file_location(
+        "skillc_trial_check_helpers", REPO_ROOT / "docker" / "trial" / "check_helpers.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 # --------------------------------------------------------------------------
 # Pinned CLI versions
 # --------------------------------------------------------------------------
@@ -147,6 +157,60 @@ def test_check_interpreters_reports_an_unparseable_dockerfile():
     check_interpreters = _load_check_interpreters()
     messages = check_interpreters.check_interpreters("FROM scratch\n", {"python3"})
     assert messages and "could not find" in messages[0]
+
+
+# --------------------------------------------------------------------------
+# docker/trial/check_helpers.py: a required helper script must be both
+# COPYed to its installed path and made executable (issue #183 PR B2).
+# --------------------------------------------------------------------------
+
+
+def test_check_helpers_agrees_on_the_real_dockerfile():
+    check_helpers = _load_check_helpers()
+    dockerfile_text = (REPO_ROOT / "docker" / "trial" / "Dockerfile").read_text(encoding="utf-8")
+    assert check_helpers.check_helpers(dockerfile_text) == []
+
+
+def test_check_helpers_reports_a_missing_copy_line():
+    """THE RED CASE: remove the COPY line for a required helper and
+    confirm the check reports it missing, rather than silently passing
+    because the chmod line (which names the same path, not the source
+    file) is still present."""
+    check_helpers = _load_check_helpers()
+    real_text = (REPO_ROOT / "docker" / "trial" / "Dockerfile").read_text(encoding="utf-8")
+    without_copy = real_text.replace(
+        "COPY skillc-disrupt-tool.py /usr/local/bin/skillc-disrupt-tool\n", "",
+    )
+    assert without_copy != real_text
+    messages = check_helpers.check_helpers(without_copy)
+    assert any("skillc-disrupt-tool.py" in m and "COPY" in m for m in messages)
+
+
+def test_check_helpers_reports_a_missing_chmod():
+    """A COPY with no matching chmod leaves the helper non-executable -
+    refused distinctly from a missing COPY, so a reader knows which half
+    is absent."""
+    check_helpers = _load_check_helpers()
+    real_text = (REPO_ROOT / "docker" / "trial" / "Dockerfile").read_text(encoding="utf-8")
+    without_chmod = real_text.replace(
+        "RUN chmod 755 /usr/local/bin/skillc-disrupt-tool\n", "",
+    )
+    assert without_chmod != real_text
+    messages = check_helpers.check_helpers(without_chmod)
+    assert any("never made executable" in m for m in messages)
+
+
+def test_check_helpers_ignores_an_unrelated_helper_not_required_here():
+    """A helper this Dockerfile never claims to install (e.g. the still-
+    HELD skillc-wrap.py, #78) is reported missing if asked for - this
+    check only knows about its OWN required map, never the base image or
+    a different helper's own install path."""
+    check_helpers = _load_check_helpers()
+    dockerfile_text = (REPO_ROOT / "docker" / "trial" / "Dockerfile").read_text(encoding="utf-8")
+    messages = check_helpers.check_helpers(
+        dockerfile_text, {"skillc-wrap.py": "/usr/local/bin/skillc-wrap"},
+    )
+    assert any("skillc-wrap.py" in m for m in messages)
 
 
 # --------------------------------------------------------------------------
