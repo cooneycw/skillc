@@ -558,3 +558,149 @@ def test_account_cell_missing_data_is_never_silently_imputed() -> None:
         rel.account_cell([AR("z", "UNKNOWN", False)])
     with pytest.raises(rel.ReliabilityRefused):
         rel.account_cell([AR("z", "", False)])  # type: ignore[arg-type]
+
+
+# --------------------------------------------------------------- two-arm verdicts (#272)
+# CPP #1084 comment: https://github.com/cooneycw/claude-power-pack/issues/1084#issuecomment-6014163660
+
+def _rule(tolerance: object = 5, alpha: float = 0.05, sidedness: str = "greater") -> rel.TwoArmRule:
+    return rel.TwoArmRule(
+        rule_id="test-rule", alpha=alpha, sidedness=sidedness,
+        tolerance=tolerance,  # type: ignore[arg-type]
+        citation_url="https://example.invalid/fixture-rule",
+    )
+
+
+@pytest.mark.parametrize(
+    "n_per_arm,weaker_passes,min_stronger_passes",
+    [(10, 0, 4), (10, 2, 7), (10, 4, 9), (10, 6, 10), (20, 10, 16), (20, 15, 20)],
+)
+def test_fisher_exact_one_sided_matches_the_owner_rulings_power_table(
+    n_per_arm: int, weaker_passes: int, min_stronger_passes: int
+) -> None:
+    """CPP #1084's own "Power limits (computed exactly)" section: the exact
+    minimum stronger-arm pass count for p < 0.05, given the weaker arm's
+    pass count. Verified at the boundary both directions."""
+    p_below = rel.fisher_exact_one_sided_greater(
+        min_stronger_passes - 1, n_per_arm - (min_stronger_passes - 1), weaker_passes, n_per_arm - weaker_passes
+    ) if min_stronger_passes > 0 else None
+    p_at = rel.fisher_exact_one_sided_greater(
+        min_stronger_passes, n_per_arm - min_stronger_passes, weaker_passes, n_per_arm - weaker_passes
+    )
+    assert p_at < 0.05
+    if p_below is not None:
+        assert p_below >= 0.05
+
+
+def test_fisher_exact_one_sided_hand_computed() -> None:
+    # a=5,b=0 (5/5 pass) vs c=0,d=5 (0/5 pass): P(X>=5 | N=10,K=5,n=5) = 1/C(10,5) = 1/252
+    assert rel.fisher_exact_one_sided_greater(5, 0, 0, 5) == pytest.approx(1 / 252)
+    # identical arms: a=c, b=d -> p must be well above 0.05 (no evidence of a difference)
+    assert rel.fisher_exact_one_sided_greater(5, 5, 5, 5) > 0.5
+
+
+def test_fisher_exact_one_sided_refuses_malformed_counts() -> None:
+    for bad in (-1, 1.5, True):
+        with pytest.raises(rel.ReliabilityRefused):
+            rel.fisher_exact_one_sided_greater(bad, 5, 5, 5)  # type: ignore[arg-type]
+    with pytest.raises(rel.ReliabilityRefused):
+        rel.fisher_exact_one_sided_greater(0, 0, 0, 0)
+
+
+def test_evaluate_discrimination_hand_computed_discriminating() -> None:
+    verdict = rel.evaluate_discrimination(_rule(), 10, 10, 0, 10, certified=True)
+    assert verdict.verdict == "DISCRIMINATING"
+    assert verdict.p_value is not None and verdict.p_value < 0.05
+
+
+def test_evaluate_discrimination_hand_computed_not_shown() -> None:
+    verdict = rel.evaluate_discrimination(_rule(), 5, 10, 5, 10, certified=True)
+    assert verdict.verdict == "NOT_SHOWN"
+    assert verdict.p_value is not None and verdict.p_value >= 0.05
+
+
+def test_evaluate_discrimination_refuses_to_decide_without_a_rule() -> None:
+    """No predeclared rule -> UNKNOWN, never a guess, never a computed p-value."""
+    verdict = rel.evaluate_discrimination(None, 10, 10, 0, 10, certified=True)
+    assert verdict.verdict == "UNKNOWN"
+    assert verdict.p_value is None
+    assert verdict.reason == "no predeclared rule"
+
+
+def test_evaluate_discrimination_without_a_declared_tolerance_is_always_unknown() -> None:
+    """CPP #1084: "a study whose declaration omits [the tolerance] cannot
+    produce a non-UNKNOWN verdict under either rule" - even when every
+    attempt is evaluable and the pair is certified."""
+    verdict = rel.evaluate_discrimination(_rule(tolerance=None), 10, 10, 0, 10, certified=True)
+    assert verdict.verdict == "UNKNOWN"
+    assert verdict.p_value is None
+    assert "tolerance" in (verdict.reason or "")
+
+
+def test_evaluate_discrimination_below_tolerance_is_unknown() -> None:
+    verdict = rel.evaluate_discrimination(_rule(tolerance=10), 10, 9, 0, 9, certified=True)
+    assert verdict.verdict == "UNKNOWN"
+    assert verdict.p_value is None
+
+
+def test_evaluate_discrimination_uncertified_pairing_is_unknown() -> None:
+    verdict = rel.evaluate_discrimination(_rule(), 10, 10, 0, 10, certified=False)
+    assert verdict.verdict == "UNKNOWN"
+    assert verdict.p_value is None
+    assert "certified" in (verdict.reason or "")
+
+
+def test_two_arm_rule_refuses_an_out_of_range_alpha() -> None:
+    """Codex review, #272: an unchecked `alpha=2` is not a significance
+    level - `p < alpha` is vacuously true for any p in [0, 1], so every
+    pair would report an affirmative verdict regardless of the data."""
+    for bad_alpha in (0.0, 1.0, 2.0, -0.05, float("nan"), float("inf"), True):
+        with pytest.raises(rel.ReliabilityRefused):
+            _rule(alpha=bad_alpha)
+
+
+def test_two_arm_rule_refuses_a_zero_or_negative_tolerance() -> None:
+    """Codex review, #272: `tolerance=0` imposes NO floor at all -
+    `arm_evaluable < tolerance` is vacuously false for `arm_evaluable=0` -
+    so `evaluate_two_arm_rule` could report a verdict computed from zero
+    evaluable attempts in an arm. `None` (the declared-omission sentinel)
+    must still be accepted."""
+    for bad_tolerance in (0, -1, True):
+        with pytest.raises(rel.ReliabilityRefused):
+            _rule(tolerance=bad_tolerance)
+    _rule(tolerance=None)  # the declared-omission sentinel - not a refusal
+
+
+def test_two_arm_rule_validation_closes_the_zero_evaluable_affirmative_verdict() -> None:
+    """The concrete Codex-reported scenario: alpha=2, tolerance=0, and a
+    zero-evaluable arm1 used to report DISCRIMINATING from Fisher's
+    degenerate p=1.0 (`1.0 < 2` is True). Constructing the rule at all now
+    refuses before any verdict is computed."""
+    with pytest.raises(rel.ReliabilityRefused):
+        rel.TwoArmRule(
+            rule_id="bad", alpha=2, sidedness="greater", tolerance=0,
+            citation_url="https://example.invalid/bad-rule",
+        )
+
+
+def test_evaluate_discrimination_refuses_a_non_greater_sidedness() -> None:
+    with pytest.raises(rel.ReliabilityRefused):
+        rel.evaluate_discrimination(_rule(sidedness="two-sided"), 10, 10, 0, 10, certified=True)
+
+
+def test_evaluate_improvement_hand_computed() -> None:
+    improved = rel.evaluate_improvement(_rule(), 10, 10, 0, 10)
+    assert improved.verdict == "IMPROVED"
+    not_shown = rel.evaluate_improvement(_rule(), 5, 10, 5, 10)
+    assert not_shown.verdict == "NO_IMPROVEMENT_SHOWN"
+
+
+def test_evaluate_improvement_without_a_rule_is_unknown() -> None:
+    verdict = rel.evaluate_improvement(None, 10, 10, 0, 10)
+    assert verdict.verdict == "UNKNOWN"
+
+
+def test_discrimination_and_improvement_use_distinct_verdict_vocabularies() -> None:
+    assert rel.DISCRIMINATION_VERDICTS == ("DISCRIMINATING", "NOT_SHOWN", "UNKNOWN")
+    assert rel.IMPROVEMENT_VERDICTS == ("IMPROVED", "NO_IMPROVEMENT_SHOWN", "UNKNOWN")
+    assert set(rel.DISCRIMINATION_VERDICTS[:2]).isdisjoint(rel.IMPROVEMENT_VERDICTS[:2])

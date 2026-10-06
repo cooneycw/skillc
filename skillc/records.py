@@ -34,7 +34,7 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -152,6 +152,57 @@ SKILL_EVIDENCE_CONTRADICTING_REASONS = (
     "stale-identity",
     "exit-code-mismatch",
     "tree-mismatch",
+)
+
+#: `external_evidence.reason` when `reconciliation == "unmatched"` (#272 scope
+#: addition, issue #272's own comment). Closed the same way #269 closed
+#: "contradicting"'s reason: a free-text excuse is refused, and each value is
+#: cross-checked against a fact skillc itself can establish WITHOUT decoding
+#: the external payload - `_skill_evidence_binding` never reads the bytes
+#: behind `artifact_ref.digest`, only compares digests and attempt ids
+#: skillc's own records already carry:
+#: - `duplicate-invocation`: this entry's `artifact_ref.digest` is ALSO cited
+#:   by another `skill-evidence` entry anywhere in the bundle - one piece of
+#:   external evidence credited more than once. Detected by digest equality
+#:   across skillc's own citations, never by reading inside the cited file
+#:   for a duplicated id. The cited digest must STILL be captured SOMEWHERE
+#:   in this attempt's own manifest - the altered-artifact check (below) is
+#:   not skipped for this reason, only for `no-correlating-attempt` (narrowly,
+#:   not for every `unmatched` record): two entries citing one digest nothing
+#:   ever captured is not "duplicate use of real evidence", it is two forged
+#:   claims, and `duplicate-invocation`'s own citation-count check cannot see
+#:   that by itself (caught in review before this shipped, #272 - widening
+#:   the skip to all of `unmatched` let exactly this through).
+#: - `no-correlating-attempt`: this entry's `artifact_ref.digest` was not
+#:   captured by THIS attempt's own manifest. `unmatched` with this reason is
+#:   the HONEST report of non-correlation - it is not the same claim
+#:   `matched`/`contradicting` make (that the evidence DOES bind to this
+#:   attempt), so it is not an altered artifact either: the altered-artifact
+#:   check (below) is gated to skip exactly `reconciliation == "unmatched"
+#:   and reason == "no-correlating-attempt"` - not every `unmatched` record,
+#:   which would also quietly exempt a mislabeled `duplicate-invocation` from
+#:   ever having to name real captured bytes. R9 (records.md, "reconciliation
+#:   states") already describes `unmatched` as "present, but does not bind to
+#:   any controller-captured attempt" rather than as a forged claim; this is
+#:   that description, scoped to the one reason it actually describes.
+#: Each reason is refused when the fact it claims does not hold, exactly as a
+#: `contradicting` record is refused without a real `witness_ref` - a label
+#: is a claim skillc checks, never a free pass.
+#:
+#: `declared-skill-not-installed` (records.md's Q3 answer) is deliberately
+#: NOT a value here yet. Its Q3 answer describes a CPP usage record's own
+#: self-declared skill name disagreeing with installed paths - a fact about
+#: a field `external_evidence` does not carry today (only `source`,
+#: `artifact_ref`, `reconciliation`, `reason`). Reusing the entry's own
+#: top-level `skill.path` for this does not work: the existing unconditional
+#: check above refuses ANY entry whose `skill.path` is not installed,
+#: regardless of reconciliation or reason, so a `skill-evidence` entry can
+#: never legitimately carry an uninstalled `skill.path` in the first place -
+#: there is no "good" bundle this reason could describe without a new field,
+#: and adding one is a decision this module should not make unilaterally.
+SKILL_EVIDENCE_UNMATCHED_REASONS = (
+    "duplicate-invocation",
+    "no-correlating-attempt",
 )
 
 #: `external_evidence.source` (#268) must be a well-formed `<namespace>/v<N>`
@@ -1520,6 +1571,11 @@ def skill_evidence(record: Record) -> Iterator[str]:
                     f"{{ref, digest}} witness_ref - a contradiction with nothing independently "
                     f"observed behind it is an unwitnessed claim, not a decided one"
                 )
+        if reconciliation == "unmatched" and external.get("reason") not in SKILL_EVIDENCE_UNMATCHED_REASONS:
+            yield (
+                f"{where}: external_evidence.reconciliation is 'unmatched' but reason "
+                f"{external.get('reason')!r} is not one of {list(SKILL_EVIDENCE_UNMATCHED_REASONS)}"
+            )
         if present:
             source = external.get("source")
             if not isinstance(source, str) or not EXTERNAL_EVIDENCE_SOURCE_RE.fullmatch(source):
@@ -1634,6 +1690,8 @@ def _skill_evidence_binding(
     criteria: dict[str, set[object]] | None,
     captured: set[str] | None,
     declared_sources: list[str],
+    digest_citation_count: Mapping[str, int] | None = None,
+    receipt_identity: str | None = None,
 ) -> Iterator[str]:
     """`skill-evidence` (#268) cross-checked against the OTHER records of its
     own attempt and trial - the things a lone `skill-evidence` record cannot
@@ -1646,7 +1704,14 @@ def _skill_evidence_binding(
       `verified-result`(s) actually recorded for that id: a copy that matches
       NONE of them is a **forged status** - the "Forged status" golden case.
     - `external_evidence.artifact_ref.digest` against the manifest's captured
-      digests: one that was never captured is an **altered** artifact.
+      digests: one that was never captured is an **altered** artifact -
+      UNLESS `reconciliation` is `unmatched` AND `reason` is
+      `no-correlating-attempt`, which is already the honest report that this
+      digest does not correlate to this attempt's own capture, not a forged
+      claim that it does (R9, records.md). The skip is NOT any `unmatched`
+      record: `duplicate-invocation` still has to name a digest captured
+      somewhere, or two forged citations of nothing would read as "duplicate
+      use of real evidence" instead of two altered artifacts.
     - `external_evidence.witness_ref.digest` (#269 scope addition), when
       `reconciliation == "contradicting"`, against the same captured digests:
       one that was never captured is an **unwitnessed** contradiction - the
@@ -1660,6 +1725,18 @@ def _skill_evidence_binding(
       trial that declares no sources at all is held to exactly the same
       refusal as one that declared others but not this one - "I didn't say"
       and "I said no" both mean nothing here is accepted.
+    - `reason` (#272 scope addition), when `reconciliation == "unmatched"`:
+      each of `SKILL_EVIDENCE_UNMATCHED_REASONS` is a claim skillc itself can
+      check from its own records, never a free pass. NONE of these checks
+      read the bytes behind `artifact_ref.digest` - they compare digests and
+      attempt ids skillc already recorded.
+      - `duplicate-invocation`: refused unless `digest_citation_count` (built
+        bundle-wide over every `skill-evidence` record) shows this digest
+        cited more than once.
+      - `no-correlating-attempt`: refused unless the cited digest is genuinely
+        absent from `captured` (this attempt's own manifest) - the same fact
+        that would otherwise be an altered artifact, honestly labeled instead
+        of forged as a match.
 
     No receipt, no result or no manifest at all for this attempt is NOT this
     rule's finding - that gap belongs to `attempt_accounting`, the same
@@ -1674,7 +1751,8 @@ def _skill_evidence_binding(
         e_where = f"{where} skills[{index}]"
         skill = entry.get("skill")
         path = skill.get("path") if isinstance(skill, dict) else None
-        if installed is not None and isinstance(path, str) and path and path not in installed:
+        not_installed = installed is not None and isinstance(path, str) and path and path not in installed
+        if not_installed:
             yield f"{e_where}: names {path!r}, which this attempt's installation receipt never installed"
 
         if criteria is not None:
@@ -1694,36 +1772,94 @@ def _skill_evidence_binding(
                         f"attempt's verified-result never recorded that outcome for it - a forged status"
                     )
 
-        if captured is not None:
-            external = entry.get("external_evidence")
-            if isinstance(external, dict) and external.get("present") is True:
-                ref = external.get("artifact_ref")
-                digest = ref.get("digest") if isinstance(ref, dict) else None
-                if isinstance(digest, str) and digest and digest not in captured:
-                    yield (
-                        f"{e_where}: external_evidence.artifact_ref cites {digest!r}, "
-                        f"which no manifest for this attempt captured - an altered artifact"
-                    )
-                source = external.get("source")
-                if (
-                    isinstance(source, str)
-                    and EXTERNAL_EVIDENCE_SOURCE_RE.fullmatch(source)
-                    and source not in declared_sources
-                ):
-                    yield (
-                        f"{e_where}: external_evidence.source {source!r} is well-formed but this "
-                        f"attempt's trial does not declare it in external_evidence_sources - "
-                        f"undeclared, an unknown schema"
-                    )
-                if external.get("reconciliation") == "contradicting":
-                    # #269 scope addition: mirrors the artifact_ref check above
-                    # for the SAME reason - `skill_evidence()` only checks
-                    # witness_ref is SHAPED correctly; whether the digest it
-                    # names was ever actually captured is a cross-record fact
-                    # no lone record can establish for itself.
-                    witness_ref = external.get("witness_ref")
-                    w_digest = witness_ref.get("digest") if isinstance(witness_ref, dict) else None
-                    if isinstance(w_digest, str) and w_digest and w_digest not in captured:
+        external = entry.get("external_evidence")
+        reason = external.get("reason") if isinstance(external, dict) else None
+
+        if captured is not None and isinstance(external, dict) and external.get("present") is True:
+            ref = external.get("artifact_ref")
+            digest = ref.get("digest") if isinstance(ref, dict) else None
+            reconciliation = external.get("reconciliation")
+            not_captured_here = isinstance(digest, str) and digest and digest not in captured
+            if not_captured_here and not (reconciliation == "unmatched" and reason == "no-correlating-attempt"):
+                yield (
+                    f"{e_where}: external_evidence.artifact_ref cites {digest!r}, "
+                    f"which no manifest for this attempt captured - an altered artifact"
+                )
+            if (
+                reconciliation == "unmatched"
+                and reason == "duplicate-invocation"
+                and isinstance(digest, str)
+                and digest
+                and (digest_citation_count or {}).get(digest, 0) <= 1
+            ):
+                yield (
+                    f"{e_where}: external_evidence.reason is 'duplicate-invocation' but "
+                    f"{digest!r} is cited by no other skill-evidence entry in this bundle - "
+                    f"a mislabeled reason"
+                )
+            if (
+                reconciliation == "unmatched"
+                and reason == "no-correlating-attempt"
+                and isinstance(digest, str)
+                and digest
+                and not not_captured_here
+            ):
+                yield (
+                    f"{e_where}: external_evidence.reason is 'no-correlating-attempt' but "
+                    f"{digest!r} WAS captured by this attempt's own manifest - a mislabeled reason"
+                )
+            source = external.get("source")
+            if (
+                isinstance(source, str)
+                and EXTERNAL_EVIDENCE_SOURCE_RE.fullmatch(source)
+                and source not in declared_sources
+            ):
+                yield (
+                    f"{e_where}: external_evidence.source {source!r} is well-formed but this "
+                    f"attempt's trial does not declare it in external_evidence_sources - "
+                    f"undeclared, an unknown schema"
+                )
+            if reconciliation == "contradicting":
+                # #269 scope addition: mirrors the artifact_ref check above
+                # for the SAME reason - `skill_evidence()` only checks
+                # witness_ref is SHAPED correctly; whether the digest it
+                # names was ever actually captured is a cross-record fact
+                # no lone record can establish for itself.
+                #
+                # #272 scope addition: `stale-identity` is a claim about
+                # this attempt's installed IDENTITY (records.md R9), never
+                # about a gate's execution - so it cites THIS attempt's own
+                # installation-receipt (by `subject.digest`, below), never a
+                # gate-witness artifact. The other three reasons remain
+                # gate-witness citations, unchanged. A citation of the wrong
+                # kind for its own reason is refused explicitly, not merely
+                # by happening not to match - "I cited the wrong witness"
+                # and "I cited nothing real" are different findings.
+                witness_ref = external.get("witness_ref")
+                w_digest = witness_ref.get("digest") if isinstance(witness_ref, dict) else None
+                if isinstance(w_digest, str) and w_digest:
+                    if reason == "stale-identity":
+                        if receipt_identity is None:
+                            yield (
+                                f"{e_where}: external_evidence.reconciliation is 'contradicting' "
+                                f"with reason 'stale-identity', but this attempt has no "
+                                f"installation-receipt for witness_ref to cite"
+                            )
+                        elif w_digest != receipt_identity:
+                            yield (
+                                f"{e_where}: external_evidence.reason is 'stale-identity' but "
+                                f"cites witness_ref {w_digest!r}, which does not match this "
+                                f"attempt's own installation-receipt identity "
+                                f"({receipt_identity!r}) - stale-identity must cite the "
+                                f"receipt, not a gate-witness artifact"
+                            )
+                    elif w_digest == receipt_identity:
+                        yield (
+                            f"{e_where}: external_evidence.reason is {reason!r} but cites "
+                            f"witness_ref {w_digest!r}, this attempt's own installation-receipt "
+                            f"identity - {reason!r} must cite a gate-witness artifact, not the receipt"
+                        )
+                    elif w_digest not in captured:
                         yield (
                             f"{e_where}: external_evidence.reconciliation is 'contradicting' and "
                             f"cites witness_ref {w_digest!r}, which no manifest for this attempt "
@@ -1761,6 +1897,11 @@ def ledger_binding(bundle: Bundle) -> Iterator[str]:
         status**); or cites an `external_evidence.artifact_ref` digest its
         attempt's manifest did not capture (an **altered** artifact, the same
         finding a `verified-result`'s `graded_digests` already gets).
+      - a `skill-evidence` (#272) entry's `external_evidence.reason` of
+        `duplicate-invocation`, when no other entry in the bundle cites the
+        same digest, or `no-correlating-attempt`, when the cited digest WAS
+        captured by this attempt's own manifest - a mislabeled reason,
+        never a free-text excuse standing in for a real check.
     """
     ledgers = bundle.of_kind(TRIAL_LEDGER)
     if len(ledgers) != 1:
@@ -1779,6 +1920,11 @@ def ledger_binding(bundle: Bundle) -> Iterator[str]:
         } if isinstance(artifacts, list) else set()
         captured.setdefault(manifest.attempt_id, set()).update(digests)
     installed_paths: dict[str, set[str]] = {}
+    #: `witness_ref` for `stale-identity` cites THIS attempt's own
+    #: installation-receipt, never a gate-witness artifact (orchestrator
+    #: review, #272) - identified by the receipt's own `subject.digest`,
+    #: already a required field, never a new digest invented for this.
+    receipt_identity: dict[str, str] = {}
     for receipt in bundle.of_kind(INSTALLATION_RECEIPT):
         entries = receipt.data.get("installed")
         paths = {
@@ -1786,6 +1932,10 @@ def ledger_binding(bundle: Bundle) -> Iterator[str]:
             if isinstance(e, dict) and _nonempty_str(e.get("path"))
         } if isinstance(entries, list) else set()
         installed_paths.setdefault(receipt.attempt_id, set()).update(paths)
+        subject = receipt.data.get("subject")
+        subject_digest = subject.get("digest") if isinstance(subject, dict) else None
+        if isinstance(subject_digest, str) and subject_digest:
+            receipt_identity[receipt.attempt_id] = subject_digest
     criteria_by_attempt: dict[str, dict[str, set[object]]] = {}
     for result in bundle.of_kind(VERIFIED_RESULT):
         criteria = result.data.get("criteria")
@@ -1795,6 +1945,26 @@ def ledger_binding(bundle: Bundle) -> Iterator[str]:
         for c in criteria:
             if isinstance(c, dict) and _nonempty_str(c.get("id")):
                 bucket.setdefault(c["id"], set()).add(c.get("outcome"))
+    #: `duplicate-invocation`'s own fact (#272): how many `skill-evidence`
+    #: entries, bundle-wide, cite each digest as their `external_evidence.
+    #: artifact_ref.digest`. A pre-pass, not read inside the per-record loop
+    #: below, because the check for any one entry needs to see every OTHER
+    #: entry's citation too, not just the ones processed so far.
+    digest_citation_count: dict[str, int] = {}
+    for ev in bundle.of_kind(SKILL_EVIDENCE):
+        ev_skills = ev.data.get("skills")
+        if not isinstance(ev_skills, list):
+            continue
+        for entry in ev_skills:
+            if not isinstance(entry, dict):
+                continue
+            external = entry.get("external_evidence")
+            if not isinstance(external, dict) or external.get("present") is not True:
+                continue
+            ref = external.get("artifact_ref")
+            digest = ref.get("digest") if isinstance(ref, dict) else None
+            if isinstance(digest, str) and digest:
+                digest_citation_count[digest] = digest_citation_count.get(digest, 0) + 1
 
     for record in bundle.records:
         if record.kind not in ATTEMPT_BOUND or not record.attempt_id:
@@ -1822,6 +1992,8 @@ def ledger_binding(bundle: Bundle) -> Iterator[str]:
                 criteria_by_attempt.get(record.attempt_id),
                 captured.get(record.attempt_id),
                 declared_sources,
+                digest_citation_count,
+                receipt_identity.get(record.attempt_id),
             )
         if record.kind == INSTALLATION_RECEIPT:
             for ident, keys in (("subject", ("digest",)), ("client", ("name", "version"))):

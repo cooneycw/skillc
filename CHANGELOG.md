@@ -8,6 +8,54 @@ and version plan.
 
 ## [Unreleased]
 
+- **Five Codex cross-model review fixes for #272** (pre-PR review, model
+  `gpt-6.1-sol`). All five mutation-checked.
+  - **[HIGH] `CoverageRow.criteria` silently overwrote a disagreeing
+    attempt's outcome.** Nothing in `records.py` requires two attempts
+    sharing a cell to agree on one criterion - each attempt's
+    `criteria_owned` is checked only against its OWN `verified-result`. Keying
+    the accumulator dict on criterion id alone let whichever attempt was
+    iterated last silently discard an earlier `VIOLATED` with a `SATISFIED`
+    (or the reverse) - a real failure hidden purely by `attempt_ids` order.
+    Now keyed on `(id, outcome, shared)`: a genuine repeat still collapses to
+    one row, but a disagreement surfaces as two rows for the same id,
+    nothing dropped.
+  - **[MEDIUM] `to_text()` never rendered `execution_observed`/
+    `read_observed`.** A row with confirmed skill execution read identically
+    to one where nothing was ever observed - exactly the distinction these
+    two fields exist to carry. Now rendered per row, every count including a
+    0, the same pattern as `outcomes`.
+  - **[MEDIUM] The generic sentinel-coverage test was whole-text, not
+    location-aware.** It could not tell `convenience.tokens`'s own `UNKNOWN`
+    apart from the `UNKNOWN=0` key-name artifact already in `outcomes`, nor
+    tell one row's `reliability` apart from another's - concretely, dropping
+    only `tokens=...` from the convenience line, or dropping one row's
+    `reliability:` line while a different row still rendered a sentinel,
+    both left the old test green (reproduced before fixing: removing
+    `tokens=` left `test_to_text_renders_every_sentinel_value_present_in_
+    the_json` passing). Two new tests check each row's own `reliability`/
+    `convenience` dict against that SAME row's own rendered line, and the
+    `task_clusters` sentinel against its own section - never the whole
+    block or the whole report. The old whole-text test stays as the cheap
+    floor for fields not yet given a scoped check.
+  - **[MEDIUM] `TwoArmRule` accepted an out-of-range `alpha` or a
+    `tolerance` of 0.** `alpha=2` with `tolerance=0` let
+    `evaluate_two_arm_rule` report `DISCRIMINATING` from a Fisher p-value of
+    `1.0` on a ZERO-evaluable arm: `tolerance=0` imposes no floor at all, so
+    `arm_evaluable < tolerance` was vacuously false, and `p < alpha` was
+    vacuously true for any alpha above 1. `TwoArmRule.__post_init__` now
+    validates `alpha` (finite, strictly between 0 and 1, same discipline as
+    `_check_confidence`) and `tolerance` (`None`, or a positive int) at
+    construction.
+  - **[MEDIUM] `reconcile_helper_identity` reported `matched` on partial
+    coverage.** A claimed path with no installed counterpart was silently
+    skipped from the comparison entirely, so an agreeing path alone reported
+    the whole record `matched` - treating an unwitnessed helper as outside
+    the comparison rather than as unknown, contradicting the function's own
+    documented "a path present on only one side is unknown" rule. `matched`
+    is now reserved for every claimed path being comparable AND agreeing;
+    partial coverage is `unknown`/`partial-helper-coverage`.
+
 - **Per-skill profile diagnostic, non-certifying** (Refs #295). `skillc
   profile diagnose` (library: `profile.diagnose`) walks the whole closure and
   reports EVERY unresolved reference, unsatisfied dependency and other
@@ -32,6 +80,141 @@ and version plan.
   - The two-arm study (`published` + `rewritten`, with its Fisher test) is
     unchanged.
 
+- **`to_text()` renders reliability, convenience and task_clusters; the
+  "nothing hidden" test is now generic** (Refs #272 acceptance item 1,
+  orchestrator review). Not a nit after all: the human view omitting
+  `reliability`, `convenience` and `task_clusters` - including their
+  `insufficient`/`not_declared`/`UNKNOWN` states - failed acceptance item
+  1's own "concise human view" requirement, and its docstring's "nothing is
+  summarized away" claim was false. `to_text()` now renders all three per
+  row (reliability's intervals/all_k/pass_at_k, convenience's per-phase
+  totals or `UNKNOWN`) and at report level (`task_clusters`: an interval or
+  `insufficient`), still derived from the same `to_dict()` `to_json`
+  serializes.
+
+  The "nothing hidden" test is now GENERIC rather than enumerating fields:
+  `test_to_text_renders_every_sentinel_value_present_in_the_json` walks
+  `to_dict()` for every string VALUE matching a known sentinel (`UNKNOWN`,
+  `insufficient`, `not_declared`, `not_captured`) and asserts each one
+  found also appears in `to_text()` - a new field carrying one of these
+  sentinels can no longer be silently dropped, without the test needing to
+  know the field exists. Mutation-checked three times, once per renderer
+  (reliability, convenience, task_clusters removed in turn), each going
+  red on a DIFFERENT sentinel - proving the test genuinely depends on all
+  three, not just the first one found. One real trap found and fixed while
+  building this: `CoverageReport.inventory` reports
+  `INVENTORY_NOT_DECLARED` ("not_declared") when no inventory is supplied -
+  the exact same literal string as `reliability`'s own `NOT_DECLARED`
+  sentinel - and `inventory` is always rendered regardless of any row-level
+  renderer, so an undeclared-inventory fixture would have let that
+  collision silently defeat the reliability mutation check; the fixture
+  declares an inventory specifically to avoid it.
+
+  Withdrew the skillc#20 nit comment (edited to record it was fixed here,
+  not left open as a stale pointer to resolved work).
+
+- **Task-cluster bootstrap: a report-level section alongside `case_pairs`**
+  (Refs #272 acceptance item 4, #273). `CoverageReport.task_clusters`
+  (`TaskClusterBootstrap`) groups every row by (skill_path, skill_version,
+  client_name, client_version, arm) - the row key minus `case_id`, so each
+  group spans every TASK (case) in the bundle that shares it - and
+  bootstraps that group's rows' own `reliability.all_k` values via
+  `reliability.task_cluster_bootstrap` directly (never reimplemented).
+  `assemble_coverage_report` gains optional `bootstrap_seed: int | None`
+  and `bootstrap_resamples: int` parameters; without a declared seed,
+  `task_clusters` is empty - the same "no declared input, no section"
+  discipline as `discrimination_rule`/`k`, never a skillc-chosen default
+  seed. A row without a numeric `all_k` (`NOT_DECLARED` or
+  `reliability.INSUFFICIENT`, itself needing `k` declared) contributes no
+  task value but the group still gets an entry, so an all-undeclared-`k`
+  group reports `task_count=0`/`INSUFFICIENT` rather than silently having
+  no entry. Below `reliability.MIN_BOOTSTRAP_TASKS` usable tasks,
+  `all_k_interval` is `reliability.INSUFFICIENT` (the same sentinel, never
+  a second one) - explicit, never a silently omitted group. 4 new tests
+  (the 4-tasks-INSUFFICIENT/5-tasks-an-interval boundary, a byte-identical
+  repeat with the same seed, absence without a declared seed) plus 2
+  mutation checks (the `MIN_BOOTSTRAP_TASKS` boundary off by one; grouping
+  by case instead of across cases), both net-diff-empty after restoration.
+
+- **Row-level convenience: `phase_wall_times` aggregated over a row's
+  attempts** (Refs #272 acceptance item 4, #273). `CoverageRow.convenience`
+  (`RowConvenience`) rolls up #273's `convenience.py` per-attempt proxies to
+  row level: `phase_wall_times` sums seconds per (from_event, to_event)
+  transition across every attempt in the row, with the contributing attempt
+  count kept alongside each sum. Each attempt's own breakdown stays
+  available by reference in `per_attempt`, keyed by the same attempt ids
+  `CoverageRow.evidence` already names, rather than duplicated. The three
+  `NOT_CAPTURED` proxies and the `UNKNOWN` tokens proxy pass through
+  unchanged - there is no per-attempt data for any of them to aggregate.
+  `conv.UNKNOWN` (never an empty tuple) when not one attempt in the row
+  contributed an actual transition - an attempt whose lifecycle has only
+  its `planned` event (a legitimate `not-run`/`never-started` disposition)
+  contributes zero transitions, and if every attempt in the row does, the
+  row has observed zero PHASES, not zero SECONDS; an empty tuple would read
+  as the latter. `records.attempt_lifecycle` only requires each event's
+  `at` to be a non-empty string, not a parseable or chronologically-ordered
+  timestamp - new plumbing coverage.py owns itself, so an unparseable or
+  out-of-order timestamp refuses the whole report (`CoverageRefused`)
+  rather than silently producing a wrong duration, the same
+  refuse-before-reporting discipline as `_refuse_on_invalid_bundle`. 3 new
+  tests (hand-computed aggregate across two attempts, the all-missing-events
+  UNKNOWN case, the unparseable-timestamp refusal) plus 2 mutation checks
+  (disabling the UNKNOWN guard on an all-empty row; swallowing the
+  unparseable-timestamp refusal), both net-diff-empty after restoration.
+
+- **Row-level reliability: `clopper_pearson`/`wilson_score` always computed,
+  `all_k`/`pass_at_k` gated on a declared `k`** (Refs #272 acceptance item
+  4, #273). `assemble_coverage_report()` gains optional `k: int | None` and
+  `confidence: float` parameters, threaded to `_build_row()`, which now
+  attaches a `RowReliability` to every `CoverageRow` (serialized in
+  `to_dict()`/`to_text()`). `clopper_pearson`/`wilson_score` use the row's
+  own `(passes, evaluable)` unconditionally, falling back to
+  `reliability.INSUFFICIENT` only when `evaluable == 0` (no rate to bound,
+  never a crash). `all_k`/`pass_at_k` need a declared `k` - a study
+  parameter, same discipline as `TwoArmRule`'s tolerance, never a skillc
+  constant - and report the new `coverage.NOT_DECLARED` sentinel when `k`
+  is absent, kept deliberately distinct from `reliability.INSUFFICIENT`:
+  no `k` means the question wasn't asked, `n < k` means it was asked and
+  couldn't be answered. 4 new tests (hand-computed values with a declared
+  `k`, the `NOT_DECLARED` case, the `INSUFFICIENT` case for `n < k`, and a
+  zero-evaluable row proven not to crash). Two mutation checks: forcing
+  `all_k`/`pass_at_k` to compute even when `k` is `None` goes red on the
+  `NOT_DECLARED` assertion; forcing `clopper_pearson`/`wilson_score` to
+  compute on a zero-evaluable row raises `ReliabilityRefused` instead of
+  returning `INSUFFICIENT`. Both restored, net diff empty.
+
+- **`CoverageReport.to_text()`: the concise human view** (Refs #272
+  acceptance item 1). Built from `self.to_dict()` - the SAME dict `to_json`
+  serializes, never a second read of `self.rows`/`self.case_pairs` - so the
+  two views cannot drift apart. Every row, every count (including a `0`),
+  every coverage flag, reconciliation count, criterion and case-pair verdict
+  appears; nothing is summarized away, only formatted for reading.
+  Deterministic (same sorted order `to_dict()` already uses). 7 new tests,
+  including one proving the failed-child-under-successful-parent golden
+  case is visible in the text too, and a mutation check (the class's own
+  `to_dict` swapped for one that drops all rows, confirming the human view
+  reports zero rows right along with it - proving a real dependency, not a
+  hardcoded summary).
+
+- **`stale-identity`'s `witness_ref` can cite the installation-receipt**
+  (Refs #269, #272). `#301` made `contradicting` require a `witness_ref`
+  validated only against `artifact-manifest`-captured digests - correct for
+  a gate-execution claim, but `stale-identity` is a claim about installed
+  IDENTITY, which an installation-receipt (never a manifest artifact)
+  cannot satisfy that way. Found while building `evals/subjects/
+  cpp-codex-flow-check/gate_reconciliation.py`'s `reconcile_helper_identity`
+  - closed as reconciliation scope rather than left as a verdict the
+  reconciler could emit and `check-records` would refuse. `ledger_binding`
+  now binds `stale-identity`'s `witness_ref.digest` against this attempt's
+  own `installation-receipt.subject.digest`; every other contradicting
+  reason is unchanged (still a gate-witness artifact citation). Closed both
+  directions with their own committed bad fixture
+  (`skill-evidence-stale-identity-wrong-witness`,
+  `skill-evidence-gate-reason-cites-receipt`) plus a good one
+  (`skill-evidence-stale-identity`), mutation-checked, net diff empty.
+  `reconcile_helper_identity` now returns the receipt citation it resolves,
+  closing the structural gap its own earlier commit had flagged.
+
 - **`uptake-study` screening-probe mode** (Refs #238). An optional `probe`
   block declares a cut-off (20-300 s), which must equal
   `shared.per_attempt_seconds`, so the attempt itself stops there.
@@ -53,6 +236,131 @@ and version plan.
   `evals/description-probe/` holds the owner-approved agreement check:
   #237's three descriptions, 5 per cell, at 45 s, against the full-run
   results. No live run yet.
+
+- **`skillc/coverage.py`: the gate reconciler and discrimination/improvement
+  evaluators wired in** (Refs #269, #272). `coverage.py` never imports
+  `evals/subjects/cpp-codex-flow-check/gate_reconciliation.py` - that would
+  put CPP-specific knowledge back inside `skillc/`, exactly what relocating
+  it there was for.
+  - Every row gains `reconciliation_counts` (`absent`/`unmatched`/
+    `matched`/`contradicting`), exposing whatever a bundle's own
+    `skill-evidence.external_evidence.reconciliation` already records -
+    the reconciler's OUTPUT, never re-decided here.
+  - `CoverageReport.case_pairs`: one `CasePairVerdict` per certified
+    `case.arm` pairing found in the bundle (#273's own `case-pairing`
+    bundle rule already guarantees reciprocity/uniqueness by the time
+    refuse-before-reporting lets a bundle through), computed with
+    `reliability.evaluate_discrimination` - per-arm pass/evaluable counts
+    kept beside the verdict, never replaced by it. No rule supplied still
+    populates every pair, verdict `UNKNOWN`.
+  - `compute_improvement`: a thin passthrough to `reliability.
+    evaluate_improvement` for a caller with its own CPP-vs-baseline
+    (`config.arm`) counts - `config.arm` is not a validated field in
+    `skillc/records.py`, so this module does not invent a discovery
+    convention for it the way it does for `case.arm`.
+  - 9 new tests (28 total in the file), two mutation-checked against the
+    REAL production code (not a stub): disabling the reconciliation-count
+    tally and dropping the intact/degraded arm filter in case-pair
+    discovery each confirmed a known-good fixture's test goes wrong,
+    restored, confirmed correct again, net diff empty.
+  - Rows gain `lineage`/`parent_path`, read from `skill-evidence.
+    invocation.lineage`/`parent_path` - item 3's own "attribute parent/child"
+    acceptance, resolved the same deterministic way as `skill_version`
+    (every attempt under one trial shares one skill-evidence declaration).
+  - Acceptance item 6's named golden case: a hand-built attempt whose own
+    `verified-result` is `PASS`, with a root skill and a child skill it
+    invoked whose OWNED criterion is `VIOLATED`. The child's failure shows
+    on the child's own row; the parent's `PASS` cannot leak into it, because
+    no row carries any per-skill verdict field at all for it to leak into
+    (item 3).
+
+- **Gate reconciler: two more reasons made reachable** (Refs #269, #272).
+  `evals/subjects/cpp-codex-flow-check/gate_reconciliation.py` adds
+  `outcome-disagreement` and `stale-identity`, after confirming both field
+  mappings against actual CPP producer code rather than guessing (the same
+  discipline that ruled out `tree-mismatch`):
+  - `outcome-disagreement`: CPP's `checks[].status == "not-run"` while the
+    witness shows a COMPLETE run of that gate in this attempt - reachable
+    without any attempt/run-count mapping. The reverse (CPP claims it ran,
+    witness shows no confirmed execution) stays `unknown`: only a
+    controller-CONFIRMED observation can contradict a claim, never silence.
+  - `stale-identity` (`reconcile_helper_identity`, RECORD-level, not
+    per-gate): CPP's `observed.helper.module_sha256` against the same
+    attempt's `installation-receipt.installed` digests - both confirmed to
+    be SHA-256 over raw file bytes (`lib/cicd/evidence.py::_sha256` and
+    `skillc/materialize.py::sha256_file`), differing only in a `sha256:`
+    prefix skillc adds. A found structural gap, not resolved here:
+    `witness_ref` has no existing mechanism to cite an installation-receipt
+    (`_skill_evidence_binding` checks it only against `artifact-manifest`
+    digests), so this function always returns `witness_ref: None`.
+  - 10 new tests (31 total in the file), two mutation-checked: both new
+    checks disabled, confirmed blind, restored, confirmed correct again,
+    net diff empty.
+
+- **Discrimination and improvement verdicts: declared one-sided Fisher
+  rules** (Refs #272, the owner's ruling on claude-power-pack #1084
+  comment https://github.com/cooneycw/claude-power-pack/issues/1084#issuecomment-6014163660).
+  `skillc/reliability.py` gains `fisher_exact_one_sided_greater` (exact via
+  `math.comb`/`Fraction`, no scipy, no normal approximation - verified
+  against the owner ruling's own published power table at n=10 and n=20 per
+  arm, all six cases exact) and a shared `evaluate_two_arm_rule` behind
+  `evaluate_discrimination` (DISCRIMINATING/NOT_SHOWN/UNKNOWN, intact vs
+  degraded) and `evaluate_improvement` (IMPROVED/NO_IMPROVEMENT_SHOWN/
+  UNKNOWN, the treatment vs baseline axis) - the same test shape on two
+  different arm pairs, built together since the second was trivial once
+  the first existed.
+  - The rule (`TwoArmRule`: id, alpha, sidedness, tolerance, citation_url)
+    is a DECLARED input, never a constant here - skillc stays
+    subject-agnostic, the same discipline `EXTERNAL_EVIDENCE_SOURCE_RE`
+    already keeps. No rule, no declared tolerance, an uncertified pairing,
+    or evaluable attempts below the declared tolerance all yield UNKNOWN,
+    never a guess - the owner ruling states explicitly that a study whose
+    declaration omits the tolerance "cannot produce a non-UNKNOWN verdict
+    under either rule," and that is its own committed control.
+  - This module never computes the net CPP gate flip (DISCRIMINATING AND
+    IMPROVED on the same certified case and revision) - the ruling is
+    explicit that decision belongs to the consumer, not skillc.
+  - Mutation-checked: the Fisher summation bound (wrong-bound mutation
+    fails 9 of the new tests, including every power-table case) and the
+    no-declared-tolerance guard (disabling it crashes rather than silently
+    computing, confirming the guard is load-bearing) - both restored, net
+    diff empty.
+
+- **A subject-scoped reconciler for `matched`/`contradicting` gate claims**
+  (Refs #269, #272 acceptance item 5). `evals/subjects/cpp-codex-flow-
+  check/gate_reconciliation.py` (loaded by file path, the same pattern
+  `gate_path.py` already uses) compares a CPP usage-record gate claim
+  against the controller's own `gate-witness` record (#269) - the one
+  comparison `skillc/records.py`'s core cannot make without decoding
+  `cpp.execution-evidence/v1`, which records.md's Q4 boundary forbids it
+  from doing.
+  - Field names pinned to `cooneycw/claude-power-pack@5e1de6d848eb29c2b926
+    f2fdf79e8aa375c12c43` (`lib/cicd/evidence.py::check_entry`, the FROZEN
+    `.specify/specs/per-skill-audit/spec.md`, and a stripped golden sample
+    derived from the real committed usage record) - not a guessed mapping.
+  - Only `exit-code-mismatch` is implemented. `outcome-disagreement` and
+    `stale-identity` need an interpretation of CPP's fields this module
+    does not make unilaterally. `tree-mismatch` is CONFIRMED unreachable
+    for this subject: CPP's tree signature is a git `write-tree` content
+    hash, record-level; skillc's own tree digest is a flat SHA-256 over
+    path/mode/content tuples, per-gate-run - two independently authored
+    algorithms with no documented equivalence, never bit-comparable.
+  - A carried-forward claim (resumed from a previous invocation) is always
+    `unknown`, never `contradicting` - this attempt's witness cannot have
+    observed a run from a different invocation. A run-count disagreement
+    between CPP's claimed attempt count and the witness's own run count is
+    likewise `unknown`, never a guessed fifth contradicting reason (`#301`
+    already removed `gate-not-executed` from the vocabulary for the same
+    kind of reason: silence cannot prove non-execution).
+  - A found disagreement, relayed rather than resolved here: CPP's producer
+    code builds a per-check `carried_from_previous_run` boolean, but the
+    real committed sample shows only a record-level
+    `observed.runner.carried_from_previous_run` list - no per-check field
+    at all. This module takes whatever boolean a caller supplies, agnostic
+    to which JSON shape it came from.
+  - 22 tests, two mutation-checked (the carried-forward and run-count
+    guards, each disabled and confirmed blind, restored, confirmed correct
+    again, net diff empty).
 
 - **Bounded synthetic profile files** (Refs #303). Profiles can declare
   non-executable marker text with explicit pinned-file replacement reasons
@@ -137,6 +445,106 @@ and version plan.
     (`SKILL_EVIDENCE_CONTRADICTING_REASONS`). `ledger-binding` cross-checks
     the cited digest was actually captured by the attempt's manifest - the
     same "altered artifact" check `artifact_ref` already gets.
+
+- **`skillc/coverage.py`: per-skill coverage reports from retained bundles**
+  (Refs #272). One row per (skill path, skill version, client, case/task,
+  arm), built from a declared-skill inventory this module reads as a
+  SEPARATE input rather than deriving from the bundle - orchestrator review
+  found `installation-receipt.installed[]` lists every installed file
+  (helpers, libraries, scripts), not just skills under evaluation, and the
+  bundle itself carries no other declaration (`trial-ledger.subject` is a
+  bare digest). Without a `DeclaredInventory`, rows exist only for skills
+  the bundle itself evidences and the report says `inventory: not_declared`
+  rather than guessing. `skill_version` is `installation-receipt.
+  installed[].digest` - always present, this schema's own per-path content
+  identity elsewhere; `skill-evidence.body_digest` was considered and
+  rejected (optional, and records.md's own Q3 answer says it is not
+  cross-checked against anything).
+  - No per-skill PASS/FAIL verdict: `verified-result.status` is
+    ATTEMPT-level, and copying it onto every skill row is exactly
+    "crediting every loaded skill" (acceptance item 3). Each row instead
+    carries the attempt's outcome alongside this skill's own
+    `execution_observed`/`read_observed` lifecycle facts and its OWNED,
+    shared-marked criteria.
+  - `outcomes` (`PASS`/`FAIL`/`NOT_RUN`/`UNAVAILABLE`/`UNKNOWN`) partition
+    `scheduled`; `coverage_flags` (`missing-transcript`,
+    `unmatched-invocation`) are orthogonal and counted separately, never
+    folded into the same denominator.
+  - Refuses before reporting: runs the bundle's own validation rules first
+    and raises `CoverageRefused`, naming the failing rule, rather than
+    trusting a caller validated already - exercised directly against
+    already-committed bad bundles (duplicate citation, forged status,
+    altered artifact).
+  - Reproducible: canonical JSON (sorted keys, sorted rows, no
+    generation timestamp in the body) is byte-identical for a reversed
+    record order. Two profiles sharing one subject digest but different
+    selections record their own `profile_digest` (the same canonical-JSON
+    + sha256 convention `skillc profile validate` already uses), so
+    reproducibility is a property of the (bundle, inventory) pair, never
+    the bundle alone.
+  - A declared inventory's row count is checked two ways: `len(declared
+    skills) * len(cells)`, and row-key uniqueness - the length check alone
+    cannot see a duplicate declared skill, since it inflates both sides of
+    that product equally.
+  - Six new tests mutation-checked: the refusal wrapper (disabled via
+    monkeypatch, confirms a known-bad bundle goes blind), the no-fallback
+    behavior (wired to the wrong source, confirms a helper path wrongly
+    surfaces), and the row-key uniqueness refusal (disabled, confirms a
+    duplicate declared skill goes blind) - each restored and confirmed
+    correct again, net diff empty.
+  - `Profile.select is None` ("full-pack") is not resolved by this module:
+    doing so needs a live checkout of the subject tree (`profile.py`'s own
+    `validate()` materializes one), out of scope for a tool that reads only
+    retained bundles. Callers pass an already-resolved skill list, never a
+    raw `Profile` object. Nit filed on skillc #20: the evaluated selection
+    is not captured in the bundle at all, so a retained bundle cannot
+    reconstruct its own inventory without this external input.
+  - `#273`'s reliability/convenience statistics and CPP #1366 pilot-receipt
+    reconciliation are deliberately not wired into rows yet - a following
+    commit in this PR, per the orchestrator's own sequencing.
+
+- **`skill-evidence`: closes `unmatched`'s own reason vocabulary** (Refs
+  #272's own scope-addition comment, for CPP #1369). R9 (`records.md`)
+  already named `duplicate-invocation` and `no-correlating-attempt` but
+  never enforced them; `skill_evidence()` now refuses any other string once
+  `reconciliation` is `unmatched`, mirroring how #269 closes `contradicting`.
+  Both checks compare digests and attempt ids skillc already recorded -
+  neither reads the bytes behind `artifact_ref.digest`:
+  - `duplicate-invocation`: refused unless the cited digest is ALSO cited by
+    another `skill-evidence` entry anywhere in the bundle (a new bundle-wide
+    citation count in `ledger_binding`).
+  - `no-correlating-attempt`: refused unless the cited digest is genuinely
+    absent from this attempt's own manifest capture - the existing
+    altered-artifact check is gated to skip exactly `reconciliation:
+    "unmatched" AND reason: "no-correlating-attempt"`, since a record with
+    that reason is the honest report that evidence does not correlate, not a
+    forged claim that it does. **Not every `unmatched` record**: a first
+    version skipped the altered-artifact check for all of `unmatched`, which
+    let two entries cite one digest NOTHING captured, label themselves
+    `duplicate-invocation`, and pass - crediting duplicate use of evidence
+    that does not exist. Caught in review before this shipped. Fixed by
+    narrowing the skip to `no-correlating-attempt` only, so
+    `duplicate-invocation` still has to name a digest captured somewhere.
+    New bad fixture `skill-evidence-duplicate-invocation-uncaptured` (two
+    entries, shared uncaptured digest, both labeled `duplicate-invocation`)
+    is refused; mutation-checked by widening the skip back to confirm it
+    goes blind. A new fixture also confirms `matched`/`contradicting` still
+    refuse an uncaptured digest unconditionally
+    (`skill-evidence-altered-artifact-contradicting`).
+  - `declared-skill-not-installed` is deliberately NOT closed: its own Q3
+    answer needs a field `external_evidence` does not carry today, and the
+    entry's own `skill.path` cannot stand in for it (the existing
+    unconditional not-installed check already refuses it regardless of
+    reconciliation) - named as a boundary in `records.md`, not assumed
+    covered.
+  - Golden cases: `controls/ledger-binding/{good,bad}/skill-evidence-
+    duplicate-invocation*` and `skill-evidence-no-correlating-attempt*`
+    (bundle-level), `controls/skill-evidence/{good,bad}/*` (record-level).
+    Each of the three new checks (the vocabulary closure, the
+    duplicate-invocation cross-check, the no-correlating-attempt cross-check
+    and its altered-artifact gate) is mutation-checked: disabled, confirmed
+    blind on its own bad input, restored, confirmed red again, net diff
+    empty.
 
 - **A controller-owned decide-and-reply channel, and `DockerBackend`'s one
   named mount exception** (Refs #183, PR A of a 4-PR split). A new Unix-

@@ -32,6 +32,7 @@ import math
 import random
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from fractions import Fraction
 from statistics import NormalDist
 
 #: The declared default confidence level (protocol.md 10.5: "95% two-sided").
@@ -623,4 +624,161 @@ def account_cell(attempts: Sequence[AttemptRecord]) -> CellAccounting:
     return CellAccounting(
         scheduled=scheduled, started=started, evaluable=len(evaluable_ids), c=c,
         coverage=coverage, evaluable_ids=tuple(evaluable_ids),
+    )
+
+
+# --------------------------------------------------------------- two-arm verdicts
+# (issue #272: the owner ruling on "discrimination" and "improvement",
+# CPP #1084 comment https://github.com/cooneycw/claude-power-pack/issues/1084#issuecomment-6014163660)
+
+#: DISCRIMINATING/NOT_SHOWN/UNKNOWN (rule 1, the comment's own section 1) and
+#: IMPROVED/NO_IMPROVEMENT_SHOWN/UNKNOWN (rule 2, section 2) are the SAME
+#: one-sided Fisher shape over a different pair of arms - intact/degraded
+#: (case.arm, #273) for discrimination, CPP/baseline (config.arm) for
+#: improvement. Both are (positive, negative, unknown) label triples for
+#: the one shared evaluator below, never two separate implementations of
+#: the same test.
+DISCRIMINATION_VERDICTS = ("DISCRIMINATING", "NOT_SHOWN", "UNKNOWN")
+IMPROVEMENT_VERDICTS = ("IMPROVED", "NO_IMPROVEMENT_SHOWN", "UNKNOWN")
+
+
+@dataclass(frozen=True)
+class TwoArmRule:
+    """A DECLARED input to the verdict, never a constant in this module -
+    the owner ruling is CPP's policy, not skillc's, and skillc stays
+    subject-agnostic (the same discipline `EXTERNAL_EVIDENCE_SOURCE_RE`
+    keeps in `skillc/records.py`). `tolerance` is declared PER STUDY (the
+    comment's own "Where the tolerance lives" section, naming skillc #287) -
+    `None` means the declaration omitted it, and the comment states
+    explicitly that such a study "cannot produce a non-UNKNOWN verdict
+    under either rule"."""
+
+    rule_id: str
+    alpha: float
+    sidedness: str
+    tolerance: int | None
+    citation_url: str
+
+    def __post_init__(self) -> None:
+        """Validated at construction, the same discipline as `_check_
+        confidence` (#273: an unchecked `confidence=2` silently returned a
+        degenerate-but-plausible-looking interval). Unvalidated here,
+        `alpha=2` with `tolerance=0` let `evaluate_two_arm_rule` report
+        `DISCRIMINATING` from a Fisher p-value of `1.0` on a ZERO-evaluable
+        arm (Codex review, #272) - `tolerance=0` imposes no floor at all,
+        so `0 < rule.tolerance` was vacuously satisfied, and `p < alpha`
+        was vacuously true for any alpha above 1."""
+        if isinstance(self.alpha, bool) or not isinstance(self.alpha, (int, float)) \
+                or not math.isfinite(self.alpha) or not (0.0 < self.alpha < 1.0):
+            raise _refuse(f"TwoArmRule.alpha must be a finite number strictly between 0 and 1, not {self.alpha!r}")
+        if self.tolerance is not None and (
+            isinstance(self.tolerance, bool) or not isinstance(self.tolerance, int) or self.tolerance < 1
+        ):
+            raise _refuse(
+                f"TwoArmRule.tolerance must be None or a positive int, not {self.tolerance!r} - "
+                f"a tolerance of 0 imposes no floor at all"
+            )
+
+
+@dataclass(frozen=True)
+class TwoArmVerdict:
+    verdict: str
+    p_value: float | None
+    reason: str | None
+
+
+def fisher_exact_one_sided_greater(a: int, b: int, c: int, d: int) -> float:
+    """One-sided Fisher exact test p-value for H1: row 1's pass rate exceeds
+    row 2's, given counts `a`=row1 pass, `b`=row1 fail, `c`=row2 pass,
+    `d`=row2 fail. Exact via the hypergeometric distribution (`math.comb`,
+    summed as `Fraction` for exactness, matching `mcnemar_exact`'s own
+    int-ratio-before-float-scaling discipline) - no scipy, no normal
+    approximation. Verified against the owner ruling's own published power
+    table (CPP #1084 comment, "Power limits (computed exactly)"): at
+    n=10/arm, a weaker-arm pass count of 0/2/4/6 needs 4/7/9/10 passes in
+    the stronger arm for significance, exactly reproduced; likewise n=20/arm
+    at 10 and 15.
+    """
+    for value, name in ((a, "a"), (b, "b"), (c, "c"), (d, "d")):
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise _refuse(f"fisher_exact_one_sided_greater: {name}={value!r} must be a non-negative int")
+    n1, n2 = a + b, c + d
+    k = a + c
+    total_n = n1 + n2
+    if total_n == 0:
+        raise _refuse("fisher_exact_one_sided_greater: both arms are empty")
+    hi = min(n1, k)
+    denominator = math.comb(total_n, k)
+    total = Fraction(0)
+    for x in range(a, hi + 1):
+        total += Fraction(math.comb(n1, x) * math.comb(n2, k - x), denominator)
+    return float(total)
+
+
+def evaluate_two_arm_rule(
+    rule: TwoArmRule | None,
+    arm1_pass: int, arm1_evaluable: int,
+    arm2_pass: int, arm2_evaluable: int,
+    *,
+    certified: bool,
+    verdict_labels: tuple[str, str, str],
+) -> TwoArmVerdict:
+    """The shared evaluator behind both `evaluate_discrimination` and
+    `evaluate_improvement`. `certified` is the caller's own fact (#273's
+    `case-pairing` bundle rule for discrimination; the comment ties
+    improvement to "the case already shown to tell good from bad", so a
+    caller evaluating improvement passes `certified=True` only once that
+    linkage is its own responsibility to have checked - this function does
+    not re-derive it). Per-arm facts are never computed here: `arm*_pass`/
+    `arm*_evaluable` are supplied by the caller from #273's own `account_cell`
+    or an equivalent source - this function only applies the predeclared test.
+    """
+    positive, negative, unknown = verdict_labels
+    if rule is None:
+        return TwoArmVerdict(unknown, None, "no predeclared rule")
+    if rule.tolerance is None:
+        return TwoArmVerdict(unknown, None, "rule declares no tolerance; every pair is UNKNOWN per the owner ruling")
+    if not certified:
+        return TwoArmVerdict(unknown, None, "pairing not certified")
+    if arm1_evaluable < rule.tolerance or arm2_evaluable < rule.tolerance:
+        return TwoArmVerdict(unknown, None, "evaluable attempts below the declared tolerance")
+    if rule.sidedness != "greater":
+        raise _refuse(
+            f"evaluate_two_arm_rule: sidedness {rule.sidedness!r} is not 'greater' - "
+            f"the owner ruling specifies only a one-sided greater test"
+        )
+    p = fisher_exact_one_sided_greater(arm1_pass, arm1_evaluable - arm1_pass, arm2_pass, arm2_evaluable - arm2_pass)
+    return TwoArmVerdict(positive if p < rule.alpha else negative, p, None)
+
+
+def evaluate_discrimination(
+    rule: TwoArmRule | None,
+    intact_pass: int, intact_evaluable: int,
+    degraded_pass: int, degraded_evaluable: int,
+    *, certified: bool,
+) -> TwoArmVerdict:
+    """CPP #1084 comment, section 1: DISCRIMINATING requires one-sided Fisher
+    p < alpha with H1 "P(pass | intact) > P(pass | degraded)", over evaluable
+    attempts of a CERTIFIED pair (#273's `case-pairing`)."""
+    return evaluate_two_arm_rule(
+        rule, intact_pass, intact_evaluable, degraded_pass, degraded_evaluable,
+        certified=certified, verdict_labels=DISCRIMINATION_VERDICTS,
+    )
+
+
+def evaluate_improvement(
+    rule: TwoArmRule | None,
+    cpp_pass: int, cpp_evaluable: int,
+    baseline_pass: int, baseline_evaluable: int,
+) -> TwoArmVerdict:
+    """CPP #1084 comment, section 2: IMPROVED requires one-sided Fisher
+    p < alpha with H1 "P(pass | CPP) > P(pass | baseline)" on the case
+    already certified DISCRIMINATING under rule 1 - the caller's
+    responsibility to have confirmed before calling this (module
+    docstring). This module never computes the net gate flip (DISCRIMINATING
+    AND IMPROVED on the same certified case and revision): the comment is
+    explicit that is CPP's own logic, not skillc's."""
+    return evaluate_two_arm_rule(
+        rule, cpp_pass, cpp_evaluable, baseline_pass, baseline_evaluable,
+        certified=True, verdict_labels=IMPROVEMENT_VERDICTS,
     )

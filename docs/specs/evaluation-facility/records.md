@@ -589,9 +589,11 @@ to name, and the cpp-eval review questions relayed 2026-10-06.
   `duplicate-invocation` or `no-correlating-attempt`), `matched` (present,
   bound, agrees with controller state), `contradicting` (present, bound, but
   disagrees with the controller's own independent observation - reason
-  `outcome-disagreement` or `stale-identity`, the latter when the usage
-  record's own bound subject/client identity differs from this trial's planned
-  one). `absent` is never treated as `contradicting`, and `unmatched` is never
+  `outcome-disagreement`, `stale-identity` (the usage record's own bound
+  subject/client identity differs from this trial's planned one),
+  `exit-code-mismatch` or `tree-mismatch` (the "Witness citation and closed
+  reason vocabulary" section, below). `absent` is never treated as
+  `contradicting`, and `unmatched` is never
   silently promoted to `matched` for lack of a reason to doubt it.
 
   **Witness citation and closed reason vocabulary (#269 scope addition, cpp-eval
@@ -629,6 +631,84 @@ to name, and the cpp-eval review questions relayed 2026-10-06.
 
   Only `contradicting` is closed this way; `unmatched`'s own reason stays
   open-vocabulary (above) and is unaffected.
+
+  **Closing `unmatched`'s own reason vocabulary (#272 scope addition).** R9
+  above names `duplicate-invocation` and `no-correlating-attempt` but did not
+  enforce them until now - `skill_evidence()` refuses any other string once
+  `reconciliation` is `unmatched`, mirroring how #269 later closes
+  `contradicting`'s own reason. Neither check reads the bytes behind
+  `artifact_ref.digest`; both compare digests and attempt ids skillc already
+  recorded:
+  - `duplicate-invocation`: refused unless the cited digest is ALSO cited by
+    another `skill-evidence` entry anywhere in the bundle - detected by
+    digest equality across skillc's own citations, never by opening the
+    cited file to look for a duplicated id inside it. The cited digest must
+    STILL be captured somewhere in this attempt's own manifest: the
+    altered-artifact check below is not skipped for this reason. A first
+    version skipped it for every `unmatched` record and missed that this
+    lets two entries cite one digest NOTHING captured, label themselves
+    `duplicate-invocation`, and pass - a bundle crediting duplicate use of
+    evidence that does not exist, caught before this shipped. Fixed by
+    narrowing the skip (next bullet); a committed bad fixture
+    (`skill-evidence-duplicate-invocation-uncaptured`) is refused for exactly
+    this shape, and mutation-checked by widening the skip back and
+    confirming it goes blind.
+  - `no-correlating-attempt`: refused unless the cited digest is genuinely
+    absent from this attempt's own `artifact-manifest` capture. This is the
+    SAME fact the altered-artifact check (above) was built to catch, so that
+    check is gated to skip exactly `reconciliation: "unmatched" AND reason:
+    "no-correlating-attempt"` - not every `unmatched` record (see the
+    `duplicate-invocation` bullet for why that distinction matters): an
+    `unmatched`/`no-correlating-attempt` record is already the honest report
+    that this evidence does not correlate to this attempt, not a forged
+    claim that it does - only `matched`/`contradicting`, and an
+    `unmatched`/`duplicate-invocation` record that fails to also cite real
+    captured bytes, claim the evidence binds, and only those claims can be
+    "altered" when the digest was never captured. A committed fixture
+    confirms `matched` and `contradicting` still refuse an uncaptured digest
+    unconditionally (`skill-evidence-altered-artifact` and
+    `skill-evidence-altered-artifact-contradicting`).
+
+  **`stale-identity`'s `witness_ref` cites the installation-receipt, never a
+  gate-witness artifact (#272 scope addition).** The original `witness_ref`
+  check (above) validated every `contradicting` reason's citation against
+  `artifact-manifest`-captured digests only - correct for a gate-execution
+  claim (`exit-code-mismatch`, `outcome-disagreement`, `tree-mismatch`), but
+  `stale-identity` is a claim about this attempt's installed IDENTITY, not
+  about anything a gate execution could witness. An `installation-receipt`
+  is a separate record kind, never captured as a manifest artifact, so that
+  check had no way to accept a receipt citation at all - found and reported
+  while building a reconciler for this (`evals/subjects/cpp-codex-flow-
+  check/gate_reconciliation.py`, #269), closed here rather than left as a
+  verdict the reconciler could emit and `check-records` would refuse.
+  `ledger_binding` now binds `stale-identity`'s `witness_ref.digest` against
+  THIS attempt's own `installation-receipt.subject.digest` - already a
+  required field, no new digest invented. The binding is CLOSED both
+  directions, each with its own committed bad fixture: a `stale-identity`
+  citing a gate-witness-shaped digest instead of the receipt
+  (`skill-evidence-stale-identity-wrong-witness`) is refused, and a gate
+  reason citing the receipt's identity instead of a gate-witness artifact
+  (`skill-evidence-gate-reason-cites-receipt`) is refused - "I cited the
+  wrong witness" is a different finding from "I cited nothing real," and
+  both are named explicitly rather than falling through to one generic
+  message. `skill-evidence-stale-identity` is the matching good fixture.
+  Both new checks are mutation-checked: disabled, confirmed blind (or
+  falling back to a less specific but still-correct refusal, for the
+  gate-reason-cites-receipt direction, since an uncaptured receipt digest
+  is also caught by the unconditional altered-artifact check), restored,
+  confirmed correct again, net diff empty.
+
+  **`declared-skill-not-installed` is deliberately not closed yet.** Its Q3
+  answer (above) describes a CPP usage record's own self-declared skill name
+  disagreeing with installed paths - a fact about a field `external_evidence`
+  does not carry today (only `source`, `artifact_ref`, `reconciliation`,
+  `reason`). The entry's own top-level `skill.path` cannot stand in for it:
+  the existing unconditional check in `_skill_evidence_binding` already
+  refuses ANY entry whose `skill.path` is not installed, regardless of
+  reconciliation or reason, so there is no "good" bundle this reason could
+  describe without a new field - and adding one is a decision this document
+  should not make unilaterally. Named as a boundary, not silently assumed
+  covered.
 
 ### Golden records (acceptance item 4)
 
