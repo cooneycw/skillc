@@ -352,6 +352,12 @@ def test_wilson_score_contains_the_point_estimate() -> None:
     assert lower < 0.5 < upper
 
 
+def test_wilson_score_refuses_zero_trials() -> None:
+    with pytest.raises(rel.ReliabilityRefused):
+        rel.wilson_score(0, 0)
+    rel.wilson_score(0, 1)  # n >= 1 computes even when c == 0
+
+
 def test_newcombe_hybrid_interval_zero_when_arms_are_identical() -> None:
     lower, upper = rel.newcombe_hybrid_interval(5, 10, 5, 10)
     assert lower < 0.0 < upper  # contains 0, the true difference
@@ -405,6 +411,14 @@ def test_mcnemar_exact_does_not_overflow_on_large_balanced_counts() -> None:
 def test_bootstrap_refuses_below_minimum_tasks() -> None:
     with pytest.raises(rel.ReliabilityRefused):
         rel.task_cluster_bootstrap([0.1, 0.2, 0.3], seed=1)
+
+
+def test_bootstrap_boundary_four_refuses_five_computes() -> None:
+    """The exact boundary `MIN_BOOTSTRAP_TASKS` draws, not just "some number
+    below it": 4 tasks must refuse, 5 must compute."""
+    with pytest.raises(rel.ReliabilityRefused):
+        rel.task_cluster_bootstrap([0.1, 0.2, 0.3, 0.4], seed=1)
+    rel.task_cluster_bootstrap([0.1, 0.2, 0.3, 0.4, 0.5], seed=1)
 
 
 def test_bootstrap_records_its_own_seed() -> None:
@@ -521,6 +535,18 @@ def test_account_cell_refuses_a_dangling_retry_of() -> None:
     account."""
     with pytest.raises(rel.ReliabilityRefused):
         rel.account_cell([AR("retry", "PASS", True, retry_of="missing")])
+
+
+def test_account_cell_refuses_a_two_node_retry_cycle() -> None:
+    """`_root`'s own cycle guard (named in `codex:code_review`'s red-cases
+    list, #273): A retry_of=B and B retry_of=A, neither a self-retry, is
+    still not a valid chain - it has no root at all - and must be refused
+    rather than looping or picking one arbitrarily."""
+    with pytest.raises(rel.ReliabilityRefused):
+        rel.account_cell([
+            AR("a", "PASS", True, retry_of="b"),
+            AR("b", "PASS", True, retry_of="a"),
+        ])
 
 
 def test_account_cell_missing_data_is_never_silently_imputed() -> None:
