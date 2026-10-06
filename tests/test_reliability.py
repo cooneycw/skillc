@@ -650,6 +650,39 @@ def test_evaluate_discrimination_uncertified_pairing_is_unknown() -> None:
     assert "certified" in (verdict.reason or "")
 
 
+def test_two_arm_rule_refuses_an_out_of_range_alpha() -> None:
+    """Codex review, #272: an unchecked `alpha=2` is not a significance
+    level - `p < alpha` is vacuously true for any p in [0, 1], so every
+    pair would report an affirmative verdict regardless of the data."""
+    for bad_alpha in (0.0, 1.0, 2.0, -0.05, float("nan"), float("inf"), True):
+        with pytest.raises(rel.ReliabilityRefused):
+            _rule(alpha=bad_alpha)
+
+
+def test_two_arm_rule_refuses_a_zero_or_negative_tolerance() -> None:
+    """Codex review, #272: `tolerance=0` imposes NO floor at all -
+    `arm_evaluable < tolerance` is vacuously false for `arm_evaluable=0` -
+    so `evaluate_two_arm_rule` could report a verdict computed from zero
+    evaluable attempts in an arm. `None` (the declared-omission sentinel)
+    must still be accepted."""
+    for bad_tolerance in (0, -1, True):
+        with pytest.raises(rel.ReliabilityRefused):
+            _rule(tolerance=bad_tolerance)
+    _rule(tolerance=None)  # the declared-omission sentinel - not a refusal
+
+
+def test_two_arm_rule_validation_closes_the_zero_evaluable_affirmative_verdict() -> None:
+    """The concrete Codex-reported scenario: alpha=2, tolerance=0, and a
+    zero-evaluable arm1 used to report DISCRIMINATING from Fisher's
+    degenerate p=1.0 (`1.0 < 2` is True). Constructing the rule at all now
+    refuses before any verdict is computed."""
+    with pytest.raises(rel.ReliabilityRefused):
+        rel.TwoArmRule(
+            rule_id="bad", alpha=2, sidedness="greater", tolerance=0,
+            citation_url="https://example.invalid/bad-rule",
+        )
+
+
 def test_evaluate_discrimination_refuses_a_non_greater_sidedness() -> None:
     with pytest.raises(rel.ReliabilityRefused):
         rel.evaluate_discrimination(_rule(sidedness="two-sided"), 10, 10, 0, 10, certified=True)

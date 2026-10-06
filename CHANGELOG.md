@@ -8,6 +8,54 @@ and version plan.
 
 ## [Unreleased]
 
+- **Five Codex cross-model review fixes for #272** (pre-PR review, model
+  `gpt-6.1-sol`). All five mutation-checked.
+  - **[HIGH] `CoverageRow.criteria` silently overwrote a disagreeing
+    attempt's outcome.** Nothing in `records.py` requires two attempts
+    sharing a cell to agree on one criterion - each attempt's
+    `criteria_owned` is checked only against its OWN `verified-result`. Keying
+    the accumulator dict on criterion id alone let whichever attempt was
+    iterated last silently discard an earlier `VIOLATED` with a `SATISFIED`
+    (or the reverse) - a real failure hidden purely by `attempt_ids` order.
+    Now keyed on `(id, outcome, shared)`: a genuine repeat still collapses to
+    one row, but a disagreement surfaces as two rows for the same id,
+    nothing dropped.
+  - **[MEDIUM] `to_text()` never rendered `execution_observed`/
+    `read_observed`.** A row with confirmed skill execution read identically
+    to one where nothing was ever observed - exactly the distinction these
+    two fields exist to carry. Now rendered per row, every count including a
+    0, the same pattern as `outcomes`.
+  - **[MEDIUM] The generic sentinel-coverage test was whole-text, not
+    location-aware.** It could not tell `convenience.tokens`'s own `UNKNOWN`
+    apart from the `UNKNOWN=0` key-name artifact already in `outcomes`, nor
+    tell one row's `reliability` apart from another's - concretely, dropping
+    only `tokens=...` from the convenience line, or dropping one row's
+    `reliability:` line while a different row still rendered a sentinel,
+    both left the old test green (reproduced before fixing: removing
+    `tokens=` left `test_to_text_renders_every_sentinel_value_present_in_
+    the_json` passing). Two new tests check each row's own `reliability`/
+    `convenience` dict against that SAME row's own rendered line, and the
+    `task_clusters` sentinel against its own section - never the whole
+    block or the whole report. The old whole-text test stays as the cheap
+    floor for fields not yet given a scoped check.
+  - **[MEDIUM] `TwoArmRule` accepted an out-of-range `alpha` or a
+    `tolerance` of 0.** `alpha=2` with `tolerance=0` let
+    `evaluate_two_arm_rule` report `DISCRIMINATING` from a Fisher p-value of
+    `1.0` on a ZERO-evaluable arm: `tolerance=0` imposes no floor at all, so
+    `arm_evaluable < tolerance` was vacuously false, and `p < alpha` was
+    vacuously true for any alpha above 1. `TwoArmRule.__post_init__` now
+    validates `alpha` (finite, strictly between 0 and 1, same discipline as
+    `_check_confidence`) and `tolerance` (`None`, or a positive int) at
+    construction.
+  - **[MEDIUM] `reconcile_helper_identity` reported `matched` on partial
+    coverage.** A claimed path with no installed counterpart was silently
+    skipped from the comparison entirely, so an agreeing path alone reported
+    the whole record `matched` - treating an unwitnessed helper as outside
+    the comparison rather than as unknown, contradicting the function's own
+    documented "a path present on only one side is unknown" rule. `matched`
+    is now reserved for every claimed path being comparable AND agreeing;
+    partial coverage is `unknown`/`partial-helper-coverage`.
+
 - **Per-skill profile diagnostic, non-certifying** (Refs #295). `skillc
   profile diagnose` (library: `profile.diagnose`) walks the whole closure and
   reports EVERY unresolved reference, unsatisfied dependency and other

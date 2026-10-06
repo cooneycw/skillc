@@ -659,6 +659,26 @@ class TwoArmRule:
     tolerance: int | None
     citation_url: str
 
+    def __post_init__(self) -> None:
+        """Validated at construction, the same discipline as `_check_
+        confidence` (#273: an unchecked `confidence=2` silently returned a
+        degenerate-but-plausible-looking interval). Unvalidated here,
+        `alpha=2` with `tolerance=0` let `evaluate_two_arm_rule` report
+        `DISCRIMINATING` from a Fisher p-value of `1.0` on a ZERO-evaluable
+        arm (Codex review, #272) - `tolerance=0` imposes no floor at all,
+        so `0 < rule.tolerance` was vacuously satisfied, and `p < alpha`
+        was vacuously true for any alpha above 1."""
+        if isinstance(self.alpha, bool) or not isinstance(self.alpha, (int, float)) \
+                or not math.isfinite(self.alpha) or not (0.0 < self.alpha < 1.0):
+            raise _refuse(f"TwoArmRule.alpha must be a finite number strictly between 0 and 1, not {self.alpha!r}")
+        if self.tolerance is not None and (
+            isinstance(self.tolerance, bool) or not isinstance(self.tolerance, int) or self.tolerance < 1
+        ):
+            raise _refuse(
+                f"TwoArmRule.tolerance must be None or a positive int, not {self.tolerance!r} - "
+                f"a tolerance of 0 imposes no floor at all"
+            )
+
 
 @dataclass(frozen=True)
 class TwoArmVerdict:

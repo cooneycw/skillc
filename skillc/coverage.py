@@ -463,6 +463,10 @@ class CoverageReport:
                 lines.append(f"    coverage_flags: {flags}")
             if reconciliation:
                 lines.append(f"    reconciliation: {reconciliation}")
+            execution_observed = ", ".join(f"{k}={v}" for k, v in row["execution_observed"].items())
+            read_observed = ", ".join(f"{k}={v}" for k, v in row["read_observed"].items())
+            lines.append(f"    execution_observed: {execution_observed}")
+            lines.append(f"    read_observed: {read_observed}")
             if row["criteria"]:
                 criteria_text = ", ".join(
                     f"{c['id']}={c['outcome']}" + (" (shared)" if c["shared"] else "")
@@ -937,7 +941,18 @@ def _build_row(
     reconciliation_counts = dict.fromkeys(records.SKILL_EVIDENCE_RECONCILIATION, 0)
     execution_observed = dict.fromkeys(records.SKILL_EVIDENCE_CONFIRMATION, 0)
     read_observed = dict.fromkeys(records.SKILL_EVIDENCE_CONFIRMATION, 0)
-    criteria: dict[str, CriterionRow] = {}
+    # Keyed by (id, outcome, shared), never by id alone (Codex review,
+    # #272): two attempts sharing this cell can legitimately disagree on one
+    # criterion (nothing in records.py requires cross-attempt agreement -
+    # each attempt's criteria_owned is checked only against its OWN
+    # verified-result). Keying on id alone let the later attempt in
+    # iteration order silently overwrite an earlier VIOLATED with a
+    # SATISFIED (or the reverse), hiding a real failure depending on
+    # attempt_ids' order alone. Keying on the full tuple collapses true
+    # repeats (same id+outcome+shared from multiple attempts) into one row
+    # exactly as before, while a genuine disagreement now surfaces as two
+    # distinct rows for the same id - nothing silently dropped.
+    criteria: dict[tuple[str, str, bool], CriterionRow] = {}
     versions: set[str] = set()
     evidence_ids: list[str] = []
     lineages: set[tuple[str, str | None]] = set()
@@ -993,7 +1008,9 @@ def _build_row(
                     continue
                 c_id = c.get("id")
                 if isinstance(c_id, str) and c_id:
-                    criteria[c_id] = CriterionRow(id=c_id, outcome=str(c.get("outcome")), shared=bool(c.get("shared")))
+                    c_outcome = str(c.get("outcome"))
+                    c_shared = bool(c.get("shared"))
+                    criteria[(c_id, c_outcome, c_shared)] = CriterionRow(id=c_id, outcome=c_outcome, shared=c_shared)
 
     # Every attempt under one trial shares that trial's installation plan, so
     # a validated bundle's receipts agree on one digest per skill path here -
@@ -1052,7 +1069,7 @@ def _build_row(
         outcomes=outcomes,
         coverage_flags=coverage_flags,
         reconciliation_counts=reconciliation_counts,
-        criteria=tuple(sorted(criteria.values(), key=lambda c: c.id)),
+        criteria=tuple(sorted(criteria.values(), key=lambda c: (c.id, c.outcome, c.shared))),
         execution_observed=execution_observed,
         read_observed=read_observed,
         lineage=resolved_lineage,

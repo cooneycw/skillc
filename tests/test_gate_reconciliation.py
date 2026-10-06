@@ -310,6 +310,23 @@ def test_helper_identity_with_no_comparable_path_is_unknown() -> None:
     assert result.reason == "no-comparable-helper-path"
 
 
+def test_helper_identity_partial_coverage_is_unknown_not_matched() -> None:
+    """Codex review, #272: a claimed path with no installed counterpart
+    (`b.py`) used to be silently skipped from the comparison entirely, so
+    an agreeing `a.py` alone reported the whole record `matched` - treating
+    an unwitnessed helper as outside the comparison rather than as unknown.
+    `matched` is reserved for every claimed path being comparable AND
+    agreeing."""
+    result = gr.reconcile_helper_identity({"a.py": "abc", "b.py": "def"}, {"a.py": "sha256:abc"})
+    assert result.state == "unknown"
+    assert result.reason == "partial-helper-coverage"
+
+    # The full-coverage case must still report matched - the fix narrows
+    # the matched verdict, it does not remove it.
+    full = gr.reconcile_helper_identity({"a.py": "abc"}, {"a.py": "sha256:abc"})
+    assert full.state == "matched"
+
+
 def test_helper_identity_prefix_difference_alone_is_not_a_mismatch() -> None:
     """CPP's bare hex and skillc's sha256:-prefixed digest are the SAME
     value, same algorithm over the same bytes - confirmed by reading both

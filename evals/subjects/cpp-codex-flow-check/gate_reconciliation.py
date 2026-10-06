@@ -269,6 +269,19 @@ def reconcile_helper_identity(
     installed, or vice versa) is `unknown`, not a guessed verdict either
     way - only a path BOTH sides name, with digests that disagree, is a
     real contradiction, and only then is a witness_ref even relevant.
+
+    A MIX of comparable and one-sided CLAIMED paths is also `unknown`, not
+    `matched` (Codex review, #272): claiming `{a: X, b: Y}` against an
+    installed set that only names `a` used to report `matched` once `a`
+    agreed, silently treating `b` - a helper CPP's execution touched that
+    skillc has no installed record of at all - as outside the comparison.
+    `matched` is reserved for every CLAIMED path being comparable and
+    agreeing; anything less is an incomplete comparison, not a confirmed
+    one. (Extra `installed_digests` paths CPP never claims are a different
+    question - this function iterates `claimed_module_sha256` by design,
+    since CPP's claim set is the population this comparison verifies, and
+    an installed helper CPP never touched has nothing here to agree or
+    disagree with.)
     """
     disagreeing: list[str] = []
     comparable = 0
@@ -285,4 +298,6 @@ def reconcile_helper_identity(
         if receipt_identity is None:
             return GateReconciliation("unknown", "no-installation-receipt-to-cite", None)
         return GateReconciliation("contradicting", "stale-identity", receipt_identity)
+    if comparable != len(claimed_module_sha256):
+        return GateReconciliation("unknown", "partial-helper-coverage", None)
     return GateReconciliation("matched", None, None)

@@ -62,6 +62,46 @@ def test_assemble_with_declared_inventory_hand_computed() -> None:
     assert row.evidence == ("att-1", "att-2")
 
 
+def test_disagreeing_attempts_both_surface_in_criteria_never_overwritten(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Codex review, #272: nothing in records.py requires two attempts
+    sharing a cell to agree on one criterion's outcome - each attempt's
+    criteria_owned is checked only against its OWN verified-result. Keying
+    row.criteria on id alone let the later attempt in iteration order
+    silently overwrite an earlier VIOLATED with a SATISFIED (or the
+    reverse), hiding a real failure depending only on attempt_ids' order.
+    Both outcomes must appear, regardless of order."""
+    bundle = _bundle(CONTROLS / "ledger-binding/good/skill-evidence-duplicate-invocation")
+    mutated = []
+    for record in bundle.records:
+        if record.kind == "skill-evidence" and record.attempt_id == "att-2":
+            data = json.loads(json.dumps(record.data))
+            data["skills"][0]["criteria_owned"][0]["outcome"] = "VIOLATED"
+            mutated.append(records.Record(path=record.path, data=data))
+        elif record.kind == "verified-result" and record.attempt_id == "att-2":
+            data = json.loads(json.dumps(record.data))
+            data["criteria"][0]["outcome"] = "VIOLATED"
+            data["status"] = "FAIL"
+            mutated.append(records.Record(path=record.path, data=data))
+        else:
+            mutated.append(record)
+    bad_bundle = records.Bundle(path=bundle.path, records=mutated)
+    report = cov.assemble_coverage_report(bad_bundle, _inventory())
+    row = report.rows[0]
+    assert row.outcomes["PASS"] == 1
+    assert row.outcomes["FAIL"] == 1
+    assert set(row.criteria) == {
+        cov.CriterionRow(id="c1", outcome="SATISFIED", shared=False),
+        cov.CriterionRow(id="c1", outcome="VIOLATED", shared=False),
+    }
+
+    # A genuine repeat (both attempts agreeing) must still collapse to ONE
+    # row, exactly as before - the fix must not turn every shared criterion
+    # into a duplicate.
+    agreeing_report = cov.assemble_coverage_report(bundle, _inventory())
+    agreeing_row = agreeing_report.rows[0]
+    assert agreeing_row.criteria == (cov.CriterionRow(id="c1", outcome="SATISFIED", shared=False),)
+
+
 def test_outcomes_partition_scheduled() -> None:
     bundle = _bundle(CONTROLS / "ledger-binding/good/skill-evidence-duplicate-invocation")
     report = cov.assemble_coverage_report(bundle, _inventory())
@@ -550,6 +590,35 @@ def test_to_text_shows_every_row_and_every_unknown_state() -> None:
     assert "UNKNOWN=0" in text
 
 
+def test_to_text_shows_execution_observed_and_read_observed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Codex review, #272: `to_text()` never rendered `execution_observed`/
+    `read_observed` at all, so a row with confirmed skill execution read
+    identically to one where nothing was ever observed - exactly the
+    distinction between attempt success and skill participation these two
+    fields exist to carry. Must show every count, including a 0."""
+    bundle = _bundle(CONTROLS / "ledger-binding/good/skill-evidence-duplicate-invocation")
+    report = cov.assemble_coverage_report(bundle, _inventory())
+    row = report.rows[0]
+    text = report.to_text()
+    assert row.execution_observed == {"CONFIRMED": 0, "NOT_CONFIRMED": 0, "UNKNOWN": 2}
+    assert "execution_observed: CONFIRMED=0, NOT_CONFIRMED=0, UNKNOWN=2" in text
+    assert "read_observed: CONFIRMED=0, NOT_CONFIRMED=0, UNKNOWN=2" in text
+
+    # Mutation check: force to_dict to report a CONFIRMED execution and
+    # confirm the human view changes right along with it - proving a real
+    # dependency, the same pattern as test_to_text_derivation_is_not_a_no_op.
+    real_to_dict = cov.CoverageReport.to_dict
+
+    def confirmed_execution(self: cov.CoverageReport) -> dict[str, object]:
+        body = real_to_dict(self)
+        rows = cast("list[dict[str, Any]]", body["rows"])
+        rows[0]["execution_observed"] = {"CONFIRMED": 2, "NOT_CONFIRMED": 0, "UNKNOWN": 0}
+        return body
+
+    monkeypatch.setattr(cov.CoverageReport, "to_dict", confirmed_execution)
+    assert "execution_observed: CONFIRMED=2, NOT_CONFIRMED=0, UNKNOWN=0" in report.to_text()
+
+
 def test_to_text_shows_insufficient_discrimination_verdict() -> None:
     """The UNKNOWN discrimination verdict (no rule supplied) must appear in
     the human view, not be silently dropped because nothing could be
@@ -983,6 +1052,19 @@ def test_to_text_renders_every_sentinel_value_present_in_the_json() -> None:
     human view - this test does not need to know the field exists, only
     that whatever sentinel it carries is accounted for.
 
+    LIMITATION (Codex review, #272): "somewhere in `to_text()`" is whole-text
+    presence, not field- or row-scoped, so it cannot tell `convenience.
+    tokens`'s own `UNKNOWN` apart from the `UNKNOWN=0` key-name artifact
+    `outcomes` already renders, and it cannot tell one row's `reliability`
+    apart from another row's. Concretely, dropping ONLY `tokens=...` from
+    the convenience line, or dropping ONE row's `reliability:` line while a
+    different row still renders a sentinel, both leave this test green.
+    `test_to_text_sentinels_are_location_aware_not_merely_present_somewhere`
+    and `test_to_text_task_clusters_sentinel_is_scoped_to_its_own_section`
+    close exactly those two gaps, scoped to the fields this issue's own work
+    added; this test stays as the cheap, field-agnostic floor for whatever
+    is added next.
+
     The fixture is built to exercise all three of reliability, convenience
     and task_clusters as the UNIQUE source of at least one sentinel each in
     this particular report, so that dropping any one of the three renderers
@@ -1022,3 +1104,131 @@ def test_to_text_renders_every_sentinel_value_present_in_the_json() -> None:
     text = report.to_text()
     missing = {s for s in found if s not in text}
     assert not missing, f"sentinel value(s) {missing} appear in the JSON but not in to_text()"
+
+
+def _mixed_reliability_bundle() -> records.Bundle:
+    """Two cases, same skill/client/arm: case-0's attempt is `not-run` (a
+    single `planned` event, zero evaluable attempts); case-1's attempt is
+    `captured`+PASS with a full lifecycle. With `k=1` declared, case-0's row
+    gets `INSUFFICIENT` on all four reliability fields (zero evaluable, and
+    `n=0 < k=1`) while case-1's row gets four real floats and no sentinel in
+    its own reliability at all - the two rows' reliability sentinels are
+    therefore genuinely DIFFERENT, not merely "the same report-wide
+    not_declared on every row" the way an undeclared `k` would give."""
+    bundle = _task_cluster_bundle(2)
+    mutated = []
+    for record in bundle.records:
+        if record.attempt_id == "att-0" and record.kind == "attempt-lifecycle":
+            data = json.loads(json.dumps(record.data))
+            data["disposition"] = "not-run"
+            data["reason"] = "never-started"
+            data["stop"] = {"reason": "never-started", "confirmed": True}
+            data["events"] = [{"event": "planned", "at": "2026-09-26T12:00:00Z"}]
+            mutated.append(records.Record(path=record.path, data=data))
+        elif record.attempt_id == "att-0" and record.kind in ("verified-result", "artifact-manifest"):
+            continue  # a not-run attempt has neither a grade nor a capture
+        else:
+            mutated.append(record)
+    return records.Bundle(path=bundle.path, records=mutated)
+
+
+def _split_rows_section(text: str) -> list[list[str]]:
+    """Split `to_text()`'s rendered output into one block of lines per row,
+    each starting at its own '- <skill_path> @ ...' header and running up
+    to (not including) the next row header or the next top-level section
+    ('case_pairs:'/'task_clusters:'). Scoping to the rows SECTION first
+    (never a bare '^- ' split over the whole text) keeps a case_pairs or
+    task_clusters entry - which also starts with '- ' - from being mistaken
+    for a row."""
+    lines = text.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("rows: ")) + 1
+    end = len(lines)
+    for i in range(start, len(lines)):
+        if lines[i].startswith("case_pairs: ") or lines[i].startswith("task_clusters: "):
+            end = i
+            break
+    blocks: list[list[str]] = []
+    for line in lines[start:end]:
+        if line.startswith("- "):
+            blocks.append([line])
+        else:
+            blocks[-1].append(line)
+    return blocks
+
+
+def _row_subfield_line(block: list[str], prefix: str) -> str:
+    """The single line in a row's block starting with `prefix` (e.g.
+    '    reliability:'), or '' if the row carries no such line - never a
+    KeyError, since a mutation that deletes the whole line is exactly what
+    this helper exists to notice as a missing line, not crash on."""
+    for line in block:
+        if line.strip().startswith(prefix):
+            return line
+    return ""
+
+
+def test_to_text_sentinels_are_location_aware_not_merely_present_somewhere() -> None:
+    """Codex review, #272: the whole-text sweep above only proves a sentinel
+    appears SOMEWHERE - it cannot tell `convenience.tokens`'s own `UNKNOWN`
+    apart from the unrelated `UNKNOWN=0` key-name artifact already in
+    `outcomes`, and it cannot tell one row's `reliability` apart from
+    another row's. Concretely: Codex showed that removing ONLY the
+    `convenience:` line, or removing ONLY one row's `reliability:` line
+    while another row still renders a sentinel, leaves the global sweep
+    green. This test checks each row's OWN `reliability`/`convenience`
+    dict against that SAME row's OWN rendered `reliability:`/`convenience:`
+    line - never the whole block, never the whole report - so a renderer
+    dropped from one field or one row cannot hide behind a sentinel
+    rendered somewhere else entirely.
+    """
+    bundle = _mixed_reliability_bundle()
+    report = cov.assemble_coverage_report(bundle, _inventory(), k=1)
+    body = report.to_dict()
+    rows = sorted(
+        cast("list[dict[str, Any]]", body["rows"]),
+        key=lambda r: (r["skill_path"], r["skill_version"], r["client_name"], r["client_version"], r["case_id"], r["arm"]),
+    )
+    text = report.to_text()
+    blocks = _split_rows_section(text)
+    assert len(blocks) == len(rows) == 2
+
+    # Sanity: the fixture gives the two rows genuinely DIFFERENT reliability
+    # sentinel content - case-0 is all-insufficient, case-1 carries none.
+    case0 = next(r for r in rows if r["case_id"] == "case-0")
+    case1 = next(r for r in rows if r["case_id"] == "case-1")
+    assert case0["reliability"]["all_k"] == rel.INSUFFICIENT
+    assert isinstance(case1["reliability"]["all_k"], float)
+
+    for row_dict, block in zip(rows, blocks, strict=True):
+        reliability_found: set[str] = set()
+        _collect_sentinel_values(row_dict["reliability"], _SENTINELS, reliability_found)
+        reliability_line = _row_subfield_line(block, "reliability:")
+        missing = {s for s in reliability_found if s not in reliability_line}
+        assert not missing, f"{row_dict['case_id']}: reliability sentinel(s) {missing} missing from its OWN rendered line"
+
+        convenience_found: set[str] = set()
+        _collect_sentinel_values(row_dict["convenience"], _SENTINELS, convenience_found)
+        convenience_line = _row_subfield_line(block, "convenience:")
+        missing = {s for s in convenience_found if s not in convenience_line}
+        assert not missing, f"{row_dict['case_id']}: convenience sentinel(s) {missing} missing from its OWN rendered line"
+
+
+def test_to_text_task_clusters_sentinel_is_scoped_to_its_own_section() -> None:
+    """The report-level counterpart: a `task_clusters` sentinel must appear
+    within the `task_clusters:` section specifically, not merely somewhere
+    in the whole report (where a row's own `convenience.tokens` UNKNOWN
+    would otherwise satisfy a non-scoped check for free)."""
+    bundle = _task_cluster_bundle(4)
+    report = cov.assemble_coverage_report(bundle, _inventory(), bootstrap_seed=42)
+    text = report.to_text()
+    lines = text.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("task_clusters: "))
+    section = "\n".join(lines[start:])
+    assert rel.INSUFFICIENT in section
+    rows_only = "\n".join(lines[: next(i for i, line in enumerate(lines) if line.startswith("rows: "))])
+    # The sanity half: INSUFFICIENT is not already present ahead of the
+    # task_clusters section for an unrelated reason in THIS fixture (k is
+    # declared and every attempt here is evaluable, so reliability carries
+    # no sentinel at all) - otherwise this test would pass without the
+    # task_clusters renderer ever running.
+    assert rel.INSUFFICIENT not in rows_only
