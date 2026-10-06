@@ -42,7 +42,8 @@ From `SKILL.md`, the walk reaches:
 | python >=3.11, uv, make, git, bash | tool | supplied by the image | command words |
 | pydantic, pyyaml (from `uv.lock`) | tool, **external** | resolved by uv | the library |
 
-63 installed files in all; the receipt-style digest of that surface is
+64 installed files in all (63 historical plus #303's one synthetic marker,
+confirmed against a real install from the pin). The receipt-style digest of that surface is
 `installed_surface.digest` in the inventory. The four bundled scripts are
 verified byte- and mode-identical to their upstream `scripts/` sources.
 `SKILL.md` and `reference.md` are generated from
@@ -98,14 +99,59 @@ inventory says nothing about Claude parity.
 
 - **The library is not traversed.** `lib/cicd` and `lib/security` are Python
   packages whose dependencies are imports, not path text. At this pin they
-  import only themselves and PyPI packages; whether they import cleanly in a
-  disposable home is #266's proof.
-- **PyPI resolution is external.** `uv run --project` resolves pydantic and
-  pyyaml from an index on first run, and trials have no network. #266 must
-  pre-supply a filled cache or report that gate step unavailable.
+  import only themselves and PyPI packages. CONFIRMED by #266's real-pin
+  proof (`evidence/install-receipt.json`, host run - not CI): `import
+  lib.cicd; import lib.security` succeeds in a disposable home installed by
+  `skillc profile install`, under `uv run --locked` with no inherited
+  environment.
+- **PyPI resolution is external.** `uv sync --locked` under `env -i` with
+  only `HOME`/`PATH` set still reached the network to resolve pydantic/pyyaml
+  from the lock on first run (no cache was pre-supplied) - this environment
+  had network; a genuinely network-less trial would need a pre-filled cache
+  or must report this step unavailable. #266 does not supply one.
 - **Tool versions are mostly unpinned by the subject.** Only Python's floor is
-  declared at the source. #266 pins the rest in the image.
+  declared at the source. The real profile's tool dependencies are LABELS
+  (`tool-python`, `tool-uv`, `tool-pypi-runtime`, `tool-make-git-bash`), not
+  bare executable names - `skillc profile install`'s literal PATH lookup
+  reports all four `unknown` rather than guessing a mapping; a human
+  confirmed python3/uv/make/git/bash present and adequate by hand for the
+  real run.
 - **Startup context is declared empty.** CPP's Codex installer at this pin
   writes skill directories only (no `AGENTS.md`, no config). The client's
   listing metadata is the skill's own description, recorded as
   `description_digest`.
+- **Checkout detection marker (#303) - real-pin proof RUN, not owed.**
+  `checkout-detection-marker` installs a short synthetic
+  `Projects/claude-power-pack/CLAUDE.md`, replacing the pinned agent-
+  instructions file with an explicitly recorded substitution
+  (`replaces_pinned_digest` in `evidence/inventory.json` and any install
+  receipt). `scripts/flow-finish-gate.sh:347` tests existence only.
+  Re-installed the real profile from a genuine GitHub clone at the pin into
+  a disposable home (64 files, up from 63) and confirmed, for real:
+  - `flow-finish-gate.sh` run under `env -i` with ONLY `HOME`/`PATH` set,
+    `FLOW_GATE_CPP_DIR` NOT set: the default self-detection now finds the
+    checkout and runs the real `lib.cicd` runner
+    (`"flow-finish-gate: running deterministic gate (lib.cicd run --plan
+    finish, CPP at ..."`), `gate_path.classify_gate_output` on that output
+    returns `"real-runner"`. The historical #266 run needed
+    `FLOW_GATE_CPP_DIR` explicitly; this profile no longer does.
+  - Canary isolation, using `materialize.py`'s own `run_client`/
+    `CANARY_ARGV` (`codex debug prompt-input`), both directions: negative
+    control - run against the real materialized home, the marker's own
+    distinctive phrase ("not agent instructions") never appears in the
+    canary's output; positive control - the SAME canary mechanism, pointed
+    at a workspace containing an `AGENTS.md` with a sentinel, DOES surface
+    it. Confirms Codex's own discovery (reads `AGENTS.md` from cwd) never
+    reaches the installed marker (under `Projects/claude-power-pack`, not
+    cwd) either way.
+  `evidence/inventory.json` is regenerated and committed (64 files,
+  includes the marker's `replaces_pinned_digest`). Re-verify both
+  `gate_path.py` classifier literals on every future re-pin.
+- **`GitTree` reads a pinned revision's committed blobs, never a working
+  tree.** A "delete this file and re-run against --repo" red case does
+  nothing against a real checkout for this reason - deleting a working-tree
+  file does not change what `git cat-file blob` returns for that commit.
+  #266's real-pin missing-helper red case instead used a plain-directory
+  snapshot of the pinned tree (`git archive <pin> | tar -x`, then delete,
+  then `--snapshot`), which does exercise the same `validate()` refusal
+  against bytes genuinely derived from the real checkout.

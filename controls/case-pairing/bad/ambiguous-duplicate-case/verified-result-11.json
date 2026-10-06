@@ -1,0 +1,26 @@
+{
+ "version": 2,
+ "kind": "verified-result",
+ "producer": "assembler",
+ "trial_id": "t-3",
+ "grader": {
+  "id": "slug-grader",
+  "revision": "g1"
+ },
+ "graded_digests": [
+  "sha256:aa"
+ ],
+ "criteria": [
+  {
+   "id": "c1",
+   "mandatory": true,
+   "outcome": "SATISFIED",
+   "evidence": [
+    "grader-log:c1"
+   ]
+  }
+ ],
+ "status": "PASS",
+ "attempt_id": "att-3",
+ "result_id": "res-att-3"
+}

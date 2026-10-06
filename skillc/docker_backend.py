@@ -58,13 +58,22 @@ similar name but carrying neither label is never touched. See
 docs/specs/evaluation-facility/failure-matrix.md for the full failure-path
 matrix and the reaping/snapshot contract.
 
-NO SOCKET, NO ESCAPE HATCH (addendum item C12): `compose_run_argv` emits a
-FIXED, closed set of flags. There is no passthrough parameter for arbitrary
-extra `docker run` arguments, so there is no code path through which a
-caller could add a socket mount, `--privileged`, or a `docker` binary into
-the trial - the guarantee is structural, not a convention nobody happens to
-violate yet, exactly as `container_executor`'s own closed schema is
-elsewhere in this fleet's ecosystem.
+NO ESCAPE HATCH, WITH ONE NAMED, NARROW EXCEPTION (addendum item C12; #183,
+owner ruling 2026-10-03): `compose_run_argv` emits a FIXED, closed set of
+flags. There is still no passthrough parameter for arbitrary extra `docker
+run` arguments, so there is no code path through which a caller could add
+`--privileged`, a `docker` binary, a second mount, or a mount at a caller-
+chosen target - the guarantee is structural for all of those, not a
+convention nobody happens to violate yet, exactly as `container_executor`'s
+own closed schema is elsewhere in this fleet's ecosystem. The one exception:
+`DockerBackend.trigger_decide`, when set, bind-mounts exactly ONE
+host-owned Unix socket at the single hardcoded target `TRIGGER_SOCKET_PATH`
+- the controller-owned decide-and-reply channel #183 and #269 build on. The
+SOURCE path is derived by `prepare()` from the attempt id alone, never
+accepted from an arbitrary caller; the TARGET is never a parameter at all.
+See `compose_run_argv`'s own `trigger_socket_host_path` docstring and
+`docs/specs/evaluation-facility/decide-reply-channel.md` §2c for the full
+reasoning and for what stays refused.
 
 UNKNOWN NEVER REAPS. `confirm_stopped()`/`confirm_absent()` return
 `Confirmation.UNKNOWN` whenever the daemon cannot be asked at all (a timeout,
@@ -108,11 +117,14 @@ live run (#10). See `describe()`'s own `unobserved` claims for the rest.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import os
 import re
+import stat
 import subprocess
 import tarfile
+import tempfile
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -129,7 +141,9 @@ from .backend import (
     ExecuteResult,
     Limits,
 )
+from .decide_reply_channel import DecideFn, DecideReplyChannel, LoggedDecision
 from .lifecycle import CANARY_NONCE_KEY
+from .verify import SURFACE_EXECUTABLE_KEY
 
 DAEMON_TIMEOUT = 5.0
 
@@ -199,6 +213,123 @@ SKILLC_WRAP_PATH = "/usr/local/bin/skillc-wrap"
 #: `unavailable-in-image` until the SAME held change that starts the
 #: supervisor also makes the socket real.
 SKILLC_CONTROL_SOCKET_PATH = "/run/skillc/control.sock"
+
+#: Where #183's controller-owned decide-and-reply channel is bind-mounted
+#: into the container, when `DockerBackend.trigger_decide` is set (see that
+#: field's own docstring and `docs/specs/evaluation-facility/
+#: decide-reply-channel.md` §2c). A single hardcoded constant, never a
+#: `compose_run_argv` parameter: the one narrow exception the owner's
+#: 2026-10-03 ruling authorized is "the controller may mount ONE socket at
+#: a path it names", never "a caller may choose the in-container target."
+#: Distinct from `SKILLC_CONTROL_SOCKET_PATH` above (#158's own, unrelated,
+#: still-held in-container control socket) - two different mechanisms, two
+#: different paths, so neither can be mistaken for the other in a log or a
+#: capability probe.
+TRIGGER_SOCKET_PATH = "/run/skillc/trigger.sock"
+
+#: Where the HOST side of #183's socket lives, by default - deliberately
+#: SHORT and independent of `base_dir` (a workspace/session clone root),
+#: because a Unix domain socket path is capped by the kernel
+#: (`sizeof(sun_path)`, 108 bytes on Linux including the terminator;
+#: `DecideReplyChannel.start()` enforces a safety margin below it and
+#: names the limit if one is ever handed a path that violates it). A
+#: `base_dir`-derived path routinely overflows that limit on its own,
+#: before any attempt-specific suffix - found running this backend's own
+#: integration test against a realistic (pytest `tmp_path`-derived)
+#: `base_dir`. `_trigger_socket_host_path` hashes the attempt id to a
+#: fixed-length name for the same reason: `attempt_id` is caller-supplied
+#: and unbounded, and a long one must not reintroduce the overflow this
+#: default was chosen to avoid.
+DEFAULT_TRIGGER_SOCKET_DIR = Path(tempfile.gettempdir()) / "skillc-trigger"
+
+
+def trigger_socket_host_path_for(trigger_socket_dir: Path, name: str) -> Path:
+    """Pure - the exact host-side socket path `_start_trigger_channel` binds
+    and `compose_run_argv`'s `trigger_socket_host_path` mounts, factored out
+    so a test can assert the path a real `prepare()` call used without
+    duplicating the hash. The filename is a hash of `name` (itself derived
+    from `attempt_id` alone), never `name` verbatim: `_container_name` allows
+    up to 128 characters, which alone can violate `DecideReplyChannel.
+    start()`'s AF_UNIX safety margin once a real `trigger_socket_dir` is
+    added on top of it - a fixed-length digest bounds the result regardless
+    of how long the caller's `attempt_id` is (`DEFAULT_TRIGGER_SOCKET_DIR`'s
+    own comment)."""
+    digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:16]
+    return trigger_socket_dir / f"{digest}.sock"
+
+
+#: #183's socket access control (design doc §2f), decisions (a)/(b).
+#:
+#: (a) DIRECTORY: `_ensure_private_trigger_dir` below creates
+#: `trigger_socket_dir` at mode 0700, owned by this process - never
+#: `exist_ok=True`'d blindly. If the directory already exists, its owner
+#: and mode are checked and the whole attempt is refused
+#: (`BackendUnavailable`) on a mismatch, rather than silently trusting
+#: something another host user or process created. A host-wide world-
+#: readable/writable temp directory would let any other process on the
+#: host list, pre-create, or replace a socket path before this backend
+#: ever gets to it; a private, owner-verified directory means no other
+#: host process can even TRAVERSE to a socket's name, regardless of that
+#: socket file's own mode (directory execute/search permission is checked
+#: before a file's own permission bits, for every syscall that resolves a
+#: path through it - `stat()`, `connect()`, `unlink()`, all of them).
+#:
+#: (b) SOCKET MODE: the subject inside the container runs as the fixed
+#: `CANDIDATE_UID:CANDIDATE_GID` (`compose_run_argv`'s `--user`), which is
+#: essentially never this controller PROCESS's own uid - so a mode-0600,
+#: owner-only socket (`DecideReplyChannel`'s own generic default, correct
+#: for a caller running AS its own subject) would make the subject's own
+#: `connect()` fail with EACCES, breaking the channel outright. Granting
+#: "other" access looks wide in isolation, but the REAL access-control
+#: boundary here is (a)'s directory, not this file's own mode: nothing on
+#: the host other than this controller process can even resolve the
+#: socket's HOST-side path to open it, because the directory's own 0700
+#: blocks every other host user's traversal regardless of what the file
+#: inside it allows. GROUP is granted too (`0o666`, not `0o606` -
+#: cross-model review): the socket's actual group is whatever
+#: this controller process's own primary group happens to be, essentially
+#: never `CANDIDATE_GID` - changing it to an arbitrary target gid would
+#: need the calling process to either own that gid as a supplementary
+#: group or hold `CAP_CHOWN`, a privilege this backend does not require
+#: anywhere else - so zeroing GROUP while granting OTHER bought nothing: a
+#: deployment where the two processes' groups happen to coincide would be
+#: denied for no reason, and (a)'s directory is doing the real work
+#: either way. The container's OWN view of the bind-mounted file is
+#: governed by the image's `/run/skillc/` directory (an image-level,
+#: #78/PR-B concern, not this one) plus this file's own mode - never by
+#: the host directory surrounding it, since a single-FILE bind mount
+#: exposes only that one file, not its host-side neighbours.
+TRIGGER_SOCKET_MODE = 0o666
+
+
+def _ensure_private_trigger_dir(path: Path) -> None:
+    """Design doc §2f decision (a). Creates `path` at mode 0700 if absent.
+    If present, refuses (raises `BackendUnavailable`) unless it is already
+    owned by this process's own uid and already mode 0700 - never widens
+    an existing directory to match, and never proceeds past a mismatch on
+    the assumption it is probably fine. `os.chmod` after `mkdir` rather
+    than relying on `mkdir(mode=...)` alone: `mkdir`'s own `mode` argument
+    is still subject to the process umask, which can only narrow it
+    further for 0700 (every bit already absent from "group"/"other"), but
+    stating the final mode explicitly removes any dependence on what the
+    umask happens to be rather than reasoning about whether it is safe
+    this time."""
+    if not path.exists():
+        path.mkdir(parents=True, mode=0o700)
+        os.chmod(path, 0o700)
+        return
+    st = path.stat()
+    if st.st_uid != os.getuid():
+        raise BackendUnavailable(
+            f"refusing to use trigger socket directory {path}: owned by uid {st.st_uid}, "
+            f"not this process's own uid {os.getuid()}"
+        )
+    if stat.S_IMODE(st.st_mode) != 0o700:
+        raise BackendUnavailable(
+            f"refusing to use trigger socket directory {path}: mode "
+            f"{oct(stat.S_IMODE(st.st_mode))}, expected 0o700"
+        )
+
 
 #: Resource limits (addendum item C9). --memory-swap MUST equal --memory or
 #: swap silently doubles the effective bound.
@@ -298,11 +429,16 @@ def compose_run_argv(
     shm_size: str,
     container_user: str,
     disk_limit: str | None,
+    trigger_socket_host_path: Path | None = None,
 ) -> list[str]:
     """The full `docker run` argv. Pure - makes no call, mutates nothing. A
     FIXED, closed set of flags: there is no passthrough for arbitrary extra
     arguments, so nothing here can ever mount the docker socket, add
     `--privileged`, or otherwise widen the container (addendum item C12).
+    `trigger_socket_host_path` (below) is the ONE deliberate, narrow
+    exception the owner's 2026-10-03 ruling on #183 authorized - everything
+    else C12 names stays refused, with no other way to reach this function
+    that could add a second mount or any other flag.
 
     NO BIND MOUNT for the workspace or home (design decision, orchestrator
     review of PR #83, 2026-09-26, choosing the "preferred" option over
@@ -316,7 +452,16 @@ def compose_run_argv(
     ownership. `-w CONTAINER_WORKSPACE` still sets the working directory -
     Docker creates it inside the container's own writable layer if the image
     does not already have it - and `install()`/`export()` are the `docker cp`
-    callers on either side of `execute()`.
+    callers on either side of `execute()`. This reasoning is unchanged and
+    still governs the workspace/home: `trigger_socket_host_path` mounts
+    neither. It mounts exactly one host-owned Unix socket, read-write, at
+    the single fixed in-container path `TRIGGER_SOCKET_PATH` - never a
+    directory, never anything content-bearing the way a workspace or home
+    bind mount would be, and the TARGET is never a parameter (#183's design
+    doc §2c): there is no way to call this function and have it mount
+    anywhere else. `None` (the default - every existing caller, every other
+    backend construction) omits the flag entirely; the rest of this
+    docstring's argv is then byte-for-byte what it was before #183.
 
     `-i` is always present so a caller MAY later deliver `execute(...,
     stdin=...)` - without it, `docker run` never attaches the client's stdin
@@ -360,6 +505,8 @@ def compose_run_argv(
     ]
     if disk_limit is not None:
         argv += ["--storage-opt", f"size={disk_limit}"]
+    if trigger_socket_host_path is not None:
+        argv += ["--mount", f"type=bind,source={trigger_socket_host_path},target={TRIGGER_SOCKET_PATH}"]
     argv += [
         "-w", CONTAINER_WORKSPACE,
         "-e", f"HOME={CONTAINER_HOME}",
@@ -526,9 +673,11 @@ class _Handle:
     """Opaque to the controller (backend.py's own rule): `attempt_id` and
     `name` are both derived from the attempt ID alone, so `str(handle)`
     (the dataclass default) never leaks a host path, uid or hostname. No
-    `work_dir`/`home_dir` fields - there is no host-side directory backing
-    this attempt at all, since data moves by `docker cp`, never a bind
-    mount.
+    `work_dir`/`home_dir` fields - the WORKSPACE and HOME are still never
+    bind-mounted; that data moves by `docker cp`, exactly as before #183.
+    `trigger_channel` (below) is the one exception elsewhere in this
+    module (#183's one named mount), and it is excluded from `repr` for
+    the same reason `env` is - see that field's own comment.
 
     `env` is the exact environment `prepare()` resolved and used to start
     THIS attempt's container, captured once and reused by every later call
@@ -542,11 +691,18 @@ class _Handle:
     removed by mistake). `repr=False`: printing a handle must never leak a
     connection string that could itself be host-identifying (a local socket
     path, a remote host/port) - the same neutral-identity rule `str(handle)`
-    already has to honor for uid/hostname/paths."""
+    already has to honor for uid/hostname/paths.
+
+    `trigger_channel` is `None` for every attempt whose backend was not
+    constructed with `trigger_decide` set (every caller before #183) -
+    `repr=False` so a handle's string form never leaks the socket's
+    host-side path (`DecideReplyChannel` itself does not override
+    `__repr__`, but a handle must not rely on that staying true)."""
 
     attempt_id: str
     name: str
     env: Mapping[str, str] = field(repr=False)
+    trigger_channel: DecideReplyChannel | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
@@ -572,6 +728,19 @@ class DockerBackend:
     disk_limit: str | None = None
     env: Mapping[str, str] = field(default_factory=dict)
     daemon_timeout: float = DAEMON_TIMEOUT
+    #: #183: opt-in, not a default, matching `disk_limit`'s own shape -
+    #: every caller before #183 leaves this `None` and gets the exact same
+    #: argv as before. When set, `prepare()` bind-mounts ONE host-owned
+    #: Unix socket at `TRIGGER_SOCKET_PATH` and owns a `DecideReplyChannel`
+    #: against it for each attempt's whole lifetime; `trigger_log()`
+    #: retrieves the finalized log. See `docs/specs/evaluation-facility/
+    #: decide-reply-channel.md`.
+    trigger_decide: DecideFn | None = field(default=None, repr=False)
+    #: Host-side directory for #183's socket files - see
+    #: `DEFAULT_TRIGGER_SOCKET_DIR`'s own comment for why this is NOT
+    #: `base_dir`. `repr=False`: a host filesystem path, same reasoning as
+    #: `env`.
+    trigger_socket_dir: Path = field(default=DEFAULT_TRIGGER_SOCKET_DIR, repr=False)
 
     def describe(self) -> BackendDescription:
         version = probe_daemon(self.docker_bin, self.daemon_timeout, _docker_env())
@@ -632,19 +801,25 @@ class DockerBackend:
             ),
         )
 
-    def _keepalive_run_argv(self, name: str, attempt_id: str) -> list[str]:
+    def _keepalive_run_argv(
+        self, name: str, attempt_id: str, trigger_socket_host_path: Path | None = None,
+    ) -> list[str]:
         """`prepare()`'s `docker run -d` argv: `compose_run_argv`'s own
         composed flags (identity, network, resource limits, ownership
         labels), with the placeholder `_KEEPALIVE_ARGV` in place of a real
         subject, detached (`-d`), and with `--rm` removed - this container's
         teardown is owned explicitly by `destroy()`/`confirm_absent()`, and
         Docker's own auto-removal on exit would otherwise race `export()`
-        after a forced `docker kill` (see `execute()`/`_stop()`)."""
+        after a forced `docker kill` (see `execute()`/`_stop()`).
+        `trigger_socket_host_path` is #183's one named exception - see
+        `compose_run_argv`'s own docstring; `None` (every caller before
+        #183) changes nothing here."""
         argv = compose_run_argv(
             docker_bin=self.docker_bin, image=self.image, name=name, attempt_id=attempt_id,
             subject_argv=_KEEPALIVE_ARGV, env=self.env, network=self.network, memory=self.memory,
             pids_limit=self.pids_limit, cpus=self.cpus, shm_size=self.shm_size,
             container_user=_container_user(), disk_limit=self.disk_limit,
+            trigger_socket_host_path=trigger_socket_host_path,
         )
         argv.insert(argv.index("run") + 1, "-d")
         argv.remove("--rm")
@@ -688,7 +863,8 @@ class DockerBackend:
                 f"'docker run -d' pull it mid-trial with no bound on how long that takes"
             )
         name = _container_name(attempt_id)
-        argv = self._keepalive_run_argv(name, attempt_id)
+        channel, trigger_socket_host_path = self._start_trigger_channel(name)
+        argv = self._keepalive_run_argv(name, attempt_id, trigger_socket_host_path)
         try:
             started = subprocess.run(
                 argv, capture_output=True, text=True, env=env, check=False, timeout=self.daemon_timeout,
@@ -697,7 +873,12 @@ class DockerBackend:
             # Best-effort: whether or not a container was actually created,
             # this makes sure none is left behind under this name. Also
             # bounded - a cleanup call that itself hangs must not turn a
-            # raising prepare() into a hanging one.
+            # raising prepare() into a hanging one. The channel's own
+            # listener is torn down too (`close()`, idempotent) - a raising
+            # prepare() must not leave a partial resource behind, and a
+            # socket with nothing ever going to mount it is exactly that.
+            if channel is not None:
+                channel.close()
             subprocess.run(
                 [*self.docker_bin, "rm", "-f", name],
                 capture_output=True, env=env, check=False, timeout=self.daemon_timeout,
@@ -706,6 +887,8 @@ class DockerBackend:
                 f"docker run failed to start a container for {attempt_id!r}: {exc}"
             ) from exc
         if started.returncode != 0:
+            if channel is not None:
+                channel.close()
             subprocess.run(
                 [*self.docker_bin, "rm", "-f", name],
                 capture_output=True, env=env, check=False, timeout=self.daemon_timeout,
@@ -713,7 +896,49 @@ class DockerBackend:
             raise BackendUnavailable(
                 f"docker run failed to start a container for {attempt_id!r}: {started.stderr.strip()}"
             )
-        return _Handle(attempt_id=attempt_id, name=name, env=env)
+        return _Handle(attempt_id=attempt_id, name=name, env=env, trigger_channel=channel)
+
+    def _start_trigger_channel(self, name: str) -> tuple[DecideReplyChannel | None, Path | None]:
+        """#183: when `self.trigger_decide` is set, create and BIND the
+        attempt's socket on the host BEFORE `docker run -d` ever runs -
+        required ordering, not a convenience: a bind mount of a Unix socket
+        captures the inode that exists at mount time, so the real socket
+        must already exist at `trigger_socket_host_path` before the
+        container that mounts it is created, or the container would
+        either fail to start (no such source path) or - on a Docker
+        version that creates a placeholder - mount an empty regular file
+        that this channel could never `bind()` over afterward without the
+        mount itself going stale (the same write-then-rename hazard
+        `CLAUDE.md`'s credential-freshness section documents for a
+        single-file mount, applied here to socket creation instead of
+        rotation). Returns `(None, None)` when no channel is configured -
+        every caller before #183, and the argv this produces downstream is
+        then unchanged (`compose_run_argv`'s own docstring)."""
+        if self.trigger_decide is None:
+            return None, None
+        trigger_socket_host_path = trigger_socket_host_path_for(self.trigger_socket_dir, name)
+        _ensure_private_trigger_dir(trigger_socket_host_path.parent)
+        channel = DecideReplyChannel(trigger_socket_host_path, self.trigger_decide, socket_mode=TRIGGER_SOCKET_MODE)
+        channel.start()
+        return channel, trigger_socket_host_path
+
+    def trigger_log(self, handle: object) -> list[LoggedDecision] | None:
+        """#183: the finalized decide-and-reply log for this attempt.
+        `None` means "this backend has no channel at all" (`trigger_decide`
+        was never set) - a fact about CONFIGURATION, never about what
+        happened during the attempt. A caller that DID configure a channel
+        and still wants the `no-controller-witness` / `witnessed` / `
+        channel-unavailable` three-way read builds its own
+        `decide_reply_channel.TrustedLog` from this method's return value
+        (an empty, non-`None` list is the bypass case - see that module's
+        own `TrustedLog.witnessed`). Idempotent: safe to call more than
+        once, and after `destroy()` has already closed the channel -
+        `DecideReplyChannel.log_or_finalize()`'s own idempotence, not
+        reimplemented here."""
+        assert isinstance(handle, _Handle)
+        if handle.trigger_channel is None:
+            return None
+        return handle.trigger_channel.log_or_finalize()
 
     def _image_present_locally(self, env: Mapping[str, str]) -> bool:
         """Whether `self.image` already exists in the local image store,
@@ -782,6 +1007,7 @@ class DockerBackend:
         reports readiness evidence. Raises `BackendUnavailable` if a
         declared copy fails - a materialization failure makes this
         attempt's backend unusable, exactly like an unreachable daemon.
+        DockerBackend honours SURFACE_EXECUTABLE_KEY for bytes-backed files.
         Any OTHER value type (for example verify.py's own
         `SURFACE_EXECUTABLE_KEY` metadata list) is silently not copied, same
         as always - it is still counted in `declared`, just not installed.
@@ -830,6 +1056,8 @@ class DockerBackend:
 
         entries: dict[str, str] = {}
         installed = 0
+        executable_rels = surface.get(SURFACE_EXECUTABLE_KEY)
+        executable_set = set(executable_rels) if isinstance(executable_rels, (list, tuple, set)) else set()
         for key, value in declared.items():
             if isinstance(value, bytes):
                 # Raw in-memory content, no host file backing it - the
@@ -841,7 +1069,7 @@ class DockerBackend:
                 # them, and the pre-fix loop just skipped them without
                 # error, so the probe failed with "no such file" the first
                 # time this combination was actually exercised).
-                payload = _owned_tar_bytes(key, value)
+                payload = _owned_tar_bytes(key, value, mode=0o755 if key in executable_set else 0o644)
             elif isinstance(value, (str, Path)):
                 host_path = _as_existing_path(value)
                 if host_path is None:
@@ -1531,8 +1759,16 @@ class DockerBackend:
     def destroy(self, handle: object) -> None:
         """Step 9: `docker rm -f` - safe to call more than once, and safe to
         call after a failed `install`/`execute` (the container is always
-        created by the time a caller has a handle at all)."""
+        created by the time a caller has a handle at all). Also closes
+        #183's channel, if this attempt had one and the caller never
+        called `trigger_log()`/finalized it directly - best-effort, never
+        raises (`DecideReplyChannel.close()`'s own idempotent contract), so
+        a caller that forgot to retrieve the log before tearing down still
+        leaves no listening thread behind; it only loses the log it never
+        asked for."""
         assert isinstance(handle, _Handle)
+        if handle.trigger_channel is not None:
+            handle.trigger_channel.close()
         try:
             subprocess.run(
                 [*self.docker_bin, "rm", "-f", handle.name],

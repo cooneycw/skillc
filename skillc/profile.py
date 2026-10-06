@@ -14,8 +14,8 @@ that closure from the pinned source and either returns a content-addressed
 inventory or refuses with a named reason.
 
 What a valid inventory does NOT establish: that anything was installed, that the
-installed helper runs, or that a client can use it. Installation and readiness
-are a later, separate proof (#266); this module never writes into a home.
+installed helper runs, or that a client can use it. Installation is a separate operation (#266); host installation and drift
+checks do not prove cold-container execution or client readiness.
 
 Generic by construction, like materialize.py: nothing here names a subject. The
 reference patterns, the dependency map and the unsupported list are all data in
@@ -49,7 +49,7 @@ INVENTORY_SCHEMA = 1
 #: Every kind of dependency a profile can declare (#247's list). A kind with no
 #: entries must be named in `declared_empty_kinds`, so "none" is a declaration
 #: and never an omission.
-KINDS = ("reference", "helper", "library", "startup-context", "tool")
+KINDS = ("reference", "helper", "library", "startup-context", "tool", "synthetic")
 
 #: protocol.md 10.4: product = the skill as installed, prose plus bundled
 #: helpers; prose = identical helpers in every arm, only the instructions differ.
@@ -77,8 +77,10 @@ _PROFILE_KEYS = {
 _DEP_KEYS = {
     "id", "kind", "scope", "source_root", "paths", "destination", "satisfies",
     "traverse", "no_traverse_reason", "unreferenced_reason", "version", "supply",
-    "role",
+    "role", "content", "shadow_check", "replaces_pinned", "replacement_reason",
 }
+
+SYNTHETIC_CONTENT_MAX_BYTES = 4096  # Marker text, not a payload channel.
 
 Refused = m.Refused
 
@@ -115,6 +117,10 @@ class Dependency:
     version: str | None
     supply: str | None
     role: str
+    content: str | None = None
+    shadow_path: str | None = None
+    replaces_pinned: bool = False
+    replacement_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -236,7 +242,7 @@ class Profile:
         contradicted = sorted(set(empty) & present)
         if contradicted:
             raise Refused(f"kind(s) declared empty but have dependencies: {contradicted}")
-        silent = sorted(set(KINDS) - present - set(empty) - {"reference"})
+        silent = sorted(set(KINDS) - present - set(empty) - {"reference", "synthetic"})
         if silent:
             # `reference` is always present: the selected skills' bundled files.
             raise Refused(
@@ -315,6 +321,9 @@ def _dependency(entry: object) -> Dependency:
     unknown = sorted(set(entry) - _DEP_KEYS)
     if unknown:
         raise Refused(f"dependency {entry.get('id')!r} has unknown keys: {unknown}")
+    synthetic_keys = {"content", "replaces_pinned", "replacement_reason"}
+    if entry.get("kind") != "synthetic" and synthetic_keys.intersection(entry):
+        raise Refused("synthetic fields require kind synthetic")
     dep_id = entry.get("id")
     if not isinstance(dep_id, str) or not dep_id:
         raise Refused(f"dependency has no id: {entry!r}")
@@ -336,7 +345,42 @@ def _dependency(entry: object) -> Dependency:
         if m._escapes(p):
             raise Refused(f"dependency {dep_id}: path {p!r} escapes its source root")
     destination = entry.get("destination")
-    if kind == "tool":
+    content = None
+    shadow_path = None
+    replaces_pinned = False
+    replacement_reason = ""
+    if kind == "synthetic":
+        forbidden = {"satisfies", "traverse", "no_traverse_reason", "version", "supply"}
+        if forbidden.intersection(entry):
+            raise Refused(f"dependency {dep_id}: synthetic file cannot declare traversal or tool fields")
+        _str(entry, "role")
+        _str(entry, "unreferenced_reason")
+        content = entry.get("content")
+        if not isinstance(content, str):
+            raise Refused(f"dependency {dep_id}: content must be UTF-8 text")
+        _synthetic_bytes(content)
+        if not isinstance(destination, str) or m._escapes(destination) or destination in ("", "."):
+            raise Refused(f"dependency {dep_id}: destination must be a home-relative directory")
+        # The installed path and the shadow-check path are DERIVED from the
+        # SAME (source_root, paths[0]) pair `_source_path` already parsed
+        # above for every kind - never two independently author-supplied
+        # values. An author who could point "where this installs" and
+        # "where we checked for a collision" at two different places could
+        # make the no-shadowing check pass while the real destination still
+        # silently substitutes for a pinned file (review finding, #303).
+        if len(paths) != 1:
+            raise Refused(f"dependency {dep_id}: synthetic declares exactly one path, naming the installed file")
+        shadow_path = _source_path(source_root, paths[0])
+        replaces_pinned = entry.get("replaces_pinned", False)
+        if not isinstance(replaces_pinned, bool):
+            raise Refused(f"dependency {dep_id}: replaces_pinned must be boolean")
+        if replaces_pinned:
+            replacement_reason = _str(entry, "replacement_reason")
+            if not replacement_reason.strip():
+                raise Refused(f"dependency {dep_id}: replacement_reason must be non-empty")
+        elif "replacement_reason" in entry:
+            raise Refused(f"dependency {dep_id}: replacement_reason requires replaces_pinned")
+    elif kind == "tool":
         if paths or destination is not None:
             raise Refused(f"dependency {dep_id}: a tool is supplied, not installed from the source")
         for key in ("version", "supply"):
@@ -362,11 +406,11 @@ def _dependency(entry: object) -> Dependency:
             satisfies.append(Satisfies(item["reference"], path))
         else:
             raise Refused(f"dependency {dep_id}: satisfies entry malformed: {item!r}")
-    traverse = entry.get("traverse", kind != "tool")
+    traverse = entry.get("traverse", kind not in ("tool", "synthetic"))
     if not isinstance(traverse, bool):
         raise Refused(f"dependency {dep_id}: traverse must be true or false")
     no_traverse_reason = str(entry.get("no_traverse_reason", ""))
-    if kind != "tool" and not traverse and not no_traverse_reason:
+    if kind not in ("tool", "synthetic") and not traverse and not no_traverse_reason:
         # An untraversed tree is a hole in the transitive closure. It may be a
         # deliberate one; it may not be a silent one.
         raise Refused(f"dependency {dep_id}: traverse is false with no no_traverse_reason")
@@ -380,6 +424,8 @@ def _dependency(entry: object) -> Dependency:
         version=entry.get("version") if isinstance(entry.get("version"), str) else None,
         supply=entry.get("supply") if isinstance(entry.get("supply"), str) else None,
         role=str(entry.get("role", "")),
+        content=content, shadow_path=shadow_path, replaces_pinned=replaces_pinned,
+        replacement_reason=replacement_reason,
     )
 
 
@@ -772,6 +818,8 @@ def git_blob_id(data: bytes) -> str:
 def _file_record(tree: Tree, repo_path: str, dest: str, owner: str) -> dict[str, object]:
     data = tree.read(repo_path)
     return {
+        "origin": "pinned",
+        "replaces_pinned_digest": None,
         "source": repo_path,
         "destination": dest,
         "mode": tree.files()[repo_path],
@@ -799,11 +847,27 @@ def _claim(installed: dict[str, dict[str, object]], dest: str, record: dict[str,
     installed[dest] = record
 
 
+def _synthetic_bytes(content: str) -> bytes:
+    try:
+        data = content.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise Refused("synthetic content must be valid UTF-8 text") from exc
+    if len(data) > SYNTHETIC_CONTENT_MAX_BYTES:
+        raise Refused(f"synthetic content exceeds {SYNTHETIC_CONTENT_MAX_BYTES} bytes")
+    if b"\0" in data:
+        raise Refused("synthetic content contains a NUL, not marker text")
+    return data
+
+
+def _source_path(root: str, name: str) -> str:
+    return name if root == "." else posixpath.join(root, name)
+
+
 def _source_files(walk: _Walk, dep: Dependency) -> list[tuple[str, str]]:
     """(repo path, path relative to source root) for every file the dependency carries."""
     out: list[tuple[str, str]] = []
     for p in dep.paths:
-        full = p if dep.source_root == "." else posixpath.join(dep.source_root, p)
+        full = _source_path(dep.source_root, p)
         found = walk.tree.under(full)
         if not found:
             raise Refused(f"missing {dep.kind} {dep.id}: {full} is absent from the source")
@@ -819,6 +883,31 @@ def _visit(walk: _Walk, dep: Dependency, installed: dict[str, dict[str, object]]
     if dep.kind == "tool":
         return
     assert dep.destination is not None
+    if dep.kind == "synthetic":
+        assert dep.content is not None and dep.shadow_path is not None
+        data = _synthetic_bytes(dep.content)
+        # `dest` (where this installs) and `dep.shadow_path` (what it would
+        # be if it were a real pinned file) are both derived from the same
+        # dep.paths[0] - one joined under dep.destination, the other under
+        # dep.source_root - so they cannot be pointed at unrelated places.
+        dest = posixpath.join(dep.destination, dep.paths[0])
+        walk.tree._refuse_links(dep.shadow_path)
+        replacement_digest = None
+        if dep.shadow_path in walk.tree.files():
+            if not dep.replaces_pinned:
+                raise Refused(f"synthetic file would silently substitute for real pinned file "
+                              f"{dep.shadow_path}; declare replaces_pinned and replacement_reason")
+            replacement_digest = m.sha256_bytes(walk.tree.read(dep.shadow_path))
+        elif dep.replaces_pinned:
+            raise Refused(f"replacement shadow path absent from pinned tree: {dep.shadow_path}")
+        _claim(installed, dest, {
+            "source": None, "destination": dest, "origin": "synthetic",
+            "content": dep.content, "mode": "100644", "size": len(data),
+            "digest": m.sha256_bytes(data), "git_blob": git_blob_id(data), "owner": dep.id,
+            "shadow_path": dep.shadow_path, "replaces_pinned_digest": replacement_digest,
+            "replacement_reason": dep.replacement_reason or None,
+        })
+        return
     for repo_path, rel in _source_files(walk, dep):
         dest = posixpath.join(dep.destination, rel)
         _claim(installed, dest, _file_record(walk.tree, repo_path, dest, owner=dep.id))
@@ -919,3 +1008,149 @@ def load_tree(profile: Profile, repo: Path | None, snapshot: Path | None) -> Tre
         return GitTree(repo, profile.subject.revision)
     assert snapshot is not None
     return DirTree(snapshot)
+
+
+# ------------------------------------------------------------ installation
+
+
+def _install_records(inventory: dict[str, Any]) -> list[dict[str, Any]]:
+    records = [r for group in ("skills", "dependencies")
+               for entry in inventory[group] for r in entry["files"]]
+    if not records:
+        raise Refused("empty installation population")
+    return sorted(records, key=lambda r: r["destination"])
+
+
+def _installed_target(home: Path, destination: str) -> Path:
+    if m._escapes(destination) or destination in ("", "."):
+        raise Refused(f"unsafe destination: {destination}")
+    target = home / destination
+    # Refuse links even when they happen to resolve inside the home. Installation
+    # must never borrow a linked host file or write through a linked parent.
+    for part in (target, *target.parents):
+        if part == home:
+            break
+        if part.is_symlink():
+            raise Refused(f"symlink at destination: {destination}")
+    return target
+
+
+def _version_matches(actual: tuple[int, ...], constraint: str) -> bool:
+    match = re.fullmatch(r"(>=|<=|==|!=|>|<)\s*(\d+(?:\.\d+)*)(?:\s+\([^\n]*\))?", constraint)
+    if match is None:
+        raise ValueError("unsupported version constraint")
+    expected = tuple(int(n) for n in match[2].split("."))
+    width = max(len(actual), len(expected))
+    actual += (0,) * (width - len(actual))
+    expected += (0,) * (width - len(expected))
+    return {">=": actual >= expected, "<=": actual <= expected,
+            "==": actual == expected, "!=": actual != expected,
+            ">": actual > expected, "<": actual < expected}[match[1]]
+
+
+def _check_tool(dep: dict[str, Any]) -> dict[str, Any]:
+    result = {"id": dep["id"], "constraint": dep["version"], "supply": dep["supply"]}
+    executable = shutil.which(dep["id"])
+    if executable is None:
+        return {**result, "status": "unknown", "reason": "missing on PATH"}
+    constraint = dep["version"]
+    if constraint in (None, "any"):
+        return {**result, "status": "satisfied", "version": None}
+    try:
+        run = subprocess.run([executable, "--version"], capture_output=True,
+                             timeout=10, check=False)
+        match = re.search(rb"\b(\d+(?:\.\d+)+)\b", run.stdout + run.stderr)
+        if run.returncode != 0 or match is None:
+            return {**result, "status": "unknown", "reason": "version probe failed"}
+        version = match[1].decode("ascii")
+        met = _version_matches(tuple(int(n) for n in version.split(".")), constraint)
+        return {**result, "status": "satisfied" if met else "violated", "version": version}
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return {**result, "status": "unknown", "reason": "version probe unavailable or constraint unsupported"}
+
+
+def install(inventory: dict[str, Any], tree: Tree, home: Path) -> dict[str, Any]:
+    """Install a validated closure, preserving bytes and executable modes.
+
+    This host-filesystem operation does not isolate absolute reads, environment,
+    PATH or caches. The cold-container proof remains owed to a Docker-capable
+    environment. Tool IDs are looked up literally, never inferred from labels.
+    Relative caller-supplied home values are recorded verbatim; absolute values
+    are omitted to keep host identities out of receipts. No home is re-derived.
+    """
+    if not home.is_dir() or home.is_symlink():
+        raise Refused("installation home must be an existing directory, not a symlink")
+    staged = []
+    preexisting = []
+    # Preflight the entire population before writing any file.
+    for record in _install_records(inventory):
+        destination = record["destination"]
+        target = _installed_target(home, destination)
+        try:
+            if record["origin"] == "synthetic":
+                data = _synthetic_bytes(record["content"])
+                if record["mode"] != "100644":
+                    raise Refused(f"synthetic mode must be 100644: {destination}")
+            else:
+                data = tree.read(record["source"])
+            if m.sha256_bytes(data) != record["digest"]:
+                raise Refused(f"source digest changed: {destination}")
+            if record["mode"] not in ("100644", "100755"):
+                raise Refused(f"unsupported mode: {destination}")
+            if target.exists():
+                if not target.is_file() or target.read_bytes() != data:
+                    raise Refused(f"different pre-existing destination: {destination}")
+                preexisting.append(destination)
+            for parent in target.parents:
+                if parent == home:
+                    break
+                if parent.exists() and not parent.is_dir():
+                    raise Refused(f"non-directory parent: {destination}")
+        except OSError as exc:
+            raise Refused(f"installation input unreadable: {destination}") from exc
+        staged.append((record, target, data))
+    for record, target, data in staged:
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if record["destination"] not in preexisting:
+                target.write_bytes(data)
+            target.chmod(0o755 if record["mode"] == "100755" else 0o644)
+        except OSError as exc:
+            raise Refused(f"installation write failed: {record['destination']}") from exc
+    receipt = {
+        "receipt_schema": 1,
+        "home": str(home) if not home.is_absolute() else None,
+        "home_provenance": "caller-supplied; absolute values omitted",
+        "installed_surface": inventory["installed_surface"],
+        "files": [{k: r[k] for k in ("destination", "digest", "mode", "origin",
+                                                   "replaces_pinned_digest")} for r, _, _ in staged],
+        "preexisting": preexisting,
+        "tools": [_check_tool(d) for d in inventory["dependencies"] if d["kind"] == "tool"],
+        "unsupported": inventory["unsupported"],
+        "client_profiles": inventory["client_profiles"],
+        "limits": ["host filesystem only; cold-container execution proof owed",
+                   "tool lookup is literal; external packages and grouped labels are not resolved",
+                   "installation does not establish client or baseline task readiness"],
+    }
+    return {**receipt, "digest": m.sha256_bytes(_canonical(receipt))}
+
+
+def verify_installed(inventory: dict[str, Any], home: Path) -> dict[str, Any]:
+    """Re-read the complete installed population; absent files remain UNKNOWN."""
+    results = []
+    for record in _install_records(inventory):
+        destination = record["destination"]
+        result: dict[str, Any] = {"destination": destination}
+        try:
+            target = _installed_target(home, destination)
+            digest = m.sha256_bytes(target.read_bytes())
+            mode = target.stat().st_mode & 0o7777
+            expected_mode = 0o755 if record["mode"] == "100755" else 0o644
+            result.update(digest=digest, mode=oct(mode), status=(
+                "satisfied" if digest == record["digest"] and mode == expected_mode else "violated"))
+        except Refused:
+            result.update(status="violated", reason="unsafe destination")
+        except OSError:
+            result.update(status="unknown", reason="missing or unreadable")
+        results.append(result)
+    return {"installed_surface": inventory["installed_surface"], "files": results}

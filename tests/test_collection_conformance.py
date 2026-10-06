@@ -573,13 +573,13 @@ def test_task_dir_run_is_graded_by_that_task_s_own_grader_fail_case(
 # --------------------------------------------------------- fixture surface
 
 
-def test_fixture_surface_installs_src_only_never_the_answer_key() -> None:
-    """`_fixture_surface` must deliver `evals/level1/slug-small-fix/fixture/src/`
+def test_fixture_surface_preserves_level1_never_the_answer_key() -> None:
+    """The unified task surface must deliver `evals/level1/slug-small-fix/fixture/src/`
     and never the sibling `expected.json` - that file is the grader's own
     ground truth for this fixture ("this candidate should FAIL, violating
     reported-example and R3"), and installing it would hand the agent the
     answer key."""
-    surface = cc._fixture_surface(GRADER_ROOT / "fixture")
+    surface = {rel: data for rel, data, _ in cc.task_surface(GRADER_ROOT / "fixture")}
     assert "src/slugify.py" in surface
     assert all(not path.endswith("expected.json") for path in surface)
     on_disk = (GRADER_ROOT / "fixture" / "src" / "slugify.py").read_bytes()
@@ -1887,3 +1887,147 @@ def test_a_transcript_over_the_stream_bound_is_partial_with_a_capture_failure(
         experiment, attempt_id, trial.TranscriptEvidence(b"1234"), Limits(max_stream_bytes=4), [],
     )
     assert at_bound["coverage"] == "complete" and at_bound["size"] == 4
+
+
+def test_red_bytes_executable_metadata_survives_install_and_export(
+    tmp_path: Path, base: Path, docker_state: Path,
+) -> None:
+    """#267 red on pre-fix DockerBackend: declared +x arrives as mode 0644."""
+    from skillc import verify
+
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-mode-control")
+    try:
+        backend.install(handle, {"helper": b"#!/bin/sh\nexit 0\n",
+                                 verify.SURFACE_EXECUTABLE_KEY: ["helper"]})
+        exported = tmp_path / "exported"
+        backend.export(handle, exported)
+        assert (exported / "helper").stat().st_mode & 0o100
+    finally:
+        backend.destroy(handle)
+
+
+def test_red_nested_answer_key_is_withheld(tmp_path: Path) -> None:
+    """#267 red on pre-fix task_surface: sub/expected.json leaks."""
+    fixture = tmp_path / "fixture"
+    (fixture / "sub").mkdir(parents=True)
+    (fixture / "code.py").write_bytes(b"public\n")
+    (fixture / "expected.json").write_bytes(b"answer\n")
+    (fixture / "sub" / "expected.json").write_bytes(b"nested answer\n")
+    old = {p.relative_to(fixture).as_posix(): p.read_bytes()
+           for p in fixture.rglob("*")
+           if p.is_file() and p.relative_to(fixture).as_posix() != "expected.json"}
+    assert "sub/expected.json" in old  # Committed proof of the old exclusion's leak.
+    surface = cc.task_surface(fixture)
+    paths = set(surface) if isinstance(surface, dict) else {rel for rel, _, _ in surface}
+    assert paths == {"code.py"}
+
+
+def test_task_surface_non_src_helper_round_trip(
+    tmp_path: Path, base: Path, docker_state: Path,
+) -> None:
+    """#267 old src-only delivery was empty; old Docker lost the helper's +x."""
+    fixture = tmp_path / "fixture"
+    (fixture / "pkg").mkdir(parents=True)
+    (fixture / "pkg" / "code.py").write_bytes(b"public\n")
+    helper = fixture / "helper"
+    helper.write_bytes(b"#!/bin/sh\nexit 0\n")
+    helper.chmod(0o755)
+    (fixture / "pyproject.toml").write_bytes(b"[project]\n")
+    (fixture / "expected.json").write_bytes(b"answer\n")
+    (tmp_path / "omitted.txt").write_bytes(b"private input\n")
+    files = cc.task_surface(fixture)
+    assert {rel for rel, _, _ in files} == {"pkg/code.py", "helper", "pyproject.toml"}
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-fixture-control")
+    try:
+        backend.install(handle, cc.surface_mapping(files))
+        exported = tmp_path / "captured"
+        backend.export(handle, exported)
+        for rel, data, executable in files:
+            installed = exported / rel
+            assert installed.read_bytes() == data
+            assert bool(installed.stat().st_mode & 0o100) == executable
+    finally:
+        backend.destroy(handle)
+
+
+@pytest.mark.parametrize("damage", ["outside-link", "answer-alias", "dir-link", "fifo",
+                                  "missing", "file-root", "root-link", "empty"])
+def test_task_surface_refuses_unsupported_entries(tmp_path: Path, damage: str) -> None:
+    """Controls for refusal, including FIFO which pre-fix code tried to read."""
+    fixture = tmp_path / "fixture"
+    fixture.mkdir()
+    (fixture / "code.py").write_bytes(b"public\n")
+    (fixture / "expected.json").write_bytes(b"answer\n")
+    outside = tmp_path / "outside"
+    outside.write_bytes(b"private\n")
+    if damage == "outside-link":
+        (fixture / "link").symlink_to(outside)
+    elif damage == "answer-alias":
+        (fixture / "answer.json").symlink_to(fixture / "expected.json")
+    elif damage == "dir-link":
+        (fixture / "link").symlink_to(tmp_path, target_is_directory=True)
+    elif damage == "fifo":
+        os.mkfifo(fixture / "pipe")
+    elif damage == "missing":
+        fixture = tmp_path / "missing"
+    elif damage == "file-root":
+        fixture = outside
+    elif damage == "root-link":
+        link = tmp_path / "linked"
+        link.symlink_to(fixture, target_is_directory=True)
+        fixture = link
+    else:
+        (fixture / "code.py").unlink()
+    with pytest.raises(demo.SubjectRefused):
+        cc.task_surface(fixture)
+
+
+def test_task_surface_never_delivers_pycache(tmp_path: Path) -> None:
+    """#267 review finding: the unified walk must keep pruning `__pycache__`
+    the way `_fixture_surface` always did. A host-local test run can leave
+    stray, gitignored bytecode under a fixture's own tree; delivering it
+    would widen the surface past the declared task with no refusal to catch
+    it (bytecode is a regular file, so the unsupported-file-type check does
+    not apply)."""
+    fixture = tmp_path / "fixture"
+    pycache = fixture / "src" / "__pycache__"
+    pycache.mkdir(parents=True)
+    (fixture / "src" / "code.py").write_bytes(b"public\n")
+    (pycache / "code.cpython-312.pyc").write_bytes(b"stale bytecode\n")
+    (fixture / "expected.json").write_bytes(b"answer\n")
+    files = cc.task_surface(fixture)
+    assert {rel for rel, _, _ in files} == {"src/code.py"}
+
+
+def test_task_surface_before_after_table_for_all_declared_tasks() -> None:
+    """#267 old src-only paths/digests survive; every non-src task gains files."""
+    import hashlib
+
+    evals = GRADER_ROOT.parents[1]
+    tasks = sorted(goal.parent for goal in evals.rglob("goal.md")
+                   if (goal.parent / "grader.json").is_file() and (goal.parent / "fixture").is_dir())
+    assert tasks
+    forbidden = {"qualify.py", "grader.json", "grader-controls", "reference", "wrong",
+                 "alternatives", "benign", "probe.py", "inputs.json", "PROVENANCE.md",
+                 "trusted-disruption-log.json"}
+    for task in tasks:
+        fixture = task / "fixture"
+        entries = list(fixture.rglob("*"))
+        assert not any(set(p.relative_to(fixture).parts) & forbidden for p in entries), task.name
+        old: dict[str, str] = {}
+        for dirpath, dirnames, filenames in os.walk(fixture / "src", followlinks=False):
+            dirnames[:] = sorted(d for d in dirnames if d != "__pycache__")
+            for name in sorted(filenames):
+                path = Path(dirpath) / name
+                old[path.relative_to(fixture).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+        new = {rel: hashlib.sha256(data).hexdigest() for rel, data, _ in cc.task_surface(fixture)}
+        label = task.relative_to(evals).as_posix()
+        assert old.items() <= new.items(), f"{label}: old={sorted(old)} new={sorted(new)}"
+        expected = {p.relative_to(fixture).as_posix() for p in entries
+                    if p.is_file() and p.name != "expected.json"}
+        assert set(new) == expected, f"{label}: missing={expected - new.keys()} extra={new.keys() - expected}"
+        assert all(Path(rel).name != "expected.json" for rel in [*old, *new]), label
+        if not (fixture / "src").exists():
+            assert not old and new, f"{label}: old empty, new={sorted(new)}"

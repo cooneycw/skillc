@@ -1,0 +1,35 @@
+{
+ "version": 2,
+ "kind": "skill-evidence",
+ "producer": "assembler",
+ "attempt_id": "att-1",
+ "trial_id": "t-1",
+ "skills": [
+  {
+   "skill": {
+    "path": ".codex/skills/slug/SKILL.md"
+   },
+   "invocation": {
+    "lineage": "root"
+   },
+   "lifecycle": {
+    "listed": {
+     "status": "UNKNOWN",
+     "reason": "x"
+    },
+    "read_observed": {
+     "status": "UNKNOWN",
+     "reason": "x"
+    },
+    "execution_observed": {
+     "status": "CONFIRMED"
+    }
+   },
+   "criteria_owned": [],
+   "external_evidence": {
+    "present": false,
+    "reconciliation": "absent"
+   }
+  }
+ ]
+}

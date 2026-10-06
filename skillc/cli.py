@@ -1128,7 +1128,7 @@ def cmd_selection_probe(args: argparse.Namespace) -> int:
             argv_for=lambda _attempt_id: client_argv,
             treatment_home_files=cc._collection_home_files(acquired.source, acquired.files),
             goal=(task_root / "goal.md").read_text(encoding="utf-8"),
-            surface=cc._fixture_surface(task_root / "fixture"),
+            surface=cc.surface_mapping(cc.task_surface(task_root / "fixture")),
             timeout=agent_timeout, cli_version=acquired.subject.client_version,
             credential_explicit_path=Path(args.credential) if args.credential else None,
             minimum_credential_seconds=minimum,
@@ -2094,6 +2094,37 @@ def cmd_degrade_subject(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_profile_install(args: argparse.Namespace) -> int:
+    """Validate live source, install, then independently check installed files."""
+    out = Path(args.out) if args.out else None
+    if out is not None and out.exists() and not args.overwrite:
+        print(f"skillc: {out} exists; pass --overwrite to replace it", file=sys.stderr)
+        return 2
+    try:
+        prof = profile.Profile.load(Path(args.profile))
+        tree = profile.load_tree(prof, Path(args.repo) if args.repo else None,
+                                 Path(args.snapshot) if args.snapshot else None)
+        inventory = profile.validate(prof, tree)
+        receipt = profile.install(inventory, tree, Path(args.home))
+        verification = profile.verify_installed(inventory, Path(args.home))
+        if any(r["status"] != "satisfied" for r in verification["files"]):
+            raise profile.Refused("installed profile verification failed")
+        text = json.dumps(receipt, indent=1) + "\n"
+        if out is not None:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(text, encoding="utf-8")
+        else:
+            sys.stdout.write(text)
+    except (profile.Refused, OSError) as exc:
+        print(f"skillc: REFUSED - {exc}", file=sys.stderr)
+        return 2
+    unavailable = [t["id"] for t in receipt["tools"] if t["status"] != "satisfied"]
+    print(f"skillc: profile {prof.name}: {len(receipt['files'])} files installed, "
+          f"{len(receipt['tools'])} tools checked; violated/unknown tools: {unavailable}; "
+          f"receipt: {out if out is not None else 'stdout'}", file=sys.stderr)
+    return 0
+
+
 def cmd_profile_validate(args: argparse.Namespace) -> int:
     """Validate a transitive installation profile against its pinned source (#265).
 
@@ -2214,6 +2245,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_prof_val.add_argument("--out", help="write the inventory here instead of stdout")
     p_prof_val.add_argument("--overwrite", action="store_true", help="replace an existing --out file")
     p_prof_val.set_defaults(func=cmd_profile_validate)
+
+    p_prof_install = prof_sub.add_parser("install", help="install and verify a validated profile")
+    p_prof_install.add_argument("profile", help="profile declaration (profile.json)")
+    install_source = p_prof_install.add_mutually_exclusive_group(required=True)
+    install_source.add_argument("--repo", help="checkout holding the pinned revision")
+    install_source.add_argument("--snapshot", help="local source directory")
+    p_prof_install.add_argument("--home", required=True, help="existing disposable home")
+    p_prof_install.add_argument("--out", help="write receipt here instead of stdout")
+    p_prof_install.add_argument("--overwrite", action="store_true", help="replace existing receipt")
+    p_prof_install.set_defaults(func=cmd_profile_install)
 
     p_exp = sub.add_parser(
         "exposure",

@@ -1,0 +1,12 @@
+{
+  "subject_schema": 1,
+  "locator": "example.invalid/tiny",
+  "revision": "0000000000000000000000000000000000000000",
+  "surface": "codex-skills",
+  "skills_root": "skills",
+  "select": "all",
+  "client": {
+    "name": "codex",
+    "version": "0.157.1"
+  }
+}

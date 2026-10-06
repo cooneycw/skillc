@@ -1,0 +1,65 @@
+{
+ "version": 2,
+ "kind": "skill-evidence",
+ "producer": "assembler",
+ "attempt_id": "att-1",
+ "trial_id": "t-1",
+ "skills": [
+  {
+   "skill": {
+    "path": ".codex/skills/a/SKILL.md"
+   },
+   "invocation": {
+    "lineage": "child",
+    "parent_path": ".codex/skills/b/SKILL.md"
+   },
+   "lifecycle": {
+    "listed": {
+     "status": "UNKNOWN",
+     "reason": "x"
+    },
+    "read_observed": {
+     "status": "UNKNOWN",
+     "reason": "x"
+    },
+    "execution_observed": {
+     "status": "UNKNOWN",
+     "reason": "x"
+    }
+   },
+   "criteria_owned": [],
+   "external_evidence": {
+    "present": false,
+    "reconciliation": "absent"
+   }
+  },
+  {
+   "skill": {
+    "path": ".codex/skills/b/SKILL.md"
+   },
+   "invocation": {
+    "lineage": "child",
+    "parent_path": ".codex/skills/a/SKILL.md"
+   },
+   "lifecycle": {
+    "listed": {
+     "status": "UNKNOWN",
+     "reason": "x"
+    },
+    "read_observed": {
+     "status": "UNKNOWN",
+     "reason": "x"
+    },
+    "execution_observed": {
+     "status": "UNKNOWN",
+     "reason": "x"
+    }
+   },
+   "criteria_owned": [],
+   "external_evidence": {
+    "present": false,
+    "reconciliation": "absent"
+   }
+  }
+ ]
+}

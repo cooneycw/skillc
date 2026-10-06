@@ -416,11 +416,13 @@ def test_an_interrupted_run_still_reconciles_every_planned_attempt(tmp_path: Pat
 def test_task_surface_matches_the_level1_surface_and_withholds_the_answer_key() -> None:
     for fixture in (ROOT / "evals" / "level1" / "slug-small-fix" / "fixture",
                     ROOT / "evals" / "level1" / "finish-close-ref" / "fixture"):
-        assert cc.task_surface(fixture) == cc._fixture_surface(fixture)
-    level3 = cc.task_surface(TASK / "fixture")
+        assert {rel: data for rel, data, _ in cc.task_surface(fixture)} == {
+            p.relative_to(fixture).as_posix(): p.read_bytes() for p in (fixture / "src").rglob("*") if p.is_file()
+        }
+    level3 = {rel: data for rel, data, _ in cc.task_surface(TASK / "fixture")}
     assert "expected.json" not in level3
     assert {"ci/verify.py", "pyproject.toml", "slugkit/core.py", "tests/test_core.py"} <= set(level3)
-    assert cc._fixture_surface(TASK / "fixture") == {}  # why task_surface exists
+    assert not (TASK / "fixture" / "src").exists()  # old src-only walk was empty
 
 
 def test_a_treatment_that_installs_nothing_is_refused() -> None:
@@ -474,7 +476,7 @@ def _fixture(tmp_path: Path) -> Path:
 
 def test_task_surface_delivers_a_plain_fixture(tmp_path: Path) -> None:
     """The green half of the refusals below."""
-    assert cc.task_surface(_fixture(tmp_path)) == {"pkg/code.py": b"x = 1\n"}
+    assert cc.task_surface(_fixture(tmp_path)) == [("pkg/code.py", b"x = 1\n", False)]
 
 
 @pytest.mark.parametrize("damage", ["answer-alias", "outside-link", "dir-link", "missing", "answer-only"])

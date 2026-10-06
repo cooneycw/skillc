@@ -1,0 +1,26 @@
+{
+ "version": 2,
+ "kind": "verified-result",
+ "producer": "assembler",
+ "trial_id": "t-degraded",
+ "grader": {
+  "id": "other-grader",
+  "revision": "g1"
+ },
+ "graded_digests": [
+  "sha256:aa"
+ ],
+ "criteria": [
+  {
+   "id": "c1",
+   "mandatory": true,
+   "outcome": "SATISFIED",
+   "evidence": [
+    "grader-log:c1"
+   ]
+  }
+ ],
+ "status": "PASS",
+ "attempt_id": "att-degraded",
+ "result_id": "res-att-degraded"
+}

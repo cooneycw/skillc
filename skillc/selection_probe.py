@@ -614,7 +614,7 @@ def agent_trial_runner(
         goal=goal if goal is not None else (GRADER_ROOT / "goal.md").read_text(encoding="utf-8"),
         surface=(
             surface if surface is not None
-            else collection_conformance._fixture_surface(GRADER_ROOT / "fixture")
+            else collection_conformance.surface_mapping(collection_conformance.task_surface(GRADER_ROOT / "fixture"))
         ),
         timeout=timeout, cli_version=cli_version, credential_explicit_path=credential_explicit_path,
         minimum_credential_seconds=minimum_credential_seconds, skill_name=skill_name,

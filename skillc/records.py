@@ -68,14 +68,24 @@ PILOT_REPORT = "pilot-report"
 #: runs). Not a verdict: a grade it carries is an audit copy, checked against
 #: its own criteria, never a substitute for a `verified-result`.
 AGENT_OBSERVATION = "agent-observation"
+#: Additive in version 2 (#268): per-attempt, per-skill attribution - skill
+#: identity (reused from the installation receipt, never re-declared), parent/
+#: child invocation lineage, criterion ownership (an audit copy of the
+#: attempt's own verified-result, never an independent claim), and reconciliation
+#: of externally produced evidence (a usage record a subject's own tooling
+#: wrote) that never becomes a trusted observation. See
+#: docs/specs/evaluation-facility/records.md's `skill-evidence` section.
+SKILL_EVIDENCE = "skill-evidence"
 KINDS = (
     INSTALLATION_RECEIPT, TRIAL_LEDGER, ARTIFACT_MANIFEST, VERIFIED_RESULT, ATTEMPT_LIFECYCLE, PILOT_REPORT,
-    AGENT_OBSERVATION,
+    AGENT_OBSERVATION, SKILL_EVIDENCE,
 )
 
 #: Records that belong to ONE attempt. The ledger is not one of them: it issues
 #: the attempt identifiers the others cite.
-ATTEMPT_BOUND = (INSTALLATION_RECEIPT, ARTIFACT_MANIFEST, VERIFIED_RESULT, ATTEMPT_LIFECYCLE, AGENT_OBSERVATION)
+ATTEMPT_BOUND = (
+    INSTALLATION_RECEIPT, ARTIFACT_MANIFEST, VERIFIED_RESULT, ATTEMPT_LIFECYCLE, AGENT_OBSERVATION, SKILL_EVIDENCE,
+)
 
 #: The one role allowed to produce each kind, from interfaces.md's producer column.
 #: The subject adapter writes the receipt, and the controller must have checked it.
@@ -87,8 +97,73 @@ AUTHORIZED_PRODUCER = {
     ATTEMPT_LIFECYCLE: "controller",
     PILOT_REPORT: "assembler",
     AGENT_OBSERVATION: "controller",
+    SKILL_EVIDENCE: "assembler",
 }
 RECEIPT_CHECKER = "controller"
+
+#: `skill-evidence.lifecycle.{listed,read_observed,execution_observed}` (#268):
+#: a usage FACT, never a compliance outcome - deliberately a separate, closed
+#: vocabulary from `CRITERION_OUTCOMES` so neither can be mistaken for the
+#: other. Mirrors `skillc/backend.py`'s own three-way `Confirmation`
+#: (`confirm_stopped`/`confirm_absent`): a backend that cannot observe returns
+#: `UNKNOWN`, never a guess, and `UNKNOWN` is never treated as confirmed.
+SKILL_EVIDENCE_CONFIRMATION = ("CONFIRMED", "NOT_CONFIRMED", "UNKNOWN")
+
+#: `invocation.lineage` (#268): whether a `skills` entry is the attempt's
+#: directly-selected skill or one invoked BY another skill in the same record.
+SKILL_EVIDENCE_LINEAGE = ("root", "child")
+
+#: `external_evidence.reconciliation` (#268): CPP #1368's R9, exactly these four
+#: states and no fifth. `absent` is never conflated with `contradicting` - no
+#: evidence is not evidence of a disagreement - and `unmatched` is never
+#: silently promoted to `matched` for lack of a reason to doubt it.
+SKILL_EVIDENCE_RECONCILIATION = ("absent", "unmatched", "matched", "contradicting")
+
+#: `external_evidence.source` (#268) must be a well-formed `<namespace>/v<N>`
+#: label. This is a FORMAT check only, unconditional, and never a hardcoded
+#: allowlist of known producer names - the module stays subject-agnostic
+#: (interfaces.md, "A skills collection need not implement an API"; the
+#: genericity guard in `tests/test_materialize.py` enforces it for every
+#: `skillc/*.py` module), so the core cannot name any one external tool's
+#: schema string as "the one skillc recognizes". A malformed label (no
+#: `/v<N>` suffix, empty, wrong type) is refused here as unknown schema,
+#: unconditionally.
+#:
+#: A well-formed label is a DIFFERENT fact from an ACCEPTED one: whether this
+#: ATTEMPT's trial accepts it is `trial.external_evidence_sources` (below) and
+#: `ledger_binding`'s own undeclared-source check - the declared allowlist the
+#: group review required (#268), because a format-only check cannot refuse a
+#: well-formed-but-unrecognized source ("some-other-tool/v9" is shaped
+#: identically to a real one) and that refusal is exactly what "unknown
+#: schema" promises. The declaration lives on the trial - caller-supplied
+#: data, like `subject.digest` - never in this module.
+EXTERNAL_EVIDENCE_SOURCE_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?/v[0-9]+$")
+
+#: `case.arm` (#273): whether this trial's case is the intact or degraded half
+#: of a discriminating design, declared by the controller's own plan - a
+#: property of the CASE/fixture, never of the treatment (`config.arm`,
+#: `skillc/calibration_run.py` - baseline vs a CPP skill - already lives there
+#: and is a different axis entirely; one trial carries both). Absent means
+#: this trial makes no discriminating claim at all. `case_pairing` (bundle
+#: rule, below) is where a declared arm is actually checked for a reciprocal,
+#: complementary counterpart and consistency with the #150 degraded-
+#: acquisition marker; this module names only the vocabulary.
+CASE_ARM = ("intact", "degraded")
+#: The #150 degraded-acquisition marker (`skillc/degrade.py`'s
+#: `f"degraded:mutated=..."`), read from `installation-receipt.subject.
+#: revision` - the one bundle-visible place it lands (`skillc/agent_trial.py`
+#: writes `InstallationReceiptContext.subject_revision` there). `case.arm`
+#: must agree with it: "degraded" requires this prefix, "intact" forbids it.
+DEGRADED_REVISION_PREFIX = "degraded:"
+#: `skillc/degrade.py:_degraded_revision` writes exactly
+#: `f"degraded:mutated={tag}:{base.kind}:{base.revision}"`, `tag` one of
+#: `"none"`/`"<N>-location"` (never a colon), `base.kind` exactly `"git"` or
+#: `"snapshot"` (`skillc/materialize.py`'s own closed set). `base.revision`
+#: can itself contain a colon (a `kind="snapshot"` base reports
+#: `"snapshot:<digest>"`), so this is maxsplit-safe rather than a naive
+#: `split(":")`: the captured group is everything after the third colon,
+#: however many colons it holds.
+DEGRADED_REVISION_RE = re.compile(r"^degraded:mutated=[^:]+:(?:git|snapshot):(.+)$")
 
 #: The four cost/time split components a pilot report's own control requires
 #: (#12's acceptance: "Separate setup/agent/grading cost and time"). Closed:
@@ -501,6 +576,29 @@ def trial_ledger(record: Record) -> Iterator[str]:
                 f"trial {name!r}: case.observes_selection must be a boolean, "
                 f"not {case['observes_selection']!r}"
             )
+        if isinstance(case, dict):
+            arm = case.get("arm")
+            if "arm" in case and arm not in CASE_ARM:
+                yield f"trial {name!r}: case.arm is {arm!r}, not one of {list(CASE_ARM)}"
+            paired = case.get("paired_with")
+            if "arm" in case and arm in CASE_ARM:
+                if not isinstance(paired, dict) or not _nonempty_str(paired.get("id")) or not _nonempty_str(paired.get("revision")):
+                    yield f"trial {name!r}: case.arm is declared but paired_with names no case {{id, revision}}"
+                elif (paired.get("id"), paired.get("revision")) == (case.get("id"), case.get("revision")):
+                    yield f"trial {name!r}: case.paired_with names its own case; a pairing names a counterpart"
+            elif "arm" not in case and "paired_with" in case:
+                yield f"trial {name!r}: case.paired_with is declared but case.arm is not - a pairing with no claimed side"
+        if "external_evidence_sources" in trial:
+            sources = trial["external_evidence_sources"]
+            if not isinstance(sources, list):
+                yield f"trial {name!r}: external_evidence_sources is not a list"
+            else:
+                for s_index, source in enumerate(sources):
+                    if not isinstance(source, str) or not EXTERNAL_EVIDENCE_SOURCE_RE.fullmatch(source):
+                        yield (
+                            f"trial {name!r}: external_evidence_sources[{s_index}] is {source!r}, "
+                            f"not a well-formed '<namespace>/v<N>' label"
+                        )
         attempts = trial.get("attempts")
         if not isinstance(attempts, list) or not attempts:
             yield f"trial {name!r} plans no attempts; its expected population is empty"
@@ -1211,6 +1309,186 @@ def pilot_report(record: Record) -> Iterator[str]:
         yield from _pilot_report_split(entry, where, "time_seconds")
 
 
+def _skill_evidence_lifecycle_fact(entry: dict[str, object], where: str, name: str) -> Iterator[str]:
+    """One of `lifecycle.{listed,read_observed,execution_observed}` (#268): a
+    USAGE fact, never a compliance outcome, so it uses `SKILL_EVIDENCE_CONFIRMATION`
+    and never `CRITERION_OUTCOMES`. `CONFIRMED`/`NOT_CONFIRMED` must cite `evidence`
+    (a reference already present in this attempt's own bundle - `ledger_binding`
+    checks that it actually is, the same way it already checks `graded_digests`);
+    `UNKNOWN` must say why, and carries no evidence - an `UNKNOWN` with an
+    evidence reference would be a confirmed fact wearing an unknown's label.
+    """
+    fact = entry.get(name)
+    if not isinstance(fact, dict):
+        yield f"{where}: lifecycle.{name} is not an object"
+        return
+    status = fact.get("status")
+    if status not in SKILL_EVIDENCE_CONFIRMATION:
+        yield (
+            f"{where}: lifecycle.{name} has status {status!r}, not one of "
+            f"{list(SKILL_EVIDENCE_CONFIRMATION)}"
+        )
+        return
+    if status == "UNKNOWN":
+        if not _nonempty_str(fact.get("reason")):
+            yield f"{where}: lifecycle.{name} is UNKNOWN without a reason"
+        if "evidence" in fact:
+            yield f"{where}: lifecycle.{name} is UNKNOWN but carries an evidence reference"
+    else:
+        evidence = fact.get("evidence")
+        if not isinstance(evidence, dict) or not _nonempty_str(evidence.get("digest")):
+            yield (
+                f"{where}: lifecycle.{name} is {status} but cites no evidence digest; "
+                f"a confirmed usage fact names what confirms it"
+            )
+
+
+def skill_evidence(record: Record) -> Iterator[str]:
+    """Per-attempt, per-skill attribution (#268): skill identity, invocation
+    lineage, criterion ownership and external-evidence reconciliation.
+
+    Three things this rule does NOT check, because another rule or record owns
+    them: that `skill.path` was actually installed by this attempt's receipt, and
+    that `criteria_owned`/`external_evidence.artifact_ref` agree with this
+    attempt's own `verified-result`/`artifact-manifest` - all three need records
+    this one does not carry, so they are `ledger_binding`'s findings, exactly as
+    `_skill_invocation_binding` already draws that line for `skill-invocations`.
+    """
+    if record.parse_error is not None or record.kind != SKILL_EVIDENCE:
+        return
+    skills = record.data.get("skills")
+    if not isinstance(skills, list) or not skills:
+        yield "skill-evidence names no skills; an empty record is refused, not passed"
+        return
+
+    paths: list[str] = [
+        s["skill"]["path"] for s in skills
+        if isinstance(s, dict) and isinstance(s.get("skill"), dict) and _nonempty_str(s["skill"].get("path"))
+    ]
+    seen_paths: set[str] = set()
+    #: child path -> parent path, for well-formed child links only (self and
+    #: dangling parents are already reported above and excluded here, so a
+    #: cycle this dict can walk is a cycle among otherwise-valid entries).
+    child_links: dict[str, str] = {}
+    for index, entry in enumerate(skills):
+        where = f"skills[{index}]"
+        if not isinstance(entry, dict):
+            yield f"{where} is not an object"
+            continue
+
+        skill = entry.get("skill")
+        path = skill.get("path") if isinstance(skill, dict) else None
+        if not isinstance(skill, dict) or not _nonempty_str(path):
+            yield f"{where}: no skill.path"
+        elif path in seen_paths:
+            yield f"{where}: skill.path {path!r} appears more than once in this record"
+        else:
+            seen_paths.add(path)  # type: ignore[arg-type]
+        if isinstance(skill, dict):
+            for digest_key in ("body_digest", "description_digest"):
+                if digest_key in skill and not _nonempty_str(skill.get(digest_key)):
+                    yield f"{where}: skill.{digest_key} is present but empty"
+
+        invocation = entry.get("invocation")
+        lineage = invocation.get("lineage") if isinstance(invocation, dict) else None
+        if lineage not in SKILL_EVIDENCE_LINEAGE:
+            yield (
+                f"{where}: invocation.lineage is {lineage!r}, not one of "
+                f"{list(SKILL_EVIDENCE_LINEAGE)}"
+            )
+        elif lineage == "child":
+            parent = invocation.get("parent_path") if isinstance(invocation, dict) else None
+            if not _nonempty_str(parent):
+                yield f"{where}: invocation.lineage is 'child' but names no parent_path"
+            elif parent == path:
+                yield f"{where}: invocation.parent_path names itself"
+            elif parent not in paths:
+                yield (
+                    f"{where}: invocation.parent_path {parent!r} is not a skill.path "
+                    f"anywhere in this record"
+                )
+            elif isinstance(path, str):
+                child_links[path] = parent  # type: ignore[assignment]
+        elif isinstance(invocation, dict) and "parent_path" in invocation:
+            yield f"{where}: invocation.lineage is 'root' but carries a parent_path"
+
+        lifecycle = entry.get("lifecycle")
+        if not isinstance(lifecycle, dict):
+            yield f"{where}: no lifecycle object"
+        else:
+            for name in ("listed", "read_observed", "execution_observed"):
+                yield from _skill_evidence_lifecycle_fact(lifecycle, where, name)
+
+        criteria_owned = entry.get("criteria_owned")
+        if not isinstance(criteria_owned, list):
+            yield f"{where}: criteria_owned is not a list"
+        else:
+            for c_index, criterion in enumerate(criteria_owned):
+                c_where = f"{where}.criteria_owned[{c_index}]"
+                if not isinstance(criterion, dict) or not _nonempty_str(criterion.get("id")):
+                    yield f"{c_where}: no id"
+                    continue
+                if criterion.get("outcome") not in CRITERION_OUTCOMES:
+                    yield (
+                        f"{c_where}: outcome {criterion.get('outcome')!r} is not one of "
+                        f"{list(CRITERION_OUTCOMES)}"
+                    )
+                if not isinstance(criterion.get("shared"), bool):
+                    yield f"{c_where}: shared is {criterion.get('shared')!r}, not a JSON boolean"
+
+        external = entry.get("external_evidence")
+        if not isinstance(external, dict):
+            yield f"{where}: no external_evidence object"
+            continue
+        present = external.get("present")
+        if not isinstance(present, bool):
+            yield f"{where}: external_evidence.present is {present!r}, not a JSON boolean"
+            continue
+        reconciliation = external.get("reconciliation")
+        if reconciliation not in SKILL_EVIDENCE_RECONCILIATION:
+            yield (
+                f"{where}: external_evidence.reconciliation is {reconciliation!r}, not "
+                f"one of {list(SKILL_EVIDENCE_RECONCILIATION)}"
+            )
+        elif present and reconciliation == "absent":
+            yield f"{where}: external_evidence.present is true but reconciliation is 'absent'"
+        elif not present and reconciliation != "absent":
+            yield (
+                f"{where}: external_evidence.present is false but reconciliation is "
+                f"{reconciliation!r}, not 'absent' - no evidence is not evidence of a "
+                f"disagreement"
+            )
+        if reconciliation not in ("matched", "absent") and not _nonempty_str(external.get("reason")):
+            yield f"{where}: external_evidence.reconciliation is {reconciliation!r} without a reason"
+        if present:
+            source = external.get("source")
+            if not isinstance(source, str) or not EXTERNAL_EVIDENCE_SOURCE_RE.fullmatch(source):
+                yield (
+                    f"{where}: external_evidence.source {source!r} is not a well-formed "
+                    f"'<namespace>/v<N>' label - unknown schema"
+                )
+            ref = external.get("artifact_ref")
+            if not isinstance(ref, dict) or not _nonempty_str(ref.get("digest")):
+                yield f"{where}: external_evidence.present is true but names no artifact_ref digest"
+        elif "source" in external or "artifact_ref" in external:
+            yield f"{where}: external_evidence.present is false but names a source or artifact_ref"
+
+    # A chain of otherwise-valid child links can still loop back on itself with
+    # no root at the end (A's parent is B, B's parent is A) - neither entry is
+    # self-referential and both parents resolve, so the per-entry checks above
+    # cannot see it. Reuses `_chain_root`, the same walk `lineage` (bundle rule)
+    # already uses for retry/regrade chains.
+    reported_cycle: set[str] = set()
+    for path in sorted(child_links):
+        root, chain = _chain_root(path, child_links)
+        if root is None and not reported_cycle & set(chain):
+            reported_cycle.update(chain)
+            yield (
+                f"invocation lineage forms a cycle ({' -> '.join(chain)}); no root "
+                f"skill exists for it"
+            )
+
+
 # ---------------------------------------------------------------------------
 # Bundle rules: facts that exist only BETWEEN records. Each is paired with a
 # committed control whose bad and good cases are bundle directories.
@@ -1289,6 +1567,91 @@ def _skill_invocations_required_but_absent(record: Record, where: str, trial: di
         )
 
 
+def _skill_evidence_binding(
+    record: Record,
+    where: str,
+    installed: set[str] | None,
+    criteria: dict[str, set[object]] | None,
+    captured: set[str] | None,
+    declared_sources: list[str],
+) -> Iterator[str]:
+    """`skill-evidence` (#268) cross-checked against the OTHER records of its
+    own attempt and trial - the things a lone `skill-evidence` record cannot
+    establish for itself, exactly as `_skill_invocation_binding` does for
+    `skill-invocations`.
+
+    - `skill.path` against the receipt's own `installed` paths: a path this
+      attempt never installed is a skill it never had.
+    - `criteria_owned[].outcome` against every outcome this attempt's own
+      `verified-result`(s) actually recorded for that id: a copy that matches
+      NONE of them is a **forged status** - the "Forged status" golden case.
+    - `external_evidence.artifact_ref.digest` against the manifest's captured
+      digests: one that was never captured is an **altered** artifact.
+    - `external_evidence.source` against this attempt's TRIAL's own declared
+      `external_evidence_sources` (`trial_ledger`, above): a well-formed source
+      - `skill_evidence()`'s own rule already refuses a malformed one - that
+      this trial does not list is **undeclared**, the second half of "unknown
+      schema". The caller (`ledger_binding`) always passes a real list: a
+      trial that declares no sources at all is held to exactly the same
+      refusal as one that declared others but not this one - "I didn't say"
+      and "I said no" both mean nothing here is accepted.
+
+    No receipt, no result or no manifest at all for this attempt is NOT this
+    rule's finding - that gap belongs to `attempt_accounting`, the same
+    division `_skill_invocation_binding` already draws.
+    """
+    skills = record.data.get("skills")
+    if not isinstance(skills, list):
+        return
+    for index, entry in enumerate(skills):
+        if not isinstance(entry, dict):
+            continue
+        e_where = f"{where} skills[{index}]"
+        skill = entry.get("skill")
+        path = skill.get("path") if isinstance(skill, dict) else None
+        if installed is not None and isinstance(path, str) and path and path not in installed:
+            yield f"{e_where}: names {path!r}, which this attempt's installation receipt never installed"
+
+        if criteria is not None:
+            owned = entry.get("criteria_owned")
+            for c in owned if isinstance(owned, list) else []:
+                if not isinstance(c, dict):
+                    continue
+                c_id, outcome = c.get("id"), c.get("outcome")
+                if not isinstance(c_id, str) or not c_id:
+                    continue
+                known = criteria.get(c_id)
+                if known is None:
+                    yield f"{e_where}: criteria_owned names {c_id!r}, which this attempt's verified-result never defines"
+                elif outcome not in known:
+                    yield (
+                        f"{e_where}: criteria_owned claims {c_id!r} is {outcome!r}, but this "
+                        f"attempt's verified-result never recorded that outcome for it - a forged status"
+                    )
+
+        if captured is not None:
+            external = entry.get("external_evidence")
+            if isinstance(external, dict) and external.get("present") is True:
+                ref = external.get("artifact_ref")
+                digest = ref.get("digest") if isinstance(ref, dict) else None
+                if isinstance(digest, str) and digest and digest not in captured:
+                    yield (
+                        f"{e_where}: external_evidence.artifact_ref cites {digest!r}, "
+                        f"which no manifest for this attempt captured - an altered artifact"
+                    )
+                source = external.get("source")
+                if (
+                    isinstance(source, str)
+                    and EXTERNAL_EVIDENCE_SOURCE_RE.fullmatch(source)
+                    and source not in declared_sources
+                ):
+                    yield (
+                        f"{e_where}: external_evidence.source {source!r} is well-formed but this "
+                        f"attempt's trial does not declare it in external_evidence_sources - "
+                        f"undeclared, an unknown schema"
+                    )
+
+
 def ledger_binding(bundle: Bundle) -> Iterator[str]:
     """Every record is bound to an attempt the ledger planned, under that trial's
     identities, and a result graded bytes that were actually captured.
@@ -1312,6 +1675,13 @@ def ledger_binding(bundle: Bundle) -> Iterator[str]:
         the ledger never planned - only this rule has the ledger's own
         planned population to check a report against; `pilot_report` checks
         each entry's own shape, not which attempts are present at all.
+      - a `skill-evidence` (#268) entry names a `skill.path` the attempt's own
+        installation receipt never installed; names a `criteria_owned` id its
+        attempt's own `verified-result` does not define, or copies an outcome
+        that disagrees with that criterion's real one there (a **forged
+        status**); or cites an `external_evidence.artifact_ref` digest its
+        attempt's manifest did not capture (an **altered** artifact, the same
+        finding a `verified-result`'s `graded_digests` already gets).
     """
     ledgers = bundle.of_kind(TRIAL_LEDGER)
     if len(ledgers) != 1:
@@ -1337,6 +1707,15 @@ def ledger_binding(bundle: Bundle) -> Iterator[str]:
             if isinstance(e, dict) and _nonempty_str(e.get("path"))
         } if isinstance(entries, list) else set()
         installed_paths.setdefault(receipt.attempt_id, set()).update(paths)
+    criteria_by_attempt: dict[str, dict[str, set[object]]] = {}
+    for result in bundle.of_kind(VERIFIED_RESULT):
+        criteria = result.data.get("criteria")
+        if not isinstance(criteria, list):
+            continue
+        bucket = criteria_by_attempt.setdefault(result.attempt_id, {})
+        for c in criteria:
+            if isinstance(c, dict) and _nonempty_str(c.get("id")):
+                bucket.setdefault(c["id"], set()).add(c.get("outcome"))
 
     for record in bundle.records:
         if record.kind not in ATTEMPT_BOUND or not record.attempt_id:
@@ -1354,6 +1733,17 @@ def ledger_binding(bundle: Bundle) -> Iterator[str]:
         if record.kind == ARTIFACT_MANIFEST:
             yield from _skill_invocation_binding(record, where, installed_paths.get(record.attempt_id))
             yield from _skill_invocations_required_but_absent(record, where, trial)
+        if record.kind == SKILL_EVIDENCE:
+            declared_sources = trial.get("external_evidence_sources")
+            if not isinstance(declared_sources, list):
+                declared_sources = []  # absent is "declares none", not "unknown" - trial_ledger() flags a wrong type
+            yield from _skill_evidence_binding(
+                record, where,
+                installed_paths.get(record.attempt_id),
+                criteria_by_attempt.get(record.attempt_id),
+                captured.get(record.attempt_id),
+                declared_sources,
+            )
         if record.kind == INSTALLATION_RECEIPT:
             for ident, keys in (("subject", ("digest",)), ("client", ("name", "version"))):
                 got = _ident(record.data.get(ident), *keys)
@@ -1406,10 +1796,10 @@ def unique_ids(bundle: Bundle) -> Iterator[str]:
     """Identifiers identify. interfaces.md makes duplicate/conflicting IDs an
     explicit validation failure, never verified success.
 
-    An attempt has at most one receipt, one manifest and one lifecycle: a second one is a
-    conflicting account of the same attempt, and nothing here can say which is
-    true. Results may be several (a regrade is a new result), but each has its own
-    `result_id`.
+    An attempt has at most one receipt, one manifest, one lifecycle and one
+    `skill-evidence` record: a second one is a conflicting account of the same
+    attempt, and nothing here can say which is true. Results may be several (a
+    regrade is a new result), but each has its own `result_id`.
     """
     for ledger in bundle.of_kind(TRIAL_LEDGER):
         trials = ledger.data.get("trials")
@@ -1427,7 +1817,7 @@ def unique_ids(bundle: Bundle) -> Iterator[str]:
             for value, count in sorted(name.items(), key=str):
                 if count > 1:
                     yield f"ledger plans {what} {value!r} {count} times"
-    for kind in (INSTALLATION_RECEIPT, ARTIFACT_MANIFEST, ATTEMPT_LIFECYCLE, AGENT_OBSERVATION):
+    for kind in (INSTALLATION_RECEIPT, ARTIFACT_MANIFEST, ATTEMPT_LIFECYCLE, AGENT_OBSERVATION, SKILL_EVIDENCE):
         per_attempt = Counter(r.attempt_id for r in bundle.of_kind(kind) if r.attempt_id)
         for attempt, count in sorted(per_attempt.items()):
             if count > 1:
@@ -1449,6 +1839,202 @@ def unique_ids(bundle: Bundle) -> Iterator[str]:
     for result_id, count in sorted(result_ids.items(), key=str):
         if count > 1:
             yield f"result_id {result_id!r} is used by {count} results"
+
+
+def _base_revision(revision: object) -> str | None:
+    """The identity a `case-pairing` comparison must use: for an ordinary
+    (non-degraded) receipt, `revision` already IS the base - returned as is.
+    For a `degraded:` one, the base is the text `degrade.py` embedded in it,
+    recovered by `DEGRADED_REVISION_RE`. Returns `None` when `revision` is
+    not a string, or is `degraded:`-prefixed in a shape this pattern does not
+    recognize - an UNRECOVERABLE base, never silently treated as matching or
+    mismatching (#273, CPP review: "if it isn't recoverable, name it as a
+    boundary rather than skipping the check")."""
+    if not isinstance(revision, str):
+        return None
+    if not revision.startswith(DEGRADED_REVISION_PREFIX):
+        return revision
+    match = DEGRADED_REVISION_RE.fullmatch(revision)
+    return match.group(1) if match else None
+
+
+def _first_receipt(bundle: Bundle, trial: dict[str, object]) -> Record | None:
+    """The first installation-receipt among `trial`'s own planned attempts, in
+    declared order - the one this module reads for a trial-level identity
+    comparison (#273). Not a claim that every attempt under a trial shares one
+    identity; that internal-consistency question is not this function's."""
+    attempts = trial.get("attempts")
+    for attempt in attempts if isinstance(attempts, list) else []:
+        if not isinstance(attempt, dict):
+            continue
+        attempt_id = attempt.get("attempt_id")
+        if not isinstance(attempt_id, str):
+            continue
+        for receipt in bundle.of_kind(INSTALLATION_RECEIPT):
+            if receipt.attempt_id == attempt_id:
+                return receipt
+    return None
+
+
+def case_pairing(bundle: Bundle) -> Iterator[str]:
+    """Every trial declaring `case.arm` (#273) pairs reciprocally with exactly
+    one counterpart declaring the complementary arm, and agrees with that
+    attempt's own installation receipt about whether it actually ran degraded.
+
+    This is the validated record CPP #1084 needs: without it, "discriminating"
+    is an inference from naming conventions, which skillc #273's own scope
+    note refuses ("not acceptable").
+
+    - **Reciprocal.** If trial A's `case.paired_with` names trial B's `case`,
+      B's own `paired_with` must name A's `case` back. A one-sided claim binds
+      nothing.
+    - **Complementary.** A and B's `case.arm` must be the two different
+      values - both `intact`, or both `degraded`, is refused: a pairing is
+      between the two sides of one discriminating design, not a trial naming
+      itself twice over.
+    - **Unique.** At most one trial in the bundle may carry a given `case`
+      identity among those declaring an arm - two trials both claiming to BE
+      the named counterpart make "the pair" ambiguous, which this rule refuses
+      rather than picking one.
+    - **Consistent with the #150 degraded marker.** `case.arm: degraded`
+      requires every attempt under that trial to carry an
+      `installation-receipt.subject.revision` starting `degraded:`
+      (`skillc/degrade.py`'s own marker); `case.arm: intact` forbids one. An
+      attempt with no receipt at all is NOT this rule's finding - that gap is
+      `attempt_accounting`'s, a different account of a different absence - so
+      this check only fires where a receipt exists and disagrees.
+    """
+    for ledger in bundle.of_kind(TRIAL_LEDGER):
+        trials = ledger.data.get("trials")
+        if not isinstance(trials, list):
+            continue
+        armed: dict[tuple[str, str], list[dict[str, object]]] = {}
+        for trial in trials:
+            if not isinstance(trial, dict):
+                continue
+            case = trial.get("case")
+            if not isinstance(case, dict) or case.get("arm") not in CASE_ARM:
+                continue
+            key = (str(case.get("id")), str(case.get("revision")))
+            armed.setdefault(key, []).append(trial)
+
+        for key, holders in sorted(armed.items()):
+            if len(holders) > 1:
+                labels = sorted(str(t.get("trial_id")) for t in holders)
+                yield f"case {key!r}: {len(holders)} trials declare it with an arm ({labels}); ambiguous"
+
+        reported_pairs: set[frozenset[tuple[str, str]]] = set()
+        for key, holders in armed.items():
+            if len(holders) != 1:
+                continue  # the ambiguity above already reported it
+            trial = holders[0]
+            name = trial.get("trial_id", key)
+            case = trial["case"]
+            if not isinstance(case, dict):
+                continue
+            paired = case.get("paired_with")
+            target = (
+                (str(paired.get("id")), str(paired.get("revision")))
+                if isinstance(paired, dict) else None
+            )
+            counterpart_holders = armed.get(target) if target is not None else None
+            if target is None or not counterpart_holders or len(counterpart_holders) != 1:
+                yield (
+                    f"trial {name!r}: case.paired_with names {target!r}, which no trial in this "
+                    f"ledger declares with an arm"
+                )
+                continue
+            pair_key = frozenset({key, target})
+            if pair_key in reported_pairs:
+                continue  # already reported from the counterpart's own iteration
+            counterpart = counterpart_holders[0]
+            c_case = counterpart["case"]
+            if not isinstance(c_case, dict):
+                continue
+            c_name = counterpart.get("trial_id", target)
+            c_paired = c_case.get("paired_with")
+            c_target = (
+                (str(c_paired.get("id")), str(c_paired.get("revision")))
+                if isinstance(c_paired, dict) else None
+            )
+            if c_target != key:
+                yield (
+                    f"trial {name!r} pairs with {c_name!r}, but {c_name!r}'s own paired_with names "
+                    f"{c_target!r}, not {key!r} - one-sided pairing"
+                )
+            elif case.get("arm") == c_case.get("arm"):
+                reported_pairs.add(pair_key)
+                yield (
+                    f"trial {name!r} and {c_name!r} both declare case.arm {case.get('arm')!r}; "
+                    f"a pairing needs one of each"
+                )
+            else:
+                reported_pairs.add(pair_key)
+                if key[0] != target[0]:
+                    yield (
+                        f"trial {name!r} pairs with {c_name!r}, but their case ids differ "
+                        f"({key[0]!r} vs {target[0]!r}) - a pairing is two revisions of the SAME "
+                        f"task, never two different ones"
+                    )
+                grader, c_grader = trial.get("grader"), counterpart.get("grader")
+                g_key = (grader.get("id"), grader.get("revision")) if isinstance(grader, dict) else None
+                c_g_key = (c_grader.get("id"), c_grader.get("revision")) if isinstance(c_grader, dict) else None
+                if g_key != c_g_key or g_key is None:
+                    yield (
+                        f"trial {name!r} pairs with {c_name!r}, but their graders differ "
+                        f"({g_key!r} vs {c_g_key!r}) - a discriminating pair must be graded the same way"
+                    )
+                receipt, c_receipt = _first_receipt(bundle, trial), _first_receipt(bundle, counterpart)
+                if receipt is not None and c_receipt is not None:
+                    subject = receipt.data.get("subject")
+                    c_subject = c_receipt.data.get("subject")
+                    base = _base_revision(subject.get("revision")) if isinstance(subject, dict) else None
+                    c_base = _base_revision(c_subject.get("revision")) if isinstance(c_subject, dict) else None
+                    if base is None or c_base is None:
+                        yield (
+                            f"trial {name!r} and {c_name!r}: the base subject revision behind one or "
+                            f"both receipts could not be recovered - not comparable, not assumed equal"
+                        )
+                    elif base != c_base:
+                        yield (
+                            f"trial {name!r} and {c_name!r} pair on different base subject revisions "
+                            f"({base!r} vs {c_base!r}) - a discriminating pair must share the same "
+                            f"pinned subject underneath the degradation"
+                        )
+
+        for key, holders in armed.items():
+            if len(holders) != 1:
+                continue
+            trial = holders[0]
+            case = trial["case"]
+            if not isinstance(case, dict):
+                continue
+            arm = case.get("arm")
+            name = trial.get("trial_id", key)
+            attempts = trial.get("attempts")
+            for attempt in attempts if isinstance(attempts, list) else []:
+                if not isinstance(attempt, dict):
+                    continue
+                attempt_id = attempt.get("attempt_id")
+                if not isinstance(attempt_id, str):
+                    continue
+                receipts = [r for r in bundle.of_kind(INSTALLATION_RECEIPT) if r.attempt_id == attempt_id]
+                if not receipts:
+                    continue
+                subject = receipts[0].data.get("subject")
+                revision = subject.get("revision") if isinstance(subject, dict) else None
+                degraded = isinstance(revision, str) and revision.startswith(DEGRADED_REVISION_PREFIX)
+                if arm == "degraded" and not degraded:
+                    yield (
+                        f"trial {name!r} attempt {attempt_id!r}: case.arm is 'degraded' but its "
+                        f"installation receipt's subject.revision {revision!r} carries no "
+                        f"{DEGRADED_REVISION_PREFIX!r} marker"
+                    )
+                elif arm == "intact" and degraded:
+                    yield (
+                        f"trial {name!r} attempt {attempt_id!r}: case.arm is 'intact' but its "
+                        f"installation receipt's subject.revision {revision!r} is a degraded acquisition"
+                    )
 
 
 def attempt_accounting(bundle: Bundle) -> Iterator[str]:

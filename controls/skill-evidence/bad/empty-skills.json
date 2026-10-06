@@ -1,0 +1,8 @@
+{
+ "version": 2,
+ "kind": "skill-evidence",
+ "producer": "assembler",
+ "attempt_id": "att-1",
+ "trial_id": "t-1",
+ "skills": []
+}
