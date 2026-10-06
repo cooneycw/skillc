@@ -73,12 +73,27 @@ and unused.
                   for the wrong reason (`--offline` is what makes the
                   failure mode specific to the cache, not the network).
 
-`xfail(strict=True, raises=AssertionError)` on every non-`none` mode -
-same shape and reasoning as `test_gate_witness_live.py` and `test_decide_
-reply_channel_live.py`: an unexpectedly-successful break is a hard
-failure (XPASS), and a break that dies of an unrelated exception (a
-docker transport error, say) is a hard FAILURE rather than an accidental
-strict-xfail pass.
+`xfail(strict=True, raises=_PropertyHeld)` on every non-`none` mode - same
+SHAPE as `test_gate_witness_live.py` and `test_decide_reply_channel_live.
+py` (an unexpectedly-successful break is a hard failure, XPASS), but with
+a NARROWER `raises` than either of those two files (counter-model review,
+2026-10-07): `_PropertyHeld` is a dedicated exception, raised ONLY by the
+two properties actually under test (zero mounts; offline sync succeeds) -
+asserted UNCONDITIONALLY, the identical check in every mode, so it fails
+naturally when a break changes the real outcome and never because the
+test itself branched its own expectation by `BREAK_MODE`. Every OTHER
+check in this file (docker create/cp/start, image build, the cache-
+digest diagnostic) is a plain `assert` (base `AssertionError`), which the
+`xfail` marker does NOT match - so an unrelated infra failure (a docker
+daemon flake during a break run, say) is reported as an ordinary hard
+FAILURE, never masked as "the break worked." An earlier draft used
+`raises=AssertionError` with every check (setup and property alike)
+raising that same type, and separately branched the mount/sync
+assertions BY `BREAK_MODE` instead of asserting them unconditionally -
+both defeating the oracle: every mount-break mode would have XPASSed
+without ever showing the oracle caught anything, and a docker-level
+infra failure during any break run would have been indistinguishable
+from the break firing correctly.
 
 THE CLAIM'S EXACT BOUNDARY (orchestrator's condition, restated in the PR
 body and PROFILE.md too): this proves an OFFLINE install from a
@@ -94,8 +109,12 @@ was written and reviewed WITHOUT EVER RUNNING IT against a real daemon -
 no Docker in the implementation environment, confirmed and reported - and
 says so rather than implying otherwise. The `uv --offline` failure text
 asserted on IS independently confirmed (a real local `uv 0.9.7`, no
-Docker needed for that one check), but nothing involving an actual
-container has run.
+Docker needed for that one check), and so is `_require`/`_PropertyHeld`'s
+own behavior (run directly, no pytest, no Docker: `_require(True, ...)`
+returns; `_require(False, ...)` raises `_PropertyHeld`; `_PropertyHeld` is
+confirmed NOT a subclass of `AssertionError`, so a plain `assert` failure
+does not satisfy `isinstance` against it) - but nothing involving an
+actual container has run.
 
 Every container and image this file builds is removed in a `finally` -
 never left to the runner's own prune.
@@ -227,8 +246,37 @@ def _container_mounts(container: str) -> list[Any]:
     return result
 
 
+class _PropertyHeld(Exception):
+    """Raised when the ONE property a given `BREAK_MODE` is supposed to
+    violate still held - the opposite of what `xfail(strict=True)` below
+    expects. This is the ONLY exception type that marker's own `raises=`
+    matches - never bare `AssertionError` - so an unrelated infra/setup
+    failure (a failed `docker create`, a failed image build, an
+    unreadable report) raises plain `AssertionError` instead and is
+    reported as an ordinary hard FAILURE, never masked as "the break
+    worked" (counter-model review finding, 2026-10-07: the earlier draft
+    used `raises=AssertionError` with every check - setup and property
+    alike - raising that same type, so an unrelated Docker flake during
+    ANY break run would have been indistinguishable from the break firing
+    correctly)."""
+
+
+def _require(condition: bool, message: str) -> None:
+    """The ONE property under test for the current `BREAK_MODE` -
+    asserted UNCONDITIONALLY, identically in the intact and the broken
+    path, so it fails naturally when (and only when) a break actually
+    changed the real outcome - never because the test branched its own
+    expectation BY `BREAK_MODE` (counter-model review finding: the
+    earlier draft asserted "mounts present" for the mount-break modes
+    instead of asserting "mounts empty" unconditionally, which made every
+    mount-break mode XPASS - the planted mount was confirmed present, not
+    shown to break anything a real caller would notice)."""
+    if not condition:
+        raise _PropertyHeld(message)
+
+
 @pytest.mark.xfail(
-    condition=BREAK_MODE != "none", strict=True, raises=AssertionError,
+    condition=BREAK_MODE != "none", strict=True, raises=_PropertyHeld,
     reason=f"SKILLC_COLDINSTALL_LIVE_BREAK={BREAK_MODE} deliberately breaks one property",
 )
 def test_profile_runs_cold_with_no_operator_mounts(tmp_path: Path) -> None:
@@ -245,20 +293,27 @@ def test_profile_runs_cold_with_no_operator_mounts(tmp_path: Path) -> None:
 
     container = f"skillc-266-{os.getpid()}-{id(tmp_path)}"
     try:
+        # SETUP, not the property under test: a failure here is an
+        # infra/environment problem, reported as an ordinary hard FAILURE
+        # via plain `assert` (base AssertionError), never mistaken for a
+        # working break (`_PropertyHeld` is the only exception type the
+        # `xfail` marker above matches).
         create = _run(
             ["docker", "create", "--network", "none", *_decoy_mount_args(tmp_path, BREAK_MODE),
              "--name", container, IMAGE_TAG, "sleep", "infinity"],
         )
         assert create.returncode == 0, f"docker create failed: {create.stderr}"
 
-        # The shared oracle every mount-break mode is caught by, checked
-        # BEFORE anything else: zero mounts for `none` and `cold-cache`,
-        # exactly one for each of the four mount-break modes.
+        # THE SHARED MOUNT-EMPTINESS ORACLE, asserted UNCONDITIONALLY -
+        # the same check for every mode, never branched by BREAK_MODE
+        # (counter-model review finding). It holds for `none` and
+        # `cold-cache` (zero mounts, by construction) and fails naturally
+        # for each of the four mount-break modes, because THEY are what
+        # actually put a mount there - this is what proves the oracle
+        # discriminates, rather than merely confirming the test's own
+        # setup did what it meant to.
         mounts = _container_mounts(container)
-        if BREAK_MODE in _DECOY_TARGETS:
-            assert mounts, f"expected a decoy mount for {BREAK_MODE}, found none"
-        else:
-            assert mounts == [], f"expected zero mounts, found {len(mounts)}"
+        _require(mounts == [], f"expected zero mounts, found {len(mounts)}: {mounts}")
 
         cp_home = _run(["docker", "cp", f"{home}/.", f"{container}:/disposable-home"])
         assert cp_home.returncode == 0, f"docker cp (home) failed: {cp_home.stderr}"
@@ -274,10 +329,11 @@ def test_profile_runs_cold_with_no_operator_mounts(tmp_path: Path) -> None:
             "UV_CACHE_DIR=/opt/skillc-coldinstall/uv-cache",
         ]
 
-        # The cache-freshness check: the image's baked digest must match
-        # the digest of the uv.lock actually being installed from -
-        # "MISSING" (cold-cache: the file was never written) is the one
-        # value this check must never silently accept as a match.
+        # Diagnostic, not the property under test: confirms the fixture is
+        # in the state this mode expects BEFORE exercising the real
+        # oracle below. A plain `assert` - if this ever disagrees with
+        # BREAK_MODE's own expectation, that is a setup bug, not the
+        # break "working".
         digest_check = _run(
             ["docker", "exec", container, "sh", "-c",
              "cat /opt/skillc-coldinstall/lockfile.sha256 2>/dev/null || echo MISSING"],
@@ -286,9 +342,7 @@ def test_profile_runs_cold_with_no_operator_mounts(tmp_path: Path) -> None:
         baked_digest = digest_check.stdout.strip()
         installed_digest = _sha256_file(installed_lockfile)
         if BREAK_MODE == "cold-cache":
-            assert baked_digest == "MISSING", (
-                "the uncached stage must carry no lockfile.sha256 at all"
-            )
+            assert baked_digest == "MISSING", "the uncached stage must carry no lockfile.sha256 at all"
         else:
             assert baked_digest == installed_digest, (
                 "the image's baked cache digest must match the uv.lock being installed from"
@@ -300,13 +354,22 @@ def test_profile_runs_cold_with_no_operator_mounts(tmp_path: Path) -> None:
             timeout=60,
         )
         if BREAK_MODE == "cold-cache":
-            assert sync.returncode != 0, "an offline sync with no warm cache must fail"
+            # Diagnostic: confirms the failure is the SPECIFIC cache-miss
+            # uv names, not merely "something went wrong" - a plain
+            # assert, so a sync that fails for some unrelated reason
+            # reports a hard failure naming that disagreement, rather
+            # than being credited as the break working.
             assert "wasn't found in the cache" in sync.stderr, (
-                "the offline sync must fail at uv's own resolution step, naming the specific "
+                f"the offline sync must fail at uv's own resolution step, naming the specific "
                 f"cache miss - got: {sync.stderr!r}"
             )
-            return
-        assert sync.returncode == 0, f"offline uv sync failed: {sync.stderr}"
+        # THE REAL ORACLE for both `none` and `cold-cache`, asserted
+        # UNCONDITIONALLY - the SAME check either way. It holds for
+        # `none` (the warm cache lets the offline sync genuinely
+        # succeed) and fails naturally for `cold-cache` (there is no
+        # cache to use, so the sync genuinely fails) - never branched to
+        # expect a different outcome by mode.
+        _require(sync.returncode == 0, f"offline uv sync failed: {sync.stderr}")
 
         import_cmd = f"cd {in_container_cpp_dir} && uv run --locked python -c 'import lib.cicd; import lib.security'"
         import_check = _run(["docker", "exec", container, *env_prefix, "sh", "-c", import_cmd])
