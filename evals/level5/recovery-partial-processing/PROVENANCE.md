@@ -281,7 +281,7 @@ the item below is narrower than it was before PR B:
   `candidate`. `tests/test_trial_image_build_live.py` proves exactly
   that, against a distinctly-tagged build (never `:latest`), and is
   SKIPPED (not run, not assumed passing) wherever no Docker daemon is
-  reachable - real-daemon execution is owed to the docker-ci agent
+  reachable - real-daemon execution is owed to the real-Docker runner
   (#315), the same framing #183's own live-channel test already uses.
 - **A real Claude Code/Codex attempt** through the existing
   `agent_trial.run_one_attempt` path, installing this task the same way
