@@ -273,29 +273,42 @@ transparency), but no exec and no `export()` read are attempted.
 
 ## 5. Coverage and `execution_observed`
 
-Four coverage states, computed OVER a gate's full run list (never only its
+FIVE coverage states, computed OVER a gate's full run list (never only its
 first or its most recent run):
 
 | Coverage | Meaning |
 |---|---|
 | `complete` | AT LEAST ONE run reached its own natural end (`reason == "exited"`) |
 | `interrupted` | at least one run GENUINELY STARTED a process but did not reach `"exited"` - a timeout, an operator-cancellation, or a call still running when the channel tore down (`_in_flight` for that gate still `True` at `finalize()` time - see below) |
-| `not-observed` | no run_gate ever arrived for this declared gate, OR every run that did arrive never started a real process at all - see the `_NOT_STARTED_REASONS` correction below |
+| `launch-failed` | at least one `run_gate` arrived for this gate, but NONE of its runs started a real process - the subject DID ask; the CONTROLLER failed to launch it |
+| `not-observed` | ZERO `run_gate` requests ever arrived for this declared gate - a true bypass or a genuinely skipped gate |
 | `channel-unavailable` | the channel itself could not be constructed/was unreachable for this whole attempt, OR the backend answered `exec_in_attempt` with `reason="unsupported"` for any run (the whole mechanism is unavailable for this attempt, not merely one call) |
 
-**Correction (codex `code_review` of the controller-executes revision): a
+**Correction 1 (codex `code_review` of the controller-executes revision): a
 run that never started a process is NOT `interrupted`.** The first pass of
 this revision folded `"launch-failed"` (the exec itself never launched),
 `"attempt-not-running"`, and `"unsupported"` into `interrupted`, which let a
 refused or never-launched exec report `execution_observed: CONFIRMED` -
 positive execution evidence for a gate that never ran at all, moved from
-the subject (the first draft's bug) to a failed launch (this one). Fixed:
+the subject (the first draft's bug) to a failed launch (this one).
 `_NOT_STARTED_REASONS = {"launch-failed", "attempt-not-running",
-"unsupported"}` contributes to neither `complete` nor `interrupted`; a gate
-whose only runs carry one of these reasons reads `not-observed`, same as a
-full bypass - the raw `runs` list still shows the attempted-but-failed-to-
-launch run for anyone reading it directly, so nothing is hidden, only kept
-out of the execution-confirmed bucket.
+"unsupported"}` contributes to neither `complete` nor `interrupted`.
+
+**Correction 2 (orchestrator review of correction 1's own fix): a gate the
+subject DID request must never become `NOT_CONFIRMED`, even under asserted
+`gate_exclusivity`.** Correction 1's first shape folded a never-started run
+into the SAME `not-observed` coverage a true bypass gets - and
+`not-observed` is exactly the coverage `execution_observed()` may read as
+`NOT_CONFIRMED` under exclusivity. That let a gate the subject genuinely
+requested, where the CONTROLLER failed to launch it, attribute the
+controller's own infrastructure failure to the subject as "proven
+non-execution" - a false negative fact about the subject, the mirror image
+of the very first bug. Fixed by splitting the population: `launch-failed`
+(≥1 request, none started) is now its OWN coverage, computed separately
+from `not-observed` (zero requests) - and `execution_observed()` reports
+`UNKNOWN`/`controller-launch-failed` for `launch-failed` UNCONDITIONALLY,
+never consulting `gate_exclusivity` at all. Only a TRUE bypass (zero
+requests) may ever become `NOT_CONFIRMED`.
 
 **The teardown-cutoff case is disambiguated by `_in_flight`, not by `reason
 is None` alone.** Both a genuinely-still-running call (cut off when the
@@ -305,16 +318,21 @@ confirmed outcome) leave a run with `reason is None`. The exception path
 always clears `_in_flight[gate]` before re-raising; the teardown-cutoff
 case cannot, because the thread is still blocked inside the call. So
 `finalize()` reads a trailing `reason is None` run as `interrupted` only
-when `_in_flight[gate]` is STILL `True` - otherwise it is treated the same
-as a `_NOT_STARTED_REASONS` run.
+when `_in_flight[gate]` is STILL `True` - otherwise it is treated as a
+`_NOT_STARTED_REASONS` run, contributing to `launch-failed` (since a
+request genuinely arrived to trigger the exception in the first place).
 
 `execution_observed`:
 - `CONFIRMED` for `complete` OR `interrupted` - both mean the controller
   genuinely caused the gate to execute; whether any run finished, and what
   it returned, are the separate `coverage`/`exit_code`/`reason` facts,
   never folded into `execution_observed` itself.
+- `launch-failed`: **`UNKNOWN`, reason `controller-launch-failed` -
+  UNCONDITIONALLY, regardless of `gate_exclusivity`** (correction 2).
 - `not-observed` SPLITS, per the orchestrator's correction to the first
-  draft's blanket "never `NOT_CONFIRMED`" ruling:
+  draft's blanket "never `NOT_CONFIRMED`" ruling - and ONLY for a TRUE
+  bypass, since `launch-failed` now owns the "subject asked, nothing
+  started" population:
   - If `gate_exclusivity=True` was asserted for this attempt AND the
     channel was never `channel-unavailable` for any part of it:
     **`NOT_CONFIRMED`, reason `proven-non-execution`.**
@@ -463,6 +481,16 @@ only the record this one now names, with its revised §2 shape.
    `NOT_CONFIRMED`.** Mutation: confirm a version that only writes
    `exclusivity` when `asserted=True` makes a `False`-asserted gate's
    record silent about the premise.
+8a. **A launch failure is `UNKNOWN`, never `NOT_CONFIRMED`, even under
+   asserted exclusivity (orchestrator correction).** `gate_exclusivity=
+   True`, the subject requests a declared gate, the launch fails
+   (`reason="launch-failed"`) - `coverage="launch-failed"`,
+   `execution_observed() == ("UNKNOWN", "controller-launch-failed")`, NOT
+   `("NOT_CONFIRMED", "proven-non-execution")`. Mutation: confirm a version
+   that lets a never-started-but-requested run share `not-observed`'s
+   coverage (correction 1's own first shape) reports `NOT_CONFIRMED` here -
+   attributing the controller's own infrastructure failure to the subject
+   as proof it never ran its checks.
 9. **`attempt-not-running` is a refusal-shaped result, never a guessed
    `exited`.** Calling `exec_in_attempt()` after the attempt's own primary
    process has already stopped (via `execute()`'s own one-shot-and-stop
@@ -505,7 +533,7 @@ only the record this one now names, with its revised §2 shape.
 
 ## 9. What #270/#271 may build on
 
-- The finalized record's shape (§2) and its four coverage states (§5) -
+- The finalized record's shape (§2) and its five coverage states (§5) -
   #270/#271 are free to add their OWN criteria logic consuming
   `execution_observed`/`coverage`/`exit_code` per gate (now per RUN, plural)
   - this design commits only to what the witness itself may honestly

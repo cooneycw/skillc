@@ -190,7 +190,11 @@ def test_a_gate_that_never_started_a_process_is_not_observed_never_confirmed(rea
     the backend cannot do this at all) - the first draft folded them into
     `interrupted`/`CONFIRMED`, which let a refused or never-launched exec
     report positive execution evidence, exactly the subject-authored-claim
-    problem #269 exists to stop."""
+    problem #269 exists to stop. `launch-failed`/`attempt-not-running` are
+    a DIFFERENT coverage than a true bypass (orchestrator correction - see
+    `test_a_launch_failure_is_unknown_never_not_confirmed_even_under_
+    exclusivity`): the subject DID request this gate, so it must never
+    become `NOT_CONFIRMED` under any exclusivity setting."""
     backend = _FakeBackend(results={("lint",): ExecuteResult(reason=reason, exit_code=None)})
     witness = GateWitness(
         declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest, backend=backend,
@@ -204,9 +208,29 @@ def test_a_gate_that_never_started_a_process_is_not_observed_never_confirmed(rea
         assert gate.coverage == "channel-unavailable"
         assert gate.execution_observed() == ("UNKNOWN", "channel-unavailable")
     else:
-        assert gate.coverage == "not-observed"
-        assert gate.execution_observed() == ("UNKNOWN", "no-controller-witness")
+        assert gate.coverage == "launch-failed"
+        assert gate.execution_observed() == ("UNKNOWN", "controller-launch-failed")
         assert len(gate.runs) == 1  # recorded for transparency, just not counted as started
+
+
+def test_a_launch_failure_is_unknown_never_not_confirmed_even_under_exclusivity() -> None:
+    """Orchestrator correction, the overclaim codex's own earlier fix left
+    behind: under `gate_exclusivity=True`, a TRUE bypass (zero requests)
+    may read `NOT_CONFIRMED` - but a gate the subject DID request, where
+    the CONTROLLER failed to launch it, must never attribute that failure
+    to the subject as "proven non-execution". That would be a false
+    negative fact about the subject, the mirror image of the original
+    bug."""
+    backend = _FakeBackend(results={("lint",): ExecuteResult(reason="launch-failed", exit_code=None)})
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest, backend=backend,
+        handle=None, limits=_limits(), gate_exclusivity=True,
+        exclusivity_basis="fixture installs no lint binary on the subject's PATH",
+    )
+    witness.decide({"op": "run_gate", "gate": "lint"})
+    gate = witness.finalize("a-1").gates["lint"]
+    assert gate.coverage == "launch-failed"
+    assert gate.execution_observed() == ("UNKNOWN", "controller-launch-failed")
 
 
 def test_an_undeclared_gate_is_refused() -> None:
@@ -331,8 +355,8 @@ def test_an_execute_exception_leaves_the_run_not_started_and_clears_in_flight() 
     with pytest.raises(RuntimeError, match="simulated backend crash"):
         witness.decide({"op": "run_gate", "gate": "lint"})
     gate = witness.finalize("a-1").gates["lint"]
-    assert gate.coverage == "not-observed"
-    assert gate.execution_observed() == ("UNKNOWN", "no-controller-witness")
+    assert gate.coverage == "launch-failed"  # the subject DID request it
+    assert gate.execution_observed() == ("UNKNOWN", "controller-launch-failed")
     assert gate.runs[0].reason is None
 
 

@@ -166,10 +166,15 @@ class GateRunRecord:
 @dataclass(frozen=True)
 class GateRecord:
     """A declared gate's entry in the finalized witness (design doc §2, §5).
-    `coverage` is one of `complete` / `interrupted` / `not-observed` /
-    `channel-unavailable`. `exclusivity` is recorded on EVERY gate,
-    regardless of its value, so a reader of `NOT_CONFIRMED` - or of its
-    absence - sees exactly what that verdict rests on, never an invisible
+    `coverage` is one of `complete` / `interrupted` / `launch-failed` /
+    `not-observed` / `channel-unavailable`. `launch-failed` (orchestrator
+    correction) is distinct from `not-observed`: the subject DID request
+    this gate at least once, but every one of its runs failed to start a
+    real process - never conflated with a true bypass, because only a
+    true bypass may ever become `NOT_CONFIRMED` under asserted
+    `gate_exclusivity`. `exclusivity` is recorded on EVERY gate, regardless
+    of its value, so a reader of `NOT_CONFIRMED` - or of its absence -
+    sees exactly what that verdict rests on, never an invisible
     constructor argument (orchestrator review)."""
 
     coverage: str
@@ -180,9 +185,19 @@ class GateRecord:
     def execution_observed(self) -> tuple[str, str | None]:
         """`(CONFIRMED|UNKNOWN|NOT_CONFIRMED, reason)` - design doc §5's
         derivation. `NOT_CONFIRMED` is produced ONLY for `not-observed`
-        coverage AND an asserted `gate_exclusivity` - never by default."""
+        coverage (a TRUE bypass - zero `run_gate` requests ever arrived)
+        AND an asserted `gate_exclusivity` - never by default, and NEVER
+        for `launch-failed` regardless of exclusivity (orchestrator
+        correction: a subject that DID request the gate, where the
+        CONTROLLER failed to launch it, must never read as "proven
+        non-execution" - that would attribute the controller's own
+        infrastructure failure to the subject as positive evidence it
+        never ran its checks, the mirror image of the bug this witness
+        exists to stop)."""
         if self.coverage in ("complete", "interrupted"):
             return "CONFIRMED", None
+        if self.coverage == "launch-failed":
+            return "UNKNOWN", "controller-launch-failed"
         if self.coverage == "not-observed":
             if self.exclusivity_asserted:
                 return "NOT_CONFIRMED", "proven-non-execution"
@@ -476,13 +491,23 @@ class GateWitness:
                     coverage = "complete"
                 elif any_interrupted:
                     coverage = "interrupted"
+                elif run_records:
+                    # At least one run_gate arrived for this gate, but NONE
+                    # of them started a real process - the subject DID ask;
+                    # the CONTROLLER failed to launch it. Orchestrator
+                    # correction: this must NEVER share `not-observed`'s
+                    # coverage, because `not-observed` is what
+                    # `execution_observed()` allows to become
+                    # `NOT_CONFIRMED` under asserted exclusivity, and doing
+                    # that here would attribute the controller's own
+                    # infrastructure failure to the subject as positive
+                    # proof it never ran its checks - the mirror image of
+                    # the bug this witness exists to stop.
+                    coverage = "launch-failed"
                 else:
-                    # Either no run arrived at all, or every run that did
-                    # arrive never started a real process (codex
-                    # `code_review` correction) - both read as
-                    # `not-observed`: the witness has no positive execution
-                    # evidence either way. The raw `runs` list still
-                    # distinguishes the two for anyone reading it directly.
+                    # Zero run_gate requests ever arrived - a TRUE bypass or
+                    # a genuinely skipped gate. This is the ONLY population
+                    # `execution_observed()` may ever read as `NOT_CONFIRMED`.
                     coverage = "not-observed"
                 records[gate] = GateRecord(
                     coverage=coverage, runs=run_records,

@@ -41,14 +41,17 @@ and version plan.
   covering the full declared gate set - a gate nothing was ever heard about
   still appears, as `not-observed`, never as a missing entry; every run of a
   gate is recorded, not only the first, so a legitimate flow-check rerun
-  after a fix is never refused or overwritten. Four coverage states
-  (`complete`/`interrupted`/`not-observed`/`channel-unavailable`);
-  `execution_observed` derives from coverage alone, never from exit code.
-  `NOT_CONFIRMED` is reachable only when the caller asserts
-  `gate_exclusivity` (the fixture gives the subject no other way to invoke
-  the gate at all) - recorded on every gate's own entry so the verdict is
-  never resting on an invisible constructor argument; without that
-  assertion, silence stays `UNKNOWN`. The reply to the subject carries the
+  after a fix is never refused or overwritten. Five coverage states
+  (`complete`/`interrupted`/`launch-failed`/`not-observed`/
+  `channel-unavailable`); `execution_observed` derives from coverage alone,
+  never from exit code. `launch-failed` (the subject DID request the gate;
+  the controller failed to launch it) always reads `UNKNOWN`, regardless of
+  exclusivity - only a TRUE bypass (zero requests) may ever read
+  `NOT_CONFIRMED`, and only when the caller asserts `gate_exclusivity` (the
+  fixture gives the subject no other way to invoke the gate at all) -
+  recorded on every gate's own entry so the verdict is never resting on an
+  invisible constructor argument; without that assertion, silence stays
+  `UNKNOWN`. The reply to the subject carries the
   gate's real exit code and bounded stdout/stderr - what it would see
   running the gate itself - never the witness's own coverage state, other
   gates' status, or tree digests. Tree identity is computed by the
