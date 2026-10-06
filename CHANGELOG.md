@@ -62,8 +62,22 @@ and version plan.
     pinned file's own bytes. Mutation-checked: reverting the record
     construction to the old hardcoded value turns the new executable-mode
     test red; restored, green.
-  The shim itself, its profile wiring, and the real-Docker conformance
-  test are not yet built.
+  - `docker/trial/flow-check-gate-shim.py` (new): the forwarding shim
+    itself. Recognizes ONLY the two argv shapes `reference.md` prescribes
+    (`--plan check --evidence flow-check`, `--check-summary`), maps each
+    to its own pre-declared gate name, forwards its own `os.getcwd()` as
+    the one dynamic input, and writes back the controller's real
+    `exit_code`/`stdout`/`stderr` byte-for-byte - never synthesises a
+    verdict of its own. Exits 125 (Docker's own "launcher failed"
+    convention) on any channel failure, an unrecognized argv, or a
+    missing real exit code (a refused/never-started gate) - deliberately
+    not 2, which the real script already uses for a stale-helper
+    mismatch (#581/#1366). `tests/test_flow_check_gate_shim.py` drives it
+    as a real subprocess against a real `DecideReplyChannel`, same
+    discipline as `test_skillc_disrupt_tool.py`.
+  Profile wiring (installing the shim at the subject-visible path,
+  relocating the real script, regenerating the inventory) and the
+  real-Docker conformance test are not yet built.
 
 - **The real-Docker runner's `--break` flag generalized to a family:mode
   table** (Refs #315, #269, #183). Found during #269's PR merge review:
