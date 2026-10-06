@@ -34,6 +34,27 @@ and version plan.
     `controls/` are untouched (claude-power-pack #1369 pins 61 golden cases
     on them).
 
+- **`exec_in_attempt()` gains `cwd`/`env`, confined per-request by the
+  gate-execution witness** (Refs #332, #269, #183). In progress: the
+  underlying mechanism for witnessing the subject's own `flow-finish-
+  gate.sh` invocation. `ExecutionBackend.exec_in_attempt()` and the new
+  `resolve_realpath_in_attempt()` (both added to the Protocol, with
+  conformance stubs on every other implementer) let a caller run a
+  declared gate at a caller-supplied working directory and under an
+  explicit, declared environment (`docker exec -w` for cwd; `env -i` for
+  environment, since `docker exec -e` only adds to the container's
+  default rather than replacing it). `GateWitness` is the one place a
+  subject-forwarded `cwd` is trusted or refused: it must resolve, via a
+  REAL in-container `realpath` (never a string-prefix check on the
+  unresolved input), to the attempt's declared `workspace_root` or
+  somewhere below it - unresolvable, unconfigured, or outside the root
+  (`cwd=/`, `cwd=../..`) all refuse before anything runs. `declared_env`
+  is per-gate, declared by the controller exactly like `declared_argv`,
+  never read from the subject. Mutation-checked: disabling confinement
+  turns 5 tests red; dropping env-forwarding turns 1 red; both restored.
+  The shim itself, its profile wiring, and the real-Docker conformance
+  test are not yet built.
+
 - **The real-Docker runner's `--break` flag generalized to a family:mode
   table** (Refs #315, #269, #183). Found during #269's PR merge review:
   the runner only ever set `SKILLC_LIVE_TEST_BREAK` (#183's channel break

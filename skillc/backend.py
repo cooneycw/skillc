@@ -344,6 +344,7 @@ class ExecutionBackend(Protocol):
     def exec_in_attempt(
         self, handle: object, argv: Sequence[str], limits: Limits,
         cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,
+        cwd: str | None = None, env: Mapping[str, str] | None = None,
     ) -> ExecuteResult:
         """Run `argv` inside the SAME running isolation `handle` already
         identifies, WITHOUT stopping or removing it - added for #269's
@@ -371,7 +372,31 @@ class ExecutionBackend(Protocol):
         bounds only THIS exec call. A backend that cannot isolate a
         same-identity, same-network in-place exec from the attempt's own
         primary process must refuse via `unsupported` rather than attempt
-        a weaker approximation silently."""
+        a weaker approximation silently.
+
+        `cwd`/`env` (#332 follow-up) are optional, default-`None`
+        - existing callers are unaffected. `cwd` overrides the attempt's
+          default working directory; a caller exposing this to anything the
+          subject influences must confine it first via
+          `resolve_realpath_in_attempt()`, never trust it unconfined. `env`,
+          when given, REPLACES the exec'd process's whole environment
+          (never merely adds to the isolation's own default) - needed for a
+          byte-identity claim against a declared, reproducible environment.
+          A backend that cannot honour either must say so through
+          `describe()`'s `unobserved`, matching `stdin`'s own convention,
+          never silently ignore them."""
+        ...
+
+    def resolve_realpath_in_attempt(self, handle: object, path: str, timeout: float = 2.0) -> str | None:
+        """Resolve `path` to its real, symlink-free absolute form INSIDE
+        the attempt's isolation (#332) - the confinement primitive a
+        caller must use before trusting any subject-forwarded path (e.g.
+        as `exec_in_attempt()`'s `cwd`). `None` on any failure to resolve
+        it (unreachable, nonexistent, a backend that cannot do this at
+        all) - never a guess, and never the unresolved input returned as
+        if it were confirmed. A backend without this capability returns
+        `None` unconditionally, which safely refuses every cwd a caller
+        would otherwise confine, rather than silently trusting one."""
         ...
 
     def confirm_stopped(self, handle: object) -> Confirmation:

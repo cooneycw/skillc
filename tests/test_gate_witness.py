@@ -56,18 +56,31 @@ class _FakeBackend:
     stdout: dict[tuple[str, ...], str] = field(default_factory=dict)
     block: set[tuple[str, ...]] = field(default_factory=set)
     calls: list[tuple[str, ...]] = field(default_factory=list)
+    #: #332: scriptable realpath resolutions (`path -> resolved path or
+    #: None`); unscripted paths resolve to `None` by default, so a
+    #: confinement check against this fake fails closed unless a test
+    #: explicitly scripts the expected resolution - never silently confirmed.
+    realpaths: dict[str, str | None] = field(default_factory=dict)
+    cwd_calls: list[str | None] = field(default_factory=list)
+    env_calls: list[Mapping[str, str] | None] = field(default_factory=list)
     _last_stdout: str = ""
 
     def exec_in_attempt(
         self, handle: object, argv: Sequence[str], limits: Limits,
         cancel: object = None, stdin: object = None,
+        cwd: str | None = None, env: Mapping[str, str] | None = None,
     ) -> ExecuteResult:
         key = tuple(argv)
         self.calls.append(key)
+        self.cwd_calls.append(cwd)
+        self.env_calls.append(env)
         if key in self.block:
             time.sleep(3600)
         self._last_stdout = self.stdout.get(key, "")
         return self.results[key]
+
+    def resolve_realpath_in_attempt(self, handle: object, path: str, timeout: float = 2.0) -> str | None:
+        return self.realpaths.get(path)
 
     def export(self, handle: object, dest: Path) -> None:
         dest.mkdir(parents=True, exist_ok=True)
@@ -258,6 +271,111 @@ def test_an_unknown_op_is_refused() -> None:
         witness.decide({"op": "something_else"})
 
 
+# ------------------------------------------------------------ #332: cwd confinement
+
+
+def test_a_cwd_is_refused_when_no_workspace_root_is_configured() -> None:
+    """`workspace_root` defaults to `None` - every `cwd` is refused, never
+    silently passed through unconfined, until a caller explicitly opts an
+    attempt into accepting one."""
+    backend = _FakeBackend(results={("lint",): _exited(0)})
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest, backend=backend,
+        handle=None, limits=_limits(), gate_exclusivity=False, exclusivity_basis="",
+    )
+    with pytest.raises(ChannelRefusal, match="accepts none"):
+        witness.decide({"op": "run_gate", "gate": "lint", "cwd": "/work/project"})
+    assert backend.calls == []  # never even attempted
+    gate = witness.finalize("a-1").gates["lint"]
+    assert gate.coverage == "not-observed"
+
+
+def test_an_unresolvable_cwd_is_refused() -> None:
+    """The fake backend's `realpaths` is unscripted for this path, so it
+    resolves to `None` by default - unresolvable must refuse, never be
+    treated as confined by coincidence."""
+    backend = _FakeBackend(results={("lint",): _exited(0)})
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest, backend=backend,
+        handle=None, limits=_limits(), gate_exclusivity=False, exclusivity_basis="", workspace_root="/work",
+    )
+    with pytest.raises(ChannelRefusal, match="could not be resolved"):
+        witness.decide({"op": "run_gate", "gate": "lint", "cwd": "some/relative/path"})
+    assert backend.calls == []
+
+
+@pytest.mark.parametrize("escaping_cwd", ["/", "../.."])
+def test_a_cwd_that_resolves_outside_the_workspace_root_is_refused(escaping_cwd: str) -> None:
+    """Orchestrator's own named red cases: `cwd=/` and `cwd=../..`. Both
+    resolve (per the fake's own scripted realpath, standing in for what a
+    REAL `realpath` would report) to something that is not `/work` and not
+    a path strictly below it, and must be refused before anything runs."""
+    backend = _FakeBackend(results={("lint",): _exited(0)}, realpaths={escaping_cwd: "/"})
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest, backend=backend,
+        handle=None, limits=_limits(), gate_exclusivity=False, exclusivity_basis="", workspace_root="/work",
+    )
+    with pytest.raises(ChannelRefusal, match="outside the attempt's workspace root"):
+        witness.decide({"op": "run_gate", "gate": "lint", "cwd": escaping_cwd})
+    assert backend.calls == []
+    gate = witness.finalize("a-1").gates["lint"]
+    assert gate.coverage == "not-observed"
+
+
+def test_a_cwd_resolving_inside_the_workspace_root_is_confined_and_forwarded() -> None:
+    """The ROOT itself and a path strictly below it both pass; the
+    RESOLVED path (never the subject's raw, unresolved string) is what
+    reaches `exec_in_attempt()`."""
+    backend = _FakeBackend(
+        results={("lint",): _exited(0)}, realpaths={"./sub": "/work/attempt-1/sub"},
+    )
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest, backend=backend,
+        handle=None, limits=_limits(), gate_exclusivity=False, exclusivity_basis="", workspace_root="/work",
+    )
+    witness.decide({"op": "run_gate", "gate": "lint", "cwd": "./sub"})
+    assert backend.cwd_calls == ["/work/attempt-1/sub"]
+
+
+def test_no_cwd_requested_forwards_none_unchanged() -> None:
+    """Backward compatibility: a request naming no `cwd` at all must not
+    be affected by `workspace_root` being configured - `exec_in_attempt()`
+    still gets `cwd=None`, running at its own default."""
+    backend = _FakeBackend(results={("lint",): _exited(0)})
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest, backend=backend,
+        handle=None, limits=_limits(), gate_exclusivity=False, exclusivity_basis="", workspace_root="/work",
+    )
+    witness.decide({"op": "run_gate", "gate": "lint"})
+    assert backend.cwd_calls == [None]
+
+
+# ------------------------------------------------------------ #332: per-gate env
+
+
+def test_declared_env_naming_an_undeclared_gate_refuses_construction() -> None:
+    backend = _FakeBackend()
+    with pytest.raises(ValueError, match="undeclared gate"):
+        GateWitness(
+            declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest, backend=backend,
+            handle=None, limits=_limits(), gate_exclusivity=False, exclusivity_basis="",
+            declared_env={"typecheck": {"HOME": "/x"}},
+        )
+
+
+def test_declared_env_is_forwarded_only_for_the_gate_it_names() -> None:
+    backend = _FakeBackend(results={("lint",): _exited(0), ("typecheck",): _exited(0)})
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"], "typecheck": ["typecheck"]},
+        tree_digest_fn=_fixed_tree_digest, backend=backend,
+        handle=None, limits=_limits(), gate_exclusivity=False, exclusivity_basis="",
+        declared_env={"lint": {"HOME": "/declared-home", "PATH": "/usr/bin"}},
+    )
+    witness.decide({"op": "run_gate", "gate": "lint"})
+    witness.decide({"op": "run_gate", "gate": "typecheck"})
+    assert backend.env_calls == [{"HOME": "/declared-home", "PATH": "/usr/bin"}, None]
+
+
 # ------------------------------------------------------------ reruns and races
 
 
@@ -344,7 +462,10 @@ def test_an_execute_exception_leaves_the_run_not_started_and_clears_in_flight() 
     tears down (see `test_a_rerun_is_still_possible_after_an_exception`)."""
     backend = _FakeBackend()
 
-    def boom(handle: object, argv: Sequence[str], limits: Limits, cancel: object = None, stdin: object = None) -> ExecuteResult:
+    def boom(
+        handle: object, argv: Sequence[str], limits: Limits, cancel: object = None, stdin: object = None,
+        cwd: str | None = None, env: Mapping[str, str] | None = None,
+    ) -> ExecuteResult:
         raise RuntimeError("simulated backend crash")
 
     backend.exec_in_attempt = boom  # type: ignore[method-assign]
@@ -368,11 +489,14 @@ def test_a_rerun_is_still_possible_after_an_exception() -> None:
     calls = {"n": 0}
     real_exec = backend.exec_in_attempt
 
-    def flaky(handle: object, argv: Sequence[str], limits: Limits, cancel: object = None, stdin: object = None) -> ExecuteResult:
+    def flaky(
+        handle: object, argv: Sequence[str], limits: Limits, cancel: object = None, stdin: object = None,
+        cwd: str | None = None, env: Mapping[str, str] | None = None,
+    ) -> ExecuteResult:
         calls["n"] += 1
         if calls["n"] == 1:
             raise RuntimeError("simulated backend crash")
-        return real_exec(handle, argv, limits, cancel, stdin)
+        return real_exec(handle, argv, limits, cancel, stdin, cwd, env)
 
     backend.exec_in_attempt = flaky  # type: ignore[method-assign]
     witness = GateWitness(
