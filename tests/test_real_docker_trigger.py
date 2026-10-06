@@ -59,6 +59,19 @@ def test_a_too_short_hex_string_does_not_match() -> None:
     assert result.requests == ()
 
 
+def test_red_case_b3_an_abbreviated_sha_is_never_selected() -> None:
+    """B3 (orchestrator review): `run-real-docker` compares the checkout's
+    full `rev-parse HEAD` to the requested string byte-for-byte, so a
+    7-40 character range (the OLD regex) let every abbreviated sha request
+    self-refuse as a checkout mismatch - never collected as a request at
+    all, so a 7-char abbreviation of a real sha must NOT match."""
+    abbreviated = SHA[:7]
+    assert len(abbreviated) == 7
+    comments = [_comment(7, OWNER, f"/run-real-docker {abbreviated}")]
+    result = t.select_requested_shas(comments, owner_login=OWNER, processed_ids=frozenset())
+    assert result.requests == (), "an abbreviated sha must never be selected - only exactly 40 hex characters"
+
+
 def test_multiple_comments_in_one_batch_are_each_handled_independently() -> None:
     comments = [
         _comment(10, OWNER, f"/run-real-docker {SHA}"),

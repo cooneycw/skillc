@@ -40,13 +40,15 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-#: `/run-real-docker <sha>` - a short hex string, case-insensitive (git
-#: accepts both), 7-40 characters (a valid abbreviated-to-full SHA range).
-#: Anchored to the whole comment body after stripping surrounding
-#: whitespace - a command embedded mid-sentence does not count, so an
-#: ordinary comment that happens to mention the phrase cannot trigger
-#: anything by accident.
-_COMMAND_RE = re.compile(r"^/run-real-docker\s+([0-9a-fA-F]{7,40})\s*$")
+#: `/run-real-docker <sha>` - EXACTLY 40 hex characters, never an
+#: abbreviated sha (orchestrator review, B3): `run-real-docker` compares
+#: the checkout's full `rev-parse HEAD` against the requested string
+#: byte-for-byte, so a 7-40 character range let every abbreviated request
+#: self-refuse as a checkout mismatch before ever running a test. Anchored
+#: to the whole comment body after stripping surrounding whitespace - a
+#: command embedded mid-sentence does not count, so an ordinary comment
+#: that happens to mention the phrase cannot trigger anything by accident.
+_COMMAND_RE = re.compile(r"^/run-real-docker\s+([0-9a-fA-F]{40})\s*$")
 
 
 @dataclass(frozen=True)

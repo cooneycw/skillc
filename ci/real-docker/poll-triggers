@@ -1,9 +1,11 @@
 #!/bin/bash
 # The systemd timer's entrypoint (#315, R5: every 5 minutes). Decides WHICH
 # sha(s), if any, this tick should run, then invokes run-real-docker once
-# per decided sha, sequentially, under the same lock run-real-docker itself
-# holds (so two decided shas in one tick never overlap in time, but both
-# still run rather than one being skipped because the other held the lock).
+# per decided sha, sequentially (the lock only matters against a
+# concurrent BY-HAND invocation outside this loop - run-real-docker's own
+# bounded wait, S1, is what keeps that case from losing a decided run
+# rather than this script's own sequencing, which never contends with
+# itself).
 #
 # Two trigger sources only (R4's framing, restated): new commits on main
 # (never arbitrary PR code - main already passed ordinary review and CI),
@@ -25,27 +27,67 @@ for var in INSTALLED_ROOT GITHUB_REPO GITHUB_TOKEN_FILE STATE_FILE; do
     fi
 done
 
-GITHUB_TOKEN="$(cat "$GITHUB_TOKEN_FILE")"
 RUNNER="$INSTALLED_ROOT/ci/real-docker/run-real-docker"
+
+# S4: token read from a file, used via curl's -K config, never on argv.
+CURL_CFG="$(mktemp)"
+chmod 600 "$CURL_CFG"
+{
+    echo "header = \"Authorization: token $(cat "$GITHUB_TOKEN_FILE")\""
+    echo "header = \"Accept: application/vnd.github+json\""
+} > "$CURL_CFG"
+trap 'rm -f "$CURL_CFG"' EXIT
 
 [ -f "$STATE_FILE" ] || echo '{"last_main_sha": null, "processed_comment_ids": []}' > "$STATE_FILE"
 
 gh_get() {
-    curl -s -H "Authorization: token $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" "$1"
+    curl -s --fail-with-body -K "$CURL_CFG" "$1"
 }
 
 # ------------------------------------------------------------- decide what to run
 
-TO_RUN=()  # shas to run this tick, in order
-
 CURRENT_MAIN_SHA="$(gh_get "https://api.github.com/repos/$GITHUB_REPO/commits/main" | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])')"
 LAST_MAIN_SHA="$(python3 -c 'import json; print(json.load(open("'"$STATE_FILE"'")).get("last_main_sha") or "")')"
-if [ "$CURRENT_MAIN_SHA" != "$LAST_MAIN_SHA" ]; then
-    TO_RUN+=("$CURRENT_MAIN_SHA")
-fi
+MAIN_SHA_TO_RUN=""
+[ "$CURRENT_MAIN_SHA" != "$LAST_MAIN_SHA" ] && MAIN_SHA_TO_RUN="$CURRENT_MAIN_SHA"
 
 OWNER_LOGIN="$(gh_get "https://api.github.com/repos/$GITHUB_REPO" | python3 -c 'import json,sys; print(json.load(sys.stdin)["owner"]["login"])')"
-COMMENTS_JSON="$(gh_get "https://api.github.com/repos/$GITHUB_REPO/issues/comments?per_page=100")"
+
+# B1 (orchestrator review, blocking): `issues/comments` with no sort/
+# direction defaults to created ASC, so a plain `per_page=100` fetch always
+# returns the 100 OLDEST comments in the repo's whole history - any
+# trigger comment posted today would never be seen, forever, on a repo
+# with more than 100 comments total. Fetch NEWEST first instead
+# (`sort=created&direction=desc`) and paginate forward only until a
+# comment id already recorded as processed is reached - everything after
+# that point is, by definition, something an earlier tick already handled,
+# so there is no need to read further. A hard page cap (20 pages = up to
+# 2000 comments) bounds a first-ever run against a very old, very
+# unprocessed state without pagination running away.
+PROCESSED_IDS_JSON="$(python3 -c 'import json; print(json.dumps(json.load(open("'"$STATE_FILE"'")).get("processed_comment_ids", [])))')"
+ALL_COMMENTS_JSON="[]"
+PAGE=1
+while [ "$PAGE" -le 20 ]; do
+    PAGE_JSON="$(gh_get "https://api.github.com/repos/$GITHUB_REPO/issues/comments?sort=created&direction=desc&per_page=100&page=$PAGE")"
+    PAGE_LEN="$(echo "$PAGE_JSON" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
+    [ "$PAGE_LEN" -eq 0 ] && break  # no more comments at all
+
+    ALL_COMMENTS_JSON="$(python3 -c '
+import json, sys
+accumulated, page, processed = json.loads(sys.argv[1]), json.loads(sys.argv[2]), set(json.loads(sys.argv[3]))
+accumulated.extend(page)
+# True once this PAGE contains an id already processed - desc order means
+# every comment after it, on this and any later page, is already known.
+hit_known = any(c.get("id") in processed for c in page)
+print(json.dumps({"accumulated": accumulated, "stop": hit_known}))
+' "$ALL_COMMENTS_JSON" "$PAGE_JSON" "$PROCESSED_IDS_JSON")"
+    SHOULD_STOP="$(echo "$ALL_COMMENTS_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["stop"])')"
+    ALL_COMMENTS_JSON="$(echo "$ALL_COMMENTS_JSON" | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["accumulated"]))')"
+
+    [ "$SHOULD_STOP" = "True" ] && break
+    [ "$PAGE_LEN" -lt 100 ] && break  # short page: no more pages exist
+    PAGE=$((PAGE + 1))
+done
 
 SELECTION_OUTPUT="$(PYTHONPATH="$INSTALLED_ROOT" python3 -c '
 import json, sys
@@ -53,39 +95,85 @@ from ci.real_docker_trigger import select_requested_shas
 
 comments = json.loads(sys.argv[1])
 owner_login = sys.argv[2]
-state = json.load(open(sys.argv[3]))
-processed = frozenset(state.get("processed_comment_ids", []))
+processed = frozenset(json.loads(sys.argv[3]))
 
 result = select_requested_shas(comments, owner_login=owner_login, processed_ids=processed)
 print(json.dumps({
     "requests": list(result.requests),
     "newly_seen_ids": list(result.newly_seen_ids),
 }))
-' "$COMMENTS_JSON" "$OWNER_LOGIN" "$STATE_FILE")"
+' "$ALL_COMMENTS_JSON" "$OWNER_LOGIN" "$PROCESSED_IDS_JSON")"
 
-REQUESTED_SHAS="$(echo "$SELECTION_OUTPUT" | python3 -c 'import json,sys; print("\n".join(sha for _cid, sha in json.load(sys.stdin)["requests"]))')"
-while IFS= read -r requested_sha; do
-    [ -n "$requested_sha" ] && TO_RUN+=("$requested_sha")
-done <<< "$REQUESTED_SHAS"
+# ------------------------------------------------------- run, sequentially
+#
+# S1: state is persisted PER DECISION, after that decision's run actually
+# STARTED (exit code 3 means it never did - see run-real-docker's bounded
+# flock wait) - never persisted up front. A sha whose run could not even
+# start is retried next tick, instead of being silently marked done.
 
-# ------------------------------------------------------------- persist state
+persist_main_done() {
+    python3 -c '
+import json, sys
+state = json.load(open(sys.argv[1]))
+state["last_main_sha"] = sys.argv[2]
+json.dump(state, open(sys.argv[1], "w"))
+' "$STATE_FILE" "$1"
+}
 
+persist_comment_done() {
+    python3 -c '
+import json, sys
+state = json.load(open(sys.argv[1]))
+existing = set(state.get("processed_comment_ids", []))
+existing.add(int(sys.argv[2]))
+state["processed_comment_ids"] = sorted(existing)
+json.dump(state, open(sys.argv[1], "w"))
+' "$STATE_FILE" "$1"
+}
+
+# Comments that were SEEN but never matched/triggered anything carry no
+# run to wait on - safe to mark processed immediately, unconditionally.
 python3 -c '
 import json, sys
-state_path, main_sha, selection_json = sys.argv[1], sys.argv[2], sys.argv[3]
-state = json.load(open(state_path))
-selection = json.loads(selection_json)
-state["last_main_sha"] = main_sha
+state = json.load(open(sys.argv[1]))
+selection = json.loads(sys.argv[2])
+triggered_ids = {cid for cid, _sha in selection["requests"]}
+non_triggering = [i for i in selection["newly_seen_ids"] if i not in triggered_ids]
 existing = set(state.get("processed_comment_ids", []))
-existing.update(selection["newly_seen_ids"])
+existing.update(non_triggering)
 state["processed_comment_ids"] = sorted(existing)
-json.dump(state, open(state_path, "w"))
-' "$STATE_FILE" "$CURRENT_MAIN_SHA" "$SELECTION_OUTPUT"
+json.dump(state, open(sys.argv[1], "w"))
+' "$STATE_FILE" "$SELECTION_OUTPUT"
 
-# ------------------------------------------------------------- run, sequentially
+run_one() {
+    # Echoes the exit code; never raises under `set -e` in the caller.
+    local sha="$1"
+    echo "poll-triggers: running $sha" >&2
+    "$RUNNER" "$sha" && echo 0 && return 0
+    echo $?
+}
 
-for sha in "${TO_RUN[@]:-}"; do
-    [ -n "$sha" ] || continue
-    echo "poll-triggers: running $sha"
-    "$RUNNER" "$sha" || echo "poll-triggers: run-real-docker exited non-zero for $sha (expected on a failing/error verdict)"
+if [ -n "$MAIN_SHA_TO_RUN" ]; then
+    EXIT_CODE="$(run_one "$MAIN_SHA_TO_RUN")"
+    if [ "$EXIT_CODE" != "3" ]; then
+        persist_main_done "$MAIN_SHA_TO_RUN"
+    else
+        echo "poll-triggers: main sha $MAIN_SHA_TO_RUN never started (lock timeout) - will retry next tick" >&2
+    fi
+fi
+
+REQUESTS_JSON="$(echo "$SELECTION_OUTPUT" | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["requests"]))')"
+REQUEST_COUNT="$(echo "$REQUESTS_JSON" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
+i=0
+while [ "$i" -lt "$REQUEST_COUNT" ]; do
+    PAIR="$(echo "$REQUESTS_JSON" | python3 -c "import json,sys; cid, sha = json.load(sys.stdin)[$i]; print(cid); print(sha)")"
+    COMMENT_ID="$(echo "$PAIR" | sed -n '1p')"
+    REQUESTED_SHA="$(echo "$PAIR" | sed -n '2p')"
+    EXIT_CODE="$(run_one "$REQUESTED_SHA")"
+    if [ "$EXIT_CODE" != "3" ]; then
+        persist_comment_done "$COMMENT_ID"
+    else
+        echo "poll-triggers: comment $COMMENT_ID's requested sha $REQUESTED_SHA never started (lock timeout) - will retry next tick" >&2
+    fi
+    i=$((i + 1))
 done

@@ -105,7 +105,7 @@ steps:
       # script below (as $SKILLC_EXCLUDE_ARGS) - one definition, so the two
       # cannot silently drift apart (the control script's own default is a
       # fallback for a standalone run, not the source of truth here).
-      - export SKILLC_EXCLUDE_ARGS="--exclude controls/leak-check/bad --exclude tests/test_leak.py --exclude ci/leak-check-control.sh --exclude tests/test_real_docker_summary.py --exclude tests/fixtures/leak_seeds"
+      - export SKILLC_EXCLUDE_ARGS="--exclude controls/leak-check/bad --exclude tests/test_leak.py --exclude ci/leak-check-control.sh --exclude tests/fixtures/leak_seeds"
       - uv run --no-sync skillc leak-check . $SKILLC_EXCLUDE_ARGS
       - uv run --no-sync bash ci/leak-check-control.sh
     environment:

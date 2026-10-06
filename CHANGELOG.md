@@ -49,14 +49,17 @@ and version plan.
     modeled on `ci/check_git_tests_ran.py` (#307).
   - `ci/real_docker_isolation.py` - the preflight isolation DETECTOR (never
     a proof - the enforced boundary is a hypervisor-level firewall the
-    operator sets up outside this repo); refuses on an unreachable-LAN
-    probe success, an unconfigured target, or an unreachable GitHub
-    positive control.
+    operator sets up outside this repo); a tri-state TCP-connect probe (a
+    connection refused still proves a host answered and counts as
+    reachable; only a timeout/no-route counts as unreachable; the probe
+    itself failing to run is its own `probe_error` state, which also
+    refuses - never folded into "unreachable" the way a bare fallback
+    would).
   - `ci/real_docker_trigger.py` - trigger-comment selection: new commits on
-    main, or an explicit `/run-real-docker <sha>` comment whose author is
-    checked against the repository's own `owner.login` (never the comment
-    text); each comment id is processed exactly once, at first sight, so an
-    edited old comment can never re-trigger.
+    main, or an explicit `/run-real-docker <40-hex-sha>` comment whose
+    author is checked against the repository's own `owner.login` (never
+    the comment text); each comment id is processed exactly once, at first
+    sight, so an edited old comment can never re-trigger.
   - `ci/real_docker_summary.py` + `ci/real_docker_post.py` - the leak-safe,
     allowlisted-by-construction summary posted off the VM (full logs stay
     local), and the glue that computes it from an INSTALLED, reviewed copy -
@@ -72,6 +75,27 @@ and version plan.
     exercised end-to-end in this environment (no real Docker daemon or
     GitHub token here) - closed by the operator's setup-time verification
     steps (`ci/real-docker/README.md`).
+  - **Orchestrator cross-model review, 8 findings, all fixed before the
+    PR.** Three blocking (two of which made the verdict blind): the
+    comment poll fetched the 100 OLDEST comments in the repo forever
+    (no `sort`/`direction`) - fixed with `sort=created&direction=desc`
+    plus id-aware pagination; a bare `wget` LAN probe could not tell
+    "connection refused" (still reachable) from "nothing answered"
+    (unreachable) from "the probe itself couldn't run" - fixed with the
+    tri-state python3 socket probe above; an abbreviated sha always
+    self-refused as a checkout mismatch - fixed by requiring exactly 40
+    hex characters in both the trigger regex and the runner's own
+    argument check. Five smaller: state persisted before a run started
+    (a lock-contended run could be marked done without ever running -
+    fixed with a bounded `flock` wait and a distinct exit code the
+    poller checks for); a failing `uv sync` died silently with nothing
+    posted; `curl` had no `--fail`, so a rejected post looked identical
+    to an accepted one; the GitHub token was visible in process argv
+    (`ps`) - moved to a private `-K` config file; and the leak-safety
+    test's planted strings had widened the leak-check exclusion to a
+    whole file - moved into the existing seeded-leak fixtures
+    (`fixtures.leak_seeds.judge_seeds`, #69) instead, so the exclusion
+    list needed no new entry.
 
 - **Raised the calibration declaration's `attempts_per_arm` bound, 3-8 to
   1-1000 (#323).** Found while sizing #287's declaration: the exact one-

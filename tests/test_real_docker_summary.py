@@ -1,9 +1,17 @@
 """Tests for `ci/real_docker_summary.py` (#315): the leak-safe summary
 formatter. The central claim is the positive-control test below - a planted
 fake home-directory path and private IP, inside content this formatter is
-handed, must never reach its output."""
+handed, must never reach its output.
+
+Uses the repo's existing seeded leak fixtures (`fixtures.leak_seeds.
+judge_seeds`, #69) rather than hand-rolled literals, so this file needs no
+entry of its own in the leak-check exclude list - excluding a whole test
+file was already found and corrected once before (PR #92, see that
+module's own docstring) for exactly this reason."""
 
 from __future__ import annotations
+
+from fixtures.leak_seeds.judge_seeds import HOME_PATH_LEAK, PRIVATE_IP_LEAK
 
 from ci import check_real_docker_ran as c
 from ci import real_docker_summary as s
@@ -28,15 +36,15 @@ def test_formatter_never_reads_verdict_reason() -> None:
     `check_real_docker_ran.py` that accidentally quotes raw failure content
     into `reason` - must not reach either posted string, because this
     formatter's sentences never include `reason` at all."""
-    planted = "found at /home/planted-user, host 10.20.30.40, see failure above"
+    planted = f"found at {HOME_PATH_LEAK}, host {PRIVATE_IP_LEAK}, see failure above"
     result = c.Verdict(status=c.FAILURE, reason=planted, executed_by_file={"tests.x": 1},
                         failed_ids=("tests.x::test_one",))
     desc = s.format_status_description(result, sha=SHA, runner_sha=RUNNER_SHA)
     body = s.format_comment_body(result, sha=SHA, runner_sha=RUNNER_SHA)
-    assert "planted-user" not in desc
-    assert "planted-user" not in body
-    assert "10.20.30.40" not in desc
-    assert "10.20.30.40" not in body
+    assert HOME_PATH_LEAK not in desc
+    assert HOME_PATH_LEAK not in body
+    assert PRIVATE_IP_LEAK not in desc
+    assert PRIVATE_IP_LEAK not in body
 
 
 def test_a_planted_path_and_ip_inside_a_failed_test_id_is_dropped() -> None:
@@ -45,13 +53,13 @@ def test_a_planted_path_and_ip_inside_a_failed_test_id_is_dropped() -> None:
     (pytest test ids are not supposed to contain these, but this proves the
     filter catches it if one somehow did, rather than assuming the input is
     already clean)."""
-    poisoned_id = "tests.test_x::test_at_/home/planted-user_10.20.30.40"
+    poisoned_id = f"tests.test_x::test_at_{HOME_PATH_LEAK}_{PRIVATE_IP_LEAK}"
     clean_id = "tests.test_x::test_ok"
     result = c.Verdict(status=c.FAILURE, reason="irrelevant", executed_by_file={"tests.test_x": 2},
                         failed_ids=(poisoned_id, clean_id))
     body = s.format_comment_body(result, sha=SHA, runner_sha=RUNNER_SHA)
-    assert "planted-user" not in body
-    assert "10.20.30.40" not in body
+    assert HOME_PATH_LEAK not in body
+    assert PRIVATE_IP_LEAK not in body
     assert clean_id in body
     assert "omitted" in body
 
@@ -60,10 +68,10 @@ def test_red_case_an_unfiltered_formatter_would_leak_the_planted_id() -> None:
     """Mutation check: a formatter that interpolates `failed_ids` directly,
     with no charset filter, WOULD leak the poisoned id - proving the test
     above actually exercises the filter rather than passing by accident."""
-    poisoned_id = "tests.test_x::test_at_/home/planted-user_10.20.30.40"
+    poisoned_id = f"tests.test_x::test_at_{HOME_PATH_LEAK}_{PRIVATE_IP_LEAK}"
 
     def unfiltered_body(ids: tuple[str, ...]) -> str:
         return "\n".join(f"- `{i}`" for i in ids)
 
     naive = unfiltered_body((poisoned_id,))
-    assert "planted-user" in naive, "the unfiltered mutation does not leak - this red case is inert"
+    assert HOME_PATH_LEAK in naive, "the unfiltered mutation does not leak - this red case is inert"
