@@ -1215,8 +1215,18 @@ def finalize(
             experiment.record(attempt_id, "stop-unconfirmed", reason="no stop was observed")
         else:
             stop = {k: stop_event[k] for k in ("reason", "confirmed", "exit_code") if k in stop_event}
-        if stop.get("reason") == "launch-failed":
-            derived, why = "unavailable", f"the subject could not be launched: {stop_event and stop_event.get('error')}"
+        if stop.get("reason") in records.NOTHING_RAN and stop.get("reason") != "never-started":
+            # `never-started` is excluded here even though it is a NOTHING_RAN
+            # member - it belongs to the `not _dispatched(events)` branch
+            # above and should never legitimately reach a real `stopped`
+            # event's reason; if it somehow did, falling through to the
+            # ordinary derivation below is safer than silently relabeling it
+            # `unavailable` under a reason this branch does not actually name.
+            if stop.get("reason") == "launch-failed":
+                why = f"the subject could not be launched: {stop_event and stop_event.get('error')}"
+            else:
+                why = f"the attempt's container was not running when execution was attempted ({stop.get('reason')})"
+            derived = "unavailable"
             experiment.record(attempt_id, "unavailable", reason=why)
         elif stop.get("confirmed") is not True:
             derived, why = "inconclusive", "the stop was never confirmed, so no output could be captured"

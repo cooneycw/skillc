@@ -437,7 +437,7 @@ def run_through_backend(
                     except Exception as exc:  # noqa: BLE001 - an observation hook must never block teardown
                         observation = {"status": "unknown", "reason": str(exc)}
 
-                if confirmed and result.reason != "launch-failed":
+                if confirmed and result.reason not in ("launch-failed", "attempt-not-running"):
                     try:
                         backend.export(handle, workspace)
                     except OSError as exc:
