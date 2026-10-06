@@ -114,9 +114,28 @@ and version plan.
     proof #183 PR B2 already established for `skillc-disrupt-tool`.
     Mutation-checked: removing the new `COPY`/`chmod` stanza turns the
     real-Dockerfile check red; restored, green.
-  The real-Docker conformance test (driving a directly-constructed
-  container, #269/#183 style, with this overlay function placing both
-  files - not by hand) is not yet built.
+  - `tests/test_gate_overlay_live.py` (new): the real-Docker conformance
+    test itself, driving a directly-constructed container (#269/#183
+    style, never a profile/surface installer) with `apply_flow_check_
+    gate_overlay()` placing both files. A STAND-IN plays the real
+    `flow-finish-gate.sh` (orchestrator guidance: its claim is about the
+    shim's forwarding, never CPP's own gate logic, which needs skillc#334's
+    real-checkout install and is deferred there) - made sensitive to
+    exactly what the shim must preserve (its own argv, `os.getcwd()`, and
+    a digest of `$HOME`, plus an argv-dependent exit code) so a dropped
+    cwd or a wrong HOME actually changes its output, which a stand-in
+    that printed a constant could not detect. One test function,
+    `SKILLC_GATE_SHIM_LIVE_BREAK` selects the mode, `xfail(strict=True)`
+    on every non-`none` value - the same shape `test_gate_witness_live.py`
+    already uses. Mutation-checked by construction: each of the four
+    `gateshim:` break modes is a deliberately-broken shim variant (three)
+    or an emptied `declared_env` (`wrong-env`, the fourth) run through
+    this same test, and is asserted to fail exactly the property it
+    names; no daemon is reachable in this environment to execute it
+    here, so it is verified by rendering and `compile()`-checking every
+    generated in-container script plus the expected-output derivation
+    against the stand-in's own print statements, and is owed to the
+    real-Docker runner (#315) for execution evidence.
 
 - **The real-Docker runner's `--break` flag generalized to a family:mode
   table** (Refs #315, #269, #183). Found during #269's PR merge review:
