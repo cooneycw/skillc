@@ -187,6 +187,21 @@ and version plan.
   change needed. All 11 equivalence cases (6 `_execution_observed` + 5
   `_last_run_is_fresh`) now run and pass.
 
+- **`skillc.profile.installed_home_files` (Refs #334, in progress)** - a
+  validated profile's install population as an in-memory
+  `{destination: bytes}` mapping, for delivery into a live attempt
+  container's HOME directory. `install()`'s own `home: Path` argument
+  cannot reach a container's home - `lifecycle.run_through_backend`'s
+  `install(handle, surface)` step only ever reaches `CONTAINER_WORKSPACE`,
+  and home is reached through its `before_execute` hook instead. Extracted
+  `_verified_file_records` out of `install()`'s preflight loop (pure
+  extraction - `install()`'s own tests still pass unmodified) so both
+  functions share the same digest/mode verification rather than each
+  having their own copy. This is the first slice of #334 (live calibration
+  attempts never install a validated profile's dependency closure, so
+  flow-check's gate script exits 127); wiring it into a live attempt is
+  not yet done.
+
 - **A `discrimination-declaration` kind in `skillc.calibration`, for the
   intact-vs-degraded contrast** (Refs #287). `parse_declaration` cannot
   express this: it requires exactly one arm literally named `baseline` with

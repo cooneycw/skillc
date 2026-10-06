@@ -36,6 +36,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -1394,6 +1395,53 @@ def _check_tool(dep: dict[str, Any]) -> dict[str, Any]:
         return {**result, "status": "unknown", "reason": "version probe unavailable or constraint unsupported"}
 
 
+def _verified_file_records(inventory: dict[str, Any], tree: Tree) -> Iterator[tuple[dict[str, Any], bytes]]:
+    """Enumerate `inventory`'s install population with each file's bytes
+    read and digest/mode-verified - the part a host install (`install()`)
+    and an in-memory delivery (`installed_home_files()`, #334) both need.
+    Pre-existing-destination and parent-directory checks are host-
+    filesystem-specific and stay in `install()` itself; this generator
+    raises only for a record whose own content is wrong, never for
+    anything about where it will land."""
+    for record in _install_records(inventory):
+        destination = record["destination"]
+        try:
+            if record["origin"] == "synthetic":
+                data = _synthetic_bytes(record["content"])
+                if record["mode"] != "100644":
+                    raise Refused(f"synthetic mode must be 100644: {destination}")
+            else:
+                data = tree.read(record["source"])
+            if m.sha256_bytes(data) != record["digest"]:
+                raise Refused(f"source digest changed: {destination}")
+            if record["mode"] not in ("100644", "100755"):
+                raise Refused(f"unsupported mode: {destination}")
+        except OSError as exc:
+            raise Refused(f"installation input unreadable: {destination}") from exc
+        yield record, data
+
+
+def installed_home_files(inventory: dict[str, Any], tree: Tree) -> dict[str, bytes]:
+    """The validated closure's install population as an in-memory
+    `{destination: bytes}` mapping, digest-verified exactly as `install()`
+    verifies before any host write (#334) - for delivery into a live
+    container's HOME directory, which `install()`'s own `home: Path`
+    target cannot reach without a real filesystem (`lifecycle.
+    run_through_backend`'s `install(handle, surface)` step only ever
+    reaches `CONTAINER_WORKSPACE`; home is reached through its
+    `before_execute` hook's `deliver_home_file` calls instead). The
+    caller is responsible for checking this mapping's keys against
+    anything else being delivered to the same home - this function knows
+    only about the one inventory it was given."""
+    files: dict[str, bytes] = {}
+    for record, data in _verified_file_records(inventory, tree):
+        destination = record["destination"]
+        if destination in files:
+            raise Refused(f"duplicate destination in one inventory: {destination}")
+        files[destination] = data
+    return files
+
+
 def install(inventory: dict[str, Any], tree: Tree, home: Path) -> dict[str, Any]:
     """Install a validated closure, preserving bytes and executable modes.
 
@@ -1408,31 +1456,18 @@ def install(inventory: dict[str, Any], tree: Tree, home: Path) -> dict[str, Any]
     staged = []
     preexisting = []
     # Preflight the entire population before writing any file.
-    for record in _install_records(inventory):
+    for record, data in _verified_file_records(inventory, tree):
         destination = record["destination"]
         target = _installed_target(home, destination)
-        try:
-            if record["origin"] == "synthetic":
-                data = _synthetic_bytes(record["content"])
-                if record["mode"] != "100644":
-                    raise Refused(f"synthetic mode must be 100644: {destination}")
-            else:
-                data = tree.read(record["source"])
-            if m.sha256_bytes(data) != record["digest"]:
-                raise Refused(f"source digest changed: {destination}")
-            if record["mode"] not in ("100644", "100755"):
-                raise Refused(f"unsupported mode: {destination}")
-            if target.exists():
-                if not target.is_file() or target.read_bytes() != data:
-                    raise Refused(f"different pre-existing destination: {destination}")
-                preexisting.append(destination)
-            for parent in target.parents:
-                if parent == home:
-                    break
-                if parent.exists() and not parent.is_dir():
-                    raise Refused(f"non-directory parent: {destination}")
-        except OSError as exc:
-            raise Refused(f"installation input unreadable: {destination}") from exc
+        if target.exists():
+            if not target.is_file() or target.read_bytes() != data:
+                raise Refused(f"different pre-existing destination: {destination}")
+            preexisting.append(destination)
+        for parent in target.parents:
+            if parent == home:
+                break
+            if parent.exists() and not parent.is_dir():
+                raise Refused(f"non-directory parent: {destination}")
         staged.append((record, target, data))
     for record, target, data in staged:
         try:
