@@ -301,13 +301,18 @@ CLIENT_TRANSCRIPT_COVERAGE = ("complete", "partial", "missing")
 #: and none of them may be dropped (EF-07).
 DISPOSITIONS = ("captured", "not-run", "unavailable", "inconclusive")
 #: Why the subject stopped. A `not-run` attempt is `never-started`; so may be an
-#: `unavailable` one, whose dependency failed before dispatch.
+#: `unavailable` one, whose dependency failed before dispatch. `attempt-not-
+#: running` is `DockerBackend.execute()`'s own refusal (skillc #304) when its
+#: entry guard finds the container already confirmed stopped or gone before
+#: a real exec would even be attempted - distinct from `launch-failed`
+#: (the exec itself failed to start) only in WHY nothing ran, not in the
+#: fact that nothing did, so it joins `NOTHING_RAN` alongside it.
 STOP_REASONS = (
     "exited", "timeout", "budget-exhausted", "operator-cancelled", "launch-failed",
-    "never-started", "unobserved",
+    "attempt-not-running", "never-started", "unobserved",
 )
 #: Stop reasons after which nothing ran long enough to leave output to capture.
-NOTHING_RAN = ("launch-failed", "never-started")
+NOTHING_RAN = ("launch-failed", "attempt-not-running", "never-started")
 #: Lifecycle events, in the vocabulary the controller writes.
 LIFECYCLE_EVENTS = (
     "planned", "dispatched", "started", "stop-requested", "stopped", "stop-confirmed",

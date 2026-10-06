@@ -1510,6 +1510,79 @@ def test_execute_reports_launch_failed_when_the_docker_binary_is_missing(
     backend.destroy(handle)
 
 
+def test_a_second_execute_against_an_already_stopped_handle_is_refused_not_fabricated(
+    base: Path, docker_state: Path,
+) -> None:
+    """THE RED CASE for #304. `execute()`'s own contract always stops the
+    container before returning (its docstring), so a second call against
+    the same handle used to fall through to a real `docker exec` the
+    daemon rejects - a genuine nonzero exit that read as an ordinary
+    `reason="exited", exit_code=1`, fabricating a second execution that
+    never touched the container. The fix refuses instead, with the same
+    `attempt-not-running` reason `exec_in_attempt()` already uses for this
+    exact situation."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000012")
+    backend.install(handle, {})
+    first = backend.execute(handle, ["true"], Limits(timeout=5.0))
+    assert first.reason == "exited" and first.exit_code == 0
+    second = backend.execute(handle, ["true"], Limits(timeout=5.0))
+    assert second.reason == "attempt-not-running"
+    assert second.exit_code is None
+    backend.destroy(handle)
+
+
+def test_execute_does_not_close_the_toctou_window_between_its_entry_check_and_the_real_exec(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DOCUMENTS the open boundary, rather than claiming a fix: the entry
+    guard above is a check-then-act, so the container can stop between
+    that `_inspect()` and the real `docker exec` a few lines later - this
+    simulates it deterministically by making the FIRST `_inspect()` call
+    (the entry guard) stop the container for real as a side effect before
+    returning its own (now-stale) "running" answer, so the `docker exec`
+    that follows hits the daemon's real rejection.
+
+    An earlier version of this fix tried to reclassify this case by
+    matching the daemon's own "is not running" text in the captured
+    stderr - `codex:code_review` found that text is read from the
+    SUBJECT's stderr, and a subject whose own legitimate output happens to
+    contain either phrase would have its real result silently discarded.
+    That reclassification was removed rather than shipped with a known
+    spoofing path. This test proves the window is genuinely still open
+    (the race defeats the guard and produces the daemon's rejection
+    unmodified) rather than merely asserting the docstring's claim."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000013")
+    assert isinstance(handle, d._Handle)
+    backend.install(handle, {})
+
+    real_inspect = d.DockerBackend._inspect
+    calls = {"n": 0}
+
+    def racing_inspect(self: d.DockerBackend, h: d._Handle) -> tuple[bool, bool, str | None]:
+        calls["n"] += 1
+        result = real_inspect(self, h)
+        if calls["n"] == 1:
+            # Stop the container for real, between this entry check and the
+            # `docker exec` `execute()` is about to issue - but still hand
+            # back the STALE "running" answer this call already computed,
+            # exactly as a genuine race would.
+            self._kill_container(handle, "TERM")
+        return result
+
+    # `DockerBackend` is a frozen dataclass - `monkeypatch.setattr(backend,
+    # "_inspect", ...)` is refused by its own `__setattr__`. Patch the
+    # CLASS method instead; it is restored automatically at teardown.
+    monkeypatch.setattr(d.DockerBackend, "_inspect", racing_inspect)
+    result = backend.execute(handle, ["true"], Limits(timeout=5.0))
+    assert result.reason == "exited"
+    assert result.exit_code not in (0, None)
+    assert result.error is not None and "not running" in result.error.lower()
+    assert calls["n"] == 1  # only the entry guard - nothing re-checks after the race
+    backend.destroy(handle)
+
+
 def test_confirm_stopped_is_unknown_when_the_daemon_is_unreachable(
     base: Path, docker_state: Path,
 ) -> None:
