@@ -30,6 +30,7 @@ CI_STEP_MAKE_TARGETS: dict[str, tuple[str, ...]] = {
     "leak-check": ("leak-check",),
     "changelog-check": ("changelog-check",),
     "readme-drift": ("readme-drift",),
+    "git-tests-control": ("git-tests-control",),
 }
 
 
