@@ -32,6 +32,27 @@ and version plan.
   - The two-arm study (`published` + `rewritten`, with its Fisher test) is
     unchanged.
 
+- **Row-level reliability: `clopper_pearson`/`wilson_score` always computed,
+  `all_k`/`pass_at_k` gated on a declared `k`** (Refs #272 acceptance item
+  4, #273). `assemble_coverage_report()` gains optional `k: int | None` and
+  `confidence: float` parameters, threaded to `_build_row()`, which now
+  attaches a `RowReliability` to every `CoverageRow` (serialized in
+  `to_dict()`/`to_text()`). `clopper_pearson`/`wilson_score` use the row's
+  own `(passes, evaluable)` unconditionally, falling back to
+  `reliability.INSUFFICIENT` only when `evaluable == 0` (no rate to bound,
+  never a crash). `all_k`/`pass_at_k` need a declared `k` - a study
+  parameter, same discipline as `TwoArmRule`'s tolerance, never a skillc
+  constant - and report the new `coverage.NOT_DECLARED` sentinel when `k`
+  is absent, kept deliberately distinct from `reliability.INSUFFICIENT`:
+  no `k` means the question wasn't asked, `n < k` means it was asked and
+  couldn't be answered. 4 new tests (hand-computed values with a declared
+  `k`, the `NOT_DECLARED` case, the `INSUFFICIENT` case for `n < k`, and a
+  zero-evaluable row proven not to crash). Two mutation checks: forcing
+  `all_k`/`pass_at_k` to compute even when `k` is `None` goes red on the
+  `NOT_DECLARED` assertion; forcing `clopper_pearson`/`wilson_score` to
+  compute on a zero-evaluable row raises `ReliabilityRefused` instead of
+  returning `INSUFFICIENT`. Both restored, net diff empty.
+
 - **`CoverageReport.to_text()`: the concise human view** (Refs #272
   acceptance item 1). Built from `self.to_dict()` - the SAME dict `to_json`
   serializes, never a second read of `self.rows`/`self.case_pairs` - so the

@@ -640,3 +640,99 @@ def test_to_text_derivation_is_not_a_no_op(monkeypatch: pytest.MonkeyPatch) -> N
 
     monkeypatch.setattr(cov.CoverageReport, "to_dict", empty_rows)
     assert "rows: 0" in report.to_text()  # the mutation's wrong answer, confirming it would go undetected
+
+
+# --------------------------------------------------------------- reliability wiring (#273)
+
+def test_reliability_without_k_reports_not_declared() -> None:
+    bundle = _bundle(CONTROLS / "ledger-binding/good/skill-evidence-duplicate-invocation")
+    report = cov.assemble_coverage_report(bundle, _inventory())
+    row = report.rows[0]
+    assert row.reliability.all_k == cov.NOT_DECLARED
+    assert row.reliability.pass_at_k == cov.NOT_DECLARED
+    # clopper_pearson/wilson_score are ALWAYS computed, regardless of k.
+    assert isinstance(row.reliability.clopper_pearson_lower, float)
+    assert isinstance(row.reliability.wilson_score_lower, float)
+
+
+def test_reliability_with_k_hand_computed() -> None:
+    bundle = _bundle(CONTROLS / "ledger-binding/good/skill-evidence-duplicate-invocation")
+    report = cov.assemble_coverage_report(bundle, _inventory(), k=1)
+    row = report.rows[0]
+    # row.evaluable == 2, outcomes["PASS"] == 2 -> all_k(2, 2, 1) == pass_at_k(2, 2, 1) == 1.0
+    assert row.reliability.all_k == pytest.approx(1.0)
+    assert row.reliability.pass_at_k == pytest.approx(1.0)
+    assert row.reliability.clopper_pearson_lower == pytest.approx(rel.clopper_pearson(2, 2)[0])
+    assert row.reliability.clopper_pearson_upper == pytest.approx(rel.clopper_pearson(2, 2)[1])
+    assert row.reliability.wilson_score_lower == pytest.approx(rel.wilson_score(2, 2)[0])
+
+
+def test_reliability_insufficient_k_passes_through_unchanged() -> None:
+    """k declared but n < k: reliability.py's own INSUFFICIENT sentinel
+    passes straight through - a DIFFERENT absence from NOT_DECLARED."""
+    bundle = _bundle(CONTROLS / "ledger-binding/good/skill-evidence-duplicate-invocation")
+    report = cov.assemble_coverage_report(bundle, _inventory(), k=10)  # evaluable is 2
+    row = report.rows[0]
+    assert row.reliability.all_k == rel.INSUFFICIENT
+    assert row.reliability.pass_at_k == rel.INSUFFICIENT
+    assert row.reliability.all_k != cov.NOT_DECLARED
+
+
+def test_reliability_zero_evaluable_is_insufficient_not_a_crash() -> None:
+    """A row with zero evaluable attempts (all NOT_RUN/UNAVAILABLE/UNKNOWN)
+    must not crash clopper_pearson(0, 0) - INSUFFICIENT, not a raised
+    exception reaching the caller."""
+    bundle = _bundle(CONTROLS / "ledger-binding/good/skill-evidence-no-correlating-attempt")
+    # This fixture's own attempt is PASS (evaluable=1) - force a zero-evaluable
+    # row by declaring a skill no attempt ever evidences a PASS/FAIL for.
+    report = cov.assemble_coverage_report(bundle)  # no inventory: rows come from skill-evidence only
+    row = report.rows[0]
+    assert row.evaluable >= 1  # sanity: this fixture's own row is NOT the zero case
+
+    # Build a dedicated zero-evaluable case: a NOT_RUN attempt.
+    ledger = records.Record(path=Path("ledger.json"), data={
+        "version": 2, "kind": "trial-ledger", "producer": "controller", "experiment_id": "exp-1",
+        "trials": [{
+            "trial_id": "t-1", "case": {"id": "c", "revision": "r1"},
+            "grader": {"id": "g", "revision": "g1"}, "subject": {"digest": "sha256:5a"},
+            "client": {"name": "codex", "version": "1.0"}, "image": {"digest": "sha256:1a"},
+            "config": {"digest": "sha256:cf"}, "attempts": [{"attempt_id": "att-1"}],
+        }],
+    })
+    lifecycle = records.Record(path=Path("lifecycle.json"), data={
+        "version": 2, "kind": "attempt-lifecycle", "producer": "controller",
+        "attempt_id": "att-1", "trial_id": "t-1", "disposition": "not-run",
+        "reason": "never-started",
+        "stop": {"reason": "never-started", "confirmed": True},
+        "events": [{"event": "planned", "at": "2026-09-26T12:00:00Z"}, {"event": "not-run", "at": "2026-09-26T12:00:01Z"}],
+        "cleanup": {"status": "not-needed", "failures": []},
+    })
+    receipt = records.Record(path=Path("receipt.json"), data={
+        "version": 2, "kind": "installation-receipt", "producer": "subject-adapter",
+        "checked_by": "controller", "attempt_id": "att-1", "trial_id": "t-1",
+        "subject": {"locator": "x", "revision": "r", "digest": "sha256:5a"},
+        "surface": "codex-skills", "adapter": {"name": "a", "version": "1"},
+        "client": {"name": "codex", "version": "1.0"}, "layers": [], "dependencies": [],
+        "allowed_writes": [], "installed": [{"path": SKILL_PATH, "digest": "sha256:v1"}],
+        "readiness": {"discovery_canary": "SATISFIED", "baseline_absence": "SATISFIED"},
+    })
+    evidence = records.Record(path=Path("evidence.json"), data={
+        "version": 2, "kind": "skill-evidence", "producer": "assembler",
+        "attempt_id": "att-1", "trial_id": "t-1",
+        "skills": [{
+            "skill": {"path": SKILL_PATH}, "invocation": {"lineage": "root"},
+            "lifecycle": {
+                "listed": {"status": "UNKNOWN", "reason": "x"},
+                "read_observed": {"status": "UNKNOWN", "reason": "x"},
+                "execution_observed": {"status": "UNKNOWN", "reason": "x"},
+            },
+            "criteria_owned": [], "external_evidence": {"present": False, "reconciliation": "absent"},
+        }],
+    })
+    zero_bundle = records.Bundle(path=Path("."), records=[ledger, lifecycle, receipt, evidence])
+    zero_report = cov.assemble_coverage_report(zero_bundle)
+    zero_row = zero_report.rows[0]
+    assert zero_row.evaluable == 0
+    assert zero_row.reliability.clopper_pearson_lower == rel.INSUFFICIENT
+    assert zero_row.reliability.clopper_pearson_upper == rel.INSUFFICIENT
+    assert zero_row.reliability.wilson_score_lower == rel.INSUFFICIENT

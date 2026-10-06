@@ -171,6 +171,40 @@ class CriterionRow:
     shared: bool
 
 
+#: `all_k`/`pass_at_k` report this when no `k` was declared for the report -
+#: a DIFFERENT absence from `reliability.INSUFFICIENT` (n < k): "not_declared"
+#: means the question was never asked; "insufficient" (reliability.py's own
+#: sentinel, passed through unchanged) means it was asked and could not be
+#: answered. Collapsing the two would lose that distinction for a reader.
+NOT_DECLARED = "not_declared"
+
+
+@dataclass(frozen=True)
+class RowReliability:
+    """#273's declared repeat-reliability estimators, applied to this row's
+    own (evaluable, PASS) counts - item 4's "repeat-reliability ... into
+    applicable per-skill reports". `clopper_pearson`/`wilson_score` are
+    always computed (default confidence unless the report declares
+    another); `all_k`/`pass_at_k` need a declared `k` (module-level
+    `NOT_DECLARED` vs `reliability.INSUFFICIENT` are different absences,
+    above)."""
+
+    all_k: float | str
+    pass_at_k: float | str
+    clopper_pearson_lower: float | str
+    clopper_pearson_upper: float | str
+    wilson_score_lower: float | str
+    wilson_score_upper: float | str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "all_k": self.all_k,
+            "pass_at_k": self.pass_at_k,
+            "clopper_pearson": [self.clopper_pearson_lower, self.clopper_pearson_upper],
+            "wilson_score": [self.wilson_score_lower, self.wilson_score_upper],
+        }
+
+
 @dataclass(frozen=True)
 class CoverageRow:
     key: RowKey
@@ -184,6 +218,7 @@ class CoverageRow:
     read_observed: Mapping[str, int]
     lineage: str | None
     parent_path: str | None
+    reliability: RowReliability
     evidence: tuple[str, ...]  # attempt ids backing this row, sorted
 
     def to_dict(self) -> dict[str, object]:
@@ -204,6 +239,7 @@ class CoverageRow:
             "read_observed": dict(self.read_observed),
             "lineage": self.lineage,
             "parent_path": self.parent_path,
+            "reliability": self.reliability.to_dict(),
             "evidence": list(self.evidence),
         }
 
@@ -453,6 +489,8 @@ def assemble_coverage_report(
     bundle: records.Bundle,
     inventory: DeclaredInventory | None = None,
     discrimination_rule: rel.TwoArmRule | None = None,
+    k: int | None = None,
+    confidence: float = rel.DEFAULT_CONFIDENCE,
 ) -> CoverageReport:
     """The report for one bundle, optionally scoped to a declared inventory.
 
@@ -466,6 +504,12 @@ def assemble_coverage_report(
     ("no predeclared rule"), per `reliability.evaluate_discrimination`'s own
     behavior for a missing rule. Per-arm facts are always present
     regardless of the rule.
+
+    `k` is `all_k`/`pass_at_k`'s own declared repeat count (module docstring:
+    a study parameter, never a skillc constant) - omitted, every row reports
+    `NOT_DECLARED` for both, distinct from `reliability.INSUFFICIENT` (`k`
+    declared, `n < k`). `confidence` applies to every row's
+    `clopper_pearson`/`wilson_score` interval, computed unconditionally.
     """
     _refuse_on_invalid_bundle(bundle)
 
@@ -506,6 +550,7 @@ def assemble_coverage_report(
                     _build_row(
                         skill_path, attempt_ids, client, case, arm,
                         lifecycles, manifests, receipts, results, evidence_by_attempt,
+                        k, confidence,
                     )
                 )
         if len(rows) != len(declared_skills) * len(cells):
@@ -546,6 +591,7 @@ def assemble_coverage_report(
                     _build_row(
                         skill_path, attempt_ids, client, case, arm,
                         lifecycles, manifests, receipts, results, evidence_by_attempt,
+                        k, confidence,
                     )
                 )
 
@@ -601,6 +647,8 @@ def _build_row(
     receipts: Mapping[str, records.Record],
     results: Mapping[str, list[records.Record]],
     evidence_by_attempt: Mapping[str, records.Record],
+    k: int | None,
+    confidence: float,
 ) -> CoverageRow:
     outcomes = dict.fromkeys(OUTCOMES, 0)
     coverage_flags = dict.fromkeys(COVERAGE_FLAGS, 0)
@@ -677,6 +725,26 @@ def _build_row(
     )
     scheduled = len(attempt_ids)
     evaluable = outcomes["PASS"] + outcomes["FAIL"]
+    passes = outcomes["PASS"]
+    if k is None:
+        row_all_k: float | str = NOT_DECLARED
+        row_pass_at_k: float | str = NOT_DECLARED
+    else:
+        row_all_k = rel.all_k(passes, evaluable, k)
+        row_pass_at_k = rel.pass_at_k(passes, evaluable, k)
+    if evaluable == 0:
+        cp_lower: float | str = rel.INSUFFICIENT
+        cp_upper: float | str = rel.INSUFFICIENT
+        ws_lower: float | str = rel.INSUFFICIENT
+        ws_upper: float | str = rel.INSUFFICIENT
+    else:
+        cp_lower, cp_upper = rel.clopper_pearson(passes, evaluable, confidence)
+        ws_lower, ws_upper = rel.wilson_score(passes, evaluable, confidence)
+    reliability = RowReliability(
+        all_k=row_all_k, pass_at_k=row_pass_at_k,
+        clopper_pearson_lower=cp_lower, clopper_pearson_upper=cp_upper,
+        wilson_score_lower=ws_lower, wilson_score_upper=ws_upper,
+    )
     key = RowKey(
         skill_path=skill_path,
         skill_version=skill_version,
@@ -697,5 +765,6 @@ def _build_row(
         read_observed=read_observed,
         lineage=resolved_lineage,
         parent_path=resolved_parent,
+        reliability=reliability,
         evidence=tuple(sorted(set(evidence_ids))),
     )
