@@ -1,10 +1,10 @@
 {
- "kind": "discrimination-pilot-declaration",
+ "kind": "discrimination-declaration",
  "status": "DRAFT - NOT YET APPROVED, NOT YET RUNNABLE",
  "issue": 287,
  "declared_at": "2026-10-06",
- "_comment": "The DISCRIMINATION pilot declaration for skillc#287 (orchestrator review, comment 6025311708, decisions P1-P6). Exploratory only: estimates p_hat_intact and p_hat_degraded for evals/calibration-287/power_simulation.py's choose_n() - draws NO verdict (operator ruling, comment 6021089903).",
- "_schema_note": "This is deliberately NOT 'kind': 'calibration-declaration'. skillc.calibration.parse_declaration requires exactly one arm literally named 'baseline' whose subject is null (skillc/calibration.py: 'the baseline arm installs nothing: its subject is null'); it has no path for a 2-arm study where BOTH arms install a real subject, which is exactly the intact-vs-degraded contrast. A 3-arm declaration does not fit either - treated arms must declare an IDENTICAL subject, and a degraded arm's subject carries a 'degraded:...' revision label that is never identical to intact's. The orchestrator's accepted plan (comment 6025299008 section 5) calls this 'the existing matched-outcome shape, unmodified - no schema change', but the discrimination side of that plan cannot literally validate under skillc.calibration.parse_declaration as that function is written today - confirmed by reading it, not assumed. This is flagged to the orchestrator (mailbox, 2026-10-06) rather than resolved unilaterally, since calibration.py's arm-equality/baseline logic is adjacent to what claude-power-pack#1369's 61 golden cases pin and no schema change was approved. The resolution drafted here needs none: CPP#1084's own discrimination ruling (comment 6014163660, cited verbatim in skillc#287 comment 6014179807) says the test is counted 'over evaluable attempts from skillc's per-arm counts (#273's case-pairing facts)' - i.e. the discrimination accounting mechanism is skillc#273's case-pairing record (skillc/records.py: case_pairing(), TRIAL_LEDGER trials declaring case.arm in {intact, degraded} with a reciprocal case.paired_with), never skillc.calibration's declaration+Fisher pipeline. This file fixes n, tolerance, task and arm_order (the things ADR 0005 requires be fixed before any attempt) in the same vocabulary as a calibration-declaration for readability and cross-review, without claiming to be one.",
+ "_comment": "The DISCRIMINATION pilot declaration for skillc#287 (orchestrator review, comment 6025311708, decisions P1-P6). Exploratory only: estimates p_hat_intact and p_hat_degraded for evals/calibration-287/power_simulation.py's choose_n() - draws NO verdict (operator ruling, comment 6021089903). Uses the 'discrimination-declaration' kind added to skillc.calibration by the separate calibration.py PR (branch feat-skillc-287-discrimination-declaration, Refs #287) - see that PR for why skillc.calibration.parse_declaration structurally cannot express this contrast, and _resolution_note below for what changed here as a result.",
+ "_resolution_note": "This file previously carried kind 'discrimination-pilot-declaration' (not validated by skillc.calibration) with a _schema_note flagging the gap to the orchestrator. Ruling received (mailbox 5614/5626, 2026-10-06): add a real 'discrimination-declaration' kind to skillc.calibration instead of accounting this test purely through skillc#273's case-pairing records. This file now uses that kind: arms.degraded.subject.revision is the DERIVED label skillc.calibration._expected_degraded_revision computes (never typed), and arms.degraded.mutation carries the structured mutation (skill/path/removed_text/diagnose_evidence/mutated_digest) the schema requires. case-pairing (skillc#273) still produces the per-attempt record this study's counts read; the declaration-level identity/approval binding is now calibration.py's job, not case-pairing's.",
  "pilot": {
   "purpose": "exploratory - estimates p_hat_intact and p_hat_degraded for evals/calibration-287/power_simulation.py's choose_n(); draws no verdict",
   "no_verdict_statement": "This pilot draws no DISCRIMINATING / NOT_SHOWN / UNKNOWN verdict. Its 10 attempts per arm are too few to be the predeclared discrimination test itself (that test is the MAIN study's schedule, sized by this pilot's results) and are never pooled into the main study's counts (P1).",
@@ -13,15 +13,8 @@
    "P2 (comment 6025311708): the pilot uses the same two-declaration shape, one pilot declaration per test, each 2-arm at n=10, each separately approved at 10. The intact arm therefore runs in both pilot declarations (see pilot-improvement-declaration.json's 'intact' arm, same subject).",
    "P3 (comment 6025311708): this pilot's own raw proportions (passes/evaluable) must never be plugged into the sizing simulation directly - convert with evals/calibration-287/power_simulation.py's jeffreys_estimate() first.",
    "P5 (comment 6025311708): tolerance is max(1, ceil(0.05*n)) per arm, not a flat 1.",
-   "P6 (comment 6025311708): arm order is calibration's seed-derived interleaving, so the two arms run interleaved in time rather than as two blocks - skillc.calibration.derive_arm_order is reused here purely as a scheduling utility; this file is not parsed by skillc.calibration.parse_declaration (see _schema_note)."
+   "P6 (comment 6025311708): arm order is calibration's seed-derived interleaving, so the two arms run interleaved in time rather than as two blocks - skillc.calibration.derive_arm_order, called by skillc.calibration.parse_discrimination_declaration itself now, not merely reused as an external scheduling utility."
   ]
- },
- "case": {
-  "id": "<CASE: pending skillc#270 certification>",
-  "task_path": "<CASE: pending skillc#270 certification>",
-  "grader_id": "<CASE: pending skillc#270 certification>",
-  "grader_revision": "<CASE: pending skillc#270 certification>",
-  "_comment": "skillc#270 ('Certify a flow-check case for omitted tests and incomplete aggregate gates') is open and uncertified as of 2026-10-06 (checked directly). Certification must produce: a case-pairing record binding an intact attempt and a degraded attempt as a reciprocal pair on this task/grader/subject revision; the degraded arm's mutation declared and verified via `skillc profile diagnose` (#295) to remove exactly the obligation this case tests, with no other installed skill/helper still enforcing it (the #150 non-discriminating-result risk, named explicitly per skillc#287 comment 6025299008 section 4)."
  },
  "arms": [
   {
@@ -31,29 +24,34 @@
     "locator": "github.com/cooneycw/claude-power-pack",
     "revision": "ea6dbfa45f9308ee6ba60f032d8e7031bd6938a1"
    },
-   "treatment": "the cpp-codex-flow-check-ea6dbfa profile installed, unmodified (skillc#265/#330, merged 841689b). The SAME subject as pilot-improvement-declaration.json's 'intact' arm (P2) - one subject identity, two separate 10-attempt pilot schedules, never shared attempts.",
-   "case_arm": "intact"
+   "treatment": "the cpp-codex-flow-check-ea6dbfa profile installed, unmodified (skillc#265/#330, merged 841689b). The SAME subject as pilot-improvement-declaration.json's 'intact' arm (P2) - one subject identity, two separate 10-attempt pilot schedules, never shared attempts."
   },
   {
    "name": "degraded",
    "subject": {
     "name": "cpp-codex-flow-check-ea6dbfa",
     "locator": "github.com/cooneycw/claude-power-pack",
-    "revision": "degraded:<CASE: pending skillc#270 certification - the mutation skillc#270 must name, per skillc/degrade.py's marker convention>"
+    "revision": "degraded:mutated=1-location:git:ea6dbfa45f9308ee6ba60f032d8e7031bd6938a1"
    },
-   "treatment": "PENDING skillc#270: the same subject as 'intact' with a declared mutation (skillc/degrade.py) removing or altering exactly the obligation skillc#270's case tests, with no other installed skill or helper still carrying equivalent content",
-   "case_arm": "degraded"
+   "treatment": "the same subject as 'intact' with the mutation below applied, no other installed skill or helper carrying equivalent content (per mutation.diagnose_evidence). removed_text is the exact, verified-single-occurrence substring of codex/skills/flow-check/reference.md at the ea6dbfa pin (tests/fixtures/profile-cpp-codex-flow-check-ea6dbfa/codex/skills/flow-check/reference.md - the committed fixture capture of that pin); mutated_digest is sha256 of that file's bytes with removed_text removed once, computed directly from the fixture, not invented. Both are re-verified against the REAL claude-power-pack checkout before any live attempt (see owed_before_run) - the fixture is this repository's evidence that the sentence and its removal are real, not the subject itself.",
+   "mutation": {
+    "skill": "flow-check",
+    "path": "reference.md",
+    "removed_text": "A\n  `skipped gates:` name is a SKIP row and a `zero coverage:` or no-tests name is\n  a WARN row - never a PASS.",
+    "diagnose_evidence": "<CASE: pending skillc#270 certification - a `skillc profile diagnose` run against cpp-codex-flow-check-ea6dbfa showing no other installed skill or helper (in particular .claude/commands/flow/check.md, which carries the identical sentence but is outside this profile's installed closure for a codex client, per sk-w1's confirmation on #270) still carries this obligation after the removal>",
+    "mutated_digest": "sha256:9149e393bb1d9e40adb97dca85774e23f77317a21e6bff832c160055c726234d"
+   }
   }
  ],
  "shared": {
   "client": {
-   "name": "PENDING - operator pilot-spend authorization has not yet named a client",
-   "version": "PENDING"
+   "name": "codex",
+   "version": "PENDING - operator pilot-spend authorization has not yet named a version; #204/#150 used 0.157.1, cited only as precedent"
   },
   "model": "PENDING - pending the operator's pilot-spend authorization (ADR 0005 rule 6); #204/#150 used codex client, model gpt-6-astra, cited only as precedent",
   "reasoning_effort": "PENDING",
   "tools": "the client's defaults inside the trial container; no MCP servers (matches every prior calibration run)",
-  "permissions": "the same non-interactive sandbox/approval settings for every attempt, whichever client is chosen",
+  "permissions": "the same non-interactive sandbox/approval settings for every attempt",
   "public_requirements": "PENDING - delivered verbatim to both arms once skillc#270 names the case's goal.md",
   "image": {
    "tag": "skillc-trial:latest",
@@ -71,7 +69,13 @@
    "degraded", "degraded", "intact", "intact", "degraded",
    "intact", "degraded", "intact", "intact", "degraded"
   ],
-  "_comment": "skillc.calibration.derive_arm_order(20261006, ['intact', 'degraded'], 10) - computed, not hand-chosen (P6). Reused as a scheduling utility only; this file is not validated by parse_declaration (see _schema_note)."
+  "_comment": "skillc.calibration.derive_arm_order(20261006, ['intact', 'degraded'], 10) - computed, not hand-chosen (P6)."
+ },
+ "task": {
+  "path": "<CASE: pending skillc#270 certification>",
+  "grader_id": "<CASE: pending skillc#270 certification>",
+  "grader_revision": "<CASE: pending skillc#270 certification>",
+  "_comment": "skillc#270 ('Certify a flow-check case for omitted tests and incomplete aggregate gates') is open and uncertified as of 2026-10-06 (checked directly). Certification must also produce a case-pairing record (skillc#273) binding an intact attempt and a degraded attempt as a reciprocal pair on this task/grader/subject revision - the #150 non-discriminating-result risk is named explicitly as open until the pilot, per the orchestrator's review on #270 (comment 6025382159)."
  },
  "retain_transcripts": true,
  "tolerance": {
@@ -81,14 +85,14 @@
  "test": "One-sided Fisher's exact test, H1: P(pass|intact) > P(pass|degraded), alpha 0.05, over evaluable attempts (claude-power-pack#1084 comment 6014163660, cited verbatim in skillc#287 comment 6014179807) - NOT run on this pilot's data (no_verdict_statement above); this field documents the MAIN study's test for cross-reference, since the pilot exists to size it.",
  "records_produced": [
   "skill-evidence (skillc#268) per attempt, binding it to the skills/paths actually read and executed",
-  "case-pairing (skillc#273, merged a2b2861) binding each intact attempt to its reciprocal degraded attempt on this case - the accounting mechanism this pilot's (and the main study's) discrimination count ultimately reads, per _schema_note above"
+  "case-pairing (skillc#273, merged a2b2861) binding each intact attempt to its reciprocal degraded attempt on this case"
  ],
  "approval": null,
  "owed_before_run": [
-  "skillc#270 - a certified discriminating flow-check case (dependency, in progress by sk-w1 as of 2026-10-06); the 'case' and 'arms[1].subject.revision' fields above are placeholders until it exists",
+  "skillc#270 - a certified discriminating flow-check case (dependency, in progress by sk-w1 as of 2026-10-06); the 'task' fields and 'diagnose_evidence' above are placeholders until it exists",
   "operator pilot-spend authorization for THIS pilot (10 attempts, 2 arms = 20 total) - separate from the 'pilot: yes' ruling in comment 6021089903",
-  "orchestrator ruling on the _schema_note finding above (relayed by mailbox, 2026-10-06): confirm the case-pairing-based accounting resolution, or state a different one",
-  "live-run inventory re-validation (skillc#274 review, comment 6018530040) once a subject inventory is referenced",
-  "shared.client/model/reasoning_effort/image.digest/per_attempt_seconds/total_seconds/public_requirements - all PENDING above"
+  "merge of the calibration.py discrimination-declaration PR (branch feat-skillc-287-discrimination-declaration, Refs #287) - this file does not yet parse against main",
+  "live-run precondition (stated here, not yet enforced by any code): re-verify, against the real claude-power-pack checkout at the pinned revision, that removed_text occurs in codex/skills/flow-check/reference.md exactly once, and that the file with it removed hashes to mutated_digest - mirrors the #274 live-run inventory re-validation precondition (comment 6018530040)",
+  "shared.client.version/model/reasoning_effort/image.digest/per_attempt_seconds/total_seconds/public_requirements - all PENDING above"
  ]
 }

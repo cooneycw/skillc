@@ -1,3 +1,25 @@
+> **SUPERSEDED 2026-10-06.** This README and `run-manifest.skeleton.json`
+> describe the ORIGINAL 3-arm (baseline/intact/degraded), cost-capped design.
+> Both halves of that design changed: the operator ruled cost is not a
+> constraint ("don't worry about what i am here to worry about" - comment
+> 6021089903), superseding Design risk 2 and the cost table below as binding
+> constraints (they remain correct ARITHMETIC, just no longer a limit this
+> study sizes against); and the orchestrator's review (comment 6025311708)
+> replaced the single 3-arm declaration with **two separate 2-arm
+> declarations** - discrimination (intact vs degraded, now
+> `skillc.calibration`'s `discrimination-declaration` kind) and improvement
+> (intact vs baseline, an ordinary `calibration-declaration`) - because
+> `parse_declaration` cannot express the 3-arm shape at all (two treated arms
+> must share an identical subject; a degraded arm's revision never matches
+> intact's). See `pilot-discrimination-declaration.json`,
+> `pilot-improvement-declaration.json`, `fisher_exact.py` and
+> `power_simulation.py` in this directory for the current design, and the
+> `discrimination-declaration` kind added to `skillc/calibration.py`
+> (branch `feat-skillc-287-discrimination-declaration`, Refs #287) for why it
+> exists. Kept below as the historical record of #287's first preparation
+> pass - Design risk 1 (the #150 non-discriminating-result risk) is still
+> live and still correctly stated.
+
 # #287 declaration skeleton (preparation only - not approved, not a valid declaration)
 
 Drafted per #287 acceptance item 1 ("Select the primary contract contrast and

@@ -1,8 +1,9 @@
 {
  "kind": "calibration-declaration",
- "status": "SKELETON - NOT A VALID DECLARATION",
+ "status": "SUPERSEDED 2026-10-06 - SKELETON - NOT A VALID DECLARATION",
  "issue": 287,
  "lane": "matched-outcome",
+ "_superseded_note": "This 3-arm (baseline/intact/degraded) shape is superseded by two separate 2-arm declarations - pilot-discrimination-declaration.json (intact vs degraded, skillc.calibration's new discrimination-declaration kind) and pilot-improvement-declaration.json (intact vs baseline, an ordinary calibration-declaration) - per orchestrator review comment 6025311708. parse_declaration cannot express this 3-arm shape at all: its two treated arms must share an identical subject, and a degraded arm's revision never matches intact's (confirmed directly, not assumed). The cost cap this file's 'design' section cites is also superseded (operator ruling, comment 6021089903: cost is not a constraint). Kept as the historical record of #287's first preparation pass; see README.md's own superseded banner.",
  "_comment": "Preparation draft for skillc #287 (#288's prerequisite). Every value marked PENDING below is an explicit placeholder, not a guess: this file does not parse under skillc.calibration.parse_declaration and is not meant to yet - attempts_per_arm, the arms' subjects and shared.model/client are all open questions this file names rather than invents answers for. See README.md for what each PENDING depends on, the two discriminating-case risks (#150's non-discriminating result; calibration.py's MAX_ATTEMPTS_PER_ARM=8 cap against power_cost_table.json's n>=10 rows), and power_cost_table.py/.json for the computed sizing this declaration must cite once #270/#271 land. No live run is authorized by this file (ADR 0005); 'approval' stays null until the operator rules on pilot-spend authorization separately from filing or drafting this.",
  "approval": null,
  "design": {
