@@ -60,10 +60,11 @@ and version plan.
     `controls/case-pairing/{good,bad}/` (2 good, 12 bad bundles - both
     directions of ambiguity/no-partner, one case per named defect, and a
     good case demonstrating `case.arm`/`config.arm` orthogonality).
-  - **Per-arm repeats are facts only, no reduction** (operator ruling): this
-    module exposes each arm's scheduled/evaluable/passing counts and its
-    attempts' `verified-result` references by reference; any PASS/FAIL
-    reduction over repeats is the consumer's predeclared rule (CPP #1084),
+  - **Per-arm repeats are facts only, no reduction** (#273's own scope
+    fence, agreed by cpp-eval review): this module exposes each arm's
+    scheduled/evaluable/passing counts and its attempts' `verified-result`
+    references by reference; any PASS/FAIL reduction over repeats is the
+    consumer's predeclared rule (CPP #1084), a separate, still-open question,
     never computed here.
   - Part of #273 (repeat-reliability and convenience summaries); the
     reliability estimator itself is a separate, following commit.

@@ -884,11 +884,13 @@ Level-1 task and grader built for the purpose (#150-A), the same boundary
 `degraded-subjects.md` already states for the single-trial degraded marker
 this rule cross-checks against.
 
-**Per-arm repeats: facts only, no reduction (operator ruling, cpp-eval
-review).** An arm's trial may schedule more than one attempt. This rule does
-not reduce them to a single PASS/FAIL for the arm, and no rule in this module
-does: #264 states no such reduction (all-fail? majority? all-k-at-some-
-threshold?), so none is picked here either. What a consumer can read, fully
+**Per-arm repeats: facts only, no reduction.** An arm's trial may schedule
+more than one attempt. This rule does not reduce them to a single PASS/FAIL
+for the arm, and no rule in this module does: #264 states no such reduction
+(all-fail? majority? all-k-at-some-threshold?), so none is picked here
+either. This is #273's own scope fence, agreed by cpp-eval review - not an
+operator ruling; CPP #1084's reduction rule is a separate, still-open
+question the operator is being asked about. What a consumer can read, fully
 by reference and never by name-matching: each arm's scheduled attempt count,
 its evaluable count and its passing count (`attempt-lifecycle` and
 `verified-result`, joined by `attempt_id` - already structurally possible,
