@@ -130,6 +130,7 @@ from .backend import (
     Limits,
 )
 from .lifecycle import CANARY_NONCE_KEY
+from .verify import SURFACE_EXECUTABLE_KEY
 
 DAEMON_TIMEOUT = 5.0
 
@@ -782,6 +783,7 @@ class DockerBackend:
         reports readiness evidence. Raises `BackendUnavailable` if a
         declared copy fails - a materialization failure makes this
         attempt's backend unusable, exactly like an unreachable daemon.
+        DockerBackend honours SURFACE_EXECUTABLE_KEY for bytes-backed files.
         Any OTHER value type (for example verify.py's own
         `SURFACE_EXECUTABLE_KEY` metadata list) is silently not copied, same
         as always - it is still counted in `declared`, just not installed.
@@ -830,6 +832,8 @@ class DockerBackend:
 
         entries: dict[str, str] = {}
         installed = 0
+        executable_rels = surface.get(SURFACE_EXECUTABLE_KEY)
+        executable_set = set(executable_rels) if isinstance(executable_rels, (list, tuple, set)) else set()
         for key, value in declared.items():
             if isinstance(value, bytes):
                 # Raw in-memory content, no host file backing it - the
@@ -841,7 +845,7 @@ class DockerBackend:
                 # them, and the pre-fix loop just skipped them without
                 # error, so the probe failed with "no such file" the first
                 # time this combination was actually exercised).
-                payload = _owned_tar_bytes(key, value)
+                payload = _owned_tar_bytes(key, value, mode=0o755 if key in executable_set else 0o644)
             elif isinstance(value, (str, Path)):
                 host_path = _as_existing_path(value)
                 if host_path is None:

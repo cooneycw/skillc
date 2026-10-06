@@ -375,7 +375,7 @@ def run_study(
     model, effort = str(declaration.shared["model"]), str(declaration.shared["reasoning_effort"])
     mp.pin_model_argv(model, effort, [])
     task_root = root / declaration.task_path
-    surface = cc._fixture_surface(task_root / "fixture")
+    surface = cc.surface_mapping(cc.task_surface(task_root / "fixture"))
     goal = (task_root / "goal.md").read_text(encoding="utf-8")
     addenda = {c.id: c.prompt_addendum for c in declaration.cases}
     per_attempt = float(str(declaration.shared["per_attempt_seconds"]))

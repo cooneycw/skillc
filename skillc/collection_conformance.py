@@ -80,6 +80,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import stat
 import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -98,16 +99,6 @@ from . import (
 )
 from .backend import Limits
 from .docker_backend import ATTEMPT_LABEL_KEY, OWNER_LABEL_KEY, OWNER_LABEL_VALUE, DockerBackend
-
-#: The Level 1 task's own starting state (`evals/level1/slug-small-fix/fixture/src`)
-#: - installed into the agent's `/work`, never the sibling `fixture/expected.json`
-#: (the grader's OWN ground truth for this fixture - "this candidate should
-#: FAIL, violating reported-example and R3" - which would hand the agent the
-#: answer key if it ever reached the container). Only `src/` is a candidate
-#: file `qualify.py`'s own certification treats as installable state; every
-#: other candidate directory (`reference/`, `wrong/*/`) is shaped the same
-#: way for the same reason.
-_FIXTURE_SRC_DIRNAME = "src"
 
 #: The AGENT container's network. A hosted-model client must reach its
 #: provider, and `DockerBackend`'s own default (`"none"`) made every real
@@ -432,67 +423,55 @@ def _collection_home_files(source: materialize.Source, files: list[demo.SubjectF
     return {f.container_relpath: (source.surface_dir / f.directory / f.rel).read_bytes() for f in files}
 
 
-def _fixture_surface(fixture_dir: Path) -> dict[str, bytes]:
-    """`fixture_dir/src/**` only, keyed by its path relative to `fixture_dir`
-    (e.g. `src/slugify.py`) - the `install()` surface shape
-    `docker_backend.DockerBackend.install` already accepts (`{relative path:
-    bytes}`, `verify.py`'s own probe-surface convention). Never
-    `fixture_dir/expected.json` - see the module-level `_FIXTURE_SRC_DIRNAME`
-    comment for why."""
-    src_dir = fixture_dir / _FIXTURE_SRC_DIRNAME
-    surface: dict[str, bytes] = {}
-    for dirpath, dirnames, filenames in os.walk(src_dir, followlinks=False):
-        dirnames[:] = sorted(d for d in dirnames if d != "__pycache__")
-        for name in sorted(filenames):
-            path = Path(dirpath) / name
-            rel = path.relative_to(fixture_dir).as_posix()
-            surface[rel] = path.read_bytes()
-    return surface
-
-
-#: The grader's own ground truth for a fixture ("this starting state should
-#: FAIL, violating ..."): never delivered to the agent, whatever the layout.
+#: The grader's ground truth is never part of the public task surface.
 _FIXTURE_ANSWER_KEY = "expected.json"
 
 
-def task_surface(fixture_dir: Path) -> dict[str, bytes]:
-    """Every file of a task's starting state, keyed by its path under
-    `fixture_dir` - the whole fixture except its top-level `expected.json`
-    answer key (and `__pycache__`). `_fixture_surface` delivers only
-    `fixture/src/`, the Level 1 layout; a Level 3 fixture
-    (`evals/level3/slugkit-pipeline/fixture`: `slugkit/`, `tests/`, `ci/`,
-    `pyproject.toml`) has no `src/`, so it would reach the agent as an empty
-    `/work`. For a fixture that is `src/` plus `expected.json` the two are
-    identical. Used by `calibration_run` (#207); `collection-run` keeps
-    `_fixture_surface`.
+def task_surface(fixture_dir: Path) -> list[tuple[str, bytes, bool]]:
+    """Declare every regular fixture file as (relative path, bytes, executable).
 
-    Refuses (`demo.SubjectRefused`) rather than delivering less than the
-    task's starting state (counter-model review): a missing or unreadable
-    fixture, a symlink anywhere in it (`answer.json -> expected.json` would
-    deliver the answer key under another name; a link outside would copy a
-    host file into the workspace), and a fixture with nothing to deliver - an
-    empty `/work` is not the declared task."""
+    Answer keys are excluded by basename at every depth. Missing, empty,
+    unreadable, symlinked and non-regular fixtures are refused, never reduced
+    silently to a different starting state.
+    """
     if fixture_dir.is_symlink() or not fixture_dir.is_dir():
         raise demo.SubjectRefused(f"task fixture {fixture_dir} is not a directory")
 
     def walk_error(exc: OSError) -> None:
         raise demo.SubjectRefused(f"task fixture {fixture_dir} could not be read: {exc}")
 
-    surface: dict[str, bytes] = {}
-    for dirpath, dirnames, filenames in os.walk(fixture_dir, onerror=walk_error, followlinks=False):
-        dirnames[:] = sorted(d for d in dirnames if d != "__pycache__")
-        for name in [*dirnames, *sorted(filenames)]:
-            path = Path(dirpath) / name
-            if path.is_symlink():
-                raise demo.SubjectRefused(f"task fixture holds a symlink, {path.relative_to(fixture_dir)}; "
-                                          "a fixture's starting state is regular files only")
-        for name in sorted(filenames):
-            path = Path(dirpath) / name
-            rel = path.relative_to(fixture_dir).as_posix()
-            if rel != _FIXTURE_ANSWER_KEY:
-                surface[rel] = path.read_bytes()
-    if not surface:
+    files: list[tuple[str, bytes, bool]] = []
+    try:
+        for dirpath, dirnames, filenames in os.walk(fixture_dir, onerror=walk_error, followlinks=False):
+            # Never delivered (issue #267 review): a host-local test run can
+            # leave stray bytecode under a fixture's own src tree even though
+            # it is gitignored - `_fixture_surface` always pruned it, and the
+            # unified walk must keep doing so rather than silently widening
+            # what a fixture delivers.
+            dirnames[:] = sorted(d for d in dirnames if d != "__pycache__")
+            for name in sorted([*dirnames, *filenames]):
+                path = Path(dirpath) / name
+                rel = path.relative_to(fixture_dir).as_posix()
+                mode = path.lstat().st_mode
+                if stat.S_ISLNK(mode):
+                    raise demo.SubjectRefused(f"task fixture holds a symlink, {rel}")
+                if stat.S_ISDIR(mode):
+                    continue
+                if not stat.S_ISREG(mode):
+                    raise demo.SubjectRefused(f"task fixture holds an unsupported file type, {rel}")
+                if path.name != _FIXTURE_ANSWER_KEY:
+                    files.append((rel, path.read_bytes(), bool(mode & stat.S_IXUSR)))
+    except OSError as exc:
+        walk_error(exc)
+    if not files:
         raise demo.SubjectRefused(f"task fixture {fixture_dir} delivers nothing; an empty /work is not the task")
+    return sorted(files)
+
+
+def surface_mapping(files: list[tuple[str, bytes, bool]]) -> dict[str, object]:
+    """Adapt declared files to the backend's bytes and executable metadata."""
+    surface: dict[str, object] = {rel: data for rel, data, _ in files}
+    surface[verify.SURFACE_EXECUTABLE_KEY] = [rel for rel, _, executable in files if executable]
     return surface
 
 
@@ -585,7 +564,7 @@ def run_level1_agent_attempt(
     caller that builds and passes one."""
     resolved_task_root = task_root if task_root is not None else demo.GRADER_ROOT
     resolved_prompt = prompt if prompt is not None else (resolved_task_root / "goal.md").read_text(encoding="utf-8")
-    resolved_surface = surface if surface is not None else _fixture_surface(resolved_task_root / "fixture")
+    resolved_surface = surface if surface is not None else surface_mapping(task_surface(resolved_task_root / "fixture"))
     grader = verify.GraderDef.load(resolved_task_root)
     return agent_trial.run_one_attempt(
         backend=backend, experiment=experiment, attempt_id=attempt_id, client=client,
@@ -639,9 +618,9 @@ def run_collection_agent_attempt(
     itself requires - this module never invents the real launch argv (see
     that function's own docstring for why). `prompt` and `surface` default to
     `task_root`'s own data - `goal.md` (#5's own "agent-facing request,
-    identical for every arm") and `fixture/src/` (never the sibling
-    `fixture/expected.json`, the grader's ground truth for it - see
-    `_fixture_surface`'s own comment) - reading them is not inventing a
+    identical for every arm") and the public `fixture/` files (never
+    `expected.json`, the grader's ground truth at any depth - see
+    `task_surface`'s own contract) - reading them is not inventing a
     prompt, since bullet 2 fixes one task per run for every collection; a
     caller that needs a different one (this module's own tests, a red case)
     may still override either.
