@@ -1,0 +1,89 @@
+{
+ "kind": "calibration-declaration",
+ "status": "SKELETON - NOT A VALID DECLARATION",
+ "issue": 287,
+ "lane": "matched-outcome",
+ "_comment": "Preparation draft for skillc #287 (#288's prerequisite). Every value marked PENDING below is an explicit placeholder, not a guess: this file does not parse under skillc.calibration.parse_declaration and is not meant to yet - attempts_per_arm, the arms' subjects and shared.model/client are all open questions this file names rather than invents answers for. See README.md for what each PENDING depends on, the two discriminating-case risks (#150's non-discriminating result; calibration.py's MAX_ATTEMPTS_PER_ARM=8 cap against power_cost_table.json's n>=10 rows), and power_cost_table.py/.json for the computed sizing this declaration must cite once #270/#271 land. No live run is authorized by this file (ADR 0005); 'approval' stays null until the operator rules on pilot-spend authorization separately from filing or drafting this.",
+ "approval": null,
+ "design": {
+  "contrast": "PENDING #270/#271: the primary contract contrast is 'intact CPP subject vs degraded CPP subject' on the certified discriminating flow-check case #270/#271 deliver. #287 acceptance item 1 requires selecting this before sizing n - it is not yet selected because no certified discriminating case exists yet (see README 'Design risk 1').",
+  "endpoint": "PENDING #270/#271: the primary endpoint is the task grader's criteria for whichever flow-check case #270/#271 certify (skillc.calibration.primary_endpoint shape, excluding installation-ready per the #204 trap this module documents) - not yet known because the task does not yet exist.",
+  "secondary_contrast": "intact CPP subject vs baseline (no subject installed) - the improvement question #288's outcome contract (#245) asks for, sharing the intact arm's attempts with the discrimination contrast above rather than running a fourth arm."
+ },
+ "task": {
+  "path": "PENDING #270/#271 - the certified discriminating case's task path (one of evals/level*, not yet filed)",
+  "grader_id": "PENDING #270/#271",
+  "grader_revision": "PENDING #270/#271"
+ },
+ "arms": [
+  {
+   "name": "baseline",
+   "subject": null,
+   "treatment": "no subject installed; stays on the agent-observation readiness stand-in (ADR 0005 'yes, narrow B1') - unchanged from #204's own baseline arm"
+  },
+  {
+   "name": "intact",
+   "subject": {
+    "name": "cpp-codex",
+    "locator": "github.com/cooneycw/claude-power-pack",
+    "revision": "PENDING - the subject revision live at study-launch time, pinned when the declaration is finalized, not the revision this skeleton was drafted against"
+   },
+   "treatment": "the whole CPP skill surface installed, unmodified - the 'better' arm in power_cost_table.py's gap calculation"
+  },
+  {
+   "name": "degraded",
+   "subject": {
+    "name": "cpp-codex",
+    "locator": "github.com/cooneycw/claude-power-pack",
+    "revision": "PENDING - a degrade.py-built 'degraded:' label (never a bare SHA), naming which skill(s)/file(s) are removed or mutated. MUST name exactly what is removed and why that removal is expected to change this specific certified case's outcome (README 'Design risk 1') - #150's degraded arm on finish-close-ref removed the prose rule but left residual enforcing code in gh-pr-merge.sh, and both arms passed anyway."
+   },
+   "treatment": "PENDING #270/#271 + skillc profile diagnose (#295): the same subject as 'intact' with a declared mutation (skillc/degrade.py) removing/altering exactly the obligation the certified case tests, with no other skill touched"
+  }
+ ],
+ "shared": {
+  "client": {
+   "name": "PENDING - codex or claude, whichever client #270/#271's certified case is observed under",
+   "version": "PENDING"
+  },
+  "model": "PENDING - pending the operator's pilot-spend authorization; #204/#150's prior runs used codex client, model gpt-6-astra, cited here only as the precedent, not a decision for this study",
+  "reasoning_effort": "PENDING",
+  "tools": "the client's defaults inside the trial container; no MCP servers (matches every prior calibration run)",
+  "permissions": "the same non-interactive sandbox/approval settings for every attempt, whichever client is chosen",
+  "public_requirements": "PENDING - the certified case's goal.md, delivered verbatim to every arm",
+  "image": {
+   "tag": "skillc-trial:latest",
+   "digest": "PENDING - resolved via `docker image inspect skillc-trial:latest` immediately before launch, per #204's own 'image_digest_resolved' approval convention; a digest recorded here now would describe today's image, not launch-day's"
+  },
+  "per_attempt_seconds": "PENDING - sized from #270/#271's own observed attempt duration, not invented",
+  "total_seconds": "PENDING - attempts_per_arm * 3 arms * per_attempt_seconds, once both are known"
+ },
+ "attempts_per_arm": "PENDING #270/#271 pilot - see power_cost_table.json's rows for n in {10, 15, 20, 30} and README 'Design risk 2': skillc.calibration.MAX_ATTEMPTS_PER_ARM is 8 today, below every n this table computes as plausibly necessary; the declaration cannot name a final attempts_per_arm until either the pilot shows a strong enough effect size to fit within 3-8, or that cap is revisited (Nit Store finding, not fixed by this preparation issue)",
+ "arm_order": {
+  "seed": "PENDING - derived from skillc.calibration.derive_arm_order once attempts_per_arm is fixed, never chosen by hand",
+  "sequence": "PENDING - derive_arm_order(seed, ['baseline', 'intact', 'degraded'], attempts_per_arm)"
+ },
+ "retain_transcripts": true,
+ "tolerance": {
+  "alpha": 0.05,
+  "test": "one-sided Fisher's exact, two instances: (1) discrimination - intact vs degraded; (2) improvement - intact vs baseline",
+  "n_per_arm": "PENDING - see power_cost_table.json",
+  "non_evaluable_outcome": "PENDING #270/#271 + pilot: what counts as a non-evaluable attempt for THIS case (timeout, crash, grader UNKNOWN) and whether it is excluded from the Fisher table or counted against its own arm - #288 acceptance item 2 ('retain... unknown coverage') requires this be fixed in advance, not decided post hoc from whichever attempts happen to come back unevaluable"
+ },
+ "design_risks": [
+  {
+   "id": "discriminating-case-not-yet-shown",
+   "source": "evals/discriminating-run (#150)",
+   "statement": "The only live discriminating-run attempt to date (finish-close-ref, NORMAL vs DEGRADED, both PASS) was NON-DISCRIMINATING; cause unresolved between (a) the model's default behaviour needing no CPP instruction, and (b) residual CPP content still present in the degraded arm (e.g. gh-pr-merge.sh's own negation-handling code) despite the prose rule's removal. #287's declaration must name, for its OWN case, precisely what the degraded arm removes and verify via `skillc profile diagnose` (#295) that no other installed skill or helper still carries equivalent content - a repeat of #150's shape (removing the stated rule while something else still enforces it) would reproduce a non-discriminating result at whatever n is chosen, wasting the whole run regardless of power."
+  },
+  {
+   "id": "attempts-per-arm-cap-vs-required-n",
+   "source": "skillc/calibration.py:70 (MIN_ATTEMPTS_PER_ARM, MAX_ATTEMPTS_PER_ARM = 3, 8); power_cost_table.json",
+   "statement": "power_cost_table.py's computed rows show that even at the most favorable observable outcome (the intact arm passing every attempt), the degraded arm must fail roughly 40%+ of its attempts at n=10 (or ~17%+ at n=30) for a one-sided Fisher's exact test to reach p<0.05. calibration.py's own schema refuses attempts_per_arm outside 3-8 (skillc/calibration.py:324-325), which this table never reaches at n=10. Either the eventual pilot shows an effect size strong enough to fit within 3-8 attempts per arm, or #287/#288 cannot run through calibration.py's existing parse_declaration/runner unmodified. This preparation issue does not resolve it (recorded on skillc's Nit Store issue #20, not fixed here)."
+  }
+ ],
+ "owed_before_run": [
+  "#270/#271 - a certified discriminating flow-check case (dependency, in progress by sk-w1 as of 2026-10-06)",
+  "operator ruling - explicit pilot-spend authorization, separate from and not implied by closing this preparation issue (#287 acceptance item: 'do not reinterpret the #237-first ruling as approval for this new study')",
+  "a decision on the attempts_per_arm cap (design_risks[1]) once a real effect size is observed"
+ ]
+}

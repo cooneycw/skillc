@@ -1,0 +1,52 @@
+{
+  "_comment": "Computed by evals/calibration-287/power_cost_table.py (run it to reproduce - math.comb is exact integer arithmetic, no approximation). alpha=0.05, one-sided Fisher's exact, better arm pinned at n/n (the most favorable observable outcome). quota-equivalent costs are NOT dollar charges (ADR 0005 rule 6) - see README.md.",
+  "alpha": 0.05,
+  "price": {
+    "name": "gpt-5.1-codex",
+    "input_usd_per_million": 1.25,
+    "output_usd_per_million": 10.0,
+    "source": "pricepertoken.com, 2026-09-26 (third-party aggregator, not independently confirmed against OpenAI's own page) - the same price #26 and the matched pilot use"
+  },
+  "assumed_input_tokens_per_attempt": 125000,
+  "assumed_output_tokens_per_attempt": 15000,
+  "assumed_total_tokens_per_attempt": 140000,
+  "shared_arms": 3,
+  "rows": [
+    {
+      "n_per_arm": 10,
+      "better_arm_passes": 10,
+      "max_worse_arm_passes_below_p05": 6,
+      "p_at_max_worse_arm_passes": 0.043343653250773995,
+      "p_at_next_worse_arm_pass": 0.10526315789473684,
+      "total_attempts_3_shared_arms": 30,
+      "worst_case_quota_equivalent_usd": 9.1875
+    },
+    {
+      "n_per_arm": 15,
+      "better_arm_passes": 15,
+      "max_worse_arm_passes_below_p05": 11,
+      "p_at_max_worse_arm_passes": 0.04980842911877394,
+      "p_at_next_worse_arm_pass": 0.11206896551724138,
+      "total_attempts_3_shared_arms": 45,
+      "worst_case_quota_equivalent_usd": 13.7812
+    },
+    {
+      "n_per_arm": 20,
+      "better_arm_passes": 20,
+      "max_worse_arm_passes_below_p05": 15,
+      "p_at_max_worse_arm_passes": 0.02356202356202356,
+      "p_at_next_worse_arm_pass": 0.05301455301455302,
+      "total_attempts_3_shared_arms": 60,
+      "worst_case_quota_equivalent_usd": 18.375
+    },
+    {
+      "n_per_arm": 30,
+      "better_arm_passes": 30,
+      "max_worse_arm_passes_below_p05": 25,
+      "p_at_max_worse_arm_passes": 0.026092774308652988,
+      "p_at_next_worse_arm_pass": 0.056199821587867974,
+      "total_attempts_3_shared_arms": 90,
+      "worst_case_quota_equivalent_usd": 27.5625
+    }
+  ]
+}
