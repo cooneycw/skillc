@@ -53,7 +53,7 @@ content-addressed inventory or refuses with a named reason.
 | `treatment_question` | `product` (the skill as installed, prose plus helpers) or `prose` (identical helpers in every arm) |
 | `allowed_destinations` | relative roots under the client's home that may receive files |
 | `reference_patterns` | regexes whose whole match is a reference, each with a `class`: `home-relative`, `variable-rooted` or `absolute` |
-| `dependencies` | `helper`, `library`, `startup-context` or `tool` entries (below) |
+| `dependencies` | `helper`, `library`, `startup-context`, `tool` or `synthetic` entries (below) |
 | `unsupported` | references deliberately not supplied, each with a reason |
 | `mirrors` | generated files that must be byte- and mode-identical to an upstream file |
 | `generated_from` | generated files produced by a transform; both digests are recorded, freshness is not claimed |
@@ -71,6 +71,70 @@ A dependency has an `id`, `kind`, `scope` (`common` or `treatment`), and:
 
 A dependency no reference reaches needs an `unreferenced_reason` (a tool run as
 a command word, a startup file the client loads by itself).
+
+## Synthetic files (#303)
+
+Synthetic dependencies deliberately install bounded marker text rather than
+pinned bytes. They are optional; existing profiles need not declare the kind empty.
+
+| Field | Contract |
+|---|---|
+| `id`, `scope`, `role` | dependency identity, arm scope and required purpose |
+| `source_root`, `paths` | same convention as `helper`/`library`: `paths` holds EXACTLY ONE relative name, joined under `source_root` |
+| `destination` | a home-relative DIRECTORY, inside allowed destinations - same convention as other kinds, never the full file path |
+| `content` | literal UTF-8 text, at most 4096 encoded bytes; no NUL or invalid Unicode |
+| `unreferenced_reason` | required: synthetic files cannot satisfy references |
+| `replaces_pinned` | boolean, default false; true requires the shadow file to exist |
+| `replacement_reason` | non-empty explanation required only for an explicit replacement |
+
+There is deliberately no separate "where does this shadow" field. The
+installed path (`destination`/`paths[0]`) and the pinned-tree shadow-check
+path (`source_root`/`paths[0]`) are BOTH derived from the same single
+`paths[0]` value - the only relative name an author supplies for the whole
+entry - so they cannot be pointed at two different places. An earlier design
+carried an independent `shadow_check` object; review found that an author (or
+a typo) could point it somewhere harmless while the real `destination`
+silently shadowed an unrelated pinned file, defeating the whole check. Making
+both sides read the same field closes that by construction rather than by an
+additional cross-check that could itself have the same kind of bug.
+
+Mode is always `100644`. Mode/executable overrides and traversal/tool fields
+(`satisfies`, `traverse`, `no_traverse_reason`, `version`, `supply`) are
+refused. This is marker text, not an executable or arbitrary payload channel.
+The shadow-check path refuses source links and escapes (the same
+`source_root`/`paths` validation every other kind already gets). If it exists
+in the pinned tree, validation refuses silent substitution unless
+`replaces_pinned` and a reason explicitly authorize it. Independently, the
+unchanged `_claim` refuses collisions with any other actually installed file,
+even identical bytes - these are two distinct checks (destination-collision
+among what actually installs, versus shadow-of-a-pinned-path nothing may
+currently install), not one check covering both.
+
+Every inventory and receipt file has `origin`: `pinned` or `synthetic`.
+Synthetic inventory records retain content, shadow path and replacement reason;
+`replaces_pinned_digest` in both inventory and receipt identifies substituted
+pinned bytes without publishing those bytes. Otherwise that digest is null.
+Installation preflights synthetic content against its digest and fixed mode;
+the existing drift verifier treats both origins identically.
+
+Committed controls live in `tests/fixtures/profile-install-synthetic/` and
+`tests/test_synthetic_profile_files.py`. The subject-only `gate_path.py`
+classifies captured output as real-runner, fallback or unknown. Ambiguous and
+unrecognized output is unknown. Its pinned literal messages must be checked
+again on every subject re-pin. Fake gate observations exercise marker presence
+and absence; real subject detection and client isolation have now been proven
+by hand against the real pin (PROFILE.md's Known limits has the full account:
+a real install, a real `flow-finish-gate.sh` run classified `real-runner`
+with no `FLOW_GATE_CPP_DIR` set, and `materialize.py`'s own canary showing
+the marker's content absent from Codex's prompt input while an `AGENTS.md`
+sentinel at Codex's real discovery location is present).
+
+Mutation audit for #303: disabling pinned-shadow refusal, destination collision,
+executable-field refusal, byte bound, origin labeling, replacement digest,
+ambiguous classifier handling, marker-present detection and marker-absent
+fallback each made its corresponding committed test fail; restoration passed.
+The real-pin inventory has been regenerated against the updated declaration
+(64 files); the full local verification is clean, not waived.
 
 ## Refused by name
 

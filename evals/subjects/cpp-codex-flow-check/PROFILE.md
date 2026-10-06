@@ -42,7 +42,8 @@ From `SKILL.md`, the walk reaches:
 | python >=3.11, uv, make, git, bash | tool | supplied by the image | command words |
 | pydantic, pyyaml (from `uv.lock`) | tool, **external** | resolved by uv | the library |
 
-63 installed files in all; the receipt-style digest of that surface is
+64 installed files in all (63 historical plus #303's one synthetic marker,
+confirmed against a real install from the pin). The receipt-style digest of that surface is
 `installed_surface.digest` in the inventory. The four bundled scripts are
 verified byte- and mode-identical to their upstream `scripts/` sources.
 `SKILL.md` and `reference.md` are generated from
@@ -119,18 +120,33 @@ inventory says nothing about Claude parity.
   writes skill directories only (no `AGENTS.md`, no config). The client's
   listing metadata is the skill's own description, recorded as
   `description_digest`.
-- **`flow-finish-gate.sh`'s own CPP-checkout self-detection needs more than
-  this profile installs.** FOUND by #266's real-pin proof: the helper's
-  default search (`$HOME/Projects/claude-power-pack`, `/opt/claude-power-pack`,
-  `$HOME/.claude-power-pack`) additionally requires a `CLAUDE.md` marker file
-  at the checkout root, which this profile does not declare as a dependency -
-  so a disposable home installed from this profile alone is NOT
-  self-discoverable by the helper's default search; it degrades to a
-  Makefile fallback instead (still correct, still never reads the real
-  operator home, but not the `lib.cicd` runner path). The real run instead
-  set the helper's own explicit override, `FLOW_GATE_CPP_DIR`, which is NOT
-  one of the profile's declared `reference_patterns` either - both gaps are
-  left for a future profile revision to close explicitly, filed on skillc#20.
+- **Checkout detection marker (#303) - real-pin proof RUN, not owed.**
+  `checkout-detection-marker` installs a short synthetic
+  `Projects/claude-power-pack/CLAUDE.md`, replacing the pinned agent-
+  instructions file with an explicitly recorded substitution
+  (`replaces_pinned_digest` in `evidence/inventory.json` and any install
+  receipt). `scripts/flow-finish-gate.sh:347` tests existence only.
+  Re-installed the real profile from a genuine GitHub clone at the pin into
+  a disposable home (64 files, up from 63) and confirmed, for real:
+  - `flow-finish-gate.sh` run under `env -i` with ONLY `HOME`/`PATH` set,
+    `FLOW_GATE_CPP_DIR` NOT set: the default self-detection now finds the
+    checkout and runs the real `lib.cicd` runner
+    (`"flow-finish-gate: running deterministic gate (lib.cicd run --plan
+    finish, CPP at ..."`), `gate_path.classify_gate_output` on that output
+    returns `"real-runner"`. The historical #266 run needed
+    `FLOW_GATE_CPP_DIR` explicitly; this profile no longer does.
+  - Canary isolation, using `materialize.py`'s own `run_client`/
+    `CANARY_ARGV` (`codex debug prompt-input`), both directions: negative
+    control - run against the real materialized home, the marker's own
+    distinctive phrase ("not agent instructions") never appears in the
+    canary's output; positive control - the SAME canary mechanism, pointed
+    at a workspace containing an `AGENTS.md` with a sentinel, DOES surface
+    it. Confirms Codex's own discovery (reads `AGENTS.md` from cwd) never
+    reaches the installed marker (under `Projects/claude-power-pack`, not
+    cwd) either way.
+  `evidence/inventory.json` is regenerated and committed (64 files,
+  includes the marker's `replaces_pinned_digest`). Re-verify both
+  `gate_path.py` classifier literals on every future re-pin.
 - **`GitTree` reads a pinned revision's committed blobs, never a working
   tree.** A "delete this file and re-run against --repo" red case does
   nothing against a real checkout for this reason - deleting a working-tree
