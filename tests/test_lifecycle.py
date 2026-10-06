@@ -131,6 +131,16 @@ class FakeBackend:
             readiness["image_digest"] = self._image_digest
         return readiness
 
+    def exec_in_attempt(
+        self, handle: object, argv: Sequence[str], limits: Limits,
+        cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,
+    ) -> ExecuteResult:
+        """#269 added this to the `ExecutionBackend` Protocol; the lifecycle
+        driver this fake exercises never calls it - unsupported here,
+        satisfied only for structural typing."""
+        del handle, argv, limits, cancel, stdin
+        return ExecuteResult(reason="unsupported", exit_code=None)
+
     def execute(
         self, handle: object, argv: Sequence[str], limits: Limits,
         cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,

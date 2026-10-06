@@ -56,6 +56,64 @@ and version plan.
   environment, with a fake-operator-home decoy proven (both directions)
   never read. Cold-container execution (acceptance item 2) remains owed.
 
+- **A controller-owned gate-execution witness** (Refs #269). The CONTROLLER
+  executes each declared gate itself (`ExecutionBackend.exec_in_attempt()`,
+  new) - the subject only asks `{"op": "run_gate", "gate": "..."}` over
+  #183's `decide_reply_channel`, reused unchanged. One record per attempt,
+  covering the full declared gate set - a gate nothing was ever heard about
+  still appears, as `not-observed`, never as a missing entry; every run of a
+  gate is recorded, not only the first, so a legitimate flow-check rerun
+  after a fix is never refused or overwritten. Five coverage states
+  (`complete`/`interrupted`/`launch-failed`/`not-observed`/
+  `channel-unavailable`); `execution_observed` derives from coverage alone,
+  never from exit code. `launch-failed` (the subject DID request the gate;
+  the controller failed to launch it) always reads `UNKNOWN`, regardless of
+  exclusivity - only a TRUE bypass (zero requests) may ever read
+  `NOT_CONFIRMED`, and only when the caller asserts `gate_exclusivity` (the
+  fixture gives the subject no other way to invoke the gate at all) -
+  recorded on every gate's own entry so the verdict is never resting on an
+  invisible constructor argument; without that assertion, silence stays
+  `UNKNOWN`. The reply to the subject carries the
+  gate's real exit code and bounded stdout/stderr - what it would see
+  running the gate itself - never the witness's own coverage state, other
+  gates' status, or tree digests. Tree identity is computed by the
+  controller itself immediately before each exec, never claimed by the
+  subject.
+  - **New `ExecutionBackend.exec_in_attempt()`** (`skillc/backend.py`,
+    `skillc/docker_backend.py`, `skillc/managed_backend.py`): execs into an
+    ALREADY-RUNNING attempt without ever stopping it - `execute()` itself
+    is one-shot per handle and always stops the container
+    (its stop-after-exec behavior is now tracked separately as #304, not
+    changed here). Refused, never folded into a guessed `exited` result,
+    when the attempt's primary process isn't running (`reason=
+    "attempt-not-running"`) or the backend doesn't implement it at all
+    (`reason="unsupported"` - `ManagedBackend`'s protocol-version-1 answer
+    today; the witness reads this as `channel-unavailable` for every gate).
+    On timeout/cancellation, the in-container process's own pid (read back
+    via a wrapped `echo $$` marker) is killed and its death independently
+    CONFIRMED (`kill -0`) before the call returns - never the container
+    itself. An unconfirmed kill (`ExecuteResult.stop_confirmed=False`)
+    refuses every later `run_gate` for the rest of the attempt
+    (`workspace-integrity-unknown`) without retroactively changing a gate
+    that already completed - a possibly-still-running process could
+    otherwise mutate the tree a later gate would measure.
+  - **A `reason` of `"launch-failed"`/`"attempt-not-running"`/
+    `"unsupported"` is `not-observed`, never `interrupted`/`CONFIRMED`**
+    (cross-model review correction on this redesign): a refused or
+    never-launched exec must not report positive execution evidence - the
+    exact subject-authored-claim problem this witness exists to stop,
+    moved from the subject to a failed launch. The raw run is still
+    recorded for transparency; only the derived coverage is corrected.
+  - **`skill-evidence.external_evidence.reconciliation == "contradicting"`
+    now requires a citation** (cpp-eval review of #268,
+    https://github.com/cooneycw/skillc/issues/269#issuecomment-6009072750):
+    a `{ref, digest}` `witness_ref` into a captured controller-witness
+    record, exactly as `lifecycle.execution_observed` already requires for
+    `CONFIRMED`/`NOT_CONFIRMED`, plus a closed reason vocabulary
+    (`SKILL_EVIDENCE_CONTRADICTING_REASONS`). `ledger-binding` cross-checks
+    the cited digest was actually captured by the attempt's manifest - the
+    same "altered artifact" check `artifact_ref` already gets.
+
 - **A controller-owned decide-and-reply channel, and `DockerBackend`'s one
   named mount exception** (Refs #183, PR A of a 4-PR split). A new Unix-
   socket channel where the controller decides, logs, and only then replies

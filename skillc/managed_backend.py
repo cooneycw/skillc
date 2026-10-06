@@ -385,6 +385,25 @@ class ManagedBackend:
             stdout_truncated=bool(result["stdout_truncated"]), stdout_bytes=stdout_bytes,
         )
 
+    def exec_in_attempt(
+        self, handle: object, argv: Sequence[str], limits: Limits,
+        cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,
+    ) -> ExecuteResult:
+        """Not yet a protocol version 1 operation (#269) - the managed-backend
+        protocol page (`docs/specs/evaluation-facility/
+        managed-backend-protocol.md`) carries no `exec_in_attempt` row, so
+        there is no request to send. Refuses unconditionally with
+        `reason="unsupported"` rather than attempting a weaker
+        approximation (e.g. falling back to `execute()`, which would stop
+        the attempt - exactly what this method exists to never do). A
+        caller (the gate-execution witness) that receives this must treat
+        the whole mechanism as unavailable for this attempt, never retry.
+        Adding real support here is owed to whichever issue extends the
+        protocol page with this operation - not done in this change."""
+        assert isinstance(handle, _Handle)
+        del argv, limits, cancel, stdin
+        return ExecuteResult(reason="unsupported", exit_code=None)
+
     def confirm_stopped(self, handle: object) -> Confirmation:
         """Step 6: `Confirmation.UNKNOWN` on any protocol/transport failure -
         never a guessed CONFIRMED/NOT_CONFIRMED."""
