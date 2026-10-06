@@ -667,3 +667,100 @@ def test_an_unobserved_attempt_is_neither_opened_nor_not_opened() -> None:
     ])["n"]
     assert (summary["opened"], summary["observed"], summary["scheduled"]) == (1, 2, 3)
 
+
+
+# ----------------------------------------------- expanded-instruction lane (#274)
+
+#: Matches `_treatment`'s real fixture exactly: `skills/tdd/SKILL.md`'s body
+#: after frontmatter is literally "Body.\n".
+_TDD_BODY = "Body.\n"
+
+
+def _prose_inventory(tmp_path: Path) -> Path:
+    path = tmp_path / "inventory.json"
+    path.write_text(json.dumps({
+        "treatment_question": "prose",
+        "helper_parity": {"common": [], "treatment": [], "bundled": []},
+        "skills": [{"name": "tdd", "body_digest": materialize.sha256_bytes(_TDD_BODY.encode("utf-8"))}],
+    }), encoding="utf-8")
+    return path
+
+
+def _expanded_instruction_run_declaration(tmp_path: Path) -> calibration.CalibrationDeclaration:
+    """Baseline + S (explicit, names tdd) + E (the SAME body inlined) - the
+    same treatment subject `_treatment` installs, so this dry run proves
+    scheduling/accounting for the new lane without a second fixture."""
+    data = _declaration_data(attempts=3)
+    data["lane"] = calibration.EXPANDED_INSTRUCTION_LANE
+    arms = data["arms"]
+    assert isinstance(arms, list)
+    subject = dict(arms[0]["subject"])
+    inventory = str(_prose_inventory(tmp_path))
+    new_arms: list[object] = [arms[1],  # baseline
+                              {"name": "explicit-skill", "subject": subject, "treatment": "told to read tdd",
+                               "instruction": "Before you start, read the `tdd` skill.", "named_skills": ["tdd"],
+                               "inventory": inventory},
+                              {"name": "expanded-instruction", "subject": subject,
+                               "treatment": "given tdd's body inline", "instruction": _TDD_BODY,
+                               "inventory": inventory}]
+    data["arms"] = new_arms
+    names = [a["name"] for a in new_arms if isinstance(a, dict)]
+    data["arm_order"] = {"seed": 7, "sequence": calibration.derive_arm_order(7, names, 3)}
+    return calibration.parse_declaration(data)
+
+
+def test_expanded_instruction_lane_dry_run_schedules_and_reconciles_all_three_arms(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Acceptance item 4: deterministic dry run, no CPP installation (the
+    fake client never touches a real one) - seeded ordering, all-attempt
+    reconciliation and per-arm accounting work for the new arm shape with
+    NO change to run_calibration/build_report, because the prompt-assembly
+    code is already generic over any declared `instruction` string."""
+    declaration = _expanded_instruction_run_declaration(tmp_path)
+    assert declaration.lane == calibration.EXPANDED_INSTRUCTION_LANE
+    seen: list[dict[str, object]] = []
+    real = cc.run_level1_agent_attempt
+
+    def spy(**kwargs: object) -> dict[str, object]:
+        seen.append(dict(kwargs))
+        return real(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(cc, "run_level1_agent_attempt", spy)
+    experiment, outcomes, _, treatment = _run(
+        tmp_path, monkeypatch, declaration=declaration,
+        solve_arms=(calibration.BASELINE_ARM, "explicit-skill", "expanded-instruction"),
+    )
+
+    assert len(seen) == 9  # 3 arms x 3 attempts, baseline readiness included
+    arm_of = {o.scheduled.attempt_id: o.scheduled.arm for o in outcomes}
+    goal = (TASK / "goal.md").read_text(encoding="utf-8")
+    for call in seen:
+        arm = arm_of[str(call["attempt_id"])]
+        if arm == "explicit-skill":
+            assert call["prompt"] == f"{goal.rstrip()}\n\nBefore you start, read the `tdd` skill.\n"
+            assert call["extra_home_files"] == treatment.home_files
+        elif arm == "expanded-instruction":
+            # The inlined body, byte-identical to what `explicit-skill` would
+            # read from the skill itself (checked once already in
+            # test_calibration.py; this proves it also reaches the prompt).
+            assert call["prompt"] == f"{goal.rstrip()}\n\n{_TDD_BODY}\n"
+            assert call["extra_home_files"] == treatment.home_files
+        else:
+            assert call["prompt"] == goal
+
+    report = cr.build_report(
+        experiment, cr.reconcile(experiment, outcomes), declared_model="gpt-6-astra", declared_effort="high",
+        named_skills=cr.named_skills_by_arm(declaration),
+    )
+    arms = report["arms"]
+    assert isinstance(arms, dict)
+    # Every attempt reconciles: all-attempt accounting, not merely the ones
+    # that happened to succeed.
+    assert {a: v["scheduled"] for a, v in arms.items()} == {
+        calibration.BASELINE_ARM: 3, "explicit-skill": 3, "expanded-instruction": 3,
+    }
+    # E has `named_skills` absent by design (nothing to name - the content
+    # is inline), so it carries no named_opened accounting; S does.
+    assert "named_opened" in arms["explicit-skill"]
+    assert "named_opened" not in arms["expanded-instruction"]
