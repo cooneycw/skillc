@@ -583,6 +583,35 @@ and version plan.
   differing keyword argument, since the argument is no longer the source of
   truth once the record carries a value.
 
+- **`skillc/convenience.py`: protocol.md 10.6 convenience proxies** (Refs
+  #273). Read every v2 record kind and its producers before writing
+  anything, per the orchestrator's constraint that a proxy with no backing
+  field is reported as `not_captured`, never `0` and never a guessed
+  `not_applicable`. Of the four proxies 10.6 names, one has real data today:
+  `phase_wall_times` computes per-phase wall time from
+  `attempt-lifecycle.events`' own `{event, at}` pairs, labeled with the
+  controller's own event names rather than a canonical phase name this
+  module invents - an event the controller never wrote produces no interval
+  rather than a fabricated one. It refuses an empty event list, an event
+  list not starting at `planned`, any event outside
+  `skillc.records.LIFECYCLE_EVENTS`, and any pair whose timestamps are not
+  non-decreasing (out-of-order events), rather than return a negative or
+  partial duration - each refusal has a mutation-checked red case in
+  `tests/test_convenience.py`. The other three - instruction length,
+  clarification/correction turns, approvals split necessary/redundant - and
+  tokens have no backing field anywhere in the schema today and are reported
+  as `NOT_CAPTURED` (tokens as the schema's own `UNKNOWN`, a declared future
+  observation per `records.md`, not the same absence as the other three).
+  `convenience_summary` returns all four together as one struct so a caller
+  reads exactly what is and is not available without guessing. A nit is
+  filed on skillc #20: protocol.md 10.1 requires the prompt be "recorded in
+  full", and no producer does - `agent-observation` keeps only the boolean
+  `prompt_delivered` - which is also why instruction length cannot be
+  reported; reconstructing a length from `goal.md` plus the arm's declared
+  instruction at report time was considered and rejected, since that is
+  reconstruction from files that can move on after the run, not capture of
+  what the subject was actually shown.
+
 ## [0.4.0] - 2026-09-29
 
 ### Added
