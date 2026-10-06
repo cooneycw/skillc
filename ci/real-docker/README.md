@@ -1,9 +1,20 @@
 # The `<agent-host>` real-Docker runner (#315)
 
-Certifies #183 (and, once they exist, #266/#269 - see `check_real_docker_ran.
-DECLARED_REAL_DOCKER_FILES`) against a REAL Docker daemon, on an isolated VM,
-with no Woodpecker involved at all. The main Woodpecker server is untouched;
-nothing here registers anything with it.
+Certifies #183's live-channel test and #326's trial-image build test (and,
+once they exist, #266/#269) against a REAL Docker daemon, on an isolated
+VM, with no Woodpecker involved at all. The main Woodpecker server is
+untouched; nothing here registers anything with it.
+
+**A file tagged `@pytest.mark.real_docker` is collected and run, but NOT
+certified, until `ci/check_real_docker_ran.py`'s `DECLARED_REAL_DOCKER_
+FILES` also names it (orchestrator review).** The marker alone only
+decides what `pytest -m real_docker` runs; the declared-files floor is what
+catches that file going silent - skipped, renamed, erroring at collection -
+in a run where every OTHER declared file still passes. Without the floor
+entry, such a run posts SUCCESS: green on the VM with no evidence from that
+file at all. Adding a file to the floor is a code change in the INSTALLED
+runner, so it takes effect only on the next explicit reinstall from a
+reviewed main sha (R1) - never implicitly at the next tick.
 
 **No machine identities appear in this repository.** `<agent-host>`,
 `<dedicated-user>`, `<server-url>` and similar are placeholders the operator

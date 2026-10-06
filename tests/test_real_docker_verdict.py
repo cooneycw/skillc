@@ -97,6 +97,33 @@ def test_a_clean_pass_is_success(tmp_path: Path) -> None:
     assert result.executed_by_file[DECLARED[0]] == 1
 
 
+_IMAGE_BUILD_SKIP_CASE = (
+    '<testcase classname="tests.test_trial_image_build_live" '
+    'name="test_image_runs_as_candidate" time="0.02">'
+    '<skipped message="no reachable Docker daemon"/></testcase>'
+)
+
+
+def test_live_channel_passes_but_image_build_all_skipped_is_failure() -> None:
+    """Orchestrator review, #315: with BOTH files in the real floor
+    (`DECLARED_REAL_DOCKER_FILES`), a run where #183's live-channel file
+    executes and passes but the image-build file collected only SKIPs must
+    give FAILURE, not SUCCESS - green on the VM with no image evidence is
+    exactly what the per-file floor exists to refuse. Uses the module's
+    OWN default declared-files tuple (not the local 1-file `DECLARED`), so
+    this exercises the real, currently-shipped floor."""
+    assert c.DECLARED_REAL_DOCKER_FILES == (
+        "tests.test_decide_reply_channel_live",
+        "tests.test_trial_image_build_live",
+    ), "this test assumes the current two-file floor - update it if the floor changes"
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        path = _write(Path(td), "mixed.xml", _suite(_PASS_CASE, _IMAGE_BUILD_SKIP_CASE))
+        result = c.verdict(path)  # module default: both files
+        assert result.status == c.FAILURE
+        assert result.skipped_only_files == ("tests.test_trial_image_build_live",)
+
+
 def test_a_second_declared_file_with_nothing_at_all_is_error(tmp_path: Path) -> None:
     """Two declared files, only one of which contributed ANY testcase - the
     silent-renamed-file case, distinct from the all-skipped case above."""

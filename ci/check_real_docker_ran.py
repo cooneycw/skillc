@@ -41,8 +41,19 @@ from dataclasses import dataclass, field
 #: floor below is what catches a file whose whole population silently
 #: vanished (renamed, every test skipped for an unrelated reason) even while
 #: `pytest -m real_docker` still "succeeds" by finding nothing to complain
-#: about elsewhere.
-DECLARED_REAL_DOCKER_FILES: tuple[str, ...] = ("tests.test_decide_reply_channel_live",)
+#: about elsewhere. A file tagged `real_docker` but absent from this tuple is
+#: NOT certified: it is collected and run, but a run where it goes entirely
+#: silent (skipped, renamed, erroring at collection) while every OTHER
+#: declared file still passes still posts SUCCESS - the floor is what closes
+#: that gap, and closing it for a given file is a deliberate, separate step
+#: from tagging it (orchestrator review, #315: "every file tagged real_docker
+#: that certifies something belongs in the floor"). Adding an entry here
+#: means re-installing the runner from a reviewed main sha (R1) before it
+#: takes effect - never implicit at the next tick.
+DECLARED_REAL_DOCKER_FILES: tuple[str, ...] = (
+    "tests.test_decide_reply_channel_live",
+    "tests.test_trial_image_build_live",
+)
 
 ERROR = "ERROR"
 FAILURE = "FAILURE"
