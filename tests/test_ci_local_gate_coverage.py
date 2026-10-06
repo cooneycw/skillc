@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -185,3 +186,76 @@ def test_leak_exclude_parsers_are_never_vacuously_empty() -> None:
     ci_paths = _ci_leak_exclude_paths(CI_YML.read_text(encoding="utf-8"))
     assert make_paths, "the Makefile parser found no --exclude paths at all - probably broken, not really empty"
     assert ci_paths, "the ci.yml parser found no --exclude paths at all - probably broken, not really empty"
+
+
+# ----------------------------------------------- agent routing labels (#315)
+
+#: #309's future workflow file - the one named exception to "no host label,
+#: no docker-ci label" below. Does not exist yet; the tests here are written
+#: ahead of #309 landing so the requirement is checked from the moment the
+#: file appears, rather than relying on someone remembering it.
+DOCKER_TESTS_WORKFLOW = "docker-tests.yml"
+
+
+def _ordinary_workflow_files() -> list[Path]:
+    return [p for p in sorted((ROOT / ".woodpecker").glob("*.yml")) if p.name != DOCKER_TESTS_WORKFLOW]
+
+
+def _workflow_labels(text: str) -> dict[str, object]:
+    config = yaml.safe_load(text)
+    return config.get("labels") or {}
+
+
+def test_ordinary_workflows_never_carry_a_host_label() -> None:
+    """#315: containment for skillc's CI is the dedicated agent's own
+    server-side `repo` Filter, not a label this repo's YAML declares - a
+    label here is author-controlled (any PR can add one) and so is never a
+    security boundary; see #315's write-up. ci.yml used to carry
+    labels: {host: kyleci}, pinning it to the agent kyle also uses - this
+    pins that regression against every ordinary workflow file, current or
+    future. docker-tests.yml (#309) is the one named exception."""
+    offenders = [p.name for p in _ordinary_workflow_files() if "host" in _workflow_labels(p.read_text(encoding="utf-8"))]
+    assert offenders == [], (
+        f"{offenders} carry a 'host' label - routing containment is the dedicated "
+        f"agent's server-side repo Filter (#315), not a label an ordinary skillc "
+        f"workflow declares; remove it"
+    )
+
+
+def test_a_reintroduced_host_label_is_caught() -> None:
+    """Red case: ci.yml's real text with labels: {host: kyleci} spliced
+    back in, run through the same two functions the test above calls -
+    proving this would catch the exact regression #315 fixed, not just
+    that the current label-free file happens to pass."""
+    text = CI_YML.read_text(encoding="utf-8")
+    drifted = text.replace("steps:\n", "labels:\n  host: kyleci\n\nsteps:\n", 1)
+    assert drifted != text, "the splice found nothing to anchor on - this red case is inert"
+    assert "host" in _workflow_labels(drifted)
+
+
+def test_docker_tests_workflow_carries_its_own_label_when_it_exists() -> None:
+    """#315/#309: once docker-tests.yml exists, it must carry a docker-ci
+    label - that's what the dedicated agent's mandatory !docker-ci=yes
+    filter actually matches against. Skips (not fails) while the file is
+    genuinely absent - #309 has not landed - which is a different fact from
+    a step that exists and silently stopped running (the #307 standard);
+    there is nothing yet to check."""
+    path = ROOT / ".woodpecker" / DOCKER_TESTS_WORKFLOW
+    if not path.exists():
+        pytest.skip(f"{DOCKER_TESTS_WORKFLOW} does not exist yet (#309 not landed)")
+    labels = _workflow_labels(path.read_text(encoding="utf-8"))
+    assert labels.get("docker-ci") is not None, (
+        f"{DOCKER_TESTS_WORKFLOW} must carry a docker-ci label so the dedicated "
+        f"agent's mandatory !docker-ci=yes filter routes it there"
+    )
+
+
+def test_a_docker_tests_workflow_missing_its_label_is_caught(tmp_path: Path) -> None:
+    """Red case for the test above: a docker-tests.yml with no docker-ci
+    label, run through the same extraction function - proving a genuinely
+    mislabelled #309 file would be caught, not just that "file absent"
+    currently skips past the check with no file to look at."""
+    bad = tmp_path / DOCKER_TESTS_WORKFLOW
+    bad.write_text("steps:\n  - name: docker-tests\n    commands: [true]\n", encoding="utf-8")
+    labels = _workflow_labels(bad.read_text(encoding="utf-8"))
+    assert labels.get("docker-ci") is None

@@ -5,11 +5,16 @@ when:
     branch: main
   - event: pull_request
 
-# The dedicated CI VM (agent 93). Unpinned, a pipeline can land on a
-# deploy-labelled agent that has no business running it.
-labels:
-  host: kyleci
-
+# No labels block: routing is by the server-enforced `repo` filter on the
+# dedicated skillc agent (#315), not by a label this file declares. A label
+# here is YAML-author-controlled and so is not a security boundary (any PR
+# could add one) - the `repo` label is stamped server-side after compilation
+# and cannot be overridden by this file, which is why containment lives in
+# the agent's own Filters, not here. See #315's write-up for the full
+# reasoning. tests/test_ci_local_gate_coverage.py pins that this file (and
+# any ordinary workflow file added later) never re-adds a `host: kyleci`
+# style label, and that only the docker-tests workflow (#309) carries
+# `docker-ci`.
 steps:
   # The four checks AGENTS.md names as the verify gate.
   - name: gate
