@@ -23,7 +23,16 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import __version__, checks, configuration_compare, exposure, leak, materialize, records
+from . import (
+    __version__,
+    checks,
+    configuration_compare,
+    exposure,
+    leak,
+    materialize,
+    profile,
+    records,
+)
 
 # `demo` is NOT imported here at module load (EF-11, #80's own no-Docker-
 # required proof: `skillc.cli` must not import `skillc.docker_backend` at
@@ -2085,6 +2094,49 @@ def cmd_degrade_subject(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_profile_validate(args: argparse.Namespace) -> int:
+    """Validate a transitive installation profile against its pinned source (#265).
+
+    Exit 0 only with a closed inventory; exit 2 on any refusal. Nothing is
+    installed: the inventory is a declaration checked against the source, not
+    evidence that anything runs.
+    """
+    try:
+        prof = profile.Profile.load(Path(args.profile))
+        tree = profile.load_tree(
+            prof,
+            Path(args.repo) if args.repo else None,
+            Path(args.snapshot) if args.snapshot else None,
+        )
+        inventory = profile.validate(prof, tree)
+    except profile.Refused as exc:
+        print(f"skillc: REFUSED - {exc}", file=sys.stderr)
+        return 2
+    text = json.dumps(inventory, indent=1) + "\n"
+    if args.out:
+        out = Path(args.out)
+        if out.exists() and not args.overwrite:
+            print(f"skillc: {out} exists; pass --overwrite to replace it", file=sys.stderr)
+            return 2
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text, encoding="utf-8")
+    else:
+        sys.stdout.write(text)
+    deps, unsupported = inventory["dependencies"], inventory["unsupported"]
+    selection, subject = inventory["selection"], inventory["subject"]
+    assert isinstance(deps, list) and isinstance(unsupported, list)
+    assert isinstance(selection, list) and isinstance(subject, dict)
+    print(
+        f"skillc: profile {prof.name}: {prof.treatment} {prof.treatment_question} treatment, "
+        f"{len(selection)} skill(s), {len(deps)} dependencies, {len(unsupported)} unsupported "
+        f"reference(s); closed at {subject['revision']}",
+        file=sys.stderr,
+    )
+    print("skillc: nothing was installed; readiness is not established by this inventory",
+          file=sys.stderr)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Separate from `main` so #73's README drift check can introspect the
     real subcommand set (`registered_commands` in `ci/readme_drift.py`)
@@ -2146,6 +2198,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_mat.add_argument("--keep", action="store_true", help="keep the disposable root")
     p_mat.add_argument("--timeout", type=float, default=120, help="per client call, seconds")
     p_mat.set_defaults(func=cmd_materialize)
+
+    p_prof = sub.add_parser(
+        "profile",
+        help="validate a transitive installation profile against its pinned source",
+    )
+    prof_sub = p_prof.add_subparsers(dest="profile_command", required=True)
+    p_prof_val = prof_sub.add_parser(
+        "validate", help="walk the profile's closure and emit its content-addressed inventory",
+    )
+    p_prof_val.add_argument("profile", help="profile declaration (profile.json)")
+    prof_source = p_prof_val.add_mutually_exclusive_group(required=True)
+    prof_source.add_argument("--repo", help="git checkout to read the subject's pinned revision from")
+    prof_source.add_argument("--snapshot", help="local directory standing in for the source tree")
+    p_prof_val.add_argument("--out", help="write the inventory here instead of stdout")
+    p_prof_val.add_argument("--overwrite", action="store_true", help="replace an existing --out file")
+    p_prof_val.set_defaults(func=cmd_profile_validate)
 
     p_exp = sub.add_parser(
         "exposure",

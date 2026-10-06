@@ -1,0 +1,171 @@
+{
+ "profile_schema": 1,
+ "name": "cpp-codex-flow-check",
+ "subject": "../cpp-codex/subject.json",
+ "select": ["flow-check"],
+ "treatment_question": "product",
+ "allowed_destinations": [
+  ".codex/skills",
+  ".claude/scripts",
+  "Projects/claude-power-pack"
+ ],
+ "reference_patterns": [
+  {
+   "name": "home-path",
+   "class": "home-relative",
+   "pattern": "(?:~|\\$HOME|\\$\\{HOME\\})/[A-Za-z0-9._/-]*[A-Za-z0-9_-]",
+   "meaning": "a path under the user's home; inside a trial that is the disposable home"
+  },
+  {
+   "name": "plugin-root",
+   "class": "variable-rooted",
+   "pattern": "\\$\\{?CLAUDE_PLUGIN_ROOT(?::-)?\\}?/[A-Za-z0-9._/-]*[A-Za-z0-9_-]",
+   "meaning": "the Claude Code plugin's bundle directory, another client's surface"
+  },
+  {
+   "name": "checkout-root",
+   "class": "variable-rooted",
+   "pattern": "\\$\\{?CPP_DIR\\}?/[A-Za-z0-9._/-]*[A-Za-z0-9_-]",
+   "meaning": "a file inside the subject's own checkout, located by the procedure's probe order"
+  },
+  {
+   "name": "absolute-system-path",
+   "class": "absolute",
+   "pattern": "(?<![\\w.~}$/-])/(?:opt|usr/local|srv|home)/[A-Za-z0-9._/-]*[A-Za-z0-9_-]",
+   "meaning": "an absolute install location outside any home; never satisfiable by a disposable home"
+  }
+ ],
+ "dependencies": [
+  {
+   "id": "helper-flow-finish-gate",
+   "kind": "helper",
+   "scope": "treatment",
+   "role": "the audited gate helper; reference.md:130 invokes it at this installed path, not at the bundled copy",
+   "source_root": "scripts",
+   "paths": ["flow-finish-gate.sh"],
+   "destination": ".claude/scripts",
+   "satisfies": [
+    {"reference": "~/.claude/scripts/flow-finish-gate.sh", "path": "flow-finish-gate.sh"}
+   ]
+  },
+  {
+   "id": "helper-gate-lib",
+   "kind": "helper",
+   "scope": "treatment",
+   "role": "library sourced by flow-finish-gate.sh from beside itself, else from the installed helper directory (flow-finish-gate.sh:170-200)",
+   "source_root": "scripts",
+   "paths": ["gate-lib.sh"],
+   "destination": ".claude/scripts",
+   "satisfies": [
+    {"reference": "$HOME/.claude/scripts", "path": null},
+    {"reference": "~/.claude/scripts", "path": null}
+   ]
+  },
+  {
+   "id": "helper-counter-model-receipt",
+   "kind": "helper",
+   "scope": "treatment",
+   "role": "receipt writer flow-finish-gate.sh looks for on its finish path (flow-finish-gate.sh:618); not reached by flow-check's --check-summary, supplied so the installed helper's own references close",
+   "source_root": "scripts",
+   "paths": ["counter-model-receipt.py"],
+   "destination": ".claude/scripts",
+   "satisfies": [
+    {"reference": "$HOME/.claude/scripts/counter-model-receipt.py", "path": "counter-model-receipt.py"}
+   ]
+  },
+  {
+   "id": "checkout-libraries",
+   "kind": "library",
+   "scope": "treatment",
+   "role": "the CPP checkout's Python packages the procedure runs through `uv run --project` (reference.md:36-48, 104; flow-finish-gate.sh:343-373)",
+   "source_root": ".",
+   "paths": ["pyproject.toml", "uv.lock", "lib/cicd", "lib/security"],
+   "destination": "Projects/claude-power-pack",
+   "traverse": false,
+   "no_traverse_reason": "Python packages: their dependencies are imports resolved by the interpreter, not path text a reference pattern can read. At this pin lib/cicd and lib/security import only themselves and PyPI packages (see tool-pypi-runtime). Whether they import cleanly in a disposable home is #266's installed-path proof.",
+   "satisfies": [
+    {"reference": "~/Projects/claude-power-pack", "path": null},
+    {"reference": "$HOME/Projects/claude-power-pack", "path": null},
+    {"reference": "$CPP_DIR/lib/cicd/__init__.py", "path": "lib/cicd/__init__.py"}
+   ]
+  },
+  {
+   "id": "checkout-scripts",
+   "kind": "helper",
+   "scope": "treatment",
+   "role": "scripts the procedure runs from the checkout rather than from the installed helper directory (reference.md:151-152; flow-finish-gate.sh:616)",
+   "source_root": ".",
+   "paths": ["scripts/check-ignored-additions.sh", "scripts/counter-model-receipt.py"],
+   "destination": "Projects/claude-power-pack",
+   "satisfies": [
+    {"reference": "$CPP_DIR/scripts/check-ignored-additions.sh", "path": "scripts/check-ignored-additions.sh"},
+    {"reference": "$CPP_DIR/scripts/counter-model-receipt.py", "path": "scripts/counter-model-receipt.py"}
+   ]
+  },
+  {
+   "id": "tool-python",
+   "kind": "tool",
+   "scope": "common",
+   "role": "interpreter for lib.cicd / lib.security and the bundled .py helpers",
+   "version": ">=3.11 (pyproject.toml requires-python at the pin)",
+   "supply": "the trial image; not carried by the subject",
+   "unreferenced_reason": "invoked as a command word (`python -m lib.security`, reference.md:104), which no path pattern reads"
+  },
+  {
+   "id": "tool-uv",
+   "kind": "tool",
+   "scope": "common",
+   "role": "runs the checkout's packages (`uv run --project`)",
+   "version": "unpinned by the subject; #266 pins it in the image",
+   "supply": "the trial image; not carried by the subject",
+   "unreferenced_reason": "invoked as a command word (`uv run --project`, reference.md:104; flow-finish-gate.sh:355), which no path pattern reads"
+  },
+  {
+   "id": "tool-pypi-runtime",
+   "kind": "tool",
+   "scope": "common",
+   "role": "PyPI runtime dependencies of lib.cicd (pydantic, pyyaml), resolved by uv from uv.lock",
+   "version": "pydantic>=2.0, pyyaml>=6.0 as locked in uv.lock at the pin",
+   "supply": "EXTERNAL: uv resolves these from a package index on first run. Trials have no network (spec.md section 4), so #266 must pre-supply a filled cache or report the gate step unavailable",
+   "unreferenced_reason": "a package-manager resolution, not a path in any file of the closure"
+  },
+  {
+   "id": "tool-make-git-bash",
+   "kind": "tool",
+   "scope": "common",
+   "role": "make (Makefile targets), git (check-ignored-additions.sh), bash (every shell helper)",
+   "version": "unpinned by the subject; any POSIX-conforming version the image carries",
+   "supply": "the trial image; not carried by the subject",
+   "unreferenced_reason": "invoked as command words (`make lint`, `git status`, `#!/usr/bin/env bash`), which no path pattern reads"
+  }
+ ],
+ "unsupported": [
+  {"reference": "/opt/claude-power-pack", "reason": "absolute alternative checkout location outside any home; the profile supplies ~/Projects/claude-power-pack, which the probe order tries first (reference.md:36)"},
+  {"reference": "~/.claude-power-pack", "reason": "third alternative checkout location; not supplied, because the first probe already succeeds"},
+  {"reference": "$HOME/.claude-power-pack", "reason": "third alternative checkout location; not supplied, because the first probe already succeeds"},
+  {"reference": "${CLAUDE_PLUGIN_ROOT:-}/scripts", "reason": "Claude Code plugin surface: another client's profile, declared unsupported below"},
+  {"reference": "$CLAUDE_PLUGIN_ROOT/scripts", "reason": "Claude Code plugin surface: another client's profile, declared unsupported below"},
+  {"reference": "${CLAUDE_PLUGIN_ROOT:-}/scripts/counter-model-receipt.py", "reason": "Claude Code plugin surface: another client's profile, declared unsupported below"},
+  {"reference": "~/.codex/sessions", "reason": "a live client's session store, read by counter-model-receipt.py to derive model identity; client state, never materialized"},
+  {"reference": "~/.claude/projects", "reason": "a live client's transcript store, read by counter-model-receipt.py; client state, never materialized"}
+ ],
+ "mirrors": [
+  {"generated": "codex/skills/flow-check/scripts/flow-finish-gate.sh", "source": "scripts/flow-finish-gate.sh"},
+  {"generated": "codex/skills/flow-check/scripts/gate-lib.sh", "source": "scripts/gate-lib.sh"},
+  {"generated": "codex/skills/flow-check/scripts/check-ignored-additions.sh", "source": "scripts/check-ignored-additions.sh"},
+  {"generated": "codex/skills/flow-check/scripts/counter-model-receipt.py", "source": "scripts/counter-model-receipt.py"}
+ ],
+ "generated_from": [
+  {"generated": "codex/skills/flow-check/SKILL.md", "source": ".claude/commands/flow/check.md"},
+  {"generated": "codex/skills/flow-check/reference.md", "source": ".claude/commands/flow/check.md"}
+ ],
+ "declared_empty_kinds": ["startup-context"],
+ "client_profiles": {
+  "codex": {"status": "declared", "reason": "the subject's own surface (codex-skills); this inventory describes it, and #266 owns the proof that it installs and runs"},
+  "claude-code": {"status": "unsupported", "reason": "Claude Code commands, plugin and native skills are a different surface with different helpers (CLAUDE_PLUGIN_ROOT); a Codex inventory does not establish Claude parity"},
+  "browser": {"status": "unsupported", "reason": "flow-check needs no browser; the browser/MCP capability profile is #283's to prove"},
+  "security-scanner": {"status": "unsupported", "reason": "external scanners and live advisory feeds are #285's profile; this one carries only the checkout's lib.security"},
+  "services": {"status": "unsupported", "reason": "GitHub, Docker, AWS, MCP servers and network are not provided to trials (spec.md section 4)"}
+ },
+ "notes": "Pinned to the historical cpp-codex subject (85e9b03) on purpose: #264's flow-check case contract pins the same revision and cites reference.md line numbers there. startup-context is declared empty because CPP's Codex installer writes only skill directories at this pin (no AGENTS.md, no config); the client's listing metadata is recorded per skill as description_digest."
+}
