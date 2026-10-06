@@ -184,7 +184,17 @@ def test_verify_repo_matches_skills_passes_on_an_ordinary_acquisition(
     repo = _fixture_collection(tmp_path, {"tdd": "tdd"})
     monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd"]))
     acquired = cc.acquire_collection("whatever", base, checkout=repo)
-    cc.verify_repo_matches_skills(acquired)  # does not raise
+    cc.verify_repo_matches_skills(acquired, revision_check="snapshot")  # does not raise
+
+
+def test_verify_repo_matches_skills_refuses_an_unrecognized_mode(
+    tmp_path: Path, base: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _fixture_collection(tmp_path, {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd"]))
+    acquired = cc.acquire_collection("whatever", base, checkout=repo)
+    with pytest.raises(demo.SubjectRefused, match="revision_check must be one of"):
+        cc.verify_repo_matches_skills(acquired, revision_check="whatever")
 
 
 def test_verify_repo_matches_skills_refuses_when_no_full_checkout_exists(
@@ -197,7 +207,24 @@ def test_verify_repo_matches_skills_refuses_when_no_full_checkout_exists(
     acquired = cc.acquire_collection("whatever", base, checkout=repo)
     degraded_shaped = dataclasses.replace(acquired, repo=None)
     with pytest.raises(demo.SubjectRefused, match="no full checkout available"):
-        cc.verify_repo_matches_skills(degraded_shaped)
+        cc.verify_repo_matches_skills(degraded_shaped, revision_check="snapshot")
+
+
+def test_red_case_required_revision_check_refuses_when_git_is_absent(
+    tmp_path: Path, base: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Orchestrator review (mailbox 5841): the revision check's mode is
+    DECLARED, never inferred from `.git`'s absence - a live attempt (always
+    `revision_check='required'`) whose checkout lost its `.git` must refuse
+    outright, never silently skip the proof. Mutation check: reverting to
+    the old infer-from-absence behaviour (treat 'required' the same as
+    'snapshot' when `.git` is missing) turns this green incorrectly."""
+    repo = _fixture_collection(tmp_path, {"tdd": "tdd"})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: _subject(select=["tdd"]))
+    acquired = cc.acquire_collection("whatever", base, checkout=repo)
+    assert not (repo / ".git").exists()
+    with pytest.raises(demo.SubjectRefused, match="has no .git directory"):
+        cc.verify_repo_matches_skills(acquired, revision_check="required")
 
 
 def test_red_case_a_resolved_revision_other_than_the_declared_pin_is_refused(
@@ -222,7 +249,7 @@ def test_red_case_a_resolved_revision_other_than_the_declared_pin_is_refused(
 
     monkeypatch.setattr(materialize, "_git", lambda *a, **k: _FakeResolved())
     with pytest.raises(demo.SubjectRefused, match="resolves to 'deadbeef', not"):
-        cc.verify_repo_matches_skills(acquired)
+        cc.verify_repo_matches_skills(acquired, revision_check="required")
 
 
 def test_red_case_a_tampered_skill_byte_in_the_full_checkout_is_refused(
@@ -238,7 +265,7 @@ def test_red_case_a_tampered_skill_byte_in_the_full_checkout_is_refused(
     tampered = repo / "skills" / "tdd" / "SKILL.md"
     tampered.write_text(tampered.read_text(encoding="utf-8") + "\ntampered\n", encoding="utf-8")
     with pytest.raises(demo.SubjectRefused, match="disagrees with the skills acquisition's"):
-        cc.verify_repo_matches_skills(acquired)
+        cc.verify_repo_matches_skills(acquired, revision_check="snapshot")
 
 
 def test_plan_records_the_collection_s_real_content_digest_not_a_placeholder(

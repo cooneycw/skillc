@@ -434,7 +434,21 @@ def acquire_degraded_collection(subject_name: str, degraded_dir: Path) -> Acquir
     return AcquiredCollection(subject, source, files, None)
 
 
-def verify_repo_matches_skills(acquired: AcquiredCollection) -> None:
+#: skillc#334 (orchestrator review, mailbox 5841): the revision check's
+#: mode is DECLARED by the caller, never inferred from `.git`'s absence.
+#: Inferring it treated "I cannot see a commit identity" as "there is
+#: nothing to check" - in a live attempt, a checkout that lost its `.git`
+#: (a copy step, a future refactor, a snapshot path leaking into
+#: production) would then pass with no revision check at all: a blind
+#: instrument. `"required"` (every live/profile-opted path) refuses when
+#: `.git` is absent; `"snapshot"` (test/fixture paths only, which are
+#: deliberately plain directories with no commit identity at all - see
+#: `_fixture_collection`'s own docstring) skips the revision half only
+#: because there is genuinely nothing of that kind to check.
+REVISION_CHECK_MODES = ("required", "snapshot")
+
+
+def verify_repo_matches_skills(acquired: AcquiredCollection, *, revision_check: str) -> None:
     """skillc#334: before using `acquired.repo` to build a profile's
     full-tree `Tree`, confirm it and the skills acquisition
     (`acquired.source`/`acquired.files`) still agree. Cheap today - both
@@ -447,13 +461,16 @@ def verify_repo_matches_skills(acquired: AcquiredCollection) -> None:
 
     Two checks, both refusals (`demo.SubjectRefused`):
 
-    1. SAME REVISION. `acquired.repo` is skipped (not refused) when it is
-       not a git checkout at all (snapshot/test mode, where there is no
-       commit identity to compare) - `(repo / '.git')` absent is read as
-       "nothing to check", never as a mismatch. When it IS a git checkout,
-       its resolved `HEAD` must equal the subject's own declared
-       `revision` - the pin `demo.acquire_subject_checkout` forced both
-       the skills acquisition and this checkout to.
+    1. SAME REVISION. `revision_check` must be one of `REVISION_CHECK_MODES`.
+       `"required"` refuses outright when `acquired.repo` has no `.git` -
+       a live attempt must always be able to prove its checkout's identity,
+       never silently skip the proof because the evidence happens to be
+       absent. `"snapshot"` skips this half only for the test/fixture paths
+       that are deliberately plain directories with no commit identity at
+       all. When a `.git` IS present (always, under `"required"`), its
+       resolved `HEAD` must equal the subject's own declared `revision` -
+       the pin `demo.acquire_subject_checkout` forced both the skills
+       acquisition and this checkout to.
     2. SAME SKILL BYTES. Every file `acquired.files` declares must be
        byte-identical, read directly from `acquired.repo` under the
        subject's `skills_root`, to the digest the skills acquisition
@@ -461,11 +478,21 @@ def verify_repo_matches_skills(acquired: AcquiredCollection) -> None:
        skills acquisition's own copy, since the whole point is to check
        the SECOND path independently.
     """
+    if revision_check not in REVISION_CHECK_MODES:
+        raise demo.SubjectRefused(
+            f"revision_check must be one of {REVISION_CHECK_MODES}, not {revision_check!r}"
+        )
     if acquired.repo is None:
         raise demo.SubjectRefused(
             "no full checkout available for this acquisition; a profile closure cannot be verified"
         )
-    if (acquired.repo / ".git").exists():
+    has_git = (acquired.repo / ".git").exists()
+    if revision_check == "required" and not has_git:
+        raise demo.SubjectRefused(
+            f"full checkout at {acquired.repo} has no .git directory; its revision cannot be proven, "
+            f"and revision_check='required' refuses rather than skipping the proof"
+        )
+    if has_git:
         resolved = materialize._git(acquired.repo, "rev-parse", "--verify", "--quiet", "HEAD")
         resolved_sha = resolved.stdout.decode().strip()
         if resolved.returncode != 0 or resolved_sha != acquired.subject.revision:
