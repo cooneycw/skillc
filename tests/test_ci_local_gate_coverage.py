@@ -16,13 +16,21 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
-CI_YML = ROOT / ".woodpecker" / "ci.yml"
+WOODPECKER_DIR = ROOT / ".woodpecker"
+CI_YML = WOODPECKER_DIR / "ci.yml"
 MAKEFILE = ROOT / "Makefile"
 
 #: Each CI step name -> the make target(s) that cover it locally. "gate" maps
 #: to four separate targets, not one, because AGENTS.md's `## Verify` lists
 #: `skillc selftest`, `pytest`, `ruff check` and `mypy` as four checks - this
 #: mapping did not invent that split, it names it.
+#:
+#: #309: docker-tests / docker-tests-control cover `.woodpecker/docker-tests.yml`,
+#: a SEPARATE file from ci.yml - this mapping, and the function below reading
+#: it, must glob every file under .woodpecker/, not just CI_YML, or a new
+#: pipeline file's steps would be invisible to this check entirely (the same
+#: class of gap #307 itself hit: a new step with no local coverage, just one
+#: level up - a new FILE rather than a new step in the existing one).
 CI_STEP_MAKE_TARGETS: dict[str, tuple[str, ...]] = {
     "gate": ("selftest", "test", "lint", "typecheck"),
     "negative-control": ("negative-control",),
@@ -32,12 +40,21 @@ CI_STEP_MAKE_TARGETS: dict[str, tuple[str, ...]] = {
     "changelog-check": ("changelog-check",),
     "readme-drift": ("readme-drift",),
     "git-tests-control": ("git-tests-control",),
+    "docker-tests": ("docker-tests",),
+    "docker-tests-control": ("docker-tests-control",),
 }
 
 
 def _ci_step_names(text: str) -> list[str]:
     config = yaml.safe_load(text)
     return [step["name"] for step in config["steps"]]
+
+
+def _all_workflow_step_names() -> list[str]:
+    names: list[str] = []
+    for path in sorted(WOODPECKER_DIR.glob("*.yml")):
+        names.extend(_ci_step_names(path.read_text(encoding="utf-8")))
+    return names
 
 
 def _unmapped_steps(step_names: list[str]) -> list[str]:
@@ -50,7 +67,7 @@ def _make_target_names() -> set[str]:
 
 
 def test_every_ci_step_maps_to_a_local_make_target() -> None:
-    steps = _ci_step_names(CI_YML.read_text(encoding="utf-8"))
+    steps = _all_workflow_step_names()
     unmapped = _unmapped_steps(steps)
     assert unmapped == [], (
         f"CI step(s) {unmapped} have no entry in CI_STEP_MAKE_TARGETS - add one "

@@ -19,7 +19,8 @@ SHELL := bash
 .SHELLFLAGS := -eu -o pipefail -c
 
 .PHONY: sync selftest test lint typecheck negative-control typecheck-control \
-	leak-check changelog-check readme-drift secret-scan git-tests-control verify
+	leak-check changelog-check readme-drift secret-scan git-tests-control \
+	docker-tests docker-tests-control verify
 
 sync:
 	uv sync --locked --extra dev
@@ -98,5 +99,23 @@ git-tests-control: test
 	python3 ci/check_git_tests_ran.py reports/pytest-report.xml
 	bash ci/git-tests-control.sh
 
+# #309: mirrors secret-scan's graceful-absence handling above - a dev
+# machine typically has no reachable docker daemon either, so this skips
+# loudly rather than failing on an environment it cannot control. The
+# dedicated agent (#315) always has one, so CI never takes this branch.
+docker-tests: sync
+	@if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then \
+		mkdir -p reports && uv run --no-sync pytest -rA --junit-xml=reports/docker-pytest-report.xml tests/test_decide_reply_channel_live.py; \
+	else \
+		echo "docker-tests: SKIPPED - no reachable docker daemon locally (CI's dedicated agent always has one)"; \
+	fi
+
+docker-tests-control: docker-tests
+	@if [ -f reports/docker-pytest-report.xml ]; then \
+		python3 ci/check_docker_tests_ran.py reports/docker-pytest-report.xml && bash ci/docker-tests-control.sh; \
+	else \
+		echo "docker-tests-control: SKIPPED - docker-tests produced no report (no local daemon)"; \
+	fi
+
 verify: selftest test lint typecheck negative-control typecheck-control leak-check \
-	changelog-check readme-drift secret-scan git-tests-control
+	changelog-check readme-drift secret-scan git-tests-control docker-tests docker-tests-control

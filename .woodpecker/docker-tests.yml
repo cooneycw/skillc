@@ -1,0 +1,55 @@
+# Real-Docker CI step (#309). Isolated dind, never the host socket - see
+# #309's design comments for the full reasoning. This file is deliberately
+# separate from ci.yml: it is the ONLY skillc workflow that requests
+# privileged capability, so it is the only one that needs to be
+# distinguishable by label, and keeping it apart means ci.yml's own
+# unlabelled ordinary steps are never at risk of inheriting it by accident.
+#
+# docker-ci is REQUESTED here; it is REQUIRED on the agent side as the
+# mandatory !docker-ci=yes filter (#315's install script) - a plain label on
+# this side would do nothing on its own, the agent's mandatory form is what
+# actually refuses every other agent. No host or pool label: routing to the
+# dedicated, skillc-only agent is also carried by the server-enforced repo
+# Filter (#315), not by anything declared here.
+when:
+  - event: push
+    branch: main
+  - event: pull_request
+
+labels:
+  docker-ci: "yes"
+
+services:
+  - name: dind
+    image: docker:27-dind
+    privileged: true
+    environment:
+      # No TLS cert directory, no host-mounted volume: this pipeline's
+      # private network is reachable only from this one run, never
+      # published to the host, so TLS between dind and the step below
+      # buys nothing here and would need trusted.volumes on top of
+      # trusted.security - a wider escalation than this design needs.
+      DOCKER_TLS_CERTDIR: ""
+
+steps:
+  - name: docker-tests
+    image: python:3.12-slim
+    depends_on: []
+    environment:
+      DOCKER_HOST: tcp://dind:2375
+    commands:
+      - apt-get update -qq && apt-get install -y -qq --no-install-recommends docker.io > /dev/null
+      - pip install uv
+      - uv sync --locked --extra dev
+      # Scoped to the docker-dependent files only (ci/check_docker_tests_ran.py's
+      # DOCKER_DEPENDENT_FILES) - ci.yml's own gate step already runs the
+      # whole suite; this step exists to give THESE tests a real daemon,
+      # not to re-run everything a second time.
+      - uv run --no-sync pytest -rA --junit-xml=docker-pytest-report.xml tests/test_decide_reply_channel_live.py
+
+  - name: docker-tests-control
+    image: python:3.12-slim
+    depends_on: [docker-tests]
+    commands:
+      - python3 ci/check_docker_tests_ran.py docker-pytest-report.xml
+      - bash ci/docker-tests-control.sh
