@@ -47,6 +47,12 @@ class _UnavailableBackend:
     ) -> b.ExecuteResult:
         raise AssertionError("must never be called: prepare() already refused")
 
+    def exec_in_attempt(
+        self, handle: object, argv: Sequence[str], limits: b.Limits,
+        cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,
+    ) -> b.ExecuteResult:
+        raise AssertionError("must never be called: prepare() already refused")
+
     def confirm_stopped(self, handle: object) -> b.Confirmation:
         raise AssertionError("must never be called: nothing was ever started")
 

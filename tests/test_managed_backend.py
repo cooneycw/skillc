@@ -105,6 +105,19 @@ def test_prepare_refuses_rather_than_falling_back_when_no_socket_is_configured()
         backend.prepare("a-absent")
 
 
+def test_exec_in_attempt_is_unconditionally_unsupported() -> None:
+    """#269: protocol version 1 carries no `exec_in_attempt` operation, so
+    this refuses without ever touching the socket - no stub server needed,
+    since no request is sent at all. The gate-execution witness reads this
+    `reason` as "the whole mechanism is unavailable for this attempt",
+    never retrying."""
+    backend = mb.ManagedBackend(socket_path=None)
+    handle = mb._Handle(attempt_id="a-unsupported", token="t")
+    result = backend.exec_in_attempt(handle, ["lint"], Limits(timeout=1.0))
+    assert result.reason == "unsupported"
+    assert result.exit_code is None
+
+
 def test_module_names_no_platform_and_docker_backend_does_not_import_it() -> None:
     """Platform-neutral by construction (#64 review): nothing under
     `skillc/` may name, import or assume any particular platform. The
