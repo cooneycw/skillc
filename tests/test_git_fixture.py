@@ -284,3 +284,15 @@ def test_unexpected_file_is_not_clean(setup: tuple[g.BuildResult, trial.Experime
     assert capture(setup)['untracked']['files']['extra']['status'] == 'violated'
     extra.unlink()
     assert capture(setup)['untracked']['status'] == 'satisfied'
+
+
+def test_no_remote_and_network_protocol_refused(setup: tuple[g.BuildResult, trial.Experiment, str]) -> None:
+    """#275 item 3: build() never adds a remote, and GIT_ALLOW_PROTOCOL=file in
+    the isolated environment refuses a network transport outright - not merely
+    "no remote happens to be configured", but "one could not reach GitHub even
+    if asked"."""
+    result = setup[0]
+    assert g._git(['remote'], result.repo).stdout == b''
+    with pytest.raises(subprocess.CalledProcessError) as excinfo:
+        g._git(['ls-remote', 'https://example.invalid/repo.git'], result.repo)
+    assert b"transport 'https' not allowed" in excinfo.value.stderr
