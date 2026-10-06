@@ -93,11 +93,14 @@ LIVE_TEST_IMAGE = os.environ.get("SKILLC_LIVE_TEST_IMAGE", "python:3.12-slim")
 BREAK_MODE = os.environ.get("SKILLC_LIVE_TEST_BREAK", "none")
 _VALID_BREAK_MODES = ("none", "omit-mount", "wrong-uid", "flip-decision")
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("docker") is None,
-    reason="no docker binary in this environment - this test needs a real Docker daemon; "
-           "see this module's own docstring for the recorded command that exercises all four modes",
-)
+pytestmark = [
+    pytest.mark.real_docker,
+    pytest.mark.skipif(
+        shutil.which("docker") is None,
+        reason="no docker binary in this environment - this test needs a real Docker daemon; "
+               "see this module's own docstring for the recorded command that exercises all four modes",
+    ),
+]
 
 if BREAK_MODE not in _VALID_BREAK_MODES:
     raise RuntimeError(f"SKILLC_LIVE_TEST_BREAK={BREAK_MODE!r} must be one of {_VALID_BREAK_MODES}")

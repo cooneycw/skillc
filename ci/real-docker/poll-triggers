@@ -1,0 +1,91 @@
+#!/bin/bash
+# The systemd timer's entrypoint (#315, R5: every 5 minutes). Decides WHICH
+# sha(s), if any, this tick should run, then invokes run-real-docker once
+# per decided sha, sequentially, under the same lock run-real-docker itself
+# holds (so two decided shas in one tick never overlap in time, but both
+# still run rather than one being skipped because the other held the lock).
+#
+# Two trigger sources only (R4's framing, restated): new commits on main
+# (never arbitrary PR code - main already passed ordinary review and CI),
+# and an explicit owner-authorized SHA request via a `/run-real-docker
+# <sha>` comment, authorship verified against the API's own user.login,
+# never the comment text (ci/real_docker_trigger.py). Both paths always run
+# with --break none - break-mode runs are a by-hand-only operator action
+# (R2), never reachable through this automated path.
+set -euo pipefail
+
+CONFIG_FILE="${SKILLC_REAL_DOCKER_CONFIG:-/etc/skillc-real-docker/config.env}"
+[ -f "$CONFIG_FILE" ] || { echo "poll-triggers: config file '$CONFIG_FILE' is absent" >&2; exit 2; }
+# shellcheck disable=SC1090
+source "$CONFIG_FILE"
+for var in INSTALLED_ROOT GITHUB_REPO GITHUB_TOKEN_FILE STATE_FILE; do
+    if [ -z "${!var:-}" ]; then
+        echo "poll-triggers: config file is missing required variable '$var'" >&2
+        exit 2
+    fi
+done
+
+GITHUB_TOKEN="$(cat "$GITHUB_TOKEN_FILE")"
+RUNNER="$INSTALLED_ROOT/ci/real-docker/run-real-docker"
+
+[ -f "$STATE_FILE" ] || echo '{"last_main_sha": null, "processed_comment_ids": []}' > "$STATE_FILE"
+
+gh_get() {
+    curl -s -H "Authorization: token $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" "$1"
+}
+
+# ------------------------------------------------------------- decide what to run
+
+TO_RUN=()  # shas to run this tick, in order
+
+CURRENT_MAIN_SHA="$(gh_get "https://api.github.com/repos/$GITHUB_REPO/commits/main" | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])')"
+LAST_MAIN_SHA="$(python3 -c 'import json; print(json.load(open("'"$STATE_FILE"'")).get("last_main_sha") or "")')"
+if [ "$CURRENT_MAIN_SHA" != "$LAST_MAIN_SHA" ]; then
+    TO_RUN+=("$CURRENT_MAIN_SHA")
+fi
+
+OWNER_LOGIN="$(gh_get "https://api.github.com/repos/$GITHUB_REPO" | python3 -c 'import json,sys; print(json.load(sys.stdin)["owner"]["login"])')"
+COMMENTS_JSON="$(gh_get "https://api.github.com/repos/$GITHUB_REPO/issues/comments?per_page=100")"
+
+SELECTION_OUTPUT="$(PYTHONPATH="$INSTALLED_ROOT" python3 -c '
+import json, sys
+from ci.real_docker_trigger import select_requested_shas
+
+comments = json.loads(sys.argv[1])
+owner_login = sys.argv[2]
+state = json.load(open(sys.argv[3]))
+processed = frozenset(state.get("processed_comment_ids", []))
+
+result = select_requested_shas(comments, owner_login=owner_login, processed_ids=processed)
+print(json.dumps({
+    "requests": list(result.requests),
+    "newly_seen_ids": list(result.newly_seen_ids),
+}))
+' "$COMMENTS_JSON" "$OWNER_LOGIN" "$STATE_FILE")"
+
+REQUESTED_SHAS="$(echo "$SELECTION_OUTPUT" | python3 -c 'import json,sys; print("\n".join(sha for _cid, sha in json.load(sys.stdin)["requests"]))')"
+while IFS= read -r requested_sha; do
+    [ -n "$requested_sha" ] && TO_RUN+=("$requested_sha")
+done <<< "$REQUESTED_SHAS"
+
+# ------------------------------------------------------------- persist state
+
+python3 -c '
+import json, sys
+state_path, main_sha, selection_json = sys.argv[1], sys.argv[2], sys.argv[3]
+state = json.load(open(state_path))
+selection = json.loads(selection_json)
+state["last_main_sha"] = main_sha
+existing = set(state.get("processed_comment_ids", []))
+existing.update(selection["newly_seen_ids"])
+state["processed_comment_ids"] = sorted(existing)
+json.dump(state, open(state_path, "w"))
+' "$STATE_FILE" "$CURRENT_MAIN_SHA" "$SELECTION_OUTPUT"
+
+# ------------------------------------------------------------- run, sequentially
+
+for sha in "${TO_RUN[@]:-}"; do
+    [ -n "$sha" ] || continue
+    echo "poll-triggers: running $sha"
+    "$RUNNER" "$sha" || echo "poll-triggers: run-real-docker exited non-zero for $sha (expected on a failing/error verdict)"
+done

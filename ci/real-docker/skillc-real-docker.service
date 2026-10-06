@@ -1,0 +1,21 @@
+# System-level unit (#315, R5 - decided, not deferred: system-level units
+# with User= set to the dedicated non-login user in the docker group, so no
+# lingering/user-session state is needed). Install at
+# /etc/systemd/system/skillc-real-docker.service on <agent-host>.
+#
+# Runs ci/real-docker/poll-triggers from the INSTALLED copy (R1) - never
+# from a checkout. Substitute <dedicated-user> for the operator's actual
+# non-login user in the docker group.
+[Unit]
+Description=skillc real-Docker runner: poll for a trigger and run if one fired
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=<dedicated-user>
+Environment=SKILLC_REAL_DOCKER_CONFIG=/etc/skillc-real-docker/config.env
+ExecStart=/opt/skillc-real-docker-runner/ci/real-docker/poll-triggers
+# No restart: a failed tick is reported by poll-triggers itself (a status
+# or comment, or just a non-zero exit logged by systemd); the next timer
+# fire tries again in 5 minutes rather than retrying immediately.

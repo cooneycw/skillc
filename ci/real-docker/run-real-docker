@@ -1,0 +1,198 @@
+#!/bin/bash
+# The <agent-host> real-Docker runner (#315). Invoked either by hand
+# (`run-real-docker <sha>` or `run-real-docker <sha> --break <mode>`) or by
+# poll-triggers from the systemd timer, with an empty --break (meaning
+# "none" - the normal, certifying run).
+#
+# R1 (load-bearing): this script, and the ci/*.py modules it calls, run from
+# an INSTALLED copy pinned to a reviewed main SHA - never from the checkout
+# under test. Updating the runner is an explicit operator step
+# (config/reinstall.sh below), never implicit at each tick. The checkout
+# supplies ONLY the test files pytest collects; it is never on PYTHONPATH
+# for the verdict/summary/posting step.
+#
+# Entrypoint lives OUTSIDE .woodpecker/ on purpose (#309 review): that
+# directory is auto-discovered WHOLESALE by the main Woodpecker server's
+# default per-repo config, so nothing with privileged-container semantics
+# may live there even unreferenced by any pipeline file.
+set -euo pipefail
+
+usage() {
+    echo "usage: run-real-docker <sha> [--break none|omit-mount|wrong-uid|flip-decision]" >&2
+    exit 2
+}
+
+[ $# -ge 1 ] || usage
+SHA="$1"; shift
+BREAK_MODE="none"
+if [ $# -gt 0 ]; then
+    [ "$1" = "--break" ] || usage
+    [ $# -ge 2 ] || usage
+    BREAK_MODE="$2"
+fi
+case "$BREAK_MODE" in
+    none|omit-mount|wrong-uid|flip-decision) ;;
+    *) echo "run-real-docker: --break must be none|omit-mount|wrong-uid|flip-decision, not '$BREAK_MODE'" >&2; exit 2 ;;
+esac
+
+# VM-local configuration - never committed, never defaulted to a real path.
+# See ci/real-docker/README.md "Setup" for how the operator populates this.
+CONFIG_FILE="${SKILLC_REAL_DOCKER_CONFIG:-/etc/skillc-real-docker/config.env}"
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "run-real-docker: config file '$CONFIG_FILE' is absent - see ci/real-docker/README.md" >&2
+    exit 2
+fi
+# shellcheck disable=SC1090
+source "$CONFIG_FILE"
+# Required: INSTALLED_ROOT, WORK_CHECKOUT, LOCK_FILE, GITHUB_TOKEN_FILE,
+# GITHUB_REPO (owner/name), PREFLIGHT_IMAGE. LAN_PROBE_TARGET is NOT in this
+# list on purpose - an empty LAN_PROBE_TARGET is a real, distinct input to
+# the isolation classifier below ("unconfigured"), not a reason to refuse
+# before even reaching it; refusing it here would make that case
+# unreachable through this script, the opposite of R6's intent.
+for var in INSTALLED_ROOT WORK_CHECKOUT LOCK_FILE GITHUB_TOKEN_FILE GITHUB_REPO PREFLIGHT_IMAGE; do
+    if [ -z "${!var:-}" ]; then
+        echo "run-real-docker: config file is missing required variable '$var'" >&2
+        exit 2
+    fi
+done
+
+RUNNER_SHA="$(git -C "$INSTALLED_ROOT" rev-parse HEAD)"
+GITHUB_TOKEN="$(cat "$GITHUB_TOKEN_FILE")"
+
+# ---------------------------------------------------------------- posting
+
+post_status() {
+    local state="$1" description="$2" context="$3"
+    curl -s -X POST \
+        -H "Authorization: token $GITHUB_TOKEN" \
+        -H "Accept: application/vnd.github+json" \
+        "https://api.github.com/repos/$GITHUB_REPO/statuses/$SHA" \
+        -d "$(python3 -c 'import json,sys; print(json.dumps({"state": sys.argv[1], "description": sys.argv[2], "context": sys.argv[3]}))' \
+              "$state" "$description" "$context")" \
+        >/dev/null
+}
+
+post_comment() {
+    local body="$1" target_issue="$2"
+    curl -s -X POST \
+        -H "Authorization: token $GITHUB_TOKEN" \
+        -H "Accept: application/vnd.github+json" \
+        "https://api.github.com/repos/$GITHUB_REPO/issues/$target_issue/comments" \
+        -d "$(python3 -c 'import json,sys; print(json.dumps({"body": sys.argv[1]}))' "$body")" \
+        >/dev/null
+}
+
+refuse_before_checkout() {
+    local reason="$1"
+    local context="skillc/real-docker"
+    [ "$BREAK_MODE" != "none" ] && context="skillc/real-docker-control"
+    echo "run-real-docker: ERROR: $reason" >&2
+    post_status "error" "ERROR: $reason (runner ${RUNNER_SHA:0:12})" "$context"
+}
+
+# -------------------------------------------------------- one run at a time
+
+exec 9>"$LOCK_FILE"
+flock -n 9 || { echo "run-real-docker: another run holds the lock, exiting" >&2; exit 1; }
+
+# ----------------------------------------------------- R6: isolation preflight
+
+LAN_PROBE_TARGET="${LAN_PROBE_TARGET:-}"
+if [ -z "$LAN_PROBE_TARGET" ]; then
+    LAN_PROBE_RESULT="unreachable"  # irrelevant - classify() below refuses on "unconfigured" regardless
+else
+    LAN_PROBE_RESULT="$(docker run --rm "$PREFLIGHT_IMAGE" sh -c \
+        "wget -q -T 3 -O /dev/null http://$LAN_PROBE_TARGET/ 2>/dev/null && echo reachable || echo unreachable" \
+        2>/dev/null || echo unreachable)"
+fi
+GITHUB_PROBE_RESULT="$(docker run --rm "$PREFLIGHT_IMAGE" sh -c \
+    "wget -q -T 5 -O /dev/null https://github.com/ 2>/dev/null && echo reachable || echo unreachable" \
+    2>/dev/null || echo unreachable)"
+
+ISOLATION_VERDICT="$(PYTHONPATH="$INSTALLED_ROOT" python3 -c '
+import sys
+from ci.real_docker_isolation import classify
+result = classify(
+    lan_reachable=(sys.argv[1] == "reachable"),
+    lan_configured=bool(sys.argv[2]),
+    github_reachable=(sys.argv[3] == "reachable"),
+)
+print(result.status)
+print(result.reason)
+' "$LAN_PROBE_RESULT" "${LAN_PROBE_TARGET:-}" "$GITHUB_PROBE_RESULT")"
+ISOLATION_STATUS="$(echo "$ISOLATION_VERDICT" | sed -n '1p')"
+ISOLATION_REASON="$(echo "$ISOLATION_VERDICT" | sed -n '2p')"
+
+if [ "$ISOLATION_STATUS" != "PROCEED" ]; then
+    refuse_before_checkout "isolation not verified: $ISOLATION_REASON"
+    exit 1
+fi
+
+# ------------------------------------------------------------- checkout
+
+if [ ! -d "$WORK_CHECKOUT/.git" ]; then
+    git clone --quiet "https://github.com/$GITHUB_REPO.git" "$WORK_CHECKOUT"
+fi
+git -C "$WORK_CHECKOUT" fetch --quiet origin
+if ! git -C "$WORK_CHECKOUT" checkout --quiet --detach "$SHA"; then
+    refuse_before_checkout "could not check out requested sha '$SHA'"
+    exit 1
+fi
+git -C "$WORK_CHECKOUT" clean -ffdx --quiet
+
+ACTUAL_HEAD="$(git -C "$WORK_CHECKOUT" rev-parse HEAD)"
+if [ "$ACTUAL_HEAD" != "$SHA" ]; then
+    refuse_before_checkout "checkout HEAD ($ACTUAL_HEAD) did not match the requested sha ($SHA)"
+    exit 1
+fi
+
+# ------------------------------------------------------------- run pytest
+
+REPORT_PATH="$WORK_CHECKOUT/reports/real-docker-report.xml"
+mkdir -p "$(dirname "$REPORT_PATH")"
+(
+    cd "$WORK_CHECKOUT"
+    uv sync --locked --extra dev --quiet
+    SKILLC_LIVE_TEST_BREAK="$BREAK_MODE" uv run --no-sync pytest -m real_docker \
+        --junit-xml="$REPORT_PATH" || true  # a test failure is EXPECTED input to the verdict step below
+)
+
+# ----------------------------------------------------- R1: compute + post
+
+cd "$INSTALLED_ROOT"  # never the checkout, for the posting step below
+POST_OUTPUT="$(PYTHONPATH="$INSTALLED_ROOT" python3 "$INSTALLED_ROOT/ci/real_docker_post.py" \
+    "$REPORT_PATH" "$SHA" "$RUNNER_SHA")"
+POSTED_STATUS="$(echo "$POST_OUTPUT" | sed -n '1p')"
+DESCRIPTION="$(echo "$POST_OUTPUT" | sed -n '2p')"
+BODY="$(echo "$POST_OUTPUT" | sed -n '/^---$/,$p' | tail -n +2)"
+
+GH_STATE="success"
+[ "$POSTED_STATUS" = "FAILURE" ] && GH_STATE="failure"
+[ "$POSTED_STATUS" = "ERROR" ] && GH_STATE="error"
+
+if [ "$BREAK_MODE" = "none" ]; then
+    post_status "$GH_STATE" "$DESCRIPTION" "skillc/real-docker"
+else
+    # R2: a break-mode run NEVER posts to the certifying context - control
+    # context only, explicitly labelled expected-red.
+    post_status "$GH_STATE" "EXPECTED-RED ($BREAK_MODE): $DESCRIPTION" "skillc/real-docker-control"
+fi
+
+if [ -n "${GITHUB_COMMENT_ISSUE:-}" ]; then
+    PREFIX=""
+    [ "$BREAK_MODE" != "none" ] && PREFIX="**EXPECTED-RED (break mode: $BREAK_MODE)**\n\n"
+    post_comment "$(printf '%b%s' "$PREFIX" "$BODY")" "$GITHUB_COMMENT_ISSUE"
+fi
+
+# ------------------------------------------------------------- cleanup
+
+docker container prune -f >/dev/null 2>&1 || true
+docker image prune -f >/dev/null 2>&1 || true
+
+echo "run-real-docker: $POSTED_STATUS (break=$BREAK_MODE, sha=${SHA:0:12}, runner=${RUNNER_SHA:0:12})"
+case "$POSTED_STATUS" in
+    SUCCESS) exit 0 ;;
+    FAILURE) exit 1 ;;
+    *) exit 2 ;;
+esac
