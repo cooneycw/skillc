@@ -82,6 +82,7 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from . import checks, records
+from . import convenience as conv
 from . import reliability as rel
 
 OUTCOMES = ("PASS", "FAIL", "NOT_RUN", "UNAVAILABLE", "UNKNOWN")
@@ -206,6 +207,73 @@ class RowReliability:
 
 
 @dataclass(frozen=True)
+class AggregatedPhaseInterval:
+    """One (from_event, to_event) transition, summed over every attempt in
+    the row that reported it. `attempts` is the contributor count, kept
+    beside the sum so a reader never mistakes a total over many attempts
+    for a total over one."""
+
+    from_event: str
+    to_event: str
+    seconds: float
+    attempts: int
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "from_event": self.from_event,
+            "to_event": self.to_event,
+            "seconds": self.seconds,
+            "attempts": self.attempts,
+        }
+
+
+def _phase_interval_dict(interval: conv.PhaseInterval) -> dict[str, object]:
+    return {"from_event": interval.from_event, "to_event": interval.to_event, "seconds": interval.seconds}
+
+
+@dataclass(frozen=True)
+class RowConvenience:
+    """protocol.md 10.6 proxies (#273's `convenience.py`), rolled up to row
+    level (item 4's "convenience summaries ... into applicable per-skill
+    reports"). `phase_wall_times` is the row-level aggregate - see
+    `_aggregate_phase_wall_times` for why it is `conv.UNKNOWN`, never an
+    empty tuple, when no attempt in the row contributed a transition. Each
+    attempt's own breakdown stays available by reference in `per_attempt`,
+    keyed by the same attempt ids `CoverageRow.evidence` already names,
+    rather than duplicated as a second copy of the row's identity.
+    `instruction_length`/`clarification_correction_turns`/`approvals`/
+    `tokens` are #273's own `NOT_CAPTURED`/`UNKNOWN` sentinels, passed
+    through unchanged - there is no per-attempt data to aggregate for any
+    of them, so a row-level computation would only be able to repeat the
+    same sentinel convenience.py already reports per attempt."""
+
+    phase_wall_times: tuple[AggregatedPhaseInterval, ...] | str
+    per_attempt: Mapping[str, tuple[conv.PhaseInterval, ...]]
+    instruction_length: str
+    clarification_correction_turns: str
+    approvals: str
+    tokens: str
+
+    def to_dict(self) -> dict[str, object]:
+        phase_wall_times = (
+            self.phase_wall_times
+            if isinstance(self.phase_wall_times, str)
+            else [p.to_dict() for p in self.phase_wall_times]
+        )
+        return {
+            "phase_wall_times": phase_wall_times,
+            "per_attempt": {
+                attempt_id: [_phase_interval_dict(iv) for iv in breakdown]
+                for attempt_id, breakdown in self.per_attempt.items()
+            },
+            "instruction_length": self.instruction_length,
+            "clarification_correction_turns": self.clarification_correction_turns,
+            "approvals": self.approvals,
+            "tokens": self.tokens,
+        }
+
+
+@dataclass(frozen=True)
 class CoverageRow:
     key: RowKey
     scheduled: int
@@ -219,6 +287,7 @@ class CoverageRow:
     lineage: str | None
     parent_path: str | None
     reliability: RowReliability
+    convenience: RowConvenience
     evidence: tuple[str, ...]  # attempt ids backing this row, sorted
 
     def to_dict(self) -> dict[str, object]:
@@ -240,6 +309,7 @@ class CoverageRow:
             "lineage": self.lineage,
             "parent_path": self.parent_path,
             "reliability": self.reliability.to_dict(),
+            "convenience": self.convenience.to_dict(),
             "evidence": list(self.evidence),
         }
 
@@ -418,6 +488,72 @@ def _attempt_outcome(
         return "UNKNOWN"  # captured, grading still owed
     status = graded[0].data.get("status")
     return status if status in ("PASS", "FAIL") else "UNKNOWN"
+
+
+def _attempt_phase_wall_times(
+    attempt_id: str, lifecycles: Mapping[str, records.Record]
+) -> tuple[conv.PhaseInterval, ...]:
+    """One attempt's own phase-transition breakdown, read from its
+    attempt-lifecycle record's own `events` list.
+
+    A validated bundle guarantees a lifecycle record exists for every
+    planned attempt (`attempt_accounting`) and that its `events` list is
+    non-empty, vocabulary-bound and starts at `planned`
+    (`records.attempt_lifecycle`) - so this function asserts that
+    precondition rather than branching on it as a legitimate state. What
+    nothing upstream checks is that each event's `at` is a PARSEABLE,
+    chronologically ordered timestamp - `records.attempt_lifecycle` only
+    requires a non-empty string. `conv.phase_wall_times` refuses on either
+    gap, and that refusal is left to propagate as `CoverageRefused` (the
+    same refuse-before-reporting discipline as `_refuse_on_invalid_bundle`)
+    rather than silently producing a wrong duration.
+
+    An attempt whose lifecycle has only its `planned` event (a legitimate
+    disposition, e.g. `not-run`/`never-started`) returns an EMPTY tuple -
+    zero transitions observed, not an error.
+    """
+    lifecycle = lifecycles.get(attempt_id)
+    if lifecycle is None:
+        raise _refuse(
+            f"attempt {attempt_id!r} has no attempt-lifecycle record; a validated "
+            f"bundle's attempt_accounting rule should already have refused this"
+        )
+    events_raw = lifecycle.data.get("events")
+    events = tuple(
+        conv.LifecycleEvent(event=str(e.get("event")), at=str(e.get("at")))
+        for e in (events_raw if isinstance(events_raw, list) else [])
+        if isinstance(e, dict)
+    )
+    try:
+        return conv.phase_wall_times(events)
+    except conv.ConvenienceRefused as exc:
+        raise _refuse(f"attempt {attempt_id!r}: {exc}") from exc
+
+
+def _aggregate_phase_wall_times(
+    per_attempt: Mapping[str, tuple[conv.PhaseInterval, ...]],
+) -> tuple[AggregatedPhaseInterval, ...] | str:
+    """Row-level roll-up of every attempt's own breakdown, by (from_event,
+    to_event): seconds summed, attempt count kept alongside.
+
+    `conv.UNKNOWN` - never an empty tuple - when NOT ONE attempt in the row
+    contributed an actual transition. An attempt whose own lifecycle has
+    only a single `planned` event contributes an empty breakdown
+    (`_attempt_phase_wall_times`); if every attempt in the row does, the
+    row has observed zero PHASES, not zero SECONDS, and an empty tuple here
+    would read as the latter - indistinguishable from a row where every
+    transition really did take no time.
+    """
+    totals: dict[tuple[str, str], list[float]] = {}
+    for breakdown in per_attempt.values():
+        for interval in breakdown:
+            totals.setdefault((interval.from_event, interval.to_event), []).append(interval.seconds)
+    if not totals:
+        return conv.UNKNOWN
+    return tuple(
+        AggregatedPhaseInterval(from_event=pair[0], to_event=pair[1], seconds=sum(secs), attempts=len(secs))
+        for pair, secs in sorted(totals.items())
+    )
 
 
 def _cell_pass_evaluable(
@@ -659,10 +795,12 @@ def _build_row(
     versions: set[str] = set()
     evidence_ids: list[str] = []
     lineages: set[tuple[str, str | None]] = set()
+    per_attempt_phase_wall_times: dict[str, tuple[conv.PhaseInterval, ...]] = {}
 
     for attempt_id in attempt_ids:
         outcome = _attempt_outcome(attempt_id, lifecycles, results)
         outcomes[outcome] += 1
+        per_attempt_phase_wall_times[attempt_id] = _attempt_phase_wall_times(attempt_id, lifecycles)
         if _transcript_missing(attempt_id, manifests):
             coverage_flags["missing-transcript"] += 1
 
@@ -745,6 +883,14 @@ def _build_row(
         clopper_pearson_lower=cp_lower, clopper_pearson_upper=cp_upper,
         wilson_score_lower=ws_lower, wilson_score_upper=ws_upper,
     )
+    convenience = RowConvenience(
+        phase_wall_times=_aggregate_phase_wall_times(per_attempt_phase_wall_times),
+        per_attempt=per_attempt_phase_wall_times,
+        instruction_length=conv.NOT_CAPTURED,
+        clarification_correction_turns=conv.NOT_CAPTURED,
+        approvals=conv.NOT_CAPTURED,
+        tokens=conv.UNKNOWN,
+    )
     key = RowKey(
         skill_path=skill_path,
         skill_version=skill_version,
@@ -766,5 +912,6 @@ def _build_row(
         lineage=resolved_lineage,
         parent_path=resolved_parent,
         reliability=reliability,
+        convenience=convenience,
         evidence=tuple(sorted(set(evidence_ids))),
     )

@@ -32,6 +32,32 @@ and version plan.
   - The two-arm study (`published` + `rewritten`, with its Fisher test) is
     unchanged.
 
+- **Row-level convenience: `phase_wall_times` aggregated over a row's
+  attempts** (Refs #272 acceptance item 4, #273). `CoverageRow.convenience`
+  (`RowConvenience`) rolls up #273's `convenience.py` per-attempt proxies to
+  row level: `phase_wall_times` sums seconds per (from_event, to_event)
+  transition across every attempt in the row, with the contributing attempt
+  count kept alongside each sum. Each attempt's own breakdown stays
+  available by reference in `per_attempt`, keyed by the same attempt ids
+  `CoverageRow.evidence` already names, rather than duplicated. The three
+  `NOT_CAPTURED` proxies and the `UNKNOWN` tokens proxy pass through
+  unchanged - there is no per-attempt data for any of them to aggregate.
+  `conv.UNKNOWN` (never an empty tuple) when not one attempt in the row
+  contributed an actual transition - an attempt whose lifecycle has only
+  its `planned` event (a legitimate `not-run`/`never-started` disposition)
+  contributes zero transitions, and if every attempt in the row does, the
+  row has observed zero PHASES, not zero SECONDS; an empty tuple would read
+  as the latter. `records.attempt_lifecycle` only requires each event's
+  `at` to be a non-empty string, not a parseable or chronologically-ordered
+  timestamp - new plumbing coverage.py owns itself, so an unparseable or
+  out-of-order timestamp refuses the whole report (`CoverageRefused`)
+  rather than silently producing a wrong duration, the same
+  refuse-before-reporting discipline as `_refuse_on_invalid_bundle`. 3 new
+  tests (hand-computed aggregate across two attempts, the all-missing-events
+  UNKNOWN case, the unparseable-timestamp refusal) plus 2 mutation checks
+  (disabling the UNKNOWN guard on an all-empty row; swallowing the
+  unparseable-timestamp refusal), both net-diff-empty after restoration.
+
 - **Row-level reliability: `clopper_pearson`/`wilson_score` always computed,
   `all_k`/`pass_at_k` gated on a declared `k`** (Refs #272 acceptance item
   4, #273). `assemble_coverage_report()` gains optional `k: int | None` and

@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
+from skillc import convenience as conv
 from skillc import coverage as cov
 from skillc import records
 from skillc import reliability as rel
@@ -736,3 +738,107 @@ def test_reliability_zero_evaluable_is_insufficient_not_a_crash() -> None:
     assert zero_row.reliability.clopper_pearson_lower == rel.INSUFFICIENT
     assert zero_row.reliability.clopper_pearson_upper == rel.INSUFFICIENT
     assert zero_row.reliability.wilson_score_lower == rel.INSUFFICIENT
+
+
+# --------------------------------------------------------------- convenience wiring (#273)
+
+def test_convenience_phase_wall_times_hand_computed_across_attempts() -> None:
+    """`skill-evidence-duplicate-invocation`'s two attempts each have an
+    identical 1.0s-per-transition lifecycle (planned->...->cleaned, 6
+    transitions) - the row-level aggregate must sum to 2.0s per transition
+    with attempts=2, and each attempt's own 1.0s breakdown stays retrievable
+    by reference."""
+    bundle = _bundle(CONTROLS / "ledger-binding/good/skill-evidence-duplicate-invocation")
+    report = cov.assemble_coverage_report(bundle, _inventory())
+    row = report.rows[0]
+    phase_wall_times = row.convenience.phase_wall_times
+    assert not isinstance(phase_wall_times, str)
+    by_pair = {(p.from_event, p.to_event): p for p in phase_wall_times}
+    assert len(by_pair) == 6
+    for pair, interval in by_pair.items():
+        assert interval.seconds == pytest.approx(2.0), pair
+        assert interval.attempts == 2
+    assert set(row.convenience.per_attempt.keys()) == {"att-1", "att-2"}
+    for attempt_id in ("att-1", "att-2"):
+        breakdown = row.convenience.per_attempt[attempt_id]
+        assert len(breakdown) == 6
+        for phase_interval in breakdown:
+            assert phase_interval.seconds == pytest.approx(1.0)
+    assert row.convenience.instruction_length == conv.NOT_CAPTURED
+    assert row.convenience.clarification_correction_turns == conv.NOT_CAPTURED
+    assert row.convenience.approvals == conv.NOT_CAPTURED
+    assert row.convenience.tokens == conv.UNKNOWN
+
+
+def test_convenience_missing_events_reports_unknown_never_zero() -> None:
+    """An attempt whose lifecycle has only its `planned` event (a
+    legitimate `not-run`/`never-started` disposition) contributes zero
+    transitions. When it is the row's ONLY attempt, the row-level aggregate
+    must be `conv.UNKNOWN` - an empty tuple here would read as "every
+    transition took no time", not as "nothing was observed"."""
+    ledger = records.Record(path=Path("ledger.json"), data={
+        "version": 2, "kind": "trial-ledger", "producer": "controller", "experiment_id": "exp-1",
+        "trials": [{
+            "trial_id": "t-1", "case": {"id": "c", "revision": "r1"},
+            "grader": {"id": "g", "revision": "g1"}, "subject": {"digest": "sha256:5a"},
+            "client": {"name": "codex", "version": "1.0"}, "image": {"digest": "sha256:1a"},
+            "config": {"digest": "sha256:cf"}, "attempts": [{"attempt_id": "att-1"}],
+        }],
+    })
+    lifecycle = records.Record(path=Path("lifecycle.json"), data={
+        "version": 2, "kind": "attempt-lifecycle", "producer": "controller",
+        "attempt_id": "att-1", "trial_id": "t-1", "disposition": "not-run",
+        "reason": "never-started",
+        "stop": {"reason": "never-started", "confirmed": True},
+        "events": [{"event": "planned", "at": "2026-09-26T12:00:00Z"}],
+        "cleanup": {"status": "not-needed", "failures": []},
+    })
+    receipt = records.Record(path=Path("receipt.json"), data={
+        "version": 2, "kind": "installation-receipt", "producer": "subject-adapter",
+        "checked_by": "controller", "attempt_id": "att-1", "trial_id": "t-1",
+        "subject": {"locator": "x", "revision": "r", "digest": "sha256:5a"},
+        "surface": "codex-skills", "adapter": {"name": "a", "version": "1"},
+        "client": {"name": "codex", "version": "1.0"}, "layers": [], "dependencies": [],
+        "allowed_writes": [], "installed": [{"path": SKILL_PATH, "digest": "sha256:v1"}],
+        "readiness": {"discovery_canary": "SATISFIED", "baseline_absence": "SATISFIED"},
+    })
+    evidence = records.Record(path=Path("evidence.json"), data={
+        "version": 2, "kind": "skill-evidence", "producer": "assembler",
+        "attempt_id": "att-1", "trial_id": "t-1",
+        "skills": [{
+            "skill": {"path": SKILL_PATH}, "invocation": {"lineage": "root"},
+            "lifecycle": {
+                "listed": {"status": "UNKNOWN", "reason": "x"},
+                "read_observed": {"status": "UNKNOWN", "reason": "x"},
+                "execution_observed": {"status": "UNKNOWN", "reason": "x"},
+            },
+            "criteria_owned": [], "external_evidence": {"present": False, "reconciliation": "absent"},
+        }],
+    })
+    bundle = records.Bundle(path=Path("."), records=[ledger, lifecycle, receipt, evidence])
+    report = cov.assemble_coverage_report(bundle)
+    row = report.rows[0]
+    assert row.convenience.phase_wall_times == conv.UNKNOWN
+    assert row.convenience.per_attempt["att-1"] == ()
+
+
+def test_convenience_unparseable_timestamp_refuses_rather_than_guesses() -> None:
+    """`records.attempt_lifecycle` only requires a non-empty string `at` -
+    not that it is parseable. That gap is new plumbing coverage.py owns
+    itself, and the same refuse-before-reporting discipline applies: an
+    unparseable timestamp must refuse the report, never silently produce a
+    wrong duration."""
+    bundle = _bundle(CONTROLS / "ledger-binding/good/skill-evidence-duplicate-invocation")
+    mutated = []
+    for record in bundle.records:
+        if record.kind == "attempt-lifecycle" and record.attempt_id == "att-1":
+            data = dict(record.data)
+            events = [dict(e) for e in cast("list[dict[str, Any]]", data["events"])]
+            events[1] = {**events[1], "at": "not-a-timestamp"}
+            data["events"] = events
+            mutated.append(records.Record(path=record.path, data=data))
+        else:
+            mutated.append(record)
+    bad_bundle = records.Bundle(path=bundle.path, records=mutated)
+    with pytest.raises(cov.CoverageRefused):
+        cov.assemble_coverage_report(bad_bundle, _inventory())
