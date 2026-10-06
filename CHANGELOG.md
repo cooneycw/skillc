@@ -89,6 +89,25 @@ and version plan.
     properly; deferred as out of scope for this PR and recorded in the
     Nit Store (cooneycw/skillc#20, comment 6025027183).
 
+- **New Level 3 task `verify-stops-early`: `gate-stops-early`'s
+  structurally distinct held-out variant** (Refs #270 acceptance item 2).
+  Same three certified criteria and the same restore-and-rerun grader
+  shape, against a deliberately different bug domain
+  (`textkit.dedupe.dedupe_adjacent`, which unconditionally drops its last
+  element, rather than `rangekit.windows.sliding_window`'s "too few
+  windows") and a different Makefile layout (`verify:` as the aggregate
+  target, listing `typecheck lint test` in that order, rather than
+  `check: lint test typecheck`). Re-proved rather than assumed that the
+  real CPP runner's skip/aggregate mechanism is keyed on plan step ids
+  and Makefile structure, never the aggregate's name or prerequisite
+  order: `discrimination/fixture/` (typecheck absent) captures the
+  identical `FLOW_FINISH_GATE: warn (skipped gates: typecheck)`/exit 3
+  signature `gate-stops-early`'s own proof found, and the full-Makefile
+  `fixture/` captures a clean `FLOW_FINISH_GATE: ok`. `QUALIFY: ok` -
+  grader certified, 5 broken graders refused, 4 restore-probe validity
+  controls held, mirroring `gate-stops-early`'s own result exactly.
+  `flow-check-honest` stays undeclared here too, for the identical reason.
+
 - **New Level 3 task `gate-stops-early`: certified for three of its four
   criteria** (Refs #270). A rangekit-derived fixture (a
   `sliding_window` off-by-one bug) whose Makefile declares `lint:`/
