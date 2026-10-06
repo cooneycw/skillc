@@ -1501,6 +1501,46 @@ class DockerBackend:
 
         Intended to be called ONCE per handle, mirroring interfaces.md's
         per-attempt step numbering (5 "Execute", then 6 "Stop and confirm").
+        A SECOND call against a handle this method already stopped is
+        REFUSED, not retried: `reason="attempt-not-running", exit_code=None`
+        (#304 - this used to fall through to a real `docker exec`, which the
+        daemon rejects, and the rejection's own nonzero exit read as an
+        ordinary `reason="exited"` - fabricating an execution that never
+        touched the container). The check is a fresh `_inspect()` at entry,
+        refusing only on a CONFIRMED non-running status - unlike
+        `exec_in_attempt()`'s otherwise-identical guard, an UNREACHABLE
+        inspect (daemon down, binary missing) falls through to the real
+        attempt instead of refusing, because this method's own existing
+        contract already names that case `launch-failed`, and folding it
+        into `attempt-not-running` regressed that documented behavior
+        (`test_execute_reports_launch_failed_when_the_docker_binary_is_missing`,
+        caught by running it).
+
+        KNOWN, DOCUMENTED, NOT CLOSED: the entry check above is a
+        check-then-act - the container can stop in the gap between it and
+        the real `docker exec` a few lines later, and the daemon's own
+        rejection for that race lands as the identical "exited"/nonzero
+        shape a legitimate subject exit produces. An earlier version of
+        this fix tried to close it by reclassifying when the captured
+        stderr carried the daemon's own "is not running" / "no such
+        container" text - but a `codex:code_review` pass found that text is
+        NOT trustworthy evidence: it is read from the subject's own stderr,
+        and a subject that happens to print either phrase as part of its
+        own legitimate output (before exiting nonzero for its own reasons)
+        would have its real result silently discarded as
+        `attempt-not-running`, on a channel with no adversarial subject
+        anywhere else in mind. Closing it for real needs a signal
+        independent of subject-controlled output - e.g. the same
+        marker-write/PID-confirmation provenance `exec_in_attempt()`
+        already uses to confirm a kill - which is a bigger, separate change
+        than this refusal (tracked - see the module's own issue reference
+        once filed). Left open rather than guessed at; the window is
+        narrow (the gap between one inspect and one exec launch) and the
+        worst case this leaves is the pre-existing one `execute()` already
+        had: a fabricated "exited" on the rare race, never a SILENTLY
+        DISCARDED real one, which the rejected reclassification attempt
+        would have risked instead.
+
         Whether the subject exits on its own or is killed for timeout/
         cancellation, this attempt's container is always stopped before
         returning - `confirm_stopped()` (step 6) must confirm the WHOLE
@@ -1547,6 +1587,40 @@ class DockerBackend:
         container - see that field's own docstring for the forgeability
         reasoning."""
         assert isinstance(handle, _Handle)
+        reachable, absent, status = self._inspect(handle)
+        if reachable and (absent or status != "running"):
+            # #304: a second `execute()` against an already-stopped handle
+            # (this method's own docstring - "always stopped before
+            # returning") used to fall through to `_launch_and_wait()`,
+            # whose `docker exec` launches fine as a host process but is
+            # rejected by the daemon - a real nonzero exit that read as an
+            # ordinary `reason="exited"`, fabricating execution that never
+            # touched the container. Same refusal reason `exec_in_attempt()`
+            # uses - already a recognized "not started" reason everywhere
+            # downstream (gate_witness.py's `_NOT_STARTED_REASONS`).
+            #
+            # Deliberately `reachable and (...)`, NOT `not reachable or
+            # (...)` like `exec_in_attempt()`'s otherwise-identical guard:
+            # `reachable=False` means `_inspect()` itself could not get an
+            # answer (unreachable daemon, missing binary) - a DIFFERENT,
+            # unconfirmed fact, not a positive "not running". Folding it in
+            # here regressed `test_execute_reports_launch_failed_when_the_
+            # docker_binary_is_missing` (caught by running it, not
+            # reasoned about): a broken `docker_bin` made `_inspect` itself
+            # fail, and the then-identical guard reported a confident
+            # "attempt-not-running" for a case this method's own contract
+            # already correctly named "launch-failed" - a different kind of
+            # guess replacing the first. Only a CONFIRMED non-running status
+            # short-circuits; an unreachable daemon falls through to the
+            # real attempt below, which still reports its own accurate
+            # `launch-failed` exactly as it did before this guard existed.
+            # `exec_in_attempt()` can fold the two together harmlessly
+            # because gate_witness.py's `_NOT_STARTED_REASONS` already
+            # treats them identically downstream; `execute()`'s caller
+            # (`lifecycle.py`) does not get that same guarantee, so this
+            # method may not assume it either (filed in the Nit Store as
+            # worth a closer look, not fixed here - out of #304's scope).
+            return ExecuteResult(reason="attempt-not-running", exit_code=None)
         forwarding_available = self._forwarding_available(handle)
         launched = self._launch_and_wait(
             handle, argv, limits, cancel, stdin, prefix_wrap=forwarding_available,

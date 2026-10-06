@@ -56,6 +56,37 @@ and version plan.
     is now reserved for every claimed path being comparable AND agreeing;
     partial coverage is `unknown`/`partial-helper-coverage`.
 
+- **`DockerBackend.execute()` refuses a second call on an already-stopped
+  handle instead of fabricating a result** (Closes #304). `execute()`'s own
+  contract always stops the container before returning; a second call used
+  to fall through to a real `docker exec` the daemon rejects, and that
+  rejection's own nonzero exit read as an ordinary `reason="exited",
+  exit_code=1` - an execution that never touched the container, reported as
+  one that did. Refused now with `reason="attempt-not-running",
+  exit_code=None`, the same reason `exec_in_attempt()` (#269) already uses
+  for this exact situation.
+  - The guard is a fresh `_inspect()` at entry, confirmed-not-running only -
+    an unreachable daemon or missing binary still falls through to the real
+    attempt, which reports its own accurate `launch-failed` exactly as
+    before this guard existed.
+  - That entry check is itself a check-then-act: the container can stop in
+    the gap before the real `docker exec` runs. **Left open, documented, not
+    closed** - a first attempt reclassified the race by matching the
+    daemon's own rejection text in the captured stderr, but `codex:
+    code_review` found that text is read from the SUBJECT's own stderr: a
+    subject whose legitimate output happens to contain that wording would
+    have its real result silently discarded as `attempt-not-running`.
+    Removed rather than shipped with a known spoofing path; a real fix
+    needs a provenance signal independent of subject-controlled output
+    (e.g. `exec_in_attempt()`'s own marker/PID-confirmation mechanism),
+    which is a separate, bigger change, tracked as its own issue.
+
+  The red case: a second `execute()` call on one handle must never report
+  `reason="exited"`. Mutation-checked (the entry guard disabled fails the
+  red case); the open TOCTOU window has its own test proving the race
+  still produces the daemon's unmodified rejection today, rather than
+  merely asserting the docstring's claim.
+
 - **Per-skill profile diagnostic, non-certifying** (Refs #295). `skillc
   profile diagnose` (library: `profile.diagnose`) walks the whole closure and
   reports EVERY unresolved reference, unsatisfied dependency and other
