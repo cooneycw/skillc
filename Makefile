@@ -19,7 +19,7 @@ SHELL := bash
 .SHELLFLAGS := -eu -o pipefail -c
 
 .PHONY: sync selftest test lint typecheck negative-control typecheck-control \
-	leak-check changelog-check readme-drift secret-scan verify
+	leak-check changelog-check readme-drift secret-scan git-tests-control verify
 
 sync:
 	uv sync --locked --extra dev
@@ -39,7 +39,7 @@ selftest: sync
 PYTEST_ARGS ?=
 test: sync
 	mkdir -p reports
-	uv run --no-sync pytest -rA $(PYTEST_ARGS) | tee reports/pytest.log
+	uv run --no-sync pytest -rA --junit-xml=reports/pytest-report.xml $(PYTEST_ARGS) | tee reports/pytest.log
 
 lint: sync
 	uv run --no-sync ruff check .
@@ -90,5 +90,13 @@ secret-scan:
 		echo "secret-scan: SKIPPED - gitleaks is not installed locally (CI always runs it)"; \
 	fi
 
+# #307: `test`'s --junit-xml=reports/pytest-report.xml is this target's
+# input - depends on `test` directly (not merely listed after it in `verify`)
+# so `make git-tests-control` alone, without a prior `make test`, fails on a
+# missing report rather than silently reading a stale one from an earlier run.
+git-tests-control: test
+	python3 ci/check_git_tests_ran.py reports/pytest-report.xml
+	bash ci/git-tests-control.sh
+
 verify: selftest test lint typecheck negative-control typecheck-control leak-check \
-	changelog-check readme-drift secret-scan
+	changelog-check readme-drift secret-scan git-tests-control
