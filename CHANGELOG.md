@@ -89,6 +89,26 @@ and version plan.
     properly; deferred as out of scope for this PR and recorded in the
     Nit Store (cooneycw/skillc#20, comment 6025027183).
 
+- **`skillc/stale_tree.py`: the tree-identity comparison `gate-witness.md`
+  §6 names but deliberately does not perform** (Refs #270). `GateWitness`
+  (#269) records a `tree_digest_at_start` on every gate run and never
+  compares it to anything itself - "the grading decision belongs to
+  #270/#271" (§6). This module is that comparison: `last_run_is_fresh`
+  checks a gate's most recent run against a caller-supplied graded-tree
+  digest, and `stale_gates` names every declared gate whose last run was
+  captured against a tree other than the one being graded. The LAST run
+  decides, never the first and never all of them - a gate is legitimately
+  rerun after an edit (gate_witness.py's own red case 3), so an earlier
+  run's digest is SUPPOSED to be stale; only the most recent run is a claim
+  about the tree a grader is looking at now. A gate with zero runs answers
+  `None`, never `False` - `gate_witness.py`'s own `not-observed` coverage
+  already owns that population, and collapsing it into staleness would let
+  a true bypass hide behind this module's verdict. 11 tests, 4
+  mutation-checked by hand (equality flip in `run_freshness`; `None`
+  collapsed to `False` for a zero-run gate; reading the first run instead
+  of the last; `stale_gates` sweeping a never-run gate into its result) -
+  each applied, confirmed red, and reverted.
+
 - **New Level 3 task `verify-stops-early`: `gate-stops-early`'s
   structurally distinct held-out variant** (Refs #270 acceptance item 2).
   Same three certified criteria and the same restore-and-rerun grader
