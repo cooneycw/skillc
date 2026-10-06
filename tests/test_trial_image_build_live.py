@@ -31,13 +31,26 @@ from pathlib import Path
 
 import pytest
 
+from skillc.docker_backend import probe_daemon
+
 DOCKERFILE_DIR = Path(__file__).resolve().parent.parent / "docker" / "trial"
 TEST_TAG = f"skillc-trial-test:b2-helper-check-{int(time.time())}"
 
+# codex:code_review finding: `shutil.which("docker")` alone proves only
+# that the CLI binary exists, not that a daemon answers it - on a host
+# with the client installed but no reachable daemon, the old skip
+# condition let the build fixture run, fail, and report an environmental
+# problem as an image-build failure. `probe_daemon()` (the same no-
+# daemon-tolerant probe `DockerBackend` itself uses) is called ONLY when
+# the binary exists, so a missing binary is still reported by its own
+# distinct message rather than probe_daemon's generic unreachable one.
+_DOCKER_BIN_PRESENT = shutil.which("docker") is not None
 pytestmark = pytest.mark.skipif(
-    shutil.which("docker") is None,
-    reason="no docker binary in this environment - this test needs a real Docker daemon "
-           "to build the trial image; real-daemon execution is owed to the docker-ci agent (#315)",
+    not _DOCKER_BIN_PRESENT or probe_daemon(["docker"]) is None,
+    reason="no reachable Docker daemon in this environment (binary "
+           + ("present" if _DOCKER_BIN_PRESENT else "absent")
+           + ") - this test needs a real daemon to build the trial image; "
+             "real-daemon execution is owed to the docker-ci agent (#315)",
 )
 
 

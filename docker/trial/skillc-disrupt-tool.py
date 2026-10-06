@@ -85,7 +85,13 @@ def _ask() -> bool:
     if not isinstance(reply, dict) or reply.get("ok") is not True:
         raise ValueError(f"the channel refused this request: {reply!r}")
     result = reply.get("result")
-    if not isinstance(result, dict) or result.get("allow") not in (True, False):
+    # `type(x) is bool`, not `isinstance`/`in (True, False)` - Python's
+    # `1 == True` and `0 == False`, so either of those forms would have
+    # let a reply carrying `{"allow": 1}` or `{"allow": 0}` pass as a
+    # genuine decision (codex:code_review finding - the same bool/int
+    # conflation class already found once in grade_recovery.py's own seq
+    # validation, now caught here too before it shipped).
+    if not isinstance(result, dict) or type(result.get("allow")) is not bool:
         raise ValueError(f"reply's 'result' is not the expected {{'allow': bool}} shape: {reply!r}")
     return bool(result["allow"])
 

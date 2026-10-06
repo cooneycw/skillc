@@ -32,25 +32,49 @@ REQUIRED_HELPERS = {
 }
 
 
+#: Octal chmod modes whose LAST digit (the "other" permission triplet -
+#: the one that matters here, since the file is root-owned and `candidate`
+#: is neither owner nor group, codex:code_review finding) has the execute
+#: bit set. Enumerated rather than computed from `int(mode, 8) & 1`: a
+#: malformed mode (wrong length, non-octal digit) must refuse, not raise
+#: or silently coerce, and an explicit set makes that refusal the default.
+_EXECUTABLE_OTHER_MODES = frozenset(f"{a}{b}{c}" for a in "01234567" for b in "01234567" for c in "1357")
+
+
 def check_helpers(dockerfile_text: str, required: dict[str, str] | None = None) -> list[str]:
     """Return one message per required helper that is not both COPYed to
-    its installed path and made executable (`chmod` naming that same
-    path) by the Dockerfile text - an empty list means every required
-    helper is fully installed. `required` defaults to `REQUIRED_HELPERS`;
-    a caller may pass a different mapping (the test suite's own red
-    cases do)."""
+    its installed path and made executable there (`chmod` naming that
+    EXACT path, with a mode that actually grants execute to a non-owner,
+    on an ACTIVE instruction line - not a comment) by the Dockerfile
+    text - an empty list means every required helper is fully installed.
+    `required` defaults to `REQUIRED_HELPERS`; a caller may pass a
+    different mapping (the test suite's own red cases do), but an EMPTY
+    mapping is refused outright (codex:code_review finding) rather than
+    reporting "ok" for a population of zero helpers checked."""
     required = REQUIRED_HELPERS if required is None else required
+    if not required:
+        return ["no required helpers were given to check - refusing rather than reporting 'ok' for an empty population"]
+    active_lines = [line for line in dockerfile_text.splitlines() if not line.strip().startswith("#")]
+    active_text = "\n".join(active_lines)
     messages = []
     for source, installed_path in required.items():
         copy_pattern = re.compile(
             rf"^COPY\s+{re.escape(source)}\s+{re.escape(installed_path)}\s*$", re.MULTILINE,
         )
-        if copy_pattern.search(dockerfile_text) is None:
-            messages.append(f"{source!r} is required but no 'COPY {source} {installed_path}' line was found")
+        if copy_pattern.search(active_text) is None:
+            messages.append(f"{source!r} is required but no active 'COPY {source} {installed_path}' line was found")
             continue
-        chmod_pattern = re.compile(rf"chmod\s+\S+\s+{re.escape(installed_path)}\b")
-        if chmod_pattern.search(dockerfile_text) is None:
-            messages.append(f"{installed_path!r} is copied in but never made executable (no matching chmod)")
+        # The path must be the WHOLE chmod argument, not merely a prefix
+        # of a longer one (codex:code_review finding: a neighbour path
+        # like "<installed_path>.backup" must not satisfy this) - matched
+        # by requiring whitespace or end-of-line immediately after it,
+        # never a bare `\b` (which is satisfied before a literal `.` too).
+        chmod_pattern = re.compile(
+            rf"^RUN\s+chmod\s+([0-7]{{3}})\s+{re.escape(installed_path)}(?=\s|$)", re.MULTILINE,
+        )
+        match = chmod_pattern.search(active_text)
+        if match is None or match.group(1) not in _EXECUTABLE_OTHER_MODES:
+            messages.append(f"{installed_path!r} is copied in but never made executable for a non-owner (no matching chmod)")
     return messages
 
 

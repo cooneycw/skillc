@@ -213,6 +213,66 @@ def test_check_helpers_ignores_an_unrelated_helper_not_required_here():
     assert any("skillc-wrap.py" in m for m in messages)
 
 
+def test_check_helpers_refuses_an_empty_required_mapping():
+    """codex:code_review finding: `check_helpers(text, {})` returned an
+    empty list, indistinguishable from "checked everything, all present" -
+    the exact "zero that could mean either" shape this whole project
+    polices elsewhere. An empty population must be refused, never
+    reported as a clean pass."""
+    check_helpers = _load_check_helpers()
+    dockerfile_text = (REPO_ROOT / "docker" / "trial" / "Dockerfile").read_text(encoding="utf-8")
+    messages = check_helpers.check_helpers(dockerfile_text, {})
+    assert messages and "no required helpers" in messages[0]
+
+
+def test_check_helpers_reports_a_non_executable_chmod_mode():
+    """codex:code_review finding: the chmod check used to accept ANY mode
+    - `chmod 644` (no execute bit for anyone but owner-write, and not even
+    that for a non-owner) would have passed as "made executable"."""
+    check_helpers = _load_check_helpers()
+    real_text = (REPO_ROOT / "docker" / "trial" / "Dockerfile").read_text(encoding="utf-8")
+    weakened = real_text.replace(
+        "RUN chmod 755 /usr/local/bin/skillc-disrupt-tool\n",
+        "RUN chmod 644 /usr/local/bin/skillc-disrupt-tool\n",
+    )
+    assert weakened != real_text
+    messages = check_helpers.check_helpers(weakened)
+    assert any("never made executable" in m for m in messages)
+
+
+def test_check_helpers_ignores_a_commented_out_chmod():
+    """codex:code_review finding: the old regex searched the whole file
+    text, so a `chmod` mentioned only in a comment (or a line someone
+    commented out while debugging) would have satisfied the check without
+    anything actually being installed executable."""
+    check_helpers = _load_check_helpers()
+    real_text = (REPO_ROOT / "docker" / "trial" / "Dockerfile").read_text(encoding="utf-8")
+    commented = real_text.replace(
+        "RUN chmod 755 /usr/local/bin/skillc-disrupt-tool\n",
+        "# RUN chmod 755 /usr/local/bin/skillc-disrupt-tool\n",
+    )
+    assert commented != real_text
+    messages = check_helpers.check_helpers(commented)
+    assert any("never made executable" in m for m in messages)
+
+
+def test_check_helpers_refuses_a_chmod_on_a_neighbour_path():
+    """codex:code_review finding: a `chmod` naming
+    `/usr/local/bin/skillc-disrupt-tool.backup` (a different file that
+    merely has the required path as a PREFIX) satisfied the old `\\b`-
+    bounded regex - `\\b` matches between a word character and `.`, so
+    the suffix was invisible to it."""
+    check_helpers = _load_check_helpers()
+    real_text = (REPO_ROOT / "docker" / "trial" / "Dockerfile").read_text(encoding="utf-8")
+    retargeted = real_text.replace(
+        "RUN chmod 755 /usr/local/bin/skillc-disrupt-tool\n",
+        "RUN chmod 755 /usr/local/bin/skillc-disrupt-tool.backup\n",
+    )
+    assert retargeted != real_text
+    messages = check_helpers.check_helpers(retargeted)
+    assert any("never made executable" in m for m in messages)
+
+
 # --------------------------------------------------------------------------
 # docker/trial/verify_codex_sidecar.js: resolves the REAL platform package,
 # never the npm wrapper's own directory (Codex code-review finding on #78:

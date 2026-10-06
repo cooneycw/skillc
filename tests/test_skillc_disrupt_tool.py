@@ -103,6 +103,27 @@ def test_exit_2_when_the_reply_does_not_match_the_expected_shape(tmp_path: Path)
     assert "not the expected" in result.stderr
 
 
+@pytest.mark.parametrize("numeric_allow", [1, 0])
+def test_exit_2_when_allow_is_a_number_not_a_boolean(tmp_path: Path, numeric_allow: int) -> None:
+    """THE RED CASE for codex:code_review's bool/int finding: Python's
+    `1 == True` and `0 == False`, so a reply carrying `{"allow": 1}` or
+    `{"allow": 0}` must still be refused as malformed (exit 2) - never
+    silently read as a genuine allow/fail-now decision."""
+    sock_path = tmp_path / "trigger.sock"
+
+    def decide(request: Mapping[str, object]) -> Mapping[str, object]:
+        return {"allow": numeric_allow}
+
+    channel = DecideReplyChannel(sock_path, decide, "a1")
+    channel.start()
+    try:
+        result = _run_proxy(sock_path)
+    finally:
+        channel.stop_and_finalize()
+    assert result.returncode == 2
+    assert "not the expected" in result.stderr
+
+
 def test_exit_2_when_the_channel_refuses_the_request_itself(tmp_path: Path) -> None:
     """Distinct from a `{"allow": false}` decision - a `ChannelRefusal`
     (wrong `op`, here deliberately triggered by a decide function that
