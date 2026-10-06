@@ -138,6 +138,63 @@ and version plan.
     the cited digest was actually captured by the attempt's manifest - the
     same "altered artifact" check `artifact_ref` already gets.
 
+- **`skillc/coverage.py`: per-skill coverage reports from retained bundles**
+  (Refs #272). One row per (skill path, skill version, client, case/task,
+  arm), built from a declared-skill inventory this module reads as a
+  SEPARATE input rather than deriving from the bundle - orchestrator review
+  found `installation-receipt.installed[]` lists every installed file
+  (helpers, libraries, scripts), not just skills under evaluation, and the
+  bundle itself carries no other declaration (`trial-ledger.subject` is a
+  bare digest). Without a `DeclaredInventory`, rows exist only for skills
+  the bundle itself evidences and the report says `inventory: not_declared`
+  rather than guessing. `skill_version` is `installation-receipt.
+  installed[].digest` - always present, this schema's own per-path content
+  identity elsewhere; `skill-evidence.body_digest` was considered and
+  rejected (optional, and records.md's own Q3 answer says it is not
+  cross-checked against anything).
+  - No per-skill PASS/FAIL verdict: `verified-result.status` is
+    ATTEMPT-level, and copying it onto every skill row is exactly
+    "crediting every loaded skill" (acceptance item 3). Each row instead
+    carries the attempt's outcome alongside this skill's own
+    `execution_observed`/`read_observed` lifecycle facts and its OWNED,
+    shared-marked criteria.
+  - `outcomes` (`PASS`/`FAIL`/`NOT_RUN`/`UNAVAILABLE`/`UNKNOWN`) partition
+    `scheduled`; `coverage_flags` (`missing-transcript`,
+    `unmatched-invocation`) are orthogonal and counted separately, never
+    folded into the same denominator.
+  - Refuses before reporting: runs the bundle's own validation rules first
+    and raises `CoverageRefused`, naming the failing rule, rather than
+    trusting a caller validated already - exercised directly against
+    already-committed bad bundles (duplicate citation, forged status,
+    altered artifact).
+  - Reproducible: canonical JSON (sorted keys, sorted rows, no
+    generation timestamp in the body) is byte-identical for a reversed
+    record order. Two profiles sharing one subject digest but different
+    selections record their own `profile_digest` (the same canonical-JSON
+    + sha256 convention `skillc profile validate` already uses), so
+    reproducibility is a property of the (bundle, inventory) pair, never
+    the bundle alone.
+  - A declared inventory's row count is checked two ways: `len(declared
+    skills) * len(cells)`, and row-key uniqueness - the length check alone
+    cannot see a duplicate declared skill, since it inflates both sides of
+    that product equally.
+  - Six new tests mutation-checked: the refusal wrapper (disabled via
+    monkeypatch, confirms a known-bad bundle goes blind), the no-fallback
+    behavior (wired to the wrong source, confirms a helper path wrongly
+    surfaces), and the row-key uniqueness refusal (disabled, confirms a
+    duplicate declared skill goes blind) - each restored and confirmed
+    correct again, net diff empty.
+  - `Profile.select is None` ("full-pack") is not resolved by this module:
+    doing so needs a live checkout of the subject tree (`profile.py`'s own
+    `validate()` materializes one), out of scope for a tool that reads only
+    retained bundles. Callers pass an already-resolved skill list, never a
+    raw `Profile` object. Nit filed on skillc #20: the evaluated selection
+    is not captured in the bundle at all, so a retained bundle cannot
+    reconstruct its own inventory without this external input.
+  - `#273`'s reliability/convenience statistics and CPP #1366 pilot-receipt
+    reconciliation are deliberately not wired into rows yet - a following
+    commit in this PR, per the orchestrator's own sequencing.
+
 - **`skill-evidence`: closes `unmatched`'s own reason vocabulary** (Refs
   #272's own scope-addition comment, for CPP #1369). R9 (`records.md`)
   already named `duplicate-invocation` and `no-correlating-attempt` but
