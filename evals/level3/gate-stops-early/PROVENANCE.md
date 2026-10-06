@@ -91,6 +91,45 @@ never a PASS."*
   client (confirmed against `PROFILE.md`'s own closure table), so it is not
   a second agent-facing copy either.
 
+### Proven, not reasoned about: the obligation actually applies here
+
+The orchestrator's correction: `fixture/`'s own Makefile declares ALL of
+`lint:`, `test:` and `typecheck:`, so `skip_if` applicability never fires
+and the "skipped gates: ... never a PASS" sentence is never exercised -
+intact and degraded could not differ on it. `evals/level3/gate-stops-early/
+discrimination/{fixture,reference}/` is a separate tree for exactly this
+pairing: identical task/bug/tests, but `typecheck:` is absent from the
+Makefile entirely (and `pyproject.toml` configures no mypy-equivalent
+tool), so the runner's own `skip_if` condition
+(`! grep -q "^typecheck:" Makefile ... && ! grep -q "<mypy token>"
+pyproject.toml`, `lib/cicd/steps.py::_gate_step`) is satisfied.
+
+**Proof, not argument** - the real runner at the pinned commit
+(`claude-power-pack` @ `ea6dbfa45f9308ee6ba60f032d8e7031bd6938a1`, cloned
+and invoked directly: `FLOW_GATE_CPP_DIR=<checkout> bash <checkout>/
+scripts/flow-finish-gate.sh --plan check --evidence flow-check`, run from
+inside each tree):
+
+- **`discrimination/fixture/`** (typecheck absent): `"skipped": ["typecheck"]`
+  in the runner's own JSON, and the verdict line reads exactly
+  `FLOW_FINISH_GATE: warn (skipped gates: typecheck)` (exit 3) - the
+  precondition the discrimination obligation depends on.
+- **`fixture/`** (all three targets present): no `"skipped"` key in the
+  JSON at all (empty), and the verdict line reads `FLOW_FINISH_GATE: warn`
+  with no `skipped gates:` qualification - confirming the full-Makefile
+  tree does NOT exercise this obligation, which is exactly why it is kept
+  as a separate tree rather than folded into the main fixture.
+
+(The `warn` on the full-Makefile tree is an unrelated qualification - the
+runner cannot parse `ci/check.py`'s own stdout as a recognized test
+framework's summary - not a skipped-gate warning; this is visible in the
+captured JSON's own `warnings` list, distinct from its `skipped` key.)
+
+`discrimination/` is the tree the #287 live study's intact/degraded
+attempts actually run against. `fixture/`/`reference/` (full Makefile,
+`check:` aggregate) stay the main task tree for the acceptance-item
+grading, including the NOT_RUN/aggregate-stopping-early variants.
+
 ## Why NOT_RUN is not the discrimination obligation (rejected first choice: FC-TEST)
 
 An earlier draft of this section proposed `FC-TEST` ("run `make test`,
