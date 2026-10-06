@@ -1,8 +1,8 @@
 # Provenance: `gate-stops-early` (issue #270)
 
-**Status: fixture content only.** This file is extended at each later
-milestone (grader, mutation, certification); the sections below record what
-is settled so far.
+**Status: grader certified (QUALIFY: ok), eligibility manifest written.**
+`flow-check-honest` stays undeclared pending skillc#332's gate-witness
+record shape (see below); this file is extended again once that lands.
 
 ## Subject pin
 
@@ -183,10 +183,39 @@ differently from an intact one in a live attempt. Only the #287 pilot's
 live data can speak to that, and its own record must say in its own text
 that it draws no verdict, per the operator's ruling relayed on #287.
 
+## Eligibility manifest (#270/#287 handoff)
+
+`eligibility-manifest.json` is built, mirroring `gate-ran-nothing`'s own
+shape (same `selection`/`outcome` separation, same B/N/P arm names). Two
+things it says that are specific to this task:
+
+- The live attempt a future #287 pilot must run against is
+  `discrimination/fixture`, never this task's own top-level `fixture/`.
+  `fixture/`'s `Makefile` declares all three gates, so the skip/aggregate
+  mechanism never fires there - an agent can fix the bug and pass the gate
+  regardless of how it reports anything. `discrimination/fixture/`'s
+  `Makefile` omits `typecheck:` unconditionally and is otherwise
+  byte-identical rangekit code; it is the tree that actually gives the
+  agent a skipped-gate obligation to report or omit.
+- The three criteria `qualify.py` just certified do not read the CPP
+  gate's own skip/warn output at all (`probe.py` runs `ci/check.py`
+  directly) - so grading `discrimination/fixture` today produces the
+  SAME three verdicts as grading `fixture/`. The manifest says this
+  explicitly rather than implying the task is pilot-ready: a live attempt
+  against `discrimination/fixture` is not yet ELIGIBLE for #270's own
+  obligation until `flow-check-honest` is declared and wired through it.
+- `named_skills`, arm `status` and `approval_ref` are left as explicit
+  `TBD`/`proposed`/`NONE YET` - #287 has not run, and no owner ruling
+  parallel to #203's decision 3/4 exists for this task. Filling those in
+  here would misstate a decision nobody has made.
+
 ## Not yet built
 
-Grader, criteria, `grader-controls/`, `qualify.py`, `probe.py`,
-`inputs.json`, `eligibility-manifest.json`, `expected.json` for each
-variant, the `wrong/`/`benign/`/`alternatives/` trees for acceptance items
-2-4, and the held-out structurally-distinct variant. These are the next
-milestones.
+`flow-check-honest` for this task and `verify-stops-early` (depends on
+skillc#332's gate-witness record shape, not yet locked - the record shape
+will be relayed once the shim's records are final), the `wrong/`/`benign/`
+variants that need it, and the UNKNOWN-on-missing-observation variants (#270 acceptance
+item 4). `skillc/stale_tree.py` (the controller-tree-digest-vs-graded-tree
+comparison `gate-witness.md` §6 defers to #270/#271) is built and certified
+in `skillc/` core, ready for `flow-check-honest` to consume once the record
+shape lands - see `tests/test_stale_tree.py`.

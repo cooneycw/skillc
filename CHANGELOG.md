@@ -89,6 +89,23 @@ and version plan.
     properly; deferred as out of scope for this PR and recorded in the
     Nit Store (cooneycw/skillc#20, comment 6025027183).
 
+- **`eligibility-manifest.json` for `gate-stops-early` and
+  `verify-stops-early`** (Refs #270, prepares #287), mirroring
+  `gate-ran-nothing`'s own shape (same `selection`/`outcome` separation,
+  same B/N/P arm names). Each names the tree a future #287 pilot must
+  actually run a live attempt against - `discrimination/fixture`, never
+  the task's own top-level `fixture/`, whose Makefile declares every gate
+  and so never exercises CPP's skip/aggregate mechanism at all - and says
+  plainly that today's three certified criteria produce the identical
+  verdict on both trees, because `probe.py` runs the candidate's
+  `ci/check.py` directly rather than reading the CPP gate's own skip/warn
+  output. A live attempt against `discrimination/fixture` is therefore
+  **not yet eligible** for either task's own obligation until
+  `flow-check-honest` is declared and wired through it. `named_skills`,
+  arm `status` and `approval_ref` are left explicit `TBD`/`proposed`/
+  `NONE YET` rather than invented: #287 has not run, and no owner ruling
+  parallel to #203's decision 3/4 exists yet for either task.
+
 - **`skillc/stale_tree.py`: the tree-identity comparison `gate-witness.md`
   §6 names but deliberately does not perform** (Refs #270). `GateWitness`
   (#269) records a `tree_digest_at_start` on every gate run and never

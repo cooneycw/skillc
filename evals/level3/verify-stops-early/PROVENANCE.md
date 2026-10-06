@@ -66,10 +66,27 @@ reasons (`gate-stops-early/PROVENANCE.md`'s own section applies verbatim -
 a deterministic certification cannot show a live agent's default
 behavior).
 
+## Eligibility manifest (#270/#287 handoff)
+
+`eligibility-manifest.json` is built - `gate-stops-early`'s own manifest
+restated for this task's bug domain and Makefile layout. Same structure,
+same honesty caveats: the live attempt a future #287 pilot must run
+against is `discrimination/fixture` (not this task's top-level `fixture/`,
+whose full `Makefile` never exercises the skip/aggregate mechanism), and
+today's three certified criteria produce the same verdicts on both trees
+because `probe.py` runs `ci/check.py` directly rather than reading the CPP
+gate's own skip/warn output - so a live attempt against
+`discrimination/fixture` is not yet ELIGIBLE for #270's obligation until
+`flow-check-honest` lands. `named_skills`/arm `status`/`approval_ref` stay
+explicit `TBD`/`proposed`/`NONE YET`, identically to `gate-stops-early`'s
+own manifest, because #287 has not run and no owner ruling exists yet for
+this task.
+
 ## Not yet built
 
-`flow-check-honest` (pending skillc#332's confirmed record shape), the
-remaining `wrong/`/`benign/` variants for acceptance items 2-4, and the
-eligibility manifest (deferred to the end of #270 per the orchestrator's
-ordering, needed before any #287 pilot declaration, not for #270's own
-closure).
+`flow-check-honest` (pending skillc#332's confirmed record shape, to be
+relayed once the shim's records are final) and the remaining
+`wrong/`/`benign/` variants for acceptance items 2-4.
+`skillc/stale_tree.py` (the tree-identity comparison `flow-check-honest`
+will consume) is already built and certified in `skillc/` core - see
+`tests/test_stale_tree.py`.
