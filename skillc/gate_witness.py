@@ -154,6 +154,15 @@ class GateWitness:
         self._tree_digest_fn = tree_digest_fn
         self._lock = Lock()
         self._gates: dict[str, _GateState] = {gate: _GateState() for gate in self._declared}
+        #: invocation_id -> gate it was reserved for, for the LIFE of the
+        #: attempt (never released on completion). Red case 2 above only
+        #: refused a second start for the SAME gate; a subject reusing one
+        #: id across two different gates (deliberately, or by OS pid reuse,
+        #: since a subject-generated id is commonly a pid) would otherwise
+        #: have its `gate_complete` matched to whichever gate started FIRST
+        #: with that id (`_decide_complete`'s linear scan), crediting the
+        #: wrong gate with the other's result (codex code_review of #269).
+        self._invocation_ids: dict[str, str] = {}
         #: Set by a caller whose channel never became reachable at all for
         #: this attempt (design doc §5's `channel-unavailable`, distinct
         #: from `not-observed` - nothing could have been witnessed, not
@@ -189,6 +198,18 @@ class GateWitness:
                 # unfavourable result could paper over the first attempt
                 # with a second, more favourable one.
                 raise ChannelRefusal(f"gate_start: {gate!r} already has a start recorded for this attempt")
+            holder = self._invocation_ids.get(invocation_id)
+            if holder is not None:
+                # Red case 6 (codex code_review of #269): an id already
+                # reserved by ANY gate - including one that has since
+                # completed - must not be reused by another. Checked before
+                # reservation so this gate's own state stays untouched on
+                # refusal.
+                raise ChannelRefusal(
+                    f"gate_start: invocation_id {invocation_id!r} is already reserved by gate "
+                    f"{holder!r} for this attempt"
+                )
+            self._invocation_ids[invocation_id] = gate
             state.invocation_id = invocation_id
             state.tree_digest_at_start = self._tree_digest_fn()
             state.started_at = time.time()

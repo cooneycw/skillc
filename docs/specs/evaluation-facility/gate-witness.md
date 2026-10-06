@@ -100,6 +100,18 @@ supplies nothing about the tree.
   the first attempt with a second, more favourable one; refusing a second
   start removes that path structurally rather than relying on a later reader
   to notice two records for one gate.
+- `invocation_id` is already reserved by a DIFFERENT declared gate for this
+  attempt, whether or not that gate has since completed (correction, codex
+  `code_review` of #269). `invocation_id` is subject-generated and treated as
+  opaque (§3) — nothing stopped two different gates being started with the
+  same id before this check existed, and `gate_complete`'s own match is a
+  linear scan over every gate's `invocation_id` (§4 below), so the completion
+  would have landed on whichever gate started FIRST with that id, crediting
+  it with a result that was never its own while the gate that actually owned
+  the id stayed open. A subject-generated id is commonly a PID, and PIDs
+  reuse — this is not only an adversarial case. Reservation is for the life
+  of the attempt, never released on completion, so a closed gate's id cannot
+  be recycled onto a different gate either.
 
 `gate_complete` is refused when:
 - `invocation_id` does not match a gate that is currently in the OPEN state
@@ -235,6 +247,13 @@ citation mechanism - only the record this one now names.
    `no-controller-witness`, never `NOT_CONFIRMED`. This is the same
    structural guarantee #183's own bypass red case established for the
    disruption trigger, applied here to gate execution instead.
+6. **Cross-gate invocation-id collision (codex `code_review` of #269).**
+   `gate_start("lint", "x")` then `gate_start("typecheck", "x")` - the second
+   is refused. Mutation: remove the global reservation check, confirm the
+   second start is silently admitted, then confirm `gate_complete("x", ...)`
+   lands on `lint` (the first registrant) even when the subject's intent was
+   to complete `typecheck` - the exact "neighbour's request determines this
+   gate's result" failure the check exists to close.
 
 ## 9. What #270/#271 may build on
 

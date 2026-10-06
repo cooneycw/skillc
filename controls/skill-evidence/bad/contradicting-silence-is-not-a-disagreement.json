@@ -29,13 +29,7 @@
      "reason": "no-controller-witness"
     }
    },
-   "criteria_owned": [
-    {
-     "id": "c1",
-     "outcome": "SATISFIED",
-     "shared": false
-    }
-   ],
+   "criteria_owned": [],
    "external_evidence": {
     "present": true,
     "source": "cpp.execution-evidence/v1",
@@ -44,7 +38,7 @@
      "digest": "sha256:cpp1"
     },
     "reconciliation": "contradicting",
-    "reason": "exit-code-mismatch",
+    "reason": "gate-ran-outside-channel",
     "witness_ref": {
      "ref": "gate-witness/att-1.json",
      "digest": "sha256:gw1"

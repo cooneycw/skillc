@@ -604,14 +604,28 @@ to name, and the cpp-eval review questions relayed 2026-10-06.
   `lifecycle.execution_observed` already requires for `CONFIRMED`/`NOT_CONFIRMED`:
 
   1. `reason` must be one of `SKILL_EVIDENCE_CONTRADICTING_REASONS` - the union of
-     the two reasons above (CPP usage-record evidence) and three new ones for a
-     gate-witness (#269) observation: `gate-not-executed`, `exit-code-mismatch`,
-     `tree-mismatch`.
+     the two reasons above (CPP usage-record evidence) and two new ones for a
+     gate-witness (#269) observation: `exit-code-mismatch`, `tree-mismatch`.
   2. `external_evidence.witness_ref` must be present and shaped `{ref, digest}`
      (non-empty strings), and `ledger-binding` cross-checks that `digest` was
      actually captured by this attempt's manifest - the identical "altered
      artifact" check `artifact_ref.digest` already gets, applied to the
      controller-witness citation instead.
+
+  **Silence is not a disagreement (orchestrator correction, #269 review of this
+  addition).** The vocabulary deliberately has no "the gate never executed"
+  reason, because the gate-witness (#269, gate-witness.md §5) never establishes
+  non-execution: coverage `not-observed` is consistent with the gate being
+  skipped AND with it running outside the channel entirely, so the witness
+  itself reports that as `execution_observed: UNKNOWN` (`no-controller-witness`),
+  never a positive fact. A usage record claiming a gate ran while the witness
+  shows `not-observed` for it is therefore `UNKNOWN`, not `contradicting` -
+  `contradicting` may only cite something the witness POSITIVELY observed that
+  disagrees (a different exit code, a different tree), never the witness's own
+  silence. The closed vocabulary enforces this structurally: there is no
+  closed-vocabulary reason that describes "the witness saw nothing," so a
+  producer attempting this overclaim has no valid `reason` to write and is
+  refused by check 1 above, not by a separate check for this case.
 
   Only `contradicting` is closed this way; `unmatched`'s own reason stays
   open-vocabulary (above) and is unaffected.

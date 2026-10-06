@@ -44,7 +44,7 @@
      "digest": "sha256:cpp1"
     },
     "reconciliation": "contradicting",
-    "reason": "gate-not-executed",
+    "reason": "exit-code-mismatch",
     "witness_ref": {
      "ref": "gate-witness/att-1.json",
      "digest": "sha256:gw1"

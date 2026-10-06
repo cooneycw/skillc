@@ -130,18 +130,26 @@ SKILL_EVIDENCE_RECONCILIATION = ("absent", "unmatched", "matched", "contradictin
 #: observation records.md already names for this state: `outcome-disagreement`
 #: and `stale-identity` predate this addition (R9, CPP usage-record evidence -
 #: a bound usage record whose own outcome or subject/client identity disagrees
-#: with this trial's planned state); `gate-not-executed`, `exit-code-mismatch`
-#: and `tree-mismatch` are new with #269's gate-witness (a bound gate-witness
-#: record whose observed coverage, exit code or tree identity disagrees with
+#: with this trial's planned state); `exit-code-mismatch` and `tree-mismatch`
+#: are new with #269's gate-witness (a bound gate-witness record whose
+#: observed exit code or controller-computed tree identity disagrees with
 #: what the subject claimed). Closing the vocabulary without this union would
-#: silently refuse the two reasons records.md already committed to. `unmatched`'s
+#: silently refuse the two reasons records.md already committed to.
+#:
+#: NO "gate-not-executed" (orchestrator correction, #269 review of this
+#: addition): the witness never establishes non-execution (gate-witness.md
+#: §5 - `NOT_CONFIRMED` is never produced by it), so "the witness shows
+#: not-observed for a gate a usage record claims ran" is consistent with the
+#: gate running OUTSIDE the channel, not with it never running. That is
+#: `execution_observed: UNKNOWN` (`no-controller-witness`), never
+#: `contradicting` - `contradicting` may only cite something the witness
+#: POSITIVELY observed that disagrees, never its own silence. `unmatched`'s
 #: own reason stays open-vocabulary (a declared skill with no correlating
 #: installed path has no single closed taxonomy of "why" worth enumerating);
 #: narrowing it too would be unrelated scope creep.
 SKILL_EVIDENCE_CONTRADICTING_REASONS = (
     "outcome-disagreement",
     "stale-identity",
-    "gate-not-executed",
     "exit-code-mismatch",
     "tree-mismatch",
 )

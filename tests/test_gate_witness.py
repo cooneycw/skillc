@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import socket
+import subprocess
+import sys
 import threading
 from pathlib import Path
 
@@ -79,6 +81,35 @@ def test_a_second_start_after_completion_is_also_refused() -> None:
     witness.decide({"op": "gate_complete", "invocation_id": "inv-1", "exit_code": 0})
     with pytest.raises(ChannelRefusal, match="already has a start"):
         witness.decide({"op": "gate_start", "gate": "lint", "invocation_id": "inv-2"})
+
+
+def test_an_invocation_id_cannot_be_reused_across_different_gates() -> None:
+    """Red case 6 (codex code_review of #269): `invocation_id` is
+    subject-generated and opaque (design doc §3) - a subject reusing it
+    across two gates (deliberately, or by OS pid reuse, since a
+    subject-generated id is commonly a pid) must not let one gate's
+    completion be credited to another."""
+    witness = GateWitness(declared_gates=("lint", "typecheck"), tree_digest_fn=_fixed_tree_digest)
+    witness.decide({"op": "gate_start", "gate": "lint", "invocation_id": "x"})
+    with pytest.raises(ChannelRefusal, match="already reserved"):
+        witness.decide({"op": "gate_start", "gate": "typecheck", "invocation_id": "x"})
+    # lint's own state is untouched by the refused collision, and typecheck
+    # never started - completing "x" must still resolve to lint alone.
+    witness.decide({"op": "gate_complete", "invocation_id": "x", "exit_code": 0})
+    record = witness.finalize("a-1")
+    assert record.gates["lint"].coverage == "complete"
+    assert record.gates["typecheck"].coverage == "not-observed"
+
+
+def test_an_invocation_id_stays_reserved_after_its_gate_completes() -> None:
+    """The reservation in `_decide_start` is for the life of the attempt,
+    never released on completion - a closed gate's id cannot be recycled
+    onto a different gate either."""
+    witness = GateWitness(declared_gates=("lint", "typecheck"), tree_digest_fn=_fixed_tree_digest)
+    witness.decide({"op": "gate_start", "gate": "lint", "invocation_id": "x"})
+    witness.decide({"op": "gate_complete", "invocation_id": "x", "exit_code": 0})
+    with pytest.raises(ChannelRefusal, match="already reserved"):
+        witness.decide({"op": "gate_start", "gate": "typecheck", "invocation_id": "x"})
 
 
 def test_a_completion_with_no_matching_open_start_is_refused_unknown_id() -> None:
@@ -238,6 +269,52 @@ def test_concurrent_starts_for_different_gates_do_not_corrupt_each_others_state(
     assert record.gates["lint"].exit_code == 0
     assert record.gates["typecheck"].coverage == "complete"
     assert record.gates["typecheck"].exit_code == 1
+
+
+def test_real_deterministic_processes_succeed_fail_and_interrupt_through_the_protected_path(
+    tmp_path: Path,
+) -> None:
+    """#269's own acceptance bar (gate-witness.md §0): "Show real deterministic
+    processes succeeding, failing and being interrupted through the protected
+    path. No live model is required." A hand-crafted dict passed straight to
+    `decide()` cannot show this - it proves the pairing logic, never that an
+    actual OS process ran. This drives three REAL subprocesses (success, a
+    non-zero exit, and one genuinely killed mid-run) through the real socket
+    and real `DecideReplyChannel`, binding each `gate_complete.exit_code` to
+    the process's own real return code - a synthetic process is still a real
+    one, which is what "no live model required" means (raised by cross-model
+    review, codex code_review of #269)."""
+    witness = GateWitness(
+        declared_gates=("succeeds", "fails", "interrupted"), tree_digest_fn=_fixed_tree_digest
+    )
+    sock_path = tmp_path / "trigger.sock"
+    channel = DecideReplyChannel(sock_path, witness.decide)
+    channel.start()
+    try:
+        _send(sock_path, {"op": "gate_start", "gate": "succeeds", "invocation_id": "s-1"})
+        proc = subprocess.run([sys.executable, "-c", "raise SystemExit(0)"], check=False)
+        _send(sock_path, {"op": "gate_complete", "invocation_id": "s-1", "exit_code": proc.returncode})
+
+        _send(sock_path, {"op": "gate_start", "gate": "fails", "invocation_id": "f-1"})
+        proc = subprocess.run([sys.executable, "-c", "raise SystemExit(7)"], check=False)
+        _send(sock_path, {"op": "gate_complete", "invocation_id": "f-1", "exit_code": proc.returncode})
+
+        _send(sock_path, {"op": "gate_start", "gate": "interrupted", "invocation_id": "i-1"})
+        killed = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        killed.terminate()
+        killed.wait(timeout=5.0)
+        # Deliberately no gate_complete - the process was cut off, not finished.
+    finally:
+        channel.stop_and_finalize()
+    record = witness.finalize("a-1")
+    assert record.gates["succeeds"].coverage == "complete"
+    assert record.gates["succeeds"].exit_code == 0
+    assert record.gates["fails"].coverage == "complete"
+    assert record.gates["fails"].exit_code == 7
+    assert record.gates["interrupted"].coverage == "interrupted"
+    for gate in ("succeeds", "fails", "interrupted"):
+        status, reason = record.gates[gate].execution_observed()
+        assert (status, reason) == ("CONFIRMED", None), gate
 
 
 def test_gate_witness_record_is_a_frozen_value() -> None:
