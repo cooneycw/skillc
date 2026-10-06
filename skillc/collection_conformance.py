@@ -100,6 +100,9 @@ from . import (
 from .backend import Limits
 from .docker_backend import ATTEMPT_LABEL_KEY, OWNER_LABEL_KEY, OWNER_LABEL_VALUE, DockerBackend
 
+#: `_fixture_surface`'s own src-only convention (#267's deprecated shim below).
+_FIXTURE_SRC_DIRNAME = "src"
+
 #: The AGENT container's network. A hosted-model client must reach its
 #: provider, and `DockerBackend`'s own default (`"none"`) made every real
 #: attempt unable to: the first live `collection-run` delivered its prompt,
@@ -472,6 +475,27 @@ def surface_mapping(files: list[tuple[str, bytes, bool]]) -> dict[str, object]:
     """Adapt declared files to the backend's bytes and executable metadata."""
     surface: dict[str, object] = {rel: data for rel, data, _ in files}
     surface[verify.SURFACE_EXECUTABLE_KEY] = [rel for rel, _, executable in files if executable]
+    return surface
+
+
+def _fixture_surface(fixture_dir: Path) -> dict[str, bytes]:
+    """DEPRECATED (#267): `fixture_dir/src/**` only, keyed by its path
+    relative to `fixture_dir`. `task_surface`/`surface_mapping` replace this
+    everywhere else in the codebase; this copy exists ONLY because
+    `uptake_study.run_study` - the runner for the live #237 study - must stay
+    byte-identical while that study is in progress. Byte-for-byte the same
+    walk `_fixture_surface` always was, never derived from `task_surface`, so
+    nothing about #267 can change what this returns. Do not add a new
+    caller - migrate `uptake_study.py` to `surface_mapping(task_surface(...))`
+    once #237 is done (tracked on skillc#20), then delete this."""
+    src_dir = fixture_dir / _FIXTURE_SRC_DIRNAME
+    surface: dict[str, bytes] = {}
+    for dirpath, dirnames, filenames in os.walk(src_dir, followlinks=False):
+        dirnames[:] = sorted(d for d in dirnames if d != "__pycache__")
+        for name in sorted(filenames):
+            path = Path(dirpath) / name
+            rel = path.relative_to(fixture_dir).as_posix()
+            surface[rel] = path.read_bytes()
     return surface
 
 
