@@ -45,6 +45,10 @@ def _ref() -> object:
     return gr.WitnessRef(ref="gate-witness.json", digest="sha256:witness1")
 
 
+def _receipt_ref() -> object:
+    return gr.WitnessRef(ref="installation-receipt", digest="sha256:receipt1")
+
+
 # --------------------------------------------------------------- matched / contradicting
 
 def test_matching_exit_codes_report_matched() -> None:
@@ -270,19 +274,34 @@ def test_golden_fixture_claim_mismatched_against_a_different_witness_exit_code()
 def test_helper_identity_matches_reports_matched() -> None:
     claimed = {"lib/cicd/evidence.py": "abc123", "lib/cicd/state.py": "def456"}
     installed = {"lib/cicd/evidence.py": "sha256:abc123", "lib/cicd/state.py": "sha256:def456"}
-    result = gr.reconcile_helper_identity(claimed, installed)
+    result = gr.reconcile_helper_identity(claimed, installed, _receipt_ref())
     assert result.state == "matched"
     assert result.reason is None
-    assert result.witness_ref is None  # structural gap, module docstring - never guessed
+    assert result.witness_ref is None  # a match cites nothing - there is no contradiction to witness
 
 
 def test_helper_identity_mismatch_reports_contradicting_stale_identity() -> None:
     claimed = {"lib/cicd/evidence.py": "abc123"}
     installed = {"lib/cicd/evidence.py": "sha256:different"}
-    result = gr.reconcile_helper_identity(claimed, installed)
+    ref = _receipt_ref()
+    result = gr.reconcile_helper_identity(claimed, installed, ref)
     assert result.state == "contradicting"
     assert result.reason == "stale-identity"
     assert result.reason in gr.CONTRADICTING_REASONS
+    assert result.witness_ref == ref  # cites the receipt identity the caller resolved, not invented here
+
+
+def test_helper_identity_mismatch_without_a_receipt_to_cite_is_unknown() -> None:
+    """A real contradiction with no installation-receipt available to cite
+    cannot be written as `contradicting` (records.py would refuse the
+    missing witness_ref) - `unknown` is the honest answer, not a verdict
+    with nothing behind it."""
+    claimed = {"lib/cicd/evidence.py": "abc123"}
+    installed = {"lib/cicd/evidence.py": "sha256:different"}
+    result = gr.reconcile_helper_identity(claimed, installed)
+    assert result.state == "unknown"
+    assert result.reason == "no-installation-receipt-to-cite"
+    assert result.witness_ref is None
 
 
 def test_helper_identity_with_no_comparable_path_is_unknown() -> None:

@@ -1691,6 +1691,7 @@ def _skill_evidence_binding(
     captured: set[str] | None,
     declared_sources: list[str],
     digest_citation_count: Mapping[str, int] | None = None,
+    receipt_identity: str | None = None,
 ) -> Iterator[str]:
     """`skill-evidence` (#268) cross-checked against the OTHER records of its
     own attempt and trial - the things a lone `skill-evidence` record cannot
@@ -1824,14 +1825,46 @@ def _skill_evidence_binding(
                 # witness_ref is SHAPED correctly; whether the digest it
                 # names was ever actually captured is a cross-record fact
                 # no lone record can establish for itself.
+                #
+                # #272 scope addition: `stale-identity` is a claim about
+                # this attempt's installed IDENTITY (records.md R9), never
+                # about a gate's execution - so it cites THIS attempt's own
+                # installation-receipt (by `subject.digest`, below), never a
+                # gate-witness artifact. The other three reasons remain
+                # gate-witness citations, unchanged. A citation of the wrong
+                # kind for its own reason is refused explicitly, not merely
+                # by happening not to match - "I cited the wrong witness"
+                # and "I cited nothing real" are different findings.
                 witness_ref = external.get("witness_ref")
                 w_digest = witness_ref.get("digest") if isinstance(witness_ref, dict) else None
-                if isinstance(w_digest, str) and w_digest and w_digest not in captured:
-                    yield (
-                        f"{e_where}: external_evidence.reconciliation is 'contradicting' and "
-                        f"cites witness_ref {w_digest!r}, which no manifest for this attempt "
-                        f"captured - an unwitnessed contradiction"
-                    )
+                if isinstance(w_digest, str) and w_digest:
+                    if reason == "stale-identity":
+                        if receipt_identity is None:
+                            yield (
+                                f"{e_where}: external_evidence.reconciliation is 'contradicting' "
+                                f"with reason 'stale-identity', but this attempt has no "
+                                f"installation-receipt for witness_ref to cite"
+                            )
+                        elif w_digest != receipt_identity:
+                            yield (
+                                f"{e_where}: external_evidence.reason is 'stale-identity' but "
+                                f"cites witness_ref {w_digest!r}, which does not match this "
+                                f"attempt's own installation-receipt identity "
+                                f"({receipt_identity!r}) - stale-identity must cite the "
+                                f"receipt, not a gate-witness artifact"
+                            )
+                    elif w_digest == receipt_identity:
+                        yield (
+                            f"{e_where}: external_evidence.reason is {reason!r} but cites "
+                            f"witness_ref {w_digest!r}, this attempt's own installation-receipt "
+                            f"identity - {reason!r} must cite a gate-witness artifact, not the receipt"
+                        )
+                    elif w_digest not in captured:
+                        yield (
+                            f"{e_where}: external_evidence.reconciliation is 'contradicting' and "
+                            f"cites witness_ref {w_digest!r}, which no manifest for this attempt "
+                            f"captured - an unwitnessed contradiction"
+                        )
 
 
 def ledger_binding(bundle: Bundle) -> Iterator[str]:
@@ -1887,6 +1920,11 @@ def ledger_binding(bundle: Bundle) -> Iterator[str]:
         } if isinstance(artifacts, list) else set()
         captured.setdefault(manifest.attempt_id, set()).update(digests)
     installed_paths: dict[str, set[str]] = {}
+    #: `witness_ref` for `stale-identity` cites THIS attempt's own
+    #: installation-receipt, never a gate-witness artifact (orchestrator
+    #: review, #272) - identified by the receipt's own `subject.digest`,
+    #: already a required field, never a new digest invented for this.
+    receipt_identity: dict[str, str] = {}
     for receipt in bundle.of_kind(INSTALLATION_RECEIPT):
         entries = receipt.data.get("installed")
         paths = {
@@ -1894,6 +1932,10 @@ def ledger_binding(bundle: Bundle) -> Iterator[str]:
             if isinstance(e, dict) and _nonempty_str(e.get("path"))
         } if isinstance(entries, list) else set()
         installed_paths.setdefault(receipt.attempt_id, set()).update(paths)
+        subject = receipt.data.get("subject")
+        subject_digest = subject.get("digest") if isinstance(subject, dict) else None
+        if isinstance(subject_digest, str) and subject_digest:
+            receipt_identity[receipt.attempt_id] = subject_digest
     criteria_by_attempt: dict[str, dict[str, set[object]]] = {}
     for result in bundle.of_kind(VERIFIED_RESULT):
         criteria = result.data.get("criteria")
@@ -1951,6 +1993,7 @@ def ledger_binding(bundle: Bundle) -> Iterator[str]:
                 captured.get(record.attempt_id),
                 declared_sources,
                 digest_citation_count,
+                receipt_identity.get(record.attempt_id),
             )
         if record.kind == INSTALLATION_RECEIPT:
             for ident, keys in (("subject", ("digest",)), ("client", ("name", "version"))):

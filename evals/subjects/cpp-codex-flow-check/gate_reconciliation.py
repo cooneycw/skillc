@@ -83,9 +83,12 @@ confirmed against actual producer code, never guessed:
   `installation-receipt.installed` digests - both SHA-256 over raw file
   bytes (confirmed by reading `lib/cicd/evidence.py::_sha256` and
   `skillc/materialize.py::sha256_file`/`sha256_bytes`), differing only in
-  a `sha256:` prefix. See that function's own docstring for a found
-  structural gap: `witness_ref` has no existing way to cite an
-  installation-receipt.
+  a `sha256:` prefix. Its `witness_ref` cites THIS attempt's own
+  installation-receipt (by `subject.digest`) rather than a gate-witness
+  artifact - `skillc/records.py` now accepts that citation for
+  `stale-identity` specifically, and refuses a receipt citation for a gate
+  reason or a gate-witness citation for `stale-identity` (orchestrator
+  review, #272 - closing a structural gap found while first building this).
 
 `tree-mismatch` IS UNREACHABLE FOR THIS SUBJECT, confirmed, not merely
 unconfigured. CPP's `tree_signature` (`lib/cicd/state.py::
@@ -242,6 +245,7 @@ def _normalize_hex_digest(value: str) -> str:
 def reconcile_helper_identity(
     claimed_module_sha256: dict[str, str],
     installed_digests: dict[str, str],
+    receipt_identity: WitnessRef | None = None,
 ) -> GateReconciliation:
     """RECORD-level, not per-gate: CPP's `observed.helper.module_sha256` is
     one map for the whole usage record, compared against the SAME attempt's
@@ -249,21 +253,22 @@ def reconcile_helper_identity(
     record's own bound ... identity differs from this trial's planned one"
     (R9, records.md).
 
-    `witness_ref` is always `None` here - a STRUCTURAL GAP found while
-    building this, not resolved: `skill-evidence.external_evidence.
-    witness_ref` is checked by `_skill_evidence_binding` against
-    `artifact-manifest`-captured digests only (the same check `artifact_ref`
-    gets). An `installation-receipt` is a separate record kind, never
-    captured as a manifest artifact, so there is no existing mechanism for
-    a `witness_ref` to cite one. Flagged to the orchestrator rather than
-    invented - using the receipt "as the authority" (as asked) may need a
-    records.py change, or a different field, before this can be written
-    into a real `skill-evidence` record.
+    `receipt_identity` is this attempt's own installation-receipt citation -
+    `WitnessRef(ref=..., digest=<receipt's subject.digest>)` - CLOSING the
+    structural gap found while first building this (orchestrator review,
+    #272): `skill_evidence()`/`_skill_evidence_binding` now accept a
+    `stale-identity` `witness_ref` that resolves to THIS attempt's own
+    installation-receipt (by `subject.digest`), never a gate-witness
+    artifact - the two are different authorities for different reasons, and
+    a citation of the wrong kind for its own reason is refused explicitly.
+    When `contradicting` is returned here, `receipt_identity` is passed
+    straight through as the verdict's own `witness_ref` - this function
+    never invents one, only cites what the caller already resolved.
 
     A path present on only one side (CPP reports a module skillc never
     installed, or vice versa) is `unknown`, not a guessed verdict either
     way - only a path BOTH sides name, with digests that disagree, is a
-    real contradiction.
+    real contradiction, and only then is a witness_ref even relevant.
     """
     disagreeing: list[str] = []
     comparable = 0
@@ -277,5 +282,7 @@ def reconcile_helper_identity(
     if comparable == 0:
         return GateReconciliation("unknown", "no-comparable-helper-path", None)
     if disagreeing:
-        return GateReconciliation("contradicting", "stale-identity", None)
+        if receipt_identity is None:
+            return GateReconciliation("unknown", "no-installation-receipt-to-cite", None)
+        return GateReconciliation("contradicting", "stale-identity", receipt_identity)
     return GateReconciliation("matched", None, None)

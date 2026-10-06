@@ -32,6 +32,25 @@ and version plan.
   - The two-arm study (`published` + `rewritten`, with its Fisher test) is
     unchanged.
 
+- **`stale-identity`'s `witness_ref` can cite the installation-receipt**
+  (Refs #269, #272). `#301` made `contradicting` require a `witness_ref`
+  validated only against `artifact-manifest`-captured digests - correct for
+  a gate-execution claim, but `stale-identity` is a claim about installed
+  IDENTITY, which an installation-receipt (never a manifest artifact)
+  cannot satisfy that way. Found while building `evals/subjects/
+  cpp-codex-flow-check/gate_reconciliation.py`'s `reconcile_helper_identity`
+  - closed as reconciliation scope rather than left as a verdict the
+  reconciler could emit and `check-records` would refuse. `ledger_binding`
+  now binds `stale-identity`'s `witness_ref.digest` against this attempt's
+  own `installation-receipt.subject.digest`; every other contradicting
+  reason is unchanged (still a gate-witness artifact citation). Closed both
+  directions with their own committed bad fixture
+  (`skill-evidence-stale-identity-wrong-witness`,
+  `skill-evidence-gate-reason-cites-receipt`) plus a good one
+  (`skill-evidence-stale-identity`), mutation-checked, net diff empty.
+  `reconcile_helper_identity` now returns the receipt citation it resolves,
+  closing the structural gap its own earlier commit had flagged.
+
 - **`uptake-study` screening-probe mode** (Refs #238). An optional `probe`
   block declares a cut-off (20-300 s), which must equal
   `shared.per_attempt_seconds`, so the attempt itself stops there.

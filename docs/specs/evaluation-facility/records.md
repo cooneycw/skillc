@@ -669,6 +669,35 @@ to name, and the cpp-eval review questions relayed 2026-10-06.
     unconditionally (`skill-evidence-altered-artifact` and
     `skill-evidence-altered-artifact-contradicting`).
 
+  **`stale-identity`'s `witness_ref` cites the installation-receipt, never a
+  gate-witness artifact (#272 scope addition).** The original `witness_ref`
+  check (above) validated every `contradicting` reason's citation against
+  `artifact-manifest`-captured digests only - correct for a gate-execution
+  claim (`exit-code-mismatch`, `outcome-disagreement`, `tree-mismatch`), but
+  `stale-identity` is a claim about this attempt's installed IDENTITY, not
+  about anything a gate execution could witness. An `installation-receipt`
+  is a separate record kind, never captured as a manifest artifact, so that
+  check had no way to accept a receipt citation at all - found and reported
+  while building a reconciler for this (`evals/subjects/cpp-codex-flow-
+  check/gate_reconciliation.py`, #269), closed here rather than left as a
+  verdict the reconciler could emit and `check-records` would refuse.
+  `ledger_binding` now binds `stale-identity`'s `witness_ref.digest` against
+  THIS attempt's own `installation-receipt.subject.digest` - already a
+  required field, no new digest invented. The binding is CLOSED both
+  directions, each with its own committed bad fixture: a `stale-identity`
+  citing a gate-witness-shaped digest instead of the receipt
+  (`skill-evidence-stale-identity-wrong-witness`) is refused, and a gate
+  reason citing the receipt's identity instead of a gate-witness artifact
+  (`skill-evidence-gate-reason-cites-receipt`) is refused - "I cited the
+  wrong witness" is a different finding from "I cited nothing real," and
+  both are named explicitly rather than falling through to one generic
+  message. `skill-evidence-stale-identity` is the matching good fixture.
+  Both new checks are mutation-checked: disabled, confirmed blind (or
+  falling back to a less specific but still-correct refusal, for the
+  gate-reason-cites-receipt direction, since an uncaptured receipt digest
+  is also caught by the unconditional altered-artifact check), restored,
+  confirmed correct again, net diff empty.
+
   **`declared-skill-not-installed` is deliberately not closed yet.** Its Q3
   answer (above) describes a CPP usage record's own self-declared skill name
   disagreeing with installed paths - a fact about a field `external_evidence`
