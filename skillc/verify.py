@@ -615,12 +615,9 @@ PROBE_WORKDIR = "/work"
 #: expected to carry `codex`/`claude`.
 PROBE_INTERPRETER = "python3"
 
-#: Surface key naming which placed candidate paths need the executable bit
-#: (codex review: the bytes-only surface convention otherwise drops it
-#: silently). A backend that does not yet honour this key installs every file
-#: without +x - stated as a real, current limitation for a candidate that
-#: must be exec'd directly rather than imported; today's shipped graders only
-#: import candidate code, so this does not block them.
+#: Surface key naming placed paths that need the executable bit.
+#: DockerBackend honours it for bytes-backed files. Other backends, including
+#: the managed backend, do not necessarily honour this metadata.
 SURFACE_EXECUTABLE_KEY = "__executable__"
 
 

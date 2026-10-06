@@ -1091,7 +1091,7 @@ def test_cli_default_task_records_the_same_identity_as_before(
     assert (grader.id, grader.revision) == ("slug-small-fix", "2")  # type: ignore[attr-defined]
     runner = call["runner"]
     assert runner.goal == (sp.GRADER_ROOT / "goal.md").read_text(encoding="utf-8")  # type: ignore[attr-defined]
-    assert runner.surface == cc._fixture_surface(sp.GRADER_ROOT / "fixture")  # type: ignore[attr-defined]
+    assert runner.surface == cc.surface_mapping(cc.task_surface(sp.GRADER_ROOT / "fixture"))  # type: ignore[attr-defined]
 
 
 def test_cli_task_flag_grades_against_the_named_task_not_the_default(
@@ -1116,7 +1116,7 @@ def test_cli_task_flag_grades_against_the_named_task_not_the_default(
     assert (grader.id, grader.revision) == ("finish-close-ref", "1")  # type: ignore[attr-defined]
     runner = call["runner"]
     assert runner.goal == (FINISH_CLOSE_REF_ROOT / "goal.md").read_text(encoding="utf-8")  # type: ignore[attr-defined]
-    assert runner.surface == cc._fixture_surface(FINISH_CLOSE_REF_ROOT / "fixture")  # type: ignore[attr-defined]
+    assert runner.surface == cc.surface_mapping(cc.task_surface(FINISH_CLOSE_REF_ROOT / "fixture"))  # type: ignore[attr-defined]
 
 
 def test_cli_task_and_detection_control_compose(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

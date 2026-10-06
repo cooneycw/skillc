@@ -8,6 +8,13 @@ and version plan.
 
 ## [Unreleased]
 
+- **Unified regular-file task delivery** (Refs #267). Collection runs,
+  calibration runs and selection probes deliver the whole declared fixture,
+  excluding answer keys at every depth. Missing, empty, symlinked and
+  unsupported inputs are refused. Docker installation preserves executable
+  metadata for bytes-backed helpers through capture; focused controls cover
+  non-src tasks, nested answer leakage and every existing task surface.
+
 - **`skillc profile validate`: a transitive installation profile for one
   workflow** (Refs #265, wave #258, workstream #247). A profile layers on one
   subject and names every dependency of a selected workflow: helpers,

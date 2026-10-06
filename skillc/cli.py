@@ -1128,7 +1128,7 @@ def cmd_selection_probe(args: argparse.Namespace) -> int:
             argv_for=lambda _attempt_id: client_argv,
             treatment_home_files=cc._collection_home_files(acquired.source, acquired.files),
             goal=(task_root / "goal.md").read_text(encoding="utf-8"),
-            surface=cc._fixture_surface(task_root / "fixture"),
+            surface=cc.surface_mapping(cc.task_surface(task_root / "fixture")),
             timeout=agent_timeout, cli_version=acquired.subject.client_version,
             credential_explicit_path=Path(args.credential) if args.credential else None,
             minimum_credential_seconds=minimum,
