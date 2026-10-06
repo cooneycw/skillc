@@ -30,8 +30,10 @@ by design, and would only ever exist for codex.
 THE DECLARATION. `load_declaration` validates a calibration run manifest
 (`evals/calibration-204/run-manifest.json`) BEFORE any attempt exists:
 two or three arms that differ only in their treatment (every other identity
-lives once, under `shared`), 3-8 attempts per arm, and an arm order derived
-from a recorded seed rather than chosen by hand. A third arm (#231, the #203
+lives once, under `shared`), 1-1000 attempts per arm (#323: a sanity rail,
+not a design-sizing constraint - see `MIN_ATTEMPTS_PER_ARM`), and an arm
+order derived from a recorded seed rather than chosen by hand. A third arm
+(#231, the #203
 B/N/P design) installs the SAME subject as the other treated arm and differs
 from it only by an `instruction` naming `named_skills` to read first: it
 separates a skill's value from its uptake, and can never be an ablation. A declaration is not an
@@ -67,7 +69,19 @@ PRIMARY_ENDPOINT_EXCLUDES = frozenset({verify.READINESS_CRITERION})
 NOT_GRADED = "NOT_GRADED"
 
 BASELINE_ARM = "baseline"
-MIN_ATTEMPTS_PER_ARM, MAX_ATTEMPTS_PER_ARM = 3, 8
+#: #323: the fixed 3-8 range this module shipped with (#204) refused any
+#: declaration that needed more repeats than that to reach significance.
+#: evals/calibration-287/power_cost_table.py showed a concrete case: even at
+#: the best observable outcome (the better arm passing every attempt), a
+#: one-sided Fisher's exact test at alpha=0.05 needs n>=10 per arm to reach
+#: p<0.05 at all. 1 is the only real floor (a single attempt is still a
+#: result, just an uninformative one - `require_approved`'s identity/grader
+#: checks catch a careless declaration long before power does); the upper
+#: bound is a sanity rail against a typo'd exponent (a declared six-figure
+#: attempts_per_arm was never a deliberate study design), not a design-
+#: sizing constraint - that question belongs to the declaration's own power
+#: justification and to ADR 0005's cost gate, not to this schema.
+MIN_ATTEMPTS_PER_ARM, MAX_ATTEMPTS_PER_ARM = 1, 1_000
 UNKNOWN = "UNKNOWN"
 
 #: protocol.md 10.1: the three lanes a declaration may measure. Absent (every
@@ -403,14 +417,34 @@ def _identity_at(declaration: CalibrationDeclaration, path: tuple[str, ...]) -> 
 
 def require_approved(declaration: CalibrationDeclaration, root: Path) -> None:
     """Refuse to authorize a run of this declaration unless its approval is
-    recorded (who and when), every `REQUIRED_IDENTITIES` field holds a real
-    value, no identity anywhere still says `UNKNOWN`, and the declared task's
-    grader is the one on disk. A declaration that validates is still only a
-    plan (ADR 0005)."""
+    recorded (who and when, and the exact schedule size approved), every
+    `REQUIRED_IDENTITIES` field holds a real value, no identity anywhere
+    still says `UNKNOWN`, and the declared task's grader is the one on disk.
+    A declaration that validates is still only a plan (ADR 0005).
+
+    #323: `approval.attempts_per_arm` must equal `declaration.attempts_per_arm`
+    - checked as its own field, not inferred from `approval.scope`'s prose.
+    Without this, raising #323's own MAX_ATTEMPTS_PER_ARM opened a gap this
+    function did not previously need to close: `parse_declaration` already
+    refuses an `attempts_per_arm` whose `arm_order.sequence` was not
+    re-derived from it (`derive_arm_order`), but a declaration edited to
+    change BOTH `attempts_per_arm` and a freshly re-derived `arm_order`
+    together is internally self-consistent and would otherwise sail through
+    this function on an approval that was never asked about the new size -
+    exactly the "approved manifest eligible for a different run" ADR 0005
+    forbids."""
     approval = declaration.approval
     if not approval or not all(isinstance(approval.get(k), str) and approval.get(k) for k in ("by", "at")):
         raise _refuse("not approved: 'approval' must record who approved it ('by') and when ('at') "
                       "before any attempt runs (ADR 0005)")
+    approved_attempts = approval.get("attempts_per_arm")
+    if isinstance(approved_attempts, bool) or not isinstance(approved_attempts, int):
+        raise _refuse("not approved: 'approval.attempts_per_arm' must record the exact schedule size "
+                      "approved, as an integer - a declaration edited to a different size afterward "
+                      "must be refused as unapproved, not silently re-matched by prose alone")
+    if approved_attempts != declaration.attempts_per_arm:
+        raise _refuse(f"approved for attempts_per_arm={approved_attempts}, not the declared "
+                      f"{declaration.attempts_per_arm}; a changed schedule needs its own approval")
     absent = [".".join(path) for path in REQUIRED_IDENTITIES
               if not (isinstance(v := _identity_at(declaration, path), str) and v.strip() and v != UNKNOWN)]
     if absent:

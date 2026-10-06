@@ -2,10 +2,11 @@
  "kind": "calibration-declaration",
  "issue": 203,
  "declared_at": "2026-10-04",
- "_comment": "#203 Q2 step (a): the same task, identities and image as evals/calibration-203, with reasoning effort lowered from high to low, to check whether gate-ran-nothing can discriminate at all. Two arms (baseline, natural) at the runner's minimum of 3 each, the smallest declaration the runner accepts. Approved by the owner 2026-10-04. NOT YET RUN.",
+ "_comment": "#203 Q2 step (a): the same task, identities and image as evals/calibration-203, with reasoning effort lowered from high to low, to check whether gate-ran-nothing can discriminate at all. Two arms (baseline, natural) at 3 each (the schema's minimum at the time this was declared - #323 later widened the range, this run's size is unaffected). Approved by the owner 2026-10-04. NOT YET RUN.",
  "approval": {
   "by": "owner (cooneycw)",
   "at": "2026-10-04",
+  "attempts_per_arm": 3,
   "source": "owner reply in the 2026-10-04 skillc session: \"Yea\", answering Q2 \"Is this shape OK for the low-effort check?\" (B and N, 3 each, effort low, same task/model/image as evals/calibration-203); step (a) of the owner's #203 Q2 ruling \"c\"",
   "scope": "the arms, identities, schedule (3 attempts per arm, seed 20261004 order) and caps declared in this file, run under the operator's codex subscription login (ADR 0005 rule 6); no judge tier, no dollar-metered spend"
  },

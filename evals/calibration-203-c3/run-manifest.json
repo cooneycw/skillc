@@ -6,6 +6,7 @@
  "approval": {
   "by": "owner (cooneycw)",
   "at": "2026-10-04",
+  "attempts_per_arm": 6,
   "source": "owner reply in the 2026-10-04 skillc session: \"yes to merge both. q2 yes\", answering Q2 \"Should I set up the calibration run for the new task?\" (B/N/P, 6 per group, same model at effort high, P told to read flow-auto and flow-check)",
   "scope": "the arms, identities, schedule (6 attempts per arm, seed 20261005 order) and caps declared in this file, run under the operator's codex subscription login (ADR 0005 rule 6); no judge tier, no dollar-metered spend"
  },

@@ -8,6 +8,21 @@ and version plan.
 
 ## [Unreleased]
 
+- **Raised the calibration declaration's `attempts_per_arm` bound, 3-8 to
+  1-1000 (#323).** Found while sizing #287's declaration: the exact one-
+  sided Fisher's-exact power table computed on
+  `evals/calibration-287/power_cost_table.py` shows a real study may need
+  n>=10 per arm even at the best observable outcome, which the old 3-8
+  range refused outright. The new range is a sanity rail against a typo'd
+  exponent, not a design-sizing constraint - that question belongs to the
+  declaration's own power justification and to ADR 0005's cost gate.
+  `require_approved` now also checks `approval.attempts_per_arm` against
+  the declared `attempts_per_arm`: raising the cap opened a gap where a
+  declaration edited to a different, self-consistent schedule (both
+  `attempts_per_arm` and its re-derived `arm_order`) would otherwise pass
+  on an approval that was never asked about the new size. The four real
+  committed declarations (`evals/calibration-204`, `-203`, `-203-low`,
+  `-203-c3`) each record their already-approved size in this new field.
 - **The expanded-instruction lane for the #204 calibration declaration
   (#274).** `lane` (`explicit-contract | matched-outcome | expanded-
   instruction`) joins the declaration schema, defaulting to

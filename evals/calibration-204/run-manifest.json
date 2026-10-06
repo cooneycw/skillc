@@ -6,6 +6,7 @@
  "approval": {
   "by": "owner (cooneycw)",
   "at": "2026-09-30",
+  "attempts_per_arm": 4,
   "source": "owner instruction in the #204 /flow:auto session: \"approve the calibration run\"",
   "scope": "the arms, identities, schedule (4 attempts per arm, seed 20260930 order) and caps declared in this file, run under the operator's codex subscription login (ADR 0005 rule 6); no judge tier, no dollar-metered spend",
   "image_digest_resolved": "2026-09-30: `docker image inspect skillc-trial:latest` -> sha256:d1b2ced9..., the image #12's rerun and #150 ran (built 2026-09-27)"
