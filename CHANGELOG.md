@@ -8,6 +8,26 @@ and version plan.
 
 ## [Unreleased]
 
+- **The expanded-instruction lane for the #204 calibration declaration
+  (#274).** `lane` (`explicit-contract | matched-outcome | expanded-
+  instruction`) joins the declaration schema, defaulting to
+  `matched-outcome` so every existing declaration keeps its prior,
+  unnamed meaning. The new lane adds a second treated-arm pair - S
+  (explicit-skill) vs E (expanded-instruction), protocol.md 10.1/10.4 -
+  sharing one `skillc profile validate` inventory, with helper-parity
+  (`treatment_question == "prose"`) and content-identity
+  (`body_digest`-matched) checks before any attempt runs. No new runner:
+  built entirely on calibration.py's existing parse/schedule/report path.
+  - **Three Codex cross-model review fixes** (diff-only scope). **[HIGH]**
+    the inventory's claims were trusted without being bound to the
+    declaration's own subject - now checked against
+    `inventory["subject"].locator/revision`. **[MEDIUM]** an E arm
+    carrying neither `instruction` nor `named_skills` passed every shape
+    check and crashed downstream instead of being refused cleanly - now
+    refused in `parse_declaration`. **[MEDIUM]** an entirely absent
+    `helper_parity` object read as an empty, passing population,
+    indistinguishable from a validated empty one - now requires the field
+    present as a list.
 - **Five Codex cross-model review fixes for #272** (pre-PR review, model
   `gpt-6.1-sol`). All five mutation-checked.
   - **[HIGH] `CoverageRow.criteria` silently overwrote a disagreeing
