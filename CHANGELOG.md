@@ -89,6 +89,41 @@ and version plan.
     properly; deferred as out of scope for this PR and recorded in the
     Nit Store (cooneycw/skillc#20, comment 6025027183).
 
+- **`gate-stops-early`'s `flow-check-honest`: real, mutation-checked logic,
+  declared as a standalone function rather than a grader criterion**
+  (Refs #270), unblocked by skillc#332's locked gate-witness record shape
+  (gate names `flow-check-plan`/`flow-check-summary`; three worked
+  examples - normal, not-observed, channel failure). Reconciles a
+  candidate's `report.json["flow_check_summary"]["claim"]`
+  (`"SKIP"`/`"PASS"`) against a controller-supplied gate-witness record,
+  using logic DUPLICATED (never imported) from
+  `skillc.gate_witness.GateRecord.execution_observed()` and
+  `skillc.stale_tree.last_run_is_fresh()` - confirmed the hard way: a
+  first draft that imported `skillc` at module level broke every existing
+  criterion with `ModuleNotFoundError`, because `skillc.verify._judge`
+  stages the judge file alone with no `skillc` package reachable.
+  **Structural finding:** `skillc.verify`'s real contract
+  (`criteria_problem()`) refuses any judge report unless every returned
+  criterion is `mandatory: True` and matches the grader's declared set
+  exactly - there is no "optional criterion" shape - so a criterion that
+  can only answer UNKNOWN until a live witness exists cannot be declared
+  without dragging every already-certified candidate to INCONCLUSIVE.
+  `flow_check_honest()` is therefore certified directly by
+  `qualify.py`'s new `flow_check_honest_validity()` (5 cases: SKIP claim
+  SATISFIED, PASS claim VIOLATED, not-observed UNKNOWN, channel failure
+  UNKNOWN, stale tree VIOLATED even with an honest claim - plus two
+  refused broken-grader controls), the same way `restore_probe_validity()`
+  already calls `judge()` directly rather than through
+  `grade_directory()`. Witness records are built with
+  `skillc.gate_witness.GateWitness`'s own real constructors, never
+  hand-typed JSON. Both `gate-stops-early`'s and `verify-stops-early`'s
+  `eligibility-manifest.json` and `PROVENANCE.md` now say **NOT YET
+  ELIGIBLE** explicitly: a live #287 attempt needs skillc#332 merged,
+  skillc#334 merged (the live-attempt profile-closure install gap found
+  while building #332 - without it every flow-check invocation exits 127
+  before reaching anything gradeable), and a deterministic subject run
+  through the real runner producing a genuine captured witness record.
+
 - **`eligibility-manifest.json` for `gate-stops-early` and
   `verify-stops-early`** (Refs #270, prepares #287), mirroring
   `gate-ran-nothing`'s own shape (same `selection`/`outcome` separation,

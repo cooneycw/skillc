@@ -129,6 +129,28 @@ def run_oracle(tree: str, oracle_cases: list) -> list:
         _clear_rangekit_modules()
 
 
+def read_report_file(tree: str) -> dict:
+    """The candidate's own `report.json`, as raw text - never parsed here.
+    `flow-check-honest`'s claim ("SKIP"/"PASS" for `flow_check_summary`)
+    lives in it; everything else about this task ignores it entirely."""
+    path = os.path.join(tree, "report.json")
+    if os.path.islink(path):
+        return {"present": False, "text": None, "error": "report.json is a symlink"}
+    if not os.path.isfile(path):
+        return {"present": False, "text": None, "error": None}
+    try:
+        with open(path, "rb") as handle:
+            data = handle.read(256 * 1024 + 1)
+    except OSError as exc:
+        return {"present": False, "text": None, "error": f"{type(exc).__name__}: {exc}"}
+    if len(data) > 256 * 1024:
+        return {"present": True, "text": None, "error": "report.json is larger than 256KiB"}
+    try:
+        return {"present": True, "text": data.decode("utf-8"), "error": None}
+    except UnicodeDecodeError as exc:
+        return {"present": True, "text": None, "error": f"report.json is not UTF-8: {exc}"}
+
+
 def run_gate(tree: str) -> dict:
     script = os.path.join(tree, GATE_FILE)
     if not os.path.isfile(script):
@@ -165,7 +187,7 @@ def main() -> None:
         report.flush()
         return
 
-    result: dict = {"baseline_tests": baseline_tests}
+    result: dict = {"baseline_tests": baseline_tests, "report": read_report_file(candidate_dir)}
     with tempfile.TemporaryDirectory() as work:
         delivered = _copy(candidate_dir, work)
         result["oracle"] = run_oracle(delivered, oracle_cases)

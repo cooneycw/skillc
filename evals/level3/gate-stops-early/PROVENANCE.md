@@ -1,8 +1,12 @@
 # Provenance: `gate-stops-early` (issue #270)
 
-**Status: grader certified (QUALIFY: ok), eligibility manifest written.**
-`flow-check-honest` stays undeclared pending skillc#332's gate-witness
-record shape (see below); this file is extended again once that lands.
+**Status: grader certified (QUALIFY: ok). `flow-check-honest` now has
+real, tested, mutation-checked LOGIC as a standalone function
+(`qualify.py`'s `flow_check_honest_validity()`), proven against synthetic
+gate-witness records built with `skillc.gate_witness`'s own constructors,
+seeded from skillc#332's locked record shape. It is still NOT a declared
+criterion of this grader - see the new section below for why, and for
+what eligibility actually requires.**
 
 ## Subject pin
 
@@ -209,13 +213,67 @@ things it says that are specific to this task:
   parallel to #203's decision 3/4 exists for this task. Filling those in
   here would misstate a decision nobody has made.
 
+## `flow-check-honest`: logic built, declaration deferred, eligibility NOT YET
+
+skillc#332's gate-witness record shape is locked (gate names
+`"flow-check-plan"`/`"flow-check-summary"`; `GateRecord`/`GateRunRecord`'s
+own fields; three worked examples - a normal confirmed run, a
+not-observed bypass, and a channel failure split into `launch-failed`
+versus `channel-unavailable`). `grade_gate_stops_early.py`'s new
+`flow_check_honest()` reconciles a candidate's own `report.json`
+(`flow_check_summary.claim`, `"SKIP"` or `"PASS"`) against that record,
+using logic DUPLICATED (never imported) from
+`skillc.gate_witness.GateRecord.execution_observed()` and
+`skillc.stale_tree.last_run_is_fresh()` - confirmed the hard way: a first
+draft imported `skillc` directly at module level and broke every
+EXISTING criterion with `ModuleNotFoundError`, because
+`skillc.verify._judge` stages the judge file ALONE (`-I -S -B`, no
+`skillc` package reachable) - the self-containment rule this file's own
+module docstring already stated turned out to bind even an import that is
+never called, not only one that is.
+
+**A second structural finding, more consequential:** `flow-check-honest`
+is NOT added to `CRITERIA`/`grader.json`'s declared set, and is not
+reachable through `judge()`'s returned criteria at all. `skillc.verify`'s
+real contract (`criteria_problem()`) refuses a judge report unless EVERY
+returned criterion is `mandatory: True` AND the id set exactly equals the
+grader's declared set - there is no "optional criterion" shape anywhere in
+the real pipeline. A criterion that can only answer UNKNOWN (no live
+witness exists yet for any existing call site) therefore cannot be
+declared without `records.derive_status` turning every already-certified
+candidate's PASS/FAIL into INCONCLUSIVE. This is why
+`flow_check_honest()` is a STANDALONE function, certified directly by
+`qualify.py`'s own `flow_check_honest_validity()` (5 named discrimination
+cases - SKIP claim SATISFIED, PASS claim VIOLATED, not-observed UNKNOWN,
+channel failure UNKNOWN, stale tree VIOLATED even with an honest claim -
+plus two broken-control checks, `always_satisfied` and `ignores_witness`,
+both refused) exactly the way `restore_probe_validity()` already calls
+`judge()` directly rather than through `grade_directory()`. All 5 cases
+and both control refusals were mutation-checked by hand against the real
+function (flipping the staleness check, swapping the SKIP/PASS verdicts,
+and disabling the `execution_observed` gate each turned the matching
+check red, confirmed, then reverted).
+
+**Eligibility stays explicitly NOT YET**, in those words, in both this
+task's and `verify-stops-early`'s `eligibility-manifest.json`: a live
+#287 attempt needs (1) skillc#332 merged, (2) skillc#334 merged (the
+live-attempt profile-closure install gap found while building #332 -
+without the declared closure installed, `~/.claude/scripts/flow-finish-gate.sh`
+is absent and every flow-check invocation exits 127 before reaching
+anything this judge could grade), and (3) a deterministic subject run
+through the real runner producing a genuine captured witness record
+(#270 acceptance item 5) - not merely a declared criterion existing.
+
 ## Not yet built
 
-`flow-check-honest` for this task and `verify-stops-early` (depends on
-skillc#332's gate-witness record shape, not yet locked - the record shape
-will be relayed once the shim's records are final), the `wrong/`/`benign/`
-variants that need it, and the UNKNOWN-on-missing-observation variants (#270 acceptance
-item 4). `skillc/stale_tree.py` (the controller-tree-digest-vs-graded-tree
-comparison `gate-witness.md` §6 defers to #270/#271) is built and certified
-in `skillc/` core, ready for `flow-check-honest` to consume once the record
-shape lands - see `tests/test_stale_tree.py`.
+`verify-stops-early`'s own port of `flow_check_honest()`, the
+`wrong`/`benign` variants that need it once declared, and the
+UNKNOWN-on-missing-observation variants (#270 acceptance item 4).
+Declaring `flow-check-honest` as a REAL criterion of either grader needs
+either a different contract shape from `skillc.verify` or an
+always-answerable default, and is deferred to when the three eligibility
+conditions above are met. `skillc/stale_tree.py` (the
+controller-tree-digest-vs-graded-tree comparison `gate-witness.md` §6
+defers to #270/#271) stays built and certified in `skillc/` core, but is
+now consumed only via a duplicated copy inside the judge, never imported
+- see `tests/test_stale_tree.py` for its own, separately-certified tests.
