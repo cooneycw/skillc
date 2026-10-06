@@ -183,8 +183,10 @@ def _arms(**treatment_extra: object) -> list[object]:
     ({"arms": _arms() + [{"name": "ablation", "subject": {"name": "x"}}]}, "different subjects"),
     ({"arms": _arms() + [{"name": "p"}, {"name": "q"}]}, "two or three arms"),
     ({"arms": _arms(model="another-model")}, "arms may differ only"),
-    ({"attempts_per_arm": 9}, "3-8"),
-    ({"attempts_per_arm": 2}, "3-8"),
+    ({"attempts_per_arm": 0}, "1-1000"),
+    ({"attempts_per_arm": 1001}, "1-1000"),
+    ({"attempts_per_arm": 2.5}, "1-1000"),
+    ({"attempts_per_arm": True}, "1-1000"),
     ({"arm_order": {"seed": 20260930, "sequence": ["full-cpp", "baseline"] * 4}}, "chosen by hand"),
     ({"arm_order": {"seed": 1, "sequence": _manifest()["arm_order"]["sequence"]}},  # type: ignore[index]
      "chosen by hand"),
@@ -211,7 +213,7 @@ def test_a_total_cap_that_cannot_cover_the_schedule_is_refused() -> None:
 
 
 def _approved() -> dict[str, object]:
-    data = _mutated(approval={"by": "owner", "at": "2026-10-01"})
+    data = _mutated(approval={"by": "owner", "at": "2026-10-01", "attempts_per_arm": 4})
     data["shared"]["image"]["digest"] = "sha256:" + "ab" * 32  # type: ignore[index]
     return data
 
@@ -268,6 +270,67 @@ def test_approval_with_an_empty_treatment_subject_is_refused() -> None:
     data = _approved()
     data["arms"][0]["subject"] = {}  # type: ignore[index]
     with pytest.raises(calibration.DeclarationRefused, match="treatment.subject"):
+        calibration.require_approved(calibration.parse_declaration(data), ROOT)
+
+
+# --------------------------------------- #323: the attempts-per-arm bound
+
+
+def _at_n(n: int) -> dict[str, object]:
+    """The committed #204 declaration re-sized to n attempts per arm,
+    self-consistently: arm_order re-derived from the same seed, total_seconds
+    widened to cover it, and approval.attempts_per_arm updated to match -
+    exactly the shape #323's raised cap must accept end to end."""
+    data = _mutated()
+    arms = data["arms"]
+    assert isinstance(arms, list)
+    names = [a["name"] for a in arms]
+    data["attempts_per_arm"] = n
+    data["arm_order"] = {"seed": 20260930, "sequence": calibration.derive_arm_order(20260930, names, n)}
+    data["shared"]["per_attempt_seconds"] = 1200  # type: ignore[index]
+    data["shared"]["total_seconds"] = 1200 * n * len(names)  # type: ignore[index]
+    data["approval"]["attempts_per_arm"] = n  # type: ignore[index]
+    return data
+
+
+def test_an_attempts_per_arm_above_the_old_cap_now_validates_and_authorizes() -> None:
+    """#323: the old MAX_ATTEMPTS_PER_ARM was 8; evals/calibration-287's
+    computed power table showed a real study may need n>=10. 30 (one of that
+    table's rows) must both parse and authorize end to end - not merely
+    parse, which alone would not prove a live run could actually be
+    declared at this size."""
+    declaration = calibration.parse_declaration(_at_n(30))
+    assert declaration.attempts_per_arm == 30
+    calibration.require_approved(declaration, ROOT)
+
+
+def test_approval_without_attempts_per_arm_is_refused() -> None:
+    """Red case: the field this section adds is not optional - an approval
+    recording only who/when, with no schedule size, must not authorize."""
+    data = _mutated(approval={"by": "owner", "at": "2026-10-01"})
+    with pytest.raises(calibration.DeclarationRefused, match="attempts_per_arm"):
+        calibration.require_approved(calibration.parse_declaration(data), ROOT)
+
+
+@pytest.mark.parametrize("value", ["4", 4.0, True, None])
+def test_approval_attempts_per_arm_must_be_a_plain_integer(value: object) -> None:
+    """Red case: a string, float, bool or null must not satisfy the check by
+    accident (`4.0 == 4` in Python, `True == 1` - neither may pass)."""
+    data = _approved()
+    data["approval"]["attempts_per_arm"] = value  # type: ignore[index]
+    with pytest.raises(calibration.DeclarationRefused, match="attempts_per_arm"):
+        calibration.require_approved(calibration.parse_declaration(data), ROOT)
+
+
+def test_red_a_schedule_edited_after_approval_is_refused_as_unapproved() -> None:
+    """The #323 acceptance item this whole field exists for: resize the
+    declared schedule to n=10 (self-consistent arm_order included) while
+    leaving the APPROVED size at the original 4 - a declaration that is
+    otherwise perfectly well-formed must still be refused, because nobody
+    approved running it at this size."""
+    data = _at_n(10)
+    data["approval"]["attempts_per_arm"] = 4  # type: ignore[index]  # stale: the ORIGINAL approval
+    with pytest.raises(calibration.DeclarationRefused, match=r"approved for attempts_per_arm=4.*declared 10"):
         calibration.require_approved(calibration.parse_declaration(data), ROOT)
 
 

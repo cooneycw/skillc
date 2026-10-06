@@ -64,7 +64,11 @@ def _no_quarantine_escapes() -> Iterator[None]:
 def _declaration_data(*, attempts: int | None = None, approved: bool = True) -> dict[str, object]:
     """The COMMITTED #204 declaration - approved by the owner (#208) - pointed
     at the fake image, or with ONLY its approval removed (the red case).
-    `attempts` re-derives the seeded order for a smaller schedule."""
+    `attempts` re-derives the seeded order for a smaller schedule - and (#323)
+    the approval's own recorded size along with it, since this helper builds
+    a fresh, self-consistent, approved-at-THIS-size declaration for test
+    speed, never the "edited after approval" case `require_approved` now
+    refuses."""
     data = json.loads(MANIFEST.read_text(encoding="utf-8"))
     assert isinstance(data["approval"], dict), "the committed declaration is expected to carry its approval"
     if not approved:
@@ -74,6 +78,8 @@ def _declaration_data(*, attempts: int | None = None, approved: bool = True) -> 
         names = [a["name"] for a in data["arms"]]
         data["attempts_per_arm"] = attempts
         data["arm_order"]["sequence"] = calibration.derive_arm_order(data["arm_order"]["seed"], names, attempts)
+        if isinstance(data["approval"], dict):
+            data["approval"]["attempts_per_arm"] = attempts
     return data
 
 
