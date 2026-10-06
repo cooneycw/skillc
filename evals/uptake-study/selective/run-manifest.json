@@ -1,0 +1,321 @@
+{
+ "kind": "uptake-study",
+ "issue": 237,
+ "declared_at": "2026-10-05",
+ "_comment": "#237 follow-up (owner ruling q2 (a), 2026-10-05): a SELECTIVE rewrite of flow-check's description - conditioned on being asked to run checks - against the published one. Same design, size and identities as evals/uptake-study. Approved by the owner 2026-10-05 (see 'approval'). NOT YET RUN.",
+ "approval": {
+  "by": "owner (cooneycw)",
+  "at": "2026-10-05",
+  "source": "owner reply in the 2026-10-05 skillc session: \"approved\", answering \"Approve or edit the selective description and its plan\" (flow-check published vs 'Use when you are asked to run a project's quality checks ...'; intended-use 20/arm, near-miss 10/arm; one-sided Fisher at 0.05; selective = primary significant AND near-miss at most 2/10)",
+  "scope": "the arms, cases, identities, schedule (seed 20261007 order), test, selectivity reading and caps declared in this file, run under the operator's codex subscription login (ADR 0005 rule 6); no judge tier, no dollar-metered spend"
+ },
+ "task": {
+  "path": "evals/level1/slug-small-fix",
+  "grader_id": "slug-small-fix",
+  "grader_revision": "2"
+ },
+ "arms": [
+  {
+   "name": "published",
+   "subject": {
+    "name": "cpp-codex",
+    "locator": "github.com/cooneycw/claude-power-pack",
+    "revision": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b"
+   }
+  },
+  {
+   "name": "rewritten",
+   "subject": {
+    "name": "cpp-codex",
+    "locator": "github.com/cooneycw/claude-power-pack",
+    "revision": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b"
+   },
+   "target_skill": "flow-check",
+   "description": "Use when you are asked to run a project's quality checks (tests, lint, type checks, security scan): runs them in one step and reports what failed, without committing."
+  }
+ ],
+ "rewritten_snapshot": "skillc degrade-subject cpp-codex --checkout <cpp checkout at 85e9b03> --override-file flow-check:SKILL.md=evals/uptake-study/selective/flow-check-SKILL.md --out <runs>/rewritten",
+ "shared": {
+  "client": {
+   "name": "codex",
+   "version": "0.157.1"
+  },
+  "model": "gpt-6-astra",
+  "reasoning_effort": "high",
+  "tools": "the client's defaults inside the trial container; no MCP servers",
+  "permissions": "the same non-interactive codex exec sandbox and approval settings for every attempt",
+  "public_requirements": "evals/level1/slug-small-fix/goal.md plus each case's prompt_addendum, identical in both arms",
+  "image": {
+   "tag": "skillc-trial:latest",
+   "digest": "sha256:eb17e8c7995f69c4f849d6d8a9165eddfd0ccc8065b5425e0bdc2e3595a86d44"
+  },
+  "per_attempt_seconds": 1200,
+  "total_seconds": 72000
+ },
+ "cases": [
+  {
+   "id": "intended-use",
+   "prompt_addendum": "Before finishing, run this project's quality checks (tests, lint, type checks) and report the result.",
+   "attempts_per_arm": 20,
+   "primary": true
+  },
+  {
+   "id": "near-miss",
+   "prompt_addendum": "",
+   "attempts_per_arm": 10,
+   "primary": false
+  }
+ ],
+ "test": {
+  "kind": "fisher-exact-one-sided",
+  "direction": "rewritten > published",
+  "alpha": 0.05
+ },
+ "power_note": "Exact enumeration under this test with the published arm's selection rate taken as 5% (observed natural uptake 0/19 across #204 and #203's runs): power 0.54 / 0.81 / 0.94 at a true rewritten rate of 30% / 40% / 50% with n=20 per arm. A smaller effect may go undetected; the report must say so.",
+ "arm_order": {
+  "seed": 20261007,
+  "sequence": [
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "near-miss",
+    "published"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "near-miss",
+    "published"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "near-miss",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "near-miss",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "near-miss",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "near-miss",
+    "rewritten"
+   ],
+   [
+    "near-miss",
+    "published"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "near-miss",
+    "published"
+   ],
+   [
+    "near-miss",
+    "published"
+   ],
+   [
+    "near-miss",
+    "rewritten"
+   ],
+   [
+    "near-miss",
+    "rewritten"
+   ],
+   [
+    "near-miss",
+    "published"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "near-miss",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "near-miss",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "near-miss",
+    "published"
+   ],
+   [
+    "near-miss",
+    "published"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "near-miss",
+    "published"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "near-miss",
+    "published"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "intended-use",
+    "published"
+   ],
+   [
+    "intended-use",
+    "rewritten"
+   ],
+   [
+    "near-miss",
+    "rewritten"
+   ],
+   [
+    "near-miss",
+    "rewritten"
+   ],
+   [
+    "intended-use",
+    "published"
+   ]
+  ]
+ },
+ "selectivity_note": "Predeclared reading, descriptive (the runner's one test is the primary): the rewrite is SELECTIVE if it is selected on intended-use (the primary test is significant) AND on near-miss at most 2/10 - against the first rewrite's 9/10 (evals/uptake-study/report.md)."
+}
