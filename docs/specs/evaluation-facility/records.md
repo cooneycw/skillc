@@ -1,7 +1,7 @@
 # Evaluation records, version 2
 
 - Status: Executable. `skillc check-records` refuses records and bundles this document rejects.
-- Date: 2026-09-27 (version 1: 2026-09-21, slice of #4 in #17; `attempt-lifecycle` added in #8; `agent-observation` in #106)
+- Date: 2026-10-06 (version 1: 2026-09-21, slice of #4 in #17; `attempt-lifecycle` added in #8; `agent-observation` in #106; `skill-evidence` in #268)
 - Governing documents: [interfaces](interfaces.md), [protocol](protocol.md), [specification](spec.md)
 - Decision: [ADR 0001](../../decisions/0001-every-check-ships-a-redcase.md)
 
@@ -21,12 +21,16 @@ executable form** so that something can refuse a malformed instance:
 | Trial ledger (lifecycle, termination, cleanup) | `kind: attempt-lifecycle` | `controller` |
 | Evidence report (#12's own acceptance, not one of interfaces.md's original four) | `kind: pilot-report` | `assembler` |
 | Artifact and observation bundle: a real agent's transcript conclusions (#106) | `kind: agent-observation` | `controller` |
+| Per-skill evidence attribution and export, reconciling externally produced evidence without granting it authority (#268's own acceptance, not one of interfaces.md's original four) | `kind: skill-evidence` | `assembler` |
 
-`attempt-lifecycle` was added to version 2 by #8, `pilot-report` by #12, and
-`agent-observation` by #106. All three are **additive**: no existing record
-changes meaning. When `agent-observation` was added, no committed bundle held
-one and no rule requires one, so no existing bundle changes verdict. The one stricter rule is
-`attempt-accounting`, below.
+`attempt-lifecycle` was added to version 2 by #8, `pilot-report` by #12,
+`agent-observation` by #106, and `skill-evidence` by #268. All four are
+**additive**: no existing record changes meaning. When `agent-observation` was
+added, no committed bundle held one and no rule requires one, so no existing
+bundle changes verdict. The one stricter rule is `attempt-accounting`, below;
+`skill-evidence` adds no stricter rule of its own - an attempt with no
+`skill-evidence` record is unaffected by this kind's rules, exactly as an
+attempt predating `agent-observation` was.
 
 A record that passes validation is **well formed and internally consistent**, and a
 bundle that passes is **consistent with its own ledger**. Neither is true because of
@@ -407,6 +411,169 @@ Optional criteria never enter this computation. **No mandatory criteria yields
 `INCONCLUSIVE`, never `PASS`.** The other three statuses may not be declared as a
 run state, or the forged verdict would simply move from `status` into `run_state`.
 
+## `skill-evidence`
+
+Additive in version 2 (#268). Produced by the assembler, one record per attempt,
+after that attempt's `verified-result` exists. It answers a question none of the
+six kinds above can: for THIS attempt, which skill does each observed fact and
+each graded criterion belong to, and how does externally produced evidence (a
+usage record a subject's own tooling wrote, never a skillc kind) reconcile
+against what the controller independently captured - without ever granting that
+external evidence authority over a verdict.
+
+`skill-evidence` is attempt-bound (`attempt_id`, `trial_id`, checked by
+`attempt-binding` and `ledger-binding` exactly like the other five attempt-bound
+kinds) and carries one non-empty `skills` list:
+
+| Field | Content |
+|---|---|
+| `skill.path` | the installed path this entry is about. Must be one the attempt's own `installation-receipt` installed (`ledger-binding`, same cross-check `_skill_invocation_binding` already performs for `skill-invocations`) |
+| `skill.body_digest`, `skill.description_digest` | optional. When present, must agree with the digest #265's installation inventory/receipt recorded for this path - **never a second, independently-trusted copy of that fact** (Q3 below) |
+| `invocation.lineage` | `root` or `child` |
+| `invocation.parent_path` | required when `lineage` is `child`; must name another entry's `skill.path` **in this same record**. A `root` entry carries no `parent_path` |
+| `lifecycle.listed`, `lifecycle.read_observed`, `lifecycle.execution_observed` | each one of `CONFIRMED` / `NOT_CONFIRMED` / `UNKNOWN` - **a separate, closed vocabulary from `SATISFIED`/`VIOLATED`/`UNKNOWN`**, so a usage fact can never be misread as a compliance outcome. `CONFIRMED` requires an `evidence` reference (a digest already present in this attempt's own bundle); `UNKNOWN` requires a `reason` |
+| `criteria_owned` | list of `{id, outcome, shared}`. `id` must name a criterion on this attempt's own `verified-result`; `outcome` is an **audit copy** of that criterion's own outcome, never an independent claim; `shared: true` means another entry in the same `skills` list may legitimately own the same `id` too |
+| `external_evidence.present` | boolean |
+| `external_evidence.source` | required when `present`; a closed vocabulary naming the schema family, e.g. `cpp.execution-evidence/v1`. An unrecognized value is refused as **unknown schema** (Q4 below) |
+| `external_evidence.artifact_ref` | required when `present`; `{path, digest}` naming an entry in **this attempt's own `artifact-manifest.artifacts`** (Q1 below) |
+| `external_evidence.reconciliation` | `absent` / `unmatched` / `matched` / `contradicting` (CPP R9's four states, exactly) |
+| `external_evidence.reason` | required unless `reconciliation` is `matched` or `absent` |
+
+### Three facts that are not compliance (acceptance item 2)
+
+`listed`, `read_observed` and `execution_observed` are **lifecycle facts**, never
+criterion outcomes, and this record never lets one stand in for the other:
+
+- `listed`: the skill appeared in the attempt's own installation receipt.
+- `read_observed`: transcript evidence (`client-transcript` / `skill-invocations`,
+  when retained) shows the skill's content reached the model. `UNKNOWN` - never
+  `NOT_CONFIRMED` - is the only legal value when the transcript stream itself is
+  `missing` or `unsupported`: an absent transcript proves nothing either way
+  (records.md's own `client-transcript` section already states this for the
+  stream; this is the same rule applied to the derived fact).
+- `execution_observed`: a **controller-witnessed** fact only. It may be
+  `CONFIRMED` solely when `evidence` cites a controller-authored witness record
+  for this attempt (see "Trust boundary", item 5, below) - never from the
+  subject's own declaration, never from `external_evidence`, whatever
+  `external_evidence.reconciliation` says. A subject that bypasses the witness
+  channel entirely leaves this `UNKNOWN` with reason `no-controller-witness`,
+  **not** `NOT_CONFIRMED` - a bypass does not positively establish
+  non-execution, it establishes nothing.
+
+A skill-evidence record never changes `derive_status`'s output for its attempt's
+`verified-result`: that function still reads only `verified-result`'s own
+`criteria`/`run_state`. `criteria_owned[].outcome` is a **read-only audit copy**,
+exactly as `agent-observation`'s grade and `pilot-report`'s `criteria` are audit
+copies of a verdict produced elsewhere - this is why item 2's "task success with
+obligation failure" case (below) is representable at all: an attempt's overall
+`status` can be `PASS` while one entry's owned, **optional** criterion shows
+`outcome: VIOLATED`. The task succeeded; the obligation did not; neither fact
+erases the other, and this record is what keeps both visible instead of letting
+the task-level `PASS` absorb the obligation failure silently.
+
+### Answering CPP #1368's open questions (R7, R9, and cpp-w2's Q1-Q4)
+
+This section is the "which field" CPP #1368's Open Questions section asks #268
+to name, and the cpp-eval review questions relayed 2026-10-06.
+
+- **Q1 / R7 (ledger binding).** Neither a bare `observations` stream nor a bare
+  `raw: {ref, digest}`. A CPP usage record is captured exactly like any other
+  captured file: as an ordinary entry in `artifact-manifest.artifacts` (path,
+  type, size, digest - `type` reads e.g. `cpp-usage-record`). `skill-evidence`'s
+  `external_evidence.artifact_ref` then cites that entry's digest, and
+  `ledger-binding` refuses a reference to a digest its attempt's manifest did not
+  capture - the **same check**, line for line, that already refuses a
+  `verified-result` citing a digest nobody captured (records.md "altered or
+  substituted artifact", above). No new storage mechanism; the existing manifest
+  contract already is the entry point into a trusted bundle.
+- **Q2 (population).** Opaque bytes behind a digest. `skill-evidence` does not
+  parse or re-derive CPP's own `{measured, count}` per-check population, and no
+  bundle rule needs those numbers: `skill-evidence`'s job is reconciliation
+  state (matched/unmatched/contradicting), not re-grading CPP's own claim.
+  `contradicting` is decided against the controller's **own** independent
+  observation (item 5's witness, once #269 exists), never against CPP's
+  internal numbers - exactly R8's point, restated here: "a consistent forgery
+  still reads `supported`" on CPP's own reader, so skillc must not treat CPP's
+  internal consistency as skillc's own evidence.
+- **Q3 (skill identity).** Reused, not re-declared. `skill.path` is checked
+  against the attempt's own `installation-receipt` (which already carries #265's
+  installed identity); `body_digest`/`description_digest`, when present, must
+  agree with what that receipt/inventory recorded for the same path - a second,
+  independently-asserted digest for the same skill is refused as a conflicting
+  identity, not accepted as corroboration. A CPP usage record's own `declared`
+  block (R6: skill name from `CPP_SKILL_SOURCE`, never verified by CPP itself)
+  is exactly the kind of claim this reconciles: a declared skill name with no
+  correlating installed path is `external_evidence.reconciliation: unmatched`,
+  reason `declared-skill-not-installed` - never silently accepted as a match.
+- **Q4 (unknown schema).** Digest only. `check-records` validates `skill-evidence`
+  and the manifest entry's envelope (digest present, `source` in the closed
+  vocabulary); it never decodes the referenced bytes as CPP's own
+  `cpp.execution-evidence/v1` schema - that parse belongs to CPP's
+  `scripts/execution-evidence-verify.py` (#1369's consumer), a different trust
+  domain, per [ADR 0003](../../decisions/0003-no-external-evaluation-runtime.md).
+  An `external_evidence.source` outside skillc's closed vocabulary is refused
+  here as **unknown schema** - but that only catches a mislabeled reference;
+  a genuinely malformed CPP payload behind a correctly labelled, correctly
+  digested reference is invisible to skillc and must stay the consumer's
+  problem, stated as a boundary, not silently assumed covered.
+- **R9 (reconciliation states).** Exactly the four CPP names, no fifth:
+  `absent` (no usage record for this skill - never read as evidence of
+  non-use), `unmatched` (present, but does not bind to any controller-captured
+  attempt - duplicate or ambiguous invocation IDs land here, reason
+  `duplicate-invocation` or `no-correlating-attempt`), `matched` (present,
+  bound, agrees with controller state), `contradicting` (present, bound, but
+  disagrees with the controller's own independent observation - reason
+  `outcome-disagreement` or `stale-identity`, the latter when the usage
+  record's own bound subject/client identity differs from this trial's planned
+  one). `absent` is never treated as `contradicting`, and `unmatched` is never
+  silently promoted to `matched` for lack of a reason to doubt it.
+
+### Golden records (acceptance item 4)
+
+Six named cases, each a committed `controls/skill-evidence/{good,bad}/` fixture:
+
+| Case | Shape |
+|---|---|
+| Parent/child attribution | Two entries; the child's `invocation.parent_path` names the root's `skill.path` |
+| Shared criteria | Two entries whose `criteria_owned` both list the same `id` with `shared: true` |
+| Absent transcript | `lifecycle.read_observed: UNKNOWN`, reason citing the attempt's own `client-transcript` stream as `missing` |
+| Task success with obligation failure | The attempt's `verified-result.status` is `PASS`; one entry's `criteria_owned` names an **optional** criterion with `outcome: VIOLATED` |
+| Forged status | Bad case: `criteria_owned[].outcome` disagrees with that criterion's actual outcome on the attempt's own `verified-result` - refused by the `ledger-binding` cross-check this record adds, named in the rule table below |
+| Unknown schema | Bad case: `external_evidence.source` outside the closed vocabulary, or `present: true` with no `artifact_ref` |
+
+### Trust boundary needed by #269 (acceptance item 5) - STUB, pending #269's own record
+
+**Status: deliberately incomplete.** This subsection names the constraint
+`skill-evidence.lifecycle.execution_observed` must satisfy; it does not define
+#269's witness record, which is #269's own deliverable. Per sk-w3 (message 4596,
+sizing #183 for #269): the proposed channel is a host-owned Unix domain socket,
+one per attempt, where the **controller** is the listener - it accepts one
+request, **decides and logs its own decision before replying**, so nothing about
+the decision is reconstructable from the reply alone. The subject never becomes
+the logger; a subject that bypasses the socket produces zero controller-received
+requests for that attempt.
+
+The constraint this places on `skill-evidence`, agreed with sk-w3 (message 4604):
+
+- `execution_observed: CONFIRMED` is legal **only** when `evidence` cites a
+  ref+digest into a controller-authored witness record for this attempt - the
+  same `{ref, digest}` shape records.md already uses for backend raw data
+  (above, "Backend raw data"). Nothing else may set it `CONFIRMED`: not a
+  subject declaration, not `external_evidence`, not a transcript.
+- No witness record for the attempt (socket bypassed, or #269 not yet wired)
+  means `execution_observed: UNKNOWN`, reason `no-controller-witness` - never
+  `NOT_CONFIRMED`. A bypass is an absence of evidence, not evidence of absence.
+- `NOT_CONFIRMED` is legal only when the controller's own witness record
+  **positively** states the gate did not run - a fact #269's own record must be
+  able to represent, which this stub does not invent.
+
+**To re-pin:** once #269 names its own record kind and field, replace "a
+controller-authored witness record for this attempt" above with the exact
+kind/field, and add #269's record to `ATTEMPT_BOUND`'s cross-check in
+`ledger-binding` if it is attempt-bound there too. Re-pin cpp-eval's spec
+citation (`.specify/specs/per-skill-audit/spec.md`, currently pinned to skillc
+`8c74a88`) to the commit that lands this section.
+
 ## `pilot-report`
 
 Additive in version 2 (#12). Produced by the assembler after a completed
@@ -500,13 +667,29 @@ says so on every run.
 - if a manifest declares a `skill-invocations` observation (#39), every `skills`
   row's `path` is one the attempt's own installation receipt actually installed.
   Otherwise it names a skill this attempt never had.
+- if a `skill-evidence` record (#268), every entry's `skill.path` is one the
+  attempt's own installation receipt actually installed, and any
+  `body_digest`/`description_digest` it carries agrees with what that receipt
+  recorded for the same path. Otherwise it names, or re-digests, a skill this
+  attempt never had (Q3, above);
+- if a `skill-evidence` entry's `criteria_owned` names a criterion `id`, that
+  `id` exists on the attempt's own `verified-result`, and the entry's copied
+  `outcome` agrees with that criterion's actual outcome there. A disagreement is
+  a **forged status** - the "Forged status" golden case, above - refused here
+  rather than left to whichever reader happens to compare the two records by hand;
+- if a `skill-evidence` entry's `external_evidence.present` is true, its
+  `artifact_ref` names a digest the attempt's own `artifact-manifest` actually
+  captured. Otherwise it points at bytes nothing here froze - the same
+  **altered artifact** finding a `verified-result`'s `graded_digests` already
+  gets, applied to the same field (Q1, above).
 
 **`unique-ids`.** interfaces.md makes "duplicate/conflicting IDs" an explicit
 validation failure:
 
 - no trial or attempt ID is planned twice;
-- an attempt has at most one receipt, one manifest and one lifecycle. A second one
-  is a conflicting account, and nothing here can say which is true;
+- an attempt has at most one receipt, one manifest, one lifecycle and one
+  `skill-evidence` record. A second one of any of these is a conflicting
+  account, and nothing here can say which is true;
 - results may be several (a regrade is a new result), but each `result_id` is unique.
 
 **`attempt-accounting`.** "Every planned attempt remains accounted for" (EF-07).
@@ -557,7 +740,11 @@ retention policy, in [capture.md](capture.md#storage-access-and-retention-review
 - Retries and regrades **add** records; the originals are retained, and `lineage`
   refuses a bundle that erased one.
 - Records never live in the subject's writable environment. That is a property of
-  the controller (#8, #9), not something a record can show about itself.
+  the controller (#8, #9), not something a record can show about itself. An
+  externally produced file (a CPP usage record) does not become an exception:
+  `skill-evidence.external_evidence.artifact_ref` cites the controller's own
+  frozen COPY in `artifact-manifest.artifacts`, captured and digested the same
+  way any other output is, never the subject-writable original.
 
 `check-records` enforces nothing here beyond the `raw` digest and lineage rules.
 The controller (`skillc/trial.py`) enforces the store location, write-once records
@@ -587,8 +774,9 @@ bundle cases as well, including against every record rule.
 | `attempt-lifecycle` | record | an unknown stop reason or disposition; a non-result without a reason; captured before a confirmed stop; no cleanup |
 | `agent-observation` | record | an unknown field; a missing field; an object in a scalar field or a census map; a `mandatory` flag that is a string, an integer or absent (each would drop a VIOLATED criterion out of the derivation); positive conclusions from zero or two transcript files; eligibility that disagrees with prompt delivery and the canary; a PASS its own criteria do not derive; both a grade and a blocked reason; an unobserved status without a reason (#106) |
 | `pilot-report` | record | empty attempts list; bad disposition or criterion outcome; no uncertainty; a negative intervention count; a cost/time split missing a key or whose parts do not sum to its total; a duplicate attempt ID (#12) |
-| `ledger-binding` | bundle | cross-trial receipt; stale receipt; attempt the ledger never issued; altered artifact; unplanned grader; a `skill-invocations` path the attempt's receipt never installed (#39); a trial declaring `case.observes_selection: true` whose manifest has no `skill-invocations` stream (#26/#39); a `pilot-report` that omits a scheduled attempt or names one the ledger never planned (#12) |
-| `unique-ids` | bundle | duplicate attempt ID; conflicting receipts; duplicate result ID |
+| `skill-evidence` | record | empty `skills` list; a `child` entry with no `parent_path`, or one naming a path absent from this record; a `lifecycle` value outside `CONFIRMED`/`NOT_CONFIRMED`/`UNKNOWN`; `CONFIRMED` with no evidence reference; `UNKNOWN` with no reason; `external_evidence.present: true` with no `artifact_ref` or an unrecognized `source`; a `reconciliation` outside the four R9 states; a non-`matched`/`absent` reconciliation with no reason (#268) |
+| `ledger-binding` | bundle | cross-trial receipt; stale receipt; attempt the ledger never issued; altered artifact; unplanned grader; a `skill-invocations` path the attempt's receipt never installed (#39); a trial declaring `case.observes_selection: true` whose manifest has no `skill-invocations` stream (#26/#39); a `pilot-report` that omits a scheduled attempt or names one the ledger never planned (#12); a `skill-evidence` path or digest the attempt's receipt never installed; a `criteria_owned` outcome that disagrees with the attempt's own `verified-result` (forged status); an `external_evidence.artifact_ref` the attempt's manifest never captured (#268) |
+| `unique-ids` | bundle | duplicate attempt ID; conflicting receipts; duplicate result ID; a second `skill-evidence` record for one attempt |
 | `attempt-accounting` | bundle | planned attempt with no lifecycle; captured with no result; graded without receipt; graded without manifest; captured but declared NOT_RUN; graded but not captured; manifest but not captured; receipt stand-in with no agent-observation, or claiming readiness (#139) |
 | `lineage` | bundle | retry reusing its own ID; regrade whose original was erased; regrade of different bytes |
 
@@ -619,3 +807,18 @@ This completes #4's contract versioning. What it deliberately does not do:
 - **The grader pin is enforced when grading, not here.** A trial ledger's `grader`
   may carry a `digest` (#9); `ledger-binding` still binds a result by grader id and
   revision only.
+- **No external schema validation (#268).** `skill-evidence.external_evidence`
+  checks a digest and a closed `source` label, never the referenced bytes'
+  actual content against that label's schema. A correctly labelled,
+  correctly digested reference to a malformed CPP record is invisible here;
+  that parse belongs to the consumer (CPP's own reader), per
+  [ADR 0003](../../decisions/0003-no-external-evaluation-runtime.md).
+- **No case-pairing here.** Nothing in this schema says that one trial's `case`
+  is another's degraded or mutated counterpart - that distinction (needed to
+  tell a discriminating PASS from a null comparison, CPP #1084) belongs to
+  #264's lane semantics and a future report-level computation (#272/#273), not
+  to any record kind defined here.
+- **No controller witness here.** `skill-evidence.lifecycle.execution_observed`
+  names the constraint a controller-authored witness record must satisfy to be
+  cited as `CONFIRMED` evidence; it does not define that witness record. #269
+  owns it.
