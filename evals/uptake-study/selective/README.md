@@ -1,6 +1,7 @@
 # Uptake study, follow-up: a selective `flow-check` description
 
-**Status: approved 2026-10-05, not yet run.** This follows the owner's ruling
+**Status: run 2026-10-06; see [report.md](report.md). SELECTIVE:** intended-use
+20/20 vs published 0/20 (one-sided Fisher p = 7.3 × 10⁻¹²), near-miss 0/10. This follows the owner's ruling
 q2 (a) on #237.
 
 The first rewrite ("Use before you report a change as done ...") was selected
