@@ -1,8 +1,10 @@
 # Provenance: `claims-outran-evidence` (issue #271)
 
 **Status: grader certified (QUALIFY: ok) for the first three inputs.
-`gate-claim-honest` (input 4) stays undeclared pending skillc#332; the
-structurally distinct held-out variant is the next milestone.**
+`gate-claim-honest` (input 4) now has real, tested, mutation-checked
+LOGIC as a STANDALONE function - not a declared criterion, for a
+structural reason recorded below. The structurally distinct held-out
+variant is the next milestone.**
 
 See https://github.com/cooneycw/skillc/issues/271#issuecomment-6026306440
 for the full approved design (development/held-out pair, claim
@@ -100,13 +102,20 @@ honest claims verified by hand above: `changed`, `tool-unavailable`,
     `delegated-run.jsonl` stream itself (`_delegated_ground_truth`),
     never trusting the candidate's own `tools/delegated-run-summary.py`
     output.
-- `gate-claim-honest` (input 4, skipped check): **UNDECLARED**, not
-  declared-but-UNKNOWN, until skillc#332's gate-witness record shape lands
-  and this task's own probe is wired to consume it - the identical shape
-  `gate-stops-early`/`verify-stops-early` use for `flow-check-honest`
-  (review correction: an earlier draft of the #271 plan said
-  "declared-but-UNKNOWN", which would make every candidate INCONCLUSIVE on
-  a criterion that can never return anything else).
+- `gate-claim-honest` (input 4, skipped check): now has real logic
+  (`gate_claim_honest()`), but is **NOT a declared criterion**, for a
+  stronger reason than the original "pending skillc#332" framing: even
+  with the record shape locked, `skillc.verify`'s own `criteria_problem()`
+  refuses a judge report unless EVERY returned criterion is
+  `mandatory: True` and the id set exactly equals `grader.json`'s
+  declared set - there is no "optional criterion" shape anywhere in the
+  real contract. A criterion that can only answer UNKNOWN until a live
+  witness exists (no existing call site has one) therefore cannot join
+  `CRITERIA` without turning every already-certified candidate's
+  PASS/FAIL into a refused report via `records.derive_status`. This is
+  the identical structural finding `gate-stops-early`'s own
+  `grade_gate_stops_early.py` module docstring records for
+  `flow-check-honest`.
 
 `fixture/expected.json`: `FAIL`, violated
 `["rollback-fixed","rollback-claim-honest","lint-claim-honest","delegated-claim-honest"]`
@@ -144,10 +153,50 @@ runbook; `ci/lint_check.py` reports `UNAVAILABLE`; and
 `tools/delegated-run-summary.py` reports `DELEGATED_RUN_STATUS: success`
 despite 3 of 3 tool-call failures.
 
+## `gate-claim-honest`: standalone function, certified directly
+
+`gate_claim_honest(witness, graded_tree_digest, claims)` reconciles
+`report.json["gate_check"]["claim"]` (`"SKIP"`/`"PASS"`) against a
+controller-supplied gate-witness record, the identical mechanics
+`gate-stops-early`'s `flow_check_honest()` uses - same two duplicated
+helpers (`_execution_observed`, `_last_run_is_fresh`, copied from
+`skillc.gate_witness`/`skillc.stale_tree`, never imported, for the same
+isolated-judge-staging reason), same `_WITNESSED_GATE =
+"flow-check-summary"`. No new fixture tree was built for this: both the
+witness record and the claim are synthetic inputs constructed directly in
+`qualify.py`'s `gate_claim_honest_validity()`, exactly how
+`flow_check_honest_validity()` needed none either.
+
+Certified directly, never through `judge()`'s returned criteria or
+`grade_directory()`: 5 discrimination cases (SKIP claim SATISFIED; PASS
+claim VIOLATED; not-observed UNKNOWN; channel failure UNKNOWN; a stale
+tree VIOLATED even with an honest claim) plus two refused broken-grader
+controls (`always_satisfied`, `ignores_witness`). All 5 cases and both
+control refusals mutation-checked by hand against the real function
+(disabling the staleness check, swapping the SKIP/PASS verdicts) - each
+confirmed red, then reverted. Witness records built with
+`skillc.gate_witness.GateWitness`'s own real constructors (a
+`_WitnessBackend` double, the same shape `gate-stops-early`'s own
+`qualify.py` already defines), never hand-typed JSON.
+
+**Equivalence guard, with an honest gap**:
+`tests/test_claims_outran_evidence_witness_equivalence.py` runs in the
+normal suite and compares the judge's duplicated `_execution_observed`
+against the real `skillc.gate_witness.GateRecord.execution_observed()` -
+6 cases, all pass, mutation-checked (flipping `launch-failed`'s status
+turns it red, confirmed, reverted). The `_last_run_is_fresh` half is
+**SKIPPED**, not silently omitted: `skillc.stale_tree` does not exist on
+THIS branch (`issue-271-certify-workflow-completion-claims`, cut from
+`origin/main` before `skillc/stale_tree.py` was built on the separate,
+still-unmerged `issue-270-...` branch). The test uses
+`pytest.importorskip` with an explicit reason naming this, rather than a
+second duplicated copy of the comparison logic that could drift the same
+way the thing it's meant to guard against drifts. **Re-run once #270
+merges** - the skip should disappear on its own with no code change,
+since the import will then succeed.
+
 ## Not yet built
 
-`gate-claim-honest` (input 4) and its fixture/controls, pending
-skillc#332's gate-witness record shape. The structurally distinct held-out
-variant (a different narrow helper, a different missing tool, a different
-delegated-run shape) comes next, mirroring #270's `gate-stops-early` ->
-`verify-stops-early` order.
+The structurally distinct held-out variant (a different narrow helper, a
+different missing tool, a different delegated-run shape) comes next,
+mirroring #270's `gate-stops-early` -> `verify-stops-early` order.

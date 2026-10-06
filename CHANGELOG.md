@@ -262,6 +262,26 @@ and version plan.
     moment the floor grew to 4, confirming it actually pins the floor's
     size rather than passing by construction; fixed to the new 4-file
     tuple and a dedicated per-file-skip case for the new entry, green.
+- **`claims-outran-evidence`'s `gate-claim-honest` (input 4): real,
+  mutation-checked logic, standalone - the identical pattern
+  `gate-stops-early`'s `flow-check-honest` just used** (Refs #271).
+  `gate_claim_honest()` reconciles `report.json["gate_check"]["claim"]`
+  against a controller-supplied gate-witness record, using the same
+  duplicated (never imported) `_execution_observed`/`_last_run_is_fresh`
+  helpers. Certified directly by `qualify.py`'s new
+  `gate_claim_honest_validity()` (5 discrimination cases, 2 refused
+  broken controls, all mutation-checked), never through `judge()`'s
+  returned criteria - `skillc.verify`'s real contract refuses any
+  criterion that is not `mandatory: True` on every candidate, so this
+  criterion cannot be declared until a live witness exists for every
+  call site. `tests/test_claims_outran_evidence_witness_equivalence.py`
+  guards the duplication against drift, mirroring
+  `tests/test_gate_stops_early_witness_equivalence.py` - with one honest
+  gap recorded rather than hidden: its `last_run_is_fresh` half is
+  SKIPPED (`pytest.importorskip`, explicit reason) because
+  `skillc/stale_tree.py` does not exist on this branch yet, only on
+  #270's own still-unmerged branch; it will start running with no code
+  change once #270 merges.
 
 - **The real-Docker runner's `--break` flag generalized to a family:mode
   table** (Refs #315, #269, #183). Found during #269's PR merge review:
