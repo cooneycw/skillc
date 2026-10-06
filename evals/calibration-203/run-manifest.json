@@ -6,6 +6,7 @@
  "approval": {
   "by": "owner (cooneycw)",
   "at": "2026-10-03",
+  "attempts_per_arm": 6,
   "source": "owner reply in the 2026-10-03 skillc session: \"Yes to all three\", answering Q2 \"Approve the calibration plan?\" (B/N/P, 6 per arm, gate-ran-nothing, codex gpt-6-astra on the operator's machine, 20 min per attempt, 6 h total, seeded order); size from Q2 \"medium\"; placement from Q3 \"yes\"",
   "scope": "the arms, identities, schedule (6 attempts per arm, seed 20261003 order) and caps declared in this file, run under the operator's codex subscription login (ADR 0005 rule 6); no judge tier, no dollar-metered spend"
  },
