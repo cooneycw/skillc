@@ -157,7 +157,13 @@ def _trusted_log(envelope: dict[str, object], expected_attempt_id: str | None = 
         if not isinstance(entry, dict):
             return None, "the trusted observation: a decision entry is not an object"
         seq = entry.get("seq")
-        if not isinstance(seq, int):
+        # `bool` is a subclass of `int` in Python - `isinstance(True, int)`
+        # is True, and `True == 1`, so a decision carrying `"seq": true`
+        # would otherwise pass this check AND collide with a real seq 1
+        # (codex:code_review finding). The channel's own counter can never
+        # produce a bool, so refuse one explicitly rather than silently
+        # accepting it as the integer it is not.
+        if not isinstance(seq, int) or isinstance(seq, bool):
             return None, "the trusted observation: a decision entry's 'seq' is not an integer"
         result = entry.get("result")
         if not isinstance(result, dict) or not isinstance(result.get("allow"), bool):
@@ -175,6 +181,18 @@ def _trusted_log(envelope: dict[str, object], expected_attempt_id: str | None = 
     if sorted(seqs) != list(range(1, len(seqs) + 1)):
         return None, f"the trusted observation: decision seq numbers {sorted(seqs)} are not a clean 1..N sequence"
     parsed.sort(key=lambda pair: pair[0])
+    # An all-allow log is NOT evidence that disruption fired at the end of
+    # it (codex:code_review finding) - it is evidence only that every
+    # request the controller actually received was allowed. A candidate
+    # that simply stopped calling the tool early (for its own reasons,
+    # buggy or not) produces exactly this shape, and reading it as "the
+    # tool failed after the last allowed call" would silently excuse
+    # whatever happened beyond that point - the same blind spot
+    # PROVENANCE.md already documents for a forged claim, now reachable
+    # through an honest but incomplete log instead. Only a log containing
+    # an OBSERVED refusal establishes a disruption point at all.
+    if not any(not allow for _, allow in parsed):
+        return None, "the trusted observation records no refusal - the disruption point is unknown"
     failed_after = 0
     for _, allow in parsed:
         if not allow:

@@ -158,15 +158,35 @@ def test_trusted_log_handles_a_genuinely_out_of_arrival_order_but_clean_log() ->
     # decide_reply_channel.py's own module docstring: seq is assigned in
     # COMPLETION order, not arrival order - a clean permutation is
     # legitimate and must still derive correctly, never refused.
-    text = _trusted_log_bytes(True, True, True, False, out_of_order=True)
-    failed_after, reason = grade_recovery._trusted_log({"trusted": text})
+    #
+    # The permutation is applied to the RAW JSON *after*
+    # `to_json_bytes()` has already run (codex:code_review finding on an
+    # earlier version of this test): `to_json_bytes()` itself sorts by
+    # seq, so permuting the `LoggedDecision` tuple before calling it would
+    # have the bytes arrive at `_trusted_log()` already sorted, proving
+    # nothing about whether THIS function's own re-sort matters. Placing
+    # the refusal first in the raw array is deliberate: if `_trusted_log`
+    # dropped its own sort, it would derive `failed_after_step=0` instead
+    # of 3.
+    raw = json.loads(_trusted_log_bytes(True, True, True, False))
+    raw["decisions"] = [raw["decisions"][-1], *raw["decisions"][:-1]]
+    failed_after, reason = grade_recovery._trusted_log({"trusted": json.dumps(raw)})
     assert (failed_after, reason) == (3, "trusted")
 
 
-def test_trusted_log_reports_the_full_count_when_nothing_was_ever_refused() -> None:
+def test_trusted_log_refuses_an_all_allow_log_with_no_observed_refusal() -> None:
+    """THE RED CASE for codex:code_review's [MEDIUM] finding: a log with
+    only allowed decisions and no refusal is evidence of permission, not
+    of disruption. Confidently deriving `failed_after_step=len(decisions)`
+    from it would let a candidate that simply stopped calling the tool
+    early (nothing to do with disruption at all) silently exclude every
+    later step from `work_preserved`'s check - the same claimed-window
+    blind spot PROVENANCE.md documents for a forged value, reachable here
+    through an honest but incomplete log instead."""
     text = _trusted_log_bytes(True, True, True)
-    failed_after, _ = grade_recovery._trusted_log({"trusted": text})
-    assert failed_after == 3
+    failed_after, reason = grade_recovery._trusted_log({"trusted": text})
+    assert failed_after is None
+    assert "no refusal" in reason
 
 
 def test_trusted_log_refuses_duplicate_seq_numbers() -> None:
@@ -178,6 +198,19 @@ def test_trusted_log_refuses_duplicate_seq_numbers() -> None:
     failed_after, reason = grade_recovery._trusted_log({"trusted": json.dumps(raw)})
     assert failed_after is None
     assert "not a clean 1..N sequence" in reason
+
+
+def test_trusted_log_refuses_a_boolean_disguised_as_a_seq_number() -> None:
+    """THE RED CASE for codex:code_review's [LOW] finding: `bool` is a
+    subclass of `int` in Python, so `isinstance(True, int)` is True and
+    `True == 1` - a decision carrying `"seq": true` would otherwise pass
+    the integer check AND collide with a genuine seq 1, defeating the
+    clean-1..N-sequence guard entirely for a 2-decision log ([true, 2])."""
+    raw = json.loads(_trusted_log_bytes(True, False))
+    raw["decisions"][0]["seq"] = True
+    failed_after, reason = grade_recovery._trusted_log({"trusted": json.dumps(raw)})
+    assert failed_after is None
+    assert "is not an integer" in reason
 
 
 def test_trusted_log_refuses_a_gap_in_seq_numbers() -> None:
