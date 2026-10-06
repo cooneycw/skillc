@@ -1,0 +1,225 @@
+{
+ "batch": "2-priority",
+ "issue": 238,
+ "subject": "cpp-codex",
+ "subject_revision": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b",
+ "_comment": "Owner ruling 2026-10-06 ('can we do the most used skills first? and then leave a test issue for the remainder for next week?'): the most-used cpp skills by the operator's own invocation counts (Claude Code transcripts, last 60 days): flow-auto 323, project-next 66, flow-register 41, flow-start 13, flow-wave 12, self-improvement-retro 4, flow-cleanup 3, flow-repair 2, flow-finish 2, flow-merge 1. Batch 1 already covers flow-auto, flow-start, flow-finish, flow-merge and flow-check; this batch adds the rest.",
+ "skills": [
+  {
+   "skill": "project-next",
+   "variants": {
+    "variant-a": "Use when you are asked what to work on next in a project: reads its open GitHub issues and worktrees and reports a prioritized next step (--brief for one pick, --full for deep analysis).",
+    "variant-b": "Use when the user wants a prioritized next-step recommendation for the current project from its GitHub issues and active worktrees."
+   },
+   "development": [
+    {
+     "id": "dev-select-1",
+     "prompt_addendum": "Before starting, look at the open GitHub issues and active worktrees and tell me what to work on next.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-select-2",
+     "prompt_addendum": "Give me a prioritized report of what this project should tackle next, from its issues and branches.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-abstain",
+     "prompt_addendum": "",
+     "expect": "abstain"
+    }
+   ],
+   "held_out": [
+    {
+     "id": "held-select",
+     "prompt_addendum": "What is the most important next step for this project? Check the issue backlog and worktrees first.",
+     "expect": "select"
+    },
+    {
+     "id": "held-abstain",
+     "prompt_addendum": "Read GitHub issue #12 in full before fixing.",
+     "expect": "abstain"
+    }
+   ]
+  },
+  {
+   "skill": "flow-register",
+   "variants": {
+    "variant-a": "Use when this session is a worker in an issue wave and must announce its role to the wave orchestrator before starting work.",
+    "variant-b": "Use at the start of a wave worker session: declares the session's role and issue to the orchestrator, which records it."
+   },
+   "development": [
+    {
+     "id": "dev-select-1",
+     "prompt_addendum": "You are a worker session in a wave: before starting, register your role with the wave orchestrator.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-select-2",
+     "prompt_addendum": "Announce this session's role (worker, issue #12) to the orchestrator before you begin.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-abstain",
+     "prompt_addendum": "",
+     "expect": "abstain"
+    }
+   ],
+   "held_out": [
+    {
+     "id": "held-select",
+     "prompt_addendum": "This session is part of an issue wave; declare your worker role to the orchestrator first.",
+     "expect": "select"
+    },
+    {
+     "id": "held-abstain",
+     "prompt_addendum": "Coordinate a wave of three worker sessions over issues #12, #13 and #14.",
+     "expect": "abstain"
+    }
+   ]
+  },
+  {
+   "skill": "flow-wave",
+   "variants": {
+    "variant-a": "Use when you are asked to orchestrate a wave: one orchestrator session runs several GitHub issues in dependency order across worker sessions.",
+    "variant-b": "Use when the user wants several issues run in parallel worker sessions under one orchestrator, in dependency order."
+   },
+   "development": [
+    {
+     "id": "dev-select-1",
+     "prompt_addendum": "Orchestrate a wave: run issues #12, #13 and #14 in dependency order across worker sessions.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-select-2",
+     "prompt_addendum": "Act as the orchestrator for a multi-session wave over the three open slugify issues.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-abstain",
+     "prompt_addendum": "",
+     "expect": "abstain"
+    }
+   ],
+   "held_out": [
+    {
+     "id": "held-select",
+     "prompt_addendum": "Plan and coordinate a dependency-ordered wave of issues across several worker sessions.",
+     "expect": "select"
+    },
+    {
+     "id": "held-abstain",
+     "prompt_addendum": "You are a worker in an existing wave; register your role with the orchestrator.",
+     "expect": "abstain"
+    }
+   ]
+  },
+  {
+   "skill": "self-improvement-retro",
+   "variants": {
+    "variant-a": "Use after a session finishes, when you are asked for a retro: grills the session for friction, then proposes and codifies fixes.",
+    "variant-b": "Use when the user wants a post-run retrospective of the session's friction points, with concrete fixes to codify."
+   },
+   "development": [
+    {
+     "id": "dev-select-1",
+     "prompt_addendum": "When you finish, run a retro on this session: list the friction you hit and propose fixes to codify.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-select-2",
+     "prompt_addendum": "After the fix, grill this session for what slowed you down and suggest improvements to the workflow.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-abstain",
+     "prompt_addendum": "",
+     "expect": "abstain"
+    }
+   ],
+   "held_out": [
+    {
+     "id": "held-select",
+     "prompt_addendum": "Finish with a post-run retrospective on the friction in this session and what should be codified.",
+     "expect": "select"
+    },
+    {
+     "id": "held-abstain",
+     "prompt_addendum": "Summarize the change you made in two sentences.",
+     "expect": "abstain"
+    }
+   ]
+  },
+  {
+   "skill": "flow-cleanup",
+   "variants": {
+    "variant-a": "Use when you are asked to tidy a repository's git state: prunes stale worktree references and deletes branches that are already merged.",
+    "variant-b": "Use when stale worktrees or merged branches have piled up and the user wants them cleaned up."
+   },
+   "development": [
+    {
+     "id": "dev-select-1",
+     "prompt_addendum": "When you are done, prune stale worktree references and delete branches that have already been merged.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-select-2",
+     "prompt_addendum": "Clean up this repository's leftover worktrees and merged branches.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-abstain",
+     "prompt_addendum": "",
+     "expect": "abstain"
+    }
+   ],
+   "held_out": [
+    {
+     "id": "held-select",
+     "prompt_addendum": "Tidy the repository: remove stale worktrees and any merged local branches.",
+     "expect": "select"
+    },
+    {
+     "id": "held-abstain",
+     "prompt_addendum": "Merge this branch's pull request and remove its worktree.",
+     "expect": "abstain"
+    }
+   ]
+  },
+  {
+   "skill": "flow-repair",
+   "variants": {
+    "variant-a": "Use when flow commands fail because their helper scripts are missing: installs the flow helper family into ~/.claude/scripts/.",
+    "variant-b": "Use to install or reinstall the flow helper scripts in ~/.claude/scripts/ when they are absent or out of date."
+   },
+   "development": [
+    {
+     "id": "dev-select-1",
+     "prompt_addendum": "The flow helper scripts in ~/.claude/scripts are missing; reinstall them before continuing.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-select-2",
+     "prompt_addendum": "Repair the flow tooling: install the flow helper family.",
+     "expect": "select"
+    },
+    {
+     "id": "dev-abstain",
+     "prompt_addendum": "",
+     "expect": "abstain"
+    }
+   ],
+   "held_out": [
+    {
+     "id": "held-select",
+     "prompt_addendum": "Flow commands fail because their helper scripts are absent; install the flow helpers.",
+     "expect": "select"
+    },
+    {
+     "id": "held-abstain",
+     "prompt_addendum": "Diagnose why the flow workflow is misbehaving in this environment.",
+     "expect": "abstain"
+    }
+   ]
+  }
+ ]
+}
