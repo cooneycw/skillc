@@ -44,7 +44,11 @@
      "digest": "sha256:not-captured"
     },
     "reconciliation": "contradicting",
-    "reason": "outcome-disagreement"
+    "reason": "outcome-disagreement",
+    "witness_ref": {
+     "ref": "manifest.json",
+     "digest": "sha256:aa"
+    }
    }
   }
  ]

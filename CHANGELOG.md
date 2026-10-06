@@ -80,6 +80,16 @@ and version plan.
     tally and dropping the intact/degraded arm filter in case-pair
     discovery each confirmed a known-good fixture's test goes wrong,
     restored, confirmed correct again, net diff empty.
+  - Rows gain `lineage`/`parent_path`, read from `skill-evidence.
+    invocation.lineage`/`parent_path` - item 3's own "attribute parent/child"
+    acceptance, resolved the same deterministic way as `skill_version`
+    (every attempt under one trial shares one skill-evidence declaration).
+  - Acceptance item 6's named golden case: a hand-built attempt whose own
+    `verified-result` is `PASS`, with a root skill and a child skill it
+    invoked whose OWNED criterion is `VIOLATED`. The child's failure shows
+    on the child's own row; the parent's `PASS` cannot leak into it, because
+    no row carries any per-skill verdict field at all for it to leak into
+    (item 3).
 
 - **Gate reconciler: two more reasons made reachable** (Refs #269, #272).
   `evals/subjects/cpp-codex-flow-check/gate_reconciliation.py` adds

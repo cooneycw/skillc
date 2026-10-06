@@ -415,3 +415,98 @@ def test_case_pair_discovery_check_is_not_a_no_op(monkeypatch: pytest.MonkeyPatc
     bundle = _bundle(CONTROLS / "case-pairing/good/reciprocal-complementary")
     report = cov.assemble_coverage_report(bundle)
     assert report.case_pairs == ()  # the mutation's wrong answer
+
+
+# --------------------------------------------------------------- lineage (parent/child)
+
+def test_root_lineage_surfaced_on_the_row() -> None:
+    bundle = _bundle(CONTROLS / "ledger-binding/good/skill-evidence-duplicate-invocation")
+    report = cov.assemble_coverage_report(bundle, _inventory())
+    row = report.rows[0]
+    assert row.lineage == "root"
+    assert row.parent_path is None
+
+
+def test_failed_child_under_a_successful_parent_golden_case() -> None:
+    """Acceptance item 6's named golden case, and item 3's 'attribute
+    parent/child ... without crediting every loaded skill' in one fixture:
+    one attempt whose own result is PASS, with a root skill and a child
+    skill it invoked whose OWNED criterion is VIOLATED. The child's failure
+    shows on the child's own row; the parent's PASS never lifts it - rows
+    never carry a per-skill verdict at all (item 3), only outcomes and
+    owned criteria, so there is no field the parent's PASS COULD leak
+    through."""
+    child_path = ".codex/skills/helper/SKILL.md"
+
+    def skill_evidence_with_child(attempt_id: str, trial_id: str) -> records.Record:
+        return records.Record(path=Path(f"evidence-{attempt_id}.json"), data={
+            "version": 2, "kind": "skill-evidence", "producer": "assembler",
+            "attempt_id": attempt_id, "trial_id": trial_id,
+            "skills": [
+                {
+                    "skill": {"path": SKILL_PATH},
+                    "invocation": {"lineage": "root"},
+                    "lifecycle": {
+                        "listed": {"status": "UNKNOWN", "reason": "x"},
+                        "read_observed": {"status": "UNKNOWN", "reason": "x"},
+                        "execution_observed": {"status": "UNKNOWN", "reason": "x"},
+                    },
+                    "criteria_owned": [],
+                    "external_evidence": {"present": False, "reconciliation": "absent"},
+                },
+                {
+                    "skill": {"path": child_path},
+                    "invocation": {"lineage": "child", "parent_path": SKILL_PATH},
+                    "lifecycle": {
+                        "listed": {"status": "UNKNOWN", "reason": "x"},
+                        "read_observed": {"status": "UNKNOWN", "reason": "x"},
+                        "execution_observed": {"status": "UNKNOWN", "reason": "x"},
+                    },
+                    "criteria_owned": [
+                        {"id": "c-child", "outcome": "VIOLATED", "shared": False},
+                    ],
+                    "external_evidence": {"present": False, "reconciliation": "absent"},
+                },
+            ],
+        })
+
+    bundle = _bundle(CONTROLS / "ledger-binding/good/skill-evidence-no-correlating-attempt")
+    # Replace that fixture's own skill-evidence record with one declaring a
+    # child too, and extend its receipt so the child path is installed.
+    records_list = []
+    for r in bundle.records:
+        if r.kind == records.SKILL_EVIDENCE:
+            continue
+        if r.kind == records.INSTALLATION_RECEIPT:
+            data = dict(r.data)
+            installed = data["installed"]
+            assert isinstance(installed, list)
+            data["installed"] = [*installed, {"path": child_path, "digest": "sha256:helper-v1"}]
+            r = records.Record(path=r.path, data=data)
+        if r.kind == records.VERIFIED_RESULT:
+            data = dict(r.data)
+            criteria = data["criteria"]
+            assert isinstance(criteria, list)
+            data["criteria"] = [*criteria, {"id": "c-child", "mandatory": False, "outcome": "VIOLATED", "evidence": ["grader-log:c-child"]}]
+            r = records.Record(path=r.path, data=data)
+        records_list.append(r)
+    records_list.append(skill_evidence_with_child("att-1", "t-1"))
+    bundle = records.Bundle(path=bundle.path, records=records_list)
+
+    report = cov.assemble_coverage_report(
+        bundle, cov.DeclaredInventory.from_profile_raw((SKILL_PATH, child_path), {"select": [SKILL_PATH, child_path]}, "sha256:5a")
+    )
+    rows_by_path = {r.key.skill_path: r for r in report.rows}
+    # The parent attempt's own outcome is PASS - the "successful parent" half.
+    assert rows_by_path[SKILL_PATH].outcomes["PASS"] == 1
+    assert rows_by_path[child_path].outcomes["PASS"] == 1  # same attempt, same outcome fact
+    assert rows_by_path[SKILL_PATH].lineage == "root"
+    assert rows_by_path[SKILL_PATH].parent_path is None
+    assert rows_by_path[child_path].lineage == "child"
+    assert rows_by_path[child_path].parent_path == SKILL_PATH
+    # Item 3's own acceptance: the child's failed owned criterion shows on
+    # the CHILD's row, never silently absorbed by (or crediting) the parent -
+    # and neither row carries any OTHER per-skill verdict the parent's PASS
+    # could leak into (item 3: no per-skill PASS/FAIL field exists at all).
+    assert rows_by_path[child_path].criteria == (cov.CriterionRow(id="c-child", outcome="VIOLATED", shared=False),)
+    assert rows_by_path[SKILL_PATH].criteria == ()

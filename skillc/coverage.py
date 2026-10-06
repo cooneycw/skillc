@@ -181,6 +181,8 @@ class CoverageRow:
     criteria: tuple[CriterionRow, ...]
     execution_observed: Mapping[str, int]
     read_observed: Mapping[str, int]
+    lineage: str | None
+    parent_path: str | None
     evidence: tuple[str, ...]  # attempt ids backing this row, sorted
 
     def to_dict(self) -> dict[str, object]:
@@ -199,6 +201,8 @@ class CoverageRow:
             "criteria": [{"id": c.id, "outcome": c.outcome, "shared": c.shared} for c in self.criteria],
             "execution_observed": dict(self.execution_observed),
             "read_observed": dict(self.read_observed),
+            "lineage": self.lineage,
+            "parent_path": self.parent_path,
             "evidence": list(self.evidence),
         }
 
@@ -548,6 +552,7 @@ def _build_row(
     criteria: dict[str, CriterionRow] = {}
     versions: set[str] = set()
     evidence_ids: list[str] = []
+    lineages: set[tuple[str, str | None]] = set()
 
     for attempt_id in attempt_ids:
         outcome = _attempt_outcome(attempt_id, lifecycles, results)
@@ -572,6 +577,12 @@ def _build_row(
             if path != skill_path:
                 continue
             evidence_ids.append(attempt_id)
+            invocation = entry.get("invocation")
+            if isinstance(invocation, dict):
+                row_lineage = invocation.get("lineage")
+                row_parent = invocation.get("parent_path")
+                if row_lineage in records.SKILL_EVIDENCE_LINEAGE:
+                    lineages.add((row_lineage, row_parent if isinstance(row_parent, str) else None))
             lifecycle_facts = entry.get("lifecycle")
             if isinstance(lifecycle_facts, dict):
                 for field_name, bucket in (("execution_observed", execution_observed), ("read_observed", read_observed)):
@@ -600,6 +611,12 @@ def _build_row(
     # produces separate rows for free, one per cell, without this function
     # needing to split anything itself.
     skill_version = min(versions) if versions else "UNKNOWN"
+    # Same assumption as skill_version, immediately above: every attempt
+    # under one trial shares that trial's own skill-evidence declaration,
+    # so a validated bundle agrees on one (lineage, parent_path) pair here.
+    resolved_lineage, resolved_parent = (
+        min(lineages, key=lambda pair: (pair[0], pair[1] or "")) if lineages else (None, None)
+    )
     scheduled = len(attempt_ids)
     evaluable = outcomes["PASS"] + outcomes["FAIL"]
     key = RowKey(
@@ -620,5 +637,7 @@ def _build_row(
         criteria=tuple(sorted(criteria.values(), key=lambda c: c.id)),
         execution_observed=execution_observed,
         read_observed=read_observed,
+        lineage=resolved_lineage,
+        parent_path=resolved_parent,
         evidence=tuple(sorted(set(evidence_ids))),
     )
