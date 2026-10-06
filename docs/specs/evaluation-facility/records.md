@@ -594,6 +594,28 @@ to name, and the cpp-eval review questions relayed 2026-10-06.
   one). `absent` is never treated as `contradicting`, and `unmatched` is never
   silently promoted to `matched` for lack of a reason to doubt it.
 
+  **Witness citation and closed reason vocabulary (#269 scope addition, cpp-eval
+  review of #268: https://github.com/cooneycw/skillc/issues/269#issuecomment-6009072750).**
+  "Decided against the controller's own independent observation" was documented,
+  above, before anything enforced it: a producer could write `contradicting` with
+  any non-empty `reason` string and nothing checked that an observation actually
+  backed it, so `check-records` accepted an un-witnessed contradiction. Two checks
+  close that gap, both in `skillc/records.py`, mirroring the citation
+  `lifecycle.execution_observed` already requires for `CONFIRMED`/`NOT_CONFIRMED`:
+
+  1. `reason` must be one of `SKILL_EVIDENCE_CONTRADICTING_REASONS` - the union of
+     the two reasons above (CPP usage-record evidence) and three new ones for a
+     gate-witness (#269) observation: `gate-not-executed`, `exit-code-mismatch`,
+     `tree-mismatch`.
+  2. `external_evidence.witness_ref` must be present and shaped `{ref, digest}`
+     (non-empty strings), and `ledger-binding` cross-checks that `digest` was
+     actually captured by this attempt's manifest - the identical "altered
+     artifact" check `artifact_ref.digest` already gets, applied to the
+     controller-witness citation instead.
+
+  Only `contradicting` is closed this way; `unmatched`'s own reason stays
+  open-vocabulary (above) and is unaffected.
+
 ### Golden records (acceptance item 4)
 
 Six named cases, each a committed `controls/skill-evidence/{good,bad}/` or

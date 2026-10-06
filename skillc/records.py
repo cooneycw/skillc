@@ -119,6 +119,33 @@ SKILL_EVIDENCE_LINEAGE = ("root", "child")
 #: silently promoted to `matched` for lack of a reason to doubt it.
 SKILL_EVIDENCE_RECONCILIATION = ("absent", "unmatched", "matched", "contradicting")
 
+#: `external_evidence.reason` when `reconciliation == "contradicting"` (#269
+#: scope addition, cpp-eval review of #268: https://github.com/cooneycw/
+#: skillc/issues/269#issuecomment-6009072750). `contradicting` is documented
+#: (below, "contradicting" bullet) as decided ONLY against the controller's
+#: own independent observation - a closed reason vocabulary is what keeps a
+#: producer from writing a free-text excuse in place of citing that
+#: observation; the citation itself is `witness_ref` (below), checked
+#: separately. The vocabulary is the UNION of both kinds of controller
+#: observation records.md already names for this state: `outcome-disagreement`
+#: and `stale-identity` predate this addition (R9, CPP usage-record evidence -
+#: a bound usage record whose own outcome or subject/client identity disagrees
+#: with this trial's planned state); `gate-not-executed`, `exit-code-mismatch`
+#: and `tree-mismatch` are new with #269's gate-witness (a bound gate-witness
+#: record whose observed coverage, exit code or tree identity disagrees with
+#: what the subject claimed). Closing the vocabulary without this union would
+#: silently refuse the two reasons records.md already committed to. `unmatched`'s
+#: own reason stays open-vocabulary (a declared skill with no correlating
+#: installed path has no single closed taxonomy of "why" worth enumerating);
+#: narrowing it too would be unrelated scope creep.
+SKILL_EVIDENCE_CONTRADICTING_REASONS = (
+    "outcome-disagreement",
+    "stale-identity",
+    "gate-not-executed",
+    "exit-code-mismatch",
+    "tree-mismatch",
+)
+
 #: `external_evidence.source` (#268) must be a well-formed `<namespace>/v<N>`
 #: label. This is a FORMAT check only, unconditional, and never a hardcoded
 #: allowlist of known producer names - the module stays subject-agnostic
@@ -1460,6 +1487,31 @@ def skill_evidence(record: Record) -> Iterator[str]:
             )
         if reconciliation not in ("matched", "absent") and not _nonempty_str(external.get("reason")):
             yield f"{where}: external_evidence.reconciliation is {reconciliation!r} without a reason"
+        if reconciliation == "contradicting":
+            # #269 scope addition (cpp-eval review of #268): "contradicting" is
+            # documented as decided ONLY against the controller's own
+            # independent observation, below ("contradicting" bullet) - so it
+            # requires the SAME witness citation `execution_observed` already
+            # requires for CONFIRMED/NOT_CONFIRMED, never a free-text reason
+            # standing in for it. `ledger_binding` separately checks that the
+            # cited digest was actually captured (`_skill_evidence_binding`).
+            reason = external.get("reason")
+            if reason not in SKILL_EVIDENCE_CONTRADICTING_REASONS:
+                yield (
+                    f"{where}: external_evidence.reconciliation is 'contradicting' but reason "
+                    f"{reason!r} is not one of {list(SKILL_EVIDENCE_CONTRADICTING_REASONS)}"
+                )
+            witness_ref = external.get("witness_ref")
+            if (
+                not isinstance(witness_ref, dict)
+                or not _nonempty_str(witness_ref.get("ref"))
+                or not _nonempty_str(witness_ref.get("digest"))
+            ):
+                yield (
+                    f"{where}: external_evidence.reconciliation is 'contradicting' but cites no "
+                    f"{{ref, digest}} witness_ref - a contradiction with nothing independently "
+                    f"observed behind it is an unwitnessed claim, not a decided one"
+                )
         if present:
             source = external.get("source")
             if not isinstance(source, str) or not EXTERNAL_EVIDENCE_SOURCE_RE.fullmatch(source):
@@ -1587,6 +1639,11 @@ def _skill_evidence_binding(
       NONE of them is a **forged status** - the "Forged status" golden case.
     - `external_evidence.artifact_ref.digest` against the manifest's captured
       digests: one that was never captured is an **altered** artifact.
+    - `external_evidence.witness_ref.digest` (#269 scope addition), when
+      `reconciliation == "contradicting"`, against the same captured digests:
+      one that was never captured is an **unwitnessed** contradiction - the
+      same "altered artifact" check, for the controller-witness citation
+      `reconciliation == "contradicting"` is documented as resting on.
     - `external_evidence.source` against this attempt's TRIAL's own declared
       `external_evidence_sources` (`trial_ledger`, above): a well-formed source
       - `skill_evidence()`'s own rule already refuses a malformed one - that
@@ -1650,6 +1707,20 @@ def _skill_evidence_binding(
                         f"attempt's trial does not declare it in external_evidence_sources - "
                         f"undeclared, an unknown schema"
                     )
+                if external.get("reconciliation") == "contradicting":
+                    # #269 scope addition: mirrors the artifact_ref check above
+                    # for the SAME reason - `skill_evidence()` only checks
+                    # witness_ref is SHAPED correctly; whether the digest it
+                    # names was ever actually captured is a cross-record fact
+                    # no lone record can establish for itself.
+                    witness_ref = external.get("witness_ref")
+                    w_digest = witness_ref.get("digest") if isinstance(witness_ref, dict) else None
+                    if isinstance(w_digest, str) and w_digest and w_digest not in captured:
+                        yield (
+                            f"{e_where}: external_evidence.reconciliation is 'contradicting' and "
+                            f"cites witness_ref {w_digest!r}, which no manifest for this attempt "
+                            f"captured - an unwitnessed contradiction"
+                        )
 
 
 def ledger_binding(bundle: Bundle) -> Iterator[str]:

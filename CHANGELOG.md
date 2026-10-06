@@ -34,6 +34,26 @@ and version plan.
   environment, with a fake-operator-home decoy proven (both directions)
   never read. Cold-container execution (acceptance item 2) remains owed.
 
+- **A controller-owned gate-execution witness** (Refs #269). Reuses #183's
+  `decide_reply_channel` unchanged, adding only its own `gate_start`/
+  `gate_complete` request vocabulary. One record per attempt, covering the
+  full declared gate set - a gate nothing was ever heard about still appears,
+  as `not-observed`, never as a missing entry. Four coverage states
+  (`complete`/`interrupted`/`not-observed`/`channel-unavailable`);
+  `execution_observed` derives from coverage alone, never from exit code, and
+  `NOT_CONFIRMED` is never produced (silence cannot be told apart from
+  "skipped" and "ran outside the channel"). Tree identity is computed by the
+  controller itself at `gate_start` time, never claimed by the subject.
+  - **`skill-evidence.external_evidence.reconciliation == "contradicting"`
+    now requires a citation** (cpp-eval review of #268,
+    https://github.com/cooneycw/skillc/issues/269#issuecomment-6009072750):
+    a `{ref, digest}` `witness_ref` into a captured controller-witness
+    record, exactly as `lifecycle.execution_observed` already requires for
+    `CONFIRMED`/`NOT_CONFIRMED`, plus a closed reason vocabulary
+    (`SKILL_EVIDENCE_CONTRADICTING_REASONS`). `ledger-binding` cross-checks
+    the cited digest was actually captured by the attempt's manifest - the
+    same "altered artifact" check `artifact_ref` already gets.
+
 - **A controller-owned decide-and-reply channel, and `DockerBackend`'s one
   named mount exception** (Refs #183, PR A of a 4-PR split). A new Unix-
   socket channel where the controller decides, logs, and only then replies
