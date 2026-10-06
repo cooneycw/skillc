@@ -1,0 +1,314 @@
+"""Tests for skillc/reliability.py (issue #273).
+
+Each estimator is checked against a hand-computable value, not against a
+second implementation of the same formula - the point of a golden dataset is
+that it can be checked by arithmetic, not by trusting the code that produced
+it. The acceptance line's five control shapes (heterogeneous-task,
+duplicate/retry, missing-data, zero-population, n<k) each have a dedicated
+test naming which shape it is.
+"""
+
+from __future__ import annotations
+
+import random
+
+import pytest
+
+from skillc import reliability as rel
+
+# --------------------------------------------------------------- all_k / pass_at_k
+
+def test_all_k_hand_computed() -> None:
+    # C(3,2)/C(5,2) = 3/10
+    assert rel.all_k(3, 5, 2) == pytest.approx(0.3)
+    # C(4,4)/C(4,4) = 1
+    assert rel.all_k(4, 4, 4) == pytest.approx(1.0)
+    # C(0,2)/C(5,2) = 0
+    assert rel.all_k(0, 5, 2) == pytest.approx(0.0)
+
+
+def test_pass_at_k_hand_computed() -> None:
+    # 1 - C(2,2)/C(5,2) = 1 - 1/10 = 0.9
+    assert rel.pass_at_k(3, 5, 2) == pytest.approx(0.9)
+    # 1 - C(5,2)/C(5,2) = 0, zero successes can never pass-at-k
+    assert rel.pass_at_k(0, 5, 2) == pytest.approx(0.0)
+
+
+def test_all_k_and_pass_at_k_are_different_functions_not_aliases() -> None:
+    # A case where they must disagree: 1 success of 2, k=1.
+    # all_k = C(1,1)/C(2,1) = 1/2. pass_at_k = 1 - C(1,1)/C(2,1) = 1/2.
+    # Pick a case where they clearly diverge instead:
+    # c=1, n=3, k=2: all_k = C(1,2)/C(3,2) = 0/3 = 0
+    #                 pass_at_k = 1 - C(2,2)/C(3,2) = 1 - 1/3 = 2/3
+    assert rel.all_k(1, 3, 2) == pytest.approx(0.0)
+    assert rel.pass_at_k(1, 3, 2) == pytest.approx(2.0 / 3.0)
+
+
+# --------------------------------------------------------------- n<k control
+
+def test_n_less_than_k_is_insufficient_never_zero() -> None:
+    assert rel.all_k(2, 3, 5) == rel.INSUFFICIENT
+    assert rel.pass_at_k(2, 3, 5) == rel.INSUFFICIENT
+    # Never confusable with a real zero result:
+    assert rel.all_k(2, 3, 5) != 0
+    assert rel.all_k(2, 3, 5) != 0.0
+
+
+def test_all_k_refuses_malformed_input() -> None:
+    with pytest.raises(rel.ReliabilityRefused):
+        rel.all_k(-1, 5, 2)
+    with pytest.raises(rel.ReliabilityRefused):
+        rel.all_k(6, 5, 2)  # c > n
+    with pytest.raises(rel.ReliabilityRefused):
+        rel.all_k(1, 5, 0)  # k must be >= 1
+    with pytest.raises(rel.ReliabilityRefused):
+        rel.all_k(True, 5, 2)  # bool is not an int here, even though it is one in Python
+
+
+# --------------------------------------------------------------- population_all_k / heterogeneous-task
+
+def test_population_all_k_heterogeneous_tasks() -> None:
+    # Three tasks with different n, k=2: t1 all_k=0.3 (3/5 C(3,2)/C(5,2)),
+    # t2 all_k=1.0 (2/2), t3 all_k=0.0 (1/4, n>=k but C(1,2)=0).
+    result = rel.population_all_k({"t1": (3, 5), "t2": (2, 2), "t3": (1, 4)}, k=2)
+    assert result.per_task == {"t1": pytest.approx(0.3), "t2": pytest.approx(1.0), "t3": pytest.approx(0.0)}
+    assert result.excluded == ()
+    assert result.mean == pytest.approx((0.3 + 1.0 + 0.0) / 3.0)
+
+
+def test_population_all_k_excludes_insufficient_tasks_by_name() -> None:
+    # t4 has n=1 < k=2: excluded, never scored as 0.
+    result = rel.population_all_k({"t1": (3, 5), "t4": (1, 1)}, k=2)
+    assert result.excluded == ("t4",)
+    assert "t4" not in result.per_task
+    assert result.mean == pytest.approx(0.3)  # only t1 counted
+
+
+def test_population_all_k_zero_population_is_none_not_zero() -> None:
+    # Every task excluded -> no mean to report, not 0.0.
+    result = rel.population_all_k({"t1": (1, 1)}, k=2)
+    assert result.mean is None
+    assert result.excluded == ("t1",)
+
+    empty = rel.population_all_k({}, k=2)
+    assert empty.mean is None
+    assert empty.excluded == ()
+
+
+def test_population_all_k_declared_weights() -> None:
+    result = rel.population_all_k(
+        {"t1": (3, 5), "t2": (2, 2)}, k=2, weights={"t1": 1.0, "t2": 3.0},
+    )
+    # weighted mean = (1*0.3 + 3*1.0) / 4 = 3.3/4 = 0.825
+    assert result.mean == pytest.approx(0.825)
+
+
+def test_population_all_k_refuses_a_weight_map_naming_the_wrong_tasks() -> None:
+    with pytest.raises(rel.ReliabilityRefused):
+        rel.population_all_k({"t1": (3, 5), "t2": (1, 1)}, k=2, weights={"t1": 1.0, "t2": 1.0})
+
+
+def test_population_all_k_refuses_a_non_positive_weight() -> None:
+    with pytest.raises(rel.ReliabilityRefused):
+        rel.population_all_k({"t1": (3, 5)}, k=2, weights={"t1": 0.0})
+
+
+def test_pooled_all_k_always_refuses() -> None:
+    with pytest.raises(rel.ReliabilityRefused):
+        rel.pooled_all_k()
+    with pytest.raises(rel.ReliabilityRefused):
+        rel.pooled_all_k(1, 2, 3)
+
+
+# --------------------------------------------------------------- Clopper-Pearson
+
+@pytest.mark.parametrize(
+    "c, n, lower, upper",
+    [
+        (0, 10, 0.0, 0.3085),
+        (5, 10, 0.1871, 0.8129),
+        (10, 10, 0.6915, 1.0),
+    ],
+)
+def test_clopper_pearson_matches_textbook_values(c: int, n: int, lower: float, upper: float) -> None:
+    got_lower, got_upper = rel.clopper_pearson(c, n)
+    assert got_lower == pytest.approx(lower, abs=1e-4)
+    assert got_upper == pytest.approx(upper, abs=1e-4)
+
+
+def test_clopper_pearson_is_symmetric_around_half() -> None:
+    lower, upper = rel.clopper_pearson(5, 10)
+    assert lower == pytest.approx(1 - upper, abs=1e-9)
+
+
+def test_clopper_pearson_refuses_zero_trials() -> None:
+    with pytest.raises(rel.ReliabilityRefused):
+        rel.clopper_pearson(0, 0)
+
+
+# --------------------------------------------------------------- Wilson / Newcombe
+
+def test_wilson_score_contains_the_point_estimate() -> None:
+    lower, upper = rel.wilson_score(5, 10)
+    assert lower < 0.5 < upper
+
+
+def test_newcombe_hybrid_interval_zero_when_arms_are_identical() -> None:
+    lower, upper = rel.newcombe_hybrid_interval(5, 10, 5, 10)
+    assert lower < 0.0 < upper  # contains 0, the true difference
+
+
+def test_newcombe_hybrid_interval_is_antisymmetric_under_swap() -> None:
+    lower, upper = rel.newcombe_hybrid_interval(8, 10, 2, 10)
+    swapped_lower, swapped_upper = rel.newcombe_hybrid_interval(2, 10, 8, 10)
+    assert swapped_lower == pytest.approx(-upper, abs=1e-9)
+    assert swapped_upper == pytest.approx(-lower, abs=1e-9)
+
+
+# --------------------------------------------------------------- McNemar exact
+
+def test_mcnemar_exact_hand_computed() -> None:
+    # n=10, k=min(1,9)=1: cumulative = (C(10,0)+C(10,1)) * 0.5^10 = 11/1024
+    # p = 2 * 11/1024 = 22/1024 = 0.021484375
+    assert rel.mcnemar_exact(1, 9) == pytest.approx(22 / 1024)
+
+
+def test_mcnemar_exact_is_symmetric_in_its_two_counts() -> None:
+    assert rel.mcnemar_exact(1, 9) == pytest.approx(rel.mcnemar_exact(9, 1))
+
+
+def test_mcnemar_exact_no_discordant_pairs_is_one() -> None:
+    assert rel.mcnemar_exact(0, 0) == 1.0
+
+
+def test_mcnemar_exact_balanced_discordance_is_one() -> None:
+    assert rel.mcnemar_exact(5, 5) == pytest.approx(1.0)
+
+
+def test_mcnemar_exact_refuses_negative_counts() -> None:
+    with pytest.raises(rel.ReliabilityRefused):
+        rel.mcnemar_exact(-1, 3)
+
+
+# --------------------------------------------------------------- bootstrap
+
+def test_bootstrap_refuses_below_minimum_tasks() -> None:
+    with pytest.raises(rel.ReliabilityRefused):
+        rel.task_cluster_bootstrap([0.1, 0.2, 0.3], seed=1)
+
+
+def test_bootstrap_records_its_own_seed() -> None:
+    result = rel.task_cluster_bootstrap([0.1, 0.2, 0.3, 0.4, 0.5], seed=7)
+    assert result.seed == 7
+
+
+def test_bootstrap_is_deterministic_given_the_same_seed() -> None:
+    values = [0.9, 0.8, 0.95, 0.7, 0.85]
+    first = rel.task_cluster_bootstrap(values, seed=42)
+    second = rel.task_cluster_bootstrap(values, seed=42)
+    assert first == second
+
+
+def test_bootstrap_shuffle_invariance_same_seed_same_multiset() -> None:
+    """The committed shuffle-order control CPP review asked for: the SAME
+    seed and the SAME multiset of task values give the SAME interval, however
+    the caller happened to order that multiset - the point estimators (mean,
+    all_k) are trivially order-invariant by `sum`/`comb`, but a resampling
+    procedure keyed on POSITION would not be, and this is what proves this
+    one is keyed on sorted VALUE instead."""
+    values = [0.9, 0.8, 0.95, 0.7, 0.85, 0.6]
+    rng = random.Random(99)
+    shuffled = values[:]
+    rng.shuffle(shuffled)
+    assert shuffled != values  # the shuffle must actually have moved something
+
+    first = rel.task_cluster_bootstrap(values, seed=42)
+    second = rel.task_cluster_bootstrap(shuffled, seed=42)
+    assert first == second
+
+
+def test_bootstrap_different_seeds_can_differ() -> None:
+    values = [0.9, 0.8, 0.95, 0.7, 0.85]
+    first = rel.task_cluster_bootstrap(values, seed=1)
+    second = rel.task_cluster_bootstrap(values, seed=2)
+    # Not asserting they MUST differ (a collision is possible but vanishingly
+    # unlikely with 10000 resamples); asserting the seed each records matches
+    # what was asked for, which is the actual reproducibility contract.
+    assert first.seed == 1
+    assert second.seed == 2
+
+
+# --------------------------------------------------------------- account_cell
+
+AR = rel.AttemptRecord
+
+
+def test_account_cell_hand_computed() -> None:
+    acct = rel.account_cell([
+        AR("a1", "PASS", True),
+        AR("a2", "FAIL", True),
+        AR("a3", "UNAVAILABLE", False),
+    ])
+    assert acct.scheduled == 3
+    assert acct.started == 2
+    assert acct.evaluable == 2
+    assert acct.c == 1
+    assert acct.coverage == {"UNAVAILABLE": 1, "INCONCLUSIVE": 0, "NOT_RUN": 0}
+    assert acct.evaluable_ids == ("a1", "a2")
+
+
+def test_account_cell_zero_population() -> None:
+    acct = rel.account_cell([])
+    assert acct.scheduled == 0
+    assert acct.started == 0
+    assert acct.evaluable == 0
+    assert acct.c == 0
+    assert acct.evaluable_ids == ()
+
+
+def test_account_cell_retry_fills_the_slot() -> None:
+    """duplicate/retry control: a retry is a NEW attempt_id in the SAME slot
+    - it must not double-count the slot as scheduled twice, and the retry's
+    own PASS must be what the slot reports."""
+    acct = rel.account_cell([
+        AR("a4", "UNAVAILABLE", False),
+        AR("a5", "PASS", True, retry_of="a4"),
+    ])
+    assert acct.scheduled == 1  # one slot, not two
+    assert acct.started == 1  # the retry started
+    assert acct.evaluable == 1
+    assert acct.c == 1
+    assert acct.evaluable_ids == ("a5",)  # the retry's own id, not the original's
+
+
+def test_account_cell_retry_cannot_select_a_better_outcome() -> None:
+    """A retry that is ALSO unavailable leaves the slot in coverage - a
+    retry can fill a slot, never upgrade a result that was never achieved."""
+    acct = rel.account_cell([
+        AR("a6", "UNAVAILABLE", False),
+        AR("a7", "UNAVAILABLE", False, retry_of="a6"),
+    ])
+    assert acct.scheduled == 1
+    assert acct.evaluable == 0
+    assert acct.coverage["UNAVAILABLE"] == 1
+
+
+def test_account_cell_refuses_duplicate_attempt_id() -> None:
+    with pytest.raises(rel.ReliabilityRefused):
+        rel.account_cell([AR("x", "PASS", True), AR("x", "FAIL", True)])
+
+
+def test_account_cell_refuses_self_retry() -> None:
+    with pytest.raises(rel.ReliabilityRefused):
+        rel.account_cell([AR("y", "PASS", True, retry_of="y")])
+
+
+def test_account_cell_missing_data_is_never_silently_imputed() -> None:
+    """missing-data control: a status outside the closed vocabulary - the
+    shape an unclassified or missing observation would take - is REFUSED, not
+    silently scored as PASS, FAIL, or dropped from the count. protocol.md:
+    "Missing data is never imputed as success or failure.\""""
+    with pytest.raises(rel.ReliabilityRefused):
+        rel.account_cell([AR("z", "UNKNOWN", False)])
+    with pytest.raises(rel.ReliabilityRefused):
+        rel.account_cell([AR("z", "", False)])  # type: ignore[arg-type]

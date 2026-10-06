@@ -26,6 +26,51 @@ and version plan.
     red case proving a bypassed channel cannot move the controller-recorded
     point are later PRs under the same issue.
 
+- **`skillc/reliability.py`: the declared repeat-reliability estimators and
+  all-attempt accounting** (Refs #273, wave #259, workstream #246). Pure
+  stdlib implementation of exactly the methods protocol.md section 10.5/10.6
+  (#264) predeclares - no method is chosen here that #264 did not already
+  name, and where #264 names none (a per-arm PASS/FAIL reduction over
+  repeated attempts), this module refuses rather than picking one.
+  - `all_k`/`pass_at_k`: `C(c,k)/C(n,k)` and its pass@k counterpart, kept as
+    separate functions sharing no code so a bug in one cannot silently
+    become the other; both report `INSUFFICIENT`, never `0`, when `n < k`.
+  - `population_all_k`: the declared-weight (equal by default) mean of
+    per-task `all_k` over tasks with `n >= k`, naming every excluded task;
+    `pooled_all_k` refuses unconditionally (protocol.md: never raise a
+    pooled rate to the k-th power).
+  - `clopper_pearson` (single-cell exact interval) and
+    `newcombe_hybrid_interval` (independent-arms difference, composed from
+    `wilson_score`): the Beta quantile Clopper-Pearson needs has no stdlib
+    closed form, so it is computed from the regularized incomplete beta
+    function (`math.lgamma` plus a continued fraction) inverted by
+    bisection - verified against textbook values (0/10, 5/10, 10/10), not
+    against a second implementation of the same approximation.
+  - `mcnemar_exact`: the paired hypothesis test, returning a bare p-value so
+    it cannot be mistaken for an interval (protocol.md's own distinction).
+  - `task_cluster_bootstrap`: seeded percentile bootstrap over TASKS (never
+    attempts - repeats of one task are not independent evidence about
+    others), refusing below 5 tasks. The seed is always recorded in the
+    result, and resampling draws from a VALUE-sorted copy of the input, so
+    the same seed and the same multiset of task values give the same
+    interval regardless of input order - the shuffle-invariance control
+    cpp-eval review asked for covers the bootstrap specifically, not only
+    the trivially order-invariant point estimators.
+  - `account_cell`: all-attempt accounting per cell (scheduled/started/
+    evaluable/coverage), with retries resolved into slots by their declared
+    `retry_of` chain - a retry fills a slot but cannot select a better
+    outcome than the chain's first PASS/FAIL. Refuses a duplicate attempt id
+    or a self-referential retry, and refuses any status outside the closed
+    PASS/FAIL/UNAVAILABLE/INCONCLUSIVE/NOT_RUN vocabulary - missing data is
+    never silently imputed as success or failure.
+  - `tests/test_reliability.py`: 37 tests, each estimator checked against a
+    hand-computable value. Named controls for all five shapes the issue's
+    acceptance requires: heterogeneous-task (`population_all_k` over tasks
+    of different `n`), duplicate/retry (`account_cell`'s slot-filling),
+    missing-data (`account_cell` refuses an unclassified status),
+    zero-population (`account_cell([])`, `population_all_k({})`), and n<k
+    (`all_k`/`pass_at_k` returning `INSUFFICIENT`).
+
 - **`case.arm`/`case.paired_with`: a validated record of which trials pair as
   a discriminating design** (Refs #273, wave #259, workstream #246). Before
   this, nothing in the v2 schema said that one case was another's degraded
