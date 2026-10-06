@@ -126,7 +126,7 @@ _REAL_SHIM_SOURCE = (
 #: A fixed, non-ambient HOME this test declares for BOTH gates - chosen to
 #: be unlike anything a bare `python:3.12-slim` exec would carry by
 #: default (typically `/root`), so `wrong-env` cannot coincidentally pass.
-_DECLARED_HOME = "/home/declared-test-home"
+_DECLARED_HOME = "/opt/declared-test-home"
 _DECLARED_ENV = {"HOME": _DECLARED_HOME, "PATH": "/usr/bin:/bin"}
 
 
