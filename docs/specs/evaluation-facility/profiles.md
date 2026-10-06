@@ -250,7 +250,12 @@ different layout, helper home and dependency mix with no code change.
 ## Declared profiles
 
 - [cpp-codex-flow-check](../../../evals/subjects/cpp-codex-flow-check/PROFILE.md) -
-  CPP's generated Codex `flow-check` skill, targeted, product question.
+  CPP's generated Codex `flow-check` skill, targeted, product question, pinned
+  at `85e9b03` (the revision #264's case contract cites line numbers against).
+- [cpp-codex-flow-check-ea6dbfa](../../../evals/subjects/cpp-codex-flow-check-ea6dbfa/PROFILE.md) -
+  the same skill re-declared at CPP's current pin for #287 (#265's profile
+  changed substantially on CPP main; a later pin is a new profile, not an
+  edit to the first one).
 
 
 ## Host installation (#266)

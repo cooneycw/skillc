@@ -47,4 +47,11 @@ files = ["skillc", "tests", "ci"]
 # The Level 1 task keeps several candidate `src/slugify.py` files side by side on
 # purpose (#5). They are one module name many times over, so a whole-tree
 # `mypy .` must not discover them; the grader and gate beside them stay in reach.
-exclude = ['^evals/level1/[^/]+/(fixture|reference|alternatives|wrong)/']
+# tests/fixtures/profile-cpp-codex-flow-check-ea6dbfa/ is a real, trimmed CPP
+# checkout snapshot (#265/#287): its own lib/cicd is bundled TWICE (once at the
+# checkout root, once mirrored inside codex/skills/flow-check/, exactly as the
+# real subject's source tree does) - two files both named `lib/cicd/__init__.py`,
+# which mypy's module-name inference (not skillc's own closure walker) cannot
+# tell apart. Excluded as fixture data, not code this repo type-checks.
+exclude = ['^evals/level1/[^/]+/(fixture|reference|alternatives|wrong)/',
+           '^tests/fixtures/profile-cpp-codex-flow-check-ea6dbfa/']
