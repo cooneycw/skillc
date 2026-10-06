@@ -223,7 +223,7 @@ SKILLC_CONTROL_SOCKET_PATH = "/run/skillc/control.sock"
 _FLAGS_WITH_VALUE = (
     "--network", "--user", "--hostname", "--memory", "--memory-swap",
     "--pids-limit", "--cpus", "--shm-size", "-w", "--storage-opt",
-    "--signal",
+    "--signal", "--mount",
 )
 
 

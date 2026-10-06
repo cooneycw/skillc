@@ -8,6 +8,24 @@ and version plan.
 
 ## [Unreleased]
 
+- **A controller-owned decide-and-reply channel, and `DockerBackend`'s one
+  named mount exception** (Refs #183, PR A of a 4-PR split). A new Unix-
+  socket channel where the controller decides, logs, and only then replies
+  - never the subject - so a request's decision is durable before any byte
+  reaches the container. `DockerBackend.compose_run_argv` gains exactly one
+  constrained, optional bind-mount parameter for it; every other case its
+  closed-argv guarantee already refused (a second mount, a caller-chosen
+  target, `--privileged`, a `docker` binary) stays refused.
+  - **Socket access control**: a private, owner/mode-verified host
+    directory is the real boundary (refused on a mismatch, never widened);
+    the socket itself is reachable from the subject's fixed uid without
+    being host-wide; two attempts racing the same path are refused, never
+    silently shared.
+  - **Not yet wired to any grader.** This PR delivers the channel and the
+    mount only - the trial-image proxy, the live conformance test, and the
+    red case proving a bypassed channel cannot move the controller-recorded
+    point are later PRs under the same issue.
+
 - **Unified regular-file task delivery** (Refs #267). Collection runs,
   calibration runs and selection probes deliver the whole declared fixture,
   excluding answer keys at every depth. Missing, empty, symlinked and
