@@ -1,6 +1,8 @@
 # Uptake study (#237): does a rewritten description raise natural selection?
 
-**Status: approved 2026-10-04, not yet run.** This is the pilot of #238, the
+**Status: run 2026-10-04; see [report.md](report.md).** Primary: rewritten 20/20
+vs published 0/20, one-sided Fisher p = 7.3 × 10⁻¹² (significant). Near-miss:
+rewritten 9/10 vs published 0/10. Task PASS 60/60. This is the pilot of #238, the
 description optimizer.
 
 ## Design
