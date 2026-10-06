@@ -54,8 +54,12 @@ and version plan.
     itself. Skipped, not failed, wherever no Docker daemon is reachable
     (`probe_daemon`, same binary-vs-daemon distinction added in #183 PR
     B2); real-daemon execution is owed to the real-Docker runner (#315).
-    `@pytest.mark.real_docker`, coordinated with the #315 runner's own PR
-    for the `DECLARED_REAL_DOCKER_FILES` floor entry.
+    `@pytest.mark.real_docker`, and `tests.test_gate_witness_live` is now
+    in `ci/check_real_docker_ran.py`'s `DECLARED_REAL_DOCKER_FILES` floor
+    (#315's PR landed first, so this PR adds the entry) - with a red case
+    pinning the real, now-three-file floor: the other two declared files
+    pass while this one collects only a SKIP must give `FAILURE`, never
+    `SUCCESS`.
 
 - **The Level 5 subject-side proxy is wired into the trial image** (Refs
   #183, PR B2). `docker/trial/skillc-disrupt-tool.py` - a one-shot client
