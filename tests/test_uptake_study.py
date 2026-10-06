@@ -359,3 +359,111 @@ def test_the_committed_selective_declaration_is_authorized_and_its_file_matches(
     with pytest.raises(us.StudyRefused, match="not approved"):
         us.require_approved(us.parse_declaration(data), ROOT)
 
+
+# ------------------------------------------------- screening probe (#238)
+
+
+def _probe_data(cutoff: object = 45, per_attempt: object = 45) -> dict[str, object]:
+    data = _data()
+    data["probe"] = {"cutoff_seconds": cutoff}
+    data["shared"]["per_attempt_seconds"] = per_attempt  # type: ignore[index]
+    return data
+
+
+def test_a_probe_declaration_parses_with_its_cutoff() -> None:
+    assert us.parse_declaration(_probe_data()).probe_seconds == 45.0
+    assert us.parse_declaration(_data()).probe_seconds is None
+
+
+@pytest.mark.parametrize(("cutoff", "per_attempt", "match"), [
+    (45, 600, "must equal probe.cutoff_seconds"),
+    (10, 10, "20-300"),
+    (400, 400, "20-300"),
+    (True, 45, "20-300"),
+])
+def test_a_malformed_probe_is_refused(cutoff: object, per_attempt: object, match: str) -> None:
+    with pytest.raises(us.StudyRefused, match=match):
+        us.parse_declaration(_probe_data(cutoff, per_attempt))
+
+
+def _probe_outcome(arm: str, *, selected: bool, calls: int | None) -> mp.AttemptOutcome:
+    obs: dict[str, object] = {"transcript_files_found": 1, "prompt_delivered": True,
+                              "skill_invocations": ["flow-check"] if selected else [],
+                              "run_metadata": {"model": "gpt-6-astra"}}
+    if calls is not None:
+        obs["transcript_line_types"] = {"response_item/custom_tool_call": calls,
+                                        "response_item/custom_tool_call_output": calls, "response_item/message": 2}
+    record: dict[str, object] = {"disposition": "captured", "graded": {"status": "FAIL"}, "observation": obs}
+    return mp.AttemptOutcome(mp.ScheduledAttempt(f"a-{arm}-{selected}-{calls}", "t", f"intended-use__{arm}", 1),
+                             record, None)
+
+
+def test_a_probe_attempt_that_never_acted_is_undecided_not_unselected() -> None:
+    """#238: a cut-off before the first tool call decides nothing. Red case:
+    counted as 'not selected', it would make a probe read zero uptake."""
+    declaration = us.parse_declaration(_probe_data())
+    outcomes = [_probe_outcome("rewritten", selected=False, calls=0),
+                _probe_outcome("rewritten", selected=False, calls=None),
+                _probe_outcome("rewritten", selected=True, calls=2),
+                _probe_outcome("published", selected=False, calls=3)]
+    report = us.build_report(_Experiment(), outcomes, declaration)  # type: ignore[arg-type]
+    assert report["undecided"] == 2
+    assert report["cells"]["intended-use"]["rewritten"] == {"scheduled": 3, "observed": 1, "selected": 1}  # type: ignore[index]
+    assert report["cells"]["intended-use"]["published"] == {"scheduled": 1, "observed": 1, "selected": 0}  # type: ignore[index]
+    assert all(e["task_status"] == "NOT_MEASURED (probe)" for e in report["attempts"])  # type: ignore[union-attr,attr-defined]
+    assert "PROBE cut-off 45s, undecided=2" in us.paste_back(report)
+
+
+def test_a_full_attempt_with_no_tool_call_is_still_decided() -> None:
+    """Outside probe mode an attempt is decided by finishing: no change."""
+    declaration = us.parse_declaration(_data())
+    report = us.build_report(_Experiment(), [_probe_outcome("rewritten", selected=False, calls=0)], declaration)  # type: ignore[arg-type]
+    assert report["cells"]["intended-use"]["rewritten"]["observed"] == 1  # type: ignore[index]
+
+
+def test_tool_calls_counts_calls_not_outputs() -> None:
+    assert us.tool_calls({"transcript_line_types": {"response_item/custom_tool_call": 2,
+                                                    "response_item/custom_tool_call_output": 2,
+                                                    "response_item/function_call": 1}}) == 3
+    assert us.tool_calls({}) is None
+
+
+@pytest.mark.parametrize("name", ["agreement-broad", "agreement-selective"])
+def test_the_committed_probe_declarations_are_authorized(name: str) -> None:
+    declaration = us.load_declaration(ROOT / "evals" / "description-probe" / name / "run-manifest.json")
+    assert declaration.probe_seconds == 45.0
+    assert [(c.id, c.attempts_per_arm) for c in declaration.cases] == [("intended-use", 5), ("near-miss", 5)]
+    us.require_approved(declaration, ROOT)
+
+
+def test_red_a_call_still_pending_at_the_cutoff_is_undecided() -> None:
+    """Counter-model review: cut off after requesting SKILL.md but before its
+    output arrives, the parser has not yet emitted the invocation - a decided
+    'not selected' would undercount near the cut-off."""
+    declaration = us.parse_declaration(_probe_data())
+    outcome = _probe_outcome("rewritten", selected=False, calls=2)
+    obs = outcome.record["observation"]
+    assert isinstance(obs, dict)
+    obs["transcript_line_types"] = {"response_item/custom_tool_call": 2, "response_item/custom_tool_call_output": 1}
+    report = us.build_report(_Experiment(), [outcome], declaration)  # type: ignore[arg-type]
+    assert report["undecided"] == 1
+    assert report["cells"]["intended-use"]["rewritten"]["observed"] == 0  # type: ignore[index]
+
+
+@pytest.mark.parametrize("probe", [True, False])
+def test_red_an_unrecognized_call_type_makes_a_negative_undecided(probe: bool) -> None:
+    """Counter-model review: a skill read in a call format the parser ignores
+    is invisible - an empty invocation list is then not a negative, in a
+    probe or a full run. A positive selection stays decided."""
+    declaration = us.parse_declaration(_probe_data() if probe else _data())
+    negative = _probe_outcome("rewritten", selected=False, calls=2)
+    positive = _probe_outcome("published", selected=True, calls=2)
+    for outcome in (negative, positive):
+        obs = outcome.record["observation"]
+        assert isinstance(obs, dict)
+        obs["transcript_unrecognized_types"] = ["function_call"]
+    report = us.build_report(_Experiment(), [negative, positive], declaration)  # type: ignore[arg-type]
+    cells = report["cells"]["intended-use"]  # type: ignore[index]
+    assert cells["rewritten"]["observed"] == 0
+    assert cells["published"] == {"scheduled": 1, "observed": 1, "selected": 1}
+
