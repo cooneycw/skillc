@@ -1304,6 +1304,10 @@ def skill_evidence(record: Record) -> Iterator[str]:
         if isinstance(s, dict) and isinstance(s.get("skill"), dict) and _nonempty_str(s["skill"].get("path"))
     ]
     seen_paths: set[str] = set()
+    #: child path -> parent path, for well-formed child links only (self and
+    #: dangling parents are already reported above and excluded here, so a
+    #: cycle this dict can walk is a cycle among otherwise-valid entries).
+    child_links: dict[str, str] = {}
     for index, entry in enumerate(skills):
         where = f"skills[{index}]"
         if not isinstance(entry, dict):
@@ -1341,6 +1345,8 @@ def skill_evidence(record: Record) -> Iterator[str]:
                     f"{where}: invocation.parent_path {parent!r} is not a skill.path "
                     f"anywhere in this record"
                 )
+            elif isinstance(path, str):
+                child_links[path] = parent  # type: ignore[assignment]
         elif isinstance(invocation, dict) and "parent_path" in invocation:
             yield f"{where}: invocation.lineage is 'root' but carries a parent_path"
 
@@ -1404,6 +1410,21 @@ def skill_evidence(record: Record) -> Iterator[str]:
                 yield f"{where}: external_evidence.present is true but names no artifact_ref digest"
         elif "source" in external or "artifact_ref" in external:
             yield f"{where}: external_evidence.present is false but names a source or artifact_ref"
+
+    # A chain of otherwise-valid child links can still loop back on itself with
+    # no root at the end (A's parent is B, B's parent is A) - neither entry is
+    # self-referential and both parents resolve, so the per-entry checks above
+    # cannot see it. Reuses `_chain_root`, the same walk `lineage` (bundle rule)
+    # already uses for retry/regrade chains.
+    reported_cycle: set[str] = set()
+    for path in sorted(child_links):
+        root, chain = _chain_root(path, child_links)
+        if root is None and not reported_cycle & set(chain):
+            reported_cycle.update(chain)
+            yield (
+                f"invocation lineage forms a cycle ({' -> '.join(chain)}); no root "
+                f"skill exists for it"
+            )
 
 
 # ---------------------------------------------------------------------------
