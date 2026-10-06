@@ -109,9 +109,8 @@ and version plan.
     `forged-log`/`silent-overclaim`/`work-loss` still FAIL for the reasons
     they always did - this restructures WHERE the trusted bytes come from,
     not what the grader is certified to catch.
-  - The subject-side proxy (`docker/trial/skillc-disrupt-tool.py`) and its
-    image/Dockerfile wiring are a separate follow-on (#183 PR B2), not yet
-    wired to anything.
+  - The subject-side proxy and its image/Dockerfile wiring are a separate
+    follow-on branch (#183 PR B2), not part of this change.
 
 - **`DockerBackend.execute()` refuses a second call on an already-stopped
   handle instead of fabricating a result** (Closes #304). `execute()`'s own

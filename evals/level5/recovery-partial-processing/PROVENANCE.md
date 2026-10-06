@@ -242,9 +242,9 @@ the item below is narrower than it was before PR B:
   `agent_trial.run_one_attempt` path, installing this task the same way
   `collection_conformance.py` already installs Level 1 tasks, with the
   subject's tool wrapper calling `docker/trial/skillc-disrupt-tool.py`
-  (#183 PR B2 - the proxy baked into the trial image; not yet wired into
-  the Dockerfile as of PR B1) instead of writing to the old advisory
-  request log. This replaces `controller-observations/*.json`'s
+  (#183 PR B2, a separate branch - the proxy baked into the trial image,
+  not yet wired into the Dockerfile) instead of writing to the old
+  advisory request log. This replaces `controller-observations/*.json`'s
   controller-SIMULATED bytes with a real channel's actual output - no
   change needed to `qualify.py` or `grade_recovery.py` when it lands,
   since both already only read whatever bytes land in that directory.
