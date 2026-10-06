@@ -162,6 +162,61 @@ was disabled in turn to confirm its case goes red.
 | a symlink the closure reaches | links are neither installed nor followed; one elsewhere in the source, including inside an unselected neighbour skill, is ignored |
 | a linked skill directory or `SKILL.md` | it hides a skill's name, so discovery fails for every selection |
 
+## Diagnostic mode (#295)
+
+`validate()` is a gate: it certifies-or-refuses on the FIRST defect category
+it finds, truncates unresolved references to 8, and gives no per-skill
+attribution. That is exactly right for a gate and useless for "what broke, and
+for which skill" - the question a producer re-checking a PINNED profile
+against a NEWER revision needs answered (claude-power-pack #1370: map changed
+CPP skills to current evaluation coverage).
+
+`skillc profile diagnose PROFILE --repo/--snapshot` (library:
+`profile.diagnose(profile, tree)`) walks the WHOLE closure and reports EVERY
+problem from the table above, attributed to the skill(s) whose closure
+reaches it, with no truncation. It is **never** a certification and is
+schema-distinct from an inventory by construction: its top-level keys
+(`diagnostic_schema`, `skills`, `problems`, `problem_count`) share nothing
+with `validate()`'s (`inventory_schema`, `dependencies`, `installed_surface`,
+...), so passing one where an inventory is required - `install()`,
+`verify_installed()` - fails immediately rather than silently treating a
+diagnostic as a certification. `validate()` itself is unchanged: both share
+one walk (`_run_walk`), and `validate()`'s call supplies no collector, so
+every one of its refusal sites still raises exactly as before, with the same
+message.
+
+**Scope is narrower than "every" might suggest, by deliberate choice.** Two
+classes of refusal are reported once, under `structural`, un-attributed, with
+whatever message `validate()` itself would raise, and nothing further is
+walked:
+
+- the subject/source cannot even be read (a revision mismatch, an absent
+  skills root, a symlink that hides a skill's name from discovery) - there is
+  no skill list yet to attribute anything to;
+- `materialize.inventory()`'s own checks (name collisions, declared required
+  references, checksums) run BEFORE this module's walk begins, and are not
+  per-skill-attributable from here either.
+
+Within the walk itself, a problem is attributed to every skill whose closure
+reaches it - computed once, after the whole walk drains, from the (owner,
+dependency) edges every resolution records: the shared queue is FIFO across
+every selected skill, so a dependency's own files can be scanned, and its
+descendants attributed, before a SECOND skill's reference to that SAME
+dependency is even reached. Attributing live, at resolve time, would
+under-attribute exactly the shared-helper case this mode exists to get right.
+
+**A broken dependency reached a second time is a CASCADE, not a second root
+cause.** The root ("missing helper/library", a synthetic shadow collision, ...)
+is recorded once, attributed to the dependency's full accumulated reach so
+every skill that resolves to it is covered by that ONE entry. A LATER
+reference that needed a SPECIFIC file from the same already-broken dependency
+(a `satisfies.path` lookup) is recorded as its own entry with `caused_by: <the
+root's id>`, rather than silently dropped or re-explained as if it were an
+unrelated defect.
+
+Golden cases and their red/mutation checks live in
+`tests/test_profile_diagnose.py`.
+
 ## What the inventory establishes, and what it does not
 
 A home-relative reference is checked against where its dependency installs. A
