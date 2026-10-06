@@ -5,4 +5,9 @@ from collections.abc import Sequence
 
 def sliding_window(seq: Sequence[int], size: int) -> list[Sequence[int]]:
     """Return all contiguous sub-sequences of seq with length size."""
-    return [seq[i:i + size] for i in range(len(seq) - size + 1)]
+    windows = []
+    start = 0
+    while start + size <= len(seq):
+        windows.append(seq[start:start + size])
+        start += 1
+    return windows

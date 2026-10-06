@@ -89,6 +89,29 @@ and version plan.
     properly; deferred as out of scope for this PR and recorded in the
     Nit Store (cooneycw/skillc#20, comment 6025027183).
 
+- **New Level 3 task `gate-stops-early`: certified for three of its four
+  criteria** (Refs #270). A rangekit-derived fixture (a
+  `sliding_window` off-by-one bug) whose Makefile declares `lint:`/
+  `test:`/`typecheck:` individually plus a `check:` aggregate - closing
+  the gap `evals/workflow-contracts/flow-check/README.md` names (no
+  existing fixture had those targets at all). `functional-windows-fix`,
+  `regression-fails-on-original` and `gate-green` are graded via the same
+  restore-and-rerun probe shape as `gate-ran-nothing`; `qualify.py`
+  certifies the grader against `alternatives/`, `benign/` and `wrong/`
+  candidates, refuses all 5 broken-grader controls, and holds 4
+  restore-probe validity controls. A fourth criterion, `flow-check-honest`
+  (consuming skillc#332's gate-witness contract once it lands), is
+  deliberately NOT YET declared - `grade_gate_stops_early.py`'s own module
+  docstring explains why, mirroring the reasoning `gate-ran-nothing`'s own
+  judge already documents for its own deliberately-undeclared criterion.
+  A separate `discrimination/{fixture,reference}/` tree (typecheck target
+  absent) is the one actually used for #287's intact/degraded case-pairing
+  - proven against the real CPP runner at the pinned commit, not reasoned
+  about; `PROVENANCE.md` records both captured runs. `eligibility-
+  manifest.json` is not yet written - deferred to whenever a live-trial
+  declaration is drafted, unlike `gate-ran-nothing`'s own, since nothing
+  here authorizes or needs one yet.
+
 - **A real-Docker conformance test for #269's gate-execution witness**
   (Refs #269). `exec_in_attempt()`'s own docstring named this gap
   explicitly - its three-exec sequence (marker write-back, in-container

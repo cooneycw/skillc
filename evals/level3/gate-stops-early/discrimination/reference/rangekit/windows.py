@@ -1,6 +1,6 @@
 """Sliding-window utilities for rangekit."""
 
-from typing import Sequence
+from collections.abc import Sequence
 
 
 def sliding_window(seq: Sequence[int], size: int) -> list[Sequence[int]]:
