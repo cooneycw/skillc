@@ -83,25 +83,9 @@ and version plan.
     never needed this, since nothing in `reference.md`'s text names the
     path it replaces. Mutation-checked: re-forbidding it turns the new
     test red; restored, green.
-  - `unreferenced_reason` is no longer required UNCONDITIONALLY on
-    `synthetic` - it was required before because every synthetic
-    dependency used to be, by construction, unreferenced (`satisfies` was
-    forbidden). One that now declares `satisfies` IS referenced; requiring
-    a reason for being unreferenced on something that is not would be
-    incoherent, so this is now conditional on `satisfies`'s absence,
-    mirroring the existing `no_traverse_reason` pattern every other kind
-    already uses. Mutation-checked: reverting to the unconditional
-    requirement turns 2 new tests red; restored, green.
-  Found while attempting the actual profile wiring for
-  `evals/subjects/cpp-codex-flow-check-ea6dbfa/profile.json`: the shim's
-  real source (a functioning program, not marker text) exceeds
-  `SYNTHETIC_CONTENT_MAX_BYTES` (4096, explicitly commented "Marker text,
-  not a payload channel" - a third, more clearly deliberate boundary than
-  the two already widened above). That wiring is deferred pending a
-  decision on this cap; the profile.json edit itself is reverted, not
-  committed, to keep this branch's own test suite green in the meantime.
-  The profile wiring itself and the real-Docker conformance test are not
-  yet built.
+  Profile wiring (installing the shim at the subject-visible path,
+  relocating the real script, regenerating the inventory) and the
+  real-Docker conformance test are not yet built.
 
 - **The real-Docker runner's `--break` flag generalized to a family:mode
   table** (Refs #315, #269, #183). Found during #269's PR merge review:
