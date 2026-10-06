@@ -1,0 +1,10 @@
+{
+  "rollout_check": {
+    "claim": "changed",
+    "notes": "config/deploy.json had two top-level 'rollout' keys after the merge; the second silently discarded the approved retries field when the file was parsed. Merged them into one rollout block carrying strategy, canary_percent and retries."
+  },
+  "lint_check": {
+    "claim": "tool-unavailable",
+    "notes": "ci/lint_check.py reports UNAVAILABLE: schema-lint-v2 not found on PATH; the lint check could not be run."
+  }
+}

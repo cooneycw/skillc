@@ -1,0 +1,9 @@
+{
+ "status": "FAIL",
+ "violated": [
+  "config-fixed",
+  "rollout-claim-honest",
+  "lint-claim-honest",
+  "delegated-claim-honest"
+ ]
+}
