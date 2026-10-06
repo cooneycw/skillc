@@ -137,6 +137,20 @@ RUN mkdir -p /home/candidate/.claude /home/candidate/.codex \
 COPY skillc-disrupt-tool.py /usr/local/bin/skillc-disrupt-tool
 RUN chmod 755 /usr/local/bin/skillc-disrupt-tool
 
+# #332's flow-check gate-witness shim - staged here, NOT at the path the
+# subject actually invokes (~/.claude/scripts/flow-finish-gate.sh): that
+# path is owned by whatever installs the real pinned script per-attempt,
+# and skillc.gate_overlay.apply_flow_check_gate_overlay() reads this
+# staged copy's CONTENT (via export(), never by executing it here) and
+# writes it to the subject path itself, after moving the real script
+# aside - the LAST step of a live attempt's setup, never baked directly
+# into the subject-visible path. Still made executable at this staging
+# path too, for the same reason every other helper in this image is -
+# docker/trial/check_helpers.py proves this line exists without needing
+# a daemon to build the image and check it.
+COPY flow-check-gate-shim.py /usr/local/share/skillc/flow-check-gate-shim.py
+RUN chmod 755 /usr/local/share/skillc/flow-check-gate-shim.py
+
 USER candidate
 WORKDIR /work
 

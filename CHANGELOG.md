@@ -103,9 +103,20 @@ and version plan.
     (the fake `docker` CLI, same discipline as `test_docker_backend.py`).
     Mutation-checked: dropping either digest comparison turns the
     matching test red; restored, green.
-  The image wiring and the real-Docker conformance test (driving a
-  directly-constructed container, #269/#183 style, with this overlay
-  function placing both files - not by hand) are not yet built.
+  - The trial image now carries the shim too (`docker/trial/Dockerfile`),
+    staged at `/usr/local/share/skillc/flow-check-gate-shim.py` -
+    deliberately NOT at the subject-visible path, which is owned by
+    whatever installs the real pinned script per attempt (skillc#334).
+    `apply_flow_check_gate_overlay()` reads this staged copy's content
+    (via `export()`) and writes it to the subject path itself, after
+    moving the real script aside. `docker/trial/check_helpers.py`'s
+    `REQUIRED_HELPERS` gains the entry, same no-daemon Dockerfile-text
+    proof #183 PR B2 already established for `skillc-disrupt-tool`.
+    Mutation-checked: removing the new `COPY`/`chmod` stanza turns the
+    real-Dockerfile check red; restored, green.
+  The real-Docker conformance test (driving a directly-constructed
+  container, #269/#183 style, with this overlay function placing both
+  files - not by hand) is not yet built.
 
 - **The real-Docker runner's `--break` flag generalized to a family:mode
   table** (Refs #315, #269, #183). Found during #269's PR merge review:
