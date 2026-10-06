@@ -113,6 +113,17 @@ def test_population_all_k_refuses_a_non_positive_weight() -> None:
         rel.population_all_k({"t1": (3, 5)}, k=2, weights={"t1": 0.0})
 
 
+def test_population_all_k_refuses_a_nan_weight() -> None:
+    """Cross-model review, #273: `w <= 0` is False for NaN (every comparison
+    with NaN is), so a NaN weight used to slide past the positivity guard and
+    silently produce a NaN mean - a population that reads as 'measured' while
+    reporting a value that is not a number."""
+    with pytest.raises(rel.ReliabilityRefused):
+        rel.population_all_k({"t1": (3, 5)}, k=2, weights={"t1": float("nan")})
+    with pytest.raises(rel.ReliabilityRefused):
+        rel.population_all_k({"t1": (3, 5)}, k=2, weights={"t1": float("inf")})
+
+
 def test_pooled_all_k_always_refuses() -> None:
     with pytest.raises(rel.ReliabilityRefused):
         rel.pooled_all_k()
@@ -144,6 +155,27 @@ def test_clopper_pearson_is_symmetric_around_half() -> None:
 def test_clopper_pearson_refuses_zero_trials() -> None:
     with pytest.raises(rel.ReliabilityRefused):
         rel.clopper_pearson(0, 0)
+
+
+@pytest.mark.parametrize("bad_confidence", [2.0, 0.0, 1.0, -0.5, float("nan"), float("inf")])
+def test_confidence_is_validated_everywhere_it_is_accepted(bad_confidence: float) -> None:
+    """Cross-model review, #273: `clopper_pearson(5, 10, confidence=2)` used
+    to silently return `(0.0, 1.0)` - a degenerate, maximally-wide interval
+    that reads as a real answer rather than a refused impossible request.
+    `wilson_score` feeds `newcombe_hybrid_interval`, so checking it there
+    covers both; `task_cluster_bootstrap` computes alpha independently and
+    needs its own check."""
+    with pytest.raises(rel.ReliabilityRefused):
+        rel.clopper_pearson(5, 10, confidence=bad_confidence)
+    with pytest.raises(rel.ReliabilityRefused):
+        rel.wilson_score(5, 10, confidence=bad_confidence)
+    with pytest.raises(rel.ReliabilityRefused):
+        rel.task_cluster_bootstrap([0.1, 0.2, 0.3, 0.4, 0.5], seed=1, confidence=bad_confidence)
+
+
+def test_bootstrap_refuses_a_non_positive_resample_count() -> None:
+    with pytest.raises(rel.ReliabilityRefused):
+        rel.task_cluster_bootstrap([0.1, 0.2, 0.3, 0.4, 0.5], seed=1, resamples=0)
 
 
 # ----------------------- independent exact oracle for the incomplete beta function
@@ -216,6 +248,63 @@ def test_betainc_matches_exact_binomial_tail_oracle_on_a_grid() -> None:
                 if abs(got - want) > 1e-10:
                     mismatches.append((n, k, x_float, got, want))
     assert not mismatches, f"{len(mismatches)} grid mismatches, first 5: {mismatches[:5]}"
+
+
+def test_betainc_endpoint_boundary_at_a_zero_and_b_zero() -> None:
+    """Cross-model review, #273: the grid above deliberately excludes `x=0`
+    and `x=1` (`_GRID_X` runs 0.001..0.999), so it could not see that the
+    FIRST fix for `a==0`/`b==0` still branched on `x` and got these two exact
+    endpoints backwards - `_betainc(0.0, 0, 11)` returned `0.0` where the
+    binomial reading (`P(Bin(n, 0) >= 0)`, always true) says `1.0`, and
+    `_betainc(1.0, 5, 0)` returned `1.0` where `P(Bin(n, 1) >= n+1)` (never
+    true) says `0.0`. Checked directly, at the exact endpoints the grid never
+    reaches."""
+    assert rel._betainc(0.0, 0, 11) == 1.0
+    assert rel._betainc(1.0, 0, 11) == 1.0
+    assert rel._betainc(0.5, 0, 11) == 1.0
+    assert rel._betainc(1.0, 5, 0) == 0.0
+    assert rel._betainc(0.0, 5, 0) == 0.0
+    assert rel._betainc(0.5, 5, 0) == 0.0
+
+
+@pytest.mark.parametrize("n", [100, 250, 500, 1000])
+def test_betainc_matches_oracle_at_large_n_spot_rows(n: int) -> None:
+    """The grid test above stops at `n=60`; convergence is a function of
+    `(x, a, b)`, not just `x`, so nothing in that grid establishes that the
+    continued fraction still converges to the right answer at the `n` a real
+    multi-task study could plausibly schedule (orchestrator review, #273:
+    "nothing shows the CORRECT branch converges at, say, n=200 or 1000").
+    `c` at `0, 1, n//2, n-1, n`, each checked against `x` chosen to keep the
+    comparison INFORMATIVE - the task's own rate (`c/n`) and the two
+    Clopper-Pearson tail points (0.001, 0.999), not a single fixed `x` that
+    would silently underflow both sides to the same float zero for an
+    extreme `(n, c)` pair and pass for the wrong reason."""
+    mismatches = []
+    for c in sorted({0, 1, n // 2, n - 1, n}):
+        a, b = c, n - c + 1
+        rate = Fraction(c, n)
+        for x in {rate, Fraction(1, 1000), Fraction(999, 1000), Fraction(1, 2)}:
+            if not (0 < x < 1):
+                continue
+            got = rel._betainc(float(x), a, b)
+            want = float(_binomial_sf_exact(n, c, x))
+            if abs(got - want) > 1e-9:
+                mismatches.append((n, c, float(x), got, want))
+    assert not mismatches, f"{len(mismatches)} mismatches at n={n}: {mismatches[:5]}"
+
+
+def test_betacf_refuses_rather_than_return_an_unconverged_value() -> None:
+    """Cross-model review, #273: the continued fraction used to return `h`
+    even when all 200 iterations ran without the convergence break firing -
+    an unverified number indistinguishable, by inspection, from a correct
+    one. `a = b = 1e7` is a committed, concrete input that genuinely exhausts
+    200 iterations without converging (verified directly, not asserted on
+    faith) - far past this module's verified range (the oracle grid through
+    `n=60`, spot rows through `n=1000`), which is exactly the point: this is
+    the floor under that range, the input that proves the refusal exists
+    rather than merely describing it."""
+    with pytest.raises(rel.ReliabilityRefused, match="did not converge"):
+        rel._betainc(0.5, 1e7, 1e7)
 
 
 def test_clopper_pearson_inversion_matches_exact_binomial_oracle() -> None:
@@ -298,6 +387,17 @@ def test_mcnemar_exact_balanced_discordance_is_one() -> None:
 def test_mcnemar_exact_refuses_negative_counts() -> None:
     with pytest.raises(rel.ReliabilityRefused):
         rel.mcnemar_exact(-1, 3)
+
+
+def test_mcnemar_exact_does_not_overflow_on_large_balanced_counts() -> None:
+    """Cross-model review, #273: `mcnemar_exact(550, 550)` used to raise
+    `OverflowError` - `math.comb(1100, i)` summed over the tail is an integer
+    too large for `float()`, and `0.5 ** 1100` had already underflowed to
+    `0.0`, so multiplying them raised rather than returning the correct
+    `1.0` for a perfectly balanced, perfectly valid input."""
+    assert rel.mcnemar_exact(550, 550) == pytest.approx(1.0)
+    # An unbalanced large case too - the smaller tail must still sum correctly.
+    assert 0.0 < rel.mcnemar_exact(400, 700) < 1.0
 
 
 # --------------------------------------------------------------- bootstrap
@@ -411,6 +511,16 @@ def test_account_cell_refuses_duplicate_attempt_id() -> None:
 def test_account_cell_refuses_self_retry() -> None:
     with pytest.raises(rel.ReliabilityRefused):
         rel.account_cell([AR("y", "PASS", True, retry_of="y")])
+
+
+def test_account_cell_refuses_a_dangling_retry_of() -> None:
+    """Cross-model review, #273: `retry_of` naming an attempt NOT present in
+    this same call's population used to be silently treated as "no parent,
+    so this must be a root" - a retry whose own original went missing
+    reported as a complete, started, evaluated slot instead of a refused
+    account."""
+    with pytest.raises(rel.ReliabilityRefused):
+        rel.account_cell([AR("retry", "PASS", True, retry_of="missing")])
 
 
 def test_account_cell_missing_data_is_never_silently_imputed() -> None:

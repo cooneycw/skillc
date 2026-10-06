@@ -74,6 +74,41 @@ and version plan.
     to `n<=60` to match the grid test's; both mutations now turn BOTH tests
     red. A narrower inversion test does not test what a wider grid test's
     range actually proves - this is the committed fix, not a documented gap.
+  - **Verified range stated, and a floor under it (orchestrator review,
+    third pass).** Convergence is a function of `(x, a, b)`, not just `x`,
+    so the `n<=60` grid alone did not establish the function's behaviour at
+    the `n` a real multi-task study could plausibly schedule. Added spot
+    rows at `n = 100, 250, 500, 1000` (`c` at `0, 1, n//2, n-1, n`, `x`
+    chosen near each cell's own rate rather than one fixed point, so the
+    comparison cannot trivially pass via both sides underflowing to the
+    same float zero) - all pass. `clopper_pearson`'s docstring now states
+    the verified range explicitly, and `_betacf` itself refuses rather than
+    silently return a value when its continued fraction exhausts 200
+    iterations without converging (a real, committed failing input:
+    `a = b = 1e7`) - the floor under the verified range, not a claim that
+    the range is unconditionally safe beyond where it was checked.
+  - **Independent cross-model review (`/codex:code_review`, read-only,
+    diff-only scope) found four further real defects, all fixed:**
+    (1) `mcnemar_exact(550, 550)` raised `OverflowError` - a huge exact
+    integer summed from `math.comb` multiplied against `0.5 ** n`, already
+    underflowed to `0.0` - fixed by dividing the two arbitrarily-large
+    integers (Python's int/int true division handles any size) BEFORE
+    scaling by `2.0`, not after. (2) `account_cell` silently treated a
+    `retry_of` naming an attempt NOT present in the same call's population
+    as "no parent, so this must be a root" instead of refusing the
+    dangling reference. (3) `confidence` was never validated anywhere it
+    was accepted - `clopper_pearson(5, 10, confidence=2)` silently
+    returned `(0.0, 1.0)`, a degenerate interval that reads as a real
+    answer; now checked (finite, strictly between 0 and 1) in
+    `clopper_pearson`, `wilson_score` (which `newcombe_hybrid_interval`
+    composes from) and `task_cluster_bootstrap`. (4) `population_all_k`'s
+    weight-positivity guard (`w <= 0`) let a NaN weight through - every
+    comparison with NaN is `False` - producing a silent NaN mean; now
+    checked with `math.isfinite`. A fifth finding (the `a==0`/`b==0`
+    boundary fix from the second review pass still branched on `x` and got
+    the exact `x=0`/`x=1` endpoints backwards) was also fixed. All five are
+    mutation-checked: each goes BLIND or produces the exact pre-fix failure
+    with its fix removed, restored, net diffs against HEAD empty.
   - `mcnemar_exact`: the paired hypothesis test, returning a bare p-value so
     it cannot be mistaken for an interval (protocol.md's own distinction).
   - `task_cluster_bootstrap`: seeded percentile bootstrap over TASKS (never

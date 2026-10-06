@@ -61,6 +61,17 @@ def _refuse(message: str) -> ReliabilityRefused:
     return ReliabilityRefused(f"reliability: {message}")
 
 
+def _check_confidence(confidence: float) -> None:
+    """Every interval function's `confidence` must be a finite probability
+    strictly between 0 and 1 (cross-model review, #273): an unchecked
+    `confidence=2` silently returned `(0.0, 1.0)` from `clopper_pearson` -
+    a degenerate, maximally-wide interval that LOOKS like a real answer
+    rather than a refused impossible request."""
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)) \
+            or not math.isfinite(confidence) or not (0.0 < confidence < 1.0):
+        raise _refuse(f"confidence must be a finite number strictly between 0 and 1, not {confidence!r}")
+
+
 def _check_c_n_k(c: int, n: int, k: int) -> None:
     for name, value in (("c", c), ("n", n), ("k", k)):
         if isinstance(value, bool) or not isinstance(value, int):
@@ -158,8 +169,12 @@ def population_all_k(
                 f"weights names {sorted(weights)}, but the tasks with n >= k are "
                 f"{sorted(per_task)} - a declared weight map must name exactly that set"
             )
-        if any(w <= 0 for w in weights.values()):
-            raise _refuse("every declared weight must be positive")
+        if any(not math.isfinite(w) or w <= 0 for w in weights.values()):
+            # `nan <= 0` is False (every comparison with NaN is), so a plain
+            # `w <= 0` guard lets a NaN weight straight through and silently
+            # produces a NaN mean (cross-model review, #273) - `math.isfinite`
+            # catches both NaN and +-inf, which `<= 0` alone cannot.
+            raise _refuse("every declared weight must be a finite, positive number")
         total_weight = sum(weights.values())
         mean = sum(weights[t] * per_task[t] for t in per_task) / total_weight
 
@@ -220,6 +235,25 @@ def _betacf(x: float, a: float, b: float) -> float:
         h *= delta
         if abs(delta - 1.0) < eps:
             break
+    else:
+        # The loop ran every iteration WITHOUT the convergence break firing
+        # (cross-model review, #273): silently returning `h` here hands
+        # `_beta_ppf`'s bisection an UNVERIFIED value that merely looks
+        # precise - no caller could tell a converged answer from a stale one
+        # by inspection. Large, nearly-balanced `(a, b)` near the branch
+        # threshold can need more than `max_iter` terms; refusing here, named
+        # by the actual `(x, a, b)` that failed, is what keeps every value
+        # this module returns either correct or absent, never merely
+        # plausible-looking. `clopper_pearson`'s own two calls never reach
+        # `n` large enough to trigger this at `max_iter=200` within the
+        # explicitly verified range (`tests/test_reliability.py`'s oracle
+        # grid plus spot rows through `n=1000`) - this is the floor under
+        # that range, not a bound this module claims never to need.
+        raise _refuse(
+            f"the continued fraction for the incomplete beta function did not converge "
+            f"within {max_iter} iterations at x={x!r}, a={a!r}, b={b!r} - refusing rather "
+            f"than returning an unverified value"
+        )
     return h
 
 
@@ -227,19 +261,26 @@ def _betainc(x: float, a: float, b: float) -> float:
     """Regularized incomplete beta function `I_x(a, b)`, for `x` in `[0, 1]`.
 
     `a == 0` or `b == 0` is a degenerate Beta - undefined as a density, but
-    `I_x` still has a well-defined LIMIT at these boundary parameters via its
+    `I_x` still has a well-defined value at these boundary parameters via its
     binomial-survival reading (`I_x(k, n-k+1) = P(Bin(n,x) >= k)`): `a == 0`
-    is "at least 0 successes" (always true for `x > 0`, so `1.0`), `b == 0` is
-    "more successes than trials" (never true, so `0.0`). Neither of
-    `clopper_pearson`'s own two calls ever reaches this - `_beta_ppf` is only
-    called with `a = c >= 1` or `b = n - c >= 1` - but `tests/
-    test_reliability.py`'s independent oracle exercises the FULL `k` range
-    (`k = 0..n`) directly against this function, and found that gap before it
-    could matter (#273, cpp-eval review's own ask for an exact-oracle grid)."""
+    is "at least 0 successes", which is trivially true for EVERY `x`
+    including `x == 0` (`Bin(n, 0)` is always exactly 0 successes, and `0 >=
+    0`), so `1.0` unconditionally; `b == 0` is "more successes than trials",
+    which is never true for any `x` including `x == 1` (`Bin(n, 1)` is always
+    exactly `n` successes, never `n+1`), so `0.0` unconditionally. The first
+    version of this fix still branched on `x` at these boundaries and got the
+    `x == 0` / `x == 1` endpoints backwards (cross-model review, #273):
+    `_betainc(0.0, 0, 11)` returned `0.0` where the binomial reading - and the
+    independent oracle - both say `1.0`. Neither of `clopper_pearson`'s own
+    two calls ever reaches `a == 0` or `b == 0` - `_beta_ppf` is only called
+    with `a = c >= 1` or `b = n - c >= 1` - but `tests/test_reliability.py`'s
+    independent oracle exercises the FULL `k` range (`k = 0..n`) directly
+    against this function, and found both gaps before they could matter
+    (#273, cpp-eval review's own ask for an exact-oracle grid)."""
     if a == 0:
-        return 1.0 if x > 0.0 else 0.0
+        return 1.0
     if b == 0:
-        return 0.0 if x < 1.0 else 1.0
+        return 0.0
     if x <= 0.0:
         return 0.0
     if x >= 1.0:
@@ -275,11 +316,25 @@ def _beta_ppf(p: float, a: float, b: float) -> float:
 def clopper_pearson(c: int, n: int, confidence: float = DEFAULT_CONFIDENCE) -> tuple[float, float]:
     """Exact two-sided Clopper-Pearson interval for `c` successes of `n`
     trials (protocol.md 10.5: "a single cell's rate: Clopper-Pearson exact").
-    `n == 0` is refused - an empty cell has no rate to bound."""
+    `n == 0` is refused - an empty cell has no rate to bound.
+
+    VERIFIED RANGE (orchestrator review, #273): checked against an
+    independent exact oracle (`fractions.Fraction`, no numerics) for every
+    `n` from 1 to 60 and every `c` in that range at `tests/test_reliability.
+    py`'s grid test, and spot-checked at `n = 100, 250, 500, 1000` (`c` at
+    `0, 1, n//2, n-1, n`). Beyond that range this function has not been
+    checked against the oracle, though `_betacf` refuses outright rather than
+    return a value when its own continued fraction fails to converge within
+    200 iterations (verified concretely at `a = b = 1e7`, far past any `n`
+    this function would plausibly see) - so a result from `n` outside the
+    verified range is either correct or absent, never merely unchecked and
+    silently returned.
+    """
     if n <= 0:
         raise _refuse(f"clopper_pearson needs n >= 1, not n={n!r}")
     if not (0 <= c <= n):
         raise _refuse(f"c must satisfy 0 <= c <= n; got c={c!r}, n={n!r}")
+    _check_confidence(confidence)
     alpha = 1.0 - confidence
     lower = 0.0 if c == 0 else _beta_ppf(alpha / 2.0, c, n - c + 1)
     upper = 1.0 if c == n else _beta_ppf(1.0 - alpha / 2.0, c + 1, n - c)
@@ -295,6 +350,7 @@ def wilson_score(c: int, n: int, confidence: float = DEFAULT_CONFIDENCE) -> tupl
         raise _refuse(f"wilson_score needs n >= 1, not n={n!r}")
     if not (0 <= c <= n):
         raise _refuse(f"c must satisfy 0 <= c <= n; got c={c!r}, n={n!r}")
+    _check_confidence(confidence)
     z = NormalDist().inv_cdf(1.0 - (1.0 - confidence) / 2.0)
     phat = c / n
     denom = 1.0 + z * z / n
@@ -334,6 +390,17 @@ def mcnemar_exact(b: int, c: int) -> float:
     `b + c == 0` (no discordant pairs at all) returns `1.0`: nothing
     distinguishes the arms in the only pairs that could, which is maximal,
     not minimal, evidence against a difference.
+
+    THE RATIO IS DIVIDED BEFORE IT IS SCALED (cross-model review, #273): for
+    `n` above roughly 1050, `math.comb(n, i)` summed over the tail is an
+    integer too large for `float()` to represent, and `0.5 ** n` has already
+    underflowed to `0.0` - multiplying the huge int by that float raises
+    `OverflowError` on a perfectly valid, non-degenerate input
+    (`mcnemar_exact(550, 550)` is exactly such a case). Python's integer
+    TRUE DIVISION of two arbitrarily large ints does not have this problem
+    (it never needs either operand to fit in a `float` on its own), so the
+    division happens first, while both operands are still exact integers,
+    and only the already-small `float` result is scaled afterward.
     """
     if isinstance(b, bool) or isinstance(c, bool) or not isinstance(b, int) or not isinstance(c, int) or b < 0 or c < 0:
         raise _refuse(f"b and c must be non-negative integers; got b={b!r}, c={c!r}")
@@ -341,8 +408,9 @@ def mcnemar_exact(b: int, c: int) -> float:
     if n == 0:
         return 1.0
     k = min(b, c)
-    cumulative = sum(math.comb(n, i) for i in range(k + 1)) * (0.5 ** n)
-    return min(1.0, 2.0 * cumulative)
+    numerator = sum(math.comb(n, i) for i in range(k + 1))
+    ratio = numerator / (2 ** n)  # int/int true division: exact until this line, safe at any n
+    return min(1.0, 2.0 * ratio)
 
 
 @dataclass(frozen=True)
@@ -380,6 +448,9 @@ def task_cluster_bootstrap(
     shuffle-invariance control, which exercises the bootstrap specifically,
     not only the point estimators that are trivially order-invariant).
     """
+    _check_confidence(confidence)
+    if isinstance(resamples, bool) or not isinstance(resamples, int) or resamples < 1:
+        raise _refuse(f"resamples must be a positive integer, not {resamples!r}")
     n = len(task_values)
     if n < MIN_BOOTSTRAP_TASKS:
         raise _refuse(
@@ -493,6 +564,21 @@ def account_cell(attempts: Sequence[AttemptRecord]) -> CellAccounting:
             raise _refuse(f"attempt {attempt.attempt_id!r} names itself as retry_of")
         if attempt.status not in SLOT_STATUSES:
             raise _refuse(f"attempt {attempt.attempt_id!r} has status {attempt.status!r}, not one of {SLOT_STATUSES}")
+    for attempt in attempts:
+        # A DANGLING retry_of (cross-model review, #273) silently made the
+        # retry read as its OWN root - [AttemptRecord("retry", "PASS", True,
+        # retry_of="missing")] accounted a complete, started, evaluated slot
+        # while the "original" attempt it claims to retry is simply absent
+        # from this call's own population. That is the one thing a retry can
+        # never legitimately be missing - the chain names a parent in THIS
+        # SAME cell's attempts (module docstring, above) - so an absent one
+        # is refused here rather than silently treated as "no parent, this
+        # must be a root after all".
+        if attempt.retry_of is not None and attempt.retry_of not in seen_ids:
+            raise _refuse(
+                f"attempt {attempt.attempt_id!r} names retry_of {attempt.retry_of!r}, "
+                f"which is not an attempt in this cell's own accounting"
+            )
 
     by_id = {a.attempt_id: a for a in attempts}
     chains: dict[str, list[AttemptRecord]] = {}
