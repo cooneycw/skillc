@@ -1844,19 +1844,27 @@ class DockerBackend:
         is independently observed, `False` if the process is still alive
         after escalation or any exec in this sequence could not be
         reached. Mirrors `_stop()`'s own escalation shape, one level down
-        (a single in-container pid instead of the whole container)."""
+        (a single in-container pid instead of the whole container).
+
+        Every call here goes through `sh -c 'kill ...'`, not a bare `kill`
+        argv - `kill` is a POSIX SHELL BUILTIN (dash, bash), so this needs
+        no standalone `kill` binary on the exec'd image's PATH at all
+        (verified: `env -i PATH=/nonexistent sh -c 'kill -0 $$'` still
+        answers correctly). A minimal image such as CI's `python:3.12-slim`
+        is not guaranteed to carry the `procps` package `kill` usually
+        comes from - this is what keeps that irrelevant."""
         def _alive() -> bool | None:
             # True/False only from an EXPLICIT, recognized signal - kill
             # -0's own exit 0 (alive) or its own "No such process" text
             # (confirmed dead). Any other nonzero exit (the exec
-            # infrastructure itself failing to even run `kill` - a bad
+            # infrastructure itself failing to even run `sh` - a bad
             # docker_bin, a daemon that dropped mid-call, an unparseable
             # error) is None, UNKNOWN - never guessed as either answer.
             # Mirrors _inspect()'s own discipline: a nonzero exit code
             # alone conflates "the process is gone" with "I could not ask".
             try:
                 proc = subprocess.run(
-                    [*self.docker_bin, "exec", "--", handle.name, "kill", "-0", str(pid)],
+                    [*self.docker_bin, "exec", "--", handle.name, "sh", "-c", f"kill -0 {pid}"],
                     capture_output=True, env=handle.env, timeout=self.daemon_timeout, check=False,
                 )
             except (OSError, subprocess.TimeoutExpired):
@@ -1870,7 +1878,7 @@ class DockerBackend:
         def _signal(sig: str) -> None:
             try:
                 subprocess.run(
-                    [*self.docker_bin, "exec", "--", handle.name, "kill", f"-{sig}", str(pid)],
+                    [*self.docker_bin, "exec", "--", handle.name, "sh", "-c", f"kill -{sig} {pid}"],
                     capture_output=True, env=handle.env, timeout=self.daemon_timeout, check=False,
                 )
             except (OSError, subprocess.TimeoutExpired):

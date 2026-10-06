@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import shutil
 import socket
 import sys
 import threading
@@ -761,6 +762,39 @@ def test_exec_in_attempt_is_refused_once_the_primary_has_already_stopped(tmp_pat
         result = backend.exec_in_attempt(handle, ["python3", "-c", "raise SystemExit(0)"], Limits(timeout=5.0))
         assert result.reason == "attempt-not-running"
         assert result.exit_code is None
+    finally:
+        backend.destroy(handle)
+
+
+def test_confirmed_kill_needs_no_standalone_kill_binary_on_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """CI's gate step runs `python:3.12-slim`, a minimal image not
+    guaranteed to carry the `procps` package `kill` usually comes from.
+    `_confirm_and_kill_in_container` goes through `sh -c 'kill ...'`
+    specifically because `kill` is a POSIX shell builtin (dash, bash) -
+    demonstrated here by stripping PATH down to `sh`/`cat`/`python3` (no
+    standalone `kill` at all) BEFORE `prepare()`, since `handle.env`'s PATH
+    is captured once, at prepare time, and reused by every later call on
+    that handle."""
+    minimal_bin = tmp_path / "minimal-bin"
+    minimal_bin.mkdir()
+    for name in ("sh", "cat", "python3", "tar"):
+        real = shutil.which(name)
+        assert real is not None, f"this test's own host is missing {name!r}"
+        (minimal_bin / name).symlink_to(real)
+    assert shutil.which("kill", path=str(minimal_bin)) is None
+
+    base = tmp_path / "work"
+    base.mkdir()
+    monkeypatch.setenv("PATH", str(minimal_bin))
+    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(tmp_path / "docker-state"))
+    handle = backend.prepare("a-gw-0000000000005")
+    backend.install(handle, {})
+    try:
+        result = backend.exec_in_attempt(
+            handle, ["python3", "-c", "import time; time.sleep(30)"], Limits(timeout=0.5, grace=0.3),
+        )
+        assert result.reason == "timeout"
+        assert result.stop_confirmed is True
     finally:
         backend.destroy(handle)
 

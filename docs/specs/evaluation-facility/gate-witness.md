@@ -100,12 +100,20 @@ in favor of CONFIRMED absence, the same rule `confirm_stopped()`/
 - On timeout or `cancel()`, a THIRD exec (`_confirm_and_kill_in_container`)
   sends `kill -TERM` to that pid INSIDE the container, polls `kill -0` for
   `limits.grace`, escalates to `kill -KILL` if still alive, and polls
-  again - never touching the container itself, only this one pid.
-  `kill -0`'s own exit 0 (alive) or its explicit "No such process" text
-  (confirmed dead) are the only two signals trusted; any other nonzero
-  exit (the exec infrastructure itself failing - a bad `docker_bin`, a
-  dropped daemon) is UNKNOWN, never guessed as either answer (mirrors
-  `_inspect()`'s own discipline).
+  again - never touching the container itself, only this one pid. Every
+  one of these goes through `sh -c 'kill ...'`, never a bare `kill` argv -
+  `kill` is a POSIX SHELL BUILTIN (dash, bash), so this needs no
+  standalone `kill` binary on the image's PATH at all, which CI's
+  `python:3.12-slim` is not guaranteed to carry (the `procps` package it
+  usually comes from). Verified directly: `test_confirmed_kill_needs_no_
+  standalone_kill_binary_on_path` strips `PATH` down to `sh`/`cat`/
+  `python3`/`tar` before `prepare()` (whose captured `handle.env` every
+  later call on that handle reuses) and the confirmed-kill path still
+  passes. `kill -0`'s own exit 0 (alive) or its explicit "No such process"
+  text (confirmed dead) are the only two signals trusted; any other
+  nonzero exit (the exec infrastructure itself failing - a bad
+  `docker_bin`, a dropped daemon) is UNKNOWN, never guessed as either
+  answer (mirrors `_inspect()`'s own discipline).
 - `ExecuteResult.stop_confirmed` reports the outcome: `True` only once
   death is independently confirmed; `False` when the pid was never
   learned, the kill exec itself could not be reached, or the process
