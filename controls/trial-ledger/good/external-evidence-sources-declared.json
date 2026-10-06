@@ -7,8 +7,8 @@
   {
    "trial_id": "t-1",
    "case": {
-    "id": "slug-fix",
-    "revision": "r1"
+    "id": "selection-probe",
+    "revision": "c1"
    },
    "grader": {
     "id": "slug-grader",

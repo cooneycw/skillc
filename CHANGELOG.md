@@ -31,6 +31,15 @@ and version plan.
     `execution_observed` are `CONFIRMED`/`NOT_CONFIRMED`/`UNKNOWN`, a closed
     vocabulary deliberately separate from `SATISFIED`/`VIOLATED`/`UNKNOWN`, so
     a usage fact is never misread as a compliance outcome.
+  - **"Unknown schema" is two checks, not one** (group review correction):
+    `external_evidence.source` must be a well-formed `<namespace>/v<N>` label
+    (a FORMAT check, in `skillc/records.py` - which stays subject-agnostic and
+    never hardcodes a producer's schema string, per the genericity guard), AND
+    it must be one this ATTEMPT's trial actually declares in its own new
+    optional `trial.external_evidence_sources` (a `ledger-binding` check,
+    #268's declared allowlist - the trial, not the core, is where "cpp" is
+    ever allowed to appear). A well-formed-but-undeclared source is refused
+    exactly as a malformed one is, by a different rule.
   - **Item 5 (the #269 trust boundary)** documents what `execution_observed`
     may and may not rely on, written against #183's proposed channel shape;
     only #269's own witness record's name is pending.
@@ -40,12 +49,13 @@ and version plan.
     `description_digest` are not cross-checked against #265's separate
     `evidence/inventory.json` (nit-stored at
     https://github.com/cooneycw/skillc/issues/20#issuecomment-6007178436).
-  - **Controls:** `controls/skill-evidence/{good,bad}/` (16 bad, 6 good,
+  - **Controls:** `controls/skill-evidence/{good,bad}/` (18 bad, 6 good,
     including the parent/child, shared-criteria, absent-transcript and
-    unknown-schema golden cases) plus bundle extensions to `ledger-binding`
-    (the forged-status and task-success-with-obligation-failure golden cases)
-    and `unique-ids`. Mutation-checked by hand: the forged-status and
-    unknown-schema refusals both go BLIND with their check removed.
+    malformed-schema golden cases) plus bundle extensions to `ledger-binding`
+    (the forged-status, undeclared-schema and task-success-with-obligation-
+    failure golden cases), `unique-ids`, and `trial-ledger`'s own new field.
+    Mutation-checked by hand: the forged-status, malformed-schema and
+    undeclared-schema refusals all go BLIND with their check removed.
 
 - **`skillc profile validate`: a transitive installation profile for one
   workflow** (Refs #265, wave #258, workstream #247). A profile layers on one

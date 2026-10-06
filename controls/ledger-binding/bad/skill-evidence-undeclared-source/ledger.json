@@ -31,9 +31,6 @@
     {
      "attempt_id": "att-1"
     }
-   ],
-   "external_evidence_sources": [
-    "cpp.execution-evidence/v1"
    ]
   }
  ]

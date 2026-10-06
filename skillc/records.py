@@ -120,18 +120,23 @@ SKILL_EVIDENCE_LINEAGE = ("root", "child")
 SKILL_EVIDENCE_RECONCILIATION = ("absent", "unmatched", "matched", "contradicting")
 
 #: `external_evidence.source` (#268) must be a well-formed `<namespace>/v<N>`
-#: label - FORMAT only, never a hardcoded allowlist of known producer names.
-#: This module stays subject-agnostic (interfaces.md, "A skills collection
-#: need not implement an API"; the genericity guard in
-#: `tests/test_materialize.py` enforces it for every `skillc/*.py` module),
-#: so the core cannot name any one external tool's schema string as
-#: "the one skillc recognizes" - that would bake a specific producer into the
-#: generic validator exactly the way `GENERICITY_EXEMPT`'s own comment warns
-#: against. A malformed label (no `/v<N>` suffix, empty, wrong type) is
-#: refused as unknown schema; a well-formed but never-vetted one still
-#: passes this format check; deciding whether a given LABEL is one this
-#: deployment actually trusts, and parsing the bytes it refers to, both stay
-#: the consumer's job (Q4, below; ADR 0003).
+#: label. This is a FORMAT check only, unconditional, and never a hardcoded
+#: allowlist of known producer names - the module stays subject-agnostic
+#: (interfaces.md, "A skills collection need not implement an API"; the
+#: genericity guard in `tests/test_materialize.py` enforces it for every
+#: `skillc/*.py` module), so the core cannot name any one external tool's
+#: schema string as "the one skillc recognizes". A malformed label (no
+#: `/v<N>` suffix, empty, wrong type) is refused here as unknown schema,
+#: unconditionally.
+#:
+#: A well-formed label is a DIFFERENT fact from an ACCEPTED one: whether this
+#: ATTEMPT's trial accepts it is `trial.external_evidence_sources` (below) and
+#: `ledger_binding`'s own undeclared-source check - the declared allowlist the
+#: group review required (#268), because a format-only check cannot refuse a
+#: well-formed-but-unrecognized source ("some-other-tool/v9" is shaped
+#: identically to a real one) and that refusal is exactly what "unknown
+#: schema" promises. The declaration lives on the trial - caller-supplied
+#: data, like `subject.digest` - never in this module.
 EXTERNAL_EVIDENCE_SOURCE_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?/v[0-9]+$")
 
 #: The four cost/time split components a pilot report's own control requires
@@ -545,6 +550,17 @@ def trial_ledger(record: Record) -> Iterator[str]:
                 f"trial {name!r}: case.observes_selection must be a boolean, "
                 f"not {case['observes_selection']!r}"
             )
+        if "external_evidence_sources" in trial:
+            sources = trial["external_evidence_sources"]
+            if not isinstance(sources, list):
+                yield f"trial {name!r}: external_evidence_sources is not a list"
+            else:
+                for s_index, source in enumerate(sources):
+                    if not isinstance(source, str) or not EXTERNAL_EVIDENCE_SOURCE_RE.fullmatch(source):
+                        yield (
+                            f"trial {name!r}: external_evidence_sources[{s_index}] is {source!r}, "
+                            f"not a well-formed '<namespace>/v<N>' label"
+                        )
         attempts = trial.get("attempts")
         if not isinstance(attempts, list) or not attempts:
             yield f"trial {name!r} plans no attempts; its expected population is empty"
@@ -1519,10 +1535,12 @@ def _skill_evidence_binding(
     installed: set[str] | None,
     criteria: dict[str, set[object]] | None,
     captured: set[str] | None,
+    declared_sources: list[str],
 ) -> Iterator[str]:
-    """`skill-evidence` (#268) cross-checked against the three OTHER records of
-    its own attempt - the one thing a lone `skill-evidence` record cannot do
-    for itself, exactly as `_skill_invocation_binding` does for `skill-invocations`.
+    """`skill-evidence` (#268) cross-checked against the OTHER records of its
+    own attempt and trial - the things a lone `skill-evidence` record cannot
+    establish for itself, exactly as `_skill_invocation_binding` does for
+    `skill-invocations`.
 
     - `skill.path` against the receipt's own `installed` paths: a path this
       attempt never installed is a skill it never had.
@@ -1531,6 +1549,14 @@ def _skill_evidence_binding(
       NONE of them is a **forged status** - the "Forged status" golden case.
     - `external_evidence.artifact_ref.digest` against the manifest's captured
       digests: one that was never captured is an **altered** artifact.
+    - `external_evidence.source` against this attempt's TRIAL's own declared
+      `external_evidence_sources` (`trial_ledger`, above): a well-formed source
+      - `skill_evidence()`'s own rule already refuses a malformed one - that
+      this trial does not list is **undeclared**, the second half of "unknown
+      schema". The caller (`ledger_binding`) always passes a real list: a
+      trial that declares no sources at all is held to exactly the same
+      refusal as one that declared others but not this one - "I didn't say"
+      and "I said no" both mean nothing here is accepted.
 
     No receipt, no result or no manifest at all for this attempt is NOT this
     rule's finding - that gap belongs to `attempt_accounting`, the same
@@ -1574,6 +1600,17 @@ def _skill_evidence_binding(
                     yield (
                         f"{e_where}: external_evidence.artifact_ref cites {digest!r}, "
                         f"which no manifest for this attempt captured - an altered artifact"
+                    )
+                source = external.get("source")
+                if (
+                    isinstance(source, str)
+                    and EXTERNAL_EVIDENCE_SOURCE_RE.fullmatch(source)
+                    and source not in declared_sources
+                ):
+                    yield (
+                        f"{e_where}: external_evidence.source {source!r} is well-formed but this "
+                        f"attempt's trial does not declare it in external_evidence_sources - "
+                        f"undeclared, an unknown schema"
                     )
 
 
@@ -1659,11 +1696,15 @@ def ledger_binding(bundle: Bundle) -> Iterator[str]:
             yield from _skill_invocation_binding(record, where, installed_paths.get(record.attempt_id))
             yield from _skill_invocations_required_but_absent(record, where, trial)
         if record.kind == SKILL_EVIDENCE:
+            declared_sources = trial.get("external_evidence_sources")
+            if not isinstance(declared_sources, list):
+                declared_sources = []  # absent is "declares none", not "unknown" - trial_ledger() flags a wrong type
             yield from _skill_evidence_binding(
                 record, where,
                 installed_paths.get(record.attempt_id),
                 criteria_by_attempt.get(record.attempt_id),
                 captured.get(record.attempt_id),
+                declared_sources,
             )
         if record.kind == INSTALLATION_RECEIPT:
             for ident, keys in (("subject", ("digest",)), ("client", ("name", "version"))):

@@ -148,6 +148,17 @@ protocol.md: "Empty selections refuse." A ledger with no trial, or a trial with 
 attempt, has an expected population of zero, and nothing measured against it could
 ever go missing.
 
+`external_evidence_sources` (#268): an OPTIONAL list of well-formed
+`<namespace>/v<N>` labels this trial accepts as `skill-evidence`'s
+`external_evidence.source`. This is the **declared allowlist**: the controller's
+own plan is the only place a specific external producer's schema name (CPP's
+`cpp.execution-evidence/v1`, or any other) is ever written down - never a
+constant in `skillc/records.py`, which stays subject-agnostic exactly as
+`subject.digest`/`client.name` already keep the core from naming a specific
+subject. Absent, or an explicit empty list, both mean this trial accepts none;
+`ledger-binding` refuses a `skill-evidence` entry whose source is well-formed
+but not in this list (see `skill-evidence`, below).
+
 Budgets, lifecycle, termination and cleanup observations are required ledger
 outputs in interfaces.md. The ledger is immutable once dispatched, so lifecycle,
 termination and cleanup live in `attempt-lifecycle` (below). A budget may be carried
@@ -434,7 +445,7 @@ kinds) and carries one non-empty `skills` list:
 | `lifecycle.listed`, `lifecycle.read_observed`, `lifecycle.execution_observed` | each one of `CONFIRMED` / `NOT_CONFIRMED` / `UNKNOWN` - **a separate, closed vocabulary from `SATISFIED`/`VIOLATED`/`UNKNOWN`**, so a usage fact can never be misread as a compliance outcome. `CONFIRMED` requires an `evidence` reference (a digest already present in this attempt's own bundle); `UNKNOWN` requires a `reason` |
 | `criteria_owned` | list of `{id, outcome, shared}`. `id` must name a criterion on this attempt's own `verified-result`; `outcome` is an **audit copy** of that criterion's own outcome, never an independent claim; `shared: true` means another entry in the same `skills` list may legitimately own the same `id` too |
 | `external_evidence.present` | boolean |
-| `external_evidence.source` | required when `present`; a well-formed `<namespace>/v<N>` label naming the schema family (e.g. `cpp.execution-evidence/v1` - not a hardcoded skillc vocabulary, a FORMAT this module checks generically, Q4 below). A malformed label is refused as **unknown schema** |
+| `external_evidence.source` | required when `present`; a well-formed `<namespace>/v<N>` label naming the schema family (e.g. `cpp.execution-evidence/v1`). TWO checks, not one (Q4 below): a malformed label is refused here as **unknown schema** (record-level, FORMAT only - never a hardcoded skillc vocabulary); a well-formed label this attempt's trial does not list in its own `external_evidence_sources` (above) is refused by `ledger-binding` as **undeclared**, the other half of unknown schema |
 | `external_evidence.artifact_ref` | required when `present`; `{path, digest}` naming an entry in **this attempt's own `artifact-manifest.artifacts`** (Q1 below) |
 | `external_evidence.reconciliation` | `absent` / `unmatched` / `matched` / `contradicting` (CPP R9's four states, exactly) |
 | `external_evidence.reason` | required unless `reconciliation` is `matched` or `absent` |
@@ -517,23 +528,39 @@ to name, and the cpp-eval review questions relayed 2026-10-06.
   `external_evidence` does reconcile: a declared skill name with no
   correlating installed path is `reconciliation: unmatched`, reason
   `declared-skill-not-installed` - never silently accepted as a match.
-- **Q4 (unknown schema).** Digest and label FORMAT only, never a hardcoded list
-  of recognized producers. `skillc/records.py` stays subject-agnostic (the
-  genericity guard in `tests/test_materialize.py` refuses any `skillc/*.py`
-  literal naming a specific subject project), so this module cannot enumerate
-  "the schema families skillc recognizes" without naming one. Instead
-  `external_evidence.source` must match a generic `<namespace>/v<N>` shape
-  (`EXTERNAL_EVIDENCE_SOURCE_RE`); a label with the wrong shape (no version
-  suffix, empty, wrong type) is refused as **unknown schema**. `check-records`
-  never decodes the referenced bytes as CPP's own `cpp.execution-evidence/v1`
-  schema either way - that parse belongs to CPP's
+- **Q4 (unknown schema) - REVISED after group review.** The first answer here
+  said "source in skillc's closed vocabulary"; that was wrong in a way that
+  mattered, caught before merge: a closed vocabulary hardcoded in
+  `skillc/records.py` would name a specific producer (CPP) in the core module
+  the genericity guard exists to keep subject-agnostic
+  (`tests/test_materialize.py`), and the fix first tried - a bare FORMAT
+  check, no enumerated list at all - silently let ANY well-formed-but-unknown
+  label through (`"some-other-tool/v9"` is shaped identically to a real one),
+  which is not "unknown schema is refused" any more. The actual answer is
+  **two checks, in two different places, for two different facts**:
+
+  1. **Format** (`skillc/records.py`, `EXTERNAL_EVIDENCE_SOURCE_RE`, unconditional,
+     subject-agnostic): `external_evidence.source` must be a well-formed
+     `<namespace>/v<N>` label. A malformed one (no version suffix, empty,
+     wrong type) is refused as unknown schema regardless of anything else.
+  2. **Declared acceptance** (`ledger-binding`, a bundle rule, #268's declared
+     allowlist): a well-formed label must also appear in THIS ATTEMPT's
+     trial's own `trial.external_evidence_sources` (trial-ledger, above) - a
+     list the controller's plan declares, exactly where `subject.digest` and
+     `client.name` already live, never a skillc constant. Absent from that
+     list - including when the trial declares no sources at all - is refused
+     as undeclared, the other half of unknown schema.
+
+  `check-records` never decodes the referenced bytes as CPP's own
+  `cpp.execution-evidence/v1` schema either way - that parse belongs to CPP's
   `scripts/execution-evidence-verify.py` (#1369's consumer), a different trust
   domain, per [ADR 0003](../../decisions/0003-no-external-evaluation-runtime.md).
-  This is a narrower claim than "skillc recognizes this producer" - it only
-  catches a malformed or missing label; a well-formed but never-vetted source
-  name, or a genuinely malformed payload behind a correctly labelled,
-  correctly digested reference, is invisible to skillc and must stay the consumer's
-  problem, stated as a boundary, not silently assumed covered.
+  This is still narrower than "skillc has vetted this producer's actual
+  bytes" - it only catches a malformed label or one this trial never declared
+  accepting; a genuinely malformed payload behind a correctly labelled,
+  correctly digested, correctly declared reference is invisible to skillc and
+  must stay the consumer's problem, stated as a boundary, not silently
+  assumed covered.
 - **R9 (reconciliation states).** Exactly the four CPP names, no fifth:
   `absent` (no usage record for this skill - never read as evidence of
   non-use), `unmatched` (present, but does not bind to any controller-captured
@@ -548,7 +575,9 @@ to name, and the cpp-eval review questions relayed 2026-10-06.
 
 ### Golden records (acceptance item 4)
 
-Six named cases, each a committed `controls/skill-evidence/{good,bad}/` fixture:
+Six named cases, each a committed `controls/skill-evidence/{good,bad}/` or
+`controls/ledger-binding/{good,bad}/skill-evidence-*/` fixture (the "unknown
+schema" case is two fixtures, one per layer - Q4 above):
 
 | Case | Shape |
 |---|---|
@@ -557,7 +586,8 @@ Six named cases, each a committed `controls/skill-evidence/{good,bad}/` fixture:
 | Absent transcript | `lifecycle.read_observed: UNKNOWN`, reason citing the attempt's own `client-transcript` stream as `missing` |
 | Task success with obligation failure | The attempt's `verified-result.status` is `PASS`; one entry's `criteria_owned` names an **optional** criterion with `outcome: VIOLATED` |
 | Forged status | Bad case: `criteria_owned[].outcome` disagrees with that criterion's actual outcome on the attempt's own `verified-result` - refused by the `ledger-binding` cross-check this record adds, named in the rule table below |
-| Unknown schema | Bad case: `external_evidence.source` not matching the `<namespace>/v<N>` format, or `present: true` with no `artifact_ref` |
+| Unknown schema (malformed) | Bad case, record-level: `external_evidence.source` not matching the `<namespace>/v<N>` format |
+| Unknown schema (undeclared) | Bad case, bundle-level: a well-formed `source` this attempt's trial does not list in its own `external_evidence_sources` |
 
 ### Trust boundary needed by #269 (acceptance item 5)
 
@@ -802,7 +832,7 @@ bundle cases as well, including against every record rule.
 | `producer-authority` | record | forged subject verdict; unchecked receipt; adapter-produced ledger |
 | `attempt-binding` | record | no attempt; malformed attempt ID; no trial |
 | `installation-receipt` | record | empty install; no readiness; subject without digest |
-| `trial-ledger` | record | no trials; a trial with no attempts; missing grader identity; malformed attempt ID; `case.observes_selection` present but not a boolean (#26) |
+| `trial-ledger` | record | no trials; a trial with no attempts; missing grader identity; malformed attempt ID; `case.observes_selection` present but not a boolean (#26); `external_evidence_sources` present but not a list, or containing a malformed `<namespace>/v<N>` label (#268) |
 | `artifact-digest` | record | an artifact without a digest; an empty manifest; a null `path`, `type` or `size` beside a valid digest (#130) |
 | `observation-coverage` | record | a silent required stream; an unknown origin; no `capture_failures`; a `skill-invocations` count that is not `UNKNOWN` under incomplete coverage, or not a real integer under complete coverage; complete coverage naming no skills; a duplicate skill path with conflicting counts (#39) |
 | `criterion-vocabulary` | record | an outcome outside the vocabulary; a non-boolean `mandatory` (`"true"` would drop a violation out of the derivation); a criterion with no `id` (#130) |
@@ -813,7 +843,7 @@ bundle cases as well, including against every record rule.
 | `agent-observation` | record | an unknown field; a missing field; an object in a scalar field or a census map; a `mandatory` flag that is a string, an integer or absent (each would drop a VIOLATED criterion out of the derivation); positive conclusions from zero or two transcript files; eligibility that disagrees with prompt delivery and the canary; a PASS its own criteria do not derive; both a grade and a blocked reason; an unobserved status without a reason (#106) |
 | `pilot-report` | record | empty attempts list; bad disposition or criterion outcome; no uncertainty; a negative intervention count; a cost/time split missing a key or whose parts do not sum to its total; a duplicate attempt ID (#12) |
 | `skill-evidence` | record | empty `skills` list; a `child` entry with no `parent_path`, naming a path absent from this record, or forming a cycle with no root (even where no single link self-references); a duplicate `skill.path`; a `lifecycle` value outside `CONFIRMED`/`NOT_CONFIRMED`/`UNKNOWN`; `CONFIRMED` with no evidence reference; `UNKNOWN` with no reason or with one anyway; `external_evidence.present: true` with no `artifact_ref` or a malformed `source` label; a `reconciliation` outside the four R9 states, or disagreeing with `present`; a non-`matched`/`absent` reconciliation with no reason (#268) |
-| `ledger-binding` | bundle | cross-trial receipt; stale receipt; attempt the ledger never issued; altered artifact; unplanned grader; a `skill-invocations` path the attempt's receipt never installed (#39); a trial declaring `case.observes_selection: true` whose manifest has no `skill-invocations` stream (#26/#39); a `pilot-report` that omits a scheduled attempt or names one the ledger never planned (#12); a `skill-evidence` path or digest the attempt's receipt never installed; a `criteria_owned` outcome that disagrees with the attempt's own `verified-result` (forged status); an `external_evidence.artifact_ref` the attempt's manifest never captured (#268) |
+| `ledger-binding` | bundle | cross-trial receipt; stale receipt; attempt the ledger never issued; altered artifact; unplanned grader; a `skill-invocations` path the attempt's receipt never installed (#39); a trial declaring `case.observes_selection: true` whose manifest has no `skill-invocations` stream (#26/#39); a `pilot-report` that omits a scheduled attempt or names one the ledger never planned (#12); a `skill-evidence` path the attempt's receipt never installed; a `criteria_owned` outcome that disagrees with the attempt's own `verified-result` (forged status); an `external_evidence.artifact_ref` the attempt's manifest never captured; a well-formed `external_evidence.source` the attempt's trial does not list in its own `external_evidence_sources` (undeclared, #268) |
 | `unique-ids` | bundle | duplicate attempt ID; conflicting receipts; duplicate result ID; a second `skill-evidence` record for one attempt |
 | `attempt-accounting` | bundle | planned attempt with no lifecycle; captured with no result; graded without receipt; graded without manifest; captured but declared NOT_RUN; graded but not captured; manifest but not captured; receipt stand-in with no agent-observation, or claiming readiness (#139) |
 | `lineage` | bundle | retry reusing its own ID; regrade whose original was erased; regrade of different bytes |
@@ -846,10 +876,11 @@ This completes #4's contract versioning. What it deliberately does not do:
   may carry a `digest` (#9); `ledger-binding` still binds a result by grader id and
   revision only.
 - **No external schema validation (#268).** `skill-evidence.external_evidence`
-  checks a digest and a closed `source` label, never the referenced bytes'
-  actual content against that label's schema. A correctly labelled,
-  correctly digested reference to a malformed CPP record is invisible here;
-  that parse belongs to the consumer (CPP's own reader), per
+  checks a digest, a `source` label's FORMAT, and whether the attempt's own
+  trial declares that label accepted - never the referenced bytes' actual
+  content against that label's schema. A correctly labelled, correctly
+  digested, correctly declared reference to a malformed CPP record is
+  invisible here; that parse belongs to the consumer (CPP's own reader), per
   [ADR 0003](../../decisions/0003-no-external-evaluation-runtime.md).
 - **No case-pairing here.** Nothing in this schema says that one trial's `case`
   is another's degraded or mutated counterpart - that distinction (needed to
