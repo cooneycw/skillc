@@ -200,6 +200,42 @@ def test_a_synthetic_dependency_may_now_declare_satisfies(source: Path) -> None:
     assert any(d["id"] == "marker" for d in inv["dependencies"])
 
 
+def test_declaring_satisfies_does_not_manufacture_a_reference_that_is_not_there(source: Path) -> None:
+    """`satisfies` declares WHICH dependency claims a reference WHEN the
+    walk finds one in the actual text - it cannot manufacture a hit that
+    is not there. This fixture's own text never mentions
+    `~/checkout/MARKER.md`, so clearing `unreferenced_reason` (now
+    optional once `satisfies` is present, per the conditional fix) must
+    still correctly refuse: the dependency is genuinely unvisited, not
+    silently treated as referenced merely for declaring a claim."""
+    change(source, satisfies=["~/checkout/MARKER.md"], unreferenced_reason="")
+    with pytest.raises(p.Refused, match="satisfied by no reference in the closure"):
+        inventory(source)
+
+
+def test_unreferenced_reason_is_not_required_once_satisfies_resolves_a_real_reference(
+    source: Path,
+) -> None:
+    """The positive case: when a synthetic dependency REPLACES a real
+    pinned file (`replaces_pinned`, so `source_root`/`paths[0]` names a
+    file that genuinely exists in the tree - #332's own shim shape, never
+    a bare marker like this), and the declared `satisfies` reference
+    actually appears in the walked text, the dependency IS referenced -
+    requiring a reason for being unreferenced on something that is not
+    would be incoherent."""
+    change(
+        source, paths=["INSTRUCTIONS.md"], replaces_pinned=True,
+        replacement_reason="Exclude instructions, preserve existence",
+        satisfies=[{"reference": "~/checkout/INSTRUCTIONS.md", "path": "INSTRUCTIONS.md"}],
+        unreferenced_reason="",
+    )
+    skill_md = source / "skills/tiny-check/SKILL.md"
+    skill_md.write_text(skill_md.read_text() + "\nSee ~/checkout/INSTRUCTIONS.md for details.\n")
+    inv, _ = inventory(source)  # must not raise
+    record = next(d for d in inv["dependencies"] if d["id"] == "marker")
+    assert record["referenced_by"]
+
+
 @pytest.mark.parametrize("text,expected", [
     (classifier.REAL + " fake)", "real-runner"),
     (classifier.FALLBACK_NOTE + "   -   " + classifier.FALLBACK_ACTION, "fallback"),

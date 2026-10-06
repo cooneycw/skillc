@@ -363,7 +363,16 @@ def _dependency(entry: object) -> Dependency:
         if forbidden.intersection(entry):
             raise Refused(f"dependency {dep_id}: synthetic file cannot declare traversal or tool fields")
         _str(entry, "role")
-        _str(entry, "unreferenced_reason")
+        # #332: `unreferenced_reason` was required UNCONDITIONALLY here
+        # because every synthetic dependency used to be, by construction,
+        # unreferenced (satisfies was forbidden, so the text walk could
+        # never visit one). Now that satisfies is allowed, a synthetic
+        # dependency that declares one IS referenced - requiring a reason
+        # for being unreferenced on something that is not would be
+        # incoherent, so this mirrors the SAME conditional pattern
+        # `no_traverse_reason` already uses for traverse below.
+        if not entry.get("satisfies"):
+            _str(entry, "unreferenced_reason")
         content = entry.get("content")
         if not isinstance(content, str):
             raise Refused(f"dependency {dep_id}: content must be UTF-8 text")
