@@ -8,6 +8,37 @@ and version plan.
 
 ## [Unreleased]
 
+- **A real-Docker conformance test for #269's gate-execution witness**
+  (Refs #269). `exec_in_attempt()`'s own docstring named this gap
+  explicitly - its three-exec sequence (marker write-back, in-container
+  kill, in-container `kill -0` confirmation) was exercised only against
+  the fake CLI. `tests/test_gate_witness_live.py` proves four properties
+  against a real daemon: concurrent `exec_in_attempt()` into the SAME
+  live container the primary subject's own `execute()` is still running
+  in; a selective, confirmed kill that targets only the gate's own
+  in-container pid, never the primary's; the PID-marker round trip across
+  two separate real `docker exec` invocations; and no standalone `kill`
+  binary needed on `python:3.12-slim`'s real shell.
+  - `SKILLC_GATE_WITNESS_LIVE_BREAK` selects one of three modes, each
+    `xfail(strict=True)`: `stale-confirm-lie` (the kill-confirmation step
+    is monkeypatched to lie - caught by the test's own independent
+    `kill -0`, never by trusting the witness's self-report),
+    `kill-wrong-pid` (the kill sequence is monkeypatched to target the
+    PRIMARY's pid instead of the gate's - caught by the primary's own
+    exit code/counter), and `gate-in-fresh-container` (`exec_in_attempt`
+    is monkeypatched to run the gate in a separate container - caught by
+    the gate no longer seeing the primary's live marker).
+  - Plan reviewed and approved on issue #269 (comment 6023059101) before
+    any code was written.
+  - Written and reviewed WITHOUT ever running it against a real daemon -
+    no Docker binary in this environment, same documented position
+    #183's own `test_decide_reply_channel_live.py` already states for
+    itself. Skipped, not failed, wherever no Docker daemon is reachable
+    (`probe_daemon`, same binary-vs-daemon distinction added in #183 PR
+    B2); real-daemon execution is owed to the real-Docker runner (#315).
+    `@pytest.mark.real_docker`, coordinated with the #315 runner's own PR
+    for the `DECLARED_REAL_DOCKER_FILES` floor entry.
+
 - **The Level 5 subject-side proxy is wired into the trial image** (Refs
   #183, PR B2). `docker/trial/skillc-disrupt-tool.py` - a one-shot client
   for #183's decide-and-reply channel, committed unwired in PR B1 - is now
