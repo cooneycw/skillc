@@ -224,7 +224,22 @@ def _betacf(x: float, a: float, b: float) -> float:
 
 
 def _betainc(x: float, a: float, b: float) -> float:
-    """Regularized incomplete beta function `I_x(a, b)`, for `x` in `[0, 1]`."""
+    """Regularized incomplete beta function `I_x(a, b)`, for `x` in `[0, 1]`.
+
+    `a == 0` or `b == 0` is a degenerate Beta - undefined as a density, but
+    `I_x` still has a well-defined LIMIT at these boundary parameters via its
+    binomial-survival reading (`I_x(k, n-k+1) = P(Bin(n,x) >= k)`): `a == 0`
+    is "at least 0 successes" (always true for `x > 0`, so `1.0`), `b == 0` is
+    "more successes than trials" (never true, so `0.0`). Neither of
+    `clopper_pearson`'s own two calls ever reaches this - `_beta_ppf` is only
+    called with `a = c >= 1` or `b = n - c >= 1` - but `tests/
+    test_reliability.py`'s independent oracle exercises the FULL `k` range
+    (`k = 0..n`) directly against this function, and found that gap before it
+    could matter (#273, cpp-eval review's own ask for an exact-oracle grid)."""
+    if a == 0:
+        return 1.0 if x > 0.0 else 0.0
+    if b == 0:
+        return 0.0 if x < 1.0 else 1.0
     if x <= 0.0:
         return 0.0
     if x >= 1.0:

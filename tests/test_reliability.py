@@ -146,6 +146,100 @@ def test_clopper_pearson_refuses_zero_trials() -> None:
         rel.clopper_pearson(0, 0)
 
 
+# ----------------------- independent exact oracle for the incomplete beta function
+#
+# `rel._betainc` has no stdlib closed form and is computed from a continued
+# fraction (Numerical Recipes 6.4) - numerics the textbook spot-checks above
+# cannot rule out a subtle error in. This oracle computes the SAME
+# mathematical quantity by a completely different, EXACT route: for integer
+# a=k, b=n-k+1, I_x(a, b) equals P(Binomial(n, x) >= k), which is just a sum
+# of binomial terms - computable exactly with `math.comb` and
+# `fractions.Fraction`, no numerics at all. The two must agree; if they
+# don't, the continued-fraction implementation is wrong, not the oracle.
+
+from fractions import Fraction
+
+
+def _binomial_pmf_table_exact(n: int, x: Fraction) -> list[Fraction]:
+    """`[P(Bin(n, x) = j) for j in range(n + 1)]`, exact. Built by the
+    standard recurrence `pmf[j] = pmf[j-1] * (n-j+1)/j * x/(1-x)` rather than
+    `n` independent calls to `math.comb` and `Fraction.__pow__`, so computing
+    the whole table once per `(n, x)` is cheap enough for a `n<=60` grid."""
+    one_minus_x = 1 - x
+    if one_minus_x == 0:
+        return [Fraction(0)] * n + [Fraction(1)]
+    pmf = [one_minus_x ** n]
+    ratio = x / one_minus_x
+    for j in range(1, n + 1):
+        pmf.append(pmf[-1] * Fraction(n - j + 1, j) * ratio)
+    return pmf
+
+
+def _binomial_sf_exact(n: int, k: int, x: Fraction) -> Fraction:
+    """`P(Bin(n, x) >= k)`, exact - this IS `I_x(k, n-k+1)` for integer `k`."""
+    if k <= 0:
+        return Fraction(1)
+    if k > n:
+        return Fraction(0)
+    return sum(_binomial_pmf_table_exact(n, x)[k:], start=Fraction(0))
+
+
+def _binomial_cdf_exact(n: int, k: int, x: Fraction) -> Fraction:
+    """`P(Bin(n, x) <= k)`, exact."""
+    if k < 0:
+        return Fraction(0)
+    if k >= n:
+        return Fraction(1)
+    return sum(_binomial_pmf_table_exact(n, x)[: k + 1], start=Fraction(0))
+
+
+#: ~20 points, including near-0 and near-1 where the continued fraction's two
+#: symmetry branches (`x < (a+1)/(a+b+2)` in `rel._betainc`) are each
+#: exercised, and both sides of `x=0.5`.
+_GRID_X = [Fraction(i, 1000) for i in (1, 2, 5, 10, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950, 980, 990, 995, 998, 999)]
+
+
+def test_betainc_matches_exact_binomial_tail_oracle_on_a_grid() -> None:
+    """`n` in 1..60, every `k` in 0..n, ~20 `x` points: `rel._betainc(x, k,
+    n-k+1)` must equal the exact binomial survival function to within 1e-10,
+    everywhere on the grid - not spot-checked, the WHOLE grid asserted in one
+    run, because a near-miss region bad enough to matter could sit between
+    textbook spot-check points."""
+    mismatches = []
+    for n in range(1, 61):
+        for x in _GRID_X:
+            x_float = float(x)
+            for k in range(n + 1):
+                a, b = k, n - k + 1
+                got = rel._betainc(x_float, a, b)
+                want = float(_binomial_sf_exact(n, k, x))
+                if abs(got - want) > 1e-10:
+                    mismatches.append((n, k, x_float, got, want))
+    assert not mismatches, f"{len(mismatches)} grid mismatches, first 5: {mismatches[:5]}"
+
+
+def test_clopper_pearson_inversion_matches_exact_binomial_oracle() -> None:
+    """The bounds `clopper_pearson` returns are not merely plausible-looking
+    numbers: `L` and `U` must satisfy the DEFINING property of the exact
+    interval, `P(Bin(n, L) >= c) = alpha/2` and `P(Bin(n, U) <= c) = alpha/2`,
+    checked against the SAME exact oracle as the grid test above - not
+    against `clopper_pearson`'s own internals, which would prove nothing."""
+    alpha = 0.05
+    for n in range(1, 41):
+        for c in range(n + 1):
+            lower, upper = rel.clopper_pearson(c, n)
+            if c == 0:
+                assert lower == 0.0
+            else:
+                got = float(_binomial_sf_exact(n, c, Fraction(lower).limit_denominator(10**12)))
+                assert got == pytest.approx(alpha / 2.0, abs=1e-6), (c, n, "lower", lower, got)
+            if c == n:
+                assert upper == 1.0
+            else:
+                got = float(_binomial_cdf_exact(n, c, Fraction(upper).limit_denominator(10**12)))
+                assert got == pytest.approx(alpha / 2.0, abs=1e-6), (c, n, "upper", upper, got)
+
+
 # --------------------------------------------------------------- Wilson / Newcombe
 
 def test_wilson_score_contains_the_point_estimate() -> None:

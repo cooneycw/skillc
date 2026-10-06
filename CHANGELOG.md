@@ -44,8 +44,24 @@ and version plan.
     `wilson_score`): the Beta quantile Clopper-Pearson needs has no stdlib
     closed form, so it is computed from the regularized incomplete beta
     function (`math.lgamma` plus a continued fraction) inverted by
-    bisection - verified against textbook values (0/10, 5/10, 10/10), not
-    against a second implementation of the same approximation.
+    bisection. Three textbook spot-checks are not enough evidence for
+    hand-rolled numerics (orchestrator review): `tests/test_reliability.py`
+    also carries an INDEPENDENT exact oracle needing no numerics at all -
+    for integer `k`, `I_x(k, n-k+1) = P(Binomial(n,x) >= k)`, computable
+    exactly with `math.comb` and `fractions.Fraction` - checked over a grid
+    (`n` in 1..60, every `k` in 0..n, ~20 `x` points near 0, 0.5 and 1) and
+    via the inversion property the Clopper-Pearson bounds must satisfy
+    (`P(Bin(n,L) >= c) = P(Bin(n,U) <= c) = alpha/2`). The grid test found a
+    real gap the three spot-checks missed: `_betainc` raised a domain error
+    at `a == 0` (the `k == 0` row of the grid, never reached by
+    `clopper_pearson`'s own two calls, but reachable by anyone calling
+    `_betainc` directly) - fixed with the boundary-parameter limit
+    (`I_x(0, b) = 1`, `I_x(a, 0) = 0` for `x` in `(0, 1)`). Mutation-checked
+    twice: flipping the continued fraction's symmetry branch and perturbing
+    one of its coefficients each turn the grid test red (24550 and 13249
+    mismatches respectively) while every spot-check and the inversion test
+    stayed green - direct evidence that the grid, not the spot-checks, is
+    what actually proves this function.
   - `mcnemar_exact`: the paired hypothesis test, returning a bare p-value so
     it cannot be mistaken for an interval (protocol.md's own distinction).
   - `task_cluster_bootstrap`: seeded percentile bootstrap over TASKS (never
