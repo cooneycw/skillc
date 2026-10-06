@@ -511,7 +511,13 @@ def parse_discrimination_declaration(data: Mapping[str, object]) -> Discriminati
             isinstance(degraded_subject.get(k), str) and degraded_subject.get(k)
             for k in ("name", "locator", "revision")):
         raise _refuse("arm 'degraded' needs a subject naming name, locator and revision")
-    mismatched_identity = [k for k in ("name", "locator") if degraded_subject.get(k) != intact_subject.get(k)]
+    if set(degraded_subject) != set(intact_subject):
+        extra = sorted(set(degraded_subject) ^ set(intact_subject))
+        raise _refuse(f"arm 'degraded' subject carries {extra} that 'intact' does not, or vice versa; a "
+                      "discrimination contrast is the SAME subject, mutated - every key but revision must "
+                      "match exactly, whatever keys a future subject dict grows")
+    mismatched_identity = [k for k in intact_subject
+                           if k != "revision" and degraded_subject.get(k) != intact_subject.get(k)]
     if mismatched_identity:
         raise _refuse(f"arm 'degraded' names a different subject {mismatched_identity} than 'intact'; "
                       "a discrimination contrast is the SAME subject, mutated - not a different one")

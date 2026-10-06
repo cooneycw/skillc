@@ -135,6 +135,28 @@ def test_red_case_a_different_subject_locator_is_refused() -> None:
         calibration.parse_discrimination_declaration(data)
 
 
+def test_red_case_a_degraded_subject_with_an_extra_key_is_refused() -> None:
+    """Orchestrator ruling (message 5743): a degraded subject carrying a
+    key `intact` does not have - `select`, `surface`, or anything a future
+    subject dict grows - must be refused, not pass silently because only
+    name/locator were ever compared."""
+    data = _declaration()
+    data["arms"][1]["subject"]["select"] = "all"
+    with pytest.raises(calibration.DeclarationRefused, match="carries"):
+        calibration.parse_discrimination_declaration(data)
+
+
+def test_red_case_a_differing_non_identity_key_is_refused() -> None:
+    """The other half of the same ruling: both arms carry the SAME key, but
+    with a DIFFERENT value - not an identity mismatch in name/locator, but
+    still a different subject."""
+    data = _declaration()
+    data["arms"][0]["subject"]["select"] = "all"
+    data["arms"][1]["subject"]["select"] = "partial"
+    with pytest.raises(calibration.DeclarationRefused, match="a different subject"):
+        calibration.parse_discrimination_declaration(data)
+
+
 # --------------------------------------------------- red case: hand-typed revision label
 
 
