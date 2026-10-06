@@ -12,7 +12,10 @@ and version plan.
   non-executable marker text with explicit pinned-file replacement reasons
   and digests. Inventories and receipts distinguish pinned and synthetic
   origins. The flow-check profile declares its checkout marker and a
-  subject-scoped three-way gate classifier; updated real-pin proof is owed.
+  subject-scoped three-way gate classifier; a real install from the pin
+  confirms `flow-finish-gate.sh`'s default self-detection now reaches the
+  real runner without `FLOW_GATE_CPP_DIR`, with canary isolation proven
+  both directions.
 
 - **Disposable git fixtures and attempt-bound facts** (Refs #275). Fresh pinned
   commits, refs, dirty indexes, preserved files, stashes and a linked sibling

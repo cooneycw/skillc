@@ -122,14 +122,19 @@ Committed controls live in `tests/fixtures/profile-install-synthetic/` and
 classifies captured output as real-runner, fallback or unknown. Ambiguous and
 unrecognized output is unknown. Its pinned literal messages must be checked
 again on every subject re-pin. Fake gate observations exercise marker presence
-and absence; real subject detection and client isolation still need human proof.
+and absence; real subject detection and client isolation have now been proven
+by hand against the real pin (PROFILE.md's Known limits has the full account:
+a real install, a real `flow-finish-gate.sh` run classified `real-runner`
+with no `FLOW_GATE_CPP_DIR` set, and `materialize.py`'s own canary showing
+the marker's content absent from Codex's prompt input while an `AGENTS.md`
+sentinel at Codex's real discovery location is present).
 
 Mutation audit for #303: disabling pinned-shadow refusal, destination collision,
 executable-field refusal, byte bound, origin labeling, replacement digest,
 ambiguous classifier handling, marker-present detection and marker-absent
 fallback each made its corresponding committed test fail; restoration passed.
-The full local verification still reports the historical real-pin inventory
-digest mismatch until the operator regenerates that evidence. It is not waived.
+The real-pin inventory has been regenerated against the updated declaration
+(64 files); the full local verification is clean, not waived.
 
 ## Refused by name
 
