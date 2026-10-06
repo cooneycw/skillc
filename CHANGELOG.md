@@ -8,6 +8,32 @@ and version plan.
 
 ## [Unreleased]
 
+- **A `discrimination-declaration` kind in `skillc.calibration`, for the
+  intact-vs-degraded contrast** (Refs #287). `parse_declaration` cannot
+  express this: it requires exactly one arm literally named `baseline` with
+  a null subject, and a 3-arm declaration's two treated arms must share an
+  identical subject, which a degraded arm's revision never does.
+  - Arms are exactly `intact` and `degraded`. The degraded arm's
+    `subject.revision` is derived from the intact subject's own pin via
+    `skillc/degrade.py`'s own `_degraded_revision` (reused by import,
+    `degrade.py` untouched) - a hand-typed label is refused.
+  - The derived label is content-independent (verified directly), so the
+    degraded arm also carries `mutation.mutated_digest` (sha256 of the
+    resulting degraded file), bound into the approval exactly like
+    `attempts_per_arm` (#323's pattern) - a changed `removed_text` under a
+    stale approval is refused through the digest, not the label.
+  - Reuses `parse_declaration`'s own shared/attempts/arm-order/task
+    machinery (`_parse_schedule_and_identities`, extracted, not copied) and
+    `require_approved`'s approval/grader-on-disk checks the same way -
+    `parse_declaration`'s own behavior for `calibration-declaration` is
+    unchanged (the full existing 127-test calibration suite still passes).
+  - `tests/test_calibration_discrimination_declaration.py` (new): the
+    red cases above, plus a hand-chosen arm order and the reused-helper
+    regression guard.
+  - Only `skillc/calibration.py` and its tests change; `records.py` and
+    `controls/` are untouched (claude-power-pack #1369 pins 61 golden cases
+    on them).
+
 - **The real-Docker runner's `--break` flag generalized to a family:mode
   table** (Refs #315, #269, #183). Found during #269's PR merge review:
   the runner only ever set `SKILLC_LIVE_TEST_BREAK` (#183's channel break
