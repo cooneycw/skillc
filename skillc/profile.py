@@ -352,7 +352,14 @@ def _dependency(entry: object) -> Dependency:
     replacement_reason = ""
     mode = "100644"
     if kind == "synthetic":
-        forbidden = {"satisfies", "traverse", "no_traverse_reason", "version", "supply"}
+        # #332: `satisfies` is now ALLOWED on synthetic (not forbidden with
+        # the traversal/tool fields below) - a harness-authored file that
+        # replaces a pinned one at a path reference.md's own TEXT names
+        # (a forwarding shim, not merely a passive existence marker like
+        # #303's) must be able to resolve that textual reference itself;
+        # #303's own marker never needed this because nothing in
+        # reference.md's text names the path it replaces.
+        forbidden = {"traverse", "no_traverse_reason", "version", "supply"}
         if forbidden.intersection(entry):
             raise Refused(f"dependency {dep_id}: synthetic file cannot declare traversal or tool fields")
         _str(entry, "role")

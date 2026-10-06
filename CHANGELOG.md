@@ -75,6 +75,14 @@ and version plan.
     mismatch (#581/#1366). `tests/test_flow_check_gate_shim.py` drives it
     as a real subprocess against a real `DecideReplyChannel`, same
     discipline as `test_skillc_disrupt_tool.py`.
+  - `skillc/profile.py`'s `synthetic` kind may now also declare
+    `satisfies` (previously unconditionally forbidden alongside the
+    traversal/tool fields) - a harness-authored file that replaces a
+    pinned one at a path `reference.md`'s own TEXT names (this shim) must
+    resolve that textual reference itself; #303's own passive marker
+    never needed this, since nothing in `reference.md`'s text names the
+    path it replaces. Mutation-checked: re-forbidding it turns the new
+    test red; restored, green.
   Profile wiring (installing the shim at the subject-visible path,
   relocating the real script, regenerating the inventory) and the
   real-Docker conformance test are not yet built.
