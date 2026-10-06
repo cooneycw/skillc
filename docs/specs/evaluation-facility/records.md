@@ -428,7 +428,7 @@ kinds) and carries one non-empty `skills` list:
 | Field | Content |
 |---|---|
 | `skill.path` | the installed path this entry is about. Must be one the attempt's own `installation-receipt` installed (`ledger-binding`, same cross-check `_skill_invocation_binding` already performs for `skill-invocations`) |
-| `skill.body_digest`, `skill.description_digest` | optional. When present, must agree with the digest #265's installation inventory/receipt recorded for this path - **never a second, independently-trusted copy of that fact** (Q3 below) |
+| `skill.body_digest`, `skill.description_digest` | optional; expected to be copied from #265's `evidence/inventory.json` for this path. Checked here for presence/shape only - **not cross-checked against that inventory**, a different artifact family this rule does not read (boundary, Q3 below) |
 | `invocation.lineage` | `root` or `child` |
 | `invocation.parent_path` | required when `lineage` is `child`; must name another entry's `skill.path` **in this same record**. A `root` entry carries no `parent_path` |
 | `lifecycle.listed`, `lifecycle.read_observed`, `lifecycle.execution_observed` | each one of `CONFIRMED` / `NOT_CONFIRMED` / `UNKNOWN` - **a separate, closed vocabulary from `SATISFIED`/`VIOLATED`/`UNKNOWN`**, so a usage fact can never be misread as a compliance outcome. `CONFIRMED` requires an `evidence` reference (a digest already present in this attempt's own bundle); `UNKNOWN` requires a `reason` |
@@ -495,16 +495,28 @@ to name, and the cpp-eval review questions relayed 2026-10-06.
   internal numbers - exactly R8's point, restated here: "a consistent forgery
   still reads `supported`" on CPP's own reader, so skillc must not treat CPP's
   internal consistency as skillc's own evidence.
-- **Q3 (skill identity).** Reused, not re-declared. `skill.path` is checked
-  against the attempt's own `installation-receipt` (which already carries #265's
-  installed identity); `body_digest`/`description_digest`, when present, must
-  agree with what that receipt/inventory recorded for the same path - a second,
-  independently-asserted digest for the same skill is refused as a conflicting
-  identity, not accepted as corroboration. A CPP usage record's own `declared`
-  block (R6: skill name from `CPP_SKILL_SOURCE`, never verified by CPP itself)
-  is exactly the kind of claim this reconciles: a declared skill name with no
-  correlating installed path is `external_evidence.reconciliation: unmatched`,
-  reason `declared-skill-not-installed` - never silently accepted as a match.
+- **Q3 (skill identity).** `skill.path` is reused, not re-declared: `ledger-binding`
+  checks it against the attempt's own `installation-receipt.installed[].path`,
+  the same cross-check `_skill_invocation_binding` already performs for
+  `skill-invocations`. **`body_digest`/`description_digest` are a narrower
+  answer than "agree with #265" would claim**, found while implementing this:
+  `installation-receipt.installed` carries one generic content `digest` per
+  installed path (records.md, `installation-receipt`, above); #265's
+  per-skill `description_digest`/`body_digest` split lives in
+  `evidence/inventory.json`, a **different artifact family** - a
+  `skillc profile validate` output, not a records.py `kind`, not a bundle
+  member, and not one this rule reads. So today: these two fields are
+  checked here for **presence and shape only** (non-empty strings when the
+  key is given at all); they are **not** cross-checked against #265's
+  inventory, because that inventory is outside the bundle this rule can see.
+  A producer is expected to copy them from #265's inventory, but nothing
+  refuses a producer that does not. Closing that gap is further work, not
+  delivered here - named as a boundary, not silently assumed covered. A CPP
+  usage record's own `declared` block (R6: skill name from
+  `CPP_SKILL_SOURCE`, never verified by CPP itself) is the kind of claim
+  `external_evidence` does reconcile: a declared skill name with no
+  correlating installed path is `reconciliation: unmatched`, reason
+  `declared-skill-not-installed` - never silently accepted as a match.
 - **Q4 (unknown schema).** Digest only. `check-records` validates `skill-evidence`
   and the manifest entry's envelope (digest present, `source` in the closed
   vocabulary); it never decodes the referenced bytes as CPP's own
@@ -668,10 +680,10 @@ says so on every run.
   row's `path` is one the attempt's own installation receipt actually installed.
   Otherwise it names a skill this attempt never had.
 - if a `skill-evidence` record (#268), every entry's `skill.path` is one the
-  attempt's own installation receipt actually installed, and any
-  `body_digest`/`description_digest` it carries agrees with what that receipt
-  recorded for the same path. Otherwise it names, or re-digests, a skill this
-  attempt never had (Q3, above);
+  attempt's own installation receipt actually installed. Otherwise it names a
+  skill this attempt never had. `body_digest`/`description_digest` are **not**
+  cross-checked here against #265's inventory - a named boundary, not an
+  oversight (Q3, above);
 - if a `skill-evidence` entry's `criteria_owned` names a criterion `id`, that
   `id` exists on the attempt's own `verified-result`, and the entry's copied
   `outcome` agrees with that criterion's actual outcome there. A disagreement is

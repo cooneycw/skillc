@@ -460,6 +460,11 @@ RECORD_RULES: tuple[RecordRule, ...] = (
                records.agent_observation, (records.AGENT_OBSERVATION,)),
     RecordRule("pilot-report", ERROR, "report gives every attempt a disposition, criteria, uncertainty and a cost/time split",
                records.pilot_report, (records.PILOT_REPORT,)),
+    RecordRule(
+        "skill-evidence", ERROR,
+        "per-skill lineage, lifecycle facts and external-evidence reconciliation are well formed",
+        records.skill_evidence, (records.SKILL_EVIDENCE,),
+    ),
 )
 
 

@@ -68,14 +68,24 @@ PILOT_REPORT = "pilot-report"
 #: runs). Not a verdict: a grade it carries is an audit copy, checked against
 #: its own criteria, never a substitute for a `verified-result`.
 AGENT_OBSERVATION = "agent-observation"
+#: Additive in version 2 (#268): per-attempt, per-skill attribution - skill
+#: identity (reused from the installation receipt, never re-declared), parent/
+#: child invocation lineage, criterion ownership (an audit copy of the
+#: attempt's own verified-result, never an independent claim), and reconciliation
+#: of externally produced evidence (a usage record a subject's own tooling
+#: wrote) that never becomes a trusted observation. See
+#: docs/specs/evaluation-facility/records.md's `skill-evidence` section.
+SKILL_EVIDENCE = "skill-evidence"
 KINDS = (
     INSTALLATION_RECEIPT, TRIAL_LEDGER, ARTIFACT_MANIFEST, VERIFIED_RESULT, ATTEMPT_LIFECYCLE, PILOT_REPORT,
-    AGENT_OBSERVATION,
+    AGENT_OBSERVATION, SKILL_EVIDENCE,
 )
 
 #: Records that belong to ONE attempt. The ledger is not one of them: it issues
 #: the attempt identifiers the others cite.
-ATTEMPT_BOUND = (INSTALLATION_RECEIPT, ARTIFACT_MANIFEST, VERIFIED_RESULT, ATTEMPT_LIFECYCLE, AGENT_OBSERVATION)
+ATTEMPT_BOUND = (
+    INSTALLATION_RECEIPT, ARTIFACT_MANIFEST, VERIFIED_RESULT, ATTEMPT_LIFECYCLE, AGENT_OBSERVATION, SKILL_EVIDENCE,
+)
 
 #: The one role allowed to produce each kind, from interfaces.md's producer column.
 #: The subject adapter writes the receipt, and the controller must have checked it.
@@ -87,8 +97,34 @@ AUTHORIZED_PRODUCER = {
     ATTEMPT_LIFECYCLE: "controller",
     PILOT_REPORT: "assembler",
     AGENT_OBSERVATION: "controller",
+    SKILL_EVIDENCE: "assembler",
 }
 RECEIPT_CHECKER = "controller"
+
+#: `skill-evidence.lifecycle.{listed,read_observed,execution_observed}` (#268):
+#: a usage FACT, never a compliance outcome - deliberately a separate, closed
+#: vocabulary from `CRITERION_OUTCOMES` so neither can be mistaken for the
+#: other. Mirrors `skillc/backend.py`'s own three-way `Confirmation`
+#: (`confirm_stopped`/`confirm_absent`): a backend that cannot observe returns
+#: `UNKNOWN`, never a guess, and `UNKNOWN` is never treated as confirmed.
+SKILL_EVIDENCE_CONFIRMATION = ("CONFIRMED", "NOT_CONFIRMED", "UNKNOWN")
+
+#: `invocation.lineage` (#268): whether a `skills` entry is the attempt's
+#: directly-selected skill or one invoked BY another skill in the same record.
+SKILL_EVIDENCE_LINEAGE = ("root", "child")
+
+#: `external_evidence.reconciliation` (#268): CPP #1368's R9, exactly these four
+#: states and no fifth. `absent` is never conflated with `contradicting` - no
+#: evidence is not evidence of a disagreement - and `unmatched` is never
+#: silently promoted to `matched` for lack of a reason to doubt it.
+SKILL_EVIDENCE_RECONCILIATION = ("absent", "unmatched", "matched", "contradicting")
+
+#: `external_evidence.source` (#268): closed, so an unrecognized label is refused
+#: as unknown schema rather than silently accepted as a reference skillc cannot
+#: name. `check-records` never decodes the referenced bytes against this label
+#: (that parse belongs to the consumer, per ADR 0003) - it only checks the label
+#: itself is one skillc recognizes.
+EXTERNAL_EVIDENCE_SOURCES = ("cpp.execution-evidence/v1",)
 
 #: The four cost/time split components a pilot report's own control requires
 #: (#12's acceptance: "Separate setup/agent/grading cost and time"). Closed:
@@ -1211,6 +1247,165 @@ def pilot_report(record: Record) -> Iterator[str]:
         yield from _pilot_report_split(entry, where, "time_seconds")
 
 
+def _skill_evidence_lifecycle_fact(entry: dict[str, object], where: str, name: str) -> Iterator[str]:
+    """One of `lifecycle.{listed,read_observed,execution_observed}` (#268): a
+    USAGE fact, never a compliance outcome, so it uses `SKILL_EVIDENCE_CONFIRMATION`
+    and never `CRITERION_OUTCOMES`. `CONFIRMED`/`NOT_CONFIRMED` must cite `evidence`
+    (a reference already present in this attempt's own bundle - `ledger_binding`
+    checks that it actually is, the same way it already checks `graded_digests`);
+    `UNKNOWN` must say why, and carries no evidence - an `UNKNOWN` with an
+    evidence reference would be a confirmed fact wearing an unknown's label.
+    """
+    fact = entry.get(name)
+    if not isinstance(fact, dict):
+        yield f"{where}: lifecycle.{name} is not an object"
+        return
+    status = fact.get("status")
+    if status not in SKILL_EVIDENCE_CONFIRMATION:
+        yield (
+            f"{where}: lifecycle.{name} has status {status!r}, not one of "
+            f"{list(SKILL_EVIDENCE_CONFIRMATION)}"
+        )
+        return
+    if status == "UNKNOWN":
+        if not _nonempty_str(fact.get("reason")):
+            yield f"{where}: lifecycle.{name} is UNKNOWN without a reason"
+        if "evidence" in fact:
+            yield f"{where}: lifecycle.{name} is UNKNOWN but carries an evidence reference"
+    else:
+        evidence = fact.get("evidence")
+        if not isinstance(evidence, dict) or not _nonempty_str(evidence.get("digest")):
+            yield (
+                f"{where}: lifecycle.{name} is {status} but cites no evidence digest; "
+                f"a confirmed usage fact names what confirms it"
+            )
+
+
+def skill_evidence(record: Record) -> Iterator[str]:
+    """Per-attempt, per-skill attribution (#268): skill identity, invocation
+    lineage, criterion ownership and external-evidence reconciliation.
+
+    Three things this rule does NOT check, because another rule or record owns
+    them: that `skill.path` was actually installed by this attempt's receipt, and
+    that `criteria_owned`/`external_evidence.artifact_ref` agree with this
+    attempt's own `verified-result`/`artifact-manifest` - all three need records
+    this one does not carry, so they are `ledger_binding`'s findings, exactly as
+    `_skill_invocation_binding` already draws that line for `skill-invocations`.
+    """
+    if record.parse_error is not None or record.kind != SKILL_EVIDENCE:
+        return
+    skills = record.data.get("skills")
+    if not isinstance(skills, list) or not skills:
+        yield "skill-evidence names no skills; an empty record is refused, not passed"
+        return
+
+    paths: list[str] = [
+        s["skill"]["path"] for s in skills
+        if isinstance(s, dict) and isinstance(s.get("skill"), dict) and _nonempty_str(s["skill"].get("path"))
+    ]
+    seen_paths: set[str] = set()
+    for index, entry in enumerate(skills):
+        where = f"skills[{index}]"
+        if not isinstance(entry, dict):
+            yield f"{where} is not an object"
+            continue
+
+        skill = entry.get("skill")
+        path = skill.get("path") if isinstance(skill, dict) else None
+        if not isinstance(skill, dict) or not _nonempty_str(path):
+            yield f"{where}: no skill.path"
+        elif path in seen_paths:
+            yield f"{where}: skill.path {path!r} appears more than once in this record"
+        else:
+            seen_paths.add(path)  # type: ignore[arg-type]
+        if isinstance(skill, dict):
+            for digest_key in ("body_digest", "description_digest"):
+                if digest_key in skill and not _nonempty_str(skill.get(digest_key)):
+                    yield f"{where}: skill.{digest_key} is present but empty"
+
+        invocation = entry.get("invocation")
+        lineage = invocation.get("lineage") if isinstance(invocation, dict) else None
+        if lineage not in SKILL_EVIDENCE_LINEAGE:
+            yield (
+                f"{where}: invocation.lineage is {lineage!r}, not one of "
+                f"{list(SKILL_EVIDENCE_LINEAGE)}"
+            )
+        elif lineage == "child":
+            parent = invocation.get("parent_path") if isinstance(invocation, dict) else None
+            if not _nonempty_str(parent):
+                yield f"{where}: invocation.lineage is 'child' but names no parent_path"
+            elif parent == path:
+                yield f"{where}: invocation.parent_path names itself"
+            elif parent not in paths:
+                yield (
+                    f"{where}: invocation.parent_path {parent!r} is not a skill.path "
+                    f"anywhere in this record"
+                )
+        elif isinstance(invocation, dict) and "parent_path" in invocation:
+            yield f"{where}: invocation.lineage is 'root' but carries a parent_path"
+
+        lifecycle = entry.get("lifecycle")
+        if not isinstance(lifecycle, dict):
+            yield f"{where}: no lifecycle object"
+        else:
+            for name in ("listed", "read_observed", "execution_observed"):
+                yield from _skill_evidence_lifecycle_fact(lifecycle, where, name)
+
+        criteria_owned = entry.get("criteria_owned")
+        if not isinstance(criteria_owned, list):
+            yield f"{where}: criteria_owned is not a list"
+        else:
+            for c_index, criterion in enumerate(criteria_owned):
+                c_where = f"{where}.criteria_owned[{c_index}]"
+                if not isinstance(criterion, dict) or not _nonempty_str(criterion.get("id")):
+                    yield f"{c_where}: no id"
+                    continue
+                if criterion.get("outcome") not in CRITERION_OUTCOMES:
+                    yield (
+                        f"{c_where}: outcome {criterion.get('outcome')!r} is not one of "
+                        f"{list(CRITERION_OUTCOMES)}"
+                    )
+                if not isinstance(criterion.get("shared"), bool):
+                    yield f"{c_where}: shared is {criterion.get('shared')!r}, not a JSON boolean"
+
+        external = entry.get("external_evidence")
+        if not isinstance(external, dict):
+            yield f"{where}: no external_evidence object"
+            continue
+        present = external.get("present")
+        if not isinstance(present, bool):
+            yield f"{where}: external_evidence.present is {present!r}, not a JSON boolean"
+            continue
+        reconciliation = external.get("reconciliation")
+        if reconciliation not in SKILL_EVIDENCE_RECONCILIATION:
+            yield (
+                f"{where}: external_evidence.reconciliation is {reconciliation!r}, not "
+                f"one of {list(SKILL_EVIDENCE_RECONCILIATION)}"
+            )
+        elif present and reconciliation == "absent":
+            yield f"{where}: external_evidence.present is true but reconciliation is 'absent'"
+        elif not present and reconciliation != "absent":
+            yield (
+                f"{where}: external_evidence.present is false but reconciliation is "
+                f"{reconciliation!r}, not 'absent' - no evidence is not evidence of a "
+                f"disagreement"
+            )
+        if reconciliation not in ("matched", "absent") and not _nonempty_str(external.get("reason")):
+            yield f"{where}: external_evidence.reconciliation is {reconciliation!r} without a reason"
+        if present:
+            source = external.get("source")
+            if source not in EXTERNAL_EVIDENCE_SOURCES:
+                yield (
+                    f"{where}: external_evidence.source {source!r} is not one of "
+                    f"{list(EXTERNAL_EVIDENCE_SOURCES)} - unknown schema"
+                )
+            ref = external.get("artifact_ref")
+            if not isinstance(ref, dict) or not _nonempty_str(ref.get("digest")):
+                yield f"{where}: external_evidence.present is true but names no artifact_ref digest"
+        elif "source" in external or "artifact_ref" in external:
+            yield f"{where}: external_evidence.present is false but names a source or artifact_ref"
+
+
 # ---------------------------------------------------------------------------
 # Bundle rules: facts that exist only BETWEEN records. Each is paired with a
 # committed control whose bad and good cases are bundle directories.
@@ -1289,6 +1484,70 @@ def _skill_invocations_required_but_absent(record: Record, where: str, trial: di
         )
 
 
+def _skill_evidence_binding(
+    record: Record,
+    where: str,
+    installed: set[str] | None,
+    criteria: dict[str, set[object]] | None,
+    captured: set[str] | None,
+) -> Iterator[str]:
+    """`skill-evidence` (#268) cross-checked against the three OTHER records of
+    its own attempt - the one thing a lone `skill-evidence` record cannot do
+    for itself, exactly as `_skill_invocation_binding` does for `skill-invocations`.
+
+    - `skill.path` against the receipt's own `installed` paths: a path this
+      attempt never installed is a skill it never had.
+    - `criteria_owned[].outcome` against every outcome this attempt's own
+      `verified-result`(s) actually recorded for that id: a copy that matches
+      NONE of them is a **forged status** - the "Forged status" golden case.
+    - `external_evidence.artifact_ref.digest` against the manifest's captured
+      digests: one that was never captured is an **altered** artifact.
+
+    No receipt, no result or no manifest at all for this attempt is NOT this
+    rule's finding - that gap belongs to `attempt_accounting`, the same
+    division `_skill_invocation_binding` already draws.
+    """
+    skills = record.data.get("skills")
+    if not isinstance(skills, list):
+        return
+    for index, entry in enumerate(skills):
+        if not isinstance(entry, dict):
+            continue
+        e_where = f"{where} skills[{index}]"
+        skill = entry.get("skill")
+        path = skill.get("path") if isinstance(skill, dict) else None
+        if installed is not None and isinstance(path, str) and path and path not in installed:
+            yield f"{e_where}: names {path!r}, which this attempt's installation receipt never installed"
+
+        if criteria is not None:
+            owned = entry.get("criteria_owned")
+            for c in owned if isinstance(owned, list) else []:
+                if not isinstance(c, dict):
+                    continue
+                c_id, outcome = c.get("id"), c.get("outcome")
+                if not isinstance(c_id, str) or not c_id:
+                    continue
+                known = criteria.get(c_id)
+                if known is None:
+                    yield f"{e_where}: criteria_owned names {c_id!r}, which this attempt's verified-result never defines"
+                elif outcome not in known:
+                    yield (
+                        f"{e_where}: criteria_owned claims {c_id!r} is {outcome!r}, but this "
+                        f"attempt's verified-result never recorded that outcome for it - a forged status"
+                    )
+
+        if captured is not None:
+            external = entry.get("external_evidence")
+            if isinstance(external, dict) and external.get("present") is True:
+                ref = external.get("artifact_ref")
+                digest = ref.get("digest") if isinstance(ref, dict) else None
+                if isinstance(digest, str) and digest and digest not in captured:
+                    yield (
+                        f"{e_where}: external_evidence.artifact_ref cites {digest!r}, "
+                        f"which no manifest for this attempt captured - an altered artifact"
+                    )
+
+
 def ledger_binding(bundle: Bundle) -> Iterator[str]:
     """Every record is bound to an attempt the ledger planned, under that trial's
     identities, and a result graded bytes that were actually captured.
@@ -1312,6 +1571,13 @@ def ledger_binding(bundle: Bundle) -> Iterator[str]:
         the ledger never planned - only this rule has the ledger's own
         planned population to check a report against; `pilot_report` checks
         each entry's own shape, not which attempts are present at all.
+      - a `skill-evidence` (#268) entry names a `skill.path` the attempt's own
+        installation receipt never installed; names a `criteria_owned` id its
+        attempt's own `verified-result` does not define, or copies an outcome
+        that disagrees with that criterion's real one there (a **forged
+        status**); or cites an `external_evidence.artifact_ref` digest its
+        attempt's manifest did not capture (an **altered** artifact, the same
+        finding a `verified-result`'s `graded_digests` already gets).
     """
     ledgers = bundle.of_kind(TRIAL_LEDGER)
     if len(ledgers) != 1:
@@ -1337,6 +1603,15 @@ def ledger_binding(bundle: Bundle) -> Iterator[str]:
             if isinstance(e, dict) and _nonempty_str(e.get("path"))
         } if isinstance(entries, list) else set()
         installed_paths.setdefault(receipt.attempt_id, set()).update(paths)
+    criteria_by_attempt: dict[str, dict[str, set[object]]] = {}
+    for result in bundle.of_kind(VERIFIED_RESULT):
+        criteria = result.data.get("criteria")
+        if not isinstance(criteria, list):
+            continue
+        bucket = criteria_by_attempt.setdefault(result.attempt_id, {})
+        for c in criteria:
+            if isinstance(c, dict) and _nonempty_str(c.get("id")):
+                bucket.setdefault(c["id"], set()).add(c.get("outcome"))
 
     for record in bundle.records:
         if record.kind not in ATTEMPT_BOUND or not record.attempt_id:
@@ -1354,6 +1629,13 @@ def ledger_binding(bundle: Bundle) -> Iterator[str]:
         if record.kind == ARTIFACT_MANIFEST:
             yield from _skill_invocation_binding(record, where, installed_paths.get(record.attempt_id))
             yield from _skill_invocations_required_but_absent(record, where, trial)
+        if record.kind == SKILL_EVIDENCE:
+            yield from _skill_evidence_binding(
+                record, where,
+                installed_paths.get(record.attempt_id),
+                criteria_by_attempt.get(record.attempt_id),
+                captured.get(record.attempt_id),
+            )
         if record.kind == INSTALLATION_RECEIPT:
             for ident, keys in (("subject", ("digest",)), ("client", ("name", "version"))):
                 got = _ident(record.data.get(ident), *keys)
@@ -1406,10 +1688,10 @@ def unique_ids(bundle: Bundle) -> Iterator[str]:
     """Identifiers identify. interfaces.md makes duplicate/conflicting IDs an
     explicit validation failure, never verified success.
 
-    An attempt has at most one receipt, one manifest and one lifecycle: a second one is a
-    conflicting account of the same attempt, and nothing here can say which is
-    true. Results may be several (a regrade is a new result), but each has its own
-    `result_id`.
+    An attempt has at most one receipt, one manifest, one lifecycle and one
+    `skill-evidence` record: a second one is a conflicting account of the same
+    attempt, and nothing here can say which is true. Results may be several (a
+    regrade is a new result), but each has its own `result_id`.
     """
     for ledger in bundle.of_kind(TRIAL_LEDGER):
         trials = ledger.data.get("trials")
@@ -1427,7 +1709,7 @@ def unique_ids(bundle: Bundle) -> Iterator[str]:
             for value, count in sorted(name.items(), key=str):
                 if count > 1:
                     yield f"ledger plans {what} {value!r} {count} times"
-    for kind in (INSTALLATION_RECEIPT, ARTIFACT_MANIFEST, ATTEMPT_LIFECYCLE, AGENT_OBSERVATION):
+    for kind in (INSTALLATION_RECEIPT, ARTIFACT_MANIFEST, ATTEMPT_LIFECYCLE, AGENT_OBSERVATION, SKILL_EVIDENCE):
         per_attempt = Counter(r.attempt_id for r in bundle.of_kind(kind) if r.attempt_id)
         for attempt, count in sorted(per_attempt.items()):
             if count > 1:
