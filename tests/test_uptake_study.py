@@ -346,3 +346,16 @@ def test_red_no_confirmed_observations_is_no_result_not_a_negative_one() -> None
     assert test["available"] is False and test["p_value"] is None  # type: ignore[index]
     assert "NO RESULT" in us.paste_back(report)
 
+
+def test_the_committed_selective_declaration_is_authorized_and_its_file_matches() -> None:
+    """#237 follow-up: the selective rewrite, approved 2026-10-05."""
+    root = ROOT / "evals" / "uptake-study" / "selective"
+    declaration = us.load_declaration(root / "run-manifest.json")
+    us.require_approved(declaration, ROOT)
+    lines, at = us._description_of((root / "flow-check-SKILL.md").read_bytes())
+    assert us._unquote(lines[at].split(":", 1)[1]) == declaration.rewritten_description
+    data = json.loads((root / "run-manifest.json").read_text(encoding="utf-8"))
+    data["approval"] = None
+    with pytest.raises(us.StudyRefused, match="not approved"):
+        us.require_approved(us.parse_declaration(data), ROOT)
+
