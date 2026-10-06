@@ -66,6 +66,16 @@ silently worked anyway, say), that run reports `XPASS` as a failure, not a
 quiet green. That is what makes this an instrument with a committed
 negative control, not three assertions hoping to be exercised.
 
+`raises=AssertionError` is also passed explicitly (#315 follow-up,
+orchestrator review): without it, a break mode that dies of an unrelated
+exception - a real daemon flake, or the oracle itself silently breaking in
+a way that crashes instead of asserting - would still satisfy a bare
+`xfail`, counting as the expected red for the wrong reason. Each of the
+three documented failures above is a plain `assert`, verified by reading
+`DockerBackend`'s own handling of `trigger_decide=None` rather than by
+running this file (no real daemon in this environment, same limitation
+stated throughout this docstring).
+
 `SKILLC_LIVE_TEST_IMAGE` defaults to `python:3.12-slim` - small, widely
 cached, and it ships a working `python3` for the subject script this file
 runs. It is NOT the pinned trial image (#78's own image is a different,
@@ -175,7 +185,8 @@ def _subject_script() -> str:
 
 
 @pytest.mark.xfail(
-    condition=BREAK_MODE != "none", strict=True, reason=f"SKILLC_LIVE_TEST_BREAK={BREAK_MODE} deliberately breaks one property",
+    condition=BREAK_MODE != "none", strict=True, raises=AssertionError,
+    reason=f"SKILLC_LIVE_TEST_BREAK={BREAK_MODE} deliberately breaks one property",
 )
 def test_the_channel_round_trips_correctly_against_a_real_daemon(live_backend: d.DockerBackend) -> None:
     """One test, three independently-breakable properties, documented

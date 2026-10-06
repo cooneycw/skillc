@@ -8,6 +8,61 @@ and version plan.
 
 ## [Unreleased]
 
+- **The real-Docker runner's `--break` flag generalized to a family:mode
+  table** (Refs #315, #269, #183). Found during #269's PR merge review:
+  the runner only ever set `SKILLC_LIVE_TEST_BREAK` (#183's channel break
+  modes), so #269's witness break modes (`stale-confirm-lie`,
+  `kill-wrong-pid`, `gate-in-fresh-container`) had no path through the
+  runner at all - the red half of #269's own evidence was unreachable.
+  - `ci/real-docker/break-lib.sh` (new): pure, sourceable
+    `resolve_break_spec`/`context_for_break_mode` functions - a closed
+    table mapping `channel:<mode>`/`witness:<mode>` to the right env var,
+    refusing any family or mode it does not name with exit 2, before any
+    checkout or docker operation. The three legacy bare channel spellings
+    (`--break omit-mount` etc., no prefix) still work, kept for
+    compatibility with runs recorded before family prefixes existed; a
+    bare witness mode has no such form and is refused.
+  - `tests/test_run_real_docker_break.py` (new): exercises both functions
+    by sourcing the lib directly (no config file, docker, or git needed -
+    the parsing and context-routing happen before any of that), plus two
+    end-to-end tests against the REAL `run-real-docker` script confirming
+    an invalid `--break` is refused before the config-file check and a
+    valid one reaches it. Mutation-checked: widening the table to accept
+    any spec, and collapsing the context function to always return the
+    certifying context, both turn the relevant tests red; restored, green.
+  - `ci/real-docker/README.md`'s step 8 now lists all six expected-red
+    runs (three channel, three witness) plus `none`.
+  - `raises=AssertionError` added to both live test files' `xfail` marks,
+    so a break mode that dies of an unrelated exception is a hard FAILURE
+    rather than an accidental XFAIL. This safety was established by
+    reading every break mode's failure path in both files (every one
+    resolves to a plain `assert`), not by running either file against a
+    real daemon - none is available in this environment.
+  - `resolve_break_spec` always emits an explicit value for BOTH families
+    on every call ("none" for the one not selected), never leaving either
+    empty for the caller to infer - a codex:code_review finding against
+    this PR's own first draft, which set only the selected family's env
+    var and left the other exactly as inherited from the runner's own
+    process environment. A stale `SKILLC_LIVE_TEST_BREAK=omit-mount` left
+    over from a prior by-hand invocation could then have silently
+    activated that break during an unrelated `--break none` (certifying)
+    run. `run-real-docker` now always sets both
+    `SKILLC_LIVE_TEST_BREAK`/`SKILLC_GATE_WITNESS_LIVE_BREAK` explicitly
+    in one `env` invocation. Mutation-checked again under the corrected
+    contract; a text-level regression guard
+    (`test_the_real_runner_always_sets_both_break_variables_explicitly`)
+    pins the fixed invocation shape itself, since driving the actual
+    pytest call needs a real checkout and daemon this environment lacks.
+  - A second codex finding (MEDIUM) - `raises=AssertionError` narrows by
+    exception type only, not by which assertion fired, so a helper/setup
+    assertion could in principle satisfy `xfail` before the intended
+    break-detection assertion is reached - is a real but currently latent
+    structural gap (by code-reading, every break mode's intended assertion
+    is the first one reached today) that would need a dedicated exception
+    type per break-detection assertion across both live files to close
+    properly; deferred as out of scope for this PR and recorded in the
+    Nit Store (cooneycw/skillc#20, comment 6025027183).
+
 - **A real-Docker conformance test for #269's gate-execution witness**
   (Refs #269). `exec_in_attempt()`'s own docstring named this gap
   explicitly - its three-exec sequence (marker write-back, in-container

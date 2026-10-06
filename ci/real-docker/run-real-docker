@@ -18,9 +18,16 @@
 set -euo pipefail
 
 usage() {
-    echo "usage: run-real-docker <sha> [--break none|omit-mount|wrong-uid|flip-decision]" >&2
+    echo "usage: run-real-docker <sha> [--break none|<family>:<mode>]" >&2
+    echo "  families: channel (omit-mount, wrong-uid, flip-decision - #183)" >&2
+    echo "            witness (stale-confirm-lie, kill-wrong-pid, gate-in-fresh-container - #269)" >&2
+    echo "  the bare channel mode spellings (no 'channel:' prefix) are also accepted," >&2
+    echo "  kept for compatibility with runs recorded before family prefixes existed." >&2
     exit 2
 }
+
+# shellcheck disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/break-lib.sh"
 
 [ $# -ge 1 ] || usage
 SHA="$1"; shift
@@ -35,16 +42,28 @@ if ! [[ "$SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
     echo "run-real-docker: sha must be exactly 40 hex characters, not '$SHA'" >&2
     exit 2
 fi
-BREAK_MODE="none"
+RAW_BREAK_SPEC="none"
 if [ $# -gt 0 ]; then
     [ "$1" = "--break" ] || usage
     [ $# -ge 2 ] || usage
-    BREAK_MODE="$2"
+    RAW_BREAK_SPEC="$2"
 fi
-case "$BREAK_MODE" in
-    none|omit-mount|wrong-uid|flip-decision) ;;
-    *) echo "run-real-docker: --break must be none|omit-mount|wrong-uid|flip-decision, not '$BREAK_MODE'" >&2; exit 2 ;;
-esac
+# BREAK_MODE is the single, NORMALIZED label used everywhere below ("none"
+# or "<family>:<mode>") - resolve_break_spec is the one place that decides
+# what a --break argument means, including the legacy bare-spelling
+# compatibility shim, so nothing downstream re-derives or duplicates that
+# mapping (orchestrator review, #315 follow-up).
+if ! BREAK_RESOLVED="$(resolve_break_spec "$RAW_BREAK_SPEC")"; then
+    exit 2
+fi
+BREAK_MODE="$(echo "$BREAK_RESOLVED" | sed -n '1p')"
+# Both always present and both always explicitly set below - never one
+# left at whatever the runner's own process environment happened to carry
+# (codex:code_review finding, #315 follow-up: the previous shape set only
+# the selected family's variable, so a stale inherited value for the
+# OTHER family could silently activate a break during a "none" run).
+CHANNEL_BREAK_VALUE="$(echo "$BREAK_RESOLVED" | sed -n '2p')"
+WITNESS_BREAK_VALUE="$(echo "$BREAK_RESOLVED" | sed -n '3p')"
 
 # VM-local configuration - never committed, never defaulted to a real path.
 # See ci/real-docker/README.md "Setup" for how the operator populates this.
@@ -115,8 +134,7 @@ post_comment() {
 
 refuse_before_checkout() {
     local reason="$1"
-    local context="skillc/real-docker"
-    [ "$BREAK_MODE" != "none" ] && context="skillc/real-docker-control"
+    local context="$(context_for_break_mode "$BREAK_MODE")"
     echo "run-real-docker: ERROR: $reason" >&2
     post_status "error" "ERROR: $reason (runner ${RUNNER_SHA:0:12})" "$context"
 }
@@ -243,8 +261,17 @@ if ! (cd "$WORK_CHECKOUT" && uv sync --locked --extra dev --quiet); then
 fi
 (
     cd "$WORK_CHECKOUT"
-    SKILLC_LIVE_TEST_BREAK="$BREAK_MODE" uv run --no-sync pytest -m real_docker \
-        --junit-xml="$REPORT_PATH"
+    # BOTH break variables are always set explicitly, never left at
+    # whatever the runner's own process environment happened to carry
+    # (codex:code_review finding, #315 follow-up) - exactly one of
+    # CHANNEL_BREAK_VALUE/WITNESS_BREAK_VALUE is a real mode and the
+    # other is the literal "none", by resolve_break_spec's own contract,
+    # so the two live files' break modes cannot cross-contaminate each
+    # other and a stale inherited value can never silently activate a
+    # break during a "none" (certifying) run.
+    env SKILLC_LIVE_TEST_BREAK="$CHANNEL_BREAK_VALUE" \
+        SKILLC_GATE_WITNESS_LIVE_BREAK="$WITNESS_BREAK_VALUE" \
+        uv run --no-sync pytest -m real_docker --junit-xml="$REPORT_PATH"
 ) || true  # a test failure is EXPECTED input to the verdict step below
 
 # ----------------------------------------------------- R1: compute + post
@@ -260,12 +287,14 @@ GH_STATE="success"
 [ "$POSTED_STATUS" = "FAILURE" ] && GH_STATE="failure"
 [ "$POSTED_STATUS" = "ERROR" ] && GH_STATE="error"
 
+# R2: a break-mode run NEVER posts to the certifying context - control
+# context only, explicitly labelled expected-red. context_for_break_mode
+# is the single place that decides this (break-lib.sh), matching
+# refuse_before_checkout's own use of it above.
 if [ "$BREAK_MODE" = "none" ]; then
-    post_status "$GH_STATE" "$DESCRIPTION" "skillc/real-docker"
+    post_status "$GH_STATE" "$DESCRIPTION" "$(context_for_break_mode "$BREAK_MODE")"
 else
-    # R2: a break-mode run NEVER posts to the certifying context - control
-    # context only, explicitly labelled expected-red.
-    post_status "$GH_STATE" "EXPECTED-RED ($BREAK_MODE): $DESCRIPTION" "skillc/real-docker-control"
+    post_status "$GH_STATE" "EXPECTED-RED ($BREAK_MODE): $DESCRIPTION" "$(context_for_break_mode "$BREAK_MODE")"
 fi
 
 if [ -n "${GITHUB_COMMENT_ISSUE:-}" ]; then

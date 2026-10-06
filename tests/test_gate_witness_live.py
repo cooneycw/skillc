@@ -31,8 +31,14 @@ comment that follows it):
 
 ONE TEST FUNCTION, SKILLC_GATE_WITNESS_LIVE_BREAK SELECTS THE MODE - same
 shape as `test_decide_reply_channel_live.py`'s `SKILLC_LIVE_TEST_BREAK`.
-`xfail(strict=True)` on every non-`none` mode: a break that fails to
-actually break anything surfaces as XPASS, not a silent pass.
+`xfail(strict=True, raises=AssertionError)` on every non-`none` mode: a
+break that fails to actually break anything surfaces as XPASS, not a
+silent pass, and a break that dies of some OTHER exception (an exec
+helper's own transport error, say) is a hard FAILURE rather than an
+accidental XFAIL - every assertion in this file, including the helper
+functions' own internal `assert`s, is a plain `AssertionError`, verified
+by reading the code rather than by running this file (#315 follow-up,
+orchestrator review).
 
     none               (default) BOTH intact cases pass:
                         (a) a concurrent gate that exits on its own;
@@ -308,7 +314,7 @@ def _run_gate_over_socket(socket_path: Path, gate: str) -> Mapping[str, object]:
 
 
 @pytest.mark.xfail(
-    condition=BREAK_MODE != "none", strict=True,
+    condition=BREAK_MODE != "none", strict=True, raises=AssertionError,
     reason=f"SKILLC_GATE_WITNESS_LIVE_BREAK={BREAK_MODE} deliberately breaks one property",
 )
 def test_the_gate_witness_round_trips_correctly_against_a_real_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
