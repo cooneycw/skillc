@@ -53,6 +53,7 @@ from dataclasses import dataclass, field
 DECLARED_REAL_DOCKER_FILES: tuple[str, ...] = (
     "tests.test_decide_reply_channel_live",
     "tests.test_trial_image_build_live",
+    "tests.test_gate_witness_live",
 )
 
 ERROR = "ERROR"

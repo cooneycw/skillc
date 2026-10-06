@@ -8,6 +8,59 @@ and version plan.
 
 ## [Unreleased]
 
+- **A real-Docker conformance test for #269's gate-execution witness**
+  (Refs #269). `exec_in_attempt()`'s own docstring named this gap
+  explicitly - its three-exec sequence (marker write-back, in-container
+  kill, in-container `kill -0` confirmation) was exercised only against
+  the fake CLI. `tests/test_gate_witness_live.py` proves four properties
+  against a real daemon: concurrent `exec_in_attempt()` into the SAME
+  live container the primary subject's own `execute()` is still running
+  in; a selective, confirmed kill that targets only the gate's own
+  in-container pid, never the primary's; the PID-marker round trip across
+  two separate real `docker exec` invocations; and no standalone `kill`
+  binary needed on `python:3.12-slim`'s real shell.
+  - `SKILLC_GATE_WITNESS_LIVE_BREAK` selects one of three modes, each
+    `xfail(strict=True)`: `stale-confirm-lie` (the kill-confirmation step
+    is monkeypatched to lie), `kill-wrong-pid` (the kill sequence is
+    monkeypatched to target the PRIMARY's pid instead of the gate's), and
+    `gate-in-fresh-container` (`exec_in_attempt` is monkeypatched to run
+    the gate in a separate container).
+  - Every conformance assertion (the concurrent gate's exit code, the
+    test's own independent `kill -0` on the gate's real pid, the
+    witness's own `stop_confirmed` record, and the primary's monotonic
+    counter progress across the kill window) is asserted as the same
+    UNCONDITIONAL invariant in every mode, never as a different expected
+    value per mode - a codex:code_review finding against this test's own
+    first draft, which had accepted some break modes' defects as their
+    "correct" outcome instead of proving the oracle rejects them. The
+    primary's own in-container pid (needed by `kill-wrong-pid`) is read
+    from a marker the primary writes itself, never via `ps`/`procps`,
+    which `python:3.12-slim` deliberately lacks (a second codex finding
+    against the same first draft).
+  - The primary's progress counter is published via a temp-file-then-
+    `os.replace()` swap, not a direct truncating `open(path, "w")` - a
+    second, re-review codex:code_review finding against this test's own
+    fix round: a `docker exec cat` landing between the primary's own
+    truncate and write could read an empty file, and the counter reader
+    turned that into a spurious zero indistinguishable from "never
+    ticked." `os.replace()` on the same filesystem is atomic, so a
+    concurrent reader sees either the whole prior value or the whole new
+    one, never a truncated in-between.
+  - Plan reviewed and approved on issue #269 (comment 6023059101) before
+    any code was written.
+  - Written and reviewed WITHOUT ever running it against a real daemon -
+    no Docker binary in this environment, same documented position
+    #183's own `test_decide_reply_channel_live.py` already states for
+    itself. Skipped, not failed, wherever no Docker daemon is reachable
+    (`probe_daemon`, same binary-vs-daemon distinction added in #183 PR
+    B2); real-daemon execution is owed to the real-Docker runner (#315).
+    `@pytest.mark.real_docker`, and `tests.test_gate_witness_live` is now
+    in `ci/check_real_docker_ran.py`'s `DECLARED_REAL_DOCKER_FILES` floor
+    (#315's PR landed first, so this PR adds the entry) - with a red case
+    pinning the real, now-three-file floor: the other two declared files
+    pass while this one collects only a SKIP must give `FAILURE`, never
+    `SUCCESS`.
+
 - **The Level 5 subject-side proxy is wired into the trial image** (Refs
   #183, PR B2). `docker/trial/skillc-disrupt-tool.py` - a one-shot client
   for #183's decide-and-reply channel, committed unwired in PR B1 - is now

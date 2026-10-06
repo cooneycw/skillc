@@ -1,9 +1,9 @@
 # The `<agent-host>` real-Docker runner (#315)
 
-Certifies #183's live-channel test and #326's trial-image build test (and,
-once they exist, #266/#269) against a REAL Docker daemon, on an isolated
-VM, with no Woodpecker involved at all. The main Woodpecker server is
-untouched; nothing here registers anything with it.
+Certifies #183's live-channel test, #326's trial-image build test, and
+#269's gate-witness test (and, once it exists, #266) against a REAL Docker
+daemon, on an isolated VM, with no Woodpecker involved at all. The main
+Woodpecker server is untouched; nothing here registers anything with it.
 
 **A file tagged `@pytest.mark.real_docker` is collected and run, but NOT
 certified, until `ci/check_real_docker_ran.py`'s `DECLARED_REAL_DOCKER_

@@ -97,31 +97,42 @@ def test_a_clean_pass_is_success(tmp_path: Path) -> None:
     assert result.executed_by_file[DECLARED[0]] == 1
 
 
-_IMAGE_BUILD_SKIP_CASE = (
+_IMAGE_BUILD_PASS_CASE = (
     '<testcase classname="tests.test_trial_image_build_live" '
-    'name="test_image_runs_as_candidate" time="0.02">'
-    '<skipped message="no reachable Docker daemon"/></testcase>'
+    'name="test_image_runs_as_candidate" time="5.0"></testcase>'
+)
+_GATE_WITNESS_SKIP_CASE = (
+    '<testcase classname="tests.test_gate_witness_live" '
+    'name="test_the_gate_witness_round_trips_correctly_against_a_real_daemon" time="0.02">'
+    '<skipped message="no reachable Docker daemon in this environment"/></testcase>'
 )
 
 
-def test_live_channel_passes_but_image_build_all_skipped_is_failure() -> None:
-    """Orchestrator review, #315: with BOTH files in the real floor
-    (`DECLARED_REAL_DOCKER_FILES`), a run where #183's live-channel file
-    executes and passes but the image-build file collected only SKIPs must
-    give FAILURE, not SUCCESS - green on the VM with no image evidence is
-    exactly what the per-file floor exists to refuse. Uses the module's
-    OWN default declared-files tuple (not the local 1-file `DECLARED`), so
-    this exercises the real, currently-shipped floor."""
+def test_the_other_two_floor_files_pass_but_gate_witness_all_skipped_is_failure() -> None:
+    """Orchestrator review, #269/#315: with all THREE files in the real
+    floor (`DECLARED_REAL_DOCKER_FILES`), a run where the decide-channel and
+    image-build files both execute and pass but #269's gate-witness file
+    collected only a SKIP must give FAILURE, not SUCCESS - green on the VM
+    with no gate-witness evidence is exactly what the per-file floor exists
+    to refuse. Uses the module's OWN default declared-files tuple (not the
+    local 1-file `DECLARED`), so this exercises the real, currently-shipped
+    floor - and pins its current size, so a future addition that forgets to
+    extend this test's fixtures is caught here (as a missing-testcase ERROR,
+    not a silent FAILURE/SUCCESS misread) rather than passing by accident."""
     assert c.DECLARED_REAL_DOCKER_FILES == (
         "tests.test_decide_reply_channel_live",
         "tests.test_trial_image_build_live",
-    ), "this test assumes the current two-file floor - update it if the floor changes"
+        "tests.test_gate_witness_live",
+    ), "this test assumes the current three-file floor - update it if the floor changes"
     import tempfile
     with tempfile.TemporaryDirectory() as td:
-        path = _write(Path(td), "mixed.xml", _suite(_PASS_CASE, _IMAGE_BUILD_SKIP_CASE))
-        result = c.verdict(path)  # module default: both files
+        path = _write(
+            Path(td), "mixed.xml",
+            _suite(_PASS_CASE, _IMAGE_BUILD_PASS_CASE, _GATE_WITNESS_SKIP_CASE),
+        )
+        result = c.verdict(path)  # module default: all three files
         assert result.status == c.FAILURE
-        assert result.skipped_only_files == ("tests.test_trial_image_build_live",)
+        assert result.skipped_only_files == ("tests.test_gate_witness_live",)
 
 
 def test_a_second_declared_file_with_nothing_at_all_is_error(tmp_path: Path) -> None:
