@@ -1,0 +1,51 @@
+{
+ "attempt_id": "wrong-forged-log",
+ "decisions": [
+  {
+   "logged_at": 1791295151.330928,
+   "request": {
+    "op": "tool-call"
+   },
+   "result": {
+    "allow": true,
+    "ok": true
+   },
+   "seq": 1
+  },
+  {
+   "logged_at": 1791295151.3313498,
+   "request": {
+    "op": "tool-call"
+   },
+   "result": {
+    "allow": true,
+    "ok": true
+   },
+   "seq": 2
+  },
+  {
+   "logged_at": 1791295151.3316927,
+   "request": {
+    "op": "tool-call"
+   },
+   "result": {
+    "allow": true,
+    "ok": true
+   },
+   "seq": 3
+  },
+  {
+   "logged_at": 1791295151.3320365,
+   "request": {
+    "op": "tool-call"
+   },
+   "result": {
+    "allow": false,
+    "ok": true
+   },
+   "seq": 4
+  }
+ ],
+ "read_as": "This log records requests the controller RECEIVED and decisions it MADE, each logged before its reply - never tool invocations, and never a claim that no bypass occurred (see 'no-controller-witness').",
+ "status": "witnessed"
+}

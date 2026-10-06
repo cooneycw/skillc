@@ -199,13 +199,20 @@ class DecideReplyChannel:
     independent of whatever `decide` itself does."""
 
     def __init__(
-        self, socket_path: Path, decide: DecideFn, *,
+        self, socket_path: Path, decide: DecideFn, attempt_id: str, *,
         socket_mode: int = 0o600, handler_drain_timeout: float = 5.0,
         max_concurrent_handlers: int = 32, max_request_bytes: int = 64 * 1024,
         request_timeout: float = 5.0,
     ) -> None:
         self._socket_path = socket_path
         self._decide = decide
+        #: Carried into `TrustedLog.witnessed()` by this channel's own
+        #: `trusted_log()` below, never re-supplied by a caller - this
+        #: channel is constructed per attempt (module docstring, "ONE
+        #: SOCKET, ONE DECISION FUNCTION, ONE ATTEMPT"), so it already
+        #: knows the one value a caller-side wrapper would otherwise have
+        #: to assert separately and could get wrong.
+        self.attempt_id = attempt_id
         self._socket_mode = socket_mode
         self._handler_drain_timeout = handler_drain_timeout
         #: Cross-model review finding: the subject's
@@ -447,6 +454,20 @@ class DecideReplyChannel:
                 return list(self._log)
         return self.stop_and_finalize()
 
+    def trusted_log(self) -> TrustedLog:
+        """`log_or_finalize()`'s result, already wrapped as this channel's
+        own `TrustedLog` - the convenience a caller should prefer over
+        calling `TrustedLog.witnessed()` itself, since this channel is the
+        one thing that actually knows its own `attempt_id` (see
+        `__init__`'s own comment); a caller-side wrapper asserting that
+        value separately is exactly the forgeable extra claim #183's
+        provenance review rejected. `channel-unavailable` (this backend
+        never configured a channel at all) is a DIFFERENT caller's fact -
+        `DockerBackend.trigger_log()` returning `None` - and is reported by
+        that caller, not by this method, which only runs once a channel
+        genuinely exists."""
+        return TrustedLog.witnessed(self.log_or_finalize(), self.attempt_id)
+
     def close(self) -> None:
         """Best-effort, idempotent teardown - safe before `start()` (no-op)
         and safe after `stop_and_finalize()` (no-op). For a caller that
@@ -469,6 +490,13 @@ class TrustedLog:
     was reported)."""
 
     status: str  # "witnessed" | "no-controller-witness" | "channel-unavailable"
+    #: Which attempt this log belongs to - REQUIRED, never optional,
+    #: because a caller that must bind a trusted observation to the
+    #: specific attempt it is grading (#183's provenance review,
+    #: evals/level5's own `grade_recovery.py`) needs this value from the
+    #: channel itself, not from a second, separately-asserted claim it
+    #: could get wrong or that a forger could fabricate to match.
+    attempt_id: str
     decisions: tuple[LoggedDecision, ...] = ()
 
     #: Read as a class attribute so callers (and this module's own tests)
@@ -476,14 +504,14 @@ class TrustedLog:
     read_as: str = field(default=READ_AS_NOTE, repr=False, compare=False)
 
     @classmethod
-    def witnessed(cls, decisions: list[LoggedDecision]) -> TrustedLog:
+    def witnessed(cls, decisions: list[LoggedDecision], attempt_id: str) -> TrustedLog:
         if not decisions:
-            return cls(status="no-controller-witness")
-        return cls(status="witnessed", decisions=tuple(decisions))
+            return cls(status="no-controller-witness", attempt_id=attempt_id)
+        return cls(status="witnessed", attempt_id=attempt_id, decisions=tuple(decisions))
 
     @classmethod
-    def unavailable(cls) -> TrustedLog:
-        return cls(status="channel-unavailable")
+    def unavailable(cls, attempt_id: str) -> TrustedLog:
+        return cls(status="channel-unavailable", attempt_id=attempt_id)
 
     def to_json_bytes(self) -> bytes:
         """A retainable, exportable form - the `raw` data a caller may cite
@@ -491,12 +519,18 @@ class TrustedLog:
         existing convention for backend raw data (design doc §2e). Shape is
         deliberately generic (status plus a decisions list), not Level 5's
         specific `trusted-disruption-log.json` schema - adapting this into
-        that shape is a caller's job (#183's own PR C), not this module's."""
+        that shape is a caller's job (#183's own PR C), not this module's.
+        `decisions` is written in `seq` order explicitly (never merely "the
+        order this tuple happens to hold," even though construction already
+        preserves it) so a reader never has to trust that ordering came
+        from this method rather than from whatever handed it the tuple -
+        the bytes are self-consistent on their own."""
         return json.dumps({
             "status": self.status,
+            "attempt_id": self.attempt_id,
             "read_as": self.read_as,
             "decisions": [
                 {"seq": d.seq, "request": d.request, "result": d.result, "logged_at": d.logged_at}
-                for d in self.decisions
+                for d in sorted(self.decisions, key=lambda d: d.seq)
             ],
         }).encode("utf-8")

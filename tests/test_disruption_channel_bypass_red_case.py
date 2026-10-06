@@ -140,13 +140,14 @@ def test_the_channel_catches_the_same_bypass_as_no_controller_witness(tmp_path: 
         trigger_decide=_fixed_decide(fail_at=3), trigger_socket_dir=_short_trigger_socket_dir(),
     )
     handle = backend.prepare("a-lc-bypass-red-000000002")
+    assert isinstance(handle, d._Handle)
     result = backend.execute(handle, [_PYTHON, "-c", _bypass_script(5)], Limits(timeout=10))
     assert result.reason == "exited" and result.exit_code == 0
     assert backend.confirm_stopped(handle) is Confirmation.CONFIRMED
     log = backend.trigger_log(handle)
     backend.destroy(handle)
     assert log == []  # the bypass never reached the channel at all
-    trusted = TrustedLog.witnessed(log)
+    trusted = TrustedLog.witnessed(log, handle.attempt_id)
     assert trusted.status == "no-controller-witness"
 
 
@@ -193,6 +194,6 @@ def test_a_cooperating_subject_is_witnessed_not_mistaken_for_a_bypass(tmp_path: 
     log = backend.trigger_log(handle)
     backend.destroy(handle)
     assert log is not None and len(log) == 5
-    trusted = TrustedLog.witnessed(log)
+    trusted = TrustedLog.witnessed(log, handle.attempt_id)
     assert trusted.status == "witnessed"
     assert [d_.result["decision"] for d_ in trusted.decisions] == ["pass", "pass", "fail", "pass", "pass"]

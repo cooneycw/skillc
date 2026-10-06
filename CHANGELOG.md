@@ -76,6 +76,42 @@ and version plan.
     is now reserved for every claimed path being comparable AND agreeing;
     partial coverage is `unknown`/`partial-helper-coverage`.
 
+- **Level 5's disruption-trigger channel is wired to #183's controller-owned
+  decide-and-reply mechanism** (Refs #183). `DecideReplyChannel` now carries
+  its own `attempt_id` (set at construction, since it is already per-attempt
+  by design) and exposes `trusted_log()` as the convenience that binds a
+  `TrustedLog` from the channel itself rather than a caller-side claim;
+  `TrustedLog.to_json_bytes()` also writes `attempt_id` and sorts decisions
+  by `seq` explicitly.
+  - `evals/level5/recovery-partial-processing/grade_recovery.py`'s
+    `_trusted_log()` no longer accepts a pre-derived `{"failed_after_step":
+    N}` claim (review found that shape forgeable even with a digest/
+    attempt_id attached). It now parses the raw channel log directly and
+    derives `failed_after_step` itself from the controller's own seq-ordered
+    decisions - refusing a non-clean seq set (duplicate/gap) but accepting
+    any arrival-order permutation (re-sorted first, per the channel's own
+    completion-order numbering). An optional `expected_attempt_id`, when
+    supplied, is cross-checked and refused on mismatch.
+  - `qualify.py` no longer reads any trusted observation from inside a
+    candidate's own tree - `reference`/`wrong/*` are now certified against
+    `controller-observations/<candidate>.json`, bytes from a REAL
+    `DecideReplyChannel` run produced by the committed
+    `generate_controller_observations.py` (never hand-typed), labelled
+    controller-simulated pending live generation (Docker-owed).
+  - The headline red case: a plausible `trusted-disruption-log.json`
+    planted inside a candidate tree is refused outright (not silently
+    ignored) - pre-PR-B code read it and graded `reference` SATISFIED on
+    its say-so. A second red case refuses a controller observation whose
+    own `attempt_id` doesn't match the candidate it's supplied for. Both
+    mutation-checked, alongside the seq-validity and attempt_id-match
+    checks in `grade_recovery.py`.
+  - No `expected.json` changed: `reference` still certifies PASS,
+    `forged-log`/`silent-overclaim`/`work-loss` still FAIL for the reasons
+    they always did - this restructures WHERE the trusted bytes come from,
+    not what the grader is certified to catch.
+  - The subject-side proxy and its image/Dockerfile wiring are a separate
+    follow-on branch (#183 PR B2), not part of this change.
+
 - **`DockerBackend.execute()` refuses a second call on an already-stopped
   handle instead of fabricating a result** (Closes #304). `execute()`'s own
   contract always stops the container before returning; a second call used

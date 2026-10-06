@@ -632,7 +632,7 @@ def test_gate_witness_composes_with_a_real_decide_reply_channel(tmp_path: Path) 
         limits=_limits(), gate_exclusivity=False, exclusivity_basis="",
     )
     sock_path = tmp_path / "trigger.sock"
-    channel = DecideReplyChannel(sock_path, witness.decide)
+    channel = DecideReplyChannel(sock_path, witness.decide, "a1")
     channel.start()
     try:
         reply = _send(sock_path, {"op": "run_gate", "gate": "lint"})
@@ -655,7 +655,7 @@ def test_concurrent_run_gate_for_different_gates_do_not_corrupt_each_others_stat
         limits=_limits(), gate_exclusivity=False, exclusivity_basis="",
     )
     sock_path = tmp_path / "trigger.sock"
-    channel = DecideReplyChannel(sock_path, witness.decide)
+    channel = DecideReplyChannel(sock_path, witness.decide, "a1")
     channel.start()
     try:
         threads = [
@@ -715,7 +715,7 @@ def test_real_gates_run_with_real_exit_codes_while_the_primary_subject_keeps_run
             limits=Limits(timeout=5.0, grace=0.5), gate_exclusivity=False, exclusivity_basis="",
         )
         sock_path = tmp_path / "trigger.sock"
-        channel = DecideReplyChannel(sock_path, witness.decide)
+        channel = DecideReplyChannel(sock_path, witness.decide, "a1")
         channel.start()
 
         primary_result: list[ExecuteResult] = []
