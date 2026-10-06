@@ -130,7 +130,17 @@ boundary itself.
 - allow outbound internet; allow inbound SSH only;
 - **the same deny rules must also sit in the `DOCKER-USER` chain** (or the
   nftables equivalent) - Docker's own rules otherwise bypass a plain `ufw`
-  policy for forwarded container traffic entirely.
+  policy for forwarded container traffic entirely;
+- **the deny rules must DROP, or REJECT with `icmp-host-prohibited`/
+  `icmp-admin-prohibited` - never REJECT with a bare TCP reset.** A
+  tcp-reset reject is indistinguishable, to the probe, from a real host
+  answering and refusing the connection: `ConnectionRefusedError` is
+  exactly what the probe script sees either way, so a reset-based deny
+  rule makes the LAN probe read "reachable" and the runner refuse EVERY
+  run, permanently - fail-closed (safe), but confusing to diagnose if the
+  operator does not know this in advance. `ufw`'s default deny already
+  drops; this matters mainly if the operator's own convention uses
+  `REJECT` instead.
 
 **The preflight (`run-real-docker`'s first step, before any checkout) is a
 DETECTOR, not a proof.** From inside a throwaway container it runs a
