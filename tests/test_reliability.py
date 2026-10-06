@@ -223,9 +223,25 @@ def test_clopper_pearson_inversion_matches_exact_binomial_oracle() -> None:
     numbers: `L` and `U` must satisfy the DEFINING property of the exact
     interval, `P(Bin(n, L) >= c) = alpha/2` and `P(Bin(n, U) <= c) = alpha/2`,
     checked against the SAME exact oracle as the grid test above - not
-    against `clopper_pearson`'s own internals, which would prove nothing."""
+    against `clopper_pearson`'s own internals, which would prove nothing.
+
+    THE RANGE MATTERS (orchestrator review, #273): this test originally ran
+    `n` up to 40 only, and BOTH committed mutations of `_betainc` (the
+    flipped symmetry branch, the perturbed continued-fraction coefficient)
+    left it GREEN - not because the check was circular or its tolerance too
+    loose, but because the continued fraction still CONVERGES to the right
+    answer under either mutation for small-to-moderate `(a, b)`; the wrong
+    branch is a numerical-stability choice, not a correctness one, until `n`
+    is large enough that convergence genuinely fails. Measured directly: at
+    `n=60` the flipped-branch mutation sends `clopper_pearson(1, 60)`'s upper
+    bound to `0.9999999999995453` (oracle: `P(Bin(60, U) <= 1) = 0.0`, not
+    the `0.025` a correct bound gives) - a failure invisible at `n<=40`, in
+    the exact region the grid test's own `n<=60` already covered. The range
+    here now matches the grid test's for exactly that reason - a narrower
+    inversion test does not test what the grid test's range actually proves.
+    """
     alpha = 0.05
-    for n in range(1, 41):
+    for n in range(1, 61):
         for c in range(n + 1):
             lower, upper = rel.clopper_pearson(c, n)
             if c == 0:

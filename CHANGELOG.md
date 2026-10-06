@@ -56,12 +56,24 @@ and version plan.
     at `a == 0` (the `k == 0` row of the grid, never reached by
     `clopper_pearson`'s own two calls, but reachable by anyone calling
     `_betainc` directly) - fixed with the boundary-parameter limit
-    (`I_x(0, b) = 1`, `I_x(a, 0) = 0` for `x` in `(0, 1)`). Mutation-checked
-    twice: flipping the continued fraction's symmetry branch and perturbing
-    one of its coefficients each turn the grid test red (24550 and 13249
-    mismatches respectively) while every spot-check and the inversion test
-    stayed green - direct evidence that the grid, not the spot-checks, is
-    what actually proves this function.
+    (`I_x(0, b) = 1`, `I_x(a, 0) = 0` for `x` in `(0, 1)`).
+  - **The inversion test's range mattered, and the first version's didn't
+    reach far enough (orchestrator review, second pass).** Mutation-checking
+    both the grid test and the inversion test (flipping the continued
+    fraction's symmetry branch; perturbing one of its coefficients) found the
+    grid test going red both times (24550 and 13249 mismatches) while the
+    inversion test - then capped at `n<=40` - stayed GREEN under both. Not
+    circularity and not a loose tolerance: the wrong branch is a numerical-
+    STABILITY choice, and the continued fraction still converges to the
+    right answer under either mutation for small-to-moderate `(a, b)` -
+    `clopper_pearson`'s own bisection calls land there for `n<=40`. Measured
+    directly: the flipped-branch mutation sends `clopper_pearson(1, 60)`'s
+    upper bound to `0.9999999999995453` against an oracle value of `0.0`
+    (should be `0.025`) - a failure invisible below `n=60`, in exactly the
+    range the grid test already covered. Extended the inversion test's range
+    to `n<=60` to match the grid test's; both mutations now turn BOTH tests
+    red. A narrower inversion test does not test what a wider grid test's
+    range actually proves - this is the committed fix, not a documented gap.
   - `mcnemar_exact`: the paired hypothesis test, returning a bare p-value so
     it cannot be mistaken for an interval (protocol.md's own distinction).
   - `task_cluster_bootstrap`: seeded percentile bootstrap over TASKS (never
