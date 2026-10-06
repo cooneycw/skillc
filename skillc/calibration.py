@@ -253,6 +253,15 @@ def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
         if provided and provided != PROVIDED_KEYS and not is_prose_arm:
             raise _refuse(f"arm {arm['name']!r} carries {sorted(provided)} alone; an instruction and the "
                           "named_skills it names are declared together")
+        # codex review: an E arm with NEITHER instruction nor named_skills
+        # (provided == set()) fell through both branches above - `provided`
+        # is falsy, so neither raised - and parse_declaration accepted it,
+        # deferring the failure to a bare KeyError inside
+        # validate_expanded_instruction_lane instead of a clean refusal here.
+        if expanded and not provided and not is_prose_arm:
+            raise _refuse(f"arm {arm['name']!r}: the expanded-instruction lane's E arm must carry "
+                          "'instruction' alone (the inlined text) - it carries neither instruction nor "
+                          "named_skills")
         if expanded:
             inventory = arm.get("inventory")
             if not isinstance(inventory, str) or not inventory.strip():
@@ -418,24 +427,33 @@ def require_approved(declaration: CalibrationDeclaration, root: Path) -> None:
 
 
 def validate_expanded_instruction_lane(declaration: CalibrationDeclaration, root: Path) -> None:
-    """The expanded-instruction lane's two file-backed checks (protocol.md
-    10.4), neither of which `parse_declaration` can do without reading a
-    file. A no-op on every other lane - nothing here is this lane's business.
+    """The expanded-instruction lane's file-backed checks (protocol.md
+    10.4), none of which `parse_declaration` can do without reading a file.
+    A no-op on every other lane - nothing here is this lane's business.
 
-    1. HELPER PARITY. The shared `inventory` (one `skillc profile validate`
-    output, read once for the pair) must have validated at
-    `treatment_question == "prose"` - never `product`, which permits
-    treatment-scoped helpers the E arm would then lack, exactly the confound
-    this check exists to rule out (orchestrator review, #274). The existing
-    `skillc.profile` helper-parity refusal already proved
-    `helper_parity.treatment == []` for a "prose" inventory; re-read here
-    rather than trusted blindly, since this function never re-runs
-    `profile.validate` itself.
+    0. SUBJECT BINDING (codex review). The inventory must be read as a
+    `skillc profile validate` output addressed to THIS declaration's
+    subject - checked against the inventory's own `subject.locator`/
+    `subject.revision`, which `profile.validate` always records. This does
+    not re-run `profile.validate` (out of this function's bounded scope,
+    #274) or cryptographically prove the file was not fabricated; it closes
+    the cheap version of that gap - an inventory that doesn't even CLAIM to
+    be for the declared subject - and is why every field below is read with
+    an explicit type/presence check rather than `.get(..., default)`: an
+    absent or malformed field must refuse, never silently pass as empty.
+
+    1. HELPER PARITY. Must have validated at `treatment_question == "prose"`
+    - never `product`, which permits treatment-scoped helpers the E arm
+    would then lack, exactly the confound this check exists to rule out
+    (orchestrator review, #274). `helper_parity.treatment` must be PRESENT
+    as a list and empty - absent entirely is refused, not read as empty
+    (codex review: `.get(\"helper_parity\", {}).get(\"treatment\")` let an
+    inventory with no helper_parity object at all pass, indistinguishable
+    from one that validated and genuinely found nothing).
 
     2. CONTENT IDENTITY. E's `instruction` (the inlined obligation text)
     must hash to the SAME `body_digest` the inventory recorded for the one
-    skill S names - `skillc.profile.validate`'s own digest of that skill's
-    `SKILL.md` body. Byte-identical, not merely equivalent: the lane's own
+    skill S names. Byte-identical, not merely equivalent: the lane's own
     "restate, never add" rule (protocol.md 10.1) is satisfied by
     construction when the bytes do not differ at all."""
     if declaration.lane != EXPANDED_INSTRUCTION_LANE:
@@ -447,25 +465,52 @@ def validate_expanded_instruction_lane(declaration: CalibrationDeclaration, root
     e_arm = next(a for a in treated if a is not s_arm)
     inventory_path = root / str(s_arm["inventory"])
     try:
-        inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+        inventory_raw = json.loads(inventory_path.read_text(encoding="utf-8"))
     except OSError as exc:
         raise _refuse(f"inventory {inventory_path} could not be read: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise _refuse(f"inventory {inventory_path} is not valid JSON: {exc}") from exc
+    if not isinstance(inventory_raw, dict):
+        raise _refuse(f"inventory {inventory_path} is not a JSON object")
+    inventory: dict[str, object] = inventory_raw
+
+    inv_subject = inventory.get("subject")
+    declared_subject = s_arm.get("subject")
+    if not isinstance(inv_subject, dict) or not isinstance(declared_subject, dict):
+        raise _refuse(f"inventory {inventory_path} carries no 'subject' record to bind against the "
+                      f"declared one")
+    mismatched = [k for k in ("locator", "revision") if inv_subject.get(k) != declared_subject.get(k)]
+    if mismatched:
+        raise _refuse(f"inventory {inventory_path} was validated for subject {inv_subject.get('locator')!r} "
+                      f"@ {inv_subject.get('revision')!r}, not the declared "
+                      f"{declared_subject.get('locator')!r} @ {declared_subject.get('revision')!r} ({mismatched})")
+
     question = inventory.get("treatment_question")
     if question != "prose":
         raise _refuse(f"inventory {inventory_path} validated at treatment_question {question!r}, not "
                       f"'prose' - the expanded-instruction lane needs identical helpers in every arm, "
                       f"which only a prose question proves (protocol.md 10.4)")
-    treatment_scoped = inventory.get("helper_parity", {}).get("treatment")
+
+    helper_parity = inventory.get("helper_parity")
+    if not isinstance(helper_parity, dict) or "treatment" not in helper_parity:
+        raise _refuse(f"inventory {inventory_path} carries no helper_parity.treatment field - absence is "
+                      f"not evidence of an empty population, it means no parity evidence was supplied")
+    treatment_scoped = helper_parity["treatment"]
+    if not isinstance(treatment_scoped, list):
+        raise _refuse(f"inventory {inventory_path}'s helper_parity.treatment is not a list: {treatment_scoped!r}")
     if treatment_scoped:
         raise _refuse(f"inventory {inventory_path} carries treatment-scoped helper(s) {treatment_scoped} "
                       f"despite a prose treatment_question - this inventory is stale or was tampered "
                       f"with after `skillc profile validate` ran")
+
     skill_name = s_arm["named_skills"][0]
-    skills = inventory.get("skills", [])
+    skills = inventory.get("skills")
+    if not isinstance(skills, list):
+        raise _refuse(f"inventory {inventory_path} carries no 'skills' list")
     matching = next((s for s in skills if isinstance(s, dict) and s.get("name") == skill_name), None)
-    if matching is None:
-        raise _refuse(f"inventory {inventory_path} has no skill named {skill_name!r} (named by arm "
-                      f"{s_arm['name']!r})")
+    if not isinstance(matching, dict) or not isinstance(matching.get("body_digest"), str):
+        raise _refuse(f"inventory {inventory_path} has no skill named {skill_name!r} with a body_digest "
+                      f"(named by arm {s_arm['name']!r})")
     actual = m.sha256_bytes(str(e_arm["instruction"]).encode("utf-8"))
     if actual != matching["body_digest"]:
         raise _refuse(f"arm {e_arm['name']!r}: instruction digest {actual} does not match {skill_name!r}'s "

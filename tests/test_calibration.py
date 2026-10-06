@@ -18,6 +18,7 @@ from __future__ import annotations
 import copy
 import json
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -419,19 +420,32 @@ def test_red_the_203_candidate_3_declaration_without_its_approval_is_refused() -
 _SKILL_BODY = "Run the gate, then open a PR. Never skip the tests.\n"
 
 
+#: Matches `_mutated()`'s real committed subject (evals/calibration-204/
+#: run-manifest.json's "full-cpp" arm) - the default every `_inventory()`
+#: call binds against, so the positive-case fixtures agree with each other
+#: without each test having to pass it explicitly.
+_DEFAULT_SUBJECT = {"locator": "github.com/cooneycw/claude-power-pack", "revision": "85e9b03ad2af1c41020ff6d92d36fa257bdacd2b"}
+
+
 def _inventory(tmp_path: Path, *, name: str = "flow-check", question: str = "prose",
-               treatment_scoped: tuple[str, ...] = (), body: str = _SKILL_BODY) -> Path:
+               treatment_scoped: tuple[str, ...] = (), body: str = _SKILL_BODY,
+               subject: Mapping[str, object] | None = None,
+               include_helper_parity: bool = True) -> Path:
     """A hand-written inventory, matching `skillc profile validate`'s real
-    output shape (treatment_question, helper_parity.treatment, skills[].
-    body_digest) closely enough for `validate_expanded_instruction_lane` to
-    read - the producer side (profile.py) has its own tests proving a REAL
-    validate() run produces this shape; this is the consumer side's fixture."""
+    output shape (subject.locator/revision, treatment_question,
+    helper_parity.treatment, skills[].body_digest) closely enough for
+    `validate_expanded_instruction_lane` to read - the producer side
+    (profile.py) has its own tests proving a REAL validate() run produces
+    this shape; this is the consumer side's fixture."""
     path = tmp_path / "inventory.json"
-    path.write_text(json.dumps({
+    body_obj: dict[str, object] = {
+        "subject": dict(subject or _DEFAULT_SUBJECT),
         "treatment_question": question,
-        "helper_parity": {"common": ["gate-script"], "treatment": list(treatment_scoped), "bundled": []},
         "skills": [{"name": name, "body_digest": calibration.m.sha256_bytes(body.encode("utf-8"))}],
-    }), encoding="utf-8")
+    }
+    if include_helper_parity:
+        body_obj["helper_parity"] = {"common": ["gate-script"], "treatment": list(treatment_scoped), "bundled": []}
+    path.write_text(json.dumps(body_obj), encoding="utf-8")
     return path
 
 
@@ -445,7 +459,7 @@ def _expanded_instruction_declaration(tmp_path: Path, *, e_instruction: str = _S
     arms = data["arms"]
     assert isinstance(arms, list)
     subject = copy.deepcopy(arms[0]["subject"])
-    inventory = str(inventory_path or _inventory(tmp_path))
+    inventory = str(inventory_path or _inventory(tmp_path, subject=subject))
     s_arm = {"name": "explicit-skill", "subject": subject, "instruction": "Use `flow-check` first.",
              "named_skills": ["flow-check"], "inventory": inventory}
     e_arm = {"name": "expanded-instruction", "subject": subject, "instruction": e_instruction,
@@ -592,4 +606,70 @@ def test_red_an_unknown_skill_name_is_refused(tmp_path: Path) -> None:
         _expanded_instruction_declaration(
             tmp_path, s_overrides={"instruction": "Use `no-such-skill` first.", "named_skills": ["no-such-skill"]}))
     with pytest.raises(calibration.DeclarationRefused, match="no skill named"):
+        calibration.validate_expanded_instruction_lane(declaration, ROOT)
+
+
+# ---------------------------------- hardening, codex cross-model review (#274)
+
+
+def test_an_e_arm_with_neither_instruction_nor_named_skills_is_refused(tmp_path: Path) -> None:
+    """Codex review: provided == set() fell through both shape branches in
+    parse_declaration (neither is truthy), so this used to validate clean
+    and crash with a bare KeyError inside validate_expanded_instruction_lane
+    instead of being refused here, at the point that actually knows the
+    arm's shape is wrong."""
+    data = _expanded_instruction_declaration(tmp_path)
+    arms = data["arms"]
+    assert isinstance(arms, list)
+    del arms[2]["instruction"]  # type: ignore[index]  # E, carries instruction alone normally
+    with pytest.raises(calibration.DeclarationRefused, match="neither instruction nor named_skills"):
+        calibration.parse_declaration(data)
+
+
+def test_an_inventory_with_no_subject_record_is_refused(tmp_path: Path) -> None:
+    """Codex review: the inventory's claims (treatment_question, digests)
+    were trusted without being bound to the declaration's own subject - a
+    hand-written inventory for ANY subject, or none, passed."""
+    path = tmp_path / "inventory.json"
+    path.write_text(json.dumps({
+        "treatment_question": "prose",
+        "helper_parity": {"common": [], "treatment": [], "bundled": []},
+        "skills": [{"name": "flow-check", "body_digest": calibration.m.sha256_bytes(_SKILL_BODY.encode("utf-8"))}],
+    }), encoding="utf-8")
+    declaration = calibration.parse_declaration(_expanded_instruction_declaration(tmp_path, inventory_path=path))
+    with pytest.raises(calibration.DeclarationRefused, match="no 'subject' record"):
+        calibration.validate_expanded_instruction_lane(declaration, ROOT)
+
+
+def test_an_inventory_validated_for_a_different_subject_is_refused(tmp_path: Path) -> None:
+    other_subject = {"locator": "github.com/someone/else", "revision": "deadbeef"}
+    path = _inventory(tmp_path, subject=other_subject)
+    declaration = calibration.parse_declaration(_expanded_instruction_declaration(tmp_path, inventory_path=path))
+    with pytest.raises(calibration.DeclarationRefused, match="was validated for subject"):
+        calibration.validate_expanded_instruction_lane(declaration, ROOT)
+
+
+def test_an_inventory_with_no_helper_parity_object_is_refused(tmp_path: Path) -> None:
+    """Codex review: `.get('helper_parity', {}).get('treatment')` read an
+    absent object as an empty, passing population - indistinguishable from
+    one that was actually validated and found nothing."""
+    path = _inventory(tmp_path, include_helper_parity=False)
+    declaration = calibration.parse_declaration(_expanded_instruction_declaration(tmp_path, inventory_path=path))
+    with pytest.raises(calibration.DeclarationRefused, match="no helper_parity.treatment field"):
+        calibration.validate_expanded_instruction_lane(declaration, ROOT)
+
+
+def test_a_malformed_inventory_file_is_refused_not_a_crash(tmp_path: Path) -> None:
+    path = tmp_path / "inventory.json"
+    path.write_text("not json at all {", encoding="utf-8")
+    declaration = calibration.parse_declaration(_expanded_instruction_declaration(tmp_path, inventory_path=path))
+    with pytest.raises(calibration.DeclarationRefused, match="not valid JSON"):
+        calibration.validate_expanded_instruction_lane(declaration, ROOT)
+
+
+def test_an_inventory_that_is_a_json_array_not_an_object_is_refused(tmp_path: Path) -> None:
+    path = tmp_path / "inventory.json"
+    path.write_text("[]", encoding="utf-8")
+    declaration = calibration.parse_declaration(_expanded_instruction_declaration(tmp_path, inventory_path=path))
+    with pytest.raises(calibration.DeclarationRefused, match="not a JSON object"):
         calibration.validate_expanded_instruction_lane(declaration, ROOT)

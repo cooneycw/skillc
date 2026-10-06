@@ -676,9 +676,10 @@ def test_an_unobserved_attempt_is_neither_opened_nor_not_opened() -> None:
 _TDD_BODY = "Body.\n"
 
 
-def _prose_inventory(tmp_path: Path) -> Path:
+def _prose_inventory(tmp_path: Path, subject: Mapping[str, object]) -> Path:
     path = tmp_path / "inventory.json"
     path.write_text(json.dumps({
+        "subject": {"locator": subject["locator"], "revision": subject["revision"]},
         "treatment_question": "prose",
         "helper_parity": {"common": [], "treatment": [], "bundled": []},
         "skills": [{"name": "tdd", "body_digest": materialize.sha256_bytes(_TDD_BODY.encode("utf-8"))}],
@@ -695,7 +696,7 @@ def _expanded_instruction_run_declaration(tmp_path: Path) -> calibration.Calibra
     arms = data["arms"]
     assert isinstance(arms, list)
     subject = dict(arms[0]["subject"])
-    inventory = str(_prose_inventory(tmp_path))
+    inventory = str(_prose_inventory(tmp_path, subject))
     new_arms: list[object] = [arms[1],  # baseline
                               {"name": "explicit-skill", "subject": subject, "treatment": "told to read tdd",
                                "instruction": "Before you start, read the `tdd` skill.", "named_skills": ["tdd"],
