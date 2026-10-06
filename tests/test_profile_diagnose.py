@@ -369,3 +369,126 @@ def test_the_cli_refuses_only_when_the_profile_itself_cannot_load(tmp_path: Path
     a diagnostic exiting 0."""
     (tmp_path / "profile.json").write_text("not json", encoding="utf-8")
     assert cli.main(["profile", "diagnose", str(tmp_path / "profile.json"), "--snapshot", str(tmp_path)]) == 2
+
+
+# ------------------------------------------------------- a cyclic dependency graph
+
+
+def test_a_dependency_cycle_terminates_and_attributes_correctly(tmp_path: Path) -> None:
+    """helper-x's own text references helper-y, and helper-y's references
+    helper-x right back - a cycle in the DEPENDENCY graph (distinct from a
+    skill-level cycle, which cannot exist: skills are never dependencies).
+
+    `_visit`'s pre-existing `dep.id in walk.visited` guard already stops the
+    walk itself from recursing forever - unchanged by #295. What #295 adds is
+    `_compute_reach`'s fixed-point over `walk.edges`, and THAT needs its own
+    proof: does the cycle make it loop forever, or let either side's
+    attribution leak into the other's where it should not?
+
+    skill-a reaches helper-x directly; skill-b reaches helper-y directly;
+    neither reaches the other's helper by any OTHER path. If the cycle is
+    handled correctly, attribution still flows across it - a real,
+    non-worthless case, not just a termination probe - so both helpers end
+    up co-owned by both skills, and the walk completes in finite time either
+    way.
+    """
+    skill_a_md = ("---\nname: skill-a\ndescription: reaches helper-x\n---\n"
+                  "Run `~/.helpers/x.sh`.\n")
+    skill_b_md = ("---\nname: skill-b\ndescription: reaches helper-y\n---\n"
+                  "Run `~/.helpers/y.sh`.\n")
+    # Each helper's OWN text references the other - the cycle.
+    x_sh = "#!/usr/bin/env bash\n# also uses ~/.helpers/y.sh\n"
+    y_sh = "#!/usr/bin/env bash\n# also uses ~/.helpers/x.sh\n"
+
+    src = tmp_path / "src"
+    _write(src / "pack" / "skills" / "skill-a" / "SKILL.md", skill_a_md)
+    _write(src / "pack" / "skills" / "skill-b" / "SKILL.md", skill_b_md)
+    _write(src / "tools" / "x.sh", x_sh, True)
+    _write(src / "tools" / "y.sh", y_sh, True)
+
+    subject = {**SUBJECT, "locator": "example.invalid/cycle"}
+    profile_data = {
+        **PROFILE,
+        "name": "cycle-diagnose",
+        "dependencies": [
+            {"id": "helper-x", "kind": "helper", "scope": "treatment",
+             "source_root": "tools", "paths": ["x.sh"], "destination": ".helpers",
+             "satisfies": [{"reference": "~/.helpers/x.sh", "path": "x.sh"}]},
+            {"id": "helper-y", "kind": "helper", "scope": "treatment",
+             "source_root": "tools", "paths": ["y.sh"], "destination": ".helpers",
+             "satisfies": [{"reference": "~/.helpers/y.sh", "path": "y.sh"}]},
+        ],
+    }
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "subject.json").write_text(json.dumps(subject), encoding="utf-8")
+    (tmp_path / "profile.json").write_text(json.dumps(profile_data), encoding="utf-8")
+    prof = p.Profile.load(tmp_path / "profile.json")
+
+    import signal
+
+    def _alarm(signum: int, frame: object) -> None:
+        raise TimeoutError("diagnose() did not terminate - possible infinite loop on a cycle")
+
+    old_handler = signal.signal(signal.SIGALRM, _alarm)
+    signal.alarm(10)
+    try:
+        diag = p.diagnose(prof, p.DirTree(src))
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old_handler)
+
+    assert diag["problems"] == [], diag["problems"]
+    assert diag["skills"]["skill-a"]["status"] == "intact"
+    assert diag["skills"]["skill-b"]["status"] == "intact"
+
+    # Direct unit check on the propagation itself: both sides of the cycle
+    # end up attributed to BOTH skills, neither more nor less.
+    walk = p._Walk(prof, p.DirTree(src), {}, problems=[])
+    walk.edges = [
+        ("skill:skill-a", "helper-x"),
+        ("skill:skill-b", "helper-y"),
+        ("helper-x", "helper-y"),
+        ("helper-y", "helper-x"),
+    ]
+    reach = p._compute_reach(walk)
+    assert reach["helper-x"] == {"skill-a", "skill-b"}
+    assert reach["helper-y"] == {"skill-a", "skill-b"}
+
+
+def test_compute_reach_needs_more_than_one_pass(tmp_path: Path) -> None:
+    """Mutation check: a THREE-hop chain (skill -> A -> B -> C) whose edges are
+    deliberately listed in an order a SINGLE sweep cannot resolve - the edge
+    supplying B's reach (`A -> B`) is listed AFTER the edge that consumes it
+    (`B -> C`). A single-pass propagation (the mutation `_compute_reach`'s
+    `while changed` loop guards against) gets `reach["B"]` right but misses
+    `reach["C"]` entirely, because C was computed from B's state before B had
+    been updated. The real walk's edge order is not under this test's
+    control (it depends on queue/scan order), so the fixed-point has to hold
+    for ANY order, not just the lucky one the end-to-end case above happens
+    to produce.
+    """
+    src = tmp_path / "src"
+    _write(src / "pack" / "skills" / "skill-a" / "SKILL.md",
+           "---\nname: skill-a\ndescription: d\n---\nx\n")
+    subject = {**SUBJECT, "locator": "example.invalid/chain"}
+    profile_data = {
+        **PROFILE, "name": "chain-diagnose", "select": ["skill-a"], "dependencies": [],
+        "declared_empty_kinds": ["startup-context", "tool", "synthetic", "library", "helper"],
+    }
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "subject.json").write_text(json.dumps(subject), encoding="utf-8")
+    (tmp_path / "profile.json").write_text(json.dumps(profile_data), encoding="utf-8")
+    prof = p.Profile.load(tmp_path / "profile.json")
+    walk = p._Walk(prof, p.DirTree(src), {}, problems=[])
+    walk.edges = [
+        ("B", "C"),             # consumes B's reach BEFORE it is ever set
+        ("skill:skill-a", "A"),
+        ("A", "B"),             # supplies B's reach, but only after the above
+    ]
+    reach = p._compute_reach(walk)
+    assert reach["A"] == {"skill-a"}
+    assert reach["B"] == {"skill-a"}
+    assert reach["C"] == {"skill-a"}, (
+        "a single, non-repeated sweep would leave this empty - the edge "
+        "that supplies it runs after the edge that reads it"
+    )
