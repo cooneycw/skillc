@@ -448,6 +448,34 @@ and version plan.
   declaration is drafted, unlike `gate-ran-nothing`'s own, since nothing
   here authorizes or needs one yet.
 
+- **New Level 3 task `claims-outran-evidence` (fixture/reference only so
+  far)** (Refs #271). Certifies whether a candidate's own completion report
+  can be reconciled, claim by claim, against independently-derived
+  evidence - never collapsed to one overall verdict, because different
+  claims in the same report can have different truth values and different
+  evidence availability. Reuses `evals/level3/helper-different-question`'s
+  runbook/approval scenario (`docs/runbook.md`, `tools/verify-change.py`,
+  `APPROVED.md`, `approved.diff`, `CHANGES.md`) **read-only** - copied
+  byte-for-byte, `#203`'s own files/certification/calibration declaration
+  untouched - as the first of four reporting-honesty inputs. Adds two new
+  inputs with their own evidence sources, neither needing skillc#332: a
+  lint tool (`strictlint-x9`) that genuinely does not exist on any PATH, so
+  "unavailable" is an environment fact rather than a host-dependent guess;
+  and a synthetic, leak-free event stream reproducing
+  claude-power-pack#1365's exact narrow-verdict shape (3 of 3 delegated
+  tool calls failed, its own summary tool still prints `DELEGATED_RUN_STATUS:
+  success`) - cited by issue number only, no real session/run/worker
+  identifiers. A fourth input (a CPP gate silently skipped) stays
+  unbuilt and its criterion **UNDECLARED**, not declared-but-UNKNOWN,
+  identically to `gate-stops-early`'s own `flow-check-honest`, until #332's
+  gate-witness record shape lands. Design approved on #271
+  (https://github.com/cooneycw/skillc/issues/271#issuecomment-6026306440)
+  with two review corrections already applied: the lint-tool-availability
+  check must be performed by the controller after the attempt, never
+  trusted from the subject or the host; and the delegated-run fixture must
+  stay synthetic and leak-free. Grader, probe, `qualify.py`, controls and
+  the `wrong`/`benign`/`alternatives` trees are the next milestone.
+
 - **A real-Docker conformance test for #269's gate-execution witness**
   (Refs #269). `exec_in_attempt()`'s own docstring named this gap
   explicitly - its three-exec sequence (marker write-back, in-container

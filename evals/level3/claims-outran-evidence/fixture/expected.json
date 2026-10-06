@@ -1,0 +1,9 @@
+{
+ "status": "FAIL",
+ "violated": [
+  "rollback-fixed",
+  "rollback-claim-honest",
+  "lint-claim-honest",
+  "delegated-claim-honest"
+ ]
+}
