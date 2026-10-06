@@ -6,6 +6,13 @@ thing: the target skill's `SKILL.md`, whose description the `rewritten` arm
 replaces (a `degrade-subject --override-file` snapshot). Everything else -
 client, model, effort, image, task, prompt - is declared once and shared.
 
+A SCREEN (#238) is the same machinery with 2-4 arms: `published` then
+`variant-a`..`variant-c`, each a different description of the same target.
+Every case declares `expect` (`select` or `abstain`); there is no primary
+case and no test - each arm is scored as its `select`-case selection rate
+minus its `abstain`-case selection rate, and the winner is confirmed by a
+separate two-arm study.
+
 THE DECLARATION (`kind: uptake-study`) is validated before any attempt
 exists, and `require_approved` refuses one whose approval or identities are
 not recorded (ADR 0005):
@@ -59,6 +66,10 @@ from . import matched_pilot as mp
 
 KIND = "uptake-study"
 ARMS = ("published", "rewritten")
+#: A screen (#238) compares published with 1-3 variants of the target's
+#: description in one run, sharing the published baseline.
+VARIANT_ARMS = ("variant-a", "variant-b", "variant-c")
+EXPECTS = ("select", "abstain")
 MIN_ATTEMPTS, MAX_ATTEMPTS = 3, 30
 TRIAL_PREFIX = "uptake"
 EXPERIMENT_LABEL = "uptake"
@@ -70,7 +81,8 @@ DEFAULT_PRIVATE_ROOT = Path.home() / ".local" / "share" / "skillc" / "uptake-run
 #: What both arms share, declared once (calibration's own set).
 SHARED_KEYS = calibration.SHARED_KEYS
 _CASE_ID = re.compile(r"^[a-z0-9][a-z0-9-]*$")
-_TRIAL_ID_RE = re.compile(rf"^t\d+-{TRIAL_PREFIX}_(?P<case>[a-z0-9-]+)__(?P<arm>published|rewritten)_(?P<k>\d+)$")
+_TRIAL_ID_RE = re.compile(
+    rf"^t\d+-{TRIAL_PREFIX}_(?P<case>[a-z0-9-]+)__(?P<arm>published|rewritten|variant-[a-c])_(?P<k>\d+)$")
 _DESCRIPTION_LINE = re.compile(r'^description:\s*(?P<value>.*)$')
 
 
@@ -88,6 +100,9 @@ class Case:
     prompt_addendum: str
     attempts_per_arm: int
     primary: bool
+    #: What a good description does here (#238): `select` the target, or
+    #: `abstain`. Required in a screen; optional in a two-arm study.
+    expect: str | None = None
 
 
 #: A screening probe's cut-off bounds (#238): long enough for the agent to
@@ -112,15 +127,24 @@ class StudyDeclaration:
     approval: Mapping[str, object] | None
     data: Mapping[str, object]
     probe_seconds: float | None = None
+    #: Every arm in declared order (`published` first), and each non-published
+    #: arm's description. A two-arm study is (`published`, `rewritten`).
+    arms: tuple[str, ...] = ARMS
+    variants: Mapping[str, str] | None = None
+
+    @property
+    def tested(self) -> bool:
+        """A two-arm study carries the predeclared test; a screen does not."""
+        return self.arms == ARMS
 
     @property
     def primary(self) -> Case:
         return next(c for c in self.cases if c.primary)
 
 
-def derive_order(seed: int, cases: Sequence[Case]) -> list[tuple[str, str]]:
+def derive_order(seed: int, cases: Sequence[Case], arms: Sequence[str] = ARMS) -> list[tuple[str, str]]:
     """Every (case, arm) attempt, shuffled by `random.Random(seed)`."""
-    order = [(c.id, arm) for c in cases for arm in ARMS for _ in range(c.attempts_per_arm)]
+    order = [(c.id, arm) for c in cases for arm in arms for _ in range(c.attempts_per_arm)]
     random.Random(seed).shuffle(order)
     return order
 
@@ -129,25 +153,43 @@ def parse_declaration(data: Mapping[str, object]) -> StudyDeclaration:
     if data.get("kind") != KIND:
         raise _refuse(f"kind is {data.get('kind')!r}, not {KIND!r}")
     arms = data.get("arms")
-    if not isinstance(arms, list) or [a.get("name") if isinstance(a, dict) else None for a in arms] != list(ARMS):
-        raise _refuse(f"arms must be exactly {list(ARMS)}, in that order")
-    published, rewritten = arms
-    if set(published) - {"name", "subject"} or set(rewritten) - {"name", "subject", "target_skill", "description"}:
-        raise _refuse("an arm may carry only name and subject; 'rewritten' adds target_skill and description - "
+    names = [a.get("name") if isinstance(a, dict) else None for a in arms] if isinstance(arms, list) else []
+    screen_names = ["published", *VARIANT_ARMS[:max(len(names) - 1, 0)]]
+    if names != list(ARMS) and not (2 <= len(names) <= 4 and names == screen_names):
+        raise _refuse(f"arms must be exactly {list(ARMS)} (a study), or 'published' then 1-3 of "
+                      f"{list(VARIANT_ARMS)} in that order (a screen)")
+    assert isinstance(arms, list)
+    published, variant_arms = arms[0], arms[1:]
+    if set(published) - {"name", "subject"} or any(set(a) - {"name", "subject", "target_skill", "description"}
+                                                    for a in variant_arms):
+        raise _refuse("an arm may carry only name and subject; a rewritten arm adds target_skill and description - "
                       "everything else is declared once under 'shared'")
     subject = published.get("subject")
     if not isinstance(subject, dict) or not subject:
         raise _refuse("the published arm names no subject")
-    if rewritten.get("subject") != subject:
-        raise _refuse("the two arms install different subjects; they may differ only in the target's description")
-    target, description = rewritten.get("target_skill"), rewritten.get("description")
+    if any(a.get("subject") != subject for a in variant_arms):
+        raise _refuse("the arms install different subjects; they may differ only in the target's description")
+    raw_targets = [a.get("target_skill") for a in variant_arms]
+    if not all(isinstance(t, str) and t.strip() for t in raw_targets):
+        raise _refuse("every rewritten arm names the same, non-empty target_skill")
+    targets = set(raw_targets)
+    target = next(iter(targets)) if len(targets) == 1 else None
     if not isinstance(target, str) or not target.strip():
-        raise _refuse("the rewritten arm names no target_skill")
-    if not isinstance(description, str) or not description.strip() or not description.isprintable():
-        # isprintable() also refuses \r, \u2028 and every other line or
-        # control separator (counter-model review: a \r could smuggle a
-        # second frontmatter field past a guard that splits on \n).
-        raise _refuse("the rewritten arm's description must be one non-empty line of printable text")
+        raise _refuse("every rewritten arm names the same, non-empty target_skill")
+    variants: dict[str, str] = {}
+    for arm in variant_arms:
+        description = arm.get("description")
+        if not isinstance(description, str) or not description.strip() or not description.isprintable():
+            # isprintable() also refuses \r, \u2028 and every other line or
+            # control separator (counter-model review: a \r could smuggle a
+            # second frontmatter field past a guard that splits on \n).
+            raise _refuse(f"arm {arm.get('name')!r}'s description must be one non-empty line of printable text")
+        variants[str(arm["name"])] = description
+    if len(set(variants.values())) != len(variants):
+        raise _refuse("two rewritten arms carry the same description; they would not differ")
+    description = next(iter(variants.values()))
+    arm_names = tuple(str(n) for n in names)
+    tested = arm_names == ARMS
 
     shared = data.get("shared")
     if not isinstance(shared, dict) or SHARED_KEYS - set(shared):
@@ -164,6 +206,11 @@ def parse_declaration(data: Mapping[str, object]) -> StudyDeclaration:
         if not isinstance(raw, dict):
             raise _refuse("every case is an object")
         cid, addendum, n, primary = raw.get("id"), raw.get("prompt_addendum"), raw.get("attempts_per_arm"), raw.get("primary")
+        expect = raw.get("expect")
+        if expect is not None and expect not in EXPECTS:
+            raise _refuse(f"case {cid!r}: expect must be one of {list(EXPECTS)}, not {expect!r}")
+        if not tested and expect is None:
+            raise _refuse(f"case {cid!r}: a screen scores every case, so each must declare expect")
         if not isinstance(cid, str) or not _CASE_ID.fullmatch(cid):
             raise _refuse(f"case id {cid!r} must be lower-case letters, digits and hyphens")
         if not isinstance(addendum, str):
@@ -172,28 +219,36 @@ def parse_declaration(data: Mapping[str, object]) -> StudyDeclaration:
             raise _refuse(f"case {cid!r}: attempts_per_arm must be {MIN_ATTEMPTS}-{MAX_ATTEMPTS}, not {n!r}")
         if not isinstance(primary, bool):
             raise _refuse(f"case {cid!r}: primary must be true or false")
-        cases.append(Case(cid, addendum, n, primary))
+        cases.append(Case(cid, addendum, n, primary, expect))
     if len({c.id for c in cases}) != len(cases):
         raise _refuse("case ids must be distinct")
-    if sum(c.primary for c in cases) != 1:
+    if tested and sum(c.primary for c in cases) != 1:
         raise _refuse("exactly one case is primary: the test is declared on one case, in advance")
-    attempts = sum(2 * c.attempts_per_arm for c in cases)
+    if not tested and any(c.primary for c in cases):
+        raise _refuse("a screen declares no primary case: it carries no test, only per-arm scores")
+    if not tested and {c.expect for c in cases} != set(EXPECTS):
+        raise _refuse("a screen needs at least one 'select' case and one 'abstain' case to score selectivity")
+    attempts = sum(len(arm_names) * c.attempts_per_arm for c in cases)
     if total < per_attempt * attempts:
         raise _refuse(f"shared.total_seconds {total:g} cannot cover {attempts} attempts of {per_attempt:g}s")
 
     test = data.get("test")
-    if not isinstance(test, dict) or test.get("kind") != "fisher-exact-one-sided" \
-            or test.get("direction") != "rewritten > published":
-        raise _refuse("test must be {kind: fisher-exact-one-sided, direction: 'rewritten > published', alpha}")
-    alpha = test.get("alpha")
-    if isinstance(alpha, bool) or not isinstance(alpha, (int, float)) or not 0 < alpha < 1:
-        raise _refuse(f"test.alpha must be between 0 and 1, not {alpha!r}")
+    alpha: object = 0.0
+    if tested:
+        if not isinstance(test, dict) or test.get("kind") != "fisher-exact-one-sided" \
+                or test.get("direction") != "rewritten > published":
+            raise _refuse("test must be {kind: fisher-exact-one-sided, direction: 'rewritten > published', alpha}")
+        alpha = test.get("alpha")
+        if isinstance(alpha, bool) or not isinstance(alpha, (int, float)) or not 0 < alpha < 1:
+            raise _refuse(f"test.alpha must be between 0 and 1, not {alpha!r}")
+    elif test is not None:
+        raise _refuse("a screen carries no test: its winner is confirmed by a separate two-arm study")
 
     order = data.get("arm_order")
     if not isinstance(order, dict) or isinstance(order.get("seed"), bool) or not isinstance(order.get("seed"), int):
         raise _refuse("arm_order.seed must be an integer recorded before any attempt")
     sequence = order.get("sequence")
-    expected = derive_order(order["seed"], cases)
+    expected = derive_order(order["seed"], cases, arm_names)
     if not isinstance(sequence, list) or [tuple(s) if isinstance(s, list) else s for s in sequence] != expected:
         raise _refuse(f"arm_order.sequence is not what seed {order['seed']} derives; an order chosen by hand "
                       "is not a randomized one")
@@ -218,9 +273,9 @@ def parse_declaration(data: Mapping[str, object]) -> StudyDeclaration:
         probe_seconds = float(cutoff)
     return StudyDeclaration(
         target_skill=target, rewritten_description=description, subject=dict(subject), cases=tuple(cases),
-        arm_order=tuple(expected), seed=int(order["seed"]), alpha=float(alpha), shared=dict(shared),
+        arm_order=tuple(expected), seed=int(order["seed"]), alpha=float(alpha), shared=dict(shared),  # type: ignore[arg-type]
         task_path=str(task["path"]), grader_id=str(task["grader_id"]), grader_revision=str(task["grader_revision"]),
-        approval=approval, data=dict(data), probe_seconds=probe_seconds,
+        approval=approval, data=dict(data), probe_seconds=probe_seconds, arms=arm_names, variants=variants,
     )
 
 
@@ -394,8 +449,8 @@ def run_study(
     """Authorize, plan and run the whole declared schedule. Nothing - no
     store, no plan, no container - exists before `require_approved`."""
     require_approved(declaration, root)
-    if set(treatments) != set(ARMS):
-        raise StudyRefused(f"treatments must be given for exactly {list(ARMS)}")
+    if set(treatments) != set(declaration.arms):
+        raise StudyRefused(f"treatments must be given for exactly {list(declaration.arms)}")
     model, effort = str(declaration.shared["model"]), str(declaration.shared["reasoning_effort"])
     mp.pin_model_argv(model, effort, [])
     task_root = root / declaration.task_path
@@ -409,7 +464,7 @@ def run_study(
 
     store = trial.open_store(run_dir / "store", forbidden=[])
     experiment, schedule = plan_study(declaration, store, root=root, image_digest=image_digest,
-                                      digests={arm: treatments[arm].digest for arm in ARMS})
+                                      digests={arm: treatments[arm].digest for arm in declaration.arms})
     outcomes: list[mp.AttemptOutcome] = []
 
     def save() -> None:
@@ -504,6 +559,30 @@ def model_observed(obs: Mapping[str, object]) -> str:
     return str(meta.get("model") or UNKNOWN) if isinstance(meta, dict) else UNKNOWN
 
 
+def _scores(cells: Mapping[str, Mapping[str, Mapping[str, int]]],
+            declaration: StudyDeclaration) -> dict[str, dict[str, object]]:
+    """Per arm, over the cases that declare `expect`: the selection rate on
+    `select` cases, the selection rate on `abstain` cases, and score = the
+    first minus the second (#238: a description that fires everywhere scores
+    no better than one that never fires). `None` where a side has no
+    confirmed observation."""
+    out: dict[str, dict[str, object]] = {}
+    for arm in declaration.arms:
+        sides: dict[str, dict[str, int]] = {e: {"selected": 0, "observed": 0} for e in EXPECTS}
+        for case in declaration.cases:
+            if case.expect is None:
+                continue
+            cell = cells.get(case.id, {}).get(arm, {})
+            sides[case.expect]["selected"] += int(cell.get("selected", 0))
+            sides[case.expect]["observed"] += int(cell.get("observed", 0))
+        rate = {e: (v["selected"] / v["observed"] if v["observed"] else None) for e, v in sides.items()}
+        score = (rate["select"] - rate["abstain"]
+                 if rate["select"] is not None and rate["abstain"] is not None else None)
+        out[arm] = {"select": f"{sides['select']['selected']}/{sides['select']['observed']}",
+                    "abstain": f"{sides['abstain']['selected']}/{sides['abstain']['observed']}", "score": score}
+    return out
+
+
 def build_report(experiment: trial.Experiment, outcomes: Sequence[mp.AttemptOutcome],
                  declaration: StudyDeclaration) -> dict[str, object]:
     """Per attempt: whether the TARGET skill was selected (from a confirmed
@@ -548,6 +627,15 @@ def build_report(experiment: trial.Experiment, outcomes: Sequence[mp.AttemptOutc
         if entry["target_selected"] in (True, False) and entry["model_eligible"] is True:
             cell["observed"] += 1
             cell["selected"] += entry["target_selected"] is True
+    scores = _scores(cells, declaration)
+    if not declaration.tested:
+        return {
+            "version": 1, "kind": REPORT_KIND, "experiment_id": experiment.id, "screen": True,
+            "probe_seconds": declaration.probe_seconds,
+            "undecided": sum(1 for e in entries if e["decided"] is False),
+            "target_skill": declaration.target_skill, "variants": dict(declaration.variants or {}),
+            "attempts": entries, "cells": cells, "scores": scores, "primary_test": None,
+        }
     primary = declaration.primary.id
     r = cells.get(primary, {}).get("rewritten", {"observed": 0, "selected": 0})
     p = cells.get(primary, {}).get("published", {"observed": 0, "selected": 0})
@@ -566,6 +654,7 @@ def build_report(experiment: trial.Experiment, outcomes: Sequence[mp.AttemptOutc
             "reason": None if available else "no confirmed, declared-model observation in one or both primary arms",
             "p_value": p_value, "significant": (p_value <= declaration.alpha) if p_value is not None else None,
         },
+        "scores": scores if any(c.expect for c in declaration.cases) else None,
     }
 
 
@@ -578,6 +667,11 @@ def paste_back(report: Mapping[str, object]) -> str:
         for arm, cell in arms.items():
             lines.append(f"  [{case} / {arm}] selected={cell['selected']}/{cell['observed']} "
                          f"(scheduled {cell['scheduled']})")
+    scores = report.get("scores")
+    for arm, score in (scores.items() if isinstance(scores, dict) else []):
+        value = score.get("score")
+        lines.append(f"  score [{arm}] select={score.get('select')} abstain={score.get('abstain')} "
+                     f"score={'n/a' if value is None else f'{value:+.2f}'}")
     test = report.get("primary_test")
     if isinstance(test, dict) and test.get("available"):
         lines.append(f"  primary ({test['case']}): rewritten {test['rewritten']} vs published {test['published']}, "
