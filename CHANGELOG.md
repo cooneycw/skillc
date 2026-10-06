@@ -138,6 +138,36 @@ and version plan.
     the cited digest was actually captured by the attempt's manifest - the
     same "altered artifact" check `artifact_ref` already gets.
 
+- **`skill-evidence`: closes `unmatched`'s own reason vocabulary** (Refs
+  #272's own scope-addition comment, for CPP #1369). R9 (`records.md`)
+  already named `duplicate-invocation` and `no-correlating-attempt` but
+  never enforced them; `skill_evidence()` now refuses any other string once
+  `reconciliation` is `unmatched`, mirroring how #269 closes `contradicting`.
+  Both checks compare digests and attempt ids skillc already recorded -
+  neither reads the bytes behind `artifact_ref.digest`:
+  - `duplicate-invocation`: refused unless the cited digest is ALSO cited by
+    another `skill-evidence` entry anywhere in the bundle (a new bundle-wide
+    citation count in `ledger_binding`).
+  - `no-correlating-attempt`: refused unless the cited digest is genuinely
+    absent from this attempt's own manifest capture - the existing
+    altered-artifact check is now gated to skip `reconciliation: "unmatched"`,
+    since an unmatched record is the honest report that evidence does not
+    correlate, not a forged claim that it does.
+  - `declared-skill-not-installed` is deliberately NOT closed: its own Q3
+    answer needs a field `external_evidence` does not carry today, and the
+    entry's own `skill.path` cannot stand in for it (the existing
+    unconditional not-installed check already refuses it regardless of
+    reconciliation) - named as a boundary in `records.md`, not assumed
+    covered.
+  - Golden cases: `controls/ledger-binding/{good,bad}/skill-evidence-
+    duplicate-invocation*` and `skill-evidence-no-correlating-attempt*`
+    (bundle-level), `controls/skill-evidence/{good,bad}/*` (record-level).
+    Each of the three new checks (the vocabulary closure, the
+    duplicate-invocation cross-check, the no-correlating-attempt cross-check
+    and its altered-artifact gate) is mutation-checked: disabled, confirmed
+    blind on its own bad input, restored, confirmed red again, net diff
+    empty.
+
 - **A controller-owned decide-and-reply channel, and `DockerBackend`'s one
   named mount exception** (Refs #183, PR A of a 4-PR split). A new Unix-
   socket channel where the controller decides, logs, and only then replies

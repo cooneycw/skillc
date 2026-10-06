@@ -589,9 +589,11 @@ to name, and the cpp-eval review questions relayed 2026-10-06.
   `duplicate-invocation` or `no-correlating-attempt`), `matched` (present,
   bound, agrees with controller state), `contradicting` (present, bound, but
   disagrees with the controller's own independent observation - reason
-  `outcome-disagreement` or `stale-identity`, the latter when the usage
-  record's own bound subject/client identity differs from this trial's planned
-  one). `absent` is never treated as `contradicting`, and `unmatched` is never
+  `outcome-disagreement`, `stale-identity` (the usage record's own bound
+  subject/client identity differs from this trial's planned one),
+  `exit-code-mismatch` or `tree-mismatch` (the "Witness citation and closed
+  reason vocabulary" section, below). `absent` is never treated as
+  `contradicting`, and `unmatched` is never
   silently promoted to `matched` for lack of a reason to doubt it.
 
   **Witness citation and closed reason vocabulary (#269 scope addition, cpp-eval
@@ -629,6 +631,38 @@ to name, and the cpp-eval review questions relayed 2026-10-06.
 
   Only `contradicting` is closed this way; `unmatched`'s own reason stays
   open-vocabulary (above) and is unaffected.
+
+  **Closing `unmatched`'s own reason vocabulary (#272 scope addition).** R9
+  above names `duplicate-invocation` and `no-correlating-attempt` but did not
+  enforce them until now - `skill_evidence()` refuses any other string once
+  `reconciliation` is `unmatched`, mirroring how #269 later closes
+  `contradicting`'s own reason. Neither check reads the bytes behind
+  `artifact_ref.digest`; both compare digests and attempt ids skillc already
+  recorded:
+  - `duplicate-invocation`: refused unless the cited digest is ALSO cited by
+    another `skill-evidence` entry anywhere in the bundle - detected by
+    digest equality across skillc's own citations, never by opening the
+    cited file to look for a duplicated id inside it.
+  - `no-correlating-attempt`: refused unless the cited digest is genuinely
+    absent from this attempt's own `artifact-manifest` capture. This is the
+    SAME fact the altered-artifact check (above) was built to catch, so that
+    check is now gated to skip exactly `reconciliation: "unmatched"`: an
+    `unmatched` record is already the honest report that this evidence does
+    not correlate to this attempt, not a forged claim that it does - only
+    `matched`/`contradicting` claim the evidence binds, and only those claims
+    can be "altered" when the digest was never captured.
+
+  **`declared-skill-not-installed` is deliberately not closed yet.** Its Q3
+  answer (above) describes a CPP usage record's own self-declared skill name
+  disagreeing with installed paths - a fact about a field `external_evidence`
+  does not carry today (only `source`, `artifact_ref`, `reconciliation`,
+  `reason`). The entry's own top-level `skill.path` cannot stand in for it:
+  the existing unconditional check in `_skill_evidence_binding` already
+  refuses ANY entry whose `skill.path` is not installed, regardless of
+  reconciliation or reason, so there is no "good" bundle this reason could
+  describe without a new field - and adding one is a decision this document
+  should not make unilaterally. Named as a boundary, not silently assumed
+  covered.
 
 ### Golden records (acceptance item 4)
 
