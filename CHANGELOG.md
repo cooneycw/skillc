@@ -26,6 +26,157 @@ and version plan.
     red case proving a bypassed channel cannot move the controller-recorded
     point are later PRs under the same issue.
 
+- **`skillc/reliability.py`: the declared repeat-reliability estimators and
+  all-attempt accounting** (Refs #273, wave #259, workstream #246). Pure
+  stdlib implementation of exactly the methods protocol.md section 10.5/10.6
+  (#264) predeclares - no method is chosen here that #264 did not already
+  name, and where #264 names none (a per-arm PASS/FAIL reduction over
+  repeated attempts), this module refuses rather than picking one.
+  - `all_k`/`pass_at_k`: `C(c,k)/C(n,k)` and its pass@k counterpart, kept as
+    separate functions sharing no code so a bug in one cannot silently
+    become the other; both report `INSUFFICIENT`, never `0`, when `n < k`.
+  - `population_all_k`: the declared-weight (equal by default) mean of
+    per-task `all_k` over tasks with `n >= k`, naming every excluded task;
+    `pooled_all_k` refuses unconditionally (protocol.md: never raise a
+    pooled rate to the k-th power).
+  - `clopper_pearson` (single-cell exact interval) and
+    `newcombe_hybrid_interval` (independent-arms difference, composed from
+    `wilson_score`): the Beta quantile Clopper-Pearson needs has no stdlib
+    closed form, so it is computed from the regularized incomplete beta
+    function (`math.lgamma` plus a continued fraction) inverted by
+    bisection. Three textbook spot-checks are not enough evidence for
+    hand-rolled numerics (orchestrator review): `tests/test_reliability.py`
+    also carries an INDEPENDENT exact oracle needing no numerics at all -
+    for integer `k`, `I_x(k, n-k+1) = P(Binomial(n,x) >= k)`, computable
+    exactly with `math.comb` and `fractions.Fraction` - checked over a grid
+    (`n` in 1..60, every `k` in 0..n, ~20 `x` points near 0, 0.5 and 1) and
+    via the inversion property the Clopper-Pearson bounds must satisfy
+    (`P(Bin(n,L) >= c) = P(Bin(n,U) <= c) = alpha/2`). The grid test found a
+    real gap the three spot-checks missed: `_betainc` raised a domain error
+    at `a == 0` (the `k == 0` row of the grid, never reached by
+    `clopper_pearson`'s own two calls, but reachable by anyone calling
+    `_betainc` directly) - fixed with the boundary-parameter limit
+    (`I_x(0, b) = 1`, `I_x(a, 0) = 0` for `x` in `(0, 1)`).
+  - **The inversion test's range mattered, and the first version's didn't
+    reach far enough (orchestrator review, second pass).** Mutation-checking
+    both the grid test and the inversion test (flipping the continued
+    fraction's symmetry branch; perturbing one of its coefficients) found the
+    grid test going red both times (24550 and 13249 mismatches) while the
+    inversion test - then capped at `n<=40` - stayed GREEN under both. Not
+    circularity and not a loose tolerance: the wrong branch is a numerical-
+    STABILITY choice, and the continued fraction still converges to the
+    right answer under either mutation for small-to-moderate `(a, b)` -
+    `clopper_pearson`'s own bisection calls land there for `n<=40`. Measured
+    directly: the flipped-branch mutation sends `clopper_pearson(1, 60)`'s
+    upper bound to `0.9999999999995453` against an oracle value of `0.0`
+    (should be `0.025`) - a failure invisible below `n=60`, in exactly the
+    range the grid test already covered. Extended the inversion test's range
+    to `n<=60` to match the grid test's; both mutations now turn BOTH tests
+    red. A narrower inversion test does not test what a wider grid test's
+    range actually proves - this is the committed fix, not a documented gap.
+  - **Verified range stated, and a floor under it (orchestrator review,
+    third pass).** Convergence is a function of `(x, a, b)`, not just `x`,
+    so the `n<=60` grid alone did not establish the function's behaviour at
+    the `n` a real multi-task study could plausibly schedule. Added spot
+    rows at `n = 100, 250, 500, 1000` (`c` at `0, 1, n//2, n-1, n`, `x`
+    chosen near each cell's own rate rather than one fixed point, so the
+    comparison cannot trivially pass via both sides underflowing to the
+    same float zero) - all pass. `clopper_pearson`'s docstring now states
+    the verified range explicitly, and `_betacf` itself refuses rather than
+    silently return a value when its continued fraction exhausts 200
+    iterations without converging (a real, committed failing input:
+    `a = b = 1e7`) - the floor under the verified range, not a claim that
+    the range is unconditionally safe beyond where it was checked.
+  - **Independent cross-model review (`/codex:code_review`, read-only,
+    diff-only scope) found four further real defects, all fixed:**
+    (1) `mcnemar_exact(550, 550)` raised `OverflowError` - a huge exact
+    integer summed from `math.comb` multiplied against `0.5 ** n`, already
+    underflowed to `0.0` - fixed by dividing the two arbitrarily-large
+    integers (Python's int/int true division handles any size) BEFORE
+    scaling by `2.0`, not after. (2) `account_cell` silently treated a
+    `retry_of` naming an attempt NOT present in the same call's population
+    as "no parent, so this must be a root" instead of refusing the
+    dangling reference. (3) `confidence` was never validated anywhere it
+    was accepted - `clopper_pearson(5, 10, confidence=2)` silently
+    returned `(0.0, 1.0)`, a degenerate interval that reads as a real
+    answer; now checked (finite, strictly between 0 and 1) in
+    `clopper_pearson`, `wilson_score` (which `newcombe_hybrid_interval`
+    composes from) and `task_cluster_bootstrap`. (4) `population_all_k`'s
+    weight-positivity guard (`w <= 0`) let a NaN weight through - every
+    comparison with NaN is `False` - producing a silent NaN mean; now
+    checked with `math.isfinite`. A fifth finding (the `a==0`/`b==0`
+    boundary fix from the second review pass still branched on `x` and got
+    the exact `x=0`/`x=1` endpoints backwards) was also fixed. All five are
+    mutation-checked: each goes BLIND or produces the exact pre-fix failure
+    with its fix removed, restored, net diffs against HEAD empty.
+  - `mcnemar_exact`: the paired hypothesis test, returning a bare p-value so
+    it cannot be mistaken for an interval (protocol.md's own distinction).
+  - `task_cluster_bootstrap`: seeded percentile bootstrap over TASKS (never
+    attempts - repeats of one task are not independent evidence about
+    others), refusing below 5 tasks. The seed is always recorded in the
+    result, and resampling draws from a VALUE-sorted copy of the input, so
+    the same seed and the same multiset of task values give the same
+    interval regardless of input order - the shuffle-invariance control
+    cpp-eval review asked for covers the bootstrap specifically, not only
+    the trivially order-invariant point estimators.
+  - `account_cell`: all-attempt accounting per cell (scheduled/started/
+    evaluable/coverage), with retries resolved into slots by their declared
+    `retry_of` chain - a retry fills a slot but cannot select a better
+    outcome than the chain's first PASS/FAIL. Refuses a duplicate attempt id
+    or a self-referential retry, and refuses any status outside the closed
+    PASS/FAIL/UNAVAILABLE/INCONCLUSIVE/NOT_RUN vocabulary - missing data is
+    never silently imputed as success or failure.
+  - `tests/test_reliability.py`: 37 tests, each estimator checked against a
+    hand-computable value. Named controls for all five shapes the issue's
+    acceptance requires: heterogeneous-task (`population_all_k` over tasks
+    of different `n`), duplicate/retry (`account_cell`'s slot-filling),
+    missing-data (`account_cell` refuses an unclassified status),
+    zero-population (`account_cell([])`, `population_all_k({})`), and n<k
+    (`all_k`/`pass_at_k` returning `INSUFFICIENT`).
+
+- **`case.arm`/`case.paired_with`: a validated record of which trials pair as
+  a discriminating design** (Refs #273, wave #259, workstream #246). Before
+  this, nothing in the v2 schema said that one case was another's degraded
+  counterpart, so a PASS from a case whose degraded arm also passed looked
+  identical to a PASS that actually discriminates (CPP #1084's own question).
+  Two new optional fields on the existing trial-ledger `case` identity
+  (`intact`/`degraded`, and the paired case's `{id, revision}`), checked for
+  shape at the record level and for reciprocity, complementary arms,
+  uniqueness, and agreement with the existing #150 `degraded:` receipt
+  marker by a new bundle rule, `case-pairing`. This is the discriminating-case
+  axis - a property of the fixture - kept structurally distinct from the
+  treatment axis (`config.arm`, already carried by `calibration_run.py`'s own
+  trial planning): one trial can carry both, and nothing lets either be read
+  as the other.
+  - Does not itself establish that a design discriminates for the right
+    reason (#150-A's job) - only that a trial's claim to be one half of one
+    is well-formed, unambiguous, reciprocated and consistent with its own
+    receipt.
+  - **Also checks, after cross-group review (cpp-eval) found a pair could
+    report clean while naming different tasks, different graders, or
+    installing different base subjects:** `case.id` must match between the
+    two sides (same task, different revision only); planned `grader` (id and
+    revision) must match; and the degraded arm's base subject revision,
+    recovered from its `degraded:` marker, must equal the intact arm's own -
+    with an explicit UNRECOVERABLE outcome (never silently treated as a
+    match or a mismatch) when that recovery itself fails.
+  - Mutation-checked: the ambiguity, reciprocity/complementary, same-task,
+    same-grader, same-base-revision, and degraded-marker-consistency checks
+    (bundle level) and the shape checks (record level) each go BLIND with
+    their check removed.
+  - Controls: `controls/trial-ledger/{good,bad}/case-*` (1 good, 5 bad) and
+    `controls/case-pairing/{good,bad}/` (2 good, 12 bad bundles - both
+    directions of ambiguity/no-partner, one case per named defect, and a
+    good case demonstrating `case.arm`/`config.arm` orthogonality).
+  - **Per-arm repeats are facts only, no reduction** (#273's own scope
+    fence, agreed by cpp-eval review): this module exposes each arm's
+    scheduled/evaluable/passing counts and its attempts' `verified-result`
+    references by reference; any PASS/FAIL reduction over repeats is the
+    consumer's predeclared rule (CPP #1084), a separate, still-open question,
+    never computed here.
+  - Part of #273 (repeat-reliability and convenience summaries); the
+    reliability estimator itself is a separate, following commit.
+
 - **Unified regular-file task delivery** (Refs #267). Collection runs,
   calibration runs and selection probes deliver the whole declared fixture,
   excluding answer keys at every depth. Missing, empty, symlinked and
@@ -431,6 +582,35 @@ and version plan.
   divergence (the same `.image-id-<container>` override) rather than a
   differing keyword argument, since the argument is no longer the source of
   truth once the record carries a value.
+
+- **`skillc/convenience.py`: protocol.md 10.6 convenience proxies** (Refs
+  #273). Read every v2 record kind and its producers before writing
+  anything, per the orchestrator's constraint that a proxy with no backing
+  field is reported as `not_captured`, never `0` and never a guessed
+  `not_applicable`. Of the four proxies 10.6 names, one has real data today:
+  `phase_wall_times` computes per-phase wall time from
+  `attempt-lifecycle.events`' own `{event, at}` pairs, labeled with the
+  controller's own event names rather than a canonical phase name this
+  module invents - an event the controller never wrote produces no interval
+  rather than a fabricated one. It refuses an empty event list, an event
+  list not starting at `planned`, any event outside
+  `skillc.records.LIFECYCLE_EVENTS`, and any pair whose timestamps are not
+  non-decreasing (out-of-order events), rather than return a negative or
+  partial duration - each refusal has a mutation-checked red case in
+  `tests/test_convenience.py`. The other three - instruction length,
+  clarification/correction turns, approvals split necessary/redundant - and
+  tokens have no backing field anywhere in the schema today and are reported
+  as `NOT_CAPTURED` (tokens as the schema's own `UNKNOWN`, a declared future
+  observation per `records.md`, not the same absence as the other three).
+  `convenience_summary` returns all four together as one struct so a caller
+  reads exactly what is and is not available without guessing. A nit is
+  filed on skillc #20: protocol.md 10.1 requires the prompt be "recorded in
+  full", and no producer does - `agent-observation` keeps only the boolean
+  `prompt_delivered` - which is also why instruction length cannot be
+  reported; reconstructing a length from `goal.md` plus the arm's declared
+  instruction at report time was considered and rejected, since that is
+  reconstruction from files that can move on after the run, not capture of
+  what the subject was actually shown.
 
 ## [0.4.0] - 2026-09-29
 

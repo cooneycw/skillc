@@ -139,6 +139,32 @@ SKILL_EVIDENCE_RECONCILIATION = ("absent", "unmatched", "matched", "contradictin
 #: data, like `subject.digest` - never in this module.
 EXTERNAL_EVIDENCE_SOURCE_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?/v[0-9]+$")
 
+#: `case.arm` (#273): whether this trial's case is the intact or degraded half
+#: of a discriminating design, declared by the controller's own plan - a
+#: property of the CASE/fixture, never of the treatment (`config.arm`,
+#: `skillc/calibration_run.py` - baseline vs a CPP skill - already lives there
+#: and is a different axis entirely; one trial carries both). Absent means
+#: this trial makes no discriminating claim at all. `case_pairing` (bundle
+#: rule, below) is where a declared arm is actually checked for a reciprocal,
+#: complementary counterpart and consistency with the #150 degraded-
+#: acquisition marker; this module names only the vocabulary.
+CASE_ARM = ("intact", "degraded")
+#: The #150 degraded-acquisition marker (`skillc/degrade.py`'s
+#: `f"degraded:mutated=..."`), read from `installation-receipt.subject.
+#: revision` - the one bundle-visible place it lands (`skillc/agent_trial.py`
+#: writes `InstallationReceiptContext.subject_revision` there). `case.arm`
+#: must agree with it: "degraded" requires this prefix, "intact" forbids it.
+DEGRADED_REVISION_PREFIX = "degraded:"
+#: `skillc/degrade.py:_degraded_revision` writes exactly
+#: `f"degraded:mutated={tag}:{base.kind}:{base.revision}"`, `tag` one of
+#: `"none"`/`"<N>-location"` (never a colon), `base.kind` exactly `"git"` or
+#: `"snapshot"` (`skillc/materialize.py`'s own closed set). `base.revision`
+#: can itself contain a colon (a `kind="snapshot"` base reports
+#: `"snapshot:<digest>"`), so this is maxsplit-safe rather than a naive
+#: `split(":")`: the captured group is everything after the third colon,
+#: however many colons it holds.
+DEGRADED_REVISION_RE = re.compile(r"^degraded:mutated=[^:]+:(?:git|snapshot):(.+)$")
+
 #: The four cost/time split components a pilot report's own control requires
 #: (#12's acceptance: "Separate setup/agent/grading cost and time"). Closed:
 #: an entry missing one of these keys is refused, not silently treated as
@@ -550,6 +576,18 @@ def trial_ledger(record: Record) -> Iterator[str]:
                 f"trial {name!r}: case.observes_selection must be a boolean, "
                 f"not {case['observes_selection']!r}"
             )
+        if isinstance(case, dict):
+            arm = case.get("arm")
+            if "arm" in case and arm not in CASE_ARM:
+                yield f"trial {name!r}: case.arm is {arm!r}, not one of {list(CASE_ARM)}"
+            paired = case.get("paired_with")
+            if "arm" in case and arm in CASE_ARM:
+                if not isinstance(paired, dict) or not _nonempty_str(paired.get("id")) or not _nonempty_str(paired.get("revision")):
+                    yield f"trial {name!r}: case.arm is declared but paired_with names no case {{id, revision}}"
+                elif (paired.get("id"), paired.get("revision")) == (case.get("id"), case.get("revision")):
+                    yield f"trial {name!r}: case.paired_with names its own case; a pairing names a counterpart"
+            elif "arm" not in case and "paired_with" in case:
+                yield f"trial {name!r}: case.paired_with is declared but case.arm is not - a pairing with no claimed side"
         if "external_evidence_sources" in trial:
             sources = trial["external_evidence_sources"]
             if not isinstance(sources, list):
@@ -1801,6 +1839,202 @@ def unique_ids(bundle: Bundle) -> Iterator[str]:
     for result_id, count in sorted(result_ids.items(), key=str):
         if count > 1:
             yield f"result_id {result_id!r} is used by {count} results"
+
+
+def _base_revision(revision: object) -> str | None:
+    """The identity a `case-pairing` comparison must use: for an ordinary
+    (non-degraded) receipt, `revision` already IS the base - returned as is.
+    For a `degraded:` one, the base is the text `degrade.py` embedded in it,
+    recovered by `DEGRADED_REVISION_RE`. Returns `None` when `revision` is
+    not a string, or is `degraded:`-prefixed in a shape this pattern does not
+    recognize - an UNRECOVERABLE base, never silently treated as matching or
+    mismatching (#273, CPP review: "if it isn't recoverable, name it as a
+    boundary rather than skipping the check")."""
+    if not isinstance(revision, str):
+        return None
+    if not revision.startswith(DEGRADED_REVISION_PREFIX):
+        return revision
+    match = DEGRADED_REVISION_RE.fullmatch(revision)
+    return match.group(1) if match else None
+
+
+def _first_receipt(bundle: Bundle, trial: dict[str, object]) -> Record | None:
+    """The first installation-receipt among `trial`'s own planned attempts, in
+    declared order - the one this module reads for a trial-level identity
+    comparison (#273). Not a claim that every attempt under a trial shares one
+    identity; that internal-consistency question is not this function's."""
+    attempts = trial.get("attempts")
+    for attempt in attempts if isinstance(attempts, list) else []:
+        if not isinstance(attempt, dict):
+            continue
+        attempt_id = attempt.get("attempt_id")
+        if not isinstance(attempt_id, str):
+            continue
+        for receipt in bundle.of_kind(INSTALLATION_RECEIPT):
+            if receipt.attempt_id == attempt_id:
+                return receipt
+    return None
+
+
+def case_pairing(bundle: Bundle) -> Iterator[str]:
+    """Every trial declaring `case.arm` (#273) pairs reciprocally with exactly
+    one counterpart declaring the complementary arm, and agrees with that
+    attempt's own installation receipt about whether it actually ran degraded.
+
+    This is the validated record CPP #1084 needs: without it, "discriminating"
+    is an inference from naming conventions, which skillc #273's own scope
+    note refuses ("not acceptable").
+
+    - **Reciprocal.** If trial A's `case.paired_with` names trial B's `case`,
+      B's own `paired_with` must name A's `case` back. A one-sided claim binds
+      nothing.
+    - **Complementary.** A and B's `case.arm` must be the two different
+      values - both `intact`, or both `degraded`, is refused: a pairing is
+      between the two sides of one discriminating design, not a trial naming
+      itself twice over.
+    - **Unique.** At most one trial in the bundle may carry a given `case`
+      identity among those declaring an arm - two trials both claiming to BE
+      the named counterpart make "the pair" ambiguous, which this rule refuses
+      rather than picking one.
+    - **Consistent with the #150 degraded marker.** `case.arm: degraded`
+      requires every attempt under that trial to carry an
+      `installation-receipt.subject.revision` starting `degraded:`
+      (`skillc/degrade.py`'s own marker); `case.arm: intact` forbids one. An
+      attempt with no receipt at all is NOT this rule's finding - that gap is
+      `attempt_accounting`'s, a different account of a different absence - so
+      this check only fires where a receipt exists and disagrees.
+    """
+    for ledger in bundle.of_kind(TRIAL_LEDGER):
+        trials = ledger.data.get("trials")
+        if not isinstance(trials, list):
+            continue
+        armed: dict[tuple[str, str], list[dict[str, object]]] = {}
+        for trial in trials:
+            if not isinstance(trial, dict):
+                continue
+            case = trial.get("case")
+            if not isinstance(case, dict) or case.get("arm") not in CASE_ARM:
+                continue
+            key = (str(case.get("id")), str(case.get("revision")))
+            armed.setdefault(key, []).append(trial)
+
+        for key, holders in sorted(armed.items()):
+            if len(holders) > 1:
+                labels = sorted(str(t.get("trial_id")) for t in holders)
+                yield f"case {key!r}: {len(holders)} trials declare it with an arm ({labels}); ambiguous"
+
+        reported_pairs: set[frozenset[tuple[str, str]]] = set()
+        for key, holders in armed.items():
+            if len(holders) != 1:
+                continue  # the ambiguity above already reported it
+            trial = holders[0]
+            name = trial.get("trial_id", key)
+            case = trial["case"]
+            if not isinstance(case, dict):
+                continue
+            paired = case.get("paired_with")
+            target = (
+                (str(paired.get("id")), str(paired.get("revision")))
+                if isinstance(paired, dict) else None
+            )
+            counterpart_holders = armed.get(target) if target is not None else None
+            if target is None or not counterpart_holders or len(counterpart_holders) != 1:
+                yield (
+                    f"trial {name!r}: case.paired_with names {target!r}, which no trial in this "
+                    f"ledger declares with an arm"
+                )
+                continue
+            pair_key = frozenset({key, target})
+            if pair_key in reported_pairs:
+                continue  # already reported from the counterpart's own iteration
+            counterpart = counterpart_holders[0]
+            c_case = counterpart["case"]
+            if not isinstance(c_case, dict):
+                continue
+            c_name = counterpart.get("trial_id", target)
+            c_paired = c_case.get("paired_with")
+            c_target = (
+                (str(c_paired.get("id")), str(c_paired.get("revision")))
+                if isinstance(c_paired, dict) else None
+            )
+            if c_target != key:
+                yield (
+                    f"trial {name!r} pairs with {c_name!r}, but {c_name!r}'s own paired_with names "
+                    f"{c_target!r}, not {key!r} - one-sided pairing"
+                )
+            elif case.get("arm") == c_case.get("arm"):
+                reported_pairs.add(pair_key)
+                yield (
+                    f"trial {name!r} and {c_name!r} both declare case.arm {case.get('arm')!r}; "
+                    f"a pairing needs one of each"
+                )
+            else:
+                reported_pairs.add(pair_key)
+                if key[0] != target[0]:
+                    yield (
+                        f"trial {name!r} pairs with {c_name!r}, but their case ids differ "
+                        f"({key[0]!r} vs {target[0]!r}) - a pairing is two revisions of the SAME "
+                        f"task, never two different ones"
+                    )
+                grader, c_grader = trial.get("grader"), counterpart.get("grader")
+                g_key = (grader.get("id"), grader.get("revision")) if isinstance(grader, dict) else None
+                c_g_key = (c_grader.get("id"), c_grader.get("revision")) if isinstance(c_grader, dict) else None
+                if g_key != c_g_key or g_key is None:
+                    yield (
+                        f"trial {name!r} pairs with {c_name!r}, but their graders differ "
+                        f"({g_key!r} vs {c_g_key!r}) - a discriminating pair must be graded the same way"
+                    )
+                receipt, c_receipt = _first_receipt(bundle, trial), _first_receipt(bundle, counterpart)
+                if receipt is not None and c_receipt is not None:
+                    subject = receipt.data.get("subject")
+                    c_subject = c_receipt.data.get("subject")
+                    base = _base_revision(subject.get("revision")) if isinstance(subject, dict) else None
+                    c_base = _base_revision(c_subject.get("revision")) if isinstance(c_subject, dict) else None
+                    if base is None or c_base is None:
+                        yield (
+                            f"trial {name!r} and {c_name!r}: the base subject revision behind one or "
+                            f"both receipts could not be recovered - not comparable, not assumed equal"
+                        )
+                    elif base != c_base:
+                        yield (
+                            f"trial {name!r} and {c_name!r} pair on different base subject revisions "
+                            f"({base!r} vs {c_base!r}) - a discriminating pair must share the same "
+                            f"pinned subject underneath the degradation"
+                        )
+
+        for key, holders in armed.items():
+            if len(holders) != 1:
+                continue
+            trial = holders[0]
+            case = trial["case"]
+            if not isinstance(case, dict):
+                continue
+            arm = case.get("arm")
+            name = trial.get("trial_id", key)
+            attempts = trial.get("attempts")
+            for attempt in attempts if isinstance(attempts, list) else []:
+                if not isinstance(attempt, dict):
+                    continue
+                attempt_id = attempt.get("attempt_id")
+                if not isinstance(attempt_id, str):
+                    continue
+                receipts = [r for r in bundle.of_kind(INSTALLATION_RECEIPT) if r.attempt_id == attempt_id]
+                if not receipts:
+                    continue
+                subject = receipts[0].data.get("subject")
+                revision = subject.get("revision") if isinstance(subject, dict) else None
+                degraded = isinstance(revision, str) and revision.startswith(DEGRADED_REVISION_PREFIX)
+                if arm == "degraded" and not degraded:
+                    yield (
+                        f"trial {name!r} attempt {attempt_id!r}: case.arm is 'degraded' but its "
+                        f"installation receipt's subject.revision {revision!r} carries no "
+                        f"{DEGRADED_REVISION_PREFIX!r} marker"
+                    )
+                elif arm == "intact" and degraded:
+                    yield (
+                        f"trial {name!r} attempt {attempt_id!r}: case.arm is 'intact' but its "
+                        f"installation receipt's subject.revision {revision!r} is a degraded acquisition"
+                    )
 
 
 def attempt_accounting(bundle: Bundle) -> Iterator[str]:
