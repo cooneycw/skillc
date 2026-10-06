@@ -119,12 +119,20 @@ SKILL_EVIDENCE_LINEAGE = ("root", "child")
 #: silently promoted to `matched` for lack of a reason to doubt it.
 SKILL_EVIDENCE_RECONCILIATION = ("absent", "unmatched", "matched", "contradicting")
 
-#: `external_evidence.source` (#268): closed, so an unrecognized label is refused
-#: as unknown schema rather than silently accepted as a reference skillc cannot
-#: name. `check-records` never decodes the referenced bytes against this label
-#: (that parse belongs to the consumer, per ADR 0003) - it only checks the label
-#: itself is one skillc recognizes.
-EXTERNAL_EVIDENCE_SOURCES = ("cpp.execution-evidence/v1",)
+#: `external_evidence.source` (#268) must be a well-formed `<namespace>/v<N>`
+#: label - FORMAT only, never a hardcoded allowlist of known producer names.
+#: This module stays subject-agnostic (interfaces.md, "A skills collection
+#: need not implement an API"; the genericity guard in
+#: `tests/test_materialize.py` enforces it for every `skillc/*.py` module),
+#: so the core cannot name any one external tool's schema string as
+#: "the one skillc recognizes" - that would bake a specific producer into the
+#: generic validator exactly the way `GENERICITY_EXEMPT`'s own comment warns
+#: against. A malformed label (no `/v<N>` suffix, empty, wrong type) is
+#: refused as unknown schema; a well-formed but never-vetted one still
+#: passes this format check; deciding whether a given LABEL is one this
+#: deployment actually trusts, and parsing the bytes it refers to, both stay
+#: the consumer's job (Q4, below; ADR 0003).
+EXTERNAL_EVIDENCE_SOURCE_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?/v[0-9]+$")
 
 #: The four cost/time split components a pilot report's own control requires
 #: (#12's acceptance: "Separate setup/agent/grading cost and time"). Closed:
@@ -1400,10 +1408,10 @@ def skill_evidence(record: Record) -> Iterator[str]:
             yield f"{where}: external_evidence.reconciliation is {reconciliation!r} without a reason"
         if present:
             source = external.get("source")
-            if source not in EXTERNAL_EVIDENCE_SOURCES:
+            if not isinstance(source, str) or not EXTERNAL_EVIDENCE_SOURCE_RE.fullmatch(source):
                 yield (
-                    f"{where}: external_evidence.source {source!r} is not one of "
-                    f"{list(EXTERNAL_EVIDENCE_SOURCES)} - unknown schema"
+                    f"{where}: external_evidence.source {source!r} is not a well-formed "
+                    f"'<namespace>/v<N>' label - unknown schema"
                 )
             ref = external.get("artifact_ref")
             if not isinstance(ref, dict) or not _nonempty_str(ref.get("digest")):

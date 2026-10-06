@@ -32,7 +32,7 @@
    "criteria_owned": [],
    "external_evidence": {
     "present": true,
-    "source": "some-other-tool/v9",
+    "source": "not-a-versioned-schema-label",
     "artifact_ref": {
      "path": "x.json",
      "digest": "sha256:x"

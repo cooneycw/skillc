@@ -31,9 +31,9 @@ and version plan.
     `execution_observed` are `CONFIRMED`/`NOT_CONFIRMED`/`UNKNOWN`, a closed
     vocabulary deliberately separate from `SATISFIED`/`VIOLATED`/`UNKNOWN`, so
     a usage fact is never misread as a compliance outcome.
-  - **Item 5 (the #269 trust boundary) is a deliberately marked stub**,
-    written against sk-w3's #183 channel shape, pending #269's own witness
-    record.
+  - **Item 5 (the #269 trust boundary)** documents what `execution_observed`
+    may and may not rely on, written against #183's proposed channel shape;
+    only #269's own witness record's name is pending.
   - **`docs/specs/evaluation-facility/records.md`** has the full contract,
     including explicit answers to CPP #1368's open questions and cpp-eval's
     review questions (Q1-Q5), and a named boundary: `body_digest`/

@@ -434,7 +434,7 @@ kinds) and carries one non-empty `skills` list:
 | `lifecycle.listed`, `lifecycle.read_observed`, `lifecycle.execution_observed` | each one of `CONFIRMED` / `NOT_CONFIRMED` / `UNKNOWN` - **a separate, closed vocabulary from `SATISFIED`/`VIOLATED`/`UNKNOWN`**, so a usage fact can never be misread as a compliance outcome. `CONFIRMED` requires an `evidence` reference (a digest already present in this attempt's own bundle); `UNKNOWN` requires a `reason` |
 | `criteria_owned` | list of `{id, outcome, shared}`. `id` must name a criterion on this attempt's own `verified-result`; `outcome` is an **audit copy** of that criterion's own outcome, never an independent claim; `shared: true` means another entry in the same `skills` list may legitimately own the same `id` too |
 | `external_evidence.present` | boolean |
-| `external_evidence.source` | required when `present`; a closed vocabulary naming the schema family, e.g. `cpp.execution-evidence/v1`. An unrecognized value is refused as **unknown schema** (Q4 below) |
+| `external_evidence.source` | required when `present`; a well-formed `<namespace>/v<N>` label naming the schema family (e.g. `cpp.execution-evidence/v1` - not a hardcoded skillc vocabulary, a FORMAT this module checks generically, Q4 below). A malformed label is refused as **unknown schema** |
 | `external_evidence.artifact_ref` | required when `present`; `{path, digest}` naming an entry in **this attempt's own `artifact-manifest.artifacts`** (Q1 below) |
 | `external_evidence.reconciliation` | `absent` / `unmatched` / `matched` / `contradicting` (CPP R9's four states, exactly) |
 | `external_evidence.reason` | required unless `reconciliation` is `matched` or `absent` |
@@ -471,7 +471,7 @@ obligation failure" case (below) is representable at all: an attempt's overall
 erases the other, and this record is what keeps both visible instead of letting
 the task-level `PASS` absorb the obligation failure silently.
 
-### Answering CPP #1368's open questions (R7, R9, and cpp-w2's Q1-Q4)
+### Answering CPP #1368's open questions (R7, R9, and the cpp-eval review's Q1-Q4)
 
 This section is the "which field" CPP #1368's Open Questions section asks #268
 to name, and the cpp-eval review questions relayed 2026-10-06.
@@ -517,16 +517,22 @@ to name, and the cpp-eval review questions relayed 2026-10-06.
   `external_evidence` does reconcile: a declared skill name with no
   correlating installed path is `reconciliation: unmatched`, reason
   `declared-skill-not-installed` - never silently accepted as a match.
-- **Q4 (unknown schema).** Digest only. `check-records` validates `skill-evidence`
-  and the manifest entry's envelope (digest present, `source` in the closed
-  vocabulary); it never decodes the referenced bytes as CPP's own
-  `cpp.execution-evidence/v1` schema - that parse belongs to CPP's
+- **Q4 (unknown schema).** Digest and label FORMAT only, never a hardcoded list
+  of recognized producers. `skillc/records.py` stays subject-agnostic (the
+  genericity guard in `tests/test_materialize.py` refuses any `skillc/*.py`
+  literal naming a specific subject project), so this module cannot enumerate
+  "the schema families skillc recognizes" without naming one. Instead
+  `external_evidence.source` must match a generic `<namespace>/v<N>` shape
+  (`EXTERNAL_EVIDENCE_SOURCE_RE`); a label with the wrong shape (no version
+  suffix, empty, wrong type) is refused as **unknown schema**. `check-records`
+  never decodes the referenced bytes as CPP's own `cpp.execution-evidence/v1`
+  schema either way - that parse belongs to CPP's
   `scripts/execution-evidence-verify.py` (#1369's consumer), a different trust
   domain, per [ADR 0003](../../decisions/0003-no-external-evaluation-runtime.md).
-  An `external_evidence.source` outside skillc's closed vocabulary is refused
-  here as **unknown schema** - but that only catches a mislabeled reference;
-  a genuinely malformed CPP payload behind a correctly labelled, correctly
-  digested reference is invisible to skillc and must stay the consumer's
+  This is a narrower claim than "skillc recognizes this producer" - it only
+  catches a malformed or missing label; a well-formed but never-vetted source
+  name, or a genuinely malformed payload behind a correctly labelled,
+  correctly digested reference, is invisible to skillc and must stay the consumer's
   problem, stated as a boundary, not silently assumed covered.
 - **R9 (reconciliation states).** Exactly the four CPP names, no fifth:
   `absent` (no usage record for this skill - never read as evidence of
@@ -551,7 +557,7 @@ Six named cases, each a committed `controls/skill-evidence/{good,bad}/` fixture:
 | Absent transcript | `lifecycle.read_observed: UNKNOWN`, reason citing the attempt's own `client-transcript` stream as `missing` |
 | Task success with obligation failure | The attempt's `verified-result.status` is `PASS`; one entry's `criteria_owned` names an **optional** criterion with `outcome: VIOLATED` |
 | Forged status | Bad case: `criteria_owned[].outcome` disagrees with that criterion's actual outcome on the attempt's own `verified-result` - refused by the `ledger-binding` cross-check this record adds, named in the rule table below |
-| Unknown schema | Bad case: `external_evidence.source` outside the closed vocabulary, or `present: true` with no `artifact_ref` |
+| Unknown schema | Bad case: `external_evidence.source` not matching the `<namespace>/v<N>` format, or `present: true` with no `artifact_ref` |
 
 ### Trust boundary needed by #269 (acceptance item 5)
 
@@ -559,14 +565,14 @@ Six named cases, each a committed `controls/skill-evidence/{good,bad}/` fixture:
 kind that can assert a skill actually RAN something, as opposed to being
 installed, listed or read. That assertion needs a trusted source, and this
 section is the boundary this document commits `execution_observed` to -
-independent of what #269 eventually builds, and binding on it. Per sk-w3
-(message 4596, sizing #183 for #269's own witness channel): a host-owned Unix
-domain socket, one per attempt, where the **controller** is the listener - it
+independent of what #269 eventually builds, and binding on it. Per #183's
+proposed design for #269's own witness channel: a host-owned Unix domain
+socket, one per attempt, where the **controller** is the listener - it
 accepts one request, **decides and logs its own decision before replying**, so
 nothing about the decision is reconstructable from the reply alone. The subject
 never becomes the logger; a subject that bypasses the socket produces zero
-controller-received requests for that attempt. Agreed with sk-w3 (message 4604)
-as the shape `skill-evidence` is written against.
+controller-received requests for that attempt. This is the shape
+`skill-evidence` is written against; see #183 and #269 for the design itself.
 
 **What `execution_observed` may rely on.** A controller-decided, controller-
 LOGGED-before-reply request/reply record for this attempt, produced by #269's
@@ -806,7 +812,7 @@ bundle cases as well, including against every record rule.
 | `attempt-lifecycle` | record | an unknown stop reason or disposition; a non-result without a reason; captured before a confirmed stop; no cleanup |
 | `agent-observation` | record | an unknown field; a missing field; an object in a scalar field or a census map; a `mandatory` flag that is a string, an integer or absent (each would drop a VIOLATED criterion out of the derivation); positive conclusions from zero or two transcript files; eligibility that disagrees with prompt delivery and the canary; a PASS its own criteria do not derive; both a grade and a blocked reason; an unobserved status without a reason (#106) |
 | `pilot-report` | record | empty attempts list; bad disposition or criterion outcome; no uncertainty; a negative intervention count; a cost/time split missing a key or whose parts do not sum to its total; a duplicate attempt ID (#12) |
-| `skill-evidence` | record | empty `skills` list; a `child` entry with no `parent_path`, naming a path absent from this record, or forming a cycle with no root (even where no single link self-references); a duplicate `skill.path`; a `lifecycle` value outside `CONFIRMED`/`NOT_CONFIRMED`/`UNKNOWN`; `CONFIRMED` with no evidence reference; `UNKNOWN` with no reason or with one anyway; `external_evidence.present: true` with no `artifact_ref` or an unrecognized `source`; a `reconciliation` outside the four R9 states, or disagreeing with `present`; a non-`matched`/`absent` reconciliation with no reason (#268) |
+| `skill-evidence` | record | empty `skills` list; a `child` entry with no `parent_path`, naming a path absent from this record, or forming a cycle with no root (even where no single link self-references); a duplicate `skill.path`; a `lifecycle` value outside `CONFIRMED`/`NOT_CONFIRMED`/`UNKNOWN`; `CONFIRMED` with no evidence reference; `UNKNOWN` with no reason or with one anyway; `external_evidence.present: true` with no `artifact_ref` or a malformed `source` label; a `reconciliation` outside the four R9 states, or disagreeing with `present`; a non-`matched`/`absent` reconciliation with no reason (#268) |
 | `ledger-binding` | bundle | cross-trial receipt; stale receipt; attempt the ledger never issued; altered artifact; unplanned grader; a `skill-invocations` path the attempt's receipt never installed (#39); a trial declaring `case.observes_selection: true` whose manifest has no `skill-invocations` stream (#26/#39); a `pilot-report` that omits a scheduled attempt or names one the ledger never planned (#12); a `skill-evidence` path or digest the attempt's receipt never installed; a `criteria_owned` outcome that disagrees with the attempt's own `verified-result` (forged status); an `external_evidence.artifact_ref` the attempt's manifest never captured (#268) |
 | `unique-ids` | bundle | duplicate attempt ID; conflicting receipts; duplicate result ID; a second `skill-evidence` record for one attempt |
 | `attempt-accounting` | bundle | planned attempt with no lifecycle; captured with no result; graded without receipt; graded without manifest; captured but declared NOT_RUN; graded but not captured; manifest but not captured; receipt stand-in with no agent-observation, or claiming readiness (#139) |
