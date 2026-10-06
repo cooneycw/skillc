@@ -504,6 +504,35 @@ def test_an_expanded_instruction_arm_that_breaks_the_design_is_refused(
         calibration.parse_declaration(data)
 
 
+def test_expanded_instruction_arms_cannot_differ_in_subject(tmp_path: Path) -> None:
+    """Evidence for #274 acceptance item 2 ('equal project obligations'),
+    demonstrated rather than merely asserted (orchestrator review).
+    `task` and `shared` are single declaration-level fields - one value for
+    every arm - so S and E cannot differ in the task, model, client,
+    image, tools, permissions or budget at all; there is nothing to test
+    there, because the schema gives them no field through which to differ.
+    The ONE per-arm field that could smuggle in a different obligation is
+    `subject` (what gets installed) - already refused by the existing,
+    lane-independent check this proves still fires for this pair."""
+    data = _expanded_instruction_declaration(tmp_path, e_overrides={"subject": {"name": "a-different-subject"}})
+    with pytest.raises(calibration.DeclarationRefused, match="different subjects"):
+        calibration.parse_declaration(data)
+
+
+def test_expanded_instruction_content_identity_is_what_rules_out_a_smuggled_obligation(tmp_path: Path) -> None:
+    """The remaining way an obligation could differ between S and E:
+    `instruction` is per-arm text, and a changed word there could add a
+    requirement the skill itself does not state. `validate_expanded_
+    instruction_lane`'s content-identity check (also proven in
+    `test_red_a_changed_word_in_the_inlined_instruction_is_refused` above)
+    is this case's answer - restated here as the named evidence for #274
+    acceptance item 2's 'equal obligations' claim, not a new mechanism."""
+    declaration = calibration.parse_declaration(
+        _expanded_instruction_declaration(tmp_path, e_instruction=_SKILL_BODY + "Also: ship on Fridays.\n"))
+    with pytest.raises(calibration.DeclarationRefused, match="does not match"):
+        calibration.validate_expanded_instruction_lane(declaration, ROOT)
+
+
 def test_expanded_instruction_arms_must_share_one_inventory(tmp_path: Path) -> None:
     other_dir = tmp_path / "other"
     other_dir.mkdir()
@@ -514,17 +543,17 @@ def test_expanded_instruction_arms_must_share_one_inventory(tmp_path: Path) -> N
 
 
 def test_matched_outcome_arm_cannot_carry_inventory(tmp_path: Path) -> None:
-    """`inventory`/`obligation` are the expanded-instruction lane's own
-    fields - a B/N/P arm declaring one is refused, not silently ignored."""
+    """`inventory` is the expanded-instruction lane's own field - a B/N/P
+    arm declaring one is refused, not silently ignored."""
     data = _mutated(arms=_arms(inventory=str(_inventory(tmp_path))))
-    with pytest.raises(calibration.DeclarationRefused, match="belong to the expanded-instruction lane"):
+    with pytest.raises(calibration.DeclarationRefused, match="belongs to the expanded-instruction lane"):
         calibration.parse_declaration(data)
 
 
 def test_baseline_cannot_carry_inventory(tmp_path: Path) -> None:
     data = _expanded_instruction_declaration(tmp_path)
     data["arms"][0]["inventory"] = str(_inventory(tmp_path))  # type: ignore[index]
-    with pytest.raises(calibration.DeclarationRefused, match="no inventory or obligation"):
+    with pytest.raises(calibration.DeclarationRefused, match="no inventory to declare"):
         calibration.parse_declaration(data)
 
 

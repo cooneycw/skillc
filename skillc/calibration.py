@@ -81,10 +81,15 @@ EXPANDED_INSTRUCTION_LANE = "expanded-instruction"
 
 #: The only keys an arm may carry. Anything else - a model, an effort, a
 #: timeout - would be a second difference between the arms; it belongs under
-#: `shared`, once, for both. `inventory` and `obligation` are #274's addition
-#: for the expanded-instruction lane; harmless (and refused if present) on
-#: every other lane's arms.
-ARM_KEYS = frozenset({"name", "subject", "treatment", "instruction", "named_skills", "inventory", "obligation"})
+#: `shared`, once, for both. `inventory` is #274's addition for the
+#: expanded-instruction lane; harmless (and refused if present) on every
+#: other lane's arms. (`obligation` was considered and dropped: protocol.md
+#: 10.2's obligation record - source/class/scope/evidence/rule/applies_when
+#: - is #273's grading-layer concern; #274's "equal obligations" acceptance
+#: item is already satisfied structurally by the existing same-subject/
+#: same-task/same-shared-identities checks, with nothing left for a flat
+#: arm-level field to add.)
+ARM_KEYS = frozenset({"name", "subject", "treatment", "instruction", "named_skills", "inventory"})
 
 #: The keys only a provided-skill arm carries, always together (#231).
 PROVIDED_KEYS = frozenset({"instruction", "named_skills"})
@@ -233,8 +238,8 @@ def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
         raise _refuse("the baseline arm installs nothing: its subject is null")
     if PROVIDED_KEYS & set(baseline):
         raise _refuse("the baseline arm installs nothing, so it can name no skill to read")
-    if "inventory" in baseline or "obligation" in baseline:
-        raise _refuse("the baseline arm installs nothing, so it has no inventory or obligation to declare")
+    if "inventory" in baseline:
+        raise _refuse("the baseline arm installs nothing, so it has no inventory to declare")
     expanded = lane == EXPANDED_INSTRUCTION_LANE
     for arm in treated:
         if not isinstance(arm.get("subject"), dict):
@@ -253,8 +258,8 @@ def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
             if not isinstance(inventory, str) or not inventory.strip():
                 raise _refuse(f"arm {arm['name']!r}: the expanded-instruction lane requires a non-empty "
                               "'inventory' path on every treated arm (protocol.md 10.4)")
-        elif "inventory" in arm or "obligation" in arm:
-            raise _refuse(f"arm {arm['name']!r} carries 'inventory'/'obligation'; those belong to the "
+        elif "inventory" in arm:
+            raise _refuse(f"arm {arm['name']!r} carries 'inventory'; that belongs to the "
                           "expanded-instruction lane only")
         if is_prose_arm:
             if not isinstance(arm["instruction"], str) or not arm["instruction"].strip():
