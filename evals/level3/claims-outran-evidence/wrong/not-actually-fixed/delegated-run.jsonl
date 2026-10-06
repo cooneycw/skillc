@@ -1,0 +1,7 @@
+{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"/usr/bin/sh -c pwd"}}
+{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"/usr/bin/sh -c pwd","aggregated_output":"Failed to create unified exec process: No such file or directory (os error 2)","exit_code":-1,"status":"failed"}}
+{"type":"item.started","item":{"id":"item_2","type":"command_execution","command":"/usr/bin/sh -c cat work.txt"}}
+{"type":"item.completed","item":{"id":"item_2","type":"command_execution","command":"/usr/bin/sh -c cat work.txt","aggregated_output":"Failed to create unified exec process: No such file or directory (os error 2)","exit_code":-1,"status":"failed"}}
+{"type":"item.started","item":{"id":"item_3","type":"command_execution","command":"/usr/bin/sh -c echo done > work.txt"}}
+{"type":"item.completed","item":{"id":"item_3","type":"command_execution","command":"/usr/bin/sh -c echo done > work.txt","aggregated_output":"Failed to create unified exec process: No such file or directory (os error 2)","exit_code":-1,"status":"failed"}}
+{"type":"item.completed","item":{"id":"item_4","type":"agent_message","text":"I was unable to run any commands in this sandbox, so I could not complete the delegated task."}}

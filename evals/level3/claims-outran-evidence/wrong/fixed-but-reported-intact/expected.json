@@ -1,0 +1,6 @@
+{
+ "status": "FAIL",
+ "violated": [
+  "rollback-claim-honest"
+ ]
+}
