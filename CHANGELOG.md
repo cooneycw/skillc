@@ -15,6 +15,38 @@ and version plan.
   metadata for bytes-backed helpers through capture; focused controls cover
   non-src tasks, nested answer leakage and every existing task surface.
 
+- **`skill-evidence`: per-skill evidence attribution and export records**
+  (Refs #268, wave #259, workstream #249). A new version-2-additive record
+  kind, producer `assembler`, one per attempt: skill identity (reused from
+  the attempt's own installation receipt, never re-declared), parent/child
+  invocation lineage (cycle-refused), criterion ownership as an audit copy of
+  the attempt's own `verified-result` (never an independent claim - a copy
+  that disagrees is refused as a forged status), and reconciliation of
+  externally produced evidence (a usage record a subject's own tooling
+  wrote - CPP's `cpp.execution-evidence/v1`, say) against exactly CPP #1368's
+  R9 states (`absent`/`unmatched`/`matched`/`contradicting`), entering the
+  bundle only as an ordinary `artifact-manifest` entry, never a trusted
+  observation.
+  - **Lifecycle facts use their own vocabulary.** `listed`/`read_observed`/
+    `execution_observed` are `CONFIRMED`/`NOT_CONFIRMED`/`UNKNOWN`, a closed
+    vocabulary deliberately separate from `SATISFIED`/`VIOLATED`/`UNKNOWN`, so
+    a usage fact is never misread as a compliance outcome.
+  - **Item 5 (the #269 trust boundary) is a deliberately marked stub**,
+    written against sk-w3's #183 channel shape, pending #269's own witness
+    record.
+  - **`docs/specs/evaluation-facility/records.md`** has the full contract,
+    including explicit answers to CPP #1368's open questions and cpp-eval's
+    review questions (Q1-Q5), and a named boundary: `body_digest`/
+    `description_digest` are not cross-checked against #265's separate
+    `evidence/inventory.json` (nit-stored at
+    https://github.com/cooneycw/skillc/issues/20#issuecomment-6007178436).
+  - **Controls:** `controls/skill-evidence/{good,bad}/` (16 bad, 6 good,
+    including the parent/child, shared-criteria, absent-transcript and
+    unknown-schema golden cases) plus bundle extensions to `ledger-binding`
+    (the forged-status and task-success-with-obligation-failure golden cases)
+    and `unique-ids`. Mutation-checked by hand: the forged-status and
+    unknown-schema refusals both go BLIND with their check removed.
+
 - **`skillc profile validate`: a transitive installation profile for one
   workflow** (Refs #265, wave #258, workstream #247). A profile layers on one
   subject and names every dependency of a selected workflow: helpers,
