@@ -21,13 +21,22 @@ and version plan.
   binary needed on `python:3.12-slim`'s real shell.
   - `SKILLC_GATE_WITNESS_LIVE_BREAK` selects one of three modes, each
     `xfail(strict=True)`: `stale-confirm-lie` (the kill-confirmation step
-    is monkeypatched to lie - caught by the test's own independent
-    `kill -0`, never by trusting the witness's self-report),
-    `kill-wrong-pid` (the kill sequence is monkeypatched to target the
-    PRIMARY's pid instead of the gate's - caught by the primary's own
-    exit code/counter), and `gate-in-fresh-container` (`exec_in_attempt`
-    is monkeypatched to run the gate in a separate container - caught by
-    the gate no longer seeing the primary's live marker).
+    is monkeypatched to lie), `kill-wrong-pid` (the kill sequence is
+    monkeypatched to target the PRIMARY's pid instead of the gate's), and
+    `gate-in-fresh-container` (`exec_in_attempt` is monkeypatched to run
+    the gate in a separate container).
+  - Every conformance assertion (the concurrent gate's exit code, the
+    test's own independent `kill -0` on the gate's real pid, the
+    witness's own `stop_confirmed` record, and the primary's monotonic
+    counter progress across the kill window) is asserted as the same
+    UNCONDITIONAL invariant in every mode, never as a different expected
+    value per mode - a codex:code_review finding against this test's own
+    first draft, which had accepted some break modes' defects as their
+    "correct" outcome instead of proving the oracle rejects them. The
+    primary's own in-container pid (needed by `kill-wrong-pid`) is read
+    from a marker the primary writes itself, never via `ps`/`procps`,
+    which `python:3.12-slim` deliberately lacks (a second codex finding
+    against the same first draft).
   - Plan reviewed and approved on issue #269 (comment 6023059101) before
     any code was written.
   - Written and reviewed WITHOUT ever running it against a real daemon -

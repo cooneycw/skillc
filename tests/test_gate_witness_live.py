@@ -94,6 +94,10 @@ _VALID_BREAK_MODES = ("none", "stale-confirm-lie", "kill-wrong-pid", "gate-in-fr
 
 PRIMARY_MARKER = f"{d.CONTAINER_WORKSPACE}/primary-marker"
 PRIMARY_COUNTER = f"{d.CONTAINER_WORKSPACE}/primary-counter"
+#: Written by the primary's OWN script - never discovered via `ps` (see
+#: `_primary_script()`'s own docstring for why `procps` is deliberately
+#: unavailable to depend on here).
+PRIMARY_PID_MARKER = f"{d.CONTAINER_WORKSPACE}/primary-pid"
 #: Written by the kill-timeout gate's OWN script, at a path the test
 #: knows in advance - `exec_in_attempt()`'s own internal marker path is a
 #: fresh uuid per call and not something a caller should need to predict,
@@ -142,13 +146,22 @@ def _image_available(image: str) -> bool:
 
 
 def _primary_script() -> str:
-    """Writes `PRIMARY_MARKER` once (property 1's own oracle - only a
-    gate reaching this SAME container can read it), then increments
-    `PRIMARY_COUNTER` once per second for the test's whole duration, then
-    exits 0 - the intact-run assertion a broken kill (`kill-wrong-pid`)
-    must interrupt."""
+    """Writes its OWN pid to `PRIMARY_PID_MARKER` and `PRIMARY_MARKER`
+    (property 1's own oracle - only a gate reaching this SAME container
+    can read it) once at startup, then increments `PRIMARY_COUNTER` once
+    per second for the test's whole duration, then exits 0 - the intact-
+    run assertion a broken kill (`kill-wrong-pid`) must interrupt.
+
+    `PRIMARY_PID_MARKER` is written by the primary ITSELF, never
+    discovered via `ps`/`procps` (codex:code_review finding: `python:
+    3.12-slim` is chosen specifically because it LACKS `procps` - a
+    `kill-wrong-pid` setup that depended on `ps` would fail before either
+    gate even ran, satisfying `xfail(strict=True)` on a missing tool, not
+    on the intended mistargeted-kill behavior)."""
     return (
-        "import time\n"
+        "import os, time\n"
+        f"with open({PRIMARY_PID_MARKER!r}, 'w') as f:\n"
+        "    f.write(str(os.getpid()))\n"
         f"with open({PRIMARY_MARKER!r}, 'w') as f:\n"
         "    f.write('primary-is-here')\n"
         f"for i in range(1, {PRIMARY_DURATION_SECONDS} + 1):\n"
@@ -208,26 +221,58 @@ def _real_daemon_pid_is_alive(backend: d.DockerBackend, handle: d._Handle, pid: 
     return None
 
 
+def _read_file_via_exec(backend: d.DockerBackend, handle: d._Handle, path: str) -> str | None:
+    """A cheap, pollable read - `docker exec cat <path>`, never the
+    heavier `export()`+tar-extract round trip `_read_counter`'s own
+    first draft used for every single poll attempt (codex:code_review
+    finding: a fixed `time.sleep` before checking readiness is fragile
+    on a loaded VM; polling needs each check to be cheap). `None` when
+    the file does not exist yet or the exec itself could not be reached -
+    both read the same as "not ready", never as a hard failure, since
+    "not yet written" is the expected state before the primary starts."""
+    try:
+        proc = subprocess.run(
+            [*backend.docker_bin, "exec", "--", handle.name, "cat", path],
+            capture_output=True, text=True, timeout=backend.daemon_timeout, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return proc.stdout if proc.returncode == 0 else None
+
+
+def _wait_for_file_via_exec(backend: d.DockerBackend, handle: d._Handle, path: str, deadline_seconds: float) -> str:
+    """Polls `_read_file_via_exec` until it returns content or the
+    deadline elapses - replaces a fixed `time.sleep` before assuming the
+    primary has started (codex:code_review finding: too short flakes on
+    a loaded VM, and a long fixed sleep eats into the primary's own
+    bounded lifetime either way)."""
+    deadline = time.monotonic() + deadline_seconds
+    while time.monotonic() < deadline:
+        content = _read_file_via_exec(backend, handle, path)
+        if content is not None:
+            return content
+        time.sleep(0.2)
+    raise AssertionError(f"timed out waiting for a file to appear in the container (after {deadline_seconds}s)")
+
+
+def _read_int_file_via_exec(backend: d.DockerBackend, handle: d._Handle, path: str) -> int:
+    content = _read_file_via_exec(backend, handle, path)
+    assert content is not None, "expected file was not found in the container"
+    text = content.strip()
+    assert text.isdigit(), f"expected file did not contain a plain integer (len={len(text)})"
+    return int(text)
+
+
+def _read_counter(backend: d.DockerBackend, handle: d._Handle) -> int:
+    content = _read_file_via_exec(backend, handle, PRIMARY_COUNTER)
+    if content is None:
+        return 0
+    text = content.strip()
+    return int(text) if text.isdigit() else 0
+
+
 def _read_gate_pid(backend: d.DockerBackend, handle: d._Handle) -> int:
-    with tempfile.TemporaryDirectory() as tmp:
-        dest = Path(tmp)
-        backend.export(handle, dest)
-        marker = dest / "gate-pid"
-        assert marker.is_file(), "the kill-timeout gate never wrote its own pid marker"
-        text = marker.read_text(encoding="utf-8").strip()
-        assert text.isdigit(), f"gate pid marker did not contain a plain integer (len={len(text)})"
-        return int(text)
-
-
-def _read_counter(backend: d.DockerBackend, handle: object) -> int:
-    with tempfile.TemporaryDirectory() as tmp:
-        dest = Path(tmp)
-        backend.export(handle, dest)
-        counter_path = dest / "primary-counter"
-        if not counter_path.is_file():
-            return 0
-        text = counter_path.read_text(encoding="utf-8").strip()
-        return int(text) if text.isdigit() else 0
+    return _read_int_file_via_exec(backend, handle, GATE_PID_MARKER)
 
 
 def _run_gate_over_socket(socket_path: Path, gate: str) -> Mapping[str, object]:
@@ -322,10 +367,10 @@ def test_the_gate_witness_round_trips_correctly_against_a_real_daemon(monkeypatc
         # the PRIMARY's own in-container pid instead of the gate's real
         # one - read back via the SAME marker-file mechanism
         # `exec_in_attempt()` itself uses, applied to the primary's own
-        # process this time (a second, test-side marker the primary
-        # script does not write - the test reads /proc directly inside
-        # the container instead, never trusting a self-reported pid for
-        # the thing this break mode is deliberately attacking).
+        # process this time (`PRIMARY_PID_MARKER`, written by the primary
+        # script itself - never discovered via `ps`/`procps`, which
+        # `python:3.12-slim` deliberately lacks; see `_primary_script()`'s
+        # own docstring for the codex:code_review finding this fixes).
         real_read_pid = d.DockerBackend._read_in_container_pid
 
         def targeting_the_primary(self: d.DockerBackend, handle_: d._Handle, marker_path: str, timeout: float = 2.0) -> int | None:
@@ -345,50 +390,49 @@ def test_the_gate_witness_round_trips_correctly_against_a_real_daemon(monkeypatc
     primary_thread = threading.Thread(target=run_primary)
     try:
         primary_thread.start()
-        time.sleep(2.0)  # let the primary write its marker and start counting
+        # Bounded poll for primary readiness, never a blind sleep (codex:
+        # code_review finding: a fixed delay is both too short on a
+        # loaded VM and eats into the primary's own bounded lifetime
+        # either way).
+        _wait_for_file_via_exec(backend, handle, PRIMARY_MARKER, deadline_seconds=10.0)
 
         if BREAK_MODE == "kill-wrong-pid":
-            # The primary's own in-container pid, read directly via `ps`
-            # inside the SAME container the primary is running in - never
-            # assumed, never self-reported by the primary script itself.
-            ps_result = subprocess.run(
-                [*backend.docker_bin, "exec", "--", handle.name, "sh", "-c",
-                 "ps -eo pid,comm | grep python3 | head -1 | awk '{print $1}'"],
-                capture_output=True, text=True, timeout=10, check=False,
-            )
-            pid_text = ps_result.stdout.strip()
-            assert pid_text.isdigit(), f"could not read the primary's own pid: {ps_result.stderr!r}"
-            primary_pid_holder.append(int(pid_text))
-
-        counter_before = _read_counter(backend, handle)
+            primary_pid_holder.append(_read_int_file_via_exec(backend, handle, PRIMARY_PID_MARKER))
 
         # Case (a): a concurrent gate that exits on its own, proving
         # property 1 (or its negation, under gate-in-fresh-container).
         concurrent_reply = _run_gate_over_socket(socket_path, "concurrent-gate")
         assert concurrent_reply["reason"] == "exited"
-        if BREAK_MODE == "gate-in-fresh-container":
-            assert concurrent_reply["exit_code"] == 1  # marker NOT visible from a fresh container
-        else:
-            assert concurrent_reply["exit_code"] == 0  # marker IS visible from the live one
+        # UNCONDITIONAL across every mode (codex:code_review finding 1):
+        # this is the real property-1 conformance check, and only a
+        # gate that actually reached the primary's live container can
+        # satisfy it - gate-in-fresh-container must fail exactly here,
+        # not at a pre-approved alternate expected value.
+        assert concurrent_reply["exit_code"] == 0, (
+            "the gate could not see the primary's own marker in its live container"
+        )
 
         # Case (b): a TERM-ignoring gate past its timeout, forcing the
-        # kill-confirmation path - proving (or, under the two kill-
-        # targeted break modes, disproving) property 2.
+        # kill-confirmation path. `counter_before`/`counter_after` bracket
+        # ONLY this call (codex:code_review finding 3) - not case (a), and
+        # not the independent-oracle reads below - so the final monotonic-
+        # progress assertion proves progress across THIS window, not
+        # merely across the whole test.
+        counter_before = _read_counter(backend, handle)
         kill_reply = _run_gate_over_socket(socket_path, "kill-timeout-gate")
+        counter_after = _read_counter(backend, handle)
         assert kill_reply["reason"] in ("timeout", "operator-cancelled")
 
-        # THE INDEPENDENT ORACLE for stale-confirm-lie: read the gate's
-        # own pid back from its OWN marker (never the witness's internal
-        # state) and ask the real daemon directly whether it is still
-        # alive - skipped for gate-in-fresh-container, whose fresh
+        # THE INDEPENDENT ORACLE for property 2: read the gate's own pid
+        # back from its OWN marker (never the witness's internal state)
+        # and ask the real daemon directly whether it is still alive -
+        # structurally absent for gate-in-fresh-container, whose fresh
         # container is already destroyed by the time control returns
-        # here, and for which this property is not the one under test.
+        # here, and for which property 2 is not the one under test.
         gate_pid_alive: bool | None = None
         if BREAK_MODE != "gate-in-fresh-container":
             gate_pid = _read_gate_pid(backend, handle)
             gate_pid_alive = _real_daemon_pid_is_alive(backend, handle, gate_pid)
-
-        counter_after = _read_counter(backend, handle)
 
         primary_thread.join(timeout=PRIMARY_DURATION_SECONDS + 15)
         assert not primary_thread.is_alive(), "the primary subject never finished"
@@ -396,32 +440,34 @@ def test_the_gate_witness_round_trips_correctly_against_a_real_daemon(monkeypatc
         backend.destroy(handle)
 
     record = witness.finalize(handle.attempt_id)
-
-    if BREAK_MODE != "gate-in-fresh-container":
-        # Only `none` genuinely kills the GATE's own real pid. Both other
-        # modes leave it untouched, for different reasons: stale-confirm-
-        # lie never sends a real kill at all; kill-wrong-pid sends a real
-        # kill, but at the PRIMARY's pid, which has no bearing on whether
-        # the gate's OWN sleep(3600) is still running. This oracle is the
-        # one that catches stale-confirm-lie; it also happens to be true
-        # (not the catching assertion, but not wrong either) for
-        # kill-wrong-pid, whose own catch is the primary's fate below.
-        if BREAK_MODE in ("stale-confirm-lie", "kill-wrong-pid"):
-            assert gate_pid_alive is True, "the gate's own real process should have been left untouched"
-        else:
-            assert gate_pid_alive is False, "the gate's own pid should have been genuinely killed and confirmed"
-
     kill_run = record.gates["kill-timeout-gate"].runs[-1]
-    if BREAK_MODE == "stale-confirm-lie":
-        # The witness's OWN record agrees with its lie (expected - the
-        # lie IS the witness's own report; the independent oracle above
-        # is what actually catches it, not this).
-        assert kill_run.stop_confirmed is True
 
-    # Per orchestrator review C3: monotonic progress, never an exact
-    # count (flakes on a loaded VM) - except kill-wrong-pid, where this
-    # IS the assertion that must go red: a kill that hit the primary
-    # instead of the gate stops its counter from advancing at all.
+    # Every assertion from here down is UNCONDITIONAL across modes
+    # (codex:code_review finding 1): a break mode is proven by the SAME
+    # true invariant failing, never by a pre-approved different expected
+    # value for that mode. gate_pid_alive is False under `none` because
+    # the real kill succeeded; it is ALSO False-expected (i.e. the
+    # assertion must fail, satisfying xfail) under stale-confirm-lie
+    # (no real kill was ever sent) and kill-wrong-pid (the real kill hit
+    # the primary, leaving the gate's own pid genuinely untouched) - both
+    # are real violations of the same property, not two different ones.
+    if BREAK_MODE != "gate-in-fresh-container":
+        assert gate_pid_alive is False, (
+            "the gate's own real process must have been genuinely killed and "
+            "independently confirmed dead by the test's own kill -0, never "
+            "merely by trusting the witness's self-report"
+        )
+        # Per codex:code_review finding 4: checked on every intact run
+        # too, not only stale-confirm-lie - an implementation that kills
+        # correctly but misreports this must also fail here.
+        assert kill_run.stop_confirmed is True, (
+            "the witness's own record must agree that the kill was confirmed"
+        )
+
     assert primary_result and primary_result[0].reason == "exited"
     assert primary_result[0].exit_code == 0
+    # Per orchestrator review C3: monotonic progress across the kill-
+    # timeout gate's own bracketed window, never an exact count (flakes
+    # on a loaded VM). kill-wrong-pid must fail HERE too: a kill that hit
+    # the primary instead of the gate stops its counter from advancing.
     assert counter_after > counter_before
