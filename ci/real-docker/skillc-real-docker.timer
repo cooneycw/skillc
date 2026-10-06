@@ -1,0 +1,13 @@
+# #315, R5: decided - 5-minute poll interval. Install at
+# /etc/systemd/system/skillc-real-docker.timer on <agent-host>, alongside
+# the matching .service file.
+[Unit]
+Description=Poll for a real-Docker run trigger every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30sec
+
+[Install]
+WantedBy=timers.target

@@ -6,7 +6,7 @@ text check.
 
 SKIPPED, NOT FAILED, WHEN NO DOCKER DAEMON IS AVAILABLE - named by reason,
 never a silent no-op. Real-daemon execution of the trial image build is
-owed to the docker-ci agent (#315); this file is written and reviewed
+owed to the real-Docker runner (#315); this file is written and reviewed
 without ever running it (no `docker` binary in the container these
 commits were written in, confirmed and reported, matching #183's own
 live-channel test's documented position). `check_helpers.py`'s no-daemon
@@ -45,13 +45,16 @@ TEST_TAG = f"skillc-trial-test:b2-helper-check-{int(time.time())}"
 # the binary exists, so a missing binary is still reported by its own
 # distinct message rather than probe_daemon's generic unreachable one.
 _DOCKER_BIN_PRESENT = shutil.which("docker") is not None
-pytestmark = pytest.mark.skipif(
-    not _DOCKER_BIN_PRESENT or probe_daemon(["docker"]) is None,
-    reason="no reachable Docker daemon in this environment (binary "
-           + ("present" if _DOCKER_BIN_PRESENT else "absent")
-           + ") - this test needs a real daemon to build the trial image; "
-             "real-daemon execution is owed to the docker-ci agent (#315)",
-)
+pytestmark = [
+    pytest.mark.real_docker,
+    pytest.mark.skipif(
+        not _DOCKER_BIN_PRESENT or probe_daemon(["docker"]) is None,
+        reason="no reachable Docker daemon in this environment (binary "
+               + ("present" if _DOCKER_BIN_PRESENT else "absent")
+               + ") - this test needs a real daemon to build the trial image; "
+                 "real-daemon execution is owed to the real-Docker runner (#315)",
+    ),
+]
 
 
 @pytest.fixture

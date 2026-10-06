@@ -32,6 +32,13 @@ testpaths = ["tests"]
 # notices. A test that legitimately needs longer raises it with
 # `@pytest.mark.timeout`.
 timeout = 120
+# #315: the selector the <agent-host> real-Docker runner collects with
+# (`pytest -m real_docker`). Registered explicitly so a new real-Docker test
+# file opts in by adding this one mark, with no runner-script change -
+# unregistered would still work, but would warn on every collection.
+markers = [
+    "real_docker: needs a real Docker daemon, not the fake CLI fixture",
+]
 
 [tool.mypy]
 # The typecheck scope, declared once. CI, AGENTS.md and ci/typecheck-control.sh

@@ -1,0 +1,291 @@
+#!/bin/bash
+# The <agent-host> real-Docker runner (#315). Invoked either by hand
+# (`run-real-docker <sha>` or `run-real-docker <sha> --break <mode>`) or by
+# poll-triggers from the systemd timer, with an empty --break (meaning
+# "none" - the normal, certifying run).
+#
+# R1 (load-bearing): this script, and the ci/*.py modules it calls, run from
+# an INSTALLED copy pinned to a reviewed main SHA - never from the checkout
+# under test. Updating the runner is an explicit operator step (see
+# ci/real-docker/README.md's "Setup" section), never implicit at each
+# tick. The checkout supplies ONLY the test files pytest collects; it is
+# never on PYTHONPATH for the verdict/summary/posting step.
+#
+# Entrypoint lives OUTSIDE .woodpecker/ on purpose (#309 review): that
+# directory is auto-discovered WHOLESALE by the main Woodpecker server's
+# default per-repo config, so nothing with privileged-container semantics
+# may live there even unreferenced by any pipeline file.
+set -euo pipefail
+
+usage() {
+    echo "usage: run-real-docker <sha> [--break none|omit-mount|wrong-uid|flip-decision]" >&2
+    exit 2
+}
+
+[ $# -ge 1 ] || usage
+SHA="$1"; shift
+# B3 (orchestrator review): exactly 40 hex characters, never an
+# abbreviation - this script compares the checkout's full `rev-parse HEAD`
+# to $SHA byte-for-byte further down, so an abbreviated sha would always
+# self-refuse as a checkout mismatch. Enforced here too, not only in
+# ci/real_docker_trigger.py's regex, so a BY-HAND invocation with a typo'd
+# or abbreviated sha is refused immediately with a clear reason instead of
+# the confusing downstream "checkout did not match" message.
+if ! [[ "$SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    echo "run-real-docker: sha must be exactly 40 hex characters, not '$SHA'" >&2
+    exit 2
+fi
+BREAK_MODE="none"
+if [ $# -gt 0 ]; then
+    [ "$1" = "--break" ] || usage
+    [ $# -ge 2 ] || usage
+    BREAK_MODE="$2"
+fi
+case "$BREAK_MODE" in
+    none|omit-mount|wrong-uid|flip-decision) ;;
+    *) echo "run-real-docker: --break must be none|omit-mount|wrong-uid|flip-decision, not '$BREAK_MODE'" >&2; exit 2 ;;
+esac
+
+# VM-local configuration - never committed, never defaulted to a real path.
+# See ci/real-docker/README.md "Setup" for how the operator populates this.
+CONFIG_FILE="${SKILLC_REAL_DOCKER_CONFIG:-/etc/skillc-real-docker/config.env}"
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "run-real-docker: config file '$CONFIG_FILE' is absent - see ci/real-docker/README.md" >&2
+    exit 2
+fi
+# shellcheck disable=SC1090
+source "$CONFIG_FILE"
+# Required: INSTALLED_ROOT, WORK_CHECKOUT, LOCK_FILE, GITHUB_TOKEN_FILE,
+# GITHUB_REPO (owner/name), PREFLIGHT_IMAGE. LAN_PROBE_TARGET is NOT in this
+# list on purpose - an empty LAN_PROBE_TARGET is a real, distinct input to
+# the isolation classifier below ("unconfigured"), not a reason to refuse
+# before even reaching it; refusing it here would make that case
+# unreachable through this script, the opposite of R6's intent.
+for var in INSTALLED_ROOT WORK_CHECKOUT LOCK_FILE GITHUB_TOKEN_FILE GITHUB_REPO PREFLIGHT_IMAGE; do
+    if [ -z "${!var:-}" ]; then
+        echo "run-real-docker: config file is missing required variable '$var'" >&2
+        exit 2
+    fi
+done
+
+RUNNER_SHA="$(git -C "$INSTALLED_ROOT" rev-parse HEAD)"
+
+# S4 (orchestrator review): the token never appears in any process's argv
+# (visible to any local user via `ps`). curl reads it from a `-K` config
+# file instead of a `-H` argument; the file is created mode 600 in a
+# private temp dir and removed on exit (the EXIT trap further down).
+CURL_CFG="$(mktemp)"
+chmod 600 "$CURL_CFG"
+{
+    echo "header = \"Authorization: token $(cat "$GITHUB_TOKEN_FILE")\""
+    echo "header = \"Accept: application/vnd.github+json\""
+} > "$CURL_CFG"
+trap 'rm -f "$CURL_CFG"' EXIT
+
+# ---------------------------------------------------------------- posting
+#
+# S3: --fail-with-body makes curl exit non-zero on an HTTP error response
+# (a rejected token, a 404/422 from a malformed request) while still
+# printing the body for diagnosis - a bare `-s` with no --fail treated a
+# rejected post exactly like an accepted one. A failed post is logged to
+# stderr (visible in the systemd journal); it does not change this
+# script's own exit code, which already reports the RUN's verdict,
+# computed independently of whether posting it succeeded.
+
+post_status() {
+    local state="$1" description="$2" context="$3"
+    local payload
+    payload="$(python3 -c 'import json,sys; print(json.dumps({"state": sys.argv[1], "description": sys.argv[2], "context": sys.argv[3]}))' \
+        "$state" "$description" "$context")"
+    if ! curl -s --fail-with-body -K "$CURL_CFG" -X POST \
+            "https://api.github.com/repos/$GITHUB_REPO/statuses/$SHA" -d "$payload"; then
+        echo "run-real-docker: WARNING: posting the commit status failed (context=$context)" >&2
+    fi
+}
+
+post_comment() {
+    local body="$1" target_issue="$2"
+    local payload
+    payload="$(python3 -c 'import json,sys; print(json.dumps({"body": sys.argv[1]}))' "$body")"
+    if ! curl -s --fail-with-body -K "$CURL_CFG" -X POST \
+            "https://api.github.com/repos/$GITHUB_REPO/issues/$target_issue/comments" -d "$payload"; then
+        echo "run-real-docker: WARNING: posting the comment failed (issue=$target_issue)" >&2
+    fi
+}
+
+refuse_before_checkout() {
+    local reason="$1"
+    local context="skillc/real-docker"
+    [ "$BREAK_MODE" != "none" ] && context="skillc/real-docker-control"
+    echo "run-real-docker: ERROR: $reason" >&2
+    post_status "error" "ERROR: $reason (runner ${RUNNER_SHA:0:12})" "$context"
+}
+
+# -------------------------------------------------------- one run at a time
+#
+# S1 (orchestrator review): a BOUNDED WAIT, not `flock -n`'s immediate
+# failure. poll-triggers persists which shas it decided to run only AFTER
+# this script actually started (exit 3 means "never started" and is
+# excluded from that bookkeeping) - a non-blocking lock would otherwise let
+# a manual run's hold on the lock cause the timer's own decided sha to be
+# marked done without ever running at all. LOCK_WAIT_SECONDS defaults to
+# 240s, comfortably inside the 5-minute timer interval.
+exec 9>"$LOCK_FILE"
+if ! flock -w "${LOCK_WAIT_SECONDS:-240}" 9; then
+    echo "run-real-docker: could not acquire the lock within ${LOCK_WAIT_SECONDS:-240}s - never started" >&2
+    exit 3
+fi
+
+# ----------------------------------------------------- R6: isolation preflight
+#
+# B2 (orchestrator review): a tri-state TCP-connect probe, run with python3
+# INSIDE the throwaway container (PREFLIGHT_IMAGE must carry python3 - the
+# default, python:3.12-slim, is the SAME image this repo's own live-Docker
+# tests already use). A connection REFUSED still proves a host answered, so
+# it counts as "reachable" exactly like a successful connect; only a
+# timeout/no-route (nothing answers at all) is "unreachable"; anything else
+# (DNS failure, a bad argument) is "probe_error" and REFUSES outright -
+# never silently folded into "unreachable" the way a bare `|| echo
+# unreachable` fallback would.
+#
+# LAN_PROBE_TARGET is now "host:port" (not a bare host): a raw TCP connect
+# needs a port, and there is no "try the default web port" fallback that
+# would not just reintroduce the same ambiguity one layer up.
+_PROBE_SCRIPT='
+import socket, sys
+try:
+    host, port, timeout = sys.argv[1], int(sys.argv[2]), float(sys.argv[3])
+    s = socket.create_connection((host, port), timeout=timeout)
+    s.close()
+    print("reachable")
+except ConnectionRefusedError:
+    print("reachable")  # a host answered and refused - still not isolated
+except OSError:
+    print("unreachable")  # timeout, no route, DNS failure, network unreachable
+except Exception as exc:
+    print(f"probe_error: {exc}", file=sys.stderr)
+    sys.exit(2)
+'
+
+run_probe() {
+    local host="$1" port="$2" timeout="$3"
+    local out
+    if out="$(docker run --rm "$PREFLIGHT_IMAGE" python3 -c "$_PROBE_SCRIPT" "$host" "$port" "$timeout" 2>/dev/null)"; then
+        echo "$out"
+    else
+        echo "probe_error"
+    fi
+}
+
+LAN_PROBE_TARGET="${LAN_PROBE_TARGET:-}"
+LAN_CONFIGURED="false"
+LAN_PROBE_RESULT="probe_error"
+if [ -n "$LAN_PROBE_TARGET" ]; then
+    LAN_CONFIGURED="true"
+    LAN_HOST="${LAN_PROBE_TARGET%:*}"
+    LAN_PORT="${LAN_PROBE_TARGET##*:}"
+    LAN_PROBE_RESULT="$(run_probe "$LAN_HOST" "$LAN_PORT" 3)"
+fi
+GITHUB_PROBE_RESULT="$(run_probe "github.com" 443 5)"
+
+ISOLATION_VERDICT="$(PYTHONPATH="$INSTALLED_ROOT" python3 -c '
+import sys
+from ci.real_docker_isolation import classify
+result = classify(
+    lan_probe=sys.argv[1],
+    lan_configured=(sys.argv[2] == "true"),
+    github_probe=sys.argv[3],
+)
+print(result.status)
+print(result.reason)
+' "$LAN_PROBE_RESULT" "$LAN_CONFIGURED" "$GITHUB_PROBE_RESULT")"
+ISOLATION_STATUS="$(echo "$ISOLATION_VERDICT" | sed -n '1p')"
+ISOLATION_REASON="$(echo "$ISOLATION_VERDICT" | sed -n '2p')"
+
+if [ "$ISOLATION_STATUS" != "PROCEED" ]; then
+    refuse_before_checkout "isolation not verified: $ISOLATION_REASON"
+    exit 1
+fi
+
+# ------------------------------------------------------------- checkout
+
+if [ ! -d "$WORK_CHECKOUT/.git" ]; then
+    git clone --quiet "https://github.com/$GITHUB_REPO.git" "$WORK_CHECKOUT"
+fi
+git -C "$WORK_CHECKOUT" fetch --quiet origin
+if ! git -C "$WORK_CHECKOUT" checkout --quiet --detach "$SHA"; then
+    refuse_before_checkout "could not check out requested sha '$SHA'"
+    exit 1
+fi
+git -C "$WORK_CHECKOUT" clean -ffdx --quiet
+
+ACTUAL_HEAD="$(git -C "$WORK_CHECKOUT" rev-parse HEAD)"
+if [ "$ACTUAL_HEAD" != "$SHA" ]; then
+    refuse_before_checkout "checkout HEAD ($ACTUAL_HEAD) did not match the requested sha ($SHA)"
+    exit 1
+fi
+
+# ------------------------------------------------------------- run pytest
+
+REPORT_PATH="$WORK_CHECKOUT/reports/real-docker-report.xml"
+mkdir -p "$(dirname "$REPORT_PATH")"
+
+# S2 (orchestrator review): environment setup (uv sync) is checked
+# SEPARATELY from pytest's own exit code, and explicitly - under `set -e`,
+# a failing `uv sync` inside the same subshell as pytest would have killed
+# this whole script with nothing posted at all (the subshell's nonzero
+# exit propagating straight out). A pytest test FAILURE is still expected
+# input to the verdict step below (its exit code is deliberately ignored);
+# an environment that never got set up at all is not.
+if ! (cd "$WORK_CHECKOUT" && uv sync --locked --extra dev --quiet); then
+    refuse_before_checkout "uv sync failed - environment setup could not complete"
+    exit 1
+fi
+(
+    cd "$WORK_CHECKOUT"
+    SKILLC_LIVE_TEST_BREAK="$BREAK_MODE" uv run --no-sync pytest -m real_docker \
+        --junit-xml="$REPORT_PATH"
+) || true  # a test failure is EXPECTED input to the verdict step below
+
+# ----------------------------------------------------- R1: compute + post
+
+cd "$INSTALLED_ROOT"  # never the checkout, for the posting step below
+POST_OUTPUT="$(PYTHONPATH="$INSTALLED_ROOT" python3 "$INSTALLED_ROOT/ci/real_docker_post.py" \
+    "$REPORT_PATH" "$SHA" "$RUNNER_SHA")"
+POSTED_STATUS="$(echo "$POST_OUTPUT" | sed -n '1p')"
+DESCRIPTION="$(echo "$POST_OUTPUT" | sed -n '2p')"
+BODY="$(echo "$POST_OUTPUT" | sed -n '/^---$/,$p' | tail -n +2)"
+
+GH_STATE="success"
+[ "$POSTED_STATUS" = "FAILURE" ] && GH_STATE="failure"
+[ "$POSTED_STATUS" = "ERROR" ] && GH_STATE="error"
+
+if [ "$BREAK_MODE" = "none" ]; then
+    post_status "$GH_STATE" "$DESCRIPTION" "skillc/real-docker"
+else
+    # R2: a break-mode run NEVER posts to the certifying context - control
+    # context only, explicitly labelled expected-red.
+    post_status "$GH_STATE" "EXPECTED-RED ($BREAK_MODE): $DESCRIPTION" "skillc/real-docker-control"
+fi
+
+if [ -n "${GITHUB_COMMENT_ISSUE:-}" ]; then
+    PREFIX=""
+    [ "$BREAK_MODE" != "none" ] && PREFIX="**EXPECTED-RED (break mode: $BREAK_MODE)**\n\n"
+    post_comment "$(printf '%b%s' "$PREFIX" "$BODY")" "$GITHUB_COMMENT_ISSUE"
+fi
+
+# ------------------------------------------------------------- cleanup
+
+docker container prune -f >/dev/null 2>&1 || true
+docker image prune -f >/dev/null 2>&1 || true
+
+echo "run-real-docker: $POSTED_STATUS (break=$BREAK_MODE, sha=${SHA:0:12}, runner=${RUNNER_SHA:0:12})"
+# Exit codes: 0 SUCCESS, 1 FAILURE, 2 ERROR (a run that started and reported
+# one of these three), 3 the lock could not be acquired within
+# LOCK_WAIT_SECONDS - this run never started at all (S1: poll-triggers
+# checks specifically for 3 and does not mark the sha/comment processed).
+case "$POSTED_STATUS" in
+    SUCCESS) exit 0 ;;
+    FAILURE) exit 1 ;;
+    *) exit 2 ;;
+esac
