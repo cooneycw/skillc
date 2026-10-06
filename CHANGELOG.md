@@ -26,6 +26,34 @@ and version plan.
     red case proving a bypassed channel cannot move the controller-recorded
     point are later PRs under the same issue.
 
+- **`case.arm`/`case.paired_with`: a validated record of which trials pair as
+  a discriminating design** (Refs #273, wave #259, workstream #246). Before
+  this, nothing in the v2 schema said that one case was another's degraded
+  counterpart, so a PASS from a case whose degraded arm also passed looked
+  identical to a PASS that actually discriminates (CPP #1084's own question).
+  Two new optional fields on the existing trial-ledger `case` identity
+  (`intact`/`degraded`, and the paired case's `{id, revision}`), checked for
+  shape at the record level and for reciprocity, complementary arms,
+  uniqueness, and agreement with the existing #150 `degraded:` receipt
+  marker by a new bundle rule, `case-pairing`. This is the discriminating-case
+  axis - a property of the fixture - kept structurally distinct from the
+  treatment axis (`config.arm`, already carried by `calibration_run.py`'s own
+  trial planning): one trial can carry both, and nothing lets either be read
+  as the other.
+  - Does not itself establish that a design discriminates for the right
+    reason (#150-A's job) - only that a trial's claim to be one half of one
+    is well-formed, unambiguous, reciprocated and consistent with its own
+    receipt.
+  - Mutation-checked: the ambiguity, reciprocity/complementary, and
+    degraded-marker-consistency checks (bundle level) and the shape checks
+    (record level) each go BLIND with their check removed.
+  - Controls: `controls/trial-ledger/{good,bad}/case-*` (1 good, 5 bad) and
+    `controls/case-pairing/{good,bad}/` (1 good, 5 bad bundles, including the
+    reciprocal-and-complementary good case and one bad case per named
+    defect).
+  - Part of #273 (repeat-reliability and convenience summaries); the
+    reliability estimator itself is a separate, following commit.
+
 - **Unified regular-file task delivery** (Refs #267). Collection runs,
   calibration runs and selection probes deliver the whole declared fixture,
   excluding answer keys at every depth. Missing, empty, symlinked and

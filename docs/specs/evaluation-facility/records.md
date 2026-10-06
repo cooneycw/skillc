@@ -159,6 +159,27 @@ subject. Absent, or an explicit empty list, both mean this trial accepts none;
 `ledger-binding` refuses a `skill-evidence` entry whose source is well-formed
 but not in this list (see `skill-evidence`, below).
 
+`case.arm` and `case.paired_with` (#273): two OPTIONAL fields on the existing
+`case` identity, declaring whether this trial's case is the `intact` or
+`degraded` half of a discriminating design, and which counterpart case it
+pairs against. This is the **discriminating-case axis** - a property of the
+case/fixture - and it is a DIFFERENT axis from the treatment arm
+(`cpp`/`baseline`, already carried in `config.arm`/`config.repeat`/
+`config.position` by `skillc/calibration_run.py`'s own trial planning): one
+trial carries both, and nothing here lets either be read as the other.
+`case.paired_with` is `{id, revision}`, required whenever `case.arm` is
+declared, and must name a DIFFERENT case - never its own. Validated here for
+shape only; `case-pairing` (a new bundle rule, below) is where a declared
+pairing is checked for reciprocity, complementary arms, uniqueness, and
+agreement with `installation-receipt.subject.revision`'s existing `degraded:`
+marker (issue #150, `skillc/degrade.py`). Before #273, nothing in this schema
+represented this axis at all: a PASS from a case whose degraded arm also
+passed was indistinguishable from a PASS that actually discriminates
+(skillc #273's own scope note). `config.arm`/`config.repeat`/`config.position`
+remain outside this document's validated fields - #273 does not widen their
+coverage; a nit is filed if the reliability statistics that read them turn
+out to need them trustworthy.
+
 Budgets, lifecycle, termination and cleanup observations are required ledger
 outputs in interfaces.md. The ledger is immutable once dispatched, so lifecycle,
 termination and cleanup live in `attempt-lifecycle` (below). A budget may be carried
@@ -793,6 +814,44 @@ operation erases the earlier attempt."
 - A regrade's `regrade_of` names a result retained in the bundle, for the same
   attempt and with the same `graded_digests`.
 
+**`case-pairing`** (#273). Every trial declaring `case.arm` pairs with exactly
+one counterpart, under four checks - the validated record CPP #1084 needs,
+so that "discriminating" is a checked fact rather than a naming convention
+(skillc #273's own scope note calls inferring it from naming "not
+acceptable"):
+
+- **Unique.** At most one trial in the bundle may carry a given `case`
+  identity among those declaring an arm. Two trials both claiming to BE the
+  named counterpart make "the pair" ambiguous, and this rule refuses rather
+  than picking one.
+- **Reciprocal.** If trial A's `case.paired_with` names trial B's `case`, B's
+  own `paired_with` must name A's `case` back. A one-sided claim binds
+  nothing - A could name any case it likes if nothing checked the other side.
+- **Complementary.** A paired A and B must declare the two DIFFERENT arm
+  values. Both `intact`, or both `degraded`, is refused: a pairing is between
+  the two sides of one discriminating design, never a trial naming itself
+  twice over under two labels.
+- **Consistent with the #150 degraded marker.** `case.arm: degraded` requires
+  every attempt under that trial to carry an `installation-receipt.subject.
+  revision` starting `degraded:` (`skillc/degrade.py`'s own marker, reaching
+  the bundle via `skillc/agent_trial.py`'s `InstallationReceiptContext`);
+  `case.arm: intact` forbids one. **Boundary:** an attempt with no
+  installation-receipt at all is not this rule's finding - a missing receipt
+  is `attempt_accounting`'s account of a different absence, and this rule
+  would otherwise refuse the same gap twice under two names. This check
+  reads two DIFFERENT facts about the SAME condition (the trial-ledger's
+  declared `case.arm` and the receipt's observed acquisition identity) - two
+  markers for one fact can disagree, so this is what makes them unable to.
+
+**What this does not establish.** `case.arm`/`case.paired_with` says a trial
+CLAIMS to be one half of a discriminating design and agrees with its own
+receipt about it; it does not establish that the design actually
+discriminates (that the degraded arm's grader genuinely fails because of the
+removed capability, rather than for an unrelated reason) - that needs a
+Level-1 task and grader built for the purpose (#150-A), the same boundary
+`degraded-subjects.md` already states for the single-trial degraded marker
+this rule cross-checks against.
+
 ## Retention boundary
 
 The boundary below is unchanged. #8 turned it into a location, access and
@@ -832,7 +891,7 @@ bundle cases as well, including against every record rule.
 | `producer-authority` | record | forged subject verdict; unchecked receipt; adapter-produced ledger |
 | `attempt-binding` | record | no attempt; malformed attempt ID; no trial |
 | `installation-receipt` | record | empty install; no readiness; subject without digest |
-| `trial-ledger` | record | no trials; a trial with no attempts; missing grader identity; malformed attempt ID; `case.observes_selection` present but not a boolean (#26); `external_evidence_sources` present but not a list, or containing a malformed `<namespace>/v<N>` label (#268) |
+| `trial-ledger` | record | no trials; a trial with no attempts; missing grader identity; malformed attempt ID; `case.observes_selection` present but not a boolean (#26); `external_evidence_sources` present but not a list, or containing a malformed `<namespace>/v<N>` label (#268); `case.arm` outside `intact`/`degraded`; `case.arm` with no well-formed `paired_with`, or one naming its own case; `paired_with` with no `case.arm` (#273) |
 | `artifact-digest` | record | an artifact without a digest; an empty manifest; a null `path`, `type` or `size` beside a valid digest (#130) |
 | `observation-coverage` | record | a silent required stream; an unknown origin; no `capture_failures`; a `skill-invocations` count that is not `UNKNOWN` under incomplete coverage, or not a real integer under complete coverage; complete coverage naming no skills; a duplicate skill path with conflicting counts (#39) |
 | `criterion-vocabulary` | record | an outcome outside the vocabulary; a non-boolean `mandatory` (`"true"` would drop a violation out of the derivation); a criterion with no `id` (#130) |
@@ -847,6 +906,7 @@ bundle cases as well, including against every record rule.
 | `unique-ids` | bundle | duplicate attempt ID; conflicting receipts; duplicate result ID; a second `skill-evidence` record for one attempt |
 | `attempt-accounting` | bundle | planned attempt with no lifecycle; captured with no result; graded without receipt; graded without manifest; captured but declared NOT_RUN; graded but not captured; manifest but not captured; receipt stand-in with no agent-observation, or claiming readiness (#139) |
 | `lineage` | bundle | retry reusing its own ID; regrade whose original was erased; regrade of different bytes |
+| `case-pairing` | bundle | two trials declaring one case with an arm (ambiguous); a one-sided pairing; both sides declaring the same arm; a `degraded` arm whose attempts carry no `degraded:` receipt marker, or an `intact` arm whose attempts carry one (#273) |
 
 Record and bundle rules live in the **same registry and the same selftest loop** as
 the `SKILL.md` rules. Only the subject-loading step knows the family.

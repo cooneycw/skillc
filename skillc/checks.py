@@ -494,6 +494,11 @@ BUNDLE_RULES: tuple[BundleRule, ...] = (
                records.attempt_accounting),
     BundleRule("lineage", ERROR, "retries and regrades link to originals that are retained",
                records.lineage),
+    BundleRule(
+        "case-pairing", ERROR,
+        "a declared case.arm pairs reciprocally with one complementary counterpart and agrees with its receipt",
+        records.case_pairing,
+    ),
 )
 
 
