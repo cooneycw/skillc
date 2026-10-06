@@ -273,6 +273,44 @@ def test_trigger_socket_host_path_stays_short_even_for_a_long_attempt_id(tmp_pat
     assert len(path.name) < 32  # hash-derived, independent of long_name's own length
 
 
+def test_ensure_private_trigger_dir_creates_mode_0700_when_absent(tmp_path: Path) -> None:
+    target = tmp_path / "trigger-dir"
+    d._ensure_private_trigger_dir(target)
+    assert target.is_dir()
+    assert stat.S_IMODE(target.stat().st_mode) == 0o700
+
+
+def test_ensure_private_trigger_dir_accepts_an_existing_correctly_owned_0700_dir(tmp_path: Path) -> None:
+    target = tmp_path / "trigger-dir"
+    target.mkdir(mode=0o700)
+    os.chmod(target, 0o700)
+    d._ensure_private_trigger_dir(target)  # must not raise
+
+
+def test_ensure_private_trigger_dir_refuses_an_existing_dir_with_the_wrong_mode(tmp_path: Path) -> None:
+    target = tmp_path / "trigger-dir"
+    target.mkdir(mode=0o700)
+    os.chmod(target, 0o755)  # world-readable/executable - the exact hazard named in review
+    with pytest.raises(BackendUnavailable, match="0o700"):
+        d._ensure_private_trigger_dir(target)
+
+
+def test_ensure_private_trigger_dir_refuses_an_existing_dir_owned_by_a_different_uid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Can't actually chown to a different uid without privilege in this
+    environment, so the OTHER side of the comparison is mocked instead:
+    `os.getuid()` is made to disagree with the directory's real owner,
+    exercising the exact branch a real cross-uid collision would hit."""
+    target = tmp_path / "trigger-dir"
+    target.mkdir(mode=0o700)
+    os.chmod(target, 0o700)
+    real_getuid = os.getuid
+    monkeypatch.setattr(d.os, "getuid", lambda: real_getuid() + 1)
+    with pytest.raises(BackendUnavailable, match="uid"):
+        d._ensure_private_trigger_dir(target)
+
+
 def test_composed_argv_has_no_parameter_for_a_second_mount_or_any_other_extra_flag() -> None:
     """Structural, not a convention: calling `compose_run_argv` with an
     unrecognized keyword (a second mount, `privileged=True`, a plausibly-
@@ -1688,6 +1726,29 @@ def test_prepare_with_trigger_decide_binds_a_real_socket_before_the_container_st
         backend.destroy(handle)
     assert log is not None
     assert [entry.result["decision"] for entry in log] == ["pass", "fail"]
+
+
+def test_prepare_with_trigger_decide_applies_the_declared_socket_mode(
+    base: Path, docker_state: Path, trigger_socket_dir: Path,
+) -> None:
+    """Design doc §2f decision (b): the socket is mode `TRIGGER_SOCKET_MODE`
+    (0o666), not `DecideReplyChannel`'s own generic 0o600 default - the
+    candidate uid inside the container is essentially never this
+    controller process's own uid, so an owner-only socket would make the
+    subject's own `connect()` fail with EACCES. GROUP is granted too, not
+    just OTHER (counter-model review, msg 4685 item 3) - zeroing GROUP
+    bought nothing once (a)'s directory is the real boundary. Checked
+    directly on the real file `prepare()` created, not merely on the
+    constant's value."""
+    backend = _trigger_backend(base, docker_state, trigger_socket_dir)
+    handle = backend.prepare("a-lc-000000000023")
+    try:
+        assert isinstance(handle, d._Handle)
+        sock_path = d.trigger_socket_host_path_for(backend.trigger_socket_dir, handle.name)
+        mode = stat.S_IMODE(sock_path.stat().st_mode)
+    finally:
+        backend.destroy(handle)
+    assert mode == d.TRIGGER_SOCKET_MODE == 0o666
 
 
 def test_destroy_closes_the_trigger_channel_even_when_the_caller_never_finalized(

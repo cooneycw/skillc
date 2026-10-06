@@ -24,21 +24,35 @@ it has not yet been told.
 THE CONTROLLER NUMBERS REQUESTS, NEVER THE SUBJECT. Any `seq`-shaped field
 in an incoming request is part of the request content handed to `decide`,
 never used as this channel's own sequence number - that number is an
-internal counter, incremented once per request IN ARRIVAL ORDER, under the
-same lock that protects the log. A subject cannot claim an out-of-order or
-duplicate position for its own request.
+internal counter, incremented once per request in COMPLETION order (the
+order `decide` calls RETURN, assigned under the same lock that protects
+the log), not necessarily the order requests ARRIVED - `decide` runs
+concurrently across connections, outside that lock, so a request that
+arrives first but whose `decide` call takes longer can be numbered after
+one that arrived second but returned first (counter-model review finding,
+msg 4685 item 7 - an earlier draft of this paragraph claimed arrival
+order, which was simply wrong). A subject cannot claim an out-of-order or
+duplicate position for its own request, whichever order this turns out
+to be.
 
 A SUBJECT THAT NEVER CONNECTS IS A REAL, NAMED CASE, NOT A MISSING ONE. See
 `TrustedLog.read_as`.
 
-Stdlib only (`socket`, `socketserver`, `json`, `threading`), per AGENTS.md.
+Stdlib only (`socket`, `socketserver`, `json`, `threading`, `fcntl`), per
+AGENTS.md. `fcntl.flock` is POSIX/Linux-only, matching this module's own
+AF_UNIX dependency - neither works on a platform this backend does not
+target anyway.
 """
 
 from __future__ import annotations
 
+import copy
+import fcntl
 import json
 import os
+import socket
 import socketserver
+import stat
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -89,29 +103,65 @@ DecideFn = Callable[[Mapping[str, object]], Mapping[str, object]]
 class _Handler(socketserver.BaseRequestHandler):
     def handle(self) -> None:
         channel: DecideReplyChannel = self.server.channel  # type: ignore[attr-defined]
+        if not channel._handler_started():
+            # Over capacity (`max_concurrent_handlers`) - refused before
+            # reading a single byte, never queued behind existing
+            # handlers, and never counted as admitted - `_handler_finished()`
+            # below is skipped for exactly this reason. No reply is sent: a
+            # caller reading an abrupt close as "malformed"/refused either
+            # way is the same observable outcome as every other refusal
+            # path here.
+            return
+        try:
+            self._handle_admitted(channel)
+        finally:
+            channel._handler_finished()
+
+    def _handle_admitted(self, channel: DecideReplyChannel) -> None:
+        self.request.settimeout(channel._request_timeout)
         chunks: list[bytes] = []
-        while True:
-            chunk = self.request.recv(65536)
-            if not chunk:
-                break
-            chunks.append(chunk)
-            if b"\n" in chunk:
-                break
+        total = 0
+        try:
+            while True:
+                chunk = self.request.recv(65536)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > channel._max_request_bytes:
+                    # Closes without a reply, same reasoning as the
+                    # over-capacity case: an unbounded line is refused,
+                    # never buffered further to find out how long it
+                    # actually is.
+                    return
+                chunks.append(chunk)
+                if b"\n" in chunk:
+                    break
+        except OSError:
+            return  # a read deadline or a reset connection - refused, not a crash
         line = b"".join(chunks).split(b"\n", 1)[0]
         try:
             request = json.loads(line.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
-            self.request.sendall(json.dumps({"ok": False, "error": "malformed request"}).encode("utf-8") + b"\n")
+            self._reply_refused("malformed request")
             return
         if not isinstance(request, dict):
-            self.request.sendall(json.dumps({"ok": False, "error": "malformed request"}).encode("utf-8") + b"\n")
+            self._reply_refused("malformed request")
             return
         try:
             result = channel._decide_and_log(request)
         except ChannelRefusal as exc:
-            self.request.sendall(json.dumps({"ok": False, "error": str(exc)}).encode("utf-8") + b"\n")
+            self._reply_refused(str(exc))
             return
-        self.request.sendall(json.dumps({"ok": True, "result": result}).encode("utf-8") + b"\n")
+        try:
+            self.request.sendall(json.dumps({"ok": True, "result": result}).encode("utf-8") + b"\n")
+        except OSError:
+            pass  # the client disconnected before reading the reply - nothing more to do
+
+    def _reply_refused(self, error: str) -> None:
+        try:
+            self.request.sendall(json.dumps({"ok": False, "error": error}).encode("utf-8") + b"\n")
+        except OSError:
+            pass  # same reasoning as the success path above
 
 
 class _Server(socketserver.ThreadingUnixStreamServer):
@@ -148,9 +198,27 @@ class DecideReplyChannel:
     own locking; this class's own log append is already locked (below),
     independent of whatever `decide` itself does."""
 
-    def __init__(self, socket_path: Path, decide: DecideFn) -> None:
+    def __init__(
+        self, socket_path: Path, decide: DecideFn, *,
+        socket_mode: int = 0o600, handler_drain_timeout: float = 5.0,
+        max_concurrent_handlers: int = 32, max_request_bytes: int = 64 * 1024,
+        request_timeout: float = 5.0,
+    ) -> None:
         self._socket_path = socket_path
         self._decide = decide
+        self._socket_mode = socket_mode
+        self._handler_drain_timeout = handler_drain_timeout
+        #: Counter-model review finding (msg 4685 item 3): the subject's
+        #: own resource limits (`--pids-limit`, `--memory`, ...) bound ITS
+        #: side of this socket, never the CONTROLLER's. These three bound
+        #: what a connecting subject can cost THIS process - concurrent
+        #: handler threads, buffered bytes per connection before a
+        #: newline, and how long one connection may sit idle before this
+        #: channel gives up on it - independent of anything Docker already
+        #: enforces on the container.
+        self._max_concurrent_handlers = max_concurrent_handlers
+        self._max_request_bytes = max_request_bytes
+        self._request_timeout = request_timeout
         self._lock = threading.Lock()
         self._log: list[LoggedDecision] = []
         self._next_seq = 1
@@ -158,6 +226,20 @@ class DecideReplyChannel:
         self._thread: threading.Thread | None = None
         self._started = False
         self._finalized = False
+        #: Counts handler threads currently inside `_Handler.handle()` -
+        #: `stop_and_finalize()` drains this to zero (bounded by
+        #: `handler_drain_timeout`) before snapshotting the log, because
+        #: `ThreadingUnixStreamServer.server_close()` does not wait for
+        #: in-flight handlers on its own: this class sets `daemon_threads =
+        #: True` on `_Server` (so a stuck handler cannot hang interpreter
+        #: exit), and `socketserver`'s own join-on-close explicitly skips
+        #: daemon threads (`_Threads.append`, stdlib). Without this, a
+        #: handler still inside `decide()` when `stop_and_finalize()` is
+        #: called could append a decision AFTER the "finalized" log was
+        #: already returned once - found by cross-model review (counter-
+        #: model review, msg 4685's item 3), not reasoned out in advance.
+        self._active_handlers = 0
+        self._handlers_idle = threading.Condition(self._lock)
 
     def start(self) -> None:
         """Binds and starts listening. Raises `OSError` if the socket path's
@@ -185,24 +267,128 @@ class DecideReplyChannel:
                 f"below AF_UNIX's sun_path limit (108 bytes on Linux, including the "
                 f"terminator): {self._socket_path}"
             )
+        lock_path = self._socket_path.with_name(self._socket_path.name + ".lock")
+        lock_file = open(lock_path, "wb")  # noqa: SIM115 - held deliberately past this block, see below
+        try:
+            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            lock_file.close()
+            raise OSError(
+                f"refusing to bind {self._socket_path}: another channel is already working on "
+                f"this exact path (two attempts hashed to the same path, racing to start)"
+            ) from None
+        try:
+            # EVERYTHING that decides whether this path is safe to bind,
+            # AND the bind-and-listen itself, happens while this lock is
+            # held (counter-model review finding, msg 4685 item 3): a
+            # probe-then-unlink-then-bind sequence with no lock has a real
+            # window between another channel's `bind()` and its `listen()`
+            # during which a socket exists but nothing is accepting yet -
+            # `connect()` fails with the SAME `ConnectionRefusedError` a
+            # genuine dead orphan produces, so a probe racing that window
+            # would misread a channel that is MID-START as stale and
+            # unlink the path out from under it. Serializing the whole
+            # decide-then-act sequence per path removes the window rather
+            # than trying to narrow it.
+            self._clear_stale_path()
+            server = _Server(str(self._socket_path), _Handler)  # binds AND listens; self-cleans on failure
+            server.channel = self
+            try:
+                os.chmod(self._socket_path, self._socket_mode)
+            except OSError:
+                # `_Server.__init__` already self-closes on a bind/listen
+                # failure (stdlib `TCPServer.__init__`'s own try/except),
+                # but a chmod failure happens AFTER that succeeds, with
+                # nothing else closing the now-live listener - found by
+                # counter-model review (msg 4685 item 3).
+                server.server_close()
+                raise
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+            lock_file.close()
         self._started = True
-        if self._socket_path.exists():
-            self._socket_path.unlink()
-        server = _Server(str(self._socket_path), _Handler)
-        server.channel = self
-        os.chmod(self._socket_path, 0o600)
         self._server = server
         thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05),
                                    daemon=True, name="decide-reply-channel")
         thread.start()
         self._thread = thread
 
+    def _clear_stale_path(self) -> None:
+        """Decides whether whatever already sits at `self._socket_path` is
+        safe to replace - design doc §2f, decision 4 (two attempts racing
+        for the same path: REFUSED, never silently shared).
+
+        Nothing there: nothing to do. A SOCKET with nothing answering on it
+        is a stale orphan (a prior attempt's listener that exited without
+        unlinking - `stop_and_finalize()` unlinks on a clean exit, but a
+        killed process cannot) and is safely removed before this call binds
+        its own listener over the same path. A SOCKET with something
+        actively accepting the connection means another live channel
+        already owns this path - refused outright, never adopted and never
+        silently shared; the two channels would otherwise interleave
+        requests on one log with no way to attribute either to its own
+        attempt. Anything OTHER than a socket (a regular file, a directory)
+        at this exact path is refused too - this channel creates nothing
+        but sockets here, so anything else is either a different caller's
+        mistake or an adversarial pre-creation, and guessing which is not
+        this method's job."""
+        if not self._socket_path.exists():
+            return
+        if not stat.S_ISSOCK(self._socket_path.stat().st_mode):
+            raise OSError(f"refusing to replace a non-socket at {self._socket_path}")
+        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            probe.settimeout(0.2)
+            probe.connect(str(self._socket_path))
+        except ConnectionRefusedError:
+            self._socket_path.unlink()  # stale orphan - nothing was listening
+        else:
+            raise OSError(
+                f"refusing to bind {self._socket_path}: another channel is already "
+                f"listening on it (two attempts hashed to the same path)"
+            )
+        finally:
+            probe.close()
+
+    def _handler_started(self) -> bool:
+        """Admits a new handler unless `max_concurrent_handlers` is already
+        reached - counter-model review finding (msg 4685 item 3): an
+        unbounded thread-per-connection accept had no cap at all, so a
+        subject opening many connections (or just many slow ones) could
+        exhaust controller-side threads regardless of the CONTAINER's own
+        resource limits, which bound the subject's side, never this
+        process's. Returns `False` without incrementing anything - a
+        caller that is refused admission must not later call
+        `_handler_finished()` for it, or the count would go negative."""
+        with self._lock:
+            if self._active_handlers >= self._max_concurrent_handlers:
+                return False
+            self._active_handlers += 1
+            return True
+
+    def _handler_finished(self) -> None:
+        with self._handlers_idle:
+            self._active_handlers -= 1
+            if self._active_handlers == 0:
+                self._handlers_idle.notify_all()
+
     def _decide_and_log(self, request: Mapping[str, object]) -> Mapping[str, object]:
         result = self._decide(request)  # may raise ChannelRefusal - never logged, see docstring
         with self._lock:
             seq = self._next_seq
             self._next_seq += 1
-            self._log.append(LoggedDecision(seq=seq, request=request, result=result, logged_at=time.time()))
+            # Deep-copied, not stored by reference (counter-model review
+            # finding, msg 4685 item 6): `LoggedDecision` is frozen only at
+            # the dataclass's own attribute level - a caller-supplied
+            # `decide` that returns the SAME mutable dict across calls (or
+            # a consumer mutating a dict retrieved from the log) would
+            # otherwise rewrite an entry already presented as finalized.
+            # `request` is freshly parsed per call in THIS module's own
+            # handler and never reused, but copying it too costs nothing
+            # and does not depend on staying true forever.
+            self._log.append(LoggedDecision(
+                seq=seq, request=copy.deepcopy(request), result=copy.deepcopy(result), logged_at=time.time(),
+            ))
         return result
 
     def stop_and_finalize(self) -> list[LoggedDecision]:
@@ -212,7 +398,16 @@ class DecideReplyChannel:
         `DisruptionTrigger.stop_and_finalize()`'s own single-call
         discipline. An empty list is a real, meaningful result: the subject
         never connected at all (see `TrustedLog.read_as`'s
-        `no-controller-witness` case) - never treated as an error here."""
+        `no-controller-witness` case) - never treated as an error here.
+
+        Waits (bounded by `handler_drain_timeout`) for every handler thread
+        already inside `handle()` to finish BEFORE snapshotting the log -
+        `shutdown()` only stops ACCEPTING new connections, it says nothing
+        about ones already in flight, and this class's own `daemon_threads
+        = True` means `server_close()` will not wait for them either (see
+        `_active_handlers`'s own comment). Raises `RuntimeError` rather than
+        returning a log that might still grow if the drain times out - a
+        silently short snapshot would read as complete when it is not."""
         if not self._started:
             raise RuntimeError("stop_and_finalize() called before start()")
         if self._finalized:
@@ -223,6 +418,16 @@ class DecideReplyChannel:
         self._server.server_close()
         if self._thread is not None:
             self._thread.join()
+        with self._handlers_idle:
+            drained = self._handlers_idle.wait_for(
+                lambda: self._active_handlers == 0, timeout=self._handler_drain_timeout,
+            )
+        if not drained:
+            raise RuntimeError(
+                f"stop_and_finalize(): {self._active_handlers} handler(s) still running past "
+                f"handler_drain_timeout={self._handler_drain_timeout}s - the log cannot be "
+                f"trusted as finalized while a decision may still be appended to it"
+            )
         try:
             self._socket_path.unlink()
         except OSError:

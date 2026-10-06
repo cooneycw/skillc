@@ -121,6 +121,7 @@ import hashlib
 import io
 import os
 import re
+import stat
 import subprocess
 import tarfile
 import tempfile
@@ -255,6 +256,80 @@ def trigger_socket_host_path_for(trigger_socket_dir: Path, name: str) -> Path:
     own comment)."""
     digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:16]
     return trigger_socket_dir / f"{digest}.sock"
+
+
+#: #183's socket access control (design doc §2f), decisions (a)/(b).
+#:
+#: (a) DIRECTORY: `_ensure_private_trigger_dir` below creates
+#: `trigger_socket_dir` at mode 0700, owned by this process - never
+#: `exist_ok=True`'d blindly. If the directory already exists, its owner
+#: and mode are checked and the whole attempt is refused
+#: (`BackendUnavailable`) on a mismatch, rather than silently trusting
+#: something another host user or process created. A host-wide world-
+#: readable/writable temp directory would let any other process on the
+#: host list, pre-create, or replace a socket path before this backend
+#: ever gets to it; a private, owner-verified directory means no other
+#: host process can even TRAVERSE to a socket's name, regardless of that
+#: socket file's own mode (directory execute/search permission is checked
+#: before a file's own permission bits, for every syscall that resolves a
+#: path through it - `stat()`, `connect()`, `unlink()`, all of them).
+#:
+#: (b) SOCKET MODE: the subject inside the container runs as the fixed
+#: `CANDIDATE_UID:CANDIDATE_GID` (`compose_run_argv`'s `--user`), which is
+#: essentially never this controller PROCESS's own uid - so a mode-0600,
+#: owner-only socket (`DecideReplyChannel`'s own generic default, correct
+#: for a caller running AS its own subject) would make the subject's own
+#: `connect()` fail with EACCES, breaking the channel outright. Granting
+#: "other" access looks wide in isolation, but the REAL access-control
+#: boundary here is (a)'s directory, not this file's own mode: nothing on
+#: the host other than this controller process can even resolve the
+#: socket's HOST-side path to open it, because the directory's own 0700
+#: blocks every other host user's traversal regardless of what the file
+#: inside it allows. GROUP is granted too (`0o666`, not `0o606` - counter-
+#: model review, msg 4685 item 3): the socket's actual group is whatever
+#: this controller process's own primary group happens to be, essentially
+#: never `CANDIDATE_GID` - changing it to an arbitrary target gid would
+#: need the calling process to either own that gid as a supplementary
+#: group or hold `CAP_CHOWN`, a privilege this backend does not require
+#: anywhere else - so zeroing GROUP while granting OTHER bought nothing: a
+#: deployment where the two processes' groups happen to coincide would be
+#: denied for no reason, and (a)'s directory is doing the real work
+#: either way. The container's OWN view of the bind-mounted file is
+#: governed by the image's `/run/skillc/` directory (an image-level,
+#: #78/PR-B concern, not this one) plus this file's own mode - never by
+#: the host directory surrounding it, since a single-FILE bind mount
+#: exposes only that one file, not its host-side neighbours.
+TRIGGER_SOCKET_MODE = 0o666
+
+
+def _ensure_private_trigger_dir(path: Path) -> None:
+    """Design doc §2f decision (a). Creates `path` at mode 0700 if absent.
+    If present, refuses (raises `BackendUnavailable`) unless it is already
+    owned by this process's own uid and already mode 0700 - never widens
+    an existing directory to match, and never proceeds past a mismatch on
+    the assumption it is probably fine. `os.chmod` after `mkdir` rather
+    than relying on `mkdir(mode=...)` alone: `mkdir`'s own `mode` argument
+    is still subject to the process umask, which can only narrow it
+    further for 0700 (every bit already absent from "group"/"other"), but
+    stating the final mode explicitly removes any dependence on what the
+    umask happens to be rather than reasoning about whether it is safe
+    this time."""
+    if not path.exists():
+        path.mkdir(parents=True, mode=0o700)
+        os.chmod(path, 0o700)
+        return
+    st = path.stat()
+    if st.st_uid != os.getuid():
+        raise BackendUnavailable(
+            f"refusing to use trigger socket directory {path}: owned by uid {st.st_uid}, "
+            f"not this process's own uid {os.getuid()}"
+        )
+    if stat.S_IMODE(st.st_mode) != 0o700:
+        raise BackendUnavailable(
+            f"refusing to use trigger socket directory {path}: mode "
+            f"{oct(stat.S_IMODE(st.st_mode))}, expected 0o700"
+        )
+
 
 #: Resource limits (addendum item C9). --memory-swap MUST equal --memory or
 #: swap silently doubles the effective bound.
@@ -842,8 +917,8 @@ class DockerBackend:
         if self.trigger_decide is None:
             return None, None
         trigger_socket_host_path = trigger_socket_host_path_for(self.trigger_socket_dir, name)
-        trigger_socket_host_path.parent.mkdir(parents=True, exist_ok=True)
-        channel = DecideReplyChannel(trigger_socket_host_path, self.trigger_decide)
+        _ensure_private_trigger_dir(trigger_socket_host_path.parent)
+        channel = DecideReplyChannel(trigger_socket_host_path, self.trigger_decide, socket_mode=TRIGGER_SOCKET_MODE)
         channel.start()
         return channel, trigger_socket_host_path
 

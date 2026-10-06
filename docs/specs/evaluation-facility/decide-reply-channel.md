@@ -206,6 +206,143 @@ This channel gives #269, without any change to this module:
 function, request shape, or log schema — only the transport (§2a) and the
 ordering guarantee (§2b). This is what §0's naming choice is for.
 
+### 2f. Socket access control (orchestrator review, msg 4685)
+
+A decide-and-reply channel's socket is the one new privilege boundary this
+design adds, and it is the part most likely to go wrong silently — a
+misconfigured permission either breaks the channel (subject can't connect,
+reads as a false bypass) or over-shares it (a different host process or
+attempt connects where it shouldn't). Four questions, each with a code
+change and a mutation-checked test (`test_docker_backend.py`,
+`test_decide_reply_channel.py`):
+
+**(a) Directory and socket modes/ownership.** `trigger_socket_dir`
+(`DEFAULT_TRIGGER_SOCKET_DIR` or a caller override) is never trusted blindly.
+`_ensure_private_trigger_dir()` creates it at mode `0o700` if absent; if it
+already exists, the directory's owner and mode are checked and the WHOLE
+ATTEMPT is refused (`BackendUnavailable`) on either mismatch — never widened
+to match, never used anyway on the assumption it is probably fine. This is
+the real access-control boundary: directory traversal permission is checked
+by the kernel before a file's own permission bits, for every syscall that
+resolves a path through it, so a private, owner-verified directory means no
+OTHER host process can even reach the socket's host-side path, regardless of
+that socket's own mode.
+
+**(b) Subject connect permission without world-openability.** The subject
+runs as the fixed `CANDIDATE_UID:CANDIDATE_GID`, essentially never this
+controller process's own uid, so `DecideReplyChannel`'s own generic default
+(`0o600`, owner-only — correct for a caller that IS its own subject) would
+make the subject's `connect()` fail with `EACCES`, breaking the channel
+outright for every real use. `DockerBackend` passes `TRIGGER_SOCKET_MODE =
+0o666` (owner/group/other all rw) instead. Granting "other" (and "group")
+looks wide in isolation; it is not the operative boundary. (a)'s directory
+is: nothing on the host other than this controller process can resolve the
+socket's HOST path to open it at all, so widening the FILE's own
+permission bits changes nothing about who can reach it — only (a) does.
+GROUP is granted too, not zeroed (correction, counter-model review msg
+4685 item 3: an earlier draft granted OTHER only, reasoning that GROUP
+would need `CAP_CHOWN` to set to `CANDIDATE_GID` — true, but irrelevant,
+since the socket's actual group is whatever this process's own primary
+group already is, essentially never `CANDIDATE_GID` either way; zeroing
+GROUP bought nothing and would needlessly deny a deployment where the two
+groups happen to coincide). The container's OWN view of the bind-mounted
+file is governed by the image's `/run/skillc/` directory (a #78/PR-B
+concern) plus this file's own mode — never by the host directory around
+it, since a single-FILE bind
+mount exposes only that one file, never its host-side neighbours.
+
+**(c) Can the subject unlink or replace the socket?** Reasoned, not tested
+— no real daemon is available in this container (confirmed to you,
+msg 4664), and this is specifically a live-kernel-and-Docker question
+`describe()`'s `unobserved` already marks this backend's boundary for
+elsewhere. A FILE bind mount's target dentry is pinned by the active mount;
+Linux refuses `unlink()` on a path something has bind-mounted onto, in the
+mount namespace doing the unmounting, with `EBUSY` — the subject cannot
+simply replace the file out from under the mount while it is active. What
+this does NOT cover: whether the subject's own mount namespace view differs
+in some Docker-specific way, and whether a different attack (e.g.
+overwriting through the fd rather than the path) is possible. Both are
+named as owed to the operator's live run (#10), the same convention
+`describe()`'s `unobserved` already uses for every other daemon-only claim
+in this module — not simulated here.
+
+**(d) Two attempts racing for the same hashed filename.** REFUSED, never
+silently shared. `DecideReplyChannel._clear_stale_path()` (called from
+`start()`, before the bind) distinguishes three states for whatever already
+exists at the socket path: nothing (proceed); a SOCKET with nothing
+answering (a stale orphan from a prior attempt whose listener was killed
+rather than cleanly finalized — `stop_and_finalize()` unlinks on a clean
+exit, but a killed process cannot — safe to clear and rebind); a SOCKET with
+something actively accepting the connection (another live channel already
+owns this path — refused with `OSError`, never adopted, because two channels
+sharing one log could not attribute a decision to either attempt). Anything
+at the path that is NOT a socket at all (a regular file, a directory) is
+refused outright too — this channel creates nothing but sockets at its own
+path, so anything else is either a different caller's mistake or an
+adversarial pre-creation, and guessing which is not this method's job.
+
+### 2g. Further hardening from cross-model review (counter-model review, msg 4685 item 3)
+
+`/codex:code_review` (reviewing model `gpt-6.1-sol`, diff-only scope — this
+container's sandbox cannot start) found six real issues in the first PR A
+draft, none of them in §2f's own access-control design — all in the
+channel's concurrency and lifecycle handling. Each is fixed and
+mutation-checked (five mechanically; the sixth is a documentation
+correction with a pinning test, since there was no code behavior to flip):
+
+1. **Finalization did not wait for an in-flight handler.** `_Server` sets
+   `daemon_threads = True` (so a stuck handler cannot hang interpreter
+   exit), and `socketserver`'s own join-on-close explicitly skips daemon
+   threads — so `stop_and_finalize()` could return a "finalized" log
+   while a handler still inside `decide()` was about to append to it.
+   Fixed with explicit handler-count tracking: `stop_and_finalize()` now
+   drains to zero (bounded by `handler_drain_timeout`, default 5s) before
+   snapshotting, and raises rather than returning a log that might still
+   grow if a handler outlives that bound.
+2. **No bound on concurrent connections, request size, or idle time.**
+   The subject's own resource limits (`--pids-limit`, `--memory`, …)
+   bound ITS side of this socket, never the controller's — an adversarial
+   or merely buggy subject could exhaust controller-side threads or
+   memory with no limit at all. `max_concurrent_handlers` (32),
+   `max_request_bytes` (64 KiB) and `request_timeout` (5s) bound all
+   three; each is a constructor parameter, not a hardcoded constant.
+3. **A TOCTOU race in stale-socket detection.** `ConnectionRefusedError`
+   on a probe `connect()` does not by itself prove an orphan: another
+   channel may have `bind()`'d but not yet `listen()`'d, and a probe
+   racing exactly that window would misread a channel mid-`start()` as
+   dead and unlink its socket out from under it. Fixed by serializing the
+   whole decide-then-act sequence (`_clear_stale_path()` through bind and
+   `chmod`) under an exclusive, non-blocking `flock()` on a sibling
+   `.lock` file — a second `start()` racing the same path during that
+   window is refused outright, never left to guess.
+4. **The socket mode zeroed GROUP while granting OTHER** (§2f(b)) for no
+   real benefit, since the file's actual group is essentially never
+   `CANDIDATE_GID` either way. Changed `TRIGGER_SOCKET_MODE` from `0o606`
+   to `0o666` — (a)'s directory remains the real boundary; this removes
+   an asymmetry that bought nothing.
+5. **A `chmod()` failure after a successful bind left the listener
+   open**, uncaught and untracked (`_Server.__init__` already self-closes
+   on a bind/listen failure via stdlib `TCPServer.__init__`'s own
+   try/except — this gap was specifically the step AFTER that succeeds).
+   Fixed by explicitly closing the server on a chmod failure before
+   re-raising. (The separate "`_started` set before the server exists"
+   half of this same finding was already resolved as a side effect of
+   fix 3's restructuring, which moved `self._started = True` to after the
+   whole bind-and-chmod section succeeds.)
+6. **Logged request/result mappings were stored by reference**, not
+   copied — a `decide` function returning the same mutable dict across
+   calls, or a consumer mutating a dict retrieved from the log, could
+   rewrite an entry already presented as finalized, breaking the
+   advertised immutable, append-only record. Fixed with `copy.deepcopy`
+   at the point of logging.
+7. **The module claimed sequence numbers reflect arrival order; they
+   reflect completion order** — `decide` runs outside the log's lock, so
+   a request that arrives first but whose `decide` call takes longer is
+   numbered after one that arrives second but returns first. Corrected
+   throughout (module docstring, tests, this doc); added a test that
+   pins the actual (completion-order) behavior rather than leaving it
+   implicit.
+
 ## 3. Image interaction (#78) — explicitly held, not in this PR
 
 The proxy binary the subject's tool wrapper calls into (to turn a tool call
@@ -322,3 +459,15 @@ Only PR D (the last PR) carries "Closes #183"; A/B/C each carry "Refs
 4. **Named `decide_reply_channel`, not `disruption_channel`** (§0) — so
    #269 can depend on the mechanism without depending on Level 5's
    vocabulary.
+5. **The private directory, not the socket file, is the real access-control
+   boundary** (§2f(a)/(b)) — directory traversal is checked before a file's
+   own permission bits, so an owner-verified `0o700` directory makes the
+   socket file's own "other" bit (needed for the candidate uid to connect
+   at all) safe to grant, rather than requiring `CAP_CHOWN` to narrow it to
+   a group instead.
+6. **An existing directory or socket path is verified, never trusted or
+   silently widened** (§2f(a)/(d)) — a wrong owner or mode on the directory,
+   or an already-live listener on the socket path, each refuse the whole
+   attempt (`BackendUnavailable`/`OSError`) rather than proceeding on the
+   assumption it is probably fine. Only a confirmed-dead orphan (a socket
+   nothing answers on) is cleared and reused.
