@@ -32,6 +32,29 @@ and version plan.
   - The two-arm study (`published` + `rewritten`, with its Fisher test) is
     unchanged.
 
+- **Task-cluster bootstrap: a report-level section alongside `case_pairs`**
+  (Refs #272 acceptance item 4, #273). `CoverageReport.task_clusters`
+  (`TaskClusterBootstrap`) groups every row by (skill_path, skill_version,
+  client_name, client_version, arm) - the row key minus `case_id`, so each
+  group spans every TASK (case) in the bundle that shares it - and
+  bootstraps that group's rows' own `reliability.all_k` values via
+  `reliability.task_cluster_bootstrap` directly (never reimplemented).
+  `assemble_coverage_report` gains optional `bootstrap_seed: int | None`
+  and `bootstrap_resamples: int` parameters; without a declared seed,
+  `task_clusters` is empty - the same "no declared input, no section"
+  discipline as `discrimination_rule`/`k`, never a skillc-chosen default
+  seed. A row without a numeric `all_k` (`NOT_DECLARED` or
+  `reliability.INSUFFICIENT`, itself needing `k` declared) contributes no
+  task value but the group still gets an entry, so an all-undeclared-`k`
+  group reports `task_count=0`/`INSUFFICIENT` rather than silently having
+  no entry. Below `reliability.MIN_BOOTSTRAP_TASKS` usable tasks,
+  `all_k_interval` is `reliability.INSUFFICIENT` (the same sentinel, never
+  a second one) - explicit, never a silently omitted group. 4 new tests
+  (the 4-tasks-INSUFFICIENT/5-tasks-an-interval boundary, a byte-identical
+  repeat with the same seed, absence without a declared seed) plus 2
+  mutation checks (the `MIN_BOOTSTRAP_TASKS` boundary off by one; grouping
+  by case instead of across cases), both net-diff-empty after restoration.
+
 - **Row-level convenience: `phase_wall_times` aggregated over a row's
   attempts** (Refs #272 acceptance item 4, #273). `CoverageRow.convenience`
   (`RowConvenience`) rolls up #273's `convenience.py` per-attempt proxies to

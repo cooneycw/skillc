@@ -343,6 +343,52 @@ class CasePairVerdict:
 
 
 @dataclass(frozen=True)
+class TaskClusterBootstrap:
+    """Report-level repeat-reliability across TASKS (cases), for one
+    (skill, version, client, arm) group spanning every case that shares
+    it (item 4's "repeat-reliability ... into applicable per-skill
+    reports", in exactly the sense of one skill's reliability across
+    tasks). Resamples TASKS, never attempts - `reliability.
+    task_cluster_bootstrap`'s own discipline, reused directly here rather
+    than reimplemented.
+
+    Built from each row's own `reliability.all_k` (itself needing a
+    declared `k` - `RowReliability`'s own distinction): a row whose `all_k`
+    is `NOT_DECLARED` or `reliability.INSUFFICIENT` contributes no task
+    value, so `task_count` can be smaller than the group's own row count.
+    Below `reliability.MIN_BOOTSTRAP_TASKS` usable tasks, `all_k_interval`
+    is `reliability.INSUFFICIENT` (the SAME sentinel, never a second one) -
+    explicit, never a silently omitted group."""
+
+    skill_path: str
+    skill_version: str
+    client_name: str
+    client_version: str
+    arm: str
+    task_count: int
+    seed: int
+    resamples: int
+    confidence: float
+    all_k_interval: tuple[float, float] | str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "skill_path": self.skill_path,
+            "skill_version": self.skill_version,
+            "client_name": self.client_name,
+            "client_version": self.client_version,
+            "arm": self.arm,
+            "task_count": self.task_count,
+            "seed": self.seed,
+            "resamples": self.resamples,
+            "confidence": self.confidence,
+            "all_k_interval": (
+                list(self.all_k_interval) if not isinstance(self.all_k_interval, str) else self.all_k_interval
+            ),
+        }
+
+
+@dataclass(frozen=True)
 class CoverageReport:
     inventory: str
     profile_digest: str | None
@@ -350,6 +396,7 @@ class CoverageReport:
     declared_skills: tuple[str, ...] | None
     rows: tuple[CoverageRow, ...]
     case_pairs: tuple[CasePairVerdict, ...] = ()
+    task_clusters: tuple[TaskClusterBootstrap, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -360,6 +407,12 @@ class CoverageReport:
             "rows": [r.to_dict() for r in sorted(self.rows, key=lambda row: row.key.as_tuple())],
             "case_pairs": [
                 p.to_dict() for p in sorted(self.case_pairs, key=lambda p: (p.case_id, p.case_revision))
+            ],
+            "task_clusters": [
+                t.to_dict() for t in sorted(
+                    self.task_clusters,
+                    key=lambda t: (t.skill_path, t.skill_version, t.client_name, t.client_version, t.arm),
+                )
             ],
         }
 
@@ -437,6 +490,45 @@ def _refuse_on_invalid_bundle(bundle: records.Bundle) -> None:
             f"bundle fails its own validation rules ({len(findings)} finding(s)); "
             f"first: {findings[0]}"
         )
+
+
+def _compute_task_clusters(
+    rows: Sequence[CoverageRow], seed: int, resamples: int, confidence: float,
+) -> tuple[TaskClusterBootstrap, ...]:
+    """Group `rows` by (skill_path, skill_version, client_name,
+    client_version, arm) - the same row key minus `case_id`, so each group
+    spans every TASK (case) that shares it - and bootstrap each group's
+    `all_k` values. A row contributes a task value only when its own
+    `reliability.all_k` is a real float; `NOT_DECLARED`/`INSUFFICIENT` rows
+    still count toward the group (so an all-undeclared-k group reports
+    `task_count=0`, `INSUFFICIENT`, rather than silently having no entry).
+    """
+    groups: dict[tuple[str, str, str, str, str], list[float]] = {}
+    for row in rows:
+        group_key = (
+            row.key.skill_path, row.key.skill_version,
+            row.key.client_name, row.key.client_version, row.key.arm,
+        )
+        task_values = groups.setdefault(group_key, [])
+        if isinstance(row.reliability.all_k, float):
+            task_values.append(row.reliability.all_k)
+
+    clusters: list[TaskClusterBootstrap] = []
+    for group_key, task_values in sorted(groups.items()):
+        skill_path, skill_version, client_name, client_version, arm = group_key
+        all_k_interval: tuple[float, float] | str
+        if len(task_values) < rel.MIN_BOOTSTRAP_TASKS:
+            all_k_interval = rel.INSUFFICIENT
+        else:
+            interval = rel.task_cluster_bootstrap(task_values, seed, resamples, confidence)
+            all_k_interval = (interval.lower, interval.upper)
+        clusters.append(TaskClusterBootstrap(
+            skill_path=skill_path, skill_version=skill_version,
+            client_name=client_name, client_version=client_version, arm=arm,
+            task_count=len(task_values), seed=seed, resamples=resamples, confidence=confidence,
+            all_k_interval=all_k_interval,
+        ))
+    return tuple(clusters)
 
 
 def _ledger_cells(ledger: records.Record) -> list[tuple[dict[str, object], list[str]]]:
@@ -627,6 +719,8 @@ def assemble_coverage_report(
     discrimination_rule: rel.TwoArmRule | None = None,
     k: int | None = None,
     confidence: float = rel.DEFAULT_CONFIDENCE,
+    bootstrap_seed: int | None = None,
+    bootstrap_resamples: int = rel.DEFAULT_BOOTSTRAP_RESAMPLES,
 ) -> CoverageReport:
     """The report for one bundle, optionally scoped to a declared inventory.
 
@@ -646,6 +740,15 @@ def assemble_coverage_report(
     `NOT_DECLARED` for both, distinct from `reliability.INSUFFICIENT` (`k`
     declared, `n < k`). `confidence` applies to every row's
     `clopper_pearson`/`wilson_score` interval, computed unconditionally.
+
+    `bootstrap_seed`, when supplied, populates `task_clusters`: one
+    `TaskClusterBootstrap` per (skill, version, client, arm) group spanning
+    every case in the bundle, bootstrapping that group's rows' own `all_k`
+    values (so `k` must also be declared for a group to have anything to
+    bootstrap). Omitted, `task_clusters` is empty - the same "no declared
+    input, no section" discipline as `discrimination_rule`/`k`, never a
+    skillc-chosen default seed standing in for one. `bootstrap_resamples`
+    applies to every group alike.
     """
     _refuse_on_invalid_bundle(bundle)
 
@@ -749,6 +852,10 @@ def assemble_coverage_report(
             verdict=verdict.verdict, p_value=verdict.p_value, reason=verdict.reason,
         ))
 
+    task_clusters: tuple[TaskClusterBootstrap, ...] = ()
+    if bootstrap_seed is not None:
+        task_clusters = _compute_task_clusters(rows, bootstrap_seed, bootstrap_resamples, confidence)
+
     return CoverageReport(
         inventory=INVENTORY_DECLARED if inventory is not None else INVENTORY_NOT_DECLARED,
         profile_digest=inventory.profile_digest if inventory is not None else None,
@@ -756,6 +863,7 @@ def assemble_coverage_report(
         declared_skills=inventory.skills if inventory is not None else None,
         rows=tuple(rows),
         case_pairs=tuple(case_pairs),
+        task_clusters=task_clusters,
     )
 
 

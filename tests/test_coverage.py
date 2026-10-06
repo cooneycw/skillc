@@ -842,3 +842,111 @@ def test_convenience_unparseable_timestamp_refuses_rather_than_guesses() -> None
     bad_bundle = records.Bundle(path=bundle.path, records=mutated)
     with pytest.raises(cov.CoverageRefused):
         cov.assemble_coverage_report(bad_bundle, _inventory())
+
+
+# --------------------------------------------------------------- task-cluster bootstrap (#273)
+
+def _task_cluster_bundle(case_count: int) -> records.Bundle:
+    """`case_count` trials, each one PASS attempt on the same skill/client/
+    subject - one task-cluster group of exactly `case_count` tasks, each
+    contributing `all_k(1, 1, 1) == 1.0`."""
+    trials: list[dict[str, Any]] = []
+    all_records: list[records.Record] = []
+    for i in range(case_count):
+        case_id, trial_id, attempt_id = f"case-{i}", f"t-{i}", f"att-{i}"
+        trials.append({
+            "trial_id": trial_id, "case": {"id": case_id, "revision": "r1"},
+            "grader": {"id": "g", "revision": "g1"}, "subject": {"digest": "sha256:5a"},
+            "client": {"name": "codex", "version": "1.0"}, "image": {"digest": "sha256:1a"},
+            "config": {"digest": "sha256:cf"}, "attempts": [{"attempt_id": attempt_id}],
+        })
+        all_records.append(records.Record(path=Path(f"lifecycle-{i}.json"), data={
+            "version": 2, "kind": "attempt-lifecycle", "producer": "controller",
+            "attempt_id": attempt_id, "trial_id": trial_id, "disposition": "captured",
+            "stop": {"reason": "exited", "confirmed": True, "exit_code": 0},
+            "events": [
+                {"event": "planned", "at": "2026-09-26T12:00:00Z"},
+                {"event": "dispatched", "at": "2026-09-26T12:00:01Z"},
+                {"event": "started", "at": "2026-09-26T12:00:02Z"},
+                {"event": "stopped", "at": "2026-09-26T12:00:03Z"},
+                {"event": "stop-confirmed", "at": "2026-09-26T12:00:04Z"},
+                {"event": "captured", "at": "2026-09-26T12:00:05Z"},
+                {"event": "cleaned", "at": "2026-09-26T12:00:06Z"},
+            ],
+            "cleanup": {"status": "removed", "failures": []},
+        }))
+        all_records.append(records.Record(path=Path(f"manifest-{i}.json"), data={
+            "version": 2, "kind": "artifact-manifest", "producer": "controller",
+            "attempt_id": attempt_id, "trial_id": trial_id,
+            "artifacts": [{"path": "out.txt", "type": "file", "size": 12, "digest": "sha256:aa1"}],
+            "observations": [
+                {"stream": "client-events", "origin": "client-reported", "coverage": "partial"},
+                {"stream": "process-lifecycle", "origin": "observed", "coverage": "complete"},
+            ],
+            "capture_failures": [],
+        }))
+        all_records.append(records.Record(path=Path(f"receipt-{i}.json"), data={
+            "version": 2, "kind": "installation-receipt", "producer": "subject-adapter",
+            "checked_by": "controller", "attempt_id": attempt_id, "trial_id": trial_id,
+            "subject": {"locator": "x", "revision": "r", "digest": "sha256:5a"},
+            "surface": "codex-skills", "adapter": {"name": "a", "version": "1"},
+            "client": {"name": "codex", "version": "1.0"}, "layers": [], "dependencies": [],
+            "allowed_writes": [], "installed": [{"path": SKILL_PATH, "digest": "sha256:i1"}],
+            "readiness": {"discovery_canary": "SATISFIED", "baseline_absence": "SATISFIED"},
+        }))
+        all_records.append(records.Record(path=Path(f"result-{i}.json"), data={
+            "version": 2, "kind": "verified-result", "producer": "assembler",
+            "attempt_id": attempt_id, "trial_id": trial_id, "result_id": f"res-{i}",
+            "grader": {"id": "g", "revision": "g1"}, "graded_digests": ["sha256:aa1"],
+            "criteria": [{"id": "c1", "mandatory": True, "outcome": "SATISFIED", "evidence": ["grader-log:c1"]}],
+            "status": "PASS",
+        }))
+        all_records.append(records.Record(path=Path(f"evidence-{i}.json"), data={
+            "version": 2, "kind": "skill-evidence", "producer": "assembler",
+            "attempt_id": attempt_id, "trial_id": trial_id,
+            "skills": [{
+                "skill": {"path": SKILL_PATH}, "invocation": {"lineage": "root"},
+                "lifecycle": {
+                    "listed": {"status": "CONFIRMED", "evidence": {"digest": "sha256:i1"}},
+                    "read_observed": {"status": "UNKNOWN", "reason": "x"},
+                    "execution_observed": {"status": "UNKNOWN", "reason": "x"},
+                },
+                "criteria_owned": [{"id": "c1", "outcome": "SATISFIED", "shared": False}],
+                "external_evidence": {"present": False, "reconciliation": "absent"},
+            }],
+        }))
+    ledger = records.Record(path=Path("ledger.json"), data={
+        "version": 2, "kind": "trial-ledger", "producer": "controller", "experiment_id": "exp-1",
+        "trials": trials,
+    })
+    return records.Bundle(path=Path("."), records=[ledger, *all_records])
+
+
+def test_task_cluster_bootstrap_boundary_four_insufficient_five_an_interval() -> None:
+    report4 = cov.assemble_coverage_report(_task_cluster_bundle(4), k=1, bootstrap_seed=42)
+    assert len(report4.task_clusters) == 1
+    cluster4 = report4.task_clusters[0]
+    assert cluster4.task_count == 4
+    assert cluster4.all_k_interval == rel.INSUFFICIENT
+    assert cluster4.seed == 42
+
+    report5 = cov.assemble_coverage_report(_task_cluster_bundle(5), k=1, bootstrap_seed=42)
+    assert len(report5.task_clusters) == 1
+    cluster5 = report5.task_clusters[0]
+    assert cluster5.task_count == 5
+    assert cluster5.all_k_interval != rel.INSUFFICIENT
+    assert isinstance(cluster5.all_k_interval, tuple)
+    lower, upper = cluster5.all_k_interval
+    assert 0.0 <= lower <= upper <= 1.0
+
+
+def test_task_cluster_bootstrap_same_seed_is_byte_identical() -> None:
+    bundle = _task_cluster_bundle(5)
+    report_a = cov.assemble_coverage_report(bundle, k=1, bootstrap_seed=7)
+    report_b = cov.assemble_coverage_report(bundle, k=1, bootstrap_seed=7)
+    assert report_a.to_json() == report_b.to_json()
+
+
+def test_task_cluster_bootstrap_absent_without_a_declared_seed() -> None:
+    report = cov.assemble_coverage_report(_task_cluster_bundle(5), k=1)
+    assert report.task_clusters == ()
