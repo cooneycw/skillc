@@ -206,6 +206,13 @@ This channel gives #269, without any change to this module:
 function, request shape, or log schema — only the transport (§2a) and the
 ordering guarantee (§2b). This is what §0's naming choice is for.
 
+**"#269 needs no `DockerBackend` change" holds only while an #269 attempt
+does not ALSO carry L5's disruption trigger in the same attempt** — only
+one host socket bind mount is authorized per attempt (§6's own limit,
+above), so a single attempt cannot run both channel purposes without
+either multiplexing over one socket or a new owner ruling. No current
+task needs both at once, so this is a named limit, not yet a gap.
+
 ### 2f. Socket access control (orchestrator review)
 
 A decide-and-reply channel's socket is the one new privilege boundary this
@@ -404,12 +411,22 @@ result (§2d's table), not yet the test.
   then (§4) — a platform-backed attempt cannot use this design's channel
   until some platform actually implements #64's protocol, which nothing
   does today.
-- **One socket, one decision function, one attempt.** This design does not
-  attempt to multiplex several distinct channel PURPOSES (disruption
-  trigger, #269's gate witness, anything else) over one socket per attempt.
-  A caller needing both opens two sockets against two mount points. Simpler
-  to reason about and to mutation-test than a multiplexed protocol, and
-  nothing in #183 or #269 needs multiplexing.
+- **One socket, one decision function, one attempt** — and the owner's
+  ruling on #183 authorizes exactly one host socket bind mount per
+  attempt, not a general mount capability (§2c's own `compose_run_argv`
+  signature and its mutation-checked tests refuse a second mount
+  structurally). This design does not attempt to multiplex several
+  distinct channel PURPOSES (disruption trigger, #269's gate witness,
+  anything else) over that one socket. No current task needs two channel
+  purposes in one attempt — L5's disruption trigger and #269's gate
+  witness belong to different task families — so this is not yet a real
+  gap, only a named limit: an attempt that ever needed two would require
+  either multiplexing over the one socket, or a new owner ruling
+  extending the one-socket exception. Neither is in scope here (correction,
+  orchestrator design review on PR #298 — an earlier draft of this bullet
+  proposed "open two sockets against two mount points," which the code
+  this design describes structurally refuses and the owner never
+  approved).
 
 ## 7. Mapping to #183's acceptance criteria
 
