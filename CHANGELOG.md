@@ -8,6 +8,17 @@ and version plan.
 
 ## [Unreleased]
 
+- **Per-skill profile diagnostic, non-certifying** (Refs #295). `skillc
+  profile diagnose` (library: `profile.diagnose`) walks the whole closure and
+  reports EVERY unresolved reference, unsatisfied dependency and other
+  refusal reason, attributed to the skill(s) whose closure reaches it, with
+  no truncation. Schema-distinct from `validate()`'s inventory by
+  construction, so nothing that expects a certification can mistake one for
+  the other; `validate()` itself is unchanged - both share one walk, and its
+  own call raises exactly as before, with the same messages. A broken
+  dependency reached a second time is marked a cascade (`caused_by`) of the
+  one root cause rather than reported again.
+
 - **`uptake-study` screening-probe mode** (Refs #238). An optional `probe`
   block declares a cut-off (20-300 s), which must equal
   `shared.per_attempt_seconds`, so the attempt itself stops there.

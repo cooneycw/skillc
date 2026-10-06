@@ -558,13 +558,172 @@ class _Walk:
     scanned: set[str] = field(default_factory=set)
     references: list[dict[str, object]] = field(default_factory=list)
     unresolved: list[str] = field(default_factory=list)
+    #: Structured twin of `unresolved` (issue #295): `unresolved` stays exactly
+    #: as validate() has always populated it (a formatted string, read only
+    #: for the truncate-to-8 combined message), and this carries the same
+    #: information as fields so diagnose() can attribute and report every one
+    #: of them, not just the first 8. Populated unconditionally - cheap, and
+    #: validate() simply never reads it.
+    unresolved_detail: list[dict[str, str]] = field(default_factory=list)
     referenced: set[str] = field(default_factory=set)
     visited: set[str] = field(default_factory=set)
     queue: list[tuple[str, str]] = field(default_factory=list)  # (repo path, owner)
+    #: Diagnostic mode only (issue #295). None here means strict: every one of
+    #: the sites below raises Refused exactly as before this issue, and
+    #: `validate()`'s behaviour is untouched. `diagnose()` supplies a list.
+    problems: list[dict[str, Any]] | None = None
+    #: (referencing owner, dependency id OR "@<path>" path-node) for every
+    #: successful resolution and every queued file, respectively,
+    #: in walk order. Attribution is computed from this AFTER the walk fully
+    #: drains (`_compute_reach`), never live during it: the shared queue is
+    #: FIFO across every selected skill, so a dependency's own files can be
+    #: scanned - and its grandchildren attributed - before a SECOND skill's
+    #: reference to that same dependency is even reached. A live update at
+    #: resolve time would under-attribute exactly that shared-helper case,
+    #: which is the one #295's golden cases most want right.
+    edges: list[tuple[str, str]] = field(default_factory=list)
+    #: dependency id -> the raw-problem index that first marked it broken
+    #: (issue #295 guard-rail 2: a broken dependency's FURTHER references are
+    #: CASCADES of that one root cause, not independent findings). Diagnostic
+    #: mode only.
+    broken: dict[str, int] = field(default_factory=dict)
+    #: Deferred findings: {"category", "message", "owners" (tuple), "in_path",
+    #: "caused_by"?}. Converted to the final attributed `problems` entries
+    #: only after the walk drains and `_compute_reach` can answer for every
+    #: owner. Diagnostic mode only.
+    raw: list[dict[str, Any]] = field(default_factory=list)
+
+
+def _compute_reach(walk: _Walk) -> dict[str, set[str]]:
+    """dependency id -> every selected skill whose closure reaches it, from
+    `walk.edges` by fixed-point propagation (issue #295). Fixed-point, not a
+    single pass, because an edge can point FROM a dependency that itself
+    hasn't had its own reach computed yet, however `edges` happens to be
+    ordered - a dependency three hops from the nearest skill needs three
+    passes if the edges supplying each hop are not already in topological
+    order, which the walk's FIFO queue does not guarantee."""
+    reach: dict[str, set[str]] = {}
+    changed = True
+    while changed:
+        changed = False
+        for owner, dep_id in walk.edges:
+            base = {owner[len("skill:"):]} if owner.startswith("skill:") else reach.get(owner, set())
+            current = reach.setdefault(dep_id, set())
+            if not base <= current:
+                current |= base
+                changed = True
+    return reach
+
+
+def _fail(walk: _Walk, category: str, message: str, owner: str | tuple[str, ...],
+          in_path: str | None = None, caused_by: int | None = None) -> int | None:
+    """Strict mode (validate(), `walk.problems is None`): raise Refused,
+    exactly the pre-#295 behaviour and message, at every call site - this is
+    what keeps validate() unchanged; it never reaches the lines below.
+    Diagnostic mode: defer the finding (attribution is computed only once the
+    whole walk has drained, see `_compute_reach`) and return its RAW index so
+    the caller can mark a later reference through the same broken dependency
+    as a cascade of this one, then the walk continues - the caller decides
+    what "continue past just this" means at its own site."""
+    if walk.problems is None:
+        raise Refused(message)
+    idx = len(walk.raw)
+    entry: dict[str, Any] = {
+        "category": category, "message": message,
+        "owners": (owner,) if isinstance(owner, str) else tuple(owner),
+        "in_path": in_path,
+    }
+    if caused_by is not None:
+        entry["caused_by"] = caused_by
+    walk.raw.append(entry)
+    return idx
 
 
 def validate(profile: Profile, tree: Tree) -> dict[str, Any]:
     """The content-addressed inventory, or Refused naming the first defect class found."""
+    return _run_walk(profile, tree, problems=None)
+
+
+def diagnose(profile: Profile, tree: Tree) -> dict[str, Any]:
+    """Walk the whole closure and report EVERY problem, attributed to the
+    skill(s) whose closure reaches it - never truncated, never refusing on
+    the first category found (issue #295).
+
+    This is NOT a certifying inventory and is schema-distinct from one by
+    construction: its top-level keys share nothing with `validate()`'s
+    (`diagnostic_schema`, never `inventory_schema`), so passing this to
+    anything that expects an inventory - `install()`, `verify_installed()` -
+    fails immediately rather than silently treating a diagnostic as a
+    certification (`test_a_diagnostic_report_is_refused_as_an_inventory`).
+
+    Two categories of refusal are NOT attributable to any skill and are never
+    reached by the shared walk at all - the subject/source cannot even be
+    read, or a symlink hides a skill's name from discovery before any
+    selection exists. Both are reported once, under `structural`, with
+    whatever message `validate()` itself would raise, and nothing further is
+    walked. The same is true, by explicit scope decision (#295 Q1), of
+    `materialize.inventory()`'s own checks (name collisions, declared
+    required references, checksums) - those run BEFORE this module's walk
+    begins and are not per-skill-attributable from here either; they are
+    reported under `structural` too, not duplicated into `problems`.
+    """
+    structural: list[dict[str, Any]] = []
+    try:
+        result = _run_walk(profile, tree, problems=[])
+    except Refused as exc:
+        structural.append({"category": "structural", "detail": str(exc)})
+        return {
+            "diagnostic_schema": 1,
+            "profile": profile.name,
+            "revision": tree.revision,
+            "selection": [] if profile.select is None else list(profile.select),
+            "structural": structural,
+            # `complete: false` and `problem_count: 0` look identical to a
+            # genuinely clean walk unless a caller also reads `structural` -
+            # counter-model review (issue #295): a zero that cannot tell "I
+            # looked and found nothing" from "there was nothing to look at"
+            # is exactly the ambiguity this field exists to remove.
+            "complete": False,
+            "skills": {},
+            "problems": [],
+            "problem_count": 0,
+        }
+    assert isinstance(result, dict) and "problems" in result
+    problems = result["problems"]
+    selection = result["selection_names"]
+    by_skill: dict[str, dict[str, Any]] = {
+        name: {"status": "intact", "problems": []} for name in selection
+    }
+    for problem in problems:
+        for name in problem["skills"]:
+            if name in by_skill:
+                by_skill[name]["problems"].append(problem["id"])
+                by_skill[name]["status"] = "broken"
+    return {
+        "diagnostic_schema": 1,
+        "profile": profile.name,
+        "revision": tree.revision,
+        "selection": selection,
+        "structural": structural,
+        "complete": True,
+        "skills": by_skill,
+        "problems": problems,
+        "problem_count": len(problems),
+    }
+
+
+def _run_walk(profile: Profile, tree: Tree, problems: list[dict[str, Any]] | None) -> dict[str, Any]:
+    """The shared walk behind both `validate()` and `diagnose()` (issue #295).
+
+    `problems=None` is `validate()`'s own call, unconditionally, and every
+    site below that used to `raise Refused(...)` still does, with the exact
+    same message, because `_fail()` raises whenever `walk.problems is None`.
+    `validate()`'s behaviour is not changed by this refactor -
+    `test_validate_output_is_unchanged_by_the_diagnose_refactor` and the
+    existing refusal-message tests in tests/test_profile.py both pin that
+    the inventory this returns for `problems=None` is byte-identical to the
+    pre-#295 code.
+    """
     subject = profile.subject
     if tree.kind == "git" and tree.revision != subject.revision:
         raise Refused(f"source is at {tree.revision}, the subject pins {subject.revision}")
@@ -611,7 +770,7 @@ def validate(profile: Profile, tree: Tree) -> dict[str, Any]:
 
     walk = _Walk(profile, tree, {
         s.reference: (d, s) for d in profile.dependencies for s in d.satisfies
-    })
+    }, problems=problems)
     files = tree.files()
     installed: dict[str, dict[str, object]] = {}  # destination -> record
     skills = []
@@ -630,7 +789,7 @@ def validate(profile: Profile, tree: Tree) -> dict[str, Any]:
             repo_path = f"{skill_dir}/{f['path']}"
             dest = f"{home_skills}/{entry.directory}/{f['path']}"
             record = _file_record(tree, repo_path, dest, owner=f"skill:{entry.name}")
-            _claim(installed, dest, record)
+            _claim(walk, installed, dest, record)
             skill_files.append(record)
             walk.queue.append((repo_path, f"skill:{entry.name}"))
         skills.append({
@@ -655,19 +814,43 @@ def validate(profile: Profile, tree: Tree) -> dict[str, Any]:
         if dep.id not in walk.visited and dep.unreferenced_reason:
             _visit(walk, dep, installed)
             _drain(walk, installed)
-    for dep in profile.dependencies:
-        if dep.id not in walk.visited:
-            raise Refused(
-                f"dependency {dep.id} is satisfied by no reference in the closure; "
-                f"declare unreferenced_reason or remove it"
-            )
+    if problems is None:
+        for dep in profile.dependencies:
+            if dep.id not in walk.visited:
+                raise Refused(
+                    f"dependency {dep.id} is satisfied by no reference in the closure; "
+                    f"declare unreferenced_reason or remove it"
+                )
+    else:
+        # Unlike validate()'s first-one-wins raise, every unreferenced
+        # dependency is reported (issue #295's "no truncation"). None of
+        # them is reached by any skill - that is the defect - so the
+        # attribution is unconditionally empty, never deferred.
+        for dep in profile.dependencies:
+            if dep.id not in walk.visited:
+                _fail(walk, "unreferenced-dependency",
+                      f"dependency {dep.id} is satisfied by no reference in the closure; "
+                      f"declare unreferenced_reason or remove it",
+                      (), in_path=None)
 
     if walk.unresolved:
-        shown = sorted(set(walk.unresolved))
-        raise Refused(
-            f"unresolved reference(s): {shown[:8]}{' ...' if len(shown) > 8 else ''}; "
-            f"each needs a dependency that satisfies it or an unsupported entry with a reason"
-        )
+        if problems is None:
+            shown = sorted(set(walk.unresolved))
+            raise Refused(
+                f"unresolved reference(s): {shown[:8]}{' ...' if len(shown) > 8 else ''}; "
+                f"each needs a dependency that satisfies it or an unsupported entry with a reason"
+            )
+        else:
+            seen: set[tuple[str, str, str]] = set()
+            for u in walk.unresolved_detail:
+                key = (u["hit"], u["path"], u["klass"])
+                if key in seen:
+                    continue
+                seen.add(key)
+                _fail(walk, "unresolved-reference",
+                      f"unresolved reference: {u['hit']} (in {u['path']}, {u['klass']}); "
+                      f"each needs a dependency that satisfies it or an unsupported entry with a reason",
+                      f"@{u['path']}", in_path=u["path"])
 
     dependencies = [_dep_record(walk, dep, installed) for dep in profile.dependencies]
     bundled_parity = _bundled_parity(profile, skills, installed)
@@ -676,28 +859,82 @@ def validate(profile: Profile, tree: Tree) -> dict[str, Any]:
     if profile.treatment_question == "prose":
         scoped = sorted(d.id for d in profile.dependencies if d.scope == "treatment")
         if scoped:
-            raise Refused(
-                f"prose treatment question but dependencies {scoped} are treatment-scoped; "
-                f"helper parity requires identical helpers in every arm"
-            )
+            msg = (f"prose treatment question but dependencies {scoped} are treatment-scoped; "
+                   f"helper parity requires identical helpers in every arm")
+            if problems is None:
+                raise Refused(msg)
+            _fail(walk, "prose-parity-scope", msg, (), in_path=None)
         orphans = sorted(str(b["path"]) for b in bundled_parity if b["supplied_by"] is None)
         if orphans:
             # Under a prose question the arm given expanded instructions has no
             # skill directory, so a helper that lives only inside the skill never
             # reaches it. Only the instructions may differ.
-            raise Refused(
-                f"prose treatment question but bundled file(s) {orphans} reach only the skill "
-                f"arm; declare a common-scoped dependency carrying identical bytes"
-            )
+            if problems is None:
+                raise Refused(
+                    f"prose treatment question but bundled file(s) {orphans} reach only the skill "
+                    f"arm; declare a common-scoped dependency carrying identical bytes"
+                )
+            else:
+                # Each orphan is a specific skill's own bundled file - directly
+                # attributable without waiting on _compute_reach.
+                for orphan in orphans:
+                    owning = next(
+                        (s["name"] for s in skills if orphan.startswith(f"{prefix}{s['directory']}/")),
+                        None,
+                    )
+                    _fail(walk, "prose-parity-orphan",
+                          f"bundled file {orphan} reaches only the skill arm under a prose "
+                          f"treatment question; declare a common-scoped dependency carrying "
+                          f"identical bytes",
+                          f"skill:{owning}" if owning else (), in_path=orphan)
 
     # Every destination sits under an allowed root.
     for dest in installed:
         if not any(dest == r or dest.startswith(r.rstrip("/") + "/") for r in profile.allowed_destinations):
-            raise Refused(f"destination {dest} is outside allowed_destinations {list(profile.allowed_destinations)}")
+            msg = f"destination {dest} is outside allowed_destinations {list(profile.allowed_destinations)}"
+            if problems is None:
+                raise Refused(msg)
+            _fail(walk, "destination-outside-allowed", msg, str(installed[dest]["owner"]), in_path=dest)
 
-    mirrors = [_mirror(tree, files, gen, src, exact=True) for gen, src in sorted(profile.mirrors.items())]
-    transforms = [_mirror(tree, files, gen, src, exact=False)
-                  for gen, src in sorted(profile.generated_from.items())]
+    mirrors = []
+    for gen, src in sorted(profile.mirrors.items()):
+        if problems is None:
+            mirrors.append(_mirror(tree, files, gen, src, exact=True))
+        else:
+            try:
+                mirrors.append(_mirror(tree, files, gen, src, exact=True))
+            except Refused as exc:
+                _fail(walk, "stale-or-missing-mirror", str(exc), (), in_path=gen)
+    transforms = []
+    for gen, src in sorted(profile.generated_from.items()):
+        if problems is None:
+            transforms.append(_mirror(tree, files, gen, src, exact=False))
+        else:
+            try:
+                transforms.append(_mirror(tree, files, gen, src, exact=False))
+            except Refused as exc:
+                _fail(walk, "missing-generated-from-source", str(exc), (), in_path=gen)
+
+    if problems is not None:
+        reach = _compute_reach(walk)
+
+        def _skills_of(owner: str) -> set[str]:
+            if owner.startswith("skill:"):
+                return {owner[len("skill:"):]}
+            return set(reach.get(owner, ())) if owner else set()
+
+        for raw in walk.raw:
+            owners_set: set[str] = set()
+            for o in raw["owners"]:
+                owners_set |= _skills_of(o)
+            entry_out: dict[str, Any] = {
+                "id": len(problems), "category": raw["category"], "detail": raw["message"],
+                "skills": sorted(owners_set), "in": raw["in_path"],
+            }
+            if "caused_by" in raw:
+                entry_out["caused_by"] = raw["caused_by"]
+            problems.append(entry_out)
+        return {"problems": problems, "selection_names": [s["name"] for s in skills]}
 
     inventory_body: dict[str, Any] = {
         "inventory_schema": INVENTORY_SCHEMA,
@@ -756,7 +993,18 @@ def _drain(walk: _Walk, installed: dict[str, dict[str, object]]) -> None:
     as unresolved. Visiting a dependency queues its files, so this reaches the
     transitive closure."""
     while walk.queue:
-        path, _owner = walk.queue.pop(0)
+        path, owner = walk.queue.pop(0)
+        # Record EVERY owner that ever reaches this path, not just the
+        # first (counter-model review, issue #295): two distinct
+        # dependencies can legitimately carry the SAME source path (same
+        # `source_root`/`paths`, different ids/destinations), and the
+        # content is only ever SCANNED once (`scanned` below) - but a
+        # finding inside it must still be attributed to every owner that
+        # reaches it, not only whichever happened to be queued first. The
+        # edge is recorded unconditionally, even on a path already scanned,
+        # since recording costs nothing and the attribution gap this closes
+        # has nothing to do with whether the content needs re-scanning.
+        walk.edges.append((owner, f"@{path}"))
         if path in walk.scanned:
             continue
         walk.scanned.add(path)
@@ -830,20 +1078,36 @@ def _file_record(tree: Tree, repo_path: str, dest: str, owner: str) -> dict[str,
     }
 
 
-def _claim(installed: dict[str, dict[str, object]], dest: str, record: dict[str, object]) -> None:
+def _claim(walk: _Walk, installed: dict[str, dict[str, object]], dest: str,
+           record: dict[str, object]) -> None:
     """One owner per installed path. Two claimants are a conflict even when their
-    bytes agree: which one an installer writes last is not a declaration."""
+    bytes agree: which one an installer writes last is not a declaration.
+
+    Diagnostic mode: the EARLIER claimant keeps the destination (installed is
+    left exactly as it was) and the conflict is reported attributed to BOTH
+    owners; the walk continues rather than aborting on the first collision.
+    """
     if dest in installed:
         other = installed[dest]
         same = other["digest"] == record["digest"]
-        raise Refused(
+        msg = (
             f"conflicting destination {dest}: claimed by {other['owner']} and {record['owner']}"
             f"{' (identical bytes, still two owners)' if same else ' with different content'}"
         )
+        if walk.problems is None:
+            raise Refused(msg)
+        _fail(walk, "conflicting-destination", msg,
+              (str(other["owner"]), str(record["owner"])), in_path=dest)
+        return
     # A file may not be installed where another claimant installs a directory.
     for existing in installed:
         if existing.startswith(dest + "/") or dest.startswith(existing + "/"):
-            raise Refused(f"conflicting destination {dest}: overlaps {existing}")
+            msg = f"conflicting destination {dest}: overlaps {existing}"
+            if walk.problems is None:
+                raise Refused(msg)
+            _fail(walk, "conflicting-destination-overlap", msg,
+                  (str(installed[existing]["owner"]), str(record["owner"])), in_path=dest)
+            return
     installed[dest] = record
 
 
@@ -864,13 +1128,33 @@ def _source_path(root: str, name: str) -> str:
 
 
 def _source_files(walk: _Walk, dep: Dependency) -> list[tuple[str, str]]:
-    """(repo path, path relative to source root) for every file the dependency carries."""
+    """(repo path, path relative to source root) for every file the dependency
+    carries.
+
+    The root-cause problem is attributed to the DEPENDENCY (`dep.id`), not to
+    whichever caller happens to trigger it first - `_compute_reach` unions in
+    every skill that ever resolves to `dep.id` via `walk.edges`, appended for
+    EVERY resolution regardless of order (issue #295). A broken dependency
+    found by skill-a's reference, then independently reached by skill-b's,
+    must attribute BOTH - not skill-a alone because the FIFO queue happened
+    to drain its file first.
+
+    A second (or third...) call for an ALREADY-broken dependency records
+    NOTHING further here - the root problem's reach already covers every
+    caller through the edge list, so a second report would duplicate the one
+    root cause rather than adding information.
+    """
     out: list[tuple[str, str]] = []
     for p in dep.paths:
         full = _source_path(dep.source_root, p)
         found = walk.tree.under(full)
         if not found:
-            raise Refused(f"missing {dep.kind} {dep.id}: {full} is absent from the source")
+            if dep.id not in walk.broken:
+                msg = f"missing {dep.kind} {dep.id}: {full} is absent from the source"
+                idx = _fail(walk, "missing-dependency-source", msg, dep.id, in_path=full)
+                if idx is not None:
+                    walk.broken[dep.id] = idx
+            continue
         base = "" if dep.source_root == "." else dep.source_root + "/"
         out.extend((f, f[len(base):]) for f in found)
     return out
@@ -895,12 +1179,20 @@ def _visit(walk: _Walk, dep: Dependency, installed: dict[str, dict[str, object]]
         replacement_digest = None
         if dep.shadow_path in walk.tree.files():
             if not dep.replaces_pinned:
-                raise Refused(f"synthetic file would silently substitute for real pinned file "
-                              f"{dep.shadow_path}; declare replaces_pinned and replacement_reason")
+                msg = (f"synthetic file would silently substitute for real pinned file "
+                       f"{dep.shadow_path}; declare replaces_pinned and replacement_reason")
+                idx = _fail(walk, "synthetic-shadow-collision", msg, dep.id, in_path=dep.shadow_path)
+                if idx is not None:
+                    walk.broken[dep.id] = idx
+                return
             replacement_digest = m.sha256_bytes(walk.tree.read(dep.shadow_path))
         elif dep.replaces_pinned:
-            raise Refused(f"replacement shadow path absent from pinned tree: {dep.shadow_path}")
-        _claim(installed, dest, {
+            msg = f"replacement shadow path absent from pinned tree: {dep.shadow_path}"
+            idx = _fail(walk, "synthetic-replacement-missing", msg, dep.id, in_path=dep.shadow_path)
+            if idx is not None:
+                walk.broken[dep.id] = idx
+            return
+        _claim(walk, installed, dest, {
             "source": None, "destination": dest, "origin": "synthetic",
             "content": dep.content, "mode": "100644", "size": len(data),
             "digest": m.sha256_bytes(data), "git_blob": git_blob_id(data), "owner": dep.id,
@@ -910,7 +1202,7 @@ def _visit(walk: _Walk, dep: Dependency, installed: dict[str, dict[str, object]]
         return
     for repo_path, rel in _source_files(walk, dep):
         dest = posixpath.join(dep.destination, rel)
-        _claim(installed, dest, _file_record(walk.tree, repo_path, dest, owner=dep.id))
+        _claim(walk, installed, dest, _file_record(walk.tree, repo_path, dest, owner=dep.id))
         if dep.traverse:
             walk.queue.append((repo_path, dep.id))
 
@@ -919,24 +1211,56 @@ def _resolve(walk: _Walk, hit: str, path: str, pattern: Pattern,
              installed: dict[str, dict[str, object]]) -> None:
     record: dict[str, object] = {"reference": hit, "in": path, "pattern": pattern.name,
                                  "class": pattern.klass}
+    # The attribution key for everything found in THIS file is the path-node
+    # "@path", never a resolved owner string (counter-model review, issue
+    # #295): two distinct dependencies can carry the identical source path,
+    # and `_drain` records an edge from EVERY one of their owners into
+    # "@path" - `_compute_reach` unions them all, regardless of which was
+    # queued (and therefore scanned) first.
+    owner = f"@{path}"
     if hit in walk.profile.unsupported:
         record.update(status="unsupported", reason=walk.profile.unsupported[hit])
     elif hit in walk.by_reference:
         dep, sat = walk.by_reference[hit]
         if pattern.klass == "absolute":
-            raise Refused(
-                f"absolute reference {hit} (in {path}) is satisfied by {dep.id}, but an absolute "
-                f"path cannot be installed into a disposable home; declare it unsupported"
-            )
+            msg = (f"absolute reference {hit} (in {path}) is satisfied by {dep.id}, but an "
+                   f"absolute path cannot be installed into a disposable home; declare it "
+                   f"unsupported")
+            _fail(walk, "absolute-unsatisfiable", msg, owner, in_path=path)
+            return  # diagnostic mode: _fail collected it; strict mode already raised.
         _visit(walk, dep, installed)
+        # Recorded regardless of what the rest of this resolution finds -
+        # diagnostic mode's attribution (`_compute_reach`) is computed once,
+        # after the whole walk drains, from exactly this edge list.
+        walk.edges.append((owner, dep.id))
         if sat.path is not None:
             full = sat.path if dep.source_root == "." else posixpath.join(dep.source_root, sat.path)
             carried = {rp for rp, _ in _source_files(walk, dep)} if dep.kind != "tool" else set()
-            if not any(c == full or c.startswith(full + "/") for c in carried):
-                raise Refused(
-                    f"missing {dep.kind} file: {hit} (in {path}) resolves to {full}, "
-                    f"which {dep.id} does not carry"
-                )
+            carries_it = any(c == full or c.startswith(full + "/") for c in carried)
+            if not carries_it:
+                # Counter-model review (issue #295): check carriage BEFORE
+                # consulting `walk.broken` - a dependency with MULTIPLE
+                # `paths` entries can be broken on one of them while still
+                # carrying THIS specific file (`paths: ["present.sh",
+                # "missing.sh"]`, resolving "present.sh"). The first cut
+                # reported a cascade for every reference once any part of
+                # the dependency was broken, including ones that resolve
+                # cleanly - a false positive on an unaffected file.
+                if dep.id in walk.broken:
+                    # issue #295 guard-rail 2: THIS reference ALSO needed a
+                    # file from a dependency already known broken (by this
+                    # call or an earlier one) - a CASCADE of that one root
+                    # cause, explicitly marked rather than silently dropped
+                    # or re-explained.
+                    _fail(walk, "missing-dependency-file-cascade",
+                          f"missing {dep.kind} file: {hit} (in {path}) resolves to {full}, which "
+                          f"{dep.id} does not carry - {dep.id} is already known broken",
+                          owner, in_path=path, caused_by=walk.broken[dep.id])
+                else:
+                    msg = (f"missing {dep.kind} file: {hit} (in {path}) resolves to {full}, "
+                           f"which {dep.id} does not carry")
+                    _fail(walk, "missing-dependency-file", msg, owner, in_path=path)
+                return
         resolves_to = (posixpath.join(dep.destination, sat.path)
                        if dep.destination and sat.path else dep.destination)
         target = _home_target(hit) if pattern.klass == "home-relative" else None
@@ -944,12 +1268,13 @@ def _resolve(walk: _Walk, hit: str, path: str, pattern: Pattern,
             # The reference names a place under HOME; the dependency installs
             # somewhere else. An installer following this inventory could not
             # supply the path the text actually uses.
-            raise Refused(
-                f"{hit} (in {path}) names ~/{target}, but {dep.id} installs it at ~/{resolves_to}"
-            )
+            msg = f"{hit} (in {path}) names ~/{target}, but {dep.id} installs it at ~/{resolves_to}"
+            _fail(walk, "home-reference-mismatch", msg, owner, in_path=path)
+            return
         record.update(status="satisfied", dependency=dep.id, resolves_to=resolves_to)
     else:
         walk.unresolved.append(f"{hit} (in {path}, {pattern.klass})")
+        walk.unresolved_detail.append({"hit": hit, "path": path, "klass": pattern.klass})
         return
     walk.references.append(record)
 

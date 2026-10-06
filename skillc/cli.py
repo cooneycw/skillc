@@ -2168,6 +2168,55 @@ def cmd_profile_validate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_profile_diagnose(args: argparse.Namespace) -> int:
+    """Walk the whole closure and report EVERY problem, attributed to the
+    skill(s) whose closure reaches it (issue #295) - a non-certifying
+    diagnostic, never a substitute for `profile validate`.
+
+    Exit 0 whenever a diagnostic report was produced, REGARDLESS of
+    `problem_count` - a diagnostic is not a verdict, so its exit code must
+    not be read as one. Nonzero only when the profile or subject declaration
+    itself could not even be loaded (a usage-level failure, not a finding
+    this diagnostic exists to report).
+
+    Check `complete` BEFORE `problem_count` (counter-model review, issue
+    #295): a structural refusal (the source can't be read, a symlink hides a
+    skill's name) stops the walk before any skill is even examined, and
+    reports `complete: false` with `problem_count: 0` - identical to a
+    genuinely clean walk unless `complete` is read first. `problem_count` is
+    only meaningful once `complete` is true.
+    """
+    try:
+        prof = profile.Profile.load(Path(args.profile))
+    except profile.Refused as exc:
+        print(f"skillc: REFUSED - {exc}", file=sys.stderr)
+        return 2
+    tree = profile.load_tree(
+        prof,
+        Path(args.repo) if args.repo else None,
+        Path(args.snapshot) if args.snapshot else None,
+    )
+    report = profile.diagnose(prof, tree)
+    text = json.dumps(report, indent=1) + "\n"
+    if args.out:
+        out = Path(args.out)
+        if out.exists() and not args.overwrite:
+            print(f"skillc: {out} exists; pass --overwrite to replace it", file=sys.stderr)
+            return 2
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text, encoding="utf-8")
+    else:
+        sys.stdout.write(text)
+    completion = "complete" if report["complete"] else "INCOMPLETE (structural refusal - problem_count is not meaningful)"
+    print(
+        f"skillc: profile {prof.name}: diagnostic (NOT a certification), {completion} - "
+        f"{len(report['selection'])} skill(s) selected, {report['problem_count']} problem(s), "
+        f"{len(report['structural'])} structural refusal(s) at {report['revision']}",
+        file=sys.stderr,
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Separate from `main` so #73's README drift check can introspect the
     real subcommand set (`registered_commands` in `ci/readme_drift.py`)
@@ -2255,6 +2304,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_prof_install.add_argument("--out", help="write receipt here instead of stdout")
     p_prof_install.add_argument("--overwrite", action="store_true", help="replace existing receipt")
     p_prof_install.set_defaults(func=cmd_profile_install)
+
+    p_prof_diag = prof_sub.add_parser(
+        "diagnose",
+        help="non-certifying: report EVERY closure problem, per skill, with no truncation (#295)",
+    )
+    p_prof_diag.add_argument("profile", help="profile declaration (profile.json)")
+    diag_source = p_prof_diag.add_mutually_exclusive_group(required=True)
+    diag_source.add_argument("--repo", help="git checkout to read the subject's pinned revision from")
+    diag_source.add_argument("--snapshot", help="local directory standing in for the source tree")
+    p_prof_diag.add_argument("--out", help="write the report here instead of stdout")
+    p_prof_diag.add_argument("--overwrite", action="store_true", help="replace an existing --out file")
+    p_prof_diag.set_defaults(func=cmd_profile_diagnose)
 
     p_exp = sub.add_parser(
         "exposure",
