@@ -136,6 +136,16 @@ and version plan.
     generated in-container script plus the expected-output derivation
     against the stand-in's own print statements, and is owed to the
     real-Docker runner (#315) for execution evidence.
+  - `ci/check_real_docker_ran.py`'s `DECLARED_REAL_DOCKER_FILES` floor
+    gains `tests.test_gate_overlay_live` (orchestrator review: a file
+    tagged `real_docker` is collected and run, but not CERTIFIED, until
+    the floor also names it - see `ci/real-docker/README.md`). README's
+    own file list and `tests/test_real_docker_verdict.py`'s floor-size
+    fixtures updated to match. Mutation-checked: the existing 3-file
+    floor assertion in `test_real_docker_verdict.py` turned red the
+    moment the floor grew to 4, confirming it actually pins the floor's
+    size rather than passing by construction; fixed to the new 4-file
+    tuple and a dedicated per-file-skip case for the new entry, green.
 
 - **The real-Docker runner's `--break` flag generalized to a family:mode
   table** (Refs #315, #269, #183). Found during #269's PR merge review:
