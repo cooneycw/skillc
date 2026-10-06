@@ -510,3 +510,133 @@ def test_failed_child_under_a_successful_parent_golden_case() -> None:
     # could leak into (item 3: no per-skill PASS/FAIL field exists at all).
     assert rows_by_path[child_path].criteria == (cov.CriterionRow(id="c-child", outcome="VIOLATED", shared=False),)
     assert rows_by_path[SKILL_PATH].criteria == ()
+
+
+# --------------------------------------------------------------- to_text (human view)
+
+def test_to_text_is_derived_from_the_same_dict_as_to_json() -> None:
+    """Orchestrator review, #272: the human view must come from the SAME
+    dict to_json serializes, never a second read of self.rows/case_pairs,
+    so the two views cannot drift apart. Checked directly: every value in
+    the dict appears, verbatim, somewhere in the text."""
+    bundle = _bundle(CONTROLS / "ledger-binding/good/skill-evidence-duplicate-invocation")
+    report = cov.assemble_coverage_report(bundle, _inventory())
+    text = report.to_text()
+    body = report.to_dict()
+    assert str(body["inventory"]) in text
+    assert str(body["profile_digest"]) in text
+    row = body["rows"][0]  # type: ignore[index]
+    assert row["skill_path"] in text  # type: ignore[index]
+    assert row["skill_version"] in text  # type: ignore[index]
+    for key, value in row["outcomes"].items():  # type: ignore[index, union-attr]
+        assert f"{key}={value}" in text
+
+
+def test_to_text_shows_every_row_and_every_unknown_state() -> None:
+    """Explicit test the orchestrator asked for: every row, and every
+    UNKNOWN count, appears in the text - the human view cannot silently
+    hide what the JSON shows."""
+    bundle = _bundle(CONTROLS / "ledger-binding/good/skill-evidence-duplicate-invocation")
+    report = cov.assemble_coverage_report(bundle, _inventory())
+    text = report.to_text()
+    assert f"rows: {len(report.rows)}" in text
+    for row in report.rows:
+        assert row.key.skill_path in text
+        assert f"UNKNOWN={row.outcomes['UNKNOWN']}" in text
+    # This fixture's own UNKNOWN count is 0 for outcomes (both attempts PASS) -
+    # confirm the ZERO still appears, not omitted for being uninteresting.
+    assert "UNKNOWN=0" in text
+
+
+def test_to_text_shows_insufficient_discrimination_verdict() -> None:
+    """The UNKNOWN discrimination verdict (no rule supplied) must appear in
+    the human view, not be silently dropped because nothing could be
+    decided."""
+    bundle = _bundle(CONTROLS / "case-pairing/good/reciprocal-complementary")
+    report = cov.assemble_coverage_report(bundle)
+    text = report.to_text()
+    assert "UNKNOWN" in text
+    assert "no predeclared rule" in text
+
+
+def test_to_text_shows_the_failed_child_under_a_successful_parent() -> None:
+    """Both the parent's PASS and the child's VIOLATED criterion must be
+    visible in the human view - neither silently absorbed."""
+    child_path = ".codex/skills/helper/SKILL.md"
+    bundle = _bundle(CONTROLS / "ledger-binding/good/skill-evidence-no-correlating-attempt")
+    records_list = []
+    for r in bundle.records:
+        if r.kind == records.SKILL_EVIDENCE:
+            continue
+        if r.kind == records.INSTALLATION_RECEIPT:
+            data = dict(r.data)
+            installed = data["installed"]
+            assert isinstance(installed, list)
+            data["installed"] = [*installed, {"path": child_path, "digest": "sha256:helper-v1"}]
+            r = records.Record(path=r.path, data=data)
+        if r.kind == records.VERIFIED_RESULT:
+            data = dict(r.data)
+            criteria = data["criteria"]
+            assert isinstance(criteria, list)
+            data["criteria"] = [*criteria, {"id": "c-child", "mandatory": False, "outcome": "VIOLATED", "evidence": ["grader-log:c-child"]}]
+            r = records.Record(path=r.path, data=data)
+        records_list.append(r)
+    records_list.append(records.Record(path=Path("evidence-att-1.json"), data={
+        "version": 2, "kind": "skill-evidence", "producer": "assembler",
+        "attempt_id": "att-1", "trial_id": "t-1",
+        "skills": [
+            {
+                "skill": {"path": SKILL_PATH}, "invocation": {"lineage": "root"},
+                "lifecycle": {
+                    "listed": {"status": "UNKNOWN", "reason": "x"},
+                    "read_observed": {"status": "UNKNOWN", "reason": "x"},
+                    "execution_observed": {"status": "UNKNOWN", "reason": "x"},
+                },
+                "criteria_owned": [], "external_evidence": {"present": False, "reconciliation": "absent"},
+            },
+            {
+                "skill": {"path": child_path}, "invocation": {"lineage": "child", "parent_path": SKILL_PATH},
+                "lifecycle": {
+                    "listed": {"status": "UNKNOWN", "reason": "x"},
+                    "read_observed": {"status": "UNKNOWN", "reason": "x"},
+                    "execution_observed": {"status": "UNKNOWN", "reason": "x"},
+                },
+                "criteria_owned": [{"id": "c-child", "outcome": "VIOLATED", "shared": False}],
+                "external_evidence": {"present": False, "reconciliation": "absent"},
+            },
+        ],
+    }))
+    bundle = records.Bundle(path=bundle.path, records=records_list)
+    report = cov.assemble_coverage_report(
+        bundle, cov.DeclaredInventory.from_profile_raw((SKILL_PATH, child_path), {"select": [SKILL_PATH, child_path]}, "sha256:5a")
+    )
+    text = report.to_text()
+    assert "PASS=1" in text
+    assert "c-child=VIOLATED" in text
+    assert child_path in text
+
+
+def test_to_text_is_deterministic_under_reversed_record_order() -> None:
+    forward = _bundle(CONTROLS / "ledger-binding/good/skill-evidence-duplicate-invocation")
+    backward = _reversed_bundle(CONTROLS / "ledger-binding/good/skill-evidence-duplicate-invocation")
+    inv = _inventory()
+    assert cov.assemble_coverage_report(forward, inv).to_text() == cov.assemble_coverage_report(backward, inv).to_text()
+
+
+# --------------------------------------------------------------- mutation check
+
+def test_to_text_derivation_is_not_a_no_op(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mutation check: force to_dict to omit rows entirely, and confirm the
+    human view would then also show zero rows - proving to_text really
+    reads the dict, not a hardcoded summary."""
+    bundle = _bundle(CONTROLS / "ledger-binding/good/skill-evidence-duplicate-invocation")
+    report = cov.assemble_coverage_report(bundle, _inventory())
+    real_to_dict = cov.CoverageReport.to_dict
+
+    def empty_rows(self: cov.CoverageReport) -> dict[str, object]:
+        body = real_to_dict(self)
+        body["rows"] = []
+        return body
+
+    monkeypatch.setattr(cov.CoverageReport, "to_dict", empty_rows)
+    assert "rows: 0" in report.to_text()  # the mutation's wrong answer, confirming it would go undetected

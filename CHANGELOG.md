@@ -32,6 +32,19 @@ and version plan.
   - The two-arm study (`published` + `rewritten`, with its Fisher test) is
     unchanged.
 
+- **`CoverageReport.to_text()`: the concise human view** (Refs #272
+  acceptance item 1). Built from `self.to_dict()` - the SAME dict `to_json`
+  serializes, never a second read of `self.rows`/`self.case_pairs` - so the
+  two views cannot drift apart. Every row, every count (including a `0`),
+  every coverage flag, reconciliation count, criterion and case-pair verdict
+  appears; nothing is summarized away, only formatted for reading.
+  Deterministic (same sorted order `to_dict()` already uses). 7 new tests,
+  including one proving the failed-child-under-successful-parent golden
+  case is visible in the text too, and a mutation check (the class's own
+  `to_dict` swapped for one that drops all rows, confirming the human view
+  reports zero rows right along with it - proving a real dependency, not a
+  hardcoded summary).
+
 - **`stale-identity`'s `witness_ref` can cite the installation-receipt**
   (Refs #269, #272). `#301` made `contradicting` require a `witness_ref`
   validated only against `artifact-manifest`-captured digests - correct for

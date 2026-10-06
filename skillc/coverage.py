@@ -79,6 +79,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import Any, cast
 
 from . import checks, records
 from . import reliability as rel
@@ -261,6 +262,63 @@ class CoverageReport:
         regardless of input record order - sorted keys, sorted rows, no
         report-generation timestamp anywhere in the body."""
         return json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"))
+
+    def to_text(self) -> str:
+        """A concise human view, built from `self.to_dict()` - the SAME
+        dict `to_json` serializes, never a second read of `self.rows`/
+        `self.case_pairs` - so the two views cannot drift apart (orchestrator
+        review, #272). Every row and every `UNKNOWN`/`INSUFFICIENT`-shaped
+        state in the JSON appears here too: nothing is summarized away, only
+        formatted for reading. Deterministic - same row/pair order
+        `to_dict()` already sorts into, no wall-clock content anywhere."""
+        body = self.to_dict()
+        lines = [f"inventory: {body['inventory']}"]
+        if body["profile_digest"] is not None:
+            lines.append(f"profile_digest: {body['profile_digest']}")
+        if body["subject_digest"] is not None:
+            lines.append(f"subject_digest: {body['subject_digest']}")
+        declared = cast("list[str] | None", body["declared_skills"])
+        if declared is not None:
+            lines.append(f"declared_skills ({len(declared)}): " + ", ".join(declared))
+        rows = cast("list[dict[str, Any]]", body["rows"])
+        lines.append(f"rows: {len(rows)}")
+        for row in rows:
+            outcomes = ", ".join(f"{k}={v}" for k, v in row["outcomes"].items())
+            flags = ", ".join(f"{k}={v}" for k, v in row["coverage_flags"].items() if v)
+            reconciliation = ", ".join(f"{k}={v}" for k, v in row["reconciliation_counts"].items() if v)
+            lineage = row["lineage"] or "-"
+            if row["parent_path"]:
+                lineage = f"{lineage} (parent: {row['parent_path']})"
+            lines.append(
+                f"- {row['skill_path']} @ {row['skill_version']} "
+                f"[{row['client_name']}/{row['client_version']}, case={row['case_id']}, arm={row['arm']}] "
+                f"scheduled={row['scheduled']} evaluable={row['evaluable']} lineage={lineage}"
+            )
+            lines.append(f"    outcomes: {outcomes}")
+            if flags:
+                lines.append(f"    coverage_flags: {flags}")
+            if reconciliation:
+                lines.append(f"    reconciliation: {reconciliation}")
+            if row["criteria"]:
+                criteria_text = ", ".join(
+                    f"{c['id']}={c['outcome']}" + (" (shared)" if c["shared"] else "")
+                    for c in row["criteria"]
+                )
+                lines.append(f"    criteria: {criteria_text}")
+        case_pairs = cast("list[dict[str, Any]]", body["case_pairs"])
+        if case_pairs:
+            lines.append(f"case_pairs: {len(case_pairs)}")
+            for pair in case_pairs:
+                p_text = f" (p={pair['p_value']:.4g})" if pair["p_value"] is not None else ""
+                reason_text = f" [{pair['reason']}]" if pair["reason"] else ""
+                lines.append(
+                    f"- {pair['case_id']}@{pair['case_revision']} (intact "
+                    f"{pair['intact_pass']}/{pair['intact_evaluable']}) vs "
+                    f"{pair['paired_case_id']}@{pair['paired_case_revision']} (degraded "
+                    f"{pair['degraded_pass']}/{pair['degraded_evaluable']}): "
+                    f"{pair['verdict']}{p_text}{reason_text}"
+                )
+        return "\n".join(lines)
 
 
 def _refuse_on_invalid_bundle(bundle: records.Bundle) -> None:
