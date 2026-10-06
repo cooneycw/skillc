@@ -87,8 +87,25 @@ and version plan.
     invocation. README step 8 lists all four new break-mode runs.
     Mutation-checked: removing the `gateshim` case entirely turns 5 tests
     red; restored, green.
-  The overlay step, its image wiring, and the real-Docker conformance
-  test are not yet built.
+  - `skillc/gate_overlay.py` (new): the overlay step itself.
+    `apply_flow_check_gate_overlay()` runs as the LAST step of a live
+    attempt's setup (skillc#334 tracks closing the separate gap - found
+    while scoping this - that nothing currently installs the profile's
+    declared dependency closure for a live attempt at all): it moves the
+    real `flow-finish-gate.sh` to a harness-only destination and places
+    the shim at the subject-visible path, reusing `ExecutionBackend.
+    export()`/`install()` - no new backend primitive needed. BOTH
+    digests (the real script's current content, the shim content handed
+    in) are checked against caller-declared expectations BEFORE anything
+    is written - orchestrator's own named red case ("an overlay that
+    places a different shim than the declared digest is refused").
+    `tests/test_gate_overlay.py` drives it against a real `DockerBackend`
+    (the fake `docker` CLI, same discipline as `test_docker_backend.py`).
+    Mutation-checked: dropping either digest comparison turns the
+    matching test red; restored, green.
+  The image wiring and the real-Docker conformance test (driving a
+  directly-constructed container, #269/#183 style, with this overlay
+  function placing both files - not by hand) are not yet built.
 
 - **The real-Docker runner's `--break` flag generalized to a family:mode
   table** (Refs #315, #269, #183). Found during #269's PR merge review:
