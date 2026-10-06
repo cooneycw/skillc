@@ -89,6 +89,22 @@ and version plan.
     properly; deferred as out of scope for this PR and recorded in the
     Nit Store (cooneycw/skillc#20, comment 6025027183).
 
+- **`tests/test_gate_stops_early_witness_equivalence.py`: an equivalence
+  guard against the duplication drift risk** (Refs #270). Runs the SAME
+  battery of 11 record shapes (normal, not-observed with and without
+  exclusivity, launch-failed, channel-unavailable, interrupted, zero
+  runs, a single fresh/stale run, an edit-then-rerun cycle, a rerun that
+  drifted away) through both `flow_check_honest()`'s duplicated
+  `_execution_observed`/`_last_run_is_fresh` and the canonical
+  `skillc.gate_witness`/`skillc.stale_tree` functions they copy, in the
+  NORMAL suite where `skillc` IS importable (unlike the isolated judge
+  itself). A silently diverging copy would grade against a different
+  rule than the real gate-witness implements, and nothing in the judge's
+  own tests could ever notice, since they never see the canonical
+  functions to compare against. Mutation-checked: flipping
+  `launch-failed`'s reported status and reading `runs[0]` instead of
+  `runs[-1]` each turned the matching case red, confirmed, then reverted.
+
 - **`gate-stops-early`'s `flow-check-honest`: real, mutation-checked logic,
   declared as a standalone function rather than a grader criterion**
   (Refs #270), unblocked by skillc#332's locked gate-witness record shape

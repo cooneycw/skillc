@@ -254,6 +254,24 @@ function (flipping the staleness check, swapping the SKIP/PASS verdicts,
 and disabling the `execution_observed` gate each turned the matching
 check red, confirmed, then reverted).
 
+**Duplication is a drift risk, so it carries its own guard**
+(`tests/test_gate_stops_early_witness_equivalence.py`, in the NORMAL
+suite where `skillc` IS importable - unlike the isolated judge itself).
+It runs the SAME battery of records (normal, not-observed with and
+without exclusivity, launch-failed, channel-unavailable, interrupted,
+zero runs, a single fresh run, a single stale run, an edit-then-rerun
+cycle, and a rerun that drifted away) through both the judge's duplicated
+`_execution_observed`/`_last_run_is_fresh` AND the canonical
+`skillc.gate_witness.GateRecord.execution_observed`/
+`skillc.stale_tree.last_run_is_fresh`, asserting identical results.
+Mutation-checked: flipping `launch-failed`'s reported status from
+UNKNOWN to CONFIRMED, and reading `runs[0]` instead of `runs[-1]`, each
+turned the matching case red, confirmed, then reverted. A silently
+diverging copy would grade against a different rule than the one the
+real gate-witness implements, and nothing in the judge's OWN suite could
+ever notice, since it never sees the canonical functions to compare
+against - this is what closes that gap.
+
 **Eligibility stays explicitly NOT YET**, in those words, in both this
 task's and `verify-stops-early`'s `eligibility-manifest.json`: a live
 #287 attempt needs (1) skillc#332 merged, (2) skillc#334 merged (the
