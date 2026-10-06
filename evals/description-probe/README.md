@@ -1,6 +1,8 @@
 # Description screening probe: agreement check (#238)
 
-**Status: approved 2026-10-06, not yet run.**
+**Status: run 2026-10-06; see [report.md](report.md). AGREES:** every cell's majority
+verdict matches #237's full runs (max rate difference 0.1), with both directions shown.
+6 of 40 attempts did not run (the total cap left no room for setup overhead).
 
 The probe is #238's cheap selection screen: an `uptake-study` attempt cut off
 at **45 s** (`probe.cutoff_seconds`, equal to `shared.per_attempt_seconds`).
