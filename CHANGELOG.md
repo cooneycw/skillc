@@ -150,9 +150,22 @@ and version plan.
     citation count in `ledger_binding`).
   - `no-correlating-attempt`: refused unless the cited digest is genuinely
     absent from this attempt's own manifest capture - the existing
-    altered-artifact check is now gated to skip `reconciliation: "unmatched"`,
-    since an unmatched record is the honest report that evidence does not
-    correlate, not a forged claim that it does.
+    altered-artifact check is gated to skip exactly `reconciliation:
+    "unmatched" AND reason: "no-correlating-attempt"`, since a record with
+    that reason is the honest report that evidence does not correlate, not a
+    forged claim that it does. **Not every `unmatched` record**: a first
+    version skipped the altered-artifact check for all of `unmatched`, which
+    let two entries cite one digest NOTHING captured, label themselves
+    `duplicate-invocation`, and pass - crediting duplicate use of evidence
+    that does not exist. Caught in review before this shipped. Fixed by
+    narrowing the skip to `no-correlating-attempt` only, so
+    `duplicate-invocation` still has to name a digest captured somewhere.
+    New bad fixture `skill-evidence-duplicate-invocation-uncaptured` (two
+    entries, shared uncaptured digest, both labeled `duplicate-invocation`)
+    is refused; mutation-checked by widening the skip back to confirm it
+    goes blind. A new fixture also confirms `matched`/`contradicting` still
+    refuse an uncaptured digest unconditionally
+    (`skill-evidence-altered-artifact-contradicting`).
   - `declared-skill-not-installed` is deliberately NOT closed: its own Q3
     answer needs a field `external_evidence` does not carry today, and the
     entry's own `skill.path` cannot stand in for it (the existing

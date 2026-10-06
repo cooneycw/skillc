@@ -165,16 +165,26 @@ SKILL_EVIDENCE_CONTRADICTING_REASONS = (
 #:   by another `skill-evidence` entry anywhere in the bundle - one piece of
 #:   external evidence credited more than once. Detected by digest equality
 #:   across skillc's own citations, never by reading inside the cited file
-#:   for a duplicated id.
+#:   for a duplicated id. The cited digest must STILL be captured SOMEWHERE
+#:   in this attempt's own manifest - the altered-artifact check (below) is
+#:   not skipped for this reason, only for `no-correlating-attempt` (narrowly,
+#:   not for every `unmatched` record): two entries citing one digest nothing
+#:   ever captured is not "duplicate use of real evidence", it is two forged
+#:   claims, and `duplicate-invocation`'s own citation-count check cannot see
+#:   that by itself (caught in review before this shipped, #272 - widening
+#:   the skip to all of `unmatched` let exactly this through).
 #: - `no-correlating-attempt`: this entry's `artifact_ref.digest` was not
 #:   captured by THIS attempt's own manifest. `unmatched` with this reason is
 #:   the HONEST report of non-correlation - it is not the same claim
 #:   `matched`/`contradicting` make (that the evidence DOES bind to this
 #:   attempt), so it is not an altered artifact either: the altered-artifact
-#:   check (above) is gated to skip exactly this `reconciliation` value, the
-#:   same way R9 (records.md, "reconciliation states") already describes
-#:   `unmatched` as "present, but does not bind to any controller-captured
-#:   attempt" rather than as a forged claim.
+#:   check (below) is gated to skip exactly `reconciliation == "unmatched"
+#:   and reason == "no-correlating-attempt"` - not every `unmatched` record,
+#:   which would also quietly exempt a mislabeled `duplicate-invocation` from
+#:   ever having to name real captured bytes. R9 (records.md, "reconciliation
+#:   states") already describes `unmatched` as "present, but does not bind to
+#:   any controller-captured attempt" rather than as a forged claim; this is
+#:   that description, scoped to the one reason it actually describes.
 #: Each reason is refused when the fact it claims does not hold, exactly as a
 #: `contradicting` record is refused without a real `witness_ref` - a label
 #: is a claim skillc checks, never a free pass.
@@ -1694,9 +1704,13 @@ def _skill_evidence_binding(
       NONE of them is a **forged status** - the "Forged status" golden case.
     - `external_evidence.artifact_ref.digest` against the manifest's captured
       digests: one that was never captured is an **altered** artifact -
-      UNLESS `reconciliation` is `unmatched`, which is already the honest
-      report that this digest does not correlate to this attempt's own
-      capture, not a forged claim that it does (R9, records.md).
+      UNLESS `reconciliation` is `unmatched` AND `reason` is
+      `no-correlating-attempt`, which is already the honest report that this
+      digest does not correlate to this attempt's own capture, not a forged
+      claim that it does (R9, records.md). The skip is NOT any `unmatched`
+      record: `duplicate-invocation` still has to name a digest captured
+      somewhere, or two forged citations of nothing would read as "duplicate
+      use of real evidence" instead of two altered artifacts.
     - `external_evidence.witness_ref.digest` (#269 scope addition), when
       `reconciliation == "contradicting"`, against the same captured digests:
       one that was never captured is an **unwitnessed** contradiction - the
@@ -1765,7 +1779,7 @@ def _skill_evidence_binding(
             digest = ref.get("digest") if isinstance(ref, dict) else None
             reconciliation = external.get("reconciliation")
             not_captured_here = isinstance(digest, str) and digest and digest not in captured
-            if not_captured_here and reconciliation != "unmatched":
+            if not_captured_here and not (reconciliation == "unmatched" and reason == "no-correlating-attempt"):
                 yield (
                     f"{e_where}: external_evidence.artifact_ref cites {digest!r}, "
                     f"which no manifest for this attempt captured - an altered artifact"

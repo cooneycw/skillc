@@ -642,15 +642,32 @@ to name, and the cpp-eval review questions relayed 2026-10-06.
   - `duplicate-invocation`: refused unless the cited digest is ALSO cited by
     another `skill-evidence` entry anywhere in the bundle - detected by
     digest equality across skillc's own citations, never by opening the
-    cited file to look for a duplicated id inside it.
+    cited file to look for a duplicated id inside it. The cited digest must
+    STILL be captured somewhere in this attempt's own manifest: the
+    altered-artifact check below is not skipped for this reason. A first
+    version skipped it for every `unmatched` record and missed that this
+    lets two entries cite one digest NOTHING captured, label themselves
+    `duplicate-invocation`, and pass - a bundle crediting duplicate use of
+    evidence that does not exist, caught before this shipped. Fixed by
+    narrowing the skip (next bullet); a committed bad fixture
+    (`skill-evidence-duplicate-invocation-uncaptured`) is refused for exactly
+    this shape, and mutation-checked by widening the skip back and
+    confirming it goes blind.
   - `no-correlating-attempt`: refused unless the cited digest is genuinely
     absent from this attempt's own `artifact-manifest` capture. This is the
     SAME fact the altered-artifact check (above) was built to catch, so that
-    check is now gated to skip exactly `reconciliation: "unmatched"`: an
-    `unmatched` record is already the honest report that this evidence does
-    not correlate to this attempt, not a forged claim that it does - only
-    `matched`/`contradicting` claim the evidence binds, and only those claims
-    can be "altered" when the digest was never captured.
+    check is gated to skip exactly `reconciliation: "unmatched" AND reason:
+    "no-correlating-attempt"` - not every `unmatched` record (see the
+    `duplicate-invocation` bullet for why that distinction matters): an
+    `unmatched`/`no-correlating-attempt` record is already the honest report
+    that this evidence does not correlate to this attempt, not a forged
+    claim that it does - only `matched`/`contradicting`, and an
+    `unmatched`/`duplicate-invocation` record that fails to also cite real
+    captured bytes, claim the evidence binds, and only those claims can be
+    "altered" when the digest was never captured. A committed fixture
+    confirms `matched` and `contradicting` still refuse an uncaptured digest
+    unconditionally (`skill-evidence-altered-artifact` and
+    `skill-evidence-altered-artifact-contradicting`).
 
   **`declared-skill-not-installed` is deliberately not closed yet.** Its Q3
   answer (above) describes a CPP usage record's own self-declared skill name
