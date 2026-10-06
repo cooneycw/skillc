@@ -64,6 +64,7 @@ BREAK_MODE="$(echo "$BREAK_RESOLVED" | sed -n '1p')"
 # OTHER family could silently activate a break during a "none" run).
 CHANNEL_BREAK_VALUE="$(echo "$BREAK_RESOLVED" | sed -n '2p')"
 WITNESS_BREAK_VALUE="$(echo "$BREAK_RESOLVED" | sed -n '3p')"
+GATESHIM_BREAK_VALUE="$(echo "$BREAK_RESOLVED" | sed -n '4p')"
 
 # VM-local configuration - never committed, never defaulted to a real path.
 # See ci/real-docker/README.md "Setup" for how the operator populates this.
@@ -261,16 +262,18 @@ if ! (cd "$WORK_CHECKOUT" && uv sync --locked --extra dev --quiet); then
 fi
 (
     cd "$WORK_CHECKOUT"
-    # BOTH break variables are always set explicitly, never left at
+    # ALL THREE break variables are always set explicitly, never left at
     # whatever the runner's own process environment happened to carry
     # (codex:code_review finding, #315 follow-up) - exactly one of
-    # CHANNEL_BREAK_VALUE/WITNESS_BREAK_VALUE is a real mode and the
-    # other is the literal "none", by resolve_break_spec's own contract,
-    # so the two live files' break modes cannot cross-contaminate each
-    # other and a stale inherited value can never silently activate a
-    # break during a "none" (certifying) run.
+    # CHANNEL_BREAK_VALUE/WITNESS_BREAK_VALUE/GATESHIM_BREAK_VALUE is a
+    # real mode and the other two are the literal "none", by
+    # resolve_break_spec's own contract, so the three live files' break
+    # modes cannot cross-contaminate each other and a stale inherited
+    # value can never silently activate a break during a "none"
+    # (certifying) run.
     env SKILLC_LIVE_TEST_BREAK="$CHANNEL_BREAK_VALUE" \
         SKILLC_GATE_WITNESS_LIVE_BREAK="$WITNESS_BREAK_VALUE" \
+        SKILLC_GATE_SHIM_LIVE_BREAK="$GATESHIM_BREAK_VALUE" \
         uv run --no-sync pytest -m real_docker --junit-xml="$REPORT_PATH"
 ) || true  # a test failure is EXPECTED input to the verdict step below
 

@@ -76,6 +76,17 @@ and version plan.
     image, same as #183 PR B2's `skillc-disrupt-tool`), never a profile
     dependency - the original `cpp-codex-flow-check-ea6dbfa` profile stays
     untouched at `841689b`.
+  - `ci/real-docker/break-lib.sh` gains a third family, `gateshim:`, for
+    the shim's own break modes (`synthesizes-output`, `drops-cwd`,
+    `exits-zero-on-channel-failure`, `wrong-env`) - `resolve_break_spec`'s
+    output widens from three lines to four (the normalized spec plus one
+    explicit value per family, exactly one real and the other two the
+    literal `"none"`, same always-all-present contract #315's own HIGH
+    finding established), and `run-real-docker` now sets a third
+    variable, `SKILLC_GATE_SHIM_LIVE_BREAK`, explicitly on every
+    invocation. README step 8 lists all four new break-mode runs.
+    Mutation-checked: removing the `gateshim` case entirely turns 5 tests
+    red; restored, green.
   The overlay step, its image wiring, and the real-Docker conformance
   test are not yet built.
 
