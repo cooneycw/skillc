@@ -25,11 +25,23 @@ claim, not this image's.
 
 ## Building the image
 
+Two named stages, built from the same `Dockerfile`:
+
 ```bash
 FIXTURE_DIR=tests/fixtures/profile-cpp-codex-flow-check-ea6dbfa
-docker build \
+
+# The normal image - plain `docker build` lands on `cached` because it is
+# the LAST stage, but naming it explicitly is clearer at the call site.
+docker build --target cached \
     -f docker/profile-cold-install/Dockerfile \
     -t skillc-coldinstall:latest \
+    "$FIXTURE_DIR"
+
+# The cold-cache break mode's negative control: the SAME base, with no
+# cache-populating layer at all.
+docker build --target uncached \
+    -f docker/profile-cold-install/Dockerfile \
+    -t skillc-coldinstall-uncached:latest \
     "$FIXTURE_DIR"
 ```
 
@@ -38,9 +50,9 @@ The fixture directory itself is the build context, so the `Dockerfile`'s
 files and nothing else in the fixture tree. No build arg carries the
 lockfile's digest - see "The cache-freshness check" below for why.
 
-(The live test builds this programmatically rather than by hand; the
-invocation above is for an operator rebuilding or inspecting the image
-directly.)
+(The live test builds both programmatically rather than by hand; the
+invocations above are for an operator rebuilding or inspecting either
+image directly.)
 
 ## The cache-freshness check
 
@@ -62,8 +74,8 @@ At run time, the offline install uses `uv sync --locked --offline` -
 without it, a missing cached package would fail only because the network
 is blocked, which is true of EVERY run regardless of whether the cache
 was ever warmed - `coldinstall:cold-cache` (a break mode, see
-`ci/real-docker/break-lib.sh`, running the same test against an image
-built WITHOUT this layer) would then pass for the wrong reason. With
+`ci/real-docker/break-lib.sh`, running the same test against the
+`uncached` stage above) would then pass for the wrong reason. With
 `--offline`, a missing distribution fails at `uv`'s own resolution step,
 naming the missing package - that specific failure is what the
 `cold-cache` mode's assertion checks for, not merely a non-zero exit.

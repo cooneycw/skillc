@@ -6,6 +6,15 @@
 # with zero bind mounts. The cache is built ONLY from the lockfile baked
 # into this image - never a live fetch at test-run time.
 #
+# TWO NAMED STAGES, not one Dockerfile plus a hand-edited variant: `cached`
+# (the normal image - plain `docker build` with no `--target` lands here,
+# because it is the LAST stage) and `uncached` (the `coldinstall:cold-
+# cache` break mode's negative control - built with `--target uncached`,
+# carrying no cache layer at all, so the offline sync has nothing to use).
+# Two stages sharing one `base` means the only difference between the
+# intact image and its own negative control is the ONE layer under test,
+# never a second file that could drift from the first by hand.
+#
 # The lockfile's sha256 is computed INSIDE THIS IMAGE, in the SAME layer
 # that populates the cache (orchestrator review) - never taken from a
 # caller-supplied build arg. A build-arg-sourced label would prove only
@@ -15,9 +24,7 @@
 # reads `/opt/skillc-coldinstall/lockfile.sha256` at run time and compares
 # it against the digest of the `uv.lock` it is actually installing from -
 # that is the check that makes "the cache is what makes this work" a
-# provable claim rather than an assumption, and what `coldinstall:cold-
-# cache` (an image built WITHOUT this layer, so the file is simply absent)
-# exists to falsify.
+# provable claim rather than an assumption.
 #
 # Deliberately NOT docker/trial/Dockerfile or the `skillc-trial` tag -
 # that image and tag belong to #237's own live-trial study (#305's stated
@@ -30,7 +37,8 @@
 # test run, the same hazard docker/trial/Dockerfile's own comment names
 # for its seed content) runs its gate helper against the real lib.cicd
 # runner is the live test's job, not this image's.
-FROM python:3.12-slim
+
+FROM python:3.12-slim AS base
 
 # Pinned uv binary - astral's documented multi-stage copy, no network
 # needed for this layer. Bump this version deliberately, never silently;
@@ -44,8 +52,10 @@ COPY --from=ghcr.io/astral-sh/uv:0.9.7 /uv /uvx /usr/local/bin/
 # default `~/.cache/uv` would land somewhere the run-time process cannot
 # predict or rely on. Baked as an image ENV, so it is inherited
 # automatically by any process in any container started from this image -
-# build time (populating it below) and run time (reading it with
-# `--offline`) alike, with no extra `-e` needed at `docker run`.
+# build time (populating it below, in the `cached` stage only) and run
+# time (reading it with `--offline`) alike, with no extra `-e` needed at
+# `docker run`. Declaring it here, in `base`, means BOTH stages agree on
+# the path - `uncached` simply never populates anything at it.
 ENV UV_CACHE_DIR=/opt/skillc-coldinstall/uv-cache
 
 # The pinned CPP lockfile/pyproject, copied in at BUILD time (network
@@ -55,6 +65,8 @@ ENV UV_CACHE_DIR=/opt/skillc-coldinstall/uv-cache
 # caller supplies these two files from that fixture, verbatim, never a
 # separately-maintained copy that could drift from it.
 COPY pyproject.toml uv.lock /cache-src/
+
+FROM base AS cached
 
 # Populates the cache at the fixed path above, from THIS lockfile only,
 # and computes the lockfile's own sha256 IN THE SAME LAYER (orchestrator
@@ -76,8 +88,17 @@ RUN cd /cache-src \
     && sha256sum uv.lock | cut -d' ' -f1 > /opt/skillc-coldinstall/lockfile.sha256 \
     && chmod -R a+rX /opt/skillc-coldinstall
 
-# No fixed WORKDIR/USER here: the test copies a disposable installed home
-# in per run (via `docker cp`, never a bind mount) and decides the run
-# user/home itself, matching #266's own "nothing borrowed from the host"
-# constraint - baking in a user here would make this image's identity a
-# silent input to that decision instead of the test's own explicit one.
+FROM base AS uncached
+
+# Deliberately NOTHING here. This stage is the `coldinstall:cold-cache`
+# break mode's whole point: no /opt/skillc-coldinstall/uv-cache, no
+# lockfile.sha256 - an offline `uv sync` against this image has no cache
+# to use at all, and must fail at uv's own resolution step, naming the
+# missing distribution.
+
+# No fixed WORKDIR/USER on either stage: the test copies a disposable
+# installed home in per run (via `docker cp`, never a bind mount) and
+# decides the run user/home itself, matching #266's own "nothing borrowed
+# from the host" constraint - baking in a user here would make this
+# image's identity a silent input to that decision instead of the test's
+# own explicit one.
