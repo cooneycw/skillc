@@ -77,7 +77,7 @@ _PROFILE_KEYS = {
 _DEP_KEYS = {
     "id", "kind", "scope", "source_root", "paths", "destination", "satisfies",
     "traverse", "no_traverse_reason", "unreferenced_reason", "version", "supply",
-    "role", "content", "shadow_check", "replaces_pinned", "replacement_reason",
+    "role", "content", "shadow_check", "replaces_pinned", "replacement_reason", "mode",
 }
 
 SYNTHETIC_CONTENT_MAX_BYTES = 4096  # Marker text, not a payload channel.
@@ -121,6 +121,7 @@ class Dependency:
     shadow_path: str | None = None
     replaces_pinned: bool = False
     replacement_reason: str = ""
+    mode: str = "100644"
 
 
 @dataclass(frozen=True)
@@ -321,7 +322,7 @@ def _dependency(entry: object) -> Dependency:
     unknown = sorted(set(entry) - _DEP_KEYS)
     if unknown:
         raise Refused(f"dependency {entry.get('id')!r} has unknown keys: {unknown}")
-    synthetic_keys = {"content", "replaces_pinned", "replacement_reason"}
+    synthetic_keys = {"content", "replaces_pinned", "replacement_reason", "mode"}
     if entry.get("kind") != "synthetic" and synthetic_keys.intersection(entry):
         raise Refused("synthetic fields require kind synthetic")
     dep_id = entry.get("id")
@@ -349,6 +350,7 @@ def _dependency(entry: object) -> Dependency:
     shadow_path = None
     replaces_pinned = False
     replacement_reason = ""
+    mode = "100644"
     if kind == "synthetic":
         forbidden = {"satisfies", "traverse", "no_traverse_reason", "version", "supply"}
         if forbidden.intersection(entry):
@@ -359,6 +361,15 @@ def _dependency(entry: object) -> Dependency:
         if not isinstance(content, str):
             raise Refused(f"dependency {dep_id}: content must be UTF-8 text")
         _synthetic_bytes(content)
+        # #332: a synthetic file defaults to 100644 (#303's own marker never
+        # needed otherwise) but may declare "mode": "100755" when the
+        # harness-authored content IS meant to be invoked directly (a
+        # forwarding shim installed at a path the subject executes, not a
+        # passive marker) - the SAME two modes every other dependency kind
+        # already supports, never a third value.
+        mode = entry.get("mode", "100644")
+        if mode not in ("100644", "100755"):
+            raise Refused(f"dependency {dep_id}: synthetic mode must be 100644 or 100755, not {mode!r}")
         if not isinstance(destination, str) or m._escapes(destination) or destination in ("", "."):
             raise Refused(f"dependency {dep_id}: destination must be a home-relative directory")
         # The installed path and the shadow-check path are DERIVED from the
@@ -425,7 +436,7 @@ def _dependency(entry: object) -> Dependency:
         supply=entry.get("supply") if isinstance(entry.get("supply"), str) else None,
         role=str(entry.get("role", "")),
         content=content, shadow_path=shadow_path, replaces_pinned=replaces_pinned,
-        replacement_reason=replacement_reason,
+        replacement_reason=replacement_reason, mode=mode,
     )
 
 
@@ -1194,7 +1205,7 @@ def _visit(walk: _Walk, dep: Dependency, installed: dict[str, dict[str, object]]
             return
         _claim(walk, installed, dest, {
             "source": None, "destination": dest, "origin": "synthetic",
-            "content": dep.content, "mode": "100644", "size": len(data),
+            "content": dep.content, "mode": dep.mode, "size": len(data),
             "digest": m.sha256_bytes(data), "git_blob": git_blob_id(data), "owner": dep.id,
             "shadow_path": dep.shadow_path, "replaces_pinned_digest": replacement_digest,
             "replacement_reason": dep.replacement_reason or None,
@@ -1414,8 +1425,8 @@ def install(inventory: dict[str, Any], tree: Tree, home: Path) -> dict[str, Any]
         try:
             if record["origin"] == "synthetic":
                 data = _synthetic_bytes(record["content"])
-                if record["mode"] != "100644":
-                    raise Refused(f"synthetic mode must be 100644: {destination}")
+                if record["mode"] not in ("100644", "100755"):
+                    raise Refused(f"unsupported synthetic mode: {destination}")
             else:
                 data = tree.read(record["source"])
             if m.sha256_bytes(data) != record["digest"]:

@@ -52,6 +52,16 @@ and version plan.
   is per-gate, declared by the controller exactly like `declared_argv`,
   never read from the subject. Mutation-checked: disabling confinement
   turns 5 tests red; dropping env-forwarding turns 1 red; both restored.
+  - `skillc/profile.py`'s `synthetic` dependency kind may now declare
+    `"mode": "100755"` (default stays `"100644"`, #303's own marker
+    unaffected) - needed because the shim installs at a path the subject
+    invokes directly, not a passive existence marker. The restriction to
+    exactly `100644` was unconditional before this (hardcoded at both the
+    walk and `install()`); a non-`synthetic` dependency declaring `mode`
+    at all is refused, since every other kind derives it from the real
+    pinned file's own bytes. Mutation-checked: reverting the record
+    construction to the old hardcoded value turns the new executable-mode
+    test red; restored, green.
   The shim itself, its profile wiring, and the real-Docker conformance
   test are not yet built.
 
