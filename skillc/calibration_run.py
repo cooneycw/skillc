@@ -63,7 +63,7 @@ import json
 import re
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import agent_trial, calibration, demo, profile, trial, verify
@@ -95,11 +95,19 @@ class Treatment:
     """What the non-baseline arm installs, acquired once for the whole run:
     the subject's selected skill files, their content digest (the plan's
     `subject.digest`), and the #150-D receipt context - one discovery cache
-    shared by every treatment attempt."""
+    shared by every treatment attempt.
+
+    `verify_home_files`/`preflight_tools` (#334) are empty unless a
+    profile was opted in: the closure files' expected digests, re-checked
+    IN the live container after delivery (never trusting delivery alone),
+    and the profile's own `tool`-kind dependencies, checked present in
+    that same container at their declared constraint."""
 
     home_files: Mapping[str, bytes]
     digest: str
     receipt_context: agent_trial.InstallationReceiptContext | None
+    verify_home_files: Mapping[str, str] = field(default_factory=dict)
+    preflight_tools: tuple[dict[str, object], ...] = ()
 
 
 def _closure_home_files(acquired: cc.AcquiredCollection, subject_profile: str, root: Path) -> dict[str, bytes]:

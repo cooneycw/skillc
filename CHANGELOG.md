@@ -187,6 +187,21 @@ and version plan.
   change needed. All 11 equivalence cases (6 `_execution_observed` + 5
   `_last_run_is_fresh`) now run and pass.
 
+- **In-container closure verification and tool preflight (Refs #334, in
+  progress)** - `agent_trial.run_one_attempt` gains `verify_home_files`
+  (relpath -> expected `sha256:` digest) and `preflight_tools` (a
+  profile's declared `tool`-kind dependencies), both checked INSIDE the
+  live container via one combined `exec_in_attempt` + one `export()` -
+  host-side checks prove what was SENT; this proves what ARRIVED and
+  that the declared tools are actually present at their constraint.
+  Raises `agent_trial.HomeFileVerificationRefused` inside the
+  `before_execute` hook, which `lifecycle.run_through_backend` already
+  turns into an unavailable (never-dispatched) attempt - no new
+  disposition, no `records.py` change. `Treatment` (calibration_run.py)
+  gains the matching `verify_home_files`/`preflight_tools` fields,
+  empty unless a profile is opted in. Unit-tested against a stub
+  backend (`tests/test_agent_trial_preflight.py`), since the function
+  only ever calls `exec_in_attempt`/`export`.
 - **`build_treatment` installs the profile closure (Refs #334, in
   progress)** - `calibration_run.build_treatment(acquired, subject_profile=,
   root=)` now merges `skillc.profile.installed_home_files`'s output

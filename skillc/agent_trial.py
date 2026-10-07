@@ -80,16 +80,17 @@ import hashlib
 import json
 import re
 import secrets
+import shlex
 import tempfile
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from . import credential, demo, leak, records, trial, trial_bootstrap, verify
+from . import credential, demo, leak, profile, records, trial, trial_bootstrap, verify
 from . import transcript_adapter as ta
 from .backend import BackendUnavailable, Confirmation, ExecutionBackend, Limits
-from .docker_backend import CANARY_RESULT_FILENAME, DockerBackend
+from .docker_backend import CANARY_RESULT_FILENAME, CONTAINER_HOME, DockerBackend
 from .lifecycle import run_through_backend
 from .trial_bootstrap import CanaryNotSatisfied, MCPServerSpec, PromptDeliveryError
 
@@ -261,16 +262,134 @@ CLIENT_SPECS: dict[str, ClientSpec] = {
 }
 
 
+class HomeFileVerificationRefused(Exception):
+    """skillc#334: a delivered home file's in-container digest disagreed
+    with what was expected, or could not be read back at all. Host-side
+    byte checks (the ones `calibration_run._closure_home_files` already
+    runs before any container exists) prove what was SENT; this proves
+    what ARRIVED - a `before_execute` hook failure, so it blocks the
+    attempt before the agent starts (`lifecycle.py`'s own contract), never
+    folded into a normal exit code."""
+
+
+_TOOLS_MARKER = "---skillc-334-tools---"
+
+
+def _preflight_in_container(
+    backend: DockerBackend, handle: object, limits: Limits,
+    verify_home_files: Mapping[str, str], tools: Sequence[Mapping[str, object]],
+) -> None:
+    """skillc#334 (orchestrator ruling, mailbox 5872 steps 2-3): read back
+    every closure file's digest FROM THE LIVE CONTAINER, and check every
+    declared tool dependency is present at its version constraint IN THE
+    CONTAINER - never trust that delivery alone proves arrival, and never
+    check tool presence on the HOST (`profile._check_tool` does that, for
+    the unrelated `skillc profile install` CLI path - it has no meaning
+    for a live attempt). `exec_in_attempt`'s `ExecuteResult` carries no
+    stdout text (only a byte COUNT - see its own docstring); the real
+    captured text reaches `CONTAINER_WORKSPACE/observations` through the
+    SAME write-back `verify.py`/`gate_witness.py` already rely on (#76),
+    read back here via one `export()` - the same technique, not a new
+    one. Both checks share ONE combined exec + ONE export, regardless of
+    how many files or tools are declared, since `export()` is the
+    expensive part."""
+    if not verify_home_files and not tools:
+        return
+    container_paths = {relpath: f"{CONTAINER_HOME}/{relpath}" for relpath in verify_home_files}
+    script_lines = [f"sha256sum {shlex.quote(path)}" for path in container_paths.values()]
+    script_lines.append(f"echo {shlex.quote(_TOOLS_MARKER)}")
+    for dep in tools:
+        tool_id = str(dep["id"])
+        quoted_id = shlex.quote(tool_id)
+        script_lines.append(
+            f'if command -v {quoted_id} >/dev/null 2>&1; then '
+            f'v=$({quoted_id} --version 2>&1 | head -1); printf "%s PRESENT %s\\n" {quoted_id} "$v"; '
+            f'else printf "%s ABSENT\\n" {quoted_id}; fi'
+        )
+    result = backend.exec_in_attempt(handle, ["sh", "-c", "\n".join(script_lines)], limits)
+    if result.exit_code != 0:
+        raise HomeFileVerificationRefused(
+            f"the in-container preflight script itself failed (exec exit {result.exit_code!r}, "
+            f"reason {result.reason!r}) - could not verify closure files or preflight tools"
+        )
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            backend.export(handle, Path(tmp))
+        except OSError as exc:
+            raise HomeFileVerificationRefused(f"could not export the container to read back the preflight output: {exc}") from exc
+        observations = Path(tmp) / "observations"
+        output = observations.read_text(encoding="utf-8", errors="replace") if observations.is_file() else ""
+    digest_section, _, tools_section = output.partition(_TOOLS_MARKER)
+
+    actual_by_path = {}
+    for line in digest_section.splitlines():
+        parts = line.split(None, 1)
+        if len(parts) == 2:
+            actual_by_path[parts[1]] = parts[0]
+    for relpath, expected_digest in verify_home_files.items():
+        container_path = container_paths[relpath]
+        actual_hex = actual_by_path.get(container_path)
+        if actual_hex is None:
+            raise HomeFileVerificationRefused(f"{relpath} was not read back from the container at all")
+        if f"sha256:{actual_hex}" != expected_digest:
+            raise HomeFileVerificationRefused(
+                f"{relpath} verified in-container digest sha256:{actual_hex} disagrees with the "
+                f"expected {expected_digest!r} - what was delivered does not match what arrived"
+            )
+
+    tool_lines = {entry.split()[0]: entry for entry in tools_section.splitlines() if entry.strip()}
+    for dep in tools:
+        tool_id = str(dep["id"])
+        tool_line = tool_lines.get(tool_id)
+        if tool_line is None or " ABSENT" in tool_line:
+            raise HomeFileVerificationRefused(
+                f"tool {tool_id!r} is not present in the container (declared by the profile)"
+            )
+        constraint = dep.get("version")
+        if constraint in (None, "any"):
+            continue
+        reported = tool_line.split(" PRESENT ", 1)[1] if " PRESENT " in tool_line else ""
+        match = re.search(r"\b(\d+(?:\.\d+)+)\b", reported)
+        if match is None:
+            raise HomeFileVerificationRefused(
+                f"tool {tool_id!r}'s version could not be determined in the container from {reported!r}"
+            )
+        actual_version = tuple(int(n) for n in match[1].split("."))
+        if not profile._version_matches(actual_version, str(constraint)):
+            raise HomeFileVerificationRefused(
+                f"tool {tool_id!r} version {match[1]} in the container does not satisfy {constraint!r}"
+            )
+
+
 def _make_before_execute(
     *, spec: ClientSpec, ctx: _AttemptContext, credential_explicit_path: str | Path | None,
     minimum_credential_seconds: float, delivered_credential_bytes: dict[str, bytes],
-    extra_home_files: Mapping[str, bytes],
+    extra_home_files: Mapping[str, bytes], verify_home_files: Mapping[str, str] | None = None,
+    preflight_tools: Sequence[Mapping[str, object]] | None = None, limits: Limits | None = None,
 ) -> Callable[[ExecutionBackend, object], None]:
     """`delivered_credential_bytes` is an OUT-parameter (a single-entry dict
     the caller reads afterward) - `observe_before_teardown` needs these
     exact bytes later to compute `refresh_observed`, and a hook's own return
     value has nowhere else to go (`before_execute`'s contract returns
-    nothing - see `lifecycle.py`'s own docstring)."""
+    nothing - see `lifecycle.py`'s own docstring).
+
+    `verify_home_files` (#334) names which of `extra_home_files`' own
+    destinations get read back from the live container and digest-checked
+    after delivery - never every file, only the ones a caller declares
+    (today: a profile's installed closure). `preflight_tools` (#334) names
+    the profile's own `tool`-kind dependencies (each a dict with at least
+    `id` and `version`), checked present in the SAME container at their
+    declared constraint - never on the host, which has no bearing on what
+    the agent's own container can actually run. `limits` is required
+    together with a non-empty `verify_home_files` or `preflight_tools`;
+    meaningless (and unused) without either - mirrors `calibration_run.
+    build_treatment`'s own subject_profile/root pairing."""
+    resolved_verify_home_files = verify_home_files or {}
+    resolved_preflight_tools = preflight_tools or ()
+    if (resolved_verify_home_files or resolved_preflight_tools) and limits is None:
+        raise HomeFileVerificationRefused(
+            "verify_home_files or preflight_tools is given but limits is None; cannot exec to verify"
+        )
 
     def hook(backend: ExecutionBackend, handle: object) -> None:
         assert isinstance(backend, DockerBackend)
@@ -301,6 +420,10 @@ def _make_before_execute(
         # decided by the caller's own intent, not by dict ordering luck.
         for relpath, data in extra_home_files.items():
             backend.deliver_home_file(handle, relpath, data)
+
+        if resolved_verify_home_files or resolved_preflight_tools:
+            assert limits is not None  # checked above, before any delivery happened
+            _preflight_in_container(backend, handle, limits, resolved_verify_home_files, resolved_preflight_tools)
 
     return hook
 
@@ -1272,6 +1395,8 @@ def run_one_attempt(
     grader: verify.GraderDef | None = None,
     grading_backend: ExecutionBackend | None = None,
     extra_home_files: Mapping[str, bytes] | None = None,
+    verify_home_files: Mapping[str, str] | None = None,
+    preflight_tools: Sequence[Mapping[str, object]] | None = None,
     retain_transcript: bool = False,
     receipt_context: InstallationReceiptContext | None = None,
 ) -> dict[str, object]:
@@ -1312,6 +1437,23 @@ def run_one_attempt(
     shape `demo.install_subject` already builds for the no-agent `--subject`
     leg. `None` (the default) delivers nothing beyond what `spec` already
     composes, so every existing caller is unaffected.
+
+    `verify_home_files` (#334): a subset of `extra_home_files`' own
+    destinations (relpath -> expected `sha256:` digest) to read back from
+    the LIVE container and digest-check after delivery, before the agent
+    starts - host-side checks prove what was SENT, this proves what
+    ARRIVED. A mismatch or an unreadable file raises `HomeFileVerificationRefused`
+    inside `before_execute`, which `lifecycle.run_through_backend` turns
+    into an unavailable attempt (never dispatched, never a guessed
+    outcome) - the same path an unreachable backend already takes.
+    `None` (the default) verifies nothing, so every existing caller is
+    unaffected.
+
+    `preflight_tools` (#334): a profile's `tool`-kind dependencies, checked
+    present in THIS container at their declared version constraint, same
+    `before_execute` failure path as `verify_home_files` above - never on
+    the host (`profile._check_tool`'s own convention, for the unrelated
+    `skillc profile install` CLI). `None` (the default) checks nothing.
 
     `retain_transcript=True` (issue #26): the ORIGINAL transcript bytes (one
     file, the same one the observation itself reads - never a second read)
@@ -1355,6 +1497,7 @@ def run_one_attempt(
         minimum_credential_seconds=minimum_credential_seconds,
         delivered_credential_bytes=delivered_credential_bytes,
         extra_home_files=extra_home_files or {},
+        verify_home_files=verify_home_files, preflight_tools=preflight_tools, limits=limits,
     )
     retained_transcript: dict[str, object] | None = {} if retain_transcript else None
     # #202: the transcript goes into the attempt's OWN store for every caller,
