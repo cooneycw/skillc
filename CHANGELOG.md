@@ -187,6 +187,20 @@ and version plan.
   change needed. All 11 equivalence cases (6 `_execution_observed` + 5
   `_last_run_is_fresh`) now run and pass.
 
+- **`subject.profile` opt-in field + approval binding (Refs #334, in
+  progress)** - a treated arm's subject may name a validated profile
+  (e.g. `evals/subjects/cpp-codex-flow-check-ea6dbfa`) to have its
+  dependency closure installed; absent is unchanged (selected skill files
+  only). `calibration.py`'s `require_approved`/`require_approved_discrimination`
+  now refuse unless `approval.profile_inventory_digest` matches the
+  committed `evidence/inventory.json` digest at that path (`skillc.profile.
+  inventory_digest`, new) - an approval binds to one exact closure, the
+  same #323 pattern as `attempts_per_arm`. A discrimination declaration's
+  existing subject set-equality check (#333) already forces both arms to
+  name the same profile, since `profile` is just another subject key.
+  This is the schema/approval half only - the opt-in field does not yet
+  install anything; the live re-validation and the wiring into a live
+  attempt are still owed.
 - **`AcquiredCollection.repo` and `collection_conformance.verify_repo_matches_skills`
   (Refs #334, in progress)** - a validated profile's dependency closure is
   declared against the subject's FULL repository root, but

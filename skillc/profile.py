@@ -640,6 +640,16 @@ def _fail(walk: _Walk, category: str, message: str, owner: str | tuple[str, ...]
     return idx
 
 
+def inventory_digest(inventory: dict[str, Any]) -> str:
+    """A stable content digest of a whole `validate()` inventory (#334) -
+    for binding a calibration declaration's approval to one exact closure,
+    the same way `_canonical`/`m.sha256_bytes` already key `install()`'s
+    own receipt and `profile_digest`. Two inventories with the same
+    content hash the same regardless of key insertion order (`_canonical`
+    sorts keys); a real content change always changes this digest."""
+    return m.sha256_bytes(_canonical(inventory))
+
+
 def validate(profile: Profile, tree: Tree) -> dict[str, Any]:
     """The content-addressed inventory, or Refused naming the first defect class found."""
     return _run_walk(profile, tree, problems=None)

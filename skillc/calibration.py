@@ -58,7 +58,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import degrade, records, verify
+from . import degrade, profile, records, verify
 from . import materialize as m
 
 #: The criteria the primary endpoint never reads, whatever a record carries.
@@ -251,6 +251,27 @@ def _positive_number(value: object, what: str) -> float:
     return float(value)
 
 
+def _validated_subject_profile(subject: Mapping[str, object], where: str) -> str | None:
+    """skillc#334: a treated arm's subject may OPT IN to having a
+    validated profile's dependency closure installed, by naming it here -
+    a repo-relative path to its `profile.json`, e.g.
+    'evals/subjects/cpp-codex-flow-check-ea6dbfa'. Absent (every
+    declaration before #334) means "install the selected skill files
+    only" - today's behavior, never inferred (orchestrator ruling,
+    mailbox 5820: a silent `profile.validate` attempt where `Refused`
+    means "no profile" would turn a real profile defect into "no
+    closure", #334's own bug coming back). Shape only here - no file is
+    read; the approval binding (`_require_profile_approval`) and the
+    live re-validation both happen later, where file reads are already
+    this module's convention (`_require_grader_matches`)."""
+    if "profile" not in subject:
+        return None
+    value = subject.get("profile")
+    if not isinstance(value, str) or not value.strip():
+        raise _refuse(f"{where}.profile must be a non-empty string naming a profile.json path")
+    return value
+
+
 @dataclass(frozen=True)
 class _ScheduleFields:
     """The parsed tail every declaration kind shares, once its own arms are
@@ -367,6 +388,7 @@ def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
     for arm in treated:
         if not isinstance(arm.get("subject"), dict):
             raise _refuse(f"arm {arm['name']!r} names no subject to install")
+        _validated_subject_profile(arm["subject"], f"arm {arm['name']!r}.subject")
         provided = PROVIDED_KEYS & set(arm)
         # The expanded-instruction lane's E arm carries `instruction` alone
         # (the inlined obligation text, no skill to name) - every other
@@ -505,6 +527,7 @@ def parse_discrimination_declaration(data: Mapping[str, object]) -> Discriminati
             isinstance(intact_subject.get(k), str) and intact_subject.get(k)
             for k in ("name", "locator", "revision")):
         raise _refuse("arm 'intact' needs a subject naming name, locator and revision")
+    _validated_subject_profile(intact_subject, "arm 'intact'.subject")
 
     degraded_subject = degraded_arm.get("subject")
     if not isinstance(degraded_subject, dict) or not all(
@@ -582,12 +605,19 @@ REQUIRED_IDENTITIES: tuple[tuple[str, ...], ...] = (
 )
 
 
+def _treated_arm(declaration: CalibrationDeclaration) -> dict[str, object] | None:
+    """The first non-baseline arm - `calibration-declaration`'s own
+    "treatment" identity path, factored out so `_identity_at` and
+    `require_approved`'s profile-opt-in check (#334) read the same arm."""
+    arms = declaration.data.get("arms")
+    return next((a for a in arms if isinstance(a, dict) and a.get("name") != BASELINE_ARM), None) \
+        if isinstance(arms, list) else None
+
+
 def _identity_at(declaration: CalibrationDeclaration, path: tuple[str, ...]) -> object:
     node: object
     if path[0] == "treatment":
-        arms = declaration.data.get("arms")
-        node = next((a for a in arms if isinstance(a, dict) and a.get("name") != BASELINE_ARM),
-                    None) if isinstance(arms, list) else None
+        node = _treated_arm(declaration)
     else:
         node = declaration.data.get(path[0])
     for key in path[1:]:
@@ -630,13 +660,56 @@ def _require_grader_matches(root: Path, task_path: str, grader_id: str, grader_r
                       f"{grader_id!r} revision {grader_revision!r}")
 
 
+def _require_profile_approval(subject: Mapping[str, object], approval: Mapping[str, object], root: Path) -> None:
+    """skillc#334: when `subject.profile` names a validated profile, the
+    approval must record `profile_inventory_digest` matching the
+    COMMITTED inventory evidence at that path - an approval binds to one
+    exact closure, exactly as #323 binds `attempts_per_arm`. A no-op when
+    `subject.profile` is absent (today's behavior: selected skill files
+    only, nothing to bind). This checks the APPROVAL's binding against
+    the repo's committed evidence file only - it is NOT the live
+    re-validation against the subject's actual current source (that runs
+    later, against a real acquisition, and is a separate precondition of
+    every live attempt, not of approval)."""
+    profile_path = subject.get("profile")
+    if profile_path is None:
+        return
+    approved_digest = approval.get("profile_inventory_digest")
+    if not isinstance(approved_digest, str) or not approved_digest:
+        raise _refuse(
+            "not approved: 'approval.profile_inventory_digest' must record the exact closure digest "
+            "approved, as a non-empty string - subject.profile names a profile but no closure was ever "
+            "approved for it"
+        )
+    inventory_path = root / str(profile_path) / "evidence" / "inventory.json"
+    try:
+        committed = json.loads(inventory_path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise _refuse(f"subject.profile {profile_path!r} names no readable evidence/inventory.json: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise _refuse(f"{inventory_path} is not valid JSON: {exc}") from exc
+    if not isinstance(committed, dict):
+        raise _refuse(f"{inventory_path} does not parse as a JSON object")
+    committed_digest = profile.inventory_digest(committed)
+    if approved_digest != committed_digest:
+        raise _refuse(
+            f"approved for profile_inventory_digest={approved_digest!r}, but the committed inventory at "
+            f"{inventory_path} is now {committed_digest!r} - the profile's evidence changed since approval "
+            f"and needs its own approval"
+        )
+
+
 def require_approved(declaration: CalibrationDeclaration, root: Path) -> None:
     """Refuse to authorize a run of this declaration unless its approval is
     recorded (who and when, and the exact schedule size approved), every
     `REQUIRED_IDENTITIES` field holds a real value, no identity anywhere
     still says `UNKNOWN`, and the declared task's grader is the one on disk.
     A declaration that validates is still only a plan (ADR 0005)."""
-    _require_schedule_approval(declaration.approval, declaration.attempts_per_arm)
+    approval = _require_schedule_approval(declaration.approval, declaration.attempts_per_arm)
+    treated = _treated_arm(declaration)
+    treated_subject = treated.get("subject") if treated is not None else None
+    if isinstance(treated_subject, dict):
+        _require_profile_approval(treated_subject, approval, root)
     absent = [".".join(path) for path in REQUIRED_IDENTITIES
               if not (isinstance(v := _identity_at(declaration, path), str) and v.strip() and v != UNKNOWN)]
     if absent:
@@ -696,6 +769,7 @@ def require_approved_discrimination(declaration: DiscriminationDeclaration, root
     if approved_digest != declared_digest:
         raise _refuse(f"approved for mutation.mutated_digest={approved_digest!r}, not the declared "
                       f"{declared_digest!r}; a changed mutation needs its own approval")
+    _require_profile_approval(declaration.intact_subject, approval, root)
     absent = [".".join(path) for path in REQUIRED_IDENTITIES_DISCRIMINATION
               if not (isinstance(v := _identity_at_discrimination(declaration, path), str)
                       and v.strip() and v != UNKNOWN)]

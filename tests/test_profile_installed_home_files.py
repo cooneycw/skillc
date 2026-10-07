@@ -15,6 +15,7 @@ pass.
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
@@ -84,6 +85,30 @@ def test_red_case_a_tampered_source_is_refused_not_silently_delivered() -> None:
             p.installed_home_files(inventory, tree)
     finally:
         target.write_bytes(original)
+
+
+# ------------------------------------------------------------- inventory_digest
+
+
+def test_inventory_digest_is_stable_and_content_sensitive() -> None:
+    inventory, _tree = _inventory_and_tree()
+    first = p.inventory_digest(inventory)
+    second = p.inventory_digest(dict(inventory))  # a different dict object, same content
+    assert first == second
+    mutated = {**inventory, "selection": [*inventory["selection"], "an-extra-entry"]}
+    assert p.inventory_digest(mutated) != first
+
+
+def test_inventory_digest_matches_the_committed_evidence_file() -> None:
+    """The committed `evidence/inventory.json` (#330) was generated against
+    a real git checkout at the pinned revision - its digest is the value
+    skillc#334's approval binding checks against, read directly, never
+    recomputed against this file's own DirTree fixture (which reports
+    source_kind='snapshot', not 'git', and would disagree on exactly those
+    two fields even when every file's content is identical)."""
+    committed = json.loads((ROOT / "evals" / "subjects" / "cpp-codex-flow-check-ea6dbfa"
+                            / "evidence" / "inventory.json").read_text(encoding="utf-8"))
+    assert p.inventory_digest(committed) == "sha256:535aa42ebd69a30d236b68a2f330a908a0b68ccbc8aefb678879764db5211647"
 
 
 def test_red_case_a_duplicate_destination_across_entries_is_refused() -> None:
