@@ -89,6 +89,136 @@ and version plan.
     properly; deferred as out of scope for this PR and recorded in the
     Nit Store (cooneycw/skillc#20, comment 6025027183).
 
+- **`tests/test_gate_stops_early_witness_equivalence.py`: an equivalence
+  guard against the duplication drift risk** (Refs #270). Runs the SAME
+  battery of 11 record shapes (normal, not-observed with and without
+  exclusivity, launch-failed, channel-unavailable, interrupted, zero
+  runs, a single fresh/stale run, an edit-then-rerun cycle, a rerun that
+  drifted away) through both `flow_check_honest()`'s duplicated
+  `_execution_observed`/`_last_run_is_fresh` and the canonical
+  `skillc.gate_witness`/`skillc.stale_tree` functions they copy, in the
+  NORMAL suite where `skillc` IS importable (unlike the isolated judge
+  itself). A silently diverging copy would grade against a different
+  rule than the real gate-witness implements, and nothing in the judge's
+  own tests could ever notice, since they never see the canonical
+  functions to compare against. Mutation-checked: flipping
+  `launch-failed`'s reported status and reading `runs[0]` instead of
+  `runs[-1]` each turned the matching case red, confirmed, then reverted.
+
+- **`gate-stops-early`'s `flow-check-honest`: real, mutation-checked logic,
+  declared as a standalone function rather than a grader criterion**
+  (Refs #270), unblocked by skillc#332's locked gate-witness record shape
+  (gate names `flow-check-plan`/`flow-check-summary`; three worked
+  examples - normal, not-observed, channel failure). Reconciles a
+  candidate's `report.json["flow_check_summary"]["claim"]`
+  (`"SKIP"`/`"PASS"`) against a controller-supplied gate-witness record,
+  using logic DUPLICATED (never imported) from
+  `skillc.gate_witness.GateRecord.execution_observed()` and
+  `skillc.stale_tree.last_run_is_fresh()` - confirmed the hard way: a
+  first draft that imported `skillc` at module level broke every existing
+  criterion with `ModuleNotFoundError`, because `skillc.verify._judge`
+  stages the judge file alone with no `skillc` package reachable.
+  **Structural finding:** `skillc.verify`'s real contract
+  (`criteria_problem()`) refuses any judge report unless every returned
+  criterion is `mandatory: True` and matches the grader's declared set
+  exactly - there is no "optional criterion" shape - so a criterion that
+  can only answer UNKNOWN until a live witness exists cannot be declared
+  without dragging every already-certified candidate to INCONCLUSIVE.
+  `flow_check_honest()` is therefore certified directly by
+  `qualify.py`'s new `flow_check_honest_validity()` (5 cases: SKIP claim
+  SATISFIED, PASS claim VIOLATED, not-observed UNKNOWN, channel failure
+  UNKNOWN, stale tree VIOLATED even with an honest claim - plus two
+  refused broken-grader controls), the same way `restore_probe_validity()`
+  already calls `judge()` directly rather than through
+  `grade_directory()`. Witness records are built with
+  `skillc.gate_witness.GateWitness`'s own real constructors, never
+  hand-typed JSON. Both `gate-stops-early`'s and `verify-stops-early`'s
+  `eligibility-manifest.json` and `PROVENANCE.md` now say **NOT YET
+  ELIGIBLE** explicitly: a live #287 attempt needs skillc#332 merged,
+  skillc#334 merged (the live-attempt profile-closure install gap found
+  while building #332 - without it every flow-check invocation exits 127
+  before reaching anything gradeable), and a deterministic subject run
+  through the real runner producing a genuine captured witness record.
+
+- **`eligibility-manifest.json` for `gate-stops-early` and
+  `verify-stops-early`** (Refs #270, prepares #287), mirroring
+  `gate-ran-nothing`'s own shape (same `selection`/`outcome` separation,
+  same B/N/P arm names). Each names the tree a future #287 pilot must
+  actually run a live attempt against - `discrimination/fixture`, never
+  the task's own top-level `fixture/`, whose Makefile declares every gate
+  and so never exercises CPP's skip/aggregate mechanism at all - and says
+  plainly that today's three certified criteria produce the identical
+  verdict on both trees, because `probe.py` runs the candidate's
+  `ci/check.py` directly rather than reading the CPP gate's own skip/warn
+  output. A live attempt against `discrimination/fixture` is therefore
+  **not yet eligible** for either task's own obligation until
+  `flow-check-honest` is declared and wired through it. `named_skills`,
+  arm `status` and `approval_ref` are left explicit `TBD`/`proposed`/
+  `NONE YET` rather than invented: #287 has not run, and no owner ruling
+  parallel to #203's decision 3/4 exists yet for either task.
+
+- **`skillc/stale_tree.py`: the tree-identity comparison `gate-witness.md`
+  §6 names but deliberately does not perform** (Refs #270). `GateWitness`
+  (#269) records a `tree_digest_at_start` on every gate run and never
+  compares it to anything itself - "the grading decision belongs to
+  #270/#271" (§6). This module is that comparison: `last_run_is_fresh`
+  checks a gate's most recent run against a caller-supplied graded-tree
+  digest, and `stale_gates` names every declared gate whose last run was
+  captured against a tree other than the one being graded. The LAST run
+  decides, never the first and never all of them - a gate is legitimately
+  rerun after an edit (gate_witness.py's own red case 3), so an earlier
+  run's digest is SUPPOSED to be stale; only the most recent run is a claim
+  about the tree a grader is looking at now. A gate with zero runs answers
+  `None`, never `False` - `gate_witness.py`'s own `not-observed` coverage
+  already owns that population, and collapsing it into staleness would let
+  a true bypass hide behind this module's verdict. 11 tests, 4
+  mutation-checked by hand (equality flip in `run_freshness`; `None`
+  collapsed to `False` for a zero-run gate; reading the first run instead
+  of the last; `stale_gates` sweeping a never-run gate into its result) -
+  each applied, confirmed red, and reverted.
+
+- **New Level 3 task `verify-stops-early`: `gate-stops-early`'s
+  structurally distinct held-out variant** (Refs #270 acceptance item 2).
+  Same three certified criteria and the same restore-and-rerun grader
+  shape, against a deliberately different bug domain
+  (`textkit.dedupe.dedupe_adjacent`, which unconditionally drops its last
+  element, rather than `rangekit.windows.sliding_window`'s "too few
+  windows") and a different Makefile layout (`verify:` as the aggregate
+  target, listing `typecheck lint test` in that order, rather than
+  `check: lint test typecheck`). Re-proved rather than assumed that the
+  real CPP runner's skip/aggregate mechanism is keyed on plan step ids
+  and Makefile structure, never the aggregate's name or prerequisite
+  order: `discrimination/fixture/` (typecheck absent) captures the
+  identical `FLOW_FINISH_GATE: warn (skipped gates: typecheck)`/exit 3
+  signature `gate-stops-early`'s own proof found, and the full-Makefile
+  `fixture/` captures a clean `FLOW_FINISH_GATE: ok`. `QUALIFY: ok` -
+  grader certified, 5 broken graders refused, 4 restore-probe validity
+  controls held, mirroring `gate-stops-early`'s own result exactly.
+  `flow-check-honest` stays undeclared here too, for the identical reason.
+
+- **New Level 3 task `gate-stops-early`: certified for three of its four
+  criteria** (Refs #270). A rangekit-derived fixture (a
+  `sliding_window` off-by-one bug) whose Makefile declares `lint:`/
+  `test:`/`typecheck:` individually plus a `check:` aggregate - closing
+  the gap `evals/workflow-contracts/flow-check/README.md` names (no
+  existing fixture had those targets at all). `functional-windows-fix`,
+  `regression-fails-on-original` and `gate-green` are graded via the same
+  restore-and-rerun probe shape as `gate-ran-nothing`; `qualify.py`
+  certifies the grader against `alternatives/`, `benign/` and `wrong/`
+  candidates, refuses all 5 broken-grader controls, and holds 4
+  restore-probe validity controls. A fourth criterion, `flow-check-honest`
+  (consuming skillc#332's gate-witness contract once it lands), is
+  deliberately NOT YET declared - `grade_gate_stops_early.py`'s own module
+  docstring explains why, mirroring the reasoning `gate-ran-nothing`'s own
+  judge already documents for its own deliberately-undeclared criterion.
+  A separate `discrimination/{fixture,reference}/` tree (typecheck target
+  absent) is the one actually used for #287's intact/degraded case-pairing
+  - proven against the real CPP runner at the pinned commit, not reasoned
+  about; `PROVENANCE.md` records both captured runs. `eligibility-
+  manifest.json` is not yet written - deferred to whenever a live-trial
+  declaration is drafted, unlike `gate-ran-nothing`'s own, since nothing
+  here authorizes or needs one yet.
+
 - **A real-Docker conformance test for #269's gate-execution witness**
   (Refs #269). `exec_in_attempt()`'s own docstring named this gap
   explicitly - its three-exec sequence (marker write-back, in-container

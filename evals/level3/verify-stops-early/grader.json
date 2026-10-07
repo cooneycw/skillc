@@ -1,0 +1,12 @@
+{
+ "id": "verify-stops-early",
+ "revision": "1",
+ "criteria": ["functional-dedupe-fix", "regression-fails-on-original", "gate-green"],
+ "dimensions": {
+  "functional-dedupe-fix": "functional",
+  "regression-fails-on-original": "constraint",
+  "gate-green": "integration"
+ },
+ "probe": {"file": "probe.py", "inputs": "inputs.json", "timeout": 90},
+ "judge": {"file": "grade_verify_stops_early.py", "timeout": 60}
+}

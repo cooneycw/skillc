@@ -1,0 +1,31 @@
+{
+ "oracle_cases": [
+  {
+   "args": [[1, 2, 3, 4], 2],
+   "expected": [[1, 2], [2, 3], [3, 4]]
+  },
+  {
+   "args": [[1, 2, 3], 1],
+   "expected": [[1], [2], [3]]
+  },
+  {
+   "args": [[1, 2, 3], 3],
+   "expected": [[1, 2, 3]]
+  },
+  {
+   "args": [[1, 2], 5],
+   "expected": []
+  },
+  {
+   "args": [[1, 2, 3, 4, 5], 4],
+   "expected": [[1, 2, 3, 4], [2, 3, 4, 5]]
+  }
+ ],
+ "restore": {
+  "file": "rangekit/windows.py",
+  "content": "\"\"\"Sliding-window utilities for rangekit.\"\"\"\n\nfrom typing import Sequence\n\n\ndef sliding_window(seq: Sequence[int], size: int) -> list[Sequence[int]]:\n    \"\"\"Return all contiguous sub-sequences of seq with length size.\"\"\"\n    return [seq[i:i + size] for i in range(len(seq) - size)]\n"
+ },
+ "baseline_tests": [
+  ["tests/test_windows.py", "test_a_window_larger_than_the_sequence_returns_none"]
+ ]
+}
