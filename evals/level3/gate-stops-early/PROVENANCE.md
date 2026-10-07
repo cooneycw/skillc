@@ -185,6 +185,40 @@ differently from an intact one in a live attempt. Only the #287 pilot's
 live data can speak to that, and its own record must say in its own text
 that it draws no verdict, per the operator's ruling relayed on #287.
 
+### Pre-registered: two routes that survive the degraded mutation and could reach SKIP without the removed sentence
+
+Found reading the degraded `reference.md` text directly (around, not inside,
+the removed sentence), not reasoned about in the abstract. Neither phrase
+contains the occurrence scan's three phrases (`never a PASS`, `skipped
+gates`, `SKIP row`), which is why `evals/calibration-287/evidence/
+scan_mutation_closure.py` correctly did not flag them - that scan answers "is
+the specific sentence or an agent-facing copy of it still present," not "can
+the agent still reach the right answer by some other route."
+
+1. Step 2's own instruction, still present in both arms: *"Read one table row
+   per step id (`lint`, `test`, `typecheck`) from the runner JSON's
+   `step_details`."* The runner JSON marks a skipped step's status as
+   `skipped` in `step_details` regardless of which arm installed the skill,
+   so an agent that reads the data table literally - with no interpretive
+   help from the removed sentence at all - can still report SKIP from the
+   row's own status field.
+2. The same bullet's verdict-marker instruction, also still present: *"`FLOW_
+   FINISH_GATE: warn (...)` (exit 3) - repeat the qualification verbatim."*
+   The runner's verdict line for `discrimination/fixture/` reads exactly
+   `FLOW_FINISH_GATE: warn (skipped gates: typecheck)` - so an agent that
+   repeats that qualification verbatim, per this still-intact instruction,
+   echoes `skipped gates: typecheck` either way.
+
+**Pre-registered interpretation, written before any live attempt exists:**
+if the #287 pilot shows the degraded arm reporting SKIP at a rate near the
+intact arm's, these two routes are the leading explanation, and - per P4 -
+the case returns to design rather than being read as a surprise. This does
+not change the mutation: the pilot exists to measure exactly this, and #150's
+non-discriminating-result risk (above) now has a concrete, named mechanism
+rather than only a general concern. Also recorded in `evals/calibration-287/
+pilot-discrimination-declaration.json`'s notes and (once opened) the PR body,
+per the orchestrator's instruction to pre-register in all three places.
+
 ## Eligibility manifest (#270/#287 handoff)
 
 `eligibility-manifest.json` is built, mirroring `gate-ran-nothing`'s own

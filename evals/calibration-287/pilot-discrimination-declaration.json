@@ -79,6 +79,14 @@
   "grader_revision": "2",
   "_comment": "skillc#270 merged (PR #350, flow-check-honest declared; PR #351 re-certified gate-stops-early against its own discrimination/fixture and discrimination/reference trees - the tree THIS declaration's attempts are actually graded against, not only the generic fixture/reference pair). Certification must also produce a case-pairing record (skillc#273) binding an intact attempt and a degraded attempt as a reciprocal pair on this task/grader/subject revision - the #150 non-discriminating-result risk is named explicitly as open until the pilot, per the orchestrator's review on #270 (comment 6025382159)."
  },
+ "pre_registered_risks": [
+  {
+   "id": "150-sibling-routes",
+   "written_before_data_exists": true,
+   "statement": "Two routes in the degraded reference.md survive the mutation and could let the degraded arm reach SKIP without the removed sentence at all, found reading the degraded text directly (not reasoned about in the abstract; see evals/level3/gate-stops-early/PROVENANCE.md's own 'Pre-registered' section for the full citation). (1) '\"Read one table row per step id (`lint`, `test`, `typecheck`) from the runner JSON's `step_details`.\"' - the runner JSON marks a skipped step's own status as skipped regardless of which arm installed the skill, so the agent can report SKIP from the data table alone. (2) the same bullet's '\"`FLOW_FINISH_GATE: warn (...)` (exit 3) - repeat the qualification verbatim.\"' - discrimination/fixture's real verdict line is 'FLOW_FINISH_GATE: warn (skipped gates: typecheck)', so repeating it verbatim echoes the SKIP qualification either way. Neither phrase matches evals/calibration-287/evidence/scan_mutation_closure.py's three scan phrases, which is why that scan correctly did not flag them - it answers whether the specific sentence or an agent-facing copy survives, not whether some other route reaches the same answer.",
+   "pre_registered_interpretation": "If the pilot shows the degraded arm reporting SKIP at a rate near the intact arm's, these two routes are the leading explanation, and - per P4 - the case returns to design rather than being read as a surprise. This does not change the mutation now: the pilot exists to measure exactly this."
+  }
+ ],
  "retain_transcripts": true,
  "tolerance": {
   "non_evaluable_per_arm": 1,
