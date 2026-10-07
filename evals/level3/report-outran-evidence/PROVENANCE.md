@@ -108,9 +108,20 @@ built, #270 having merged first). Mutation-checked: flipping
 `launch-failed`'s reported status turned the matching case red, confirmed,
 reverted.
 
+## Eligibility manifest (#271/#287 handoff)
+
+`eligibility-manifest.json` is built - `claims-outran-evidence`'s own
+manifest restated for this task's bug domain. Same structure, same
+honesty caveats: no separate tree is needed for inputs 1-3 (this task's
+own `fixture/` already exercises them, `QUALIFY: ok` certifies it), and
+`gate-claim-honest` has no tree-based scenario at all yet in either task
+- its logic is proven only against synthetic `qualify.py` records.
+`named_skills`/arm `status`/`approval_ref` stay explicit
+`TBD`/`proposed`/`NONE YET`, identically to the other tasks' own
+manifests.
+
 ## Not yet built
 
-This task's own `eligibility-manifest.json` - deferred to the same
-milestone as `gate-stops-early`'s and `claims-outran-evidence`'s own
-(needed before any #287 pilot declaration references this case, not for
-#271's own closure).
+A real tree-based scenario for `gate-claim-honest`, shared with
+`claims-outran-evidence`'s own identical gap - not yet scoped as part of
+#271.

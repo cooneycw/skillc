@@ -197,8 +197,29 @@ onto the new `origin/main` put `skillc/stale_tree.py` on this branch too,
 and all 11 cases now run and pass with no code change - confirmed
 directly, not assumed.
 
+## Eligibility manifest (#271/#287 handoff)
+
+`eligibility-manifest.json` is built, mirroring `gate-stops-early`'s own
+shape and framing - with one structural difference stated explicitly
+rather than glossed over: unlike #270's tasks, this task needs NO
+separate `discrimination/` tree for inputs 1-3 - its own top-level
+`fixture/` already exercises the narrow-helper mismatch, the
+tool-unavailability fact, and the narrow-verdict delegated-run defect
+directly, and `QUALIFY: ok` already certifies all three. `gate-claim-honest`
+(input 4) is different in kind: no tree-based scenario for it exists in
+this task AT ALL, not even an unused one - its logic is proven only
+against synthetic `qualify.py` records. The manifest names this explicitly
+(`fourth_input_has_no_tree_yet`) as a prerequisite STRICTLY EARLIER than
+#270's own three eligibility conditions, which already has a real tree.
+`named_skills`/arm `status`/`approval_ref` stay explicit
+`TBD`/`proposed`/`NONE YET`, identically to `gate-stops-early`'s own
+manifest, because #287 has not run and no owner ruling exists yet for
+this task.
+
 ## Not yet built
 
-The structurally distinct held-out variant (a different narrow helper, a
-different missing tool, a different delegated-run shape) comes next,
-mirroring #270's `gate-stops-early` -> `verify-stops-early` order.
+A real tree-based scenario for `gate-claim-honest` (see
+`fourth_input_has_no_tree_yet` above) - not yet scoped as part of #271.
+`evals/level3/report-outran-evidence` is this task's own structurally
+distinct held-out variant, already built and certified, mirroring #270's
+`gate-stops-early` -> `verify-stops-early` order.

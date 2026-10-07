@@ -89,6 +89,24 @@ and version plan.
     boundary. Mutation-checked: a writable-directory-but-not-file case
     added to `tests/test_gate_overlay.py`, with its own red case proving
     a file-only check would wrongly accept it.
+- **`eligibility-manifest.json` for `claims-outran-evidence` and
+  `report-outran-evidence`** (Refs #271, prepares #287), mirroring
+  `gate-stops-early`'s own shape and NOT YET ELIGIBLE framing - with one
+  structural difference stated explicitly: unlike #270's tasks, neither
+  #271 task needs a separate `discrimination/` tree for inputs 1-3 - each
+  task's own top-level `fixture/` already exercises the narrow-helper
+  mismatch, the tool-unavailability fact and the narrow-verdict
+  delegated-run defect directly, and `QUALIFY: ok` already certifies all
+  three. `gate-claim-honest` (input 4) is different in kind: no
+  tree-based scenario for it exists in EITHER task at all - its logic is
+  proven only against synthetic `qualify.py` records, never a committed
+  candidate tree. Each manifest names this (`fourth_input_has_no_tree_yet`)
+  as a prerequisite STRICTLY EARLIER than #270's own three eligibility
+  conditions, which already has a real tree. `named_skills`, arm `status`
+  and `approval_ref` are left explicit `TBD`/`proposed`/`NONE YET` rather
+  than invented: #287 has not run, and no owner ruling exists yet for
+  either task.
+
 - **`report-outran-evidence`'s `gate-claim-honest` (input 4): ported
   byte-for-byte from `claims-outran-evidence`, standalone, certified
   directly** (Refs #271). The gate-witness reconciliation logic does not
