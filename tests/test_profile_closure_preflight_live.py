@@ -253,8 +253,12 @@ def _require(cls: type[_PropertyHeld], condition: bool, message: str) -> None:
 
 
 def _build_trial_image(tag: str) -> None:
+    # Explicit `--target trial`, not relying on it being the last-declared
+    # (default) stage: docker/trial/Dockerfile now has three stages (base,
+    # no-uv, trial - #343), and this test's claim is specifically about the
+    # production `trial` stage, not about whichever stage happens to be last.
     build = subprocess.run(
-        ["docker", "build", "-t", tag, str(TRIAL_DOCKERFILE_DIR)],
+        ["docker", "build", "--target", "trial", "-t", tag, str(TRIAL_DOCKERFILE_DIR)],
         capture_output=True, text=True, timeout=600, check=False,
     )
     assert build.returncode == 0, f"trial image build failed: {build.stderr}"

@@ -8,6 +8,16 @@ and version plan.
 
 ## [Unreleased]
 
+- **#334's own live test builds the trial image's `trial` target explicitly**
+  (Refs #334, #343). `docker/trial/Dockerfile` gained a `no-uv`/`trial` stage
+  split in #343, with `trial` declared last - so an unqualified `docker build`
+  (no `--target`) happens to still produce the working image today, but only
+  because of declaration order, not because anything asserts it.
+  `tests/test_profile_closure_preflight_live.py::_build_trial_image` now
+  passes `--target trial`, matching `test_trial_image_tools_live.py`'s own
+  explicit-target convention, so this test's claim is pinned to the
+  production stage rather than to whichever stage is currently last.
+
 - **The trial image pins `uv` and installs `make`/`bash` explicitly; a
   fifth real-Docker break family proves the pin is what makes the uv
   probe work** (Refs #343). `cpp-codex-flow-check-ea6dbfa/profile.json`
