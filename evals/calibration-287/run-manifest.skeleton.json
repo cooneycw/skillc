@@ -83,7 +83,7 @@
   }
  ],
  "owed_before_run": [
-  "#270/#271 - a certified discriminating flow-check case (dependency, in progress by sk-w1 as of 2026-10-06)",
+  "#270/#271 - DONE (both merged: #270 via PR #350/#351, #271 via PR #344/#351) - a certified discriminating flow-check case now exists",
   "operator ruling - explicit pilot-spend authorization, separate from and not implied by closing this preparation issue (#287 acceptance item: 'do not reinterpret the #237-first ruling as approval for this new study')",
   "a decision on the attempts_per_arm cap (design_risks[1]) once a real effect size is observed"
  ]

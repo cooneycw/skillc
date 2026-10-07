@@ -4,7 +4,7 @@
  "issue": 287,
  "declared_at": "2026-10-06",
  "_comment": "The DISCRIMINATION pilot declaration for skillc#287 (orchestrator review, comment 6025311708, decisions P1-P6). Exploratory only: estimates p_hat_intact and p_hat_degraded for evals/calibration-287/power_simulation.py's choose_n() - draws NO verdict (operator ruling, comment 6021089903). Uses the 'discrimination-declaration' kind added to skillc.calibration by the separate calibration.py PR (branch feat-skillc-287-discrimination-declaration, Refs #287) - see that PR for why skillc.calibration.parse_declaration structurally cannot express this contrast, and _resolution_note below for what changed here as a result.",
- "_resolution_note": "This file previously carried kind 'discrimination-pilot-declaration' (not validated by skillc.calibration) with a _schema_note flagging the gap to the orchestrator. Ruling received (mailbox 5614/5626, 2026-10-06): add a real 'discrimination-declaration' kind to skillc.calibration instead of accounting this test purely through skillc#273's case-pairing records. This file now uses that kind: arms.degraded.subject.revision is the DERIVED label skillc.calibration._expected_degraded_revision computes (never typed), and arms.degraded.mutation carries the structured mutation (skill/path/removed_text/diagnose_evidence/mutated_digest) the schema requires. case-pairing (skillc#273) still produces the per-attempt record this study's counts read; the declaration-level identity/approval binding is now calibration.py's job, not case-pairing's.",
+ "_resolution_note": "This file previously carried kind 'discrimination-pilot-declaration' (not validated by skillc.calibration) with a _schema_note flagging the gap to the orchestrator. Ruling received (orchestrator review, 2026-10-06): add a real 'discrimination-declaration' kind to skillc.calibration instead of accounting this test purely through skillc#273's case-pairing records. This file now uses that kind: arms.degraded.subject.revision is the DERIVED label skillc.calibration._expected_degraded_revision computes (never typed), and arms.degraded.mutation carries the structured mutation (skill/path/removed_text/diagnose_evidence/mutated_digest) the schema requires. case-pairing (skillc#273) still produces the per-attempt record this study's counts read; the declaration-level identity/approval binding is now calibration.py's job, not case-pairing's.",
  "pilot": {
   "purpose": "exploratory - estimates p_hat_intact and p_hat_degraded for evals/calibration-287/power_simulation.py's choose_n(); draws no verdict",
   "no_verdict_statement": "This pilot draws no DISCRIMINATING / NOT_SHOWN / UNKNOWN verdict. Its 10 attempts per arm are too few to be the predeclared discrimination test itself (that test is the MAIN study's schedule, sized by this pilot's results) and are never pooled into the main study's counts (P1).",
@@ -33,32 +33,33 @@
     "locator": "github.com/cooneycw/claude-power-pack",
     "revision": "degraded:mutated=1-location:git:ea6dbfa45f9308ee6ba60f032d8e7031bd6938a1"
    },
-   "treatment": "the same subject as 'intact' with the mutation below applied, no other installed skill or helper carrying equivalent content (per mutation.diagnose_evidence). removed_text is the exact, verified-single-occurrence substring of codex/skills/flow-check/reference.md at the ea6dbfa pin (tests/fixtures/profile-cpp-codex-flow-check-ea6dbfa/codex/skills/flow-check/reference.md - the committed fixture capture of that pin); mutated_digest is sha256 of that file's bytes with removed_text removed once, computed directly from the fixture, not invented. Both are re-verified against the REAL claude-power-pack checkout before any live attempt (see owed_before_run) - the fixture is this repository's evidence that the sentence and its removal are real, not the subject itself.",
+   "treatment": "the same subject as 'intact' with the mutation below applied, no other installed skill or helper carrying equivalent content (per mutation.diagnose_evidence). removed_text is the exact, verified-single-occurrence substring of codex/skills/flow-check/reference.md at the ea6dbfa pin - read from tests/fixtures/profile-cpp-codex-flow-check-ea6dbfa/codex/skills/flow-check/reference.md (this repository's own committed capture of that file; confirmed byte-for-byte identical to claude-power-pack's own git blob 95995556f1454200a0121670afd1fd6153a3d191 and to the sha256 evals/subjects/cpp-codex-flow-check-ea6dbfa/evidence/inventory.json records for it - not assumed); mutated_digest is sha256 of that file's bytes with removed_text removed once, computed directly from the fixture. Both are re-verified against the REAL claude-power-pack checkout before any live attempt (see owed_before_run) - evals/calibration-287/evidence/scan_mutation_closure.py is committed and re-runnable from this repository's own fixture alone, no external fetch or local CPP clone required, so the sentence and its removal are reproducible evidence, not merely a one-time claim.",
    "mutation": {
     "skill": "flow-check",
     "path": "reference.md",
     "removed_text": "A\n  `skipped gates:` name is a SKIP row and a `zero coverage:` or no-tests name is\n  a WARN row - never a PASS.",
-    "diagnose_evidence": "<CASE: pending skillc#270 certification - a `skillc profile diagnose` run against cpp-codex-flow-check-ea6dbfa showing no other installed skill or helper (in particular .claude/commands/flow/check.md, which carries the identical sentence but is outside this profile's installed closure for a codex client, per sk-w1's confirmation on #270) still carries this obligation after the removal>",
+    "diagnose_evidence": "evals/calibration-287/evidence/discrimination-mutation-diagnose.json: skillc profile diagnose against both the intact and degraded closures (0 problems, complete, on both - necessary but not sufficient, since removing one prose sentence never breaks a declared reference) PLUS an occurrence scan of the whole installed closure (37 files, per evidence/inventory.json) for the sentence's distinctive phrases, positive-controlled against the intact closure (finds the sentence at reference.md:72-73) before trusting the degraded result (0 hits of 'never a PASS' anywhere; the only other agent-facing hit in reference.md, an unrelated bullet about exit code 4, is present unchanged in both closures). Every other hit, in both closures, is in lib/cicd/runner.py, lib/cicd/steps.py or scripts/flow-finish-gate.sh - shell/Python comments or the literal verdict string flow-finish-gate.sh EMITS, never an interpretive instruction the agent reads, confirming #270's own PROVENANCE.md finding by direct scan rather than by inspection. claim_holds: true.",
     "mutated_digest": "sha256:9149e393bb1d9e40adb97dca85774e23f77317a21e6bff832c160055c726234d"
    }
   }
  ],
+ "_shared_comment": "Every field below is PROPOSED for the operator's pilot-spend authorization (ADR 0005 rule 6), not yet authorized - filing/drafting a value is not approving it. client/model/reasoning_effort/per_attempt_seconds are copied from evals/calibration-203-c3/run-manifest.json (approved 2026-10-04, the most recently approved cpp-codex calibration manifest at declaration time - tied on date with evals/calibration-203-low/run-manifest.json, which used reasoning_effort 'low'; 'high' is chosen here to match the main-study convention evals/calibration-204/run-manifest.json also used).",
  "shared": {
   "client": {
    "name": "codex",
-   "version": "PENDING - operator pilot-spend authorization has not yet named a version; #204/#150 used 0.157.1, cited only as precedent"
+   "version": "PROPOSED: 0.157.1 (copied from evals/calibration-203-c3/run-manifest.json's own approved shared.client.version)"
   },
-  "model": "PENDING - pending the operator's pilot-spend authorization (ADR 0005 rule 6); #204/#150 used codex client, model gpt-6-astra, cited only as precedent",
-  "reasoning_effort": "PENDING",
+  "model": "PROPOSED: gpt-6-astra (copied from evals/calibration-203-c3/run-manifest.json's own approved shared.model)",
+  "reasoning_effort": "PROPOSED: high (copied from evals/calibration-203-c3/run-manifest.json's own approved shared.reasoning_effort; matches evals/calibration-204/run-manifest.json's own main-study convention)",
   "tools": "the client's defaults inside the trial container; no MCP servers (matches every prior calibration run)",
   "permissions": "the same non-interactive sandbox/approval settings for every attempt",
-  "public_requirements": "PENDING - delivered verbatim to both arms once skillc#270 names the case's goal.md",
+  "public_requirements": "evals/level3/gate-stops-early/goal.md, delivered verbatim to both arms (now resolvable: skillc#270 merged; discrimination/fixture and discrimination/reference share the task's own top-level goal.md - neither has its own)",
   "image": {
    "tag": "skillc-trial:latest",
-   "digest": "PENDING - resolved via `docker image inspect skillc-trial:latest` immediately before launch"
+   "digest": "PROPOSED: trial image built from skillc >= e43445a (the commit that merged #343's trial-image uv/make/bash fix - the profile's own tool-uv/tool-make-git-bash dependencies need it); digest to be filled at build on the runner via `docker image inspect skillc-trial:latest`, never typed in advance"
   },
-  "per_attempt_seconds": "PENDING - sized from skillc#270's own observed attempt duration once it exists",
-  "total_seconds": "PENDING - attempts_per_arm * 2 arms * per_attempt_seconds, once both are known"
+  "per_attempt_seconds": "PROPOSED: 1200 (copied from evals/calibration-203-c3/run-manifest.json and every other prior calibration manifest checked - 204, 203, 203-low all also used 1200)",
+  "total_seconds": "PROPOSED: 24000 (attempts_per_arm 10 * 2 arms * per_attempt_seconds 1200 - derived from the two proposed values above, not independently chosen)"
  },
  "attempts_per_arm": 10,
  "arm_order": {
@@ -72,10 +73,11 @@
   "_comment": "skillc.calibration.derive_arm_order(20261006, ['intact', 'degraded'], 10) - computed, not hand-chosen (P6)."
  },
  "task": {
-  "path": "<CASE: pending skillc#270 certification>",
-  "grader_id": "<CASE: pending skillc#270 certification>",
-  "grader_revision": "<CASE: pending skillc#270 certification>",
-  "_comment": "skillc#270 ('Certify a flow-check case for omitted tests and incomplete aggregate gates') is open and uncertified as of 2026-10-06 (checked directly). Certification must also produce a case-pairing record (skillc#273) binding an intact attempt and a degraded attempt as a reciprocal pair on this task/grader/subject revision - the #150 non-discriminating-result risk is named explicitly as open until the pilot, per the orchestrator's review on #270 (comment 6025382159)."
+  "path": "evals/level3/gate-stops-early",
+  "fixture": "PENDING - \"discrimination/fixture\" once skillc#287's own task.fixture schema field (branch issue-287-task-fixture-field) merges; the default \"fixture\" would silently grade the wrong tree (gate-stops-early's own top-level fixture/ never exercises the skipped-gate obligation - its Makefile declares every gate) - see evals/level3/gate-stops-early/eligibility-manifest.json's own declaration_fields block, which names this exact value",
+  "grader_id": "gate-stops-early",
+  "grader_revision": "2",
+  "_comment": "skillc#270 merged (PR #350, flow-check-honest declared; PR #351 re-certified gate-stops-early against its own discrimination/fixture and discrimination/reference trees - the tree THIS declaration's attempts are actually graded against, not only the generic fixture/reference pair). Certification must also produce a case-pairing record (skillc#273) binding an intact attempt and a degraded attempt as a reciprocal pair on this task/grader/subject revision - the #150 non-discriminating-result risk is named explicitly as open until the pilot, per the orchestrator's review on #270 (comment 6025382159)."
  },
  "retain_transcripts": true,
  "tolerance": {
@@ -89,10 +91,11 @@
  ],
  "approval": null,
  "owed_before_run": [
-  "skillc#270 - a certified discriminating flow-check case (dependency, in progress by sk-w1 as of 2026-10-06); the 'task' fields and 'diagnose_evidence' above are placeholders until it exists",
-  "operator pilot-spend authorization for THIS pilot (10 attempts, 2 arms = 20 total) - separate from the 'pilot: yes' ruling in comment 6021089903",
-  "merge of the calibration.py discrimination-declaration PR (branch feat-skillc-287-discrimination-declaration, Refs #287) - this file does not yet parse against main",
-  "live-run precondition (stated here, not yet enforced by any code): re-verify, against the real claude-power-pack checkout at the pinned revision, that removed_text occurs in codex/skills/flow-check/reference.md exactly once, and that the file with it removed hashes to mutated_digest - mirrors the #274 live-run inventory re-validation precondition (comment 6018530040)",
-  "shared.client.version/model/reasoning_effort/image.digest/per_attempt_seconds/total_seconds/public_requirements - all PENDING above"
+  "skillc#270 - DONE (merged: PR #350 declared flow-check-honest; PR #351 certified gate-stops-early against its own discrimination/fixture and discrimination/reference trees). 'task.path'/'grader_id'/'grader_revision'/'mutation.diagnose_evidence' above are now real, not placeholders.",
+  "skillc#287's task.fixture schema field (branch issue-287-task-fixture-field) - merge still owed; 'task.fixture' above stays an explicit PENDING placeholder until it does, naming the exact value (\"discrimination/fixture\") rather than omitting the key",
+  "operator pilot-spend authorization for THIS pilot (10 attempts, 2 arms = 20 total) - separate from the owner's earlier in-principle 'pilot: yes' ruling",
+  "merge of the calibration.py discrimination-declaration kind (Refs #287) - DONE, this file now parses against main's skillc.calibration",
+  "live-run precondition (stated here, not yet enforced by any code): re-verify, against the real claude-power-pack checkout at the pinned revision, that removed_text occurs in codex/skills/flow-check/reference.md exactly once, and that the file with it removed hashes to mutated_digest - mirrors the #274 live-run inventory re-validation precondition. evals/calibration-287/evidence/scan_mutation_closure.py is the committed, re-runnable tool for this - it already did so against this repository's own tests/fixtures/profile-cpp-codex-flow-check-ea6dbfa/ capture; re-running it against a fresh claude-power-pack checkout immediately before launch is what remains owed.",
+  "operator authorization of the PROPOSED shared.client/model/reasoning_effort/per_attempt_seconds/total_seconds values above (copied from precedent, never independently chosen) - filing a proposal is not approving it (ADR 0005); shared.image.digest is resolved at build time regardless, never typed in advance"
  ]
 }

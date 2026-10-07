@@ -17,10 +17,10 @@
   ]
  },
  "task": {
-  "path": "<CASE: pending skillc#270 certification>",
-  "grader_id": "<CASE: pending skillc#270 certification>",
-  "grader_revision": "<CASE: pending skillc#270 certification>",
-  "_comment": "Per the operator's improvement ruling (claude-power-pack#1084 comment 6014163660, cited verbatim in skillc#287 comment 6014179807): 'on the same task, grader and pinned subject revision as the case that #273's pairing record certifies as discriminating'. skillc#270 is open and uncertified as of 2026-10-06 (checked directly); this declaration cannot be finalized until it names a real path/grader_id/grader_revision."
+  "path": "evals/level3/gate-stops-early",
+  "grader_id": "gate-stops-early",
+  "grader_revision": "2",
+  "_comment": "Per the operator's improvement ruling (claude-power-pack#1084 comment 6014163660, cited verbatim in skillc#287 comment 6014179807): 'on the same task, grader and pinned subject revision as the case that #273's pairing record certifies as discriminating'. skillc#270 merged (PR #350/#351) - the same task/grader as pilot-discrimination-declaration.json's own 'task' block, filled in identically here."
  },
  "arms": [
   {
@@ -71,12 +71,12 @@
   "non_evaluable_per_arm": 1,
   "rule": "max(1, ceil(0.05 * attempts_per_arm)) = max(1, ceil(0.5)) = 1 at n=10 (P5)"
  },
- "primary_endpoint": "skillc.calibration.primary_endpoint: the task grader's own criteria (excludes installation-ready); status by records.derive_status - PENDING skillc#270's case for the concrete criteria list",
+ "primary_endpoint": "skillc.calibration.primary_endpoint: the task grader's own criteria (excludes installation-ready); status by records.derive_status - gate-stops-early's own declared criteria (functional-windows-fix, regression-fails-on-original, gate-green, flow-check-honest; grader.json revision 2)",
  "reported_beside": "skillc.calibration.readiness_beside: installation-ready, its readiness source and the verified-result status, per attempt",
  "approval": null,
  "owed_before_run": [
-  "skillc#270 - a certified discriminating flow-check case (dependency, in progress by sk-w1 as of 2026-10-06); this declaration's task/grader fields are placeholders until it exists",
-  "operator pilot-spend authorization for THIS pilot (10 attempts, 2 arms = 20 total) - separate from the 'pilot: yes' ruling in comment 6021089903, which authorized the pilot in principle, not this specific schedule (ADR 0005: filing/drafting never authorizes a run)",
+  "skillc#270 - DONE (merged: PR #350/#351). 'task' fields above are now real, not placeholders.",
+  "operator pilot-spend authorization for THIS pilot (10 attempts, 2 arms = 20 total) - separate from the owner's earlier in-principle 'pilot: yes' ruling, which authorized the pilot in principle, not this specific schedule (ADR 0005: filing/drafting never authorizes a run)",
   "live-run inventory re-validation (skillc#274 review, comment 6018530040): before any live attempt, re-run `skillc profile validate` against cpp-codex-flow-check-ea6dbfa's pinned revision and refuse unless the result's digest equals the inventory this declaration references",
   "shared.client/model/reasoning_effort/image.digest/per_attempt_seconds/total_seconds/public_requirements - all PENDING above"
  ]
