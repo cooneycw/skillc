@@ -1,5 +1,5 @@
 """Tests for the discrimination-declaration kind (skillc#287, orchestrator
-ruling 2026-10-06, mailbox message 5614/5626).
+ruling 2026-10-06).
 
 `skillc.calibration.parse_declaration` cannot express an intact-vs-degraded
 contrast: it requires exactly one arm literally named 'baseline' with a null
@@ -136,9 +136,9 @@ def test_red_case_a_different_subject_locator_is_refused() -> None:
 
 
 def test_red_case_a_degraded_subject_with_an_extra_key_is_refused() -> None:
-    """Orchestrator ruling (message 5743): a degraded subject carrying a
-    key `intact` does not have - `select`, `surface`, or anything a future
-    subject dict grows - must be refused, not pass silently because only
+    """Orchestrator ruling: a degraded subject carrying a key `intact`
+    does not have - `select`, `surface`, or anything a future subject
+    dict grows - must be refused, not pass silently because only
     name/locator were ever compared."""
     data = _declaration()
     data["arms"][1]["subject"]["select"] = "all"
@@ -221,9 +221,9 @@ def test_red_case_approval_at_the_wrong_attempts_per_arm_is_refused() -> None:
 
 
 def test_red_case_a_changed_removed_text_with_a_stale_approval_is_refused_through_the_digest() -> None:
-    """The mailbox ruling's own named red case (message 5626): the same
-    file, a DIFFERENT removed_text (hence a different real degraded file),
-    under an approval that still names the OLD mutated_digest. The revision
+    """The orchestrator ruling's own named red case: the same file, a
+    DIFFERENT removed_text (hence a different real degraded file), under
+    an approval that still names the OLD mutated_digest. The revision
     label cannot catch this (previous test) - the digest binding must."""
     approved_digest = MUTATED_DIGEST
     data = _approved(mutated_digest=approved_digest)
