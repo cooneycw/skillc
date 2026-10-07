@@ -1970,3 +1970,105 @@ def test_bounded_drain_still_drains_fully_to_eof(base: Path) -> None:
     assert len(drain.captured_bytes()) == 200_000
     assert drain.total_bytes == 200_000
     assert drain.truncated is False
+
+
+# ------------------------------------------------------------------ #332 follow-up: root parameter
+
+
+def test_install_and_export_respect_a_custom_root(base: Path, docker_state: Path, tmp_path: Path) -> None:
+    """#332 follow-up: `root` defaults to `CONTAINER_WORKSPACE` (every
+    existing caller, unchanged - covered by every other `install()`/
+    `export()` test in this file, none of which pass it), but a caller
+    naming a different one (#334's profile closure delivery into the
+    agent's home directory, say) must land there instead - never
+    silently at `/work` regardless of what was asked for."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000006a")
+    assert isinstance(handle, d._Handle)
+    readiness = backend.install(handle, {"flow-finish-gate.sh": b"#!/bin/sh\necho real\n"}, root=d.CONTAINER_HOME)
+    assert readiness["installed"] == 1
+
+    # Never landed at the DEFAULT root instead.
+    assert not (docker_state / f"{handle.name}.fsroot" / "work" / "flow-finish-gate.sh").exists()
+    assert (docker_state / f"{handle.name}.fsroot" / "home" / "candidate" / "flow-finish-gate.sh").read_bytes() == (
+        b"#!/bin/sh\necho real\n"
+    )
+
+    dest = tmp_path / "export-home"
+    backend.export(handle, dest, root=d.CONTAINER_HOME)
+    assert (dest / "flow-finish-gate.sh").read_bytes() == b"#!/bin/sh\necho real\n"
+    backend.destroy(handle)
+
+
+def test_write_root_owned_file_in_attempt_writes_root_owned_content(base: Path, docker_state: Path) -> None:
+    """#332 follow-up: the gate-witness harness copy of the real script
+    must land somewhere the candidate identity cannot write - never
+    through `install()`'s own candidate-owned tar convention. This
+    fixture has no real per-uid permission model (every `exec` here runs
+    a REAL subprocess as whatever host user runs the test suite - see
+    `cmd_exec`'s own `-u` comment - and `_remap_absolute` only rewrites
+    the two KNOWN container prefixes, `/work` and `/home/candidate`, so
+    an arbitrary path like the real `/opt/skillc-harness` would hit the
+    actual host filesystem and fail on a real permission error having
+    nothing to do with this method). Using a path under the workspace
+    prefix instead proves the MECHANICS this method owns (content lands
+    at the given path, with the given mode, under a directory this call
+    itself creates) - genuine uid-based write-protection, and the real
+    harness path, are owed to the real-Docker runner, matching `resolve_
+    realpath_in_attempt`'s own documented limitation."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000006b")
+    assert isinstance(handle, d._Handle)
+    ok = backend.write_root_owned_file_in_attempt(
+        handle, f"{d.CONTAINER_WORKSPACE}/skillc-harness/flow-finish-gate.sh",
+        b"#!/bin/sh\necho real\n", mode=0o750,
+    )
+    assert ok is True
+    written = docker_state / f"{handle.name}.fsroot" / "work" / "skillc-harness" / "flow-finish-gate.sh"
+    assert written.read_bytes() == b"#!/bin/sh\necho real\n"
+    assert stat.S_IMODE(written.stat().st_mode) == 0o750
+    backend.destroy(handle)
+
+
+def test_write_root_owned_file_in_attempt_returns_false_not_raises_for_an_unreachable_container(
+    base: Path, docker_state: Path,
+) -> None:
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000006c")
+    backend.destroy(handle)
+    assert backend.write_root_owned_file_in_attempt(handle, "/opt/skillc-harness/x.sh", b"x") is False
+
+
+def test_candidate_can_write_in_attempt_true_for_a_writable_path(base: Path, docker_state: Path) -> None:
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000006d")
+    backend.install(handle, {"writable.txt": b"x\n"})
+    writable_path = f"{d.CONTAINER_WORKSPACE}/writable.txt"
+    assert backend.candidate_can_write_in_attempt(handle, writable_path) is True
+    backend.destroy(handle)
+
+
+def test_candidate_can_write_in_attempt_false_for_a_nonexistent_path(base: Path, docker_state: Path) -> None:
+    """A clean `test -w` failure (no stderr) on a path that simply does not
+    exist - distinct from the unreachable-container case below, which
+    carries real stderr and must read as UNKNOWN, never a confident
+    `False`."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000006e")
+    assert backend.candidate_can_write_in_attempt(handle, f"{d.CONTAINER_WORKSPACE}/does-not-exist") is False
+    backend.destroy(handle)
+
+
+def test_candidate_can_write_in_attempt_is_unknown_not_false_for_an_unreachable_container(
+    base: Path, docker_state: Path,
+) -> None:
+    """Mutation-check target for the stderr-sensitivity itself: a naive
+    implementation that reads ANY nonzero exit as `False` would wrongly
+    report this unreachable-container case as a confident "not writable"
+    instead of UNKNOWN - caught here because the fake CLI's own "No such
+    container" error writes to stderr, exactly like a real daemon's
+    equivalent failure would."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000006f")
+    backend.destroy(handle)
+    assert backend.candidate_can_write_in_attempt(handle, "/work/whatever") is None

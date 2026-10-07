@@ -31,12 +31,38 @@ against `expected_shim_digest` the same way - a mismatch means the wrong
 file was handed to this function as "the shim," and is refused before
 anything is written, rather than silently placing it.
 
-Reuses `ExecutionBackend.export()`/`install()` - no new backend primitive
-is needed. The "move" is a read via `export()`, two writes via `install()`
-(the real content to the harness destination, the shim content to the
-subject path) - `install()`'s own tar-based write overwrites an existing
-destination cleanly, so no explicit "remove the old file first" step is
-needed.
+TWO ROOTS, NOT ONE (#332 follow-up, orchestrator review: "turning the
+witness into a laundering channel"). `subject_root` is where the agent's
+own files live (`CONTAINER_HOME` for a live attempt, matching where #334
+delivers the real script) - the shim lands there, and a subject editing or
+replacing the SHIM at its own path is fine: that is a bypass, reads as
+`not-observed`, and is already handled by the witness's own coverage
+semantics. `harness_root` is DIFFERENT and REQUIRED (no default): a
+directory the candidate identity cannot write. If the harness copy of the
+REAL script sat under the candidate's own home, the subject could edit the
+real script itself, and the controller would faithfully execute the edited
+version and record it as a genuine gate run - the witness would be
+laundering a subject-controlled result as controller-executed evidence,
+exactly the class of bug #269's own design exists to prevent one layer up.
+
+So the harness copy is placed via `write_root_owned_file_in_attempt()`
+(root-owned, mode 0o755) - NEVER through `install()`'s own candidate-owned
+tar convention (`_owned_tarinfo`), which exists specifically so a declared
+skill surface is usable BY the candidate, the opposite of what is needed
+here. After placement, `candidate_can_write_in_attempt()` independently
+VERIFIES the real script is actually unwritable by the candidate uid
+before this function returns - never assumed from the mode bits alone, and
+never from trusting the write call's own success. Only a confirmed `False`
+(verified unwritable) is accepted; `True` (writable) or `None`
+(unverifiable) both refuse, since a harness copy nobody has confirmed is
+protected is not evidence of protection.
+
+Reuses `ExecutionBackend.export()`/`install()` for the subject-root halves
+(the real-script read, the shim placement) - no new primitive needed
+there. The harness-root write uses `DockerBackend`'s own two new, narrow
+primitives instead (not part of the general `ExecutionBackend` Protocol,
+since nothing else needs them): `write_root_owned_file_in_attempt()` and
+`candidate_can_write_in_attempt()`.
 """
 
 from __future__ import annotations
@@ -51,8 +77,9 @@ from .verify import SURFACE_EXECUTABLE_KEY
 
 
 class OverlayRefused(Exception):
-    """Either digest did not match what the caller declared - refused
-    before anything is moved or written, never partially applied."""
+    """A digest mismatch, an unwritable-harness verification failure, or a
+    failed write - refused before anything is moved or written beyond that
+    point, never partially applied."""
 
 
 @dataclass(frozen=True)
@@ -66,18 +93,26 @@ class OverlayRecord:
     shim_digest: str
 
 
-class _ExportInstallBackend(Protocol):
-    """The narrow slice of `ExecutionBackend` this module actually calls -
+class _OverlayBackend(Protocol):
+    """The narrow slice of backend operations this module actually calls -
     named here so a caller can pass anything structurally compatible
-    without importing `skillc.backend`'s full Protocol."""
+    without importing `skillc.backend`'s full Protocol. The last two are
+    `DockerBackend`-specific primitives (#332 follow-up), never added to
+    the general `ExecutionBackend` Protocol since nothing else needs them."""
 
-    def export(self, handle: object, dest: Path) -> None: ...
+    def export(self, handle: object, dest: Path, root: str | None = None) -> None: ...
 
-    def install(self, handle: object, surface: dict[str, object]) -> dict[str, object]: ...
+    def install(self, handle: object, surface: dict[str, object], root: str | None = None) -> dict[str, object]: ...
+
+    def write_root_owned_file_in_attempt(
+        self, handle: object, path: str, content: bytes, mode: int = 0o755,
+    ) -> bool: ...
+
+    def candidate_can_write_in_attempt(self, handle: object, path: str) -> bool | None: ...
 
 
 def apply_flow_check_gate_overlay(
-    backend: _ExportInstallBackend,
+    backend: _OverlayBackend,
     handle: object,
     *,
     subject_path: str,
@@ -85,19 +120,32 @@ def apply_flow_check_gate_overlay(
     expected_real_digest: str,
     expected_shim_digest: str,
     shim_content: bytes,
+    subject_root: str | None = None,
+    harness_root: str,
 ) -> OverlayRecord:
-    """Moves the real script at `subject_path` to `harness_path`, then
-    places `shim_content` at `subject_path` - both paths relative to the
-    same root `export()`/`install()` already share (`CONTAINER_WORKSPACE`),
-    matching `.claude/scripts/flow-finish-gate.sh`-style relative paths
-    elsewhere in this codebase.
+    """Moves the real script at `{subject_root}/{subject_path}` to
+    `{harness_root}/{harness_path}` (root-owned, verified unwritable by
+    the candidate), then places `shim_content` at `{subject_root}/
+    {subject_path}`. `subject_path`/`harness_path` are relative; `subject_
+    root` defaults like `export()`/`install()` do (`None` -> the backend's
+    own default workspace root - unchanged for every #332-era caller that
+    predates this parameter). `harness_root` has NO default: a caller must
+    say explicitly where the candidate-unwritable copy goes.
 
     Raises `OverlayRefused` - never partially applies - when:
     - `shim_content`'s own digest does not match `expected_shim_digest`
       (checked FIRST, before the container is even read, since it depends
       on nothing about the container's current state);
     - the real script currently at `subject_path` cannot be read at all,
-      or its digest does not match `expected_real_digest`.
+      or its digest does not match `expected_real_digest`;
+    - the root-owned write to `harness_root` fails;
+    - `candidate_can_write_in_attempt()` against the harness destination
+      does not return a confirmed `False` - `True` or `None` both refuse.
+
+    The shim is placed at `subject_path` only AFTER the harness copy is
+    written and independently confirmed unwritable - a refusal at any
+    earlier step leaves the real script exactly where it was, never
+    replaced by a shim pointing at an unverified or insecure harness copy.
     """
     actual_shim_digest = hashlib.sha256(shim_content).hexdigest()
     if actual_shim_digest != expected_shim_digest:
@@ -108,7 +156,7 @@ def apply_flow_check_gate_overlay(
 
     with tempfile.TemporaryDirectory() as tmp:
         dest = Path(tmp)
-        backend.export(handle, dest)
+        backend.export(handle, dest, root=subject_root)
         real_path = dest / subject_path
         try:
             real_bytes = real_path.read_bytes()
@@ -121,13 +169,24 @@ def apply_flow_check_gate_overlay(
             f"not the declared expected digest {expected_real_digest} - refusing before moving it"
         )
 
+    harness_destination = f"{harness_root}/{harness_path}"
+    if not backend.write_root_owned_file_in_attempt(handle, harness_destination, real_bytes, mode=0o755):
+        raise OverlayRefused(f"could not write the root-owned harness copy at {harness_destination!r}")
+
+    writable = backend.candidate_can_write_in_attempt(handle, harness_destination)
+    if writable is not False:
+        raise OverlayRefused(
+            f"harness destination {harness_destination!r} is writable by the candidate identity "
+            f"(or this could not be verified: candidate_can_write_in_attempt returned {writable!r}) - "
+            "refusing to trust a gate-witness copy the subject could edit"
+        )
+
     backend.install(handle, {
-        harness_path: real_bytes,
         subject_path: shim_content,
-        SURFACE_EXECUTABLE_KEY: [harness_path, subject_path],
-    })
+        SURFACE_EXECUTABLE_KEY: [subject_path],
+    }, root=subject_root)
 
     return OverlayRecord(
-        real_script_destination=harness_path, real_script_digest=real_digest,
+        real_script_destination=harness_destination, real_script_digest=real_digest,
         shim_destination=subject_path, shim_digest=actual_shim_digest,
     )

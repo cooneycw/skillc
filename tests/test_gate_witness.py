@@ -82,7 +82,7 @@ class _FakeBackend:
     def resolve_realpath_in_attempt(self, handle: object, path: str, timeout: float = 2.0) -> str | None:
         return self.realpaths.get(path)
 
-    def export(self, handle: object, dest: Path) -> None:
+    def export(self, handle: object, dest: Path, root: str | None = None) -> None:
         dest.mkdir(parents=True, exist_ok=True)
         (dest / "observations").write_text(self._last_stdout, encoding="utf-8")
 
@@ -96,7 +96,7 @@ class _FakeBackend:
     def prepare(self, attempt_id: str) -> object:
         raise NotImplementedError
 
-    def install(self, handle: object, surface: Mapping[str, object]) -> dict[str, object]:
+    def install(self, handle: object, surface: Mapping[str, object], root: str | None = None) -> dict[str, object]:
         raise NotImplementedError
 
     def execute(

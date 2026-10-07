@@ -38,7 +38,7 @@ class _UnavailableBackend:
     def prepare(self, attempt_id: str) -> object:
         raise b.BackendUnavailable("no daemon reachable")
 
-    def install(self, handle: object, surface: Mapping[str, object]) -> dict[str, object]:
+    def install(self, handle: object, surface: Mapping[str, object], root: str | None = None) -> dict[str, object]:
         raise AssertionError("must never be called: prepare() already refused")
 
     def execute(
@@ -60,7 +60,7 @@ class _UnavailableBackend:
     def confirm_stopped(self, handle: object) -> b.Confirmation:
         raise AssertionError("must never be called: nothing was ever started")
 
-    def export(self, handle: object, dest: Path) -> None:
+    def export(self, handle: object, dest: Path, root: str | None = None) -> None:
         raise AssertionError("must never be called: nothing was ever started")
 
     def destroy(self, handle: object) -> None:
