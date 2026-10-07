@@ -1,7 +1,7 @@
 {
  "inventory_schema": 1,
  "profile": "cpp-codex-flow-check",
- "profile_digest": "sha256:4f579e2eaa2139b49b112763eae9a75f6a43398fb7df4f0f3296f0eebb6418f7",
+ "profile_digest": "sha256:4aea1d90a1f0fc77e0c0032e602f7328b243bdccfc087b02c6089bf516c4b3a5",
  "subject": {
   "declaration_digest": "sha256:623a9e810cc23499c68ac52496b75e02e5166cdd1a92deac6056a502c23eb220",
   "locator": "github.com/cooneycw/claude-power-pack",
@@ -1291,7 +1291,8 @@
      "modules": [
       "pydantic",
       "yaml"
-     ]
+     ],
+     "uv_project": "Projects/claude-power-pack"
     }
    ]
   },

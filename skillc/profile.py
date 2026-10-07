@@ -123,13 +123,27 @@ class Probe:
     is checked against `version_args`' output (default `["--version"]`).
     `python-import`: every name in `modules` must import cleanly under the
     interpreter the check runs in - for a dependency supplied as PyPI
-    packages (never a command at all), this is the only checkable claim."""
+    packages (never a command at all), this is the only checkable claim.
+
+    `uv_project` (mailbox 5944 fix 1): a home-relative directory the import
+    must be checked INSIDE, via `uv run --project <home>/<uv_project>`,
+    mirroring the real runner's own invocation
+    (`flow-finish-gate.sh`: `PYTHONPATH="$CPP_DIR:${PYTHONPATH:-}" uv run
+    --project "$CPP_DIR" python -m lib.cicd ...`). Bare `python3 -c` (the
+    pre-fix behavior, still the default when this is `None`) checks the
+    HOST's or the trial image's own system interpreter - a package the
+    checkout's `uv.lock` resolves and the system interpreter happens to
+    also carry would pass a bare check even if the checkout's own isolated
+    venv lacks it entirely, and the reverse is just as possible. The probe
+    has to run the import the way the gate actually runs it, not a nearby
+    approximation of it."""
 
     kind: str
     name: str | None = None
     version_args: tuple[str, ...] = ()
     constraint: str | None = None
     modules: tuple[str, ...] = ()
+    uv_project: str | None = None
 
 
 @dataclass(frozen=True)
@@ -366,13 +380,20 @@ def _probe(entry: object, dep_id: str) -> Probe:
         if constraint is not None and not isinstance(constraint, str):
             raise Refused(f"dependency {dep_id}: command probe constraint must be a string")
         return Probe(kind="command", name=name, version_args=tuple(version_args_raw), constraint=constraint)
-    unknown = sorted(set(entry) - {"kind", "modules"})
+    unknown = sorted(set(entry) - {"kind", "modules", "uv_project"})
     if unknown:
         raise Refused(f"dependency {dep_id}: python-import probe has unknown keys: {unknown}")
     modules = entry.get("modules")
     if not isinstance(modules, list) or not modules or not all(isinstance(mod, str) and mod for mod in modules):
         raise Refused(f"dependency {dep_id}: python-import probe needs a non-empty list of module names")
-    return Probe(kind="python-import", modules=tuple(modules))
+    uv_project = entry.get("uv_project")
+    if uv_project is not None:
+        if not isinstance(uv_project, str) or not uv_project:
+            raise Refused(f"dependency {dep_id}: python-import probe uv_project must be a non-empty string")
+        uv_project = posixpath.normpath(uv_project)
+        if m._escapes(uv_project) or uv_project in ("", "."):
+            raise Refused(f"dependency {dep_id}: python-import probe uv_project must be a safe relative path")
+    return Probe(kind="python-import", modules=tuple(modules), uv_project=uv_project)
 
 
 def _dependency(entry: object) -> Dependency:
@@ -1359,7 +1380,7 @@ def _probe_record(probe: Probe) -> dict[str, object]:
     if probe.kind == "command":
         return {"kind": "command", "name": probe.name, "version_args": list(probe.version_args),
                 "constraint": probe.constraint}
-    return {"kind": "python-import", "modules": list(probe.modules)}
+    return {"kind": "python-import", "modules": list(probe.modules), "uv_project": probe.uv_project}
 
 
 def _dep_record(walk: _Walk, dep: Dependency, installed: dict[str, dict[str, object]]) -> dict[str, object]:
@@ -1546,11 +1567,38 @@ def _gather_command_probe_host(probe: Mapping[str, Any]) -> CommandProbeOutcome:
         return CommandProbeOutcome(present=True, version_output=None)
 
 
-def _gather_python_import_probe_host(probe: Mapping[str, Any]) -> PythonImportProbeOutcome:
+def _gather_python_import_probe_host(probe: Mapping[str, Any], home: Path | None) -> PythonImportProbeOutcome:
+    """Mailbox 5944 fix 1: when the probe declares `uv_project`, the import
+    is checked the way the real runner checks it - `uv run --project
+    <home>/<uv_project>`, with `PYTHONPATH` prepended the same way
+    `flow-finish-gate.sh` prepends it - never the bare host interpreter,
+    which can diverge from the checkout's own isolated venv in either
+    direction."""
     modules = probe.get("modules") or []
     script = "; ".join(f"import {mod}" for mod in modules)
+    uv_project = probe.get("uv_project")
+    if uv_project is None:
+        argv = [sys.executable, "-c", script]
+        env = None
+    else:
+        if home is None:
+            return PythonImportProbeOutcome(
+                succeeded=False, error="uv_project probe needs an installation home to resolve against",
+            )
+        project_dir = home / str(uv_project)
+        if not project_dir.is_dir():
+            return PythonImportProbeOutcome(
+                succeeded=False, error=f"uv project directory not installed: {project_dir}",
+            )
+        uv_bin = shutil.which("uv")
+        if uv_bin is None:
+            return PythonImportProbeOutcome(
+                succeeded=False, error="uv not found on PATH; cannot run the import through the checkout's own environment",
+            )
+        env = {**os.environ, "PYTHONPATH": f"{project_dir}{os.pathsep}{os.environ.get('PYTHONPATH', '')}"}
+        argv = [uv_bin, "run", "--project", str(project_dir), "python", "-c", script]
     try:
-        run = subprocess.run([sys.executable, "-c", script], capture_output=True, timeout=10, check=False)
+        run = subprocess.run(argv, capture_output=True, timeout=30, check=False, env=env)
         if run.returncode == 0:
             return PythonImportProbeOutcome(succeeded=True)
         return PythonImportProbeOutcome(succeeded=False, error=run.stderr.decode("utf-8", errors="replace")[:200])
@@ -1558,20 +1606,22 @@ def _gather_python_import_probe_host(probe: Mapping[str, Any]) -> PythonImportPr
         return PythonImportProbeOutcome(succeeded=False, error=str(exc))
 
 
-def _check_tool(dep: dict[str, Any]) -> dict[str, Any]:
+def _check_tool(dep: dict[str, Any], home: Path | None = None) -> dict[str, Any]:
     """#334: a tool dependency's overall status, from its own declared
     `probes` - never from treating `dep["id"]` as a command name (that
     was the pre-#334 behavior, and it silently reported "missing on
     PATH" for every one of the ea6dbfa profile's four real tool
     dependencies, on a host that genuinely has all four - confirmed, not
-    assumed, before this fix)."""
+    assumed, before this fix). `home` resolves a `python-import` probe's
+    `uv_project`, when declared; `install()` is the only caller and
+    always has one by the time it checks tools."""
     result = {"id": dep["id"], "constraint": dep["version"], "supply": dep["supply"]}
     outcomes = []
     for probe in dep.get("probes") or []:
         if probe["kind"] == "command":
             outcomes.append(evaluate_command_probe(probe, _gather_command_probe_host(probe)))
         elif probe["kind"] == "python-import":
-            outcomes.append(evaluate_python_import_probe(probe, _gather_python_import_probe_host(probe)))
+            outcomes.append(evaluate_python_import_probe(probe, _gather_python_import_probe_host(probe, home)))
         else:
             raise Refused(f"dependency {dep['id']}: unknown probe kind: {probe['kind']!r}")
     return {**result, **aggregate_probe_results(outcomes)}
@@ -1667,7 +1717,7 @@ def install(inventory: dict[str, Any], tree: Tree, home: Path) -> dict[str, Any]
         "files": [{k: r[k] for k in ("destination", "digest", "mode", "origin",
                                                    "replaces_pinned_digest")} for r, _, _ in staged],
         "preexisting": preexisting,
-        "tools": [_check_tool(d) for d in inventory["dependencies"] if d["kind"] == "tool"],
+        "tools": [_check_tool(d, home) for d in inventory["dependencies"] if d["kind"] == "tool"],
         "unsupported": inventory["unsupported"],
         "client_profiles": inventory["client_profiles"],
         "limits": ["host filesystem only; cold-container execution proof owed",

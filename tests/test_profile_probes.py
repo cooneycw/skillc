@@ -68,6 +68,44 @@ def test_a_python_import_probe_needs_non_empty_modules(tmp_path: Path) -> None:
         p.Profile.load(path)
 
 
+def test_a_command_probe_cannot_declare_uv_project(tmp_path: Path) -> None:
+    """`uv_project` only means something for a `python-import` probe - the
+    real runner names a `uv run --project` directory, never a command's
+    own PATH lookup."""
+    path = _profile_with(tmp_path, -1, probes=[{"kind": "command", "name": "x", "uv_project": "lib"}])
+    with pytest.raises(p.Refused, match="unknown keys"):
+        p.Profile.load(path)
+
+
+def test_a_python_import_probe_uv_project_must_be_non_empty(tmp_path: Path) -> None:
+    path = _profile_with(tmp_path, -1, probes=[{"kind": "python-import", "modules": ["x"], "uv_project": ""}])
+    with pytest.raises(p.Refused, match="non-empty string"):
+        p.Profile.load(path)
+
+
+def test_a_python_import_probe_uv_project_cannot_escape(tmp_path: Path) -> None:
+    path = _profile_with(
+        tmp_path, -1, probes=[{"kind": "python-import", "modules": ["x"], "uv_project": "../../etc"}],
+    )
+    with pytest.raises(p.Refused, match="safe relative path"):
+        p.Profile.load(path)
+
+
+def test_a_python_import_probe_with_uv_project_round_trips(tmp_path: Path) -> None:
+    """The parsed `Probe.uv_project` survives `_probe_record` serialization
+    unchanged - the shape `_dep_record` puts into every inventory, and the
+    shape `agent_trial`'s in-container preflight reads back out."""
+    path = _profile_with(
+        tmp_path, -1,
+        probes=[{"kind": "python-import", "modules": ["pydantic"], "uv_project": "lib/checkout"}],
+    )
+    prof = p.Profile.load(path)
+    dep = next(d for d in prof.dependencies if d.kind == "tool")
+    assert dep.probes[0].uv_project == "lib/checkout"
+    record = p._probe_record(dep.probes[0])
+    assert record == {"kind": "python-import", "modules": ["pydantic"], "uv_project": "lib/checkout"}
+
+
 # ------------------------------------------------- shared evaluate functions
 
 
@@ -152,3 +190,58 @@ def test_check_tool_refuses_an_unknown_probe_kind_defensively() -> None:
     dep = {"id": "a-tool", "version": "any", "supply": "x", "probes": [{"kind": "registry-key"}]}
     with pytest.raises(p.Refused, match="unknown probe kind"):
         p._check_tool(dep)
+
+
+needs_uv = pytest.mark.skipif(shutil.which("uv") is None, reason="uv is not installed")
+
+
+@needs_uv
+def test_check_tool_with_uv_project_satisfied_by_a_stdlib_module(tmp_path: Path) -> None:
+    """`json` is stdlib - importable in ANY uv-managed venv regardless of
+    declared dependencies - so this proves the `uv run --project` plumbing
+    itself works end to end, not merely that the divergence case (below)
+    fails for an unrelated reason like `uv` being absent."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    (project / "pyproject.toml").write_text(
+        '[project]\nname = "probe-fixture"\nversion = "0.1.0"\nrequires-python = ">=3.9"\ndependencies = []\n',
+        encoding="utf-8",
+    )
+    dep = {"id": "a-tool", "version": "any", "supply": "x",
+          "probes": [{"kind": "python-import", "modules": ["json"], "uv_project": "proj"}]}
+    result = p._check_tool(dep, tmp_path)
+    assert result["status"] == "satisfied"
+
+
+@needs_uv
+def test_red_case_a_module_present_in_this_interpreter_but_absent_from_the_uv_env_is_refused(tmp_path: Path) -> None:
+    """Mailbox 5944 fix 1's own stated red case: a package importable by
+    THIS interpreter (`pytest` - self-evidently true, since this test
+    runs under it) but absent from a freshly created, dependency-less uv
+    project's own ISOLATED venv (uv venvs never inherit site-packages)
+    must be refused - proving the probe actually runs the checkout's own
+    environment rather than falling back to the interpreter running the
+    check itself."""
+    import pytest as _pytest_self_check  # noqa: F401 - importability is the point
+    project = tmp_path / "proj"
+    project.mkdir()
+    (project / "pyproject.toml").write_text(
+        '[project]\nname = "probe-fixture"\nversion = "0.1.0"\nrequires-python = ">=3.9"\ndependencies = []\n',
+        encoding="utf-8",
+    )
+    dep = {"id": "a-tool", "version": "any", "supply": "x",
+          "probes": [{"kind": "python-import", "modules": ["pytest"], "uv_project": "proj"}]}
+    result = p._check_tool(dep, tmp_path)
+    assert result["status"] == "violated"
+
+
+def test_gather_python_import_probe_host_uv_project_needs_a_home() -> None:
+    outcome = p._gather_python_import_probe_host({"modules": ["json"], "uv_project": "proj"}, None)
+    assert outcome.succeeded is False
+    assert "home" in outcome.error
+
+
+def test_gather_python_import_probe_host_uv_project_dir_must_exist(tmp_path: Path) -> None:
+    outcome = p._gather_python_import_probe_host({"modules": ["json"], "uv_project": "nope"}, tmp_path)
+    assert outcome.succeeded is False
+    assert "not installed" in outcome.error

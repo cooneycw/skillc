@@ -26,7 +26,7 @@ ROOT = HERE.parent
 TASK = ROOT / "evals" / "level3" / "slugkit-pipeline"
 GRADER = verify.GraderDef.load(TASK)
 PROFILE_PATH = "evals/subjects/cpp-codex-flow-check-ea6dbfa"
-COMMITTED_INVENTORY_DIGEST = "sha256:43d4cf5683130cbe599a4b8c0fbfb12ae392216d8b595843a9a404bf88d5cc8e"
+COMMITTED_INVENTORY_DIGEST = "sha256:bd91eff7624d7eeabcb3d5320ecc568d2ca366d5242604b54a7d4e56e67f3e7e"
 
 SUBJECT = {
     "name": "cpp-codex-flow-check-ea6dbfa",

@@ -225,6 +225,42 @@ and version plan.
     `validate` both still report 0 problems, and the inventory's digest
     changes (recorded in the PR body, since nothing is approved against
     it yet).
+- **Review fixes to the in-container tool preflight (Refs #334, in
+  progress)** - three corrections from orchestrator review of the
+  preflight/probes work below:
+  1. A `python-import` probe's `uv_project` field (new, optional,
+     home-relative) checks the import through the checkout's own `uv`
+     environment - `uv run --project <home>/<uv_project> python -c ...`,
+     `PYTHONPATH` prepended the same way - mirroring the real runner's
+     own invocation (`flow-finish-gate.sh`'s `PYTHONPATH="$CPP_DIR:
+     ${PYTHONPATH:-}" uv run --project "$CPP_DIR" python -m lib.cicd
+     ...`), never a bare `python3`/`sys.executable`, which checks the
+     wrong interpreter entirely: the trial image's or the host's own
+     system python can diverge from the checkout's isolated venv in
+     either direction. `cpp-codex-flow-check-ea6dbfa`'s `tool-pypi-
+     runtime` probe is updated to use it, and its evidence is
+     regenerated again. Both callers (`profile._check_tool`'s host-side
+     gathering and `agent_trial`'s in-container preflight) mirror the
+     same invocation shape. Red case, real and mutation-checked, not a
+     mock: a package importable by the interpreter running the test but
+     absent from a freshly created, dependency-less `uv` project's own
+     isolated venv is refused (`tests/test_profile_probes.py`).
+  2. The preflight exec's own write-back left a digest/probe report
+     sitting in the agent's workspace at `CONTAINER_WORKSPACE/
+     observations` - visible to the agent and the grader. Removed via
+     the new `DockerBackend.remove_file_in_attempt`, a bare `docker exec`
+     that bypasses `exec_in_attempt()`'s own write-back tail entirely
+     (mirroring `resolve_realpath_in_attempt`'s shape) - a second
+     `exec_in_attempt()` call cannot do this: its own empty stdout
+     recreates the file instead of removing it, confirmed directly in
+     `tests/test_docker_backend.py`. The observations-residue question
+     for `gate_witness.py`'s own write-back is noted on skillc#20 (Nit
+     Store), not fixed here.
+  3. The `apply_flow_check_gate_overlay` TODO stub's cited signature is
+     updated to the two-root shape (`subject_root=CONTAINER_HOME`,
+     `harness_root=`a root-owned, non-candidate-writable directory)
+     superseding the single-`root` shape this TODO previously named -
+     the call site itself is still stubbed, pending #332's own follow-up.
 - **In-container closure verification and tool preflight (Refs #334, in
   progress)** - `agent_trial.run_one_attempt` gains `verify_home_files`
   (relpath -> expected `sha256:` digest) and `preflight_tools` (a

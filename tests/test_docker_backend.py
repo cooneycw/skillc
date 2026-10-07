@@ -2096,3 +2096,72 @@ def test_clean_write_probe_result_direct() -> None:
             return None
         return returncode == 0
     assert naive(137, b"") is False, "the naive version should disagree with the real function here"
+
+
+# ---------------------------------------------------- remove_file_in_attempt
+
+
+def test_remove_file_in_attempt_removes_the_observations_write_back(base: Path, docker_state: Path) -> None:
+    """skillc#334 mailbox 5944 fix 2. `exec_in_attempt()`'s own shared tail
+    (`_finish_result`, #76/#186) writes the exec'd process's stdout back to
+    `CONTAINER_WORKSPACE/observations` after EVERY call, unconditionally -
+    confirmed here directly, not assumed: a plain SECOND `exec_in_attempt()`
+    call that deletes the file from inside the container does not leave it
+    absent, because that call's own (empty) stdout immediately write-backs
+    a fresh, empty file in its place. `remove_file_in_attempt` is the only
+    one of the two that leaves the file genuinely gone, because it never
+    goes through that tail at all."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-rm-0000000000001")
+    backend.install(handle, {})
+    try:
+        first = backend.exec_in_attempt(handle, ["python3", "-c", "print('report')"], Limits(timeout=5.0))
+        assert first.exit_code == 0
+        with tempfile.TemporaryDirectory() as tmp:
+            backend.export(handle, Path(tmp))
+            assert (Path(tmp) / "observations").read_text() == "report\n"
+
+        # The defect this fix exists to avoid, shown directly: deleting the
+        # file through a second exec_in_attempt() call does not work.
+        second = backend.exec_in_attempt(
+            handle, ["python3", "-c", f"import os; os.remove({d.CONTAINER_WORKSPACE + '/observations'!r})"],
+            Limits(timeout=5.0),
+        )
+        assert second.exit_code == 0
+        with tempfile.TemporaryDirectory() as tmp:
+            backend.export(handle, Path(tmp))
+            # Recreated empty by the SECOND call's own write-back - not absent.
+            assert (Path(tmp) / "observations").read_text() == ""
+
+        removed = backend.remove_file_in_attempt(handle, f"{d.CONTAINER_WORKSPACE}/observations")
+        assert removed is True
+        with tempfile.TemporaryDirectory() as tmp:
+            backend.export(handle, Path(tmp))
+            assert not (Path(tmp) / "observations").exists()
+    finally:
+        backend.destroy(handle)
+
+
+def test_remove_file_in_attempt_on_a_path_that_never_existed_is_still_true(
+    base: Path, docker_state: Path,
+) -> None:
+    """`rm -f` alone reports success even when nothing existed - the
+    confirming `[ ! -e ]` is what makes a `True` here mean "checked and
+    absent", not merely "the remove command did not error"."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-rm-0000000000002")
+    backend.install(handle, {})
+    try:
+        assert backend.remove_file_in_attempt(handle, f"{d.CONTAINER_WORKSPACE}/never-existed") is True
+    finally:
+        backend.destroy(handle)
+
+
+def test_remove_file_in_attempt_is_false_when_the_attempt_is_not_running(
+    base: Path, docker_state: Path,
+) -> None:
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-rm-0000000000003")
+    backend.install(handle, {})
+    backend.destroy(handle)
+    assert backend.remove_file_in_attempt(handle, f"{d.CONTAINER_WORKSPACE}/x") is False

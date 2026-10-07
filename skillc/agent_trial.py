@@ -91,7 +91,12 @@ from typing import Any
 from . import credential, demo, leak, profile, records, trial, trial_bootstrap, verify
 from . import transcript_adapter as ta
 from .backend import BackendUnavailable, Confirmation, ExecutionBackend, Limits
-from .docker_backend import CANARY_RESULT_FILENAME, CONTAINER_HOME, DockerBackend
+from .docker_backend import (
+    CANARY_RESULT_FILENAME,
+    CONTAINER_HOME,
+    CONTAINER_WORKSPACE,
+    DockerBackend,
+)
 from .lifecycle import run_through_backend
 from .trial_bootstrap import CanaryNotSatisfied, MCPServerSpec, PromptDeliveryError
 
@@ -338,8 +343,23 @@ def _preflight_in_container(
         elif kind == "python-import":
             modules = probe.get("modules") or []
             script_body = "; ".join(f"import {mod}" for mod in modules)
+            uv_project = probe.get("uv_project")
+            if uv_project is None:
+                check_cmd = f'python3 -c {shlex.quote(script_body)}'
+            else:
+                # Mailbox 5944 fix 1: mirror the real runner's own
+                # invocation (flow-finish-gate.sh: `PYTHONPATH="$CPP_DIR:
+                # ${PYTHONPATH:-}" uv run --project "$CPP_DIR" python -m
+                # lib.cicd ...`) - never a bare `python3`, which checks the
+                # trial image's system interpreter rather than the
+                # checkout's own isolated venv.
+                project_dir = f"{CONTAINER_HOME}/{uv_project}"
+                check_cmd = (
+                    f'PYTHONPATH={shlex.quote(project_dir)}:${{PYTHONPATH:-}} '
+                    f'uv run --project {shlex.quote(project_dir)} python -c {shlex.quote(script_body)}'
+                )
             script_lines.append(
-                f'if python3 -c {shlex.quote(script_body)} >/dev/null 2>&1; then '
+                f'if {check_cmd} >/dev/null 2>&1; then '
                 f'printf "PROBE:{idx}:IMPORT_OK\\n"; '
                 f'else printf "PROBE:{idx}:IMPORT_FAIL\\n"; fi'
             )
@@ -361,6 +381,22 @@ def _preflight_in_container(
             ) from exc
         observations = Path(tmp) / "observations"
         output = observations.read_text(encoding="utf-8", errors="replace") if observations.is_file() else ""
+
+    # Mailbox 5944 fix 2: the preflight exec's own write-back left its
+    # digest/probe report sitting in the AGENT's workspace, at the same
+    # `CONTAINER_WORKSPACE/observations` path the agent's own run (and the
+    # grader, after it) will see - the preflight's internal verification
+    # detail would otherwise show up in the graded tree or diff. Removed
+    # via `remove_file_in_attempt`, never a second `exec_in_attempt()` call
+    # (that method's own write-back would just recreate an empty file in
+    # its place - see that method's docstring). Red case: after this call,
+    # the workspace tree is byte-identical to what it was before the
+    # preflight ran.
+    if not backend.remove_file_in_attempt(handle, f"{CONTAINER_WORKSPACE}/observations"):
+        raise HomeFileVerificationRefused(
+            "could not remove the preflight's own observations file from the workspace after reading it back"
+        )
+
     digest_section, _, tools_section = output.partition(_TOOLS_MARKER)
 
     actual_by_path = {}
@@ -480,17 +516,22 @@ def _make_before_execute(
             assert limits is not None  # checked above, before any delivery happened
             _preflight_in_container(backend, handle, limits, resolved_verify_home_files, resolved_preflight_tools)
 
-        # TODO(skillc#334 step 4): once #332's own follow-up lands (a
-        # `root` parameter on DockerBackend.export()/install() and on
-        # gate_overlay.apply_flow_check_gate_overlay(), defaulting to
-        # CONTAINER_WORKSPACE so every existing caller is unchanged), a
-        # profile-opted attempt whose subject needs the flow-check gate
-        # witness calls it here, as the LAST setup step before the agent
-        # starts (gate_overlay.py's own ordering requirement):
+        # TODO(skillc#334 step 4): once #332's own follow-up lands (TWO
+        # root parameters on gate_overlay.apply_flow_check_gate_overlay() -
+        # mailbox 5944 fix 3, superseding the single-`root` shape named
+        # earlier in this TODO - `subject_path`/`harness_path` resolve
+        # against DIFFERENT roots because a harness copy reachable from
+        # inside the candidate's own home could be edited by the subject
+        # and then run by the controller), a profile-opted attempt whose
+        # subject needs the flow-check gate witness calls it here, as the
+        # LAST setup step before the agent starts (gate_overlay.py's own
+        # ordering requirement):
         #   gate_overlay.apply_flow_check_gate_overlay(
-        #       backend, handle, root=CONTAINER_HOME,
+        #       backend, handle,
+        #       subject_root=CONTAINER_HOME,
+        #       harness_root=<a root-owned, non-candidate-writable directory>,
         #       subject_path=".claude/scripts/flow-finish-gate.sh",
-        #       harness_path=<a home-relative harness-only path>,
+        #       harness_path=<a harness_root-relative path>,
         #       expected_real_digest=..., expected_shim_digest=...,
         #       shim_content=...,
         #   )

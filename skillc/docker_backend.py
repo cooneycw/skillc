@@ -2010,6 +2010,37 @@ class DockerBackend:
             return False
         return proc.returncode == 0
 
+    def remove_file_in_attempt(self, handle: object, path: str, timeout: float = 5.0) -> bool:
+        """Deletes `path` inside the attempt's container and confirms it is
+        gone, via a bare `docker exec` - deliberately NOT routed through
+        `exec_in_attempt()` (skillc#334 mailbox 5944 fix 2). That method's
+        own shared tail (`_finish_result`, #76/#186) unconditionally writes
+        the exec'd process's stdout back to `CONTAINER_WORKSPACE/observations`
+        AFTER every call, even one whose stdout is empty - `_owned_tar_bytes`
+        builds a real (zero-length) tar entry regardless, and `docker cp`
+        extracts it. So using `exec_in_attempt()` itself to remove that very
+        file would always leave a freshly-recreated empty one in its place:
+        the file would never again be ABSENT, only ever emptied. This
+        mirrors `resolve_realpath_in_attempt`'s own raw-`docker exec` shape,
+        which has the same property for the same reason - neither one goes
+        through the write-back tail at all.
+
+        Returns `True` only once the removal AND an immediate `[ ! -e ]`
+        check, in the same shell invocation, both succeed - never from
+        `rm -f`'s own exit code alone, since `rm -f` reports success even
+        when the path never existed, which would read as a confirmed
+        removal that was never actually checked."""
+        assert isinstance(handle, _Handle)
+        try:
+            proc = subprocess.run(
+                [*self.docker_bin, "exec", "--", handle.name, "sh", "-c",
+                 'rm -f -- "$1" && [ ! -e "$1" ]', "sh", path],
+                capture_output=True, env=handle.env, timeout=timeout, check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        return proc.returncode == 0
+
     def candidate_can_write_in_attempt(self, handle: object, path: str, timeout: float | None = None) -> bool | None:
         """Empirically tests whether the CANDIDATE identity (never root)
         can write `path` INSIDE the live container, via `test -w` run AS

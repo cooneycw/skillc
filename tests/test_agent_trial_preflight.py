@@ -7,9 +7,10 @@ executable name (confirmed false for the real ea6dbfa profile).
 
 A stub backend (not the fake docker CLI fixture `test_agent_trial.py`
 itself uses) is enough here: `_preflight_in_container` only ever calls
-`backend.exec_in_attempt(...)` and `backend.export(...)`, so a plain
-object providing exactly those two methods tests the function's own
-logic directly, without needing a real or fake container at all.
+`backend.exec_in_attempt(...)`, `backend.export(...)` and (mailbox 5944
+fix 2) `backend.remove_file_in_attempt(...)`, so a plain object providing
+exactly those three methods tests the function's own logic directly,
+without needing a real or fake container at all.
 """
 
 from __future__ import annotations
@@ -26,11 +27,13 @@ LIMITS = Limits(timeout=5)
 
 
 class _StubBackend:
-    def __init__(self, *, exec_exit_code: int = 0, observations: str = "") -> None:
+    def __init__(self, *, exec_exit_code: int = 0, observations: str = "", remove_result: bool = True) -> None:
         self.exec_exit_code = exec_exit_code
         self.observations = observations
+        self.remove_result = remove_result
         self.exec_calls: list[list[str]] = []
         self.export_calls: list[Path] = []
+        self.remove_calls: list[str] = []
 
     def exec_in_attempt(self, handle: object, argv: list[str], limits: Limits) -> ExecuteResult:
         self.exec_calls.append(argv)
@@ -39,6 +42,10 @@ class _StubBackend:
     def export(self, handle: object, dest: Path) -> None:
         self.export_calls.append(dest)
         (dest / "observations").write_text(self.observations, encoding="utf-8")
+
+    def remove_file_in_attempt(self, handle: object, path: str) -> bool:
+        self.remove_calls.append(path)
+        return self.remove_result
 
 
 def _command_tool(dep_id: str, *, name: str, constraint: str | None = None) -> dict[str, Any]:
@@ -57,6 +64,7 @@ def test_empty_inputs_does_nothing() -> None:
     at._preflight_in_container(backend, object(), LIMITS, {}, ())
     assert backend.exec_calls == []
     assert backend.export_calls == []
+    assert backend.remove_calls == []
 
 
 def test_a_matching_digest_and_satisfied_command_probe_pass() -> None:
@@ -74,6 +82,9 @@ def test_a_matching_digest_and_satisfied_command_probe_pass() -> None:
     )
     assert len(backend.exec_calls) == 1
     assert len(backend.export_calls) == 1
+    # Mailbox 5944 fix 2: the preflight's own observations file is removed
+    # from the agent's workspace, not left for the agent or grader to see.
+    assert backend.remove_calls == [f"{at.CONTAINER_WORKSPACE}/observations"]
 
 
 def test_a_command_probe_with_no_constraint_only_checks_presence() -> None:
@@ -181,3 +192,36 @@ def test_one_combined_exec_and_export_regardless_of_how_many_files_or_tools() ->
     )
     assert len(backend.exec_calls) == 1
     assert len(backend.export_calls) == 1
+    assert len(backend.remove_calls) == 1
+
+
+def test_red_case_the_cleanup_removal_failing_is_refused() -> None:
+    """Mailbox 5944 fix 2's own red case: a `remove_file_in_attempt` that
+    cannot confirm removal must refuse the attempt, never continue as if
+    the workspace were clean when it was never checked."""
+    digest = "d" * 64
+    observations = f"{digest}  {at.CONTAINER_HOME}/x\n{at._TOOLS_MARKER}\n"
+    backend: Any = _StubBackend(observations=observations, remove_result=False)
+    with pytest.raises(at.HomeFileVerificationRefused, match="could not remove"):
+        at._preflight_in_container(backend, object(), LIMITS, {"x": f"sha256:{digest}"}, ())
+
+
+def test_a_python_import_probe_with_uv_project_runs_through_uv_run() -> None:
+    """Mailbox 5944 fix 1: a probe declaring `uv_project` must be checked
+    the way the real runner checks it - `uv run --project
+    <CONTAINER_HOME>/<uv_project> python -c ...` - never a bare `python3`,
+    which would check the trial image's system interpreter instead of the
+    checkout's own isolated venv."""
+    observations = f"{at._TOOLS_MARKER}\nPROBE:0:IMPORT_OK\n"
+    backend: Any = _StubBackend(observations=observations)
+    at._preflight_in_container(
+        backend, object(), LIMITS, {},
+        [{"id": "tool-pypi-runtime", "probes": [
+            {"kind": "python-import", "modules": ["pydantic", "yaml"],
+             "uv_project": "Projects/claude-power-pack"},
+        ]}],
+    )
+    script = backend.exec_calls[0][-1]
+    assert "uv run --project" in script
+    assert f"{at.CONTAINER_HOME}/Projects/claude-power-pack" in script
+    assert "python3 -c" not in script

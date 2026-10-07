@@ -149,7 +149,7 @@
    "supply": "EXTERNAL: uv resolves these from a package index on first run. Trials have no network (spec.md section 4), so #266 must pre-supply a filled cache or report the gate step unavailable",
    "unreferenced_reason": "a package-manager resolution, not a path in any file of the closure",
    "probes": [
-    {"kind": "python-import", "modules": ["pydantic", "yaml"]}
+    {"kind": "python-import", "modules": ["pydantic", "yaml"], "uv_project": "Projects/claude-power-pack"}
    ]
   },
   {
