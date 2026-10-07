@@ -66,25 +66,29 @@ silently worked anyway, say), that run reports `XPASS` as a failure, not a
 quiet green. That is what makes this an instrument with a committed
 negative control, not three assertions hoping to be exercised.
 
-`raises=_PropertyHeld` (issue #336, counter-model review on #266):
-`raises=AssertionError` was passed here originally, but that type is too
-WIDE - every check in this file, setup and property alike, raised plain
-`AssertionError`, so an unrelated infra failure during a break run (a
-real daemon flake, a setup assert firing for some other reason) would
-also satisfy the marker and be counted as the expected red for the wrong
-reason. `_PropertyHeld` is a dedicated exception, confirmed NOT an
-`AssertionError` subclass, raised ONLY by the three property checks
-(`result.exit_code == 0` for `omit-mount`; `reported["uid"] ==
-d.CANDIDATE_UID` for `wrong-uid`; `reported["decisions"]`/the controller
-log for `flip-decision`) via a `_require()` helper - each asserted
+`raises=_PropertyHeld` subtypes, ONE PER TARGETED PROPERTY (issue #341,
+counter-model review on #336's own fix): `raises=AssertionError` was
+passed here originally (too WIDE - every check, setup and property
+alike, raised plain `AssertionError`); #336 narrowed it to a single
+shared `_PropertyHeld`, which closed THAT gap but opened a different
+one - within one break-mode run, a NEIGHBORING property's own failure
+(not the targeted one) could ALSO satisfy the marker, since all three
+properties shared one type. Fixed by giving each its own subtype -
+`_ConnectivityPropertyHeld` (`omit-mount`: `result.exit_code == 0`),
+`_UidPropertyHeld` (`wrong-uid`: `reported["uid"] == d.CANDIDATE_UID`),
+`_DecisionPropertyHeld` (`flip-decision`: `reported["decisions"]`/the
+controller log, both from the SAME targeted property) - via a
+`_require()` helper that now takes WHICH subtype to raise, looked up
+per `BREAK_MODE` by the `xfail` marker itself (`_EXPECTED_PROPERTY_
+EXCEPTION`) rather than one static type. Each check is still asserted
 UNCONDITIONALLY and IDENTICALLY in every mode, never branched by
 `BREAK_MODE` (audited: this file never was branched this way, so no
-XPASS-by-construction fix was needed, only the exception type). Every
-other check (handle/channel preconditions, `result.reason == "exited"`,
-`confirm_stopped()`, `log is not None`) stays a plain `assert`, verified
-by reading `DockerBackend`'s own handling of `trigger_decide=None`
-rather than by running this file (no real daemon in this environment,
-same limitation stated throughout this docstring).
+XPASS-by-construction fix was ever needed, only the exception
+granularity). Every other check (handle/channel preconditions, `result.
+reason == "exited"`, `confirm_stopped()`, `log is not None`) stays a
+plain `assert`, verified by reading `DockerBackend`'s own handling of
+`trigger_decide=None` rather than by running this file (no real daemon
+in this environment, same limitation stated throughout this docstring).
 
 KNOWN LIMITATION, unverified against a real daemon: this classification
 assumes `omit-mount`'s real symptom surfaces through `result.exit_code`
@@ -136,23 +140,57 @@ if BREAK_MODE not in _VALID_BREAK_MODES:
 
 
 class _PropertyHeld(Exception):
-    """Raised when the ONE property a given `BREAK_MODE` is supposed to
-    violate still held (issue #336, same pattern as skillc#266's
-    counter-model-review fix, commit 2c9c638). The only exception type
-    the `xfail` marker below matches - never bare `AssertionError` - so
-    an unrelated infra/setup failure raises plain `AssertionError`
-    instead and is reported as an ordinary hard FAILURE, never masked as
-    "the break worked"."""
+    """Shared base for every property-specific exception below (issue
+    #341: one subtype per independently-targeted property, so a
+    NEIGHBORING property's own failure cannot satisfy a break mode's own
+    `xfail(raises=...)` - counter-model review on #336's own fix, which
+    gave every property the same single type). Never raised directly;
+    kept importable/catchable generically for a caller that genuinely
+    wants "any property failed," which nothing here currently needs."""
 
 
-def _require(condition: bool, message: str) -> None:
+class _ConnectivityPropertyHeld(_PropertyHeld):
+    """`omit-mount`'s own targeted property: the subject could reach the
+    trigger socket at all."""
+
+
+class _UidPropertyHeld(_PropertyHeld):
+    """`wrong-uid`'s own targeted property: the container ran as the
+    declared candidate identity."""
+
+
+class _DecisionPropertyHeld(_PropertyHeld):
+    """`flip-decision`'s own targeted property: the channel's decisions
+    matched the fixed oracle - checked from both the subject's own
+    report and the controller's independent log, which share this one
+    subtype since both observe the SAME targeted property."""
+
+
+#: Issue #341: which subtype (or tuple of subtypes) a given `BREAK_MODE`
+#: is expected to raise - looked up by the `xfail` marker below instead
+#: of a single static type, so a neighboring property's own failure
+#: (which raises a DIFFERENT subtype) can no longer satisfy the wrong
+#: mode's marker. `.get(BREAK_MODE, _PropertyHeld)` is irrelevant for
+#: `none` (the marker's `condition` is `False` there, so `raises=` is
+#: never consulted).
+_EXPECTED_PROPERTY_EXCEPTION: dict[str, type[Exception]] = {
+    "omit-mount": _ConnectivityPropertyHeld,
+    "wrong-uid": _UidPropertyHeld,
+    "flip-decision": _DecisionPropertyHeld,
+}
+
+
+def _require(condition: bool, message: str, exc_type: type[Exception] = _PropertyHeld) -> None:
     """The property under test for the current `BREAK_MODE` - asserted
     UNCONDITIONALLY, identically for `none` and every break mode alike,
-    never branched by `BREAK_MODE`. Confirmed directly, no pytest or
-    Docker needed: `_require(True, ...)` returns; `_require(False, ...)`
-    raises `_PropertyHeld`, which is not a subclass of `AssertionError`."""
+    never branched by `BREAK_MODE`. `exc_type` names WHICH property this
+    particular check is (issue #341) - defaults to the shared base,
+    which no real call site should still be using. Confirmed directly,
+    no pytest or Docker needed: `_require(True, ...)` returns;
+    `_require(False, ...)` raises `exc_type`, which is always a subclass
+    of `_PropertyHeld`, never of `AssertionError`."""
     if not condition:
-        raise _PropertyHeld(message)
+        raise exc_type(message)
 
 
 def _image_available(image: str) -> bool:
@@ -224,7 +262,8 @@ def _subject_script() -> str:
 
 
 @pytest.mark.xfail(
-    condition=BREAK_MODE != "none", strict=True, raises=_PropertyHeld,
+    condition=BREAK_MODE != "none", strict=True,
+    raises=_EXPECTED_PROPERTY_EXCEPTION.get(BREAK_MODE, _PropertyHeld),
     reason=f"SKILLC_LIVE_TEST_BREAK={BREAK_MODE} deliberately breaks one property",
 )
 def test_the_channel_round_trips_correctly_against_a_real_daemon(live_backend: d.DockerBackend) -> None:
@@ -255,7 +294,7 @@ def test_the_channel_round_trips_correctly_against_a_real_daemon(live_backend: d
     try:
         result = live_backend.execute(handle, ["python3", "-c", _subject_script()], Limits(timeout=15))
         assert result.reason == "exited", result.error
-        _require(result.exit_code == 0, result.error or "expected a clean exit")
+        _require(result.exit_code == 0, result.error or "expected a clean exit", _ConnectivityPropertyHeld)
         assert live_backend.confirm_stopped(handle) is Confirmation.CONFIRMED
         export_dir = Path(tempfile.mkdtemp(prefix="sk-live-export-"))
         live_backend.export(handle, export_dir)
@@ -266,10 +305,17 @@ def test_the_channel_round_trips_correctly_against_a_real_daemon(live_backend: d
     # `observations`, not returned inline (`ExecutionBackend.execute()`'s
     # own documented convention).
     reported = json.loads((export_dir / "observations").read_text(encoding="utf-8").strip().splitlines()[-1])
-    _require(reported["uid"] == d.CANDIDATE_UID, f"expected uid {d.CANDIDATE_UID}, got {reported['uid']}")
-    _require(reported["decisions"] == _expected_decisions(), f"subject-reported decisions diverged: {reported['decisions']}")
+    _require(
+        reported["uid"] == d.CANDIDATE_UID, f"expected uid {d.CANDIDATE_UID}, got {reported['uid']}",
+        _UidPropertyHeld,
+    )
+    _require(
+        reported["decisions"] == _expected_decisions(), f"subject-reported decisions diverged: {reported['decisions']}",
+        _DecisionPropertyHeld,
+    )
     assert log is not None
     _require(
         [entry.result["decision"] for entry in log] == _expected_decisions(),
         "the controller's own trigger log diverged from the expected decisions",
+        _DecisionPropertyHeld,
     )

@@ -29,23 +29,28 @@ second thing that could itself be wrong, not strengthen the claim.
 
 ONE TEST FUNCTION, SKILLC_GATE_SHIM_LIVE_BREAK SELECTS THE MODE - same
 shape as `test_gate_witness_live.py`'s own `SKILLC_GATE_WITNESS_LIVE_
-BREAK`. `xfail(strict=True, raises=_PropertyHeld)` on every non-`none`
-mode: a break that fails to actually break anything surfaces as XPASS,
-not a silent pass.
+BREAK`. `xfail(strict=True)` on every non-`none` mode, `raises=` looked
+up per mode: a break that fails to actually break anything surfaces as
+XPASS, not a silent pass.
 
-`_PropertyHeld` is a DEDICATED exception, NOT an `AssertionError`
-subclass (counter-model review on #266, adopted here per orchestrator
-direction, 2026-10-06): both properties below are asserted via a
-`_require()` helper that raises it, UNCONDITIONALLY and IDENTICALLY in
-every mode - never branched by `BREAK_MODE` to check "the break
-occurred" instead of "the real property held," which would XPASS by
-construction. Every other check in this file (the driver process
-completing, the result marker being readable) stays a plain `assert`
-(base `AssertionError`), which the `xfail` marker does NOT match - so an
-unrelated infra failure (a Docker flake during a break run) is reported
-as an ordinary hard FAILURE, never masked as "the break worked." An
-earlier draft of this file used `raises=AssertionError` for everything,
-which could not tell the two apart.
+`raises=` a PER-PROPERTY `_PropertyHeld` subtype, not one shared type
+(issue #341, counter-model review): an earlier draft of this file gave
+BOTH of the two properties below the same single `_PropertyHeld` type -
+dedicated and not an `AssertionError` subclass, but still too WIDE
+within a single run, since a neighboring property's own failure could
+satisfy either mode's marker. Fixed with `_ForwardingPropertyHeld`
+(property 1) and `_ChannelFailurePropertyHeld` (property 2), each
+asserted via a `_require()` helper that takes WHICH subtype to raise,
+UNCONDITIONALLY and IDENTICALLY in every mode - never branched by
+`BREAK_MODE` to check "the break occurred" instead of "the real
+property held," which would XPASS by construction. Every other check
+in this file (the driver process completing, the result marker being
+readable) stays a plain `assert` (base `AssertionError`), which no
+`_PropertyHeld` subtype's `xfail` marker matches - so an unrelated
+infra failure (a Docker flake during a break run) is reported as an
+ordinary hard FAILURE, never masked as "the break worked." An earlier
+draft of this file used `raises=AssertionError` for everything, which
+could not tell infra apart from property at all.
 
 TWO INDEPENDENT PROPERTIES, both forced identically in EVERY mode
 (counter-model review): (1) forwarding fidelity - both prescribed
@@ -337,36 +342,58 @@ def _read_result_via_exec(backend: d.DockerBackend, handle: d._Handle, path: str
 
 
 class _PropertyHeld(Exception):
-    """Raised when the ONE property a given `BREAK_MODE` is supposed to
-    violate still held - the opposite of what `xfail(strict=True)` below
-    expects. This is the ONLY exception type that marker's own `raises=`
-    matches - never bare `AssertionError` - so an unrelated infra/setup
-    failure (an unreadable marker, a driver process that never completed)
-    raises plain `AssertionError` instead and is reported as an ordinary
-    hard FAILURE, never masked as "the break worked" (same pattern as
-    `tests/test_profile_install_cold_container_live.py`'s own fix,
-    counter-model review on #266, adopted here per orchestrator
-    direction: an earlier draft of THIS file used `raises=AssertionError`
-    with every check - setup and property alike - raising that same
-    type, so an unrelated Docker flake during any break run would have
-    been indistinguishable from the break firing correctly)."""
+    """Shared base for the two property-specific exceptions below (issue
+    #341: one subtype per independently-targeted property, so a
+    NEIGHBORING property's own failure cannot satisfy a break mode's own
+    `xfail(raises=...)` - counter-model review finding: an earlier draft
+    of this file gave both properties the same single type). Never
+    raised directly."""
 
 
-def _require(condition: bool, message: str) -> None:
-    """The forwarding-fidelity property under test for the current
-    `BREAK_MODE` - asserted UNCONDITIONALLY, the identical check for
-    `none` and every break mode alike (never branched by `BREAK_MODE`),
-    so it fails naturally when, and only when, a break actually changed
-    the real forwarded result - never because the test branched its own
-    expectation. Confirmed directly, no pytest or Docker needed:
-    `_require(True, ...)` returns; `_require(False, ...)` raises
-    `_PropertyHeld`, which is not a subclass of `AssertionError`."""
+class _ForwardingPropertyHeld(_PropertyHeld):
+    """Property 1's own targeted property: forwarding fidelity (exit
+    code, byte-identical stdout) over a REACHABLE channel. Targeted by
+    `synthesizes-output`, `drops-cwd`, and `wrong-env` - three different
+    mechanisms, the same targeted check."""
+
+
+class _ChannelFailurePropertyHeld(_PropertyHeld):
+    """Property 2's own targeted property: a genuinely unreachable
+    channel reports exit 125, forced identically in every mode.
+    `exits-zero-on-channel-failure`'s own target - invisible to property
+    1, since that mutation only touches FAILURE paths."""
+
+
+#: Issue #341: which subtype a given `BREAK_MODE` is expected to raise -
+#: looked up by the `xfail` marker below instead of one static type.
+#: `.get(BREAK_MODE, _PropertyHeld)` is irrelevant for `none` (the
+#: marker's `condition` is `False` there).
+_EXPECTED_PROPERTY_EXCEPTION: dict[str, type[Exception]] = {
+    "synthesizes-output": _ForwardingPropertyHeld,
+    "drops-cwd": _ForwardingPropertyHeld,
+    "wrong-env": _ForwardingPropertyHeld,
+    "exits-zero-on-channel-failure": _ChannelFailurePropertyHeld,
+}
+
+
+def _require(condition: bool, message: str, exc_type: type[Exception] = _PropertyHeld) -> None:
+    """The property under test for the current `BREAK_MODE` - asserted
+    UNCONDITIONALLY, the identical check for `none` and every break mode
+    alike (never branched by `BREAK_MODE`), so it fails naturally when,
+    and only when, a break actually changed the real forwarded result -
+    never because the test branched its own expectation. `exc_type`
+    names WHICH property this particular check is (issue #341) -
+    defaults to the shared base, which no real call site should still be
+    using. Confirmed directly, no pytest or Docker needed: `_require(
+    True, ...)` returns; `_require(False, ...)` raises `exc_type`, which
+    is always a subclass of `_PropertyHeld`, never of `AssertionError`."""
     if not condition:
-        raise _PropertyHeld(message)
+        raise exc_type(message)
 
 
 @pytest.mark.xfail(
-    condition=BREAK_MODE != "none", strict=True, raises=_PropertyHeld,
+    condition=BREAK_MODE != "none", strict=True,
+    raises=_EXPECTED_PROPERTY_EXCEPTION.get(BREAK_MODE, _PropertyHeld),
     reason=f"SKILLC_GATE_SHIM_LIVE_BREAK={BREAK_MODE} deliberately breaks one forwarding property",
 )
 def test_the_shim_forwards_the_controllers_real_result_against_a_real_daemon() -> None:
@@ -470,10 +497,12 @@ def test_the_shim_forwards_the_controllers_real_result_against_a_real_daemon() -
             _require(
                 result["exit_code"] == _expected_exit_code(argv_tail),
                 f"{gate}: the shim's forwarded exit code did not match the controller's real result",
+                _ForwardingPropertyHeld,
             )
             _require(
                 result["stdout"] == _expected_output(argv_tail, _DECLARED_HOME),
                 f"{gate}: the shim's forwarded stdout was not byte-identical to the controller's real result",
+                _ForwardingPropertyHeld,
             )
 
         # Property 2: a genuinely unreachable channel. Forced UNCONDITIONALLY
@@ -498,6 +527,7 @@ def test_the_shim_forwards_the_controllers_real_result_against_a_real_daemon() -
             channel_failure_result["exit_code"] == _SHIM_EXIT_CHANNEL_FAILURE,
             "a genuinely unreachable channel must make the shim report exit "
             f"{_SHIM_EXIT_CHANNEL_FAILURE}, never something else",
+            _ChannelFailurePropertyHeld,
         )
     finally:
         backend.destroy(handle)

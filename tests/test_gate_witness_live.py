@@ -31,29 +31,34 @@ comment that follows it):
 
 ONE TEST FUNCTION, SKILLC_GATE_WITNESS_LIVE_BREAK SELECTS THE MODE - same
 shape as `test_decide_reply_channel_live.py`'s `SKILLC_LIVE_TEST_BREAK`.
-`xfail(strict=True, raises=_PropertyHeld)` on every non-`none` mode: a
-break that fails to actually break anything surfaces as XPASS, not a
-silent pass.
+`xfail(strict=True)` on every non-`none` mode, `raises=` looked up per
+mode: a break that fails to actually break anything surfaces as XPASS,
+not a silent pass.
 
-`raises=_PropertyHeld` (issue #336, counter-model review on #266):
-`raises=AssertionError` was passed here originally - too WIDE, since
-every assertion in this file, setup and property alike, raised that
-same base type, so a break mode that died of an unrelated infra failure
-(an exec helper's own transport error, a real daemon flake) would also
-satisfy the marker and be counted as the expected red for the wrong
-reason. `_PropertyHeld` is a dedicated exception, confirmed NOT an
-`AssertionError` subclass, raised ONLY by the property checks via a
-`_require()` helper - property 1 (`concurrent_reply["exit_code"] == 0`)
-and property 2 (`gate_pid_alive is False`, `kill_run.stop_confirmed is
-True`, and the primary-unaffected checks `primary_result[0].reason`/
-`exit_code`/`counter_after > counter_before`), each asserted
-UNCONDITIONALLY and IDENTICALLY across every mode where it applies,
-never branched to check "the break occurred" instead of "the real
-property held" (audited: this file was already unbranched this way, so
-no XPASS-by-construction fix was needed, only the exception type).
-Every other check (handle/channel preconditions, `concurrent_reply`/
-`kill_reply`'s own `reason` sanity checks, the thread having joined)
-stays a plain `assert`.
+`raises=` a PER-PROPERTY `_PropertyHeld` subtype, not one shared type
+(issue #341, counter-model review on #336's own fix): `raises=
+AssertionError` was passed here originally (too WIDE - every
+assertion, setup and property alike, raised that same base type); #336
+narrowed it to one shared `_PropertyHeld`, which closed that gap but
+opened a different one - a NEIGHBORING property's own failure, within
+the SAME break-mode run, could also satisfy the marker, since every
+property shared one type. Fixed by giving each its own subtype -
+`_ConcurrentAccessPropertyHeld` (property 1: `concurrent_reply
+["exit_code"] == 0`) and, for property 2, `_KillConfirmationPropertyHeld`
+(`gate_pid_alive is False`, `kill_run.stop_confirmed is True` - targeted
+by BOTH `stale-confirm-lie` and `kill-wrong-pid`) plus
+`_PrimaryUnaffectedPropertyHeld` (the primary-unaffected checks
+`primary_result[0].reason`/`exit_code`/`counter_after > counter_before` -
+`kill-wrong-pid`'s own additional observable). `kill-wrong-pid`'s own
+`xfail` accepts a TUPLE of both property-2 subtypes, since either is a
+genuine violation for that mode (`_EXPECTED_PROPERTY_EXCEPTION`). Each
+check is still asserted UNCONDITIONALLY and IDENTICALLY across every
+mode where it applies, never branched to check "the break occurred"
+instead of "the real property held" (audited: this file was already
+unbranched this way, so no XPASS-by-construction fix was ever needed,
+only the exception granularity). Every other check (handle/channel
+preconditions, `concurrent_reply`/`kill_reply`'s own `reason` sanity
+checks, the thread having joined) stays a plain `assert`.
 
 KNOWN LIMITATION, unverified against a real daemon: this classification
 assumes each break's real symptom surfaces through the property checks
@@ -150,24 +155,65 @@ if BREAK_MODE not in _VALID_BREAK_MODES:
 
 
 class _PropertyHeld(Exception):
-    """Raised when the ONE property a given `BREAK_MODE` is supposed to
-    violate still held (issue #336, same pattern as skillc#266's
-    counter-model-review fix, commit 2c9c638). The only exception type
-    the `xfail` marker below matches - never bare `AssertionError` - so
-    an unrelated infra/setup failure raises plain `AssertionError`
-    instead and is reported as an ordinary hard FAILURE, never masked as
-    "the break worked"."""
+    """Shared base for every property-specific exception below (issue
+    #341: one subtype per independently-targeted property, so a
+    NEIGHBORING property's own failure cannot satisfy a break mode's own
+    `xfail(raises=...)` - counter-model review on #336's own fix, which
+    gave every property in this file the same single type). Never
+    raised directly."""
 
 
-def _require(condition: bool, message: str) -> None:
+class _ConcurrentAccessPropertyHeld(_PropertyHeld):
+    """Property 1's own targeted property: a gate reaches the SAME live
+    container the primary subject is running in. `gate-in-fresh-
+    container`'s own target."""
+
+
+class _KillConfirmationPropertyHeld(_PropertyHeld):
+    """Property 2's own targeted property: a timed-out gate's real
+    in-container process is genuinely killed and independently
+    confirmed. Targeted by BOTH `stale-confirm-lie` (the confirmation
+    step lies) and `kill-wrong-pid` (the kill lands on the wrong
+    process, so the gate's own pid survives) - the file's own prior
+    comments already establish both as violations of this ONE property,
+    not two different ones."""
+
+
+class _PrimaryUnaffectedPropertyHeld(_PropertyHeld):
+    """Property 2's own secondary observable, specific to `kill-wrong-
+    pid`: a kill that hit the PRIMARY instead of the gate must be
+    visible there too (the primary's own exit/counter). Code order means
+    `_KillConfirmationPropertyHeld` fires first in practice for this
+    mode, but `kill-wrong-pid`'s own `xfail` accepts a TUPLE of both -
+    see `_EXPECTED_PROPERTY_EXCEPTION` - matching the file's own stated
+    intent that either observable legitimately catches this mode."""
+
+
+#: Issue #341: which subtype (or tuple of subtypes) a given `BREAK_MODE`
+#: is expected to raise - looked up by the `xfail` marker below instead
+#: of a single static type. `kill-wrong-pid` names a TUPLE: its own
+#: discriminating checks span two properties (the kill-confirmation
+#: checks and the primary-unaffected checks), and either is a genuine
+#: violation for this mode. `.get(BREAK_MODE, _PropertyHeld)` is
+#: irrelevant for `none` (the marker's `condition` is `False` there).
+_EXPECTED_PROPERTY_EXCEPTION: dict[str, type[Exception] | tuple[type[Exception], ...]] = {
+    "gate-in-fresh-container": _ConcurrentAccessPropertyHeld,
+    "stale-confirm-lie": _KillConfirmationPropertyHeld,
+    "kill-wrong-pid": (_KillConfirmationPropertyHeld, _PrimaryUnaffectedPropertyHeld),
+}
+
+
+def _require(condition: bool, message: str, exc_type: type[Exception] = _PropertyHeld) -> None:
     """The property under test for the current `BREAK_MODE` - asserted
     UNCONDITIONALLY, identically for `none` and every applicable break
-    mode, never branched by `BREAK_MODE`. Confirmed directly, no pytest
-    or Docker needed: `_require(True, ...)` returns; `_require(False,
-    ...)` raises `_PropertyHeld`, which is not a subclass of
-    `AssertionError`."""
+    mode, never branched by `BREAK_MODE`. `exc_type` names WHICH
+    property this particular check is (issue #341) - defaults to the
+    shared base, which no real call site should still be using.
+    Confirmed directly, no pytest or Docker needed: `_require(True,
+    ...)` returns; `_require(False, ...)` raises `exc_type`, which is
+    always a subclass of `_PropertyHeld`, never of `AssertionError`."""
     if not condition:
-        raise _PropertyHeld(message)
+        raise exc_type(message)
 
 
 _DOCKER_BIN_PRESENT = shutil.which("docker") is not None
@@ -359,7 +405,8 @@ def _run_gate_over_socket(socket_path: Path, gate: str) -> Mapping[str, object]:
 
 
 @pytest.mark.xfail(
-    condition=BREAK_MODE != "none", strict=True, raises=_PropertyHeld,
+    condition=BREAK_MODE != "none", strict=True,
+    raises=_EXPECTED_PROPERTY_EXCEPTION.get(BREAK_MODE, _PropertyHeld),
     reason=f"SKILLC_GATE_WITNESS_LIVE_BREAK={BREAK_MODE} deliberately breaks one property",
 )
 def test_the_gate_witness_round_trips_correctly_against_a_real_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -471,6 +518,7 @@ def test_the_gate_witness_round_trips_correctly_against_a_real_daemon(monkeypatc
         _require(
             concurrent_reply["exit_code"] == 0,
             "the gate could not see the primary's own marker in its live container",
+            _ConcurrentAccessPropertyHeld,
         )
 
         # Case (b): a TERM-ignoring gate past its timeout, forcing the
@@ -518,6 +566,7 @@ def test_the_gate_witness_round_trips_correctly_against_a_real_daemon(monkeypatc
             "the gate's own real process must have been genuinely killed and "
             "independently confirmed dead by the test's own kill -0, never "
             "merely by trusting the witness's self-report",
+            _KillConfirmationPropertyHeld,
         )
         # Per codex:code_review finding 4: checked on every intact run
         # too, not only stale-confirm-lie - an implementation that kills
@@ -525,15 +574,23 @@ def test_the_gate_witness_round_trips_correctly_against_a_real_daemon(monkeypatc
         _require(
             kill_run.stop_confirmed is True,
             "the witness's own record must agree that the kill was confirmed",
+            _KillConfirmationPropertyHeld,
         )
 
     _require(
         bool(primary_result) and primary_result[0].reason == "exited",
         "the primary subject did not exit cleanly",
+        _PrimaryUnaffectedPropertyHeld,
     )
-    _require(primary_result[0].exit_code == 0, "the primary subject's own exit code was not 0")
+    _require(
+        primary_result[0].exit_code == 0, "the primary subject's own exit code was not 0",
+        _PrimaryUnaffectedPropertyHeld,
+    )
     # Per orchestrator review C3: monotonic progress across the kill-
     # timeout gate's own bracketed window, never an exact count (flakes
     # on a loaded VM). kill-wrong-pid must fail HERE too: a kill that hit
     # the primary instead of the gate stops its counter from advancing.
-    _require(counter_after > counter_before, f"no progress: counter stayed at {counter_before}")
+    _require(
+        counter_after > counter_before, f"no progress: counter stayed at {counter_before}",
+        _PrimaryUnaffectedPropertyHeld,
+    )

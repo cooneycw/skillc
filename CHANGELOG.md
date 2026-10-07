@@ -183,6 +183,47 @@ and version plan.
   "Trials have no network" prose is what's stale, noted on the Nit
   Store (skillc#20), not fixed here (pre-existing text, not authored on
   this branch).
+
+- **One `_PropertyHeld` exception SUBTYPE per independently-targeted
+  property, across all four live-Docker tests** (Refs #341, #336, #332,
+  #266). Counter-model review on #336's own fix found that a single
+  shared `_PropertyHeld` closed the infra-vs-property gap but left a
+  property-vs-property one open: within one break-mode run, a
+  NEIGHBORING property's own failure (raising the SAME shared type)
+  could also satisfy that mode's `xfail(raises=...)` marker, so a
+  control could pass without ever showing the targeted property's own
+  check fired.
+  - Each file gains its own sibling subtypes (never one a subclass of
+    another) and a `_require()` that takes WHICH subtype to raise;
+    each `xfail` marker's `raises=` is now looked up per `BREAK_MODE`
+    (`_EXPECTED_PROPERTY_EXCEPTION`) instead of one static type:
+    - `tests/test_decide_reply_channel_live.py`: `_ConnectivityPropertyHeld`
+      (`omit-mount`), `_UidPropertyHeld` (`wrong-uid`),
+      `_DecisionPropertyHeld` (`flip-decision`).
+    - `tests/test_gate_witness_live.py`: `_ConcurrentAccessPropertyHeld`
+      (`gate-in-fresh-container`), `_KillConfirmationPropertyHeld`
+      (`stale-confirm-lie`) and `_PrimaryUnaffectedPropertyHeld` (the
+      primary-unaffected checks) - `kill-wrong-pid` accepts a TUPLE of
+      the latter two, since the file's own prior comments already treat
+      both as genuine violations of that one mode.
+    - `tests/test_gate_overlay_live.py`: `_ForwardingPropertyHeld`
+      (`synthesizes-output`/`drops-cwd`/`wrong-env` - three mechanisms,
+      one targeted check) and `_ChannelFailurePropertyHeld`
+      (`exits-zero-on-channel-failure`).
+    - `tests/test_profile_install_cold_container_live.py`:
+      `_MountEmptinessPropertyHeld` (all four mount-family modes) and
+      `_OfflineSyncPropertyHeld` (`cold-cache`).
+  - `tests/test_property_held_xfail_pattern.py` gains the committed
+    negative control for the mechanism itself: two sibling subtypes
+    under pytest's real `pytester` fixture prove a neighboring
+    property's own subtype does NOT satisfy a marker naming a different,
+    specific sibling (hard FAILED, never XFAILED) - and a mutation check
+    proves widening that marker back to the shared base (the #336-era
+    shape) brings the bug back, both inner tests wrongly XFAILing.
+  - `tests/test_trial_image_build_live.py` has no break-mode machinery
+    at all and needed no change; `#343`'s trial-image-tools test and
+    `#334`'s closure test are being built with per-property subtypes
+    from the start and are out of this PR's scope.
 - **`install()`/`export()` gain a `root` parameter; the gate-witness
   overlay gets two, with a candidate-write verification** (Refs #332,
   #334). #334's profile-closure delivery installs the real `flow-
