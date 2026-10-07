@@ -143,6 +143,29 @@ def test_evaluate_command_probe_missing_version_output_is_unknown() -> None:
     assert result["status"] == "unknown"
 
 
+def test_red_case_a_matching_version_from_a_failed_command_is_unknown_not_satisfied() -> None:
+    """Counter-model review (codex `gpt-6.1-sol`, #334): a version command
+    that PRINTS a matching version string but EXITS NONZERO must not be
+    read as a confirmed version check - the text could be anything (a
+    usage error, a crash) when the command itself reports failure.
+    Mutation check: the pre-fix `CommandProbeOutcome` had no
+    `version_exit_code` field at all, so this exact input - identical to
+    the "meets constraint" case except for the exit code - was
+    indistinguishable from a genuine success and reported `satisfied`."""
+    outcome = p.CommandProbeOutcome(present=True, version_output="foo 3.12.3\n", version_exit_code=1)
+    result = p.evaluate_command_probe({"name": "foo", "constraint": ">=3.10"}, outcome)
+    assert result["status"] == "unknown"
+
+
+def test_evaluate_command_probe_meets_constraint_with_a_confirmed_zero_exit() -> None:
+    """Positive control beside the red case above: a matching version
+    AND a confirmed exit 0 is still satisfied - the fix narrows what
+    counts as confirmed, it does not make the check stricter overall."""
+    outcome = p.CommandProbeOutcome(present=True, version_output="foo 3.12.3\n", version_exit_code=0)
+    result = p.evaluate_command_probe({"name": "foo", "constraint": ">=3.10"}, outcome)
+    assert result == {"status": "satisfied", "version": "3.12.3"}
+
+
 def test_evaluate_python_import_probe() -> None:
     assert p.evaluate_python_import_probe(
         {"modules": ["pydantic"]}, p.PythonImportProbeOutcome(succeeded=True),
@@ -245,3 +268,20 @@ def test_gather_python_import_probe_host_uv_project_dir_must_exist(tmp_path: Pat
     outcome = p._gather_python_import_probe_host({"modules": ["json"], "uv_project": "nope"}, tmp_path)
     assert outcome.succeeded is False
     assert "not installed" in outcome.error
+
+
+def test_gather_command_probe_host_captures_a_real_nonzero_exit(tmp_path: Path) -> None:
+    """Counter-model review (codex `gpt-6.1-sol`, #334): a REAL executable
+    (not a synthetic outcome) that prints a matching version string and
+    exits 1 - `_gather_command_probe_host` must capture that exit code,
+    never discard it, so `evaluate_command_probe` can refuse to certify
+    a version check the command itself reported failing."""
+    script = tmp_path / "fake-tool"
+    script.write_text("#!/bin/sh\necho 'fake-tool 9.9.9'\nexit 1\n", encoding="utf-8")
+    script.chmod(0o755)
+    probe = {"name": str(script), "constraint": ">=1.0", "version_args": ["--version"]}
+    outcome = p._gather_command_probe_host(probe)
+    assert outcome.present is True
+    assert outcome.version_exit_code == 1
+    result = p.evaluate_command_probe(probe, outcome)
+    assert result["status"] == "unknown"

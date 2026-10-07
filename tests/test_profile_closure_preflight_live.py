@@ -80,16 +80,21 @@ unrelated failure.
   given - both `agent_trial.HomeFileVerificationRefused` (preflight) and
   `gate_overlay.OverlayRefused` (the overlay's own independent digest
   re-check) are the SAME property from this test's outside view: "could
-  the attempt proceed to running the agent at all". Checked
-  UNCONDITIONALLY, identically, in every mode: `_require(not refused,
-  ...)`. The INPUT varies by mode (a complete closure for `none`; one
-  file omitted for `missing-closure`; one file's bytes corrupted for
-  `tampered-closure`) - never the assertion itself, which stays "no
-  refusal" in every mode (counter-model review doctrine, matching
-  #340's own `mounts == []`/`sync.returncode == 0` shape): for `none`
-  the input is correct, so the assertion naturally holds; for the other
-  two, `_preflight_in_container` itself already refuses on the broken
-  digest before the overlay is ever reached, which
+  the attempt proceed to running the agent at all". The INPUT varies by
+  mode (a complete closure for `none`; one file omitted for `missing-
+  closure`; one file's bytes corrupted for `tampered-closure`) - for
+  `none` the check stays the plain "no refusal", matching #340's own
+  `mounts == []`/`sync.returncode == 0` shape. For the two break modes
+  the check additionally requires the refusal to NAME `_TARGET_RELPATH`
+  and its own documented symptom ("was not read back" / "disagrees with
+  the expected") - counter-model review (codex `gpt-6.1-sol`) caught
+  that a bare "was it refused at all" check cannot tell this mode's own
+  targeted file check firing apart from an UNRELATED refusal (e.g.
+  today's own missing-uv/make tool failure, pending #343) - exactly the
+  "a neighbour changed" collapse #341's design exists to rule out. This
+  still never branches to expect a different BOOLEAN outcome from the
+  input construction above; it tightens what counts as "the refusal" to
+  the one each mode's own input actually targets, which
   `xfail(strict=True, raises=_PreflightVerdictPropertyHeld)` then
   credits as the mode's own evidence.
 - `_GateReachesRealRunnerPropertyHeld`: once the pipeline accepts the
@@ -349,14 +354,35 @@ def test_a_treated_attempts_closure_is_verified_and_the_gate_reaches_the_real_ru
             refused = True
             refusal_reason = str(exc)
 
-        # THE REAL ORACLE for property 1, asserted UNCONDITIONALLY - the
-        # SAME check in every mode. It holds for `none` (a correct
-        # closure is never refused, and the overlay's own independent
-        # digest re-check agrees) and fails naturally for the other two
-        # (a genuinely broken closure IS refused, before the overlay is
-        # ever reached) - never branched to expect a different outcome
-        # by mode.
-        _require(_PreflightVerdictPropertyHeld, not refused, f"the attempt was refused: {refusal_reason}")
+        # THE REAL ORACLE for property 1. `none` keeps the plain "not
+        # refused" shape (a correct closure is never refused, and the
+        # overlay's own independent digest re-check agrees). The two
+        # break modes additionally require the refusal to NAME
+        # `_TARGET_RELPATH` and its own documented symptom - counter-
+        # model review (codex `gpt-6.1-sol`): without this, an UNRELATED
+        # refusal (today's own missing-uv/make tool failure pending
+        # #343, say) would be wrongly credited as evidence that THIS
+        # mode's own targeted file check fired, exactly the "a neighbour
+        # changed" failure #341 exists to rule out. This still never
+        # branches to expect a different BOOLEAN outcome from the input
+        # construction above - it tightens what counts as "the
+        # refusal" to the one each mode's own input actually targets.
+        if BREAK_MODE == "missing-closure":
+            _require(
+                _PreflightVerdictPropertyHeld,
+                refused and _TARGET_RELPATH in refusal_reason and "was not read back" in refusal_reason,
+                f"expected a refusal naming {_TARGET_RELPATH!r} as missing, not: refused={refused} "
+                f"reason={refusal_reason!r}",
+            )
+        elif BREAK_MODE == "tampered-closure":
+            _require(
+                _PreflightVerdictPropertyHeld,
+                refused and _TARGET_RELPATH in refusal_reason and "disagrees with the expected" in refusal_reason,
+                f"expected a refusal naming {_TARGET_RELPATH!r} as digest-mismatched, not: refused={refused} "
+                f"reason={refusal_reason!r}",
+            )
+        else:
+            _require(_PreflightVerdictPropertyHeld, not refused, f"the attempt was refused: {refusal_reason}")
 
         # Property 2 is only reachable once property 1 holds - #334's own
         # constraint is that a refused attempt never runs at all, so

@@ -1520,10 +1520,20 @@ class CommandProbeOutcome:
     """What actually happened when a `command` probe's claim was checked -
     gathered differently by each caller (a host `subprocess.run` for
     `_check_tool`, a container `exec_in_attempt` for a live attempt's
-    preflight), evaluated identically by `evaluate_command_probe`."""
+    preflight), evaluated identically by `evaluate_command_probe`.
+
+    `version_exit_code` (counter-model review, codex `gpt-6.1-sol`, #334):
+    the version command's OWN exit status, captured separately from
+    `version_output` - a command that prints a matching version string
+    but exits nonzero must not be read as a confirmed version check: the
+    text could be anything (a usage error, a crash traceback that happens
+    to mention a number) when the command itself reports failure.
+    `None` only when no version command ever ran (no constraint to
+    check, or the command was never found at all)."""
 
     present: bool
     version_output: str | None = None
+    version_exit_code: int | None = None
 
 
 @dataclass(frozen=True)
@@ -1544,6 +1554,10 @@ def evaluate_command_probe(probe: Mapping[str, Any], outcome: CommandProbeOutcom
     constraint = probe.get("constraint")
     if constraint is None:
         return {"status": "satisfied"}
+    if outcome.version_exit_code not in (0, None):
+        return {"status": "unknown",
+                "reason": f"command {name!r}: version command exited {outcome.version_exit_code}, "
+                          f"not a confirmed version check"}
     if outcome.version_output is None:
         return {"status": "unknown", "reason": f"command {name!r}: no version output captured"}
     match = re.search(r"\b(\d+(?:\.\d+)+)\b", outcome.version_output)
@@ -1598,8 +1612,10 @@ def _gather_command_probe_host(probe: Mapping[str, Any]) -> CommandProbeOutcome:
     version_args = probe.get("version_args") or ["--version"]
     try:
         run = subprocess.run([executable, *version_args], capture_output=True, timeout=10, check=False)
-        return CommandProbeOutcome(present=True, version_output=(run.stdout + run.stderr).decode(
-            "utf-8", errors="replace"))
+        return CommandProbeOutcome(
+            present=True, version_output=(run.stdout + run.stderr).decode("utf-8", errors="replace"),
+            version_exit_code=run.returncode,
+        )
     except (OSError, subprocess.TimeoutExpired):
         return CommandProbeOutcome(present=True, version_output=None)
 

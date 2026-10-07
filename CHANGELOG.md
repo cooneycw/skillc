@@ -40,6 +40,47 @@ and version plan.
   - This changes the trial image's identity: no digest is approved for
     a live #287 attempt yet, and this PR does not claim one.
 
+- **Counter-model review fixes on #334's branch (codex `gpt-6.1-sol`,
+  diff-only)** - two real findings, fixed:
+  1. **A command probe's version check ignored the version command's
+     own exit code.** Both `profile._gather_command_probe_host` (host)
+     and `agent_trial`'s in-container preflight script discarded the
+     version command's return code entirely, so an executable that
+     printed a matching version string and exited nonzero was reported
+     `satisfied` - the text could be anything (a usage error, a crash)
+     when the command itself reports failure. `CommandProbeOutcome`
+     gains `version_exit_code: int | None`; `evaluate_command_probe`
+     reports `unknown` (never `satisfied`) when it is anything but `0`
+     or `None`. The in-container wire format gains the exit code
+     (`PRESENT:<rc>:<version text>`), captured in its own statement
+     immediately after the version command, never after a `head`
+     pipeline (which would report `head`'s own exit status, always 0).
+     Red case, both layers: a real fixture executable that prints a
+     matching version and exits 1 (`tests/test_profile_probes.py`); the
+     same shape through the in-container wire format
+     (`tests/test_agent_trial_preflight.py`).
+  2. **The real-Docker live test's two break modes credited ANY
+     refusal**, not specifically the one each mode's own broken input
+     targets - an unrelated refusal (e.g. today's own missing-uv/make
+     tool failure, pending #343) would be wrongly credited as evidence
+     that the targeted missing-file/digest-mismatch check fired, the
+     exact "a neighbour changed" collapse issue #341's per-property
+     subtypes exist to rule out. `missing-closure`/`tampered-closure`
+     now additionally require the refusal to NAME `_TARGET_RELPATH` and
+     its own documented symptom; `none` keeps the plain "no refusal"
+     shape. Verified directly (no Docker needed) by simulating both an
+     unrelated-refusal input and the targeted-refusal input against the
+     tightened check in isolation.
+  A third finding (`verify_home_files`/`preflight_tools`/`gate_entrypoint`
+  never reach a real calibration attempt - no production caller threads
+  them from `Treatment` into `agent_trial.run_one_attempt`) is real but
+  architectural; filed separately as #346, not fixed here. A fourth
+  (network-enabled preflight in the live test) was investigated and
+  disagreed with: `network="bridge"` matches the real agent container's
+  own network policy (owner ruling, issue #11) - the profile's own
+  "Trials have no network" prose is what's stale, noted on the Nit
+  Store (skillc#20), not fixed here (pre-existing text, not authored on
+  this branch).
 - **`install()`/`export()` gain a `root` parameter; the gate-witness
   overlay gets two, with a candidate-write verification** (Refs #332,
   #334). #334's profile-closure delivery installs the real `flow-

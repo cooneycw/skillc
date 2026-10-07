@@ -385,10 +385,20 @@ def _preflight_in_container(
             name = str(probe["name"])
             version_args = probe.get("version_args") or ["--version"]
             quoted_args = " ".join(shlex.quote(a) for a in version_args)
+            # Counter-model review (codex gpt-6.1-sol, #334): `$?` is
+            # captured IMMEDIATELY after the version command itself, in a
+            # separate statement - never after piping its output through
+            # `head`, which would report `head`'s own exit status instead
+            # (always 0) and silently let a nonzero-exiting command that
+            # happens to print a matching version string pass as
+            # "satisfied". The exit code rides in the wire format
+            # (`PRESENT:<rc>:<version text>`) so `evaluate_command_probe`
+            # can refuse to certify a version it never confirmed.
             script_lines.append(
                 f'if command -v {shlex.quote(name)} >/dev/null 2>&1; then '
-                f'v=$({shlex.quote(name)} {quoted_args} 2>&1 | head -1); '
-                f'printf "PROBE:{idx}:PRESENT:%s\\n" "$v"; '
+                f'out=$({shlex.quote(name)} {quoted_args} 2>&1); rc=$?; '
+                f'v=$(printf "%s" "$out" | head -1); '
+                f'printf "PROBE:{idx}:PRESENT:%s:%s\\n" "$rc" "$v"; '
                 f'else printf "PROBE:{idx}:ABSENT\\n"; fi'
             )
         elif kind == "python-import":
@@ -503,9 +513,14 @@ def _preflight_in_container(
         if probe.get("kind") == "command":
             if probe_detail is None or probe_detail == "ABSENT":
                 command_outcome = profile.CommandProbeOutcome(present=False)
+            elif probe_detail.startswith("PRESENT:"):
+                rc_str, _, version_output = probe_detail[len("PRESENT:"):].partition(":")
+                command_outcome = profile.CommandProbeOutcome(
+                    present=True, version_output=version_output,
+                    version_exit_code=int(rc_str) if rc_str.isdigit() else None,
+                )
             else:
-                version_output = probe_detail.split("PRESENT:", 1)[1] if probe_detail.startswith("PRESENT:") else None
-                command_outcome = profile.CommandProbeOutcome(present=True, version_output=version_output)
+                command_outcome = profile.CommandProbeOutcome(present=True, version_output=None)
             results_by_dep[dep_key].append(profile.evaluate_command_probe(probe, command_outcome))
         else:
             succeeded = probe_detail == "IMPORT_OK"

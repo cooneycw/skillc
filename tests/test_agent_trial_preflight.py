@@ -92,7 +92,7 @@ def test_a_matching_digest_and_satisfied_command_probe_pass() -> None:
     observations = (
         f"{digest}  /home/candidate/.claude/scripts/flow-finish-gate.sh\n"
         f"{at._TOOLS_MARKER}\n"
-        "PROBE:0:PRESENT:Python 3.12.3\n"
+        "PROBE:0:PRESENT:0:Python 3.12.3\n"
     )
     backend: Any = _StubBackend(observations=observations)
     at._preflight_in_container(
@@ -111,7 +111,7 @@ def test_a_matching_digest_and_satisfied_command_probe_pass() -> None:
 
 
 def test_a_command_probe_with_no_constraint_only_checks_presence() -> None:
-    observations = f"{at._TOOLS_MARKER}\nPROBE:0:PRESENT:\n"
+    observations = f"{at._TOOLS_MARKER}\nPROBE:0:PRESENT:0:\n"
     backend: Any = _StubBackend(observations=observations)
     at._preflight_in_container(backend, object(), LIMITS, {}, [_command_tool("tool-make", name="make")])
 
@@ -164,7 +164,21 @@ def test_red_case_a_missing_command_is_refused() -> None:
 
 
 def test_red_case_a_command_below_the_version_constraint_is_refused() -> None:
-    observations = f"{at._TOOLS_MARKER}\nPROBE:0:PRESENT:Python 3.8.0\n"
+    observations = f"{at._TOOLS_MARKER}\nPROBE:0:PRESENT:0:Python 3.8.0\n"
+    backend: Any = _StubBackend(observations=observations)
+    with pytest.raises(at.HomeFileVerificationRefused, match="not satisfied"):
+        at._preflight_in_container(
+            backend, object(), LIMITS, {}, [_command_tool("tool-python", name="python3", constraint=">=3.10")],
+        )
+
+
+def test_red_case_a_matching_version_from_a_nonzero_exit_in_container_is_refused() -> None:
+    """Counter-model review (codex `gpt-6.1-sol`, #334): the in-container
+    wire format carries the version command's own exit code
+    (`PRESENT:<rc>:<version>`) - a matching version string reported
+    alongside a nonzero exit must be refused, exactly like the host-side
+    case, never silently treated as a confirmed version check."""
+    observations = f"{at._TOOLS_MARKER}\nPROBE:0:PRESENT:1:Python 3.12.3\n"
     backend: Any = _StubBackend(observations=observations)
     with pytest.raises(at.HomeFileVerificationRefused, match="not satisfied"):
         at._preflight_in_container(
@@ -206,7 +220,7 @@ def test_one_combined_exec_regardless_of_how_many_files_or_tools() -> None:
     observations = (
         f"{digest}  /home/candidate/a\n{digest}  /home/candidate/b\n{digest}  /home/candidate/c\n"
         f"{at._TOOLS_MARKER}\n"
-        "PROBE:0:PRESENT:\nPROBE:1:IMPORT_OK\n"
+        "PROBE:0:PRESENT:0:\nPROBE:1:IMPORT_OK\n"
     )
     backend: Any = _StubBackend(observations=observations)
     at._preflight_in_container(
@@ -224,7 +238,7 @@ def test_residue_beyond_the_known_observations_file_is_also_removed() -> None:
     left behind that this module does not specifically know the name of
     (e.g. `exec_in_attempt()`'s own `.skillc-exec-pid-<uuid>` marker) is
     removed too, never just `observations`."""
-    observations = f"{at._TOOLS_MARKER}\nPROBE:0:PRESENT:\n"
+    observations = f"{at._TOOLS_MARKER}\nPROBE:0:PRESENT:0:\n"
     backend: Any = _StubBackend(
         observations=observations,
         post_exec_extra_files={".skillc-exec-pid-deadbeef": b"12345\n"},
@@ -256,7 +270,7 @@ def test_red_case_a_preexisting_file_disappearing_is_refused() -> None:
                 (dest / "observations").write_text(self.observations, encoding="utf-8")
 
     backend: Any = _DeletingBackend(
-        observations=f"{at._TOOLS_MARKER}\nPROBE:0:PRESENT:\n", baseline_files={"task/README.md": b"hello\n"},
+        observations=f"{at._TOOLS_MARKER}\nPROBE:0:PRESENT:0:\n", baseline_files={"task/README.md": b"hello\n"},
     )
     with pytest.raises(at.HomeFileVerificationRefused, match="unexpectedly removed"):
         at._preflight_in_container(backend, object(), LIMITS, {}, [_command_tool("tool-make", name="make")])
@@ -276,7 +290,7 @@ def test_red_case_a_preexisting_file_being_modified_is_refused() -> None:
                 (dest / "task" / "README.md").write_bytes(b"tampered\n")
 
     backend: Any = _MutatingBackend(
-        observations=f"{at._TOOLS_MARKER}\nPROBE:0:PRESENT:\n", baseline_files=first_export,
+        observations=f"{at._TOOLS_MARKER}\nPROBE:0:PRESENT:0:\n", baseline_files=first_export,
     )
     with pytest.raises(at.HomeFileVerificationRefused, match="unexpectedly modified"):
         at._preflight_in_container(backend, object(), LIMITS, {}, [_command_tool("tool-make", name="make")])
