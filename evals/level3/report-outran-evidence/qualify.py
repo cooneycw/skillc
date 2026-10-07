@@ -246,12 +246,20 @@ class _WitnessBackend:
     through `decide()`/`finalize()` - the same shape
     `tests/test_gate_witness.py`'s own `_FakeBackend` uses, and the same
     helper `gate-stops-early`'s and `claims-outran-evidence`'s own
-    `qualify.py` already define."""
+    `qualify.py` already define.
+
+    `cwd`/`env` were added to the real `ExecutionBackend.exec_in_attempt()`
+    Protocol for #269's gate-execution witness itself - this double went
+    stale against its own Protocol until this fix, crashing with
+    `TypeError` on every `request=True` call the moment `GateWitness`
+    started passing `cwd` through `_decide_run_gate()`. Same fix, same
+    root cause, as the other two tasks' own copies (#270)."""
 
     result: ExecuteResult
 
     def exec_in_attempt(self, handle: object, argv: list, limits: Limits,
-                        cancel: object = None, stdin: object = None) -> ExecuteResult:
+                        cancel: object = None, stdin: object = None,
+                        cwd: object = None, env: object = None) -> ExecuteResult:
         return self.result
 
     def export(self, handle: object, dest: Path) -> None:
