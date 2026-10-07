@@ -187,6 +187,25 @@ and version plan.
   change needed. All 11 equivalence cases (6 `_execution_observed` + 5
   `_last_run_is_fresh`) now run and pass.
 
+- **`build_treatment` installs the profile closure (Refs #334, in
+  progress)** - `calibration_run.build_treatment(acquired, subject_profile=,
+  root=)` now merges `skillc.profile.installed_home_files`'s output
+  (built from `acquired.repo`, never a second acquisition) into the
+  treatment's home files, gated behind three refusals before any
+  container exists: `verify_repo_matches_skills(..., revision_check=
+  "required")`; the live inventory (re-`validate()`d against the
+  acquired checkout at the subject's declared pin) must digest-match the
+  committed `evidence/inventory.json` at `subject_profile`, or the
+  profile is stale against the current subject source; and the
+  closure's destinations must not DISAGREE with the skill surface's
+  (an overlap that agrees byte-for-byte is expected - a validated
+  profile's own closure covers the selected skill's files too - only a
+  genuine content disagreement refuses). End-to-end tested with a real
+  git checkout (`tests/test_calibration_run_profile_closure.py`,
+  `needs_git`), the same pattern every other git-mode test in this repo
+  uses. The tool preflight (declared `tool`-kind dependencies checked
+  inside the live container) and the `before_execute` wiring are still
+  owed.
 - **`subject.profile` opt-in field + approval binding (Refs #334, in
   progress)** - a treated arm's subject may name a validated profile
   (e.g. `evals/subjects/cpp-codex-flow-check-ea6dbfa`) to have its

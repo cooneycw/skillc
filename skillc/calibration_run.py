@@ -66,7 +66,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import agent_trial, calibration, demo, trial, verify
+from . import agent_trial, calibration, demo, profile, trial, verify
 from . import collection_conformance as cc
 from . import matched_pilot as mp
 
@@ -102,21 +102,91 @@ class Treatment:
     receipt_context: agent_trial.InstallationReceiptContext | None
 
 
+def _closure_home_files(acquired: cc.AcquiredCollection, subject_profile: str, root: Path) -> dict[str, bytes]:
+    """skillc#334: the validated profile's dependency closure, built from
+    the SAME checkout the skills came from (`acquired.repo`), not a
+    second acquisition - see `AcquiredCollection.repo`'s own docstring.
+
+    Three refusals, all before any container exists:
+    1. `verify_repo_matches_skills` (required mode - a live attempt must
+       always be able to prove its checkout's identity).
+    2. The LIVE inventory (re-`validate()`d against `acquired.repo` at
+       the subject's own declared pin) must digest-match the COMMITTED
+       `evidence/inventory.json` at `subject_profile` - the profile is
+       stale against the current subject source otherwise, and `#334`'s
+       whole point is to install the closure that was actually validated,
+       never one assumed still accurate.
+    3. The closure's own destinations must not collide with the skill
+       surface's - the two delivery paths share one container home.
+    """
+    cc.verify_repo_matches_skills(acquired, revision_check="required")
+    if acquired.repo is None:
+        raise CalibrationRefused("subject.profile is named but no full checkout was acquired")
+    prof = profile.Profile.load(root / subject_profile / "profile.json")
+    tree = profile.GitTree(acquired.repo, acquired.subject.revision)
+    inventory = profile.validate(prof, tree)
+    inventory_path = root / subject_profile / "evidence" / "inventory.json"
+    try:
+        committed = json.loads(inventory_path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise CalibrationRefused(f"subject.profile {subject_profile!r} names no readable "
+                                 f"evidence/inventory.json: {exc}") from exc
+    live_digest, committed_digest = profile.inventory_digest(inventory), profile.inventory_digest(committed)
+    if live_digest != committed_digest:
+        raise CalibrationRefused(
+            f"profile {subject_profile!r}'s live inventory (validated against the acquired checkout at "
+            f"{acquired.subject.revision}) digests to {live_digest!r}, not the committed "
+            f"{committed_digest!r} at {inventory_path} - the profile is stale against the current "
+            f"subject source and must be re-declared before this closure can be installed"
+        )
+    return profile.installed_home_files(inventory, tree)
+
+
 def build_treatment(
     acquired: cc.AcquiredCollection, *, listing_client_argv: Sequence[str] | None = None,
+    subject_profile: str | None = None, root: Path | None = None,
 ) -> Treatment:
     """The treatment arm from an acquisition, built exactly as
     `run_collection_agent_attempt` builds its own - the same home files, the
     same receipt context - so the calibration treatment IS a collection-run
     install. A subject whose selection is empty installs nothing: refused,
-    since the arms would then not differ at all."""
+    since the arms would then not differ at all.
+
+    `subject_profile` (#334) names a validated profile (repo-relative path
+    to its `profile.json`, as `calibration.py`'s `subject.profile` opt-in
+    field declares it) whose dependency closure joins the skill surface in
+    ONE merged home-files mapping - never a second delivery mechanism.
+    `root` is the skillc checkout root the profile path resolves against;
+    required together with `subject_profile`, meaningless alone."""
     if not acquired.files:
         raise CalibrationRefused(
             f"subject {acquired.subject.locator!r} selects no skill; a treatment arm that installs "
             "nothing is a second baseline"
         )
+    if (subject_profile is None) != (root is None):
+        raise CalibrationRefused("subject_profile and root must be given together, or not at all")
+    home_files: dict[str, bytes] = dict(cc._collection_home_files(acquired.source, acquired.files))
+    if subject_profile is not None:
+        assert root is not None
+        closure_files = _closure_home_files(acquired, subject_profile, root)
+        # A validated profile's own closure covers the selected skill's
+        # bundled files too (profile.py installs skills AND dependencies
+        # together) - so an overlap with the skill surface is EXPECTED,
+        # not an error, as long as the two paths agree byte-for-byte
+        # (which `verify_repo_matches_skills`, already run inside
+        # `_closure_home_files`, is what makes that a safe assumption
+        # rather than a hope). Only a genuine DISAGREEMENT - the two
+        # paths naming different bytes for the same destination - is
+        # refused: that would mean the acquisition and the profile
+        # validation drifted apart despite the consistency check.
+        disagreeing = sorted(k for k in set(closure_files) & set(home_files) if closure_files[k] != home_files[k])
+        if disagreeing:
+            raise CalibrationRefused(
+                f"profile {subject_profile!r}'s closure disagrees with the skill surface at: {disagreeing}"
+            )
+        home_files.update(closure_files)
     return Treatment(
-        home_files=cc._collection_home_files(acquired.source, acquired.files),
+        home_files=home_files,
         digest=acquired.source.digest,
         receipt_context=agent_trial.InstallationReceiptContext(
             declared=frozenset(f.skill for f in acquired.files),
