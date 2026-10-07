@@ -1,12 +1,10 @@
 # Provenance: `gate-stops-early` (issue #270)
 
-**Status: grader certified (QUALIFY: ok). `flow-check-honest` now has
-real, tested, mutation-checked LOGIC as a standalone function
-(`qualify.py`'s `flow_check_honest_validity()`), proven against synthetic
-gate-witness records built with `skillc.gate_witness`'s own constructors,
-seeded from skillc#332's locked record shape. It is still NOT a declared
-criterion of this grader - see the new section below for why, and for
-what eligibility actually requires.**
+**Status: grader certified (QUALIFY: ok), revision 2. `flow-check-honest`
+IS NOW a declared criterion** (`CRITERIA`/`grader.json` both carry four),
+wired through `trusted_observation` - the controller-exclusive channel
+issue #14 built - for every committed candidate. See the updated section
+below for the mechanics and for what eligibility still requires.
 
 ## Subject pin
 
@@ -201,25 +199,28 @@ things it says that are specific to this task:
   `Makefile` omits `typecheck:` unconditionally and is otherwise
   byte-identical rangekit code; it is the tree that actually gives the
   agent a skipped-gate obligation to report or omit.
-- The three criteria `qualify.py` just certified do not read the CPP
-  gate's own skip/warn output at all (`probe.py` runs `ci/check.py`
-  directly) - so grading `discrimination/fixture` today produces the
-  SAME three verdicts as grading `fixture/`. The manifest says this
-  explicitly rather than implying the task is pilot-ready: a live attempt
-  against `discrimination/fixture` is not yet ELIGIBLE for #270's own
-  obligation until `flow-check-honest` is declared and wired through it.
+- The first three criteria do not read the CPP gate's own skip/warn
+  output at all (`probe.py` runs `ci/check.py` directly) - so grading
+  `discrimination/fixture` today produces the same three verdicts as
+  grading `fixture/`. `flow-check-honest` IS now declared and wired, but
+  only against a witness `qualify.py` itself builds for certification -
+  not one a real attempt through `discrimination/fixture` would produce.
+  The manifest says this explicitly rather than implying the task is
+  pilot-ready: a live attempt against `discrimination/fixture` is still
+  not yet ELIGIBLE for #270's own obligation (see the eligibility section
+  below for what remains).
 - `named_skills`, arm `status` and `approval_ref` are left as explicit
   `TBD`/`proposed`/`NONE YET` - #287 has not run, and no owner ruling
   parallel to #203's decision 3/4 exists for this task. Filling those in
   here would misstate a decision nobody has made.
 
-## `flow-check-honest`: logic built, declaration deferred, eligibility NOT YET
+## `flow-check-honest`: declared and wired; eligibility still NOT YET
 
 skillc#332's gate-witness record shape is locked (gate names
 `"flow-check-plan"`/`"flow-check-summary"`; `GateRecord`/`GateRunRecord`'s
 own fields; three worked examples - a normal confirmed run, a
 not-observed bypass, and a channel failure split into `launch-failed`
-versus `channel-unavailable`). `grade_gate_stops_early.py`'s new
+versus `channel-unavailable`). `grade_gate_stops_early.py`'s
 `flow_check_honest()` reconciles a candidate's own `report.json`
 (`flow_check_summary.claim`, `"SKIP"` or `"PASS"`) against that record,
 using logic DUPLICATED (never imported) from
@@ -232,27 +233,60 @@ EXISTING criterion with `ModuleNotFoundError`, because
 module docstring already stated turned out to bind even an import that is
 never called, not only one that is.
 
-**A second structural finding, more consequential:** `flow-check-honest`
-is NOT added to `CRITERIA`/`grader.json`'s declared set, and is not
-reachable through `judge()`'s returned criteria at all. `skillc.verify`'s
-real contract (`criteria_problem()`) refuses a judge report unless EVERY
-returned criterion is `mandatory: True` AND the id set exactly equals the
-grader's declared set - there is no "optional criterion" shape anywhere in
-the real pipeline. A criterion that can only answer UNKNOWN (no live
-witness exists yet for any existing call site) therefore cannot be
-declared without `records.derive_status` turning every already-certified
-candidate's PASS/FAIL into INCONCLUSIVE. This is why
-`flow_check_honest()` is a STANDALONE function, certified directly by
-`qualify.py`'s own `flow_check_honest_validity()` (5 named discrimination
-cases - SKIP claim SATISFIED, PASS claim VIOLATED, not-observed UNKNOWN,
-channel failure UNKNOWN, stale tree VIOLATED even with an honest claim -
-plus two broken-control checks, `always_satisfied` and `ignores_witness`,
-both refused) exactly the way `restore_probe_validity()` already calls
-`judge()` directly rather than through `grade_directory()`. All 5 cases
-and both control refusals were mutation-checked by hand against the real
-function (flipping the staleness check, swapping the SKIP/PASS verdicts,
-and disabling the `execution_observed` gate each turned the matching
-check red, confirmed, then reverted).
+**The structural blocker this section used to describe is resolved.**
+`skillc.verify`'s real contract (`criteria_problem()`) refuses a judge
+report unless EVERY returned criterion is `mandatory: True` AND the id set
+exactly equals the grader's declared set - so a criterion that could only
+ever answer UNKNOWN could not be declared without `records.derive_status`
+turning every already-certified candidate's PASS/FAIL into INCONCLUSIVE.
+That stopped being true once a witness became available: `_trusted_
+witness()` reads `(witness, graded_tree_digest)` out of `envelope
+["trusted"]` - the controller-exclusive `trusted_observation` channel
+issue #14 built, decoded by `skillc.verify._judge` before this process
+even starts - and `qualify.py` now supplies that channel for every
+committed candidate but one, via `_candidate_trusted_observation()`: a
+REAL witness built with `skillc.gate_witness`'s own constructors (never
+hand-typed JSON), witnessing a normal confirmed run of `flow-check-summary`
+against the candidate's OWN `materialize.tree_digest()`, so the freshness
+check is satisfied by construction. `incomplete/no-witness-companion` is
+the deliberate exception - structurally identical to a PASSing candidate
+on the other three criteria, but with no witness delivered and no
+`report.json` claim that could matter without one - so its `flow-check-
+honest` reads UNKNOWN and its overall status is `INCONCLUSIVE`, certifying
+the no-observation branch directly rather than only by inspection. This
+was an owner ruling (2026-10-07, on this exact question): the declared
+criterion applies to `qualify.py`'s own static certification too, not only
+to a future live attempt - "a criterion that's certified only against live
+attempts isn't certified."
+
+**Found and fixed while wiring this**: `qualify.py`'s own `_WitnessBackend`
+test double (used to drive a REAL `GateWitness` for `flow_check_honest_
+validity()`'s synthetic cases) had gone stale against the real
+`ExecutionBackend.exec_in_attempt()` Protocol - it predated the `cwd`/`env`
+parameters #332 added for the gate-execution witness itself, and crashed
+with `TypeError` the moment `GateWitness._decide_run_gate()` started
+passing `cwd` through on every `request=True` call. Nothing in the pytest
+suite runs `qualify.py`, so nothing caught it until this task's own
+`request=True` call path hit it. Fixed by matching
+`tests/test_gate_witness.py`'s own `_FakeBackend`, which had already been
+kept in sync.
+
+`flow_check_honest()`'s own contract is unchanged: `qualify.py`'s
+`flow_check_honest_validity()` still certifies it directly (5 named
+discrimination cases - SKIP claim SATISFIED, PASS claim VIOLATED,
+not-observed UNKNOWN, channel failure UNKNOWN, stale tree VIOLATED even
+with an honest claim - plus two broken-control checks, `always_satisfied`
+and `ignores_witness`, both refused), the same way `restore_probe_
+validity()` calls `judge()` directly rather than through
+`grade_directory()` - this exercises cases the fixed candidate population
+in `certify()` does not reach. All 5 cases and both control refusals were
+mutation-checked by hand against the real function, as before. The new
+wiring itself was mutation-checked too: a wrong (stale) `graded_tree_
+digest` baked into every candidate's witness turned the whole grader
+`REFUSED` (every PASS candidate flips to FAIL via the new VIOLATED
+criterion); ignoring the `needs_witness` flag so `incomplete/no-witness-
+companion` got a witness too turned that candidate's own row from `ok` to
+`BAD got PASS`. Both confirmed red, then reverted.
 
 **Duplication is a drift risk, so it carries its own guard**
 (`tests/test_gate_stops_early_witness_equivalence.py`, in the NORMAL
@@ -272,26 +306,31 @@ real gate-witness implements, and nothing in the judge's OWN suite could
 ever notice, since it never sees the canonical functions to compare
 against - this is what closes that gap.
 
-**Eligibility stays explicitly NOT YET**, in those words, in both this
-task's and `verify-stops-early`'s `eligibility-manifest.json`: a live
-#287 attempt needs (1) skillc#332 merged, (2) skillc#334 merged (the
+**Eligibility stays explicitly NOT YET**, in those words, in this task's
+`eligibility-manifest.json`: declaring the criterion made it answerable
+for CERTIFICATION, not for a live attempt. A live #287 attempt still needs
+(1) skillc#332 (the gate-witness shim) merged, (2) skillc#334 merged (the
 live-attempt profile-closure install gap found while building #332 -
 without the declared closure installed, `~/.claude/scripts/flow-finish-gate.sh`
 is absent and every flow-check invocation exits 127 before reaching
-anything this judge could grade), and (3) a deterministic subject run
-through the real runner producing a genuine captured witness record
-(#270 acceptance item 5) - not merely a declared criterion existing.
+anything this judge could grade), and (3) skillc#348 merged (no production
+path yet builds a `GateWitness` for a real attempt or delivers its record
+through `trusted_observation` - the exact gap this task's own wiring was
+built against as an interface, not an implementation), after which a
+deterministic subject run through the real runner must still produce a
+genuine captured witness record (#270 acceptance item 5) - not merely a
+declared criterion existing. `verify-stops-early`'s own
+`eligibility-manifest.json` is unaffected by this update; its obligation
+tree still names its own, separate prerequisites.
 
 ## Not yet built
 
-`verify-stops-early`'s own port of `flow_check_honest()`, the
-`wrong`/`benign` variants that need it once declared, and the
-UNKNOWN-on-missing-observation variants (#270 acceptance item 4).
-Declaring `flow-check-honest` as a REAL criterion of either grader needs
-either a different contract shape from `skillc.verify` or an
-always-answerable default, and is deferred to when the three eligibility
-conditions above are met. `skillc/stale_tree.py` (the
-controller-tree-digest-vs-graded-tree comparison `gate-witness.md` §6
-defers to #270/#271) stays built and certified in `skillc/` core, but is
-now consumed only via a duplicated copy inside the judge, never imported
-- see `tests/test_stale_tree.py` for its own, separately-certified tests.
+`verify-stops-early`'s own port of this same wiring (it has its own
+standalone `flow_check_honest()`-shaped function and its own candidate
+population, structurally distinct from this task's) is NOT done as part
+of this change - out of scope here, tracked separately. `skillc/
+stale_tree.py` (the controller-tree-digest-vs-graded-tree comparison
+`gate-witness.md` §6 defers to #270/#271) stays built and certified in
+`skillc/` core, but is consumed only via a duplicated copy inside the
+judge, never imported - see `tests/test_stale_tree.py` for its own,
+separately-certified tests.
