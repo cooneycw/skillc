@@ -329,6 +329,42 @@ and version plan.
   #337 (`5f2c484`), and rebasing this branch picked it up with no code
   change needed. All 11 equivalence cases (6 `_execution_observed` + 5
   `_last_run_is_fresh`) now run and pass.
+- **Hardened the two already-merged live-Docker tests' break-mode
+  controls** (Refs #336, #183, #269, #266). `tests/test_decide_reply_
+  channel_live.py` and `tests/test_gate_witness_live.py` used
+  `xfail(strict=True, raises=AssertionError)` - too WIDE, since every
+  assertion in each file, setup and property alike, raised that same
+  base type, so an unrelated infra failure during a break run (a real
+  daemon flake, an unrelated setup assert) would also satisfy the
+  marker and be wrongly counted as the expected red. Adopted the same
+  `_PropertyHeld`/`_require()` pattern #332's `tests/test_gate_overlay_
+  live.py` already uses (itself from skillc#266's counter-model-review
+  fix, commit 2c9c638): a dedicated, non-`AssertionError` exception
+  raised ONLY by each file's own property checks, asserted
+  UNCONDITIONALLY and IDENTICALLY across every mode. Audited both files
+  for XPASS-by-construction FIRST - neither had it; every property
+  check was already unbranched by `BREAK_MODE`, so only the exception
+  type needed changing.
+  - `tests/test_property_held_xfail_pattern.py` (new): a committed
+    negative control, using pytest's `pytester` fixture to run a real,
+    separate inner pytest invocation and read its own reported
+    outcomes - never a throwaway script (orchestrator direction).
+    Proves the mechanism itself, not any one file's specific class:
+    (a) `xfail(raises=_PropertyHeld)` + raising `_PropertyHeld` ->
+    XFAILED; (b) the same marker + raising plain `AssertionError` ->
+    FAILED, never XFAILED; (c) the OLD, too-wide `raises=AssertionError`
+    + raising plain `AssertionError` -> XFAILED, the wrong pass - the
+    acceptance criterion's own named mutation, demonstrated directly.
+  - Confirmed directly in both edited files (no pytest/Docker):
+    `_PropertyHeld` is not an `AssertionError` subclass, `_require(True,
+    ...)` returns, `_require(False, ...)` raises it.
+  - Known limitation, documented in both files: this classification is
+    unverified against a real daemon. If a break's real symptom ever
+    surfaces through a plain-assert infra check instead of the property
+    checks named in each docstring, that break would report a hard
+    FAILED rather than the expected XFAILED - the loud direction, never
+    a silent pass, but worth knowing before reading such a result as
+    "the mechanism broke."
 
 - **Real-Docker evidence for the installed-closure proof (Refs #334, in
   progress)** - `tests/test_profile_closure_preflight_live.py`, the sixth

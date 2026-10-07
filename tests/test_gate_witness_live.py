@@ -31,14 +31,37 @@ comment that follows it):
 
 ONE TEST FUNCTION, SKILLC_GATE_WITNESS_LIVE_BREAK SELECTS THE MODE - same
 shape as `test_decide_reply_channel_live.py`'s `SKILLC_LIVE_TEST_BREAK`.
-`xfail(strict=True, raises=AssertionError)` on every non-`none` mode: a
+`xfail(strict=True, raises=_PropertyHeld)` on every non-`none` mode: a
 break that fails to actually break anything surfaces as XPASS, not a
-silent pass, and a break that dies of some OTHER exception (an exec
-helper's own transport error, say) is a hard FAILURE rather than an
-accidental XFAIL - every assertion in this file, including the helper
-functions' own internal `assert`s, is a plain `AssertionError`, verified
-by reading the code rather than by running this file (#315 follow-up,
-orchestrator review).
+silent pass.
+
+`raises=_PropertyHeld` (issue #336, counter-model review on #266):
+`raises=AssertionError` was passed here originally - too WIDE, since
+every assertion in this file, setup and property alike, raised that
+same base type, so a break mode that died of an unrelated infra failure
+(an exec helper's own transport error, a real daemon flake) would also
+satisfy the marker and be counted as the expected red for the wrong
+reason. `_PropertyHeld` is a dedicated exception, confirmed NOT an
+`AssertionError` subclass, raised ONLY by the property checks via a
+`_require()` helper - property 1 (`concurrent_reply["exit_code"] == 0`)
+and property 2 (`gate_pid_alive is False`, `kill_run.stop_confirmed is
+True`, and the primary-unaffected checks `primary_result[0].reason`/
+`exit_code`/`counter_after > counter_before`), each asserted
+UNCONDITIONALLY and IDENTICALLY across every mode where it applies,
+never branched to check "the break occurred" instead of "the real
+property held" (audited: this file was already unbranched this way, so
+no XPASS-by-construction fix was needed, only the exception type).
+Every other check (handle/channel preconditions, `concurrent_reply`/
+`kill_reply`'s own `reason` sanity checks, the thread having joined)
+stays a plain `assert`.
+
+KNOWN LIMITATION, unverified against a real daemon: this classification
+assumes each break's real symptom surfaces through the property checks
+named above, never through one of the plain-assert infra checks. If a
+real run ever shows otherwise, that break would report a hard FAILED
+rather than the expected XFAILED - the loud direction, never a silent
+pass, but worth knowing before reading such a result as "the mechanism
+broke."
 
     none               (default) BOTH intact cases pass:
                         (a) a concurrent gate that exits on its own;
@@ -124,6 +147,28 @@ PRIMARY_DURATION_SECONDS = 12
 
 if BREAK_MODE not in _VALID_BREAK_MODES:
     raise RuntimeError(f"SKILLC_GATE_WITNESS_LIVE_BREAK={BREAK_MODE!r} must be one of {_VALID_BREAK_MODES}")
+
+
+class _PropertyHeld(Exception):
+    """Raised when the ONE property a given `BREAK_MODE` is supposed to
+    violate still held (issue #336, same pattern as skillc#266's
+    counter-model-review fix, commit 2c9c638). The only exception type
+    the `xfail` marker below matches - never bare `AssertionError` - so
+    an unrelated infra/setup failure raises plain `AssertionError`
+    instead and is reported as an ordinary hard FAILURE, never masked as
+    "the break worked"."""
+
+
+def _require(condition: bool, message: str) -> None:
+    """The property under test for the current `BREAK_MODE` - asserted
+    UNCONDITIONALLY, identically for `none` and every applicable break
+    mode, never branched by `BREAK_MODE`. Confirmed directly, no pytest
+    or Docker needed: `_require(True, ...)` returns; `_require(False,
+    ...)` raises `_PropertyHeld`, which is not a subclass of
+    `AssertionError`."""
+    if not condition:
+        raise _PropertyHeld(message)
+
 
 _DOCKER_BIN_PRESENT = shutil.which("docker") is not None
 pytestmark = [
@@ -314,7 +359,7 @@ def _run_gate_over_socket(socket_path: Path, gate: str) -> Mapping[str, object]:
 
 
 @pytest.mark.xfail(
-    condition=BREAK_MODE != "none", strict=True, raises=AssertionError,
+    condition=BREAK_MODE != "none", strict=True, raises=_PropertyHeld,
     reason=f"SKILLC_GATE_WITNESS_LIVE_BREAK={BREAK_MODE} deliberately breaks one property",
 )
 def test_the_gate_witness_round_trips_correctly_against_a_real_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -423,8 +468,9 @@ def test_the_gate_witness_round_trips_correctly_against_a_real_daemon(monkeypatc
         # gate that actually reached the primary's live container can
         # satisfy it - gate-in-fresh-container must fail exactly here,
         # not at a pre-approved alternate expected value.
-        assert concurrent_reply["exit_code"] == 0, (
-            "the gate could not see the primary's own marker in its live container"
+        _require(
+            concurrent_reply["exit_code"] == 0,
+            "the gate could not see the primary's own marker in its live container",
         )
 
         # Case (b): a TERM-ignoring gate past its timeout, forcing the
@@ -467,22 +513,27 @@ def test_the_gate_witness_round_trips_correctly_against_a_real_daemon(monkeypatc
     # the primary, leaving the gate's own pid genuinely untouched) - both
     # are real violations of the same property, not two different ones.
     if BREAK_MODE != "gate-in-fresh-container":
-        assert gate_pid_alive is False, (
+        _require(
+            gate_pid_alive is False,
             "the gate's own real process must have been genuinely killed and "
             "independently confirmed dead by the test's own kill -0, never "
-            "merely by trusting the witness's self-report"
+            "merely by trusting the witness's self-report",
         )
         # Per codex:code_review finding 4: checked on every intact run
         # too, not only stale-confirm-lie - an implementation that kills
         # correctly but misreports this must also fail here.
-        assert kill_run.stop_confirmed is True, (
-            "the witness's own record must agree that the kill was confirmed"
+        _require(
+            kill_run.stop_confirmed is True,
+            "the witness's own record must agree that the kill was confirmed",
         )
 
-    assert primary_result and primary_result[0].reason == "exited"
-    assert primary_result[0].exit_code == 0
+    _require(
+        bool(primary_result) and primary_result[0].reason == "exited",
+        "the primary subject did not exit cleanly",
+    )
+    _require(primary_result[0].exit_code == 0, "the primary subject's own exit code was not 0")
     # Per orchestrator review C3: monotonic progress across the kill-
     # timeout gate's own bracketed window, never an exact count (flakes
     # on a loaded VM). kill-wrong-pid must fail HERE too: a kill that hit
     # the primary instead of the gate stops its counter from advancing.
-    assert counter_after > counter_before
+    _require(counter_after > counter_before, f"no progress: counter stayed at {counter_before}")
