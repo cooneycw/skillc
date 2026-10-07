@@ -35,44 +35,64 @@ not a silent pass.
 
 `_PropertyHeld` is a DEDICATED exception, NOT an `AssertionError`
 subclass (counter-model review on #266, adopted here per orchestrator
-direction, 2026-10-06): the two forwarding-fidelity checks (exit code,
-byte-identical stdout) are asserted via a `_require()` helper that
-raises it, UNCONDITIONALLY and IDENTICALLY in every mode - never
-branched by `BREAK_MODE` to check "the break occurred" instead of "the
-real property held," which would XPASS by construction. Every other
-check in this file (the driver process completing, the result marker
-being readable) stays a plain `assert` (base `AssertionError`), which
-the `xfail` marker does NOT match - so an unrelated infra failure (a
-Docker flake during a break run) is reported as an ordinary hard
-FAILURE, never masked as "the break worked." An earlier draft of this
-file used `raises=AssertionError` for everything, which could not tell
-the two apart.
+direction, 2026-10-06): both properties below are asserted via a
+`_require()` helper that raises it, UNCONDITIONALLY and IDENTICALLY in
+every mode - never branched by `BREAK_MODE` to check "the break
+occurred" instead of "the real property held," which would XPASS by
+construction. Every other check in this file (the driver process
+completing, the result marker being readable) stays a plain `assert`
+(base `AssertionError`), which the `xfail` marker does NOT match - so an
+unrelated infra failure (a Docker flake during a break run) is reported
+as an ordinary hard FAILURE, never masked as "the break worked." An
+earlier draft of this file used `raises=AssertionError` for everything,
+which could not tell the two apart.
+
+TWO INDEPENDENT PROPERTIES, both forced identically in EVERY mode
+(counter-model review): (1) forwarding fidelity - both prescribed
+invocations, over a REACHABLE channel, forward byte-identical stdout
+and exit code; (2) a genuinely UNREACHABLE channel (`SKILLC_TRIGGER_
+SOCKET` pointed at a path that cannot exist, forced in every mode, not
+only `exits-zero-on-channel-failure`) must make the shim report exit 125
+- never something else. An earlier draft forced the channel-unreachable
+condition only inside `exits-zero-on-channel-failure` and compared
+against the NORMAL-forwarding expected exit code, so the check could
+not tell "the shim's own bug fired" apart from "the forced outage alone
+would have failed this comparison regardless" - fixed by making
+property (2) its own unconditional check, run identically whether or not
+BREAK_MODE targets it, so only that mode's own shim mutation can make it
+fail.
 
     none                        (default) both prescribed invocations
                                  (`--plan check --evidence flow-check` and
                                  `--check-summary`) forward byte-identical
-                                 stdout, exit code and cwd.
+                                 stdout and exit code; the unreachable-
+                                 channel check also reports exit 125.
     synthesizes-output          the shim never asks the channel at all -
                                  it fabricates a fixed "ok" line and exits
                                  0 regardless of which gate was invoked.
+                                 Caught by property (1).
     drops-cwd                   the shim forwards a FIXED cwd
                                  (`CONTAINER_WORKSPACE`) instead of its own
                                  `os.getcwd()` - still inside the declared
                                  workspace root, so the controller's own
                                  confinement accepts it; only the WRONG
-                                 value forwarded is the defect.
+                                 value forwarded is the defect. Caught by
+                                 property (1).
     exits-zero-on-channel-failure
                                  every one of the shim's own `return
                                  EXIT_CHANNEL_FAILURE` paths is replaced
-                                 with `return 0`, and the driver points
-                                 `SKILLC_TRIGGER_SOCKET` at a path that
-                                 cannot exist so a real channel failure is
-                                 actually forced, never merely implied.
+                                 with `return 0`. Invisible to property
+                                 (1) - the mutation only touches FAILURE
+                                 paths, so with a reachable channel this
+                                 variant forwards normally - and caught
+                                 instead by property (2), which forces the
+                                 one condition that exercises it.
     wrong-env                   the shim is untouched; the WITNESS is
                                  constructed with an empty `declared_env`,
                                  so the real exec carries whatever ambient
                                  HOME the container's default exec
                                  environment has, not the declared one.
+                                 Caught by property (1).
 
 Every container this file starts is removed in a `finally`.
 
@@ -108,6 +128,12 @@ _VALID_BREAK_MODES = ("none", "synthesizes-output", "drops-cwd", "exits-zero-on-
 if BREAK_MODE not in _VALID_BREAK_MODES:
     raise RuntimeError(f"SKILLC_GATE_SHIM_LIVE_BREAK={BREAK_MODE!r} must be one of {_VALID_BREAK_MODES}")
 
+#: Mirrors `docker/trial/flow-check-gate-shim.py`'s own `EXIT_CHANNEL_
+#: FAILURE` - duplicated rather than imported, since the shim is a
+#: standalone staged script read as bytes (`_REAL_SHIM_SOURCE`), never a
+#: package module this test can import.
+_SHIM_EXIT_CHANNEL_FAILURE = 125
+
 _DOCKER_BIN_PRESENT = shutil.which("docker") is not None
 pytestmark = [
     pytest.mark.real_docker,
@@ -142,7 +168,13 @@ _REAL_SHIM_SOURCE = (
 #: be unlike anything a bare `python:3.12-slim` exec would carry by
 #: default (typically `/root`), so `wrong-env` cannot coincidentally pass.
 _DECLARED_HOME = "/opt/declared-test-home"
-_DECLARED_ENV = {"HOME": _DECLARED_HOME, "PATH": "/usr/bin:/bin"}
+#: `/usr/local/bin` is load-bearing (counter-model review finding): the
+#: `python:3.12-slim` image installs `python3` there, never in `/usr/bin`
+#: or `/bin`, and `exec_in_attempt()`'s env-pinning is a FULL replacement
+#: (`env -i`), not an addition - a declared PATH that omits it makes the
+#: bare `python3` in every declared gate argv unresolvable, so even the
+#: INTACT (`none`) run would fail to launch the gate at all.
+_DECLARED_ENV = {"HOME": _DECLARED_HOME, "PATH": "/usr/local/bin:/usr/bin:/bin"}
 
 
 def _digest(data: bytes) -> str:
@@ -395,18 +427,20 @@ def test_the_shim_forwards_the_controllers_real_result_against_a_real_daemon() -
         )
         witness_holder.append(witness)
 
-        shim_env_override = (
-            {"SKILLC_TRIGGER_SOCKET": "/does/not/exist/trigger.sock"}
-            if BREAK_MODE == "exits-zero-on-channel-failure"
-            else None
-        )
-
+        # Property 1: forwarding fidelity. The channel is always reachable
+        # here - `exits-zero-on-channel-failure`'s shim mutation only
+        # touches its FAILURE paths, so with a reachable channel it
+        # forwards normally, same as the real shim, and is caught instead
+        # by the channel-failure property below (counter-model review:
+        # forcing the outage here would have made this check indistinguishable
+        # from a forced-failure artifact for every mode, never proof the
+        # mutation itself mattered).
         for gate, argv_tail, result_name in (
             ("flow-check-plan", ["--plan", "check", "--evidence", "flow-check"], "result-plan.json"),
             ("flow-check-summary", ["--check-summary"], "result-summary.json"),
         ):
             result_path = f"{d.CONTAINER_WORKSPACE}/{result_name}"
-            driver_src = _driver_script(result_path, shim_env_override)
+            driver_src = _driver_script(result_path, None)
             driver_outcome = backend.execute(
                 handle, ["python3", "-c", driver_src, *argv_tail], Limits(timeout=30.0),
             )
@@ -421,5 +455,29 @@ def test_the_shim_forwards_the_controllers_real_result_against_a_real_daemon() -
                 result["stdout"] == _expected_output(argv_tail, _DECLARED_HOME),
                 f"{gate}: the shim's forwarded stdout was not byte-identical to the controller's real result",
             )
+
+        # Property 2: a genuinely unreachable channel. Forced UNCONDITIONALLY
+        # in every mode, not only `exits-zero-on-channel-failure` (counter-
+        # model review) - this is what makes it a discriminator: under every
+        # OTHER mode the shim in play (real, or broken in some OTHER way)
+        # still reaches this path correctly and must still report
+        # `_SHIM_EXIT_CHANNEL_FAILURE`, so only `exits-zero-on-channel-
+        # failure`'s own mutation can make this specific check fail.
+        channel_failure_result_path = f"{d.CONTAINER_WORKSPACE}/result-channel-failure.json"
+        channel_failure_driver_src = _driver_script(
+            channel_failure_result_path, {"SKILLC_TRIGGER_SOCKET": "/does/not/exist/trigger.sock"},
+        )
+        channel_failure_outcome = backend.execute(
+            handle,
+            ["python3", "-c", channel_failure_driver_src, "--plan", "check", "--evidence", "flow-check"],
+            Limits(timeout=30.0),
+        )
+        assert channel_failure_outcome.reason == "exited", "the driver process itself never completed for the channel-failure check"
+        channel_failure_result = _read_result_via_exec(backend, handle, channel_failure_result_path)
+        _require(
+            channel_failure_result["exit_code"] == _SHIM_EXIT_CHANNEL_FAILURE,
+            "a genuinely unreachable channel must make the shim report exit "
+            f"{_SHIM_EXIT_CHANNEL_FAILURE}, never something else",
+        )
     finally:
         backend.destroy(handle)

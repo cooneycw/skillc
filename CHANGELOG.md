@@ -138,9 +138,31 @@ and version plan.
     ordinary hard FAILURE, never credited as the break working.
     Confirmed directly (no pytest/Docker): `_PropertyHeld` is not an
     `AssertionError` subclass, `_require(True, ...)` returns, and
-    `_require(False, ...)` raises it. Mutation-checked by construction:
-    each of the four `gateshim:` break modes is a deliberately-broken
-    shim variant (three)
+    `_require(False, ...)` raises it.
+  - Two more counter-model review findings, fixed before the PR opened.
+    (1) `_DECLARED_ENV`'s `PATH` omitted `/usr/local/bin`, where
+    `python:3.12-slim` actually installs `python3` - under
+    `exec_in_attempt()`'s full-replacement env-pinning this made even
+    the intact run fail to launch the gate at all; fixed by including
+    it. (2) The channel-failure break mode forced its outage only inside
+    `exits-zero-on-channel-failure` and compared against the NORMAL-
+    forwarding expected exit code, so the check could not tell "the
+    shim's own bug fired" from "the forced outage alone would fail this
+    regardless" - a real shim given the same forced outage legitimately
+    returns 125, not the forwarded value, so every mode would have
+    looked identical. Fixed by splitting it into its own property,
+    forced identically in EVERY mode (only `exits-zero-on-channel-
+    failure`'s mutation can still fail it, since that mutation is
+    otherwise invisible to normal forwarding - it only touches FAILURE
+    paths).
+  - A third finding (realpath-then-exec TOCTOU in `GateWitness._confine_
+    requested_cwd`: the in-container directory a resolved `cwd` names
+    could in principle be replaced with a symlink between confinement
+    and the later `docker exec -w`) is real but architectural, not a
+    quick fix - filed as its own issue rather than patched into #332
+    under time pressure; see that issue for detail.
+  - Mutation-checked by construction: each of the four `gateshim:` break
+    modes is a deliberately-broken shim variant (three)
     or an emptied `declared_env` (`wrong-env`, the fourth) run through
     this same test, and is asserted to fail exactly the property it
     names; no daemon is reachable in this environment to execute it
