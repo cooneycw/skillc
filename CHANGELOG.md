@@ -8,6 +8,32 @@ and version plan.
 
 ## [Unreleased]
 
+- **Replace every private mailbox-message citation in #334's own files with
+  durable phrasing** (Refs #334, #100). `tests/test_private_citations.py`
+  (issue #100's own CI guard) refused 50 citations of the form "mailbox
+  NNNN" across CHANGELOG.md, PROFILE.md, four `skillc/` modules and nine
+  test files - comments and docstrings written during #334's development
+  that cited internal fleet mailbox message numbers, none of which resolve
+  to anything outside the fleet that produced this repository. Replaced
+  with the durable attribution the guard's own docstring asks for (an issue
+  number, "the orchestrator's ruling/correction", "counter-model review")
+  or dropped where the citation added nothing the surrounding prose didn't
+  already say. Also updated `tests/test_profile_closure_preflight_live.py`'s
+  "known failure" note, written before #343 merged: `none` mode is now
+  *expected* to be accepted and reach the real runner (not refused for
+  missing `uv`/`make`), though this has not yet been exercised against a
+  real Docker daemon.
+
+- **#334's own live test builds the trial image's `trial` target explicitly**
+  (Refs #334, #343). `docker/trial/Dockerfile` gained a `no-uv`/`trial` stage
+  split in #343, with `trial` declared last - so an unqualified `docker build`
+  (no `--target`) happens to still produce the working image today, but only
+  because of declaration order, not because anything asserts it.
+  `tests/test_profile_closure_preflight_live.py::_build_trial_image` now
+  passes `--target trial`, matching `test_trial_image_tools_live.py`'s own
+  explicit-target convention, so this test's claim is pinned to the
+  production stage rather than to whichever stage is currently last.
+
 - **The trial image pins `uv` and installs `make`/`bash` explicitly; a
   fifth real-Docker break family proves the pin is what makes the uv
   probe work** (Refs #343). `cpp-codex-flow-check-ea6dbfa/profile.json`
@@ -40,6 +66,66 @@ and version plan.
   - This changes the trial image's identity: no digest is approved for
     a live #287 attempt yet, and this PR does not claim one.
 
+- **A treated calibration attempt actually installs the profile closure
+  (Refs #334)** - the orchestrator's correction to the
+  counter-model review's finding 1: this is #334's own outcome ("a
+  treated attempt installs the profile's declared closure"), not
+  architectural follow-up - without it, no real attempt receives the
+  closure and exit 127 is never actually fixed, only built. Scoped to
+  skillc's own path: `collection_conformance.run_level1_agent_attempt`
+  gains `verify_home_files`/`preflight_tools`/`gate_entrypoint`
+  (all `None`/empty by default, so every existing caller - including the
+  fenced `uptake_study.run_study`, #346, owned by its outside session -
+  is unaffected), forwarded to `agent_trial.run_one_attempt`.
+  `calibration_run.run_calibration`'s own `run_attempt` threads them
+  from the `Treatment` for the TREATED arm only, exactly the same
+  ternary shape `extra_home_files`/`receipt_context` already use - the
+  baseline arm passes none of them, never partially profile-opted.
+  Mutation-checked: `tests/test_calibration_run.py::test_run_
+  calibration_threads_closure_fields_for_the_treated_arm_only`,
+  confirmed to fail with `KeyError` on the pre-fix code (the three
+  kwargs not passed at all) before restoring the fix.
+- **Counter-model review fixes on #334's branch (codex `gpt-6.1-sol`,
+  diff-only)** - two real findings, fixed:
+  1. **A command probe's version check ignored the version command's
+     own exit code.** Both `profile._gather_command_probe_host` (host)
+     and `agent_trial`'s in-container preflight script discarded the
+     version command's return code entirely, so an executable that
+     printed a matching version string and exited nonzero was reported
+     `satisfied` - the text could be anything (a usage error, a crash)
+     when the command itself reports failure. `CommandProbeOutcome`
+     gains `version_exit_code: int | None`; `evaluate_command_probe`
+     reports `unknown` (never `satisfied`) when it is anything but `0`
+     or `None`. The in-container wire format gains the exit code
+     (`PRESENT:<rc>:<version text>`), captured in its own statement
+     immediately after the version command, never after a `head`
+     pipeline (which would report `head`'s own exit status, always 0).
+     Red case, both layers: a real fixture executable that prints a
+     matching version and exits 1 (`tests/test_profile_probes.py`); the
+     same shape through the in-container wire format
+     (`tests/test_agent_trial_preflight.py`).
+  2. **The real-Docker live test's two break modes credited ANY
+     refusal**, not specifically the one each mode's own broken input
+     targets - an unrelated refusal (e.g. today's own missing-uv/make
+     tool failure, pending #343) would be wrongly credited as evidence
+     that the targeted missing-file/digest-mismatch check fired, the
+     exact "a neighbour changed" collapse issue #341's per-property
+     subtypes exist to rule out. `missing-closure`/`tampered-closure`
+     now additionally require the refusal to NAME `_TARGET_RELPATH` and
+     its own documented symptom; `none` keeps the plain "no refusal"
+     shape. Verified directly (no Docker needed) by simulating both an
+     unrelated-refusal input and the targeted-refusal input against the
+     tightened check in isolation.
+  A third finding (`verify_home_files`/`preflight_tools`/`gate_entrypoint`
+  never reach a real calibration attempt - no production caller threads
+  them from `Treatment` into `agent_trial.run_one_attempt`) is real but
+  architectural; filed separately as #346, not fixed here. A fourth
+  (network-enabled preflight in the live test) was investigated and
+  disagreed with: `network="bridge"` matches the real agent container's
+  own network policy (owner ruling, issue #11) - the profile's own
+  "Trials have no network" prose is what's stale, noted on the Nit
+  Store (skillc#20), not fixed here (pre-existing text, not authored on
+  this branch).
 - **`install()`/`export()` gain a `root` parameter; the gate-witness
   overlay gets two, with a candidate-write verification** (Refs #332,
   #334). #334's profile-closure delivery installs the real `flow-
@@ -186,6 +272,246 @@ and version plan.
   #337 (`5f2c484`), and rebasing this branch picked it up with no code
   change needed. All 11 equivalence cases (6 `_execution_observed` + 5
   `_last_run_is_fresh`) now run and pass.
+
+- **Real-Docker evidence for the installed-closure proof (Refs #334, in
+  progress)** - `tests/test_profile_closure_preflight_live.py`, the sixth
+  entry in the real-Docker floor (`ci/check_real_docker_ran.py`) and a
+  new `closure` break family (`ci/real-docker/break-lib.sh`,
+  `missing-closure`/`tampered-closure`). Drives the REAL, unmodified
+  `agent_trial._preflight_in_container` against a real container built
+  from `docker/trial` - the SAME image every live attempt actually runs
+  in, not a dedicated test image (orchestrator ruling: #334's own
+  acceptance line, "reaches the real `lib.cicd` runner", is about
+  production). Two independent properties, each with its own
+  `_PropertyHeld` subtype from the start (#341's design, not retrofitted):
+  the preflight's accept/refuse decision, and (only once accepted)
+  whether `flow-finish-gate.sh` reaches the real runner. **Known,
+  documented, current limitation:** `docker/trial/Dockerfile` has no `uv`
+  or `make` yet, so the intact (`none`) mode correctly refuses today -
+  skillc#343 (filed this session, a separate issue, landing before #334)
+  adds both; this file's own `none` mode will pass once that merges, and
+  is not expected to pass before it. Written and reviewed without ever
+  running it against a real daemon (no `docker` binary in the
+  implementation environment), matching every other live test in this
+  repository.
+- **Tool dependencies declare explicit `probes` (Refs #334, in
+  progress)** - **found and fixed a pre-existing defect**: `profile.
+  _check_tool` (the `skillc profile install` CLI receipt's own tool
+  check) treated a dependency's `id` as a real executable name.
+  Confirmed on the real `cpp-codex-flow-check-ea6dbfa` profile: its four
+  tool ids (`tool-python`, `tool-uv`, `tool-pypi-runtime`, `tool-make-
+  git-bash`) are labels, not commands, so `_check_tool` has reported
+  every one of them `unknown`/`missing on PATH` since #265/#330 - on a
+  host that genuinely has python/uv/make/git/bash installed. The
+  `install()` receipt's `tools` field has never actually proven anything
+  for this profile.
+  - A tool-kind dependency now carries a `probes` list - a closed set
+    of checkable claims (`command`: a name plus an optional version
+    constraint, checked via `command -v` and a version-args capture;
+    `python-import`: module names that must import cleanly under the
+    interpreter the closure's runner uses - the only checkable claim for
+    a dependency supplied as PyPI packages, never a command at all). An
+    unknown probe kind is refused at `Profile.load` time.
+  - `profile.evaluate_command_probe`/`evaluate_python_import_probe`/
+    `aggregate_probe_results` are the ONE shared decision logic, used by
+    both `_check_tool` (host-side gathering, via `subprocess.run`) and
+    `agent_trial`'s new in-container preflight (container-side
+    gathering, via one combined `exec_in_attempt` + `export()`) - never
+    duplicated.
+  - A pre-#334 profile declaring no probes at all still validates and
+    installs (`_check_tool` reports `unknown`, `"no probes declared"` -
+    an honest status, not an error, so the historical record stays
+    readable). A profile-opted LIVE attempt is stricter: a tool
+    dependency with zero probes is refused outright, before any exec -
+    reporting unknown-and-continuing there would pass every attempt by
+    construction, the same blind instrument that let exit 127 through.
+  - `cpp-codex-flow-check-ea6dbfa`'s four tool dependencies gain real
+    probes (`python3`, `uv`, `pydantic`+`yaml` imports, and three command
+    probes for `make`/`git`/`bash`); its `evidence/inventory.json` is
+    regenerated against a real clone at the pinned revision, `diagnose`/
+    `validate` both still report 0 problems, and the inventory's digest
+    changes (recorded in the PR body, since nothing is approved against
+    it yet).
+- **Review fixes to the in-container tool preflight (Refs #334, in
+  progress)** - three corrections from orchestrator review of the
+  preflight/probes work below:
+  1. A `python-import` probe's `uv_project` field (new, optional,
+     home-relative) checks the import through the checkout's own `uv`
+     environment - `uv run --project <home>/<uv_project> python -c ...`,
+     `PYTHONPATH` prepended the same way - mirroring the real runner's
+     own invocation (`flow-finish-gate.sh`'s `PYTHONPATH="$CPP_DIR:
+     ${PYTHONPATH:-}" uv run --project "$CPP_DIR" python -m lib.cicd
+     ...`), never a bare `python3`/`sys.executable`, which checks the
+     wrong interpreter entirely: the trial image's or the host's own
+     system python can diverge from the checkout's isolated venv in
+     either direction. `cpp-codex-flow-check-ea6dbfa`'s `tool-pypi-
+     runtime` probe is updated to use it, and its evidence is
+     regenerated again. Both callers (`profile._check_tool`'s host-side
+     gathering and `agent_trial`'s in-container preflight) mirror the
+     same invocation shape. Red case, real and mutation-checked, not a
+     mock: a package importable by the interpreter running the test but
+     absent from a freshly created, dependency-less `uv` project's own
+     isolated venv is refused (`tests/test_profile_probes.py`).
+  2. The preflight exec's own write-back left a digest/probe report
+     sitting in the agent's workspace at `CONTAINER_WORKSPACE/
+     observations` - visible to the agent and the grader. Removed via
+     the new `DockerBackend.remove_file_in_attempt`, a bare `docker exec`
+     that bypasses `exec_in_attempt()`'s own write-back tail entirely
+     (mirroring `resolve_realpath_in_attempt`'s shape) - a second
+     `exec_in_attempt()` call cannot do this: its own empty stdout
+     recreates the file instead of removing it, confirmed directly in
+     `tests/test_docker_backend.py`. The observations-residue question
+     for `gate_witness.py`'s own write-back is noted on skillc#20 (Nit
+     Store), not fixed here.
+  3. The preflight now proves the whole workspace tree is
+     byte-identical before and after it runs, not only that
+     `observations` specifically is gone - covering any other residue
+     path, such as `exec_in_attempt()`'s own per-call
+     `.skillc-exec-pid-<uuid>` marker, which the SAME write-back tail
+     also leaves behind and which nothing previously cleaned up. A
+     content-hashed snapshot (`_workspace_snapshot`, via `export()`,
+     never via an exec, since an exec would itself plant `observations`
+     as a side effect of taking the snapshot) is taken before the exec
+     and again after; every new file is removed the same way as
+     `observations`, and a pre-existing file that vanished or changed
+     content refuses the attempt outright rather than silently
+     continuing. Unit-tested against the stub for all three shapes (new
+     residue removed, pre-existing file vanished, pre-existing file
+     modified).
+  4. The `apply_flow_check_gate_overlay` TODO stub's cited signature is
+     updated to the two-root shape (`subject_root=CONTAINER_HOME`,
+     `harness_root=`a root-owned, non-candidate-writable directory)
+     superseding the single-`root` shape this TODO previously named -
+     the call site itself is still stubbed, pending #332's own follow-up.
+- **The overlay call site is un-stubbed (Refs #334, #332's #342)** -
+  now that #342 landed the real two-root `apply_flow_check_
+  gate_overlay` signature, `_make_before_execute`'s hook calls it for
+  real as the last setup step. `harness_root` is a new fixed constant,
+  `/opt/skillc-harness`. Wiring-only unit tests
+  (`tests/test_agent_trial.py`) monkeypatch both `_preflight_in_container`
+  and the overlay call itself, isolating the new conditional/argument-
+  construction logic from each mechanism's own correctness (tested
+  elsewhere); found and recorded on the Nit Store (skillc#20), not fixed
+  here: the fake docker CLI's sha256sum output leaks its host-side fsroot
+  path prefix, which would make `_preflight_in_container`'s own digest
+  parser refuse every home-delivered file if driven through the fake CLI
+  directly - every existing preflight test already used a stub backend
+  instead. `tests/test_profile_closure_preflight_live.py`'s `none` mode
+  now exercises the FULL production order end to end: install, verify,
+  preflight, overlay, and (through a real `GateWitness`/decide-reply
+  channel, the real forwarding shim, and the real moved script) the
+  gate - not merely the preflight subset it tested before.
+- **`profile.gate_entrypoint`: a subject fact, not a harness inference
+  (Refs #334)** - the first cut of the overlay wiring above
+  fired whenever `.claude/scripts/flow-finish-gate.sh` happened to be a
+  key in `verify_home_files`: orchestrator correction, "that makes
+  witnessing an inference from a file's presence... the same silent-skip
+  shape as the `.git` revision check" - a closure regression that
+  silently dropped the gate script would skip witnessing instead of
+  refusing, with nothing to say why. `Profile` gains an optional
+  top-level `gate_entrypoint: str | None` field (a repo/home-relative
+  path, e.g. `.claude/scripts/flow-finish-gate.sh`) describing a FACT
+  about the skill - which installed path is the command its own
+  instructions invoke to run its gates - never a harness/study concern,
+  so the field says nothing about witnessing itself. `validate()`
+  refuses (`gate-entrypoint-not-installed`) when a declared entrypoint is
+  not actually produced by the profile's own install population - a
+  typo'd or stale path is caught at declaration time, not only at a live
+  attempt. `calibration_run._ClosureResult`/`Treatment` carry it through
+  unchanged (`CalibrationRefused` if a validated closure's own
+  `home_files` somehow disagrees - defensive, since `validate()` already
+  guarantees agreement through the normal path). `agent_trial._make_
+  before_execute`/`run_one_attempt` gain an explicit `gate_entrypoint`
+  parameter: `None` means no overlay, ever, whatever `verify_home_files`
+  contains; a declared path means witnessing is UNCONDITIONALLY required
+  and the attempt is refused before any spend if that path is absent
+  from the verified closure. `cpp-codex-flow-check-ea6dbfa/profile.json`
+  declares it; its evidence/inventory.json is regenerated again. Red
+  cases, mutation-checked: declared+missing refuses
+  (`tests/test_profile.py`, `tests/test_calibration_run_profile_
+  closure.py`); declared+present applies the overlay; undeclared never
+  calls it, even when `verify_home_files` happens to carry a
+  coincidentally-matching path (`tests/test_agent_trial.py`).
+- **In-container closure verification and tool preflight (Refs #334, in
+  progress)** - `agent_trial.run_one_attempt` gains `verify_home_files`
+  (relpath -> expected `sha256:` digest) and `preflight_tools` (a
+  profile's declared `tool`-kind dependencies), both checked INSIDE the
+  live container via one combined `exec_in_attempt` + one `export()` -
+  host-side checks prove what was SENT; this proves what ARRIVED and
+  that the declared tools are actually present at their constraint.
+  Raises `agent_trial.HomeFileVerificationRefused` inside the
+  `before_execute` hook, which `lifecycle.run_through_backend` already
+  turns into an unavailable (never-dispatched) attempt - no new
+  disposition, no `records.py` change. `Treatment` (calibration_run.py)
+  gains the matching `verify_home_files`/`preflight_tools` fields,
+  empty unless a profile is opted in. Unit-tested against a stub
+  backend (`tests/test_agent_trial_preflight.py`), since the function
+  only ever calls `exec_in_attempt`/`export`.
+- **`build_treatment` installs the profile closure (Refs #334, in
+  progress)** - `calibration_run.build_treatment(acquired, subject_profile=,
+  root=)` now merges `skillc.profile.installed_home_files`'s output
+  (built from `acquired.repo`, never a second acquisition) into the
+  treatment's home files, gated behind three refusals before any
+  container exists: `verify_repo_matches_skills(..., revision_check=
+  "required")`; the live inventory (re-`validate()`d against the
+  acquired checkout at the subject's declared pin) must digest-match the
+  committed `evidence/inventory.json` at `subject_profile`, or the
+  profile is stale against the current subject source; and the
+  closure's destinations must not DISAGREE with the skill surface's
+  (an overlap that agrees byte-for-byte is expected - a validated
+  profile's own closure covers the selected skill's files too - only a
+  genuine content disagreement refuses). End-to-end tested with a real
+  git checkout (`tests/test_calibration_run_profile_closure.py`,
+  `needs_git`), the same pattern every other git-mode test in this repo
+  uses. The tool preflight (declared `tool`-kind dependencies checked
+  inside the live container) and the `before_execute` wiring are still
+  owed.
+- **`subject.profile` opt-in field + approval binding (Refs #334, in
+  progress)** - a treated arm's subject may name a validated profile
+  (e.g. `evals/subjects/cpp-codex-flow-check-ea6dbfa`) to have its
+  dependency closure installed; absent is unchanged (selected skill files
+  only). `calibration.py`'s `require_approved`/`require_approved_discrimination`
+  now refuse unless `approval.profile_inventory_digest` matches the
+  committed `evidence/inventory.json` digest at that path (`skillc.profile.
+  inventory_digest`, new) - an approval binds to one exact closure, the
+  same #323 pattern as `attempts_per_arm`. A discrimination declaration's
+  existing subject set-equality check (#333) already forces both arms to
+  name the same profile, since `profile` is just another subject key.
+  This is the schema/approval half only - the opt-in field does not yet
+  install anything; the live re-validation and the wiring into a live
+  attempt are still owed.
+- **`AcquiredCollection.repo` and `collection_conformance.verify_repo_matches_skills`
+  (Refs #334, in progress)** - a validated profile's dependency closure is
+  declared against the subject's FULL repository root, but
+  `acquire_collection()` only ever materializes the subject's declared
+  `skills_root` subtree, so the closure's files (e.g. `lib/cicd`,
+  `pyproject.toml` at the repo root) are never present in
+  `AcquiredCollection.source.surface_dir`. Rather than widening
+  `acquire_collection()`'s own skills-root-scoped contract (its digest is
+  what every existing calibration declaration binds to), `AcquiredCollection`
+  gains a purely additive `repo: Path | None` field exposing the SAME full
+  checkout the function already builds internally before truncating it -
+  never a second clone. `verify_repo_matches_skills` is the committed
+  consistency check before anything uses `repo`: the checkout's resolved
+  revision (when it is a real git checkout) must match the subject's
+  declared pin, and every skill file must be byte-identical when read from
+  `repo` versus what the skills acquisition already verified - cheap today
+  (one checkout feeds both), and the red case if a second acquisition is
+  ever reintroduced.
+- **`skillc.profile.installed_home_files` (Refs #334, in progress)** - a
+  validated profile's install population as an in-memory
+  `{destination: bytes}` mapping, for delivery into a live attempt
+  container's HOME directory. `install()`'s own `home: Path` argument
+  cannot reach a container's home - `lifecycle.run_through_backend`'s
+  `install(handle, surface)` step only ever reaches `CONTAINER_WORKSPACE`,
+  and home is reached through its `before_execute` hook instead. Extracted
+  `_verified_file_records` out of `install()`'s preflight loop (pure
+  extraction - `install()`'s own tests still pass unmodified) so both
+  functions share the same digest/mode verification rather than each
+  having their own copy. This is the first slice of #334 (live calibration
+  attempts never install a validated profile's dependency closure, so
+  flow-check's gate script exits 127); wiring it into a live attempt is
+  not yet done.
 
 - **A `discrimination-declaration` kind in `skillc.calibration`, for the
   intact-vs-degraded contrast** (Refs #287). `parse_declaration` cannot

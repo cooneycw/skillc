@@ -35,7 +35,9 @@ import posixpath
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -73,12 +75,25 @@ _PROFILE_KEYS = {
     "profile_schema", "name", "subject", "select", "treatment_question",
     "allowed_destinations", "reference_patterns", "dependencies", "unsupported",
     "mirrors", "generated_from", "declared_empty_kinds", "client_profiles", "notes",
+    "gate_entrypoint",
 }
 _DEP_KEYS = {
     "id", "kind", "scope", "source_root", "paths", "destination", "satisfies",
     "traverse", "no_traverse_reason", "unreferenced_reason", "version", "supply",
     "role", "content", "shadow_check", "replaces_pinned", "replacement_reason",
+    "probes",
 }
+
+#: skillc#334 (orchestrator ruling): a tool-kind dependency's
+#: own closed set of checkable claims. A dependency's `id` alone was never
+#: a real executable name for every real tool (confirmed: the ea6dbfa
+#: profile's `tool-python`/`tool-uv`/`tool-pypi-runtime`/`tool-make-git-bash`
+#: are labels, and `_check_tool` reported "missing on PATH" for every one
+#: of them even on a host that genuinely has python/uv/make/git/bash) -
+#: `probes` is the explicit, checkable statement a dependency makes instead
+#: of relying on its `id` happening to double as a command. An unknown kind
+#: is refused at parse time (`_probe`), never silently skipped.
+PROBE_KINDS = ("command", "python-import")
 
 SYNTHETIC_CONTENT_MAX_BYTES = 4096  # Marker text, not a payload channel.
 
@@ -103,6 +118,36 @@ class Satisfies:
 
 
 @dataclass(frozen=True)
+class Probe:
+    """One checkable claim a tool-kind dependency makes (#334). `command`:
+    `name` is checked present via `command -v`; `constraint`, when given,
+    is checked against `version_args`' output (default `["--version"]`).
+    `python-import`: every name in `modules` must import cleanly under the
+    interpreter the check runs in - for a dependency supplied as PyPI
+    packages (never a command at all), this is the only checkable claim.
+
+    `uv_project`: a home-relative directory the import
+    must be checked INSIDE, via `uv run --project <home>/<uv_project>`,
+    mirroring the real runner's own invocation
+    (`flow-finish-gate.sh`: `PYTHONPATH="$CPP_DIR:${PYTHONPATH:-}" uv run
+    --project "$CPP_DIR" python -m lib.cicd ...`). Bare `python3 -c` (the
+    pre-fix behavior, still the default when this is `None`) checks the
+    HOST's or the trial image's own system interpreter - a package the
+    checkout's `uv.lock` resolves and the system interpreter happens to
+    also carry would pass a bare check even if the checkout's own isolated
+    venv lacks it entirely, and the reverse is just as possible. The probe
+    has to run the import the way the gate actually runs it, not a nearby
+    approximation of it."""
+
+    kind: str
+    name: str | None = None
+    version_args: tuple[str, ...] = ()
+    constraint: str | None = None
+    modules: tuple[str, ...] = ()
+    uv_project: str | None = None
+
+
+@dataclass(frozen=True)
 class Dependency:
     id: str
     kind: str
@@ -121,6 +166,7 @@ class Dependency:
     shadow_path: str | None = None
     replaces_pinned: bool = False
     replacement_reason: str = ""
+    probes: tuple[Probe, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -138,6 +184,19 @@ class Profile:
     generated_from: dict[str, str]  # generated repo path -> upstream repo path (transformed)
     declared_empty_kinds: tuple[str, ...]
     client_profiles: dict[str, dict[str, str]]
+    #: skillc#334 (orchestrator ruling): a FACT about the
+    #: skill, never a harness concern - which installed, home-relative
+    #: path is the command the skill's own instructions invoke to run its
+    #: gates (e.g. ".claude/scripts/flow-finish-gate.sh"). `None` (the
+    #: default - every profile before this one, and most after it) means
+    #: this skill names no such entrypoint. A harness that wants to
+    #: WITNESS gate execution reads this field to decide IF witnessing
+    #: applies at all - it is never inferred from whether some file
+    #: happens to be present in an installed closure, which the
+    #: orchestrator named as the exact failure mode to avoid: an attempt
+    #: whose closure silently drops this path (a regression, a renamed
+    #: destination) must be REFUSED, not silently un-witnessed.
+    gate_entrypoint: str | None
     raw: dict[str, object] = field(compare=False, repr=False)
 
     @property
@@ -270,12 +329,23 @@ class Profile:
         if profiles.get(subject.client, {}).get("status") != "declared":
             raise Refused(f"client_profiles does not declare the subject's own client {subject.client!r}")
 
+        gate_entrypoint_raw = data.get("gate_entrypoint")
+        gate_entrypoint: str | None
+        if gate_entrypoint_raw is None:
+            gate_entrypoint = None
+        elif not isinstance(gate_entrypoint_raw, str) or not gate_entrypoint_raw:
+            raise Refused("gate_entrypoint must be a non-empty string when given")
+        else:
+            gate_entrypoint = posixpath.normpath(gate_entrypoint_raw)
+            if m._escapes(gate_entrypoint) or gate_entrypoint in ("", "."):
+                raise Refused(f"gate_entrypoint {gate_entrypoint_raw!r} is not a safe relative path")
+
         return cls(
             name=name, subject=subject, subject_path=subject_path, select=select,
             treatment_question=str(question), allowed_destinations=tuple(allowed),
             patterns=tuple(patterns), dependencies=deps, unsupported=unsupported,
             mirrors=mirrors, generated_from=generated_from, declared_empty_kinds=empty,
-            client_profiles=profiles, raw=data,
+            client_profiles=profiles, gate_entrypoint=gate_entrypoint, raw=data,
         )
 
 
@@ -313,6 +383,42 @@ def _pairs(data: dict[str, object], key: str) -> dict[str, str]:
             raise Refused(f"{key} names {entry['generated']} twice")
         out[entry["generated"]] = entry["source"]
     return out
+
+
+def _probe(entry: object, dep_id: str) -> Probe:
+    if not isinstance(entry, dict):
+        raise Refused(f"dependency {dep_id}: probe entry malformed: {entry!r}")
+    kind = entry.get("kind")
+    if kind not in PROBE_KINDS:
+        raise Refused(f"dependency {dep_id}: probe kind must be one of {PROBE_KINDS}, not {kind!r}")
+    if kind == "command":
+        unknown = sorted(set(entry) - {"kind", "name", "version_args", "constraint"})
+        if unknown:
+            raise Refused(f"dependency {dep_id}: command probe has unknown keys: {unknown}")
+        name = entry.get("name")
+        if not isinstance(name, str) or not name:
+            raise Refused(f"dependency {dep_id}: command probe needs a non-empty name")
+        version_args_raw = entry.get("version_args", ["--version"])
+        if not isinstance(version_args_raw, list) or not all(isinstance(a, str) and a for a in version_args_raw):
+            raise Refused(f"dependency {dep_id}: command probe version_args must be a list of strings")
+        constraint = entry.get("constraint")
+        if constraint is not None and not isinstance(constraint, str):
+            raise Refused(f"dependency {dep_id}: command probe constraint must be a string")
+        return Probe(kind="command", name=name, version_args=tuple(version_args_raw), constraint=constraint)
+    unknown = sorted(set(entry) - {"kind", "modules", "uv_project"})
+    if unknown:
+        raise Refused(f"dependency {dep_id}: python-import probe has unknown keys: {unknown}")
+    modules = entry.get("modules")
+    if not isinstance(modules, list) or not modules or not all(isinstance(mod, str) and mod for mod in modules):
+        raise Refused(f"dependency {dep_id}: python-import probe needs a non-empty list of module names")
+    uv_project = entry.get("uv_project")
+    if uv_project is not None:
+        if not isinstance(uv_project, str) or not uv_project:
+            raise Refused(f"dependency {dep_id}: python-import probe uv_project must be a non-empty string")
+        uv_project = posixpath.normpath(uv_project)
+        if m._escapes(uv_project) or uv_project in ("", "."):
+            raise Refused(f"dependency {dep_id}: python-import probe uv_project must be a safe relative path")
+    return Probe(kind="python-import", modules=tuple(modules), uv_project=uv_project)
 
 
 def _dependency(entry: object) -> Dependency:
@@ -395,6 +501,12 @@ def _dependency(entry: object) -> Dependency:
             raise Refused(f"dependency {dep_id}: names no source path")
         if not isinstance(destination, str) or not destination or m._escapes(destination):
             raise Refused(f"dependency {dep_id}: destination must be a relative path inside the home")
+    if kind != "tool" and "probes" in entry:
+        raise Refused(f"dependency {dep_id}: probes is tool-only")
+    probes_raw = entry.get("probes", []) if kind == "tool" else []
+    if not isinstance(probes_raw, list):
+        raise Refused(f"dependency {dep_id}: probes must be a list")
+    probes = tuple(_probe(p, dep_id) for p in probes_raw)
     satisfies = []
     for item in entry.get("satisfies", []):
         if isinstance(item, str):
@@ -425,7 +537,7 @@ def _dependency(entry: object) -> Dependency:
         supply=entry.get("supply") if isinstance(entry.get("supply"), str) else None,
         role=str(entry.get("role", "")),
         content=content, shadow_path=shadow_path, replaces_pinned=replaces_pinned,
-        replacement_reason=replacement_reason,
+        replacement_reason=replacement_reason, probes=probes,
     )
 
 
@@ -637,6 +749,16 @@ def _fail(walk: _Walk, category: str, message: str, owner: str | tuple[str, ...]
         entry["caused_by"] = caused_by
     walk.raw.append(entry)
     return idx
+
+
+def inventory_digest(inventory: dict[str, Any]) -> str:
+    """A stable content digest of a whole `validate()` inventory (#334) -
+    for binding a calibration declaration's approval to one exact closure,
+    the same way `_canonical`/`m.sha256_bytes` already key `install()`'s
+    own receipt and `profile_digest`. Two inventories with the same
+    content hash the same regardless of key insertion order (`_canonical`
+    sorts keys); a real content change always changes this digest."""
+    return m.sha256_bytes(_canonical(inventory))
 
 
 def validate(profile: Profile, tree: Tree) -> dict[str, Any]:
@@ -896,6 +1018,17 @@ def _run_walk(profile: Profile, tree: Tree, problems: list[dict[str, Any]] | Non
                 raise Refused(msg)
             _fail(walk, "destination-outside-allowed", msg, str(installed[dest]["owner"]), in_path=dest)
 
+    # skillc#334: a declared gate_entrypoint must actually be
+    # something this profile's own closure installs - a typo'd or stale
+    # path here would otherwise validate cleanly while naming a file that
+    # can never arrive in any attempt, silently defeating the "always
+    # witness it when declared" rule one layer up.
+    if profile.gate_entrypoint is not None and profile.gate_entrypoint not in installed:
+        msg = f"gate_entrypoint {profile.gate_entrypoint!r} is not installed by this profile's own closure"
+        if problems is None:
+            raise Refused(msg)
+        _fail(walk, "gate-entrypoint-not-installed", msg, (), in_path=profile.gate_entrypoint)
+
     mirrors = []
     for gen, src in sorted(profile.mirrors.items()):
         if problems is None:
@@ -970,6 +1103,7 @@ def _run_walk(profile: Profile, tree: Tree, problems: list[dict[str, Any]] | Non
         },
         "declared_empty_kinds": list(profile.declared_empty_kinds),
         "client_profiles": profile.client_profiles,
+        "gate_entrypoint": profile.gate_entrypoint,
         "installed_surface": {
             "files": len(installed),
             "digest": m.sha256_bytes("".join(
@@ -1279,6 +1413,13 @@ def _resolve(walk: _Walk, hit: str, path: str, pattern: Pattern,
     walk.references.append(record)
 
 
+def _probe_record(probe: Probe) -> dict[str, object]:
+    if probe.kind == "command":
+        return {"kind": "command", "name": probe.name, "version_args": list(probe.version_args),
+                "constraint": probe.constraint}
+    return {"kind": "python-import", "modules": list(probe.modules), "uv_project": probe.uv_project}
+
+
 def _dep_record(walk: _Walk, dep: Dependency, installed: dict[str, dict[str, object]]) -> dict[str, object]:
     files = sorted((r for r in installed.values() if r["owner"] == dep.id),
                    key=lambda r: str(r["destination"]))
@@ -1298,6 +1439,7 @@ def _dep_record(walk: _Walk, dep: Dependency, installed: dict[str, dict[str, obj
         "digest": m.sha256_bytes("".join(
             f"{r['destination']}\0{r['mode']}\0{r['digest']}\n" for r in files
         ).encode()) if files else None,
+        "probes": [_probe_record(p) for p in dep.probes],
     }
 
 
@@ -1373,25 +1515,216 @@ def _version_matches(actual: tuple[int, ...], constraint: str) -> bool:
             ">": actual > expected, "<": actual < expected}[match[1]]
 
 
-def _check_tool(dep: dict[str, Any]) -> dict[str, Any]:
-    result = {"id": dep["id"], "constraint": dep["version"], "supply": dep["supply"]}
-    executable = shutil.which(dep["id"])
+@dataclass(frozen=True)
+class CommandProbeOutcome:
+    """What actually happened when a `command` probe's claim was checked -
+    gathered differently by each caller (a host `subprocess.run` for
+    `_check_tool`, a container `exec_in_attempt` for a live attempt's
+    preflight), evaluated identically by `evaluate_command_probe`.
+
+    `version_exit_code` (counter-model review, codex `gpt-6.1-sol`, #334):
+    the version command's OWN exit status, captured separately from
+    `version_output` - a command that prints a matching version string
+    but exits nonzero must not be read as a confirmed version check: the
+    text could be anything (a usage error, a crash traceback that happens
+    to mention a number) when the command itself reports failure.
+    `None` only when no version command ever ran (no constraint to
+    check, or the command was never found at all)."""
+
+    present: bool
+    version_output: str | None = None
+    version_exit_code: int | None = None
+
+
+@dataclass(frozen=True)
+class PythonImportProbeOutcome:
+    succeeded: bool
+    error: str = ""
+
+
+def evaluate_command_probe(probe: Mapping[str, Any], outcome: CommandProbeOutcome) -> dict[str, Any]:
+    """The decision logic for one `command` probe, shared by `_check_tool`
+    (host) and `agent_trial`'s in-container preflight - never duplicated,
+    per the orchestrator's ruling on #334. Takes already-gathered FACTS,
+    never does the gathering itself, so it has no opinion on WHERE the
+    command ran."""
+    name = str(probe["name"])
+    if not outcome.present:
+        return {"status": "violated", "reason": f"command {name!r} not found"}
+    constraint = probe.get("constraint")
+    if constraint is None:
+        return {"status": "satisfied"}
+    if outcome.version_exit_code not in (0, None):
+        return {"status": "unknown",
+                "reason": f"command {name!r}: version command exited {outcome.version_exit_code}, "
+                          f"not a confirmed version check"}
+    if outcome.version_output is None:
+        return {"status": "unknown", "reason": f"command {name!r}: no version output captured"}
+    match = re.search(r"\b(\d+(?:\.\d+)+)\b", outcome.version_output)
+    if match is None:
+        return {"status": "unknown",
+                "reason": f"command {name!r}: version could not be parsed from {outcome.version_output[:200]!r}"}
+    version = tuple(int(n) for n in match[1].split("."))
+    if not _version_matches(version, str(constraint)):
+        return {"status": "violated",
+                "reason": f"command {name!r}: version {match[1]} does not satisfy {constraint!r}"}
+    return {"status": "satisfied", "version": match[1]}
+
+
+def evaluate_python_import_probe(probe: Mapping[str, Any], outcome: PythonImportProbeOutcome) -> dict[str, Any]:
+    """The decision logic for one `python-import` probe - shared the same
+    way as `evaluate_command_probe`."""
+    modules = probe.get("modules")
+    if outcome.succeeded:
+        return {"status": "satisfied"}
+    return {"status": "violated", "reason": f"could not import {modules}: {outcome.error or 'unknown error'}"}
+
+
+def aggregate_probe_results(results: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """One dependency's overall status from its own probes' results -
+    shared by both callers. No probes at all is `unknown`, `"no probes
+    declared"` - the honest status for a pre-#334 profile (never an
+    error; `_check_tool` reports it, a live attempt's preflight refuses
+    on it instead - that policy difference lives in each CALLER, not
+    here). `violated` beats `unknown` beats `satisfied`, so one failing
+    probe among several is never masked by the others."""
+    if not results:
+        return {"status": "unknown", "reason": "no probes declared"}
+    violated = [r for r in results if r["status"] == "violated"]
+    if violated:
+        return {"status": "violated", "reason": "; ".join(str(r.get("reason", "")) for r in violated)}
+    unknown = [r for r in results if r["status"] == "unknown"]
+    if unknown:
+        return {"status": "unknown", "reason": "; ".join(str(r.get("reason", "")) for r in unknown)}
+    return {"status": "satisfied"}
+
+
+def _gather_command_probe_host(probe: Mapping[str, Any]) -> CommandProbeOutcome:
+    """The HOST-side gathering half of a `command` probe - `_check_tool`'s
+    own job, never shared, since `agent_trial`'s container-side gathering
+    runs through `exec_in_attempt`/`export()` instead."""
+    name = str(probe["name"])
+    executable = shutil.which(name)
     if executable is None:
-        return {**result, "status": "unknown", "reason": "missing on PATH"}
-    constraint = dep["version"]
-    if constraint in (None, "any"):
-        return {**result, "status": "satisfied", "version": None}
+        return CommandProbeOutcome(present=False)
+    if probe.get("constraint") is None:
+        return CommandProbeOutcome(present=True)
+    version_args = probe.get("version_args") or ["--version"]
     try:
-        run = subprocess.run([executable, "--version"], capture_output=True,
-                             timeout=10, check=False)
-        match = re.search(rb"\b(\d+(?:\.\d+)+)\b", run.stdout + run.stderr)
-        if run.returncode != 0 or match is None:
-            return {**result, "status": "unknown", "reason": "version probe failed"}
-        version = match[1].decode("ascii")
-        met = _version_matches(tuple(int(n) for n in version.split(".")), constraint)
-        return {**result, "status": "satisfied" if met else "violated", "version": version}
-    except (OSError, subprocess.TimeoutExpired, ValueError):
-        return {**result, "status": "unknown", "reason": "version probe unavailable or constraint unsupported"}
+        run = subprocess.run([executable, *version_args], capture_output=True, timeout=10, check=False)
+        return CommandProbeOutcome(
+            present=True, version_output=(run.stdout + run.stderr).decode("utf-8", errors="replace"),
+            version_exit_code=run.returncode,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return CommandProbeOutcome(present=True, version_output=None)
+
+
+def _gather_python_import_probe_host(probe: Mapping[str, Any], home: Path | None) -> PythonImportProbeOutcome:
+    """Mailbox 5944 fix 1: when the probe declares `uv_project`, the import
+    is checked the way the real runner checks it - `uv run --project
+    <home>/<uv_project>`, with `PYTHONPATH` prepended the same way
+    `flow-finish-gate.sh` prepends it - never the bare host interpreter,
+    which can diverge from the checkout's own isolated venv in either
+    direction."""
+    modules = probe.get("modules") or []
+    script = "; ".join(f"import {mod}" for mod in modules)
+    uv_project = probe.get("uv_project")
+    if uv_project is None:
+        argv = [sys.executable, "-c", script]
+        env = None
+    else:
+        if home is None:
+            return PythonImportProbeOutcome(
+                succeeded=False, error="uv_project probe needs an installation home to resolve against",
+            )
+        project_dir = home / str(uv_project)
+        if not project_dir.is_dir():
+            return PythonImportProbeOutcome(
+                succeeded=False, error=f"uv project directory not installed: {project_dir}",
+            )
+        uv_bin = shutil.which("uv")
+        if uv_bin is None:
+            return PythonImportProbeOutcome(
+                succeeded=False, error="uv not found on PATH; cannot run the import through the checkout's own environment",
+            )
+        env = {**os.environ, "PYTHONPATH": f"{project_dir}{os.pathsep}{os.environ.get('PYTHONPATH', '')}"}
+        argv = [uv_bin, "run", "--project", str(project_dir), "python", "-c", script]
+    try:
+        run = subprocess.run(argv, capture_output=True, timeout=30, check=False, env=env)
+        if run.returncode == 0:
+            return PythonImportProbeOutcome(succeeded=True)
+        return PythonImportProbeOutcome(succeeded=False, error=run.stderr.decode("utf-8", errors="replace")[:200])
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return PythonImportProbeOutcome(succeeded=False, error=str(exc))
+
+
+def _check_tool(dep: dict[str, Any], home: Path | None = None) -> dict[str, Any]:
+    """#334: a tool dependency's overall status, from its own declared
+    `probes` - never from treating `dep["id"]` as a command name (that
+    was the pre-#334 behavior, and it silently reported "missing on
+    PATH" for every one of the ea6dbfa profile's four real tool
+    dependencies, on a host that genuinely has all four - confirmed, not
+    assumed, before this fix). `home` resolves a `python-import` probe's
+    `uv_project`, when declared; `install()` is the only caller and
+    always has one by the time it checks tools."""
+    result = {"id": dep["id"], "constraint": dep["version"], "supply": dep["supply"]}
+    outcomes = []
+    for probe in dep.get("probes") or []:
+        if probe["kind"] == "command":
+            outcomes.append(evaluate_command_probe(probe, _gather_command_probe_host(probe)))
+        elif probe["kind"] == "python-import":
+            outcomes.append(evaluate_python_import_probe(probe, _gather_python_import_probe_host(probe, home)))
+        else:
+            raise Refused(f"dependency {dep['id']}: unknown probe kind: {probe['kind']!r}")
+    return {**result, **aggregate_probe_results(outcomes)}
+
+
+def _verified_file_records(inventory: dict[str, Any], tree: Tree) -> Iterator[tuple[dict[str, Any], bytes]]:
+    """Enumerate `inventory`'s install population with each file's bytes
+    read and digest/mode-verified - the part a host install (`install()`)
+    and an in-memory delivery (`installed_home_files()`, #334) both need.
+    Pre-existing-destination and parent-directory checks are host-
+    filesystem-specific and stay in `install()` itself; this generator
+    raises only for a record whose own content is wrong, never for
+    anything about where it will land."""
+    for record in _install_records(inventory):
+        destination = record["destination"]
+        try:
+            if record["origin"] == "synthetic":
+                data = _synthetic_bytes(record["content"])
+                if record["mode"] != "100644":
+                    raise Refused(f"synthetic mode must be 100644: {destination}")
+            else:
+                data = tree.read(record["source"])
+            if m.sha256_bytes(data) != record["digest"]:
+                raise Refused(f"source digest changed: {destination}")
+            if record["mode"] not in ("100644", "100755"):
+                raise Refused(f"unsupported mode: {destination}")
+        except OSError as exc:
+            raise Refused(f"installation input unreadable: {destination}") from exc
+        yield record, data
+
+
+def installed_home_files(inventory: dict[str, Any], tree: Tree) -> dict[str, bytes]:
+    """The validated closure's install population as an in-memory
+    `{destination: bytes}` mapping, digest-verified exactly as `install()`
+    verifies before any host write (#334) - for delivery into a live
+    container's HOME directory, which `install()`'s own `home: Path`
+    target cannot reach without a real filesystem (`lifecycle.
+    run_through_backend`'s `install(handle, surface)` step only ever
+    reaches `CONTAINER_WORKSPACE`; home is reached through its
+    `before_execute` hook's `deliver_home_file` calls instead). The
+    caller is responsible for checking this mapping's keys against
+    anything else being delivered to the same home - this function knows
+    only about the one inventory it was given."""
+    files: dict[str, bytes] = {}
+    for record, data in _verified_file_records(inventory, tree):
+        destination = record["destination"]
+        if destination in files:
+            raise Refused(f"duplicate destination in one inventory: {destination}")
+        files[destination] = data
+    return files
 
 
 def install(inventory: dict[str, Any], tree: Tree, home: Path) -> dict[str, Any]:
@@ -1408,31 +1741,18 @@ def install(inventory: dict[str, Any], tree: Tree, home: Path) -> dict[str, Any]
     staged = []
     preexisting = []
     # Preflight the entire population before writing any file.
-    for record in _install_records(inventory):
+    for record, data in _verified_file_records(inventory, tree):
         destination = record["destination"]
         target = _installed_target(home, destination)
-        try:
-            if record["origin"] == "synthetic":
-                data = _synthetic_bytes(record["content"])
-                if record["mode"] != "100644":
-                    raise Refused(f"synthetic mode must be 100644: {destination}")
-            else:
-                data = tree.read(record["source"])
-            if m.sha256_bytes(data) != record["digest"]:
-                raise Refused(f"source digest changed: {destination}")
-            if record["mode"] not in ("100644", "100755"):
-                raise Refused(f"unsupported mode: {destination}")
-            if target.exists():
-                if not target.is_file() or target.read_bytes() != data:
-                    raise Refused(f"different pre-existing destination: {destination}")
-                preexisting.append(destination)
-            for parent in target.parents:
-                if parent == home:
-                    break
-                if parent.exists() and not parent.is_dir():
-                    raise Refused(f"non-directory parent: {destination}")
-        except OSError as exc:
-            raise Refused(f"installation input unreadable: {destination}") from exc
+        if target.exists():
+            if not target.is_file() or target.read_bytes() != data:
+                raise Refused(f"different pre-existing destination: {destination}")
+            preexisting.append(destination)
+        for parent in target.parents:
+            if parent == home:
+                break
+            if parent.exists() and not parent.is_dir():
+                raise Refused(f"non-directory parent: {destination}")
         staged.append((record, target, data))
     for record, target, data in staged:
         try:
@@ -1450,7 +1770,7 @@ def install(inventory: dict[str, Any], tree: Tree, home: Path) -> dict[str, Any]
         "files": [{k: r[k] for k in ("destination", "digest", "mode", "origin",
                                                    "replaces_pinned_digest")} for r, _, _ in staged],
         "preexisting": preexisting,
-        "tools": [_check_tool(d) for d in inventory["dependencies"] if d["kind"] == "tool"],
+        "tools": [_check_tool(d, home) for d in inventory["dependencies"] if d["kind"] == "tool"],
         "unsupported": inventory["unsupported"],
         "client_profiles": inventory["client_profiles"],
         "limits": ["host filesystem only; cold-container execution proof owed",

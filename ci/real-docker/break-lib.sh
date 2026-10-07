@@ -43,15 +43,23 @@ _BREAK_COLDINSTALL_MODES="skill-mount home-mount mcp-mount secret-mount cold-cac
 #: multi-stage COPY is what makes the intact image's uv probe work.
 _BREAK_TRIALIMAGE_MODES="no-uv"
 
-# Resolves a --break argument to SIX lines on stdout: the NORMALIZED spec
+#: #334's installed-closure break modes - no bare form, same as witness.
+#: missing-closure omits one closure-only file from delivery entirely;
+#: tampered-closure delivers it with different bytes than the bound
+#: inventory's own digest expects. Both must make the real in-container
+#: preflight (`agent_trial._preflight_in_container`) refuse the attempt.
+_BREAK_CLOSURE_MODES="missing-closure tampered-closure"
+
+# Resolves a --break argument to SEVEN lines on stdout: the NORMALIZED spec
 # ("none", or "<family>:<mode>" - a bare legacy channel mode is normalized
 # to its "channel:<mode>" form here, so every caller downstream has exactly
 # one spelling to compare against "none"), the value to export as
 # SKILLC_LIVE_TEST_BREAK, the value to export as SKILLC_GATE_WITNESS_
 # LIVE_BREAK, the value to export as SKILLC_GATE_SHIM_LIVE_BREAK, the value
-# to export as SKILLC_COLDINSTALL_LIVE_BREAK, and the value to export as
-# SKILLC_TRIAL_IMAGE_BREAK - ALL FIVE FAMILY VALUES ALWAYS PRESENT, exactly
-# one of them equal to the resolved mode and the other four the literal
+# to export as SKILLC_COLDINSTALL_LIVE_BREAK, the value to export as
+# SKILLC_TRIAL_IMAGE_BREAK, and the value to export as SKILLC_CLOSURE_
+# PREFLIGHT_LIVE_BREAK - ALL SIX FAMILY VALUES ALWAYS PRESENT, exactly
+# one of them equal to the resolved mode and the other five the literal
 # string "none" (never empty, never left for the caller to infer from an
 # empty field).
 #
@@ -75,7 +83,7 @@ _BREAK_TRIALIMAGE_MODES="no-uv"
 resolve_break_spec() {
     local spec="${1:-}" family mode m
     if [ "$spec" = "none" ]; then
-        printf 'none\nnone\nnone\nnone\nnone\nnone\n'
+        printf 'none\nnone\nnone\nnone\nnone\nnone\nnone\n'
         return 0
     fi
     case "$spec" in
@@ -92,7 +100,7 @@ resolve_break_spec() {
         channel)
             for m in $_BREAK_CHANNEL_MODES; do
                 if [ "$m" = "$mode" ]; then
-                    printf 'channel:%s\n%s\nnone\nnone\nnone\nnone\n' "$mode" "$mode"
+                    printf 'channel:%s\n%s\nnone\nnone\nnone\nnone\nnone\n' "$mode" "$mode"
                     return 0
                 fi
             done
@@ -102,7 +110,7 @@ resolve_break_spec() {
         witness)
             for m in $_BREAK_WITNESS_MODES; do
                 if [ "$m" = "$mode" ]; then
-                    printf 'witness:%s\nnone\n%s\nnone\nnone\nnone\n' "$mode" "$mode"
+                    printf 'witness:%s\nnone\n%s\nnone\nnone\nnone\nnone\n' "$mode" "$mode"
                     return 0
                 fi
             done
@@ -112,7 +120,7 @@ resolve_break_spec() {
         gateshim)
             for m in $_BREAK_GATESHIM_MODES; do
                 if [ "$m" = "$mode" ]; then
-                    printf 'gateshim:%s\nnone\nnone\n%s\nnone\nnone\n' "$mode" "$mode"
+                    printf 'gateshim:%s\nnone\nnone\n%s\nnone\nnone\nnone\n' "$mode" "$mode"
                     return 0
                 fi
             done
@@ -122,7 +130,7 @@ resolve_break_spec() {
         coldinstall)
             for m in $_BREAK_COLDINSTALL_MODES; do
                 if [ "$m" = "$mode" ]; then
-                    printf 'coldinstall:%s\nnone\nnone\nnone\n%s\nnone\n' "$mode" "$mode"
+                    printf 'coldinstall:%s\nnone\nnone\nnone\n%s\nnone\nnone\n' "$mode" "$mode"
                     return 0
                 fi
             done
@@ -132,15 +140,25 @@ resolve_break_spec() {
         trialimage)
             for m in $_BREAK_TRIALIMAGE_MODES; do
                 if [ "$m" = "$mode" ]; then
-                    printf 'trialimage:%s\nnone\nnone\nnone\nnone\n%s\n' "$mode" "$mode"
+                    printf 'trialimage:%s\nnone\nnone\nnone\nnone\n%s\nnone\n' "$mode" "$mode"
                     return 0
                 fi
             done
             echo "run-real-docker: unknown trialimage break mode '$mode' (must be one of: $_BREAK_TRIALIMAGE_MODES)" >&2
             return 2
             ;;
+        closure)
+            for m in $_BREAK_CLOSURE_MODES; do
+                if [ "$m" = "$mode" ]; then
+                    printf 'closure:%s\nnone\nnone\nnone\nnone\nnone\n%s\n' "$mode" "$mode"
+                    return 0
+                fi
+            done
+            echo "run-real-docker: unknown closure break mode '$mode' (must be one of: $_BREAK_CLOSURE_MODES)" >&2
+            return 2
+            ;;
         *)
-            echo "run-real-docker: unknown break family '$family' (must be 'channel', 'witness', 'gateshim', 'coldinstall' or 'trialimage'), from spec '$spec'" >&2
+            echo "run-real-docker: unknown break family '$family' (must be 'channel', 'witness', 'gateshim', 'coldinstall', 'trialimage' or 'closure'), from spec '$spec'" >&2
             return 2
             ;;
     esac

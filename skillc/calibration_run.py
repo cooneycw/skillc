@@ -63,12 +63,13 @@ import json
 import re
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import agent_trial, calibration, demo, trial, verify
+from . import agent_trial, calibration, demo, profile, trial, verify
 from . import collection_conformance as cc
 from . import matched_pilot as mp
+from . import materialize as m
 
 ROOT = mp.ROOT
 EXPERIMENT_LABEL = "calibration"
@@ -95,29 +96,155 @@ class Treatment:
     """What the non-baseline arm installs, acquired once for the whole run:
     the subject's selected skill files, their content digest (the plan's
     `subject.digest`), and the #150-D receipt context - one discovery cache
-    shared by every treatment attempt."""
+    shared by every treatment attempt.
+
+    `verify_home_files`/`preflight_tools` (#334) are empty unless a
+    profile was opted in: the closure files' expected digests, re-checked
+    IN the live container after delivery (never trusting delivery alone),
+    and the profile's own `tool`-kind dependencies, checked present in
+    that same container at their declared constraint. `gate_entrypoint`
+    is `None` unless the opted-in profile declares one -
+    the SUBJECT's own fact about which installed path is its gate
+    command, never inferred from `verify_home_files`' own membership."""
 
     home_files: Mapping[str, bytes]
     digest: str
     receipt_context: agent_trial.InstallationReceiptContext | None
+    verify_home_files: Mapping[str, str] = field(default_factory=dict)
+    preflight_tools: tuple[dict[str, object], ...] = ()
+    gate_entrypoint: str | None = None
+
+
+@dataclass(frozen=True)
+class _ClosureResult:
+    home_files: dict[str, bytes]
+    #: The inventory's own `kind == "tool"` dependency records - #334's
+    #: in-container preflight reads these directly (each already carries
+    #: its own `probes`, serialized by `profile._dep_record`).
+    tools: tuple[dict[str, object], ...]
+    #: The profile's own declared `gate_entrypoint`, or
+    #: `None` if it declares none - carried straight through, never
+    #: re-derived from `home_files`' own keys.
+    gate_entrypoint: str | None
+
+
+def _closure_home_files(acquired: cc.AcquiredCollection, subject_profile: str, root: Path) -> _ClosureResult:
+    """skillc#334: the validated profile's dependency closure, built from
+    the SAME checkout the skills came from (`acquired.repo`), not a
+    second acquisition - see `AcquiredCollection.repo`'s own docstring.
+
+    Three refusals, all before any container exists:
+    1. `verify_repo_matches_skills` (required mode - a live attempt must
+       always be able to prove its checkout's identity).
+    2. The LIVE inventory (re-`validate()`d against `acquired.repo` at
+       the subject's own declared pin) must digest-match the COMMITTED
+       `evidence/inventory.json` at `subject_profile` - the profile is
+       stale against the current subject source otherwise, and `#334`'s
+       whole point is to install the closure that was actually validated,
+       never one assumed still accurate.
+    3. The closure's own destinations must not collide with the skill
+       surface's - the two delivery paths share one container home.
+    """
+    cc.verify_repo_matches_skills(acquired, revision_check="required")
+    if acquired.repo is None:
+        raise CalibrationRefused("subject.profile is named but no full checkout was acquired")
+    prof = profile.Profile.load(root / subject_profile / "profile.json")
+    tree = profile.GitTree(acquired.repo, acquired.subject.revision)
+    inventory = profile.validate(prof, tree)
+    inventory_path = root / subject_profile / "evidence" / "inventory.json"
+    try:
+        committed = json.loads(inventory_path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise CalibrationRefused(f"subject.profile {subject_profile!r} names no readable "
+                                 f"evidence/inventory.json: {exc}") from exc
+    live_digest, committed_digest = profile.inventory_digest(inventory), profile.inventory_digest(committed)
+    if live_digest != committed_digest:
+        raise CalibrationRefused(
+            f"profile {subject_profile!r}'s live inventory (validated against the acquired checkout at "
+            f"{acquired.subject.revision}) digests to {live_digest!r}, not the committed "
+            f"{committed_digest!r} at {inventory_path} - the profile is stale against the current "
+            f"subject source and must be re-declared before this closure can be installed"
+        )
+    home_files = profile.installed_home_files(inventory, tree)
+    tools = tuple(dep for dep in inventory["dependencies"] if dep["kind"] == "tool")
+    gate_entrypoint = inventory.get("gate_entrypoint")
+    assert gate_entrypoint is None or isinstance(gate_entrypoint, str)
+    # The earliest possible refusal point, before any container exists:
+    # `profile.validate()` already proved the entrypoint
+    # is installed by SOME closure at declaration time, but THIS run's
+    # own installed_home_files() - built from the live, re-validated
+    # inventory above - is the actual population this attempt would
+    # deliver. The two can only disagree if something between validation
+    # and here dropped the file, which must never pass silently.
+    if gate_entrypoint is not None and gate_entrypoint not in home_files:
+        raise CalibrationRefused(
+            f"profile {subject_profile!r} declares gate_entrypoint {gate_entrypoint!r}, but this "
+            f"closure's own installed_home_files does not carry it - witnessing is required "
+            f"whenever a gate_entrypoint is declared, and cannot be honoured for a file that was "
+            f"never actually produced"
+        )
+    return _ClosureResult(home_files=home_files, tools=tools, gate_entrypoint=gate_entrypoint)
 
 
 def build_treatment(
     acquired: cc.AcquiredCollection, *, listing_client_argv: Sequence[str] | None = None,
+    subject_profile: str | None = None, root: Path | None = None,
 ) -> Treatment:
     """The treatment arm from an acquisition, built exactly as
     `run_collection_agent_attempt` builds its own - the same home files, the
     same receipt context - so the calibration treatment IS a collection-run
     install. A subject whose selection is empty installs nothing: refused,
-    since the arms would then not differ at all."""
+    since the arms would then not differ at all.
+
+    `subject_profile` (#334) names a validated profile (repo-relative path
+    to its `profile.json`, as `calibration.py`'s `subject.profile` opt-in
+    field declares it) whose dependency closure joins the skill surface in
+    ONE merged home-files mapping - never a second delivery mechanism.
+    `root` is the skillc checkout root the profile path resolves against;
+    required together with `subject_profile`, meaningless alone."""
     if not acquired.files:
         raise CalibrationRefused(
             f"subject {acquired.subject.locator!r} selects no skill; a treatment arm that installs "
             "nothing is a second baseline"
         )
+    if (subject_profile is None) != (root is None):
+        raise CalibrationRefused("subject_profile and root must be given together, or not at all")
+    home_files: dict[str, bytes] = dict(cc._collection_home_files(acquired.source, acquired.files))
+    verify_home_files: dict[str, str] = {}
+    preflight_tools: tuple[dict[str, object], ...] = ()
+    gate_entrypoint: str | None = None
+    if subject_profile is not None:
+        assert root is not None
+        closure = _closure_home_files(acquired, subject_profile, root)
+        closure_files = closure.home_files
+        # A validated profile's own closure covers the selected skill's
+        # bundled files too (profile.py installs skills AND dependencies
+        # together) - so an overlap with the skill surface is EXPECTED,
+        # not an error, as long as the two paths agree byte-for-byte
+        # (which `verify_repo_matches_skills`, already run inside
+        # `_closure_home_files`, is what makes that a safe assumption
+        # rather than a hope). Only a genuine DISAGREEMENT - the two
+        # paths naming different bytes for the same destination - is
+        # refused: that would mean the acquisition and the profile
+        # validation drifted apart despite the consistency check.
+        disagreeing = sorted(k for k in set(closure_files) & set(home_files) if closure_files[k] != home_files[k])
+        if disagreeing:
+            raise CalibrationRefused(
+                f"profile {subject_profile!r}'s closure disagrees with the skill surface at: {disagreeing}"
+            )
+        home_files.update(closure_files)
+        # Every closure file, not a curated subset (orchestrator ruling:
+        # "read back the digest of every closure
+        # file") - host-side bytes were already digest-verified against
+        # the inventory inside `installed_home_files`, so this is simply
+        # that same digest, carried forward for the in-container re-check.
+        verify_home_files = {relpath: m.sha256_bytes(data) for relpath, data in closure_files.items()}
+        preflight_tools = closure.tools
+        gate_entrypoint = closure.gate_entrypoint
     return Treatment(
-        home_files=cc._collection_home_files(acquired.source, acquired.files),
+        home_files=home_files,
         digest=acquired.source.digest,
+        gate_entrypoint=gate_entrypoint,
         receipt_context=agent_trial.InstallationReceiptContext(
             declared=frozenset(f.skill for f in acquired.files),
             tree_digest=acquired.source.digest,
@@ -127,6 +254,8 @@ def build_treatment(
             surface_name=acquired.subject.surface,
             cache={},
         ),
+        verify_home_files=verify_home_files,
+        preflight_tools=preflight_tools,
     )
 
 
@@ -302,6 +431,13 @@ def run_calibration(
             client=client_name, cli_version=client_version, task_root=task_root, surface=surface, prompt=prompt,
             timeout=budget, credential_explicit_path=credential_explicit_path,
             receipt_context=treatment.receipt_context if treated else None,
+            # #334: the profile-closure fields reach a real
+            # calibration attempt - for a TREATED arm only; the baseline
+            # stays exactly as empty as `extra_home_files`/`receipt_context`
+            # already do above, never partially profile-opted.
+            verify_home_files=treatment.verify_home_files if treated else None,
+            preflight_tools=treatment.preflight_tools if treated else None,
+            gate_entrypoint=treatment.gate_entrypoint if treated else None,
         )
 
     def on_outcome(outcome: mp.AttemptOutcome) -> None:

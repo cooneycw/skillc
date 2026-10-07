@@ -123,7 +123,10 @@
    "role": "interpreter for lib.cicd / lib.security and the bundled .py helpers",
    "version": ">=3.11 (pyproject.toml requires-python at the pin)",
    "supply": "the trial image; not carried by the subject",
-   "unreferenced_reason": "invoked as a command word (`python -m lib.security`, reference.md:104), which no path pattern reads"
+   "unreferenced_reason": "invoked as a command word (`python -m lib.security`, reference.md:104), which no path pattern reads",
+   "probes": [
+    {"kind": "command", "name": "python3", "version_args": ["--version"], "constraint": ">=3.11"}
+   ]
   },
   {
    "id": "tool-uv",
@@ -132,7 +135,10 @@
    "role": "runs the checkout's packages (`uv run --project`)",
    "version": "unpinned by the subject; #266 pins it in the image",
    "supply": "the trial image; not carried by the subject",
-   "unreferenced_reason": "invoked as a command word (`uv run --project`, reference.md:104; flow-finish-gate.sh:355), which no path pattern reads"
+   "unreferenced_reason": "invoked as a command word (`uv run --project`, reference.md:104; flow-finish-gate.sh:355), which no path pattern reads",
+   "probes": [
+    {"kind": "command", "name": "uv", "version_args": ["--version"]}
+   ]
   },
   {
    "id": "tool-pypi-runtime",
@@ -141,7 +147,10 @@
    "role": "PyPI runtime dependencies of lib.cicd (pydantic, pyyaml), resolved by uv from uv.lock",
    "version": "pydantic>=2.0, pyyaml>=6.0 as locked in uv.lock at the pin",
    "supply": "EXTERNAL: uv resolves these from a package index on first run. Trials have no network (spec.md section 4), so #266 must pre-supply a filled cache or report the gate step unavailable",
-   "unreferenced_reason": "a package-manager resolution, not a path in any file of the closure"
+   "unreferenced_reason": "a package-manager resolution, not a path in any file of the closure",
+   "probes": [
+    {"kind": "python-import", "modules": ["pydantic", "yaml"], "uv_project": "Projects/claude-power-pack"}
+   ]
   },
   {
    "id": "tool-make-git-bash",
@@ -150,7 +159,12 @@
    "role": "make (Makefile targets), git (check-ignored-additions.sh), bash (every shell helper)",
    "version": "unpinned by the subject; any POSIX-conforming version the image carries",
    "supply": "the trial image; not carried by the subject",
-   "unreferenced_reason": "invoked as command words (`make lint`, `git status`, `#!/usr/bin/env bash`), which no path pattern reads"
+   "unreferenced_reason": "invoked as command words (`make lint`, `git status`, `#!/usr/bin/env bash`), which no path pattern reads",
+   "probes": [
+    {"kind": "command", "name": "make"},
+    {"kind": "command", "name": "git"},
+    {"kind": "command", "name": "bash"}
+   ]
   }
  ],
  "unsupported": [
@@ -200,5 +214,6 @@
   "security-scanner": {"status": "unsupported", "reason": "external scanners and live advisory feeds are #285's profile; this one carries only the checkout's lib.security"},
   "services": {"status": "unsupported", "reason": "GitHub, Docker, AWS, MCP servers and network are not provided to trials (spec.md section 4)"}
  },
+ "gate_entrypoint": ".claude/scripts/flow-finish-gate.sh",
  "notes": "A SEPARATE profile from evals/subjects/cpp-codex-flow-check/ (pinned at 85e9b03), per that profile's own stated rule: 'flow-check changed substantially on CPP's main after this pin... a later pin is a new profile with its own inventory, not an edit to this one.' Declared for skillc#265/#287 (2026-10-06) at claude-power-pack ea6dbfa45f9308ee6ba60f032d8e7031bd6938a1 - claude-power-pack#1370 found the 85e9b03 profile stale on both content and dependency axes against current CPP main. The 85e9b03 profile, its evidence/inventory.json, and skillc#264's flow-check case-contract line-number citations against that profile's blobs are UNTOUCHED and remain valid - this directory exists so #287's study can run at a current pin without disturbing them. Own subject.json (never evals/subjects/cpp-codex/subject.json, which stays at 85e9b03 for the #204/#203 calibration manifests already approved and run against it). startup-context is declared empty because CPP's Codex installer writes only skill directories at this pin (no AGENTS.md, no config); the client's listing metadata is recorded per skill as description_digest."
 }

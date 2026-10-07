@@ -3,7 +3,7 @@
 - Declaration: [profile.json](profile.json) - the machine form; this page explains it
 - Subject: [subject.json](subject.json) - this profile's OWN pin, never `../cpp-codex/subject.json`
 - Validator: `skillc profile validate` ([profiles spec](../../../docs/specs/evaluation-facility/profiles.md))
-- Evidence: [evidence/inventory.json](evidence/inventory.json), generated 2026-10-06 (#265/#287)
+- Evidence: [evidence/inventory.json](evidence/inventory.json), generated 2026-10-06 (#265/#287), regenerated 2026-10-07 (#334: the four `tool`-kind dependencies gained explicit `probes` - see below), regenerated again 2026-10-07 (#334 counter-model review fix: `tool-pypi-runtime`'s `python-import` probe gained `uv_project`, so the import is checked through the checkout's own `uv` environment, the way the real runner runs it, rather than through a bare system interpreter), regenerated again 2026-10-07 (#334: the profile declares `gate_entrypoint: ".claude/scripts/flow-finish-gate.sh"` - a fact about this skill, not a harness concern - naming which installed path is the command its own instructions invoke to run its gates; a live attempt refuses rather than silently skipping witnessing if this path is ever absent from its verified closure)
 - Obligations: #264's flow-check case contract (`evals/workflow-contracts/flow-check/`) - cites `reference.md` line numbers at the OLDER `85e9b03` pin; this profile's content moved, so those citations describe [the other profile](../cpp-codex-flow-check/PROFILE.md), not this one
 
 **This is a SEPARATE profile from
@@ -121,3 +121,15 @@ pin, trimmed to exactly what diagnosing needs): the 85e9b03 profile's frozen
 copy against this snapshot reports the exact set of 20 distinct
 unresolved-reference strings (21 occurrences); this profile against the same
 snapshot reports zero.
+
+`tests/test_profile_closure_preflight_live.py` (#334): the installed-
+closure proof against a REAL container built from `docker/trial` - not a
+dedicated test image, since #334's own acceptance claim is about the
+production trial image. Its intact (`none`) mode exercises the full
+production order end to end - install, verify, preflight, the real
+two-root gate overlay (#332/#342), and the gate itself, reached through
+a real `GateWitness`/decide-reply channel and the real forwarding shim.
+Currently refuses at preflight (the image has no `uv`/`make` yet,
+tracked separately as #343); the two break modes (`missing-closure`,
+`tampered-closure`) pass today regardless, since they prove the
+preflight's own refusal correctness, which does not depend on #343.
