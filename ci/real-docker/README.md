@@ -1,9 +1,10 @@
 # The `<agent-host>` real-Docker runner (#315)
 
-Certifies #183's live-channel test, #326's trial-image build test, and
-#269's gate-witness test (and, once it exists, #266) against a REAL Docker
-daemon, on an isolated VM, with no Woodpecker involved at all. The main
-Woodpecker server is untouched; nothing here registers anything with it.
+Certifies #183's live-channel test, #326's trial-image build test, #269's
+gate-witness test, and #332's gate-overlay-shim test (and, once it exists,
+#266) against a REAL Docker daemon, on an isolated VM, with no Woodpecker
+involved at all. The main Woodpecker server is untouched; nothing here
+registers anything with it.
 
 **A file tagged `@pytest.mark.real_docker` is collected and run, but NOT
 certified, until `ci/check_real_docker_ran.py`'s `DECLARED_REAL_DOCKER_
@@ -83,13 +84,13 @@ matters is in WHICH commits run at all, not in what R1 covers.
    - **Record both outcomes on this issue**, generically (no addresses) -
      this is the committed evidence that the detector actually detects
      something, on this specific host, not only in the unit tests.
-8. **#183/#269 break-mode verification (R2):** `--break` takes `none` or
-   `<family>:<mode>`, resolved from a closed table in `break-lib.sh` - an
-   unknown family or mode is refused with exit 2 before any checkout or
-   docker operation. The three bare `channel` spellings below (no
+8. **#183/#269/#332 break-mode verification (R2):** `--break` takes `none`
+   or `<family>:<mode>`, resolved from a closed table in `break-lib.sh` -
+   an unknown family or mode is refused with exit 2 before any checkout
+   or docker operation. The three bare `channel` spellings below (no
    `channel:` prefix) also still work, kept for compatibility with runs
    recorded before family prefixes existed (#315 follow-up); a bare
-   `witness` mode has no such form and is refused.
+   `witness` or `gateshim` mode has no such form and is refused.
    ```
    run-real-docker <post-#300-main-sha> --break none                           # expect SUCCESS
    run-real-docker <post-#300-main-sha> --break channel:omit-mount             # expect FAILURE
@@ -98,10 +99,14 @@ matters is in WHICH commits run at all, not in what R1 covers.
    run-real-docker <post-#300-main-sha> --break witness:stale-confirm-lie      # expect FAILURE
    run-real-docker <post-#300-main-sha> --break witness:kill-wrong-pid         # expect FAILURE
    run-real-docker <post-#300-main-sha> --break witness:gate-in-fresh-container # expect FAILURE
+   run-real-docker <post-#300-main-sha> --break gateshim:synthesizes-output    # expect FAILURE
+   run-real-docker <post-#300-main-sha> --break gateshim:drops-cwd             # expect FAILURE
+   run-real-docker <post-#300-main-sha> --break gateshim:exits-zero-on-channel-failure # expect FAILURE
+   run-real-docker <post-#300-main-sha> --break gateshim:wrong-env            # expect FAILURE
    ```
    Break-mode runs post only to `skillc/real-docker-control`
    (never the certifying `skillc/real-docker` context) and are labelled
-   EXPECTED-RED. Record all seven results on this issue.
+   EXPECTED-RED. Record all eleven results on this issue.
 9. `systemctl enable --now skillc-real-docker.timer`.
 
 ## `config.env` template

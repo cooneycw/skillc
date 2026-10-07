@@ -24,11 +24,16 @@ import re
 from pathlib import Path
 
 #: {source filename (relative to docker/trial/): installed path in the
-#: image}. One entry today - grows the same way a second required
-#: interpreter would in `check_interpreters.py`, by adding to this map,
-#: never by hand-maintaining a second list anywhere else.
+#: image}. Grows the same way a second required interpreter would in
+#: `check_interpreters.py`, by adding to this map, never by hand-
+#: maintaining a second list anywhere else. The #332 shim is staged at a
+#: path the subject never invokes directly (see the Dockerfile's own
+#: comment) - this check only proves it is COPYed in and executable
+#: THERE, same as any other required helper; it says nothing about
+#: whether the overlay that reads it later is wired correctly.
 REQUIRED_HELPERS = {
     "skillc-disrupt-tool.py": "/usr/local/bin/skillc-disrupt-tool",
+    "flow-check-gate-shim.py": "/usr/local/share/skillc/flow-check-gate-shim.py",
 }
 
 

@@ -1413,7 +1413,7 @@ class DockerBackend:
     def _launch_and_wait(
         self, handle: _Handle, argv: Sequence[str], limits: Limits,
         cancel: Callable[[], bool] | None, stdin: bytes | None, *, prefix_wrap: bool,
-        after_launch: Callable[[], None] | None = None,
+        after_launch: Callable[[], None] | None = None, cwd: str | None = None,
     ) -> tuple[subprocess.Popen[bytes], _BoundedDrain, _BoundedDrain, threading.Thread, threading.Thread, str] | ExecuteResult:
         """Shared `docker exec` launch-drain-wait mechanics for `execute()`
         and `exec_in_attempt()` (#269) - everything up to, but NOT
@@ -1430,11 +1430,17 @@ class DockerBackend:
         client has launched, before the wait loop begins - `exec_in_
         attempt()`'s own hook for reading back the in-container PID its
         wrapped argv just wrote (orchestrator ruling on finding 3), which
-        `execute()` has no need for and leaves `None`."""
+        `execute()` has no need for and leaves `None`.
+
+        `cwd` (#332 follow-up), when given, overrides the default
+        `CONTAINER_WORKSPACE` working directory via `docker exec`'s own
+        `-w` - `execute()` never passes this and keeps the default;
+        `exec_in_attempt()`'s own docstring states the confinement a
+        caller must apply before passing one through here."""
         exec_argv = [*self.docker_bin, "exec"]
         if stdin is not None:
             exec_argv.append("-i")
-        exec_argv += ["-w", CONTAINER_WORKSPACE, "--", handle.name]
+        exec_argv += ["-w", cwd if cwd is not None else CONTAINER_WORKSPACE, "--", handle.name]
         if prefix_wrap:
             exec_argv.append(SKILLC_WRAP_PATH)
         exec_argv += list(argv)
@@ -1771,6 +1777,7 @@ class DockerBackend:
     def exec_in_attempt(
         self, handle: object, argv: Sequence[str], limits: Limits,
         cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,
+        cwd: str | None = None, env: Mapping[str, str] | None = None,
     ) -> ExecuteResult:
         """Run `argv` inside the attempt's ALREADY-RUNNING container via a
         bare `docker exec`, WITHOUT ever stopping or removing it - added for
@@ -1837,21 +1844,46 @@ class DockerBackend:
         group is still reaped afterward regardless (`start_new_session=
         True` at launch), so this method's own call returns promptly
         rather than waiting on a client whose remote session may outlive
-        it."""
+        it.
+
+        `cwd` (#332 follow-up) sets `docker exec -w`, native support rather
+        than a shell `cd` - this method does not validate it; a caller
+        exposing `cwd` to anything the subject influences must confine it
+        (realpath-resolve inside the container, e.g. via
+        `_resolve_realpath_in_attempt()`, and check the result against a
+        known root) BEFORE calling this, exactly as `gate_witness.py`'s
+        `_decide_run_gate()` does for a subject-forwarded gate cwd - an
+        unconfined cwd here would let a caller run the (still
+        controller-chosen) argv against an arbitrary path.
+
+        `env`, when given, runs the wrapped argv under `env -i <env
+        pairs>`, replacing the exec'd process's whole environment rather
+        than adding to whatever the container's own default carries
+        (`docker exec -e` only ADDS/overrides named vars on top of that
+        default, which cannot express "exactly this set, nothing
+        inherited") - needed so a gate's output can be compared
+        byte-for-byte against a real invocation under a declared,
+        reproducible environment rather than whatever the controller
+        process happens to be carrying (#332's environment-parity
+        condition)."""
         assert isinstance(handle, _Handle)
         reachable, absent, status = self._inspect(handle)
         if not reachable or absent or status != "running":
             return ExecuteResult(reason="attempt-not-running", exit_code=None)
 
         marker_path = f"{CONTAINER_WORKSPACE}/.skillc-exec-pid-{uuid.uuid4().hex}"
-        wrapped_argv = ["sh", "-c", f'echo $$ > {marker_path}; exec "$@"', "sh", *argv]
+        if env is not None:
+            env_pairs = [f"{k}={v}" for k, v in env.items()]
+            wrapped_argv = ["sh", "-c", f'echo $$ > {marker_path}; exec env -i "$@"', "sh", *env_pairs, *argv]
+        else:
+            wrapped_argv = ["sh", "-c", f'echo $$ > {marker_path}; exec "$@"', "sh", *argv]
         in_container_pid: list[int | None] = [None]
 
         def _capture_pid() -> None:
             in_container_pid[0] = self._read_in_container_pid(handle, marker_path)
 
         launched = self._launch_and_wait(
-            handle, wrapped_argv, limits, cancel, stdin, prefix_wrap=False, after_launch=_capture_pid,
+            handle, wrapped_argv, limits, cancel, stdin, prefix_wrap=False, after_launch=_capture_pid, cwd=cwd,
         )
         if isinstance(launched, ExecuteResult):
             return launched  # launch-failed, built by _launch_and_wait itself
@@ -1889,6 +1921,30 @@ class DockerBackend:
             handle, proc, stdout_drain, stderr_drain, stdout_thread, stderr_thread,
             limits, reason, signal_name=None, term_forwarding=None, stop_confirmed=stop_confirmed,
         )
+
+    def resolve_realpath_in_attempt(self, handle: object, path: str, timeout: float = 2.0) -> str | None:
+        """Resolves `path` to its real, symlink-free absolute form INSIDE
+        the attempt's container via `realpath` - for a caller (#332's
+        `gate_witness.py`) that must CONFINE a subject-forwarded path to a
+        known root before trusting it for anything, including as a `cwd`
+        to `exec_in_attempt()`. A string-prefix check on the unresolved
+        input would miss a symlink pointing outside the root; this asks
+        the container itself to resolve it first. `None` on any failure to
+        read a single absolute-path line (unreachable exec, nonexistent
+        path, timeout, a `realpath` that printed nothing) - never a guess,
+        and never the unresolved input returned as if it were confirmed."""
+        assert isinstance(handle, _Handle)
+        try:
+            proc = subprocess.run(
+                [*self.docker_bin, "exec", "--", handle.name, "sh", "-c", 'realpath -- "$1" 2>/dev/null', "sh", path],
+                capture_output=True, env=handle.env, timeout=timeout, check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if proc.returncode != 0:
+            return None
+        text = proc.stdout.decode("utf-8", errors="replace").strip()
+        return text if text.startswith("/") else None
 
     def _read_in_container_pid(self, handle: _Handle, marker_path: str, timeout: float = 2.0) -> int | None:
         """Polls `docker exec ... cat MARKER` for the pid `exec_in_attempt()`'s

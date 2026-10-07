@@ -388,6 +388,7 @@ class ManagedBackend:
     def exec_in_attempt(
         self, handle: object, argv: Sequence[str], limits: Limits,
         cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,
+        cwd: str | None = None, env: Mapping[str, str] | None = None,
     ) -> ExecuteResult:
         """Not yet a protocol version 1 operation (#269) - the managed-backend
         protocol page (`docs/specs/evaluation-facility/
@@ -401,8 +402,16 @@ class ManagedBackend:
         Adding real support here is owed to whichever issue extends the
         protocol page with this operation - not done in this change."""
         assert isinstance(handle, _Handle)
-        del argv, limits, cancel, stdin
+        del argv, limits, cancel, stdin, cwd, env
         return ExecuteResult(reason="unsupported", exit_code=None)
+
+    def resolve_realpath_in_attempt(self, handle: object, path: str, timeout: float = 2.0) -> str | None:
+        """#332: not a protocol version 1 operation here either, for the
+        same reason `exec_in_attempt` is unsupported - `None` unconditionally,
+        which safely refuses every cwd a caller would otherwise confine."""
+        assert isinstance(handle, _Handle)
+        del path, timeout
+        return None
 
     def confirm_stopped(self, handle: object) -> Confirmation:
         """Step 6: `Confirmation.UNKNOWN` on any protocol/transport failure -

@@ -284,6 +284,8 @@ class GateWitness:
         gate_exclusivity: bool,
         exclusivity_basis: str,
         reply_byte_cap: int = DEFAULT_REPLY_BYTE_CAP,
+        declared_env: Mapping[str, Mapping[str, str]] | None = None,
+        workspace_root: str | None = None,
     ) -> None:
         if not declared_gates:
             raise ValueError(
@@ -296,6 +298,24 @@ class GateWitness:
         self._declared_argv: dict[str, tuple[str, ...]] = {
             gate: tuple(argv) for gate, argv in declared_gates.items()
         }
+        #: #332: per-gate exec environment, declared by the CALLER exactly
+        #: like `_declared_argv` - never read from the subject. A gate with
+        #: no entry here runs under `exec_in_attempt()`'s own default
+        #: (whatever the isolation already carries), unchanged from before
+        #: this existed. Keys outside `declared_gates` are refused eagerly
+        #: (a typo'd gate name here would otherwise sit dead forever).
+        if declared_env:
+            unknown_env_gates = set(declared_env) - set(self._declared_argv)
+            if unknown_env_gates:
+                raise ValueError(f"declared_env names undeclared gate(s): {sorted(unknown_env_gates)}")
+        self._declared_env: dict[str, Mapping[str, str]] = dict(declared_env) if declared_env else {}
+        #: #332: the one root a subject-forwarded `cwd` must resolve inside
+        #: (after a REAL in-container `realpath`, never a string-prefix
+        #: check on the unresolved input - a symlink could point outside
+        #: it). `None` means this attempt accepts no `cwd` at all: every
+        #: `run_gate` naming one is refused, never silently ignored or
+        #: passed through unconfined.
+        self._workspace_root = workspace_root
         self._tree_digest_fn = tree_digest_fn
         self._backend = backend
         self._handle = handle
@@ -341,12 +361,42 @@ class GateWitness:
             return self._decide_run_gate(request)
         raise ChannelRefusal(f"gate-witness: unknown op {op!r}")
 
+    def _confine_requested_cwd(self, cwd: object) -> str | None:
+        """#332: the ONE place a subject-forwarded `cwd` is trusted or
+        refused. `None` (no cwd requested) passes through unchanged -
+        `exec_in_attempt()` then runs at its own default. Anything else
+        must resolve, via a REAL in-container `realpath` (never a
+        string-prefix check on the unresolved input - a symlink could
+        point outside the root), to this attempt's declared workspace
+        root or somewhere below it. Any failure to resolve, any
+        resolution outside that root, or a cwd requested when no root is
+        configured at all, is refused - never run, never silently
+        confined by guessing. Orchestrator's own named red cases
+        (`cwd=/`, `cwd=../..`) are exactly what the suffix/prefix check
+        below rejects: either resolves to something that is not this
+        root or a path strictly below it."""
+        if cwd is None:
+            return None
+        if self._workspace_root is None:
+            raise ChannelRefusal("run_gate: a cwd was requested but this attempt accepts none")
+        if not isinstance(cwd, str) or not cwd:
+            raise ChannelRefusal(f"run_gate: cwd must be a non-empty string, not {cwd!r}")
+        resolved = self._backend.resolve_realpath_in_attempt(self._handle, cwd)
+        if resolved is None:
+            raise ChannelRefusal("run_gate: cwd could not be resolved inside the attempt")
+        if resolved != self._workspace_root and not resolved.startswith(self._workspace_root + "/"):
+            raise ChannelRefusal(
+                f"run_gate: cwd resolves outside the attempt's workspace root ({self._workspace_root!r})"
+            )
+        return resolved
+
     def _decide_run_gate(self, request: Mapping[str, object]) -> Mapping[str, object]:
         gate = request.get("gate")
         if not isinstance(gate, str) or gate not in self._declared_argv:
             # Red case 1: the controller's own declared set is the only
             # source of truth for what may be run at all.
             raise ChannelRefusal(f"run_gate: {gate!r} is not a declared gate for this attempt")
+        gate_cwd = self._confine_requested_cwd(request.get("cwd"))
         with self._lock:
             if self._workspace_integrity_unknown:
                 # Orchestrator ruling on finding 3: an earlier timeout or
@@ -402,6 +452,7 @@ class GateWitness:
                 try:
                     result = self._backend.exec_in_attempt(
                         self._handle, list(self._declared_argv[gate]), self._limits,
+                        cwd=gate_cwd, env=self._declared_env.get(gate),
                     )
                 except Exception:
                     # An exception out of `exec_in_attempt()` itself is an

@@ -34,6 +34,153 @@ and version plan.
     `controls/` are untouched (claude-power-pack #1369 pins 61 golden cases
     on them).
 
+- **`exec_in_attempt()` gains `cwd`/`env`, confined per-request by the
+  gate-execution witness** (Refs #332, #269, #183). In progress: the
+  underlying mechanism for witnessing the subject's own `flow-finish-
+  gate.sh` invocation. `ExecutionBackend.exec_in_attempt()` and the new
+  `resolve_realpath_in_attempt()` (both added to the Protocol, with
+  conformance stubs on every other implementer) let a caller run a
+  declared gate at a caller-supplied working directory and under an
+  explicit, declared environment (`docker exec -w` for cwd; `env -i` for
+  environment, since `docker exec -e` only adds to the container's
+  default rather than replacing it). `GateWitness` is the one place a
+  subject-forwarded `cwd` is trusted or refused: it must resolve, via a
+  REAL in-container `realpath` (never a string-prefix check on the
+  unresolved input), to the attempt's declared `workspace_root` or
+  somewhere below it - unresolvable, unconfigured, or outside the root
+  (`cwd=/`, `cwd=../..`) all refuse before anything runs. `declared_env`
+  is per-gate, declared by the controller exactly like `declared_argv`,
+  never read from the subject. Mutation-checked: disabling confinement
+  turns 5 tests red; dropping env-forwarding turns 1 red; both restored.
+  - `docker/trial/flow-check-gate-shim.py` (new): the forwarding shim
+    itself. Recognizes ONLY the two argv shapes `reference.md` prescribes
+    (`--plan check --evidence flow-check`, `--check-summary`), maps each
+    to its own pre-declared gate name, forwards its own `os.getcwd()` as
+    the one dynamic input, and writes back the controller's real
+    `exit_code`/`stdout`/`stderr` byte-for-byte - never synthesises a
+    verdict of its own. Exits 125 (Docker's own "launcher failed"
+    convention) on any channel failure, an unrecognized argv, or a
+    missing real exit code (a refused/never-started gate) - deliberately
+    not 2, which the real script already uses for a stale-helper
+    mismatch (#581/#1366). `tests/test_flow_check_gate_shim.py` drives it
+    as a real subprocess against a real `DecideReplyChannel`, same
+    discipline as `test_skillc_disrupt_tool.py`.
+  - **Decided against wiring the shim through `profile.json`** (orchestrator
+    review): the profile declares what the SUBJECT needs; the shim is
+    measurement apparatus the subject must never declare, and three
+    successive `synthetic`-kind widenings (mode, satisfies, the
+    unreferenced-reason requirement) to force it through anyway were each
+    a sign the shim was in the wrong layer, not a sign `synthetic` needed
+    extending - all three are reverted here. The shim instead becomes a
+    harness OVERLAY applied after installation (baked into the trial
+    image, same as #183 PR B2's `skillc-disrupt-tool`), never a profile
+    dependency - the original `cpp-codex-flow-check-ea6dbfa` profile stays
+    untouched at `841689b`.
+  - `ci/real-docker/break-lib.sh` gains a third family, `gateshim:`, for
+    the shim's own break modes (`synthesizes-output`, `drops-cwd`,
+    `exits-zero-on-channel-failure`, `wrong-env`) - `resolve_break_spec`'s
+    output widens from three lines to four (the normalized spec plus one
+    explicit value per family, exactly one real and the other two the
+    literal `"none"`, same always-all-present contract #315's own HIGH
+    finding established), and `run-real-docker` now sets a third
+    variable, `SKILLC_GATE_SHIM_LIVE_BREAK`, explicitly on every
+    invocation. README step 8 lists all four new break-mode runs.
+    Mutation-checked: removing the `gateshim` case entirely turns 5 tests
+    red; restored, green.
+  - `skillc/gate_overlay.py` (new): the overlay step itself.
+    `apply_flow_check_gate_overlay()` runs as the LAST step of a live
+    attempt's setup (skillc#334 tracks closing the separate gap - found
+    while scoping this - that nothing currently installs the profile's
+    declared dependency closure for a live attempt at all): it moves the
+    real `flow-finish-gate.sh` to a harness-only destination and places
+    the shim at the subject-visible path, reusing `ExecutionBackend.
+    export()`/`install()` - no new backend primitive needed. BOTH
+    digests (the real script's current content, the shim content handed
+    in) are checked against caller-declared expectations BEFORE anything
+    is written - orchestrator's own named red case ("an overlay that
+    places a different shim than the declared digest is refused").
+    `tests/test_gate_overlay.py` drives it against a real `DockerBackend`
+    (the fake `docker` CLI, same discipline as `test_docker_backend.py`).
+    Mutation-checked: dropping either digest comparison turns the
+    matching test red; restored, green.
+  - The trial image now carries the shim too (`docker/trial/Dockerfile`),
+    staged at `/usr/local/share/skillc/flow-check-gate-shim.py` -
+    deliberately NOT at the subject-visible path, which is owned by
+    whatever installs the real pinned script per attempt (skillc#334).
+    `apply_flow_check_gate_overlay()` reads this staged copy's content
+    (via `export()`) and writes it to the subject path itself, after
+    moving the real script aside. `docker/trial/check_helpers.py`'s
+    `REQUIRED_HELPERS` gains the entry, same no-daemon Dockerfile-text
+    proof #183 PR B2 already established for `skillc-disrupt-tool`.
+    Mutation-checked: removing the new `COPY`/`chmod` stanza turns the
+    real-Dockerfile check red; restored, green.
+  - `tests/test_gate_overlay_live.py` (new): the real-Docker conformance
+    test itself, driving a directly-constructed container (#269/#183
+    style, never a profile/surface installer) with `apply_flow_check_
+    gate_overlay()` placing both files. A STAND-IN plays the real
+    `flow-finish-gate.sh` (orchestrator guidance: its claim is about the
+    shim's forwarding, never CPP's own gate logic, which needs skillc#334's
+    real-checkout install and is deferred there) - made sensitive to
+    exactly what the shim must preserve (its own argv, `os.getcwd()`, and
+    a digest of `$HOME`, plus an argv-dependent exit code) so a dropped
+    cwd or a wrong HOME actually changes its output, which a stand-in
+    that printed a constant could not detect. One test function,
+    `SKILLC_GATE_SHIM_LIVE_BREAK` selects the mode, `xfail(strict=True,
+    raises=_PropertyHeld)` on every non-`none` value - the same shape
+    `test_gate_witness_live.py` already uses, with a narrower `raises`
+    (counter-model review on #266, adopted here): the two forwarding-
+    fidelity checks (exit code, byte-identical stdout) go through a
+    `_require()` helper that raises the dedicated, non-`AssertionError`
+    `_PropertyHeld` - asserted UNCONDITIONALLY and identically in every
+    mode, never branched by `BREAK_MODE` (which would XPASS by
+    construction). Every other check stays a plain `assert`, so an
+    unrelated infra failure (a Docker flake during a break run) is an
+    ordinary hard FAILURE, never credited as the break working.
+    Confirmed directly (no pytest/Docker): `_PropertyHeld` is not an
+    `AssertionError` subclass, `_require(True, ...)` returns, and
+    `_require(False, ...)` raises it.
+  - Two more counter-model review findings, fixed before the PR opened.
+    (1) `_DECLARED_ENV`'s `PATH` omitted `/usr/local/bin`, where
+    `python:3.12-slim` actually installs `python3` - under
+    `exec_in_attempt()`'s full-replacement env-pinning this made even
+    the intact run fail to launch the gate at all; fixed by including
+    it. (2) The channel-failure break mode forced its outage only inside
+    `exits-zero-on-channel-failure` and compared against the NORMAL-
+    forwarding expected exit code, so the check could not tell "the
+    shim's own bug fired" from "the forced outage alone would fail this
+    regardless" - a real shim given the same forced outage legitimately
+    returns 125, not the forwarded value, so every mode would have
+    looked identical. Fixed by splitting it into its own property,
+    forced identically in EVERY mode (only `exits-zero-on-channel-
+    failure`'s mutation can still fail it, since that mutation is
+    otherwise invisible to normal forwarding - it only touches FAILURE
+    paths).
+  - A third finding (realpath-then-exec TOCTOU in `GateWitness._confine_
+    requested_cwd`: the in-container directory a resolved `cwd` names
+    could in principle be replaced with a symlink between confinement
+    and the later `docker exec -w`) is real but architectural, not a
+    quick fix - filed as its own issue rather than patched into #332
+    under time pressure; see that issue for detail.
+  - Mutation-checked by construction: each of the four `gateshim:` break
+    modes is a deliberately-broken shim variant (three)
+    or an emptied `declared_env` (`wrong-env`, the fourth) run through
+    this same test, and is asserted to fail exactly the property it
+    names; no daemon is reachable in this environment to execute it
+    here, so it is verified by rendering and `compile()`-checking every
+    generated in-container script plus the expected-output derivation
+    against the stand-in's own print statements, and is owed to the
+    real-Docker runner (#315) for execution evidence.
+  - `ci/check_real_docker_ran.py`'s `DECLARED_REAL_DOCKER_FILES` floor
+    gains `tests.test_gate_overlay_live` (orchestrator review: a file
+    tagged `real_docker` is collected and run, but not CERTIFIED, until
+    the floor also names it - see `ci/real-docker/README.md`). README's
+    own file list and `tests/test_real_docker_verdict.py`'s floor-size
+    fixtures updated to match. Mutation-checked: the existing 3-file
+    floor assertion in `test_real_docker_verdict.py` turned red the
+    moment the floor grew to 4, confirming it actually pins the floor's
+    size rather than passing by construction; fixed to the new 4-file
+    tuple and a dedicated per-file-skip case for the new entry, green.
+
 - **The real-Docker runner's `--break` flag generalized to a family:mode
   table** (Refs #315, #269, #183). Found during #269's PR merge review:
   the runner only ever set `SKILLC_LIVE_TEST_BREAK` (#183's channel break

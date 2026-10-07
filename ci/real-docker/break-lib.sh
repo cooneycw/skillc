@@ -25,14 +25,19 @@ _BREAK_CHANNEL_MODES="omit-mount wrong-uid flip-decision"
 #: `witness:` prefix; see resolve_break_spec's legacy-bare branch below.
 _BREAK_WITNESS_MODES="stale-confirm-lie kill-wrong-pid gate-in-fresh-container"
 
-# Resolves a --break argument to three lines on stdout: the NORMALIZED spec
+#: #332's flow-check-gate-shim break modes - same no-bare-form rule as
+#: witness (no bare spelling was ever documented for these either).
+_BREAK_GATESHIM_MODES="synthesizes-output drops-cwd exits-zero-on-channel-failure wrong-env"
+
+# Resolves a --break argument to FOUR lines on stdout: the NORMALIZED spec
 # ("none", or "<family>:<mode>" - a bare legacy channel mode is normalized
 # to its "channel:<mode>" form here, so every caller downstream has exactly
 # one spelling to compare against "none"), the value to export as
-# SKILLC_LIVE_TEST_BREAK, and the value to export as SKILLC_GATE_WITNESS_
-# LIVE_BREAK - BOTH ALWAYS PRESENT, exactly one of them equal to the
-# resolved mode and the other the literal string "none" (never empty,
-# never left for the caller to infer from an empty field).
+# SKILLC_LIVE_TEST_BREAK, the value to export as SKILLC_GATE_WITNESS_
+# LIVE_BREAK, and the value to export as SKILLC_GATE_SHIM_LIVE_BREAK -
+# ALWAYS ALL PRESENT, exactly one equal to the resolved mode and the other
+# two the literal string "none" (never empty, never left for the caller to
+# infer from an empty field).
 #
 # codex:code_review finding (HIGH, this file's own follow-up review): an
 # earlier draft returned only the SELECTED family's env var name and
@@ -54,7 +59,7 @@ _BREAK_WITNESS_MODES="stale-confirm-lie kill-wrong-pid gate-in-fresh-container"
 resolve_break_spec() {
     local spec="${1:-}" family mode m
     if [ "$spec" = "none" ]; then
-        printf 'none\nnone\nnone\n'
+        printf 'none\nnone\nnone\nnone\n'
         return 0
     fi
     case "$spec" in
@@ -71,7 +76,7 @@ resolve_break_spec() {
         channel)
             for m in $_BREAK_CHANNEL_MODES; do
                 if [ "$m" = "$mode" ]; then
-                    printf 'channel:%s\n%s\nnone\n' "$mode" "$mode"
+                    printf 'channel:%s\n%s\nnone\nnone\n' "$mode" "$mode"
                     return 0
                 fi
             done
@@ -81,15 +86,25 @@ resolve_break_spec() {
         witness)
             for m in $_BREAK_WITNESS_MODES; do
                 if [ "$m" = "$mode" ]; then
-                    printf 'witness:%s\nnone\n%s\n' "$mode" "$mode"
+                    printf 'witness:%s\nnone\n%s\nnone\n' "$mode" "$mode"
                     return 0
                 fi
             done
             echo "run-real-docker: unknown witness break mode '$mode' (must be one of: $_BREAK_WITNESS_MODES)" >&2
             return 2
             ;;
+        gateshim)
+            for m in $_BREAK_GATESHIM_MODES; do
+                if [ "$m" = "$mode" ]; then
+                    printf 'gateshim:%s\nnone\nnone\n%s\n' "$mode" "$mode"
+                    return 0
+                fi
+            done
+            echo "run-real-docker: unknown gateshim break mode '$mode' (must be one of: $_BREAK_GATESHIM_MODES)" >&2
+            return 2
+            ;;
         *)
-            echo "run-real-docker: unknown break family '$family' (must be 'channel' or 'witness'), from spec '$spec'" >&2
+            echo "run-real-docker: unknown break family '$family' (must be 'channel', 'witness' or 'gateshim'), from spec '$spec'" >&2
             return 2
             ;;
     esac
