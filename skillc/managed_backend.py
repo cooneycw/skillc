@@ -312,14 +312,28 @@ class ManagedBackend:
             raise BackendUnavailable(f"managed backend unavailable for {attempt_id!r}: {exc}") from exc
         return _Handle(attempt_id=attempt_id, token=str(result["handle"]))
 
-    def install(self, handle: object, surface: Mapping[str, object]) -> dict[str, object]:
+    def install(self, handle: object, surface: Mapping[str, object], root: str | None = None) -> dict[str, object]:
         """Step 4: encodes every declared entry as base64 content - there is
         no shared filesystem with the platform to `cp` into, unlike
         `DockerBackend`. Raises `BackendUnavailable` on failure, exactly like
         `DockerBackend.install()`'s own stated reasoning: a materialization
         failure makes this attempt's backend unusable, same as an
-        unreachable daemon."""
+        unreachable daemon.
+
+        `root` (#332 follow-up): the managed-backend protocol page has no
+        root concept yet - every entry installs to the remote's own fixed
+        default. A non-`None` root is refused outright (`BackendUnavailable`)
+        rather than silently honored-as-default, since silently installing
+        somewhere other than what the caller asked for is a worse failure
+        than a loud refusal - same posture as `exec_in_attempt`'s own
+        unconditional `reason="unsupported"` for a protocol surface not yet
+        extended here."""
         assert isinstance(handle, _Handle)
+        if root is not None:
+            raise BackendUnavailable(
+                f"managed backend does not support installing at a non-default root ({root!r}) - "
+                "the protocol has no root concept yet"
+            )
         nonce = surface.get(CANARY_NONCE_KEY)
         encoded: dict[str, object] = {}
         for key, value in surface.items():
@@ -423,12 +437,22 @@ class ManagedBackend:
             return Confirmation.UNKNOWN
         return _confirmation_from(result.get("state"))
 
-    def export(self, handle: object, dest: Path) -> None:
+    def export(self, handle: object, dest: Path, root: str | None = None) -> None:
         """Step 7 (backend side): decodes the platform's base64 tar stream
         and extracts it under `dest` - contents only, never nesting the
         workspace itself inside `dest`. `filter="data"` refuses an absolute
-        path or a symlink escape in the archive (stdlib, Python 3.12+)."""
+        path or a symlink escape in the archive (stdlib, Python 3.12+).
+
+        `root` (#332 follow-up): refused outright when not `None`, same
+        posture and reasoning as `install()`'s own refusal - the protocol
+        has no root concept yet, so a non-default root cannot be honored
+        and must not be silently ignored."""
         assert isinstance(handle, _Handle)
+        if root is not None:
+            raise BackendUnavailable(
+                f"managed backend does not support exporting from a non-default root ({root!r}) - "
+                "the protocol has no root concept yet"
+            )
         dest.mkdir(parents=True, exist_ok=True)
         try:
             result = self._call("export", {"handle": handle.token, "attempt_id": handle.attempt_id})

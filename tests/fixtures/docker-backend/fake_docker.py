@@ -608,6 +608,17 @@ def cmd_exec(state_dir: Path, rest: list[str]) -> int:
         elif arg == "-w":
             workdir = rest[i + 1]
             i += 2
+        elif arg == "-u":
+            # #332 follow-up: `write_root_owned_file_in_attempt`/
+            # `candidate_can_write_in_attempt` pass `-u 0` / `-u
+            # CANDIDATE_UID`. This fixture has no real per-uid filesystem
+            # permission model (every exec here runs as whatever host
+            # user runs the test suite) - consumed only so the flag
+            # parses correctly and `--`/NAME are still found afterward;
+            # genuine uid-based permission semantics are owed to the
+            # real-Docker runner, matching the existing `wrong-uid` live
+            # test's own documented limitation.
+            i += 2
         elif arg == "--":
             i += 1
             break

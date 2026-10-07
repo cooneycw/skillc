@@ -125,7 +125,7 @@ class FakeProbeBackend:
         self.prepared.append(handle)
         return handle
 
-    def install(self, handle: object, surface: Mapping[str, object]) -> dict[str, object]:
+    def install(self, handle: object, surface: Mapping[str, object], root: str | None = None) -> dict[str, object]:
         assert isinstance(handle, _Handle)
         if self.unavailable_at == "install":
             raise BackendUnavailable("fake probe backend forced unavailable at install()")
@@ -212,7 +212,7 @@ class FakeProbeBackend:
     def confirm_stopped(self, handle: object) -> Confirmation:
         return self.force_confirm_stopped or Confirmation.CONFIRMED
 
-    def export(self, handle: object, dest: Path) -> None:
+    def export(self, handle: object, dest: Path, root: str | None = None) -> None:
         assert isinstance(handle, _Handle)
         if self.export_fails:
             raise OSError("fake probe backend forced export() failure")

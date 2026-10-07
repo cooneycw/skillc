@@ -8,6 +8,88 @@ and version plan.
 
 ## [Unreleased]
 
+- **`install()`/`export()` gain a `root` parameter; the gate-witness
+  overlay gets two, with a candidate-write verification** (Refs #332,
+  #334). #334's profile-closure delivery installs the real `flow-
+  finish-gate.sh` under the agent's home directory (`CONTAINER_HOME`),
+  but `apply_flow_check_gate_overlay()` could only ever see `CONTAINER_
+  WORKSPACE` - `DockerBackend.install()`/`export()`/`_workspace_
+  baseline()` had it hardcoded, so a live attempt's overlay call would
+  refuse on every real run. Found integrating #334's call site.
+  - `ExecutionBackend.install(handle, surface, root=None)`/`export(handle,
+    dest, root=None)`: `None` means the backend's own default (`CONTAINER_
+    WORKSPACE`, unchanged for every existing caller); Protocol-wide, with
+    conformance stubs on `managed_backend.py` (refuses a non-default root
+    outright - the remote protocol has no root concept yet, so silently
+    honoring one would place content somewhere other than what the caller
+    asked for) and every test fake.
+  - **Two roots, not one, for the overlay** (orchestrator review: a
+    single `root` would let the harness copy of the real script sit
+    under the candidate's own home, where the subject could edit it and
+    the controller would faithfully execute and record the edited
+    version as genuine - "a laundering channel"). `apply_flow_check_
+    gate_overlay()` now takes `subject_root` (defaults like `install()`/
+    `export()` do) and a REQUIRED `harness_root`, a directory the
+    candidate identity cannot write. The harness copy is placed via two
+    new `DockerBackend`-only primitives - never through `install()`'s
+    own candidate-owned tar convention, which exists precisely so a
+    surface is usable BY the candidate:
+    - `write_root_owned_file_in_attempt()`: `docker exec -u 0`, creates
+      missing parent directories (root-owned, mode 0755), writes
+      content with an explicit mode. Returns `True`/`False`, never
+      raises.
+    - `candidate_can_write_in_attempt()`: empirically tests write access
+      AS the candidate uid (`docker exec -u CANDIDATE_UID … test -w`) -
+      never inferred from mode bits alone. `True`/`False` only on a
+      clean result (no stderr); `None` (unreachable, timeout, or ANY
+      stderr output) means unverifiable.
+    - The overlay writes the harness copy, then REQUIRES a confirmed
+      `False` from `candidate_can_write_in_attempt()` before placing the
+      shim - `True` or `None` both refuse (`OverlayRefused`), since an
+      unverified harness copy is not evidence of protection. The shim
+      only replaces the real script at `subject_path` AFTER this passes,
+      so a refusal leaves the real script exactly where it was.
+  - `tests/test_gate_overlay_live.py` updated to match production:
+    `SUBJECT_ROOT = CONTAINER_HOME`, `HARNESS_ROOT = "/opt/skillc-
+    harness"` - a bare `python:3.12-slim` has no candidate home by
+    default, so the test creates it directly before installing anything
+    there, matching the one setup step #334 would already have
+    performed in a real attempt.
+  - Mutation-checked: `tests/test_gate_overlay.py` gains cases for a
+    writable harness destination (refused, exercised for real against
+    the fake CLI's own unenforced permissions - see its module
+    docstring), an unverifiable (`None`) one (refused, monkeypatched -
+    the fake CLI cannot produce a confirmed `False` either way, so the
+    happy path needs the same monkeypatch), a failed root-owned write
+    (refused), and two red cases proving the `is not False`/only-`True`-
+    refuses distinctions actually matter (a naive version that only
+    refuses literal `True` would wrongly accept `None`).
+  - `tests/fixtures/docker-backend/fake_docker.py`'s `cmd_exec` gains
+    `-u UID` parsing (consumed, not enforced - this fixture has no real
+    per-uid permission model, same limitation `wrong-uid`'s own live
+    test already states for itself).
+  - Two more counter-model review findings, fixed before the PR opened.
+    (1) HIGH: `candidate_can_write_in_attempt()` checked only the harness
+    FILE's own write access - a candidate with no access to the file
+    itself can still unlink and replace it if the CONTAINING DIRECTORY is
+    writable (Unix write permission on a file controls its contents;
+    write+execute on a directory controls whether an entry can be removed
+    and recreated, independent of that entry's own mode or owner). The
+    overlay now checks both the file and its containing directory,
+    refusing unless BOTH return a confirmed `False`. (2) MEDIUM: the probe
+    read any nonzero exit with empty-after-`.strip()` stderr as a
+    confident `False` - a signal-killed exec (137 for SIGKILL) can exit
+    outside `test`'s own `{0, 1}` vocabulary while leaving stderr empty,
+    and a genuinely clean `test -w` writes EXACTLY zero bytes either way,
+    so even a lone newline is evidence something else happened. Fixed:
+    only `{0, 1}` is accepted, and ANY stderr at all (not merely non-
+    whitespace) forces `None`. The decision is now a pure, directly-
+    tested helper (`_clean_write_probe_result`) exercised with synthetic
+    `(returncode, stderr)` pairs - no subprocess needed to pin the exact
+    boundary. Mutation-checked: a writable-directory-but-not-file case
+    added to `tests/test_gate_overlay.py`, with its own red case proving
+    a file-only check would wrongly accept it.
+
 - **A `discrimination-declaration` kind in `skillc.calibration`, for the
   intact-vs-degraded contrast** (Refs #287). `parse_declaration` cannot
   express this: it requires exactly one arm literally named `baseline` with

@@ -307,7 +307,7 @@ class ExecutionBackend(Protocol):
         Protocol provides (issue #10 review: /codex:code_review)."""
         ...
 
-    def install(self, handle: object, surface: Mapping[str, object]) -> dict[str, object]:
+    def install(self, handle: object, surface: Mapping[str, object], root: str | None = None) -> dict[str, object]:
         """Step 4: materialize the declared skill surface INSIDE the backend
         and return readiness evidence (interfaces.md's installation-receipt
         fields: selected surface, dependencies, installed paths/digests). The
@@ -316,6 +316,14 @@ class ExecutionBackend(Protocol):
         materialization contract; this seam only requires that whatever is
         passed here is what actually gets installed, not a host-side proxy
         for it.
+
+        `root` (#332 follow-up) names the destination directory `surface`'s
+        relative paths are installed under - `None` means the backend's own
+        default root (the attempt's main workspace; this Protocol does not
+        name it, since it is backend-specific). A caller installing content
+        somewhere other than the workspace - #334's profile closure delivery
+        into the agent's home directory, say - passes the destination
+        explicitly; every existing caller, passing nothing, is unaffected.
         """
         ...
 
@@ -415,12 +423,17 @@ class ExecutionBackend(Protocol):
         never treated as a confirmed stop by any caller."""
         ...
 
-    def export(self, handle: object, dest: Path) -> None:
+    def export(self, handle: object, dest: Path, root: str | None = None) -> None:
         """Step 7 (backend side only): copy `handle`'s output to `dest`, a
         controller-owned directory outside the backend. The CONTROLLER
         re-hashes and freezes what lands here (`trial.capture`); `export`
         itself produces no manifest, digest or verdict, and nothing it claims
         about what it copied is trusted without that freeze.
+
+        `root` (#332 follow-up) names the in-backend directory copied FROM -
+        `None` means the backend's own default root, matching `install()`'s
+        own `root` parameter; every existing caller, passing nothing, reads
+        the same location it always did.
 
         May be called more than once per attempt, to different `dest`
         directories, and must not mutate what it reads: the lifecycle driver

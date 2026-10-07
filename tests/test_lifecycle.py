@@ -106,7 +106,7 @@ class FakeBackend:
         root.mkdir(parents=True)
         return _Handle(attempt_id=attempt_id, root=root)
 
-    def install(self, handle: object, surface: Mapping[str, object]) -> dict[str, object]:
+    def install(self, handle: object, surface: Mapping[str, object], root: str | None = None) -> dict[str, object]:
         """Leaves a scaffold file behind, like a real skill installation would,
         and - when anything was actually declared - plants the liveness
         canary (lifecycle.CANARY_NONCE_KEY) at `.skillc-canary` and tells the
@@ -212,7 +212,7 @@ class FakeBackend:
             return Confirmation.UNKNOWN
         return Confirmation.CONFIRMED if handle.proc.poll() is not None else Confirmation.NOT_CONFIRMED
 
-    def export(self, handle: object, dest: Path) -> None:
+    def export(self, handle: object, dest: Path, root: str | None = None) -> None:
         assert isinstance(handle, _Handle)
         self.export_calls += 1
         if self._export_fails:
@@ -974,9 +974,9 @@ def test_before_execute_runs_after_install_and_before_execute_call(store: Path, 
     real_install = backend.install
     real_execute = backend.execute
 
-    def tracking_install(handle: object, surface: Mapping[str, object]) -> dict[str, object]:
+    def tracking_install(handle: object, surface: Mapping[str, object], root: str | None = None) -> dict[str, object]:
         order.append("install")
-        return real_install(handle, surface)
+        return real_install(handle, surface, root)
 
     def tracking_execute(
         handle: object, argv: Sequence[str], limits: Limits,

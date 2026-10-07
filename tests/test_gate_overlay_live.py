@@ -5,9 +5,9 @@ CLI's host-process simulation - the same evidence class `test_gate_witness_
 live.py` supplies for #269, reused here for the forwarding mechanism.
 
 A STAND-IN script plays the role of the real `flow-finish-gate.sh`
-(orchestrator guidance, message 5738): its claim is about the shim's
-forwarding, never about CPP's own gate logic, so a trivial constant-output
-script would do for that claim alone - but a constant output cannot
+(orchestrator guidance): its claim is about the shim's forwarding, never
+about CPP's own gate logic, so a trivial constant-output script would do
+for that claim alone - but a constant output cannot
 DETECT a dropped cwd or a wrong $HOME, which are exactly the properties
 this test exists to catch. The stand-in is therefore made SENSITIVE to
 everything the shim must preserve: its own argv, its own `os.getcwd()`,
@@ -146,13 +146,20 @@ pytestmark = [
     ),
 ]
 
-#: `reference.md`'s own exact subject path, and the harness-only
-#: destination the overlay moves the real script to - matching
-#: `tests/test_gate_overlay.py`'s own constants exactly.
+#: `reference.md`'s own exact subject path, resolved against `SUBJECT_
+#: ROOT` - `CONTAINER_HOME` (#332 follow-up), matching where #334 actually
+#: delivers the real script in a live attempt, never `CONTAINER_WORKSPACE`
+#: as an earlier draft of this file used. `HARNESS_ROOT` is a SEPARATE,
+#: dedicated directory the overlay itself creates root-owned - never under
+#: the candidate's home, which would let the subject edit the "real"
+#: script the controller later executes (orchestrator review: "a
+#: laundering channel").
 SUBJECT_PATH = ".claude/scripts/flow-finish-gate.sh"
-HARNESS_PATH = ".skillc-harness/flow-finish-gate.sh"
-SUBJECT_ABS = f"{d.CONTAINER_WORKSPACE}/{SUBJECT_PATH}"
-HARNESS_ABS = f"{d.CONTAINER_WORKSPACE}/{HARNESS_PATH}"
+HARNESS_PATH = "flow-finish-gate.sh"
+SUBJECT_ROOT = d.CONTAINER_HOME
+HARNESS_ROOT = "/opt/skillc-harness"
+SUBJECT_ABS = f"{SUBJECT_ROOT}/{SUBJECT_PATH}"
+HARNESS_ABS = f"{HARNESS_ROOT}/{HARNESS_PATH}"
 TINY_PROJECT_DIR = f"{d.CONTAINER_WORKSPACE}/tiny-project"
 
 #: The real shim's own source - read from the host file this test does
@@ -188,7 +195,7 @@ def _home_digest(home: str) -> str:
 def _stand_in_real_script() -> bytes:
     """Plays the role of the real, pinned `flow-finish-gate.sh` for this
     test's claim (forwarding fidelity, never CPP's own gate logic -
-    orchestrator guidance, message 5738). Prints exactly what the shim
+    orchestrator guidance). Prints exactly what the shim
     must preserve byte-for-byte - its own argv, its own `os.getcwd()`,
     and a digest of its own `$HOME` - then exits 3 for a `--plan` call
     (matching the real script's documented "warn" exit) or 0 for
@@ -384,8 +391,21 @@ def test_the_shim_forwards_the_controllers_real_result_against_a_real_daemon() -
     assert isinstance(handle, d._Handle)
     assert handle.trigger_channel is not None
 
+    # CONTAINER_HOME does not pre-exist on a bare python:3.12-slim (no
+    # "candidate" user/home is created outside the real trial image) -
+    # created here directly, matching the one explicit setup step a real
+    # deployment's own profile-closure delivery (#334) would already have
+    # performed before this overlay ever runs.
+    mkdir_home = subprocess.run(
+        [*backend.docker_bin, "exec", "--", handle.name, "mkdir", "-p", SUBJECT_ROOT],
+        capture_output=True, timeout=backend.daemon_timeout, check=False,
+    )
+    assert mkdir_home.returncode == 0, f"could not create {SUBJECT_ROOT!r}: {mkdir_home.stderr!r}"
+
     stand_in = _stand_in_real_script()
-    backend.install(handle, {SUBJECT_PATH: stand_in, SURFACE_EXECUTABLE_KEY: [SUBJECT_PATH]})
+    backend.install(
+        handle, {SUBJECT_PATH: stand_in, SURFACE_EXECUTABLE_KEY: [SUBJECT_PATH]}, root=SUBJECT_ROOT,
+    )
 
     if BREAK_MODE == "synthesizes-output":
         shim_content = _broken_shim_synthesizes_output()
@@ -403,7 +423,7 @@ def test_the_shim_forwards_the_controllers_real_result_against_a_real_daemon() -
         apply_flow_check_gate_overlay(
             backend, handle, subject_path=SUBJECT_PATH, harness_path=HARNESS_PATH,
             expected_real_digest=_digest(stand_in), expected_shim_digest=_digest(shim_content),
-            shim_content=shim_content,
+            shim_content=shim_content, subject_root=SUBJECT_ROOT, harness_root=HARNESS_ROOT,
         )
 
         declared_env = {} if BREAK_MODE == "wrong-env" else {
