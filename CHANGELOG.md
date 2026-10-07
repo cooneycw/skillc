@@ -8,6 +8,54 @@ and version plan.
 
 ## [Unreleased]
 
+- **Close the cwd-confinement TOCTOU in `exec_in_attempt()`** (Refs #338).
+  `GateWitness._confine_requested_cwd()` resolved and root-checked a
+  subject-forwarded `cwd` via one `docker exec`, then a later, separate
+  `docker exec -w <that resolved string>` reused it - with real wall-clock
+  time (lock acquisition, `tree_digest_fn()`) between the two, long enough
+  for the subject, who owns the whole workspace tree, to swap an ancestor
+  of the resolved path for a symlink pointing outside `workspace_root`
+  before the second exec ran. `docker exec -w` re-resolves the path STRING
+  fresh at the moment it runs, with no binding to the directory the
+  earlier check actually observed.
+  `DockerBackend.exec_in_attempt()` gained a `confine_root` parameter:
+  when given alongside `cwd`, the wrapped argv opens `cwd` by file
+  descriptor, asks the kernel what that fd actually resolved to
+  (`readlink -f /proc/self/fd/9`, a `/proc` magic symlink that answers
+  from the open file description itself, never by re-walking the original
+  string), checks that answer against `confine_root`, and only then `cd`s
+  through the SAME fd before exec'ing the real argv - check and use are
+  two reads of one already-open fd inside one exec, with no re-resolution
+  of a path string anywhere between them. The fd is opened on a compound
+  command (`{ ...; } 9<"$1"`), never a bare `exec 9<"$1"` - dash treats
+  `exec`'s own redirection failure as fatal to the whole non-interactive
+  shell, bypassing any `||`/`if` around it, verified by hand before
+  settling on the compound-command form, which both fails like an
+  ordinary command and auto-closes the fd once its block ends (verified:
+  without an explicit or automatic close, dash DOES leak the fd into the
+  exec'd child). A refusal reports `reason="launch-failed"` (the gate's
+  own argv never ran) via a stderr sentinel the Python side checks for
+  PRESENCE, not equality - a failed open also puts dash's own "cannot
+  open" diagnostic on the same stderr ahead of the sentinel, which an
+  exact-match check would have missed.
+  `GateWitness._decide_run_gate()` now passes `confine_root=self.
+  _workspace_root` at its one `exec_in_attempt()` call site;
+  `_confine_requested_cwd()` itself is unchanged in shape and demoted to a
+  cheap, non-load-bearing early rejection - the real guarantee moved
+  entirely into `exec_in_attempt()`. `tests/test_docker_backend.py` adds a
+  deterministic red case (no real timing race needed, since the fake CLI
+  execs real subprocesses against a real sandboxed root: resolve, then
+  synchronously swap the directory for an outside symlink, then call) that
+  must and does follow the swap WITHOUT `confine_root` and is refused WITH
+  it - mutation-checked (the root-membership `case` branch flipped to
+  always match, confirmed red, restored, confirmed green) - plus the fd-
+  leak and nonexistent-cwd edge cases. A new dedicated live file,
+  `tests/test_cwd_confinement_live.py`, proves the same property against a
+  real daemon (the floor's eighth entry in `ci/check_real_docker_ran.py`;
+  `tests/test_real_docker_verdict.py`'s own floor-size tests and fixtures
+  updated to match). Plan reviewed and approved on issue #338 before any
+  code was written.
+
 - **Replace every private mailbox-message citation in #334's own files with
   durable phrasing** (Refs #334, #100). `tests/test_private_citations.py`
   (issue #100's own CI guard) refused 50 citations of the form "mailbox

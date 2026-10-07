@@ -403,6 +403,7 @@ class ManagedBackend:
         self, handle: object, argv: Sequence[str], limits: Limits,
         cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,
         cwd: str | None = None, env: Mapping[str, str] | None = None,
+        confine_root: str | None = None,
     ) -> ExecuteResult:
         """Not yet a protocol version 1 operation (#269) - the managed-backend
         protocol page (`docs/specs/evaluation-facility/
@@ -414,9 +415,12 @@ class ManagedBackend:
         caller (the gate-execution witness) that receives this must treat
         the whole mechanism as unavailable for this attempt, never retry.
         Adding real support here is owed to whichever issue extends the
-        protocol page with this operation - not done in this change."""
+        protocol page with this operation - not done in this change.
+        `confine_root` (#338) is accepted for the same reason `cwd` already
+        is - unsupported here regardless, never a path to run `cwd`
+        unconfined."""
         assert isinstance(handle, _Handle)
-        del argv, limits, cancel, stdin, cwd, env
+        del argv, limits, cancel, stdin, cwd, env, confine_root
         return ExecuteResult(reason="unsupported", exit_code=None)
 
     def resolve_realpath_in_attempt(self, handle: object, path: str, timeout: float = 2.0) -> str | None:

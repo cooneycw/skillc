@@ -50,7 +50,7 @@ class _UnavailableBackend:
     def exec_in_attempt(
         self, handle: object, argv: Sequence[str], limits: b.Limits,
         cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,
-        cwd: str | None = None, env: object = None,
+        cwd: str | None = None, env: object = None, confine_root: str | None = None,
     ) -> b.ExecuteResult:
         raise AssertionError("must never be called: prepare() already refused")
 

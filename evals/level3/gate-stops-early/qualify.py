@@ -290,7 +290,8 @@ class _WitnessBackend:
 
     def exec_in_attempt(self, handle: object, argv: list, limits: Limits,
                         cancel: object = None, stdin: object = None,
-                        cwd: object = None, env: object = None) -> ExecuteResult:
+                        cwd: object = None, env: object = None,
+                        confine_root: object = None) -> ExecuteResult:
         return self.result
 
     def export(self, handle: object, dest: Path) -> None:

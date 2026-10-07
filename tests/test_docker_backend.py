@@ -2098,6 +2098,178 @@ def test_clean_write_probe_result_direct() -> None:
     assert naive(137, b"") is False, "the naive version should disagree with the real function here"
 
 
+# ------------------------------------------------- #338: cwd TOCTOU confinement
+
+
+def _real_dir(docker_state: Path, handle: d._Handle, *container_parts: str) -> Path:
+    """The fake CLI's own `_in_container()` convention, duplicated here
+    (not imported - that fixture is invoked as a subprocess script, never
+    as a module) so a test can plant or swap a real directory BEFORE the
+    exec that should observe it, exactly at the path `_remap_absolute`
+    will resolve the matching container-side string to."""
+    return docker_state / f"{handle.name}.fsroot" / Path(*container_parts)
+
+
+def test_exec_in_attempt_confine_root_runs_the_gate_at_the_resolved_cwd(
+    base: Path, docker_state: Path,
+) -> None:
+    """The functional happy path, and - per the orchestrator's check 1 -
+    direct proof that `exec 9<DIR` (opening a DIRECTORY for read) and `cd
+    /proc/self/fd/9` both work under whatever `sh` this fixture's real
+    subprocess exec actually runs (dash, on the bookworm-slim base image
+    `test_gate_witness_live.py` names): the gate's own command reads back
+    its REAL kernel cwd via `/proc/self/cwd`, not a shell builtin's cached
+    `$PWD` (dash's plain `pwd` prints the pre-chdir `/proc/self/fd/9`
+    string, not the resolved directory - `readlink -f /proc/self/cwd` is
+    what a real exec'd child actually inherits, and it is what GateWitness
+    needs the gate to land in)."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-cwd-00000000001")
+    assert isinstance(handle, d._Handle)
+    backend.install(handle, {})
+    sub = _real_dir(docker_state, handle, "work", "trial", "sub")
+    sub.mkdir(parents=True, exist_ok=True)
+
+    result = backend.exec_in_attempt(
+        handle, ["sh", "-c", "readlink -f /proc/self/cwd"], Limits(timeout=5.0),
+        cwd=f"{d.CONTAINER_WORKSPACE}/trial/sub", confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert result.reason == "exited"
+    assert result.exit_code == 0
+    with tempfile.TemporaryDirectory() as tmp:
+        backend.export(handle, Path(tmp))
+        reported_cwd = (Path(tmp) / "observations").read_text().strip()
+    assert reported_cwd == str(sub.resolve())
+
+
+def test_exec_in_attempt_confine_root_closes_the_fd_before_the_gate_runs(
+    base: Path, docker_state: Path,
+) -> None:
+    """The orchestrator's check 2: the confinement fd must not leak into
+    the subject's own gate process. Without the `exec 9<&-` close this
+    fix adds, dash DOES inherit the open directory fd across its final
+    `exec` (verified by hand before writing this test) - so the gate here
+    checks for fd 9's absence directly rather than trusting the close is
+    a no-op either way."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-cwd-00000000002")
+    assert isinstance(handle, d._Handle)
+    backend.install(handle, {})
+    sub = _real_dir(docker_state, handle, "work", "trial", "sub")
+    sub.mkdir(parents=True, exist_ok=True)
+
+    result = backend.exec_in_attempt(
+        handle, ["sh", "-c", "test -e /proc/self/fd/9 && echo LEAKED || echo CLOSED"], Limits(timeout=5.0),
+        cwd=f"{d.CONTAINER_WORKSPACE}/trial/sub", confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert result.exit_code == 0
+    with tempfile.TemporaryDirectory() as tmp:
+        backend.export(handle, Path(tmp))
+        assert (Path(tmp) / "observations").read_text().strip() == "CLOSED"
+
+
+def test_exec_in_attempt_confine_root_refuses_a_directory_swapped_for_an_outside_symlink(
+    base: Path, docker_state: Path,
+) -> None:
+    """The deterministic red case (#338 point 3) - no real timing race is
+    needed, because this fake CLI execs real subprocesses against a real
+    (sandboxed) filesystem: resolve a real subdirectory once, THEN - still
+    before the exec that uses it - replace that same directory with a
+    symlink to a sibling path outside `workspace_root`. `exec_in_attempt`
+    must refuse rather than follow the swap, because its own `exec 9<`
+    happens AFTER the swap and binds to whatever is there NOW, and its
+    readlink-against-`confine_root` check must catch that."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-cwd-00000000003")
+    assert isinstance(handle, d._Handle)
+    backend.install(handle, {})
+    workspace_root = _real_dir(docker_state, handle, "work")
+    outside = _real_dir(docker_state, handle, "home", "candidate", "outside")
+    outside.mkdir(parents=True, exist_ok=True)
+    sub = workspace_root / "trial" / "sub"
+    sub.mkdir(parents=True, exist_ok=True)
+    gate_cwd = f"{d.CONTAINER_WORKSPACE}/trial/sub"  # as GateWitness would have resolved it
+
+    # The swap: exactly what an earlier `resolve_realpath_in_attempt` could
+    # not have seen coming, and could not re-observe once it already
+    # returned - a SEPARATE, later call is the only thing that could.
+    shutil.rmtree(sub)
+    sub.symlink_to(outside, target_is_directory=True)
+
+    result = backend.exec_in_attempt(
+        handle, ["sh", "-c", "echo should-not-run"], Limits(timeout=5.0),
+        cwd=gate_cwd, confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert result.reason == "launch-failed"
+    assert result.exit_code is None
+    assert result.error == d.CWD_CONFINEMENT_REFUSED_SENTINEL
+
+
+def test_exec_in_attempt_without_confine_root_follows_the_swapped_symlink(
+    base: Path, docker_state: Path,
+) -> None:
+    """The structural proof the fix exists to close, run against the
+    UNCHANGED path (`cwd` alone, no `confine_root`) that every caller not
+    exposing `cwd` to the subject still legitimately uses: the identical
+    swap as the refusal test above, but exercised through the plain
+    `docker exec -w` route. This is the vulnerability #338 describes,
+    shown directly rather than only argued - the same swap that gets
+    refused above is silently FOLLOWED here, landing the gate's cwd inside
+    the swapped, outside-`workspace_root` target. A caller that forwards a
+    subject-influenced `cwd` through this path alone (skipping
+    `confine_root`) is exactly as exposed as this test demonstrates."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-cwd-00000000004")
+    assert isinstance(handle, d._Handle)
+    backend.install(handle, {})
+    workspace_root = _real_dir(docker_state, handle, "work")
+    outside = _real_dir(docker_state, handle, "home", "candidate", "outside")
+    outside.mkdir(parents=True, exist_ok=True)
+    sub = workspace_root / "trial" / "sub"
+    sub.mkdir(parents=True, exist_ok=True)
+    gate_cwd = f"{d.CONTAINER_WORKSPACE}/trial/sub"
+
+    shutil.rmtree(sub)
+    sub.symlink_to(outside, target_is_directory=True)
+
+    result = backend.exec_in_attempt(
+        handle, ["sh", "-c", "readlink -f /proc/self/cwd"], Limits(timeout=5.0), cwd=gate_cwd,
+    )
+    assert result.reason == "exited"
+    assert result.exit_code == 0
+    with tempfile.TemporaryDirectory() as tmp:
+        backend.export(handle, Path(tmp))
+        reported_cwd = (Path(tmp) / "observations").read_text().strip()
+    # Landed in the swapped target, OUTSIDE workspace_root - not refused.
+    assert reported_cwd == str(outside.resolve())
+    assert not reported_cwd.startswith(str(workspace_root.resolve()))
+
+
+def test_exec_in_attempt_confine_root_refuses_when_the_cwd_no_longer_exists(
+    base: Path, docker_state: Path,
+) -> None:
+    """A narrower failure than a swap: the directory is simply gone by the
+    time this exec runs (deleted, not replaced). `exec 9<` itself fails to
+    open - the confinement script's own first guard, never reaching the
+    readlink/case check at all - and this must refuse exactly like a
+    confirmed-outside-root swap, never silently fall through to the
+    outer `docker exec -w` default."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-cwd-00000000005")
+    assert isinstance(handle, d._Handle)
+    backend.install(handle, {})
+    sub = _real_dir(docker_state, handle, "work", "trial", "sub")
+    sub.mkdir(parents=True, exist_ok=True)
+    shutil.rmtree(sub)  # gone, not swapped
+
+    result = backend.exec_in_attempt(
+        handle, ["sh", "-c", "echo should-not-run"], Limits(timeout=5.0),
+        cwd=f"{d.CONTAINER_WORKSPACE}/trial/sub", confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert result.reason == "launch-failed"
+    assert result.error == d.CWD_CONFINEMENT_REFUSED_SENTINEL
+
+
 # ---------------------------------------------------- remove_file_in_attempt
 
 
