@@ -300,12 +300,8 @@ and version plan.
 - **The overlay call site is un-stubbed (Refs #334, #332's #342, mailbox
   6018)** - now that #342 landed the real two-root `apply_flow_check_
   gate_overlay` signature, `_make_before_execute`'s hook calls it for
-  real as the last setup step, firing only when the attempt's own
-  closure actually delivered `.claude/scripts/flow-finish-gate.sh` (keyed
-  off `verify_home_files`, never hardcoded to one profile's name, so a
-  future profile without this dependency is silently unaffected rather
-  than refused for a file it never declared). `harness_root` is a new
-  fixed constant, `/opt/skillc-harness`. Wiring-only unit tests
+  real as the last setup step. `harness_root` is a new fixed constant,
+  `/opt/skillc-harness`. Wiring-only unit tests
   (`tests/test_agent_trial.py`) monkeypatch both `_preflight_in_container`
   and the overlay call itself, isolating the new conditional/argument-
   construction logic from each mechanism's own correctness (tested
@@ -319,6 +315,37 @@ and version plan.
   preflight, overlay, and (through a real `GateWitness`/decide-reply
   channel, the real forwarding shim, and the real moved script) the
   gate - not merely the preflight subset it tested before.
+- **`profile.gate_entrypoint`: a subject fact, not a harness inference
+  (Refs #334, mailbox 6047)** - the first cut of the overlay wiring above
+  fired whenever `.claude/scripts/flow-finish-gate.sh` happened to be a
+  key in `verify_home_files`: orchestrator correction, "that makes
+  witnessing an inference from a file's presence... the same silent-skip
+  shape as the `.git` revision check" - a closure regression that
+  silently dropped the gate script would skip witnessing instead of
+  refusing, with nothing to say why. `Profile` gains an optional
+  top-level `gate_entrypoint: str | None` field (a repo/home-relative
+  path, e.g. `.claude/scripts/flow-finish-gate.sh`) describing a FACT
+  about the skill - which installed path is the command its own
+  instructions invoke to run its gates - never a harness/study concern,
+  so the field says nothing about witnessing itself. `validate()`
+  refuses (`gate-entrypoint-not-installed`) when a declared entrypoint is
+  not actually produced by the profile's own install population - a
+  typo'd or stale path is caught at declaration time, not only at a live
+  attempt. `calibration_run._ClosureResult`/`Treatment` carry it through
+  unchanged (`CalibrationRefused` if a validated closure's own
+  `home_files` somehow disagrees - defensive, since `validate()` already
+  guarantees agreement through the normal path). `agent_trial._make_
+  before_execute`/`run_one_attempt` gain an explicit `gate_entrypoint`
+  parameter: `None` means no overlay, ever, whatever `verify_home_files`
+  contains; a declared path means witnessing is UNCONDITIONALLY required
+  and the attempt is refused before any spend if that path is absent
+  from the verified closure. `cpp-codex-flow-check-ea6dbfa/profile.json`
+  declares it; its evidence/inventory.json is regenerated again. Red
+  cases, mutation-checked: declared+missing refuses
+  (`tests/test_profile.py`, `tests/test_calibration_run_profile_
+  closure.py`); declared+present applies the overlay; undeclared never
+  calls it, even when `verify_home_files` happens to carry a
+  coincidentally-matching path (`tests/test_agent_trial.py`).
 - **In-container closure verification and tool preflight (Refs #334, in
   progress)** - `agent_trial.run_one_attempt` gains `verify_home_files`
   (relpath -> expected `sha256:` digest) and `preflight_tools` (a

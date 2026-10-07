@@ -30,7 +30,17 @@ TWO PHASES, mirroring #340's own split:
   signature #342 landed) are driven directly against the real backend -
   never a re-implementation of either's logic. The `none` mode therefore
   exercises the FULL production order #334 defines: install, verify,
-  preflight, overlay, (agent) gate - mailbox 6018.
+  preflight, overlay, (agent) gate - mailbox 6018, witnessing-fact
+  revised mailbox 6047 (below).
+
+GATE_ENTRYPOINT IS AN EXPLICIT FACT, NEVER INFERRED (mailbox 6047's
+correction): the profile's own `gate_entrypoint` field - this test's
+fixture profile declares `.claude/scripts/flow-finish-gate.sh`, exactly
+matching the real `evals/subjects/cpp-codex-flow-check-ea6dbfa/
+profile.json` - is what decides whether the overlay runs, never whether
+`verify_home_files` happens to carry that path. `_TARGET_RELPATH` (the
+break modes' own target) is a DIFFERENT file specifically so breaking it
+can never be confused with breaking the entrypoint declaration itself.
 
 ONCE THE OVERLAY HAS RUN, the agent's own gate invocation goes through
 the REAL forwarding shim (`docker/trial/flow-check-gate-shim.py`, the
@@ -181,7 +191,6 @@ _TAMPERED_BYTES = b"# skillc#334 live-test tamper marker - not the real file\n"
 #: Dockerfile` stages into the image).
 _SHIM_SOURCE = at._FLOW_CHECK_GATE_SHIM_SOURCE.read_bytes()
 _HARNESS_ABS = f"{at._FLOW_CHECK_GATE_HARNESS_ROOT}/{at._FLOW_CHECK_GATE_HARNESS_PATH}"
-_SUBJECT_ABS = f"{d.CONTAINER_HOME}/{at._FLOW_CHECK_GATE_SUBJECT_PATH}"
 #: `--plan check --evidence flow-check`, never `--check-summary` - the
 #: REAL classifier string (`gate_path.REAL`, "running deterministic gate
 #: (lib.cicd run --plan") is printed only by the "run" code path
@@ -246,10 +255,15 @@ def _build_trial_image(tag: str) -> None:
     assert build.returncode == 0, f"trial image build failed: {build.stderr}"
 
 
-def _closure_inputs() -> tuple[dict[str, bytes], dict[str, str], tuple[dict[str, object], ...]]:
+def _closure_inputs() -> tuple[dict[str, bytes], dict[str, str], tuple[dict[str, object], ...], str]:
     """HOST PHASE: the exact derivation `calibration_run._closure_home_
     files` uses, against the committed fixture snapshot - no network, no
-    git. Returns `(home_files, verify_home_files, preflight_tools)`."""
+    git. Returns `(home_files, verify_home_files, preflight_tools,
+    gate_entrypoint)` - `gate_entrypoint` is the profile's own declared
+    fact (mailbox 6047), asserted non-None here since this fixture's own
+    profile.json declares one; a profile that declared none would never
+    reach the overlay at all, by construction, not by this test's own
+    branching."""
     prof = p.Profile.load(PROFILE_JSON)
     tree = p.DirTree(FIXTURE_DIR)
     inventory = p.validate(prof, tree)
@@ -257,7 +271,9 @@ def _closure_inputs() -> tuple[dict[str, bytes], dict[str, str], tuple[dict[str,
     assert _TARGET_RELPATH in home_files, "fixture bug: the target closure file is not part of this closure"
     verify_home_files = {relpath: m.sha256_bytes(data) for relpath, data in home_files.items()}
     preflight_tools = tuple(dep for dep in inventory["dependencies"] if dep["kind"] == "tool")
-    return home_files, verify_home_files, preflight_tools
+    gate_entrypoint = inventory["gate_entrypoint"]
+    assert isinstance(gate_entrypoint, str), "fixture bug: this profile must declare a gate_entrypoint"
+    return home_files, verify_home_files, preflight_tools, gate_entrypoint
 
 
 @pytest.mark.xfail(
@@ -265,7 +281,8 @@ def _closure_inputs() -> tuple[dict[str, bytes], dict[str, str], tuple[dict[str,
     reason=f"SKILLC_CLOSURE_PREFLIGHT_LIVE_BREAK={BREAK_MODE} deliberately breaks one property",
 )
 def test_a_treated_attempts_closure_is_verified_and_the_gate_reaches_the_real_runner() -> None:
-    home_files, verify_home_files, preflight_tools = _closure_inputs()
+    home_files, verify_home_files, preflight_tools, gate_entrypoint = _closure_inputs()
+    subject_abs = f"{d.CONTAINER_HOME}/{gate_entrypoint}"
 
     # Diagnostic, not the property under test - confirms THIS mode's own
     # input construction did what it means to, via a plain `assert`
@@ -308,20 +325,21 @@ def test_a_treated_attempts_closure_is_verified_and_the_gate_reaches_the_real_ru
         refusal_reason = ""
         try:
             at._preflight_in_container(backend, handle, Limits(timeout=120.0), verify_home_files, preflight_tools)
-            # skillc#334 step 4 / mailbox 6018: the LAST setup step before
+            # skillc#334 step 4 / mailbox 6047: the LAST setup step before
             # the agent starts, using the real two-root signature #342
-            # landed - fires only because this closure's own
-            # verify_home_files carries the flow-check gate script's
-            # digest (`_TARGET_RELPATH` is a DIFFERENT file; this is
-            # never refused for the break modes, since they never reach
-            # this line at all - the preflight call above already raised).
-            real_digest = verify_home_files[at._FLOW_CHECK_GATE_SUBJECT_PATH]
+            # landed. `gate_entrypoint` is the profile's own EXPLICIT
+            # declared fact (`_TARGET_RELPATH` is a DIFFERENT file; the
+            # break modes never reach this line at all, since the
+            # preflight call above already raised for them) - never
+            # inferred from `verify_home_files`' own membership, matching
+            # `agent_trial`'s own corrected wiring exactly.
+            real_digest = verify_home_files[gate_entrypoint]
             assert real_digest.startswith("sha256:")
             gate_overlay.apply_flow_check_gate_overlay(
                 backend, handle,
                 subject_root=d.CONTAINER_HOME,
                 harness_root=at._FLOW_CHECK_GATE_HARNESS_ROOT,
-                subject_path=at._FLOW_CHECK_GATE_SUBJECT_PATH,
+                subject_path=gate_entrypoint,
                 harness_path=at._FLOW_CHECK_GATE_HARNESS_PATH,
                 expected_real_digest=real_digest[len("sha256:"):],
                 expected_shim_digest=hashlib.sha256(_SHIM_SOURCE).hexdigest(),
@@ -348,7 +366,7 @@ def test_a_treated_attempts_closure_is_verified_and_the_gate_reaches_the_real_ru
         # GateWitness/decide-reply channel rather than running the real
         # script directly.
         witness = GateWitness(
-            declared_gates={_GATE_NAME: (_SUBJECT_ABS, *_GATE_ARGV_TAIL)},
+            declared_gates={_GATE_NAME: (subject_abs, *_GATE_ARGV_TAIL)},
             tree_digest_fn=lambda: "live-conformance-digest",
             backend=backend, handle=handle, limits=Limits(timeout=120.0),
             gate_exclusivity=False, exclusivity_basis="#334 live conformance test - no exclusivity claim exercised here",
@@ -359,7 +377,7 @@ def test_a_treated_attempts_closure_is_verified_and_the_gate_reaches_the_real_ru
         gate_argv = " ".join(_GATE_ARGV_TAIL)
         gate = backend.execute(
             handle,
-            ["bash", "-c", f"cd {d.CONTAINER_WORKSPACE}/tiny-project && exec {_SUBJECT_ABS} {gate_argv}"],
+            ["bash", "-c", f"cd {d.CONTAINER_WORKSPACE}/tiny-project && exec {subject_abs} {gate_argv}"],
             Limits(timeout=120.0),
         )
         assert gate.reason == "exited", f"the gate process itself never completed (reason={gate.reason!r})"

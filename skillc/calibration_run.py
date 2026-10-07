@@ -102,13 +102,17 @@ class Treatment:
     profile was opted in: the closure files' expected digests, re-checked
     IN the live container after delivery (never trusting delivery alone),
     and the profile's own `tool`-kind dependencies, checked present in
-    that same container at their declared constraint."""
+    that same container at their declared constraint. `gate_entrypoint`
+    (mailbox 6047) is `None` unless the opted-in profile declares one -
+    the SUBJECT's own fact about which installed path is its gate
+    command, never inferred from `verify_home_files`' own membership."""
 
     home_files: Mapping[str, bytes]
     digest: str
     receipt_context: agent_trial.InstallationReceiptContext | None
     verify_home_files: Mapping[str, str] = field(default_factory=dict)
     preflight_tools: tuple[dict[str, object], ...] = ()
+    gate_entrypoint: str | None = None
 
 
 @dataclass(frozen=True)
@@ -118,6 +122,10 @@ class _ClosureResult:
     #: in-container preflight reads these directly (each already carries
     #: its own `probes`, serialized by `profile._dep_record`).
     tools: tuple[dict[str, object], ...]
+    #: The profile's own declared `gate_entrypoint` (mailbox 6047), or
+    #: `None` if it declares none - carried straight through, never
+    #: re-derived from `home_files`' own keys.
+    gate_entrypoint: str | None
 
 
 def _closure_home_files(acquired: cc.AcquiredCollection, subject_profile: str, root: Path) -> _ClosureResult:
@@ -159,7 +167,23 @@ def _closure_home_files(acquired: cc.AcquiredCollection, subject_profile: str, r
         )
     home_files = profile.installed_home_files(inventory, tree)
     tools = tuple(dep for dep in inventory["dependencies"] if dep["kind"] == "tool")
-    return _ClosureResult(home_files=home_files, tools=tools)
+    gate_entrypoint = inventory.get("gate_entrypoint")
+    assert gate_entrypoint is None or isinstance(gate_entrypoint, str)
+    # The earliest possible refusal point, before any container exists
+    # (mailbox 6047): `profile.validate()` already proved the entrypoint
+    # is installed by SOME closure at declaration time, but THIS run's
+    # own installed_home_files() - built from the live, re-validated
+    # inventory above - is the actual population this attempt would
+    # deliver. The two can only disagree if something between validation
+    # and here dropped the file, which must never pass silently.
+    if gate_entrypoint is not None and gate_entrypoint not in home_files:
+        raise CalibrationRefused(
+            f"profile {subject_profile!r} declares gate_entrypoint {gate_entrypoint!r}, but this "
+            f"closure's own installed_home_files does not carry it - witnessing is required "
+            f"whenever a gate_entrypoint is declared, and cannot be honoured for a file that was "
+            f"never actually produced"
+        )
+    return _ClosureResult(home_files=home_files, tools=tools, gate_entrypoint=gate_entrypoint)
 
 
 def build_treatment(
@@ -188,6 +212,7 @@ def build_treatment(
     home_files: dict[str, bytes] = dict(cc._collection_home_files(acquired.source, acquired.files))
     verify_home_files: dict[str, str] = {}
     preflight_tools: tuple[dict[str, object], ...] = ()
+    gate_entrypoint: str | None = None
     if subject_profile is not None:
         assert root is not None
         closure = _closure_home_files(acquired, subject_profile, root)
@@ -215,9 +240,11 @@ def build_treatment(
         # that same digest, carried forward for the in-container re-check.
         verify_home_files = {relpath: m.sha256_bytes(data) for relpath, data in closure_files.items()}
         preflight_tools = closure.tools
+        gate_entrypoint = closure.gate_entrypoint
     return Treatment(
         home_files=home_files,
         digest=acquired.source.digest,
+        gate_entrypoint=gate_entrypoint,
         receipt_context=agent_trial.InstallationReceiptContext(
             declared=frozenset(f.skill for f in acquired.files),
             tree_digest=acquired.source.digest,

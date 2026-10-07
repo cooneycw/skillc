@@ -75,6 +75,7 @@ _PROFILE_KEYS = {
     "profile_schema", "name", "subject", "select", "treatment_question",
     "allowed_destinations", "reference_patterns", "dependencies", "unsupported",
     "mirrors", "generated_from", "declared_empty_kinds", "client_profiles", "notes",
+    "gate_entrypoint",
 }
 _DEP_KEYS = {
     "id", "kind", "scope", "source_root", "paths", "destination", "satisfies",
@@ -183,6 +184,19 @@ class Profile:
     generated_from: dict[str, str]  # generated repo path -> upstream repo path (transformed)
     declared_empty_kinds: tuple[str, ...]
     client_profiles: dict[str, dict[str, str]]
+    #: skillc#334 (orchestrator ruling, mailbox 6047): a FACT about the
+    #: skill, never a harness concern - which installed, home-relative
+    #: path is the command the skill's own instructions invoke to run its
+    #: gates (e.g. ".claude/scripts/flow-finish-gate.sh"). `None` (the
+    #: default - every profile before this one, and most after it) means
+    #: this skill names no such entrypoint. A harness that wants to
+    #: WITNESS gate execution reads this field to decide IF witnessing
+    #: applies at all - it is never inferred from whether some file
+    #: happens to be present in an installed closure, which the
+    #: orchestrator named as the exact failure mode to avoid: an attempt
+    #: whose closure silently drops this path (a regression, a renamed
+    #: destination) must be REFUSED, not silently un-witnessed.
+    gate_entrypoint: str | None
     raw: dict[str, object] = field(compare=False, repr=False)
 
     @property
@@ -315,12 +329,23 @@ class Profile:
         if profiles.get(subject.client, {}).get("status") != "declared":
             raise Refused(f"client_profiles does not declare the subject's own client {subject.client!r}")
 
+        gate_entrypoint_raw = data.get("gate_entrypoint")
+        gate_entrypoint: str | None
+        if gate_entrypoint_raw is None:
+            gate_entrypoint = None
+        elif not isinstance(gate_entrypoint_raw, str) or not gate_entrypoint_raw:
+            raise Refused("gate_entrypoint must be a non-empty string when given")
+        else:
+            gate_entrypoint = posixpath.normpath(gate_entrypoint_raw)
+            if m._escapes(gate_entrypoint) or gate_entrypoint in ("", "."):
+                raise Refused(f"gate_entrypoint {gate_entrypoint_raw!r} is not a safe relative path")
+
         return cls(
             name=name, subject=subject, subject_path=subject_path, select=select,
             treatment_question=str(question), allowed_destinations=tuple(allowed),
             patterns=tuple(patterns), dependencies=deps, unsupported=unsupported,
             mirrors=mirrors, generated_from=generated_from, declared_empty_kinds=empty,
-            client_profiles=profiles, raw=data,
+            client_profiles=profiles, gate_entrypoint=gate_entrypoint, raw=data,
         )
 
 
@@ -993,6 +1018,17 @@ def _run_walk(profile: Profile, tree: Tree, problems: list[dict[str, Any]] | Non
                 raise Refused(msg)
             _fail(walk, "destination-outside-allowed", msg, str(installed[dest]["owner"]), in_path=dest)
 
+    # skillc#334 (mailbox 6047): a declared gate_entrypoint must actually be
+    # something this profile's own closure installs - a typo'd or stale
+    # path here would otherwise validate cleanly while naming a file that
+    # can never arrive in any attempt, silently defeating the "always
+    # witness it when declared" rule one layer up.
+    if profile.gate_entrypoint is not None and profile.gate_entrypoint not in installed:
+        msg = f"gate_entrypoint {profile.gate_entrypoint!r} is not installed by this profile's own closure"
+        if problems is None:
+            raise Refused(msg)
+        _fail(walk, "gate-entrypoint-not-installed", msg, (), in_path=profile.gate_entrypoint)
+
     mirrors = []
     for gen, src in sorted(profile.mirrors.items()):
         if problems is None:
@@ -1067,6 +1103,7 @@ def _run_walk(profile: Profile, tree: Tree, problems: list[dict[str, Any]] | Non
         },
         "declared_empty_kinds": list(profile.declared_empty_kinds),
         "client_profiles": profile.client_profiles,
+        "gate_entrypoint": profile.gate_entrypoint,
         "installed_surface": {
             "files": len(installed),
             "digest": m.sha256_bytes("".join(

@@ -1,7 +1,7 @@
 {
  "inventory_schema": 1,
  "profile": "cpp-codex-flow-check",
- "profile_digest": "sha256:4aea1d90a1f0fc77e0c0032e602f7328b243bdccfc087b02c6089bf516c4b3a5",
+ "profile_digest": "sha256:f2636695c92e1aa59bf28cd1596b292fb2e60788c8bee3dc51561db0387117f6",
  "subject": {
   "declaration_digest": "sha256:623a9e810cc23499c68ac52496b75e02e5166cdd1a92deac6056a502c23eb220",
   "locator": "github.com/cooneycw/claude-power-pack",
@@ -2110,6 +2110,7 @@
    "reason": "GitHub, Docker, AWS, MCP servers and network are not provided to trials (spec.md section 4)"
   }
  },
+ "gate_entrypoint": ".claude/scripts/flow-finish-gate.sh",
  "installed_surface": {
   "files": 97,
   "digest": "sha256:d838cb262366c9229e1808ef647c1e55f0180d71caacc5453b4c710260879312"

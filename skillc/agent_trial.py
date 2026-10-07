@@ -280,17 +280,22 @@ class HomeFileVerificationRefused(Exception):
 
 _TOOLS_MARKER = "---skillc-334-tools---"
 
-#: skillc#334 step 4 (mailbox 6018, following #332's own follow-up #342):
-#: the flow-check gate-witness overlay fires for whichever treated attempt's
-#: closure actually delivers this exact subject path - never hardcoded to
-#: one profile's name, so a future profile without this dependency is
-#: correctly skipped rather than refused for a file it never declared.
-#: `_FLOW_CHECK_GATE_SHIM_SOURCE` is read from THIS repository's own
-#: tracked copy, the same file `docker/trial/Dockerfile` COPies into the
-#: trial image - both are the one tracked source, never two independent
-#: copies that could drift (matching `tests/test_gate_overlay_live.py`'s
-#: own `_REAL_SHIM_SOURCE` convention).
-_FLOW_CHECK_GATE_SUBJECT_PATH = ".claude/scripts/flow-finish-gate.sh"
+#: skillc#334 step 4 (mailbox 6018, revised mailbox 6047): the flow-check
+#: gate-witness overlay fires whenever the attempt's own `gate_entrypoint`
+#: is given - an explicit, caller-supplied fact (ultimately the SUBJECT's
+#: own profile declaration, threaded through `calibration_run.Treatment`),
+#: never inferred from whether some file happens to be present in
+#: `verify_home_files`. The orchestrator's own correction: inferring
+#: witnessing from dict membership means a closure regression that drops
+#: the gate script would silently skip witnessing instead of refusing -
+#: "the same silent-skip shape as the .git revision check." `harness_root`/
+#: `harness_path`/the shim itself are HARNESS concerns, never subject
+#: facts, so they stay fixed constants here. `_FLOW_CHECK_GATE_SHIM_SOURCE`
+#: is read from THIS repository's own tracked copy, the same file
+#: `docker/trial/Dockerfile` COPies into the trial image - both are the
+#: one tracked source, never two independent copies that could drift
+#: (matching `tests/test_gate_overlay_live.py`'s own `_REAL_SHIM_SOURCE`
+#: convention).
 _FLOW_CHECK_GATE_HARNESS_ROOT = "/opt/skillc-harness"
 _FLOW_CHECK_GATE_HARNESS_PATH = "flow-finish-gate.sh"
 _FLOW_CHECK_GATE_SHIM_SOURCE = (
@@ -523,6 +528,7 @@ def _make_before_execute(
     minimum_credential_seconds: float, delivered_credential_bytes: dict[str, bytes],
     extra_home_files: Mapping[str, bytes], verify_home_files: Mapping[str, str] | None = None,
     preflight_tools: Sequence[Mapping[str, object]] | None = None, limits: Limits | None = None,
+    gate_entrypoint: str | None = None,
 ) -> Callable[[ExecutionBackend, object], None]:
     """`delivered_credential_bytes` is an OUT-parameter (a single-entry dict
     the caller reads afterward) - `observe_before_teardown` needs these
@@ -540,13 +546,27 @@ def _make_before_execute(
     the agent's own container can actually run. `limits` is required
     together with a non-empty `verify_home_files` or `preflight_tools`;
     meaningless (and unused) without either - mirrors `calibration_run.
-    build_treatment`'s own subject_profile/root pairing."""
+    build_treatment`'s own subject_profile/root pairing.
+
+    `gate_entrypoint` (mailbox 6047) is the subject's OWN declared fact -
+    ultimately `profile.Profile.gate_entrypoint`, threaded through
+    `calibration_run.Treatment` - naming which installed path is this
+    skill's gate command. `None` means the subject declares none, so the
+    overlay never runs, whatever `verify_home_files` happens to contain.
+    A real path means witnessing is UNCONDITIONALLY required: it must be
+    present in the verified closure or the attempt is refused before any
+    spend - never silently un-witnessed because the file happened to be
+    missing (the orchestrator's own correction: inferring the need to
+    witness from a file's presence has the same silent-skip shape as the
+    `.git` revision check's own blind-instrument defect)."""
     resolved_verify_home_files = verify_home_files or {}
     resolved_preflight_tools = preflight_tools or ()
     if (resolved_verify_home_files or resolved_preflight_tools) and limits is None:
         raise HomeFileVerificationRefused(
             "verify_home_files or preflight_tools is given but limits is None; cannot exec to verify"
         )
+    if gate_entrypoint is not None and limits is None:
+        raise HomeFileVerificationRefused("gate_entrypoint is given but limits is None; cannot exec to witness")
 
     def hook(backend: ExecutionBackend, handle: object) -> None:
         assert isinstance(backend, DockerBackend)
@@ -582,29 +602,32 @@ def _make_before_execute(
             assert limits is not None  # checked above, before any delivery happened
             _preflight_in_container(backend, handle, limits, resolved_verify_home_files, resolved_preflight_tools)
 
-        # skillc#334 step 4 (mailbox 6018, #332's own follow-up #342 landed
-        # the two-root `install()`/`export()`/`apply_flow_check_gate_
-        # overlay()` this needed): the LAST setup step before the agent
-        # starts (gate_overlay.py's own ordering requirement - anything
-        # that re-reads an installed-file digest after this runs would see
-        # the shim's digest where it expects the real script's). Fires
-        # only when THIS closure actually delivered the flow-check gate
-        # script - never unconditionally, so a profile without this
-        # dependency is silently correct rather than refused for a file
-        # it never declared. `expected_real_digest` is the exact digest
-        # `_preflight_in_container` just verified arrived - re-reading it
-        # from `resolved_verify_home_files` rather than re-deriving it, so
-        # the overlay can never disagree with what verification already
-        # confirmed.
-        real_digest = resolved_verify_home_files.get(_FLOW_CHECK_GATE_SUBJECT_PATH)
-        if real_digest is not None:
+        # skillc#334 step 4 (mailbox 6018, revised 6047; #332's own
+        # follow-up #342 landed the two-root `install()`/`export()`/
+        # `apply_flow_check_gate_overlay()` this needed): the LAST setup
+        # step before the agent starts (gate_overlay.py's own ordering
+        # requirement - anything that re-reads an installed-file digest
+        # after this runs would see the shim's digest where it expects
+        # the real script's). Fires whenever `gate_entrypoint` is given -
+        # an explicit fact, never inferred from `resolved_verify_home_
+        # files`' own membership - and REFUSES if that declared path is
+        # not actually in the verified closure, rather than silently
+        # skipping witnessing for a reason nothing would ever surface.
+        if gate_entrypoint is not None:
+            real_digest = resolved_verify_home_files.get(gate_entrypoint)
+            if real_digest is None:
+                raise HomeFileVerificationRefused(
+                    f"gate_entrypoint {gate_entrypoint!r} is declared but not present in the "
+                    f"verified closure - witnessing is required whenever a gate_entrypoint is "
+                    f"declared, and this attempt cannot honour it"
+                )
             assert real_digest.startswith("sha256:")
             shim_content = _FLOW_CHECK_GATE_SHIM_SOURCE.read_bytes()
             gate_overlay.apply_flow_check_gate_overlay(
                 backend, handle,
                 subject_root=CONTAINER_HOME,
                 harness_root=_FLOW_CHECK_GATE_HARNESS_ROOT,
-                subject_path=_FLOW_CHECK_GATE_SUBJECT_PATH,
+                subject_path=gate_entrypoint,
                 harness_path=_FLOW_CHECK_GATE_HARNESS_PATH,
                 expected_real_digest=real_digest[len("sha256:"):],
                 expected_shim_digest=hashlib.sha256(shim_content).hexdigest(),
@@ -1583,6 +1606,7 @@ def run_one_attempt(
     extra_home_files: Mapping[str, bytes] | None = None,
     verify_home_files: Mapping[str, str] | None = None,
     preflight_tools: Sequence[Mapping[str, object]] | None = None,
+    gate_entrypoint: str | None = None,
     retain_transcript: bool = False,
     receipt_context: InstallationReceiptContext | None = None,
 ) -> dict[str, object]:
@@ -1684,6 +1708,7 @@ def run_one_attempt(
         delivered_credential_bytes=delivered_credential_bytes,
         extra_home_files=extra_home_files or {},
         verify_home_files=verify_home_files, preflight_tools=preflight_tools, limits=limits,
+        gate_entrypoint=gate_entrypoint,
     )
     retained_transcript: dict[str, object] | None = {} if retain_transcript else None
     # #202: the transcript goes into the attempt's OWN store for every caller,

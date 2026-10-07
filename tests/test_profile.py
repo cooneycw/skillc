@@ -582,3 +582,50 @@ def test_the_evidence_check_sees_a_drifted_declaration() -> None:
     inv = json.loads(CPP_INVENTORY.read_text(encoding="utf-8"))
     declared["select"] = ["flow-check", "flow-finish"]
     assert inv["profile_digest"] != _canonical_digest(declared)
+
+
+# ------------------------------------------------------------- gate_entrypoint
+
+
+def test_gate_entrypoint_defaults_to_none(tmp_path: Path) -> None:
+    """Every profile before #334's mailbox-6047 field, and most after it,
+    names no gate entrypoint at all - absence must mean `None`, never an
+    inferred value."""
+    prof = _profile(tmp_path)
+    assert prof.gate_entrypoint is None
+    inv = _run(tmp_path)
+    assert inv["gate_entrypoint"] is None
+
+
+def test_a_gate_entrypoint_installed_by_this_closure_validates(tmp_path: Path) -> None:
+    inv = _run(tmp_path, gate_entrypoint=".helpers/run-gate.sh")
+    assert inv["gate_entrypoint"] == ".helpers/run-gate.sh"
+
+
+def test_red_case_a_gate_entrypoint_this_closure_never_installs_is_refused(tmp_path: Path) -> None:
+    """Mutation check: a typo'd or stale `gate_entrypoint` must be caught
+    at `validate()` time, naming the exact reason - never silently
+    accepted as a fact that can never actually hold for a live attempt."""
+    with pytest.raises(p.Refused, match="gate_entrypoint '.helpers/does-not-exist.sh' is not installed"):
+        _run(tmp_path, gate_entrypoint=".helpers/does-not-exist.sh")
+
+
+def test_gate_entrypoint_must_be_a_non_empty_string(tmp_path: Path) -> None:
+    with pytest.raises(p.Refused, match="non-empty string"):
+        _profile(tmp_path, gate_entrypoint="")
+
+
+def test_gate_entrypoint_cannot_escape(tmp_path: Path) -> None:
+    with pytest.raises(p.Refused, match="safe relative path"):
+        _profile(tmp_path, gate_entrypoint="../../etc/passwd")
+
+
+def test_diagnose_reports_an_unsatisfiable_gate_entrypoint_as_a_problem(tmp_path: Path) -> None:
+    """`diagnose()`'s own non-strict mode (#295) must record the same
+    defect as a problem, never silently drop it just because it continues
+    past the first failure instead of raising."""
+    src = tmp_path / "src"
+    _source(src)
+    prof = _profile(tmp_path, gate_entrypoint=".helpers/does-not-exist.sh")
+    result = p.diagnose(prof, p.DirTree(src))
+    assert any(problem["category"] == "gate-entrypoint-not-installed" for problem in result["problems"])

@@ -768,21 +768,22 @@ def test_extra_home_files_default_omits_nothing_delivered_before(
 # ------------------------------------------- flow-check gate overlay (#334 step 4)
 
 
-def test_the_overlay_fires_when_the_closure_delivers_the_flow_check_gate_script(
+def test_the_overlay_fires_when_gate_entrypoint_is_declared_and_delivered(
     store: Path, base: Path, docker_state: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """skillc#334 step 4: once a treated attempt's closure includes
-    `.claude/scripts/flow-finish-gate.sh`, the hook calls `gate_overlay.
-    apply_flow_check_gate_overlay` with the real two-root signature. Two
-    OTHER mechanisms are monkeypatched out, each independently tested
-    elsewhere, so this test isolates exactly the new wiring decision:
-    `_preflight_in_container`'s own digest-verification correctness is
-    `tests/test_agent_trial_preflight.py`'s job (the fake docker CLI's
-    own path-remapping simulation reports a sha256sum line prefixed with
-    its HOST-side fsroot path, not the clean in-container path
-    `_preflight_in_container`'s parser expects - a fake-CLI limitation
-    unrelated to this wiring, confirmed directly before writing this
-    test); `apply_flow_check_gate_overlay`'s own correctness is `tests/
+    """skillc#334 step 4 (mailbox 6047): the hook calls `gate_overlay.
+    apply_flow_check_gate_overlay` with the real two-root signature
+    whenever `gate_entrypoint` is EXPLICITLY given - never inferred from
+    `verify_home_files`' own membership. Two OTHER mechanisms are
+    monkeypatched out, each independently tested elsewhere, so this test
+    isolates exactly the new wiring decision: `_preflight_in_container`'s
+    own digest-verification correctness is `tests/test_agent_trial_
+    preflight.py`'s job (the fake docker CLI's own path-remapping
+    simulation reports a sha256sum line prefixed with its HOST-side
+    fsroot path, not the clean in-container path `_preflight_in_
+    container`'s parser expects - a fake-CLI limitation unrelated to this
+    wiring, confirmed directly before writing this test);
+    `apply_flow_check_gate_overlay`'s own correctness is `tests/
     test_gate_overlay.py`'s job (mutation-checked there)."""
     monkeypatch.setattr(at, "_preflight_in_container", lambda *a, **k: None)
     calls: list[dict[str, object]] = []
@@ -800,13 +801,15 @@ def test_the_overlay_fires_when_the_closure_delivers_the_flow_check_gate_script(
 
     gate_script = b"#!/bin/bash\necho real\n"
     digest = f"sha256:{hashlib.sha256(gate_script).hexdigest()}"
+    entrypoint = ".claude/scripts/flow-finish-gate.sh"
 
     record = at.run_one_attempt(
         backend=backend, experiment=experiment, attempt_id=attempt_id, client="codex",
         base_argv=argv, prompt="Fix the slug helper.", skill_name=None,
         surface={}, limits=Limits(timeout=5), base=base, credential_explicit_path=cred_path,
-        extra_home_files={at._FLOW_CHECK_GATE_SUBJECT_PATH: gate_script},
-        verify_home_files={at._FLOW_CHECK_GATE_SUBJECT_PATH: digest},
+        extra_home_files={entrypoint: gate_script},
+        verify_home_files={entrypoint: digest},
+        gate_entrypoint=entrypoint,
     )
 
     assert record["disposition"] == "captured", record.get("reason")
@@ -815,12 +818,85 @@ def test_the_overlay_fires_when_the_closure_delivers_the_flow_check_gate_script(
     assert calls[0] == {
         "subject_root": d.CONTAINER_HOME,
         "harness_root": at._FLOW_CHECK_GATE_HARNESS_ROOT,
-        "subject_path": at._FLOW_CHECK_GATE_SUBJECT_PATH,
+        "subject_path": entrypoint,
         "harness_path": at._FLOW_CHECK_GATE_HARNESS_PATH,
         "expected_real_digest": hashlib.sha256(gate_script).hexdigest(),
         "expected_shim_digest": hashlib.sha256(shim_content).hexdigest(),
         "shim_content": shim_content,
     }
+
+
+def test_the_overlay_is_skipped_when_gate_entrypoint_is_not_declared(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A treated attempt whose profile declares no `gate_entrypoint` must
+    never call the overlay - even if `verify_home_files` happens to carry
+    a file at the exact path a different profile would use as its own
+    entrypoint, since the decision is never inferred from dict
+    membership (mailbox 6047's own correction)."""
+    monkeypatch.setattr(at, "_preflight_in_container", lambda *a, **k: None)
+    calls: list[dict[str, object]] = []
+
+    def fake_overlay(backend: object, handle: object, **kwargs: object) -> None:
+        calls.append(kwargs)
+
+    monkeypatch.setattr(at.gate_overlay, "apply_flow_check_gate_overlay", fake_overlay)
+
+    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+    experiment, attempt_id = _planned(store)
+    cred_path = _fresh_credential(tmp_path, "codex")
+    home = _mapped_home(docker_state, attempt_id)
+    argv = _fake_argv(fmt="codex-fake", home=home, transcript_relpath=".codex/sessions/2026/01/01/rollout-ov2.jsonl")
+
+    gate_script = b"#!/bin/bash\necho real\n"
+    digest = f"sha256:{hashlib.sha256(gate_script).hexdigest()}"
+    entrypoint = ".claude/scripts/flow-finish-gate.sh"
+
+    record = at.run_one_attempt(
+        backend=backend, experiment=experiment, attempt_id=attempt_id, client="codex",
+        base_argv=argv, prompt="Fix the slug helper.", skill_name=None,
+        surface={}, limits=Limits(timeout=5), base=base, credential_explicit_path=cred_path,
+        extra_home_files={entrypoint: gate_script},
+        verify_home_files={entrypoint: digest},
+        # gate_entrypoint deliberately omitted (None) - the file's mere
+        # presence must not be read as "witnessing applies".
+    )
+
+    assert record["disposition"] == "captured", record.get("reason")
+    assert calls == []
+
+
+def test_red_case_gate_entrypoint_declared_but_not_delivered_is_refused(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """mailbox 6047's own named red case: a declared `gate_entrypoint`
+    absent from the verified closure must refuse the attempt before any
+    spend - never silently skip witnessing, which would be the exact
+    silent-skip defect this field exists to prevent."""
+    monkeypatch.setattr(at, "_preflight_in_container", lambda *a, **k: None)
+    calls: list[dict[str, object]] = []
+
+    def fake_overlay(backend: object, handle: object, **kwargs: object) -> None:
+        calls.append(kwargs)
+
+    monkeypatch.setattr(at.gate_overlay, "apply_flow_check_gate_overlay", fake_overlay)
+
+    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+    experiment, attempt_id = _planned(store)
+    cred_path = _fresh_credential(tmp_path, "codex")
+    home = _mapped_home(docker_state, attempt_id)
+    argv = _fake_argv(fmt="codex-fake", home=home, transcript_relpath=".codex/sessions/2026/01/01/rollout-ov3.jsonl")
+
+    record = at.run_one_attempt(
+        backend=backend, experiment=experiment, attempt_id=attempt_id, client="codex",
+        base_argv=argv, prompt="Fix the slug helper.", skill_name=None,
+        surface={}, limits=Limits(timeout=5), base=base, credential_explicit_path=cred_path,
+        gate_entrypoint=".claude/scripts/flow-finish-gate.sh",  # declared, but never delivered
+    )
+
+    assert record["disposition"] == "unavailable"
+    assert "declared but not present in the verified closure" in str(record.get("reason"))
+    assert calls == []
 
 
 def test_the_overlay_is_skipped_when_the_closure_has_no_gate_script(

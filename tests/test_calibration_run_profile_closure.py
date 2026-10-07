@@ -81,12 +81,14 @@ def _build_content_repo(tmp_path: Path) -> tuple[Path, str]:
     return repo, _git(repo, "rev-parse", "HEAD")
 
 
-def _write_declaration(declaration_root: Path, revision: str) -> None:
+def _write_declaration(declaration_root: Path, revision: str, **profile_changes: object) -> None:
     declaration_root.mkdir(parents=True)
     (declaration_root / "subject.json").write_text(
         json.dumps({**SUBJECT_DICT, "revision": revision}), encoding="utf-8",
     )
-    (declaration_root / "profile.json").write_text(json.dumps(PROFILE_DICT), encoding="utf-8")
+    (declaration_root / "profile.json").write_text(
+        json.dumps({**PROFILE_DICT, **profile_changes}), encoding="utf-8",
+    )
 
 
 @needs_git
@@ -226,8 +228,92 @@ def test_red_case_a_genuine_disagreement_between_closure_and_skill_surface_is_re
         result = real_closure_home_files(acquired, subject_profile, root)
         files = dict(result.home_files)
         files[".codex/skills/gate-check/SKILL.md"] = b"not the real skill content\n"
-        return cr._ClosureResult(home_files=files, tools=result.tools)
+        return cr._ClosureResult(home_files=files, tools=result.tools, gate_entrypoint=result.gate_entrypoint)
 
     monkeypatch.setattr(cr, "_closure_home_files", _tampered)
     with pytest.raises(cr.CalibrationRefused, match="disagrees with the skill surface"):
+        cr.build_treatment(acquired, subject_profile=subject_profile, root=root)
+
+
+# --------------------------------------------------------------- gate_entrypoint
+
+
+@needs_git
+def test_build_treatment_carries_a_declared_gate_entrypoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """mailbox 6047: a profile's own declared `gate_entrypoint` reaches
+    `Treatment` unchanged - a fact about the subject, never re-derived
+    from `verify_home_files`' own membership."""
+    content_repo, revision = _build_content_repo(tmp_path)
+    root = tmp_path / "root"
+    subject_profile = "subject-profile"
+    entrypoint = ".codex/skills/gate-check/SKILL.md"
+    _write_declaration(root / subject_profile, revision, gate_entrypoint=entrypoint)
+
+    subject = materialize.Subject.from_dict({**SUBJECT_DICT, "revision": revision})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: subject)
+    acquired = cc.acquire_collection("whatever", tmp_path / "base", checkout=content_repo)
+
+    prof = p.Profile.load(root / subject_profile / "profile.json")
+    tree = p.GitTree(content_repo, revision)
+    committed_inventory = p.validate(prof, tree)
+    assert committed_inventory["gate_entrypoint"] == entrypoint
+    (root / subject_profile / "evidence").mkdir()
+    (root / subject_profile / "evidence" / "inventory.json").write_text(
+        json.dumps(committed_inventory), encoding="utf-8",
+    )
+
+    treatment = cr.build_treatment(acquired, subject_profile=subject_profile, root=root)
+    assert treatment.gate_entrypoint == entrypoint
+
+
+@needs_git
+def test_build_treatment_gate_entrypoint_defaults_to_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A profile that declares no `gate_entrypoint` at all must leave
+    `Treatment.gate_entrypoint` as `None` - never inferred from anything
+    the closure happens to install."""
+    content_repo, revision = _build_content_repo(tmp_path)
+    root = tmp_path / "root"
+    subject_profile = "subject-profile"
+    _write_declaration(root / subject_profile, revision)  # PROFILE_DICT, unmodified
+
+    subject = materialize.Subject.from_dict({**SUBJECT_DICT, "revision": revision})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: subject)
+    acquired = cc.acquire_collection("whatever", tmp_path / "base", checkout=content_repo)
+
+    prof = p.Profile.load(root / subject_profile / "profile.json")
+    tree = p.GitTree(content_repo, revision)
+    committed_inventory = p.validate(prof, tree)
+    assert committed_inventory["gate_entrypoint"] is None
+    (root / subject_profile / "evidence").mkdir()
+    (root / subject_profile / "evidence" / "inventory.json").write_text(
+        json.dumps(committed_inventory), encoding="utf-8",
+    )
+
+    treatment = cr.build_treatment(acquired, subject_profile=subject_profile, root=root)
+    assert treatment.gate_entrypoint is None
+
+
+@needs_git
+def test_red_case_a_gate_entrypoint_this_closure_never_installs_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """mailbox 6047's own named red case, exercised end to end through
+    `build_treatment`: a declared `gate_entrypoint` this profile's closure
+    never actually installs is refused - caught by `profile.validate()`
+    itself (the earliest possible point, before any container exists),
+    never silently accepted as a fact that could never be honoured."""
+    content_repo, revision = _build_content_repo(tmp_path)
+    root = tmp_path / "root"
+    subject_profile = "subject-profile"
+    _write_declaration(root / subject_profile, revision, gate_entrypoint=".codex/skills/does-not-exist.sh")
+
+    subject = materialize.Subject.from_dict({**SUBJECT_DICT, "revision": revision})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: subject)
+    acquired = cc.acquire_collection("whatever", tmp_path / "base", checkout=content_repo)
+
+    with pytest.raises(p.Refused, match="gate_entrypoint '.codex/skills/does-not-exist.sh' is not installed"):
         cr.build_treatment(acquired, subject_profile=subject_profile, root=root)
