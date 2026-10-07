@@ -176,6 +176,21 @@ def candidates(root: Path) -> list[tuple[Path, str, frozenset[str], bool]]:
     #: Optional - a grader need not have a deliberate no-witness candidate,
     #: but this one does (`incomplete/no-witness-companion`).
     incomplete = sorted(p for p in (root / "incomplete").iterdir() if p.is_dir()) if (root / "incomplete").is_dir() else []
+    #: Optional (#287): the tree a live #287 attempt is actually graded
+    #: against (`eligibility-manifest.json`'s own `live_attempt_tree`) -
+    #: this task's own top-level `fixture/` never exercises the skipped-
+    #: gate obligation at all (its Makefile declares every gate, so no gate
+    #: is ever skipped); `discrimination/fixture`'s Makefile omits
+    #: `typecheck:` unconditionally, the real tree where the obligation
+    #: applies. Certified here too, not only named in the eligibility
+    #: manifest - a tree nothing certifies could still silently fail to
+    #: discriminate.
+    discrimination_fixture = root / "discrimination" / "fixture"
+    discrimination_reference = root / "discrimination" / "reference"
+    discrimination = (
+        [(discrimination_fixture, "FAIL", True), (discrimination_reference, "PASS", True)]
+        if discrimination_fixture.is_dir() and discrimination_reference.is_dir() else []
+    )
     placed = [
         (root / "fixture", "FAIL", True),
         (root / "reference", "PASS", True),
@@ -183,6 +198,7 @@ def candidates(root: Path) -> list[tuple[Path, str, frozenset[str], bool]]:
         *[(p, "PASS", True) for p in benign],
         *[(p, "FAIL", True) for p in wrong],
         *[(p, "INCONCLUSIVE", False) for p in incomplete],
+        *discrimination,
     ]
     return [(p, *_expectation(p, want), needs_witness) for p, want, needs_witness in placed]
 
