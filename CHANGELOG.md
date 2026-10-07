@@ -8,6 +8,38 @@ and version plan.
 
 ## [Unreleased]
 
+- **The trial image pins `uv` and installs `make`/`bash` explicitly; a
+  fifth real-Docker break family proves the pin is what makes the uv
+  probe work** (Refs #343). `cpp-codex-flow-check-ea6dbfa/profile.json`
+  declares `tool-uv` and `tool-make-git-bash` as tool dependencies the
+  trial image supplies, so without this every profile-opted live attempt
+  would be refused at preflight once #334 wires that check in.
+  - `docker/trial/Dockerfile`: `ARG UV_VERSION=0.9.7` (same pin
+    `docker/profile-cold-install/Dockerfile` already reviewed and uses),
+    installed via astral's documented multi-stage `COPY`; `make`/`bash`
+    added to the explicit apt-get list. The file is split into two named
+    stages from this point - `no-uv` (nothing, a deliberately broken
+    negative control) and `trial` (the pinned `COPY`) - with `trial`
+    placed LAST so every caller that builds without `--target`
+    (`tests/test_trial_image_build_live.py`) still gets the working
+    image by default.
+  - `docker/trial/pinned-versions.json` gains a `uv` entry, reusing
+    rather than independently re-verifying the pin above.
+  - `ci/real-docker/break-lib.sh` gains a fifth break family,
+    `trialimage:no-uv`, selecting the Dockerfile's `no-uv` stage;
+    `ci/real-docker/run-real-docker` sets `SKILLC_TRIAL_IMAGE_BREAK`
+    explicitly on every invocation, alongside the existing four.
+  - `tests/test_trial_image_tools_live.py` (new): a real-Docker
+    conformance test asserting the EXACT pinned uv version (not merely
+    presence), using issue #341's per-property `_PropertyHeld` subtype
+    pattern (`_UvPropertyHeld`) from the start; also probes `python3`,
+    `make`, `bash` and `git` presence. Tests the probe commands
+    directly rather than through skillc#334's own evaluator, which is
+    not merged yet and whose dependency `id` fields are not real binary
+    names.
+  - This changes the trial image's identity: no digest is approved for
+    a live #287 attempt yet, and this PR does not claim one.
+
 - **`install()`/`export()` gain a `root` parameter; the gate-witness
   overlay gets two, with a candidate-write verification** (Refs #332,
   #334). #334's profile-closure delivery installs the real `flow-
