@@ -200,6 +200,16 @@ CONTAINER_HOME = "/home/candidate"
 #: probe confirms it is actually there.
 SKILLC_WRAP_PATH = "/usr/local/bin/skillc-wrap"
 
+#: #338: printed to stderr by `exec_in_attempt()`'s own in-container
+#: confinement check, and ONLY by it, before that check has refused and
+#: BEFORE the real gate argv has ever been exec'd - so no byte of the
+#: gate's own output can be mixed in yet when this appears. `exec_in_
+#: attempt()` matches this EXACT line to tell "confinement refused" apart
+#: from "the gate's own declared argv happened to exit with the same
+#: code" - the raw exit code alone cannot do that, because the gate's
+#: argv is controller-declared but its own exit code is unconstrained.
+CWD_CONFINEMENT_REFUSED_SENTINEL = "skillc-cwd-confinement-refused"
+
 #: Must match skillc-supervisor.py's own default (`$SKILLC_CONTROL_SOCKET`
 #: unset). `_forwarding_available` requires this socket to exist, not only
 #: `SKILLC_WRAP_PATH`'s executable bit (review must-fix, PR #182): in THIS
@@ -1812,6 +1822,7 @@ class DockerBackend:
         self, handle: object, argv: Sequence[str], limits: Limits,
         cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,
         cwd: str | None = None, env: Mapping[str, str] | None = None,
+        confine_root: str | None = None,
     ) -> ExecuteResult:
         """Run `argv` inside the attempt's ALREADY-RUNNING container via a
         bare `docker exec`, WITHOUT ever stopping or removing it - added for
@@ -1880,15 +1891,51 @@ class DockerBackend:
         rather than waiting on a client whose remote session may outlive
         it.
 
-        `cwd` (#332 follow-up) sets `docker exec -w`, native support rather
-        than a shell `cd` - this method does not validate it; a caller
-        exposing `cwd` to anything the subject influences must confine it
-        (realpath-resolve inside the container, e.g. via
-        `_resolve_realpath_in_attempt()`, and check the result against a
-        known root) BEFORE calling this, exactly as `gate_witness.py`'s
-        `_decide_run_gate()` does for a subject-forwarded gate cwd - an
-        unconfined cwd here would let a caller run the (still
-        controller-chosen) argv against an arbitrary path.
+        `cwd` alone (no `confine_root`) sets `docker exec -w`, native
+        support rather than a shell `cd` - this method does not validate
+        it, so a caller exposing `cwd` to anything the subject influences
+        must confine it first (realpath-resolve inside the container, e.g.
+        via `resolve_realpath_in_attempt()`, and check the result against a
+        known root). This path is unchanged since #332 and stays the right
+        one for a `cwd` the subject never influences at all.
+
+        `cwd` WITH `confine_root` (#338) is for exactly the case the
+        paragraph above warns about: a `cwd` the subject can influence.
+        `gate_witness.py`'s `_decide_run_gate()` already resolves and
+        root-checks a subject-forwarded cwd via `_confine_requested_cwd()`
+        before calling here - but that check and this call are two
+        SEPARATE `docker exec`s, separated by real wall-clock time (lock
+        acquisition, `tree_digest_fn()`), during which the subject (same
+        container, owns the whole workspace tree) can swap an ancestor of
+        the already-resolved path for a symlink pointing outside the root.
+        `docker exec -w` re-resolves the path STRING fresh at the moment
+        IT runs, with no binding to the directory `_confine_requested_cwd`
+        actually observed - so passing its resolved string straight
+        through as plain `cwd` would carry the gap forward unfixed.
+
+        So when `confine_root` is given, this method does NOT pass `cwd`
+        to `docker exec -w` at all. Instead the wrapped argv opens `cwd` by
+        file descriptor on a compound command (`{ ...; } 9<"$cwd"`, never
+        a bare `exec 9<"$cwd"` - see the implementation's own comment for
+        why), asks the KERNEL what that fd actually resolved to (`readlink
+        -f /proc/self/fd/9` - a `/proc` magic symlink that answers from the
+        open file description itself, never by re-walking the original
+        string), checks that answer against `confine_root` (exact match or
+        strictly below it), and only then `cd`s through the SAME fd (`cd
+        /proc/self/fd/9`) before the block ends (auto-closing the fd) and
+        the real argv runs. Check and use are therefore two reads of one
+        fd inside one exec, with no re-resolution of a path string
+        anywhere between them - closing the gap structurally rather than
+        narrowing the window `_confine_requested_cwd` already
+        leaves open. `_confine_requested_cwd` itself is NOT redundant: it
+        is a cheap, non-load-bearing early rejection (a fast error for an
+        obviously-wrong cwd, before any exec is built at all) - the
+        guarantee lives here now, not there.
+
+        A refusal from this check is reported as `reason="launch-failed"`
+        (the gate's own argv never ran) rather than as a normal exit code,
+        because the gate's own exit code is unconstrained and the two must
+        not be confused - see `CWD_CONFINEMENT_REFUSED_SENTINEL`.
 
         `env`, when given, runs the wrapped argv under `env -i <env
         pairs>`, replacing the exec'd process's whole environment rather
@@ -1906,18 +1953,76 @@ class DockerBackend:
             return ExecuteResult(reason="attempt-not-running", exit_code=None)
 
         marker_path = f"{CONTAINER_WORKSPACE}/.skillc-exec-pid-{uuid.uuid4().hex}"
+        confining = cwd is not None and confine_root is not None
+        # #338: check-and-use as ONE atomic fd, inside this single exec.
+        # The fd is opened on a COMPOUND command (`{ ...; } 9<"$1"`), never
+        # on a bare `exec 9<"$1"` - verified empirically: dash treats `exec`
+        # as a "special builtin" whose OWN redirection failure terminates
+        # the whole (non-interactive) shell immediately, bypassing any
+        # `||`/`if` around it entirely, so a missing/unreadable cwd would
+        # kill this script before it ever got to refuse cleanly. A redirect
+        # on an ordinary compound command fails like any other command -
+        # caught by `if`, shell untouched - and, also verified, auto-closes
+        # the fd once the block ends, so no explicit close is needed.
+        #
+        # Whatever `$1` resolves to AT THE MOMENT this one open() runs is
+        # what fd 9 stays bound to for the rest of the block, regardless of
+        # anything the subject does to the PATH afterward. `readlink -f
+        # /proc/self/fd/9` (the check) and `cd /proc/self/fd/9` (the use)
+        # both read that SAME already-open fd via its `/proc` magic
+        # symlink - never a re-walk of the string `$1` - so there is no
+        # point between them where a swapped ancestor could change the
+        # answer either check sees. `cd` runs inside the `{...}` group,
+        # which is the current shell, not a subshell, so it persists after
+        # the group (and the fd it used) closes.
+        #
+        # A failed open is handled identically to a failed root-check or a
+        # failed `cd` (one shared `else`) - but dash's OWN diagnostic for a
+        # failed open ("cannot open ...: No such file") lands on this
+        # script's real stderr regardless of this block's redirection
+        # (verified: it is emitted before the block's own io is set up), so
+        # it can precede this method's sentinel line rather than being the
+        # only thing there. That is why the Python side below checks the
+        # sentinel is PRESENT in stderr, never that stderr equals it.
+        confinement_check = (
+            f'if {{\n'
+            f'  REAL=$(readlink -f /proc/self/fd/9) &&\n'
+            f'  case "$REAL" in\n'
+            f'    "$2") true ;;\n'
+            f'    "$2"/*) true ;;\n'
+            f'    *) false ;;\n'
+            f'  esac &&\n'
+            f'  cd /proc/self/fd/9\n'
+            f'}} 9<"$1"\n'
+            f'then\n'
+            f'  shift 2\n'
+            f'else\n'
+            f'  echo {CWD_CONFINEMENT_REFUSED_SENTINEL} >&2\n'
+            f'  exit 125\n'
+            f'fi\n'
+        ) if confining else ""
         if env is not None:
             env_pairs = [f"{k}={v}" for k, v in env.items()]
-            wrapped_argv = ["sh", "-c", f'echo $$ > {marker_path}; exec env -i "$@"', "sh", *env_pairs, *argv]
+            script = f'{confinement_check}echo $$ > {marker_path}; exec env -i "$@"'
+            positional = [cwd, confine_root, *env_pairs, *argv] if confining else [*env_pairs, *argv]
         else:
-            wrapped_argv = ["sh", "-c", f'echo $$ > {marker_path}; exec "$@"', "sh", *argv]
+            script = f'{confinement_check}echo $$ > {marker_path}; exec "$@"'
+            positional = [cwd, confine_root, *argv] if confining else [*argv]
+        wrapped_argv = ["sh", "-c", script, "sh", *positional]
         in_container_pid: list[int | None] = [None]
 
         def _capture_pid() -> None:
             in_container_pid[0] = self._read_in_container_pid(handle, marker_path)
 
+        # Once `confining`, the real working directory is established by
+        # the script's OWN `cd /proc/self/fd/9` above, immediately before
+        # the real argv runs - passing `cwd` here too would additionally
+        # apply it as the OUTER `docker exec -w`, the very path-string
+        # re-resolution this fix exists to stop trusting. Let the outer
+        # exec start at the default and leave the real move to the script.
         launched = self._launch_and_wait(
-            handle, wrapped_argv, limits, cancel, stdin, prefix_wrap=False, after_launch=_capture_pid, cwd=cwd,
+            handle, wrapped_argv, limits, cancel, stdin, prefix_wrap=False, after_launch=_capture_pid,
+            cwd=None if confining else cwd,
         )
         if isinstance(launched, ExecuteResult):
             return launched  # launch-failed, built by _launch_and_wait itself
@@ -1951,10 +2056,26 @@ class DockerBackend:
         else:
             proc.wait()
 
-        return self._finish_result(
+        result = self._finish_result(
             handle, proc, stdout_drain, stderr_drain, stdout_thread, stderr_thread,
             limits, reason, signal_name=None, term_forwarding=None, stop_confirmed=stop_confirmed,
         )
+        # #338: the confinement check's own refusal shares its raw exit
+        # code with the gate's unconstrained one, so the sentinel string -
+        # never the code - is what disambiguates "confinement refused, the
+        # gate never ran" from "the gate ran and exited with that code for
+        # its own reasons". PRESENT, not EQUAL: a failed `exec 9<"$1"` open
+        # also puts dash's own "cannot open ..." diagnostic on this same
+        # stderr ahead of the sentinel line (verified - the shell's own
+        # redirection diagnostic is not something this script's io redirects
+        # can suppress), so stderr containing other text alongside the
+        # sentinel is the expected shape for that case, not a mismatch.
+        # Checked only when this call itself requested confinement, so a
+        # gate that legitimately prints this same line cannot be
+        # reinterpreted by an unrelated caller.
+        if confining and result.reason == "exited" and CWD_CONFINEMENT_REFUSED_SENTINEL in (result.error or ""):
+            return ExecuteResult(reason="launch-failed", exit_code=None, error=CWD_CONFINEMENT_REFUSED_SENTINEL)
+        return result
 
     def resolve_realpath_in_attempt(self, handle: object, path: str, timeout: float = 2.0) -> str | None:
         """Resolves `path` to its real, symlink-free absolute form INSIDE

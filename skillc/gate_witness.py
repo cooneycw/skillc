@@ -362,19 +362,34 @@ class GateWitness:
         raise ChannelRefusal(f"gate-witness: unknown op {op!r}")
 
     def _confine_requested_cwd(self, cwd: object) -> str | None:
-        """#332: the ONE place a subject-forwarded `cwd` is trusted or
-        refused. `None` (no cwd requested) passes through unchanged -
-        `exec_in_attempt()` then runs at its own default. Anything else
-        must resolve, via a REAL in-container `realpath` (never a
-        string-prefix check on the unresolved input - a symlink could
-        point outside the root), to this attempt's declared workspace
-        root or somewhere below it. Any failure to resolve, any
-        resolution outside that root, or a cwd requested when no root is
-        configured at all, is refused - never run, never silently
-        confined by guessing. Orchestrator's own named red cases
+        """#332, demoted by #338: no longer the security boundary for a
+        subject-forwarded `cwd` - only a cheap, non-load-bearing EARLY
+        rejection, so an obviously-wrong cwd fails fast with a clear
+        message before any exec is even built. `None` (no cwd requested)
+        passes through unchanged - `exec_in_attempt()` then runs at its own
+        default. Anything else must resolve, via a REAL in-container
+        `realpath` (never a string-prefix check on the unresolved input -
+        a symlink could point outside the root), to this attempt's
+        declared workspace root or somewhere below it. Any failure to
+        resolve, any resolution outside that root, or a cwd requested when
+        no root is configured at all, is refused here - never run, never
+        silently confined by guessing. Orchestrator's own named red cases
         (`cwd=/`, `cwd=../..`) are exactly what the suffix/prefix check
         below rejects: either resolves to something that is not this
-        root or a path strictly below it."""
+        root or a path strictly below it.
+
+        THE REAL GUARANTEE IS NOT HERE. This check and `exec_in_attempt()`'s
+        own call are two separate `docker exec`s with real wall-clock time
+        between them (lock acquisition, `tree_digest_fn()`) - long enough
+        for the subject, who owns the whole workspace tree, to swap an
+        ancestor of the resolved path for a symlink pointing outside the
+        root before the later exec ever runs. `_decide_run_gate()` below
+        passes `confine_root=self._workspace_root` to `exec_in_attempt()`
+        so THAT call re-does this same root check atomically, on a
+        freshly-opened fd, immediately before use - see its own docstring
+        (#338). This method staying unchanged in shape is deliberate: the
+        fix is bounded to `exec_in_attempt()`'s own cwd handling, not a
+        redesign of this witness."""
         if cwd is None:
             return None
         if self._workspace_root is None:
@@ -453,6 +468,17 @@ class GateWitness:
                     result = self._backend.exec_in_attempt(
                         self._handle, list(self._declared_argv[gate]), self._limits,
                         cwd=gate_cwd, env=self._declared_env.get(gate),
+                        # #338: `gate_cwd` was resolved and root-checked by
+                        # `_confine_requested_cwd` above, but that check and
+                        # THIS call are two separate execs with real time
+                        # between them - `confine_root` tells
+                        # `exec_in_attempt` to redo the same check
+                        # atomically, on a freshly-opened fd, immediately
+                        # before use, closing the gap rather than trusting
+                        # the earlier snapshot. Harmless to pass when no
+                        # cwd was requested at all (`gate_cwd is None`):
+                        # `exec_in_attempt` only applies it alongside a cwd.
+                        confine_root=self._workspace_root,
                     )
                 except Exception:
                     # An exception out of `exec_in_attempt()` itself is an
