@@ -431,6 +431,13 @@ def run_calibration(
             client=client_name, cli_version=client_version, task_root=task_root, surface=surface, prompt=prompt,
             timeout=budget, credential_explicit_path=credential_explicit_path,
             receipt_context=treatment.receipt_context if treated else None,
+            # #334 (mailbox 6103): the profile-closure fields reach a real
+            # calibration attempt - for a TREATED arm only; the baseline
+            # stays exactly as empty as `extra_home_files`/`receipt_context`
+            # already do above, never partially profile-opted.
+            verify_home_files=treatment.verify_home_files if treated else None,
+            preflight_tools=treatment.preflight_tools if treated else None,
+            gate_entrypoint=treatment.gate_entrypoint if treated else None,
         )
 
     def on_outcome(outcome: mp.AttemptOutcome) -> None:

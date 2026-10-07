@@ -40,6 +40,25 @@ and version plan.
   - This changes the trial image's identity: no digest is approved for
     a live #287 attempt yet, and this PR does not claim one.
 
+- **A treated calibration attempt actually installs the profile closure
+  (Refs #334, mailbox 6103)** - the orchestrator's correction to the
+  counter-model review's finding 1: this is #334's own outcome ("a
+  treated attempt installs the profile's declared closure"), not
+  architectural follow-up - without it, no real attempt receives the
+  closure and exit 127 is never actually fixed, only built. Scoped to
+  skillc's own path: `collection_conformance.run_level1_agent_attempt`
+  gains `verify_home_files`/`preflight_tools`/`gate_entrypoint`
+  (all `None`/empty by default, so every existing caller - including the
+  fenced `uptake_study.run_study`, #346, owned by its outside session -
+  is unaffected), forwarded to `agent_trial.run_one_attempt`.
+  `calibration_run.run_calibration`'s own `run_attempt` threads them
+  from the `Treatment` for the TREATED arm only, exactly the same
+  ternary shape `extra_home_files`/`receipt_context` already use - the
+  baseline arm passes none of them, never partially profile-opted.
+  Mutation-checked: `tests/test_calibration_run.py::test_run_
+  calibration_threads_closure_fields_for_the_treated_arm_only`,
+  confirmed to fail with `KeyError` on the pre-fix code (the three
+  kwargs not passed at all) before restoring the fix.
 - **Counter-model review fixes on #334's branch (codex `gpt-6.1-sol`,
   diff-only)** - two real findings, fixed:
   1. **A command probe's version check ignored the version command's

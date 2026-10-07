@@ -668,6 +668,9 @@ def run_level1_agent_attempt(
     credential_explicit_path: str | Path | None = None,
     minimum_credential_seconds: float = credential.MINIMUM_REMAINING_SECONDS,
     receipt_context: agent_trial.InstallationReceiptContext | None = None,
+    verify_home_files: Mapping[str, str] | None = None,
+    preflight_tools: Sequence[Mapping[str, object]] | None = None,
+    gate_entrypoint: str | None = None,
 ) -> dict[str, object]:
     """One real (or, in tests, scripted-fake) codex attempt against a Level 1
     task (`task_root`, default `demo.GRADER_ROOT`), in skill-free canary mode,
@@ -682,7 +685,15 @@ def run_level1_agent_attempt(
     through to `agent_trial.run_one_attempt` - `None` (the default) for
     every EXISTING caller (matched pilot's own arms), so nothing here
     changes their behavior; `run_collection_agent_attempt` below is the one
-    caller that builds and passes one."""
+    caller that builds and passes one.
+
+    `verify_home_files`/`preflight_tools`/`gate_entrypoint` (#334, mailbox
+    6103): a profile-opted treatment's own closure-verification fields,
+    forwarded straight through to `agent_trial.run_one_attempt` - all
+    `None`/empty by default, so every existing caller (including the
+    fenced `uptake_study.run_study`, #346) is unaffected. `calibration_run.
+    run_calibration`'s own `run_attempt` is the first caller that passes
+    real values, for a TREATED arm only."""
     resolved_task_root = task_root if task_root is not None else demo.GRADER_ROOT
     resolved_prompt = prompt if prompt is not None else (resolved_task_root / "goal.md").read_text(encoding="utf-8")
     resolved_surface = surface if surface is not None else surface_mapping(task_surface(resolved_task_root / "fixture"))
@@ -697,6 +708,9 @@ def run_level1_agent_attempt(
         grader=grader, grading_backend=grading_backend,
         extra_home_files=extra_home_files,
         receipt_context=receipt_context,
+        verify_home_files=verify_home_files,
+        preflight_tools=preflight_tools,
+        gate_entrypoint=gate_entrypoint,
     )
 
 
