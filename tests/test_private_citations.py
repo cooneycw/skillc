@@ -76,7 +76,27 @@ def _skip_dir(name: str) -> bool:
 #: form is used anywhere in this codebase for a legitimate, non-fleet reason
 #: (confirmed by this test's own green run over every file it does not
 #: exclude).
-PRIVATE_CITATION = re.compile(r"\bmsgs? ?\d{4}\b|\bw\d\b")
+#:
+#: SPELLED-OUT citations, widened in separately (found 2026-10-07: this
+#: pattern only ever matched the ABBREVIATED "msg"/"msgs" forms, so a
+#: spelled-out "message NNNN" or "mailbox message NNNN/NNNN" passed every
+#: scan and the merged CI gate - "message" does not start with "msg" as a
+#: token, so the original pattern never had a chance to see it). Added:
+#: `message(s) [#]NNNN`, optionally followed by a `/NNNN` pair (the
+#: "message NNNN/NNNN" shape), and `mailbox [message(s)] [#]NNNN` the same
+#: way. Verified by running this widened pattern over the WHOLE tree before
+#: committing it (not merely against the known offenders at the time) -
+#: 2205 files inspected, exactly the known offenders matched, zero
+#: unrelated hits; ordinary prose using the word "message" (error message,
+#: commit message, log message, ...) never has a 4-digit number
+#: immediately following it, so the narrow `\d{4}` anchor is what keeps
+#: this from flagging those.
+PRIVATE_CITATION = re.compile(
+    r"\bmsgs? ?\d{4}\b"
+    r"|\bw\d\b"
+    r"|\bmessages? #?\d{4}(?:/\d{4})?\b"
+    r"|\bmailbox(?: messages?)? #?\d{4}(?:/\d{4})?\b"
+)
 
 #: Directory prefixes end in "/" and match anything underneath; anything
 #: else is matched by EXACT equality only - `startswith()` on every entry
@@ -270,6 +290,65 @@ def test_the_pattern_does_not_match_an_ordinary_word_ending_in_a_digit() -> None
     assert PRIVATE_CITATION.search("w2-g1") is not None, "w2-g1 legitimately contains the bare token w2"
     assert PRIVATE_CITATION.search("row3") is None
     assert PRIVATE_CITATION.search("view2") is None
+
+
+#: Reconstructs the SHAPE of the three real offenders found on main
+#: 2026-10-07 (found by counter-model review while editing an unrelated
+#: #332 file) with obviously-fake, non-colliding numbers - never the real
+#: ids themselves, which this committed test file must not republish any
+#: more than the files it fixed should have carried them. Each shape is
+#: realistic and is what the ABBREVIATED-only pattern missed for months
+#: on this exact codebase before the fix below. Named here, not only in
+#: the regex's own comment, so a future edit that narrows the pattern
+#: again has a concrete sentence to re-run against, not just a
+#: description.
+_SPELLED_OUT_OFFENDERS = (
+    "(orchestrator guidance, message 9999): its claim is about the shim's",
+    "ruling 2026-10-06, mailbox message 9998/9997).",
+    "Orchestrator ruling (message 9996): a degraded subject carrying a",
+)
+
+
+def test_the_pattern_matches_each_spelled_out_offender_shape_found_on_main() -> None:
+    """Positive control: the widened pattern actually catches the three
+    offender SHAPES this fix was written for (synthetic numbers; see
+    `_SPELLED_OUT_OFFENDERS`' own docstring) - not merely a synthetic
+    shape that happens to look similar for some other reason."""
+    for offender in _SPELLED_OUT_OFFENDERS:
+        assert PRIVATE_CITATION.search(offender), f"expected a match in: {offender!r}"
+
+
+def test_the_pre_fix_pattern_missed_all_three_spelled_out_offender_shapes() -> None:
+    """Mutation check: the OLD (abbreviated-only) pattern must NOT catch
+    any of the three offender shapes above - proving this fix actually
+    closes a real gap, not a hypothetical one. If the old pattern already
+    matched these, the widening would be solving a problem that did not
+    exist."""
+    pre_fix_pattern = re.compile(r"\bmsgs? ?\d{4}\b|\bw\d\b")
+    for offender in _SPELLED_OUT_OFFENDERS:
+        assert not pre_fix_pattern.search(offender), (
+            f"the pre-fix pattern should NOT have matched {offender!r} - "
+            "if it did, this red case is inert"
+        )
+
+
+def test_the_pattern_does_not_flag_ordinary_prose_using_the_word_message() -> None:
+    """The word "message" is common prose in this codebase (error
+    message, commit message, log message, ...) - the widened pattern must
+    stay narrow to "message/mailbox immediately followed by a 4-digit
+    number", never fire on the bare word alone."""
+    assert PRIVATE_CITATION.search("the error message was truncated") is None
+    assert PRIVATE_CITATION.search("write a clear commit message") is None
+    assert PRIVATE_CITATION.search("the log message format changed") is None
+    assert PRIVATE_CITATION.search("a message queue with no mailbox at all") is None
+
+
+def test_the_pattern_matches_a_hash_prefixed_and_a_pair_form_message_citation() -> None:
+    """Positive controls for the two sub-shapes added alongside the three
+    offender shapes above: a `#`-prefixed message number, and a bare
+    (non-mailbox-prefixed) pair form. Synthetic numbers throughout."""
+    assert PRIVATE_CITATION.search("see message #9995 for the ruling")
+    assert PRIVATE_CITATION.search("message 9994/9993 covers both halves")
 
 
 def test_a_citation_wrapped_across_a_comment_continuation_is_still_caught(tmp_path: Path) -> None:
