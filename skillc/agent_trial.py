@@ -480,6 +480,31 @@ def _make_before_execute(
             assert limits is not None  # checked above, before any delivery happened
             _preflight_in_container(backend, handle, limits, resolved_verify_home_files, resolved_preflight_tools)
 
+        # TODO(skillc#334 step 4): once #332's own follow-up lands (a
+        # `root` parameter on DockerBackend.export()/install() and on
+        # gate_overlay.apply_flow_check_gate_overlay(), defaulting to
+        # CONTAINER_WORKSPACE so every existing caller is unchanged), a
+        # profile-opted attempt whose subject needs the flow-check gate
+        # witness calls it here, as the LAST setup step before the agent
+        # starts (gate_overlay.py's own ordering requirement):
+        #   gate_overlay.apply_flow_check_gate_overlay(
+        #       backend, handle, root=CONTAINER_HOME,
+        #       subject_path=".claude/scripts/flow-finish-gate.sh",
+        #       harness_path=<a home-relative harness-only path>,
+        #       expected_real_digest=..., expected_shim_digest=...,
+        #       shim_content=...,
+        #   )
+        # Deliberately not called yet: the real script this closure
+        # delivers lives under CONTAINER_HOME (via deliver_home_file,
+        # above), but `apply_flow_check_gate_overlay` as merged in #332
+        # can only reach CONTAINER_WORKSPACE (confirmed directly - its own
+        # test plants the "real script" via backend.install(), which is
+        # CONTAINER_WORKSPACE-only) - calling it today would refuse every
+        # attempt, never finding the file. Rejected alternative: a second,
+        # CONTAINER_WORKSPACE-relative delivery of the same script plus a
+        # symlink - exactly the parallel delivery path this module's own
+        # `extra_home_files` docstring already warns against.
+
     return hook
 
 
