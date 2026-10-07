@@ -66,15 +66,34 @@ silently worked anyway, say), that run reports `XPASS` as a failure, not a
 quiet green. That is what makes this an instrument with a committed
 negative control, not three assertions hoping to be exercised.
 
-`raises=AssertionError` is also passed explicitly (#315 follow-up,
-orchestrator review): without it, a break mode that dies of an unrelated
-exception - a real daemon flake, or the oracle itself silently breaking in
-a way that crashes instead of asserting - would still satisfy a bare
-`xfail`, counting as the expected red for the wrong reason. Each of the
-three documented failures above is a plain `assert`, verified by reading
-`DockerBackend`'s own handling of `trigger_decide=None` rather than by
-running this file (no real daemon in this environment, same limitation
-stated throughout this docstring).
+`raises=_PropertyHeld` (issue #336, counter-model review on #266):
+`raises=AssertionError` was passed here originally, but that type is too
+WIDE - every check in this file, setup and property alike, raised plain
+`AssertionError`, so an unrelated infra failure during a break run (a
+real daemon flake, a setup assert firing for some other reason) would
+also satisfy the marker and be counted as the expected red for the wrong
+reason. `_PropertyHeld` is a dedicated exception, confirmed NOT an
+`AssertionError` subclass, raised ONLY by the three property checks
+(`result.exit_code == 0` for `omit-mount`; `reported["uid"] ==
+d.CANDIDATE_UID` for `wrong-uid`; `reported["decisions"]`/the controller
+log for `flip-decision`) via a `_require()` helper - each asserted
+UNCONDITIONALLY and IDENTICALLY in every mode, never branched by
+`BREAK_MODE` (audited: this file never was branched this way, so no
+XPASS-by-construction fix was needed, only the exception type). Every
+other check (handle/channel preconditions, `result.reason == "exited"`,
+`confirm_stopped()`, `log is not None`) stays a plain `assert`, verified
+by reading `DockerBackend`'s own handling of `trigger_decide=None`
+rather than by running this file (no real daemon in this environment,
+same limitation stated throughout this docstring).
+
+KNOWN LIMITATION, unverified against a real daemon: this classification
+assumes `omit-mount`'s real symptom surfaces through `result.exit_code`
+(the connect failure's own nonzero exit), never through the earlier
+plain-assert `result.reason == "exited"` check. If a real run ever
+shows the daemon reporting something other than a clean exit for this
+case, that break would report a hard FAILED rather than the expected
+XFAILED - the loud direction, never a silent pass, but worth knowing
+before reading such a result as "the mechanism broke."
 
 `SKILLC_LIVE_TEST_IMAGE` defaults to `python:3.12-slim` - small, widely
 cached, and it ships a working `python3` for the subject script this file
@@ -114,6 +133,26 @@ pytestmark = [
 
 if BREAK_MODE not in _VALID_BREAK_MODES:
     raise RuntimeError(f"SKILLC_LIVE_TEST_BREAK={BREAK_MODE!r} must be one of {_VALID_BREAK_MODES}")
+
+
+class _PropertyHeld(Exception):
+    """Raised when the ONE property a given `BREAK_MODE` is supposed to
+    violate still held (issue #336, same pattern as skillc#266's
+    counter-model-review fix, commit 2c9c638). The only exception type
+    the `xfail` marker below matches - never bare `AssertionError` - so
+    an unrelated infra/setup failure raises plain `AssertionError`
+    instead and is reported as an ordinary hard FAILURE, never masked as
+    "the break worked"."""
+
+
+def _require(condition: bool, message: str) -> None:
+    """The property under test for the current `BREAK_MODE` - asserted
+    UNCONDITIONALLY, identically for `none` and every break mode alike,
+    never branched by `BREAK_MODE`. Confirmed directly, no pytest or
+    Docker needed: `_require(True, ...)` returns; `_require(False, ...)`
+    raises `_PropertyHeld`, which is not a subclass of `AssertionError`."""
+    if not condition:
+        raise _PropertyHeld(message)
 
 
 def _image_available(image: str) -> bool:
@@ -185,7 +224,7 @@ def _subject_script() -> str:
 
 
 @pytest.mark.xfail(
-    condition=BREAK_MODE != "none", strict=True, raises=AssertionError,
+    condition=BREAK_MODE != "none", strict=True, raises=_PropertyHeld,
     reason=f"SKILLC_LIVE_TEST_BREAK={BREAK_MODE} deliberately breaks one property",
 )
 def test_the_channel_round_trips_correctly_against_a_real_daemon(live_backend: d.DockerBackend) -> None:
@@ -216,7 +255,7 @@ def test_the_channel_round_trips_correctly_against_a_real_daemon(live_backend: d
     try:
         result = live_backend.execute(handle, ["python3", "-c", _subject_script()], Limits(timeout=15))
         assert result.reason == "exited", result.error
-        assert result.exit_code == 0, result.error
+        _require(result.exit_code == 0, result.error or "expected a clean exit")
         assert live_backend.confirm_stopped(handle) is Confirmation.CONFIRMED
         export_dir = Path(tempfile.mkdtemp(prefix="sk-live-export-"))
         live_backend.export(handle, export_dir)
@@ -227,7 +266,10 @@ def test_the_channel_round_trips_correctly_against_a_real_daemon(live_backend: d
     # `observations`, not returned inline (`ExecutionBackend.execute()`'s
     # own documented convention).
     reported = json.loads((export_dir / "observations").read_text(encoding="utf-8").strip().splitlines()[-1])
-    assert reported["uid"] == d.CANDIDATE_UID
-    assert reported["decisions"] == _expected_decisions()
+    _require(reported["uid"] == d.CANDIDATE_UID, f"expected uid {d.CANDIDATE_UID}, got {reported['uid']}")
+    _require(reported["decisions"] == _expected_decisions(), f"subject-reported decisions diverged: {reported['decisions']}")
     assert log is not None
-    assert [entry.result["decision"] for entry in log] == _expected_decisions()
+    _require(
+        [entry.result["decision"] for entry in log] == _expected_decisions(),
+        "the controller's own trigger log diverged from the expected decisions",
+    )
