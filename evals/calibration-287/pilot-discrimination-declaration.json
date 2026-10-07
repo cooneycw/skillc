@@ -74,7 +74,7 @@
  },
  "task": {
   "path": "evals/level3/gate-stops-early",
-  "fixture": "PENDING - \"discrimination/fixture\" once skillc#287's own task.fixture schema field (branch issue-287-task-fixture-field) merges; the default \"fixture\" would silently grade the wrong tree (gate-stops-early's own top-level fixture/ never exercises the skipped-gate obligation - its Makefile declares every gate) - see evals/level3/gate-stops-early/eligibility-manifest.json's own declaration_fields block, which names this exact value",
+  "fixture": "discrimination/fixture",
   "grader_id": "gate-stops-early",
   "grader_revision": "2",
   "_comment": "skillc#270 merged (PR #350, flow-check-honest declared; PR #351 re-certified gate-stops-early against its own discrimination/fixture and discrimination/reference trees - the tree THIS declaration's attempts are actually graded against, not only the generic fixture/reference pair). Certification must also produce a case-pairing record (skillc#273) binding an intact attempt and a degraded attempt as a reciprocal pair on this task/grader/subject revision - the #150 non-discriminating-result risk is named explicitly as open until the pilot, per the orchestrator's review on #270 (comment 6025382159)."
@@ -100,7 +100,7 @@
  "approval": null,
  "owed_before_run": [
   "skillc#270 - DONE (merged: PR #350 declared flow-check-honest; PR #351 certified gate-stops-early against its own discrimination/fixture and discrimination/reference trees). 'task.path'/'grader_id'/'grader_revision'/'mutation.diagnose_evidence' above are now real, not placeholders.",
-  "skillc#287's task.fixture schema field (branch issue-287-task-fixture-field) - merge still owed; 'task.fixture' above stays an explicit PENDING placeholder until it does, naming the exact value (\"discrimination/fixture\") rather than omitting the key",
+  "skillc#287's task.fixture schema field - DONE (merged: PR #353, 23bb1ba). 'task.fixture' above is now the real value \"discrimination/fixture\", not a placeholder.",
   "operator pilot-spend authorization for THIS pilot (10 attempts, 2 arms = 20 total) - separate from the owner's earlier in-principle 'pilot: yes' ruling",
   "merge of the calibration.py discrimination-declaration kind (Refs #287) - DONE, this file now parses against main's skillc.calibration",
   "live-run precondition (stated here, not yet enforced by any code): re-verify, against the real claude-power-pack checkout at the pinned revision, that removed_text occurs in codex/skills/flow-check/reference.md exactly once, and that the file with it removed hashes to mutated_digest - mirrors the #274 live-run inventory re-validation precondition. evals/calibration-287/evidence/scan_mutation_closure.py is the committed, re-runnable tool for this - it already did so against this repository's own tests/fixtures/profile-cpp-codex-flow-check-ea6dbfa/ capture; re-running it against a fresh claude-power-pack checkout immediately before launch is what remains owed.",

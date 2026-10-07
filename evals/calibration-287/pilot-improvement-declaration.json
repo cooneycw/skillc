@@ -18,9 +18,10 @@
  },
  "task": {
   "path": "evals/level3/gate-stops-early",
+  "fixture": "discrimination/fixture",
   "grader_id": "gate-stops-early",
   "grader_revision": "2",
-  "_comment": "Per the operator's improvement ruling (claude-power-pack#1084 comment 6014163660, cited verbatim in skillc#287 comment 6014179807): 'on the same task, grader and pinned subject revision as the case that #273's pairing record certifies as discriminating'. skillc#270 merged (PR #350/#351) - the same task/grader as pilot-discrimination-declaration.json's own 'task' block, filled in identically here."
+  "_comment": "Per the operator's improvement ruling (claude-power-pack#1084 comment 6014163660, cited verbatim in skillc#287 comment 6014179807): 'on the same task, grader and pinned subject revision as the case that #273's pairing record certifies as discriminating'. skillc#270 merged (PR #350/#351); skillc#287's task.fixture schema field merged (PR #353, 23bb1ba) - the same task/grader/fixture as pilot-discrimination-declaration.json's own 'task' block, filled in identically here, since the discriminating case IS discrimination/fixture, not the generic top-level fixture/."
  },
  "arms": [
   {
