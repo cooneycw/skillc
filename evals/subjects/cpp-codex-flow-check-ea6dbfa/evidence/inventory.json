@@ -1,7 +1,7 @@
 {
  "inventory_schema": 1,
  "profile": "cpp-codex-flow-check",
- "profile_digest": "sha256:19965a43ee39663a3dd501077262e903b4b8abcd79451c8245e034c99f656799",
+ "profile_digest": "sha256:4f579e2eaa2139b49b112763eae9a75f6a43398fb7df4f0f3296f0eebb6418f7",
  "subject": {
   "declaration_digest": "sha256:623a9e810cc23499c68ac52496b75e02e5166cdd1a92deac6056a502c23eb220",
   "locator": "github.com/cooneycw/claude-power-pack",
@@ -467,7 +467,8 @@
      "owner": "helper-flow-finish-gate"
     }
    ],
-   "digest": "sha256:6505cdcf3e5ed29155b24f9035eec2d54cfe152fe761061a6cb56a4435b69426"
+   "digest": "sha256:6505cdcf3e5ed29155b24f9035eec2d54cfe152fe761061a6cb56a4435b69426",
+   "probes": []
   },
   {
    "id": "helper-gate-lib",
@@ -497,7 +498,8 @@
      "owner": "helper-gate-lib"
     }
    ],
-   "digest": "sha256:97ca02a07e9974a33f4f8707c846f47fea87d0a434d8bfc597882fa36210fdc9"
+   "digest": "sha256:97ca02a07e9974a33f4f8707c846f47fea87d0a434d8bfc597882fa36210fdc9",
+   "probes": []
   },
   {
    "id": "helper-counter-model-receipt",
@@ -527,7 +529,8 @@
      "owner": "helper-counter-model-receipt"
     }
    ],
-   "digest": "sha256:caf62f5ce3dc4ce4e422a7328fc844eebfe9a05d0ddda9bfaf1b9df65f7eeaf5"
+   "digest": "sha256:caf62f5ce3dc4ce4e422a7328fc844eebfe9a05d0ddda9bfaf1b9df65f7eeaf5",
+   "probes": []
   },
   {
    "id": "checkout-libraries",
@@ -1130,7 +1133,8 @@
      "owner": "checkout-libraries"
     }
    ],
-   "digest": "sha256:68e6282d80238931ad841e8b901fdecad13677d89fbe97a584d1793fd338cfff"
+   "digest": "sha256:68e6282d80238931ad841e8b901fdecad13677d89fbe97a584d1793fd338cfff",
+   "probes": []
   },
   {
    "id": "checkout-detection-marker",
@@ -1160,7 +1164,8 @@
      "replacement_reason": "The pinned CLAUDE.md is CPP agent instructions. Separately confirmed by the operator: Codex project-doc discovery reads AGENTS.md from cwd, not CLAUDE.md. scripts/flow-finish-gate.sh:347 only tests existence, so a minimal marker preserves detection without installing instructions content."
     }
    ],
-   "digest": "sha256:f88f4f4118d733c5b3e39af33a7377287b5c2e1d7b42055370490ddee1710722"
+   "digest": "sha256:f88f4f4118d733c5b3e39af33a7377287b5c2e1d7b42055370490ddee1710722",
+   "probes": []
   },
   {
    "id": "checkout-scripts",
@@ -1213,7 +1218,8 @@
      "owner": "checkout-scripts"
     }
    ],
-   "digest": "sha256:520d21a56e68ccaec76c2fda4c8974d2f491710837a87960e90f8b9da7079168"
+   "digest": "sha256:520d21a56e68ccaec76c2fda4c8974d2f491710837a87960e90f8b9da7079168",
+   "probes": []
   },
   {
    "id": "tool-python",
@@ -1228,7 +1234,17 @@
    "referenced_by": [],
    "unreferenced_reason": "invoked as a command word (`python -m lib.security`, reference.md:104), which no path pattern reads",
    "files": [],
-   "digest": null
+   "digest": null,
+   "probes": [
+    {
+     "kind": "command",
+     "name": "python3",
+     "version_args": [
+      "--version"
+     ],
+     "constraint": ">=3.11"
+    }
+   ]
   },
   {
    "id": "tool-uv",
@@ -1243,7 +1259,17 @@
    "referenced_by": [],
    "unreferenced_reason": "invoked as a command word (`uv run --project`, reference.md:104; flow-finish-gate.sh:355), which no path pattern reads",
    "files": [],
-   "digest": null
+   "digest": null,
+   "probes": [
+    {
+     "kind": "command",
+     "name": "uv",
+     "version_args": [
+      "--version"
+     ],
+     "constraint": null
+    }
+   ]
   },
   {
    "id": "tool-pypi-runtime",
@@ -1258,7 +1284,16 @@
    "referenced_by": [],
    "unreferenced_reason": "a package-manager resolution, not a path in any file of the closure",
    "files": [],
-   "digest": null
+   "digest": null,
+   "probes": [
+    {
+     "kind": "python-import",
+     "modules": [
+      "pydantic",
+      "yaml"
+     ]
+    }
+   ]
   },
   {
    "id": "tool-make-git-bash",
@@ -1273,7 +1308,33 @@
    "referenced_by": [],
    "unreferenced_reason": "invoked as command words (`make lint`, `git status`, `#!/usr/bin/env bash`), which no path pattern reads",
    "files": [],
-   "digest": null
+   "digest": null,
+   "probes": [
+    {
+     "kind": "command",
+     "name": "make",
+     "version_args": [
+      "--version"
+     ],
+     "constraint": null
+    },
+    {
+     "kind": "command",
+     "name": "git",
+     "version_args": [
+      "--version"
+     ],
+     "constraint": null
+    },
+    {
+     "kind": "command",
+     "name": "bash",
+     "version_args": [
+      "--version"
+     ],
+     "constraint": null
+    }
+   ]
   }
  ],
  "references": [

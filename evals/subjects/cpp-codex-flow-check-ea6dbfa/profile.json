@@ -123,7 +123,10 @@
    "role": "interpreter for lib.cicd / lib.security and the bundled .py helpers",
    "version": ">=3.11 (pyproject.toml requires-python at the pin)",
    "supply": "the trial image; not carried by the subject",
-   "unreferenced_reason": "invoked as a command word (`python -m lib.security`, reference.md:104), which no path pattern reads"
+   "unreferenced_reason": "invoked as a command word (`python -m lib.security`, reference.md:104), which no path pattern reads",
+   "probes": [
+    {"kind": "command", "name": "python3", "version_args": ["--version"], "constraint": ">=3.11"}
+   ]
   },
   {
    "id": "tool-uv",
@@ -132,7 +135,10 @@
    "role": "runs the checkout's packages (`uv run --project`)",
    "version": "unpinned by the subject; #266 pins it in the image",
    "supply": "the trial image; not carried by the subject",
-   "unreferenced_reason": "invoked as a command word (`uv run --project`, reference.md:104; flow-finish-gate.sh:355), which no path pattern reads"
+   "unreferenced_reason": "invoked as a command word (`uv run --project`, reference.md:104; flow-finish-gate.sh:355), which no path pattern reads",
+   "probes": [
+    {"kind": "command", "name": "uv", "version_args": ["--version"]}
+   ]
   },
   {
    "id": "tool-pypi-runtime",
@@ -141,7 +147,10 @@
    "role": "PyPI runtime dependencies of lib.cicd (pydantic, pyyaml), resolved by uv from uv.lock",
    "version": "pydantic>=2.0, pyyaml>=6.0 as locked in uv.lock at the pin",
    "supply": "EXTERNAL: uv resolves these from a package index on first run. Trials have no network (spec.md section 4), so #266 must pre-supply a filled cache or report the gate step unavailable",
-   "unreferenced_reason": "a package-manager resolution, not a path in any file of the closure"
+   "unreferenced_reason": "a package-manager resolution, not a path in any file of the closure",
+   "probes": [
+    {"kind": "python-import", "modules": ["pydantic", "yaml"]}
+   ]
   },
   {
    "id": "tool-make-git-bash",
@@ -150,7 +159,12 @@
    "role": "make (Makefile targets), git (check-ignored-additions.sh), bash (every shell helper)",
    "version": "unpinned by the subject; any POSIX-conforming version the image carries",
    "supply": "the trial image; not carried by the subject",
-   "unreferenced_reason": "invoked as command words (`make lint`, `git status`, `#!/usr/bin/env bash`), which no path pattern reads"
+   "unreferenced_reason": "invoked as command words (`make lint`, `git status`, `#!/usr/bin/env bash`), which no path pattern reads",
+   "probes": [
+    {"kind": "command", "name": "make"},
+    {"kind": "command", "name": "git"},
+    {"kind": "command", "name": "bash"}
+   ]
   }
  ],
  "unsupported": [

@@ -108,7 +108,7 @@ def test_inventory_digest_matches_the_committed_evidence_file() -> None:
     two fields even when every file's content is identical)."""
     committed = json.loads((ROOT / "evals" / "subjects" / "cpp-codex-flow-check-ea6dbfa"
                             / "evidence" / "inventory.json").read_text(encoding="utf-8"))
-    assert p.inventory_digest(committed) == "sha256:535aa42ebd69a30d236b68a2f330a908a0b68ccbc8aefb678879764db5211647"
+    assert p.inventory_digest(committed) == "sha256:43d4cf5683130cbe599a4b8c0fbfb12ae392216d8b595843a9a404bf88d5cc8e"
 
 
 def test_red_case_a_duplicate_destination_across_entries_is_refused() -> None:

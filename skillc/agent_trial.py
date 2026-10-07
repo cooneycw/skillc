@@ -86,6 +86,7 @@ import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 from . import credential, demo, leak, profile, records, trial, trial_bootstrap, verify
 from . import transcript_adapter as ta
@@ -277,35 +278,74 @@ _TOOLS_MARKER = "---skillc-334-tools---"
 
 def _preflight_in_container(
     backend: DockerBackend, handle: object, limits: Limits,
-    verify_home_files: Mapping[str, str], tools: Sequence[Mapping[str, object]],
+    verify_home_files: Mapping[str, str], tools: Sequence[Mapping[str, Any]],
 ) -> None:
-    """skillc#334 (orchestrator ruling, mailbox 5872 steps 2-3): read back
-    every closure file's digest FROM THE LIVE CONTAINER, and check every
-    declared tool dependency is present at its version constraint IN THE
-    CONTAINER - never trust that delivery alone proves arrival, and never
-    check tool presence on the HOST (`profile._check_tool` does that, for
-    the unrelated `skillc profile install` CLI path - it has no meaning
-    for a live attempt). `exec_in_attempt`'s `ExecuteResult` carries no
-    stdout text (only a byte COUNT - see its own docstring); the real
-    captured text reaches `CONTAINER_WORKSPACE/observations` through the
-    SAME write-back `verify.py`/`gate_witness.py` already rely on (#76),
-    read back here via one `export()` - the same technique, not a new
-    one. Both checks share ONE combined exec + ONE export, regardless of
-    how many files or tools are declared, since `export()` is the
-    expensive part."""
+    """skillc#334 (orchestrator ruling, mailbox 5872 steps 2-3, probe
+    design per mailbox 5896): read back every closure file's digest FROM
+    THE LIVE CONTAINER, and evaluate every declared tool dependency's own
+    `probes` IN THE CONTAINER - never trust that delivery alone proves
+    arrival, and never check a tool on the HOST (`profile._check_tool`
+    does that, for the unrelated `skillc profile install` CLI path - it
+    has no meaning for a live attempt). The DECISION logic
+    (`profile.evaluate_command_probe`/`evaluate_python_import_probe`/
+    `aggregate_probe_results`) is shared with `profile._check_tool`,
+    never duplicated - only the FACT-GATHERING differs (host subprocess
+    there, one combined container exec here).
+
+    A tool dependency with NO probes is refused outright, naming it -
+    unlike `_check_tool`'s host-side "unknown, no probes declared" (an
+    informational receipt field), this is the gate that decides whether
+    the agent starts at all, so reporting unknown-and-continuing would
+    pass every attempt by construction - the same blind instrument that
+    let exit 127 through in the first place.
+
+    `exec_in_attempt`'s `ExecuteResult` carries no stdout text (only a
+    byte COUNT - see its own docstring); the real captured text reaches
+    `CONTAINER_WORKSPACE/observations` through the SAME write-back
+    `verify.py`/`gate_witness.py` already rely on (#76), read back here
+    via one `export()` - the same technique, not a new one. Every check
+    - digests and every probe - shares ONE combined exec + ONE export,
+    regardless of how many files, tools or probes are declared, since
+    `export()` is the expensive part."""
     if not verify_home_files and not tools:
         return
+    for dep in tools:
+        if not dep.get("probes"):
+            raise HomeFileVerificationRefused(
+                f"tool dependency {dep.get('id')!r} declares no probes; a profile-opted live attempt "
+                f"cannot verify an unchecked tool claim, so it refuses rather than silently passing"
+            )
+
     container_paths = {relpath: f"{CONTAINER_HOME}/{relpath}" for relpath in verify_home_files}
     script_lines = [f"sha256sum {shlex.quote(path)}" for path in container_paths.values()]
     script_lines.append(f"echo {shlex.quote(_TOOLS_MARKER)}")
-    for dep in tools:
-        tool_id = str(dep["id"])
-        quoted_id = shlex.quote(tool_id)
-        script_lines.append(
-            f'if command -v {quoted_id} >/dev/null 2>&1; then '
-            f'v=$({quoted_id} --version 2>&1 | head -1); printf "%s PRESENT %s\\n" {quoted_id} "$v"; '
-            f'else printf "%s ABSENT\\n" {quoted_id}; fi'
-        )
+
+    probe_entries: list[tuple[Mapping[str, Any], Mapping[str, Any]]] = [
+        (dep, probe) for dep in tools for probe in dep["probes"]
+    ]
+    for idx, (_dep, probe) in enumerate(probe_entries):
+        kind = probe.get("kind")
+        if kind == "command":
+            name = str(probe["name"])
+            version_args = probe.get("version_args") or ["--version"]
+            quoted_args = " ".join(shlex.quote(a) for a in version_args)
+            script_lines.append(
+                f'if command -v {shlex.quote(name)} >/dev/null 2>&1; then '
+                f'v=$({shlex.quote(name)} {quoted_args} 2>&1 | head -1); '
+                f'printf "PROBE:{idx}:PRESENT:%s\\n" "$v"; '
+                f'else printf "PROBE:{idx}:ABSENT\\n"; fi'
+            )
+        elif kind == "python-import":
+            modules = probe.get("modules") or []
+            script_body = "; ".join(f"import {mod}" for mod in modules)
+            script_lines.append(
+                f'if python3 -c {shlex.quote(script_body)} >/dev/null 2>&1; then '
+                f'printf "PROBE:{idx}:IMPORT_OK\\n"; '
+                f'else printf "PROBE:{idx}:IMPORT_FAIL\\n"; fi'
+            )
+        else:
+            raise HomeFileVerificationRefused(f"unknown probe kind: {kind!r}")
+
     result = backend.exec_in_attempt(handle, ["sh", "-c", "\n".join(script_lines)], limits)
     if result.exit_code != 0:
         raise HomeFileVerificationRefused(
@@ -316,7 +356,9 @@ def _preflight_in_container(
         try:
             backend.export(handle, Path(tmp))
         except OSError as exc:
-            raise HomeFileVerificationRefused(f"could not export the container to read back the preflight output: {exc}") from exc
+            raise HomeFileVerificationRefused(
+                f"could not export the container to read back the preflight output: {exc}"
+            ) from exc
         observations = Path(tmp) / "observations"
         output = observations.read_text(encoding="utf-8", errors="replace") if observations.is_file() else ""
     digest_section, _, tools_section = output.partition(_TOOLS_MARKER)
@@ -337,27 +379,40 @@ def _preflight_in_container(
                 f"expected {expected_digest!r} - what was delivered does not match what arrived"
             )
 
-    tool_lines = {entry.split()[0]: entry for entry in tools_section.splitlines() if entry.strip()}
-    for dep in tools:
-        tool_id = str(dep["id"])
-        tool_line = tool_lines.get(tool_id)
-        if tool_line is None or " ABSENT" in tool_line:
-            raise HomeFileVerificationRefused(
-                f"tool {tool_id!r} is not present in the container (declared by the profile)"
-            )
-        constraint = dep.get("version")
-        if constraint in (None, "any"):
+    probe_output: dict[int, str] = {}
+    for line in tools_section.splitlines():
+        if not line.startswith("PROBE:"):
             continue
-        reported = tool_line.split(" PRESENT ", 1)[1] if " PRESENT " in tool_line else ""
-        match = re.search(r"\b(\d+(?:\.\d+)+)\b", reported)
-        if match is None:
-            raise HomeFileVerificationRefused(
-                f"tool {tool_id!r}'s version could not be determined in the container from {reported!r}"
+        rest = line[len("PROBE:"):]
+        idx_str, _, detail = rest.partition(":")
+        if idx_str.isdigit():
+            probe_output[int(idx_str)] = detail
+
+    results_by_dep: dict[int, list[dict[str, Any]]] = {}
+    for idx, (dep, probe) in enumerate(probe_entries):
+        dep_key = id(dep)
+        results_by_dep.setdefault(dep_key, [])
+        probe_detail = probe_output.get(idx)
+        if probe.get("kind") == "command":
+            if probe_detail is None or probe_detail == "ABSENT":
+                command_outcome = profile.CommandProbeOutcome(present=False)
+            else:
+                version_output = probe_detail.split("PRESENT:", 1)[1] if probe_detail.startswith("PRESENT:") else None
+                command_outcome = profile.CommandProbeOutcome(present=True, version_output=version_output)
+            results_by_dep[dep_key].append(profile.evaluate_command_probe(probe, command_outcome))
+        else:
+            succeeded = probe_detail == "IMPORT_OK"
+            import_outcome = profile.PythonImportProbeOutcome(
+                succeeded=succeeded, error="" if succeeded else "import failed",
             )
-        actual_version = tuple(int(n) for n in match[1].split("."))
-        if not profile._version_matches(actual_version, str(constraint)):
+            results_by_dep[dep_key].append(profile.evaluate_python_import_probe(probe, import_outcome))
+
+    for dep in tools:
+        aggregate = profile.aggregate_probe_results(results_by_dep.get(id(dep), []))
+        if aggregate["status"] != "satisfied":
             raise HomeFileVerificationRefused(
-                f"tool {tool_id!r} version {match[1]} in the container does not satisfy {constraint!r}"
+                f"tool dependency {dep.get('id')!r} is not satisfied in the container: "
+                f"{aggregate['status']} - {aggregate.get('reason', '')}"
             )
 
 

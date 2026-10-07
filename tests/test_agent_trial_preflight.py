@@ -1,7 +1,9 @@
 """Unit tests for `agent_trial._preflight_in_container` (skillc#334,
-orchestrator ruling mailbox 5872 steps 2-3): read back every closure
-file's digest from the LIVE container, and preflight every declared
-tool-kind dependency inside it - never on the host.
+orchestrator ruling mailbox 5872 steps 2-3, probe design mailbox 5896):
+read back every closure file's digest from the LIVE container, and
+evaluate every declared tool dependency's own `probes` inside it - never
+on the host, and never by treating a dependency's `id` as a real
+executable name (confirmed false for the real ea6dbfa profile).
 
 A stub backend (not the fake docker CLI fixture `test_agent_trial.py`
 itself uses) is enough here: `_preflight_in_container` only ever calls
@@ -39,37 +41,53 @@ class _StubBackend:
         (dest / "observations").write_text(self.observations, encoding="utf-8")
 
 
+def _command_tool(dep_id: str, *, name: str, constraint: str | None = None) -> dict[str, Any]:
+    probe: dict[str, Any] = {"kind": "command", "name": name}
+    if constraint is not None:
+        probe["constraint"] = constraint
+    return {"id": dep_id, "probes": [probe]}
+
+
+def _import_tool(dep_id: str, *, modules: list[str]) -> dict[str, Any]:
+    return {"id": dep_id, "probes": [{"kind": "python-import", "modules": modules}]}
+
+
 def test_empty_inputs_does_nothing() -> None:
     backend: Any = _StubBackend()
-    at._preflight_in_container(backend, object(), LIMITS, {}, ())  # type: ignore[arg-type]
+    at._preflight_in_container(backend, object(), LIMITS, {}, ())
     assert backend.exec_calls == []
     assert backend.export_calls == []
 
 
-def test_a_matching_digest_and_present_tool_pass() -> None:
-    observations = (
-        "sha256:a" + "a" * 63 + "\n"  # placeholder - replaced below
-    )
+def test_a_matching_digest_and_satisfied_command_probe_pass() -> None:
     digest = "a" * 64
     observations = (
         f"{digest}  /home/candidate/.claude/scripts/flow-finish-gate.sh\n"
         f"{at._TOOLS_MARKER}\n"
-        "python3 PRESENT Python 3.12.3\n"
+        "PROBE:0:PRESENT:Python 3.12.3\n"
     )
     backend: Any = _StubBackend(observations=observations)
     at._preflight_in_container(
         backend, object(), LIMITS,
         {".claude/scripts/flow-finish-gate.sh": f"sha256:{digest}"},
-        [{"id": "python3", "version": ">=3.10"}],
+        [_command_tool("tool-python", name="python3", constraint=">=3.10")],
     )
     assert len(backend.exec_calls) == 1
     assert len(backend.export_calls) == 1
 
 
-def test_a_tool_with_no_version_constraint_only_checks_presence() -> None:
-    observations = f"{at._TOOLS_MARKER}\nmake PRESENT\n"
+def test_a_command_probe_with_no_constraint_only_checks_presence() -> None:
+    observations = f"{at._TOOLS_MARKER}\nPROBE:0:PRESENT:\n"
     backend: Any = _StubBackend(observations=observations)
-    at._preflight_in_container(backend, object(), LIMITS, {}, [{"id": "make", "version": "any"}])
+    at._preflight_in_container(backend, object(), LIMITS, {}, [_command_tool("tool-make", name="make")])
+
+
+def test_a_satisfied_python_import_probe_passes() -> None:
+    observations = f"{at._TOOLS_MARKER}\nPROBE:0:IMPORT_OK\n"
+    backend: Any = _StubBackend(observations=observations)
+    at._preflight_in_container(
+        backend, object(), LIMITS, {}, [_import_tool("tool-pypi-runtime", modules=["pydantic", "yaml"])],
+    )
 
 
 def test_red_case_the_preflight_exec_itself_failing_is_refused() -> None:
@@ -92,25 +110,47 @@ def test_red_case_a_file_never_read_back_is_refused() -> None:
         at._preflight_in_container(backend, object(), LIMITS, {"x": "sha256:" + "a" * 64}, ())
 
 
-def test_red_case_a_missing_tool_is_refused() -> None:
-    observations = f"{at._TOOLS_MARKER}\npython3 ABSENT\n"
+def test_red_case_a_tool_with_no_probes_is_refused_before_any_exec() -> None:
+    """The live-path strictness the orchestrator required (mailbox 5896
+    point 3): unlike the host-side receipt's 'unknown, no probes
+    declared', a profile-opted live attempt refuses outright - and
+    before even building the script, so a probe-less dependency costs
+    no exec at all."""
+    backend: Any = _StubBackend()
+    with pytest.raises(at.HomeFileVerificationRefused, match="declares no probes"):
+        at._preflight_in_container(backend, object(), LIMITS, {}, [{"id": "tool-pypi-runtime", "probes": []}])
+    assert backend.exec_calls == []
+
+
+def test_red_case_a_missing_command_is_refused() -> None:
+    observations = f"{at._TOOLS_MARKER}\nPROBE:0:ABSENT\n"
     backend: Any = _StubBackend(observations=observations)
-    with pytest.raises(at.HomeFileVerificationRefused, match="is not present in the container"):
-        at._preflight_in_container(backend, object(), LIMITS, {}, [{"id": "python3", "version": "any"}])
+    with pytest.raises(at.HomeFileVerificationRefused, match="not satisfied"):
+        at._preflight_in_container(backend, object(), LIMITS, {}, [_command_tool("tool-python", name="python3")])
 
 
-def test_red_case_a_tool_present_but_below_the_version_constraint_is_refused() -> None:
-    observations = f"{at._TOOLS_MARKER}\npython3 PRESENT Python 3.8.0\n"
+def test_red_case_a_command_below_the_version_constraint_is_refused() -> None:
+    observations = f"{at._TOOLS_MARKER}\nPROBE:0:PRESENT:Python 3.8.0\n"
     backend: Any = _StubBackend(observations=observations)
-    with pytest.raises(at.HomeFileVerificationRefused, match="does not satisfy"):
-        at._preflight_in_container(backend, object(), LIMITS, {}, [{"id": "python3", "version": ">=3.10"}])
+    with pytest.raises(at.HomeFileVerificationRefused, match="not satisfied"):
+        at._preflight_in_container(
+            backend, object(), LIMITS, {}, [_command_tool("tool-python", name="python3", constraint=">=3.10")],
+        )
 
 
-def test_red_case_an_unparseable_reported_version_is_refused() -> None:
-    observations = f"{at._TOOLS_MARKER}\npython3 PRESENT not-a-version\n"
+def test_red_case_a_failed_python_import_is_refused() -> None:
+    observations = f"{at._TOOLS_MARKER}\nPROBE:0:IMPORT_FAIL\n"
     backend: Any = _StubBackend(observations=observations)
-    with pytest.raises(at.HomeFileVerificationRefused, match="could not be determined"):
-        at._preflight_in_container(backend, object(), LIMITS, {}, [{"id": "python3", "version": ">=3.10"}])
+    with pytest.raises(at.HomeFileVerificationRefused, match="not satisfied"):
+        at._preflight_in_container(backend, object(), LIMITS, {}, [_import_tool("tool-pypi-runtime", modules=["pydantic"])])
+
+
+def test_red_case_an_unknown_probe_kind_is_refused() -> None:
+    backend: Any = _StubBackend()
+    with pytest.raises(at.HomeFileVerificationRefused, match="unknown probe kind"):
+        at._preflight_in_container(
+            backend, object(), LIMITS, {}, [{"id": "tool-weird", "probes": [{"kind": "registry-key"}]}],
+        )
 
 
 def test_red_case_export_failure_is_refused() -> None:
@@ -124,19 +164,20 @@ def test_red_case_export_failure_is_refused() -> None:
 
 
 def test_one_combined_exec_and_export_regardless_of_how_many_files_or_tools() -> None:
-    """The whole point of combining both checks into one script: N files
-    and M tools still cost exactly one exec_in_attempt and one export."""
+    """The whole point of combining both checks into one script: N files,
+    M tools and however many probes still cost exactly one
+    exec_in_attempt and one export."""
     digest = "c" * 64
     observations = (
         f"{digest}  /home/candidate/a\n{digest}  /home/candidate/b\n{digest}  /home/candidate/c\n"
         f"{at._TOOLS_MARKER}\n"
-        "tool1 PRESENT v1\ntool2 PRESENT v1\n"
+        "PROBE:0:PRESENT:\nPROBE:1:IMPORT_OK\n"
     )
     backend: Any = _StubBackend(observations=observations)
     at._preflight_in_container(
         backend, object(), LIMITS,
         {"a": f"sha256:{digest}", "b": f"sha256:{digest}", "c": f"sha256:{digest}"},
-        [{"id": "tool1", "version": "any"}, {"id": "tool2", "version": "any"}],
+        [_command_tool("tool-make", name="make"), _import_tool("tool-pypi-runtime", modules=["pydantic"])],
     )
     assert len(backend.exec_calls) == 1
     assert len(backend.export_calls) == 1

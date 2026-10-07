@@ -3,7 +3,7 @@
 - Declaration: [profile.json](profile.json) - the machine form; this page explains it
 - Subject: [subject.json](subject.json) - this profile's OWN pin, never `../cpp-codex/subject.json`
 - Validator: `skillc profile validate` ([profiles spec](../../../docs/specs/evaluation-facility/profiles.md))
-- Evidence: [evidence/inventory.json](evidence/inventory.json), generated 2026-10-06 (#265/#287)
+- Evidence: [evidence/inventory.json](evidence/inventory.json), generated 2026-10-06 (#265/#287), regenerated 2026-10-07 (#334: the four `tool`-kind dependencies gained explicit `probes` - see below)
 - Obligations: #264's flow-check case contract (`evals/workflow-contracts/flow-check/`) - cites `reference.md` line numbers at the OLDER `85e9b03` pin; this profile's content moved, so those citations describe [the other profile](../cpp-codex-flow-check/PROFILE.md), not this one
 
 **This is a SEPARATE profile from

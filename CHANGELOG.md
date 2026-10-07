@@ -187,6 +187,44 @@ and version plan.
   change needed. All 11 equivalence cases (6 `_execution_observed` + 5
   `_last_run_is_fresh`) now run and pass.
 
+- **Tool dependencies declare explicit `probes` (Refs #334, in
+  progress)** - **found and fixed a pre-existing defect**: `profile.
+  _check_tool` (the `skillc profile install` CLI receipt's own tool
+  check) treated a dependency's `id` as a real executable name.
+  Confirmed on the real `cpp-codex-flow-check-ea6dbfa` profile: its four
+  tool ids (`tool-python`, `tool-uv`, `tool-pypi-runtime`, `tool-make-
+  git-bash`) are labels, not commands, so `_check_tool` has reported
+  every one of them `unknown`/`missing on PATH` since #265/#330 - on a
+  host that genuinely has python/uv/make/git/bash installed. The
+  `install()` receipt's `tools` field has never actually proven anything
+  for this profile.
+  - A tool-kind dependency now carries a `probes` list - a closed set
+    of checkable claims (`command`: a name plus an optional version
+    constraint, checked via `command -v` and a version-args capture;
+    `python-import`: module names that must import cleanly under the
+    interpreter the closure's runner uses - the only checkable claim for
+    a dependency supplied as PyPI packages, never a command at all). An
+    unknown probe kind is refused at `Profile.load` time.
+  - `profile.evaluate_command_probe`/`evaluate_python_import_probe`/
+    `aggregate_probe_results` are the ONE shared decision logic, used by
+    both `_check_tool` (host-side gathering, via `subprocess.run`) and
+    `agent_trial`'s new in-container preflight (container-side
+    gathering, via one combined `exec_in_attempt` + `export()`) - never
+    duplicated.
+  - A pre-#334 profile declaring no probes at all still validates and
+    installs (`_check_tool` reports `unknown`, `"no probes declared"` -
+    an honest status, not an error, so the historical record stays
+    readable). A profile-opted LIVE attempt is stricter: a tool
+    dependency with zero probes is refused outright, before any exec -
+    reporting unknown-and-continuing there would pass every attempt by
+    construction, the same blind instrument that let exit 127 through.
+  - `cpp-codex-flow-check-ea6dbfa`'s four tool dependencies gain real
+    probes (`python3`, `uv`, `pydantic`+`yaml` imports, and three command
+    probes for `make`/`git`/`bash`); its `evidence/inventory.json` is
+    regenerated against a real clone at the pinned revision, `diagnose`/
+    `validate` both still report 0 problems, and the inventory's digest
+    changes (recorded in the PR body, since nothing is approved against
+    it yet).
 - **In-container closure verification and tool preflight (Refs #334, in
   progress)** - `agent_trial.run_one_attempt` gains `verify_home_files`
   (relpath -> expected `sha256:` digest) and `preflight_tools` (a

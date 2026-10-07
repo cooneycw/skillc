@@ -116,6 +116,15 @@ def test_build_treatment_merges_the_profile_closure_with_the_skill_surface(
     treatment = cr.build_treatment(acquired, subject_profile=subject_profile, root=root)
     assert treatment.home_files[".codex/skills/gate-check/SKILL.md"] == SKILL_MD.encode()
     assert treatment.home_files["Work/kit/pyproject.toml"] == b"[project]\nname = 'kit'\n"
+    # #334: every closure file's digest is carried for in-container
+    # re-verification, and the profile's tool dependencies (here,
+    # tool-bash - declared with no probes, since PROFILE_DICT predates
+    # #334's probe requirement) are carried for the live preflight.
+    assert treatment.verify_home_files[".codex/skills/gate-check/SKILL.md"] == \
+        materialize.sha256_bytes(SKILL_MD.encode())
+    assert treatment.verify_home_files["Work/kit/pyproject.toml"] == \
+        materialize.sha256_bytes(b"[project]\nname = 'kit'\n")
+    assert [t["id"] for t in treatment.preflight_tools] == ["tool-bash"]
 
 
 @needs_git
@@ -213,10 +222,11 @@ def test_red_case_a_genuine_disagreement_between_closure_and_skill_surface_is_re
 
     real_closure_home_files = cr._closure_home_files
 
-    def _tampered(acquired: cc.AcquiredCollection, subject_profile: str, root: Path) -> dict[str, bytes]:
-        files = dict(real_closure_home_files(acquired, subject_profile, root))
+    def _tampered(acquired: cc.AcquiredCollection, subject_profile: str, root: Path) -> cr._ClosureResult:
+        result = real_closure_home_files(acquired, subject_profile, root)
+        files = dict(result.home_files)
         files[".codex/skills/gate-check/SKILL.md"] = b"not the real skill content\n"
-        return files
+        return cr._ClosureResult(home_files=files, tools=result.tools)
 
     monkeypatch.setattr(cr, "_closure_home_files", _tampered)
     with pytest.raises(cr.CalibrationRefused, match="disagrees with the skill surface"):

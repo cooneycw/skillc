@@ -69,6 +69,7 @@ from pathlib import Path
 from . import agent_trial, calibration, demo, profile, trial, verify
 from . import collection_conformance as cc
 from . import matched_pilot as mp
+from . import materialize as m
 
 ROOT = mp.ROOT
 EXPERIMENT_LABEL = "calibration"
@@ -110,7 +111,16 @@ class Treatment:
     preflight_tools: tuple[dict[str, object], ...] = ()
 
 
-def _closure_home_files(acquired: cc.AcquiredCollection, subject_profile: str, root: Path) -> dict[str, bytes]:
+@dataclass(frozen=True)
+class _ClosureResult:
+    home_files: dict[str, bytes]
+    #: The inventory's own `kind == "tool"` dependency records - #334's
+    #: in-container preflight reads these directly (each already carries
+    #: its own `probes`, serialized by `profile._dep_record`).
+    tools: tuple[dict[str, object], ...]
+
+
+def _closure_home_files(acquired: cc.AcquiredCollection, subject_profile: str, root: Path) -> _ClosureResult:
     """skillc#334: the validated profile's dependency closure, built from
     the SAME checkout the skills came from (`acquired.repo`), not a
     second acquisition - see `AcquiredCollection.repo`'s own docstring.
@@ -147,7 +157,9 @@ def _closure_home_files(acquired: cc.AcquiredCollection, subject_profile: str, r
             f"{committed_digest!r} at {inventory_path} - the profile is stale against the current "
             f"subject source and must be re-declared before this closure can be installed"
         )
-    return profile.installed_home_files(inventory, tree)
+    home_files = profile.installed_home_files(inventory, tree)
+    tools = tuple(dep for dep in inventory["dependencies"] if dep["kind"] == "tool")
+    return _ClosureResult(home_files=home_files, tools=tools)
 
 
 def build_treatment(
@@ -174,9 +186,12 @@ def build_treatment(
     if (subject_profile is None) != (root is None):
         raise CalibrationRefused("subject_profile and root must be given together, or not at all")
     home_files: dict[str, bytes] = dict(cc._collection_home_files(acquired.source, acquired.files))
+    verify_home_files: dict[str, str] = {}
+    preflight_tools: tuple[dict[str, object], ...] = ()
     if subject_profile is not None:
         assert root is not None
-        closure_files = _closure_home_files(acquired, subject_profile, root)
+        closure = _closure_home_files(acquired, subject_profile, root)
+        closure_files = closure.home_files
         # A validated profile's own closure covers the selected skill's
         # bundled files too (profile.py installs skills AND dependencies
         # together) - so an overlap with the skill surface is EXPECTED,
@@ -193,6 +208,13 @@ def build_treatment(
                 f"profile {subject_profile!r}'s closure disagrees with the skill surface at: {disagreeing}"
             )
         home_files.update(closure_files)
+        # Every closure file, not a curated subset (orchestrator ruling,
+        # mailbox 5872 step 2: "read back the digest of every closure
+        # file") - host-side bytes were already digest-verified against
+        # the inventory inside `installed_home_files`, so this is simply
+        # that same digest, carried forward for the in-container re-check.
+        verify_home_files = {relpath: m.sha256_bytes(data) for relpath, data in closure_files.items()}
+        preflight_tools = closure.tools
     return Treatment(
         home_files=home_files,
         digest=acquired.source.digest,
@@ -205,6 +227,8 @@ def build_treatment(
             surface_name=acquired.subject.surface,
             cache={},
         ),
+        verify_home_files=verify_home_files,
+        preflight_tools=preflight_tools,
     )
 
 

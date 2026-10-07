@@ -35,8 +35,9 @@ import posixpath
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -79,7 +80,19 @@ _DEP_KEYS = {
     "id", "kind", "scope", "source_root", "paths", "destination", "satisfies",
     "traverse", "no_traverse_reason", "unreferenced_reason", "version", "supply",
     "role", "content", "shadow_check", "replaces_pinned", "replacement_reason",
+    "probes",
 }
+
+#: skillc#334 (orchestrator ruling, mailbox 5896): a tool-kind dependency's
+#: own closed set of checkable claims. A dependency's `id` alone was never
+#: a real executable name for every real tool (confirmed: the ea6dbfa
+#: profile's `tool-python`/`tool-uv`/`tool-pypi-runtime`/`tool-make-git-bash`
+#: are labels, and `_check_tool` reported "missing on PATH" for every one
+#: of them even on a host that genuinely has python/uv/make/git/bash) -
+#: `probes` is the explicit, checkable statement a dependency makes instead
+#: of relying on its `id` happening to double as a command. An unknown kind
+#: is refused at parse time (`_probe`), never silently skipped.
+PROBE_KINDS = ("command", "python-import")
 
 SYNTHETIC_CONTENT_MAX_BYTES = 4096  # Marker text, not a payload channel.
 
@@ -104,6 +117,22 @@ class Satisfies:
 
 
 @dataclass(frozen=True)
+class Probe:
+    """One checkable claim a tool-kind dependency makes (#334). `command`:
+    `name` is checked present via `command -v`; `constraint`, when given,
+    is checked against `version_args`' output (default `["--version"]`).
+    `python-import`: every name in `modules` must import cleanly under the
+    interpreter the check runs in - for a dependency supplied as PyPI
+    packages (never a command at all), this is the only checkable claim."""
+
+    kind: str
+    name: str | None = None
+    version_args: tuple[str, ...] = ()
+    constraint: str | None = None
+    modules: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class Dependency:
     id: str
     kind: str
@@ -122,6 +151,7 @@ class Dependency:
     shadow_path: str | None = None
     replaces_pinned: bool = False
     replacement_reason: str = ""
+    probes: tuple[Probe, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -316,6 +346,35 @@ def _pairs(data: dict[str, object], key: str) -> dict[str, str]:
     return out
 
 
+def _probe(entry: object, dep_id: str) -> Probe:
+    if not isinstance(entry, dict):
+        raise Refused(f"dependency {dep_id}: probe entry malformed: {entry!r}")
+    kind = entry.get("kind")
+    if kind not in PROBE_KINDS:
+        raise Refused(f"dependency {dep_id}: probe kind must be one of {PROBE_KINDS}, not {kind!r}")
+    if kind == "command":
+        unknown = sorted(set(entry) - {"kind", "name", "version_args", "constraint"})
+        if unknown:
+            raise Refused(f"dependency {dep_id}: command probe has unknown keys: {unknown}")
+        name = entry.get("name")
+        if not isinstance(name, str) or not name:
+            raise Refused(f"dependency {dep_id}: command probe needs a non-empty name")
+        version_args_raw = entry.get("version_args", ["--version"])
+        if not isinstance(version_args_raw, list) or not all(isinstance(a, str) and a for a in version_args_raw):
+            raise Refused(f"dependency {dep_id}: command probe version_args must be a list of strings")
+        constraint = entry.get("constraint")
+        if constraint is not None and not isinstance(constraint, str):
+            raise Refused(f"dependency {dep_id}: command probe constraint must be a string")
+        return Probe(kind="command", name=name, version_args=tuple(version_args_raw), constraint=constraint)
+    unknown = sorted(set(entry) - {"kind", "modules"})
+    if unknown:
+        raise Refused(f"dependency {dep_id}: python-import probe has unknown keys: {unknown}")
+    modules = entry.get("modules")
+    if not isinstance(modules, list) or not modules or not all(isinstance(mod, str) and mod for mod in modules):
+        raise Refused(f"dependency {dep_id}: python-import probe needs a non-empty list of module names")
+    return Probe(kind="python-import", modules=tuple(modules))
+
+
 def _dependency(entry: object) -> Dependency:
     if not isinstance(entry, dict):
         raise Refused(f"dependency entry malformed: {entry!r}")
@@ -396,6 +455,12 @@ def _dependency(entry: object) -> Dependency:
             raise Refused(f"dependency {dep_id}: names no source path")
         if not isinstance(destination, str) or not destination or m._escapes(destination):
             raise Refused(f"dependency {dep_id}: destination must be a relative path inside the home")
+    if kind != "tool" and "probes" in entry:
+        raise Refused(f"dependency {dep_id}: probes is tool-only")
+    probes_raw = entry.get("probes", []) if kind == "tool" else []
+    if not isinstance(probes_raw, list):
+        raise Refused(f"dependency {dep_id}: probes must be a list")
+    probes = tuple(_probe(p, dep_id) for p in probes_raw)
     satisfies = []
     for item in entry.get("satisfies", []):
         if isinstance(item, str):
@@ -426,7 +491,7 @@ def _dependency(entry: object) -> Dependency:
         supply=entry.get("supply") if isinstance(entry.get("supply"), str) else None,
         role=str(entry.get("role", "")),
         content=content, shadow_path=shadow_path, replaces_pinned=replaces_pinned,
-        replacement_reason=replacement_reason,
+        replacement_reason=replacement_reason, probes=probes,
     )
 
 
@@ -1290,6 +1355,13 @@ def _resolve(walk: _Walk, hit: str, path: str, pattern: Pattern,
     walk.references.append(record)
 
 
+def _probe_record(probe: Probe) -> dict[str, object]:
+    if probe.kind == "command":
+        return {"kind": "command", "name": probe.name, "version_args": list(probe.version_args),
+                "constraint": probe.constraint}
+    return {"kind": "python-import", "modules": list(probe.modules)}
+
+
 def _dep_record(walk: _Walk, dep: Dependency, installed: dict[str, dict[str, object]]) -> dict[str, object]:
     files = sorted((r for r in installed.values() if r["owner"] == dep.id),
                    key=lambda r: str(r["destination"]))
@@ -1309,6 +1381,7 @@ def _dep_record(walk: _Walk, dep: Dependency, installed: dict[str, dict[str, obj
         "digest": m.sha256_bytes("".join(
             f"{r['destination']}\0{r['mode']}\0{r['digest']}\n" for r in files
         ).encode()) if files else None,
+        "probes": [_probe_record(p) for p in dep.probes],
     }
 
 
@@ -1384,25 +1457,124 @@ def _version_matches(actual: tuple[int, ...], constraint: str) -> bool:
             ">": actual > expected, "<": actual < expected}[match[1]]
 
 
-def _check_tool(dep: dict[str, Any]) -> dict[str, Any]:
-    result = {"id": dep["id"], "constraint": dep["version"], "supply": dep["supply"]}
-    executable = shutil.which(dep["id"])
+@dataclass(frozen=True)
+class CommandProbeOutcome:
+    """What actually happened when a `command` probe's claim was checked -
+    gathered differently by each caller (a host `subprocess.run` for
+    `_check_tool`, a container `exec_in_attempt` for a live attempt's
+    preflight), evaluated identically by `evaluate_command_probe`."""
+
+    present: bool
+    version_output: str | None = None
+
+
+@dataclass(frozen=True)
+class PythonImportProbeOutcome:
+    succeeded: bool
+    error: str = ""
+
+
+def evaluate_command_probe(probe: Mapping[str, Any], outcome: CommandProbeOutcome) -> dict[str, Any]:
+    """The decision logic for one `command` probe, shared by `_check_tool`
+    (host) and `agent_trial`'s in-container preflight - never duplicated,
+    per the orchestrator's ruling on #334. Takes already-gathered FACTS,
+    never does the gathering itself, so it has no opinion on WHERE the
+    command ran."""
+    name = str(probe["name"])
+    if not outcome.present:
+        return {"status": "violated", "reason": f"command {name!r} not found"}
+    constraint = probe.get("constraint")
+    if constraint is None:
+        return {"status": "satisfied"}
+    if outcome.version_output is None:
+        return {"status": "unknown", "reason": f"command {name!r}: no version output captured"}
+    match = re.search(r"\b(\d+(?:\.\d+)+)\b", outcome.version_output)
+    if match is None:
+        return {"status": "unknown",
+                "reason": f"command {name!r}: version could not be parsed from {outcome.version_output[:200]!r}"}
+    version = tuple(int(n) for n in match[1].split("."))
+    if not _version_matches(version, str(constraint)):
+        return {"status": "violated",
+                "reason": f"command {name!r}: version {match[1]} does not satisfy {constraint!r}"}
+    return {"status": "satisfied", "version": match[1]}
+
+
+def evaluate_python_import_probe(probe: Mapping[str, Any], outcome: PythonImportProbeOutcome) -> dict[str, Any]:
+    """The decision logic for one `python-import` probe - shared the same
+    way as `evaluate_command_probe`."""
+    modules = probe.get("modules")
+    if outcome.succeeded:
+        return {"status": "satisfied"}
+    return {"status": "violated", "reason": f"could not import {modules}: {outcome.error or 'unknown error'}"}
+
+
+def aggregate_probe_results(results: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """One dependency's overall status from its own probes' results -
+    shared by both callers. No probes at all is `unknown`, `"no probes
+    declared"` - the honest status for a pre-#334 profile (never an
+    error; `_check_tool` reports it, a live attempt's preflight refuses
+    on it instead - that policy difference lives in each CALLER, not
+    here). `violated` beats `unknown` beats `satisfied`, so one failing
+    probe among several is never masked by the others."""
+    if not results:
+        return {"status": "unknown", "reason": "no probes declared"}
+    violated = [r for r in results if r["status"] == "violated"]
+    if violated:
+        return {"status": "violated", "reason": "; ".join(str(r.get("reason", "")) for r in violated)}
+    unknown = [r for r in results if r["status"] == "unknown"]
+    if unknown:
+        return {"status": "unknown", "reason": "; ".join(str(r.get("reason", "")) for r in unknown)}
+    return {"status": "satisfied"}
+
+
+def _gather_command_probe_host(probe: Mapping[str, Any]) -> CommandProbeOutcome:
+    """The HOST-side gathering half of a `command` probe - `_check_tool`'s
+    own job, never shared, since `agent_trial`'s container-side gathering
+    runs through `exec_in_attempt`/`export()` instead."""
+    name = str(probe["name"])
+    executable = shutil.which(name)
     if executable is None:
-        return {**result, "status": "unknown", "reason": "missing on PATH"}
-    constraint = dep["version"]
-    if constraint in (None, "any"):
-        return {**result, "status": "satisfied", "version": None}
+        return CommandProbeOutcome(present=False)
+    if probe.get("constraint") is None:
+        return CommandProbeOutcome(present=True)
+    version_args = probe.get("version_args") or ["--version"]
     try:
-        run = subprocess.run([executable, "--version"], capture_output=True,
-                             timeout=10, check=False)
-        match = re.search(rb"\b(\d+(?:\.\d+)+)\b", run.stdout + run.stderr)
-        if run.returncode != 0 or match is None:
-            return {**result, "status": "unknown", "reason": "version probe failed"}
-        version = match[1].decode("ascii")
-        met = _version_matches(tuple(int(n) for n in version.split(".")), constraint)
-        return {**result, "status": "satisfied" if met else "violated", "version": version}
-    except (OSError, subprocess.TimeoutExpired, ValueError):
-        return {**result, "status": "unknown", "reason": "version probe unavailable or constraint unsupported"}
+        run = subprocess.run([executable, *version_args], capture_output=True, timeout=10, check=False)
+        return CommandProbeOutcome(present=True, version_output=(run.stdout + run.stderr).decode(
+            "utf-8", errors="replace"))
+    except (OSError, subprocess.TimeoutExpired):
+        return CommandProbeOutcome(present=True, version_output=None)
+
+
+def _gather_python_import_probe_host(probe: Mapping[str, Any]) -> PythonImportProbeOutcome:
+    modules = probe.get("modules") or []
+    script = "; ".join(f"import {mod}" for mod in modules)
+    try:
+        run = subprocess.run([sys.executable, "-c", script], capture_output=True, timeout=10, check=False)
+        if run.returncode == 0:
+            return PythonImportProbeOutcome(succeeded=True)
+        return PythonImportProbeOutcome(succeeded=False, error=run.stderr.decode("utf-8", errors="replace")[:200])
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return PythonImportProbeOutcome(succeeded=False, error=str(exc))
+
+
+def _check_tool(dep: dict[str, Any]) -> dict[str, Any]:
+    """#334: a tool dependency's overall status, from its own declared
+    `probes` - never from treating `dep["id"]` as a command name (that
+    was the pre-#334 behavior, and it silently reported "missing on
+    PATH" for every one of the ea6dbfa profile's four real tool
+    dependencies, on a host that genuinely has all four - confirmed, not
+    assumed, before this fix)."""
+    result = {"id": dep["id"], "constraint": dep["version"], "supply": dep["supply"]}
+    outcomes = []
+    for probe in dep.get("probes") or []:
+        if probe["kind"] == "command":
+            outcomes.append(evaluate_command_probe(probe, _gather_command_probe_host(probe)))
+        elif probe["kind"] == "python-import":
+            outcomes.append(evaluate_python_import_probe(probe, _gather_python_import_probe_host(probe)))
+        else:
+            raise Refused(f"dependency {dep['id']}: unknown probe kind: {probe['kind']!r}")
+    return {**result, **aggregate_probe_results(outcomes)}
 
 
 def _verified_file_records(inventory: dict[str, Any], tree: Tree) -> Iterator[tuple[dict[str, Any], bytes]]:
