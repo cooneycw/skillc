@@ -24,8 +24,31 @@ TWO PHASES, mirroring #340's own split:
   image-agnostic claim). The closure is delivered via
   `DockerBackend.deliver_home_file`, the SAME seam
   `agent_trial._make_before_execute`'s hook uses, then the REAL,
-  unmodified `agent_trial._preflight_in_container` is called directly
-  against the real backend - never a re-implementation of its logic.
+  unmodified `agent_trial._preflight_in_container` AND
+  `agent_trial._make_before_execute`'s own overlay call
+  (`gate_overlay.apply_flow_check_gate_overlay`, with the real two-root
+  signature #342 landed) are driven directly against the real backend -
+  never a re-implementation of either's logic. The `none` mode therefore
+  exercises the FULL production order #334 defines: install, verify,
+  preflight, overlay, (agent) gate - mailbox 6018.
+
+ONCE THE OVERLAY HAS RUN, the agent's own gate invocation goes through
+the REAL forwarding shim (`docker/trial/flow-check-gate-shim.py`, the
+exact staged file, read from this repository's own tracked copy - never
+a stand-in, unlike #332's own mechanism-only live test), which only
+answers two prescribed invocations (`reference.md`'s Step 2 and Step 5).
+This file drives Step 2's invocation (`--plan check --evidence flow-
+check`, the ONLY one of the two that runs through `flow-finish-gate.sh`'s
+"run" code path and so the only one that can ever print the classifier's
+own REAL string - `--check-summary` runs a separate `lib.cicd check
+--summary` branch that never prints it, confirmed by reading the fixture
+script directly), over a real `GateWitness`/decide-reply channel wired
+the same way `test_gate_overlay_live.py` wires it - the controller executes the REAL script
+(now moved to the harness root) via `exec_in_attempt()`, and the shim
+forwards that real result byte-for-byte. `gate_path.classify_gate_
+output` is then asked of THAT forwarded result, not of a directly-run
+script - proving the closure, the preflight, the overlay and the
+witness all compose correctly, together, end to end.
 
 KNOWN, DOCUMENTED, CURRENT FAILURE (orchestrator ruling, mailbox 5997):
 `docker/trial/Dockerfile` has no `uv` and no `make` as of this writing,
@@ -42,26 +65,32 @@ from the start (issue #341's design, not retrofitted): a break targeting
 one property must never be satisfiable by a neighbouring property's
 unrelated failure.
 
-- `_PreflightVerdictPropertyHeld`: the preflight's accept/refuse decision
-  is correct for the closure it was actually given. Checked
-  UNCONDITIONALLY, identically, in every mode: `_require_preflight(not
-  refused, ...)`. The INPUT varies by mode (a complete closure for
-  `none`; one file omitted for `missing-closure`; one file's bytes
-  corrupted for `tampered-closure`) - never the assertion itself, which
-  stays "no refusal" in every mode (counter-model review doctrine,
-  matching #340's own `mounts == []`/`sync.returncode == 0` shape): for
-  `none` the input is correct, so the assertion naturally holds; for the
-  other two the deliberately broken input naturally violates it, which
+- `_PreflightVerdictPropertyHeld`: the install→verify→overlay pipeline's
+  accept/refuse decision is correct for the closure it was actually
+  given - both `agent_trial.HomeFileVerificationRefused` (preflight) and
+  `gate_overlay.OverlayRefused` (the overlay's own independent digest
+  re-check) are the SAME property from this test's outside view: "could
+  the attempt proceed to running the agent at all". Checked
+  UNCONDITIONALLY, identically, in every mode: `_require(not refused,
+  ...)`. The INPUT varies by mode (a complete closure for `none`; one
+  file omitted for `missing-closure`; one file's bytes corrupted for
+  `tampered-closure`) - never the assertion itself, which stays "no
+  refusal" in every mode (counter-model review doctrine, matching
+  #340's own `mounts == []`/`sync.returncode == 0` shape): for `none`
+  the input is correct, so the assertion naturally holds; for the other
+  two, `_preflight_in_container` itself already refuses on the broken
+  digest before the overlay is ever reached, which
   `xfail(strict=True, raises=_PreflightVerdictPropertyHeld)` then
   credits as the mode's own evidence.
-- `_GateReachesRealRunnerPropertyHeld`: once the preflight accepts the
-  closure, running `flow-finish-gate.sh` reaches the real `lib.cicd`
-  runner (`gate_path.classify_gate_output`), not the Makefile fallback.
-  Only reachable when the preflight did not refuse - #334's own
-  constraint ("the attempt is refused before any spend; it never runs
-  with a partial closure") means there is no gate run to observe once
-  refused, so `missing-closure`/`tampered-closure` never exercise this
-  property at all, and their `xfail` is wired to the OTHER subtype only.
+- `_GateReachesRealRunnerPropertyHeld`: once the pipeline accepts the
+  closure and applies the overlay, invoking the shim through a real
+  `GateWitness` reaches the real `lib.cicd` runner
+  (`gate_path.classify_gate_output`), not the Makefile fallback. Only
+  reachable when property 1 held - #334's own constraint ("the attempt
+  is refused before any spend; it never runs with a partial closure")
+  means there is no gate run to observe once refused, so `missing-
+  closure`/`tampered-closure` never exercise this property at all, and
+  their `xfail` is wired to the OTHER subtype only.
 
     none              (default) the full intact run: complete closure,
                        preflight accepts, gate reaches the real runner.
@@ -95,12 +124,14 @@ or the classifier's own fixed string return values.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import os
 import shutil
 import subprocess
 import tempfile
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -108,10 +139,11 @@ import pytest
 
 from skillc import agent_trial as at
 from skillc import docker_backend as d
+from skillc import gate_overlay
 from skillc import materialize as m
 from skillc import profile as p
 from skillc.backend import Limits
-from skillc.gate_witness import _read_observations
+from skillc.gate_witness import GateWitness, _read_observations
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_DIR = ROOT / "tests" / "fixtures" / "profile-cpp-codex-flow-check-ea6dbfa"
@@ -142,6 +174,25 @@ if BREAK_MODE not in _VALID_BREAK_MODES:
 #: with a skill-delivery defect.
 _TARGET_RELPATH = "Projects/claude-power-pack/lib/cicd/__init__.py"
 _TAMPERED_BYTES = b"# skillc#334 live-test tamper marker - not the real file\n"
+
+#: The real shim's own source - read from the host file this test does
+#: NOT edit, matching `agent_trial._FLOW_CHECK_GATE_SHIM_SOURCE`'s own
+#: convention exactly (both read the one tracked file `docker/trial/
+#: Dockerfile` stages into the image).
+_SHIM_SOURCE = at._FLOW_CHECK_GATE_SHIM_SOURCE.read_bytes()
+_HARNESS_ABS = f"{at._FLOW_CHECK_GATE_HARNESS_ROOT}/{at._FLOW_CHECK_GATE_HARNESS_PATH}"
+_SUBJECT_ABS = f"{d.CONTAINER_HOME}/{at._FLOW_CHECK_GATE_SUBJECT_PATH}"
+#: `--plan check --evidence flow-check`, never `--check-summary` - the
+#: REAL classifier string (`gate_path.REAL`, "running deterministic gate
+#: (lib.cicd run --plan") is printed only by the "run" code path
+#: (`flow-finish-gate.sh`'s bare/`--plan` invocation, confirmed by
+#: reading the fixture script directly), never by `--check-summary`'s
+#: own, separate `lib.cicd check --summary` branch - using the wrong one
+#: here would make `classify_gate_output` report "unknown" even on a
+#: fully correct run, for a reason that has nothing to do with this
+#: test's own claim.
+_GATE_NAME = "flow-check-plan"
+_GATE_ARGV_TAIL = ("--plan", "check", "--evidence", "flow-check")
 
 _DOCKER_BIN_PRESENT = shutil.which("docker") is not None
 pytestmark = [
@@ -232,7 +283,16 @@ def test_a_treated_attempts_closure_is_verified_and_the_gate_reaches_the_real_ru
 
     _build_trial_image(IMAGE_TAG)
     base = Path(tempfile.mkdtemp(prefix="sk-334-live-base-"))
-    backend = d.DockerBackend(image=IMAGE_TAG, base_dir=base, network="bridge")
+    trigger_dir = Path(tempfile.mkdtemp(prefix="sk-334-live-trig-"))
+    witness_holder: list[GateWitness] = []
+
+    def decide(request: Mapping[str, object]) -> Mapping[str, object]:
+        return witness_holder[0].decide(request)
+
+    backend = d.DockerBackend(
+        image=IMAGE_TAG, base_dir=base, network="bridge",
+        trigger_decide=decide, trigger_socket_dir=trigger_dir,
+    )
     handle = backend.prepare("a-334-closure-preflight-0000001")
     try:
         surface = {
@@ -248,23 +308,58 @@ def test_a_treated_attempts_closure_is_verified_and_the_gate_reaches_the_real_ru
         refusal_reason = ""
         try:
             at._preflight_in_container(backend, handle, Limits(timeout=120.0), verify_home_files, preflight_tools)
-        except at.HomeFileVerificationRefused as exc:
+            # skillc#334 step 4 / mailbox 6018: the LAST setup step before
+            # the agent starts, using the real two-root signature #342
+            # landed - fires only because this closure's own
+            # verify_home_files carries the flow-check gate script's
+            # digest (`_TARGET_RELPATH` is a DIFFERENT file; this is
+            # never refused for the break modes, since they never reach
+            # this line at all - the preflight call above already raised).
+            real_digest = verify_home_files[at._FLOW_CHECK_GATE_SUBJECT_PATH]
+            assert real_digest.startswith("sha256:")
+            gate_overlay.apply_flow_check_gate_overlay(
+                backend, handle,
+                subject_root=d.CONTAINER_HOME,
+                harness_root=at._FLOW_CHECK_GATE_HARNESS_ROOT,
+                subject_path=at._FLOW_CHECK_GATE_SUBJECT_PATH,
+                harness_path=at._FLOW_CHECK_GATE_HARNESS_PATH,
+                expected_real_digest=real_digest[len("sha256:"):],
+                expected_shim_digest=hashlib.sha256(_SHIM_SOURCE).hexdigest(),
+                shim_content=_SHIM_SOURCE,
+            )
+        except (at.HomeFileVerificationRefused, gate_overlay.OverlayRefused) as exc:
             refused = True
             refusal_reason = str(exc)
 
         # THE REAL ORACLE for property 1, asserted UNCONDITIONALLY - the
         # SAME check in every mode. It holds for `none` (a correct
-        # closure is never refused) and fails naturally for the other two
-        # (a genuinely broken closure IS refused) - never branched to
-        # expect a different outcome by mode.
+        # closure is never refused, and the overlay's own independent
+        # digest re-check agrees) and fails naturally for the other two
+        # (a genuinely broken closure IS refused, before the overlay is
+        # ever reached) - never branched to expect a different outcome
+        # by mode.
         _require(_PreflightVerdictPropertyHeld, not refused, f"the attempt was refused: {refusal_reason}")
 
         # Property 2 is only reachable once property 1 holds - #334's own
         # constraint is that a refused attempt never runs at all, so
-        # there is no gate run to observe for either break mode.
+        # there is no gate run to observe for either break mode. The
+        # overlay has replaced the subject path with the real forwarding
+        # shim, so the agent's own invocation now goes through a real
+        # GateWitness/decide-reply channel rather than running the real
+        # script directly.
+        witness = GateWitness(
+            declared_gates={_GATE_NAME: (_SUBJECT_ABS, *_GATE_ARGV_TAIL)},
+            tree_digest_fn=lambda: "live-conformance-digest",
+            backend=backend, handle=handle, limits=Limits(timeout=120.0),
+            gate_exclusivity=False, exclusivity_basis="#334 live conformance test - no exclusivity claim exercised here",
+            workspace_root=d.CONTAINER_WORKSPACE,
+        )
+        witness_holder.append(witness)
+
+        gate_argv = " ".join(_GATE_ARGV_TAIL)
         gate = backend.execute(
             handle,
-            ["bash", "-c", f"cd {d.CONTAINER_WORKSPACE}/tiny-project && exec {d.CONTAINER_HOME}/.claude/scripts/flow-finish-gate.sh"],
+            ["bash", "-c", f"cd {d.CONTAINER_WORKSPACE}/tiny-project && exec {_SUBJECT_ABS} {gate_argv}"],
             Limits(timeout=120.0),
         )
         assert gate.reason == "exited", f"the gate process itself never completed (reason={gate.reason!r})"

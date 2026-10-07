@@ -88,7 +88,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from . import credential, demo, leak, profile, records, trial, trial_bootstrap, verify
+from . import credential, demo, gate_overlay, leak, profile, records, trial, trial_bootstrap, verify
 from . import transcript_adapter as ta
 from .backend import BackendUnavailable, Confirmation, ExecutionBackend, Limits
 from .docker_backend import (
@@ -279,6 +279,23 @@ class HomeFileVerificationRefused(Exception):
 
 
 _TOOLS_MARKER = "---skillc-334-tools---"
+
+#: skillc#334 step 4 (mailbox 6018, following #332's own follow-up #342):
+#: the flow-check gate-witness overlay fires for whichever treated attempt's
+#: closure actually delivers this exact subject path - never hardcoded to
+#: one profile's name, so a future profile without this dependency is
+#: correctly skipped rather than refused for a file it never declared.
+#: `_FLOW_CHECK_GATE_SHIM_SOURCE` is read from THIS repository's own
+#: tracked copy, the same file `docker/trial/Dockerfile` COPies into the
+#: trial image - both are the one tracked source, never two independent
+#: copies that could drift (matching `tests/test_gate_overlay_live.py`'s
+#: own `_REAL_SHIM_SOURCE` convention).
+_FLOW_CHECK_GATE_SUBJECT_PATH = ".claude/scripts/flow-finish-gate.sh"
+_FLOW_CHECK_GATE_HARNESS_ROOT = "/opt/skillc-harness"
+_FLOW_CHECK_GATE_HARNESS_PATH = "flow-finish-gate.sh"
+_FLOW_CHECK_GATE_SHIM_SOURCE = (
+    Path(__file__).resolve().parent.parent / "docker" / "trial" / "flow-check-gate-shim.py"
+)
 
 
 def _workspace_snapshot(backend: DockerBackend, handle: object) -> dict[str, str]:
@@ -565,35 +582,34 @@ def _make_before_execute(
             assert limits is not None  # checked above, before any delivery happened
             _preflight_in_container(backend, handle, limits, resolved_verify_home_files, resolved_preflight_tools)
 
-        # TODO(skillc#334 step 4): once #332's own follow-up lands (TWO
-        # root parameters on gate_overlay.apply_flow_check_gate_overlay() -
-        # mailbox 5944 fix 3, superseding the single-`root` shape named
-        # earlier in this TODO - `subject_path`/`harness_path` resolve
-        # against DIFFERENT roots because a harness copy reachable from
-        # inside the candidate's own home could be edited by the subject
-        # and then run by the controller), a profile-opted attempt whose
-        # subject needs the flow-check gate witness calls it here, as the
-        # LAST setup step before the agent starts (gate_overlay.py's own
-        # ordering requirement):
-        #   gate_overlay.apply_flow_check_gate_overlay(
-        #       backend, handle,
-        #       subject_root=CONTAINER_HOME,
-        #       harness_root=<a root-owned, non-candidate-writable directory>,
-        #       subject_path=".claude/scripts/flow-finish-gate.sh",
-        #       harness_path=<a harness_root-relative path>,
-        #       expected_real_digest=..., expected_shim_digest=...,
-        #       shim_content=...,
-        #   )
-        # Deliberately not called yet: the real script this closure
-        # delivers lives under CONTAINER_HOME (via deliver_home_file,
-        # above), but `apply_flow_check_gate_overlay` as merged in #332
-        # can only reach CONTAINER_WORKSPACE (confirmed directly - its own
-        # test plants the "real script" via backend.install(), which is
-        # CONTAINER_WORKSPACE-only) - calling it today would refuse every
-        # attempt, never finding the file. Rejected alternative: a second,
-        # CONTAINER_WORKSPACE-relative delivery of the same script plus a
-        # symlink - exactly the parallel delivery path this module's own
-        # `extra_home_files` docstring already warns against.
+        # skillc#334 step 4 (mailbox 6018, #332's own follow-up #342 landed
+        # the two-root `install()`/`export()`/`apply_flow_check_gate_
+        # overlay()` this needed): the LAST setup step before the agent
+        # starts (gate_overlay.py's own ordering requirement - anything
+        # that re-reads an installed-file digest after this runs would see
+        # the shim's digest where it expects the real script's). Fires
+        # only when THIS closure actually delivered the flow-check gate
+        # script - never unconditionally, so a profile without this
+        # dependency is silently correct rather than refused for a file
+        # it never declared. `expected_real_digest` is the exact digest
+        # `_preflight_in_container` just verified arrived - re-reading it
+        # from `resolved_verify_home_files` rather than re-deriving it, so
+        # the overlay can never disagree with what verification already
+        # confirmed.
+        real_digest = resolved_verify_home_files.get(_FLOW_CHECK_GATE_SUBJECT_PATH)
+        if real_digest is not None:
+            assert real_digest.startswith("sha256:")
+            shim_content = _FLOW_CHECK_GATE_SHIM_SOURCE.read_bytes()
+            gate_overlay.apply_flow_check_gate_overlay(
+                backend, handle,
+                subject_root=CONTAINER_HOME,
+                harness_root=_FLOW_CHECK_GATE_HARNESS_ROOT,
+                subject_path=_FLOW_CHECK_GATE_SUBJECT_PATH,
+                harness_path=_FLOW_CHECK_GATE_HARNESS_PATH,
+                expected_real_digest=real_digest[len("sha256:"):],
+                expected_shim_digest=hashlib.sha256(shim_content).hexdigest(),
+                shim_content=shim_content,
+            )
 
     return hook
 

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import ast
 import base64
+import hashlib
 import json
 import sys
 import time
@@ -762,6 +763,94 @@ def test_extra_home_files_default_omits_nothing_delivered_before(
 
     assert record["disposition"] == "captured"
     assert not any(path.startswith(".codex/skills/") for path in backend.delivered)
+
+
+# ------------------------------------------- flow-check gate overlay (#334 step 4)
+
+
+def test_the_overlay_fires_when_the_closure_delivers_the_flow_check_gate_script(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """skillc#334 step 4: once a treated attempt's closure includes
+    `.claude/scripts/flow-finish-gate.sh`, the hook calls `gate_overlay.
+    apply_flow_check_gate_overlay` with the real two-root signature. Two
+    OTHER mechanisms are monkeypatched out, each independently tested
+    elsewhere, so this test isolates exactly the new wiring decision:
+    `_preflight_in_container`'s own digest-verification correctness is
+    `tests/test_agent_trial_preflight.py`'s job (the fake docker CLI's
+    own path-remapping simulation reports a sha256sum line prefixed with
+    its HOST-side fsroot path, not the clean in-container path
+    `_preflight_in_container`'s parser expects - a fake-CLI limitation
+    unrelated to this wiring, confirmed directly before writing this
+    test); `apply_flow_check_gate_overlay`'s own correctness is `tests/
+    test_gate_overlay.py`'s job (mutation-checked there)."""
+    monkeypatch.setattr(at, "_preflight_in_container", lambda *a, **k: None)
+    calls: list[dict[str, object]] = []
+
+    def fake_overlay(backend: object, handle: object, **kwargs: object) -> None:
+        calls.append(kwargs)
+
+    monkeypatch.setattr(at.gate_overlay, "apply_flow_check_gate_overlay", fake_overlay)
+
+    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+    experiment, attempt_id = _planned(store)
+    cred_path = _fresh_credential(tmp_path, "codex")
+    home = _mapped_home(docker_state, attempt_id)
+    argv = _fake_argv(fmt="codex-fake", home=home, transcript_relpath=".codex/sessions/2026/01/01/rollout-ov1.jsonl")
+
+    gate_script = b"#!/bin/bash\necho real\n"
+    digest = f"sha256:{hashlib.sha256(gate_script).hexdigest()}"
+
+    record = at.run_one_attempt(
+        backend=backend, experiment=experiment, attempt_id=attempt_id, client="codex",
+        base_argv=argv, prompt="Fix the slug helper.", skill_name=None,
+        surface={}, limits=Limits(timeout=5), base=base, credential_explicit_path=cred_path,
+        extra_home_files={at._FLOW_CHECK_GATE_SUBJECT_PATH: gate_script},
+        verify_home_files={at._FLOW_CHECK_GATE_SUBJECT_PATH: digest},
+    )
+
+    assert record["disposition"] == "captured", record.get("reason")
+    assert len(calls) == 1
+    shim_content = at._FLOW_CHECK_GATE_SHIM_SOURCE.read_bytes()
+    assert calls[0] == {
+        "subject_root": d.CONTAINER_HOME,
+        "harness_root": at._FLOW_CHECK_GATE_HARNESS_ROOT,
+        "subject_path": at._FLOW_CHECK_GATE_SUBJECT_PATH,
+        "harness_path": at._FLOW_CHECK_GATE_HARNESS_PATH,
+        "expected_real_digest": hashlib.sha256(gate_script).hexdigest(),
+        "expected_shim_digest": hashlib.sha256(shim_content).hexdigest(),
+        "shim_content": shim_content,
+    }
+
+
+def test_the_overlay_is_skipped_when_the_closure_has_no_gate_script(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A treated attempt whose closure never declares the flow-check gate
+    script (today: every attempt without `subject.profile` opted in, or a
+    future profile with a different closure) must never call the overlay
+    at all - never refused for a file it was never given to install."""
+    calls: list[dict[str, object]] = []
+
+    def fake_overlay(backend: object, handle: object, **kwargs: object) -> None:
+        calls.append(kwargs)
+
+    monkeypatch.setattr(at.gate_overlay, "apply_flow_check_gate_overlay", fake_overlay)
+
+    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+    experiment, attempt_id = _planned(store)
+    cred_path = _fresh_credential(tmp_path, "codex")
+    home = _mapped_home(docker_state, attempt_id)
+    argv = _fake_argv(fmt="codex-fake", home=home, transcript_relpath=".codex/sessions/2026/01/01/rollout-ov2.jsonl")
+
+    record = at.run_one_attempt(
+        backend=backend, experiment=experiment, attempt_id=attempt_id, client="codex",
+        base_argv=argv, prompt="Fix the slug helper.", skill_name=None,
+        surface={}, limits=Limits(timeout=5), base=base, credential_explicit_path=cred_path,
+    )
+
+    assert record["disposition"] == "captured"
+    assert calls == []
 
 
 # --------------------------------------------------------- no real model call

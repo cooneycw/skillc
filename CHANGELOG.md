@@ -297,6 +297,28 @@ and version plan.
      `harness_root=`a root-owned, non-candidate-writable directory)
      superseding the single-`root` shape this TODO previously named -
      the call site itself is still stubbed, pending #332's own follow-up.
+- **The overlay call site is un-stubbed (Refs #334, #332's #342, mailbox
+  6018)** - now that #342 landed the real two-root `apply_flow_check_
+  gate_overlay` signature, `_make_before_execute`'s hook calls it for
+  real as the last setup step, firing only when the attempt's own
+  closure actually delivered `.claude/scripts/flow-finish-gate.sh` (keyed
+  off `verify_home_files`, never hardcoded to one profile's name, so a
+  future profile without this dependency is silently unaffected rather
+  than refused for a file it never declared). `harness_root` is a new
+  fixed constant, `/opt/skillc-harness`. Wiring-only unit tests
+  (`tests/test_agent_trial.py`) monkeypatch both `_preflight_in_container`
+  and the overlay call itself, isolating the new conditional/argument-
+  construction logic from each mechanism's own correctness (tested
+  elsewhere); found and recorded on the Nit Store (skillc#20), not fixed
+  here: the fake docker CLI's sha256sum output leaks its host-side fsroot
+  path prefix, which would make `_preflight_in_container`'s own digest
+  parser refuse every home-delivered file if driven through the fake CLI
+  directly - every existing preflight test already used a stub backend
+  instead. `tests/test_profile_closure_preflight_live.py`'s `none` mode
+  now exercises the FULL production order end to end: install, verify,
+  preflight, overlay, and (through a real `GateWitness`/decide-reply
+  channel, the real forwarding shim, and the real moved script) the
+  gate - not merely the preflight subset it tested before.
 - **In-container closure verification and tool preflight (Refs #334, in
   progress)** - `agent_trial.run_one_attempt` gains `verify_home_files`
   (relpath -> expected `sha256:` digest) and `preflight_tools` (a

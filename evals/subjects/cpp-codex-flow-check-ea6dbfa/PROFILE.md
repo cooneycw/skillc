@@ -125,8 +125,11 @@ snapshot reports zero.
 `tests/test_profile_closure_preflight_live.py` (#334): the installed-
 closure proof against a REAL container built from `docker/trial` - not a
 dedicated test image, since #334's own acceptance claim is about the
-production trial image. Currently refuses at preflight in its intact
-mode (the image has no `uv`/`make` yet, tracked separately as #343); the
-two break modes (`missing-closure`, `tampered-closure`) pass today
-regardless, since they prove the preflight's own refusal correctness,
-which does not depend on #343.
+production trial image. Its intact (`none`) mode exercises the full
+production order end to end - install, verify, preflight, the real
+two-root gate overlay (#332/#342), and the gate itself, reached through
+a real `GateWitness`/decide-reply channel and the real forwarding shim.
+Currently refuses at preflight (the image has no `uv`/`make` yet,
+tracked separately as #343); the two break modes (`missing-closure`,
+`tampered-closure`) pass today regardless, since they prove the
+preflight's own refusal correctness, which does not depend on #343.
