@@ -84,14 +84,14 @@ matters is in WHICH commits run at all, not in what R1 covers.
    - **Record both outcomes on this issue**, generically (no addresses) -
      this is the committed evidence that the detector actually detects
      something, on this specific host, not only in the unit tests.
-8. **#183/#269/#332/#266/#343 break-mode verification (R2):** `--break` takes
+8. **#183/#269/#332/#266/#343/#334 break-mode verification (R2):** `--break` takes
    `none` or `<family>:<mode>`, resolved from a closed table in
    `break-lib.sh` - an unknown family or mode is refused with exit 2
    before any checkout or docker operation. The three bare `channel`
    spellings below (no `channel:` prefix) also still work, kept for
    compatibility with runs recorded before family prefixes existed (#315
-   follow-up); a bare `witness`, `gateshim`, `coldinstall` or `trialimage`
-   mode has no such form and is refused.
+   follow-up); a bare `witness`, `gateshim`, `coldinstall`, `trialimage`
+   or `closure` mode has no such form and is refused.
    ```
    run-real-docker <post-#300-main-sha> --break none                           # expect SUCCESS
    run-real-docker <post-#300-main-sha> --break channel:omit-mount             # expect FAILURE
@@ -110,10 +110,13 @@ matters is in WHICH commits run at all, not in what R1 covers.
    run-real-docker <post-#300-main-sha> --break coldinstall:secret-mount      # expect FAILURE
    run-real-docker <post-#300-main-sha> --break coldinstall:cold-cache        # expect FAILURE
    run-real-docker <post-#300-main-sha> --break trialimage:no-uv              # expect FAILURE
+   run-real-docker <post-#300-main-sha> --break closure:missing-closure      # expect FAILURE
+   run-real-docker <post-#300-main-sha> --break closure:tampered-closure     # expect FAILURE
    ```
    Break-mode runs post only to `skillc/real-docker-control`
    (never the certifying `skillc/real-docker` context) and are labelled
-   EXPECTED-RED. Record all seventeen results on this issue.
+   EXPECTED-RED. Record all nineteen results on this issue (the eighteen
+   break-mode commands above, plus the `none` run itself).
 9. `systemctl enable --now skillc-real-docker.timer`.
 
 ## `config.env` template

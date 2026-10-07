@@ -187,6 +187,27 @@ and version plan.
   change needed. All 11 equivalence cases (6 `_execution_observed` + 5
   `_last_run_is_fresh`) now run and pass.
 
+- **Real-Docker evidence for the installed-closure proof (Refs #334, in
+  progress)** - `tests/test_profile_closure_preflight_live.py`, the sixth
+  entry in the real-Docker floor (`ci/check_real_docker_ran.py`) and a
+  new `closure` break family (`ci/real-docker/break-lib.sh`,
+  `missing-closure`/`tampered-closure`). Drives the REAL, unmodified
+  `agent_trial._preflight_in_container` against a real container built
+  from `docker/trial` - the SAME image every live attempt actually runs
+  in, not a dedicated test image (orchestrator ruling: #334's own
+  acceptance line, "reaches the real `lib.cicd` runner", is about
+  production). Two independent properties, each with its own
+  `_PropertyHeld` subtype from the start (#341's design, not retrofitted):
+  the preflight's accept/refuse decision, and (only once accepted)
+  whether `flow-finish-gate.sh` reaches the real runner. **Known,
+  documented, current limitation:** `docker/trial/Dockerfile` has no `uv`
+  or `make` yet, so the intact (`none`) mode correctly refuses today -
+  skillc#343 (filed this session, a separate issue, landing before #334)
+  adds both; this file's own `none` mode will pass once that merges, and
+  is not expected to pass before it. Written and reviewed without ever
+  running it against a real daemon (no `docker` binary in the
+  implementation environment), matching every other live test in this
+  repository.
 - **Tool dependencies declare explicit `probes` (Refs #334, in
   progress)** - **found and fixed a pre-existing defect**: `profile.
   _check_tool` (the `skillc profile install` CLI receipt's own tool
