@@ -40,14 +40,22 @@ either trust or see through, so each is checked, not assumed:
     (that check is what catches an unmerged duplicate key);
   - a malformed probe report makes every criterion UNKNOWN.
 
-`gate-claim-honest` (the fourth input, a CPP gate silently skipped) is
-not a DECLARED criterion of this grader either - see
+`gate-claim-honest` (the fifth input, a CPP gate silently skipped) IS a
+declared criterion of this grader too - see
 `grade_report_outran_evidence.py`'s own module docstring for the
-structural reason. `gate_claim_honest_validity()` certifies the
-STANDALONE `gate_claim_honest()` function directly, the same pattern
-`claims-outran-evidence`'s and `gate-stops-early`'s own validity
-functions already use, against witness records built with
-`skillc.gate_witness`'s own real constructors, never hand-typed JSON.
+mechanics. Every candidate but one carries a real witness, delivered
+through `grade_directory()`'s `trusted_observation` parameter exactly
+how a real attempt's record would arrive, mirroring `gate-stops-early`'s
+and `claims-outran-evidence`'s own wiring exactly (#270/#271).
+`incomplete/no-witness-companion` is the deliberate exception: no witness
+at all, certifying "no observation gives UNKNOWN" directly. Owner ruling:
+the declared criterion applies to `qualify.py`'s own static
+certification, not only to a future live attempt.
+`gate_claim_honest_validity()` still certifies `gate_claim_honest()`
+directly too, the same pattern `claims-outran-evidence`'s and
+`gate-stops-early`'s own validity functions use, against witness records
+built with `skillc.gate_witness`'s own real constructors, never
+hand-typed JSON.
 
 Exit 0 only if all of that holds.
 """
@@ -60,7 +68,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from skillc import verify
+from skillc import materialize, verify
 from skillc.backend import ExecuteResult, Limits
 from skillc.gate_witness import GateWitness
 
@@ -97,8 +105,28 @@ class Row:
         return self.status == self.expected and self.violated == self.expected_violated
 
 
-def status_of(grader: Path, candidate: Path, root: Path = HERE) -> tuple[str, str, frozenset[str], str]:
-    graded = verify.grade_directory(verify.GraderDef.load(root).with_judge(grader), candidate)
+#: Every committed candidate but one carries a witness, delivered through
+#: `trusted_observation` exactly how a real attempt's record would arrive
+#: (skillc#348 owns threading a REAL attempt's witness into that same
+#: channel - this harness builds against the channel, not against #348's
+#: own implementation). `incomplete/` is the deliberate exception: no
+#: witness at all, certifying the "no observation gives UNKNOWN" branch
+#: directly rather than only by inspection - see `candidates()`.
+def _candidate_trusted_observation(candidate: Path) -> bytes:
+    """A REAL `GateWitnessRecord`, built with `skillc.gate_witness`'s own
+    constructors (never hand-typed JSON) - mirrors `gate-stops-early`'s
+    and `claims-outran-evidence`'s own `_candidate_trusted_observation()`
+    exactly (#270/#271)."""
+    digest = materialize.tree_digest(candidate)
+    witness = _witness_json(ExecuteResult(reason="exited", exit_code=3), digest, request=True)
+    return json.dumps({"witness": witness, "graded_tree_digest": digest}).encode("utf-8")
+
+
+def status_of(grader: Path, candidate: Path, root: Path = HERE, *,
+             needs_witness: bool = True) -> tuple[str, str, frozenset[str], str]:
+    trusted = _candidate_trusted_observation(candidate) if needs_witness else None
+    graded = verify.grade_directory(verify.GraderDef.load(root).with_judge(grader), candidate,
+                                    trusted_observation=trusted)
     return graded.status, graded.detail, graded.violated, graded.category
 
 
@@ -113,11 +141,11 @@ def _expectation(path: Path, placed: str) -> tuple[str, frozenset[str]]:
     if status != placed or not isinstance(violated, list):
         raise SystemExit(f"{path}: expected.json says {status!r}, placement says {placed!r}")
     if (placed == "FAIL") != bool(violated):
-        raise SystemExit(f"{path}: a FAIL must name violated criteria, a PASS none")
+        raise SystemExit(f"{path}: a FAIL must name violated criteria; a PASS or INCONCLUSIVE none")
     return placed, frozenset(map(str, violated))
 
 
-def candidates(root: Path) -> list[tuple[Path, str, frozenset[str]]]:
+def candidates(root: Path) -> list[tuple[Path, str, frozenset[str], bool]]:
     alternatives = sorted(p for p in (root / "alternatives").iterdir() if p.is_dir())
     benign = sorted(p for p in (root / "benign").iterdir() if p.is_dir())
     wrong = sorted(p for p in (root / "wrong").iterdir() if p.is_dir())
@@ -126,20 +154,24 @@ def candidates(root: Path) -> list[tuple[Path, str, frozenset[str]]]:
             f"{root}: no alternatives, no benign changes or no wrong outputs; an empty "
             "population cannot certify a grader"
         )
+    #: Optional - a grader need not have a deliberate no-witness candidate,
+    #: but this one does (`incomplete/no-witness-companion`).
+    incomplete = sorted(p for p in (root / "incomplete").iterdir() if p.is_dir()) if (root / "incomplete").is_dir() else []
     placed = [
-        (root / "fixture", "FAIL"),
-        (root / "reference", "PASS"),
-        *[(p, "PASS") for p in alternatives],
-        *[(p, "PASS") for p in benign],
-        *[(p, "FAIL") for p in wrong],
+        (root / "fixture", "FAIL", True),
+        (root / "reference", "PASS", True),
+        *[(p, "PASS", True) for p in alternatives],
+        *[(p, "PASS", True) for p in benign],
+        *[(p, "FAIL", True) for p in wrong],
+        *[(p, "INCONCLUSIVE", False) for p in incomplete],
     ]
-    return [(p, *_expectation(p, want)) for p, want in placed]
+    return [(p, *_expectation(p, want), needs_witness) for p, want, needs_witness in placed]
 
 
 def certify(grader: Path, root: Path = HERE) -> tuple[bool, list[Row]]:
     rows = []
-    for path, expected, expected_violated in candidates(root):
-        status, detail, violated, category = status_of(grader, path, root)
+    for path, expected, expected_violated, needs_witness in candidates(root):
+        status, detail, violated, category = status_of(grader, path, root, needs_witness=needs_witness)
         rows.append(Row(str(path.relative_to(root)), expected, status, detail,
                         expected_violated, violated, category))
     return all(r.ok for r in rows), rows
@@ -227,9 +259,18 @@ def instrument_validity(root: Path = HERE) -> list[tuple[str, bool, str]]:
 
     # 6. Blinding the duplicate-key check turns wrong/not-actually-fixed
     #    into a PASS: that check, not another, is what catches it.
+    #    gate-claim-honest reads UNKNOWN here, not SATISFIED - this path
+    #    calls judge() directly, with no envelope["trusted"] key at all
+    #    (never through grade_directory), so there is no witness to
+    #    reconcile - expected, not a regression; checked explicitly rather
+    #    than folded into "all satisfied" so a future drift in THIS
+    #    criterion's own default is still caught.
     blinded = _judged(root / "wrong" / "not-actually-fixed", blind_duplicate=True)
-    checks.append(("blinding config-fixed turns wrong/not-actually-fixed PASS",
-                   all(o == "SATISFIED" for o in blinded.values()), f"got {blinded}"))
+    checks.append((("blinding config-fixed turns wrong/not-actually-fixed PASS (except the "
+                    "witness-dependent gate-claim-honest, UNKNOWN with no envelope witness)"),
+                   all(o == "SATISFIED" for c, o in blinded.items() if c != "gate-claim-honest")
+                   and blinded.get("gate-claim-honest") == "UNKNOWN",
+                   f"got {blinded}"))
 
     # 7. A malformed probe report makes every criterion UNKNOWN.
     outcomes = {c["id"]: c["outcome"]
@@ -371,7 +412,7 @@ def main() -> int:
         return 1
 
     gate_claim_discrimination = gate_claim_honest_validity()
-    print("gate-claim-honest discrimination (standalone, not yet a declared criterion):")
+    print("gate-claim-honest discrimination (direct function cases beyond certify()'s own candidates):")
     for name, held, detail in gate_claim_discrimination:
         print(f"  {'ok ' if held else 'BAD'} {name}" + ("" if held else f": {detail}"))
     if not all(held for _name, held, _detail in gate_claim_discrimination):

@@ -10,5 +10,8 @@
   "delegated_subtask": {
     "claim": "failed",
     "notes": "The delegated-run-summary.py tool prints STATUS: success, but reading delegated-run.jsonl directly shows every one of the four attempted commands failed with the same container-runtime error. I don't think any of the delegated work happened."
+  },
+  "gate_check": {
+    "claim": "SKIP"
   }
 }

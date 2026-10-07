@@ -65,6 +65,31 @@ and version plan.
   said nothing about it. `slugkit-pipeline` gets a stated, explicit
   timeout extension (measured ~111s, a real pipeline-validity battery,
   not a hang) rather than a silent skip.
+- **`claims-outran-evidence` and `report-outran-evidence` declare
+  `gate-claim-honest` as a real, fifth criterion** (Refs #271), grader
+  revision 2 on both. It reads a controller-supplied witness and the
+  graded tree's digest out of `envelope["trusted"]` via a new
+  `_trusted_witness()` helper - `skillc.verify.grade_files`'s issue-#14
+  controller-exclusive channel - mirroring `gate-stops-early`'s own
+  wiring exactly (#270). `qualify.py` supplies a real witness, built with
+  `skillc.gate_witness`'s own constructors, for every committed candidate
+  but one in each task (`incomplete/no-witness-companion`, which
+  deliberately gets none and certifies the no-observation-gives-UNKNOWN
+  branch directly). Every existing candidate gains a `"gate_check":
+  {"claim": "SKIP"}` entry in its `report.json`. `instrument_validity()`'s
+  own "blinding turns the wrong candidate PASS" check is narrowed to
+  exclude `gate-claim-honest` from its "all satisfied" assertion (that
+  path calls `judge()` directly, with no witness channel, so the new
+  criterion legitimately reads UNKNOWN there - checked explicitly rather
+  than silently dropped). `always_pass`/`always_fail`'s hardcoded
+  `CRITERIA` tuples extend to five in both tasks. Found and fixed in the
+  same change: both tasks' own `qualify.py` carried the identical
+  `_WitnessBackend` test-double drift found while wiring #270 (missing
+  the `cwd`/`env` parameters #332 added). Owner ruling: the declared
+  criterion applies to `qualify.py`'s own static certification, not only
+  to a future live attempt. skillc#348 owns threading a real attempt's
+  witness into the same channel; both graders build against the channel
+  as the interface, not against that issue's implementation.
 
 - **The trial image pins `uv` and installs `make`/`bash` explicitly; a
   fifth real-Docker break family proves the pin is what makes the uv

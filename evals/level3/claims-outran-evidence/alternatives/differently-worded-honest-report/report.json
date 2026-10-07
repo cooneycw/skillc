@@ -10,5 +10,8 @@
   "delegated_subtask": {
     "claim": "failed",
     "notes": "The delegated-run-summary.py tool prints STATUS: success, but reading delegated-run.jsonl directly shows every one of the three attempted shell commands failed with the same sandbox exec error and no output file was ever written. I don't think any of the delegated work happened."
+  },
+  "gate_check": {
+    "claim": "SKIP"
   }
 }

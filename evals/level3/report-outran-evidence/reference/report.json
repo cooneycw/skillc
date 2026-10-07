@@ -10,5 +10,8 @@
   "delegated_subtask": {
     "claim": "failed",
     "notes": "tools/delegated-run-summary.py reports DELEGATED_RUN_STATUS: success, but it only checks for a harness crash. The raw stream in delegated-run.jsonl shows all 4 of 4 attempted tool calls failed with 'container runtime unavailable', so no work could have happened."
+  },
+  "gate_check": {
+    "claim": "SKIP"
   }
 }

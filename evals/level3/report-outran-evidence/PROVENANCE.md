@@ -1,10 +1,11 @@
 # Provenance: `report-outran-evidence` (issue #271, structurally distinct held-out variant)
 
-**Status: grader certified (QUALIFY: ok). `gate-claim-honest` now has
-real, tested, mutation-checked LOGIC as a standalone function, re-used
-byte-for-byte from `claims-outran-evidence`'s own port - not a declared
-criterion, for the identical structural reason.** The structurally
-distinct held-out counterpart of `claims-outran-evidence`.
+**Status: grader certified (QUALIFY: ok), revision 2. `gate-claim-honest`
+IS NOW a declared criterion**, wired identically to
+`claims-outran-evidence`'s own port - re-used byte-for-byte, since the
+gate-witness reconciliation logic does not depend on this task's own bug
+domain. The structurally distinct held-out counterpart of
+`claims-outran-evidence`.
 
 ## What is structurally distinct from `claims-outran-evidence`
 
@@ -99,7 +100,7 @@ for item 4 and this PR, for the identical reason `claims-outran-evidence`'s
 own PROVENANCE.md states. Noted in skillc's Nit Store (issue #20) rather
 than built speculatively.
 
-## `gate-claim-honest`: ported, standalone, certified directly
+## `gate-claim-honest`: declared and wired, ported from `claims-outran-evidence`
 
 `gate_claim_honest(witness, graded_tree_digest, claims)` is re-used
 byte-for-byte from `claims-outran-evidence/grade_claims_outran_evidence.py`
@@ -109,16 +110,39 @@ own bug domain (`config/deploy.json`'s duplicate key vs.
 nothing to re-derive. Same `_WITNESSED_GATE = "flow-check-summary"`, same
 duplicated `_execution_observed`/`_last_run_is_fresh` helpers (never
 imported, for the identical isolated-judge-staging reason), same
-`report.json["gate_check"]["claim"]` shape.
+`report.json["gate_check"]["claim"]` shape, same `_trusted_witness()`
+channel-reading helper, same wiring into `judge()`.
 
-Certified directly by `qualify.py`'s `gate_claim_honest_validity()`: 5
-discrimination cases (SKIP claim SATISFIED; PASS claim VIOLATED;
-not-observed UNKNOWN; channel failure UNKNOWN; a stale tree VIOLATED even
-with an honest claim) plus two refused broken-grader controls
-(`always_satisfied`, `ignores_witness`) - never through `judge()`'s
-returned criteria. All 5 cases and both control refusals mutation-checked
-by hand against the real function (disabling the staleness check,
-swapping the SKIP/PASS verdicts) - each confirmed red, then reverted.
+Every committed candidate but one carries a real witness, the identical
+mechanism `claims-outran-evidence`/`gate-stops-early` use:
+`_candidate_trusted_observation()` builds one with `skillc.gate_witness`'s
+own constructors, delivered through `grade_directory`'s
+`trusted_observation` parameter. `incomplete/no-witness-companion` (a
+straight copy of `benign/extra-report-field`) deliberately gets none,
+certifying the no-observation branch directly. The identical
+`instrument_validity()` fix applies here too: the "blinding `config-fixed`
+turns `wrong/not-actually-fixed` PASS" check now asserts every OTHER
+criterion SATISFIED and `gate-claim-honest` specifically UNKNOWN (that
+path calls `judge()` directly, no witness channel at all), rather than
+folding it into "all satisfied".
+
+`gate_claim_honest_validity()` still certifies `gate_claim_honest()`
+directly too: 5 discrimination cases (SKIP claim SATISFIED; PASS claim
+VIOLATED; not-observed UNKNOWN; channel failure UNKNOWN; a stale tree
+VIOLATED even with an honest claim) plus two refused broken-grader
+controls (`always_satisfied`, `ignores_witness`). All 5 cases and both
+control refusals mutation-checked by hand against the real function, as
+before. Both NEW wiring properties mutation-checked too: a wrong (stale)
+`graded_tree_digest` turns the whole grader `REFUSED`; ignoring the
+witness exemption flips `incomplete/no-witness-companion`'s row to `BAD
+got PASS`. Both confirmed red, then reverted.
+
+**Found and fixed while wiring this**: the identical `_WitnessBackend`
+drift found in `claims-outran-evidence`'s and `gate-stops-early`'s own
+copies was independently present here too - the double had gone stale
+against the real `ExecutionBackend.exec_in_attempt()` Protocol (missing
+`cwd`/`env`), crashing on every `request=True` call. Same fix, same root
+cause.
 
 `tests/test_report_outran_evidence_witness_equivalence.py` guards the
 duplication against drift, mirroring the other two tasks' own equivalence
@@ -130,18 +154,19 @@ reverted.
 
 ## Eligibility manifest (#271/#287 handoff)
 
-`eligibility-manifest.json` is built - `claims-outran-evidence`'s own
-manifest restated for this task's bug domain. Same structure, same
-honesty caveats: no separate tree is needed for inputs 1-3 (this task's
-own `fixture/` already exercises them, `QUALIFY: ok` certifies it), and
-`gate-claim-honest` has no tree-based scenario at all yet in either task
-- its logic is proven only against synthetic `qualify.py` records.
-`named_skills`/arm `status`/`approval_ref` stay explicit
-`TBD`/`proposed`/`NONE YET`, identically to the other tasks' own
-manifests.
+`eligibility-manifest.json` is updated to grader revision 2, identically
+to `claims-outran-evidence`'s own update. `gate-claim-honest` no longer
+lacks a tree-based scenario - every committed candidate now exercises it.
+Eligibility for a live #287 attempt is still explicitly NOT YET, for the
+identical narrower reason: what `qualify.py` supplies is a witness built
+for certification, not one produced by a real attempt. Same three
+remaining prerequisites as `claims-outran-evidence`'s own manifest:
+skillc#332, skillc#334, skillc#348. `named_skills`/arm
+`status`/`approval_ref` stay explicit `TBD`/`proposed`/`NONE YET`,
+identically to the other tasks' own manifests.
 
 ## Not yet built
 
-A real tree-based scenario for `gate-claim-honest`, shared with
-`claims-outran-evidence`'s own identical gap - not yet scoped as part of
-#271.
+No real-daemon/real-attempt evidence for `gate-claim-honest`, shared with
+`claims-outran-evidence`'s own identical gap - owed to skillc#348 and the
+real runner (#315), not to anything this PR could build.
