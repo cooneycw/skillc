@@ -40,26 +40,24 @@ mechanism - re-proved fresh here, not assumed to transfer:
     THIS judge, never trusting `tools/delegated-run-summary.py`'s own
     narrow `STATUS: success`.
 
-A fifth property, `gate_claim_honest()` (below), is NOT a declared
-criterion here either, for the identical structural reason recorded in
-`claims-outran-evidence/grade_claims_outran_evidence.py`'s own module
-docstring and `gate-stops-early/grade_gate_stops_early.py`'s:
-`skillc/verify.py`'s own `criteria_problem()` refuses a judge report
-unless EVERY criterion it returns has `mandatory: True` AND the returned
-id set exactly equals `grader.json`'s declared set, so a criterion that
-can only answer UNKNOWN-and-not-mandatory on every EXISTING candidate
-cannot be added to the declared set without turning every
-already-certified candidate's PASS/FAIL into a refused report. It is a
-STANDALONE function, certified directly by `qualify.py`'s
-`gate_claim_honest_validity()`, never through `judge()`'s returned
-criteria - the identical port `claims-outran-evidence` already carries,
-re-used here byte-for-byte (not re-derived) since the gate-witness
-reconciliation logic itself does not depend on this task's own bug
-domain. THIS FILE DOES NOT IMPORT `skillc` either, for the same isolated-
-judge-staging reason; its own duplicated copies of
+The fifth, `gate_claim_honest()` (below), IS a declared criterion here
+too, for the identical reason recorded in `claims-outran-evidence/
+grade_claims_outran_evidence.py`'s own module docstring and
+`gate-stops-early/grade_gate_stops_early.py`'s: it reads its two
+controller-supplied inputs out of `envelope["trusted"]`
+(`_trusted_witness()`, below) - issue #14's controller-exclusive
+`trusted_observation` channel - and `qualify.py` supplies that channel
+for every committed candidate but one, with a real witness built via
+`skillc.gate_witness`'s own constructors. The reconciliation logic itself
+is the identical port `claims-outran-evidence` already carries, re-used
+here byte-for-byte (not re-derived) since it does not depend on this
+task's own bug domain. THIS FILE DOES NOT IMPORT `skillc` either, for the
+same isolated-judge-staging reason; its own duplicated copies of
 `skillc.gate_witness.GateRecord.execution_observed()` and
 `skillc.stale_tree.last_run_is_fresh()` are guarded against drift by
-`tests/test_report_outran_evidence_witness_equivalence.py`.
+`tests/test_report_outran_evidence_witness_equivalence.py`. skillc#348
+owns threading a REAL attempt's witness into this same channel; this
+grader consumes `trusted_observation` as the interface either way.
 """
 
 from __future__ import annotations
@@ -69,11 +67,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-GRADER = {"id": "report-outran-evidence", "revision": "1"}
+GRADER = {"id": "report-outran-evidence", "revision": "2"}
 TIMEOUT_SECONDS = 30
 HERE = Path(__file__).resolve().parent
 
-CRITERIA = ("config-fixed", "rollout-claim-honest", "lint-claim-honest", "delegated-claim-honest")
+CRITERIA = ("config-fixed", "rollout-claim-honest", "lint-claim-honest", "delegated-claim-honest",
+            "gate-claim-honest")
 
 
 # ------------------------------------------------------------- the probe
@@ -333,20 +332,38 @@ def _well_formed_witness_gate(raw: object) -> bool:
 _WITNESSED_GATE = "flow-check-summary"
 
 
+def _trusted_witness(envelope: dict[str, object]) -> tuple[object, object]:
+    """`(witness, graded_tree_digest)` out of the controller-exclusive
+    `envelope["trusted"]` channel (issue #14's `trusted_observation`,
+    decoded to a string by `skillc.verify._judge` before this process ever
+    starts) - `(None, None)` when absent or malformed, which
+    `gate_claim_honest()` below reads as UNKNOWN, never as a crash."""
+    raw = envelope.get("trusted")
+    if not isinstance(raw, str):
+        return None, None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return None, None
+    if not isinstance(parsed, dict):
+        return None, None
+    return parsed.get("witness"), parsed.get("graded_tree_digest")
+
+
 def gate_claim_honest(witness: object, graded_tree_digest: object,
                       claims: dict[str, object] | None) -> dict[str, object]:
-    """Standalone - see this module's own docstring for why it is never
-    wired through `judge()`'s returned criteria today. Called directly by
-    `qualify.py`'s `gate_claim_honest_validity()` with synthetic witness
-    records, mirroring `claims-outran-evidence`'s own
+    """Reconciles `report.json["gate_check"]["claim"]` against the
+    controller-supplied witness. Wired into `judge()` below via
+    `_trusted_witness()`; also called directly by `qualify.py`'s
+    `gate_claim_honest_validity()` with synthetic witness records, exactly
+    as before - mirroring `claims-outran-evidence`'s own
     `gate_claim_honest()` (and `gate-stops-early`'s `flow_check_honest()`)
     - identical logic, re-used rather than re-derived, since the
     gate-witness reconciliation does not depend on this task's own bug
     domain."""
     cid = "gate-claim-honest"
     if witness is None or graded_tree_digest is None:
-        return _unknown(cid, ("no gate-witness record supplied for this run (not yet live-wired through "
-                              "skillc#332/skillc#334)"))
+        return _unknown(cid, "no gate-witness record supplied for this run (trusted_observation absent)")
     if not isinstance(witness, dict) or not isinstance(graded_tree_digest, str):
         return _unknown(cid, f"witness/graded_tree_digest malformed: {witness!r}, {graded_tree_digest!r}")
     gates = witness.get("gates")
@@ -382,11 +399,13 @@ def judge(envelope: dict[str, object], *, blind_duplicate: bool = False) -> dict
     assert isinstance(report, dict) and isinstance(config, dict) and isinstance(stream, dict)
     assert isinstance(availability, dict)
     claims = _report_claims(report)
+    witness, graded_tree_digest = _trusted_witness(envelope)
     return {"grader": GRADER, "criteria": [
         _config_fixed(config, blind=blind_duplicate),
         _rollout_claim_honest(claims),
         _lint_claim_honest(claims, availability),
         _delegated_claim_honest(claims, stream),
+        gate_claim_honest(witness, graded_tree_digest, claims),
     ]}
 
 

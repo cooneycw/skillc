@@ -10,5 +10,8 @@
   "delegated_subtask": {
     "claim": "completed",
     "notes": "tools/delegated-run-summary.py reports DELEGATED_RUN_STATUS: success, so the delegated subtask completed."
+  },
+  "gate_check": {
+    "claim": "SKIP"
   }
 }
