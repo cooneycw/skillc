@@ -22,6 +22,7 @@ usage() {
     echo "  families: channel (omit-mount, wrong-uid, flip-decision - #183)" >&2
     echo "            witness (stale-confirm-lie, kill-wrong-pid, gate-in-fresh-container - #269)" >&2
     echo "            coldinstall (skill-mount, home-mount, mcp-mount, secret-mount, cold-cache - #266)" >&2
+    echo "            trialimage (no-uv - #343)" >&2
     echo "  the bare channel mode spellings (no 'channel:' prefix) are also accepted," >&2
     echo "  kept for compatibility with runs recorded before family prefixes existed." >&2
     exit 2
@@ -67,6 +68,7 @@ CHANNEL_BREAK_VALUE="$(echo "$BREAK_RESOLVED" | sed -n '2p')"
 WITNESS_BREAK_VALUE="$(echo "$BREAK_RESOLVED" | sed -n '3p')"
 GATESHIM_BREAK_VALUE="$(echo "$BREAK_RESOLVED" | sed -n '4p')"
 COLDINSTALL_BREAK_VALUE="$(echo "$BREAK_RESOLVED" | sed -n '5p')"
+TRIALIMAGE_BREAK_VALUE="$(echo "$BREAK_RESOLVED" | sed -n '6p')"
 
 # VM-local configuration - never committed, never defaulted to a real path.
 # See ci/real-docker/README.md "Setup" for how the operator populates this.
@@ -264,19 +266,20 @@ if ! (cd "$WORK_CHECKOUT" && uv sync --locked --extra dev --quiet); then
 fi
 (
     cd "$WORK_CHECKOUT"
-    # ALL FOUR break variables are always set explicitly, never left at
+    # ALL FIVE break variables are always set explicitly, never left at
     # whatever the runner's own process environment happened to carry
-    # (codex:code_review finding, #315 follow-up; extended #332, #266) -
+    # (codex:code_review finding, #315 follow-up; extended #332, #266, #343) -
     # exactly one of CHANNEL_BREAK_VALUE/WITNESS_BREAK_VALUE/GATESHIM_
-    # BREAK_VALUE/COLDINSTALL_BREAK_VALUE is a real mode and the other
-    # three are the literal "none", by resolve_break_spec's own contract,
-    # so the four live files' break modes cannot cross-contaminate each
-    # other and a stale inherited value can never silently activate a
-    # break during a "none" (certifying) run.
+    # BREAK_VALUE/COLDINSTALL_BREAK_VALUE/TRIALIMAGE_BREAK_VALUE is a real
+    # mode and the other four are the literal "none", by resolve_break_spec's
+    # own contract, so the five live files' break modes cannot
+    # cross-contaminate each other and a stale inherited value can never
+    # silently activate a break during a "none" (certifying) run.
     env SKILLC_LIVE_TEST_BREAK="$CHANNEL_BREAK_VALUE" \
         SKILLC_GATE_WITNESS_LIVE_BREAK="$WITNESS_BREAK_VALUE" \
         SKILLC_GATE_SHIM_LIVE_BREAK="$GATESHIM_BREAK_VALUE" \
         SKILLC_COLDINSTALL_LIVE_BREAK="$COLDINSTALL_BREAK_VALUE" \
+        SKILLC_TRIAL_IMAGE_BREAK="$TRIALIMAGE_BREAK_VALUE" \
         uv run --no-sync pytest -m real_docker --junit-xml="$REPORT_PATH"
 ) || true  # a test failure is EXPECTED input to the verdict step below
 
