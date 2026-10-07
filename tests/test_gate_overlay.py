@@ -192,6 +192,79 @@ def test_a_writable_harness_destination_is_refused(base: Path, docker_state: Pat
         backend.destroy(handle)
 
 
+def test_a_writable_containing_directory_is_refused_even_when_the_file_itself_is_not(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Counter-model review finding: a candidate with no write access to
+    the harness FILE can still unlink and replace it if the containing
+    DIRECTORY is writable - Unix write permission on a file controls its
+    contents, write+execute on the directory controls whether it can be
+    removed and recreated. The file-level check alone would wrongly
+    accept this; the overlay must check the directory too. Monkeypatched
+    so the FILE path reports unwritable while the DIRECTORY reports
+    writable - isolating the directory check as the one doing the work."""
+    harness_destination = f"{HARNESS_ROOT}/{HARNESS_PATH}"
+
+    def fake_check(self: object, handle: object, path: str) -> bool | None:
+        return path != harness_destination
+
+    monkeypatch.setattr(d.DockerBackend, "candidate_can_write_in_attempt", fake_check)
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-overlay-000000000010")
+    backend.install(handle, {SUBJECT_PATH: REAL_SCRIPT})
+    try:
+        with pytest.raises(OverlayRefused, match="writable by the candidate identity"):
+            apply_flow_check_gate_overlay(
+                backend, handle, subject_path=SUBJECT_PATH, harness_path=HARNESS_PATH,
+                expected_real_digest=_digest(REAL_SCRIPT), expected_shim_digest=_digest(SHIM_CONTENT),
+                shim_content=SHIM_CONTENT, harness_root=HARNESS_ROOT,
+            )
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp)
+            backend.export(handle, dest)
+            assert (dest / SUBJECT_PATH).read_bytes() == REAL_SCRIPT  # untouched
+    finally:
+        backend.destroy(handle)
+
+
+def test_red_case_checking_only_the_file_not_the_directory_would_miss_this(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mutation check: a plausible-but-wrong overlay that checks only the
+    harness FILE's own write access (the pre-fix shape) would wrongly
+    accept the writable-directory case above - the real function's own
+    directory check disagrees with that naive version here."""
+    harness_destination = f"{HARNESS_ROOT}/{HARNESS_PATH}"
+
+    def fake_check(self: object, handle: object, path: str) -> bool | None:
+        return path != harness_destination
+
+    def naive_checks_file_only(path: str) -> bool | None:
+        return fake_check(object(), object(), path) if path == harness_destination else None
+
+    monkeypatch.setattr(d.DockerBackend, "candidate_can_write_in_attempt", fake_check)
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-overlay-000000000011")
+    backend.install(handle, {SUBJECT_PATH: REAL_SCRIPT})
+    try:
+        real_refuses = False
+        try:
+            apply_flow_check_gate_overlay(
+                backend, handle, subject_path=SUBJECT_PATH, harness_path=HARNESS_PATH,
+                expected_real_digest=_digest(REAL_SCRIPT), expected_shim_digest=_digest(SHIM_CONTENT),
+                shim_content=SHIM_CONTENT, harness_root=HARNESS_ROOT,
+            )
+        except OverlayRefused:
+            real_refuses = True
+        assert real_refuses, "the real function should refuse a writable containing directory"
+        assert naive_checks_file_only(harness_destination) is False, (
+            "the naive file-only check should disagree with the real function here - "
+            "if it also refuses, this red case is inert"
+        )
+    finally:
+        backend.destroy(handle)
+
+
 def test_an_unverifiable_harness_destination_is_refused_same_as_writable(
     base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

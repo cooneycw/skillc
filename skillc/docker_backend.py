@@ -574,6 +574,29 @@ def _owned_tarinfo(info: tarfile.TarInfo) -> tarfile.TarInfo:
     return info
 
 
+def _clean_write_probe_result(returncode: int, stderr: bytes) -> bool | None:
+    """The pure decision `candidate_can_write_in_attempt` makes from a
+    completed `test -w` exec - extracted so the exact boundary (counter-
+    model review finding: a signal-killed exec, e.g. 137 for SIGKILL, can
+    exit outside `test`'s own `{0, 1}` vocabulary while still leaving
+    stderr empty) is directly testable with synthetic inputs, no
+    subprocess or Docker needed. `test` itself exits exactly 0 (writable)
+    or 1 (not writable) and writes nothing to stderr either way; any
+    OTHER exit code, or any stderr output at all, means something other
+    than a clean test happened and must read as `None` (unverifiable),
+    never guessed as a confident `False`."""
+    if returncode not in (0, 1):
+        return None
+    if stderr:
+        # ANY stderr at all, not merely non-whitespace content (counter-
+        # model review finding): a genuinely clean `test -w` writes
+        # EXACTLY zero bytes on either outcome, so even a lone newline is
+        # evidence something else happened, never an ordinary trailing
+        # newline to tolerate.
+        return None
+    return returncode == 0
+
+
 def _owned_tar(host_path: Path, arcname: str) -> bytes:
     """A tar stream of `host_path` (file or directory, recursively), every
     member owned by the fixed candidate identity - for `docker cp -
@@ -1993,17 +2016,30 @@ class DockerBackend:
         that uid (`docker exec -u CANDIDATE_UID`) - never inferred from
         mode bits alone, which can be fooled by an unexpected owner or an
         ACL this check does not read. `True`/`False` only when `sh`
-        itself genuinely ran `test` and produced a clean result (`test`
-        exits 0 or 1 and writes nothing to stderr on either outcome, so
-        any stderr output here means something OTHER than a clean test
-        happened - a daemon-level exec failure, say - and must not be
-        read as a confident `False`). `None` - never guessed either way -
-        when the exec could not be reached/timed out, or produced any
-        stderr at all. A caller must treat `None` exactly like `False`
-        for any refusal this feeds (#332 follow-up's own ruling: an
-        unverified harness destination is refused, the same as a
-        confirmed-writable one) - but must never report `None` AS `False`
-        in anything that claims the check actually ran."""
+        itself genuinely ran `test` and produced a clean result: `test`'s
+        OWN exit codes are exactly `{0, 1}` with nothing on stderr either
+        way, so ANY other exit code (counter-model review finding: a
+        process killed by a signal - 137 for SIGKILL, say - exits outside
+        that set but can still leave stderr empty) OR any stderr output
+        at all means something OTHER than a clean test happened - a
+        daemon-level exec failure, an OOM kill, say - and must not be
+        read as a confident `False`. `None` - never guessed either way -
+        covers all of that, plus an unreachable exec/timeout. A caller
+        must treat `None` exactly like `False` for any refusal this feeds
+        (#332 follow-up's own ruling: an unverified harness destination is
+        refused, the same as a confirmed-writable one) - but must never
+        report `None` AS `False` in anything that claims the check
+        actually ran.
+
+        CHECKS ONLY THIS ONE PATH - never its parent directory (counter-
+        model review finding: Unix write permission on a FILE controls
+        modifying its contents, but write+execute permission on its
+        CONTAINING DIRECTORY is what actually controls whether it can be
+        unlinked and replaced entirely, regardless of the file's own
+        mode or owner). A caller protecting a file against replacement -
+        not merely in-place modification - must check the ENCLOSING
+        DIRECTORY the same way, not infer it from this result
+        (`apply_flow_check_gate_overlay` does both)."""
         assert isinstance(handle, _Handle)
         wait = timeout if timeout is not None else self.daemon_timeout
         try:
@@ -2014,9 +2050,7 @@ class DockerBackend:
             )
         except (OSError, subprocess.TimeoutExpired):
             return None
-        if proc.stderr.strip():
-            return None
-        return proc.returncode == 0
+        return _clean_write_probe_result(proc.returncode, proc.stderr)
 
     def _read_in_container_pid(self, handle: _Handle, marker_path: str, timeout: float = 2.0) -> int | None:
         """Polls `docker exec ... cat MARKER` for the pid `exec_in_attempt()`'s

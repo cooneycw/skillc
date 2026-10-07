@@ -2072,3 +2072,27 @@ def test_candidate_can_write_in_attempt_is_unknown_not_false_for_an_unreachable_
     handle = backend.prepare("a-lc-000000000006f")
     backend.destroy(handle)
     assert backend.candidate_can_write_in_attempt(handle, "/work/whatever") is None
+
+
+def test_clean_write_probe_result_direct() -> None:
+    """Counter-model review finding, exercised directly with synthetic
+    (returncode, stderr) pairs - no subprocess or Docker needed, matching
+    this module's own `_PropertyHeld`-family precedent elsewhere in this
+    session for pinning an exact boundary: a signal-killed exec (137 for
+    SIGKILL) can leave stderr empty while exiting outside `test`'s own
+    `{0, 1}` vocabulary, and must read as UNKNOWN, never a confident
+    `False`."""
+    f = d._clean_write_probe_result
+    assert f(0, b"") is True
+    assert f(1, b"") is False
+    assert f(137, b"") is None  # signal-killed, empty stderr - the red case
+    assert f(1, b"\n") is None  # whitespace-only stderr still counts as "something happened"
+    assert f(0, b"some daemon warning\n") is None
+    # Mutation check: a naive version that reads ANY nonzero exit (with no
+    # stderr) as a confident False would disagree with the real function
+    # on exactly the 137 case - proving this red case is not inert.
+    def naive(returncode: int, stderr: bytes) -> bool | None:
+        if stderr.strip():
+            return None
+        return returncode == 0
+    assert naive(137, b"") is False, "the naive version should disagree with the real function here"

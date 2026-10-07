@@ -68,6 +68,27 @@ and version plan.
     `-u UID` parsing (consumed, not enforced - this fixture has no real
     per-uid permission model, same limitation `wrong-uid`'s own live
     test already states for itself).
+  - Two more counter-model review findings, fixed before the PR opened.
+    (1) HIGH: `candidate_can_write_in_attempt()` checked only the harness
+    FILE's own write access - a candidate with no access to the file
+    itself can still unlink and replace it if the CONTAINING DIRECTORY is
+    writable (Unix write permission on a file controls its contents;
+    write+execute on a directory controls whether an entry can be removed
+    and recreated, independent of that entry's own mode or owner). The
+    overlay now checks both the file and its containing directory,
+    refusing unless BOTH return a confirmed `False`. (2) MEDIUM: the probe
+    read any nonzero exit with empty-after-`.strip()` stderr as a
+    confident `False` - a signal-killed exec (137 for SIGKILL) can exit
+    outside `test`'s own `{0, 1}` vocabulary while leaving stderr empty,
+    and a genuinely clean `test -w` writes EXACTLY zero bytes either way,
+    so even a lone newline is evidence something else happened. Fixed:
+    only `{0, 1}` is accepted, and ANY stderr at all (not merely non-
+    whitespace) forces `None`. The decision is now a pure, directly-
+    tested helper (`_clean_write_probe_result`) exercised with synthetic
+    `(returncode, stderr)` pairs - no subprocess needed to pin the exact
+    boundary. Mutation-checked: a writable-directory-but-not-file case
+    added to `tests/test_gate_overlay.py`, with its own red case proving
+    a file-only check would wrongly accept it.
 
 - **A `discrimination-declaration` kind in `skillc.calibration`, for the
   intact-vs-degraded contrast** (Refs #287). `parse_declaration` cannot

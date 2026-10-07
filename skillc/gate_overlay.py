@@ -50,12 +50,18 @@ So the harness copy is placed via `write_root_owned_file_in_attempt()`
 tar convention (`_owned_tarinfo`), which exists specifically so a declared
 skill surface is usable BY the candidate, the opposite of what is needed
 here. After placement, `candidate_can_write_in_attempt()` independently
-VERIFIES the real script is actually unwritable by the candidate uid
-before this function returns - never assumed from the mode bits alone, and
-never from trusting the write call's own success. Only a confirmed `False`
-(verified unwritable) is accepted; `True` (writable) or `None`
-(unverifiable) both refuse, since a harness copy nobody has confirmed is
-protected is not evidence of protection.
+VERIFIES both the real script AND its containing directory are unwritable
+by the candidate uid before this function returns - BOTH, never the file
+alone (counter-model review finding): Unix write permission on a FILE
+controls modifying its contents in place, but write+execute permission on
+the DIRECTORY controls whether it can be unlinked and replaced entirely,
+regardless of the file's own mode - a candidate with no access to the
+file itself can still delete and recreate it if the directory is theirs
+to write. Never assumed from mode bits, and never from trusting the write
+call's own success. Only a confirmed `False` on BOTH checks is accepted;
+`True` (writable) or `None` (unverifiable) on EITHER one refuses, since a
+harness copy nobody has confirmed is protected - at the file level or the
+directory level - is not evidence of protection.
 
 Reuses `ExecutionBackend.export()`/`install()` for the subject-root halves
 (the real-script read, the shim placement) - no new primitive needed
@@ -70,7 +76,7 @@ from __future__ import annotations
 import hashlib
 import tempfile
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Protocol
 
 from .verify import SURFACE_EXECUTABLE_KEY
@@ -140,7 +146,8 @@ def apply_flow_check_gate_overlay(
       or its digest does not match `expected_real_digest`;
     - the root-owned write to `harness_root` fails;
     - `candidate_can_write_in_attempt()` against the harness destination
-      does not return a confirmed `False` - `True` or `None` both refuse.
+      OR its containing directory does not return a confirmed `False` -
+      `True` or `None` on either one refuses.
 
     The shim is placed at `subject_path` only AFTER the harness copy is
     written and independently confirmed unwritable - a refusal at any
@@ -173,13 +180,25 @@ def apply_flow_check_gate_overlay(
     if not backend.write_root_owned_file_in_attempt(handle, harness_destination, real_bytes, mode=0o755):
         raise OverlayRefused(f"could not write the root-owned harness copy at {harness_destination!r}")
 
-    writable = backend.candidate_can_write_in_attempt(handle, harness_destination)
-    if writable is not False:
-        raise OverlayRefused(
-            f"harness destination {harness_destination!r} is writable by the candidate identity "
-            f"(or this could not be verified: candidate_can_write_in_attempt returned {writable!r}) - "
-            "refusing to trust a gate-witness copy the subject could edit"
-        )
+    # BOTH the file and its containing directory must be confirmed
+    # unwritable (counter-model review finding): Unix write permission on
+    # the FILE controls modifying its contents in place, but write+execute
+    # on the DIRECTORY is what actually controls whether it can be
+    # unlinked and replaced entirely - a candidate with no access to the
+    # file itself can still delete and recreate it if the directory is
+    # theirs to write. `write_root_owned_file_in_attempt` already creates
+    # that directory root-owned mode 0755, but this is independently
+    # VERIFIED, never assumed from how it was created, the same posture
+    # as the file check itself.
+    harness_dir = str(PurePosixPath(harness_destination).parent)
+    for target in (harness_destination, harness_dir):
+        writable = backend.candidate_can_write_in_attempt(handle, target)
+        if writable is not False:
+            raise OverlayRefused(
+                f"{target!r} is writable by the candidate identity "
+                f"(or this could not be verified: candidate_can_write_in_attempt returned {writable!r}) - "
+                "refusing to trust a gate-witness copy the subject could edit or replace"
+            )
 
     backend.install(handle, {
         subject_path: shim_content,
