@@ -29,15 +29,24 @@ _BREAK_WITNESS_MODES="stale-confirm-lie kill-wrong-pid gate-in-fresh-container"
 #: witness (no bare spelling was ever documented for these either).
 _BREAK_GATESHIM_MODES="synthesizes-output drops-cwd exits-zero-on-channel-failure wrong-env"
 
-# Resolves a --break argument to FOUR lines on stdout: the NORMALIZED spec
+#: #266's cold-container-install break modes - no bare form, same as
+#: witness. skill-mount/home-mount/mcp-mount/secret-mount each plant one
+#: decoy bind mount the shared mount-emptiness oracle must catch;
+#: cold-cache runs an image built without the pre-warmed uv cache layer,
+#: where the offline `uv sync` must fail - the negative control proving
+#: the cache is what makes the intact run work.
+_BREAK_COLDINSTALL_MODES="skill-mount home-mount mcp-mount secret-mount cold-cache"
+
+# Resolves a --break argument to FIVE lines on stdout: the NORMALIZED spec
 # ("none", or "<family>:<mode>" - a bare legacy channel mode is normalized
 # to its "channel:<mode>" form here, so every caller downstream has exactly
 # one spelling to compare against "none"), the value to export as
 # SKILLC_LIVE_TEST_BREAK, the value to export as SKILLC_GATE_WITNESS_
-# LIVE_BREAK, and the value to export as SKILLC_GATE_SHIM_LIVE_BREAK -
-# ALWAYS ALL PRESENT, exactly one equal to the resolved mode and the other
-# two the literal string "none" (never empty, never left for the caller to
-# infer from an empty field).
+# LIVE_BREAK, the value to export as SKILLC_GATE_SHIM_LIVE_BREAK, and the
+# value to export as SKILLC_COLDINSTALL_LIVE_BREAK - ALL FOUR FAMILY VALUES
+# ALWAYS PRESENT, exactly one of them equal to the resolved mode and the
+# other three the literal string "none" (never empty, never left for the
+# caller to infer from an empty field).
 #
 # codex:code_review finding (HIGH, this file's own follow-up review): an
 # earlier draft returned only the SELECTED family's env var name and
@@ -47,19 +56,19 @@ _BREAK_GATESHIM_MODES="synthesizes-output drops-cwd exits-zero-on-channel-failur
 # SKILLC_LIVE_TEST_BREAK=omit-mount already in the environment (left over
 # from a prior by-hand invocation, say) would silently run that break
 # while posting to the CERTIFYING context, the exact failure this whole
-# mechanism exists to prevent. Emitting an explicit value for BOTH
-# families, every time, makes "the non-selected family is always clean"
+# mechanism exists to prevent. Emitting an explicit value for every
+# family, every time, makes "the non-selected families are always clean"
 # true by construction rather than by a caller remembering to unset it.
 #
 # Prints a reason to STDERR and returns 2 for anything the closed table
 # below does not name - an unknown family, an unknown mode inside a known
 # family, or a bare spelling outside the three legacy channel modes
-# (including every witness mode, which has no bare form) - nothing is
-# printed to stdout on refusal.
+# (including every witness/gateshim/coldinstall mode, none of which has a
+# bare form) - nothing is printed to stdout on refusal.
 resolve_break_spec() {
     local spec="${1:-}" family mode m
     if [ "$spec" = "none" ]; then
-        printf 'none\nnone\nnone\nnone\n'
+        printf 'none\nnone\nnone\nnone\nnone\n'
         return 0
     fi
     case "$spec" in
@@ -76,7 +85,7 @@ resolve_break_spec() {
         channel)
             for m in $_BREAK_CHANNEL_MODES; do
                 if [ "$m" = "$mode" ]; then
-                    printf 'channel:%s\n%s\nnone\nnone\n' "$mode" "$mode"
+                    printf 'channel:%s\n%s\nnone\nnone\nnone\n' "$mode" "$mode"
                     return 0
                 fi
             done
@@ -86,7 +95,7 @@ resolve_break_spec() {
         witness)
             for m in $_BREAK_WITNESS_MODES; do
                 if [ "$m" = "$mode" ]; then
-                    printf 'witness:%s\nnone\n%s\nnone\n' "$mode" "$mode"
+                    printf 'witness:%s\nnone\n%s\nnone\nnone\n' "$mode" "$mode"
                     return 0
                 fi
             done
@@ -96,15 +105,25 @@ resolve_break_spec() {
         gateshim)
             for m in $_BREAK_GATESHIM_MODES; do
                 if [ "$m" = "$mode" ]; then
-                    printf 'gateshim:%s\nnone\nnone\n%s\n' "$mode" "$mode"
+                    printf 'gateshim:%s\nnone\nnone\n%s\nnone\n' "$mode" "$mode"
                     return 0
                 fi
             done
             echo "run-real-docker: unknown gateshim break mode '$mode' (must be one of: $_BREAK_GATESHIM_MODES)" >&2
             return 2
             ;;
+        coldinstall)
+            for m in $_BREAK_COLDINSTALL_MODES; do
+                if [ "$m" = "$mode" ]; then
+                    printf 'coldinstall:%s\nnone\nnone\nnone\n%s\n' "$mode" "$mode"
+                    return 0
+                fi
+            done
+            echo "run-real-docker: unknown coldinstall break mode '$mode' (must be one of: $_BREAK_COLDINSTALL_MODES)" >&2
+            return 2
+            ;;
         *)
-            echo "run-real-docker: unknown break family '$family' (must be 'channel', 'witness' or 'gateshim'), from spec '$spec'" >&2
+            echo "run-real-docker: unknown break family '$family' (must be 'channel', 'witness', 'gateshim' or 'coldinstall'), from spec '$spec'" >&2
             return 2
             ;;
     esac

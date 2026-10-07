@@ -51,9 +51,20 @@ assumed from the old profile's citations):
 `skillc profile diagnose`/`validate` both report **zero problems, closed** at
 this pin (27 unsupported references, 10 dependencies). Install-level claims
 the 85e9b03 PROFILE.md records (actual host installs, canary isolation,
-#303's marker proof) are NOT re-verified at this pin - this re-declaration's
-bounded scope was reaching zero unresolved references under `diagnose`, not
-re-running #266/#274's install proofs. Treat those as owed, not inherited.
+#303's marker proof) were NOT re-verified at this pin when this profile was
+first declared - that re-declaration's bounded scope was reaching zero
+unresolved references under `diagnose`, not re-running #266/#274's install
+proofs. #266's own work since then confirmed, standalone and against THIS
+pin's committed fixture (`tests/fixtures/profile-cpp-codex-flow-check-
+ea6dbfa/`, no network): `profile.install()` succeeds (4 tools checked),
+`checkout-detection-marker` installs with the exact #303 content, and the
+installed `uv.lock` digest matches the fixture's own. The cold-container
+run itself - `tests/test_profile_install_cold_container_live.py`, exercising
+all of this inside a real `--network none` container with zero bind mounts -
+is CODE, reviewed, not yet EXECUTED: no Docker daemon in the implementation
+environment, so real-daemon execution remains owed to the operator's
+real-Docker runner (#315), same as every other live test in this
+repository.
 
 ## Declared unsupported (27 entries)
 
@@ -81,6 +92,25 @@ and gets one entry, hence 19 entries for 20 occurrences plus the two carried
 Unchanged from the 85e9b03 profile: `codex` **declared**; `claude-code`,
 `browser`, `security-scanner`, `services` **unsupported** pending their own
 readiness proofs.
+
+## Known limits
+
+- **The cold-container proof's boundary (orchestrator condition, #266).**
+  `tests/test_profile_install_cold_container_live.py` proves an OFFLINE
+  install from a pin-matched `uv` cache - the cache is pre-warmed from this
+  profile's own pinned `uv.lock` at image-build time
+  (`docker/profile-cold-install/Dockerfile`), and a run-time digest check
+  refuses to trust it if that lockfile ever drifts from the one actually
+  being installed. It does NOT prove, and does not claim to prove, how a
+  live trial container (which needs the network, for the model API)
+  behaves - that remains #237's own path, unchanged by this issue.
+- **PyPI resolution is still external to the PROFILE itself.** The offline
+  guarantee above comes from the cold-install image's own pre-warmed cache,
+  not from anything this profile declares - a caller installing this
+  profile WITHOUT that image (the plain host install `tests/test_profile_
+  install.py` already proves) still needs the network the first time it
+  resolves `pydantic`/`pyyaml` from the lock, exactly as the 85e9b03
+  profile's own PROFILE.md already states for itself.
 
 ## Regression evidence
 
