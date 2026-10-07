@@ -16,13 +16,22 @@
 # "Provenance" section) because a moving base tag is a build input, not an
 # identity claim - the identity claim is the digest of the image that RAN,
 # recorded after this build completes.
-FROM node:22-bookworm-slim
+FROM node:22-bookworm-slim AS base
 
 # Bump these together with docker/trial/pinned-versions.json - never
 # '@latest'. docker/trial/check_pins.py fails the check when they drift
 # apart, without needing Docker to run.
 ARG CLAUDE_CODE_VERSION=2.1.283
 ARG CODEX_VERSION=0.157.1
+
+# Issue #343: the `cpp-codex-flow-check-ea6dbfa` profile declares `tool-uv`
+# and `tool-make-git-bash` as tool dependencies the TRIAL IMAGE supplies
+# (profile.json's own "supply" field for both), so without this pin every
+# profile-opted live attempt is refused at preflight once #334 wires that
+# check in. Same pin docker/profile-cold-install/Dockerfile already
+# reviewed and uses - reused rather than independently chosen, so the two
+# images never silently carry different uv versions.
+ARG UV_VERSION=0.9.7
 
 # apt mirrors fail transiently (#10 lesson D15). Retry a bounded number of
 # times before giving up, so CI turns red for a real build problem, not a
@@ -40,12 +49,28 @@ ARG CODEX_VERSION=0.157.1
 # rather than a guess. `docker/trial/check_interpreters.py` is the committed,
 # no-daemon control that catches a regression here without building the
 # image.
+#
+# `make` and `bash` explicit (issue #343): `cpp-codex-flow-check-ea6dbfa`'s
+# gate is `make` targets, and `flow-finish-gate.sh`'s own shebang and every
+# other helper it sources need `bash`, not merely a POSIX `/bin/sh` - both
+# declared as the subject's own `tool-make-git-bash` dependency (`git` is
+# already installed above). `bash` is very likely present transitively
+# already (Debian's own base utilities), but the issue wants it an
+# explicit, visible dependency of THIS image, not an accident of whatever
+# the base image happens to carry. `docker/trial/check_interpreters.py`
+# does NOT cover this line - it is deliberately scoped to
+# `skillc.verify.PROBE_INTERPRETER` only, a different population for a
+# different reason (what skillc's OWN demo/verifier invoke, not what the
+# SUBJECT's profile declares) - `tests/test_trial_image_tools_live.py`'s
+# real-Docker probes are this line's actual proof.
 RUN set -eu; \
     n=0; \
     until apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         git \
         python3 \
+        make \
+        bash \
     ; do \
         n=$((n + 1)); \
         if [ "$n" -ge 5 ]; then \
@@ -150,6 +175,39 @@ RUN chmod 755 /usr/local/bin/skillc-disrupt-tool
 # a daemon to build the image and check it.
 COPY flow-check-gate-shim.py /usr/local/share/skillc/flow-check-gate-shim.py
 RUN chmod 755 /usr/local/share/skillc/flow-check-gate-shim.py
+
+# TWO NAMED STAGES from here (issue #343), the same pattern
+# docker/profile-cold-install/Dockerfile already uses for its own
+# cached/uncached split: one `base` with everything common, branching only
+# on the ONE layer under test. `no-uv` is the `trialimage:no-uv` break
+# mode's own negative control - built explicitly with `--target no-uv`,
+# never the default - and must come FIRST in the file: Docker's own
+# "no --target means the LAST stage" rule means whichever stage is named
+# last here is what every EXISTING caller that builds this Dockerfile
+# without `--target` (`tests/test_trial_image_build_live.py`, today's
+# backend) gets, and that must stay the full, working trial image,
+# unchanged by this issue - never the deliberately broken one.
+FROM base AS no-uv
+
+# Deliberately NOTHING here. No uv binary at all - a `uv --version` probe
+# against a container from THIS stage must fail, the trialimage:no-uv red
+# case `tests/test_trial_image_tools_live.py` asserts.
+
+USER candidate
+WORKDIR /work
+
+LABEL org.skillc.image=trial-image
+
+FROM base AS trial
+
+# Pinned uv binary - astral's documented multi-stage copy, the same exact
+# pin docker/profile-cold-install/Dockerfile already uses. `ARG` must be
+# re-declared here: Docker clears every ARG value at each new `FROM`, so
+# the default set on `base` is not visible in THIS stage without this line
+# (docker/trial/check_pins.py scans for the ORIGINAL `ARG UV_VERSION=...`
+# default above, on `base`, and is unaffected by this bare re-declaration).
+ARG UV_VERSION
+COPY --from=ghcr.io/astral-sh/uv:${UV_VERSION} /uv /uvx /usr/local/bin/
 
 USER candidate
 WORKDIR /work

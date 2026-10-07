@@ -11,5 +11,11 @@
     "version": "0.157.1",
     "pinned_on": "2026-09-26",
     "verified": "resolved against registry.npmjs.org/@openai/codex/0.157.1"
+  },
+  "uv": {
+    "package": "uv",
+    "version": "0.9.7",
+    "pinned_on": "2026-10-07",
+    "verified": "the same pin docker/profile-cold-install/Dockerfile already reviewed and uses (ghcr.io/astral-sh/uv:0.9.7) - reused rather than independently re-verified, so this image and that one never carry two different uv versions by accident"
   }
 }

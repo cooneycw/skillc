@@ -131,10 +131,20 @@ _COLDINSTALL_SKIP_CASE = (
     'name="test_profile_runs_cold_with_no_operator_mounts" time="0.02">'
     '<skipped message="no reachable Docker daemon in this environment"/></testcase>'
 )
+#: #343: the trial-image tool-probe proof's own floor entry.
+_IMAGE_TOOLS_PASS_CASE = (
+    '<testcase classname="tests.test_trial_image_tools_live" '
+    'name="test_uv_is_present_at_the_pinned_version" time="4.0"></testcase>'
+)
+_IMAGE_TOOLS_SKIP_CASE = (
+    '<testcase classname="tests.test_trial_image_tools_live" '
+    'name="test_uv_is_present_at_the_pinned_version" time="0.02">'
+    '<skipped message="no reachable Docker daemon in this environment"/></testcase>'
+)
 
 
-def test_the_other_four_floor_files_pass_but_gate_witness_all_skipped_is_failure() -> None:
-    """Orchestrator review, #269/#315: with all FIVE files in the real
+def test_the_other_five_floor_files_pass_but_gate_witness_all_skipped_is_failure() -> None:
+    """Orchestrator review, #269/#315: with all SIX files in the real
     floor (`DECLARED_REAL_DOCKER_FILES`), a run where every OTHER declared
     file executes and passes but #269's gate-witness file collected only a
     SKIP must give FAILURE, not SUCCESS - green on the VM with no
@@ -150,17 +160,18 @@ def test_the_other_four_floor_files_pass_but_gate_witness_all_skipped_is_failure
         "tests.test_gate_witness_live",
         "tests.test_gate_overlay_live",
         "tests.test_profile_install_cold_container_live",
-    ), "this test assumes the current five-file floor - update it if the floor changes"
+        "tests.test_trial_image_tools_live",
+    ), "this test assumes the current six-file floor - update it if the floor changes"
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         path = _write(
             Path(td), "mixed.xml",
             _suite(
                 _PASS_CASE, _IMAGE_BUILD_PASS_CASE, _GATE_OVERLAY_PASS_CASE,
-                _GATE_WITNESS_SKIP_CASE, _COLDINSTALL_PASS_CASE,
+                _GATE_WITNESS_SKIP_CASE, _COLDINSTALL_PASS_CASE, _IMAGE_TOOLS_PASS_CASE,
             ),
         )
-        result = c.verdict(path)  # module default: all five files
+        result = c.verdict(path)  # module default: all six files
         assert result.status == c.FAILURE
         assert result.skipped_only_files == ("tests.test_gate_witness_live",)
 
@@ -188,7 +199,7 @@ def test_gate_overlay_live_going_all_skipped_is_also_failure_not_success() -> No
         assert result.skipped_only_files == ("tests.test_gate_overlay_live",)
 
 
-def test_the_other_four_floor_files_pass_but_coldinstall_all_skipped_is_failure() -> None:
+def test_the_other_five_floor_files_pass_but_coldinstall_all_skipped_is_failure() -> None:
     """#266's own red case, same shape as the gate-witness one above but
     with the roles reversed: the cold-container-install proof collecting
     only a SKIP (Docker unreachable, or a skip condition firing on a
@@ -201,19 +212,38 @@ def test_the_other_four_floor_files_pass_but_coldinstall_all_skipped_is_failure(
         "tests.test_gate_witness_live",
         "tests.test_gate_overlay_live",
         "tests.test_profile_install_cold_container_live",
-    ), "this test assumes the current five-file floor - update it if the floor changes"
+        "tests.test_trial_image_tools_live",
+    ), "this test assumes the current six-file floor - update it if the floor changes"
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         path = _write(
             Path(td), "mixed.xml",
             _suite(
                 _PASS_CASE, _IMAGE_BUILD_PASS_CASE, _GATE_WITNESS_PASS_CASE,
-                _GATE_OVERLAY_PASS_CASE, _COLDINSTALL_SKIP_CASE,
+                _GATE_OVERLAY_PASS_CASE, _COLDINSTALL_SKIP_CASE, _IMAGE_TOOLS_PASS_CASE,
             ),
         )
-        result = c.verdict(path)  # module default: all five files
+        result = c.verdict(path)  # module default: all six files
         assert result.status == c.FAILURE
         assert result.skipped_only_files == ("tests.test_profile_install_cold_container_live",)
+
+
+def test_the_other_five_floor_files_pass_but_trial_image_tools_all_skipped_is_failure() -> None:
+    """The SAME per-file floor property for #343's own new entry: every
+    other declared file executes and passes; only the trial-image
+    tool-probe file goes silent (no reachable Docker daemon)."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        path = _write(
+            Path(td), "mixed.xml",
+            _suite(
+                _PASS_CASE, _IMAGE_BUILD_PASS_CASE, _GATE_WITNESS_PASS_CASE,
+                _GATE_OVERLAY_PASS_CASE, _COLDINSTALL_PASS_CASE, _IMAGE_TOOLS_SKIP_CASE,
+            ),
+        )
+        result = c.verdict(path)  # module default: all six files
+        assert result.status == c.FAILURE
+        assert result.skipped_only_files == ("tests.test_trial_image_tools_live",)
 
 
 def test_a_second_declared_file_with_nothing_at_all_is_error(tmp_path: Path) -> None:
