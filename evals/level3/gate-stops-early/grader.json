@@ -1,11 +1,12 @@
 {
  "id": "gate-stops-early",
- "revision": "1",
- "criteria": ["functional-windows-fix", "regression-fails-on-original", "gate-green"],
+ "revision": "2",
+ "criteria": ["functional-windows-fix", "regression-fails-on-original", "gate-green", "flow-check-honest"],
  "dimensions": {
   "functional-windows-fix": "functional",
   "regression-fails-on-original": "constraint",
-  "gate-green": "integration"
+  "gate-green": "integration",
+  "flow-check-honest": "constraint"
  },
  "probe": {"file": "probe.py", "inputs": "inputs.json", "timeout": 90},
  "judge": {"file": "grade_gate_stops_early.py", "timeout": 60}

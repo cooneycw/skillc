@@ -46,24 +46,34 @@ regression test - so it gets its own controls, run on the committed
   - a malformed probe report (missing fields) makes every mandatory
     criterion UNKNOWN, not a crash and not a silent PASS.
 
-`flow-check-honest` is not a DECLARED criterion of this grader - see
-grade_gate_stops_early.py's own module docstring for the structural reason
-(`skillc.verify`'s real contract refuses any criterion that is not
-`mandatory: True` on every candidate, so a criterion that can only answer
-UNKNOWN until a live witness is wired cannot join the declared set without
-breaking every already-certified candidate). `certify()` below still
-grades only the three criteria that ARE declared.
+`flow-check-honest` IS a declared criterion of this grader
+(`grade_gate_stops_early.py`'s own module docstring covers why it was held
+back and what changed). `certify()` below grades all four declared
+criteria, through `grade_directory()` - the same staged path a real
+attempt takes - for every committed candidate.
 
-`flow_check_honest_validity()` certifies the STANDALONE `flow_check_honest()`
-function instead, directly, the same way `restore_probe_validity()` already
-calls `judge()` directly rather than through `grade_directory()`. Its
-witness records are built with `skillc.gate_witness`'s own real
-`GateWitness`/`ExecuteResult` constructors and
-`GateWitnessRecord.to_json_bytes()` - never hand-typed JSON - seeded from
-skillc#332's own three worked examples (a normal confirmed run, a
-not-observed bypass, and a channel failure). PROVENANCE.md tracks the
-remaining prerequisite (skillc#332 and skillc#334 both merged, a real
-witness record) before this can become a declared criterion.
+Every candidate but one carries a real witness, delivered through
+`grade_directory()`'s `trusted_observation` parameter exactly how a real
+attempt's record would arrive (`status_of()`/`_candidate_trusted_
+observation()` below). Built with `skillc.gate_witness`'s own real
+`GateWitness`/`ExecuteResult` constructors and `GateWitnessRecord.
+to_json_bytes()` - never hand-typed JSON - mirroring skillc#332's own
+worked example. `incomplete/no-witness-companion` is the deliberate
+exception: structurally identical to a PASSing candidate on the other
+three criteria, but with NO witness delivered at all, so its `flow-check-
+honest` criterion reads UNKNOWN and its overall status is `INCONCLUSIVE`
+(`records.derive_status()`: a mandatory `UNKNOWN` can never yield `PASS`).
+This certifies "no observation gives UNKNOWN" directly, rather than only
+by inspection of the standalone function.
+
+`flow_check_honest_validity()` still certifies `flow_check_honest()`
+directly too, the same way `restore_probe_validity()` calls `judge()`
+directly rather than through `grade_directory()` - this exercises cases
+`certify()`'s own fixed candidate population does not reach (a stale tree,
+a channel failure, a not-observed-but-present witness), seeded from
+skillc#332's own three worked examples. skillc#348 owns threading a REAL
+attempt's witness into the same `trusted_observation` channel this harness
+already builds against; nothing here depends on its implementation.
 
 Exit 0 only if all of that holds.
 """
@@ -75,7 +85,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from skillc import verify
+from skillc import materialize, verify
 from skillc.backend import ExecuteResult, Limits
 from skillc.gate_witness import GateWitness
 
@@ -112,8 +122,30 @@ class Row:
         return self.status == self.expected and self.violated == self.expected_violated
 
 
-def status_of(grader: Path, candidate: Path, root: Path = HERE) -> tuple[str, str, frozenset[str], str]:
-    graded = verify.grade_directory(verify.GraderDef.load(root).with_judge(grader), candidate)
+#: Every committed candidate but one carries a witness, delivered through
+#: `trusted_observation` exactly how a real attempt's record would arrive
+#: (skillc#348 owns threading a REAL attempt's witness into that same
+#: channel - this harness builds against the channel, not against #348's
+#: own implementation). `incomplete/` is the deliberate exception: no
+#: witness at all, certifying the "no observation gives UNKNOWN" branch
+#: directly rather than only by inspection - see `candidates()`.
+def _candidate_trusted_observation(candidate: Path) -> bytes:
+    """A REAL `GateWitnessRecord`, built with `skillc.gate_witness`'s own
+    constructors (never hand-typed JSON) - a normal confirmed run of the
+    one gate this grader reconciles, witnessed against THIS candidate's
+    own tree digest, so the freshness check in `flow_check_honest()` is
+    satisfied by construction. Mirrors skillc#332's own worked example
+    (`FLOW_FINISH_GATE: warn (skipped gates: typecheck)`, exit 3)."""
+    digest = materialize.tree_digest(candidate)
+    witness = _witness_json(ExecuteResult(reason="exited", exit_code=3), digest, request=True)
+    return json.dumps({"witness": witness, "graded_tree_digest": digest}).encode("utf-8")
+
+
+def status_of(grader: Path, candidate: Path, root: Path = HERE, *,
+             needs_witness: bool = True) -> tuple[str, str, frozenset[str], str]:
+    trusted = _candidate_trusted_observation(candidate) if needs_witness else None
+    graded = verify.grade_directory(verify.GraderDef.load(root).with_judge(grader), candidate,
+                                    trusted_observation=trusted)
     return graded.status, graded.detail, graded.violated, graded.category
 
 
@@ -128,11 +160,11 @@ def _expectation(path: Path, placed: str) -> tuple[str, frozenset[str]]:
     if status != placed or not isinstance(violated, list):
         raise SystemExit(f"{path}: expected.json says {status!r}, placement says {placed!r}")
     if (placed == "FAIL") != bool(violated):
-        raise SystemExit(f"{path}: a FAIL must name violated criteria, a PASS none")
+        raise SystemExit(f"{path}: a FAIL must name violated criteria; a PASS or INCONCLUSIVE none")
     return placed, frozenset(map(str, violated))
 
 
-def candidates(root: Path) -> list[tuple[Path, str, frozenset[str]]]:
+def candidates(root: Path) -> list[tuple[Path, str, frozenset[str], bool]]:
     alternatives = sorted(p for p in (root / "alternatives").iterdir() if p.is_dir())
     benign = sorted(p for p in (root / "benign").iterdir() if p.is_dir())
     wrong = sorted(p for p in (root / "wrong").iterdir() if p.is_dir())
@@ -141,20 +173,24 @@ def candidates(root: Path) -> list[tuple[Path, str, frozenset[str]]]:
             f"{root}: no alternatives, no benign changes or no wrong outputs; an empty "
             "population cannot certify a grader"
         )
+    #: Optional - a grader need not have a deliberate no-witness candidate,
+    #: but this one does (`incomplete/no-witness-companion`).
+    incomplete = sorted(p for p in (root / "incomplete").iterdir() if p.is_dir()) if (root / "incomplete").is_dir() else []
     placed = [
-        (root / "fixture", "FAIL"),
-        (root / "reference", "PASS"),
-        *[(p, "PASS") for p in alternatives],
-        *[(p, "PASS") for p in benign],
-        *[(p, "FAIL") for p in wrong],
+        (root / "fixture", "FAIL", True),
+        (root / "reference", "PASS", True),
+        *[(p, "PASS", True) for p in alternatives],
+        *[(p, "PASS", True) for p in benign],
+        *[(p, "FAIL", True) for p in wrong],
+        *[(p, "INCONCLUSIVE", False) for p in incomplete],
     ]
-    return [(p, *_expectation(p, want)) for p, want in placed]
+    return [(p, *_expectation(p, want), needs_witness) for p, want, needs_witness in placed]
 
 
 def certify(grader: Path, root: Path = HERE) -> tuple[bool, list[Row]]:
     rows = []
-    for path, expected, expected_violated in candidates(root):
-        status, detail, violated, category = status_of(grader, path, root)
+    for path, expected, expected_violated, needs_witness in candidates(root):
+        status, detail, violated, category = status_of(grader, path, root, needs_witness=needs_witness)
         rows.append(Row(str(path.relative_to(root)), expected, status, detail,
                         expected_violated, violated, category))
     return all(r.ok for r in rows), rows
@@ -239,12 +275,22 @@ class _WitnessBackend:
     """Minimal `ExecutionBackend` double for driving a REAL `GateWitness`
     through `decide()`/`finalize()` - the same shape
     `tests/test_gate_witness.py`'s own `_FakeBackend` uses, kept to exactly
-    the two methods `GateWitness` calls."""
+    the two methods `GateWitness` calls.
+
+    `cwd`/`env` were added to the real `ExecutionBackend.exec_in_attempt()`
+    Protocol for #269's gate-execution witness itself - this double went
+    stale against its own Protocol until this fix, crashing with
+    `TypeError` on every `request=True` call the moment `GateWitness`
+    started passing `cwd` through `_decide_run_gate()`. Nothing in the
+    pytest suite runs `qualify.py`, so nothing caught it; found only
+    because this task's own `flow_check_honest_validity()` and the new
+    witness-companion wiring both drive `request=True` directly."""
 
     result: ExecuteResult
 
     def exec_in_attempt(self, handle: object, argv: list, limits: Limits,
-                        cancel: object = None, stdin: object = None) -> ExecuteResult:
+                        cancel: object = None, stdin: object = None,
+                        cwd: object = None, env: object = None) -> ExecuteResult:
         return self.result
 
     def export(self, handle: object, dest: Path) -> None:
@@ -368,7 +414,7 @@ def main() -> int:
         return 1
 
     flow_check_discrimination = flow_check_honest_validity()
-    print("flow-check-honest discrimination (standalone, not yet a declared criterion):")
+    print("flow-check-honest discrimination (direct function cases beyond certify()'s own candidates):")
     for name, held, detail in flow_check_discrimination:
         print(f"  {'ok ' if held else 'BAD'} {name}" + ("" if held else f": {detail}"))
     if not all(held for _name, held, _detail in flow_check_discrimination):

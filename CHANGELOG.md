@@ -33,6 +33,38 @@ and version plan.
   passes `--target trial`, matching `test_trial_image_tools_live.py`'s own
   explicit-target convention, so this test's claim is pinned to the
   production stage rather than to whichever stage is currently last.
+- **`gate-stops-early` declares `flow-check-honest` as a real, fourth
+  criterion** (Refs #270), grader revision 2. It reads a controller-
+  supplied witness and the graded tree's digest out of
+  `skillc.verify.grade_files`'s `trusted_observation` channel
+  (`envelope["trusted"]`) rather than from a standalone function nobody
+  calls through `grade_directory()`. `qualify.py` supplies a real witness,
+  built with `skillc.gate_witness`'s own constructors, for every
+  committed candidate but one (`incomplete/no-witness-companion`, which
+  deliberately gets none and certifies the no-observation-gives-UNKNOWN
+  branch directly). Owner ruling: the declared criterion applies to
+  `qualify.py`'s own static certification, not only to a future live
+  attempt. Found and fixed in the same change: `qualify.py`'s own
+  `_WitnessBackend` test double had drifted from the real
+  `ExecutionBackend.exec_in_attempt()` Protocol (missing the `cwd`/`env`
+  parameters #332 added), uncaught because nothing in the pytest suite
+  runs `qualify.py`. skillc#348 owns threading a real attempt's witness
+  into the same channel; this grader builds against the channel as the
+  interface, not against that issue's implementation. The identical
+  `_WitnessBackend` drift was independently present in
+  `claims-outran-evidence/qualify.py` and `report-outran-evidence/
+  qualify.py` (#271) - same root cause, same fix, found by running every
+  task's `qualify.py` for the first time.
+
+- **`tests/test_qualify_scripts_run.py`** (new): runs every eval task's
+  own `qualify.py` as a real subprocess and asserts `QUALIFY: ok` -
+  discovered via `rglob`, never hand-listed, so a future script is
+  covered automatically. This is the negative control the `_WitnessBackend`
+  drift above exposed the need for: nothing in the suite ever ran these
+  scripts, so a certification script could rot silently and a green suite
+  said nothing about it. `slugkit-pipeline` gets a stated, explicit
+  timeout extension (measured ~111s, a real pipeline-validity battery,
+  not a hang) rather than a silent skip.
 
 - **The trial image pins `uv` and installs `make`/`bash` explicitly; a
   fifth real-Docker break family proves the pin is what makes the uv

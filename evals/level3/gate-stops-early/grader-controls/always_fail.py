@@ -3,7 +3,7 @@
 
 import json
 
-CRITERIA = ("functional-windows-fix", "regression-fails-on-original", "gate-green")
+CRITERIA = ("functional-windows-fix", "regression-fails-on-original", "gate-green", "flow-check-honest")
 print(json.dumps({
     "grader": {"id": "gate-stops-early", "revision": "control-always-fail"},
     "criteria": [
