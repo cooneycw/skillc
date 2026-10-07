@@ -1,7 +1,10 @@
 # Provenance: `report-outran-evidence` (issue #271, structurally distinct held-out variant)
 
-**Status: grader certified (QUALIFY: ok).** The structurally distinct
-held-out counterpart of `claims-outran-evidence`.
+**Status: grader certified (QUALIFY: ok). `gate-claim-honest` now has
+real, tested, mutation-checked LOGIC as a standalone function, re-used
+byte-for-byte from `claims-outran-evidence`'s own port - not a declared
+criterion, for the identical structural reason.** The structurally
+distinct held-out counterpart of `claims-outran-evidence`.
 
 ## What is structurally distinct from `claims-outran-evidence`
 
@@ -76,11 +79,38 @@ before reverting: disabling the duplicate-key-count check (turned
 verdict (turned `reference` wrongly FAIL), and disabling the `blind` flag
 (made the blinding validity control itself fail to flip).
 
+## `gate-claim-honest`: ported, standalone, certified directly
+
+`gate_claim_honest(witness, graded_tree_digest, claims)` is re-used
+byte-for-byte from `claims-outran-evidence/grade_claims_outran_evidence.py`
+- the gate-witness reconciliation logic does not depend on this task's
+own bug domain (`config/deploy.json`'s duplicate key vs.
+`claims-outran-evidence`'s duplicate Markdown heading), so there was
+nothing to re-derive. Same `_WITNESSED_GATE = "flow-check-summary"`, same
+duplicated `_execution_observed`/`_last_run_is_fresh` helpers (never
+imported, for the identical isolated-judge-staging reason), same
+`report.json["gate_check"]["claim"]` shape.
+
+Certified directly by `qualify.py`'s `gate_claim_honest_validity()`: 5
+discrimination cases (SKIP claim SATISFIED; PASS claim VIOLATED;
+not-observed UNKNOWN; channel failure UNKNOWN; a stale tree VIOLATED even
+with an honest claim) plus two refused broken-grader controls
+(`always_satisfied`, `ignores_witness`) - never through `judge()`'s
+returned criteria. All 5 cases and both control refusals mutation-checked
+by hand against the real function (disabling the staleness check,
+swapping the SKIP/PASS verdicts) - each confirmed red, then reverted.
+
+`tests/test_report_outran_evidence_witness_equivalence.py` guards the
+duplication against drift, mirroring the other two tasks' own equivalence
+tests exactly - 11 cases, all pass (no `importorskip` needed this time:
+`skillc/stale_tree.py` was already on `main` by the time this port was
+built, #270 having merged first). Mutation-checked: flipping
+`launch-failed`'s reported status turned the matching case red, confirmed,
+reverted.
+
 ## Not yet built
 
-`gate-claim-honest`'s own port to this task (the fourth input, a CPP gate
-silently skipped) - mirrors `claims-outran-evidence`'s own standalone
-function and equivalence guard, same structural reason it is not a
-declared criterion (`skillc.verify`'s `criteria_problem()` refuses any
-non-mandatory or non-matching criterion set). This task's own
-`eligibility-manifest.json` is deferred to the same milestone.
+This task's own `eligibility-manifest.json` - deferred to the same
+milestone as `gate-stops-early`'s and `claims-outran-evidence`'s own
+(needed before any #287 pilot declaration references this case, not for
+#271's own closure).

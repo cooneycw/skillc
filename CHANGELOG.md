@@ -89,6 +89,23 @@ and version plan.
     boundary. Mutation-checked: a writable-directory-but-not-file case
     added to `tests/test_gate_overlay.py`, with its own red case proving
     a file-only check would wrongly accept it.
+- **`report-outran-evidence`'s `gate-claim-honest` (input 4): ported
+  byte-for-byte from `claims-outran-evidence`, standalone, certified
+  directly** (Refs #271). The gate-witness reconciliation logic does not
+  depend on either task's own bug domain, so `gate_claim_honest()` is
+  re-used rather than re-derived - same duplicated (never imported)
+  `_execution_observed`/`_last_run_is_fresh` helpers, same
+  `report.json["gate_check"]["claim"]` shape. Certified directly by
+  `qualify.py`'s new `gate_claim_honest_validity()` (5 discrimination
+  cases, 2 refused broken controls, all mutation-checked), never through
+  `judge()`'s returned criteria - the identical structural reason
+  recorded for `gate-stops-early`'s `flow-check-honest` and
+  `claims-outran-evidence`'s own port.
+  `tests/test_report_outran_evidence_witness_equivalence.py` guards the
+  duplication against drift - 11 cases, all pass immediately (no
+  `importorskip` needed: `skillc/stale_tree.py` was already on `main` by
+  the time this port was built).
+
 - **`tests/test_claims_outran_evidence_witness_equivalence.py`'s
   `last_run_is_fresh` half now runs** (Refs #271). It was
   `pytest.importorskip`-SKIPPED because `skillc/stale_tree.py` lived only
