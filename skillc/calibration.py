@@ -238,6 +238,7 @@ class CalibrationDeclaration:
     approval: Mapping[str, object] | None
     data: Mapping[str, object]
     lane: str = DEFAULT_LANE
+    task_fixture: str = "fixture"
 
 
 def _refuse(message: str) -> DeclarationRefused:
@@ -283,6 +284,7 @@ class _ScheduleFields:
     task_path: str
     grader_id: str
     grader_revision: str
+    task_fixture: str
     approval: Mapping[str, object] | None
 
 
@@ -333,6 +335,21 @@ def _parse_schedule_and_identities(data: Mapping[str, object], names: Sequence[s
     if not isinstance(task, dict) or not all(isinstance(task.get(k), str) and task.get(k)
                                              for k in ("path", "grader_id", "grader_revision")):
         raise _refuse("task must name path, grader_id and grader_revision")
+    #: Optional (#287): which subdirectory under task.path a live attempt is
+    #: actually graded against. Defaults to "fixture" - every declaration
+    #: written before this field existed names no "fixture" key, so it
+    #: parses to the identical tree it always ran, unchanged. gate-stops-
+    #: early's discrimination case is the first to need a different one
+    #: (discrimination/fixture): that task's own top-level fixture/ never
+    #: exercises the skipped-gate obligation at all (its Makefile declares
+    #: every gate), so running the default tree would make the study #150
+    #: by construction - found and fixed before any attempt, not after.
+    fixture = task.get("fixture", "fixture")
+    if not isinstance(fixture, str) or not fixture.strip():
+        raise _refuse("task.fixture must be a non-empty string naming a subdirectory under task.path")
+    if m._escapes(fixture):
+        raise _refuse(f"task.fixture {fixture!r} must be a relative subdirectory under task.path, "
+                      "never absolute and never climbing out of it")
     if data.get("retain_transcripts") is not True:
         raise _refuse("retain_transcripts must be true: report question 4 is answered from transcripts (#202)")
     approval = data.get("approval")
@@ -342,7 +359,7 @@ def _parse_schedule_and_identities(data: Mapping[str, object], names: Sequence[s
     return _ScheduleFields(
         shared=dict(shared), attempts_per_arm=attempts, seed=seed, sequence=tuple(sequence),
         task_path=str(task["path"]), grader_id=str(task["grader_id"]), grader_revision=str(task["grader_revision"]),
-        approval=approval,
+        task_fixture=fixture, approval=approval,
     )
 
 
@@ -460,7 +477,7 @@ def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
         arms=tuple(names), attempts_per_arm=fields.attempts_per_arm, arm_order=fields.sequence, seed=fields.seed,
         shared=fields.shared, task_path=fields.task_path, grader_id=fields.grader_id,
         grader_revision=fields.grader_revision, retain_transcripts=True, approval=fields.approval,
-        data=dict(data), lane=str(lane),
+        data=dict(data), lane=str(lane), task_fixture=fields.task_fixture,
     )
 
 
@@ -484,6 +501,7 @@ class DiscriminationDeclaration:
     tolerance_non_evaluable_per_arm: int
     approval: Mapping[str, object] | None
     data: Mapping[str, object]
+    task_fixture: str = "fixture"
 
 
 def _expected_degraded_revision(intact_subject: Mapping[str, object]) -> str:
@@ -572,6 +590,7 @@ def parse_discrimination_declaration(data: Mapping[str, object]) -> Discriminati
         shared=fields.shared, task_path=fields.task_path, grader_id=fields.grader_id,
         grader_revision=fields.grader_revision, retain_transcripts=True,
         tolerance_non_evaluable_per_arm=non_evaluable, approval=fields.approval, data=dict(data),
+        task_fixture=fields.task_fixture,
     )
 
 
@@ -660,6 +679,27 @@ def _require_grader_matches(root: Path, task_path: str, grader_id: str, grader_r
                       f"{grader_id!r} revision {grader_revision!r}")
 
 
+def _require_task_fixture(root: Path, task_path: str, task_fixture: str, approval: Mapping[str, object]) -> None:
+    """task.fixture (#287) is an approval-bound identity - an approval
+    covers exactly one tree, the same #323 pattern `attempts_per_arm`/
+    `mutated_digest`/`profile_inventory_digest` already use. The tree must
+    exist on disk (a declaration naming a fixture nobody committed cannot
+    be run), and the approval must name the SAME fixture, defaulting to
+    "fixture" when the approval predates this field - every already-
+    approved manifest named no other tree, so it stays valid unchanged;
+    only a declaration asking for a NON-default tree needs an approval
+    that says so explicitly. Shared by every declaration kind's
+    `require_approved*`, alongside `_require_grader_matches`, which is why
+    it takes the same `root`/`task_path`."""
+    fixture_dir = root / task_path / task_fixture
+    if not fixture_dir.is_dir():
+        raise _refuse(f"task.fixture {task_fixture!r} does not exist under {task_path!r} ({fixture_dir})")
+    approved_fixture = approval.get("task_fixture", "fixture")
+    if approved_fixture != task_fixture:
+        raise _refuse(f"approved for task.fixture={approved_fixture!r}, not the declared {task_fixture!r}; "
+                      "a changed fixture tree needs its own approval")
+
+
 def _require_profile_approval(subject: Mapping[str, object], approval: Mapping[str, object], root: Path) -> None:
     """skillc#334: when `subject.profile` names a validated profile, the
     approval must record `profile_inventory_digest` matching the
@@ -720,6 +760,7 @@ def require_approved(declaration: CalibrationDeclaration, root: Path) -> None:
     if unknown:
         raise _refuse(f"identities still UNKNOWN: {unknown}; record them before approving a run")
     _require_grader_matches(root, declaration.task_path, declaration.grader_id, declaration.grader_revision)
+    _require_task_fixture(root, declaration.task_path, declaration.task_fixture, approval)
 
 
 #: skillc#287: a discrimination declaration's own identity fields - parallel
@@ -781,6 +822,7 @@ def require_approved_discrimination(declaration: DiscriminationDeclaration, root
     if unknown:
         raise _refuse(f"identities still UNKNOWN: {unknown}; record them before approving a run")
     _require_grader_matches(root, declaration.task_path, declaration.grader_id, declaration.grader_revision)
+    _require_task_fixture(root, declaration.task_path, declaration.task_fixture, approval)
 
 
 def validate_expanded_instruction_lane(declaration: CalibrationDeclaration, root: Path) -> None:

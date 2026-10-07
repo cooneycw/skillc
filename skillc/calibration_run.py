@@ -396,7 +396,7 @@ def run_calibration(
     mp.pin_model_argv(model, effort, [])
     task_root = root / declaration.task_path
     try:
-        surface = cc.surface_mapping(cc.task_surface(task_root / "fixture"))
+        surface = cc.surface_mapping(cc.task_surface(task_root / declaration.task_fixture))
     except demo.SubjectRefused as exc:
         raise CalibrationRefused(str(exc)) from exc
     per_attempt = float(str(declaration.shared["per_attempt_seconds"]))

@@ -263,3 +263,48 @@ def test_calibration_declaration_parsing_is_unaffected_by_the_refactor() -> None
     from the real, previously-approved #204 manifest."""
     declaration = calibration.load_declaration(ROOT / "evals" / "calibration-204" / "run-manifest.json")
     calibration.require_approved(declaration, ROOT)
+
+
+# ------------------------------------------------------------- task.fixture (#287)
+
+
+def test_discrimination_task_fixture_is_optional_and_defaults_to_fixture() -> None:
+    data = _declaration()
+    assert "fixture" not in data["task"]
+    assert calibration.parse_discrimination_declaration(data).task_fixture == "fixture"
+
+
+@pytest.mark.parametrize("fixture", ["/etc", "../outside", "wrong/../../outside", "..", ""])
+def test_red_a_discrimination_task_fixture_that_escapes_or_is_empty_is_refused_at_parse_time(fixture: str) -> None:
+    data = _declaration()
+    data["task"]["fixture"] = fixture
+    with pytest.raises(calibration.DeclarationRefused):
+        calibration.parse_discrimination_declaration(data)
+
+
+def test_red_a_discrimination_task_fixture_naming_an_absent_directory_is_refused_at_approval_time() -> None:
+    data = _approved()
+    data["task"]["fixture"] = "no-such-subdirectory"
+    data["approval"]["task_fixture"] = "no-such-subdirectory"
+    declaration = calibration.parse_discrimination_declaration(data)
+    with pytest.raises(calibration.DeclarationRefused, match="does not exist"):
+        calibration.require_approved_discrimination(declaration, ROOT)
+
+
+def test_red_a_discrimination_approval_for_a_different_fixture_is_refused() -> None:
+    """Mirrors the calibration-declaration test of the same name: task.fixture
+    is an approval-bound identity in BOTH declaration kinds."""
+    data = _approved()
+    data["task"]["fixture"] = "wrong/pipeline-red"
+    # approval still silent on task_fixture - defaults to "fixture", which no
+    # longer matches the declared "wrong/pipeline-red".
+    declaration = calibration.parse_discrimination_declaration(data)
+    with pytest.raises(calibration.DeclarationRefused, match="approved for task.fixture"):
+        calibration.require_approved_discrimination(declaration, ROOT)
+
+
+def test_a_discrimination_approval_that_explicitly_names_the_matching_fixture_is_authorized() -> None:
+    data = _approved()
+    data["task"]["fixture"] = "wrong/pipeline-red"
+    data["approval"]["task_fixture"] = "wrong/pipeline-red"
+    calibration.require_approved_discrimination(calibration.parse_discrimination_declaration(data), ROOT)

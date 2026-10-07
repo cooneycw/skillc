@@ -153,6 +153,11 @@ def test_the_committed_declaration_validates() -> None:
     assert declaration.attempts_per_arm == 4
     assert sorted(declaration.arm_order) == sorted(["full-cpp", "baseline"] * 4)
     assert (ROOT / declaration.task_path / "grader.json").is_file()
+    # #287: task.fixture is optional, default "fixture" - #204's own manifest
+    # predates the field and names no "fixture" key, so it must parse to the
+    # identical tree it always ran, unchanged.
+    assert "fixture" not in _manifest()["task"]  # type: ignore[operator]
+    assert declaration.task_fixture == "fixture"
 
 
 def test_the_committed_declaration_is_authorized() -> None:
@@ -234,6 +239,65 @@ def test_approval_of_another_grader_revision_is_refused() -> None:
     data["task"]["grader_revision"] = "2"  # type: ignore[index]
     with pytest.raises(calibration.DeclarationRefused, match="not the declared"):
         calibration.require_approved(calibration.parse_declaration(data), ROOT)
+
+
+# ------------------------------------------------------------- task.fixture (#287)
+
+
+def test_task_fixture_is_optional_and_defaults_to_fixture() -> None:
+    data = _mutated()
+    assert "fixture" not in data["task"]  # type: ignore[operator]
+    assert calibration.parse_declaration(data).task_fixture == "fixture"
+
+
+def test_task_fixture_may_name_a_different_real_subdirectory() -> None:
+    data = _mutated()
+    data["task"]["fixture"] = "wrong/pipeline-red"  # type: ignore[index]
+    declaration = calibration.parse_declaration(data)
+    assert declaration.task_fixture == "wrong/pipeline-red"
+
+
+@pytest.mark.parametrize("fixture", ["/etc", "../outside", "wrong/../../outside", "..", ""])
+def test_red_a_task_fixture_that_escapes_or_is_empty_is_refused_at_parse_time(fixture: str) -> None:
+    data = _mutated()
+    data["task"]["fixture"] = fixture  # type: ignore[index]
+    with pytest.raises(calibration.DeclarationRefused):
+        calibration.parse_declaration(data)
+
+
+def test_red_a_task_fixture_naming_an_absent_directory_is_refused_at_approval_time() -> None:
+    """Parses fine (the string shape is valid) but is refused once `root` is
+    available to check the real filesystem - the same split `_require_
+    grader_matches` already uses for the grader file."""
+    data = _approved()
+    data["task"]["fixture"] = "no-such-subdirectory"  # type: ignore[index]
+    data["approval"]["task_fixture"] = "no-such-subdirectory"  # type: ignore[index]
+    declaration = calibration.parse_declaration(data)
+    assert declaration.task_fixture == "no-such-subdirectory"
+    with pytest.raises(calibration.DeclarationRefused, match="does not exist"):
+        calibration.require_approved(declaration, ROOT)
+
+
+def test_red_an_approval_for_a_different_fixture_is_refused() -> None:
+    """task.fixture is an approval-bound identity (#287), the same #323
+    pattern attempts_per_arm already uses: a declaration changed to a
+    DIFFERENT real tree after approval must be refused, not silently
+    re-matched."""
+    data = _approved()
+    data["task"]["fixture"] = "wrong/pipeline-red"  # type: ignore[index]
+    # approval still silent on task_fixture - defaults to "fixture", which
+    # no longer matches the declared "wrong/pipeline-red".
+    declaration = calibration.parse_declaration(data)
+    assert declaration.task_fixture == "wrong/pipeline-red"
+    with pytest.raises(calibration.DeclarationRefused, match="approved for task.fixture"):
+        calibration.require_approved(declaration, ROOT)
+
+
+def test_an_approval_that_explicitly_names_the_matching_fixture_is_authorized() -> None:
+    data = _approved()
+    data["task"]["fixture"] = "wrong/pipeline-red"  # type: ignore[index]
+    data["approval"]["task_fixture"] = "wrong/pipeline-red"  # type: ignore[index]
+    calibration.require_approved(calibration.parse_declaration(data), ROOT)
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])

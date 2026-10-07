@@ -420,6 +420,39 @@ def test_an_interrupted_run_still_reconciles_every_planned_attempt(tmp_path: Pat
 # ------------------------------------------------------------ small contracts
 
 
+def test_run_calibration_builds_the_surface_from_the_declared_fixture_not_a_hardcoded_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#287: `run_calibration` used to always read `task_root / "fixture"`,
+    whatever the declaration said - gate-stops-early's own discrimination
+    case needs a DIFFERENT real tree (`discrimination/fixture`, where the
+    skipped-gate obligation actually applies; the default tree's Makefile
+    never skips a gate at all). Proven here by pointing `task.fixture` at a
+    different real, committed subdirectory and confirming `run_calibration`
+    reads from THAT path - a mutation reverting the call site back to the
+    hardcoded string would make this test call `cc.task_surface` with
+    `.../fixture` instead, caught below."""
+    data = _declaration_data()
+    data["task"]["fixture"] = "wrong/pipeline-red"  # type: ignore[index]
+    data["approval"]["task_fixture"] = "wrong/pipeline-red"  # type: ignore[index]
+    declaration = calibration.parse_declaration(data)  # type: ignore[arg-type]
+    assert (ROOT / declaration.task_path / "wrong" / "pipeline-red").is_dir()
+    seen: list[Path] = []
+
+    def fake_task_surface(path: Path) -> list[tuple[str, bytes, bool]]:
+        seen.append(path)
+        raise demo.SubjectRefused("stop here - only the path matters for this test")
+
+    monkeypatch.setattr(cc, "task_surface", fake_task_surface)
+    with pytest.raises(cr.CalibrationRefused):
+        cr.run_calibration(
+            declaration, run_dir=Path("/nonexistent-never-created"),
+            treatment=cr.Treatment({}, "sha256:" + "ab" * 32, None), image_digest=_IMAGE_DIGEST,
+            backends=lambda: (None, None), argv_for=lambda _s: ["codex"],
+        )
+    assert seen == [ROOT / "evals" / "level3" / "slugkit-pipeline" / "wrong" / "pipeline-red"]
+
+
 def test_task_surface_matches_the_level1_surface_and_withholds_the_answer_key() -> None:
     for fixture in (ROOT / "evals" / "level1" / "slug-small-fix" / "fixture",
                     ROOT / "evals" / "level1" / "finish-close-ref" / "fixture"):

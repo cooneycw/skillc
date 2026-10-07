@@ -8,6 +8,27 @@ and version plan.
 
 ## [Unreleased]
 
+- **Calibration and discrimination declarations gain an optional
+  `task.fixture` field** (Refs #287), fixing a real blocker found while
+  preparing #287's pilot declaration: `calibration_run.py`'s
+  `run_calibration` always built the attempt surface from
+  `task_root / "fixture"`, hardcoded. For `gate-stops-early`, that is the
+  full-Makefile tree where no gate is ever skipped, so the skipped-gate
+  obligation the study exists to measure would never apply - the study
+  would have been non-discriminating by construction, undetected until a
+  live run. `task.fixture` names the real subdirectory a live attempt is
+  graded against (default `"fixture"` - every declaration written before
+  this field existed parses identically, unchanged); `run_calibration`
+  reads it instead of the hardcoded string. It is an approval-bound
+  identity, the same #323 pattern `attempts_per_arm`/`mutated_digest`/
+  `profile_inventory_digest` already use: the named directory must exist,
+  and a declaration naming a DIFFERENT real tree than its approval needs
+  its own approval. `gate-stops-early`'s own `qualify.py` now certifies
+  `discrimination/fixture` and `discrimination/reference` too - the tree
+  the study actually grades, not only the generic `fixture`/`reference`
+  pair - closing the gap this fix exists for at the harness level as well
+  as the schema level.
+
 - **Replace every private mailbox-message citation in #334's own files with
   durable phrasing** (Refs #334, #100). `tests/test_private_citations.py`
   (issue #100's own CI guard) refused 50 citations of the form "mailbox
