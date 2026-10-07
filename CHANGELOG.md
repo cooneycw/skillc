@@ -256,7 +256,22 @@ and version plan.
      `tests/test_docker_backend.py`. The observations-residue question
      for `gate_witness.py`'s own write-back is noted on skillc#20 (Nit
      Store), not fixed here.
-  3. The `apply_flow_check_gate_overlay` TODO stub's cited signature is
+  3. The preflight now proves the whole workspace tree is
+     byte-identical before and after it runs, not only that
+     `observations` specifically is gone - covering any other residue
+     path, such as `exec_in_attempt()`'s own per-call
+     `.skillc-exec-pid-<uuid>` marker, which the SAME write-back tail
+     also leaves behind and which nothing previously cleaned up. A
+     content-hashed snapshot (`_workspace_snapshot`, via `export()`,
+     never via an exec, since an exec would itself plant `observations`
+     as a side effect of taking the snapshot) is taken before the exec
+     and again after; every new file is removed the same way as
+     `observations`, and a pre-existing file that vanished or changed
+     content refuses the attempt outright rather than silently
+     continuing. Unit-tested against the stub for all three shapes (new
+     residue removed, pre-existing file vanished, pre-existing file
+     modified).
+  4. The `apply_flow_check_gate_overlay` TODO stub's cited signature is
      updated to the two-root shape (`subject_root=CONTAINER_HOME`,
      `harness_root=`a root-owned, non-candidate-writable directory)
      superseding the single-`root` shape this TODO previously named -

@@ -281,6 +281,25 @@ class HomeFileVerificationRefused(Exception):
 _TOOLS_MARKER = "---skillc-334-tools---"
 
 
+def _workspace_snapshot(backend: DockerBackend, handle: object) -> dict[str, str]:
+    """A `{relpath: sha256-hex}` content snapshot of every file currently
+    under `CONTAINER_WORKSPACE`, via `export()` - never via an exec, since
+    `exec_in_attempt()`'s own write-back tail (#76/#186) would plant an
+    `observations` file as a SIDE EFFECT of taking the very snapshot meant
+    to prove nothing was planted. Used twice by `_preflight_in_container`
+    (mailbox 5944 fix 3) to prove the workspace ends up byte-identical to
+    its state before the preflight ran - not only that the observations
+    file specifically is gone, but that nothing else (e.g.
+    `exec_in_attempt()`'s own per-call `.skillc-exec-pid-<uuid>` marker)
+    was left behind either."""
+    with tempfile.TemporaryDirectory() as tmp:
+        backend.export(handle, Path(tmp))
+        return {
+            path.relative_to(tmp).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in Path(tmp).rglob("*") if path.is_file()
+        }
+
+
 def _preflight_in_container(
     backend: DockerBackend, handle: object, limits: Limits,
     verify_home_files: Mapping[str, str], tools: Sequence[Mapping[str, Any]],
@@ -308,10 +327,13 @@ def _preflight_in_container(
     byte COUNT - see its own docstring); the real captured text reaches
     `CONTAINER_WORKSPACE/observations` through the SAME write-back
     `verify.py`/`gate_witness.py` already rely on (#76), read back here
-    via one `export()` - the same technique, not a new one. Every check
-    - digests and every probe - shares ONE combined exec + ONE export,
-    regardless of how many files, tools or probes are declared, since
-    `export()` is the expensive part."""
+    via `export()`. Every check - digests and every probe - shares ONE
+    combined exec, regardless of how many files, tools or probes are
+    declared. TWO exports are needed, not one (mailbox 5944 fix 3): a
+    BASELINE snapshot taken before the exec even runs, and one taken
+    after it, so the function can prove the workspace it leaves behind is
+    byte-identical to the workspace it found - never only that the one
+    file this module happens to know about (`observations`) is gone."""
     if not verify_home_files and not tools:
         return
     for dep in tools:
@@ -320,6 +342,13 @@ def _preflight_in_container(
                 f"tool dependency {dep.get('id')!r} declares no probes; a profile-opted live attempt "
                 f"cannot verify an unchecked tool claim, so it refuses rather than silently passing"
             )
+
+    try:
+        baseline = _workspace_snapshot(backend, handle)
+    except OSError as exc:
+        raise HomeFileVerificationRefused(
+            f"could not export the container to take a pre-preflight workspace baseline: {exc}"
+        ) from exc
 
     container_paths = {relpath: f"{CONTAINER_HOME}/{relpath}" for relpath in verify_home_files}
     script_lines = [f"sha256sum {shlex.quote(path)}" for path in container_paths.values()]
@@ -379,22 +408,42 @@ def _preflight_in_container(
             raise HomeFileVerificationRefused(
                 f"could not export the container to read back the preflight output: {exc}"
             ) from exc
-        observations = Path(tmp) / "observations"
+        tmp_root = Path(tmp)
+        observations = tmp_root / "observations"
         output = observations.read_text(encoding="utf-8", errors="replace") if observations.is_file() else ""
+        after_exec = {
+            path.relative_to(tmp_root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in tmp_root.rglob("*") if path.is_file()
+        }
 
-    # Mailbox 5944 fix 2: the preflight exec's own write-back left its
-    # digest/probe report sitting in the AGENT's workspace, at the same
+    # Mailbox 5944 fixes 2+3: the preflight exec left its digest/probe
+    # report sitting in the AGENT's own workspace, at the same
     # `CONTAINER_WORKSPACE/observations` path the agent's own run (and the
     # grader, after it) will see - the preflight's internal verification
-    # detail would otherwise show up in the graded tree or diff. Removed
-    # via `remove_file_in_attempt`, never a second `exec_in_attempt()` call
+    # detail would otherwise show up in the graded tree or diff. Every
+    # NEW file the exec left behind (never only the one this module
+    # happens to know the name of - e.g. `exec_in_attempt()`'s own
+    # per-call `.skillc-exec-pid-<uuid>` marker) is removed via
+    # `remove_file_in_attempt`, never a second `exec_in_attempt()` call
     # (that method's own write-back would just recreate an empty file in
-    # its place - see that method's docstring). Red case: after this call,
-    # the workspace tree is byte-identical to what it was before the
-    # preflight ran.
-    if not backend.remove_file_in_attempt(handle, f"{CONTAINER_WORKSPACE}/observations"):
+    # its place - see that method's docstring). A pre-existing file the
+    # script has no business touching must not have changed either -
+    # the whole point is a workspace byte-identical to what it was
+    # before the preflight ran, not merely "the known file is gone".
+    for relpath in sorted(set(after_exec) - set(baseline)):
+        if not backend.remove_file_in_attempt(handle, f"{CONTAINER_WORKSPACE}/{relpath}"):
+            raise HomeFileVerificationRefused(
+                f"could not remove a preflight residue file from the workspace: {relpath}"
+            )
+    vanished = sorted(set(baseline) - set(after_exec))
+    if vanished:
         raise HomeFileVerificationRefused(
-            "could not remove the preflight's own observations file from the workspace after reading it back"
+            f"the preflight script unexpectedly removed pre-existing workspace file(s): {vanished}"
+        )
+    changed = sorted(p for p in set(baseline) & set(after_exec) if baseline[p] != after_exec[p])
+    if changed:
+        raise HomeFileVerificationRefused(
+            f"the preflight script unexpectedly modified pre-existing workspace file(s): {changed}"
         )
 
     digest_section, _, tools_section = output.partition(_TOOLS_MARKER)
