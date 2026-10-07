@@ -79,17 +79,18 @@ def _skip_dir(name: str) -> bool:
 #:
 #: SPELLED-OUT citations, widened in separately (found 2026-10-07: this
 #: pattern only ever matched the ABBREVIATED "msg"/"msgs" forms, so a
-#: spelled-out "message 5738" or "mailbox message 5614/5626" passed every
+#: spelled-out "message NNNN" or "mailbox message NNNN/NNNN" passed every
 #: scan and the merged CI gate - "message" does not start with "msg" as a
 #: token, so the original pattern never had a chance to see it). Added:
 #: `message(s) [#]NNNN`, optionally followed by a `/NNNN` pair (the
-#: "message 5614/5626" shape), and `mailbox [message(s)] [#]NNNN` the same
+#: "message NNNN/NNNN" shape), and `mailbox [message(s)] [#]NNNN` the same
 #: way. Verified by running this widened pattern over the WHOLE tree before
-#: committing it (not merely against the 5 known offenders) - 2205 files
-#: inspected, exactly the 5 known offenders matched, zero unrelated hits;
-#: ordinary prose using the word "message" (error message, commit message,
-#: log message, ...) never has a 4-digit number immediately following it,
-#: so the narrow `\d{4}` anchor is what keeps this from flagging those.
+#: committing it (not merely against the known offenders at the time) -
+#: 2205 files inspected, exactly the known offenders matched, zero
+#: unrelated hits; ordinary prose using the word "message" (error message,
+#: commit message, log message, ...) never has a 4-digit number
+#: immediately following it, so the narrow `\d{4}` anchor is what keeps
+#: this from flagging those.
 PRIVATE_CITATION = re.compile(
     r"\bmsgs? ?\d{4}\b"
     r"|\bw\d\b"
@@ -291,30 +292,35 @@ def test_the_pattern_does_not_match_an_ordinary_word_ending_in_a_digit() -> None
     assert PRIVATE_CITATION.search("view2") is None
 
 
-#: The three real offenders found on main 2026-10-07 (issue found by
-#: counter-model review while editing an unrelated #332 file) - each a
-#: realistic shape the ABBREVIATED-only pattern missed for months on this
-#: exact codebase before the fix below. Named here, not only in the
-#: regex's own comment, so a future edit that narrows the pattern again
-#: has a concrete sentence to re-run against, not just a description.
+#: Reconstructs the SHAPE of the three real offenders found on main
+#: 2026-10-07 (found by counter-model review while editing an unrelated
+#: #332 file) with obviously-fake, non-colliding numbers - never the real
+#: ids themselves, which this committed test file must not republish any
+#: more than the files it fixed should have carried them. Each shape is
+#: realistic and is what the ABBREVIATED-only pattern missed for months
+#: on this exact codebase before the fix below. Named here, not only in
+#: the regex's own comment, so a future edit that narrows the pattern
+#: again has a concrete sentence to re-run against, not just a
+#: description.
 _SPELLED_OUT_OFFENDERS = (
-    "(orchestrator guidance, message 5738): its claim is about the shim's",
-    "ruling 2026-10-06, mailbox message 5614/5626).",
-    "Orchestrator ruling (message 5743): a degraded subject carrying a",
+    "(orchestrator guidance, message 9999): its claim is about the shim's",
+    "ruling 2026-10-06, mailbox message 9998/9997).",
+    "Orchestrator ruling (message 9996): a degraded subject carrying a",
 )
 
 
-def test_the_pattern_matches_each_real_spelled_out_offender_found_on_main() -> None:
+def test_the_pattern_matches_each_spelled_out_offender_shape_found_on_main() -> None:
     """Positive control: the widened pattern actually catches the three
-    real offenders this fix was written for - not merely a synthetic
-    shape that happens to look similar."""
+    offender SHAPES this fix was written for (synthetic numbers; see
+    `_SPELLED_OUT_OFFENDERS`' own docstring) - not merely a synthetic
+    shape that happens to look similar for some other reason."""
     for offender in _SPELLED_OUT_OFFENDERS:
         assert PRIVATE_CITATION.search(offender), f"expected a match in: {offender!r}"
 
 
-def test_the_pre_fix_pattern_missed_all_three_spelled_out_offenders() -> None:
+def test_the_pre_fix_pattern_missed_all_three_spelled_out_offender_shapes() -> None:
     """Mutation check: the OLD (abbreviated-only) pattern must NOT catch
-    any of the three real offenders above - proving this fix actually
+    any of the three offender shapes above - proving this fix actually
     closes a real gap, not a hypothetical one. If the old pattern already
     matched these, the widening would be solving a problem that did not
     exist."""
@@ -339,10 +345,10 @@ def test_the_pattern_does_not_flag_ordinary_prose_using_the_word_message() -> No
 
 def test_the_pattern_matches_a_hash_prefixed_and_a_pair_form_message_citation() -> None:
     """Positive controls for the two sub-shapes added alongside the three
-    real offenders: a `#`-prefixed message number, and a bare (non-
-    mailbox-prefixed) pair form."""
-    assert PRIVATE_CITATION.search("see message #5738 for the ruling")
-    assert PRIVATE_CITATION.search("message 5614/5626 covers both halves")
+    offender shapes above: a `#`-prefixed message number, and a bare
+    (non-mailbox-prefixed) pair form. Synthetic numbers throughout."""
+    assert PRIVATE_CITATION.search("see message #9995 for the ruling")
+    assert PRIVATE_CITATION.search("message 9994/9993 covers both halves")
 
 
 def test_a_citation_wrapped_across_a_comment_continuation_is_still_caught(tmp_path: Path) -> None:
