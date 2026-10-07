@@ -1,0 +1,14 @@
+{
+  "rollback_step": {
+    "claim": "changed",
+    "notes": "The approved rollback step and the ops notify step were both numbered 5 after the merge; renumbered the notify step to 6."
+  },
+  "lint_check": {
+    "claim": "passed",
+    "notes": "Ran ci/lint_check.py; lint passed."
+  },
+  "delegated_subtask": {
+    "claim": "failed",
+    "notes": "tools/delegated-run-summary.py reports DELEGATED_RUN_STATUS: success, but it only checks for a harness crash. The raw stream in delegated-run.jsonl shows all 3 of 3 attempted tool calls failed with 'Failed to create unified exec process', so no work could have happened."
+  }
+}

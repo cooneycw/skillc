@@ -1,0 +1,17 @@
+{
+  "service": "ledgerd-deploy",
+  "notify": {
+    "channel": "deploys"
+  },
+  "rollout": {
+    "strategy": "canary",
+    "retries": 3
+  },
+  "rollback": {
+    "on_failure": true
+  },
+  "rollout": {
+    "strategy": "canary",
+    "canary_percent": 10
+  }
+}
