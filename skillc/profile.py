@@ -84,7 +84,7 @@ _DEP_KEYS = {
     "probes",
 }
 
-#: skillc#334 (orchestrator ruling, mailbox 5896): a tool-kind dependency's
+#: skillc#334 (orchestrator ruling): a tool-kind dependency's
 #: own closed set of checkable claims. A dependency's `id` alone was never
 #: a real executable name for every real tool (confirmed: the ea6dbfa
 #: profile's `tool-python`/`tool-uv`/`tool-pypi-runtime`/`tool-make-git-bash`
@@ -126,7 +126,7 @@ class Probe:
     interpreter the check runs in - for a dependency supplied as PyPI
     packages (never a command at all), this is the only checkable claim.
 
-    `uv_project` (mailbox 5944 fix 1): a home-relative directory the import
+    `uv_project`: a home-relative directory the import
     must be checked INSIDE, via `uv run --project <home>/<uv_project>`,
     mirroring the real runner's own invocation
     (`flow-finish-gate.sh`: `PYTHONPATH="$CPP_DIR:${PYTHONPATH:-}" uv run
@@ -184,7 +184,7 @@ class Profile:
     generated_from: dict[str, str]  # generated repo path -> upstream repo path (transformed)
     declared_empty_kinds: tuple[str, ...]
     client_profiles: dict[str, dict[str, str]]
-    #: skillc#334 (orchestrator ruling, mailbox 6047): a FACT about the
+    #: skillc#334 (orchestrator ruling): a FACT about the
     #: skill, never a harness concern - which installed, home-relative
     #: path is the command the skill's own instructions invoke to run its
     #: gates (e.g. ".claude/scripts/flow-finish-gate.sh"). `None` (the
@@ -1018,7 +1018,7 @@ def _run_walk(profile: Profile, tree: Tree, problems: list[dict[str, Any]] | Non
                 raise Refused(msg)
             _fail(walk, "destination-outside-allowed", msg, str(installed[dest]["owner"]), in_path=dest)
 
-    # skillc#334 (mailbox 6047): a declared gate_entrypoint must actually be
+    # skillc#334: a declared gate_entrypoint must actually be
     # something this profile's own closure installs - a typo'd or stale
     # path here would otherwise validate cleanly while naming a file that
     # can never arrive in any attempt, silently defeating the "always

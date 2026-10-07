@@ -257,8 +257,8 @@ def _validated_subject_profile(subject: Mapping[str, object], where: str) -> str
     a repo-relative path to its `profile.json`, e.g.
     'evals/subjects/cpp-codex-flow-check-ea6dbfa'. Absent (every
     declaration before #334) means "install the selected skill files
-    only" - today's behavior, never inferred (orchestrator ruling,
-    mailbox 5820: a silent `profile.validate` attempt where `Refused`
+    only" - today's behavior, never inferred (orchestrator ruling: a
+    silent `profile.validate` attempt where `Refused`
     means "no profile" would turn a real profile defect into "no
     closure", #334's own bug coming back). Shape only here - no file is
     read; the approval binding (`_require_profile_approval`) and the

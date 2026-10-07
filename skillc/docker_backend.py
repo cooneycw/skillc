@@ -2013,7 +2013,7 @@ class DockerBackend:
     def remove_file_in_attempt(self, handle: object, path: str, timeout: float = 5.0) -> bool:
         """Deletes `path` inside the attempt's container and confirms it is
         gone, via a bare `docker exec` - deliberately NOT routed through
-        `exec_in_attempt()` (skillc#334 mailbox 5944 fix 2). That method's
+        `exec_in_attempt()` (skillc#334). That method's
         own shared tail (`_finish_result`, #76/#186) unconditionally writes
         the exec'd process's stdout back to `CONTAINER_WORKSPACE/observations`
         AFTER every call, even one whose stdout is empty - `_owned_tar_bytes`

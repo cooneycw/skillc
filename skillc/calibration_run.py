@@ -103,7 +103,7 @@ class Treatment:
     IN the live container after delivery (never trusting delivery alone),
     and the profile's own `tool`-kind dependencies, checked present in
     that same container at their declared constraint. `gate_entrypoint`
-    (mailbox 6047) is `None` unless the opted-in profile declares one -
+    is `None` unless the opted-in profile declares one -
     the SUBJECT's own fact about which installed path is its gate
     command, never inferred from `verify_home_files`' own membership."""
 
@@ -122,7 +122,7 @@ class _ClosureResult:
     #: in-container preflight reads these directly (each already carries
     #: its own `probes`, serialized by `profile._dep_record`).
     tools: tuple[dict[str, object], ...]
-    #: The profile's own declared `gate_entrypoint` (mailbox 6047), or
+    #: The profile's own declared `gate_entrypoint`, or
     #: `None` if it declares none - carried straight through, never
     #: re-derived from `home_files`' own keys.
     gate_entrypoint: str | None
@@ -169,8 +169,8 @@ def _closure_home_files(acquired: cc.AcquiredCollection, subject_profile: str, r
     tools = tuple(dep for dep in inventory["dependencies"] if dep["kind"] == "tool")
     gate_entrypoint = inventory.get("gate_entrypoint")
     assert gate_entrypoint is None or isinstance(gate_entrypoint, str)
-    # The earliest possible refusal point, before any container exists
-    # (mailbox 6047): `profile.validate()` already proved the entrypoint
+    # The earliest possible refusal point, before any container exists:
+    # `profile.validate()` already proved the entrypoint
     # is installed by SOME closure at declaration time, but THIS run's
     # own installed_home_files() - built from the live, re-validated
     # inventory above - is the actual population this attempt would
@@ -233,8 +233,8 @@ def build_treatment(
                 f"profile {subject_profile!r}'s closure disagrees with the skill surface at: {disagreeing}"
             )
         home_files.update(closure_files)
-        # Every closure file, not a curated subset (orchestrator ruling,
-        # mailbox 5872 step 2: "read back the digest of every closure
+        # Every closure file, not a curated subset (orchestrator ruling:
+        # "read back the digest of every closure
         # file") - host-side bytes were already digest-verified against
         # the inventory inside `installed_home_files`, so this is simply
         # that same digest, carried forward for the in-container re-check.
@@ -431,7 +431,7 @@ def run_calibration(
             client=client_name, cli_version=client_version, task_root=task_root, surface=surface, prompt=prompt,
             timeout=budget, credential_explicit_path=credential_explicit_path,
             receipt_context=treatment.receipt_context if treated else None,
-            # #334 (mailbox 6103): the profile-closure fields reach a real
+            # #334: the profile-closure fields reach a real
             # calibration attempt - for a TREATED arm only; the baseline
             # stays exactly as empty as `extra_home_files`/`receipt_context`
             # already do above, never partially profile-opted.

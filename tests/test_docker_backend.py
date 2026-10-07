@@ -2102,7 +2102,7 @@ def test_clean_write_probe_result_direct() -> None:
 
 
 def test_remove_file_in_attempt_removes_the_observations_write_back(base: Path, docker_state: Path) -> None:
-    """skillc#334 mailbox 5944 fix 2. `exec_in_attempt()`'s own shared tail
+    """skillc#334. `exec_in_attempt()`'s own shared tail
     (`_finish_result`, #76/#186) writes the exec'd process's stdout back to
     `CONTAINER_WORKSPACE/observations` after EVERY call, unconditionally -
     confirmed here directly, not assumed: a plain SECOND `exec_in_attempt()`

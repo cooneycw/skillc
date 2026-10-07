@@ -8,6 +8,22 @@ and version plan.
 
 ## [Unreleased]
 
+- **Replace every private mailbox-message citation in #334's own files with
+  durable phrasing** (Refs #334, #100). `tests/test_private_citations.py`
+  (issue #100's own CI guard) refused 50 citations of the form "mailbox
+  NNNN" across CHANGELOG.md, PROFILE.md, four `skillc/` modules and nine
+  test files - comments and docstrings written during #334's development
+  that cited internal fleet mailbox message numbers, none of which resolve
+  to anything outside the fleet that produced this repository. Replaced
+  with the durable attribution the guard's own docstring asks for (an issue
+  number, "the orchestrator's ruling/correction", "counter-model review")
+  or dropped where the citation added nothing the surrounding prose didn't
+  already say. Also updated `tests/test_profile_closure_preflight_live.py`'s
+  "known failure" note, written before #343 merged: `none` mode is now
+  *expected* to be accepted and reach the real runner (not refused for
+  missing `uv`/`make`), though this has not yet been exercised against a
+  real Docker daemon.
+
 - **#334's own live test builds the trial image's `trial` target explicitly**
   (Refs #334, #343). `docker/trial/Dockerfile` gained a `no-uv`/`trial` stage
   split in #343, with `trial` declared last - so an unqualified `docker build`
@@ -51,7 +67,7 @@ and version plan.
     a live #287 attempt yet, and this PR does not claim one.
 
 - **A treated calibration attempt actually installs the profile closure
-  (Refs #334, mailbox 6103)** - the orchestrator's correction to the
+  (Refs #334)** - the orchestrator's correction to the
   counter-model review's finding 1: this is #334's own outcome ("a
   treated attempt installs the profile's declared closure"), not
   architectural follow-up - without it, no real attempt receives the
@@ -367,8 +383,8 @@ and version plan.
      `harness_root=`a root-owned, non-candidate-writable directory)
      superseding the single-`root` shape this TODO previously named -
      the call site itself is still stubbed, pending #332's own follow-up.
-- **The overlay call site is un-stubbed (Refs #334, #332's #342, mailbox
-  6018)** - now that #342 landed the real two-root `apply_flow_check_
+- **The overlay call site is un-stubbed (Refs #334, #332's #342)** -
+  now that #342 landed the real two-root `apply_flow_check_
   gate_overlay` signature, `_make_before_execute`'s hook calls it for
   real as the last setup step. `harness_root` is a new fixed constant,
   `/opt/skillc-harness`. Wiring-only unit tests
@@ -386,7 +402,7 @@ and version plan.
   channel, the real forwarding shim, and the real moved script) the
   gate - not merely the preflight subset it tested before.
 - **`profile.gate_entrypoint`: a subject fact, not a harness inference
-  (Refs #334, mailbox 6047)** - the first cut of the overlay wiring above
+  (Refs #334)** - the first cut of the overlay wiring above
   fired whenever `.claude/scripts/flow-finish-gate.sh` happened to be a
   key in `verify_home_files`: orchestrator correction, "that makes
   witnessing an inference from a file's presence... the same silent-skip

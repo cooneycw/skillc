@@ -242,7 +242,7 @@ def test_red_case_a_genuine_disagreement_between_closure_and_skill_surface_is_re
 def test_build_treatment_carries_a_declared_gate_entrypoint(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """mailbox 6047: a profile's own declared `gate_entrypoint` reaches
+    """skillc#334: a profile's own declared `gate_entrypoint` reaches
     `Treatment` unchanged - a fact about the subject, never re-derived
     from `verify_home_files`' own membership."""
     content_repo, revision = _build_content_repo(tmp_path)
@@ -301,7 +301,7 @@ def test_build_treatment_gate_entrypoint_defaults_to_none(
 def test_red_case_a_gate_entrypoint_this_closure_never_installs_is_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """mailbox 6047's own named red case, exercised end to end through
+    """skillc#334's own named red case, exercised end to end through
     `build_treatment`: a declared `gate_entrypoint` this profile's closure
     never actually installs is refused - caught by `profile.validate()`
     itself (the earliest possible point, before any container exists),

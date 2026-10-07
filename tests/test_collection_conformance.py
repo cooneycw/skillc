@@ -163,7 +163,7 @@ def _planned_digest(experiment: trial.Experiment, attempt_id: str, section: str)
 def test_the_additive_repo_field_does_not_change_source_digest_or_files(
     tmp_path: Path, base: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """skillc#334 (orchestrator ruling, mailbox 5833, condition 1): adding
+    """skillc#334 (orchestrator ruling): adding
     `AcquiredCollection.repo` must not change what `source`/`files`/
     `source.digest` report - the byte-for-byte identity every existing
     calibration declaration's treatment digest binds to. Checked against a
@@ -213,7 +213,7 @@ def test_verify_repo_matches_skills_refuses_when_no_full_checkout_exists(
 def test_red_case_required_revision_check_refuses_when_git_is_absent(
     tmp_path: Path, base: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Orchestrator review (mailbox 5841): the revision check's mode is
+    """Orchestrator review: the revision check's mode is
     DECLARED, never inferred from `.git`'s absence - a live attempt (always
     `revision_check='required'`) whose checkout lost its `.git` must refuse
     outright, never silently skip the proof. Mutation check: reverting to

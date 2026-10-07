@@ -1,5 +1,5 @@
 """Tests for a tool-kind dependency's `probes` (skillc#334, orchestrator
-ruling mailbox 5896): the explicit, checkable claims a dependency makes,
+ruling): the explicit, checkable claims a dependency makes,
 replacing the pre-#334 assumption that `dep["id"]` doubles as a real
 executable name - confirmed false for the real `cpp-codex-flow-check-
 ea6dbfa` profile, whose tool ids (`tool-python`, `tool-uv`, `tool-pypi-

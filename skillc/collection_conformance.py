@@ -434,7 +434,7 @@ def acquire_degraded_collection(subject_name: str, degraded_dir: Path) -> Acquir
     return AcquiredCollection(subject, source, files, None)
 
 
-#: skillc#334 (orchestrator review, mailbox 5841): the revision check's
+#: skillc#334 (orchestrator review): the revision check's
 #: mode is DECLARED by the caller, never inferred from `.git`'s absence.
 #: Inferring it treated "I cannot see a commit identity" as "there is
 #: nothing to check" - in a live attempt, a checkout that lost its `.git`
@@ -687,8 +687,8 @@ def run_level1_agent_attempt(
     changes their behavior; `run_collection_agent_attempt` below is the one
     caller that builds and passes one.
 
-    `verify_home_files`/`preflight_tools`/`gate_entrypoint` (#334, mailbox
-    6103): a profile-opted treatment's own closure-verification fields,
+    `verify_home_files`/`preflight_tools`/`gate_entrypoint` (#334): a
+    profile-opted treatment's own closure-verification fields,
     forwarded straight through to `agent_trial.run_one_attempt` - all
     `None`/empty by default, so every existing caller (including the
     fenced `uptake_study.run_study`, #346) is unaffected. `calibration_run.

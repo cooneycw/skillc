@@ -780,7 +780,7 @@ def test_expanded_instruction_lane_dry_run_schedules_and_reconciles_all_three_ar
 def test_run_calibration_threads_closure_fields_for_the_treated_arm_only(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """skillc#334 (mailbox 6103): `run_calibration`'s own `run_attempt`
+    """skillc#334: `run_calibration`'s own `run_attempt`
     must thread `Treatment.verify_home_files`/`.preflight_tools`/
     `.gate_entrypoint` into `cc.run_level1_agent_attempt` for a TREATED
     arm, and pass none of them (empty/`None`, exactly like `extra_home_

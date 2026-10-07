@@ -280,7 +280,7 @@ class HomeFileVerificationRefused(Exception):
 
 _TOOLS_MARKER = "---skillc-334-tools---"
 
-#: skillc#334 step 4 (mailbox 6018, revised mailbox 6047): the flow-check
+#: skillc#334 step 4: the flow-check
 #: gate-witness overlay fires whenever the attempt's own `gate_entrypoint`
 #: is given - an explicit, caller-supplied fact (ultimately the SUBJECT's
 #: own profile declaration, threaded through `calibration_run.Treatment`),
@@ -309,7 +309,7 @@ def _workspace_snapshot(backend: DockerBackend, handle: object) -> dict[str, str
     `exec_in_attempt()`'s own write-back tail (#76/#186) would plant an
     `observations` file as a SIDE EFFECT of taking the very snapshot meant
     to prove nothing was planted. Used twice by `_preflight_in_container`
-    (mailbox 5944 fix 3) to prove the workspace ends up byte-identical to
+    to prove the workspace ends up byte-identical to
     its state before the preflight ran - not only that the observations
     file specifically is gone, but that nothing else (e.g.
     `exec_in_attempt()`'s own per-call `.skillc-exec-pid-<uuid>` marker)
@@ -326,8 +326,8 @@ def _preflight_in_container(
     backend: DockerBackend, handle: object, limits: Limits,
     verify_home_files: Mapping[str, str], tools: Sequence[Mapping[str, Any]],
 ) -> None:
-    """skillc#334 (orchestrator ruling, mailbox 5872 steps 2-3, probe
-    design per mailbox 5896): read back every closure file's digest FROM
+    """skillc#334 (orchestrator ruling, probe
+    design): read back every closure file's digest FROM
     THE LIVE CONTAINER, and evaluate every declared tool dependency's own
     `probes` IN THE CONTAINER - never trust that delivery alone proves
     arrival, and never check a tool on the HOST (`profile._check_tool`
@@ -351,7 +351,7 @@ def _preflight_in_container(
     `verify.py`/`gate_witness.py` already rely on (#76), read back here
     via `export()`. Every check - digests and every probe - shares ONE
     combined exec, regardless of how many files, tools or probes are
-    declared. TWO exports are needed, not one (mailbox 5944 fix 3): a
+    declared. TWO exports are needed, not one: a
     BASELINE snapshot taken before the exec even runs, and one taken
     after it, so the function can prove the workspace it leaves behind is
     byte-identical to the workspace it found - never only that the one
@@ -563,7 +563,7 @@ def _make_before_execute(
     meaningless (and unused) without either - mirrors `calibration_run.
     build_treatment`'s own subject_profile/root pairing.
 
-    `gate_entrypoint` (mailbox 6047) is the subject's OWN declared fact -
+    `gate_entrypoint` is the subject's OWN declared fact -
     ultimately `profile.Profile.gate_entrypoint`, threaded through
     `calibration_run.Treatment` - naming which installed path is this
     skill's gate command. `None` means the subject declares none, so the
@@ -617,7 +617,7 @@ def _make_before_execute(
             assert limits is not None  # checked above, before any delivery happened
             _preflight_in_container(backend, handle, limits, resolved_verify_home_files, resolved_preflight_tools)
 
-        # skillc#334 step 4 (mailbox 6018, revised 6047; #332's own
+        # skillc#334 step 4 (#332's own
         # follow-up #342 landed the two-root `install()`/`export()`/
         # `apply_flow_check_gate_overlay()` this needed): the LAST setup
         # step before the agent starts (gate_overlay.py's own ordering

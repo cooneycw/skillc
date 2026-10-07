@@ -16,8 +16,8 @@ TWO PHASES, mirroring #340's own split:
   via `DirTree` - the exact closure `agent_trial._preflight_in_container`
   would be asked to verify in a real live attempt.
 - CONTAINER PHASE: a REAL container built from `docker/trial` - the
-  SAME image every live attempt actually runs in (orchestrator ruling,
-  mailbox 5997: "#334's acceptance line is about production, and a test
+  SAME image every live attempt actually runs in (orchestrator ruling:
+  "#334's acceptance line is about production, and a test
   image would let #334 claim something the production path can't do" -
   rejecting a dedicated test image, unlike #340's own `--network none`
   cold-install proof, which deliberately scoped itself to a narrower,
@@ -30,10 +30,10 @@ TWO PHASES, mirroring #340's own split:
   signature #342 landed) are driven directly against the real backend -
   never a re-implementation of either's logic. The `none` mode therefore
   exercises the FULL production order #334 defines: install, verify,
-  preflight, overlay, (agent) gate - mailbox 6018, witnessing-fact
-  revised mailbox 6047 (below).
+  preflight, overlay, (agent) gate - with the witnessing-fact
+  revision described below.
 
-GATE_ENTRYPOINT IS AN EXPLICIT FACT, NEVER INFERRED (mailbox 6047's
+GATE_ENTRYPOINT IS AN EXPLICIT FACT, NEVER INFERRED (the orchestrator's
 correction): the profile's own `gate_entrypoint` field - this test's
 fixture profile declares `.claude/scripts/flow-finish-gate.sh`, exactly
 matching the real `evals/subjects/cpp-codex-flow-check-ea6dbfa/
@@ -60,15 +60,14 @@ output` is then asked of THAT forwarded result, not of a directly-run
 script - proving the closure, the preflight, the overlay and the
 witness all compose correctly, together, end to end.
 
-KNOWN, DOCUMENTED, CURRENT FAILURE (orchestrator ruling, mailbox 5997):
-`docker/trial/Dockerfile` has no `uv` and no `make` as of this writing,
-so the `none` mode's preflight refuses TODAY, correctly - the tool
-probes genuinely fail, which is this file's own evidence that they are
-not a blind instrument. skillc#343 adds both, pinned; merge order is
-#343 first, then #334, so by the time this file's CI run actually
-counts, the image carries what the profile declares. This is not a gap
-in this test - it is the test correctly observing a real, already-filed,
-already-sequenced gap in a DIFFERENT file.
+#343 LANDED FIRST, AS SEQUENCED: before it merged, `docker/trial/Dockerfile`
+had no `uv` and no `make`, so the `none` mode's preflight would have
+refused - correctly, since the tool probes genuinely failed, which was
+this file's own evidence that they were not a blind instrument. Now that
+#343 has landed (pinning both), `none` is expected to be accepted and
+reach the real runner - but this has not yet been exercised against a
+real Docker daemon (this environment has none); that run is still owed
+to the #315 real-Docker VM runner.
 
 TWO INDEPENDENT PROPERTIES, each with its own `_PropertyHeld` subtype
 from the start (issue #341's design, not retrofitted): a break targeting
@@ -269,7 +268,7 @@ def _closure_inputs() -> tuple[dict[str, bytes], dict[str, str], tuple[dict[str,
     files` uses, against the committed fixture snapshot - no network, no
     git. Returns `(home_files, verify_home_files, preflight_tools,
     gate_entrypoint)` - `gate_entrypoint` is the profile's own declared
-    fact (mailbox 6047), asserted non-None here since this fixture's own
+    fact, asserted non-None here since this fixture's own
     profile.json declares one; a profile that declared none would never
     reach the overlay at all, by construction, not by this test's own
     branching."""
@@ -334,7 +333,7 @@ def test_a_treated_attempts_closure_is_verified_and_the_gate_reaches_the_real_ru
         refusal_reason = ""
         try:
             at._preflight_in_container(backend, handle, Limits(timeout=120.0), verify_home_files, preflight_tools)
-            # skillc#334 step 4 / mailbox 6047: the LAST setup step before
+            # skillc#334 step 4: the LAST setup step before
             # the agent starts, using the real two-root signature #342
             # landed. `gate_entrypoint` is the profile's own EXPLICIT
             # declared fact (`_TARGET_RELPATH` is a DIFFERENT file; the

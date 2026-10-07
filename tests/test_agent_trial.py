@@ -771,7 +771,7 @@ def test_extra_home_files_default_omits_nothing_delivered_before(
 def test_the_overlay_fires_when_gate_entrypoint_is_declared_and_delivered(
     store: Path, base: Path, docker_state: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """skillc#334 step 4 (mailbox 6047): the hook calls `gate_overlay.
+    """skillc#334 step 4: the hook calls `gate_overlay.
     apply_flow_check_gate_overlay` with the real two-root signature
     whenever `gate_entrypoint` is EXPLICITLY given - never inferred from
     `verify_home_files`' own membership. Two OTHER mechanisms are
@@ -833,7 +833,7 @@ def test_the_overlay_is_skipped_when_gate_entrypoint_is_not_declared(
     never call the overlay - even if `verify_home_files` happens to carry
     a file at the exact path a different profile would use as its own
     entrypoint, since the decision is never inferred from dict
-    membership (mailbox 6047's own correction)."""
+    membership (the orchestrator's own correction)."""
     monkeypatch.setattr(at, "_preflight_in_container", lambda *a, **k: None)
     calls: list[dict[str, object]] = []
 
@@ -869,7 +869,7 @@ def test_the_overlay_is_skipped_when_gate_entrypoint_is_not_declared(
 def test_red_case_gate_entrypoint_declared_but_not_delivered_is_refused(
     store: Path, base: Path, docker_state: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """mailbox 6047's own named red case: a declared `gate_entrypoint`
+    """skillc#334's own named red case: a declared `gate_entrypoint`
     absent from the verified closure must refuse the attempt before any
     spend - never silently skip witnessing, which would be the exact
     silent-skip defect this field exists to prevent."""

@@ -1,5 +1,5 @@
 """Tests for the `subject.profile` opt-in field (skillc#334, orchestrator
-ruling mailbox 5820): a treated arm's subject may name a validated
+ruling): a treated arm's subject may name a validated
 profile to have its dependency closure installed, approval-bound to the
 profile's committed inventory digest exactly as #323 binds
 `attempts_per_arm`. Absent (every declaration before #334) is unchanged:

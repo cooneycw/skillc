@@ -1,5 +1,5 @@
 """Unit tests for `agent_trial._preflight_in_container` (skillc#334,
-orchestrator ruling mailbox 5872 steps 2-3, probe design mailbox 5896):
+orchestrator ruling, probe design):
 read back every closure file's digest from the LIVE container, and
 evaluate every declared tool dependency's own `probes` inside it - never
 on the host, and never by treating a dependency's `id` as a real
@@ -7,11 +7,11 @@ executable name (confirmed false for the real ea6dbfa profile).
 
 A stub backend (not the fake docker CLI fixture `test_agent_trial.py`
 itself uses) is enough here: `_preflight_in_container` only ever calls
-`backend.exec_in_attempt(...)`, `backend.export(...)` and (mailbox 5944
-fix 2) `backend.remove_file_in_attempt(...)`, so a plain object providing
+`backend.exec_in_attempt(...)`, `backend.export(...)` and
+`backend.remove_file_in_attempt(...)`, so a plain object providing
 exactly those three methods tests the function's own logic directly,
 without needing a real or fake container at all. `export()` is called
-TWICE (mailbox 5944 fix 3: a baseline before the exec, and once after) -
+TWICE (a baseline before the exec, and once after) -
 the stub models that by only adding `observations` (and any other
 `post_exec_extra_files`) once an exec has actually run, exactly as a
 real container would have nothing there beforehand.
@@ -145,8 +145,8 @@ def test_red_case_a_file_never_read_back_is_refused() -> None:
 
 
 def test_red_case_a_tool_with_no_probes_is_refused_before_any_exec() -> None:
-    """The live-path strictness the orchestrator required (mailbox 5896
-    point 3): unlike the host-side receipt's 'unknown, no probes
+    """The live-path strictness the orchestrator required: unlike
+    the host-side receipt's 'unknown, no probes
     declared', a profile-opted live attempt refuses outright - and
     before even building the script, so a probe-less dependency costs
     no exec at all."""
@@ -214,8 +214,8 @@ def test_red_case_export_failure_is_refused() -> None:
 def test_one_combined_exec_regardless_of_how_many_files_or_tools() -> None:
     """The whole point of combining both checks into one script: N files,
     M tools and however many probes still cost exactly one
-    exec_in_attempt (two exports regardless - a baseline and one after,
-    per mailbox 5944 fix 3 - never a third one per file or tool)."""
+    exec_in_attempt (two exports regardless - a baseline and one after -
+    never a third one per file or tool)."""
     digest = "c" * 64
     observations = (
         f"{digest}  /home/candidate/a\n{digest}  /home/candidate/b\n{digest}  /home/candidate/c\n"
