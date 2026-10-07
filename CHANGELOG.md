@@ -89,6 +89,13 @@ and version plan.
     boundary. Mutation-checked: a writable-directory-but-not-file case
     added to `tests/test_gate_overlay.py`, with its own red case proving
     a file-only check would wrongly accept it.
+- **`tests/test_claims_outran_evidence_witness_equivalence.py`'s
+  `last_run_is_fresh` half now runs** (Refs #271). It was
+  `pytest.importorskip`-SKIPPED because `skillc/stale_tree.py` lived only
+  on the separate, then-unmerged #270 branch; #270 merged to main as PR
+  #337 (`5f2c484`), and rebasing this branch picked it up with no code
+  change needed. All 11 equivalence cases (6 `_execution_observed` + 5
+  `_last_run_is_fresh`) now run and pass.
 
 - **A `discrimination-declaration` kind in `skillc.calibration`, for the
   intact-vs-degraded contrast** (Refs #287). `parse_declaration` cannot

@@ -85,16 +85,16 @@ FRESHNESS_CASES = [
 
 @pytest.mark.parametrize("label,digests,graded_digest", FRESHNESS_CASES)
 def test_last_run_is_fresh_matches_canonical(label: str, digests: list[str], graded_digest: str) -> None:
-    # `skillc.stale_tree` does not exist on THIS branch yet - it was built
-    # on the #270 branch (issue-270-flow-check-omitted-tests-incomplete-
-    # aggregate-gates) and has not merged to main. Skip rather than fall
-    # back to a second duplicated copy of the same logic here, which would
-    # defeat the point: this test exists to compare the judge's copy
-    # against the ONE canonical source, not against a third copy that
-    # could silently drift the same way. Re-run once #270 merges.
+    # `skillc.stale_tree` landed on main via #270 (PR #337, 5f2c484,
+    # 2026-10-07) - this import now always succeeds. Kept as
+    # `importorskip` rather than a plain import so a future checkout that
+    # somehow lacks the module degrades to an honest skip instead of a
+    # collection error, never falling back to a second duplicated copy of
+    # the comparison logic that could drift the same way the thing it
+    # guards against drifts.
     stale_tree = pytest.importorskip(
         "skillc.stale_tree",
-        reason="skillc.stale_tree is pending #270's own merge to main; cannot cross-check against it yet",
+        reason="skillc.stale_tree is unexpectedly absent; cannot cross-check against it",
     )
     canonical_record = GateRecord(coverage="complete", runs=tuple(_run_record(d) for d in digests),
                                   exclusivity_asserted=False, exclusivity_basis="equivalence test")

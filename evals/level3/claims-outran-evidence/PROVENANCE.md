@@ -179,21 +179,23 @@ confirmed red, then reverted. Witness records built with
 `_WitnessBackend` double, the same shape `gate-stops-early`'s own
 `qualify.py` already defines), never hand-typed JSON.
 
-**Equivalence guard, with an honest gap**:
-`tests/test_claims_outran_evidence_witness_equivalence.py` runs in the
-normal suite and compares the judge's duplicated `_execution_observed`
-against the real `skillc.gate_witness.GateRecord.execution_observed()` -
-6 cases, all pass, mutation-checked (flipping `launch-failed`'s status
-turns it red, confirmed, reverted). The `_last_run_is_fresh` half is
-**SKIPPED**, not silently omitted: `skillc.stale_tree` does not exist on
-THIS branch (`issue-271-certify-workflow-completion-claims`, cut from
-`origin/main` before `skillc/stale_tree.py` was built on the separate,
-still-unmerged `issue-270-...` branch). The test uses
-`pytest.importorskip` with an explicit reason naming this, rather than a
-second duplicated copy of the comparison logic that could drift the same
-way the thing it's meant to guard against drifts. **Re-run once #270
-merges** - the skip should disappear on its own with no code change,
-since the import will then succeed.
+**Equivalence guard**: `tests/test_claims_outran_evidence_witness_equivalence.py`
+runs in the normal suite and compares the judge's duplicated
+`_execution_observed`/`_last_run_is_fresh` against the real
+`skillc.gate_witness.GateRecord.execution_observed()`/
+`skillc.stale_tree.last_run_is_fresh()` - 11 cases, all pass,
+mutation-checked (flipping `launch-failed`'s status turns the
+`_execution_observed` half red, confirmed, reverted). The
+`_last_run_is_fresh` half was `pytest.importorskip`-SKIPPED for a time:
+`skillc.stale_tree` did not exist on this branch
+(`issue-271-certify-workflow-completion-claims`, cut from `origin/main`
+before `skillc/stale_tree.py` was built on the separate
+`issue-270-...` branch) - the test said so with an explicit reason rather
+than silently omitting it or adding a second duplicated comparison copy.
+#270 merged as PR #337 (`5f2c484`) on 2026-10-07; rebasing this branch
+onto the new `origin/main` put `skillc/stale_tree.py` on this branch too,
+and all 11 cases now run and pass with no code change - confirmed
+directly, not assumed.
 
 ## Not yet built
 
