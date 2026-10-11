@@ -1,0 +1,6 @@
+{
+  "report": "report.json",
+  "runbook": "docs/runbook.md",
+  "delegated_stream": "delegated-run.jsonl",
+  "lint_tool": "strictlint-x9"
+}

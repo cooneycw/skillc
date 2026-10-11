@@ -1,0 +1,6 @@
+{
+ "status": "FAIL",
+ "violated": [
+  "lint-claim-honest"
+ ]
+}

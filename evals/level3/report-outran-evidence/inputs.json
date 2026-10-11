@@ -1,0 +1,6 @@
+{
+  "report": "report.json",
+  "config": "config/deploy.json",
+  "delegated_stream": "delegated-run.jsonl",
+  "lint_tool": "schema-lint-v2"
+}

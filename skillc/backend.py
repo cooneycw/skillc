@@ -307,7 +307,7 @@ class ExecutionBackend(Protocol):
         Protocol provides (issue #10 review: /codex:code_review)."""
         ...
 
-    def install(self, handle: object, surface: Mapping[str, object]) -> dict[str, object]:
+    def install(self, handle: object, surface: Mapping[str, object], root: str | None = None) -> dict[str, object]:
         """Step 4: materialize the declared skill surface INSIDE the backend
         and return readiness evidence (interfaces.md's installation-receipt
         fields: selected surface, dependencies, installed paths/digests). The
@@ -316,6 +316,14 @@ class ExecutionBackend(Protocol):
         materialization contract; this seam only requires that whatever is
         passed here is what actually gets installed, not a host-side proxy
         for it.
+
+        `root` (#332 follow-up) names the destination directory `surface`'s
+        relative paths are installed under - `None` means the backend's own
+        default root (the attempt's main workspace; this Protocol does not
+        name it, since it is backend-specific). A caller installing content
+        somewhere other than the workspace - #334's profile closure delivery
+        into the agent's home directory, say - passes the destination
+        explicitly; every existing caller, passing nothing, is unaffected.
         """
         ...
 
@@ -344,6 +352,7 @@ class ExecutionBackend(Protocol):
     def exec_in_attempt(
         self, handle: object, argv: Sequence[str], limits: Limits,
         cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,
+        cwd: str | None = None, env: Mapping[str, str] | None = None,
     ) -> ExecuteResult:
         """Run `argv` inside the SAME running isolation `handle` already
         identifies, WITHOUT stopping or removing it - added for #269's
@@ -371,7 +380,31 @@ class ExecutionBackend(Protocol):
         bounds only THIS exec call. A backend that cannot isolate a
         same-identity, same-network in-place exec from the attempt's own
         primary process must refuse via `unsupported` rather than attempt
-        a weaker approximation silently."""
+        a weaker approximation silently.
+
+        `cwd`/`env` (#332 follow-up) are optional, default-`None`
+        - existing callers are unaffected. `cwd` overrides the attempt's
+          default working directory; a caller exposing this to anything the
+          subject influences must confine it first via
+          `resolve_realpath_in_attempt()`, never trust it unconfined. `env`,
+          when given, REPLACES the exec'd process's whole environment
+          (never merely adds to the isolation's own default) - needed for a
+          byte-identity claim against a declared, reproducible environment.
+          A backend that cannot honour either must say so through
+          `describe()`'s `unobserved`, matching `stdin`'s own convention,
+          never silently ignore them."""
+        ...
+
+    def resolve_realpath_in_attempt(self, handle: object, path: str, timeout: float = 2.0) -> str | None:
+        """Resolve `path` to its real, symlink-free absolute form INSIDE
+        the attempt's isolation (#332) - the confinement primitive a
+        caller must use before trusting any subject-forwarded path (e.g.
+        as `exec_in_attempt()`'s `cwd`). `None` on any failure to resolve
+        it (unreachable, nonexistent, a backend that cannot do this at
+        all) - never a guess, and never the unresolved input returned as
+        if it were confirmed. A backend without this capability returns
+        `None` unconditionally, which safely refuses every cwd a caller
+        would otherwise confine, rather than silently trusting one."""
         ...
 
     def confirm_stopped(self, handle: object) -> Confirmation:
@@ -390,12 +423,17 @@ class ExecutionBackend(Protocol):
         never treated as a confirmed stop by any caller."""
         ...
 
-    def export(self, handle: object, dest: Path) -> None:
+    def export(self, handle: object, dest: Path, root: str | None = None) -> None:
         """Step 7 (backend side only): copy `handle`'s output to `dest`, a
         controller-owned directory outside the backend. The CONTROLLER
         re-hashes and freezes what lands here (`trial.capture`); `export`
         itself produces no manifest, digest or verdict, and nothing it claims
         about what it copied is trusted without that freeze.
+
+        `root` (#332 follow-up) names the in-backend directory copied FROM -
+        `None` means the backend's own default root, matching `install()`'s
+        own `root` parameter; every existing caller, passing nothing, reads
+        the same location it always did.
 
         May be called more than once per attempt, to different `dest`
         directories, and must not mutate what it reads: the lifecycle driver

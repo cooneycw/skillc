@@ -347,11 +347,26 @@ class AcquiredCollection:
     review flagged - `materialize.acquire_snapshot`'s own `tree_digest`) and
     `run_collection_agent_attempt` (which needs `files` to build
     `extra_home_files`). Splitting acquisition out this way means calling
-    both never doubles a real subject's real git clone."""
+    both never doubles a real subject's real git clone.
+
+    `repo` (#334) is purely additive: the same full checkout `source`/`files`
+    were already built from (see `acquire_collection`'s own body) - never a
+    second clone, never a second acquisition. It exists so a profile-opted-in
+    treated arm's closure (`skillc/profile.py`'s dependencies, declared
+    against the FULL repository root, not `subject.skills_root`) can be
+    installed from the SAME checkout the skills came from, rather than
+    cloning the subject's repository a second time. `source`, `files` and
+    `source.digest` - what every existing calibration declaration binds to -
+    are computed exactly as before this field existed; nothing reads `repo`
+    unless it opts into a profile. `None` for `acquire_degraded_collection`
+    (no full checkout exists there - the degraded tree is a persisted,
+    already-mutated directory, not a git clone); a degraded arm opting into
+    a profile closure is not yet supported and must refuse, not guess."""
 
     subject: materialize.Subject
     source: materialize.Source
     files: list[demo.SubjectFile]
+    repo: Path | None
 
 
 def acquire_collection(subject_name: str, base: Path, *, checkout: Path | None = None) -> AcquiredCollection:
@@ -380,7 +395,7 @@ def acquire_collection(subject_name: str, base: Path, *, checkout: Path | None =
     except materialize.Refused as exc:
         raise demo.SubjectRefused(f"subject {subject_name!r} could not be prepared: {exc}") from exc
     files = demo.subject_surface_files(source, entries, subject.surface_spec.home_skills_relpath)
-    return AcquiredCollection(subject, source, files)
+    return AcquiredCollection(subject, source, files, repo)
 
 
 def acquire_degraded_collection(subject_name: str, degraded_dir: Path) -> AcquiredCollection:
@@ -416,7 +431,89 @@ def acquire_degraded_collection(subject_name: str, degraded_dir: Path) -> Acquir
             f"subject {subject_name!r} could not be prepared from degraded tree {degraded_dir}: {exc}"
         ) from exc
     files = demo.subject_surface_files(source, entries, subject.surface_spec.home_skills_relpath)
-    return AcquiredCollection(subject, source, files)
+    return AcquiredCollection(subject, source, files, None)
+
+
+#: skillc#334 (orchestrator review): the revision check's
+#: mode is DECLARED by the caller, never inferred from `.git`'s absence.
+#: Inferring it treated "I cannot see a commit identity" as "there is
+#: nothing to check" - in a live attempt, a checkout that lost its `.git`
+#: (a copy step, a future refactor, a snapshot path leaking into
+#: production) would then pass with no revision check at all: a blind
+#: instrument. `"required"` (every live/profile-opted path) refuses when
+#: `.git` is absent; `"snapshot"` (test/fixture paths only, which are
+#: deliberately plain directories with no commit identity at all - see
+#: `_fixture_collection`'s own docstring) skips the revision half only
+#: because there is genuinely nothing of that kind to check.
+REVISION_CHECK_MODES = ("required", "snapshot")
+
+
+def verify_repo_matches_skills(acquired: AcquiredCollection, *, revision_check: str) -> None:
+    """skillc#334: before using `acquired.repo` to build a profile's
+    full-tree `Tree`, confirm it and the skills acquisition
+    (`acquired.source`/`acquired.files`) still agree. Cheap today - both
+    come from the ONE checkout `acquire_collection` made (see
+    `AcquiredCollection.repo`'s own docstring) - which is exactly why this
+    is worth having: it is the red case that would catch a future
+    acquisition disagreeing with this one (a different checkout filter, a
+    different line-ending handling, or a second, independent clone
+    reintroduced later).
+
+    Two checks, both refusals (`demo.SubjectRefused`):
+
+    1. SAME REVISION. `revision_check` must be one of `REVISION_CHECK_MODES`.
+       `"required"` refuses outright when `acquired.repo` has no `.git` -
+       a live attempt must always be able to prove its checkout's identity,
+       never silently skip the proof because the evidence happens to be
+       absent. `"snapshot"` skips this half only for the test/fixture paths
+       that are deliberately plain directories with no commit identity at
+       all. When a `.git` IS present (always, under `"required"`), its
+       resolved `HEAD` must equal the subject's own declared `revision` -
+       the pin `demo.acquire_subject_checkout` forced both the skills
+       acquisition and this checkout to.
+    2. SAME SKILL BYTES. Every file `acquired.files` declares must be
+       byte-identical, read directly from `acquired.repo` under the
+       subject's `skills_root`, to the digest the skills acquisition
+       already verified (`SubjectFile.digest`) - never re-trusting the
+       skills acquisition's own copy, since the whole point is to check
+       the SECOND path independently.
+    """
+    if revision_check not in REVISION_CHECK_MODES:
+        raise demo.SubjectRefused(
+            f"revision_check must be one of {REVISION_CHECK_MODES}, not {revision_check!r}"
+        )
+    if acquired.repo is None:
+        raise demo.SubjectRefused(
+            "no full checkout available for this acquisition; a profile closure cannot be verified"
+        )
+    has_git = (acquired.repo / ".git").exists()
+    if revision_check == "required" and not has_git:
+        raise demo.SubjectRefused(
+            f"full checkout at {acquired.repo} has no .git directory; its revision cannot be proven, "
+            f"and revision_check='required' refuses rather than skipping the proof"
+        )
+    if has_git:
+        resolved = materialize._git(acquired.repo, "rev-parse", "--verify", "--quiet", "HEAD")
+        resolved_sha = resolved.stdout.decode().strip()
+        if resolved.returncode != 0 or resolved_sha != acquired.subject.revision:
+            raise demo.SubjectRefused(
+                f"full checkout at {acquired.repo} resolves to {resolved_sha or '<unresolvable>'!r}, not "
+                f"the declared pin {acquired.subject.revision!r} the skills acquisition used"
+            )
+    skills_root = acquired.subject.skills_root
+    for f in acquired.files:
+        repo_path = acquired.repo / skills_root / f.directory / f.rel
+        try:
+            actual = materialize.sha256_bytes(repo_path.read_bytes())
+        except OSError as exc:
+            raise demo.SubjectRefused(
+                f"full checkout is missing {f.directory}/{f.rel}, which the skills acquisition installed: {exc}"
+            ) from exc
+        if actual != f.digest:
+            raise demo.SubjectRefused(
+                f"full checkout's {f.directory}/{f.rel} digest {actual} disagrees with the skills "
+                f"acquisition's {f.digest} - the two acquisitions disagree about this subject"
+            )
 
 
 def _collection_home_files(source: materialize.Source, files: list[demo.SubjectFile]) -> dict[str, bytes]:
@@ -571,6 +668,9 @@ def run_level1_agent_attempt(
     credential_explicit_path: str | Path | None = None,
     minimum_credential_seconds: float = credential.MINIMUM_REMAINING_SECONDS,
     receipt_context: agent_trial.InstallationReceiptContext | None = None,
+    verify_home_files: Mapping[str, str] | None = None,
+    preflight_tools: Sequence[Mapping[str, object]] | None = None,
+    gate_entrypoint: str | None = None,
 ) -> dict[str, object]:
     """One real (or, in tests, scripted-fake) codex attempt against a Level 1
     task (`task_root`, default `demo.GRADER_ROOT`), in skill-free canary mode,
@@ -585,7 +685,15 @@ def run_level1_agent_attempt(
     through to `agent_trial.run_one_attempt` - `None` (the default) for
     every EXISTING caller (matched pilot's own arms), so nothing here
     changes their behavior; `run_collection_agent_attempt` below is the one
-    caller that builds and passes one."""
+    caller that builds and passes one.
+
+    `verify_home_files`/`preflight_tools`/`gate_entrypoint` (#334): a
+    profile-opted treatment's own closure-verification fields,
+    forwarded straight through to `agent_trial.run_one_attempt` - all
+    `None`/empty by default, so every existing caller (including the
+    fenced `uptake_study.run_study`, #346) is unaffected. `calibration_run.
+    run_calibration`'s own `run_attempt` is the first caller that passes
+    real values, for a TREATED arm only."""
     resolved_task_root = task_root if task_root is not None else demo.GRADER_ROOT
     resolved_prompt = prompt if prompt is not None else (resolved_task_root / "goal.md").read_text(encoding="utf-8")
     resolved_surface = surface if surface is not None else surface_mapping(task_surface(resolved_task_root / "fixture"))
@@ -600,6 +708,9 @@ def run_level1_agent_attempt(
         grader=grader, grading_backend=grading_backend,
         extra_home_files=extra_home_files,
         receipt_context=receipt_context,
+        verify_home_files=verify_home_files,
+        preflight_tools=preflight_tools,
+        gate_entrypoint=gate_entrypoint,
     )
 
 

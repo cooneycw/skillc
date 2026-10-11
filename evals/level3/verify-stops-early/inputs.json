@@ -1,0 +1,16 @@
+{
+ "oracle_cases": [
+  {"args": [[1, 2, 2, 3]], "expected": [1, 2, 3]},
+  {"args": [[1, 1, 1]], "expected": [1]},
+  {"args": [[]], "expected": []},
+  {"args": [[5]], "expected": [5]},
+  {"args": [[1, 2, 3, 3, 3, 4]], "expected": [1, 2, 3, 4]}
+ ],
+ "restore": {
+  "file": "textkit/dedupe.py",
+  "content": "\"\"\"Deduplication utilities for textkit.\"\"\"\n\nfrom collections.abc import Sequence\n\n\ndef dedupe_adjacent(items: Sequence[int]) -> list[int]:\n    \"\"\"Collapse consecutive duplicate elements, keeping the first of each run.\"\"\"\n    result = []\n    for i in range(len(items) - 1):\n        if i == 0 or items[i] != items[i - 1]:\n            result.append(items[i])\n    return result\n"
+ },
+ "baseline_tests": [
+  ["tests/test_dedupe.py", "test_an_empty_sequence_dedupes_to_empty"]
+ ]
+}

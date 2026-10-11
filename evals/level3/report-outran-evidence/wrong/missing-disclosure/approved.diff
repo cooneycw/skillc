@@ -1,0 +1,12 @@
+--- a/config/deploy.json
++++ b/config/deploy.json
+@@ -3,6 +3,7 @@
+   "notify": {
+     "channel": "deploys"
+   },
+   "rollout": {
+     "strategy": "canary",
++    "retries": 3
+   },
+   "rollback": {
+     "on_failure": true

@@ -125,7 +125,7 @@ class FakeProbeBackend:
         self.prepared.append(handle)
         return handle
 
-    def install(self, handle: object, surface: Mapping[str, object]) -> dict[str, object]:
+    def install(self, handle: object, surface: Mapping[str, object], root: str | None = None) -> dict[str, object]:
         assert isinstance(handle, _Handle)
         if self.unavailable_at == "install":
             raise BackendUnavailable("fake probe backend forced unavailable at install()")
@@ -147,12 +147,20 @@ class FakeProbeBackend:
     def exec_in_attempt(
         self, handle: object, argv: Sequence[str], limits: Limits,
         cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,
+        cwd: str | None = None, env: object = None,
     ) -> ExecuteResult:
         """#269 added this to the `ExecutionBackend` Protocol; verify.py's
         probe path never calls it - unsupported here, same as
         `ManagedBackend`'s own answer, satisfied only for structural typing."""
-        del handle, argv, limits, cancel, stdin
+        del handle, argv, limits, cancel, stdin, cwd, env
         return ExecuteResult(reason="unsupported", exit_code=None)
+
+    def resolve_realpath_in_attempt(self, handle: object, path: str, timeout: float = 2.0) -> str | None:
+        """#332 added this to the Protocol; verify.py's probe path never
+        calls it - `None` unconditionally, satisfied only for structural
+        typing."""
+        del handle, path, timeout
+        return None
 
     def execute(
         self, handle: object, argv: Sequence[str], limits: Limits,
@@ -204,7 +212,7 @@ class FakeProbeBackend:
     def confirm_stopped(self, handle: object) -> Confirmation:
         return self.force_confirm_stopped or Confirmation.CONFIRMED
 
-    def export(self, handle: object, dest: Path) -> None:
+    def export(self, handle: object, dest: Path, root: str | None = None) -> None:
         assert isinstance(handle, _Handle)
         if self.export_fails:
             raise OSError("fake probe backend forced export() failure")

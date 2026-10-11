@@ -58,8 +58,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import degrade, profile, records, verify
 from . import materialize as m
-from . import records, verify
 
 #: The criteria the primary endpoint never reads, whatever a record carries.
 PRIMARY_ENDPOINT_EXCLUDES = frozenset({verify.READINESS_CRITERION})
@@ -122,6 +122,41 @@ SHARED_KEYS = frozenset({
     "client", "model", "reasoning_effort", "tools", "permissions", "public_requirements",
     "image", "per_attempt_seconds", "total_seconds",
 })
+
+#: skillc#287: the discrimination test's own shape (intact vs degraded).
+#: Never `parse_declaration`'s business - neither arm installs nothing, so
+#: neither can be the literal `BASELINE_ARM`, and a 3-arm declaration's
+#: "treated arms share an identical subject" rule also refuses it (a
+#: degraded arm's revision is never identical to intact's, by construction
+#: - see `_expected_degraded_revision`). Orchestrator ruling on #287
+#: (2026-10-06): add this kind rather than writing a declaration against a
+#: shape `parse_declaration` cannot load.
+DISCRIMINATION_KIND = "discrimination-declaration"
+DISCRIMINATION_ARMS = ("intact", "degraded")
+
+#: The keys a degraded arm's structured mutation records (#287): the single
+#: file edit this discrimination tests, the evidence that no other
+#: installed skill or helper still carries what it removes, and the
+#: resulting file's own content identity. `skillc/degrade.py`'s own
+#: `Mutation`/`FileEdit` shape, narrowed to exactly one file edit - a
+#: discrimination declaration states ONE mutation, never a general degrade.
+#: `mutated_digest` exists because `degrade._degraded_revision`'s label
+#: encodes the LOCATION COUNT and the base revision, never the edit's own
+#: bytes (verified directly: two edits of the same file with different
+#: content produce an identical label) - so the label alone cannot tell two
+#: different removals of the same file apart. `mutated_digest` is the
+#: sha256 of the degraded file's bytes (the intact file at the pinned
+#: revision with exactly `removed_text` removed); this module checks only
+#: its FORMAT. Verifying it against the real intact file, and that
+#: `removed_text` occurs in it exactly once, are run-time preconditions of
+#: every live attempt (stated here, enforced at materialize/run time,
+#: beside the inventory re-validation precondition - not built yet).
+MUTATION_KEYS = frozenset({"skill", "path", "removed_text", "diagnose_evidence", "mutated_digest"})
+
+#: `sha256:` + 64 lowercase hex characters - `materialize.tree_digest`'s own
+#: format, reused here for `mutation.mutated_digest` rather than inventing
+#: a second digest convention.
+_SHA256_DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}")
 
 
 class DeclarationRefused(ValueError):
@@ -203,6 +238,7 @@ class CalibrationDeclaration:
     approval: Mapping[str, object] | None
     data: Mapping[str, object]
     lane: str = DEFAULT_LANE
+    task_fixture: str = "fixture"
 
 
 def _refuse(message: str) -> DeclarationRefused:
@@ -214,6 +250,117 @@ def _positive_number(value: object, what: str) -> float:
             or not math.isfinite(value) or value <= 0:
         raise _refuse(f"{what} must be a positive, finite number of seconds, not {value!r}")
     return float(value)
+
+
+def _validated_subject_profile(subject: Mapping[str, object], where: str) -> str | None:
+    """skillc#334: a treated arm's subject may OPT IN to having a
+    validated profile's dependency closure installed, by naming it here -
+    a repo-relative path to its `profile.json`, e.g.
+    'evals/subjects/cpp-codex-flow-check-ea6dbfa'. Absent (every
+    declaration before #334) means "install the selected skill files
+    only" - today's behavior, never inferred (orchestrator ruling: a
+    silent `profile.validate` attempt where `Refused`
+    means "no profile" would turn a real profile defect into "no
+    closure", #334's own bug coming back). Shape only here - no file is
+    read; the approval binding (`_require_profile_approval`) and the
+    live re-validation both happen later, where file reads are already
+    this module's convention (`_require_grader_matches`)."""
+    if "profile" not in subject:
+        return None
+    value = subject.get("profile")
+    if not isinstance(value, str) or not value.strip():
+        raise _refuse(f"{where}.profile must be a non-empty string naming a profile.json path")
+    return value
+
+
+@dataclass(frozen=True)
+class _ScheduleFields:
+    """The parsed tail every declaration kind shares, once its own arms are
+    validated - see `_parse_schedule_and_identities`."""
+    shared: dict[str, object]
+    attempts_per_arm: int
+    seed: int
+    sequence: tuple[str, ...]
+    task_path: str
+    grader_id: str
+    grader_revision: str
+    task_fixture: str
+    approval: Mapping[str, object] | None
+
+
+def _parse_schedule_and_identities(data: Mapping[str, object], names: Sequence[str]) -> _ScheduleFields:
+    """The tail every declaration kind shares once its own arms are parsed:
+    the shared identities block, `attempts_per_arm`, the seed-derived arm
+    order (checked against `names`, in the order the caller passes - a
+    calibration declaration's own declared order; a discrimination
+    declaration's fixed `DISCRIMINATION_ARMS` order), the task pointer,
+    `retain_transcripts` and the approval shape.
+
+    Pulled out of `parse_declaration` (#287) so `parse_discrimination_
+    declaration` reuses it rather than copying it. `parse_declaration`'s own
+    behavior and messages for `kind == 'calibration-declaration'` are
+    unchanged by this extraction - every check and every refusal string
+    moved here verbatim."""
+    shared = data.get("shared")
+    if not isinstance(shared, dict):
+        raise _refuse("no 'shared' block: the identities both arms run under")
+    missing = SHARED_KEYS - set(shared)
+    if missing:
+        raise _refuse(f"'shared' is missing {sorted(missing)}")
+    per_attempt = _positive_number(shared["per_attempt_seconds"], "shared.per_attempt_seconds")
+    total = _positive_number(shared["total_seconds"], "shared.total_seconds")
+
+    attempts = data.get("attempts_per_arm")
+    if isinstance(attempts, bool) or not isinstance(attempts, int) \
+            or not MIN_ATTEMPTS_PER_ARM <= attempts <= MAX_ATTEMPTS_PER_ARM:
+        raise _refuse(f"attempts_per_arm must be {MIN_ATTEMPTS_PER_ARM}-{MAX_ATTEMPTS_PER_ARM}, not {attempts!r}")
+    if total < per_attempt * attempts * len(names):
+        raise _refuse(f"shared.total_seconds {total:g} cannot cover {attempts * len(names)} attempts of "
+                      f"{per_attempt:g}s; a total cap that cuts the schedule short is not the declared schedule")
+
+    order = data.get("arm_order")
+    if not isinstance(order, dict):
+        raise _refuse("no arm_order: the seed and the sequence it produced are recorded before any attempt")
+    seed, sequence = order.get("seed"), order.get("sequence")
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise _refuse("arm_order.seed must be an integer")
+    if not isinstance(sequence, list) or not all(isinstance(s, str) for s in sequence):
+        raise _refuse("arm_order.sequence must be a list of arm names")
+    expected = derive_arm_order(seed, names, attempts)
+    if sequence != expected:
+        raise _refuse(f"arm_order.sequence is not what seed {seed} derives ({expected}); "
+                      "an order chosen by hand is not a randomized one")
+
+    task = data.get("task")
+    if not isinstance(task, dict) or not all(isinstance(task.get(k), str) and task.get(k)
+                                             for k in ("path", "grader_id", "grader_revision")):
+        raise _refuse("task must name path, grader_id and grader_revision")
+    #: Optional (#287): which subdirectory under task.path a live attempt is
+    #: actually graded against. Defaults to "fixture" - every declaration
+    #: written before this field existed names no "fixture" key, so it
+    #: parses to the identical tree it always ran, unchanged. gate-stops-
+    #: early's discrimination case is the first to need a different one
+    #: (discrimination/fixture): that task's own top-level fixture/ never
+    #: exercises the skipped-gate obligation at all (its Makefile declares
+    #: every gate), so running the default tree would make the study #150
+    #: by construction - found and fixed before any attempt, not after.
+    fixture = task.get("fixture", "fixture")
+    if not isinstance(fixture, str) or not fixture.strip():
+        raise _refuse("task.fixture must be a non-empty string naming a subdirectory under task.path")
+    if m._escapes(fixture):
+        raise _refuse(f"task.fixture {fixture!r} must be a relative subdirectory under task.path, "
+                      "never absolute and never climbing out of it")
+    if data.get("retain_transcripts") is not True:
+        raise _refuse("retain_transcripts must be true: report question 4 is answered from transcripts (#202)")
+    approval = data.get("approval")
+    if approval is not None and not isinstance(approval, dict):
+        raise _refuse("approval is null (not yet approved) or an object recording who approved and when")
+
+    return _ScheduleFields(
+        shared=dict(shared), attempts_per_arm=attempts, seed=seed, sequence=tuple(sequence),
+        task_path=str(task["path"]), grader_id=str(task["grader_id"]), grader_revision=str(task["grader_revision"]),
+        task_fixture=fixture, approval=approval,
+    )
 
 
 def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
@@ -258,6 +405,7 @@ def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
     for arm in treated:
         if not isinstance(arm.get("subject"), dict):
             raise _refuse(f"arm {arm['name']!r} names no subject to install")
+        _validated_subject_profile(arm["subject"], f"arm {arm['name']!r}.subject")
         provided = PROVIDED_KEYS & set(arm)
         # The expanded-instruction lane's E arm carries `instruction` alone
         # (the inlined obligation text, no skill to name) - every other
@@ -324,56 +472,130 @@ def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
         raise _refuse("a provided-skill arm needs a natural arm beside it, installing the same subject "
                       "without the instruction; alone it confounds value with the instruction")
 
-    shared = data.get("shared")
-    if not isinstance(shared, dict):
-        raise _refuse("no 'shared' block: the identities both arms run under")
-    missing = SHARED_KEYS - set(shared)
-    if missing:
-        raise _refuse(f"'shared' is missing {sorted(missing)}")
-    per_attempt = _positive_number(shared["per_attempt_seconds"], "shared.per_attempt_seconds")
-    total = _positive_number(shared["total_seconds"], "shared.total_seconds")
-
-    attempts = data.get("attempts_per_arm")
-    if isinstance(attempts, bool) or not isinstance(attempts, int) \
-            or not MIN_ATTEMPTS_PER_ARM <= attempts <= MAX_ATTEMPTS_PER_ARM:
-        raise _refuse(f"attempts_per_arm must be {MIN_ATTEMPTS_PER_ARM}-{MAX_ATTEMPTS_PER_ARM}, not {attempts!r}")
-    if total < per_attempt * attempts * len(names):
-        raise _refuse(f"shared.total_seconds {total:g} cannot cover {attempts * len(names)} attempts of "
-                      f"{per_attempt:g}s; a total cap that cuts the schedule short is not the declared schedule")
-
-    order = data.get("arm_order")
-    if not isinstance(order, dict):
-        raise _refuse("no arm_order: the seed and the sequence it produced are recorded before any attempt")
-    seed, sequence = order.get("seed"), order.get("sequence")
-    if isinstance(seed, bool) or not isinstance(seed, int):
-        raise _refuse("arm_order.seed must be an integer")
-    if not isinstance(sequence, list) or not all(isinstance(s, str) for s in sequence):
-        raise _refuse("arm_order.sequence must be a list of arm names")
-    expected = derive_arm_order(seed, names, attempts)
-    if sequence != expected:
-        raise _refuse(f"arm_order.sequence is not what seed {seed} derives ({expected}); "
-                      "an order chosen by hand is not a randomized one")
-
-    task = data.get("task")
-    if not isinstance(task, dict) or not all(isinstance(task.get(k), str) and task.get(k)
-                                             for k in ("path", "grader_id", "grader_revision")):
-        raise _refuse("task must name path, grader_id and grader_revision")
-    if data.get("retain_transcripts") is not True:
-        raise _refuse("retain_transcripts must be true: report question 4 is answered from transcripts (#202)")
-    approval = data.get("approval")
-    if approval is not None and not isinstance(approval, dict):
-        raise _refuse("approval is null (not yet approved) or an object recording who approved and when")
-
+    fields = _parse_schedule_and_identities(data, names)
     return CalibrationDeclaration(
-        arms=tuple(names), attempts_per_arm=attempts, arm_order=tuple(sequence), seed=seed,
-        shared=dict(shared), task_path=str(task["path"]), grader_id=str(task["grader_id"]),
-        grader_revision=str(task["grader_revision"]), retain_transcripts=True, approval=approval,
-        data=dict(data), lane=str(lane),
+        arms=tuple(names), attempts_per_arm=fields.attempts_per_arm, arm_order=fields.sequence, seed=fields.seed,
+        shared=fields.shared, task_path=fields.task_path, grader_id=fields.grader_id,
+        grader_revision=fields.grader_revision, retain_transcripts=True, approval=fields.approval,
+        data=dict(data), lane=str(lane), task_fixture=fields.task_fixture,
     )
 
 
 def load_declaration(path: Path) -> CalibrationDeclaration:
     return parse_declaration(json.loads(path.read_text(encoding="utf-8")))
+
+
+@dataclass(frozen=True)
+class DiscriminationDeclaration:
+    intact_subject: Mapping[str, object]
+    degraded_subject: Mapping[str, object]
+    mutation: Mapping[str, object]
+    attempts_per_arm: int
+    arm_order: tuple[str, ...]
+    seed: int
+    shared: Mapping[str, object]
+    task_path: str
+    grader_id: str
+    grader_revision: str
+    retain_transcripts: bool
+    tolerance_non_evaluable_per_arm: int
+    approval: Mapping[str, object] | None
+    data: Mapping[str, object]
+    task_fixture: str = "fixture"
+
+
+def _expected_degraded_revision(intact_subject: Mapping[str, object]) -> str:
+    """The degraded arm's revision label, DERIVED from the intact subject's
+    own pin, never typed - `degrade.py`'s own formula (`_degraded_revision`),
+    called rather than copied, so the two cannot silently drift apart. A
+    discrimination declaration states exactly ONE structured mutation
+    (`MUTATION_KEYS`), so the location count is always 1; verified directly
+    that the edit's skill/path/content play no part in this label (only the
+    location COUNT and the base revision do) - that is what `mutated_digest`
+    exists to cover instead (see `MUTATION_KEYS`'s comment)."""
+    base = m.Source(
+        kind="git", locator=str(intact_subject["locator"]), revision=str(intact_subject["revision"]),
+        surface_dir=Path("."), digest="", origin=Path("."),
+    )
+    mutation = degrade.Mutation(edits=(degrade.FileEdit(skill="_", path="_", content=b"_"),))
+    return degrade._degraded_revision(base, mutation)
+
+
+def parse_discrimination_declaration(data: Mapping[str, object]) -> DiscriminationDeclaration:
+    """skillc#287's discrimination test (intact vs degraded): validates the
+    shape ADR 0005 needs fixed before any attempt - task, schedule,
+    tolerance, arm order, the mutation's own identity - without going
+    through `parse_declaration`, which structurally cannot express this
+    contrast (see `DISCRIMINATION_KIND`'s comment). Reuses `parse_
+    declaration`'s own shared/attempts/arm_order/task machinery via
+    `_parse_schedule_and_identities`, never a copy of it."""
+    if data.get("kind") != DISCRIMINATION_KIND:
+        raise _refuse(f"kind is {data.get('kind')!r}, not {DISCRIMINATION_KIND!r}")
+    arms_raw = data.get("arms")
+    if not isinstance(arms_raw, list) or len(arms_raw) != 2 or not all(isinstance(a, dict) for a in arms_raw):
+        raise _refuse("exactly two arms are declared: 'intact' and 'degraded'")
+    by_name = {a.get("name"): a for a in arms_raw}
+    if set(by_name) != set(DISCRIMINATION_ARMS):
+        raise _refuse(f"arms must be named exactly {sorted(DISCRIMINATION_ARMS)}, got "
+                      f"{sorted(str(n) for n in by_name)}")
+    intact_arm, degraded_arm = by_name["intact"], by_name["degraded"]
+
+    intact_subject = intact_arm.get("subject")
+    if not isinstance(intact_subject, dict) or not all(
+            isinstance(intact_subject.get(k), str) and intact_subject.get(k)
+            for k in ("name", "locator", "revision")):
+        raise _refuse("arm 'intact' needs a subject naming name, locator and revision")
+    _validated_subject_profile(intact_subject, "arm 'intact'.subject")
+
+    degraded_subject = degraded_arm.get("subject")
+    if not isinstance(degraded_subject, dict) or not all(
+            isinstance(degraded_subject.get(k), str) and degraded_subject.get(k)
+            for k in ("name", "locator", "revision")):
+        raise _refuse("arm 'degraded' needs a subject naming name, locator and revision")
+    if set(degraded_subject) != set(intact_subject):
+        extra = sorted(set(degraded_subject) ^ set(intact_subject))
+        raise _refuse(f"arm 'degraded' subject carries {extra} that 'intact' does not, or vice versa; a "
+                      "discrimination contrast is the SAME subject, mutated - every key but revision must "
+                      "match exactly, whatever keys a future subject dict grows")
+    mismatched_identity = [k for k in intact_subject
+                           if k != "revision" and degraded_subject.get(k) != intact_subject.get(k)]
+    if mismatched_identity:
+        raise _refuse(f"arm 'degraded' names a different subject {mismatched_identity} than 'intact'; "
+                      "a discrimination contrast is the SAME subject, mutated - not a different one")
+
+    mutation = degraded_arm.get("mutation")
+    if not isinstance(mutation, dict) or set(mutation) != MUTATION_KEYS \
+            or not all(isinstance(mutation.get(k), str) and mutation.get(k) for k in MUTATION_KEYS):
+        raise _refuse(f"arm 'degraded' needs a 'mutation' naming exactly {sorted(MUTATION_KEYS)}, each a "
+                      "non-empty string - diagnose_evidence is not optional: without it, nothing shows "
+                      "that no other installed skill or helper still carries what this removes")
+    if not _SHA256_DIGEST_RE.fullmatch(mutation["mutated_digest"]):
+        raise _refuse(f"mutation.mutated_digest must be 'sha256:' + 64 lowercase hex characters, not "
+                      f"{mutation['mutated_digest']!r}")
+
+    expected_revision = _expected_degraded_revision(intact_subject)
+    if degraded_subject["revision"] != expected_revision:
+        raise _refuse(f"arm 'degraded' subject.revision is {degraded_subject['revision']!r}, not the derived "
+                      f"{expected_revision!r} - a hand-typed label is not a recorded mutation")
+
+    tolerance = data.get("tolerance")
+    non_evaluable = tolerance.get("non_evaluable_per_arm") if isinstance(tolerance, dict) else None
+    if isinstance(non_evaluable, bool) or not isinstance(non_evaluable, int) or non_evaluable < 1:
+        raise _refuse("tolerance.non_evaluable_per_arm must be a positive integer, fixed before any attempt runs")
+
+    fields = _parse_schedule_and_identities(data, list(DISCRIMINATION_ARMS))
+    return DiscriminationDeclaration(
+        intact_subject=dict(intact_subject), degraded_subject=dict(degraded_subject), mutation=dict(mutation),
+        attempts_per_arm=fields.attempts_per_arm, arm_order=fields.sequence, seed=fields.seed,
+        shared=fields.shared, task_path=fields.task_path, grader_id=fields.grader_id,
+        grader_revision=fields.grader_revision, retain_transcripts=True,
+        tolerance_non_evaluable_per_arm=non_evaluable, approval=fields.approval, data=dict(data),
+        task_fixture=fields.task_fixture,
+    )
+
+
+def load_discrimination_declaration(path: Path) -> DiscriminationDeclaration:
+    return parse_discrimination_declaration(json.loads(path.read_text(encoding="utf-8")))
 
 
 def _unknown_leaves(value: object, where: str) -> list[str]:
@@ -402,12 +624,19 @@ REQUIRED_IDENTITIES: tuple[tuple[str, ...], ...] = (
 )
 
 
+def _treated_arm(declaration: CalibrationDeclaration) -> dict[str, object] | None:
+    """The first non-baseline arm - `calibration-declaration`'s own
+    "treatment" identity path, factored out so `_identity_at` and
+    `require_approved`'s profile-opt-in check (#334) read the same arm."""
+    arms = declaration.data.get("arms")
+    return next((a for a in arms if isinstance(a, dict) and a.get("name") != BASELINE_ARM), None) \
+        if isinstance(arms, list) else None
+
+
 def _identity_at(declaration: CalibrationDeclaration, path: tuple[str, ...]) -> object:
     node: object
     if path[0] == "treatment":
-        arms = declaration.data.get("arms")
-        node = next((a for a in arms if isinstance(a, dict) and a.get("name") != BASELINE_ARM),
-                    None) if isinstance(arms, list) else None
+        node = _treated_arm(declaration)
     else:
         node = declaration.data.get(path[0])
     for key in path[1:]:
@@ -415,25 +644,18 @@ def _identity_at(declaration: CalibrationDeclaration, path: tuple[str, ...]) -> 
     return node
 
 
-def require_approved(declaration: CalibrationDeclaration, root: Path) -> None:
-    """Refuse to authorize a run of this declaration unless its approval is
-    recorded (who and when, and the exact schedule size approved), every
-    `REQUIRED_IDENTITIES` field holds a real value, no identity anywhere
-    still says `UNKNOWN`, and the declared task's grader is the one on disk.
-    A declaration that validates is still only a plan (ADR 0005).
-
-    #323: `approval.attempts_per_arm` must equal `declaration.attempts_per_arm`
-    - checked as its own field, not inferred from `approval.scope`'s prose.
-    Without this, raising #323's own MAX_ATTEMPTS_PER_ARM opened a gap this
-    function did not previously need to close: `parse_declaration` already
+def _require_schedule_approval(approval: Mapping[str, object] | None, attempts_per_arm: int) -> Mapping[str, object]:
+    """#323: `approval` must record who/when and the exact schedule size
+    approved - checked as its own field, not inferred from `approval.scope`'s
+    prose. Without this, raising #323's own `MAX_ATTEMPTS_PER_ARM` opened a
+    gap this check did not previously need to close: a parser already
     refuses an `attempts_per_arm` whose `arm_order.sequence` was not
-    re-derived from it (`derive_arm_order`), but a declaration edited to
-    change BOTH `attempts_per_arm` and a freshly re-derived `arm_order`
-    together is internally self-consistent and would otherwise sail through
-    this function on an approval that was never asked about the new size -
-    exactly the "approved manifest eligible for a different run" ADR 0005
-    forbids."""
-    approval = declaration.approval
+    re-derived from it, but a declaration edited to change BOTH
+    `attempts_per_arm` and a freshly re-derived `arm_order` together is
+    internally self-consistent and would otherwise sail through on an
+    approval that was never asked about the new size - exactly the
+    "approved manifest eligible for a different run" ADR 0005 forbids.
+    Shared by every declaration kind's `require_approved*`."""
     if not approval or not all(isinstance(approval.get(k), str) and approval.get(k) for k in ("by", "at")):
         raise _refuse("not approved: 'approval' must record who approved it ('by') and when ('at') "
                       "before any attempt runs (ADR 0005)")
@@ -442,9 +664,92 @@ def require_approved(declaration: CalibrationDeclaration, root: Path) -> None:
         raise _refuse("not approved: 'approval.attempts_per_arm' must record the exact schedule size "
                       "approved, as an integer - a declaration edited to a different size afterward "
                       "must be refused as unapproved, not silently re-matched by prose alone")
-    if approved_attempts != declaration.attempts_per_arm:
+    if approved_attempts != attempts_per_arm:
         raise _refuse(f"approved for attempts_per_arm={approved_attempts}, not the declared "
-                      f"{declaration.attempts_per_arm}; a changed schedule needs its own approval")
+                      f"{attempts_per_arm}; a changed schedule needs its own approval")
+    return approval
+
+
+def _require_grader_matches(root: Path, task_path: str, grader_id: str, grader_revision: str) -> None:
+    """The declared task's grader is the one on disk - shared by every
+    declaration kind's `require_approved*`."""
+    grader = verify.GraderDef.load(root / task_path)
+    if (grader.id, grader.revision) != (grader_id, grader_revision):
+        raise _refuse(f"the task's grader is {grader.id!r} revision {grader.revision!r}, not the declared "
+                      f"{grader_id!r} revision {grader_revision!r}")
+
+
+def _require_task_fixture(root: Path, task_path: str, task_fixture: str, approval: Mapping[str, object]) -> None:
+    """task.fixture (#287) is an approval-bound identity - an approval
+    covers exactly one tree, the same #323 pattern `attempts_per_arm`/
+    `mutated_digest`/`profile_inventory_digest` already use. The tree must
+    exist on disk (a declaration naming a fixture nobody committed cannot
+    be run), and the approval must name the SAME fixture, defaulting to
+    "fixture" when the approval predates this field - every already-
+    approved manifest named no other tree, so it stays valid unchanged;
+    only a declaration asking for a NON-default tree needs an approval
+    that says so explicitly. Shared by every declaration kind's
+    `require_approved*`, alongside `_require_grader_matches`, which is why
+    it takes the same `root`/`task_path`."""
+    fixture_dir = root / task_path / task_fixture
+    if not fixture_dir.is_dir():
+        raise _refuse(f"task.fixture {task_fixture!r} does not exist under {task_path!r} ({fixture_dir})")
+    approved_fixture = approval.get("task_fixture", "fixture")
+    if approved_fixture != task_fixture:
+        raise _refuse(f"approved for task.fixture={approved_fixture!r}, not the declared {task_fixture!r}; "
+                      "a changed fixture tree needs its own approval")
+
+
+def _require_profile_approval(subject: Mapping[str, object], approval: Mapping[str, object], root: Path) -> None:
+    """skillc#334: when `subject.profile` names a validated profile, the
+    approval must record `profile_inventory_digest` matching the
+    COMMITTED inventory evidence at that path - an approval binds to one
+    exact closure, exactly as #323 binds `attempts_per_arm`. A no-op when
+    `subject.profile` is absent (today's behavior: selected skill files
+    only, nothing to bind). This checks the APPROVAL's binding against
+    the repo's committed evidence file only - it is NOT the live
+    re-validation against the subject's actual current source (that runs
+    later, against a real acquisition, and is a separate precondition of
+    every live attempt, not of approval)."""
+    profile_path = subject.get("profile")
+    if profile_path is None:
+        return
+    approved_digest = approval.get("profile_inventory_digest")
+    if not isinstance(approved_digest, str) or not approved_digest:
+        raise _refuse(
+            "not approved: 'approval.profile_inventory_digest' must record the exact closure digest "
+            "approved, as a non-empty string - subject.profile names a profile but no closure was ever "
+            "approved for it"
+        )
+    inventory_path = root / str(profile_path) / "evidence" / "inventory.json"
+    try:
+        committed = json.loads(inventory_path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise _refuse(f"subject.profile {profile_path!r} names no readable evidence/inventory.json: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise _refuse(f"{inventory_path} is not valid JSON: {exc}") from exc
+    if not isinstance(committed, dict):
+        raise _refuse(f"{inventory_path} does not parse as a JSON object")
+    committed_digest = profile.inventory_digest(committed)
+    if approved_digest != committed_digest:
+        raise _refuse(
+            f"approved for profile_inventory_digest={approved_digest!r}, but the committed inventory at "
+            f"{inventory_path} is now {committed_digest!r} - the profile's evidence changed since approval "
+            f"and needs its own approval"
+        )
+
+
+def require_approved(declaration: CalibrationDeclaration, root: Path) -> None:
+    """Refuse to authorize a run of this declaration unless its approval is
+    recorded (who and when, and the exact schedule size approved), every
+    `REQUIRED_IDENTITIES` field holds a real value, no identity anywhere
+    still says `UNKNOWN`, and the declared task's grader is the one on disk.
+    A declaration that validates is still only a plan (ADR 0005)."""
+    approval = _require_schedule_approval(declaration.approval, declaration.attempts_per_arm)
+    treated = _treated_arm(declaration)
+    treated_subject = treated.get("subject") if treated is not None else None
+    if isinstance(treated_subject, dict):
+        _require_profile_approval(treated_subject, approval, root)
     absent = [".".join(path) for path in REQUIRED_IDENTITIES
               if not (isinstance(v := _identity_at(declaration, path), str) and v.strip() and v != UNKNOWN)]
     if absent:
@@ -454,10 +759,70 @@ def require_approved(declaration: CalibrationDeclaration, root: Path) -> None:
         arms if isinstance(arms, list) else [], "arms")
     if unknown:
         raise _refuse(f"identities still UNKNOWN: {unknown}; record them before approving a run")
-    grader = verify.GraderDef.load(root / declaration.task_path)
-    if (grader.id, grader.revision) != (declaration.grader_id, declaration.grader_revision):
-        raise _refuse(f"the task's grader is {grader.id!r} revision {grader.revision!r}, not the declared "
-                      f"{declaration.grader_id!r} revision {declaration.grader_revision!r}")
+    _require_grader_matches(root, declaration.task_path, declaration.grader_id, declaration.grader_revision)
+    _require_task_fixture(root, declaration.task_path, declaration.task_fixture, approval)
+
+
+#: skillc#287: a discrimination declaration's own identity fields - parallel
+#: to `REQUIRED_IDENTITIES`, which is `calibration-declaration`'s baseline/
+#: treatment shape and does not apply here (neither arm is `BASELINE_ARM`).
+REQUIRED_IDENTITIES_DISCRIMINATION: tuple[tuple[str, ...], ...] = (
+    ("shared", "client", "name"), ("shared", "client", "version"),
+    ("shared", "model"), ("shared", "reasoning_effort"),
+    ("shared", "image", "tag"), ("shared", "image", "digest"),
+    ("shared", "tools"), ("shared", "permissions"), ("shared", "public_requirements"),
+    ("intact", "subject", "name"), ("intact", "subject", "locator"), ("intact", "subject", "revision"),
+    ("degraded", "subject", "name"), ("degraded", "subject", "locator"), ("degraded", "subject", "revision"),
+    ("degraded", "mutation", "skill"), ("degraded", "mutation", "path"),
+    ("degraded", "mutation", "removed_text"), ("degraded", "mutation", "diagnose_evidence"),
+    ("degraded", "mutation", "mutated_digest"),
+)
+
+
+def _identity_at_discrimination(declaration: DiscriminationDeclaration, path: tuple[str, ...]) -> object:
+    node: object
+    if path[0] in DISCRIMINATION_ARMS:
+        arms_raw = declaration.data.get("arms")
+        node = next((a for a in arms_raw if isinstance(a, dict) and a.get("name") == path[0]), None) \
+            if isinstance(arms_raw, list) else None
+    else:
+        node = declaration.data.get(path[0])
+    for key in path[1:]:
+        node = node.get(key) if isinstance(node, dict) else None
+    return node
+
+
+def require_approved_discrimination(declaration: DiscriminationDeclaration, root: Path) -> None:
+    """The discrimination-declaration counterpart to `require_approved`:
+    the same approval/identity/grader-on-disk checks, against this kind's
+    own identity paths (`REQUIRED_IDENTITIES_DISCRIMINATION`) rather than
+    the baseline/treatment shape that does not exist here - plus one check
+    `require_approved` has no counterpart for: `approval.mutated_digest`
+    must equal the declared mutation's own `mutated_digest` (the same
+    #323 pattern as `attempts_per_arm`, applied to the OTHER thing that can
+    change after approval without changing the schedule size: a different
+    `removed_text` on the same file produces a different degraded file,
+    hence a different `mutated_digest`, and an approval is for one exact
+    degraded file, never "whatever this field says now")."""
+    approval = _require_schedule_approval(declaration.approval, declaration.attempts_per_arm)
+    approved_digest = approval.get("mutated_digest")
+    declared_digest = declaration.mutation.get("mutated_digest")
+    if approved_digest != declared_digest:
+        raise _refuse(f"approved for mutation.mutated_digest={approved_digest!r}, not the declared "
+                      f"{declared_digest!r}; a changed mutation needs its own approval")
+    _require_profile_approval(declaration.intact_subject, approval, root)
+    absent = [".".join(path) for path in REQUIRED_IDENTITIES_DISCRIMINATION
+              if not (isinstance(v := _identity_at_discrimination(declaration, path), str)
+                      and v.strip() and v != UNKNOWN)]
+    if absent:
+        raise _refuse(f"identities not recorded: {absent}; record them before approving a run")
+    arms = declaration.data.get("arms")
+    unknown = _unknown_leaves(declaration.shared, "shared") + _unknown_leaves(
+        arms if isinstance(arms, list) else [], "arms")
+    if unknown:
+        raise _refuse(f"identities still UNKNOWN: {unknown}; record them before approving a run")
+    _require_grader_matches(root, declaration.task_path, declaration.grader_id, declaration.grader_revision)
+    _require_task_fixture(root, declaration.task_path, declaration.task_fixture, approval)
 
 
 def validate_expanded_instruction_lane(declaration: CalibrationDeclaration, root: Path) -> None:

@@ -57,7 +57,15 @@
       "scope": "common",
       "version": ">=3.0",
       "supply": "environment",
-      "unreferenced_reason": "interpreter command word"
+      "unreferenced_reason": "interpreter command word",
+      "probes": [
+        {
+          "kind": "command",
+          "name": "python3",
+          "version_args": ["--version"],
+          "constraint": ">=3.0"
+        }
+      ]
     }
   ],
   "unsupported": [],

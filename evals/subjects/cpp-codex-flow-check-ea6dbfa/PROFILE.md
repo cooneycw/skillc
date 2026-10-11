@@ -3,7 +3,7 @@
 - Declaration: [profile.json](profile.json) - the machine form; this page explains it
 - Subject: [subject.json](subject.json) - this profile's OWN pin, never `../cpp-codex/subject.json`
 - Validator: `skillc profile validate` ([profiles spec](../../../docs/specs/evaluation-facility/profiles.md))
-- Evidence: [evidence/inventory.json](evidence/inventory.json), generated 2026-10-06 (#265/#287)
+- Evidence: [evidence/inventory.json](evidence/inventory.json), generated 2026-10-06 (#265/#287), regenerated 2026-10-07 (#334: the four `tool`-kind dependencies gained explicit `probes` - see below), regenerated again 2026-10-07 (#334 counter-model review fix: `tool-pypi-runtime`'s `python-import` probe gained `uv_project`, so the import is checked through the checkout's own `uv` environment, the way the real runner runs it, rather than through a bare system interpreter), regenerated again 2026-10-07 (#334: the profile declares `gate_entrypoint: ".claude/scripts/flow-finish-gate.sh"` - a fact about this skill, not a harness concern - naming which installed path is the command its own instructions invoke to run its gates; a live attempt refuses rather than silently skipping witnessing if this path is ever absent from its verified closure)
 - Obligations: #264's flow-check case contract (`evals/workflow-contracts/flow-check/`) - cites `reference.md` line numbers at the OLDER `85e9b03` pin; this profile's content moved, so those citations describe [the other profile](../cpp-codex-flow-check/PROFILE.md), not this one
 
 **This is a SEPARATE profile from
@@ -51,9 +51,20 @@ assumed from the old profile's citations):
 `skillc profile diagnose`/`validate` both report **zero problems, closed** at
 this pin (27 unsupported references, 10 dependencies). Install-level claims
 the 85e9b03 PROFILE.md records (actual host installs, canary isolation,
-#303's marker proof) are NOT re-verified at this pin - this re-declaration's
-bounded scope was reaching zero unresolved references under `diagnose`, not
-re-running #266/#274's install proofs. Treat those as owed, not inherited.
+#303's marker proof) were NOT re-verified at this pin when this profile was
+first declared - that re-declaration's bounded scope was reaching zero
+unresolved references under `diagnose`, not re-running #266/#274's install
+proofs. #266's own work since then confirmed, standalone and against THIS
+pin's committed fixture (`tests/fixtures/profile-cpp-codex-flow-check-
+ea6dbfa/`, no network): `profile.install()` succeeds (4 tools checked),
+`checkout-detection-marker` installs with the exact #303 content, and the
+installed `uv.lock` digest matches the fixture's own. The cold-container
+run itself - `tests/test_profile_install_cold_container_live.py`, exercising
+all of this inside a real `--network none` container with zero bind mounts -
+is CODE, reviewed, not yet EXECUTED: no Docker daemon in the implementation
+environment, so real-daemon execution remains owed to the operator's
+real-Docker runner (#315), same as every other live test in this
+repository.
 
 ## Declared unsupported (27 entries)
 
@@ -82,6 +93,25 @@ Unchanged from the 85e9b03 profile: `codex` **declared**; `claude-code`,
 `browser`, `security-scanner`, `services` **unsupported** pending their own
 readiness proofs.
 
+## Known limits
+
+- **The cold-container proof's boundary (orchestrator condition, #266).**
+  `tests/test_profile_install_cold_container_live.py` proves an OFFLINE
+  install from a pin-matched `uv` cache - the cache is pre-warmed from this
+  profile's own pinned `uv.lock` at image-build time
+  (`docker/profile-cold-install/Dockerfile`), and a run-time digest check
+  refuses to trust it if that lockfile ever drifts from the one actually
+  being installed. It does NOT prove, and does not claim to prove, how a
+  live trial container (which needs the network, for the model API)
+  behaves - that remains #237's own path, unchanged by this issue.
+- **PyPI resolution is still external to the PROFILE itself.** The offline
+  guarantee above comes from the cold-install image's own pre-warmed cache,
+  not from anything this profile declares - a caller installing this
+  profile WITHOUT that image (the plain host install `tests/test_profile_
+  install.py` already proves) still needs the network the first time it
+  resolves `pydantic`/`pyyaml` from the lock, exactly as the 85e9b03
+  profile's own PROFILE.md already states for itself.
+
 ## Regression evidence
 
 `tests/test_cpp_codex_flow_check_redeclare.py`, with a committed real-source
@@ -91,3 +121,15 @@ pin, trimmed to exactly what diagnosing needs): the 85e9b03 profile's frozen
 copy against this snapshot reports the exact set of 20 distinct
 unresolved-reference strings (21 occurrences); this profile against the same
 snapshot reports zero.
+
+`tests/test_profile_closure_preflight_live.py` (#334): the installed-
+closure proof against a REAL container built from `docker/trial` - not a
+dedicated test image, since #334's own acceptance claim is about the
+production trial image. Its intact (`none`) mode exercises the full
+production order end to end - install, verify, preflight, the real
+two-root gate overlay (#332/#342), and the gate itself, reached through
+a real `GateWitness`/decide-reply channel and the real forwarding shim.
+Currently refuses at preflight (the image has no `uv`/`make` yet,
+tracked separately as #343); the two break modes (`missing-closure`,
+`tampered-closure`) pass today regardless, since they prove the
+preflight's own refusal correctness, which does not depend on #343.

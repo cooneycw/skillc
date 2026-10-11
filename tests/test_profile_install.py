@@ -75,9 +75,14 @@ def test_missing_dependency(tmp_path: Path, source_file: str) -> None:
 
 
 def test_wrong_tool_version(setup: tuple[dict[str, Any], p.Tree, Path]) -> None:
+    """#334: the checked constraint is the probe's own `constraint`, never
+    `dep["version"]` (a free-text field the pre-#334 check happened to
+    also read, but which a probe-based dependency may legitimately word
+    differently, e.g. with explanatory prose - `dep["version"]` is no
+    longer load-bearing for the check itself)."""
     inventory, tree, home = setup
     inventory = copy.deepcopy(inventory)
-    inventory["dependencies"][-1]["version"] = ">=99.0"
+    inventory["dependencies"][-1]["probes"][0]["constraint"] = ">=99.0"
     assert p.install(inventory, tree, home)["tools"][0]["status"] == "violated"
 
 
@@ -174,7 +179,18 @@ def test_missing_tool(setup: tuple[dict[str, Any], p.Tree, Path], monkeypatch: p
     inventory, tree, home = setup
     monkeypatch.setattr(shutil, "which", lambda name: None)
     result = p.install(inventory, tree, home)["tools"][0]
-    assert result["status"] == "unknown" and result["reason"] == "missing on PATH"
+    assert result["status"] == "violated" and "not found" in result["reason"]
+
+
+def test_tool_with_no_probes_is_unknown_not_an_error(setup: tuple[dict[str, Any], p.Tree, Path]) -> None:
+    """#334: a pre-#334 profile declaring no probes at all must still
+    validate and install - the historical record stays readable, only
+    honestly 'unknown' rather than silently 'satisfied'."""
+    inventory, tree, home = setup
+    inventory = copy.deepcopy(inventory)
+    inventory["dependencies"][-1]["probes"] = []
+    result = p.install(inventory, tree, home)["tools"][0]
+    assert result["status"] == "unknown" and result["reason"] == "no probes declared"
 
 
 def test_cli_install(tmp_path: Path) -> None:

@@ -574,6 +574,29 @@ def _owned_tarinfo(info: tarfile.TarInfo) -> tarfile.TarInfo:
     return info
 
 
+def _clean_write_probe_result(returncode: int, stderr: bytes) -> bool | None:
+    """The pure decision `candidate_can_write_in_attempt` makes from a
+    completed `test -w` exec - extracted so the exact boundary (counter-
+    model review finding: a signal-killed exec, e.g. 137 for SIGKILL, can
+    exit outside `test`'s own `{0, 1}` vocabulary while still leaving
+    stderr empty) is directly testable with synthetic inputs, no
+    subprocess or Docker needed. `test` itself exits exactly 0 (writable)
+    or 1 (not writable) and writes nothing to stderr either way; any
+    OTHER exit code, or any stderr output at all, means something other
+    than a clean test happened and must read as `None` (unverifiable),
+    never guessed as a confident `False`."""
+    if returncode not in (0, 1):
+        return None
+    if stderr:
+        # ANY stderr at all, not merely non-whitespace content (counter-
+        # model review finding): a genuinely clean `test -w` writes
+        # EXACTLY zero bytes on either outcome, so even a lone newline is
+        # evidence something else happened, never an ordinary trailing
+        # newline to tolerate.
+        return None
+    return returncode == 0
+
+
 def _owned_tar(host_path: Path, arcname: str) -> bytes:
     """A tar stream of `host_path` (file or directory, recursively), every
     member owned by the fixed candidate identity - for `docker cp -
@@ -999,7 +1022,7 @@ class DockerBackend:
             return False
         return proc.returncode == 0
 
-    def install(self, handle: object, surface: Mapping[str, object]) -> dict[str, object]:
+    def install(self, handle: object, surface: Mapping[str, object], root: str | None = None) -> dict[str, object]:
         """Step 4: copy every declared surface entry into the running
         container - a host path (`str`/`Path`, materialize.py's own
         skill-installation convention) or raw `bytes` (verify.py's own
@@ -1052,12 +1075,22 @@ class DockerBackend:
         unreachable daemon) independently of every later `docker cp`, in
         which case `baseline_absence` is UNKNOWN, never a guessed SATISFIED -
         the same "UNKNOWN never reaps" posture `confirm_stopped()` already
-        holds elsewhere in this module."""
+        holds elsewhere in this module.
+
+        `root` (#332 follow-up) names the destination directory surface
+        entries install under - `None` (every existing caller) means
+        `CONTAINER_WORKSPACE`, unchanged. A caller installing somewhere
+        else (#334's profile closure into the agent's home directory, say)
+        passes it explicitly; the baseline inspection and canary plant
+        below are scoped to the SAME `root`, since "already present" and
+        "the attempt's own install" only mean something relative to one
+        directory."""
         assert isinstance(handle, _Handle)
+        effective_root = root if root is not None else CONTAINER_WORKSPACE
         nonce = surface.get(CANARY_NONCE_KEY)
         declared = {k: v for k, v in surface.items() if k != CANARY_NONCE_KEY}
 
-        baseline, baseline_observed = self._workspace_baseline(handle)
+        baseline, baseline_observed = self._workspace_baseline(handle, root=effective_root)
         preexisting = sorted(k for k in declared if k in baseline)
 
         entries: dict[str, str] = {}
@@ -1087,7 +1120,7 @@ class DockerBackend:
                 continue
             try:
                 copied = subprocess.run(
-                    [*self.docker_bin, "cp", "-", f"{handle.name}:{CONTAINER_WORKSPACE}"],
+                    [*self.docker_bin, "cp", "-", f"{handle.name}:{effective_root}"],
                     input=payload, capture_output=True, env=handle.env, check=False,
                     timeout=self.daemon_timeout,
                 )
@@ -1128,7 +1161,7 @@ class DockerBackend:
             canary_copied: subprocess.CompletedProcess[bytes] | None
             try:
                 canary_copied = subprocess.run(
-                    [*self.docker_bin, "cp", "-", f"{handle.name}:{CONTAINER_WORKSPACE}"],
+                    [*self.docker_bin, "cp", "-", f"{handle.name}:{effective_root}"],
                     input=payload, capture_output=True, env=handle.env, check=False,
                     timeout=self.daemon_timeout,
                 )
@@ -1141,24 +1174,25 @@ class DockerBackend:
                 readiness["canary_path"] = CANARY_RESULT_FILENAME
         return readiness
 
-    def _workspace_baseline(self, handle: _Handle) -> tuple[frozenset[str], bool]:
-        """Every top-level entry already present under `CONTAINER_WORKSPACE`
-        before `install()` copies anything - the image's own baseline, never
-        this attempt's own installs, since this is called before the first
-        `docker cp`. `(names, True)` on a successful listing; `(frozenset(),
-        False)` when the daemon could not be asked at all, which callers
-        must read as UNKNOWN, never as a confirmed-empty baseline (issue
-        #133 item 4; the same "UNKNOWN never reaps" posture
-        `confirm_stopped()` already holds for this module).
+    def _workspace_baseline(self, handle: _Handle, root: str = CONTAINER_WORKSPACE) -> tuple[frozenset[str], bool]:
+        """Every top-level entry already present under `root` (#332
+        follow-up: defaults to `CONTAINER_WORKSPACE`, unchanged for every
+        existing caller) before `install()` copies anything - the image's
+        own baseline, never this attempt's own installs, since this is
+        called before the first `docker cp`. `(names, True)` on a
+        successful listing; `(frozenset(), False)` when the daemon could
+        not be asked at all, which callers must read as UNKNOWN, never as
+        a confirmed-empty baseline (issue #133 item 4; the same "UNKNOWN
+        never reaps" posture `confirm_stopped()` already holds for this
+        module).
 
-        `ls -1A` runs relative to `-w CONTAINER_WORKSPACE`'s own working
-        directory rather than naming `CONTAINER_WORKSPACE` in the argv, so
-        no absolute-path remapping is needed against the fake CLI fixture
-        either (`tests/fixtures/docker-backend/fake_docker.py`'s own
-        `cwd=`-only containment)."""
+        `ls -1A` runs relative to `-w root`'s own working directory rather
+        than naming `root` in the argv, so no absolute-path remapping is
+        needed against the fake CLI fixture either (`tests/fixtures/
+        docker-backend/fake_docker.py`'s own `cwd=`-only containment)."""
         try:
             proc = subprocess.run(
-                [*self.docker_bin, "exec", "-w", CONTAINER_WORKSPACE, "--", handle.name,
+                [*self.docker_bin, "exec", "-w", root, "--", handle.name,
                  "sh", "-c", "ls -1A ."],
                 capture_output=True, text=True, env=handle.env, check=False, timeout=self.daemon_timeout,
             )
@@ -1413,7 +1447,7 @@ class DockerBackend:
     def _launch_and_wait(
         self, handle: _Handle, argv: Sequence[str], limits: Limits,
         cancel: Callable[[], bool] | None, stdin: bytes | None, *, prefix_wrap: bool,
-        after_launch: Callable[[], None] | None = None,
+        after_launch: Callable[[], None] | None = None, cwd: str | None = None,
     ) -> tuple[subprocess.Popen[bytes], _BoundedDrain, _BoundedDrain, threading.Thread, threading.Thread, str] | ExecuteResult:
         """Shared `docker exec` launch-drain-wait mechanics for `execute()`
         and `exec_in_attempt()` (#269) - everything up to, but NOT
@@ -1430,11 +1464,17 @@ class DockerBackend:
         client has launched, before the wait loop begins - `exec_in_
         attempt()`'s own hook for reading back the in-container PID its
         wrapped argv just wrote (orchestrator ruling on finding 3), which
-        `execute()` has no need for and leaves `None`."""
+        `execute()` has no need for and leaves `None`.
+
+        `cwd` (#332 follow-up), when given, overrides the default
+        `CONTAINER_WORKSPACE` working directory via `docker exec`'s own
+        `-w` - `execute()` never passes this and keeps the default;
+        `exec_in_attempt()`'s own docstring states the confinement a
+        caller must apply before passing one through here."""
         exec_argv = [*self.docker_bin, "exec"]
         if stdin is not None:
             exec_argv.append("-i")
-        exec_argv += ["-w", CONTAINER_WORKSPACE, "--", handle.name]
+        exec_argv += ["-w", cwd if cwd is not None else CONTAINER_WORKSPACE, "--", handle.name]
         if prefix_wrap:
             exec_argv.append(SKILLC_WRAP_PATH)
         exec_argv += list(argv)
@@ -1771,6 +1811,7 @@ class DockerBackend:
     def exec_in_attempt(
         self, handle: object, argv: Sequence[str], limits: Limits,
         cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,
+        cwd: str | None = None, env: Mapping[str, str] | None = None,
     ) -> ExecuteResult:
         """Run `argv` inside the attempt's ALREADY-RUNNING container via a
         bare `docker exec`, WITHOUT ever stopping or removing it - added for
@@ -1837,21 +1878,46 @@ class DockerBackend:
         group is still reaped afterward regardless (`start_new_session=
         True` at launch), so this method's own call returns promptly
         rather than waiting on a client whose remote session may outlive
-        it."""
+        it.
+
+        `cwd` (#332 follow-up) sets `docker exec -w`, native support rather
+        than a shell `cd` - this method does not validate it; a caller
+        exposing `cwd` to anything the subject influences must confine it
+        (realpath-resolve inside the container, e.g. via
+        `_resolve_realpath_in_attempt()`, and check the result against a
+        known root) BEFORE calling this, exactly as `gate_witness.py`'s
+        `_decide_run_gate()` does for a subject-forwarded gate cwd - an
+        unconfined cwd here would let a caller run the (still
+        controller-chosen) argv against an arbitrary path.
+
+        `env`, when given, runs the wrapped argv under `env -i <env
+        pairs>`, replacing the exec'd process's whole environment rather
+        than adding to whatever the container's own default carries
+        (`docker exec -e` only ADDS/overrides named vars on top of that
+        default, which cannot express "exactly this set, nothing
+        inherited") - needed so a gate's output can be compared
+        byte-for-byte against a real invocation under a declared,
+        reproducible environment rather than whatever the controller
+        process happens to be carrying (#332's environment-parity
+        condition)."""
         assert isinstance(handle, _Handle)
         reachable, absent, status = self._inspect(handle)
         if not reachable or absent or status != "running":
             return ExecuteResult(reason="attempt-not-running", exit_code=None)
 
         marker_path = f"{CONTAINER_WORKSPACE}/.skillc-exec-pid-{uuid.uuid4().hex}"
-        wrapped_argv = ["sh", "-c", f'echo $$ > {marker_path}; exec "$@"', "sh", *argv]
+        if env is not None:
+            env_pairs = [f"{k}={v}" for k, v in env.items()]
+            wrapped_argv = ["sh", "-c", f'echo $$ > {marker_path}; exec env -i "$@"', "sh", *env_pairs, *argv]
+        else:
+            wrapped_argv = ["sh", "-c", f'echo $$ > {marker_path}; exec "$@"', "sh", *argv]
         in_container_pid: list[int | None] = [None]
 
         def _capture_pid() -> None:
             in_container_pid[0] = self._read_in_container_pid(handle, marker_path)
 
         launched = self._launch_and_wait(
-            handle, wrapped_argv, limits, cancel, stdin, prefix_wrap=False, after_launch=_capture_pid,
+            handle, wrapped_argv, limits, cancel, stdin, prefix_wrap=False, after_launch=_capture_pid, cwd=cwd,
         )
         if isinstance(launched, ExecuteResult):
             return launched  # launch-failed, built by _launch_and_wait itself
@@ -1889,6 +1955,133 @@ class DockerBackend:
             handle, proc, stdout_drain, stderr_drain, stdout_thread, stderr_thread,
             limits, reason, signal_name=None, term_forwarding=None, stop_confirmed=stop_confirmed,
         )
+
+    def resolve_realpath_in_attempt(self, handle: object, path: str, timeout: float = 2.0) -> str | None:
+        """Resolves `path` to its real, symlink-free absolute form INSIDE
+        the attempt's container via `realpath` - for a caller (#332's
+        `gate_witness.py`) that must CONFINE a subject-forwarded path to a
+        known root before trusting it for anything, including as a `cwd`
+        to `exec_in_attempt()`. A string-prefix check on the unresolved
+        input would miss a symlink pointing outside the root; this asks
+        the container itself to resolve it first. `None` on any failure to
+        read a single absolute-path line (unreachable exec, nonexistent
+        path, timeout, a `realpath` that printed nothing) - never a guess,
+        and never the unresolved input returned as if it were confirmed."""
+        assert isinstance(handle, _Handle)
+        try:
+            proc = subprocess.run(
+                [*self.docker_bin, "exec", "--", handle.name, "sh", "-c", 'realpath -- "$1" 2>/dev/null', "sh", path],
+                capture_output=True, env=handle.env, timeout=timeout, check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if proc.returncode != 0:
+            return None
+        text = proc.stdout.decode("utf-8", errors="replace").strip()
+        return text if text.startswith("/") else None
+
+    def write_root_owned_file_in_attempt(
+        self, handle: object, path: str, content: bytes, mode: int = 0o755, timeout: float | None = None,
+    ) -> bool:
+        """Writes `content` to `path` INSIDE the live container AS ROOT
+        (`docker exec -u 0`), creating any missing parent directory along
+        the way (also root-owned, mode `0755`) - for #332 follow-up's
+        gate-witness harness copy of the real `flow-finish-gate.sh`,
+        which must land somewhere the candidate identity cannot write.
+        Deliberately NEVER routed through `install()`'s own candidate-
+        owned tar convention (`_owned_tarinfo`): that convention exists
+        precisely so a declared skill surface is usable by the candidate,
+        the opposite of what this primitive is for. Returns `True` on
+        success, `False` on ANY failure (daemon unreachable, timeout, a
+        nonzero exit) - never raises, matching `resolve_realpath_in_
+        attempt`'s own best-effort posture; a caller must verify the
+        result independently (`candidate_can_write_in_attempt`) rather
+        than trust this return value alone for anything security-relevant."""
+        assert isinstance(handle, _Handle)
+        wait = timeout if timeout is not None else self.daemon_timeout
+        script = 'dir=$(dirname "$1") && mkdir -p "$dir" && chmod 0755 "$dir" && cat > "$1" && chmod "$2" "$1"'
+        try:
+            proc = subprocess.run(
+                [*self.docker_bin, "exec", "-u", "0", "-i", "--", handle.name,
+                 "sh", "-c", script, "sh", path, format(mode, "o")],
+                input=content, capture_output=True, env=handle.env, timeout=wait, check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        return proc.returncode == 0
+
+    def remove_file_in_attempt(self, handle: object, path: str, timeout: float = 5.0) -> bool:
+        """Deletes `path` inside the attempt's container and confirms it is
+        gone, via a bare `docker exec` - deliberately NOT routed through
+        `exec_in_attempt()` (skillc#334). That method's
+        own shared tail (`_finish_result`, #76/#186) unconditionally writes
+        the exec'd process's stdout back to `CONTAINER_WORKSPACE/observations`
+        AFTER every call, even one whose stdout is empty - `_owned_tar_bytes`
+        builds a real (zero-length) tar entry regardless, and `docker cp`
+        extracts it. So using `exec_in_attempt()` itself to remove that very
+        file would always leave a freshly-recreated empty one in its place:
+        the file would never again be ABSENT, only ever emptied. This
+        mirrors `resolve_realpath_in_attempt`'s own raw-`docker exec` shape,
+        which has the same property for the same reason - neither one goes
+        through the write-back tail at all.
+
+        Returns `True` only once the removal AND an immediate `[ ! -e ]`
+        check, in the same shell invocation, both succeed - never from
+        `rm -f`'s own exit code alone, since `rm -f` reports success even
+        when the path never existed, which would read as a confirmed
+        removal that was never actually checked."""
+        assert isinstance(handle, _Handle)
+        try:
+            proc = subprocess.run(
+                [*self.docker_bin, "exec", "--", handle.name, "sh", "-c",
+                 'rm -f -- "$1" && [ ! -e "$1" ]', "sh", path],
+                capture_output=True, env=handle.env, timeout=timeout, check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        return proc.returncode == 0
+
+    def candidate_can_write_in_attempt(self, handle: object, path: str, timeout: float | None = None) -> bool | None:
+        """Empirically tests whether the CANDIDATE identity (never root)
+        can write `path` INSIDE the live container, via `test -w` run AS
+        that uid (`docker exec -u CANDIDATE_UID`) - never inferred from
+        mode bits alone, which can be fooled by an unexpected owner or an
+        ACL this check does not read. `True`/`False` only when `sh`
+        itself genuinely ran `test` and produced a clean result: `test`'s
+        OWN exit codes are exactly `{0, 1}` with nothing on stderr either
+        way, so ANY other exit code (counter-model review finding: a
+        process killed by a signal - 137 for SIGKILL, say - exits outside
+        that set but can still leave stderr empty) OR any stderr output
+        at all means something OTHER than a clean test happened - a
+        daemon-level exec failure, an OOM kill, say - and must not be
+        read as a confident `False`. `None` - never guessed either way -
+        covers all of that, plus an unreachable exec/timeout. A caller
+        must treat `None` exactly like `False` for any refusal this feeds
+        (#332 follow-up's own ruling: an unverified harness destination is
+        refused, the same as a confirmed-writable one) - but must never
+        report `None` AS `False` in anything that claims the check
+        actually ran.
+
+        CHECKS ONLY THIS ONE PATH - never its parent directory (counter-
+        model review finding: Unix write permission on a FILE controls
+        modifying its contents, but write+execute permission on its
+        CONTAINING DIRECTORY is what actually controls whether it can be
+        unlinked and replaced entirely, regardless of the file's own
+        mode or owner). A caller protecting a file against replacement -
+        not merely in-place modification - must check the ENCLOSING
+        DIRECTORY the same way, not infer it from this result
+        (`apply_flow_check_gate_overlay` does both)."""
+        assert isinstance(handle, _Handle)
+        wait = timeout if timeout is not None else self.daemon_timeout
+        try:
+            proc = subprocess.run(
+                [*self.docker_bin, "exec", "-u", str(CANDIDATE_UID), "--", handle.name,
+                 "sh", "-c", 'test -w "$1"', "sh", path],
+                capture_output=True, env=handle.env, timeout=wait, check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        return _clean_write_probe_result(proc.returncode, proc.stderr)
 
     def _read_in_container_pid(self, handle: _Handle, marker_path: str, timeout: float = 2.0) -> int | None:
         """Polls `docker exec ... cat MARKER` for the pid `exec_in_attempt()`'s
@@ -2076,16 +2269,19 @@ class DockerBackend:
             return Confirmation.NOT_CONFIRMED
         return Confirmation.UNKNOWN
 
-    def export(self, handle: object, dest: Path) -> None:
-        """Step 7 (backend side): copy the container's workspace contents
-        into `dest` via `docker cp NAME:/work/. dest` - contents only, never
-        nesting `/work` itself inside `dest`. Read-only on the container
-        side and safe to call more than once, per the Protocol's own rule."""
+    def export(self, handle: object, dest: Path, root: str | None = None) -> None:
+        """Step 7 (backend side): copy `root`'s contents (#332 follow-up:
+        `None`, every existing caller, means `CONTAINER_WORKSPACE`,
+        unchanged) into `dest` via `docker cp NAME:{root}/. dest` -
+        contents only, never nesting `root` itself inside `dest`.
+        Read-only on the container side and safe to call more than once,
+        per the Protocol's own rule."""
         assert isinstance(handle, _Handle)
+        effective_root = root if root is not None else CONTAINER_WORKSPACE
         dest.mkdir(parents=True, exist_ok=True)
         try:
             copied = subprocess.run(
-                [*self.docker_bin, "cp", f"{handle.name}:{CONTAINER_WORKSPACE}/.", str(dest)],
+                [*self.docker_bin, "cp", f"{handle.name}:{effective_root}/.", str(dest)],
                 capture_output=True, text=True, env=handle.env, check=False, timeout=self.daemon_timeout,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:

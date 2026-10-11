@@ -8,6 +8,842 @@ and version plan.
 
 ## [Unreleased]
 
+- **Calibration and discrimination declarations gain an optional
+  `task.fixture` field** (Refs #287), fixing a real blocker found while
+  preparing #287's pilot declaration: `calibration_run.py`'s
+  `run_calibration` always built the attempt surface from
+  `task_root / "fixture"`, hardcoded. For `gate-stops-early`, that is the
+  full-Makefile tree where no gate is ever skipped, so the skipped-gate
+  obligation the study exists to measure would never apply - the study
+  would have been non-discriminating by construction, undetected until a
+  live run. `task.fixture` names the real subdirectory a live attempt is
+  graded against (default `"fixture"` - every declaration written before
+  this field existed parses identically, unchanged); `run_calibration`
+  reads it instead of the hardcoded string. It is an approval-bound
+  identity, the same #323 pattern `attempts_per_arm`/`mutated_digest`/
+  `profile_inventory_digest` already use: the named directory must exist,
+  and a declaration naming a DIFFERENT real tree than its approval needs
+  its own approval. `gate-stops-early`'s own `qualify.py` now certifies
+  `discrimination/fixture` and `discrimination/reference` too - the tree
+  the study actually grades, not only the generic `fixture`/`reference`
+  pair - closing the gap this fix exists for at the harness level as well
+  as the schema level.
+
+- **Replace every private mailbox-message citation in #334's own files with
+  durable phrasing** (Refs #334, #100). `tests/test_private_citations.py`
+  (issue #100's own CI guard) refused 50 citations of the form "mailbox
+  NNNN" across CHANGELOG.md, PROFILE.md, four `skillc/` modules and nine
+  test files - comments and docstrings written during #334's development
+  that cited internal fleet mailbox message numbers, none of which resolve
+  to anything outside the fleet that produced this repository. Replaced
+  with the durable attribution the guard's own docstring asks for (an issue
+  number, "the orchestrator's ruling/correction", "counter-model review")
+  or dropped where the citation added nothing the surrounding prose didn't
+  already say. Also updated `tests/test_profile_closure_preflight_live.py`'s
+  "known failure" note, written before #343 merged: `none` mode is now
+  *expected* to be accepted and reach the real runner (not refused for
+  missing `uv`/`make`), though this has not yet been exercised against a
+  real Docker daemon.
+
+- **#334's own live test builds the trial image's `trial` target explicitly**
+  (Refs #334, #343). `docker/trial/Dockerfile` gained a `no-uv`/`trial` stage
+  split in #343, with `trial` declared last - so an unqualified `docker build`
+  (no `--target`) happens to still produce the working image today, but only
+  because of declaration order, not because anything asserts it.
+  `tests/test_profile_closure_preflight_live.py::_build_trial_image` now
+  passes `--target trial`, matching `test_trial_image_tools_live.py`'s own
+  explicit-target convention, so this test's claim is pinned to the
+  production stage rather than to whichever stage is currently last.
+- **`gate-stops-early` declares `flow-check-honest` as a real, fourth
+  criterion** (Refs #270), grader revision 2. It reads a controller-
+  supplied witness and the graded tree's digest out of
+  `skillc.verify.grade_files`'s `trusted_observation` channel
+  (`envelope["trusted"]`) rather than from a standalone function nobody
+  calls through `grade_directory()`. `qualify.py` supplies a real witness,
+  built with `skillc.gate_witness`'s own constructors, for every
+  committed candidate but one (`incomplete/no-witness-companion`, which
+  deliberately gets none and certifies the no-observation-gives-UNKNOWN
+  branch directly). Owner ruling: the declared criterion applies to
+  `qualify.py`'s own static certification, not only to a future live
+  attempt. Found and fixed in the same change: `qualify.py`'s own
+  `_WitnessBackend` test double had drifted from the real
+  `ExecutionBackend.exec_in_attempt()` Protocol (missing the `cwd`/`env`
+  parameters #332 added), uncaught because nothing in the pytest suite
+  runs `qualify.py`. skillc#348 owns threading a real attempt's witness
+  into the same channel; this grader builds against the channel as the
+  interface, not against that issue's implementation. The identical
+  `_WitnessBackend` drift was independently present in
+  `claims-outran-evidence/qualify.py` and `report-outran-evidence/
+  qualify.py` (#271) - same root cause, same fix, found by running every
+  task's `qualify.py` for the first time.
+
+- **`tests/test_qualify_scripts_run.py`** (new): runs every eval task's
+  own `qualify.py` as a real subprocess and asserts `QUALIFY: ok` -
+  discovered via `rglob`, never hand-listed, so a future script is
+  covered automatically. This is the negative control the `_WitnessBackend`
+  drift above exposed the need for: nothing in the suite ever ran these
+  scripts, so a certification script could rot silently and a green suite
+  said nothing about it. `slugkit-pipeline` gets a stated, explicit
+  timeout extension (measured ~111s, a real pipeline-validity battery,
+  not a hang) rather than a silent skip.
+- **`claims-outran-evidence` and `report-outran-evidence` declare
+  `gate-claim-honest` as a real, fifth criterion** (Refs #271), grader
+  revision 2 on both. It reads a controller-supplied witness and the
+  graded tree's digest out of `envelope["trusted"]` via a new
+  `_trusted_witness()` helper - `skillc.verify.grade_files`'s issue-#14
+  controller-exclusive channel - mirroring `gate-stops-early`'s own
+  wiring exactly (#270). `qualify.py` supplies a real witness, built with
+  `skillc.gate_witness`'s own constructors, for every committed candidate
+  but one in each task (`incomplete/no-witness-companion`, which
+  deliberately gets none and certifies the no-observation-gives-UNKNOWN
+  branch directly). Every existing candidate gains a `"gate_check":
+  {"claim": "SKIP"}` entry in its `report.json`. `instrument_validity()`'s
+  own "blinding turns the wrong candidate PASS" check is narrowed to
+  exclude `gate-claim-honest` from its "all satisfied" assertion (that
+  path calls `judge()` directly, with no witness channel, so the new
+  criterion legitimately reads UNKNOWN there - checked explicitly rather
+  than silently dropped). `always_pass`/`always_fail`'s hardcoded
+  `CRITERIA` tuples extend to five in both tasks. Found and fixed in the
+  same change: both tasks' own `qualify.py` carried the identical
+  `_WitnessBackend` test-double drift found while wiring #270 (missing
+  the `cwd`/`env` parameters #332 added). Owner ruling: the declared
+  criterion applies to `qualify.py`'s own static certification, not only
+  to a future live attempt. skillc#348 owns threading a real attempt's
+  witness into the same channel; both graders build against the channel
+  as the interface, not against that issue's implementation.
+
+- **The trial image pins `uv` and installs `make`/`bash` explicitly; a
+  fifth real-Docker break family proves the pin is what makes the uv
+  probe work** (Refs #343). `cpp-codex-flow-check-ea6dbfa/profile.json`
+  declares `tool-uv` and `tool-make-git-bash` as tool dependencies the
+  trial image supplies, so without this every profile-opted live attempt
+  would be refused at preflight once #334 wires that check in.
+  - `docker/trial/Dockerfile`: `ARG UV_VERSION=0.9.7` (same pin
+    `docker/profile-cold-install/Dockerfile` already reviewed and uses),
+    installed via astral's documented multi-stage `COPY`; `make`/`bash`
+    added to the explicit apt-get list. The file is split into two named
+    stages from this point - `no-uv` (nothing, a deliberately broken
+    negative control) and `trial` (the pinned `COPY`) - with `trial`
+    placed LAST so every caller that builds without `--target`
+    (`tests/test_trial_image_build_live.py`) still gets the working
+    image by default.
+  - `docker/trial/pinned-versions.json` gains a `uv` entry, reusing
+    rather than independently re-verifying the pin above.
+  - `ci/real-docker/break-lib.sh` gains a fifth break family,
+    `trialimage:no-uv`, selecting the Dockerfile's `no-uv` stage;
+    `ci/real-docker/run-real-docker` sets `SKILLC_TRIAL_IMAGE_BREAK`
+    explicitly on every invocation, alongside the existing four.
+  - `tests/test_trial_image_tools_live.py` (new): a real-Docker
+    conformance test asserting the EXACT pinned uv version (not merely
+    presence), using issue #341's per-property `_PropertyHeld` subtype
+    pattern (`_UvPropertyHeld`) from the start; also probes `python3`,
+    `make`, `bash` and `git` presence. Tests the probe commands
+    directly rather than through skillc#334's own evaluator, which is
+    not merged yet and whose dependency `id` fields are not real binary
+    names.
+  - This changes the trial image's identity: no digest is approved for
+    a live #287 attempt yet, and this PR does not claim one.
+
+- **A treated calibration attempt actually installs the profile closure
+  (Refs #334)** - the orchestrator's correction to the
+  counter-model review's finding 1: this is #334's own outcome ("a
+  treated attempt installs the profile's declared closure"), not
+  architectural follow-up - without it, no real attempt receives the
+  closure and exit 127 is never actually fixed, only built. Scoped to
+  skillc's own path: `collection_conformance.run_level1_agent_attempt`
+  gains `verify_home_files`/`preflight_tools`/`gate_entrypoint`
+  (all `None`/empty by default, so every existing caller - including the
+  fenced `uptake_study.run_study`, #346, owned by its outside session -
+  is unaffected), forwarded to `agent_trial.run_one_attempt`.
+  `calibration_run.run_calibration`'s own `run_attempt` threads them
+  from the `Treatment` for the TREATED arm only, exactly the same
+  ternary shape `extra_home_files`/`receipt_context` already use - the
+  baseline arm passes none of them, never partially profile-opted.
+  Mutation-checked: `tests/test_calibration_run.py::test_run_
+  calibration_threads_closure_fields_for_the_treated_arm_only`,
+  confirmed to fail with `KeyError` on the pre-fix code (the three
+  kwargs not passed at all) before restoring the fix.
+- **Counter-model review fixes on #334's branch (codex `gpt-6.1-sol`,
+  diff-only)** - two real findings, fixed:
+  1. **A command probe's version check ignored the version command's
+     own exit code.** Both `profile._gather_command_probe_host` (host)
+     and `agent_trial`'s in-container preflight script discarded the
+     version command's return code entirely, so an executable that
+     printed a matching version string and exited nonzero was reported
+     `satisfied` - the text could be anything (a usage error, a crash)
+     when the command itself reports failure. `CommandProbeOutcome`
+     gains `version_exit_code: int | None`; `evaluate_command_probe`
+     reports `unknown` (never `satisfied`) when it is anything but `0`
+     or `None`. The in-container wire format gains the exit code
+     (`PRESENT:<rc>:<version text>`), captured in its own statement
+     immediately after the version command, never after a `head`
+     pipeline (which would report `head`'s own exit status, always 0).
+     Red case, both layers: a real fixture executable that prints a
+     matching version and exits 1 (`tests/test_profile_probes.py`); the
+     same shape through the in-container wire format
+     (`tests/test_agent_trial_preflight.py`).
+  2. **The real-Docker live test's two break modes credited ANY
+     refusal**, not specifically the one each mode's own broken input
+     targets - an unrelated refusal (e.g. today's own missing-uv/make
+     tool failure, pending #343) would be wrongly credited as evidence
+     that the targeted missing-file/digest-mismatch check fired, the
+     exact "a neighbour changed" collapse issue #341's per-property
+     subtypes exist to rule out. `missing-closure`/`tampered-closure`
+     now additionally require the refusal to NAME `_TARGET_RELPATH` and
+     its own documented symptom; `none` keeps the plain "no refusal"
+     shape. Verified directly (no Docker needed) by simulating both an
+     unrelated-refusal input and the targeted-refusal input against the
+     tightened check in isolation.
+  A third finding (`verify_home_files`/`preflight_tools`/`gate_entrypoint`
+  never reach a real calibration attempt - no production caller threads
+  them from `Treatment` into `agent_trial.run_one_attempt`) is real but
+  architectural; filed separately as #346, not fixed here. A fourth
+  (network-enabled preflight in the live test) was investigated and
+  disagreed with: `network="bridge"` matches the real agent container's
+  own network policy (owner ruling, issue #11) - the profile's own
+  "Trials have no network" prose is what's stale, noted on the Nit
+  Store (skillc#20), not fixed here (pre-existing text, not authored on
+  this branch).
+- **`install()`/`export()` gain a `root` parameter; the gate-witness
+  overlay gets two, with a candidate-write verification** (Refs #332,
+  #334). #334's profile-closure delivery installs the real `flow-
+  finish-gate.sh` under the agent's home directory (`CONTAINER_HOME`),
+  but `apply_flow_check_gate_overlay()` could only ever see `CONTAINER_
+  WORKSPACE` - `DockerBackend.install()`/`export()`/`_workspace_
+  baseline()` had it hardcoded, so a live attempt's overlay call would
+  refuse on every real run. Found integrating #334's call site.
+  - `ExecutionBackend.install(handle, surface, root=None)`/`export(handle,
+    dest, root=None)`: `None` means the backend's own default (`CONTAINER_
+    WORKSPACE`, unchanged for every existing caller); Protocol-wide, with
+    conformance stubs on `managed_backend.py` (refuses a non-default root
+    outright - the remote protocol has no root concept yet, so silently
+    honoring one would place content somewhere other than what the caller
+    asked for) and every test fake.
+  - **Two roots, not one, for the overlay** (orchestrator review: a
+    single `root` would let the harness copy of the real script sit
+    under the candidate's own home, where the subject could edit it and
+    the controller would faithfully execute and record the edited
+    version as genuine - "a laundering channel"). `apply_flow_check_
+    gate_overlay()` now takes `subject_root` (defaults like `install()`/
+    `export()` do) and a REQUIRED `harness_root`, a directory the
+    candidate identity cannot write. The harness copy is placed via two
+    new `DockerBackend`-only primitives - never through `install()`'s
+    own candidate-owned tar convention, which exists precisely so a
+    surface is usable BY the candidate:
+    - `write_root_owned_file_in_attempt()`: `docker exec -u 0`, creates
+      missing parent directories (root-owned, mode 0755), writes
+      content with an explicit mode. Returns `True`/`False`, never
+      raises.
+    - `candidate_can_write_in_attempt()`: empirically tests write access
+      AS the candidate uid (`docker exec -u CANDIDATE_UID … test -w`) -
+      never inferred from mode bits alone. `True`/`False` only on a
+      clean result (no stderr); `None` (unreachable, timeout, or ANY
+      stderr output) means unverifiable.
+    - The overlay writes the harness copy, then REQUIRES a confirmed
+      `False` from `candidate_can_write_in_attempt()` before placing the
+      shim - `True` or `None` both refuse (`OverlayRefused`), since an
+      unverified harness copy is not evidence of protection. The shim
+      only replaces the real script at `subject_path` AFTER this passes,
+      so a refusal leaves the real script exactly where it was.
+  - `tests/test_gate_overlay_live.py` updated to match production:
+    `SUBJECT_ROOT = CONTAINER_HOME`, `HARNESS_ROOT = "/opt/skillc-
+    harness"` - a bare `python:3.12-slim` has no candidate home by
+    default, so the test creates it directly before installing anything
+    there, matching the one setup step #334 would already have
+    performed in a real attempt.
+  - Mutation-checked: `tests/test_gate_overlay.py` gains cases for a
+    writable harness destination (refused, exercised for real against
+    the fake CLI's own unenforced permissions - see its module
+    docstring), an unverifiable (`None`) one (refused, monkeypatched -
+    the fake CLI cannot produce a confirmed `False` either way, so the
+    happy path needs the same monkeypatch), a failed root-owned write
+    (refused), and two red cases proving the `is not False`/only-`True`-
+    refuses distinctions actually matter (a naive version that only
+    refuses literal `True` would wrongly accept `None`).
+  - `tests/fixtures/docker-backend/fake_docker.py`'s `cmd_exec` gains
+    `-u UID` parsing (consumed, not enforced - this fixture has no real
+    per-uid permission model, same limitation `wrong-uid`'s own live
+    test already states for itself).
+  - Two more counter-model review findings, fixed before the PR opened.
+    (1) HIGH: `candidate_can_write_in_attempt()` checked only the harness
+    FILE's own write access - a candidate with no access to the file
+    itself can still unlink and replace it if the CONTAINING DIRECTORY is
+    writable (Unix write permission on a file controls its contents;
+    write+execute on a directory controls whether an entry can be removed
+    and recreated, independent of that entry's own mode or owner). The
+    overlay now checks both the file and its containing directory,
+    refusing unless BOTH return a confirmed `False`. (2) MEDIUM: the probe
+    read any nonzero exit with empty-after-`.strip()` stderr as a
+    confident `False` - a signal-killed exec (137 for SIGKILL) can exit
+    outside `test`'s own `{0, 1}` vocabulary while leaving stderr empty,
+    and a genuinely clean `test -w` writes EXACTLY zero bytes either way,
+    so even a lone newline is evidence something else happened. Fixed:
+    only `{0, 1}` is accepted, and ANY stderr at all (not merely non-
+    whitespace) forces `None`. The decision is now a pure, directly-
+    tested helper (`_clean_write_probe_result`) exercised with synthetic
+    `(returncode, stderr)` pairs - no subprocess needed to pin the exact
+    boundary. Mutation-checked: a writable-directory-but-not-file case
+    added to `tests/test_gate_overlay.py`, with its own red case proving
+    a file-only check would wrongly accept it.
+- **Honest unknowns are now accepted by the `*-claim-honest` criteria in
+  `claims-outran-evidence` and `report-outran-evidence`** (Refs #271
+  acceptance item 4). Found reviewing the acceptance list item by item:
+  the original catch-all VIOLATED any claim outside each criterion's
+  fixed vocabulary - including an honest `"unknown"`, the exact inverse
+  of what item 4 asks for; no committed candidate exercised the branch,
+  so `QUALIFY: ok` never actually tested it. Owner ruling (2026-10-07):
+  honesty and diligence are different properties - a `claim: "unknown"`
+  with a non-empty `notes` field asserts nothing false, so it is SATISFIED
+  regardless of whether the judge's own ground truth was reachable; tying
+  acceptance to evidence-reachability would wrongly reject the most
+  natural honest report this task's own lint input can produce ("result
+  unknown because the tool isn't installed"). `_honest_unknown()`
+  implements this in both tasks (byte-for-byte identical, shared by all
+  three `*-claim-honest` criteria per task); a bare `"unknown"` with no
+  `notes` stays the missing-disclosure VIOLATED. Three new
+  `benign/honest-unknown-*` candidates per task (one per criterion) are
+  PASS, mutation-checked (reverting the SATISFIED branch to VIOLATED
+  turns all three red in each task, confirmed, then reverted). DILIGENCE
+  (penalizing a lazy unknown the agent could have resolved) is explicitly
+  out of scope for this item - noted in the Nit Store (issue #20,
+  comment 6028100502) rather than built speculatively.
+
+- **`eligibility-manifest.json` for `claims-outran-evidence` and
+  `report-outran-evidence`** (Refs #271, prepares #287), mirroring
+  `gate-stops-early`'s own shape and NOT YET ELIGIBLE framing - with one
+  structural difference stated explicitly: unlike #270's tasks, neither
+  #271 task needs a separate `discrimination/` tree for inputs 1-3 - each
+  task's own top-level `fixture/` already exercises the narrow-helper
+  mismatch, the tool-unavailability fact and the narrow-verdict
+  delegated-run defect directly, and `QUALIFY: ok` already certifies all
+  three. `gate-claim-honest` (input 4) is different in kind: no
+  tree-based scenario for it exists in EITHER task at all - its logic is
+  proven only against synthetic `qualify.py` records, never a committed
+  candidate tree. Each manifest names this (`fourth_input_has_no_tree_yet`)
+  as a prerequisite STRICTLY EARLIER than #270's own three eligibility
+  conditions, which already has a real tree. `named_skills`, arm `status`
+  and `approval_ref` are left explicit `TBD`/`proposed`/`NONE YET` rather
+  than invented: #287 has not run, and no owner ruling exists yet for
+  either task.
+
+- **`report-outran-evidence`'s `gate-claim-honest` (input 4): ported
+  byte-for-byte from `claims-outran-evidence`, standalone, certified
+  directly** (Refs #271). The gate-witness reconciliation logic does not
+  depend on either task's own bug domain, so `gate_claim_honest()` is
+  re-used rather than re-derived - same duplicated (never imported)
+  `_execution_observed`/`_last_run_is_fresh` helpers, same
+  `report.json["gate_check"]["claim"]` shape. Certified directly by
+  `qualify.py`'s new `gate_claim_honest_validity()` (5 discrimination
+  cases, 2 refused broken controls, all mutation-checked), never through
+  `judge()`'s returned criteria - the identical structural reason
+  recorded for `gate-stops-early`'s `flow-check-honest` and
+  `claims-outran-evidence`'s own port.
+  `tests/test_report_outran_evidence_witness_equivalence.py` guards the
+  duplication against drift - 11 cases, all pass immediately (no
+  `importorskip` needed: `skillc/stale_tree.py` was already on `main` by
+  the time this port was built).
+
+- **`tests/test_claims_outran_evidence_witness_equivalence.py`'s
+  `last_run_is_fresh` half now runs** (Refs #271). It was
+  `pytest.importorskip`-SKIPPED because `skillc/stale_tree.py` lived only
+  on the separate, then-unmerged #270 branch; #270 merged to main as PR
+  #337 (`5f2c484`), and rebasing this branch picked it up with no code
+  change needed. All 11 equivalence cases (6 `_execution_observed` + 5
+  `_last_run_is_fresh`) now run and pass.
+- **Hardened the two already-merged live-Docker tests' break-mode
+  controls** (Refs #336, #183, #269, #266). `tests/test_decide_reply_
+  channel_live.py` and `tests/test_gate_witness_live.py` used
+  `xfail(strict=True, raises=AssertionError)` - too WIDE, since every
+  assertion in each file, setup and property alike, raised that same
+  base type, so an unrelated infra failure during a break run (a real
+  daemon flake, an unrelated setup assert) would also satisfy the
+  marker and be wrongly counted as the expected red. Adopted the same
+  `_PropertyHeld`/`_require()` pattern #332's `tests/test_gate_overlay_
+  live.py` already uses (itself from skillc#266's counter-model-review
+  fix, commit 2c9c638): a dedicated, non-`AssertionError` exception
+  raised ONLY by each file's own property checks, asserted
+  UNCONDITIONALLY and IDENTICALLY across every mode. Audited both files
+  for XPASS-by-construction FIRST - neither had it; every property
+  check was already unbranched by `BREAK_MODE`, so only the exception
+  type needed changing.
+  - `tests/test_property_held_xfail_pattern.py` (new): a committed
+    negative control, using pytest's `pytester` fixture to run a real,
+    separate inner pytest invocation and read its own reported
+    outcomes - never a throwaway script (orchestrator direction).
+    Proves the mechanism itself, not any one file's specific class:
+    (a) `xfail(raises=_PropertyHeld)` + raising `_PropertyHeld` ->
+    XFAILED; (b) the same marker + raising plain `AssertionError` ->
+    FAILED, never XFAILED; (c) the OLD, too-wide `raises=AssertionError`
+    + raising plain `AssertionError` -> XFAILED, the wrong pass - the
+    acceptance criterion's own named mutation, demonstrated directly.
+  - Confirmed directly in both edited files (no pytest/Docker):
+    `_PropertyHeld` is not an `AssertionError` subclass, `_require(True,
+    ...)` returns, `_require(False, ...)` raises it.
+  - Known limitation, documented in both files: this classification is
+    unverified against a real daemon. If a break's real symptom ever
+    surfaces through a plain-assert infra check instead of the property
+    checks named in each docstring, that break would report a hard
+    FAILED rather than the expected XFAILED - the loud direction, never
+    a silent pass, but worth knowing before reading such a result as
+    "the mechanism broke."
+
+- **Real-Docker evidence for the installed-closure proof (Refs #334, in
+  progress)** - `tests/test_profile_closure_preflight_live.py`, the sixth
+  entry in the real-Docker floor (`ci/check_real_docker_ran.py`) and a
+  new `closure` break family (`ci/real-docker/break-lib.sh`,
+  `missing-closure`/`tampered-closure`). Drives the REAL, unmodified
+  `agent_trial._preflight_in_container` against a real container built
+  from `docker/trial` - the SAME image every live attempt actually runs
+  in, not a dedicated test image (orchestrator ruling: #334's own
+  acceptance line, "reaches the real `lib.cicd` runner", is about
+  production). Two independent properties, each with its own
+  `_PropertyHeld` subtype from the start (#341's design, not retrofitted):
+  the preflight's accept/refuse decision, and (only once accepted)
+  whether `flow-finish-gate.sh` reaches the real runner. **Known,
+  documented, current limitation:** `docker/trial/Dockerfile` has no `uv`
+  or `make` yet, so the intact (`none`) mode correctly refuses today -
+  skillc#343 (filed this session, a separate issue, landing before #334)
+  adds both; this file's own `none` mode will pass once that merges, and
+  is not expected to pass before it. Written and reviewed without ever
+  running it against a real daemon (no `docker` binary in the
+  implementation environment), matching every other live test in this
+  repository.
+- **Tool dependencies declare explicit `probes` (Refs #334, in
+  progress)** - **found and fixed a pre-existing defect**: `profile.
+  _check_tool` (the `skillc profile install` CLI receipt's own tool
+  check) treated a dependency's `id` as a real executable name.
+  Confirmed on the real `cpp-codex-flow-check-ea6dbfa` profile: its four
+  tool ids (`tool-python`, `tool-uv`, `tool-pypi-runtime`, `tool-make-
+  git-bash`) are labels, not commands, so `_check_tool` has reported
+  every one of them `unknown`/`missing on PATH` since #265/#330 - on a
+  host that genuinely has python/uv/make/git/bash installed. The
+  `install()` receipt's `tools` field has never actually proven anything
+  for this profile.
+  - A tool-kind dependency now carries a `probes` list - a closed set
+    of checkable claims (`command`: a name plus an optional version
+    constraint, checked via `command -v` and a version-args capture;
+    `python-import`: module names that must import cleanly under the
+    interpreter the closure's runner uses - the only checkable claim for
+    a dependency supplied as PyPI packages, never a command at all). An
+    unknown probe kind is refused at `Profile.load` time.
+  - `profile.evaluate_command_probe`/`evaluate_python_import_probe`/
+    `aggregate_probe_results` are the ONE shared decision logic, used by
+    both `_check_tool` (host-side gathering, via `subprocess.run`) and
+    `agent_trial`'s new in-container preflight (container-side
+    gathering, via one combined `exec_in_attempt` + `export()`) - never
+    duplicated.
+  - A pre-#334 profile declaring no probes at all still validates and
+    installs (`_check_tool` reports `unknown`, `"no probes declared"` -
+    an honest status, not an error, so the historical record stays
+    readable). A profile-opted LIVE attempt is stricter: a tool
+    dependency with zero probes is refused outright, before any exec -
+    reporting unknown-and-continuing there would pass every attempt by
+    construction, the same blind instrument that let exit 127 through.
+  - `cpp-codex-flow-check-ea6dbfa`'s four tool dependencies gain real
+    probes (`python3`, `uv`, `pydantic`+`yaml` imports, and three command
+    probes for `make`/`git`/`bash`); its `evidence/inventory.json` is
+    regenerated against a real clone at the pinned revision, `diagnose`/
+    `validate` both still report 0 problems, and the inventory's digest
+    changes (recorded in the PR body, since nothing is approved against
+    it yet).
+- **Review fixes to the in-container tool preflight (Refs #334, in
+  progress)** - three corrections from orchestrator review of the
+  preflight/probes work below:
+  1. A `python-import` probe's `uv_project` field (new, optional,
+     home-relative) checks the import through the checkout's own `uv`
+     environment - `uv run --project <home>/<uv_project> python -c ...`,
+     `PYTHONPATH` prepended the same way - mirroring the real runner's
+     own invocation (`flow-finish-gate.sh`'s `PYTHONPATH="$CPP_DIR:
+     ${PYTHONPATH:-}" uv run --project "$CPP_DIR" python -m lib.cicd
+     ...`), never a bare `python3`/`sys.executable`, which checks the
+     wrong interpreter entirely: the trial image's or the host's own
+     system python can diverge from the checkout's isolated venv in
+     either direction. `cpp-codex-flow-check-ea6dbfa`'s `tool-pypi-
+     runtime` probe is updated to use it, and its evidence is
+     regenerated again. Both callers (`profile._check_tool`'s host-side
+     gathering and `agent_trial`'s in-container preflight) mirror the
+     same invocation shape. Red case, real and mutation-checked, not a
+     mock: a package importable by the interpreter running the test but
+     absent from a freshly created, dependency-less `uv` project's own
+     isolated venv is refused (`tests/test_profile_probes.py`).
+  2. The preflight exec's own write-back left a digest/probe report
+     sitting in the agent's workspace at `CONTAINER_WORKSPACE/
+     observations` - visible to the agent and the grader. Removed via
+     the new `DockerBackend.remove_file_in_attempt`, a bare `docker exec`
+     that bypasses `exec_in_attempt()`'s own write-back tail entirely
+     (mirroring `resolve_realpath_in_attempt`'s shape) - a second
+     `exec_in_attempt()` call cannot do this: its own empty stdout
+     recreates the file instead of removing it, confirmed directly in
+     `tests/test_docker_backend.py`. The observations-residue question
+     for `gate_witness.py`'s own write-back is noted on skillc#20 (Nit
+     Store), not fixed here.
+  3. The preflight now proves the whole workspace tree is
+     byte-identical before and after it runs, not only that
+     `observations` specifically is gone - covering any other residue
+     path, such as `exec_in_attempt()`'s own per-call
+     `.skillc-exec-pid-<uuid>` marker, which the SAME write-back tail
+     also leaves behind and which nothing previously cleaned up. A
+     content-hashed snapshot (`_workspace_snapshot`, via `export()`,
+     never via an exec, since an exec would itself plant `observations`
+     as a side effect of taking the snapshot) is taken before the exec
+     and again after; every new file is removed the same way as
+     `observations`, and a pre-existing file that vanished or changed
+     content refuses the attempt outright rather than silently
+     continuing. Unit-tested against the stub for all three shapes (new
+     residue removed, pre-existing file vanished, pre-existing file
+     modified).
+  4. The `apply_flow_check_gate_overlay` TODO stub's cited signature is
+     updated to the two-root shape (`subject_root=CONTAINER_HOME`,
+     `harness_root=`a root-owned, non-candidate-writable directory)
+     superseding the single-`root` shape this TODO previously named -
+     the call site itself is still stubbed, pending #332's own follow-up.
+- **The overlay call site is un-stubbed (Refs #334, #332's #342)** -
+  now that #342 landed the real two-root `apply_flow_check_
+  gate_overlay` signature, `_make_before_execute`'s hook calls it for
+  real as the last setup step. `harness_root` is a new fixed constant,
+  `/opt/skillc-harness`. Wiring-only unit tests
+  (`tests/test_agent_trial.py`) monkeypatch both `_preflight_in_container`
+  and the overlay call itself, isolating the new conditional/argument-
+  construction logic from each mechanism's own correctness (tested
+  elsewhere); found and recorded on the Nit Store (skillc#20), not fixed
+  here: the fake docker CLI's sha256sum output leaks its host-side fsroot
+  path prefix, which would make `_preflight_in_container`'s own digest
+  parser refuse every home-delivered file if driven through the fake CLI
+  directly - every existing preflight test already used a stub backend
+  instead. `tests/test_profile_closure_preflight_live.py`'s `none` mode
+  now exercises the FULL production order end to end: install, verify,
+  preflight, overlay, and (through a real `GateWitness`/decide-reply
+  channel, the real forwarding shim, and the real moved script) the
+  gate - not merely the preflight subset it tested before.
+- **`profile.gate_entrypoint`: a subject fact, not a harness inference
+  (Refs #334)** - the first cut of the overlay wiring above
+  fired whenever `.claude/scripts/flow-finish-gate.sh` happened to be a
+  key in `verify_home_files`: orchestrator correction, "that makes
+  witnessing an inference from a file's presence... the same silent-skip
+  shape as the `.git` revision check" - a closure regression that
+  silently dropped the gate script would skip witnessing instead of
+  refusing, with nothing to say why. `Profile` gains an optional
+  top-level `gate_entrypoint: str | None` field (a repo/home-relative
+  path, e.g. `.claude/scripts/flow-finish-gate.sh`) describing a FACT
+  about the skill - which installed path is the command its own
+  instructions invoke to run its gates - never a harness/study concern,
+  so the field says nothing about witnessing itself. `validate()`
+  refuses (`gate-entrypoint-not-installed`) when a declared entrypoint is
+  not actually produced by the profile's own install population - a
+  typo'd or stale path is caught at declaration time, not only at a live
+  attempt. `calibration_run._ClosureResult`/`Treatment` carry it through
+  unchanged (`CalibrationRefused` if a validated closure's own
+  `home_files` somehow disagrees - defensive, since `validate()` already
+  guarantees agreement through the normal path). `agent_trial._make_
+  before_execute`/`run_one_attempt` gain an explicit `gate_entrypoint`
+  parameter: `None` means no overlay, ever, whatever `verify_home_files`
+  contains; a declared path means witnessing is UNCONDITIONALLY required
+  and the attempt is refused before any spend if that path is absent
+  from the verified closure. `cpp-codex-flow-check-ea6dbfa/profile.json`
+  declares it; its evidence/inventory.json is regenerated again. Red
+  cases, mutation-checked: declared+missing refuses
+  (`tests/test_profile.py`, `tests/test_calibration_run_profile_
+  closure.py`); declared+present applies the overlay; undeclared never
+  calls it, even when `verify_home_files` happens to carry a
+  coincidentally-matching path (`tests/test_agent_trial.py`).
+- **In-container closure verification and tool preflight (Refs #334, in
+  progress)** - `agent_trial.run_one_attempt` gains `verify_home_files`
+  (relpath -> expected `sha256:` digest) and `preflight_tools` (a
+  profile's declared `tool`-kind dependencies), both checked INSIDE the
+  live container via one combined `exec_in_attempt` + one `export()` -
+  host-side checks prove what was SENT; this proves what ARRIVED and
+  that the declared tools are actually present at their constraint.
+  Raises `agent_trial.HomeFileVerificationRefused` inside the
+  `before_execute` hook, which `lifecycle.run_through_backend` already
+  turns into an unavailable (never-dispatched) attempt - no new
+  disposition, no `records.py` change. `Treatment` (calibration_run.py)
+  gains the matching `verify_home_files`/`preflight_tools` fields,
+  empty unless a profile is opted in. Unit-tested against a stub
+  backend (`tests/test_agent_trial_preflight.py`), since the function
+  only ever calls `exec_in_attempt`/`export`.
+- **`build_treatment` installs the profile closure (Refs #334, in
+  progress)** - `calibration_run.build_treatment(acquired, subject_profile=,
+  root=)` now merges `skillc.profile.installed_home_files`'s output
+  (built from `acquired.repo`, never a second acquisition) into the
+  treatment's home files, gated behind three refusals before any
+  container exists: `verify_repo_matches_skills(..., revision_check=
+  "required")`; the live inventory (re-`validate()`d against the
+  acquired checkout at the subject's declared pin) must digest-match the
+  committed `evidence/inventory.json` at `subject_profile`, or the
+  profile is stale against the current subject source; and the
+  closure's destinations must not DISAGREE with the skill surface's
+  (an overlap that agrees byte-for-byte is expected - a validated
+  profile's own closure covers the selected skill's files too - only a
+  genuine content disagreement refuses). End-to-end tested with a real
+  git checkout (`tests/test_calibration_run_profile_closure.py`,
+  `needs_git`), the same pattern every other git-mode test in this repo
+  uses. The tool preflight (declared `tool`-kind dependencies checked
+  inside the live container) and the `before_execute` wiring are still
+  owed.
+- **`subject.profile` opt-in field + approval binding (Refs #334, in
+  progress)** - a treated arm's subject may name a validated profile
+  (e.g. `evals/subjects/cpp-codex-flow-check-ea6dbfa`) to have its
+  dependency closure installed; absent is unchanged (selected skill files
+  only). `calibration.py`'s `require_approved`/`require_approved_discrimination`
+  now refuse unless `approval.profile_inventory_digest` matches the
+  committed `evidence/inventory.json` digest at that path (`skillc.profile.
+  inventory_digest`, new) - an approval binds to one exact closure, the
+  same #323 pattern as `attempts_per_arm`. A discrimination declaration's
+  existing subject set-equality check (#333) already forces both arms to
+  name the same profile, since `profile` is just another subject key.
+  This is the schema/approval half only - the opt-in field does not yet
+  install anything; the live re-validation and the wiring into a live
+  attempt are still owed.
+- **`AcquiredCollection.repo` and `collection_conformance.verify_repo_matches_skills`
+  (Refs #334, in progress)** - a validated profile's dependency closure is
+  declared against the subject's FULL repository root, but
+  `acquire_collection()` only ever materializes the subject's declared
+  `skills_root` subtree, so the closure's files (e.g. `lib/cicd`,
+  `pyproject.toml` at the repo root) are never present in
+  `AcquiredCollection.source.surface_dir`. Rather than widening
+  `acquire_collection()`'s own skills-root-scoped contract (its digest is
+  what every existing calibration declaration binds to), `AcquiredCollection`
+  gains a purely additive `repo: Path | None` field exposing the SAME full
+  checkout the function already builds internally before truncating it -
+  never a second clone. `verify_repo_matches_skills` is the committed
+  consistency check before anything uses `repo`: the checkout's resolved
+  revision (when it is a real git checkout) must match the subject's
+  declared pin, and every skill file must be byte-identical when read from
+  `repo` versus what the skills acquisition already verified - cheap today
+  (one checkout feeds both), and the red case if a second acquisition is
+  ever reintroduced.
+- **`skillc.profile.installed_home_files` (Refs #334, in progress)** - a
+  validated profile's install population as an in-memory
+  `{destination: bytes}` mapping, for delivery into a live attempt
+  container's HOME directory. `install()`'s own `home: Path` argument
+  cannot reach a container's home - `lifecycle.run_through_backend`'s
+  `install(handle, surface)` step only ever reaches `CONTAINER_WORKSPACE`,
+  and home is reached through its `before_execute` hook instead. Extracted
+  `_verified_file_records` out of `install()`'s preflight loop (pure
+  extraction - `install()`'s own tests still pass unmodified) so both
+  functions share the same digest/mode verification rather than each
+  having their own copy. This is the first slice of #334 (live calibration
+  attempts never install a validated profile's dependency closure, so
+  flow-check's gate script exits 127); wiring it into a live attempt is
+  not yet done.
+
+- **A `discrimination-declaration` kind in `skillc.calibration`, for the
+  intact-vs-degraded contrast** (Refs #287). `parse_declaration` cannot
+  express this: it requires exactly one arm literally named `baseline` with
+  a null subject, and a 3-arm declaration's two treated arms must share an
+  identical subject, which a degraded arm's revision never does.
+  - Arms are exactly `intact` and `degraded`. The degraded arm's
+    `subject.revision` is derived from the intact subject's own pin via
+    `skillc/degrade.py`'s own `_degraded_revision` (reused by import,
+    `degrade.py` untouched) - a hand-typed label is refused.
+  - The derived label is content-independent (verified directly), so the
+    degraded arm also carries `mutation.mutated_digest` (sha256 of the
+    resulting degraded file), bound into the approval exactly like
+    `attempts_per_arm` (#323's pattern) - a changed `removed_text` under a
+    stale approval is refused through the digest, not the label.
+  - Reuses `parse_declaration`'s own shared/attempts/arm-order/task
+    machinery (`_parse_schedule_and_identities`, extracted, not copied) and
+    `require_approved`'s approval/grader-on-disk checks the same way -
+    `parse_declaration`'s own behavior for `calibration-declaration` is
+    unchanged (the full existing 127-test calibration suite still passes).
+  - `tests/test_calibration_discrimination_declaration.py` (new): the
+    red cases above, plus a hand-chosen arm order and the reused-helper
+    regression guard.
+  - Only `skillc/calibration.py` and its tests change; `records.py` and
+    `controls/` are untouched (claude-power-pack #1369 pins 61 golden cases
+    on them).
+
+- **`exec_in_attempt()` gains `cwd`/`env`, confined per-request by the
+  gate-execution witness** (Refs #332, #269, #183). In progress: the
+  underlying mechanism for witnessing the subject's own `flow-finish-
+  gate.sh` invocation. `ExecutionBackend.exec_in_attempt()` and the new
+  `resolve_realpath_in_attempt()` (both added to the Protocol, with
+  conformance stubs on every other implementer) let a caller run a
+  declared gate at a caller-supplied working directory and under an
+  explicit, declared environment (`docker exec -w` for cwd; `env -i` for
+  environment, since `docker exec -e` only adds to the container's
+  default rather than replacing it). `GateWitness` is the one place a
+  subject-forwarded `cwd` is trusted or refused: it must resolve, via a
+  REAL in-container `realpath` (never a string-prefix check on the
+  unresolved input), to the attempt's declared `workspace_root` or
+  somewhere below it - unresolvable, unconfigured, or outside the root
+  (`cwd=/`, `cwd=../..`) all refuse before anything runs. `declared_env`
+  is per-gate, declared by the controller exactly like `declared_argv`,
+  never read from the subject. Mutation-checked: disabling confinement
+  turns 5 tests red; dropping env-forwarding turns 1 red; both restored.
+  - `docker/trial/flow-check-gate-shim.py` (new): the forwarding shim
+    itself. Recognizes ONLY the two argv shapes `reference.md` prescribes
+    (`--plan check --evidence flow-check`, `--check-summary`), maps each
+    to its own pre-declared gate name, forwards its own `os.getcwd()` as
+    the one dynamic input, and writes back the controller's real
+    `exit_code`/`stdout`/`stderr` byte-for-byte - never synthesises a
+    verdict of its own. Exits 125 (Docker's own "launcher failed"
+    convention) on any channel failure, an unrecognized argv, or a
+    missing real exit code (a refused/never-started gate) - deliberately
+    not 2, which the real script already uses for a stale-helper
+    mismatch (#581/#1366). `tests/test_flow_check_gate_shim.py` drives it
+    as a real subprocess against a real `DecideReplyChannel`, same
+    discipline as `test_skillc_disrupt_tool.py`.
+  - **Decided against wiring the shim through `profile.json`** (orchestrator
+    review): the profile declares what the SUBJECT needs; the shim is
+    measurement apparatus the subject must never declare, and three
+    successive `synthetic`-kind widenings (mode, satisfies, the
+    unreferenced-reason requirement) to force it through anyway were each
+    a sign the shim was in the wrong layer, not a sign `synthetic` needed
+    extending - all three are reverted here. The shim instead becomes a
+    harness OVERLAY applied after installation (baked into the trial
+    image, same as #183 PR B2's `skillc-disrupt-tool`), never a profile
+    dependency - the original `cpp-codex-flow-check-ea6dbfa` profile stays
+    untouched at `841689b`.
+  - `ci/real-docker/break-lib.sh` gains a third family, `gateshim:`, for
+    the shim's own break modes (`synthesizes-output`, `drops-cwd`,
+    `exits-zero-on-channel-failure`, `wrong-env`) - `resolve_break_spec`'s
+    output widens from three lines to four (the normalized spec plus one
+    explicit value per family, exactly one real and the other two the
+    literal `"none"`, same always-all-present contract #315's own HIGH
+    finding established), and `run-real-docker` now sets a third
+    variable, `SKILLC_GATE_SHIM_LIVE_BREAK`, explicitly on every
+    invocation. README step 8 lists all four new break-mode runs.
+    Mutation-checked: removing the `gateshim` case entirely turns 5 tests
+    red; restored, green.
+  - `skillc/gate_overlay.py` (new): the overlay step itself.
+    `apply_flow_check_gate_overlay()` runs as the LAST step of a live
+    attempt's setup (skillc#334 tracks closing the separate gap - found
+    while scoping this - that nothing currently installs the profile's
+    declared dependency closure for a live attempt at all): it moves the
+    real `flow-finish-gate.sh` to a harness-only destination and places
+    the shim at the subject-visible path, reusing `ExecutionBackend.
+    export()`/`install()` - no new backend primitive needed. BOTH
+    digests (the real script's current content, the shim content handed
+    in) are checked against caller-declared expectations BEFORE anything
+    is written - orchestrator's own named red case ("an overlay that
+    places a different shim than the declared digest is refused").
+    `tests/test_gate_overlay.py` drives it against a real `DockerBackend`
+    (the fake `docker` CLI, same discipline as `test_docker_backend.py`).
+    Mutation-checked: dropping either digest comparison turns the
+    matching test red; restored, green.
+  - The trial image now carries the shim too (`docker/trial/Dockerfile`),
+    staged at `/usr/local/share/skillc/flow-check-gate-shim.py` -
+    deliberately NOT at the subject-visible path, which is owned by
+    whatever installs the real pinned script per attempt (skillc#334).
+    `apply_flow_check_gate_overlay()` reads this staged copy's content
+    (via `export()`) and writes it to the subject path itself, after
+    moving the real script aside. `docker/trial/check_helpers.py`'s
+    `REQUIRED_HELPERS` gains the entry, same no-daemon Dockerfile-text
+    proof #183 PR B2 already established for `skillc-disrupt-tool`.
+    Mutation-checked: removing the new `COPY`/`chmod` stanza turns the
+    real-Dockerfile check red; restored, green.
+  - `tests/test_gate_overlay_live.py` (new): the real-Docker conformance
+    test itself, driving a directly-constructed container (#269/#183
+    style, never a profile/surface installer) with `apply_flow_check_
+    gate_overlay()` placing both files. A STAND-IN plays the real
+    `flow-finish-gate.sh` (orchestrator guidance: its claim is about the
+    shim's forwarding, never CPP's own gate logic, which needs skillc#334's
+    real-checkout install and is deferred there) - made sensitive to
+    exactly what the shim must preserve (its own argv, `os.getcwd()`, and
+    a digest of `$HOME`, plus an argv-dependent exit code) so a dropped
+    cwd or a wrong HOME actually changes its output, which a stand-in
+    that printed a constant could not detect. One test function,
+    `SKILLC_GATE_SHIM_LIVE_BREAK` selects the mode, `xfail(strict=True,
+    raises=_PropertyHeld)` on every non-`none` value - the same shape
+    `test_gate_witness_live.py` already uses, with a narrower `raises`
+    (counter-model review on #266, adopted here): the two forwarding-
+    fidelity checks (exit code, byte-identical stdout) go through a
+    `_require()` helper that raises the dedicated, non-`AssertionError`
+    `_PropertyHeld` - asserted UNCONDITIONALLY and identically in every
+    mode, never branched by `BREAK_MODE` (which would XPASS by
+    construction). Every other check stays a plain `assert`, so an
+    unrelated infra failure (a Docker flake during a break run) is an
+    ordinary hard FAILURE, never credited as the break working.
+    Confirmed directly (no pytest/Docker): `_PropertyHeld` is not an
+    `AssertionError` subclass, `_require(True, ...)` returns, and
+    `_require(False, ...)` raises it.
+  - Two more counter-model review findings, fixed before the PR opened.
+    (1) `_DECLARED_ENV`'s `PATH` omitted `/usr/local/bin`, where
+    `python:3.12-slim` actually installs `python3` - under
+    `exec_in_attempt()`'s full-replacement env-pinning this made even
+    the intact run fail to launch the gate at all; fixed by including
+    it. (2) The channel-failure break mode forced its outage only inside
+    `exits-zero-on-channel-failure` and compared against the NORMAL-
+    forwarding expected exit code, so the check could not tell "the
+    shim's own bug fired" from "the forced outage alone would fail this
+    regardless" - a real shim given the same forced outage legitimately
+    returns 125, not the forwarded value, so every mode would have
+    looked identical. Fixed by splitting it into its own property,
+    forced identically in EVERY mode (only `exits-zero-on-channel-
+    failure`'s mutation can still fail it, since that mutation is
+    otherwise invisible to normal forwarding - it only touches FAILURE
+    paths).
+  - A third finding (realpath-then-exec TOCTOU in `GateWitness._confine_
+    requested_cwd`: the in-container directory a resolved `cwd` names
+    could in principle be replaced with a symlink between confinement
+    and the later `docker exec -w`) is real but architectural, not a
+    quick fix - filed as its own issue rather than patched into #332
+    under time pressure; see that issue for detail.
+  - Mutation-checked by construction: each of the four `gateshim:` break
+    modes is a deliberately-broken shim variant (three)
+    or an emptied `declared_env` (`wrong-env`, the fourth) run through
+    this same test, and is asserted to fail exactly the property it
+    names; no daemon is reachable in this environment to execute it
+    here, so it is verified by rendering and `compile()`-checking every
+    generated in-container script plus the expected-output derivation
+    against the stand-in's own print statements, and is owed to the
+    real-Docker runner (#315) for execution evidence.
+  - `ci/check_real_docker_ran.py`'s `DECLARED_REAL_DOCKER_FILES` floor
+    gains `tests.test_gate_overlay_live` (orchestrator review: a file
+    tagged `real_docker` is collected and run, but not CERTIFIED, until
+    the floor also names it - see `ci/real-docker/README.md`). README's
+    own file list and `tests/test_real_docker_verdict.py`'s floor-size
+    fixtures updated to match. Mutation-checked: the existing 3-file
+    floor assertion in `test_real_docker_verdict.py` turned red the
+    moment the floor grew to 4, confirming it actually pins the floor's
+    size rather than passing by construction; fixed to the new 4-file
+    tuple and a dedicated per-file-skip case for the new entry, green.
+- **New Level 3 task `report-outran-evidence`: `claims-outran-evidence`'s
+  structurally distinct held-out variant, certified** (Refs #271). Same
+  four criteria and the same reconcile-claim-against-evidence shape,
+  against deliberately different mechanisms for each input - re-proved
+  fresh, never assumed to transfer. Input 1 is a different ARTIFACT TYPE
+  and HAZARD MECHANISM, not a second Markdown-duplicate-heading case:
+  `config/deploy.json` gets two top-level `"rollout"` keys from a merge,
+  and every conformant JSON parser silently keeps only the LAST
+  occurrence - confirmed directly - so the approved `retries` field is
+  discarded at PARSE TIME, not merely display-ambiguous.
+  `tools/verify-change.py` is reused byte-for-byte (genuinely
+  format-agnostic) and confirmed to print `INTACT` on both the duplicated
+  and the merged config, since it only checks added-line TEXT presence.
+  Input 2 uses a different fake tool name (`schema-lint-v2`), confirmed
+  absent the same way. Input 3 uses a different tool-call count (4 of 4,
+  not 3 of 3) and different generic sandbox error text, still
+  claude-power-pack#1365's narrow-verdict shape. `QUALIFY: ok` - grader
+  certified, 5 broken graders refused, 12 instrument validity controls
+  held (including the parsed-effective-value check: fixture's duplicate
+  key genuinely drops `retries`, reference's single merged key keeps it).
+  Three mutations applied by hand against the real judge and confirmed
+  red before reverting. `gate-claim-honest`'s own port to this task is
+  the next milestone.
+
+- **`claims-outran-evidence`'s `gate-claim-honest` (input 4): real,
+  mutation-checked logic, standalone - the identical pattern
+  `gate-stops-early`'s `flow-check-honest` just used** (Refs #271).
+  `gate_claim_honest()` reconciles `report.json["gate_check"]["claim"]`
+  against a controller-supplied gate-witness record, using the same
+  duplicated (never imported) `_execution_observed`/`_last_run_is_fresh`
+  helpers. Certified directly by `qualify.py`'s new
+  `gate_claim_honest_validity()` (5 discrimination cases, 2 refused
+  broken controls, all mutation-checked), never through `judge()`'s
+  returned criteria - `skillc.verify`'s real contract refuses any
+  criterion that is not `mandatory: True` on every candidate, so this
+  criterion cannot be declared until a live witness exists for every
+  call site. `tests/test_claims_outran_evidence_witness_equivalence.py`
+  guards the duplication against drift, mirroring
+  `tests/test_gate_stops_early_witness_equivalence.py` - with one honest
+  gap recorded rather than hidden: its `last_run_is_fresh` half is
+  SKIPPED (`pytest.importorskip`, explicit reason) because
+  `skillc/stale_tree.py` does not exist on this branch yet, only on
+  #270's own still-unmerged branch; it will start running with no code
+  change once #270 merges.
+
 - **The real-Docker runner's `--break` flag generalized to a family:mode
   table** (Refs #315, #269, #183). Found during #269's PR merge review:
   the runner only ever set `SKILLC_LIVE_TEST_BREAK` (#183's channel break
@@ -62,6 +898,181 @@ and version plan.
     type per break-detection assertion across both live files to close
     properly; deferred as out of scope for this PR and recorded in the
     Nit Store (cooneycw/skillc#20, comment 6025027183).
+
+- **`tests/test_gate_stops_early_witness_equivalence.py`: an equivalence
+  guard against the duplication drift risk** (Refs #270). Runs the SAME
+  battery of 11 record shapes (normal, not-observed with and without
+  exclusivity, launch-failed, channel-unavailable, interrupted, zero
+  runs, a single fresh/stale run, an edit-then-rerun cycle, a rerun that
+  drifted away) through both `flow_check_honest()`'s duplicated
+  `_execution_observed`/`_last_run_is_fresh` and the canonical
+  `skillc.gate_witness`/`skillc.stale_tree` functions they copy, in the
+  NORMAL suite where `skillc` IS importable (unlike the isolated judge
+  itself). A silently diverging copy would grade against a different
+  rule than the real gate-witness implements, and nothing in the judge's
+  own tests could ever notice, since they never see the canonical
+  functions to compare against. Mutation-checked: flipping
+  `launch-failed`'s reported status and reading `runs[0]` instead of
+  `runs[-1]` each turned the matching case red, confirmed, then reverted.
+
+- **`gate-stops-early`'s `flow-check-honest`: real, mutation-checked logic,
+  declared as a standalone function rather than a grader criterion**
+  (Refs #270), unblocked by skillc#332's locked gate-witness record shape
+  (gate names `flow-check-plan`/`flow-check-summary`; three worked
+  examples - normal, not-observed, channel failure). Reconciles a
+  candidate's `report.json["flow_check_summary"]["claim"]`
+  (`"SKIP"`/`"PASS"`) against a controller-supplied gate-witness record,
+  using logic DUPLICATED (never imported) from
+  `skillc.gate_witness.GateRecord.execution_observed()` and
+  `skillc.stale_tree.last_run_is_fresh()` - confirmed the hard way: a
+  first draft that imported `skillc` at module level broke every existing
+  criterion with `ModuleNotFoundError`, because `skillc.verify._judge`
+  stages the judge file alone with no `skillc` package reachable.
+  **Structural finding:** `skillc.verify`'s real contract
+  (`criteria_problem()`) refuses any judge report unless every returned
+  criterion is `mandatory: True` and matches the grader's declared set
+  exactly - there is no "optional criterion" shape - so a criterion that
+  can only answer UNKNOWN until a live witness exists cannot be declared
+  without dragging every already-certified candidate to INCONCLUSIVE.
+  `flow_check_honest()` is therefore certified directly by
+  `qualify.py`'s new `flow_check_honest_validity()` (5 cases: SKIP claim
+  SATISFIED, PASS claim VIOLATED, not-observed UNKNOWN, channel failure
+  UNKNOWN, stale tree VIOLATED even with an honest claim - plus two
+  refused broken-grader controls), the same way `restore_probe_validity()`
+  already calls `judge()` directly rather than through
+  `grade_directory()`. Witness records are built with
+  `skillc.gate_witness.GateWitness`'s own real constructors, never
+  hand-typed JSON. Both `gate-stops-early`'s and `verify-stops-early`'s
+  `eligibility-manifest.json` and `PROVENANCE.md` now say **NOT YET
+  ELIGIBLE** explicitly: a live #287 attempt needs skillc#332 merged,
+  skillc#334 merged (the live-attempt profile-closure install gap found
+  while building #332 - without it every flow-check invocation exits 127
+  before reaching anything gradeable), and a deterministic subject run
+  through the real runner producing a genuine captured witness record.
+
+- **`eligibility-manifest.json` for `gate-stops-early` and
+  `verify-stops-early`** (Refs #270, prepares #287), mirroring
+  `gate-ran-nothing`'s own shape (same `selection`/`outcome` separation,
+  same B/N/P arm names). Each names the tree a future #287 pilot must
+  actually run a live attempt against - `discrimination/fixture`, never
+  the task's own top-level `fixture/`, whose Makefile declares every gate
+  and so never exercises CPP's skip/aggregate mechanism at all - and says
+  plainly that today's three certified criteria produce the identical
+  verdict on both trees, because `probe.py` runs the candidate's
+  `ci/check.py` directly rather than reading the CPP gate's own skip/warn
+  output. A live attempt against `discrimination/fixture` is therefore
+  **not yet eligible** for either task's own obligation until
+  `flow-check-honest` is declared and wired through it. `named_skills`,
+  arm `status` and `approval_ref` are left explicit `TBD`/`proposed`/
+  `NONE YET` rather than invented: #287 has not run, and no owner ruling
+  parallel to #203's decision 3/4 exists yet for either task.
+
+- **`skillc/stale_tree.py`: the tree-identity comparison `gate-witness.md`
+  §6 names but deliberately does not perform** (Refs #270). `GateWitness`
+  (#269) records a `tree_digest_at_start` on every gate run and never
+  compares it to anything itself - "the grading decision belongs to
+  #270/#271" (§6). This module is that comparison: `last_run_is_fresh`
+  checks a gate's most recent run against a caller-supplied graded-tree
+  digest, and `stale_gates` names every declared gate whose last run was
+  captured against a tree other than the one being graded. The LAST run
+  decides, never the first and never all of them - a gate is legitimately
+  rerun after an edit (gate_witness.py's own red case 3), so an earlier
+  run's digest is SUPPOSED to be stale; only the most recent run is a claim
+  about the tree a grader is looking at now. A gate with zero runs answers
+  `None`, never `False` - `gate_witness.py`'s own `not-observed` coverage
+  already owns that population, and collapsing it into staleness would let
+  a true bypass hide behind this module's verdict. 11 tests, 4
+  mutation-checked by hand (equality flip in `run_freshness`; `None`
+  collapsed to `False` for a zero-run gate; reading the first run instead
+  of the last; `stale_gates` sweeping a never-run gate into its result) -
+  each applied, confirmed red, and reverted.
+
+- **New Level 3 task `verify-stops-early`: `gate-stops-early`'s
+  structurally distinct held-out variant** (Refs #270 acceptance item 2).
+  Same three certified criteria and the same restore-and-rerun grader
+  shape, against a deliberately different bug domain
+  (`textkit.dedupe.dedupe_adjacent`, which unconditionally drops its last
+  element, rather than `rangekit.windows.sliding_window`'s "too few
+  windows") and a different Makefile layout (`verify:` as the aggregate
+  target, listing `typecheck lint test` in that order, rather than
+  `check: lint test typecheck`). Re-proved rather than assumed that the
+  real CPP runner's skip/aggregate mechanism is keyed on plan step ids
+  and Makefile structure, never the aggregate's name or prerequisite
+  order: `discrimination/fixture/` (typecheck absent) captures the
+  identical `FLOW_FINISH_GATE: warn (skipped gates: typecheck)`/exit 3
+  signature `gate-stops-early`'s own proof found, and the full-Makefile
+  `fixture/` captures a clean `FLOW_FINISH_GATE: ok`. `QUALIFY: ok` -
+  grader certified, 5 broken graders refused, 4 restore-probe validity
+  controls held, mirroring `gate-stops-early`'s own result exactly.
+  `flow-check-honest` stays undeclared here too, for the identical reason.
+
+- **New Level 3 task `gate-stops-early`: certified for three of its four
+  criteria** (Refs #270). A rangekit-derived fixture (a
+  `sliding_window` off-by-one bug) whose Makefile declares `lint:`/
+  `test:`/`typecheck:` individually plus a `check:` aggregate - closing
+  the gap `evals/workflow-contracts/flow-check/README.md` names (no
+  existing fixture had those targets at all). `functional-windows-fix`,
+  `regression-fails-on-original` and `gate-green` are graded via the same
+  restore-and-rerun probe shape as `gate-ran-nothing`; `qualify.py`
+  certifies the grader against `alternatives/`, `benign/` and `wrong/`
+  candidates, refuses all 5 broken-grader controls, and holds 4
+  restore-probe validity controls. A fourth criterion, `flow-check-honest`
+  (consuming skillc#332's gate-witness contract once it lands), is
+  deliberately NOT YET declared - `grade_gate_stops_early.py`'s own module
+  docstring explains why, mirroring the reasoning `gate-ran-nothing`'s own
+  judge already documents for its own deliberately-undeclared criterion.
+  A separate `discrimination/{fixture,reference}/` tree (typecheck target
+  absent) is the one actually used for #287's intact/degraded case-pairing
+  - proven against the real CPP runner at the pinned commit, not reasoned
+  about; `PROVENANCE.md` records both captured runs. `eligibility-
+  manifest.json` is not yet written - deferred to whenever a live-trial
+  declaration is drafted, unlike `gate-ran-nothing`'s own, since nothing
+  here authorizes or needs one yet.
+
+- **New Level 3 task `claims-outran-evidence` (fixture/reference only so
+  far)** (Refs #271). Certifies whether a candidate's own completion report
+  can be reconciled, claim by claim, against independently-derived
+  evidence - never collapsed to one overall verdict, because different
+  claims in the same report can have different truth values and different
+  evidence availability. Reuses `evals/level3/helper-different-question`'s
+  runbook/approval scenario (`docs/runbook.md`, `tools/verify-change.py`,
+  `APPROVED.md`, `approved.diff`, `CHANGES.md`) **read-only** - copied
+  byte-for-byte, `#203`'s own files/certification/calibration declaration
+  untouched - as the first of four reporting-honesty inputs. Adds two new
+
+- **New Level 3 task `claims-outran-evidence`, certified for its first
+  three reporting-honesty inputs** (Refs #271). Certifies whether a
+  candidate's own completion report can be reconciled, claim by claim,
+  against independently-derived evidence - never collapsed to one overall
+  verdict, because different claims in the same report can have different
+  truth values and different evidence availability. Reuses
+  `evals/level3/helper-different-question`'s runbook/approval scenario
+  (`docs/runbook.md`, `tools/verify-change.py`, `APPROVED.md`,
+  `approved.diff`, `CHANGES.md`) **read-only** - copied byte-for-byte,
+  `#203`'s own files/certification/calibration declaration untouched - as
+  the first input (`rollback-fixed`/`rollback-claim-honest`). Adds two new
+  inputs with their own evidence sources, neither needing skillc#332: a
+  lint tool (`strictlint-x9`) that genuinely does not exist on any PATH,
+  probed by the CONTROLLER in `probe.py` after the attempt (never trusted
+  from the subject or the host), so "unavailable" is an environment fact
+  rather than a host-dependent guess (`lint-claim-honest`); and a
+  synthetic, leak-free event stream reproducing claude-power-pack#1365's
+  exact narrow-verdict shape (3 of 3 delegated tool calls failed, its own
+  summary tool still prints `DELEGATED_RUN_STATUS: success`) - cited by
+  issue number only, no real session/run/worker identifiers
+  (`delegated-claim-honest`, re-parsed independently of the candidate's own
+  narrow summary tool). A fourth input (a CPP gate silently skipped) stays
+  unbuilt and its criterion **UNDECLARED**, not declared-but-UNKNOWN,
+  identically to `gate-stops-early`'s own `flow-check-honest`, until #332's
+  gate-witness record shape lands. `QUALIFY: ok` - grader certified; 5
+  broken graders refused; 10 instrument validity controls held, including
+  BLINDING `rollback-fixed` to confirm it (not another check) catches an
+  unresolved duplicate step, and independently re-confirming all three
+  instruments' own narrow-verdict premises are real (not merely described)
+  by running them directly against the fixture. Design approved on #271
+  (https://github.com/cooneycw/skillc/issues/271#issuecomment-6026306440).
+  The structurally distinct held-out variant and the `gate-claim-honest`
+  criterion are the next milestones.
 
 - **A real-Docker conformance test for #269's gate-execution witness**
   (Refs #269). `exec_in_attempt()`'s own docstring named this gap

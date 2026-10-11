@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import dataclasses
 import json
 import shutil
 import sys
@@ -419,6 +420,39 @@ def test_an_interrupted_run_still_reconciles_every_planned_attempt(tmp_path: Pat
 # ------------------------------------------------------------ small contracts
 
 
+def test_run_calibration_builds_the_surface_from_the_declared_fixture_not_a_hardcoded_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#287: `run_calibration` used to always read `task_root / "fixture"`,
+    whatever the declaration said - gate-stops-early's own discrimination
+    case needs a DIFFERENT real tree (`discrimination/fixture`, where the
+    skipped-gate obligation actually applies; the default tree's Makefile
+    never skips a gate at all). Proven here by pointing `task.fixture` at a
+    different real, committed subdirectory and confirming `run_calibration`
+    reads from THAT path - a mutation reverting the call site back to the
+    hardcoded string would make this test call `cc.task_surface` with
+    `.../fixture` instead, caught below."""
+    data = _declaration_data()
+    data["task"]["fixture"] = "wrong/pipeline-red"  # type: ignore[index]
+    data["approval"]["task_fixture"] = "wrong/pipeline-red"  # type: ignore[index]
+    declaration = calibration.parse_declaration(data)  # type: ignore[arg-type]
+    assert (ROOT / declaration.task_path / "wrong" / "pipeline-red").is_dir()
+    seen: list[Path] = []
+
+    def fake_task_surface(path: Path) -> list[tuple[str, bytes, bool]]:
+        seen.append(path)
+        raise demo.SubjectRefused("stop here - only the path matters for this test")
+
+    monkeypatch.setattr(cc, "task_surface", fake_task_surface)
+    with pytest.raises(cr.CalibrationRefused):
+        cr.run_calibration(
+            declaration, run_dir=Path("/nonexistent-never-created"),
+            treatment=cr.Treatment({}, "sha256:" + "ab" * 32, None), image_digest=_IMAGE_DIGEST,
+            backends=lambda: (None, None), argv_for=lambda _s: ["codex"],
+        )
+    assert seen == [ROOT / "evals" / "level3" / "slugkit-pipeline" / "wrong" / "pipeline-red"]
+
+
 def test_task_surface_matches_the_level1_surface_and_withholds_the_answer_key() -> None:
     for fixture in (ROOT / "evals" / "level1" / "slug-small-fix" / "fixture",
                     ROOT / "evals" / "level1" / "finish-close-ref" / "fixture"):
@@ -433,7 +467,7 @@ def test_task_surface_matches_the_level1_surface_and_withholds_the_answer_key() 
 
 def test_a_treatment_that_installs_nothing_is_refused() -> None:
     acquired = cc.AcquiredCollection(
-        subject=argparse.Namespace(locator="test/test"), source=None, files=[],  # type: ignore[arg-type]
+        subject=argparse.Namespace(locator="test/test"), source=None, files=[], repo=None,  # type: ignore[arg-type]
     )
     with pytest.raises(cr.CalibrationRefused, match="second baseline"):
         cr.build_treatment(acquired)
@@ -771,3 +805,78 @@ def test_expanded_instruction_lane_dry_run_schedules_and_reconciles_all_three_ar
     # is inline), so it carries no named_opened accounting; S does.
     assert "named_opened" in arms["explicit-skill"]
     assert "named_opened" not in arms["expanded-instruction"]
+
+
+# --------------------------------------------------- profile-closure fields (#334)
+
+
+def test_run_calibration_threads_closure_fields_for_the_treated_arm_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """skillc#334: `run_calibration`'s own `run_attempt`
+    must thread `Treatment.verify_home_files`/`.preflight_tools`/
+    `.gate_entrypoint` into `cc.run_level1_agent_attempt` for a TREATED
+    arm, and pass none of them (empty/`None`, exactly like `extra_home_
+    files`/`receipt_context` already do) for the baseline - never a
+    treatment whose closure is only partially opted in. Captured at the
+    SAME spy boundary `test_both_arms_run_one_path_and_differ_only_in_
+    what_is_installed` already uses, so this is a wiring test only: the
+    treated attempt is free to end up `unavailable` downstream (this
+    sentinel closure was never actually validated against a real
+    profile), which does not affect what was threaded into the call."""
+    seen: list[dict[str, object]] = []
+    real = cc.run_level1_agent_attempt
+
+    def spy(**kwargs: object) -> dict[str, object]:
+        seen.append(dict(kwargs))
+        return real(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(cc, "run_level1_agent_attempt", spy)
+
+    declaration = _declaration(attempts=1)
+    treatment = _treatment(tmp_path, monkeypatch)
+    sentinel_digest = "sha256:" + "a" * 64
+    sentinel_entrypoint = ".codex/skills/tdd/SKILL.md"  # a real delivered path, chosen as a plausible sentinel
+    treatment = dataclasses.replace(
+        treatment,
+        verify_home_files={sentinel_entrypoint: sentinel_digest},
+        preflight_tools=({"id": "tool-sentinel", "probes": []},),
+        gate_entrypoint=sentinel_entrypoint,
+    )
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    docker_state = tmp_path / "docker-state"
+
+    def backends() -> tuple[object, object]:
+        make = lambda: d.DockerBackend(
+            image=_IMAGE, base_dir=run_dir, docker_bin=_docker_bin(docker_state), daemon_timeout=_FAKE_DAEMON_TIMEOUT,
+        )
+        return make(), make()
+
+    def argv_for(scheduled: mp.ScheduledAttempt) -> list[str]:
+        home = docker_state / f"{d._container_name(scheduled.attempt_id)}.fsroot" / "home" / "candidate"
+        return [
+            sys.executable, str(FAKE_CLIENT), "--format", "codex-fake", "--home", str(home),
+            "--transcript-relpath", f".codex/sessions/2026/01/01/rollout-{scheduled.attempt_id}.jsonl",
+        ]
+
+    _, outcomes = cr.run_calibration(
+        declaration, run_dir=run_dir, treatment=treatment, image_digest=_IMAGE_DIGEST,
+        backends=backends, argv_for=argv_for, credential_explicit_path=_fresh_codex_credential(tmp_path),
+    )
+
+    assert len(seen) == 2  # one baseline, one treated - attempts=1
+    arm_of = {o.scheduled.attempt_id: o.scheduled.arm for o in outcomes}
+    saw_baseline = saw_treated = False
+    for call in seen:
+        if arm_of[str(call["attempt_id"])] == calibration.BASELINE_ARM:
+            saw_baseline = True
+            assert call["verify_home_files"] is None
+            assert call["preflight_tools"] is None
+            assert call["gate_entrypoint"] is None
+        else:
+            saw_treated = True
+            assert call["verify_home_files"] == {sentinel_entrypoint: sentinel_digest}
+            assert call["preflight_tools"] == ({"id": "tool-sentinel", "probes": []},)
+            assert call["gate_entrypoint"] == sentinel_entrypoint
+    assert saw_baseline and saw_treated
