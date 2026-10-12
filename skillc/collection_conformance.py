@@ -690,10 +690,10 @@ def run_level1_agent_attempt(
     `verify_home_files`/`preflight_tools`/`gate_entrypoint` (#334): a
     profile-opted treatment's own closure-verification fields,
     forwarded straight through to `agent_trial.run_one_attempt` - all
-    `None`/empty by default, so every existing caller (including the
-    fenced `uptake_study.run_study`, #346) is unaffected. `calibration_run.
-    run_calibration`'s own `run_attempt` is the first caller that passes
-    real values, for a TREATED arm only."""
+    `None`/empty by default. `calibration_run.run_calibration` passes
+    the treatment's fields for treated arms only; `uptake_study.run_study`
+    passes each selected arm's fields (#346). Treatments without a profile
+    keep their empty verification defaults."""
     resolved_task_root = task_root if task_root is not None else demo.GRADER_ROOT
     resolved_prompt = prompt if prompt is not None else (resolved_task_root / "goal.md").read_text(encoding="utf-8")
     resolved_surface = surface if surface is not None else surface_mapping(task_surface(resolved_task_root / "fixture"))
