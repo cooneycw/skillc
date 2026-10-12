@@ -31,6 +31,7 @@ CI_STEP_MAKE_TARGETS: dict[str, tuple[str, ...]] = {
     "changelog-check": ("changelog-check",),
     "readme-drift": ("readme-drift",),
     "git-tests-control": ("git-tests-control",),
+    "pytest-population-control": ("pytest-population-control",),
 }
 
 
@@ -185,3 +186,48 @@ def test_leak_exclude_parsers_are_never_vacuously_empty() -> None:
     ci_paths = _ci_leak_exclude_paths(CI_YML.read_text(encoding="utf-8"))
     assert make_paths, "the Makefile parser found no --exclude paths at all - probably broken, not really empty"
     assert ci_paths, "the ci.yml parser found no --exclude paths at all - probably broken, not really empty"
+
+
+# ----------------------------------------------- parallel population gate (#364)
+
+
+def _parallel_contract(ci_text: str, make_text: str) -> bool:
+    config = yaml.safe_load(ci_text)
+    gate = next(step for step in config["steps"] if step["name"] == "gate")
+    run = next(command for command in gate["commands"] if "--junit-xml=" in command)
+    make_run = next(line for line in make_text.splitlines() if "--junit-xml=" in line and "uv run" in line)
+    make_run = make_run.replace("$(PYTEST_WORKERS)", "auto")
+    flags = ("-n auto", "--maxprocesses=8", "--dist=loadgroup", "-rA")
+    return (all(flag in run and flag in make_run for flag in flags)
+            and "PYTEST_WORKERS ?= auto" in make_text
+            and any("pytest --collect-only -q" in command for command in gate["commands"])
+            and "pytest --collect-only -q" in make_text
+            and "python3 ci/check_pytest_population.py" in make_text
+            and "pytest-population-control: test" in make_text
+            and "pytest-population-control" in make_text.split("verify:", 1)[1]
+            and any(step["name"] == "pytest-population-control"
+                    and step["depends_on"] == ["gate"]
+                    and "python3 ci/check_pytest_population.py pytest-collected.txt pytest-report.xml"
+                    in step["commands"]
+                    and "bash ci/pytest-population-control.sh" in step["commands"]
+                    for step in config["steps"]))
+
+
+def test_ci_and_local_parallel_population_contract() -> None:
+    assert _parallel_contract(CI_YML.read_text(), MAKEFILE.read_text())
+
+
+def test_parallel_contract_rejects_serial_or_missing_control() -> None:
+    ci_text, make_text = CI_YML.read_text(), MAKEFILE.read_text()
+    for old, new in (("-n auto", "-n 0"),
+                     ("pytest --collect-only -q", "pytest --version"),
+                     ("python3 ci/check_pytest_population.py", "true")):
+        changed = ci_text.replace(old, new)
+        assert changed != ci_text
+        assert not _parallel_contract(changed, make_text)
+    for old, new in (("PYTEST_WORKERS ?= auto", "PYTEST_WORKERS ?= 0"),
+                     ("pytest --collect-only -q", "pytest --version"),
+                     ("python3 ci/check_pytest_population.py", "true")):
+        changed = make_text.replace(old, new)
+        assert changed != make_text
+        assert not _parallel_contract(ci_text, changed)

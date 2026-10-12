@@ -34,9 +34,18 @@ steps:
       # a CI run - #134's `make verify` covers that sighting; see AGENTS.md.)
       # --junit-xml (#307): read by the git-tests-control step below, from
       # the shared workspace (steps do not share each other's /tmp).
-      - uv run --no-sync pytest -rA --junit-xml=pytest-report.xml
+      - uv run --no-sync pytest --collect-only -q > pytest-collected.txt
+      - uv run --no-sync pytest -n auto --maxprocesses=8 --dist=loadgroup -rA --junit-xml=pytest-report.xml
       - uv run --no-sync ruff check .
       - uv run --no-sync mypy
+
+  # Independent collection plus a committed short-report negative control (#364).
+  - name: pytest-population-control
+    image: python:3.12-slim
+    depends_on: [gate]
+    commands:
+      - python3 ci/check_pytest_population.py pytest-collected.txt pytest-report.xml
+      - bash ci/pytest-population-control.sh
 
   # #307: proves the git-dependent population above actually RAN, not just
   # that `gate` exited 0 - a file whose whole git-gated subset re-skipped

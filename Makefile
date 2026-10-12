@@ -19,7 +19,7 @@ SHELL := bash
 .SHELLFLAGS := -eu -o pipefail -c
 
 .PHONY: sync selftest test lint typecheck negative-control typecheck-control \
-	leak-check changelog-check readme-drift secret-scan git-tests-control verify
+	leak-check changelog-check readme-drift secret-scan git-tests-control pytest-population-control verify
 
 sync:
 	uv sync --locked --extra dev
@@ -37,9 +37,13 @@ selftest: sync
 # who wants a faster local loop); empty by default, so plain `make test`
 # still runs the whole suite.
 PYTEST_ARGS ?=
+PYTEST_WORKERS ?= auto
+PYTEST_REPORT_DIR ?= reports
 test: sync
-	mkdir -p reports
-	uv run --no-sync pytest -rA --junit-xml=reports/pytest-report.xml $(PYTEST_ARGS) | tee reports/pytest.log
+	mkdir -p $(PYTEST_REPORT_DIR)
+	uv run --no-sync pytest --collect-only -q $(PYTEST_ARGS) > $(PYTEST_REPORT_DIR)/pytest-collected.txt
+	uv run --no-sync pytest -n $(PYTEST_WORKERS) --maxprocesses=8 --dist=loadgroup -rA --junit-xml=$(PYTEST_REPORT_DIR)/pytest-report.xml $(PYTEST_ARGS) | tee $(PYTEST_REPORT_DIR)/pytest.log
+	python3 ci/check_pytest_population.py $(PYTEST_REPORT_DIR)/pytest-collected.txt $(PYTEST_REPORT_DIR)/pytest-report.xml
 
 lint: sync
 	uv run --no-sync ruff check .
@@ -95,8 +99,11 @@ secret-scan:
 # so `make git-tests-control` alone, without a prior `make test`, fails on a
 # missing report rather than silently reading a stale one from an earlier run.
 git-tests-control: test
-	python3 ci/check_git_tests_ran.py reports/pytest-report.xml
+	python3 ci/check_git_tests_ran.py $(PYTEST_REPORT_DIR)/pytest-report.xml
 	bash ci/git-tests-control.sh
 
+pytest-population-control: test
+	bash ci/pytest-population-control.sh
+
 verify: selftest test lint typecheck negative-control typecheck-control leak-check \
-	changelog-check readme-drift secret-scan git-tests-control
+	changelog-check readme-drift secret-scan git-tests-control pytest-population-control
