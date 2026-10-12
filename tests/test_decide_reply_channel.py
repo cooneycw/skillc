@@ -541,52 +541,122 @@ def test_an_oversized_request_is_refused_without_a_reply(tmp_path: Path) -> None
     assert log == []
 
 
-def test_connections_past_max_concurrent_handlers_are_refused(tmp_path: Path) -> None:
-    """A subject opening more connections than declared capacity is
-    refused outright on the excess ones - never queued behind the
-    in-flight ones, and never allowed to spawn unbounded controller-side
-    threads. The admitted connection is unaffected."""
+def _assert_capacity_refusal(tmp_path: Path) -> None:
     sock_path = tmp_path / "trigger.sock"
+    admitted = threading.Event()
     released = threading.Event()
 
     def decide(request: Mapping[str, object]) -> Mapping[str, object]:
-        released.wait(timeout=5.0)
+        if request["client_seq"] == 1:
+            admitted.set()
+            released.wait(timeout=5.0)
         return {"decision": "pass"}
 
     channel = DecideReplyChannel(sock_path, decide, "a1", max_concurrent_handlers=1)
     channel.start()
+    first = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    second = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
-        first = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         first.settimeout(5.0)
         first.connect(str(sock_path))
         first.sendall(json.dumps({"op": "disruption_check", "client_seq": 1}).encode("utf-8") + b"\n")
-        time.sleep(0.05)  # let the first handler be admitted and block in decide()
+        assert admitted.wait(timeout=5.0), "first handler was not admitted"
 
-        second_data = b"\x00"  # sentinel - overwritten below if recv ever returns
-        second = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         second.settimeout(1.0)
         second.connect(str(sock_path))
-        second.sendall(json.dumps({"op": "disruption_check", "client_seq": 2}).encode("utf-8") + b"\n")
         try:
+            second.sendall(json.dumps({"op": "disruption_check", "client_seq": 2}).encode("utf-8") + b"\n")
             second_data = second.recv(65536)
-        except TimeoutError:
-            second_data = b""  # refused by a hang this bound prevents
-        except (ConnectionResetError, OSError):
-            # The over-capacity handler returns without reading the bytes
-            # already sent - closing a socket with unread buffered data
-            # produces an abrupt reset on the peer, same as a plain EOF
-            # for this test's purposes: no reply was ever sent.
+        except TimeoutError as exc:
+            raise AssertionError("excess connection remained open instead of being refused") from exc
+        except (BrokenPipeError, ConnectionResetError):
+            # Refusal may close before sendall, or reset unread bytes after
+            # sendall. Both are actual closure; a timeout is not refusal.
             second_data = b""
-        second.close()
+        assert second_data == b"", "excess connection sent a reply"
 
         released.set()
         first_data = first.recv(65536)
-        first.close()
     finally:
+        released.set()
+        first.close()
+        second.close()
         log = channel.stop_and_finalize()
-    assert second_data == b""  # the second connection got no reply
     assert json.loads(first_data.decode("utf-8").splitlines()[0]) == {"ok": True, "result": {"decision": "pass"}}
     assert len(log) == 1  # only the admitted connection's decision is logged
+    assert log[0].request["client_seq"] == 1
+
+
+def test_connections_past_max_concurrent_handlers_are_refused(tmp_path: Path) -> None:
+    """Excess connections close without queuing; the admitted one is unaffected."""
+    _assert_capacity_refusal(tmp_path)
+
+
+def test_capacity_refusal_can_close_before_the_client_sends(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    closed = threading.Event()
+    real_close = d._Server.close_request
+    real_send = socket.socket.sendall
+
+    def close_then_signal(self: d._Server, request: socket.socket) -> None:
+        real_close(self, request)
+        closed.set()
+
+    def send_after_close(self: socket.socket, data: bytes, flags: int = 0) -> None:
+        if b'"client_seq": 2' in data:
+            assert closed.wait(timeout=3.0), "excess connection was not closed"
+        real_send(self, data, flags)
+
+    monkeypatch.setattr(d._Server, "close_request", close_then_signal)
+    monkeypatch.setattr(socket.socket, "sendall", send_after_close)
+    _assert_capacity_refusal(tmp_path)
+
+
+def test_capacity_check_rejects_excess_admission(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    finalized: list[LoggedDecision] = []
+    real_finalize = DecideReplyChannel.stop_and_finalize
+
+    def ignore_capacity(self: DecideReplyChannel) -> bool:
+        with self._lock:
+            self._active_handlers += 1
+        return True
+
+    def retain_log(self: DecideReplyChannel) -> list[LoggedDecision]:
+        log = real_finalize(self)
+        finalized.extend(log)
+        return log
+
+    monkeypatch.setattr(DecideReplyChannel, "_handler_started", ignore_capacity)
+    monkeypatch.setattr(DecideReplyChannel, "stop_and_finalize", retain_log)
+    with pytest.raises(AssertionError, match="excess connection sent a reply"):
+        _assert_capacity_refusal(tmp_path)
+    assert len(finalized) == 2
+    assert {entry.request["client_seq"] for entry in finalized} == {1, 2}
+
+
+def test_capacity_check_rejects_a_queued_connection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    release_queue = threading.Event()
+    queued: list[threading.Thread] = []
+    real_admit = DecideReplyChannel._handler_started
+
+    def queue_excess(self: DecideReplyChannel) -> bool:
+        admitted = real_admit(self)
+        if not admitted:
+            queued.append(threading.current_thread())
+            release_queue.wait(timeout=5.0)
+        return admitted
+
+    monkeypatch.setattr(DecideReplyChannel, "_handler_started", queue_excess)
+    try:
+        with pytest.raises(AssertionError, match="excess connection remained open"):
+            _assert_capacity_refusal(tmp_path)
+    finally:
+        release_queue.set()
+        for handler in queued:
+            handler.join(timeout=5.0)
+            assert not handler.is_alive()
+    assert len(queued) == 1
 
 
 def test_an_idle_connection_is_closed_after_the_request_timeout(tmp_path: Path) -> None:

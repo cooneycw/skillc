@@ -2559,3 +2559,92 @@ def test_remove_file_in_attempt_is_false_when_the_attempt_is_not_running(
     backend.install(handle, {})
     backend.destroy(handle)
     assert backend.remove_file_in_attempt(handle, f"{d.CONTAINER_WORKSPACE}/x") is False
+
+
+@pytest.mark.parametrize("witness_io", [False, True])
+def test_retained_output_and_opted_witness_io_preserve_candidate_files(
+    base: Path, docker_state: Path, tmp_path: Path, witness_io: bool,
+) -> None:
+    from dataclasses import replace
+
+    backend = replace(_backend(base, docker_state), witness_io=witness_io)
+    handle = backend.prepare("witness-io-control")
+    try:
+        backend.install(handle, {})
+        gate = backend.exec_in_attempt(handle, [sys.executable, "-c",
+            "from pathlib import Path; Path('observations').write_text('candidate'); print('gate')"],
+            Limits(timeout=5))
+        primary = backend.execute(handle, [sys.executable, "-c", "print('primary')"], Limits(timeout=5))
+        assert primary.stdout == b"primary\n"
+        assert gate.stdout == b"gate\n"
+        dest = tmp_path / "witness-output"
+        backend.export(handle, dest)
+        assert (dest / "observations").read_text() == ("candidate" if witness_io else "primary\n")
+        assert bool(list(dest.glob(".skillc-exec-pid-*"))) is (not witness_io)
+        assert gate.observations_capture == (None if witness_io else "written")
+    finally:
+        backend.destroy(handle)
+
+
+@pytest.mark.parametrize("setup_fails", [False, True])
+def test_home_delivery_creates_parents_as_candidate_before_owned_leaf_copy(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch, setup_fails: bool,
+) -> None:
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("home-parent-control")
+    assert isinstance(handle, d._Handle)
+    home = docker_state / f"{handle.name}.fsroot" / "home" / "candidate"
+    existing = home / "Projects"
+    existing.mkdir(parents=True, exist_ok=True)
+    existing.chmod(0o751)
+    before = existing.stat()
+    calls: list[list[str]] = []
+    real_run = subprocess.run
+
+    def observed_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        calls.append(argv)
+        if "mkdir" in argv and setup_fails:
+            return subprocess.CompletedProcess(argv, 1, b"", b"permission denied")
+        if "cp" in argv:
+            payload = kwargs["input"]
+            assert isinstance(payload, bytes)
+            with tarfile.open(fileobj=io.BytesIO(payload)) as archive:
+                member, = archive.getmembers()
+                assert (member.uid, member.gid, member.mode) == (d.CANDIDATE_UID, d.CANDIDATE_GID, 0o600)
+        return real_run(argv, **kwargs)  # type: ignore[call-overload]
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(subprocess, "run", observed_run)
+            if setup_fails:
+                with pytest.raises(BackendUnavailable, match="parent"):
+                    backend.deliver_home_file(handle, "Projects/new/nested/pyproject.toml", b"private-data")
+                assert len(calls) == 1
+            else:
+                backend.deliver_home_file(handle, "Projects/new/nested/pyproject.toml", b"private-data")
+                assert (home / "Projects/new/nested/pyproject.toml").read_bytes() == b"private-data"
+                assert len(calls) == 2
+            assert calls[0][len(backend.docker_bin):] == [
+                "exec", "-u", d._container_user(), "--", handle.name,
+                "mkdir", "-p", "--", "/home/candidate/Projects/new/nested",
+            ]
+        after = existing.stat()
+        assert (after.st_uid, after.st_gid, stat.S_IMODE(after.st_mode)) == (
+            before.st_uid, before.st_gid, stat.S_IMODE(before.st_mode))
+    finally:
+        backend.destroy(handle)
+
+
+@pytest.mark.parametrize("path", ["", ".", "/absolute/file", "../escape/file", "nested/../file", "bad\0file"])
+def test_home_delivery_refuses_invalid_path_before_any_mutation(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch, path: str,
+) -> None:
+    backend = _backend(base, docker_state)
+    handle = d._Handle(attempt_id="path-control", name="unused", env={})
+
+    def must_not_run(*args: object, **kwargs: object) -> None:
+        raise AssertionError("invalid delivery path reached a container mutation")
+
+    monkeypatch.setattr(subprocess, "run", must_not_run)
+    with pytest.raises(BackendUnavailable, match="relative"):
+        backend.deliver_home_file(handle, path, b"private-data")

@@ -134,6 +134,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import IO
 
+from . import runtime_supply as rs
 from .backend import CANDIDATE_GID as _CANDIDATE_GID
 from .backend import CANDIDATE_UID as _CANDIDATE_UID
 from .backend import (
@@ -835,6 +836,10 @@ class DockerBackend:
     #: retrieves the finalized log. See `docs/specs/evaluation-facility/
     #: decide-reply-channel.md`.
     trigger_decide: DecideFn | None = field(default=None, repr=False)
+    #: Gate witnessing must not change the capture population through its own
+    #: observations/PID bookkeeping. Default probe write-back stays unchanged.
+    witness_io: bool = False
+    runtime_supply: rs.RuntimeSupply | None = field(default=None, repr=False)
     #: Host-side directory for #183's socket files - see
     #: `DEFAULT_TRIGGER_SOCKET_DIR`'s own comment for why this is NOT
     #: `base_dir`. `repr=False`: a host filesystem path, same reasoning as
@@ -1331,13 +1336,27 @@ class DockerBackend:
         scans exported content for credential material independently rather
         than relying on this placement alone.
 
-        `.claude` and `.codex` already exist under `CONTAINER_HOME`, owned
-        by the candidate identity (#78's image build) - this method never
-        creates a directory itself, only a leaf file inside one that must
-        already exist.
+        Missing parents are created as the candidate before tar delivery.
+        Existing owners/modes are preserved; an unwritable parent refuses,
+        never triggers privileged creation or a recursive ownership change.
         """
         assert isinstance(handle, _Handle)
-        payload = _owned_tar_bytes(container_relpath, data, mode=mode)
+        relative = PurePosixPath(container_relpath)
+        if (not container_relpath or relative.is_absolute() or not relative.parts
+                or ".." in relative.parts or "\0" in container_relpath):
+            raise BackendUnavailable("home delivery requires a nonescaping relative file path")
+        parent = str(PurePosixPath(CONTAINER_HOME) / relative.parent)
+        try:
+            prepared = subprocess.run(
+                [*self.docker_bin, "exec", "-u", _container_user(), "--", handle.name,
+                 "mkdir", "-p", "--", parent],
+                capture_output=True, env=handle.env, check=False, timeout=self.daemon_timeout,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise BackendUnavailable("home delivery parent setup failed") from exc
+        if prepared.returncode != 0:
+            raise BackendUnavailable("home delivery parent setup failed")
+        payload = _owned_tar_bytes(relative.as_posix(), data, mode=mode)
         try:
             copied = subprocess.run(
                 [*self.docker_bin, "cp", "-", f"{handle.name}:{CONTAINER_HOME}"],
@@ -1353,6 +1372,71 @@ class DockerBackend:
                 f"docker cp failed delivering {container_relpath!r} to home for {handle.attempt_id!r}: "
                 f"{copied.stderr.decode('utf-8', errors='replace').strip()}"
             )
+
+    def controller_output(self, handle: object, argv: Sequence[str], limits: Limits) -> bytes:
+        """Complete bounded output from the controller drain, never an artifact."""
+        result = self.exec_in_attempt(handle, argv, limits)
+        if (result.reason != "exited" or result.exit_code != 0 or result.stdout is None
+                or result.stdout_truncated or result.stdout_incomplete or result.stderr_incomplete):
+            raise rs.Refused("controller measurement failed or returned incomplete output")
+        return result.stdout
+
+    def runtime_environment(
+        self, handle: object, limits: Limits, verified_files: Mapping[str, str],
+    ) -> Mapping[str, str]:
+        """Measure selected runtime facts as candidate before any subject runs.
+
+        Raw environment stays private. The caller still verifies every installed
+        closure file through its ordinary preflight before dispatch.
+        """
+        assert isinstance(handle, _Handle)
+        if self.runtime_supply is None:
+            raise rs.Refused("no controller runtime supply selected")
+        if not self.witness_io:
+            raise rs.Refused("runtime measurement requires private controller output")
+        bounded = Limits(timeout=min(limits.timeout, self.daemon_timeout),
+                         max_captured_stdout_bytes=rs.MAX_JSON + 1)
+
+        def read(argv: Sequence[str]) -> bytes:
+            return self.controller_output(handle, argv, bounded)
+
+        env = rs.environment(read(["env", "-0"]))
+        descriptor_path = PurePosixPath(rs.DESCRIPTOR_PATH)
+        for path in (descriptor_path, *descriptor_path.parents):
+            if self.candidate_can_write_in_attempt(handle, str(path)) is not False:
+                raise rs.Refused("runtime descriptor or ancestor is writable or unmeasurable")
+        # Reject symlink ancestry, including a descriptor whose target's parents
+        # are outside the inspected chain. No subject runs during these reads.
+        descriptor = read(["/usr/bin/python3", "-c",
+            ("import pathlib,sys; p=pathlib.Path(sys.argv[1]); "
+             "assert not any(q.is_symlink() for q in (p,*p.parents)); "
+             "sys.stdout.buffer.write(p.open('rb').read(int(sys.argv[2])))"),
+            rs.DESCRIPTOR_PATH, str(rs.MAX_JSON + 1)])
+        actual_image = self.image_id(handle)
+        if actual_image is None:
+            raise rs.Refused("runtime image identity is unmeasurable")
+        declared = self.runtime_supply.descriptor(descriptor, actual_image=actual_image)
+        rs.validate_environment(env, declared)
+        measured_python = rs.load_json(read(["/usr/bin/python3", "-c",
+            ("import json,platform,sys; print(json.dumps(dict(executable=sys.executable, "
+             "version=platform.python_version(),cache_tag=sys.implementation.cache_tag, "
+             "platform=sys.platform,machine=platform.machine())))")]))
+        if measured_python != declared["python"]:
+            raise rs.Refused("actual Python identity differs from selected runtime")
+        policy = rs.supported_policy()
+        uv = read(["uv", "--version"]).decode("utf-8", errors="strict").split()
+        if len(uv) < 2 or uv[:2] != ["uv", policy["uv_version"]]:
+            raise rs.Refused("actual uv version differs from selected runtime")
+        if verified_files:
+            if any(verified_files.get(path) != digest for path, digest in rs.metadata(policy).items()):
+                raise rs.Refused("installed closure metadata does not match selected runtime")
+            project = f"{CONTAINER_HOME}/{policy['project']}"
+            if self.candidate_can_write_in_attempt(handle, project) is not True:
+                raise rs.Refused("selected project cannot create its candidate-owned venv")
+            read(["/usr/bin/python3", "-c",
+                  "import pathlib,sys; assert not pathlib.Path(sys.argv[1]).exists()",
+                  project + "/.venv"])
+        return env
 
     def read_home_file(self, handle: object, container_relpath: str) -> bytes:
         """Read back the current bytes at `container_relpath` (relative to
@@ -1869,23 +1953,25 @@ class DockerBackend:
         # exception here, no field on the result, the subject's own object
         # left in place). `observations_capture` now names the checked
         # outcome instead of swallowing it.
-        try:
-            payload = _owned_tar_bytes("observations", stdout)
-            write_back = subprocess.run(
-                [*self.docker_bin, "cp", "-", f"{handle.name}:{CONTAINER_WORKSPACE}"],
-                input=payload, capture_output=True, env=handle.env, check=False,
-                timeout=self.daemon_timeout,
-            )
-            observations_capture = "written" if write_back.returncode == 0 else "failed"
-        except (OSError, subprocess.TimeoutExpired):
-            observations_capture = "failed"
+        observations_capture = None
+        if not self.witness_io:
+            try:
+                payload = _owned_tar_bytes("observations", stdout)
+                write_back = subprocess.run(
+                    [*self.docker_bin, "cp", "-", f"{handle.name}:{CONTAINER_WORKSPACE}"],
+                    input=payload, capture_output=True, env=handle.env, check=False,
+                    timeout=self.daemon_timeout,
+                )
+                observations_capture = "written" if write_back.returncode == 0 else "failed"
+            except (OSError, subprocess.TimeoutExpired):
+                observations_capture = "failed"
 
         return ExecuteResult(
             reason=reason, exit_code=code, error=error, signal=signal_name,
             stdout_truncated=stdout_drain.truncated, stdout_bytes=stdout_drain.total_bytes,
             stdout_incomplete=stdout_incomplete, stderr_incomplete=stderr_incomplete,
             term_forwarding=term_forwarding, observations_capture=observations_capture,
-            stop_confirmed=stop_confirmed,
+            stop_confirmed=stop_confirmed, stdout=stdout,
         )
 
     def exec_in_attempt(
@@ -2048,7 +2134,8 @@ class DockerBackend:
         if not reachable or absent or status != "running":
             return ExecuteResult(reason="attempt-not-running", exit_code=None)
 
-        marker_path = f"{CONTAINER_WORKSPACE}/.skillc-exec-pid-{uuid.uuid4().hex}"
+        marker_root = CONTAINER_HOME if self.witness_io else CONTAINER_WORKSPACE
+        marker_path = f"{marker_root}/.skillc-exec-pid-{uuid.uuid4().hex}"
         confining = cwd is not None and confine_root is not None
         # #338: open `$1` ONCE as fd 9, then use only the fd - see the
         # docstring for the guarantee and its limit. `readlink` without

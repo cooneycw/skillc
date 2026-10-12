@@ -68,6 +68,7 @@ class _FakeBackend:
     #: trusting its own earlier resolve alone.
     confine_root_calls: list[str | None] = field(default_factory=list)
     _last_stdout: str = ""
+    retain_output: bool = True
 
     def exec_in_attempt(
         self, handle: object, argv: Sequence[str], limits: Limits,
@@ -83,7 +84,10 @@ class _FakeBackend:
         if key in self.block:
             time.sleep(3600)
         self._last_stdout = self.stdout.get(key, "")
-        return self.results[key]
+        result = self.results[key]
+        if self.retain_output and result.stdout is None:
+            return dataclasses.replace(result, stdout=self._last_stdout.encode())
+        return result
 
     def resolve_realpath_in_attempt(self, handle: object, path: str, timeout: float = 2.0) -> str | None:
         return self.realpaths.get(path)
@@ -1026,3 +1030,163 @@ def test_a_rerun_after_an_unconfirmed_stop_is_refused_workspace_integrity_unknow
     assert record.gates["lint"].runs[0].exit_code == 0
     assert record.gates["typecheck"].coverage == "interrupted"
     assert record.gates["typecheck"].runs[0].stop_confirmed is False
+
+
+def test_gate_reply_uses_controller_bytes_not_candidate_observations() -> None:
+    backend = _FakeBackend(results={("lint",): ExecuteResult(reason="exited", exit_code=0, stdout=b"real")},
+                           stdout={("lint",): "forged candidate artifact"})
+    witness = GateWitness(declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest,
+                          backend=backend, handle=None, limits=_limits(),
+                          gate_exclusivity=False, exclusivity_basis="")
+    assert witness.decide({"op": "run_gate", "gate": "lint"})["stdout"] == "real"
+
+
+def test_gate_reruns_do_not_accumulate_controller_output_buffers() -> None:
+    import gc
+    import weakref
+
+    results: list[weakref.ReferenceType[ExecuteResult]] = []
+
+    class EphemeralBackend(_FakeBackend):
+        def exec_in_attempt(self, *args: object, **kwargs: object) -> ExecuteResult:
+            result = ExecuteResult(reason="exited", exit_code=0, stdout=b"bounded controller output")
+            results.append(weakref.ref(result))
+            return result
+
+    witness = GateWitness(declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest,
+                          backend=EphemeralBackend(), handle=None, limits=_limits(),
+                          gate_exclusivity=False, exclusivity_basis="")
+    for _ in range(4):
+        assert witness.decide({"op": "run_gate", "gate": "lint"})["stdout"] == "bounded controller output"
+    gc.collect()
+    assert all(result() is None for result in results)
+    assert len(witness.finalize("attempt").gates["lint"].runs) == 4
+
+
+@pytest.mark.parametrize("fault", ["missing", "truncated", "incomplete"])
+def test_unavailable_controller_output_never_certifies_complete(fault: str) -> None:
+    result = ExecuteResult(reason="exited", exit_code=0,
+                           stdout=None if fault == "missing" else b"prefix",
+                           stdout_truncated=fault == "truncated", stdout_incomplete=fault == "incomplete")
+    backend = _FakeBackend(results={("lint",): result}, stdout={("lint",): "forged complete"},
+                           retain_output=fault != "missing")
+    witness = GateWitness(declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest,
+                          backend=backend, handle=None, limits=_limits(),
+                          gate_exclusivity=False, exclusivity_basis="")
+    with pytest.raises(ChannelRefusal, match="output"):
+        witness.decide({"op": "run_gate", "gate": "lint"})
+    assert witness.finalize("attempt").gates["lint"].coverage == "channel-unavailable"
+
+
+def test_snapshot_waits_for_prior_gate_execution() -> None:
+    executing = threading.Event()
+    release = threading.Event()
+    second_snapshot = threading.Event()
+    snapshots: list[str] = []
+    state = ["before"]
+
+    class BlockingBackend(_FakeBackend):
+        def exec_in_attempt(self, *args: object, **kwargs: object) -> ExecuteResult:
+            if not executing.is_set():
+                executing.set()
+                assert release.wait(3)
+                state[0] = "after"
+            return ExecuteResult(reason="exited", exit_code=0, stdout=b"")
+
+    def snapshot() -> str:
+        snapshots.append(state[0])
+        if len(snapshots) == 2:
+            second_snapshot.set()
+        return state[0]
+
+    witness = GateWitness(declared_gates={"one": ["one"], "two": ["two"]}, tree_digest_fn=snapshot,
+                          backend=BlockingBackend(), handle=None, limits=_limits(),
+                          gate_exclusivity=False, exclusivity_basis="")
+    errors: list[Exception] = []
+
+    def call(gate: str) -> None:
+        try:
+            witness.decide({"op": "run_gate", "gate": gate})
+        except Exception as exc:  # noqa: BLE001 - report worker failures to the test thread
+            errors.append(exc)
+
+    first = threading.Thread(target=call, args=("one",))
+    second = threading.Thread(target=call, args=("two",))
+    first.start()
+    try:
+        assert executing.wait(2)
+        second.start()
+        assert not second_snapshot.wait(0.2)
+    finally:
+        release.set()
+        first.join(3)
+        if second.ident is not None:
+            second.join(3)
+    assert not first.is_alive() and not second.is_alive()
+    assert errors == []
+    assert snapshots == ["before", "after"]
+
+
+@pytest.mark.parametrize("confirmed", [False, True])
+def test_queued_gate_rechecks_prior_stop_before_snapshot_or_execution(
+    monkeypatch: pytest.MonkeyPatch, confirmed: bool,
+) -> None:
+    executing, queued, release = threading.Event(), threading.Event(), threading.Event()
+    calls: list[str] = []
+    snapshots: list[str] = []
+    errors: list[Exception] = []
+
+    class BlockingBackend(_FakeBackend):
+        def exec_in_attempt(self, *args: object, **kwargs: object) -> ExecuteResult:
+            calls.append("exec")
+            if len(calls) == 1:
+                executing.set()
+                assert release.wait(3)
+                return ExecuteResult(reason="timeout", exit_code=None, stop_confirmed=confirmed)
+            return ExecuteResult(reason="exited", exit_code=0, stdout=b"")
+
+    class QueueSignal:
+        lock = threading.Lock()
+
+        def __enter__(self) -> None:
+            if executing.is_set():
+                queued.set()  # second request already passed its first state check
+            self.lock.acquire()
+
+        def __exit__(self, *args: object) -> None:
+            self.lock.release()
+
+    def snapshot() -> str:
+        snapshots.append("snapshot")
+        return _fixed_tree_digest()
+
+    witness = GateWitness(declared_gates={"one": ["one"], "two": ["two"]}, tree_digest_fn=snapshot,
+                          backend=BlockingBackend(), handle=None, limits=_limits(),
+                          gate_exclusivity=False, exclusivity_basis="")
+    monkeypatch.setattr(witness, "_exec_lock", QueueSignal())
+
+    def call(gate: str) -> None:
+        try:
+            witness.decide({"op": "run_gate", "gate": gate})
+        except Exception as exc:  # noqa: BLE001 - assert worker errors in the controlling thread
+            errors.append(exc)
+
+    first, second = threading.Thread(target=call, args=("one",)), threading.Thread(target=call, args=("two",))
+    first.start()
+    try:
+        assert executing.wait(2)
+        second.start()
+        assert queued.wait(2)
+    finally:
+        release.set()
+        first.join(3)
+        if second.ident is not None:
+            second.join(3)
+    assert not first.is_alive() and not second.is_alive()
+    assert len(calls) == len(snapshots) == (2 if confirmed else 1)
+    assert len(errors) == (0 if confirmed else 1)
+    assert witness._in_flight["two"] is False
+    assert len(witness.finalize("attempt").gates["two"].runs) == (1 if confirmed else 0)
+    if errors:
+        assert isinstance(errors[0], ChannelRefusal)
+        assert "workspace-integrity-unknown" in str(errors[0])

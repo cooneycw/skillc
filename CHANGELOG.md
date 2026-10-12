@@ -31,6 +31,27 @@ and version plan.
   These establish test discrimination, not real-container behavior; actual
   break execution remains owed through #315.
 
+- **Calibration CLI builds the declared profile closure, and the runner supplies
+  a controller witness bound to frozen files** (Refs #348).
+  Profile tools, file digests and gate entrypoint now reach the attempt runner;
+  invalid profile inputs refuse before dispatch and remove acquisition copies.
+  A disposable capture adapter reuses final capture policy and refuses partial,
+  empty or failed projections. Both grading paths can receive a finalized
+  controller record with the digest of the exact frozen files under the grading
+  lock; conflicting trusted inputs and mismatched attempt identities refuse.
+  Witnessed attempts prove socket readiness with a controller nonce before
+  dispatch, retain gate stdout outside candidate artifacts, and serialize each
+  capture with its gate. Failed stop, drain or output finalization blocks trusted
+  grading, including a first drain failure followed by an apparently successful
+  read (the separate channel defect remains #367). The selected CPP runtime
+  requires an immutable image receipt, measured protected descriptor and
+  environment, and independently pinned dependency metadata. All arms share
+  that policy; selected imports use offline, locked project-local uv environments.
+  Nested home delivery creates parents as the candidate before copying owned
+  leaves. Gate output buffers are released after each reply; compact run history
+  remains. Actual Docker acceptance remains pending; raw gate output has no
+  lifetime archive, and grading persists only the existing witness envelope digest.
+
 - **The trial image builds on Docker 29, and the ea6dbfa fixture carries
   CPP's `secrets.py` scanner module** (#356). Two real-daemon `make verify`
   failures CI could not see, because it has no daemon. (1)
