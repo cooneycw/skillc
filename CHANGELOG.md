@@ -8,6 +8,12 @@ and version plan.
 
 ## [Unreleased]
 
+- **Uptake studies forward each arm's profile verification fields** (#346).
+  The prepared treatment's file digests, tool preflight probes and gate
+  entrypoint now reach the real attempt runner through the existing
+  collection wrapper. Treatments without a profile keep empty checks. A
+  regression observes the runner boundary for both named arm choices.
+
 - **Calibration and discrimination declarations gain an optional
   `task.fixture` field** (Refs #287), fixing a real blocker found while
   preparing #287's pilot declaration: `calibration_run.py`'s
