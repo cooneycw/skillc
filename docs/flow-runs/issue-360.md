@@ -106,3 +106,34 @@ The later CHANGELOG grant is an authorized addition to the original file plan;
 the filename compliance helper reports that difference. Lane verification
 reports all 16 paths within the current grant. Implementation whitespace checks
 pass; the generated as-read issue snapshot preserves a trailing blank line.
+
+### Phase-one full verification completed
+
+Root requested checkpointing and current-main integration before the queued
+full run. Phase-one checkpoint `76388e6` was followed by main-sync merges,
+ending at `0f8214fffaf72dd2531e4a30e494305f61104369` with main `1c9954a` included.
+The #356/#360 changelog insertion conflict retained both entries.
+
+After DD's explicit completion and slot release, unfiltered `make verify`
+returned exit 0. `DOCKER_CONTEXT`, `PYTEST_ARGS`, `PYTEST_WORKERS` and
+`PYTEST_REPORT_DIR` were unset; `DOCKER_HOST` named a deliberately unavailable
+Unix socket. The Makefile's default eight-worker run finished with 3,329
+passed and 15 skipped in 251.92 seconds. All 3,344 collected identities matched
+the JUnit report. The skips were 12 Docker-dependent cases, two frontmatter
+refusal fixtures and the intentionally gated timeout control.
+
+Lint, typechecking (193 files), changelog/README checks, leak and secret scans,
+and all negative/typecheck/leak/secret/git/population controls passed. The
+population short-report control failed as intended and its complete twin
+passed. The actual owned process exit was collected before releasing the
+serialized slot to AA; no replacement full run was started.
+
+This is phase-one evidence only. Root assigned supporting delivery and
+selected-runtime preflight fixes to DD: candidate-created missing parents,
+explicit offline/locked import probing and rejection of an undeclared external
+venv selector. The default project-local `.venv` and image schemas stay unchanged.
+Those supporting changes, shared live-test/runner integration, actual cache and
+venv-permission controls, baseline purity and real consuming-path acceptance
+remain owed to #360. The separate host-probe override defect remains #365.
+The historical bridge refusal's actual cause is still unproven. No Docker
+image build or model trial ran in this phase.
