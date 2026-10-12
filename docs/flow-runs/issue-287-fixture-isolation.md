@@ -59,3 +59,29 @@ and merge authority. Full verification and final-head CI remain required.
 Observed repair diff SHA256: 49600abc760057173db7eaeff0467dff79f33fac81f1ea46eb0a56e4a39747f5.
 Original report SHA256: c75f1ccc5cf826fa3d4b4a98fb82c965ed923eaec654424bbf7d4e29b7188c91.
 Original reviewer rollout SHA256: 57234d0e488b807b27cafa7190293b0e9a2df730054e4fe4cc494dd47d93c6aa.
+
+## Final disposition and local verification
+
+Root issued GO-WITH-CONDITIONS for this separate repair under delegated wave
+gate authority after reading the exact diff, report and binding and separately
+confirming the reviewer model. The clean verdict and red cases are accepted
+as actual evidence despite the parser's missing-heading rejection and the
+writer's unsupported native implementer. Both limitations remain explicit;
+no generated receipt, machine-gate pass, false skip or formatting resume is
+claimed. Full local verification and exact-head CI are still mandatory before
+root merges. This ruling is scoped to the repair, not another endpoint review.
+
+Full unfiltered make verify at 1931ae9 passed with exit 0: 3715 passed, 15
+skipped in 272.89 seconds; all 3730 collected identities matched the report.
+Docker was explicitly unavailable with context unset. Selftest, ruff, mypy
+(200 files), leak and secret scans, changelog and README drift checks passed.
+Committed controls rejected the bad rule, empty population, unknown selector,
+planted type error, leak, secret, invalid git-test reports and short pytest
+report, and accepted their healthy counterparts. All eight profile tests ran.
+
+This final update changes only the evidence record after the full check;
+the test patch is unchanged from reviewed 310b2c1. Exact-head CI remains
+required before merge. Original failure, review evidence, terminal full log,
+JUnit and collected identities are retained in private persistent storage.
+After this repair reaches main, integrate it into PR #372 and verify that
+combined tree separately; no readiness or paid-study approval follows.
