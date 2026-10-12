@@ -99,6 +99,7 @@ from . import (
 )
 from .backend import Limits
 from .docker_backend import ATTEMPT_LABEL_KEY, OWNER_LABEL_KEY, OWNER_LABEL_VALUE, DockerBackend
+from .runtime_supply import RuntimeSupply
 
 #: `_fixture_surface`'s own src-only convention (#267's deprecated shim below).
 _FIXTURE_SRC_DIRNAME = "src"
@@ -182,6 +183,7 @@ def attributable_leftovers(
 
 def agent_backends(
     *, image: str, base: Path, docker_bin: Sequence[str], daemon_timeout: float,
+    runtime_supply: RuntimeSupply | None = None,
 ) -> tuple[TrackingDockerBackend, TrackingDockerBackend]:
     """`(agent backend, grading backend)` for one collection run. The agent
     backend runs on `AGENT_NETWORK` (see its comment for the ruling); the
@@ -189,6 +191,7 @@ def agent_backends(
     not passed a network, so the grader never gains egress by this ruling."""
     agent = TrackingDockerBackend(
         image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=daemon_timeout, network=AGENT_NETWORK,
+        runtime_supply=runtime_supply,
     )
     grading = TrackingDockerBackend(image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=daemon_timeout)
     return agent, grading

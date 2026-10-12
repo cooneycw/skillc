@@ -74,7 +74,7 @@ backend's transport.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -216,7 +216,8 @@ class ExecuteResult:
     the subject pre-created `observations` as a directory, which makes the
     tar extraction fail with `IsADirectoryError` - a raised `OSError`, or a
     timeout). `None` means this backend does not report it at all (every
-    backend but `DockerBackend`) OR the write-back was never attempted
+    backend but `DockerBackend`), opted witness IO retains stdout only in the
+    controller, OR the write-back was never attempted
     because the subject's own process never ran (the `"launch-failed"`
     path, before any capture exists to write back) - `execute()`'s own
     comment at that return states which case applies, mirroring
@@ -249,6 +250,9 @@ class ExecuteResult:
     #: attempt-wide integrity loss: kyle's own lifecycle rule applies here
     #: too, a terminal state needs CONFIRMED absence, never an assumption.
     stop_confirmed: bool | None = None
+    #: Controller drain bytes, never read from a candidate artifact. None means
+    #: unavailable; callers must also check truncation and incomplete flags.
+    stdout: bytes | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)

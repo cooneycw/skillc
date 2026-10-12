@@ -645,7 +645,7 @@ def test_cold_cache_complete_function_reaches_the_healthy_predicate(pytester: py
     result.stdout.fnmatch_lines(["*XPASS(strict)*"])
 
 
-def _drive_closure(ns, refusal, monkeypatch) -> None:
+def _drive_closure(ns, refusal, monkeypatch, output_fault=None) -> None:
     from unittest.mock import Mock, patch
 
     from skillc.backend import ExecuteResult
@@ -653,12 +653,18 @@ def _drive_closure(ns, refusal, monkeypatch) -> None:
     files = {entrypoint: b"real", ns["_TARGET_RELPATH"]: b"library"}
     digests = {path: "sha256:" + "a" * 64 for path in files}
     backend = Mock()
-    backend.execute.return_value = ExecuteResult(reason="exited", exit_code=0)
+    stdout = b"flow-finish-gate: running deterministic gate (lib.cicd run --plan check)\n"
+    backend.execute.return_value = ExecuteResult(
+        reason="exited", exit_code=0,
+        stdout=None if output_fault == "missing" else b"\xff" if output_fault == "invalid" else stdout,
+        stdout_truncated=output_fault == "truncated",
+        stdout_incomplete=output_fault == "stdout-incomplete",
+        stderr_incomplete=output_fault == "stderr-incomplete",
+    )
     witness = Mock()
     test = ns["test_a_treated_attempts_closure_is_verified_and_the_gate_reaches_the_real_runner"]
     monkeypatch.setitem(test.__globals__, "_closure_inputs", lambda: (files, digests, (), entrypoint))
     monkeypatch.setitem(test.__globals__, "_build_trial_image", lambda *args: None)
-    monkeypatch.setitem(test.__globals__, "_read_observations", lambda *args, **kwargs: "runner")
     monkeypatch.setitem(test.__globals__, "GateWitness", witness)
     error = None
     if refusal == "target":
@@ -670,13 +676,34 @@ def _drive_closure(ns, refusal, monkeypatch) -> None:
     with patch.object(ns["d"], "DockerBackend", return_value=backend), \
             patch.object(ns["at"], "_preflight_in_container", side_effect=error), \
             patch.object(ns["gate_overlay"], "apply_flow_check_gate_overlay"), \
-            patch.object(ns["gate_path"], "classify_gate_output", return_value="real-runner"), \
             patch("subprocess.run"):
         test()
     assert witness.call_args.kwargs["declared_gates"] == {
         ns["_GATE_NAME"]: (ns["_HARNESS_ABS"], *ns["_GATE_ARGV_TAIL"]),
     }
     assert f"exec {ns['d'].CONTAINER_HOME}/{entrypoint} " in backend.execute.call_args.args[1][-1]
+
+
+@pytest.mark.parametrize("fault", [None, "missing", "truncated", "stdout-incomplete", "stderr-incomplete", "invalid"])
+def test_closure_consumes_complete_controller_output_not_forged_artifacts(monkeypatch, fault) -> None:
+    import runpy
+    from unittest.mock import patch
+
+    from skillc import gate_witness
+
+    # A forged legacy artifact can classify as healthy. It must never supply
+    # missing controller output or hide its incomplete/invalid measurement.
+    monkeypatch.setattr(gate_witness, "_read_observations", lambda *args, **kwargs:
+                        "flow-finish-gate: running deterministic gate (lib.cicd run --plan check)", raising=False)
+    with patch.dict("os.environ", {"SKILLC_CLOSURE_PREFLIGHT_LIVE_BREAK": "none"}), patch("shutil.which", return_value=None):
+        ns = runpy.run_path(str(_ROOT / "tests" / "test_profile_closure_preflight_live.py"))
+    if fault is None:
+        _drive_closure(ns, None, monkeypatch)
+    else:
+        expected = UnicodeDecodeError if fault == "invalid" else AssertionError
+        with pytest.raises(expected) as raised:
+            _drive_closure(ns, None, monkeypatch, fault)
+        assert type(raised.value) is expected  # generic failure, never a targeted-property exception
 
 
 @pytest.mark.parametrize("old_routing", [False, True], ids=["harness", "mutated-subject-shim"])
@@ -722,6 +749,29 @@ def test_closure_complete_function_refusals_and_missed_refusal(pytester: pytest.
         for kind, status in (("target", "XFAIL"), ("intact", "FAILED"), ("unrelated", "FAILED")):
             result.stdout.fnmatch_lines([f"*test_{kind}_{suffix} {status}*"])
     result.stdout.fnmatch_lines(["*XPASS(strict)*"])
+
+
+def test_closure_output_faults_cannot_receive_targeted_xfail_credit(pytester: pytest.Pytester) -> None:
+    source = _live_control_source(
+        "test_profile_closure_preflight_live.py", "SKILLC_CLOSURE_PREFLIGHT_LIVE_BREAK", _CLOSURE_MODES,
+        "test_a_treated_attempts_closure_is_verified_and_the_gate_reaches_the_real_runner", widen=False,
+    ) + textwrap.dedent(f"""
+        controls = runpy.run_path({str(Path(__file__).resolve())!r})
+        def observe(ns, fault):
+            with pytest.MonkeyPatch.context() as mp:
+                controls['_drive_closure'](ns, None, mp, fault)
+        for mode in MODES:
+            for fault in (None, 'missing', 'truncated', 'stdout-incomplete', 'stderr-incomplete', 'invalid'):
+                add_case('test_' + str(fault).replace('-', '_') + '_' + mode.replace('-', '_'), mode,
+                         lambda ns, f=fault: observe(ns, f))
+    """)
+    pytester.makepyfile(source)
+    result = pytester.runpytest("-v", "--tb=short")
+    result.assert_outcomes(failed=12)
+    result.stdout.fnmatch_lines(["*XPASS(strict)*"])
+    for mode in _CLOSURE_MODES:
+        for fault in ("missing", "truncated", "stdout_incomplete", "stderr_incomplete", "invalid"):
+            result.stdout.fnmatch_lines([f"*test_{fault}_{mode.replace('-', '_')} FAILED*"])
 
 
 @pytest.mark.parametrize("error", [FileNotFoundError("absent"), PermissionError("denied"), RuntimeError("unrelated")])

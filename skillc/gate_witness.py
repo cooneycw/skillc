@@ -80,17 +80,15 @@ status, or any tree digest. The witness stays trustworthy regardless of
 what the reply contains, because the RECORD is controller-written and never
 derived from anything the subject sees or sends back.
 
-Stdlib only (`threading`, `time`, `tempfile`), per AGENTS.md.
+Stdlib only (`threading`, `time`, `json`), per AGENTS.md.
 """
 
 from __future__ import annotations
 
 import json
-import tempfile
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 from threading import Lock
 
 from .backend import ExecuteResult, ExecutionBackend, Limits
@@ -234,23 +232,6 @@ class GateWitnessRecord:
         }).encode("utf-8")
 
 
-def _read_observations(backend: ExecutionBackend, handle: object, cap: int) -> str:
-    """Best-effort read of the gate's own captured stdout (`verify.py`'s
-    documented `observations` write-back convention, #76) - never raises:
-    an export or read failure here must not take down the gate's own
-    `run_gate` reply over a secondary capture concern."""
-    try:
-        with tempfile.TemporaryDirectory() as tmp:
-            dest = Path(tmp)
-            backend.export(handle, dest)
-            observations = dest / "observations"
-            if not observations.is_file():
-                return ""
-            return observations.read_text(encoding="utf-8", errors="replace")[:cap]
-    except OSError:
-        return ""
-
-
 class GateWitness:
     """Owns the per-attempt gate state and supplies `decide` to a
     `DecideReplyChannel` (#183) constructed against this attempt's socket.
@@ -324,14 +305,7 @@ class GateWitness:
         self._exclusivity_basis = exclusivity_basis
         self._reply_byte_cap = reply_byte_cap
         self._lock = Lock()
-        #: Serializes the ACTUAL exec + observations-read critical section
-        #: across every gate (codex `code_review` correction) - `_lock`
-        #: alone let two different gates' `exec_in_attempt()` calls run
-        #: concurrently, both writing and reading the SAME shared
-        #: `observations` artifact the backend's write-back convention
-        #: uses, so one gate's reply could carry a neighbour's (or the
-        #: primary subject's) stdout. Claim-checking (`_in_flight`) stays
-        #: fast under `_lock`; only the slow exec itself is serialized here.
+        #: Snapshot and execution share one order across different gates.
         self._exec_lock = Lock()
         self._runs: dict[str, list[_Run]] = {gate: [] for gate in self._declared_argv}
         self._in_flight: dict[str, bool] = {gate: False for gate in self._declared_argv}
@@ -433,94 +407,60 @@ class GateWitness:
                 raise ChannelRefusal(f"run_gate: {gate!r} is already executing for this attempt")
             self._in_flight[gate] = True
         try:
-            # The digest call is OUTSIDE the lock but still able to leave
-            # `_in_flight` wedged true forever if it raises (codex
-            # `code_review` correction: the first draft computed this
-            # INSIDE the lock, with no cleanup on failure) - caught
-            # explicitly so a digest failure clears the claim exactly like
-            # an `exec_in_attempt()` failure does, rather than permanently
-            # refusing every later request for this gate.
-            tree_digest = self._tree_digest_fn()
-        except Exception:
-            with self._lock:
-                self._in_flight[gate] = False
-            raise
-        with self._lock:
-            run = _Run(requested_at=time.time(), tree_digest_at_start=tree_digest)
-            self._runs[gate].append(run)
-            backend_known_unsupported = self._backend_unsupported
-        if backend_known_unsupported:
-            # The backend already told us, for a PRIOR gate, that it cannot
-            # do this at all (codex `code_review` correction: the first
-            # draft kept calling a backend already known incapable). Still
-            # record a run - for transparency - without calling the
-            # backend or reading observations again.
-            result = ExecuteResult(reason="unsupported", exit_code=None)
-            stdout = ""
-        else:
-            # Serializes the ACTUAL exec + observations-read globally
-            # (`_exec_lock`, not `_lock`) - claim-checking above stays
-            # concurrent across different gates; only the slow exec and
-            # its shared-artifact read are serialized, closing the
-            # cross-gate/cross-primary `observations` race (codex
-            # `code_review` correction).
             with self._exec_lock:
-                try:
+                with self._lock:
+                    if self._workspace_integrity_unknown:
+                        raise ChannelRefusal(
+                            f"run_gate: {gate!r} refused - workspace-integrity-unknown "
+                            "(an earlier queued execution was not confirmed stopped)"
+                        )
+                # A gate waiting behind another gate must snapshot AFTER it,
+                # not measure the tree that existed when its request arrived.
+                tree_digest = self._tree_digest_fn()
+                with self._lock:
+                    run = _Run(requested_at=time.time(), tree_digest_at_start=tree_digest)
+                    self._runs[gate].append(run)
+                    unsupported = self._backend_unsupported
+                if unsupported:
+                    result = ExecuteResult(reason="unsupported", exit_code=None)
+                else:
                     result = self._backend.exec_in_attempt(
                         self._handle, list(self._declared_argv[gate]), self._limits,
                         cwd=gate_cwd, env=self._declared_env.get(gate),
-                        # #338: `gate_cwd` was resolved and root-checked by
-                        # `_confine_requested_cwd` above, but that check and
-                        # THIS call are two separate execs with real time
-                        # between them - `confine_root` tells
-                        # `exec_in_attempt` to check the directory it
-                        # actually opens and start the gate in that same
-                        # directory, rather than trusting the earlier
-                        # snapshot of the name. Harmless to pass when no
-                        # cwd was requested at all (`gate_cwd is None`):
-                        # `exec_in_attempt` only applies it alongside a cwd.
+                        # #338's opened-directory boundary, never replaced by
+                        # the earlier realpath check or a subject status claim.
                         confine_root=self._workspace_root,
                     )
-                except Exception:
-                    # An exception out of `exec_in_attempt()` itself is an
-                    # infrastructure fault the Protocol does not document as
-                    # a normal outcome (`attempt-not-running` and
-                    # `unsupported` already have their own `reason`,
-                    # returned normally) - never silently recorded as a
-                    # clean result. The run stays unresolved (`reason`
-                    # stays `None`); `finalize()` tells this apart from a
-                    # genuinely still-running call cut off by teardown via
-                    # `_in_flight` (cleared here, left `True` by teardown).
-                    with self._lock:
-                        self._in_flight[gate] = False
-                    raise
-                if result.reason == "unsupported":
-                    with self._lock:
+                output_bad = result.reason == "exited" and (
+                    result.stdout is None or result.stdout_truncated
+                    or result.stdout_incomplete or result.stderr_incomplete
+                )
+                with self._lock:
+                    if result.reason == "unsupported":
                         self.channel_unavailable = True
                         self._backend_unsupported = True
-                    stdout = ""
-                else:
-                    stdout = _read_observations(self._backend, self._handle, self._reply_byte_cap)
+                    if output_bad:
+                        self.channel_unavailable = True
                     if result.stop_confirmed is False:
-                        # Orchestrator ruling on finding 3: cannot confirm
-                        # the in-container process is dead - sticky,
-                        # attempt-wide, and NEVER retroactive (see the
-                        # flag's own docstring).
-                        with self._lock:
-                            self._workspace_integrity_unknown = True
-        with self._lock:
-            run.completed_at = time.time()
-            run.exit_code = result.exit_code
-            run.reason = result.reason
-            run.stop_confirmed = result.stop_confirmed
-            self._in_flight[gate] = False
-        return {
-            "accepted": True,
-            "exit_code": result.exit_code,
-            "reason": result.reason,
-            "stdout": stdout,
-            "stderr": (result.error or "")[: self._reply_byte_cap],
-        }
+                        self._workspace_integrity_unknown = True
+                    run.completed_at = time.time()
+                    run.exit_code = result.exit_code
+                    run.reason = result.reason
+                    run.stop_confirmed = result.stop_confirmed
+                if output_bad:
+                    raise ChannelRefusal("gate-witness: controller output is missing or incomplete")
+                return {
+                    "accepted": True,
+                    "exit_code": result.exit_code,
+                    "reason": result.reason,
+                    "stdout": (result.stdout or b"")[:self._reply_byte_cap].decode("utf-8", errors="replace"),
+                    "stderr": (result.error or "")[:self._reply_byte_cap],
+                }
+        finally:
+            # Includes a failed snapshot and backend exceptions; neither may
+            # wedge this gate's in-flight claim forever.
+            with self._lock:
+                self._in_flight[gate] = False
 
     def finalize(self, attempt_id: str) -> GateWitnessRecord:
         """Design doc §5's coverage derivation, over every declared gate -
