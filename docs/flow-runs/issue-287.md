@@ -141,3 +141,48 @@ final merged public contract; both remain unapproved and non-runnable.
 Root owns the full-verification slot for that upstream work. A final identity
 refresh and full integration verification remain owed, as does finish receipt
 disposition. No CI rerun is used to replace the initial red.
+
+### Orchestrator ruling on native independent review
+
+The wave orchestrator issued GO-WITH-CONDITIONS for #287 under its delegated
+orchestrator-only gate authority. The procedure's unsupported honest review
+state requires a ruling, not a new user-only permission gate. An earlier
+permission question was withdrawn on that authority, not treated as answered.
+The ruling accepts the original two substantive Sol reviews, the measured
+Astra implementer and DD's independent provenance audit for this bounded PR.
+It requires a committed audit/ruling account, integration of PR #373, refreshed
+actual task identities, full local verification and successful exact-head CI
+before merge. It grants no live-study approval.
+
+DD inspected the preserved raw review turns and patch bytes independently.
+Pass 1 (turn 01a13209-7ba0-7472-9809-37f3d824bc1e) and substantive pass 2
+(turn 01a1320d-80e1-7fb1-bae6-a6ed74d25c97) both record gpt-6.1-sol. The
+implementing context records gpt-6-astra. Pass 1 found two MEDIUM defects;
+pass 2 returned No findings. The later gpt-6-astra formatting turn
+(01a1320f-7973-7c32-9043-4f756712b81f) changed only that verdict sentence,
+with zero recorded tool calls. DD's extractor found eight calls in the real
+second review, and inserting one known call into the inspected formatting
+segment changed its count from zero to one. The formatting turn receives no
+independent-review credit. Neither substantive review itself ran tests.
+
+At audited checkpoint 8cb35e2, all four Python patches and three eval-document
+patches matched the second review input byte for byte. Their original base was
+f22d6c8; reviewed HEAD 41d664b alone did not capture the uncommitted changes.
+The observed full second-review diff has SHA256
+55b1b4e0124a1b0e5232ea085047f2aa539a41755f5e5f39a177ce4f00490a64;
+the four Python patches together have SHA256
+9111b5e468483e7d0a8e28c563703be8a7d155e00836476e7c678f4ec106f1f1.
+The original reports have SHA256
+6e6c2b6799edda608ef3b8080729ff481e0d7267ee391511ac37eae90946b322
+(pass 1) and
+f11623775fdfe9caf305f06b746448daecd562864cbd4f77122650408dd7f246
+(pass 2). Later flow records, CHANGELOG, upstream integrations and snapshot
+normalization are outside that original review. The test-helper identity
+refresh in 421e4ff and subsequent declaration refresh are likewise disclosed
+integration changes, not silently credited to those reviews.
+
+The official helper still refuses the mixed-model whole rollout and does not
+support native Codex-to-Codex evidence attribution. The ruling accepts the
+audited evidence without claiming a successful generated receipt, a
+machine-gate pass, an unavailable-reviewer skip or a third review. No helper,
+allowlist, model metadata or review verdict was rewritten to create a pass.
