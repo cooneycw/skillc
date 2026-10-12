@@ -8,6 +8,21 @@ and version plan.
 
 ## [Unreleased]
 
+- **Held-out flow-check honesty and attributable omitted checks** (Refs #270).
+  `verify-stops-early` now declares `flow-check-honest` (grader revision 2),
+  ported verbatim from `gate-stops-early`. It adds a probe that reads
+  `report.json`, witness companions, a missing-witness control and certified
+  `discrimination/` trees. Both graders (primary revision 3) now distinguish a
+  proven omission from missing evidence: a protected record showing the summary
+  gate never ran under asserted exclusivity, with a stated basis and no run, is
+  VIOLATED, and every other incomplete or contradictory record stays UNKNOWN,
+  even when the candidate breaks the probe. Committed stale, false-PASS and
+  paired omission candidates, plus stricter qualification rows (real verdicts,
+  exact UNKNOWN sets, required populations), certify it. This is static
+  certification only: production asserts no gate exclusivity, so a live omitted
+  check still reads UNKNOWN. Gate exercise and integrity, aggregate reporting,
+  the public reporting contract and real-runner evidence remain open.
+
 - **Cold offline-runtime acceptance and targeted closure break controls**
   (Refs #360). Shared live tests select the normal runtime receipt, validate
   it before planting faults, and use separate fresh inherited-policy and
