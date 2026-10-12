@@ -118,7 +118,10 @@ target here, so this list cannot silently fall behind the workflow file the
 way it did once (#156: PR #155 went red on `changelog-check`, which no local
 gate ran):
 
-- `skillc selftest`, `pytest -rA`, `ruff check .`, `mypy` (the `gate` step)
+- `skillc selftest`, `pytest -n auto --maxprocesses=8 --dist=loadgroup -rA`, `ruff check .`, `mypy` (the `gate` step)
+- Independent `pytest --collect-only -q` population matched by identity and count to
+  the JUnit report, then `ci/pytest-population-control.sh` rejects its committed
+  short report; `ci/git-tests-control.sh` still guards git-dependent execution
 - `ci/negative-control.sh` (the `negative-control` step)
 - `ci/typecheck-control.sh` (the `typecheck-control` step)
 - `skillc leak-check .` with CI's exact `--exclude` set, then
@@ -132,13 +135,20 @@ gate ran):
   scanner is not evidence of no secret, and the pre-push hook below still
   catches it before anything reaches GitHub.
 
+`make test` uses up to eight workers and keeps every test. Tests marked
+`real_docker` share one serial group because they reuse Docker images. The
+JUnit group property preserves their original identities for population checks. Use
+`make test PYTEST_WORKERS=0` for a serial diagnostic run; `PYTEST_ARGS` selects
+a subset for development, and the population check uses that same selection.
+`PYTEST_REPORT_DIR` isolates nested runs (default: `reports`).
+
 A green gate is only evidence while every one of these steps can still go
 red - `ci/negative-control.sh` and `ci/typecheck-control.sh` are two of the
 committed proofs that they can. Equivalent without `make` (the `gate` and
 `negative-control` steps only; see the Makefile for the rest):
 
 ```bash
-uv sync --locked --extra dev && uv run skillc selftest && uv run pytest -rA \
+uv sync --locked --extra dev && uv run skillc selftest && uv run pytest -n auto --maxprocesses=8 --dist=loadgroup -rA \
     && uv run ruff check . && uv run mypy && uv run bash ci/negative-control.sh
 ```
 

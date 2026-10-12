@@ -284,12 +284,10 @@ uv run skillc selftest
 `main` is branch-protected: the `ci/woodpecker/pr/ci` check is required and
 must be up to date with `main` before merging (strict mode), and force-push
 and branch deletion are blocked. Before opening a PR, run
-`uv run skillc selftest && uv run pytest && uv run ruff check . && uv run mypy`
-and `uv run skillc leak-check . --exclude controls/leak-check/bad --exclude
-tests/test_leak.py --exclude ci/leak-check-control.sh --exclude
-tests/fixtures/leak_seeds` (the excludes skip this repo's own seeded-bad
-fixtures, which a bare scan would otherwise report as findings - see CI's
-`leak-check` step for the authoritative list); `uv run pytest
+`make verify`. Its test run uses up to eight parallel workers, checks the
+collected test identities against the result report, and proves the population
+check rejects a committed short report. `make test PYTEST_WORKERS=0` runs the
+same population serially; reports are kept under `reports/`. `uv run pytest
 tests/test_private_citations.py` guards tracked files against a private
 fleet message number or worker name (issue #100) - and a PR that
 changes `skillc/` also needs a new entry under `CHANGELOG.md`'s `[Unreleased]`

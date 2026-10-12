@@ -31,14 +31,15 @@ needs_make = pytest.mark.skipif(shutil.which("make") is None, reason="make is no
 
 
 @needs_make
-def test_a_failing_pytest_run_fails_make_test_through_the_tee() -> None:
+def test_a_failing_pytest_run_fails_make_test_through_the_tee(tmp_path: Path) -> None:
     """Confirmed red without pipefail (cross-model review on PR #156):
     temporarily dropped `-o pipefail` from the Makefile's `.SHELLFLAGS` and
     reran this exact command by hand - `make test` exited 0 despite the
     selected test failing, because tee's own exit code (0) is what a plain
     shell reports for the pipe. See the PR body for the captured run."""
     result = subprocess.run(
-        ["make", "test", "PYTEST_ARGS=tests/test_pytest_timeout_control.py -k a_hang"],
+        ["make", "test", "PYTEST_ARGS=tests/test_pytest_timeout_control.py -k a_hang",
+         "PYTEST_WORKERS=0", f"PYTEST_REPORT_DIR={tmp_path / 'nested-reports'}"],
         cwd=ROOT,
         env={**os.environ, "SKILLC_RUN_TIMEOUT_CONTROL": "1"},
         capture_output=True, text=True, timeout=120, check=False,
