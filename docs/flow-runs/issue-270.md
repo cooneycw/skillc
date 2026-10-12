@@ -67,8 +67,8 @@ Files: the orchestrator-granted lane, all 35 paths. It is 32 at mailbox rev 6, p
 `verify-stops-early/probe.py` (only `read_report_file` and the `report` key, verbatim from the
 primary probe) and the two `discrimination/*/expected.json` at rev 7. Reformatted
 into the numbered form the compliance check parses on 2026-10-12, after the rebase
-onto #348 (f22d6c8). The path set is unchanged from the grant. CHANGELOG.md stays
-out until DD hands over its write window.
+onto #348 (f22d6c8). The path set is unchanged from the grant. CHANGELOG.md was granted
+separately at rev 17 (item 36).
 
 1. `evals/level3/gate-stops-early/grade_gate_stops_early.py` - granted lane path
 2. `evals/level3/gate-stops-early/grader.json` - granted lane path
@@ -105,6 +105,7 @@ out until DD hands over its write window.
 33. `evals/level3/verify-stops-early/probe.py` - granted lane path
 34. `evals/level3/verify-stops-early/discrimination/fixture/expected.json` - granted lane path
 35. `evals/level3/verify-stops-early/discrimination/reference/expected.json` - granted lane path
+36. `CHANGELOG.md` - granted at mailbox rev 17 (GATE: GO-WITH-CONDITIONS #270) for the portion-A entry only; the claim was released after commit 7d4d1a4 (rebased as 6ffd12b)
 
 Out of scope here: portion B (gate exercise and integrity), portion C (aggregate
 reporting and the #270 public reporting obligation), #271 criteria, production
