@@ -399,7 +399,7 @@ def test_profile_runs_cold_with_no_operator_mounts(tmp_path: Path) -> None:
              f"cd {in_container_cpp_dir} && uv sync --locked --offline"],
             timeout=60,
         )
-        if BREAK_MODE == "cold-cache":
+        if BREAK_MODE == "cold-cache" and sync.returncode != 0:
             # Diagnostic: confirms the failure is the SPECIFIC cache-miss
             # uv names, not merely "something went wrong" - a plain
             # assert, so a sync that fails for some unrelated reason

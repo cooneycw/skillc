@@ -380,7 +380,7 @@ def test_a_treated_attempts_closure_is_verified_and_the_gate_reaches_the_real_ru
         # GateWitness/decide-reply channel rather than running the real
         # script directly.
         witness = GateWitness(
-            declared_gates={_GATE_NAME: (subject_abs, *_GATE_ARGV_TAIL)},
+            declared_gates={_GATE_NAME: (_HARNESS_ABS, *_GATE_ARGV_TAIL)},
             tree_digest_fn=lambda: "live-conformance-digest",
             backend=backend, handle=handle, limits=Limits(timeout=120.0),
             gate_exclusivity=False, exclusivity_basis="#334 live conformance test - no exclusivity claim exercised here",

@@ -31,29 +31,33 @@ comment that follows it):
 
 ONE TEST FUNCTION, SKILLC_GATE_WITNESS_LIVE_BREAK SELECTS THE MODE - same
 shape as `test_decide_reply_channel_live.py`'s `SKILLC_LIVE_TEST_BREAK`.
-`xfail(strict=True, raises=_PropertyHeld)` on every non-`none` mode: a
-break that fails to actually break anything surfaces as XPASS, not a
-silent pass.
+`xfail(strict=True)` on every non-`none` mode, `raises=` looked up per
+mode: a break that fails to actually break anything surfaces as XPASS,
+not a silent pass.
 
-`raises=_PropertyHeld` (issue #336, counter-model review on #266):
-`raises=AssertionError` was passed here originally - too WIDE, since
-every assertion in this file, setup and property alike, raised that
-same base type, so a break mode that died of an unrelated infra failure
-(an exec helper's own transport error, a real daemon flake) would also
-satisfy the marker and be counted as the expected red for the wrong
-reason. `_PropertyHeld` is a dedicated exception, confirmed NOT an
-`AssertionError` subclass, raised ONLY by the property checks via a
-`_require()` helper - property 1 (`concurrent_reply["exit_code"] == 0`)
-and property 2 (`gate_pid_alive is False`, `kill_run.stop_confirmed is
-True`, and the primary-unaffected checks `primary_result[0].reason`/
-`exit_code`/`counter_after > counter_before`), each asserted
-UNCONDITIONALLY and IDENTICALLY across every mode where it applies,
-never branched to check "the break occurred" instead of "the real
-property held" (audited: this file was already unbranched this way, so
-no XPASS-by-construction fix was needed, only the exception type).
-Every other check (handle/channel preconditions, `concurrent_reply`/
-`kill_reply`'s own `reason` sanity checks, the thread having joined)
-stays a plain `assert`.
+`raises=` a PER-PROPERTY `_PropertyHeld` subtype, not one shared type
+(issue #341, counter-model review on #336's own fix): `raises=
+AssertionError` was passed here originally (too WIDE - every
+assertion, setup and property alike, raised that same base type); #336
+narrowed it to one shared `_PropertyHeld`, which closed that gap but
+opened a different one - a NEIGHBORING property's own failure, within
+the SAME break-mode run, could also satisfy the marker, since every
+property shared one type. Fixed by giving each its own subtype -
+`_ConcurrentAccessPropertyHeld` (property 1: `concurrent_reply
+["exit_code"] == 0`) and, for property 2, `_KillConfirmationPropertyHeld`
+(`gate_pid_alive is False`, `kill_run.stop_confirmed is True` - targeted
+by BOTH `stale-confirm-lie` and `kill-wrong-pid`) plus
+`_PrimaryUnaffectedPropertyHeld` (the primary-unaffected checks
+`primary_result[0].reason`/`exit_code`/`counter_after > counter_before` -
+`kill-wrong-pid`'s own additional observable). `kill-wrong-pid`'s marker accepts only confirmed survival of the actual
+gate. A primary-only failure stays an unrelated hard failure. Each
+check is still asserted UNCONDITIONALLY and IDENTICALLY across every
+mode where it applies, never branched to check "the break occurred"
+instead of "the real property held" (audited: this file was already
+unbranched this way, so no XPASS-by-construction fix was ever needed,
+only the exception granularity). Every other check (handle/channel
+preconditions, `concurrent_reply`/`kill_reply`'s own `reason` sanity
+checks, the thread having joined) stays a plain `assert`.
 
 KNOWN LIMITATION, unverified against a real daemon: this classification
 assumes each break's real symptom surfaces through the property checks
@@ -109,7 +113,7 @@ import tempfile
 import threading
 import time
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 import pytest
@@ -151,24 +155,113 @@ if BREAK_MODE not in _VALID_BREAK_MODES:
 
 
 class _PropertyHeld(Exception):
-    """Raised when the ONE property a given `BREAK_MODE` is supposed to
-    violate still held (issue #336, same pattern as skillc#266's
-    counter-model-review fix, commit 2c9c638). The only exception type
-    the `xfail` marker below matches - never bare `AssertionError` - so
-    an unrelated infra/setup failure raises plain `AssertionError`
-    instead and is reported as an ordinary hard FAILURE, never masked as
-    "the break worked"."""
+    """Shared base for every property-specific exception below (issue
+    #341: one subtype per independently-targeted property, so a
+    NEIGHBORING property's own failure cannot satisfy a break mode's own
+    `xfail(raises=...)` - counter-model review on #336's own fix, which
+    gave every property in this file the same single type). Never
+    raised directly."""
 
 
-def _require(condition: bool, message: str) -> None:
-    """The property under test for the current `BREAK_MODE` - asserted
-    UNCONDITIONALLY, identically for `none` and every applicable break
-    mode, never branched by `BREAK_MODE`. Confirmed directly, no pytest
-    or Docker needed: `_require(True, ...)` returns; `_require(False,
-    ...)` raises `_PropertyHeld`, which is not a subclass of
-    `AssertionError`."""
+class _ConcurrentAccessPropertyHeld(_PropertyHeld):
+    """Property 1's own targeted property: a gate reaches the SAME live
+    container the primary subject is running in. `gate-in-fresh-
+    container`'s own target."""
+
+
+class _KillConfirmationPropertyHeld(_PropertyHeld):
+    """Property 2's own targeted property: a timed-out gate's real
+    in-container process is genuinely killed and independently
+    confirmed. Targeted by BOTH `stale-confirm-lie` (the confirmation
+    step lies) and `kill-wrong-pid` (the kill lands on the wrong
+    process, so the gate's own pid survives) - the file's own prior
+    comments already establish both as violations of this ONE property,
+    not two different ones."""
+
+
+class _PrimaryUnaffectedPropertyHeld(_PropertyHeld):
+    """The primary did not remain healthy while the gate was stopped."""
+
+
+_EXPECTED_PROPERTY_EXCEPTION: dict[str, type[_PropertyHeld]] = {
+    "gate-in-fresh-container": _ConcurrentAccessPropertyHeld,
+    "stale-confirm-lie": _KillConfirmationPropertyHeld,
+    "kill-wrong-pid": _KillConfirmationPropertyHeld,
+}
+
+
+def _require(condition: bool, message: str, exc_type: type[_PropertyHeld]) -> None:
     if not condition:
-        raise _PropertyHeld(message)
+        raise exc_type(message)
+
+
+def _check_concurrent_reply(reply: Mapping[str, object], *, missing_marker_confirmed: bool) -> None:
+    assert reply["reason"] == "exited", "concurrent gate did not launch and exit normally"
+    assert reply["exit_code"] in (0, 1), "unexpected concurrent gate exit"
+    if reply["exit_code"] != 0:
+        assert missing_marker_confirmed, "no independent missing-primary-marker observation"
+    _require(reply["exit_code"] == 0, "gate did not reach the primary container", _ConcurrentAccessPropertyHeld)
+
+
+def _check_kill_observation(alive: bool | None, confirmed: bool | None) -> None:
+    assert type(alive) is bool, "gate liveness is unknown"
+    _require(not alive, "the actual gate process survived the kill", _KillConfirmationPropertyHeld)
+    assert confirmed is True, "dead gate and witness kill confirmation disagree"
+
+
+def _check_primary(results: list[ExecuteResult], before: int, after: int) -> None:
+    _require(
+        bool(results) and results[0].reason == "exited" and results[0].exit_code == 0 and after > before,
+        "the primary did not remain healthy across the gate", _PrimaryUnaffectedPropertyHeld,
+    )
+
+
+def _make_fresh_exec(real_exec: Callable[..., ExecuteResult], observations: list[tuple[int | None, str | None]]):
+    """Substitute only gate transport; preserve all current exec arguments.
+
+    #338's prospective confine_root argument must be integrated only after
+    that production dependency merges. This helper targets the current API.
+    """
+    def fresh_container_exec(
+        self: d.DockerBackend, _handle: object, argv: Sequence[str], limits: Limits,
+        cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,
+        cwd: str | None = None, env: Mapping[str, str] | None = None,
+    ) -> ExecuteResult:
+        fresh_handle = self.prepare(f"a-gw-live-fresh-container-{uuid.uuid4().hex[:12]}")
+        try:
+            assert isinstance(fresh_handle, d._Handle)
+            _prepare_candidate_workspace(self, fresh_handle)
+            self.install(fresh_handle, {})
+            result = real_exec(self, fresh_handle, argv, limits, cancel, stdin, cwd=cwd, env=env)
+            assert result.reason == "exited" and result.error is None, "fresh gate transport failed"
+            output = _read_file_via_exec(self, fresh_handle, f"{d.CONTAINER_WORKSPACE}/observations")
+            assert output is not None, "fresh gate output unavailable"
+            observations.append((result.exit_code, output))
+            return result
+        finally:
+            self.destroy(fresh_handle)
+    return fresh_container_exec
+
+
+def _run_primary(
+    real_exec: Callable[..., ExecuteResult], backend: d.DockerBackend, handle: object,
+    results: list[ExecuteResult], errors: list[Exception],
+) -> None:
+    try:
+        results.append(real_exec(
+            backend, handle, ["python3", "-c", _primary_script()], Limits(timeout=PRIMARY_DURATION_SECONDS + 10),
+        ))
+    except Exception as exc:  # noqa: BLE001 - re-raised by the owning test thread
+        errors.append(exc)
+
+
+def _destroy_and_join(backend: d.DockerBackend, handle: object, primary: threading.Thread | None) -> None:
+    try:
+        backend.destroy(handle)
+    finally:
+        if primary is not None:
+            primary.join(timeout=backend.daemon_timeout + GATE_GRACE)
+            assert not primary.is_alive(), "primary worker did not stop after container cleanup"
 
 
 _DOCKER_BIN_PRESENT = shutil.which("docker") is not None
@@ -235,9 +328,14 @@ def _primary_script() -> str:
 def _concurrent_gate_argv() -> list[str]:
     """Case (a): exits on its own, reporting whether it can see the
     primary's marker - exit 0 only if the marker is readable, exit 1
-    otherwise. Never trusted via stdout text; the exit code alone is the
-    oracle, matching this whole module's "no raw output" leak discipline."""
-    script = f"import sys, os; sys.exit(0 if os.path.isfile({PRIMARY_MARKER!r}) else 1)"
+    otherwise. The fresh-container control also requires the exact fixed
+    missing-marker observation before crediting the targeted failure.
+    Raw container output is never published in the test report."""
+    script = (
+        f"import sys, os; present = os.path.isfile({PRIMARY_MARKER!r}); "
+        "print('PRIMARY_MARKER: present' if present else 'PRIMARY_MARKER: absent'); "
+        "sys.exit(0 if present else 1)"
+    )
     return ["python3", "-c", script]
 
 
@@ -377,7 +475,8 @@ def _prepare_candidate_workspace(backend: d.DockerBackend, handle: d._Handle) ->
 
 
 @pytest.mark.xfail(
-    condition=BREAK_MODE != "none", strict=True, raises=_PropertyHeld,
+    condition=BREAK_MODE != "none", strict=True,
+    raises=_EXPECTED_PROPERTY_EXCEPTION.get(BREAK_MODE, _PropertyHeld),
     reason=f"SKILLC_GATE_WITNESS_LIVE_BREAK={BREAK_MODE} deliberately breaks one property",
 )
 def test_the_gate_witness_round_trips_correctly_against_a_real_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -402,6 +501,9 @@ def test_the_gate_witness_round_trips_correctly_against_a_real_daemon(monkeypatc
     # (#355): a fixed name plus a setup step outside the `try` leaked the
     # container, and the leak failed every later run on a name `Conflict`.
     handle = backend.prepare(f"a-gw-live-conformance-{uuid.uuid4().hex[:12]}")
+    primary_thread: threading.Thread | None = None
+    real_exec = d.DockerBackend.exec_in_attempt
+    fresh_observations: list[tuple[int | None, str | None]] = []
     try:
         assert isinstance(handle, d._Handle)
         assert handle.trigger_channel is not None
@@ -432,19 +534,10 @@ def test_the_gate_witness_round_trips_correctly_against_a_real_daemon(monkeypatc
             # prepared container instead of the live one, so it cannot see
             # the primary's marker - the concurrent-gate case must now report
             # exit 1 (marker not found), not 0.
-            real_execute = d.DockerBackend.execute
-
-            def fresh_container_exec(self: d.DockerBackend, _handle: object, argv, limits, cancel=None, stdin=None):
-                fresh_handle = self.prepare(f"a-gw-live-fresh-container-{uuid.uuid4().hex[:12]}")
-                try:
-                    self.install(fresh_handle, {})
-                    return real_execute(self, fresh_handle, argv, limits, cancel, stdin)
-                finally:
-                    self.destroy(fresh_handle)
-
-            monkeypatch.setattr(d.DockerBackend, "exec_in_attempt", fresh_container_exec)
+            monkeypatch.setattr(d.DockerBackend, "exec_in_attempt", _make_fresh_exec(real_exec, fresh_observations))
 
         primary_pid_holder: list[int] = []
+        injected_targets: list[tuple[int, int]] = []
         if BREAK_MODE == "kill-wrong-pid":
             # Property 2's own break: the kill-confirmation sequence targets
             # the PRIMARY's own in-container pid instead of the gate's real
@@ -457,20 +550,20 @@ def test_the_gate_witness_round_trips_correctly_against_a_real_daemon(monkeypatc
             real_read_pid = d.DockerBackend._read_in_container_pid
 
             def targeting_the_primary(self: d.DockerBackend, handle_: d._Handle, marker_path: str, timeout: float = 2.0) -> int | None:
+                actual = real_read_pid(self, handle_, marker_path, timeout)
                 if primary_pid_holder:
+                    assert actual is not None, "actual exec PID was not observed"
+                    injected_targets.append((actual, primary_pid_holder[0]))
                     return primary_pid_holder[0]
-                return real_read_pid(self, handle_, marker_path, timeout)
+                return actual
 
             monkeypatch.setattr(d.DockerBackend, "_read_in_container_pid", targeting_the_primary)
 
         primary_result: list[ExecuteResult] = []
-
-        def run_primary() -> None:
-            primary_result.append(
-                backend.execute(handle, ["python3", "-c", _primary_script()], Limits(timeout=PRIMARY_DURATION_SECONDS + 10)),
-            )
-
-        primary_thread = threading.Thread(target=run_primary)
+        primary_errors: list[Exception] = []
+        primary_thread = threading.Thread(
+            target=_run_primary, args=(real_exec, backend, handle, primary_result, primary_errors), daemon=True,
+        )
         primary_thread.start()
         # Bounded poll for primary readiness, never a blind sleep (codex:
         # code_review finding: a fixed delay is both too short on a
@@ -478,21 +571,16 @@ def test_the_gate_witness_round_trips_correctly_against_a_real_daemon(monkeypatc
         # either way).
         _wait_for_file_via_exec(backend, handle, PRIMARY_MARKER, deadline_seconds=10.0)
 
+        primary_pid = _read_int_file_via_exec(backend, handle, PRIMARY_PID_MARKER)
+        assert primary_pid > 0, "invalid primary PID"
         if BREAK_MODE == "kill-wrong-pid":
-            primary_pid_holder.append(_read_int_file_via_exec(backend, handle, PRIMARY_PID_MARKER))
+            primary_pid_holder.append(primary_pid)
 
         # Case (a): a concurrent gate that exits on its own, proving
         # property 1 (or its negation, under gate-in-fresh-container).
         concurrent_reply = _run_gate_over_socket(socket_path, "concurrent-gate")
-        assert concurrent_reply["reason"] == "exited"
-        # UNCONDITIONAL across every mode (codex:code_review finding 1):
-        # this is the real property-1 conformance check, and only a
-        # gate that actually reached the primary's live container can
-        # satisfy it - gate-in-fresh-container must fail exactly here,
-        # not at a pre-approved alternate expected value.
-        _require(
-            concurrent_reply["exit_code"] == 0,
-            "the gate could not see the primary's own marker in its live container",
+        _check_concurrent_reply(
+            concurrent_reply, missing_marker_confirmed=fresh_observations == [(1, "PRIMARY_MARKER: absent\n")],
         )
 
         # Case (b): a TERM-ignoring gate past its timeout, forcing the
@@ -506,56 +594,23 @@ def test_the_gate_witness_round_trips_correctly_against_a_real_daemon(monkeypatc
         counter_after = _read_counter(backend, handle)
         assert kill_reply["reason"] in ("timeout", "operator-cancelled")
 
-        # THE INDEPENDENT ORACLE for property 2: read the gate's own pid
-        # back from its OWN marker (never the witness's internal state)
-        # and ask the real daemon directly whether it is still alive -
-        # structurally absent for gate-in-fresh-container, whose fresh
-        # container is already destroyed by the time control returns
-        # here, and for which property 2 is not the one under test.
-        gate_pid_alive: bool | None = None
-        if BREAK_MODE != "gate-in-fresh-container":
-            gate_pid = _read_gate_pid(backend, handle)
-            gate_pid_alive = _real_daemon_pid_is_alive(backend, handle, gate_pid)
+        # Independent identities come from the processes' own marker files,
+        # not the monkeypatched backend PID reader.
+        gate_pid = _read_gate_pid(backend, handle)
+        assert gate_pid > 0 and gate_pid != primary_pid, "ambiguous primary/gate identities"
+        if BREAK_MODE == "kill-wrong-pid":
+            assert (gate_pid, primary_pid) in injected_targets, "wrong-target injection did not reach the timed-out gate"
+        gate_pid_alive = _real_daemon_pid_is_alive(backend, handle, gate_pid)
 
         primary_thread.join(timeout=PRIMARY_DURATION_SECONDS + 15)
         assert not primary_thread.is_alive(), "the primary subject never finished"
+        if primary_errors:
+            raise primary_errors[0]
     finally:
-        backend.destroy(handle)
+        _destroy_and_join(backend, handle, primary_thread)
 
     record = witness.finalize(handle.attempt_id)
     kill_run = record.gates["kill-timeout-gate"].runs[-1]
 
-    # Every assertion from here down is UNCONDITIONAL across modes
-    # (codex:code_review finding 1): a break mode is proven by the SAME
-    # true invariant failing, never by a pre-approved different expected
-    # value for that mode. gate_pid_alive is False under `none` because
-    # the real kill succeeded; it is ALSO False-expected (i.e. the
-    # assertion must fail, satisfying xfail) under stale-confirm-lie
-    # (no real kill was ever sent) and kill-wrong-pid (the real kill hit
-    # the primary, leaving the gate's own pid genuinely untouched) - both
-    # are real violations of the same property, not two different ones.
-    if BREAK_MODE != "gate-in-fresh-container":
-        _require(
-            gate_pid_alive is False,
-            "the gate's own real process must have been genuinely killed and "
-            "independently confirmed dead by the test's own kill -0, never "
-            "merely by trusting the witness's self-report",
-        )
-        # Per codex:code_review finding 4: checked on every intact run
-        # too, not only stale-confirm-lie - an implementation that kills
-        # correctly but misreports this must also fail here.
-        _require(
-            kill_run.stop_confirmed is True,
-            "the witness's own record must agree that the kill was confirmed",
-        )
-
-    _require(
-        bool(primary_result) and primary_result[0].reason == "exited",
-        "the primary subject did not exit cleanly",
-    )
-    _require(primary_result[0].exit_code == 0, "the primary subject's own exit code was not 0")
-    # Per orchestrator review C3: monotonic progress across the kill-
-    # timeout gate's own bracketed window, never an exact count (flakes
-    # on a loaded VM). kill-wrong-pid must fail HERE too: a kill that hit
-    # the primary instead of the gate stops its counter from advancing.
-    _require(counter_after > counter_before, f"no progress: counter stayed at {counter_before}")
+    _check_kill_observation(gate_pid_alive, kill_run.stop_confirmed)
+    _check_primary(primary_result, counter_before, counter_after)

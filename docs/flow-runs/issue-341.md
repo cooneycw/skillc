@@ -51,3 +51,88 @@ Approval conditions: reuse parked work; predicates remain mode-independent; no e
 Orchestrator expanded the gate after independent confirmation that closure-preflight credited a missed or wrong-reason refusal as XFAIL. No production behavior changes. The healthy predicate remains acceptance in every mode; precise path/symptom verification is a hard failure before a targeted refusal can receive credit. Actual-oracle and mutation controls are required. This resolves a seven-file-floor acceptance blocker.
 
 7. `tests/test_profile_closure_preflight_live.py` - repair the inverted preflight oracle and validate refusal identity before crediting XFAIL; retain independent runner failure.
+
+### Resume and approved witness-control amendment
+
+- Checkpoint 3508657 preserved the reviewed nonoverlap work before main sync.
+- Merge 8c3cd75 incorporated main faf8810 and #355's setup/ownership/cleanup
+  and persistent overlay exec fixes. Parked subtype hunks then applied cleanly.
+- Orchestrator approved the bounded witness-control amendment: only the
+  existing witness/control/changelog/run-record files, no production changes.
+  The fresh callback signature defect was verified on the original function;
+  primary execute teardown remained a hypothesis for the reported live symptom.
+- Save actual exec transport for the primary, bypassing gate-only substitution;
+  forward current arguments in the fresh-container callback; preserve bounded
+  teardown. Verify independent primary/gate identities and injection into the
+  timed-out gate. Unknown liveness or missing markers remain hard failures;
+  primary-only failure must not earn gate-kill XFAIL.
+- New actual-helper controls and pre-fix red runs are required. Real Docker
+  confirmation remains owed; #338's future API is integrated only after merge.
+
+### Focused evidence after resume
+
+- Actual-marker/predicate/routing controls: 25 passed without Docker. The
+  channel and overlay matrices invoke the actual complete live test function
+  with external I/O replaced; they pin each targeted/neighbor/infra outcome.
+- New channel/overlay regressions run against actual pre-fix faf8810 sources:
+  both outer controls failed because old markers credited neighboring failures.
+  The fixed sources pass the same controls. Shared-base mutations remain
+  committed and demonstrate the corresponding false XFAIL credit.
+- Original faf8810 fresh callback, extracted without altering its body, fails
+  the same cwd/env call with unexpected-keyword TypeError; the updated helper
+  forwards argv, limits, cancellation, stdin, cwd and env and always cleans up.
+- Original primary callback selects one-shot execute, failing the saved-exec
+  routing control. This proves call routing, not the reported Docker teardown
+  hypothesis. Original closure predicate returns normally for the intended
+  missing-file refusal; fixed predicate raises the targeted exception.
+- Scoped ruff/mypy and 13 private-citation tests pass. Full verification and
+  real-Docker intended-fault evidence remain pending; no live result inferred.
+
+### Approved review corrections and focused red/green evidence
+
+- Independent review (gpt-6.1-sol) found four remaining distinctions. The
+  orchestrator accepted all four within the existing test/documentation lane.
+- Channel connectivity now requires the explicit missing-socket exit and
+  report; launch errors, other runtime errors and malformed reports fail hard.
+  Overlay channel handling admits only healthy 125 or the planted faulty zero.
+- Closure declares the preserved harness copy as the controller command while
+  the candidate still invokes the shim. Full-function controls assert both
+  routes and retain the old recursive route as a known-bad mutation.
+- Cold-cache diagnostics apply only to failed sync. The complete live function
+  now reaches strict XPASS for successful sync under the cold-cache marker.
+- Before these corrections, new controls produced 6 failures and 21 passes.
+  After correction and additional socket-report controls: 32 property controls
+  and 13 private-citation tests pass; scoped ruff and mypy pass on all six
+  changed test files. No Docker was used. Independent re-review and serialized
+  full verification are the remaining local gates.
+
+### Final independent review
+
+- Two gpt-6.1-sol review passes read all nine lane files. Four first-pass
+  findings were accepted and fixed; the final pass reports no findings.
+  It independently exercised corrected channel, overlay, closure, cold-cache
+  and witness paths with in-memory I/O. It did not run Docker or full suites.
+- Review threads: 01a1310d-45d4-7c93-bc2b-2ec63e849473 (first),
+  01a13116-7041-71c0-91ee-f44e8c5278cd (final). The authentic exec streams and
+  reports remain in the wave ledger. The receipt helper refuses this Codex
+  implementer session because it requires a Claude transcript on one side;
+  the approved conditional receipt is unsupported, not a skipped review.
+  Limitation recorded in claude-power-pack Nit Store #864, comment 6128975985.
+- The concurrent-gate docstring was aligned with the reviewed fixed-marker
+  evidence requirement; no behavioral change followed the final review.
+
+### Full verification and handoff
+
+- Full `make verify` exited 0: 3168 passed, 14 skipped in 1480.78 seconds.
+  Docker was deliberately unavailable through an isolated socket setting;
+  no real-Docker behavior or intended-fault acceptance is inferred.
+- Ruff passed and mypy checked 188 source files. Selftest, rule/typecheck
+  negative controls, leak scan and seeded control, changelog/readme checks,
+  gitleaks and its planted-key control, and git-test population controls passed.
+  The latter refused partial-skip, missing and malformed reports and accepted
+  the complete good report. Main remained faf8810 at the gate's fetch.
+- Lane check covered exactly nine authorized paths; main-worktree guard found
+  no tracked leak. Plan compliance reports the approved closure addition and
+  append-only amendments; preserve those findings and explain them in the PR.
+- The serialized verification slot was released after completion. Refs #341
+  remains appropriate until the separate real-runtime campaign is accepted.

@@ -8,16 +8,20 @@ and version plan.
 
 ## [Unreleased]
 
-- **Live-test controls distinguish forbidden mount destinations and
-  validate closure refusal identity** (Refs #341). Cold-install checks use
-  a separate exception for each observed mount destination and for offline
-  sync; unknown, malformed and simultaneous mounts remain hard failures.
-  Closure preflight checks the same healthy acceptance predicate in every
-  mode, after checking a refusal's exact path and expected symptom. A
-  missed refusal produces strict XPASS rather than incorrectly certifying
-  the break. No-daemon controls exercise the actual markers and predicates,
-  including cross-property failures, shared-base mutations and an inverted
-  acceptance predicate. Real-Docker confirmation remains owed through #315.
+- **Live break controls credit only their targeted property** (Refs #341).
+  Channel, witness, shim and cold-install checks use separate exceptions for
+  independent observations. Shim cwd and environment failures no longer
+  certify each other; forbidden mounts are distinguished by destination.
+  Channel failures require explicit intended-fault observations.
+  Closure controls route the controller to the preserved harness, validate
+  the refusal's path/symptom and use the same
+  healthy predicate in every mode, so a missed refusal becomes strict XPASS.
+  Witness controls preserve the primary's container, forward the current
+  exec arguments and require independent missing-marker or live-gate proof.
+  Committed no-daemon controls exercise actual markers/helpers, neighboring
+  failures, strict XPASS, broad-marker mutations and bounded cleanup.
+  These establish test discrimination, not real-container behavior; actual
+  break execution remains owed through #315.
 
 - **Uptake studies forward each arm's profile verification fields** (#346).
   The prepared treatment's file digests, tool preflight probes and gate
