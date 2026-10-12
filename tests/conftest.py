@@ -98,3 +98,20 @@ def _no_real_credential_defaults(
 #: both sides: a delay under this bound still reports captured/confirmed,
 #: and a delay past it still reports UNKNOWN/inconclusive/quarantined.
 FAKE_DOCKER_DAEMON_TIMEOUT = 30.0
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Keep shared real-Docker resources on one worker; retain canonical JUnit ids.
+
+    xdist's later collection hook appends the combined group name to worker
+    nodeids. Record that exact suffix so the population checker can reconcile
+    worker reports with independent serial collection without guessing at '@'.
+    """
+    for item in items:
+        if item.get_closest_marker("real_docker") is not None:
+            item.add_marker(pytest.mark.xdist_group("real_docker"))
+        groups = {str(mark.args[0] if mark.args else mark.kwargs.get("name", "default"))
+                  for mark in item.iter_markers("xdist_group")}
+        if groups:
+            item.user_properties.append(("skillc_xdist_group", "_".join(sorted(groups))))
