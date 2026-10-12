@@ -10,6 +10,7 @@ the next time it goes red in CI on something nobody ran locally.
 from __future__ import annotations
 
 import re
+import shlex
 from pathlib import Path
 
 import yaml
@@ -197,11 +198,24 @@ def _parallel_contract(ci_text: str, make_text: str) -> bool:
     run = next(command for command in gate["commands"] if "--junit-xml=" in command)
     make_run = next(line for line in make_text.splitlines() if "--junit-xml=" in line and "uv run" in line)
     make_run = make_run.replace("$(PYTEST_WORKERS)", "auto")
-    flags = ("-n auto", "--maxprocesses=8", "--dist=loadgroup", "-rA")
-    return (all(flag in run and flag in make_run for flag in flags)
+    def args(command: str) -> list[str]:
+        words = shlex.split(command.replace("$(PYTEST_ARGS)", ""))
+        words = words[words.index("pytest") + 1:]
+        for boundary in ("|", ">"):
+            if boundary in words:
+                words = words[:words.index(boundary)]
+        return ["--junit-xml=REPORT" if word.startswith("--junit-xml=") else word
+                for word in words]
+
+    collect = next((command for command in gate["commands"] if "--collect-only" in command), "")
+    make_collect = next((line for line in make_text.splitlines() if "--collect-only" in line), "")
+    if not collect or not make_collect:
+        return False
+    expected = ["-n", "auto", "--maxprocesses=8", "--dist=loadgroup", "-rA", "--junit-xml=REPORT"]
+    return (args(run) == args(make_run) == expected
             and "PYTEST_WORKERS ?= auto" in make_text
-            and any("pytest --collect-only -q" in command for command in gate["commands"])
-            and "pytest --collect-only -q" in make_text
+            and "PYTEST_ARGS ?=\n" in make_text
+            and args(collect) == args(make_collect) == ["--collect-only", "-q"]
             and "python3 ci/check_pytest_population.py" in make_text
             and "pytest-population-control: test" in make_text
             and "pytest-population-control" in make_text.split("verify:", 1)[1]
@@ -231,3 +245,16 @@ def test_parallel_contract_rejects_serial_or_missing_control() -> None:
         changed = make_text.replace(old, new)
         assert changed != make_text
         assert not _parallel_contract(ci_text, changed)
+
+
+def test_parallel_contract_rejects_ci_only_selection_and_worker_overrides() -> None:
+    ci_text, make_text = CI_YML.read_text(), MAKEFILE.read_text()
+    for option in ("--ignore=tests/test_docker_backend.py", "-n 0"):
+        changed = ci_text.replace("pytest --collect-only -q", "pytest --collect-only -q " + option)
+        changed = changed.replace("--junit-xml=pytest-report.xml", "--junit-xml=pytest-report.xml " + option)
+        assert not _parallel_contract(changed, make_text)
+
+
+def test_generated_collection_is_excluded_from_both_leak_scans() -> None:
+    assert "pytest-collected.txt" in _ci_leak_exclude_paths(CI_YML.read_text())
+    assert "pytest-collected.txt" in _makefile_leak_exclude_paths(MAKEFILE.read_text())

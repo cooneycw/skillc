@@ -1,11 +1,14 @@
 """The population gate must reject incomplete or substituted evidence (#364)."""
 from __future__ import annotations
 
+import inspect
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
+from conftest import pytest_collection_modifyitems
 
 from ci.check_pytest_population import check, collected, outcomes
 
@@ -87,9 +90,12 @@ def test_cli_refuses_unreadable_reports(tmp_path: Path, name: str, body: str | N
 
 def test_checker_matches_real_parallel_pytest_xml(tmp_path: Path) -> None:
     """An actual pytest producer proves parameter-id mangling and skips, not just fixtures."""
+    (tmp_path / "conftest.py").write_text(
+        "import pytest\n" + inspect.getsource(pytest_collection_modifyitems))
+    (tmp_path / "pytest.ini").write_text("[pytest]\nmarkers = real_docker: sample grouping\n")
     suite = tmp_path / "test_sample.py"
-    suite.write_text('import pytest\nclass TestSample:\n'
-                     ' @pytest.mark.parametrize("value", [1], ids=["a::b.c/d"])\n'
+    suite.write_text('import pytest\npytestmark = pytest.mark.real_docker\nclass TestSample:\n'
+                     ' @pytest.mark.parametrize("value", [1], ids=["a::b.c/d@real_docker"])\n'
                      ' def test_pass(self, value): assert value == 1\n'
                      ' @pytest.mark.skip(reason="sample")\n'
                      ' def test_skip(self): pass\n')
@@ -99,3 +105,23 @@ def test_checker_matches_real_parallel_pytest_xml(tmp_path: Path) -> None:
     subprocess.run([sys.executable, '-m', 'pytest', '-n', '2', '--dist=loadgroup',
                     '--junit-xml=report.xml'], cwd=tmp_path, capture_output=True, check=True)
     assert "2 collected identities" in check(tmp_path / 'collection.txt', tmp_path / 'report.xml')
+    cases = list(ET.parse(tmp_path / 'report.xml').iter('testcase'))
+    assert all(case.get('name', '').endswith('@real_docker') for case in cases)
+    assert all(case.find("properties/property[@name='skillc_xdist_group']") is not None
+               for case in cases)
+    subprocess.run([sys.executable, '-m', 'pytest', '-n', '0', '--junit-xml=serial.xml'],
+                   cwd=tmp_path, capture_output=True, check=True)
+    assert "identical per-test outcomes" in check(
+        tmp_path / 'collection.txt', tmp_path / 'report.xml', tmp_path / 'serial.xml')
+
+
+def test_grouped_reports_use_verified_group_property(tmp_path: Path) -> None:
+    path = tmp_path / 'grouped.xml'
+    good = (FIXTURES / 'good.xml').read_text()
+    path.write_text(good.replace('name="test_pass"/>', 'name="test_pass@serial">'
+                    '<properties><property name="skillc_xdist_group" value="serial"/>'
+                    '</properties></testcase>'))
+    assert "2 collected identities" in check(FIXTURES / 'collected.txt', path, FIXTURES / 'good.xml')
+    path.write_text(path.read_text().replace('value="serial"', 'value="other"'))
+    with pytest.raises(ValueError, match="population mismatch"):
+        check(FIXTURES / 'collected.txt', path)

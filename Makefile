@@ -69,7 +69,7 @@ typecheck-control: sync
 # going to be committed. Measured: `make verify` failed
 # on exactly this the first time leak-check was chained after test.
 SKILLC_LEAK_EXCLUDE := --exclude controls/leak-check/bad --exclude tests/test_leak.py \
-	--exclude ci/leak-check-control.sh --exclude tests/fixtures/leak_seeds --exclude reports
+	--exclude ci/leak-check-control.sh --exclude pytest-collected.txt --exclude tests/fixtures/leak_seeds --exclude reports
 leak-check: sync
 	uv run --no-sync skillc leak-check . $(SKILLC_LEAK_EXCLUDE)
 	uv run --no-sync bash ci/leak-check-control.sh

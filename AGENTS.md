@@ -135,7 +135,9 @@ gate ran):
   scanner is not evidence of no secret, and the pre-push hook below still
   catches it before anything reaches GitHub.
 
-`make test` uses up to eight workers and keeps every test. Use
+`make test` uses up to eight workers and keeps every test. Tests marked
+`real_docker` share one serial group because they reuse Docker images. The
+JUnit group property preserves their original identities for population checks. Use
 `make test PYTEST_WORKERS=0` for a serial diagnostic run; `PYTEST_ARGS` selects
 a subset for development, and the population check uses that same selection.
 `PYTEST_REPORT_DIR` isolates nested runs (default: `reports`).

@@ -47,6 +47,14 @@ def outcomes(path: Path) -> dict[Identity, str]:
         classname, name = case.get("classname"), case.get("name")
         if not classname or not name:
             raise ValueError("testcase lacks classname or name")
+        groups = [prop.get("value", "") for prop in case.findall("properties/property")
+                  if prop.get("name") == "skillc_xdist_group"]
+        if len(groups) > 1 or (groups and not groups[0]):
+            raise ValueError("invalid xdist group property")
+        if groups:
+            # Our collection hook records the exact scheduler suffix, on both
+            # serial and worker runs. Never strip arbitrary '@' parameter text.
+            name = name.removesuffix("@" + groups[0])
         key = classname, name
         if key in result:
             raise ValueError(f"duplicate testcase: {key}")
