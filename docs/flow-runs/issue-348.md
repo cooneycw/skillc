@@ -43,3 +43,55 @@ receipt plumbing await separate approval and dependency handoffs. #354 caller
 pin adoption and integrated isolated-VM evidence remain required for study
 readiness. Tests and negative controls precede independent review; full verify
 requires the shared serialized slot. No Docker or model calls are authorized.
+
+<!-- flow-run n=2 id=6203df67f54548f3b070ff98d1893b06 -->
+## Run 2
+
+- Run-id:            6203df67f54548f3b070ff98d1893b06
+- Run-start:         f45a939fba98f0c3faf0ba2c772fe53bd04cd312
+
+- Issue: #348
+- Base SHA: 1c9954ad3aacf230596e4bf5cbf21b00ff5cde4d
+- Necessity verdict: Still needed
+- Approval: granted
+- Approver: skillc wave orchestrator, phase-two GO-WITH-CONDITIONS
+- Recorded at: 2026-10-12
+
+### Section B evidence
+
+Phase one checkpoint f45a939 carries profile forwarding, capture projection and
+locked frozen-envelope grading. Old-base full verification passed; post-sync
+focused controls pass. Main now carries #338 confine_root/status and #356 image
+prerequisite plus #364 parallel population gate. Production witness construction
+is still absent. CC supplied the closed runtime descriptor/receipt contract.
+Root independently reproduced channel retry-after-drain-failure defect #367.
+
+### Section C - the approved plan
+
+1. `skillc/cli.py`, `skillc/collection_conformance.py` - controller receipt ingress,
+   freshly validated profile/closure selection and agent factory propagation.
+   Match supported pin/metadata, not directory spelling; document #287 derived
+   profile compatibility. Baseline uses the selected image without CPP closure.
+2. `skillc/runtime_supply.py`, `tests/test_runtime_supply.py` - bounded closed
+   schemas and independent expected policy, identity/environment controls.
+3. `skillc/backend.py`, `skillc/docker_backend.py`, `tests/test_docker_backend.py` -
+   optional retained output, opted workspace-write avoidance and bounded runtime
+   measurement. Preserve merged confinement/status and default grading behavior.
+4. `skillc/gate_witness.py`, `tests/test_gate_witness.py` - snapshot inside exec
+   serialization, controller-retained output and failure/ordering controls.
+5. `skillc/agent_trial.py`, `tests/test_agent_trial_gate_witness.py`,
+   `tests/test_agent_trial_preflight.py` - actual witness setup, nonce readiness,
+   runtime binding, confirmed-stop/channel-drain finalization and both graders.
+   Latch first drain failure; never retry #367 into trusted completion.
+6. `skillc/witness_capture.py`, `skillc/verify.py`, `tests/test_witness_capture.py`,
+   `tests/test_verify.py`, `tests/test_calibration_run_profile_closure.py` - preserve
+   and extend actual capture/frozen-file/CLI consuming controls without trusting
+   candidate artifacts or backfilling earlier gate digests.
+7. `CHANGELOG.md` - accurate phase-two entry only after CC's explicit release;
+   preserve all existing entries. Historical flow-run sections remain unchanged.
+
+No confinement-core rewrite, channel/lifecycle/managed backend edit, shared live
+file, #354 trial/profile/records, CC image/fixture, grader or runner-floor edit.
+No raw archival field. Red-before controls, independent phase-two review and
+serialized full verification after CC then AA. Actual Docker/model execution,
+study eligibility, shared live acceptance and final merge remain separately gated.

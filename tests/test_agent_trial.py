@@ -776,7 +776,11 @@ def test_the_overlay_fires_when_gate_entrypoint_is_declared_and_delivered(
     whenever `gate_entrypoint` is EXPLICITLY given - never inferred from
     `verify_home_files`' own membership. Two OTHER mechanisms are
     monkeypatched out, each independently tested elsewhere, so this test
-    isolates exactly the new wiring decision: `_preflight_in_container`'s
+    isolates exactly the overlay wiring decision. The mandatory witness
+    readiness round trip is explicitly stubbed in THIS wiring-only test because
+    fake Docker does not implement socket mounts. Actual callback/nonce/drain
+    behavior is exercised by test_agent_trial_gate_witness.py:
+ `_preflight_in_container`'s
     own digest-verification correctness is `tests/test_agent_trial_
     preflight.py`'s job (the fake docker CLI's own path-remapping
     simulation reports a sha256sum line prefixed with its HOST-side
@@ -786,6 +790,7 @@ def test_the_overlay_fires_when_gate_entrypoint_is_declared_and_delivered(
     `apply_flow_check_gate_overlay`'s own correctness is `tests/
     test_gate_overlay.py`'s job (mutation-checked there)."""
     monkeypatch.setattr(at, "_preflight_in_container", lambda *a, **k: None)
+    monkeypatch.setattr(at._WitnessSession, "bind_and_check", lambda *a, **k: None)
     calls: list[dict[str, object]] = []
 
     def fake_overlay(backend: object, handle: object, **kwargs: object) -> None:

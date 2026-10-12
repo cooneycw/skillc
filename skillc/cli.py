@@ -1697,6 +1697,7 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
     from . import calibration_run as cr
     from . import collection_conformance as cc
     from . import matched_pilot as mp
+    from . import runtime_supply as rs
 
     try:
         declaration = calibration.load_declaration(Path(args.declaration))
@@ -1759,7 +1760,20 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
         treatment = cr.build_treatment(
             acquired, subject_profile=subject_profile, root=cr.ROOT if subject_profile is not None else None,
         )
-    except (cr.CalibrationRefused, profile.Refused, OSError, json.JSONDecodeError, UnicodeError) as exc:
+        needs_supply = rs.requires_supply(
+            locator=acquired.subject.locator, revision=acquired.subject.revision,
+            gate_entrypoint=treatment.gate_entrypoint, files=treatment.verify_home_files,
+            tools=treatment.preflight_tools,
+        )
+        receipt_path = args.runtime_supply_receipt
+        if needs_supply and not receipt_path:
+            raise rs.Refused("supported CPP profile requires --runtime-supply-receipt")
+        if receipt_path and not needs_supply:
+            raise rs.Refused("runtime receipt supplied for an unrelated or absent profile")
+        supply = rs.RuntimeSupply.from_path(Path(receipt_path)) if receipt_path else None
+        if supply is not None and supply.image_id != image_digest:
+            raise rs.Refused("runtime receipt image differs from the approved resolved image")
+    except (cr.CalibrationRefused, profile.Refused, rs.Refused, OSError, json.JSONDecodeError, UnicodeError) as exc:
         print(f"skillc: {exc}", file=sys.stderr)
         return 2
     finally:
@@ -1772,6 +1786,7 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
             # By the resolved immutable digest, never the tag (pilot-run's rule).
             backends=lambda: cc.agent_backends(
                 image=image_digest, base=run_dir, docker_bin=docker_bin, daemon_timeout=args.timeout,
+                runtime_supply=supply,
             ),
             argv_for=lambda _scheduled: client_argv,
             credential_explicit_path=Path(args.credential) if args.credential else None,
@@ -2515,6 +2530,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_calibration_run.add_argument("--docker-bin", help="docker executable (space-separated words; default: docker)")
     p_calibration_run.add_argument("--timeout", type=float, default=30, help="per-container-call timeout, seconds")
     p_calibration_run.add_argument("--credential", help="explicit path to the client credential file")
+    p_calibration_run.add_argument(
+        "--runtime-supply-receipt", help="controller-selected receipt for the supported pinned CPP runtime",
+    )
     p_calibration_run.add_argument(
         "--client-argv", default=None,
         help="the client invocation, space-separated words, WITHOUT a model or effort (the declared ones are "

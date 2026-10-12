@@ -320,13 +320,17 @@ def test_red_case_a_gate_entrypoint_this_closure_never_installs_is_refused(
 
 
 @needs_git
-@pytest.mark.parametrize(("with_profile", "fault"), [
-    (True, None), (False, None), (True, "missing-profile"),
-    (True, "invalid-profile"), (True, "malformed-inventory"),
+@pytest.mark.parametrize(("with_profile", "fault", "runtime"), [
+    (True, None, None), (False, None, None), (True, "missing-profile", None),
+    (True, "invalid-profile", None), (True, "malformed-inventory", None),
+    (True, None, "selected"), (True, None, "relocated"),
+    (True, "missing-receipt", "selected"), (True, "bad-receipt", "selected"),
+    (True, "wrong-image", "selected"), (True, "changed-metadata", "selected"),
+    (True, "unrelated-receipt", None),
 ])
 def test_calibration_cli_carries_the_declared_profile_to_the_attempt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
-    with_profile: bool, fault: str | None,
+    with_profile: bool, fault: str | None, runtime: str | None,
 ) -> None:
     """Parse the real CLI and build a real closure; stop at agent dispatch.
 
@@ -334,16 +338,38 @@ def test_calibration_cli_carries_the_declared_profile_to_the_attempt(
     Neither treatment construction nor calibration/collection forwarding is mocked.
     """
     from test_calibration_run import _declaration_data
+    from test_runtime_supply import RECEIPT
 
-    from skillc import agent_trial, calibration, cli, trial, trial_bootstrap
+    from skillc import (
+        agent_trial,
+        calibration,
+        cli,
+        docker_backend,
+        runtime_supply,
+        trial,
+        trial_bootstrap,
+    )
 
     content_repo, revision = _build_content_repo(tmp_path)
     root = tmp_path / "root"
     entrypoint = ".codex/skills/gate-check/SKILL.md"
-    _write_declaration(root / "subject-profile", revision, gate_entrypoint=entrypoint)
-    inventory = p.validate(p.Profile.load(root / "subject-profile" / "profile.json"),
+    profile_name = "relocated/identical-profile" if runtime == "relocated" else "subject-profile"
+    dependencies = json.loads(json.dumps(PROFILE_DICT["dependencies"]))
+    if runtime:
+        dependencies[-1]["probes"] = [{"kind": "python-import", "modules": ["json"], "uv_project": "Work/kit"}]
+        # A synthetic supported pin exercises the actual classifier with real
+        # validated closures. It does not claim this fixture is CPP evidence.
+        monkeypatch.setattr(runtime_supply, "LOCATOR", SUBJECT_DICT["locator"])
+        monkeypatch.setattr(runtime_supply, "REVISION", revision)
+        monkeypatch.setattr(runtime_supply, "GATE", entrypoint)
+        monkeypatch.setattr(runtime_supply, "PROJECT", "Work/kit")
+        digest = materialize.sha256_bytes(b"[project]\nname = 'kit'\n")
+        monkeypatch.setattr(runtime_supply, "METADATA", {"Work/kit/pyproject.toml":
+                                                       "sha256:" + "0" * 64 if fault == "changed-metadata" else digest})
+    _write_declaration(root / profile_name, revision, gate_entrypoint=entrypoint, dependencies=dependencies)
+    inventory = p.validate(p.Profile.load(root / profile_name / "profile.json"),
                            p.GitTree(content_repo, revision))
-    evidence = root / "subject-profile" / "evidence"
+    evidence = root / profile_name / "evidence"
     evidence.mkdir()
     (evidence / "inventory.json").write_text(json.dumps(inventory))
     subject = materialize.Subject.from_dict({**SUBJECT_DICT, "revision": revision})
@@ -355,9 +381,13 @@ def test_calibration_cli_carries_the_declared_profile_to_the_attempt(
     declared_subject = next(arm["subject"] for arm in arms if isinstance(arm["subject"], dict))
     declared_subject.update(name="fixture", locator=subject.locator, revision=revision)
     if with_profile:
-        declared_subject["profile"] = "subject-profile"
+        declared_subject["profile"] = profile_name
     else:
         declared_subject.pop("profile", None)
+    shared = data["shared"]
+    assert isinstance(shared, dict)
+    if runtime or fault == "unrelated-receipt":
+        shared["image"]["digest"] = json.loads(RECEIPT)["image_id"]
     declaration = tmp_path / "declaration.json"
     declaration.write_text(json.dumps(data))
     monkeypatch.setattr(cr, "ROOT", root)
@@ -377,9 +407,9 @@ def test_calibration_cli_carries_the_declared_profile_to_the_attempt(
 
     monkeypatch.setattr(cc, "acquire_collection", acquire_fixture)
     if fault == "missing-profile":
-        (root / "subject-profile" / "profile.json").unlink()
+        (root / profile_name / "profile.json").unlink()
     elif fault == "invalid-profile":
-        (root / "subject-profile" / "profile.json").write_text("{}")
+        (root / profile_name / "profile.json").write_text("{}")
     elif fault == "malformed-inventory":
         (evidence / "inventory.json").write_text("{broken")
     seen: list[dict[str, object]] = []
@@ -392,7 +422,15 @@ def test_calibration_cli_carries_the_declared_profile_to_the_attempt(
                               reason="CLI control stops before subject dispatch")
 
     monkeypatch.setattr(agent_trial, "run_one_attempt", observe_attempt)
-    code = cli.main(["calibration-run", str(declaration), "--private-dir", str(tmp_path / "private")])
+    args = ["calibration-run", str(declaration), "--private-dir", str(tmp_path / "private")]
+    if (runtime or fault == "unrelated-receipt") and fault != "missing-receipt":
+        receipt = tmp_path / "runtime-receipt.json"
+        receipt_value = json.loads(RECEIPT)
+        if fault == "wrong-image":
+            receipt_value["image_id"] = "sha256:" + "f" * 64
+        receipt.write_bytes(b"{}" if fault == "bad-receipt" else json.dumps(receipt_value).encode())
+        args.extend(["--runtime-supply-receipt", str(receipt)])
+    code = cli.main(args)
     assert len(acquisition_paths) == 2
     assert all(not path.exists() for path in acquisition_paths)
     if fault is not None:
@@ -404,6 +442,18 @@ def test_calibration_cli_carries_the_declared_profile_to_the_attempt(
     assert len(seen) == 2
     treated = next(call for call in seen if call["extra_home_files"])
     baseline = next(call for call in seen if not call["extra_home_files"])
+    for call in seen:
+        agent = call["backend"]
+        grading = call["grading_backend"]
+        assert isinstance(agent, docker_backend.DockerBackend)
+        assert isinstance(grading, docker_backend.DockerBackend)
+        assert agent.image == grading.image == shared["image"]["digest"]
+        assert grading.runtime_supply is None
+        if runtime:
+            assert agent.runtime_supply is not None
+            assert agent.runtime_supply.image_id == agent.image
+        else:
+            assert agent.runtime_supply is None
     assert not baseline["verify_home_files"]
     assert not baseline["preflight_tools"]
     assert baseline["gate_entrypoint"] is None
