@@ -20,8 +20,8 @@
   "path": "evals/level3/gate-stops-early",
   "fixture": "discrimination/fixture",
   "grader_id": "gate-stops-early",
-  "grader_revision": "2",
-  "_comment": "Current committed primary task identity. Reconcile with final merged EE public-report contract before exact declaration approval; pending4/3 are not live identities."
+  "grader_revision": "4",
+  "_comment": "Measured from merged task contract at 1ff273e: primary revision 4, held-out revision 3. The shared primary prompt includes the public checks.*.status vocabulary. Revalidate exact task bytes before study approval."
  },
  "arms": [
   {
@@ -96,7 +96,7 @@
  "approval": null,
  "owed_before_run": [
   "Preparation only: exact study approval, final model/client/effort/image/caps and measured cost remain pending; approval stays null.",
-  "Refresh both declarations against the final MERGED EE public report contract and byte identities; pending grader revisions are not live identities.",
+  "Task identities refreshed from merged 1ff273e. Revalidate prompt, grader and fixture bytes against the frozen declaration before exact study approval; any change requires refreshed binding.",
   "Public status vocabulary passed/failed/not run may change discrimination; direction and magnitude remain unmeasured. Preserve UNKNOWN and INCONCLUSIVE counts by arm, including finer unclassifiable-claim accounting once supplied by the accepted contract.",
   "Consume merged #348 profile forwarding/runtime witness; finish #354 skill-pin API and #315 runtime readiness. No baseline CPP installation or invented witness.",
   "Run the real discrimination runner and derived full-tree closure preparation with separately bound manifests/receipts; these are not implemented by this endpoint slice.",
@@ -115,8 +115,8 @@
  },
  "task_content": {
   "version": 1,
-  "goal_digest": "sha256:1eb78e3c8cd2bae0b16baa2fd9a39b7b94d3b3d20f93b5056e95bed55640c33d",
-  "grader_digest": "sha256:566a47a46ce39b8f6c406180b0dd271f844463b586c46a6c2b833340077fba9e",
-  "fixture_digest": "sha256:939f5f677c4f875fbc7dd25711550ae79caa27aca68c19a7dab03731696f2779"
+  "goal_digest": "sha256:250b82c4e9ebd2cb5afc88e3a4f1dfaa19075b22142b87444efe3f33cff1bb9e",
+  "grader_digest": "sha256:d0dfd3a75b9e4db9be85543a2188e9946fc09c8fba39e5d9bf64945063253364",
+  "fixture_digest": "sha256:03d514e48b1806a218aaef43a9982dc17271e69679728bc2ac1106d090139e5f"
  }
 }

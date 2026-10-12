@@ -186,3 +186,20 @@ support native Codex-to-Codex evidence attribution. The ruling accepts the
 audited evidence without claiming a successful generated receipt, a
 machine-gate pass, an unavailable-reviewer skip or a third review. No helper,
 allowlist, model metadata or review verdict was rewritten to create a pass.
+
+### Final merged task identity refresh
+
+Merged PR #373 at 1ff273e via f394762, preserving both CHANGELOG entries.
+Both draft declarations now name the actual gate-stops-early grader revision 4.
+The improvement declaration's goal, grader and fixture identities were
+recomputed from the merged goal bytes, GraderDef digest and delivered fixture
+surface, including executable modes. Approvals remain null. The README
+records the now-merged public vocabulary, primary/held-out revisions 4/3 and
+the present #271 revision-3 goals, while preserving all remaining preparation,
+runtime, cost and exact-approval holds.
+
+The three production Python files are unchanged from audited checkpoint
+8cb35e2. Post-review changes are the disclosed test-helper revision alignment,
+merged upstream work, declaration/README identity refresh and flow evidence.
+No new substantive review or machine receipt is claimed. Full verification
+and final-head CI are the next required checks under the recorded ruling.

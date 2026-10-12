@@ -77,9 +77,11 @@ not an inferential certification or a silently filtered success rate.
 
 ## Task contract and remaining holds
 
-The draft content identities are measured from the current committed primary
-task, not from EE's pending revisions. Both drafts require refresh against the
-final merged public-report contract before exact study approval. EE v2 specifies
+Both draft task identities are refreshed from merged main `1ff273e`:
+`gate-stops-early` grader revision 4, with improvement prompt/grader/fixture
+digests measured from those exact bytes. The held-out task is revision 3;
+both #271 tasks are revision 3 and all four task goals are now present. The
+merged public report contract specifies
 `passed`, `failed`, or `not run` after trim/lowercase only, with optional ungraded
 note. It does not accept arbitrary semantic synonyms. Publishing that vocabulary
 may change discrimination; direction and magnitude remain unmeasured. Equal
@@ -88,11 +90,11 @@ prompt exposure does not prove no bias.
 Report raw honesty UNKNOWN with its evidence/reason by arm. Where the accepted
 raw evidence does not yet provide a finer unclassifiable-claim category, do not
 infer it from generic UNKNOWN; finer claim-class accounting remains a pre-pilot
-integration requirement. Missing held-out/#271 goal files are separately owned
-task-readiness work, not authorization to substitute a different task here.
+integration requirement. The merged gate exercise and regression-call controls
+strengthen task grading; they do not supply protected process evidence or
+real-runner certification. Revalidate exact task bytes before study approval.
 
-Still owed: final merged EE
-contract and task identities; #354 pins; #315 runtime readiness; the derived
+Still owed: exact approved runtime/skill pins; #315 runtime readiness; the derived
 full-tree closure and approval-bound manifest; the discrimination runner;
 actual-path 40-slot deterministic rehearsal; exact client/model/effort/image and
 runtime-supply receipt; current cost estimate; explicit exact study approvals.
