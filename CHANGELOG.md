@@ -8,6 +8,17 @@ and version plan.
 
 ## [Unreleased]
 
+- **Approval-bound common task outcomes for improvement preparation** (Refs #287).
+  Opted-in two-arm calibration runs bind the selected criteria and exact
+  prompt/grader/fixture identities to an approved declaration stored in hashed
+  trial configuration. Reconstructed reports retain raw task, process-honesty
+  and verified results, eligibility and every scheduled slot beside the common
+  outcome. Malformed evidence, changed approvals or stored identities refuse
+  or stay inconclusive; existing nonempty legacy reports retain their endpoint.
+  Discrimination remains separate. Pilot drafts stay unapproved; derived
+  closures, discrimination execution, final task/runtime identities, cost and
+  live readiness are still owed. No study or paid execution is authorized.
+
 - **Pinned CPP offline-runtime build preparation** (Refs #360). An optional
   same-trial-stage image builder validates the declared CPP package metadata,
   prepares a candidate-owned dependency cache and root-owned runtime descriptor,

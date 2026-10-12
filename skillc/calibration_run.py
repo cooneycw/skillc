@@ -329,6 +329,8 @@ def plan_calibration(
     snapshot = None
     if calibration.outcome_endpoint(declaration) is not None:
         calibration.require_approved(declaration, root)
+        if image_digest != _shared_str(declaration, "image", "digest"):
+            raise CalibrationRefused("planned image differs from the approved declaration")
         _outcome_task_inputs(declaration, root)
         snapshot = json.loads(trial.canonical(declaration.data))
         content = snapshot["task_content"]
@@ -432,6 +434,11 @@ def run_calibration(
     if calibration.outcome_endpoint(declaration) is not None:
         declaration = calibration.parse_declaration(json.loads(trial.canonical(declaration.data)))
     calibration.require_approved(declaration, root)
+    if calibration.outcome_endpoint(declaration) is not None:
+        if image_digest != _shared_str(declaration, "image", "digest"):
+            raise CalibrationRefused("planned image differs from the approved declaration")
+        if total_seconds is not None and total_seconds != float(str(declaration.shared["total_seconds"])):
+            raise CalibrationRefused("outcome run cannot override the approved total_seconds cap")
     model, effort = declared_model(declaration)
     client_name, client_version = declared_client(declaration)
     mp.pin_model_argv(model, effort, [])
@@ -569,7 +576,9 @@ def _report_declaration(experiment: trial.Experiment) -> calibration.Calibration
     if not any("calibration_declaration" in config for config in configs):
         return None
     snapshot = configs[0].get("calibration_declaration")
-    if not isinstance(snapshot, dict) or any(config.get("calibration_declaration") != snapshot for config in configs):
+    if not isinstance(snapshot, dict) or any(
+        trial.canonical(config.get("calibration_declaration")) != trial.canonical(snapshot) for config in configs
+    ):
         raise CalibrationRefused("partial, malformed or mixed outcome declaration snapshots")
     declaration = calibration.parse_declaration(snapshot)
     if calibration.outcome_endpoint(declaration) is None:
@@ -584,13 +593,17 @@ def _report_declaration(experiment: trial.Experiment) -> calibration.Calibration
     for position, ((planned, _attempt), config, scheduled) in enumerate(zip(pairs, configs, schedule, strict=True), 1):
         counts[scheduled.arm] = counts.get(scheduled.arm, 0) + 1
         expected = {"arm": scheduled.arm, "repeat": counts[scheduled.arm], "position": position}
-        if any(config.get(key) != value for key, value in expected.items()) or scheduled.repeat != counts[scheduled.arm]:
+        if any(type(config.get(key)) is not type(value) or config.get(key) != value for key, value in expected.items()) \
+                or scheduled.repeat != counts[scheduled.arm]:
             raise CalibrationRefused("stored declaration and trial configuration schedule disagree")
         grader = planned.get("grader")
         if planned.get("case") != {"id": declaration.grader_id, "revision": declaration.grader_revision} \
                 or not isinstance(grader, dict) or grader.get("digest") != content["grader_digest"] \
                 or grader.get("id") != declaration.grader_id or grader.get("revision") != declaration.grader_revision:
             raise CalibrationRefused("stored declaration and ledger grader identity disagree")
+        if planned.get("client") != declaration.shared["client"] \
+                or planned.get("image") != {"digest": _shared_str(declaration, "image", "digest")}:
+            raise CalibrationRefused("stored declaration and ledger runtime identity disagree")
     return declaration
 
 
@@ -636,6 +649,8 @@ def build_report(
         _shared_str(declaration, "model"), _shared_str(declaration, "reasoning_effort"),
     ):
         raise CalibrationRefused("report model/effort differs from the bound declaration")
+    if endpoint is not None and named_skills:
+        raise CalibrationRefused("common-task-outcome cannot add post-run named-skill eligibility")
     ids = [outcome.scheduled.attempt_id for outcome in outcomes]
     if len(set(ids)) != len(ids):
         raise CalibrationRefused("report contains duplicate attempt outcomes")

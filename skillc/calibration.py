@@ -215,6 +215,8 @@ def declaration_digest(data: Mapping[str, object]) -> str:
 def require_outcome_approval(declaration: CalibrationDeclaration) -> None:
     """Pure check, also usable when replaying the immutable launch declaration."""
     if outcome_endpoint(declaration) is None:
+        if declaration.approval is not None and "declaration_digest" in declaration.approval:
+            raise _refuse("outcome fields were removed from a declaration carrying an outcome approval")
         return
     approval = _require_schedule_approval(declaration.approval, declaration.attempts_per_arm)
     if approval.get("declaration_digest") != declaration_digest(declaration.data):
@@ -268,6 +270,11 @@ def _selected_endpoint(raw: object, endpoint: OutcomeEndpoint) -> dict[str, obje
     if any(cid not in by_id or by_id[cid]["mandatory"] is not True for cid in endpoint.criteria):
         return bad
     kept = [by_id[cid] for cid in endpoint.criteria]
+    for row in kept:
+        if row["outcome"] in ("SATISFIED", "VIOLATED") and not records._str_list(row.get("evidence")):
+            return {**bad, "reason": f"selected criterion {row['id']!r} has no valid evidence references"}
+        if row["outcome"] == UNKNOWN and not records._nonempty_str(row.get("missing")):
+            return {**bad, "reason": f"selected criterion {row['id']!r} does not name its missing evidence"}
     status = records.derive_status(records.Record(Path("<common-task-outcome>"), {"criteria": kept}))
     return {"status": status,
             "criteria": [{"id": c["id"], "mandatory": c["mandatory"], "outcome": c["outcome"]} for c in kept],

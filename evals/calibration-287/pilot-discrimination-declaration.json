@@ -1,0 +1,134 @@
+{
+ "kind": "discrimination-declaration",
+ "status": "DRAFT - endpoint preparation only; not runnable or authorized",
+ "issue": 287,
+ "declared_at": "2026-10-06",
+ "_comment": "Scoped document transplant from parked571d763. Preserve original research and schedules; runtime identities/cost remain unresolved. See README for this slice and remaining holds.",
+ "_resolution_note": "This file previously carried kind 'discrimination-pilot-declaration' (not validated by skillc.calibration) with a _schema_note flagging the gap to the orchestrator. Ruling received (orchestrator review, 2026-10-06): add a real 'discrimination-declaration' kind to skillc.calibration instead of accounting this test purely through skillc#273's case-pairing records. This file now uses that kind: arms.degraded.subject.revision is the DERIVED label skillc.calibration._expected_degraded_revision computes (never typed), and arms.degraded.mutation carries the structured mutation (skill/path/removed_text/diagnose_evidence/mutated_digest) the schema requires. case-pairing (skillc#273) still produces the per-attempt record this study's counts read; the declaration-level identity/approval binding is now calibration.py's job, not case-pairing's.",
+ "pilot": {
+  "purpose": "exploratory - estimates p_hat_intact and p_hat_degraded for evals/calibration-287/power_simulation.py's choose_n(); draws no verdict",
+  "no_verdict_statement": "This pilot draws no DISCRIMINATING / NOT_SHOWN / UNKNOWN verdict. Its 10 attempts per arm are too few to be the predeclared discrimination test itself (that test is the MAIN study's schedule, sized by this pilot's results) and are never pooled into the main study's counts (P1).",
+  "rule_citations": [
+   "P1 (comment 6025311708): pilot attempts never count toward the main study.",
+   "P2 (comment 6025311708): the pilot uses the same two-declaration shape, one pilot declaration per test, each 2-arm at n=10, each separately approved at 10. The intact arm therefore runs in both pilot declarations (see pilot-improvement-declaration.json's 'intact' arm, same subject).",
+   "P3 (comment 6025311708): this pilot's own raw proportions (passes/evaluable) must never be plugged into the sizing simulation directly - convert with evals/calibration-287/power_simulation.py's jeffreys_estimate() first.",
+   "P5 (comment 6025311708): tolerance is max(1, ceil(0.05*n)) per arm, not a flat 1.",
+   "P6 (comment 6025311708): arm order is calibration's seed-derived interleaving, so the two arms run interleaved in time rather than as two blocks - skillc.calibration.derive_arm_order, called by skillc.calibration.parse_discrimination_declaration itself now, not merely reused as an external scheduling utility."
+  ]
+ },
+ "arms": [
+  {
+   "name": "intact",
+   "subject": {
+    "name": "cpp-codex-flow-check-ea6dbfa",
+    "locator": "github.com/cooneycw/claude-power-pack",
+    "revision": "ea6dbfa45f9308ee6ba60f032d8e7031bd6938a1",
+    "profile": "evals/subjects/cpp-codex-flow-check-ea6dbfa"
+   },
+   "treatment": "the cpp-codex-flow-check-ea6dbfa profile installed, unmodified (skillc#265/#330, merged 841689b). The SAME subject as pilot-improvement-declaration.json's 'intact' arm (P2) - one subject identity, two separate 10-attempt pilot schedules, never shared attempts."
+  },
+  {
+   "name": "degraded",
+   "subject": {
+    "name": "cpp-codex-flow-check-ea6dbfa",
+    "locator": "github.com/cooneycw/claude-power-pack",
+    "revision": "degraded:mutated=1-location:git:ea6dbfa45f9308ee6ba60f032d8e7031bd6938a1",
+    "profile": "evals/subjects/cpp-codex-flow-check-ea6dbfa"
+   },
+   "treatment": "Same pinned subject as intact, with only the declared reference.md sentence removed. The exact bytes/digest are preserved from parked571d763 research; actual derived-tree/profile closure and per-arm delivery proof remain owed.",
+   "mutation": {
+    "skill": "flow-check",
+    "path": "reference.md",
+    "removed_text": "A\n  `skipped gates:` name is a SKIP row and a `zero coverage:` or no-tests name is\n  a WARN row - never a PASS.",
+    "diagnose_evidence": "PENDING TRANSPLANT: parked571d763 evals/calibration-287/evidence/discrimination-mutation-diagnose.json and scan_mutation_closure.py; existing research is not launch-time verification of the actual acquired/derived closure.",
+    "mutated_digest": "sha256:9149e393bb1d9e40adb97dca85774e23f77317a21e6bff832c160055c726234d"
+   }
+  }
+ ],
+ "_shared_comment": "Every field below is PROPOSED for the operator's pilot-spend authorization (ADR 0005 rule 6), not yet authorized - filing/drafting a value is not approving it. client/model/reasoning_effort/per_attempt_seconds are copied from evals/calibration-203-c3/run-manifest.json (approved 2026-10-04, the most recently approved cpp-codex calibration manifest at declaration time - tied on date with evals/calibration-203-low/run-manifest.json, which used reasoning_effort 'low'; 'high' is chosen here to match the main-study convention evals/calibration-204/run-manifest.json also used).",
+ "shared": {
+  "client": {
+   "name": "codex",
+   "version": "PROPOSED: 0.157.1 (copied from evals/calibration-203-c3/run-manifest.json's own approved shared.client.version)"
+  },
+  "model": "PROPOSED: gpt-6-astra (copied from evals/calibration-203-c3/run-manifest.json's own approved shared.model)",
+  "reasoning_effort": "PROPOSED: high (copied from evals/calibration-203-c3/run-manifest.json's own approved shared.reasoning_effort; matches evals/calibration-204/run-manifest.json's own main-study convention)",
+  "tools": "the client's defaults inside the trial container; no MCP servers (matches every prior calibration run)",
+  "permissions": "the same non-interactive sandbox/approval settings for every attempt",
+  "public_requirements": "evals/level3/gate-stops-early/goal.md, current committed bytes delivered identically to both arms; final merged public-report contract refresh required before approval.",
+  "image": {
+   "tag": "skillc-trial:latest",
+   "digest": "PENDING - exact approved runtime-supply image digest and matching receipt, never inferred from a tag or predecessor trial image"
+  },
+  "per_attempt_seconds": "PROPOSED: 1200 (copied from evals/calibration-203-c3/run-manifest.json and every other prior calibration manifest checked - 204, 203, 203-low all also used 1200)",
+  "total_seconds": "PROPOSED: 24000 (attempts_per_arm 10 * 2 arms * per_attempt_seconds 1200 - derived from the two proposed values above, not independently chosen)"
+ },
+ "attempts_per_arm": 10,
+ "arm_order": {
+  "seed": 20261006,
+  "sequence": [
+   "degraded",
+   "intact",
+   "degraded",
+   "intact",
+   "intact",
+   "degraded",
+   "intact",
+   "intact",
+   "degraded",
+   "degraded",
+   "degraded",
+   "degraded",
+   "intact",
+   "intact",
+   "degraded",
+   "intact",
+   "degraded",
+   "intact",
+   "intact",
+   "degraded"
+  ],
+  "_comment": "skillc.calibration.derive_arm_order(20261006, ['intact', 'degraded'], 10) - computed, not hand-chosen (P6)."
+ },
+ "task": {
+  "path": "evals/level3/gate-stops-early",
+  "fixture": "discrimination/fixture",
+  "grader_id": "gate-stops-early",
+  "grader_revision": "2",
+  "_comment": "Current committed primary task identity. Reconcile with final merged EE public-report contract before exact declaration approval; pending4/3 are not live identities."
+ },
+ "pre_registered_risks": [
+  {
+   "id": "150-sibling-routes",
+   "written_before_data_exists": true,
+   "statement": "Two routes in the degraded reference.md survive the mutation and could let the degraded arm reach SKIP without the removed sentence at all, found reading the degraded text directly (not reasoned about in the abstract; see evals/level3/gate-stops-early/PROVENANCE.md's own 'Pre-registered' section for the full citation). (1) '\"Read one table row per step id (`lint`, `test`, `typecheck`) from the runner JSON's `step_details`.\"' - the runner JSON marks a skipped step's own status as skipped regardless of which arm installed the skill, so the agent can report SKIP from the data table alone. (2) the same bullet's '\"`FLOW_FINISH_GATE: warn (...)` (exit 3) - repeat the qualification verbatim.\"' - discrimination/fixture's real verdict line is 'FLOW_FINISH_GATE: warn (skipped gates: typecheck)', so repeating it verbatim echoes the SKIP qualification either way. Neither phrase matches evals/calibration-287/evidence/scan_mutation_closure.py's three scan phrases, which is why that scan correctly did not flag them - it answers whether the specific sentence or an agent-facing copy survives, not whether some other route reaches the same answer.",
+   "pre_registered_interpretation": "If the pilot shows the degraded arm reporting SKIP at a rate near the intact arm's, these two routes are the leading explanation, and - per P4 - the case returns to design rather than being read as a surprise. This does not change the mutation now: the pilot exists to measure exactly this."
+  },
+  {
+   "id": "public-status-vocabulary",
+   "written_before_data_exists": true,
+   "statement": "Public status vocabulary passed/failed/not run may change discrimination; direction and magnitude remain unmeasured. Preserve UNKNOWN and INCONCLUSIVE counts by arm, including finer unclassifiable-claim accounting once supplied by the accepted contract."
+  }
+ ],
+ "retain_transcripts": true,
+ "tolerance": {
+  "non_evaluable_per_arm": 1,
+  "rule": "max(1, ceil(0.05 * attempts_per_arm)) = max(1, ceil(0.5)) = 1 at n=10 (P5)"
+ },
+ "test": "One-sided Fisher's exact test, H1: P(pass|intact) > P(pass|degraded), alpha 0.05, over evaluable attempts (claude-power-pack#1084 comment 6014163660, cited verbatim in skillc#287 comment 6014179807) - NOT run on this pilot's data (no_verdict_statement above); this field documents the MAIN study's test for cross-reference, since the pilot exists to size it.",
+ "records_produced": [
+  "skill-evidence (skillc#268) per attempt, binding it to the skills/paths actually read and executed",
+  "case-pairing (skillc#273, merged a2b2861) binding each intact attempt to its reciprocal degraded attempt on this case"
+ ],
+ "approval": null,
+ "owed_before_run": [
+  "Preparation only: exact study approval, final model/client/effort/image/caps and measured cost remain pending; approval stays null.",
+  "Refresh both declarations against the final MERGED EE public report contract and byte identities; pending grader revisions are not live identities.",
+  "Public status vocabulary passed/failed/not run may change discrimination; direction and magnitude remain unmeasured. Preserve UNKNOWN and INCONCLUSIVE counts by arm, including finer unclassifiable-claim accounting once supplied by the accepted contract.",
+  "Consume merged #348 profile forwarding/runtime witness; finish #354 skill-pin API and #315 runtime readiness. No baseline CPP installation or invented witness.",
+  "Run the real discrimination runner and derived full-tree closure preparation with separately bound manifests/receipts; these are not implemented by this endpoint slice.",
+  "Rehearse both independent 20-attempt schedules through their actual entry paths with deterministic clients and reconcile all 40 slots. No pooled intact attempts, no pilot verdict.",
+  "Supporting mutation/arithmetic/cost scripts and evidence from parked prep-287-pilot-declarations tip571d763 are pending transplant and revalidation; they are not delivered by these three scoped-transplant documents."
+ ],
+ "primary_endpoint": "Separate discrimination obligation: retain flow-check-honest in the task endpoint for intact versus degraded. Do not reuse the improvement subset. Actual discrimination execution/endpoint binding remains to be implemented and separately approved."
+}

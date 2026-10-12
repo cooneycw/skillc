@@ -44,3 +44,42 @@ CLI and CHANGELOG are not granted; consuming CLI refusal handling remains a
 later integration requirement. Merge #348 before finish. Full verification
 requires root scheduling after CC and EE. No paid trials, Docker campaign,
 task-tree edits, profile/records changes, or changes to parked draft history.
+
+### Approved expansion and evidence
+
+Root mailbox revision 16 granted the complete nine-path lane after DD release.
+7. `skillc/cli.py` - controlled calibration report refusal; let build_report verify the ledger before reconciliation.
+
+Checkpoint a23fdba preserved the implementation before clean integration of
+merged #348 f22d6c8. CHANGELOG remains ungranted.
+The baseline report regression failed on unchanged 5e80 production code with
+INCONCLUSIVE != PASS, then passed after endpoint binding. The damaged-config
+CLI control also failed before CLI handling with an uncaught trial.Refused;
+its matching intact input returned success. These are behavioral reds, not
+missing-helper import failures.
+
+### Final preparation checkpoint
+
+Root mailbox revision 17 granted CHANGELOG after EE committed its entry and
+released the file; the complete lane now contains ten paths.
+8. `CHANGELOG.md` - bounded endpoint preparation entry, preserving other workers' entries on later integration.
+
+Independent review: implementing thread measured gpt-6-astra; reviewer measured
+codex/gpt-6.1-sol. Pass 1 returned two MEDIUM findings, both accepted and fixed:
+canonical snapshot comparison and selected-row evidence validation. Eight
+behavioral red cases failed before those fixes (including removal of both
+opt-in fields while retaining the new approval), then passed. Pass 2 reported
+no defects; a formatting-only restatement made that same verdict parseable.
+No third substantive review occurred.
+
+Checks: 64 focused endpoint/CLI controls pass; final parser/discrimination/
+endpoint selection 189 passed. Earlier compatibility selection, including the
+existing calibration runner and profile closure tests, passed 236 tests.
+Ruff and mypy pass for the four changed Python files. Full verification remains
+queued behind EE, on then-current main; this checkpoint does not claim it ran.
+No real Docker or paid study calls ran. Exact study approvals remain null.
+
+Plan compliance correctly reports CLI (and now CHANGELOG) beyond the initial
+Section C file list and notes the appended record changed. These are explicit
+root-approved expansions at mailbox revisions 16 and 17, recorded above,
+not silent changes to the original gate. Retain that explanation in the PR.
