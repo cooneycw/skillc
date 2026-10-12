@@ -8,6 +8,17 @@ and version plan.
 
 ## [Unreleased]
 
+- **Cold offline-runtime acceptance and targeted closure break controls**
+  (Refs #360). Shared live tests select the normal runtime receipt, validate
+  it before planting faults, and use separate fresh inherited-policy and
+  frozen-policy attempts through the actual preflight and controller witness.
+  Empty-cache, cache-write and project-venv permission modes require their
+  specific dependency and diagnostic; unrelated failures remain hard failures
+  and missed faults produce strict XPASS. Offline controls cover baseline
+  contamination and scan errors, candidate delivery, metadata, bounded
+  controller output and runner routing. Actual Docker acceptance remains owed;
+  these tests do not establish runtime availability or study eligibility.
+
 - **Pinned CPP offline-runtime build preparation** (Refs #360). An optional
   same-trial-stage image builder validates the declared CPP package metadata,
   prepares a candidate-owned dependency cache and root-owned runtime descriptor,

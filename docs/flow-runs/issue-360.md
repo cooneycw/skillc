@@ -267,3 +267,18 @@ The default main-relative lane check correctly still sees DD's unmerged files.
 That is the declared temporary dependency, not authorization to ship those
 files as part of this follow-up. Final DD integration and the main-relative
 lane check remain required before a full gate or PR.
+
+
+### Changelog window and post-merge full-check grant
+
+After DD published PR #369 and released future changelog edits, the
+orchestrator granted the complete nine-file lane, adding CHANGELOG.md.
+Worker-CC registered it before writing the entry. The entry describes the
+runnable tests and offline controls and explicitly leaves actual Docker
+acceptance owed. Reviewed implementation bytes are unchanged.
+
+The same grant assigns worker-CC the next serialized full verification slot
+only after the orchestrator confirms DD's merge and this branch synchronizes
+to current main, preserving the packaged-policy and qualifier compatibility
+fixes. Full verification and PR creation remain held until those conditions
+are met; no additional approval is needed after the merge handoff.
