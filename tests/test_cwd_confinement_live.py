@@ -46,6 +46,22 @@ fd/N` mechanism works for real inside a container's own namespaces, not
 only on the bare host `tests/test_docker_backend.py`'s fake CLI runs
 against.
 
+The OUTSIDE target is genuinely outside: under `/tmp` (present and
+candidate-writable in every image, unlike the candidate's home, which a
+plain image need not have), not anywhere beneath `workspace_root` (#338
+correction: an earlier draft of this file used `/work/.outside-root`,
+which is inside `/work` and so could never have been refused). The
+workspace tree is installed through `backend.install()` as a host
+DIRECTORY, so its directories are candidate-owned - exactly what a
+subject's installed surface gives it (a bytes entry alone would leave its
+parent directories root-owned, and the candidate could not swap
+anything). Every setup step after that - creating the outside target,
+the swap itself - is a plain `docker exec` running as the container's
+own (candidate) user, never root: the subject's own power, nothing
+more. Every setup step is checked and a
+setup failure is a plain hard failure, never the `xfail` this file
+reserves for the break mode.
+
 Every container this file starts is removed in a `finally`.
 
 LEAK SAFETY: no host path or raw container name is ever printed into an
@@ -113,14 +129,29 @@ def _image_available(image: str) -> bool:
 
 
 def _exec_setup(backend: d.DockerBackend, handle: d._Handle, shell_command: str) -> None:
-    """Direct `docker exec` for test SETUP only - creating/swapping real
-    directories inside the live container - never through `exec_in_
-    attempt()` itself, which is the thing under test."""
+    """Direct `docker exec` for test SETUP only - as the container's own
+    candidate user, i.e. with exactly the subject's power - never through
+    `exec_in_attempt()` itself, which is the thing under test. A failure is
+    a hard `AssertionError`, never `_PropertyHeld`."""
     proc = subprocess.run(
         [*backend.docker_bin, "exec", "--", handle.name, "sh", "-c", shell_command],
         capture_output=True, timeout=backend.daemon_timeout, check=False,
     )
     assert proc.returncode == 0, f"test setup exec failed (exit {proc.returncode})"
+
+
+def _gate_cwd(backend: d.DockerBackend, handle: d._Handle, cwd: str, confine_root: str | None) -> tuple[str, int | None, str | None, str]:
+    """Runs a gate that reports its own real cwd; returns (reason,
+    exit_code, error, reported cwd from `observations`)."""
+    result = backend.exec_in_attempt(
+        handle, ["sh", "-c", "readlink /proc/self/cwd"], Limits(timeout=10.0),
+        cwd=cwd, confine_root=confine_root,
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        backend.export(handle, Path(tmp))
+        observations = Path(tmp) / "observations"
+        reported = observations.read_text().strip() if observations.is_file() else ""
+    return result.reason, result.exit_code, result.error, reported
 
 
 @pytest.mark.xfail(
@@ -139,8 +170,14 @@ def test_a_swapped_cwd_is_refused_against_a_real_daemon() -> None:
     try:
         workspace_root = d.CONTAINER_WORKSPACE
         sub = f"{workspace_root}/trial/sub"
-        outside = f"{workspace_root}/.outside-root"  # same filesystem, different subtree - still outside workspace_root
-        _exec_setup(backend, handle, f"mkdir -p {sub} {outside}")
+        outside_parent = "/tmp"
+        outside = f"{outside_parent}/outside-root"
+        # Hard preconditions on the test itself, not the property.
+        assert outside != workspace_root and not outside.startswith(workspace_root + "/")
+        with tempfile.TemporaryDirectory() as surface:
+            (Path(surface) / "sub").mkdir()
+            backend.install(handle, {"trial": Path(surface)})
+        _exec_setup(backend, handle, f"mkdir {outside} && test -w {sub} && test -w {workspace_root}/trial")
 
         # Happy path, UNCONDITIONAL in every mode: a legitimately-resolved,
         # never-swapped cwd under confine_root must land the gate there for
@@ -148,33 +185,28 @@ def test_a_swapped_cwd_is_refused_against_a_real_daemon() -> None:
         # actual container's own namespaces, not only on the bare host.
         resolved_sub = backend.resolve_realpath_in_attempt(handle, sub)
         assert resolved_sub == sub
-        happy = backend.exec_in_attempt(
-            handle, ["sh", "-c", "readlink -f /proc/self/cwd"], Limits(timeout=5.0),
-            cwd=resolved_sub, confine_root=workspace_root,
-        )
-        assert happy.reason == "exited"
-        assert happy.exit_code == 0
-        with tempfile.TemporaryDirectory() as tmp:
-            backend.export(handle, Path(tmp))
-            assert (Path(tmp) / "observations").read_text().strip() == sub
+        assert _gate_cwd(backend, handle, resolved_sub, workspace_root) == ("exited", 0, None, sub)
 
-        # The swap: exactly what an earlier, separate `resolve_realpath_in_
-        # attempt()` call could not have seen coming, and could not
-        # re-observe once it already returned.
-        _exec_setup(backend, handle, f"rm -rf {sub} && ln -s {outside} {sub}")
+        # The swap, as the candidate: exactly what an earlier, separate
+        # `resolve_realpath_in_attempt()` call could not have seen coming.
+        _exec_setup(backend, handle, f"mv {sub} {sub}.orig && ln -s {outside} {sub} && test -L {sub}")
+        assert backend.resolve_realpath_in_attempt(handle, sub) == outside, \
+            "the swap must really point outside workspace_root, or this test proves nothing"
 
-        # `confine_root=None` behaves identically to omitting it entirely
-        # (`exec_in_attempt`'s own `confining` check is `cwd is not None
-        # and confine_root is not None`), so this is the full break for
-        # `confine-root-omitted` with no separate code path to maintain.
-        swapped = backend.exec_in_attempt(
-            handle, ["sh", "-c", "echo should-not-run-outside-root"], Limits(timeout=5.0),
-            cwd=sub, confine_root=None if BREAK_MODE == "confine-root-omitted" else workspace_root,
+        # `confine_root=None` behaves identically to omitting it entirely,
+        # so this is the full break for `confine-root-omitted`.
+        reason, exit_code, error, reported = _gate_cwd(
+            backend, handle, sub, None if BREAK_MODE == "confine-root-omitted" else workspace_root,
         )
+        if BREAK_MODE == "confine-root-omitted":
+            # The vulnerability, shown on a real daemon: `-w` followed the
+            # swap. Checked as a hard assertion first, so the xfail below
+            # can only come from the real property failing for this reason.
+            assert (reason, exit_code, reported) == ("exited", 0, outside)
         # UNCONDITIONAL across both modes - the real property, never a
         # pre-approved different expected value for the break mode.
         _require(
-            swapped.reason == "launch-failed" and d.CWD_CONFINEMENT_REFUSED_SENTINEL in (swapped.error or ""),
+            reason == "launch-failed" and error == d.CWD_CONFINEMENT_REFUSED_SENTINEL,
             "a cwd swapped to outside workspace_root between resolve and exec "
             "must be refused, not silently followed, on a real daemon",
         )

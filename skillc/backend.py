@@ -400,13 +400,19 @@ class ExecutionBackend(Protocol):
         and this call are two separate operations with real time between
         them, during which a subject who owns the isolation's own tree can
         swap an ancestor of the already-resolved `cwd` for something
-        outside this root. A backend honouring `confine_root` re-does the
-        root check atomically, immediately before use, inside the SAME
-        operation that then uses `cwd` - never trusting the earlier
-        snapshot alone - and refuses (`reason="launch-failed"`) rather
-        than silently falling back to an unconfined `cwd` if it cannot. A
-        backend that does not implement this re-check must say so through
-        `describe()`'s `unobserved`, exactly as for `cwd`/`env` above -
+        outside this root. A backend honouring `confine_root` opens `cwd`
+        once, inside the SAME operation that then uses it, checks the
+        directory it actually opened against this root, and starts `argv`
+        in THAT directory - never re-resolving the name - refusing
+        (`reason="launch-failed"`) rather than silently falling back to an
+        unconfined `cwd` if it cannot. The guarantee is about identity at
+        the check, not ancestry forever: a subject that can rename the
+        opened directory can still move it out from under the root, and
+        the running `argv`'s cwd moves with it. Whether `argv` was started
+        must come from a status channel the backend owns, never from
+        anything `argv` itself can print. A backend that does not
+        implement this must say so through `describe()`'s `unobserved`,
+        exactly as for `cwd`/`env` above -
         never silently ignore it and run `cwd` unconfined regardless."""
         ...
 

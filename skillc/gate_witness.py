@@ -385,9 +385,10 @@ class GateWitness:
         ancestor of the resolved path for a symlink pointing outside the
         root before the later exec ever runs. `_decide_run_gate()` below
         passes `confine_root=self._workspace_root` to `exec_in_attempt()`
-        so THAT call re-does this same root check atomically, on a
-        freshly-opened fd, immediately before use - see its own docstring
-        (#338). This method staying unchanged in shape is deliberate: the
+        so THAT call opens the cwd once, checks the directory it opened,
+        and starts the gate in that same directory - see its own docstring
+        (#338), including what it does not guarantee (a subject that can
+        rename the opened directory can still move it after the check). This method staying unchanged in shape is deliberate: the
         fix is bounded to `exec_in_attempt()`'s own cwd handling, not a
         redesign of this witness."""
         if cwd is None:
@@ -472,10 +473,10 @@ class GateWitness:
                         # `_confine_requested_cwd` above, but that check and
                         # THIS call are two separate execs with real time
                         # between them - `confine_root` tells
-                        # `exec_in_attempt` to redo the same check
-                        # atomically, on a freshly-opened fd, immediately
-                        # before use, closing the gap rather than trusting
-                        # the earlier snapshot. Harmless to pass when no
+                        # `exec_in_attempt` to check the directory it
+                        # actually opens and start the gate in that same
+                        # directory, rather than trusting the earlier
+                        # snapshot of the name. Harmless to pass when no
                         # cwd was requested at all (`gate_cwd is None`):
                         # `exec_in_attempt` only applies it alongside a cwd.
                         confine_root=self._workspace_root,

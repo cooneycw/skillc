@@ -341,6 +341,9 @@ def test_a_cwd_resolving_inside_the_workspace_root_is_confined_and_forwarded() -
     )
     witness.decide({"op": "run_gate", "gate": "lint", "cwd": "./sub"})
     assert backend.cwd_calls == ["/work/attempt-1/sub"]
+    # #338: the early resolve above is not the boundary - the exec itself
+    # must be told the root, so it can check the directory it opens.
+    assert backend.confine_root_calls == ["/work"]
 
 
 def test_no_cwd_requested_forwards_none_unchanged() -> None:
@@ -354,6 +357,7 @@ def test_no_cwd_requested_forwards_none_unchanged() -> None:
     )
     witness.decide({"op": "run_gate", "gate": "lint"})
     assert backend.cwd_calls == [None]
+    assert backend.confine_root_calls == ["/work"]  # inert without a cwd, but never dropped
 
 
 # ------------------------------------------------------------ #332: per-gate env
