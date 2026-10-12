@@ -1,0 +1,25 @@
+{
+  "branch": "issue-270-heldout-port-proven-omission",
+  "counts": {
+    "accepted": 5,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "becf48ee508011dcb08c48114b6419f79dc83734",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "270",
+  "passes": 2,
+  "recorded_at": "2026-10-12T22:01:23Z",
+  "red_cases": {
+    "already_covered": 7,
+    "proposed": 13
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/12/rollout-2026-10-12T16-46-16-01a131dd-b852-7012-82d4-f4e26604eb7c.jsonl",
+    "thread_id": "01a131dd-b852-7012-82d4-f4e26604eb7c"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

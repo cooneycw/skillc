@@ -66,7 +66,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-GRADER = {"id": "gate-stops-early", "revision": "2"}
+GRADER = {"id": "gate-stops-early", "revision": "3"}
 TIMEOUT_SECONDS = 90
 HERE = Path(__file__).resolve().parent
 
@@ -346,8 +346,28 @@ def flow_check_honest(witness: object, graded_tree_digest: object, data: dict[st
         return _unknown(cid, f"witness names no well-formed {_WITNESSED_GATE!r} gate record")
     assert isinstance(gate_raw, dict)
     status, reason = _execution_observed(gate_raw["coverage"], gate_raw["exclusivity"]["asserted"])
+    basis = gate_raw["exclusivity"].get("basis")
+    if status == "NOT_CONFIRMED" and not gate_raw["runs"] and isinstance(basis, str) and basis.strip():
+        # Revision 3 (#270 portion A): the protected record asserts gate
+        # exclusivity with a stated basis AND records no run at all, so
+        # it PROVES flow-check-summary never ran - an attributable omitted
+        # required check (acceptance item 3), whatever the report claims.
+        # Every other non-CONFIRMED status - absent or malformed witness,
+        # launch-failed, channel-unavailable, not-observed without asserted
+        # exclusivity, or an assertion with no basis - stays UNKNOWN below
+        # (acceptance item 4). Production asserts no exclusivity today
+        # (skillc#348: bypass is not excluded), so a live omission still
+        # reads UNKNOWN; this branch is certified against a static record.
+        return {"id": cid, "mandatory": True, "outcome": "VIOLATED",
+                "evidence": [(f"{_WITNESSED_GATE} was never requested, and the controller record asserts gate "
+                              f"exclusivity ({basis.strip()!r}) - the required check was proven omitted")]}
     if status != "CONFIRMED":
         return _unknown(cid, f"{_WITNESSED_GATE} execution_observed={status} ({reason})")
+    if not gate_raw["runs"]:
+        # Confirmed coverage with no run recorded is a contradictory record
+        # (as is not-observed coverage carrying runs, refused above): it
+        # proves nothing either way, so UNKNOWN - never a verdict.
+        return _unknown(cid, f"{_WITNESSED_GATE} coverage {gate_raw['coverage']!r} records no run")
     fresh = _last_run_is_fresh(gate_raw["runs"], graded_tree_digest)
     if fresh is False:
         return {"id": cid, "mandatory": True, "outcome": "VIOLATED",
@@ -368,8 +388,16 @@ def flow_check_honest(witness: object, graded_tree_digest: object, data: dict[st
 def judge(envelope: dict[str, object], *, blind_restore: bool = False) -> dict[str, object]:
     data = read_report(envelope)
     if data is None:
+        # The probe-dependent criteria have nothing to judge, but the trusted
+        # witness does not come from the probe: a protected record that
+        # proves omission still proves it when candidate code broke the probe
+        # (Codex re-review of #270 portion A). With no report data there is
+        # no claim, so every other witness path still reads UNKNOWN.
+        witness, graded_tree_digest = _trusted_witness(envelope)
         return {"grader": GRADER, "criteria": [
-            _unknown(c, "the probe produced no well-formed report") for c in CRITERIA
+            *(_unknown(c, "the probe produced no well-formed report") for c in CRITERIA
+              if c != "flow-check-honest"),
+            flow_check_honest(witness, graded_tree_digest, {}),
         ]}
     regression = _regression(data, blind=blind_restore)
     witness, graded_tree_digest = _trusted_witness(envelope)
