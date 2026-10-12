@@ -46,4 +46,3 @@ Run repository checks appropriate to the change. Report exactly which acceptance
 No paid agent, model change, task tuning on held-out outcomes or implicit live approval from closing this preparation issue.
 
 No live model trials are authorized by this issue. A separately approved declaration is required under skillc ADR 0005. Existing approvals and the cooneycw/skillc#203 / cooneycw/skillc#237 priority ruling are unchanged.
-
