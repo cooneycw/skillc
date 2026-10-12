@@ -4,9 +4,16 @@ INSTALLED copy, never by a copy the requested commit could have edited."""
 
 from __future__ import annotations
 
+import json
+import os
+import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
+
+import pytest
 
 from ci import check_real_docker_ran as c
 from ci import real_docker_post as p
@@ -14,6 +21,121 @@ from ci import real_docker_post as p
 ROOT = Path(__file__).resolve().parent.parent
 SHA = "a" * 40
 RUNNER_SHA = "b" * 40
+
+_FAKE_EXTERNAL = '''#!/usr/bin/env python3
+import json, os, pathlib, sys
+tool = pathlib.Path(sys.argv[0]).name
+args = sys.argv[1:]
+event = {"tool": tool}
+if tool == "curl":
+    event["payload"] = json.loads(args[args.index("-d") + 1])
+    event["config"] = args[args.index("-K") + 1]
+if tool == "docker":
+    event["operation"] = args[:2]
+with open(os.environ["RUNNER_TEST_EVENTS"], "a") as stream:
+    stream.write(json.dumps(event) + "\\n")
+if tool == "git" and "rev-parse" in args:
+    print("b" * 40 if args[1] == os.environ["RUNNER_TEST_INSTALLED"] else "a" * 40)
+if tool == "docker" and args[0] == "run":
+    print("reachable" if args[-3] == "github.com" else "unreachable")
+'''
+
+
+def _run_installed_runner(
+    tmp_path: Path, status: str, break_spec: str, helper: str | None = None,
+) -> tuple[subprocess.CompletedProcess[str], list[dict[str, Any]]]:
+    """Run the actual shell and posting modules; replace external I/O only."""
+    installed = tmp_path / "installed"
+    shutil.copytree(ROOT / "ci", installed / "ci")
+    if helper is not None:
+        (installed / "ci" / "real_docker_post.py").write_text(helper)
+    checkout = tmp_path / "checkout"
+    (checkout / ".git").mkdir(parents=True)
+    (checkout / "reports").mkdir()
+    if status != c.ERROR:
+        cases = [f'<testcase classname="{name}" name="test_intact"/>' for name in c.DECLARED_REAL_DOCKER_FILES]
+        if status == c.FAILURE:
+            cases.append(
+                '<testcase classname="tests.test_trial_image_tools_live" name="test_uv">'
+                '<skipped type="pytest.xfail" message="no-uv"/></testcase>',
+            )
+        (checkout / "reports" / "real-docker-report.xml").write_text(
+            '<testsuite>' + ''.join(cases) + '</testsuite>',
+        )
+    token = tmp_path / "token"
+    token.write_text("not-a-credential")
+    config = tmp_path / "config.env"
+    values = {
+        "INSTALLED_ROOT": str(installed), "WORK_CHECKOUT": str(checkout),
+        "LOCK_FILE": str(tmp_path / "run.lock"), "GITHUB_TOKEN_FILE": str(token),
+        "GITHUB_REPO": "example/project", "GITHUB_COMMENT_ISSUE": "315",
+        "PREFLIGHT_IMAGE": "probe-fixture", "LAN_PROBE_TARGET": "target.invalid:443",
+    }
+    config.write_text(''.join(f'{key}={shlex.quote(value)}\n' for key, value in values.items()))
+    binaries = tmp_path / "bin"
+    binaries.mkdir()
+    (binaries / "python3").symlink_to(sys.executable)
+    for name in ("git", "docker", "curl", "uv"):
+        command = binaries / name
+        command.write_text(_FAKE_EXTERNAL)
+        command.chmod(0o755)
+    events = tmp_path / "events.jsonl"
+    env = {
+        "PATH": f"{binaries}{os.pathsep}{os.defpath}",
+        "SKILLC_REAL_DOCKER_CONFIG": str(config),
+        "RUNNER_TEST_EVENTS": str(events), "RUNNER_TEST_INSTALLED": str(installed),
+    }
+    result = subprocess.run(
+        ["bash", str(installed / "ci" / "real-docker" / "run-real-docker"), SHA, "--break", break_spec],
+        cwd=tmp_path, env=env, text=True, capture_output=True, timeout=30, check=False,
+    )
+    return result, [json.loads(line) for line in events.read_text().splitlines()]
+
+
+@pytest.mark.parametrize(("status", "break_spec", "context", "exit_code"), [
+    (c.SUCCESS, "none", "skillc/real-docker", 0),
+    (c.FAILURE, "none", "skillc/real-docker", 1),
+    (c.FAILURE, "trialimage:no-uv", "skillc/real-docker-control", 1),
+    (c.ERROR, "none", "skillc/real-docker", 2),
+    (c.ERROR, "trialimage:no-uv", "skillc/real-docker-control", 2),
+])
+def test_runner_posts_every_valid_verdict_and_cleans_up(
+    tmp_path: Path, status: str, break_spec: str, context: str, exit_code: int,
+) -> None:
+    result, events = _run_installed_runner(tmp_path, status, break_spec)
+    assert result.returncode == exit_code, result.stderr
+    posts = [event for event in events if event["tool"] == "curl"]
+    statuses = [event["payload"] for event in posts if "context" in event["payload"]]
+    assert len(statuses) == 1, result.stderr
+    assert statuses[0]["state"] == {c.SUCCESS: "success", c.FAILURE: "failure", c.ERROR: "error"}[status]
+    assert statuses[0]["context"] == context
+    assert ("EXPECTED-RED" in statuses[0]["description"]) == (break_spec != "none")
+    assert len(posts) == 2  # commit status and configured comment
+    assert all(not Path(str(event["config"])).exists() for event in posts)
+    assert {tuple(event["operation"]) for event in events if event["tool"] == "docker"} >= {
+        ("container", "prune"), ("image", "prune"),
+    }
+
+
+@pytest.mark.parametrize("helper", [
+    "raise RuntimeError('helper failed')\n",
+    "print('not a verdict')\n",
+    "print('SUCCESS\\nlooks green\\n---\\nbody'); raise SystemExit(9)\n",
+    "print('SUCCESS\\nlooks green\\n---\\nbody'); raise SystemExit(1)\n",
+    "print('SUCCESS\\nlooks green')\n",
+    "print('SUCCESS\\n\\n---\\nbody')\n",
+])
+def test_runner_reports_helper_crash_or_malformed_output_as_error(tmp_path: Path, helper: str) -> None:
+    result, events = _run_installed_runner(tmp_path, c.SUCCESS, "trialimage:no-uv", helper)
+    assert result.returncode == 2, result.stderr
+    statuses = [
+        event["payload"] for event in events
+        if event["tool"] == "curl" and "context" in event["payload"]
+    ]
+    assert len(statuses) == 1, result.stderr
+    assert statuses[0]["state"] == "error"
+    assert statuses[0]["context"] == "skillc/real-docker-control"
+    assert any(event.get("operation") == ["container", "prune"] for event in events)
 
 _FAIL_REPORT = (
     '<?xml version="1.0"?><testsuites><testsuite name="pytest">'
