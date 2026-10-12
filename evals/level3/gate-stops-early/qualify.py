@@ -185,7 +185,7 @@ def _candidate_trusted_observation(candidate: Path, root: Path = HERE) -> bytes:
     digest = materialize.tree_digest(candidate)
     kind = _WITNESS_KINDS.get(candidate.relative_to(root).as_posix(), "normal")
     if kind == "stale":
-        witness = _witness_json(ExecuteResult(reason="exited", exit_code=3),
+        witness = _witness_json(ExecuteResult(reason="exited", exit_code=3, stdout=b""),
                                 materialize.tree_digest(root / "fixture"), request=True)
     elif kind == "proven-omission":
         witness = _witness_json(None, digest, request=False, exclusivity=True,
@@ -193,7 +193,7 @@ def _candidate_trusted_observation(candidate: Path, root: Path = HERE) -> bytes:
     elif kind == "unasserted-omission":
         witness = _witness_json(None, digest, request=False)
     else:
-        witness = _witness_json(ExecuteResult(reason="exited", exit_code=3), digest, request=True)
+        witness = _witness_json(ExecuteResult(reason="exited", exit_code=3, stdout=b""), digest, request=True)
     return json.dumps({"witness": witness, "graded_tree_digest": digest}).encode("utf-8")
 
 
@@ -537,7 +537,7 @@ def flow_check_honest_control_verdict(name: str) -> tuple[bool, str]:
     }[name]
     fresh_digest = "sha256:fresh-tree"
     stale_digest = "sha256:stale-tree"
-    normal = _witness_json(ExecuteResult(reason="exited", exit_code=3), fresh_digest, request=True)
+    normal = _witness_json(ExecuteResult(reason="exited", exit_code=3, stdout=b""), fresh_digest, request=True)
     proven = _witness_json(None, fresh_digest, request=False, exclusivity=True, basis=_STATIC_EXCLUSIVITY_BASIS)
     cases = [
         (normal, fresh_digest, _report_claim("SKIP"), "SATISFIED"),
