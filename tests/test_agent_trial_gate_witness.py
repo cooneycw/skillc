@@ -34,6 +34,8 @@ from skillc import trial, verify, witness_capture
 from skillc.backend import Confirmation, ExecuteResult, Limits
 from skillc.collection_conformance import TrackingDockerBackend
 
+_HOST_INTERPRETER = sys.executable
+
 
 def failure_reason(result: Mapping[str, Any]) -> str:
     return f"lifecycle: {result.get('reason')}; grading: {result.get('grading_blocked_reason')}"
@@ -61,7 +63,7 @@ class VirtualMountBackend(TrackingDockerBackend):
                     and "witness_ready" in args[2]), "unexpected readiness invocation"
             # The real image has this pinned interpreter; fake Docker executes
             # host processes, whose Python can live elsewhere (python:slim CI).
-            args[0] = sys.executable
+            args[0] = _HOST_INTERPRETER
             args[index] = str(d.trigger_socket_host_path_for(self.trigger_socket_dir, handle.name))
             if self.fault == "nonce":
                 args[index + 1] = "wrong-controller-nonce"
@@ -261,6 +263,9 @@ def test_actual_gate_history_binds_each_call_to_its_own_snapshot(
 def test_readiness_runs_without_a_host_container_interpreter(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str | None,
 ) -> None:
+    host_interpreter = tmp_path / "host-python"
+    host_interpreter.symlink_to(sys.executable)
+    monkeypatch.setattr(sys.modules[__name__], "_HOST_INTERPRETER", str(host_interpreter))
     real_exec = d.DockerBackend.exec_in_attempt
     interpreters: list[str] = []
     measurements: list[ExecuteResult] = []
@@ -291,7 +296,7 @@ def test_readiness_runs_without_a_host_container_interpreter(
     else:
         assert result["disposition"] == "unavailable", failure_reason(result)
         assert backend.executed == [] and trusted == []
-    assert interpreters == [sys.executable], failure_reason(result)
+    assert interpreters == [str(host_interpreter)], failure_reason(result)
 
 
 @pytest.mark.parametrize("fault", ["interpreter", "mode", "script", "arity"])
