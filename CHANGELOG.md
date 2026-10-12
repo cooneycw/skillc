@@ -8,6 +8,12 @@ and version plan.
 
 ## [Unreleased]
 
+- **Uptake studies forward each arm's profile verification fields** (#346).
+  The prepared treatment's file digests, tool preflight probes and gate
+  entrypoint now reach the real attempt runner through the existing
+  collection wrapper. Treatments without a profile keep empty checks. A
+  regression observes the runner boundary for both named arm choices.
+
 - **The real-Docker isolation probe refuses DNS and local probe errors**
   (Refs #315). Its embedded socket probe previously treated every `OSError`
   as an unreachable LAN, including DNS and permission errors. Only explicit
