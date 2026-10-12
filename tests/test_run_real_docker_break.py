@@ -109,7 +109,10 @@ def test_namespaced_trialimage_modes_set_only_the_trialimage_value(mode: str) ->
     ]
 
 
-@pytest.mark.parametrize("mode", ["missing-closure", "tampered-closure"])
+@pytest.mark.parametrize("mode", [
+    "missing-closure", "tampered-closure", "empty-runtime-cache",
+    "runtime-cache-permissions", "project-venv-permissions",
+])
 def test_namespaced_closure_modes_set_only_the_closure_value(mode: str) -> None:
     result = _resolve(f"closure:{mode}")
     assert result.returncode == 0
@@ -172,13 +175,16 @@ def test_a_bare_trialimage_mode_is_refused_not_silently_accepted() -> None:
     assert result.stdout == ""
 
 
-def test_a_bare_closure_mode_is_refused_not_silently_accepted() -> None:
+@pytest.mark.parametrize("mode", [
+    "missing-closure", "empty-runtime-cache", "runtime-cache-permissions", "project-venv-permissions",
+])
+def test_a_bare_closure_mode_is_refused_not_silently_accepted(mode: str) -> None:
     """Same red case, the closure family: no bare form was ever
     documented for it either, so a bare spelling must be refused rather
     than silently treated as a channel mode of the same name."""
-    result = _resolve("missing-closure")
+    result = _resolve(mode)
     assert result.returncode == 2
-    assert "unknown channel break mode 'missing-closure'" in result.stderr
+    assert f"unknown channel break mode '{mode}'" in result.stderr
     assert result.stdout == ""
 
 
@@ -281,6 +287,9 @@ def test_none_resolves_to_the_certifying_context() -> None:
         "trialimage:no-uv",
         "closure:missing-closure",
         "closure:tampered-closure",
+        "closure:empty-runtime-cache",
+        "closure:runtime-cache-permissions",
+        "closure:project-venv-permissions",
     ],
 )
 def test_every_break_mode_resolves_to_the_control_context_never_the_certifying_one(normalized_spec: str) -> None:
@@ -319,6 +328,9 @@ def test_the_real_runner_refuses_an_unknown_break_spec_before_touching_any_confi
         "coldinstall:cold-cache",
         "trialimage:no-uv",
         "closure:missing-closure",
+        "closure:empty-runtime-cache",
+        "closure:runtime-cache-permissions",
+        "closure:project-venv-permissions",
     ],
 )
 def test_the_real_runner_accepts_valid_break_specs_and_reaches_the_config_check(break_arg: str) -> None:

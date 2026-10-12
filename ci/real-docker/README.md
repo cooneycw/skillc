@@ -150,11 +150,23 @@ but #315 and the real campaign remain pending.
    run-real-docker <reviewed-tested-sha> --break trialimage:no-uv              # expect FAILURE
    run-real-docker <reviewed-tested-sha> --break closure:missing-closure      # expect FAILURE
    run-real-docker <reviewed-tested-sha> --break closure:tampered-closure     # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break closure:empty-runtime-cache  # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break closure:runtime-cache-permissions # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break closure:project-venv-permissions  # expect FAILURE
    ```
    Break-mode runs post only to `skillc/real-docker-control`
    (never the certifying `skillc/real-docker` context) and are labelled
-   EXPECTED-RED. Record all nineteen results on this issue (the eighteen
+   EXPECTED-RED. Record all twenty-two results on this issue (the twenty-one
    break-mode commands above, plus the `none` run itself).
+
+   The three runtime closure controls first validate the normal runtime image,
+   receipt and environment, then plant the fault before consuming preflight.
+   They require both `tool-pypi-runtime` refusal and a retained, specific
+   offline-cache or permission diagnostic. An unrelated image, receipt, setup,
+   timeout or channel failure cannot satisfy the expected failure; an unplanted
+   fault must produce strict XPASS. These controls do not establish the cause
+   of the historical bridge-network failure. A normal-target receipt is
+   required; a break-image receipt cannot stand in for an observed cache fault.
 9. `systemctl enable --now skillc-real-docker.timer`.
 
 Keep the timer disabled until the operator accepts both isolation setup

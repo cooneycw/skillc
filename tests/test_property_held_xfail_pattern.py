@@ -664,13 +664,35 @@ def _drive_closure(ns, refusal, monkeypatch, output_fault=None) -> None:
     witness = Mock()
     test = ns["test_a_treated_attempts_closure_is_verified_and_the_gate_reaches_the_real_runner"]
     monkeypatch.setitem(test.__globals__, "_closure_inputs", lambda: (files, digests, (), entrypoint))
-    monkeypatch.setitem(test.__globals__, "_build_trial_image", lambda *args: None)
+    supply = Mock(image_id="sha256:" + "a" * 64)
+    backend.image_id.return_value = supply.image_id
+    backend.runtime_environment.return_value = {"HOME": "/home/candidate"}
+    backend.gate_outputs = [backend.execute.return_value]
+    # Healthy/forged subject output cannot replace broken controller bytes.
+    backend.execute.return_value = ExecuteResult(reason="exited", exit_code=0, stdout=stdout)
+    monkeypatch.setitem(test.__globals__, "_build_trial_image", lambda *args: supply)
+    monkeypatch.setitem(test.__globals__, "_baseline_acceptance", lambda *args: None)
+    for helper in ("_environment_controls", "_generic_offline_control", "_observe_delivery", "_check_metadata"):
+        monkeypatch.setitem(test.__globals__, helper, lambda *args: None)
+    monkeypatch.setitem(test.__globals__, "_RuntimeBackend", lambda **kwargs: backend)
+    replacements = []
+    def replace_backend(original, **kwargs):
+        replacements.append(kwargs["frozen_preflight"])
+        return original
+    monkeypatch.setitem(test.__globals__, "replace", replace_backend)
     monkeypatch.setitem(test.__globals__, "GateWitness", witness)
+    diagnostics = {
+        "empty-runtime-cache": "pydantic-core wasn't found in the cache and network is disabled",
+        "runtime-cache-permissions": "Permission denied: /home/candidate/.cache/uv/.lock",
+        "project-venv-permissions": "Permission denied: /home/candidate/Projects/claude-power-pack/.venv",
+    }
+    monkeypatch.setitem(test.__globals__, "_runtime_diagnostic", lambda *args: diagnostics[ns["BREAK_MODE"]])
     error = None
     if refusal == "target":
-        error = ns["at"].HomeFileVerificationRefused(
-            ns["_TARGET_RELPATH"] + " " + ns["_REFUSAL_SYMPTOMS"][ns["BREAK_MODE"]],
-        )
+        reason = ("tool dependency 'tool-pypi-runtime' was not verified in-container"
+                  if ns["BREAK_MODE"] in ns["_RUNTIME_MODES"] else
+                  ns["_TARGET_RELPATH"] + " " + ns["_REFUSAL_SYMPTOMS"][ns["BREAK_MODE"]])
+        error = ns["at"].HomeFileVerificationRefused(reason)
     elif refusal == "unrelated":
         error = ns["at"].HomeFileVerificationRefused("a tool could not be verified")
     with patch.object(ns["d"], "DockerBackend", return_value=backend), \
@@ -678,6 +700,9 @@ def _drive_closure(ns, refusal, monkeypatch, output_fault=None) -> None:
             patch.object(ns["gate_overlay"], "apply_flow_check_gate_overlay"), \
             patch("subprocess.run"):
         test()
+    assert replacements == [False, True]
+    assert backend.prepare.call_count == 2
+    assert backend.prepare.call_args_list[0] != backend.prepare.call_args_list[1]
     assert witness.call_args.kwargs["declared_gates"] == {
         ns["_GATE_NAME"]: (ns["_HARNESS_ABS"], *ns["_GATE_ARGV_TAIL"]),
     }
@@ -792,3 +817,329 @@ def test_actual_channel_subject_reports_only_missing_socket(error, capsys) -> No
         else:
             with pytest.raises(type(error)):
                 exec(ns["_subject_script"](), {})  # noqa: S102 - execute the actual fixed test subject
+
+
+_RUNTIME_MODES = ("empty-runtime-cache", "runtime-cache-permissions", "project-venv-permissions")
+
+
+def _closure_namespace(mode="none"):
+    import runpy
+    from unittest.mock import patch
+    with patch.dict("os.environ", {"SKILLC_CLOSURE_PREFLIGHT_LIVE_BREAK": mode}), patch("shutil.which", return_value=None):
+        return runpy.run_path(str(_ROOT / "tests" / "test_profile_closure_preflight_live.py"))
+
+
+@pytest.mark.parametrize("mode", _RUNTIME_MODES)
+def test_runtime_fault_requires_dependency_and_specific_diagnostic(mode) -> None:
+    ns = _closure_namespace()
+    check = ns["_check_runtime_preflight"]
+    reason = "tool dependency 'tool-pypi-runtime' was not verified in-container"
+    diagnostic = {
+        "empty-runtime-cache": "pydantic-core wasn't found in the cache and network is disabled",
+        "runtime-cache-permissions": "Permission denied (os error 13): /home/candidate/.cache/uv/.lock",
+        "project-venv-permissions": "Permission denied (os error 13): /home/candidate/Projects/claude-power-pack/.venv",
+    }[mode]
+    with pytest.raises(ns["_MODE_PROPERTY"][mode]):
+        check(True, reason, mode=mode, diagnostic=diagnostic)
+    check(False, "", mode=mode, diagnostic="")  # unchanged healthy predicate; marker must XPASS
+    for bad_reason, bad_diag in ((reason.replace("tool-pypi-runtime", "neighbor"), diagnostic),
+                                 (reason, "IMPORT_FAIL"), (reason, "timed out"),
+                                 (reason, diagnostic.replace(".cache/uv", ".cache/other").replace("claude-power-pack/.venv", "neighbor/.venv"))):
+        if bad_diag == diagnostic:
+            continue
+        with pytest.raises(AssertionError) as error:
+            check(True, bad_reason, mode=mode, diagnostic=bad_diag)
+        assert type(error.value) is AssertionError
+    with pytest.raises(AssertionError):
+        check(True, reason.replace("tool-pypi-runtime", "neighbor"), mode=mode, diagnostic=diagnostic)
+
+
+@pytest.mark.parametrize("decoy", [False, True])
+def test_actual_baseline_scan_detects_recognized_skill_decoy(tmp_path, decoy) -> None:
+    import json
+    import subprocess
+    import sys
+    ns = _closure_namespace()
+    home, work = tmp_path / "home", tmp_path / "work"
+    home.mkdir()
+    work.mkdir()
+    if decoy:
+        skill = home / ".codex" / "skills" / "decoy" / "SKILL.md"
+        skill.parent.mkdir(parents=True)
+        skill.write_text("decoy")
+    result = subprocess.run([sys.executable, "-c", ns["_BASELINE_SCAN"], str(home), str(work)],
+                            capture_output=True, check=False)
+    assert result.returncode == 0
+    if decoy:
+        with pytest.raises(AssertionError, match="baseline"):
+            ns["_check_baseline_scan"](result.stdout)
+    else:
+        ns["_check_baseline_scan"](result.stdout)
+    with pytest.raises(AssertionError):
+        ns["_check_baseline_scan"](json.dumps({"roots": [], "hits": []}).encode())
+    missing = subprocess.run([sys.executable, "-c", ns["_BASELINE_SCAN"], str(home / "absent")],
+                             capture_output=True, check=False)
+    assert missing.returncode != 0
+
+
+@pytest.mark.parametrize("widen", [False, True], ids=["specific", "mutated-base"])
+def test_runtime_real_markers_exclude_neighbor_properties(pytester, widen) -> None:
+    source = _live_control_source(
+        "test_profile_closure_preflight_live.py", "SKILLC_CLOSURE_PREFLIGHT_LIVE_BREAK", _RUNTIME_MODES,
+        "test_a_treated_attempts_closure_is_verified_and_the_gate_reaches_the_real_runner", widen=widen,
+    ) + textwrap.dedent("""
+        def observe(ns, kind):
+            mode = ns['BREAK_MODE']
+            reason = "tool dependency 'tool-pypi-runtime' was not verified in-container"
+            diagnostic = {
+                'empty-runtime-cache': "pydantic-core wasn't found in the cache and network is disabled",
+                'runtime-cache-permissions': 'Permission denied: /home/candidate/.cache/uv/.lock',
+                'project-venv-permissions': 'Permission denied: /home/candidate/Projects/claude-power-pack/.venv',
+            }[mode]
+            if kind == 'neighbor':
+                ns['_check_gate_classification']('fallback')
+            if kind == 'wrong-dependency':
+                reason = reason.replace('tool-pypi-runtime', 'neighbor')
+            if kind == 'wrong-symptom':
+                diagnostic = 'IMPORT_FAIL'
+            ns['_check_runtime_preflight'](kind != 'intact', reason, mode=mode, diagnostic=diagnostic)
+        for mode in MODES:
+            for kind in ('target', 'intact', 'neighbor', 'wrong-dependency', 'wrong-symptom'):
+                add_case('test_' + kind.replace('-', '_') + '_' + mode.replace('-', '_'), mode,
+                         lambda ns, k=kind: observe(ns, k))
+    """)
+    pytester.makepyfile(source)
+    result = pytester.runpytest("-v", "--tb=short")
+    result.assert_outcomes(xfailed=6 if widen else 3, failed=9 if widen else 12)
+    for mode in _RUNTIME_MODES:
+        for kind, status in (("target", "XFAIL"), ("intact", "FAILED"),
+                             ("neighbor", "XFAIL" if widen else "FAILED"),
+                             ("wrong_dependency", "FAILED"), ("wrong_symptom", "FAILED")):
+            result.stdout.fnmatch_lines([f"*test_{kind}_{mode.replace('-', '_')} {status}*"])
+    result.stdout.fnmatch_lines(["*XPASS(strict)*"])
+
+
+def test_runtime_complete_function_target_missed_and_unrelated_failures(pytester) -> None:
+    source = _live_control_source(
+        "test_profile_closure_preflight_live.py", "SKILLC_CLOSURE_PREFLIGHT_LIVE_BREAK", _RUNTIME_MODES,
+        "test_a_treated_attempts_closure_is_verified_and_the_gate_reaches_the_real_runner", widen=False,
+    ) + textwrap.dedent(f"""
+        controls = runpy.run_path({str(Path(__file__).resolve())!r})
+        def observe(ns, kind):
+            with pytest.MonkeyPatch.context() as mp:
+                controls['_drive_closure'](ns, kind, mp)
+        for mode in MODES:
+            for kind in ('target', 'intact', 'unrelated'):
+                add_case('test_' + kind + '_' + mode.replace('-', '_'), mode,
+                         lambda ns, k=kind: observe(ns, k))
+    """)
+    pytester.makepyfile(source)
+    result = pytester.runpytest("-v", "--tb=short")
+    result.assert_outcomes(xfailed=3, failed=6)
+    for mode in _RUNTIME_MODES:
+        for kind, status in (("target", "XFAIL"), ("intact", "FAILED"), ("unrelated", "FAILED")):
+            result.stdout.fnmatch_lines([f"*test_{kind}_{mode.replace('-', '_')} {status}*"])
+    result.stdout.fnmatch_lines(["*XPASS(strict)*"])
+
+
+@pytest.mark.parametrize("refuse", [False, True])
+def test_actual_runtime_wrapper_validates_before_fault_without_warming(monkeypatch, tmp_path, refuse) -> None:
+    ns = _closure_namespace()
+    events = []
+    backend = ns["_RuntimeBackend"](image="image", base_dir=tmp_path, fault="project-venv-permissions")
+    def validate(self, handle, limits, verified):
+        events.append("validated")
+        if refuse:
+            raise ValueError("receipt/image/environment refusal")
+        return {"HOME": "/home/candidate"}
+    monkeypatch.setattr(ns["d"].DockerBackend, "runtime_environment", validate)
+    monkeypatch.setattr(ns["d"].DockerBackend, "controller_output", lambda self, handle, argv, limits:
+                        events.append(tuple(argv)))
+    if refuse:
+        with pytest.raises(ValueError):
+            backend.runtime_environment(object(), ns["_LIVE_LIMITS"], {"file": "digest"})
+        assert events == ["validated"]
+    else:
+        assert backend.runtime_environment(object(), ns["_LIVE_LIMITS"], {"file": "digest"}) == {"HOME": "/home/candidate"}
+        assert events == ["validated", ("chmod", "a-w", ns["_PROJECT"])]
+
+
+@pytest.mark.parametrize("fault", [None, "missing", "truncated", "incomplete", "timeout", "wrong-env", "repeat"])
+def test_actual_bounded_observer_uses_controller_call_only(monkeypatch, tmp_path, fault) -> None:
+    from skillc.backend import ExecuteResult
+    ns = _closure_namespace()
+    backend = ns["_RuntimeBackend"](image="image", base_dir=tmp_path)
+    backend.frozen_env.update(HOME="/home/candidate")
+    result = ExecuteResult(reason="timeout" if fault == "timeout" else "exited", exit_code=0,
+                           stdout=None if fault == "missing" else b"controller",
+                           stdout_truncated=fault == "truncated", stdout_incomplete=fault == "incomplete")
+    monkeypatch.setattr(ns["d"].DockerBackend, "exec_in_attempt", lambda *args, **kwargs: result)
+    # A primary/subject call cannot fill the controller observation slot.
+    backend.exec_in_attempt(object(), ["subject-shim"], ns["_LIVE_LIMITS"])
+    assert backend.gate_outputs == []
+    if fault == "repeat":
+        backend.gate_outputs.append(result)
+    kwargs = {"env": {} if fault == "wrong-env" else dict(backend.frozen_env)}
+    if fault:
+        with pytest.raises(AssertionError):
+            backend.exec_in_attempt(object(), [ns["_HARNESS_ABS"]], ns["_LIVE_LIMITS"], **kwargs)
+    else:
+        backend.exec_in_attempt(object(), [ns["_HARNESS_ABS"]], ns["_LIVE_LIMITS"], **kwargs)
+        assert backend.gate_outputs == [result]
+
+
+@pytest.mark.parametrize("fault", [None, "uid", "gid", "mode", "writable", "symlink", "venv", "candidate", "empty"])
+def test_delivery_ownership_measurement_has_discriminating_controls(fault) -> None:
+    import json
+    ns = _closure_namespace()
+    record = {"candidate": ns["d"].CANDIDATE_UID, "venv": False, "paths": [
+        {"uid": ns["d"].CANDIDATE_UID, "gid": ns["d"].CANDIDATE_GID,
+         "mode": 0o755, "writable": True, "symlink": False} for _ in range(2)]}
+    if fault == "empty":
+        record["paths"] = []
+    elif fault in ("uid", "gid", "mode"):
+        record["paths"][0][fault] = 0
+    elif fault in ("writable", "symlink"):
+        record["paths"][0][fault] = fault == "symlink"
+    elif fault == "venv":
+        record["venv"] = True
+    elif fault == "candidate":
+        record["candidate"] = 0
+    if fault:
+        with pytest.raises(AssertionError):
+            ns["_check_delivery"](json.dumps(record).encode())
+    else:
+        ns["_check_delivery"](json.dumps(record).encode())
+
+
+@pytest.mark.parametrize("changed", [None, "pyproject.toml", "uv.lock"])
+def test_post_gate_metadata_matches_exact_pinned_bytes(changed) -> None:
+    from unittest.mock import Mock
+    ns = _closure_namespace()
+    backend = Mock()
+    def read(handle, path):
+        original = (ns["FIXTURE_DIR"] / Path(path).name).read_bytes()
+        return original + b"\nchanged" if Path(path).name == changed else original
+    backend.read_home_file.side_effect = read
+    verified = {"Projects/claude-power-pack/" + name: ns["m"].sha256_bytes((ns["FIXTURE_DIR"] / name).read_bytes())
+                for name in ("pyproject.toml", "uv.lock")}
+    if changed:
+        with pytest.raises(AssertionError, match="metadata changed"):
+            ns["_check_metadata"](backend, object(), verified)
+    else:
+        ns["_check_metadata"](backend, object(), verified)
+
+
+@pytest.mark.parametrize("fault", [None, "success", "timeout", "missing", "truncated"])
+def test_runtime_diagnostic_uses_fresh_delivery_and_actual_import_command(monkeypatch, fault) -> None:
+    from unittest.mock import Mock
+
+    from skillc.backend import ExecuteResult
+    ns = _closure_namespace()
+    backend = Mock()
+    events = []
+    def prepare(attempt):
+        events.append("fresh")
+        return object()
+    backend.prepare.side_effect = prepare
+    backend.deliver_home_file.side_effect = lambda *args: events.append("delivered")
+    backend.runtime_environment.side_effect = lambda *args: events.append("validated-then-faulted")
+    output = b"pydantic-core wasn't found in the cache and network is disabled"
+    def run(handle, argv, limits):
+        events.append("import")
+        assert "--offline --locked --project" in argv[-1]
+        assert "import pydantic; import yaml" in argv[-1]
+        assert argv[-1].endswith("2>&1") and "dev/null" not in argv[-1]
+        return ExecuteResult(reason="timeout" if fault == "timeout" else "exited",
+                             exit_code=0 if fault == "success" else 1,
+                             stdout=None if fault == "missing" else output,
+                             stdout_truncated=fault == "truncated")
+    backend.exec_in_attempt.side_effect = run
+    tools = ({"id": "tool-pypi-runtime", "probes": [{"kind": "python-import", "modules": ["pydantic", "yaml"],
+              "uv_project": "Projects/claude-power-pack"}]},)
+    if fault:
+        with pytest.raises(AssertionError):
+            ns["_runtime_diagnostic"](backend, {"file": b"bytes"}, {"file": "digest"}, tools)
+    else:
+        assert ns["_runtime_diagnostic"](backend, {"file": b"bytes"}, {"file": "digest"}, tools) == output.decode()
+    assert events == ["fresh", "delivered", "validated-then-faulted", "import"]
+    backend.destroy.assert_called_once()
+
+
+@pytest.mark.parametrize("mode", ["cache-sibling", "cache-link", "walk-error"])
+def test_baseline_scan_cannot_hide_cache_neighbors_or_walk_errors(tmp_path, mode) -> None:
+    import subprocess
+    import sys
+    ns = _closure_namespace()
+    home, work = tmp_path / "home", tmp_path / "work"
+    home.mkdir()
+    work.mkdir()
+    cache = home / ".cache"
+    cache.mkdir()
+    if mode == "cache-sibling":
+        decoy = cache / "other" / "SKILL.md"
+        decoy.parent.mkdir()
+        decoy.write_text("decoy")
+    elif mode == "cache-link":
+        (cache / "uv").symlink_to(work, target_is_directory=True)
+    script = ns["_BASELINE_SCAN"]
+    if mode == "walk-error":
+        script = ("from unittest.mock import patch\n" +
+                  "with patch('os.scandir', side_effect=PermissionError('seeded unreadable subtree')):\n" +
+                  "    exec(" + repr(script) + ")\n")
+    result = subprocess.run([sys.executable, "-c", script, str(home), str(work)], capture_output=True, check=False)
+    if mode == "cache-sibling":
+        assert result.returncode == 0
+        with pytest.raises(AssertionError, match="baseline"):
+            ns["_check_baseline_scan"](result.stdout)
+    else:
+        assert result.returncode != 0
+
+
+@pytest.mark.parametrize("frozen", [False, True])
+def test_cold_preflight_uses_declared_environment_only_in_frozen_arm(monkeypatch, tmp_path, frozen) -> None:
+    from skillc.backend import ExecuteResult
+    ns = _closure_namespace()
+    calls = []
+    backend = ns["_RuntimeBackend"](image="image", base_dir=tmp_path, frozen_preflight=frozen)
+    backend.frozen_env.update(HOME="/home/candidate")
+    def execute(self, handle, argv, limits, cancel, stdin, cwd, env, confine_root):
+        calls.append(env)
+        return ExecuteResult(reason="exited", exit_code=0, stdout=b"report")
+    monkeypatch.setattr(ns["d"].DockerBackend, "exec_in_attempt", execute)
+    command = ["sh", "-c", "echo " + ns["at"]._TOOLS_MARKER]
+    backend.exec_in_attempt(object(), command, ns["_LIVE_LIMITS"])
+    assert calls == [dict(backend.frozen_env) if frozen else None]
+
+
+@pytest.mark.parametrize("frozen", [False, True])
+def test_actual_consuming_preflight_dispatches_cold_frozen_policy(monkeypatch, tmp_path, frozen) -> None:
+    from skillc.backend import ExecuteResult
+    ns = _closure_namespace()
+    calls = []
+    supply = ns["rs"].RuntimeSupply.from_path(_ROOT / "tests/fixtures/profile-trial-runtime/receipt.good.json")
+    backend = ns["_RuntimeBackend"](image=supply.image_id, base_dir=tmp_path, runtime_supply=supply,
+                                   witness_io=True, frozen_preflight=frozen)
+    backend.frozen_env.update(HOME="/home/candidate", UV_OFFLINE="1", UV_LOCKED="1")
+    def execute(self, handle, argv, limits, cancel, stdin, cwd, env, confine_root):
+        assert "uv run --offline --locked --project" in argv[-1]
+        assert "import json" in argv[-1]
+        calls.append(env)
+        return ExecuteResult(reason="exited", exit_code=0,
+                             stdout=(ns["at"]._TOOLS_MARKER + "\nPROBE:0:IMPORT_OK\n").encode())
+    monkeypatch.setattr(ns["d"].DockerBackend, "exec_in_attempt", execute)
+    monkeypatch.setattr(ns["d"].DockerBackend, "export", lambda *args: None)
+    tools = ({"id": "tool-pypi-runtime", "probes": [{"kind": "python-import", "modules": ["json"],
+              "uv_project": "Projects/claude-power-pack"}]},)
+    ns["at"]._preflight_in_container(backend, object(), ns["_LIVE_LIMITS"], {}, tools)
+    assert calls == [dict(backend.frozen_env) if frozen else None]
+
+
+def test_venv_permission_diagnostic_rejects_neighboring_path_prefix() -> None:
+    ns = _closure_namespace()
+    with pytest.raises(AssertionError):
+        ns["_check_runtime_preflight"](
+            True, "tool dependency 'tool-pypi-runtime' is not satisfied in the container",
+            mode="project-venv-permissions",
+            diagnostic="Permission denied: /home/candidate/Projects/claude-power-pack/.venv-neighbor",
+        )
