@@ -31,6 +31,18 @@ and version plan.
   These establish test discrimination, not real-container behavior; actual
   break execution remains owed through #315.
 
+- **Calibration CLI builds the declared profile closure, and grading accepts
+  a controller witness bound to frozen files** (Refs #348, phase one).
+  Profile tools, file digests and gate entrypoint now reach the attempt runner;
+  invalid profile inputs refuse before dispatch and remove acquisition copies.
+  A disposable capture adapter reuses final capture policy and refuses partial,
+  empty or failed projections. Both grading paths can receive a finalized
+  controller record with the digest of the exact frozen files under the grading
+  lock; conflicting trusted inputs and mismatched attempt identities refuse.
+  Candidate artifacts cannot populate this trusted channel. Production witness
+  construction and runtime integration remain pending; raw witness bytes are
+  not archived by grading, which persists their existing envelope digest.
+
 - **The trial image builds on Docker 29, and the ea6dbfa fixture carries
   CPP's `secrets.py` scanner module** (#356). Two real-daemon `make verify`
   failures CI could not see, because it has no daemon. (1)

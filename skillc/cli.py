@@ -1754,8 +1754,12 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
             print(f"skillc: subject {subject_name!r} is (locator, revision, client) {found}, but the "
                   f"declaration names {wanted}; refusing", file=sys.stderr)
             return 2
-        treatment = cr.build_treatment(acquired)
-    except cr.CalibrationRefused as exc:
+        subject_profile = subject.get("profile")
+        assert subject_profile is None or isinstance(subject_profile, str)
+        treatment = cr.build_treatment(
+            acquired, subject_profile=subject_profile, root=cr.ROOT if subject_profile is not None else None,
+        )
+    except (cr.CalibrationRefused, profile.Refused, OSError, json.JSONDecodeError, UnicodeError) as exc:
         print(f"skillc: {exc}", file=sys.stderr)
         return 2
     finally:

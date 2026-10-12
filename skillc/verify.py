@@ -80,9 +80,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 
-from . import checks, provenance, records, trial
+from . import checks, provenance, records, trial, witness_capture
 from . import judge as judge_seam
 from .backend import BackendUnavailable, Confirmation, ExecutionBackend, Limits
+from .gate_witness import GateWitnessRecord
 from .materialize import Refused as NotOwned
 from .materialize import cleanup as remove_owned
 from .materialize import create_root
@@ -1134,7 +1135,8 @@ def _eligible_observation(attempt_id: str, observation: Mapping[str, object]) ->
 def grade_agent_attempt(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base: Path,
                         observation: Mapping[str, object], backend: ExecutionBackend | None = None,
                         forbidden: list[Path] | None = None,
-                        trusted_observation: bytes | None = None) -> tuple[dict[str, object], Graded]:
+                        trusted_observation: bytes | None = None,
+                     gate_witness: GateWitnessRecord | None = None) -> tuple[dict[str, object], Graded]:
     """Grade one captured agent-trial attempt and store its `verified-result`
     (#139), exactly as `grade` does - the same pin, capture, snapshot, ledger
     and frozen-digest checks - except that the controller's transcript
@@ -1148,13 +1150,19 @@ def grade_agent_attempt(experiment: trial.Experiment, attempt_id: str, grader: G
     the caller no earlier than the backend's confirmed stop, never anything
     the subject's own process produced.
 
+    `gate_witness` (#348), alternatively, is a finalized controller record,
+    never candidate JSON. The common locked grading seam pairs it with the
+    exact frozen-file digest. Passing both forms is refused. The result stores
+    the trusted envelope digest, not its raw bytes; retaining those bytes for
+    later inspection remains the controller caller's responsibility.
+
     Returns the stored result and the task grade (`Graded`, without the
     verifier's readiness criterion), which is what the agent driver reports
     as the attempt's own grade."""
     _eligible_observation(attempt_id, observation)
     return _grade_and_store(experiment, attempt_id, grader, base, forbidden, backend=backend,
                             readiness_source=AGENT_OBSERVATION_READINESS,
-                            trusted_observation=trusted_observation)
+                            trusted_observation=trusted_observation, gate_witness=gate_witness)
 
 
 def grade(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base: Path,
@@ -1211,7 +1219,8 @@ def _grade_and_store(experiment: trial.Experiment, attempt_id: str, grader: Grad
                      backend: ExecutionBackend | None = None,
                      judges: Mapping[str, judge_seam.Judge] | None = None, goal_text: str = "",
                      readiness_source: str = records.INSTALLATION_RECEIPT,
-                     trusted_observation: bytes | None = None) -> tuple[dict[str, object], Graded]:
+                     trusted_observation: bytes | None = None,
+                     gate_witness: GateWitnessRecord | None = None) -> tuple[dict[str, object], Graded]:
     """Holds the experiment lock (#12) from the first read to the stored
     result, so a sibling attempt's capture, finalize or stored result waits
     for this grade instead of reading to its snapshot as tampering.
@@ -1224,7 +1233,7 @@ def _grade_and_store(experiment: trial.Experiment, attempt_id: str, grader: Grad
     with trial.experiment_lock(experiment.root):
         current = trial.Experiment.open(experiment.root)
         return _grade_and_store_held(current, attempt_id, grader, base, forbidden, regrade_of,
-                                     backend, judges, goal_text, readiness_source, trusted_observation)
+                                     backend, judges, goal_text, readiness_source, trusted_observation, gate_witness)
 
 
 def _grade_and_store_held(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base: Path,
@@ -1232,7 +1241,13 @@ def _grade_and_store_held(experiment: trial.Experiment, attempt_id: str, grader:
                           backend: ExecutionBackend | None,
                           judges: Mapping[str, judge_seam.Judge] | None, goal_text: str,
                           readiness_source: str,
-                          trusted_observation: bytes | None = None) -> tuple[dict[str, object], Graded]:
+                          trusted_observation: bytes | None = None,
+                          gate_witness: GateWitnessRecord | None = None) -> tuple[dict[str, object], Graded]:
+    if gate_witness is not None:
+        if trusted_observation is not None:
+            raise Refused("cannot supply both trusted_observation and gate_witness")
+        if not isinstance(gate_witness, GateWitnessRecord) or gate_witness.attempt_id != attempt_id:
+            raise Refused("controller gate witness does not belong to this attempt")
     if judges:
         unknown_tiers = set(judges) - set(judge_seam.JUDGE_TIERS)
         if unknown_tiers:
@@ -1271,6 +1286,14 @@ def _grade_and_store_held(experiment: trial.Experiment, attempt_id: str, grader:
         (str(a["path"]), _read_frozen(experiment, str(a["digest"])), a.get("mode") == "x")
         for a in frozen
     ]
+
+    if gate_witness is not None:
+        # The lock is held and files came from validated frozen blobs. Never
+        # use the export or assign this final identity to an earlier gate run.
+        trusted_observation = trial.canonical({
+            "witness": json.loads(gate_witness.to_json_bytes()),
+            "graded_tree_digest": witness_capture.files_digest(files),
+        })
 
     in_flight = _in_flight_scratch(experiment, attempt_id)
     before = _snapshot(experiment.root, in_flight)

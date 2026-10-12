@@ -317,3 +317,105 @@ def test_red_case_a_gate_entrypoint_this_closure_never_installs_is_refused(
 
     with pytest.raises(p.Refused, match="gate_entrypoint '.codex/skills/does-not-exist.sh' is not installed"):
         cr.build_treatment(acquired, subject_profile=subject_profile, root=root)
+
+
+@needs_git
+@pytest.mark.parametrize(("with_profile", "fault"), [
+    (True, None), (False, None), (True, "missing-profile"),
+    (True, "invalid-profile"), (True, "malformed-inventory"),
+])
+def test_calibration_cli_carries_the_declared_profile_to_the_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    with_profile: bool, fault: str | None,
+) -> None:
+    """Parse the real CLI and build a real closure; stop at agent dispatch.
+
+    Approval/image resolution and acquisition are supplied local fixtures.
+    Neither treatment construction nor calibration/collection forwarding is mocked.
+    """
+    from test_calibration_run import _declaration_data
+
+    from skillc import agent_trial, calibration, cli, trial, trial_bootstrap
+
+    content_repo, revision = _build_content_repo(tmp_path)
+    root = tmp_path / "root"
+    entrypoint = ".codex/skills/gate-check/SKILL.md"
+    _write_declaration(root / "subject-profile", revision, gate_entrypoint=entrypoint)
+    inventory = p.validate(p.Profile.load(root / "subject-profile" / "profile.json"),
+                           p.GitTree(content_repo, revision))
+    evidence = root / "subject-profile" / "evidence"
+    evidence.mkdir()
+    (evidence / "inventory.json").write_text(json.dumps(inventory))
+    subject = materialize.Subject.from_dict({**SUBJECT_DICT, "revision": revision})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: subject)
+    acquired = cc.acquire_collection("fixture", tmp_path / "acquisition", checkout=content_repo)
+    data = _declaration_data(attempts=1)
+    arms = data["arms"]
+    assert isinstance(arms, list)
+    declared_subject = next(arm["subject"] for arm in arms if isinstance(arm["subject"], dict))
+    declared_subject.update(name="fixture", locator=subject.locator, revision=revision)
+    if with_profile:
+        declared_subject["profile"] = "subject-profile"
+    else:
+        declared_subject.pop("profile", None)
+    declaration = tmp_path / "declaration.json"
+    declaration.write_text(json.dumps(data))
+    monkeypatch.setattr(cr, "ROOT", root)
+    monkeypatch.setattr(calibration, "require_approved", lambda *args, **kwargs: None)
+    shared = data["shared"]
+    assert isinstance(shared, dict)
+    monkeypatch.setattr(trial_bootstrap, "pinned_cli_version", lambda key: shared["client"]["version"])
+    monkeypatch.setattr(demo, "resolve_image_digest", lambda *args: shared["image"]["digest"])
+    acquisition_paths: list[Path] = []
+
+    def acquire_fixture(name: str, run_dir: Path) -> cc.AcquiredCollection:
+        for suffix in ("checkout", "staging"):
+            path = run_dir / f"{name}-{suffix}"
+            path.mkdir()
+            acquisition_paths.append(path)
+        return acquired
+
+    monkeypatch.setattr(cc, "acquire_collection", acquire_fixture)
+    if fault == "missing-profile":
+        (root / "subject-profile" / "profile.json").unlink()
+    elif fault == "invalid-profile":
+        (root / "subject-profile" / "profile.json").write_text("{}")
+    elif fault == "malformed-inventory":
+        (evidence / "inventory.json").write_text("{broken")
+    seen: list[dict[str, object]] = []
+
+    def observe_attempt(**kwargs: object) -> dict[str, object]:
+        seen.append(kwargs)
+        experiment = kwargs["experiment"]
+        assert isinstance(experiment, trial.Experiment)
+        return trial.finalize(experiment, str(kwargs["attempt_id"]), disposition="unavailable",
+                              reason="CLI control stops before subject dispatch")
+
+    monkeypatch.setattr(agent_trial, "run_one_attempt", observe_attempt)
+    code = cli.main(["calibration-run", str(declaration), "--private-dir", str(tmp_path / "private")])
+    assert len(acquisition_paths) == 2
+    assert all(not path.exists() for path in acquisition_paths)
+    if fault is not None:
+        assert code == 2
+        assert seen == []
+        assert "skillc:" in capsys.readouterr().err
+        return
+    assert code == 1
+    assert len(seen) == 2
+    treated = next(call for call in seen if call["extra_home_files"])
+    baseline = next(call for call in seen if not call["extra_home_files"])
+    assert not baseline["verify_home_files"]
+    assert not baseline["preflight_tools"]
+    assert baseline["gate_entrypoint"] is None
+    if with_profile:
+        assert treated["gate_entrypoint"] == entrypoint
+        checked = treated["verify_home_files"]
+        tools = treated["preflight_tools"]
+        assert isinstance(checked, dict) and isinstance(tools, (tuple, list))
+        assert checked["Work/kit/pyproject.toml"] == materialize.sha256_bytes(
+            b"[project]\nname = 'kit'\n")
+        assert [tool["id"] for tool in tools] == ["tool-bash"]
+    else:
+        assert treated["gate_entrypoint"] is None
+        assert not treated["verify_home_files"]
+        assert not treated["preflight_tools"]
