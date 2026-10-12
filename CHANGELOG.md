@@ -16,6 +16,21 @@ and version plan.
   before certification. Real consuming-path cache, permissions and baseline
   purity acceptance remain pending; no default trial image changes.
 
+- **Live break controls credit only their targeted property** (Refs #341).
+  Channel, witness, shim and cold-install checks use separate exceptions for
+  independent observations. Shim cwd and environment failures no longer
+  certify each other; forbidden mounts are distinguished by destination.
+  Channel failures require explicit intended-fault observations.
+  Closure controls route the controller to the preserved harness, validate
+  the refusal's path/symptom and use the same
+  healthy predicate in every mode, so a missed refusal becomes strict XPASS.
+  Witness controls preserve the primary's container, forward the current
+  exec arguments and require independent missing-marker or live-gate proof.
+  Committed no-daemon controls exercise actual markers/helpers, neighboring
+  failures, strict XPASS, broad-marker mutations and bounded cleanup.
+  These establish test discrimination, not real-container behavior; actual
+  break execution remains owed through #315.
+
 - **The trial image builds on Docker 29, and the ea6dbfa fixture carries
   CPP's `secrets.py` scanner module** (#356). Two real-daemon `make verify`
   failures CI could not see, because it has no daemon. (1)
