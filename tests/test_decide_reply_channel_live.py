@@ -110,6 +110,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import uuid
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -248,11 +249,14 @@ def test_the_channel_round_trips_correctly_against_a_real_daemon(live_backend: d
       `_expected_decisions()`, which never flips.
 
     `none` (the default): all three hold, and the test passes outright."""
-    handle = live_backend.prepare("a-live-conformance-000000001")
-    assert isinstance(handle, d._Handle)
-    if BREAK_MODE != "omit-mount":
-        assert handle.trigger_channel is not None
+    # Per-run suffix, and the setup asserts inside the `try` (#355): a fixed
+    # name plus an assert before the `try` leaked the container on failure,
+    # and the leak failed every later run on a name `Conflict`.
+    handle = live_backend.prepare(f"a-live-conformance-{uuid.uuid4().hex[:12]}")
     try:
+        assert isinstance(handle, d._Handle)
+        if BREAK_MODE != "omit-mount":
+            assert handle.trigger_channel is not None
         result = live_backend.execute(handle, ["python3", "-c", _subject_script()], Limits(timeout=15))
         assert result.reason == "exited", result.error
         _require(result.exit_code == 0, result.error or "expected a clean exit")

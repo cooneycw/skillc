@@ -1,0 +1,24 @@
+{
+  "branch": "issue-355-test-gate-overlay-live-cannot-pass-on-a-real-docke",
+  "counts": {
+    "accepted": 0,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "99e8474ef406860116525e1895658c82c44210c7",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "355",
+  "passes": 1,
+  "recorded_at": "2026-10-12T14:05:36Z",
+  "red_cases": {
+    "already_covered": 5,
+    "proposed": 5
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/12/rollout-2026-10-12T10-04-24-01a1306d-caab-70c3-b965-6566a7be7efc.jsonl",
+    "thread_id": "01a1306d-caab-70c3-b965-6566a7be7efc"
+  },
+  "schema": 1,
+  "status": "ran"
+}
