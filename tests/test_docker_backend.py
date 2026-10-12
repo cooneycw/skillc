@@ -2098,6 +2098,400 @@ def test_clean_write_probe_result_direct() -> None:
     assert naive(137, b"") is False, "the naive version should disagree with the real function here"
 
 
+# ------------------------------------------------- #338: cwd TOCTOU confinement
+
+
+def _real_dir(docker_state: Path, handle: d._Handle, *container_parts: str) -> Path:
+    """The fake CLI's own `_in_container()` convention, duplicated here
+    (not imported - that fixture is invoked as a subprocess script, never
+    as a module) so a test can plant or swap a real directory BEFORE the
+    exec that should observe it, exactly at the path `_remap_absolute`
+    will resolve the matching container-side string to."""
+    return docker_state / f"{handle.name}.fsroot" / Path(*container_parts)
+
+
+def _confined_handle(base: Path, docker_state: Path, attempt_id: str) -> tuple[d.DockerBackend, d._Handle]:
+    backend = _backend(base, docker_state)
+    handle = backend.prepare(attempt_id)
+    assert isinstance(handle, d._Handle)
+    backend.install(handle, {})
+    return backend, handle
+
+
+def _observations(backend: d.DockerBackend, handle: d._Handle) -> str:
+    with tempfile.TemporaryDirectory() as tmp:
+        backend.export(handle, Path(tmp))
+        return (Path(tmp) / "observations").read_text()
+
+
+_SUB = f"{d.CONTAINER_WORKSPACE}/trial/sub"
+
+
+def _readlink_shim(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str) -> None:
+    """Puts a `readlink` first on the PATH the fake container inherits. The
+    confining wrapper runs `readlink` exactly once, AFTER it has opened the
+    cwd as fd 9 and BEFORE it checks or moves - so `body` runs at exactly
+    that point, deterministically, with no timing race: the place a subject
+    swapping the path mid-check would have to act."""
+    shim_dir = tmp_path / "shim-bin"
+    shim_dir.mkdir()
+    real = shutil.which("readlink")
+    assert real is not None
+    shim = shim_dir / "readlink"
+    shim.write_text(f'#!/bin/sh\n{body}\nexec {real} "$@"\n')
+    shim.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{shim_dir}{os.pathsep}{os.environ['PATH']}")
+
+
+def test_exec_in_attempt_confine_root_runs_the_gate_at_the_resolved_cwd(
+    base: Path, docker_state: Path,
+) -> None:
+    """The functional happy path: the gate's own `/proc/self/cwd` (what an
+    exec'd child really inherits) is the requested directory."""
+    backend, handle = _confined_handle(base, docker_state, "a-cwd-00000000001")
+    sub = _real_dir(docker_state, handle, "work", "trial", "sub")
+    sub.mkdir(parents=True)
+
+    result = backend.exec_in_attempt(
+        handle, ["sh", "-c", "readlink /proc/self/cwd"], Limits(timeout=5.0),
+        cwd=_SUB, confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert (result.reason, result.exit_code) == ("exited", 0)
+    assert _observations(backend, handle).strip() == str(sub.resolve())
+
+
+def test_exec_in_attempt_confine_root_moves_physically_not_to_the_proc_fd_string(
+    base: Path, docker_state: Path,
+) -> None:
+    """`cd -P`, not a logical `cd`: a logical `cd /proc/self/fd/9` leaves
+    `PWD=/proc/self/fd/9` exported to the gate (red against the parked
+    wrapper, which used a plain `cd`) - a path that names nothing once the
+    fd closes, and something else entirely inside any later process."""
+    backend, handle = _confined_handle(base, docker_state, "a-cwd-00000000012")
+    sub = _real_dir(docker_state, handle, "work", "trial", "sub")
+    sub.mkdir(parents=True)
+
+    result = backend.exec_in_attempt(
+        handle, ["printenv", "PWD"], Limits(timeout=5.0), cwd=_SUB, confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert (result.reason, result.exit_code) == ("exited", 0)
+    assert _observations(backend, handle).strip() == str(sub.resolve())
+
+
+def test_exec_in_attempt_confine_root_closes_the_fd_before_the_gate_runs(
+    base: Path, docker_state: Path,
+) -> None:
+    """The confinement fd must not leak into the gate: it lives on the
+    compound command's redirection and closes when that block ends."""
+    backend, handle = _confined_handle(base, docker_state, "a-cwd-00000000002")
+    _real_dir(docker_state, handle, "work", "trial", "sub").mkdir(parents=True)
+
+    result = backend.exec_in_attempt(
+        handle, ["sh", "-c", "test -e /proc/self/fd/9 && echo LEAKED || echo CLOSED"], Limits(timeout=5.0),
+        cwd=_SUB, confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert result.exit_code == 0
+    assert _observations(backend, handle).strip() == "CLOSED"
+
+
+def test_exec_in_attempt_confine_root_refuses_a_directory_swapped_for_an_outside_symlink(
+    base: Path, docker_state: Path,
+) -> None:
+    """The deterministic red case (#338 point 3): resolve-time said the
+    directory was inside; by exec time it is a symlink to a sibling OUTSIDE
+    the root. The wrapper's one open lands on the outside target and the
+    check against the open directory refuses it."""
+    backend, handle = _confined_handle(base, docker_state, "a-cwd-00000000003")
+    outside = _real_dir(docker_state, handle, "home", "candidate", "outside")
+    outside.mkdir(parents=True)
+    sub = _real_dir(docker_state, handle, "work", "trial", "sub")
+    sub.mkdir(parents=True)
+
+    shutil.rmtree(sub)
+    sub.symlink_to(outside, target_is_directory=True)
+
+    result = backend.exec_in_attempt(
+        handle, ["sh", "-c", "touch ran-here"], Limits(timeout=5.0), cwd=_SUB, confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert (result.reason, result.exit_code) == ("launch-failed", None)
+    assert result.error == d.CWD_CONFINEMENT_REFUSED_SENTINEL
+    assert not (outside / "ran-here").exists()
+
+
+def test_exec_in_attempt_confine_root_refuses_an_ancestor_swapped_for_an_outside_symlink(
+    base: Path, docker_state: Path,
+) -> None:
+    """The issue's other named shape: not the directory itself but an
+    ANCESTOR (`trial`) replaced by a symlink, with a same-named `sub`
+    waiting on the far side."""
+    backend, handle = _confined_handle(base, docker_state, "a-cwd-00000000006")
+    outside = _real_dir(docker_state, handle, "home", "candidate", "outside")
+    (outside / "sub").mkdir(parents=True)
+    trial = _real_dir(docker_state, handle, "work", "trial")
+    (trial / "sub").mkdir(parents=True)
+
+    shutil.rmtree(trial)
+    trial.symlink_to(outside, target_is_directory=True)
+
+    result = backend.exec_in_attempt(
+        handle, ["sh", "-c", "touch ran-here"], Limits(timeout=5.0), cwd=_SUB, confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert (result.reason, result.error) == ("launch-failed", d.CWD_CONFINEMENT_REFUSED_SENTINEL)
+    assert not (outside / "sub" / "ran-here").exists()
+
+
+def test_exec_in_attempt_confine_root_uses_the_opened_directory_not_the_name(
+    base: Path, docker_state: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Correction 1: once the wrapper has opened and checked a directory,
+    a swap of the NAME must not change where the gate runs. The shim swaps
+    `sub` for an outside symlink after the open and before the check and
+    the move; the gate must still land in the original directory (now
+    `sub.orig`), never at the swapped target. Red against any wrapper that
+    goes back to the name for the move (`cd "$1"`)."""
+    outside_marker = tmp_path / "outside-target"
+    outside_marker.mkdir()
+    sub_holder = tmp_path / "sub-path.txt"
+    _readlink_shim(
+        tmp_path, monkeypatch,
+        f'sub=$(cat {sub_holder})\n'
+        f'if [ ! -e "$sub.orig" ]; then mv "$sub" "$sub.orig" && ln -s {outside_marker} "$sub"; fi',
+    )
+    backend, handle = _confined_handle(base, docker_state, "a-cwd-00000000007")
+    sub = _real_dir(docker_state, handle, "work", "trial", "sub")
+    sub.mkdir(parents=True)
+    sub_holder.write_text(str(sub))
+
+    result = backend.exec_in_attempt(
+        handle, ["sh", "-c", "touch ran-here; readlink /proc/self/cwd"], Limits(timeout=5.0),
+        cwd=_SUB, confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert sub.is_symlink(), "the shim must actually have swapped the name, or this test proves nothing"
+    assert (result.reason, result.exit_code) == ("exited", 0)
+    assert not (outside_marker / "ran-here").exists()
+    assert (Path(f"{sub}.orig") / "ran-here").exists()
+    assert _observations(backend, handle).strip() == str(sub.parent.resolve() / "sub.orig")
+
+
+def test_exec_in_attempt_without_confine_root_follows_the_swapped_symlink(
+    base: Path, docker_state: Path,
+) -> None:
+    """The vulnerability itself, on the unchanged `cwd`-only path (`docker
+    exec -w`): the identical swap the refusal test above refuses is
+    silently FOLLOWED here, landing the gate outside the workspace root."""
+    backend, handle = _confined_handle(base, docker_state, "a-cwd-00000000004")
+    workspace_root = _real_dir(docker_state, handle, "work")
+    outside = _real_dir(docker_state, handle, "home", "candidate", "outside")
+    outside.mkdir(parents=True)
+    sub = workspace_root / "trial" / "sub"
+    sub.mkdir(parents=True)
+
+    shutil.rmtree(sub)
+    sub.symlink_to(outside, target_is_directory=True)
+
+    result = backend.exec_in_attempt(
+        handle, ["sh", "-c", "readlink -f /proc/self/cwd"], Limits(timeout=5.0), cwd=_SUB,
+    )
+    assert (result.reason, result.exit_code) == ("exited", 0)
+    reported_cwd = _observations(backend, handle).strip()
+    assert reported_cwd == str(outside.resolve())
+    assert not reported_cwd.startswith(str(workspace_root.resolve()))
+
+
+def test_exec_in_attempt_confine_root_refuses_a_sibling_named_root_plus_newline(
+    base: Path, docker_state: Path,
+) -> None:
+    """Command substitution strips trailing newlines, so a check that
+    compared `$(readlink ...)` directly would read a sibling directory
+    named "<root>\\n" as the root itself. The wrapper keeps the newline
+    (a trailing `.` sentinel), so that sibling - outside the root - is
+    refused."""
+    backend, handle = _confined_handle(base, docker_state, "a-cwd-00000000014")
+    _real_dir(docker_state, handle, "work", "trial").mkdir(parents=True)
+    sibling = _real_dir(docker_state, handle, "work", "trial\n")
+    sibling.mkdir()
+
+    result = backend.exec_in_attempt(
+        handle, ["sh", "-c", "touch ran-here"], Limits(timeout=5.0),
+        cwd=f"{d.CONTAINER_WORKSPACE}/trial\n", confine_root=f"{d.CONTAINER_WORKSPACE}/trial",
+    )
+    assert (result.reason, result.error) == ("launch-failed", d.CWD_CONFINEMENT_REFUSED_SENTINEL)
+    assert not (sibling / "ran-here").exists()
+
+
+@pytest.mark.parametrize("shape", ["missing", "regular-file"])
+def test_exec_in_attempt_confine_root_refuses_a_cwd_that_is_not_a_directory(
+    base: Path, docker_state: Path, shape: str,
+) -> None:
+    """Gone, or a regular file where a directory was: the open (missing) or
+    the physical `cd` (file) fails, and both refuse exactly like an
+    outside-root swap - with only the wrapper's record on stderr, dash's
+    own "cannot open" diagnostic never reaching the caller."""
+    backend, handle = _confined_handle(base, docker_state, "a-cwd-00000000005")
+    trial = _real_dir(docker_state, handle, "work", "trial")
+    trial.mkdir(parents=True)
+    if shape == "regular-file":
+        (trial / "sub").write_text("not a directory\n")
+
+    result = backend.exec_in_attempt(
+        handle, ["sh", "-c", "echo should-not-run"], Limits(timeout=5.0), cwd=_SUB, confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert (result.reason, result.exit_code) == ("launch-failed", None)
+    assert result.error == d.CWD_CONFINEMENT_REFUSED_SENTINEL
+
+
+def test_exec_in_attempt_confine_root_keeps_stdin_env_exit_and_output(
+    base: Path, docker_state: Path,
+) -> None:
+    """Correction 4, non-racing: confinement changes where the gate starts
+    and nothing else. stdin reaches it, `env` replaces its environment,
+    stdout is captured, its own non-zero exit and stderr are reported as
+    the gate's - with the wrapper's status record removed from that
+    stderr."""
+    backend, handle = _confined_handle(base, docker_state, "a-cwd-00000000008")
+    _real_dir(docker_state, handle, "work", "trial", "sub").mkdir(parents=True)
+
+    result = backend.exec_in_attempt(
+        handle,
+        ["sh", "-c", 'read line; printf "%s|%s|%s\\n" "$line" "$GATE_VAR" "${PATH:-unset}"; echo gate-err >&2; exit 7'],
+        Limits(timeout=5.0), stdin=b"from-stdin\n", cwd=_SUB, confine_root=d.CONTAINER_WORKSPACE,
+        env={"GATE_VAR": "declared", "PATH": "/usr/bin:/bin"},
+    )
+    assert (result.reason, result.exit_code) == ("exited", 7)
+    assert result.error == "gate-err"
+    assert _observations(backend, handle) == "from-stdin|declared|/usr/bin:/bin\n"
+
+
+def test_exec_in_attempt_confine_root_gate_printing_a_refusal_is_still_the_gates_result(
+    base: Path, docker_state: Path,
+) -> None:
+    """Correction 2's red case: a gate that prints the refusal record AND
+    the refusal sentinel and exits 125 - the wrapper's own refusal code -
+    ran, and must be reported as having run. Red against the parked
+    implementation, which matched the sentinel anywhere in stderr and
+    returned `launch-failed` for this."""
+    backend, handle = _confined_handle(base, docker_state, "a-cwd-00000000009")
+    _real_dir(docker_state, handle, "work", "trial", "sub").mkdir(parents=True)
+    spoof = d.CWD_CONFINEMENT_REFUSED_RECORD.decode().strip()
+
+    result = backend.exec_in_attempt(
+        handle,
+        ["sh", "-c", f"echo {spoof} >&2; echo {d.CWD_CONFINEMENT_REFUSED_SENTINEL} >&2; touch ran; exit 125"],
+        Limits(timeout=5.0), cwd=_SUB, confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert (result.reason, result.exit_code) == ("exited", 125)
+    assert result.error == f"{spoof}\n{d.CWD_CONFINEMENT_REFUSED_SENTINEL}"
+    assert (_real_dir(docker_state, handle, "work", "trial", "sub") / "ran").exists()
+
+
+def test_exec_in_attempt_confine_root_status_survives_a_zero_stderr_cap(
+    base: Path, docker_state: Path,
+) -> None:
+    """The status record is captured apart from the gate's retained stderr,
+    so a cap of 0 cannot cost a refusal - and the gate's own capped stderr
+    still reports its truncation against the gate's bytes alone."""
+    backend, handle = _confined_handle(base, docker_state, "a-cwd-00000000010")
+    _real_dir(docker_state, handle, "work", "trial", "sub").mkdir(parents=True)
+
+    refused = backend.exec_in_attempt(
+        handle, ["true"], Limits(timeout=5.0, max_captured_stderr_bytes=0),
+        cwd=f"{d.CONTAINER_WORKSPACE}/missing", confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert (refused.reason, refused.error) == ("launch-failed", d.CWD_CONFINEMENT_REFUSED_SENTINEL)
+
+    capped = backend.exec_in_attempt(
+        handle, ["sh", "-c", "printf 0123456789 >&2; exit 3"], Limits(timeout=5.0, max_captured_stderr_bytes=4),
+        cwd=_SUB, confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert (capped.reason, capped.exit_code) == ("exited", 3)
+    assert capped.error == "0123 (truncated, 10 bytes total)"
+
+
+def test_exec_in_attempt_confine_root_missing_status_is_neither_refusal_nor_a_run(
+    base: Path, docker_state: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A wrapper that dies before writing any status record (here: killed
+    from inside its own check) leaves the call with no evidence either way
+    from the wrapper - reported as not started, but as MISSING status,
+    never as the refusal and never as a gate result."""
+    # Kill the OUTERMOST `sh` ancestor running the confining script - the
+    # wrapper itself, not a `$(...)` subshell copy of it, whichever way
+    # the shell happens to fork.
+    _readlink_shim(
+        tmp_path, monkeypatch,
+        'pid=$PPID; target=\n'
+        'while [ "$pid" -gt 1 ]; do\n'
+        '  if [ "$(cat /proc/$pid/comm)" = sh ] && tr "\\0" " " </proc/$pid/cmdline | grep -q skillc-cwd-confinement; then\n'
+        '    target=$pid\n'
+        '  fi\n'
+        '  pid=$(cut -d" " -f4 /proc/$pid/stat)\n'
+        'done\n'
+        'kill -9 "$target"',
+    )
+    backend, handle = _confined_handle(base, docker_state, "a-cwd-00000000011")
+    _real_dir(docker_state, handle, "work", "trial", "sub").mkdir(parents=True)
+
+    result = backend.exec_in_attempt(
+        handle, ["sh", "-c", "touch ran"], Limits(timeout=5.0), cwd=_SUB, confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert (result.reason, result.exit_code) == ("launch-failed", None)
+    assert result.error == d.CWD_CONFINEMENT_STATUS_MISSING
+    assert not (_real_dir(docker_state, handle, "work", "trial", "sub") / "ran").exists()
+
+
+def test_exec_in_attempt_timeout_under_confinement_still_confirms_the_stop(
+    base: Path, docker_state: Path,
+) -> None:
+    """Correction 4: a confined gate that hangs is still a timeout, its
+    in-container process still confirmed stopped - the status record does
+    not turn an interrupted run into anything else."""
+    backend, handle = _confined_handle(base, docker_state, "a-cwd-00000000013")
+    _real_dir(docker_state, handle, "work", "trial", "sub").mkdir(parents=True)
+
+    result = backend.exec_in_attempt(
+        handle, ["sleep", "30"], Limits(timeout=0.5, grace=1.0), cwd=_SUB, confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert result.reason == "timeout"
+    assert result.stop_confirmed is True
+
+
+def _status_of(payload: bytes, cap: int = 1_000_000) -> tuple[str, bytes, int]:
+    read_fd, write_fd = os.pipe()
+    drain = d._BoundedDrain(os.fdopen(read_fd, "rb"), cap, d.CWD_CONFINEMENT_RECORD_MAX)
+    os.write(write_fd, payload)
+    os.close(write_fd)
+    drain.run()
+    return d._confinement_status(drain), drain.captured_bytes(), drain.total_bytes
+
+
+@pytest.mark.parametrize(
+    ("payload", "status", "captured"),
+    [
+        (d.CWD_CONFINEMENT_READY_RECORD + b"gate-err\n", "ready", b"gate-err\n"),
+        (d.CWD_CONFINEMENT_REFUSED_RECORD, "refused", b""),
+        (b"", "missing", b""),
+        (b"skillc-cwd-confinement:rea", "invalid", b""),  # cut short at EOF
+        (b"Error response from daemon: boom\n" + d.CWD_CONFINEMENT_REFUSED_RECORD, "invalid",
+         d.CWD_CONFINEMENT_REFUSED_RECORD),  # something else came first
+        (b"x" * 200, "invalid", b"x" * (200 - d.CWD_CONFINEMENT_RECORD_MAX)),  # no newline within the bound
+        (d.CWD_CONFINEMENT_READY_RECORD[:-1] + b" \n", "invalid", b""),  # near miss is not a match
+    ],
+    ids=["ready", "refused", "empty", "partial", "other-text-first", "overlong", "near-miss"],
+)
+def test_confinement_status_reads_only_an_exact_bounded_leading_record(
+    payload: bytes, status: str, captured: bytes,
+) -> None:
+    got_status, got_captured, total = _status_of(payload)
+    assert got_status == status
+    assert got_captured == captured
+    assert total == len(captured), "the record is never counted as the gate's output"
+
+
+def test_bounded_drain_status_record_is_outside_the_retention_cap() -> None:
+    status, captured, total = _status_of(d.CWD_CONFINEMENT_READY_RECORD + b"abcdef", cap=2)
+    assert (status, captured, total) == ("ready", b"ab", 6)
+
+
 # ---------------------------------------------------- remove_file_in_attempt
 
 

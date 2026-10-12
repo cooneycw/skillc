@@ -63,17 +63,23 @@ class _FakeBackend:
     realpaths: dict[str, str | None] = field(default_factory=dict)
     cwd_calls: list[str | None] = field(default_factory=list)
     env_calls: list[Mapping[str, str] | None] = field(default_factory=list)
+    #: #338: every `_decide_run_gate()` call now passes `confine_root` -
+    #: recorded so a test can assert GateWitness forwards it rather than
+    #: trusting its own earlier resolve alone.
+    confine_root_calls: list[str | None] = field(default_factory=list)
     _last_stdout: str = ""
 
     def exec_in_attempt(
         self, handle: object, argv: Sequence[str], limits: Limits,
         cancel: object = None, stdin: object = None,
         cwd: str | None = None, env: Mapping[str, str] | None = None,
+        confine_root: str | None = None,
     ) -> ExecuteResult:
         key = tuple(argv)
         self.calls.append(key)
         self.cwd_calls.append(cwd)
         self.env_calls.append(env)
+        self.confine_root_calls.append(confine_root)
         if key in self.block:
             time.sleep(3600)
         self._last_stdout = self.stdout.get(key, "")
@@ -335,6 +341,9 @@ def test_a_cwd_resolving_inside_the_workspace_root_is_confined_and_forwarded() -
     )
     witness.decide({"op": "run_gate", "gate": "lint", "cwd": "./sub"})
     assert backend.cwd_calls == ["/work/attempt-1/sub"]
+    # #338: the early resolve above is not the boundary - the exec itself
+    # must be told the root, so it can check the directory it opens.
+    assert backend.confine_root_calls == ["/work"]
 
 
 def test_no_cwd_requested_forwards_none_unchanged() -> None:
@@ -348,6 +357,7 @@ def test_no_cwd_requested_forwards_none_unchanged() -> None:
     )
     witness.decide({"op": "run_gate", "gate": "lint"})
     assert backend.cwd_calls == [None]
+    assert backend.confine_root_calls == ["/work"]  # inert without a cwd, but never dropped
 
 
 # ------------------------------------------------------------ #332: per-gate env
@@ -464,7 +474,7 @@ def test_an_execute_exception_leaves_the_run_not_started_and_clears_in_flight() 
 
     def boom(
         handle: object, argv: Sequence[str], limits: Limits, cancel: object = None, stdin: object = None,
-        cwd: str | None = None, env: Mapping[str, str] | None = None,
+        cwd: str | None = None, env: Mapping[str, str] | None = None, confine_root: str | None = None,
     ) -> ExecuteResult:
         raise RuntimeError("simulated backend crash")
 
@@ -491,12 +501,12 @@ def test_a_rerun_is_still_possible_after_an_exception() -> None:
 
     def flaky(
         handle: object, argv: Sequence[str], limits: Limits, cancel: object = None, stdin: object = None,
-        cwd: str | None = None, env: Mapping[str, str] | None = None,
+        cwd: str | None = None, env: Mapping[str, str] | None = None, confine_root: str | None = None,
     ) -> ExecuteResult:
         calls["n"] += 1
         if calls["n"] == 1:
             raise RuntimeError("simulated backend crash")
-        return real_exec(handle, argv, limits, cancel, stdin, cwd, env)
+        return real_exec(handle, argv, limits, cancel, stdin, cwd, env, confine_root)
 
     backend.exec_in_attempt = flaky  # type: ignore[method-assign]
     witness = GateWitness(

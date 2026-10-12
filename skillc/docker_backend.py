@@ -200,6 +200,30 @@ CONTAINER_HOME = "/home/candidate"
 #: probe confirms it is actually there.
 SKILLC_WRAP_PATH = "/usr/local/bin/skillc-wrap"
 
+#: #338: the wrapper-owned status record `exec_in_attempt()`'s confining
+#: wrapper writes as the FIRST bytes of its stderr - `READY` immediately
+#: before it execs the real argv, `REFUSED` instead when the cwd check
+#: fails. Nothing else can write to that stderr before the record: the
+#: check's own diagnostics (dash's "cannot open ...", `readlink`'s, `cd`'s)
+#: go to /dev/null, and the gate has not been exec'd yet. The Python side
+#: reads only that LEADING record, through a slot separate from the gate's
+#: own retained stderr (`_BoundedDrain`'s `status_record_max`), so a gate
+#: that prints either line itself is just printing output, never status.
+CWD_CONFINEMENT_READY_RECORD = b"skillc-cwd-confinement:ready\n"
+CWD_CONFINEMENT_REFUSED_RECORD = b"skillc-cwd-confinement:refused\n"
+#: The bound on that leading record: a line longer than this, or no line
+#: at all, is an invalid status, never something read further into the
+#: stream looking for one.
+CWD_CONFINEMENT_RECORD_MAX = 64
+
+#: `ExecuteResult.error` for each way a confining exec can end without the
+#: gate having been exec'd: the check refused the cwd, or the status record
+#: was missing or malformed (the wrapper never reached its READY write, so
+#: the gate never ran - but nothing confirmed a refusal either).
+CWD_CONFINEMENT_REFUSED_SENTINEL = "skillc-cwd-confinement-refused"
+CWD_CONFINEMENT_STATUS_MISSING = "skillc-cwd-confinement-status-missing"
+CWD_CONFINEMENT_STATUS_INVALID = "skillc-cwd-confinement-status-invalid"
+
 #: Must match skillc-supervisor.py's own default (`$SKILLC_CONTROL_SOCKET`
 #: unset). `_forwarding_available` requires this socket to exist, not only
 #: `SKILLC_WRAP_PATH`'s executable bit (review must-fix, PR #182): in THIS
@@ -659,16 +683,47 @@ class _BoundedDrain:
     the portable way to reach the same one-syscall behavior without
     narrowing that type.)"""
 
-    def __init__(self, pipe: IO[bytes], cap: int) -> None:
+    def __init__(self, pipe: IO[bytes], cap: int, status_record_max: int = 0) -> None:
         self._pipe = pipe
         self._cap = cap
         self._chunks: list[bytes] = []
         self._captured_len = 0
         self.total_bytes = 0
         self.truncated = False
+        # #338: when `status_record_max` > 0, the stream's first line (at
+        # most that many bytes, newline included) is a wrapper-owned status
+        # record, taken into `status_record` and never into the retained
+        # capture, `total_bytes` or the cap - so a gate's own retention cap
+        # (even 0) can never cost the status, and the status can never be
+        # mistaken for, or displace, the gate's own output.
+        self._status_max = status_record_max
+        self._status_buf = b""
+        self.status_record: bytes | None = None
+        self.status_overflowed = False
+
+    def _take_status(self, chunk: bytes) -> bytes:
+        """Moves leading bytes into the status slot until a newline or the
+        bound; returns whatever of `chunk` is past the record."""
+        self._status_buf += chunk
+        newline = self._status_buf.find(b"\n", 0, self._status_max)
+        if newline >= 0:
+            self.status_record = self._status_buf[:newline + 1]
+            rest = self._status_buf[newline + 1:]
+        elif len(self._status_buf) >= self._status_max:
+            self.status_record = self._status_buf[:self._status_max]
+            self.status_overflowed = True
+            rest = self._status_buf[self._status_max:]
+        else:
+            return b""
+        self._status_buf = b""
+        return rest
 
     def run(self) -> None:
         while chunk := os.read(self._pipe.fileno(), 65536):
+            if self._status_max and self.status_record is None:
+                chunk = self._take_status(chunk)
+                if not chunk:
+                    continue
             self.total_bytes += len(chunk)
             if self._captured_len >= self._cap:
                 self.truncated = True
@@ -682,6 +737,25 @@ class _BoundedDrain:
 
     def captured_bytes(self) -> bytes:
         return b"".join(self._chunks)
+
+
+def _confinement_status(drain: _BoundedDrain) -> str:
+    """#338: `"ready"`, `"refused"`, `"missing"` or `"invalid"` for a
+    confining exec's stderr drain. Only an EXACT leading record counts:
+    an empty stream is `"missing"`; anything else - a partial line at EOF,
+    a line past `CWD_CONFINEMENT_RECORD_MAX`, a `docker exec` client error
+    that got there first, any other text - is `"invalid"`. Neither of
+    those two can be read as a refusal or as a started gate."""
+    record = drain.status_record
+    if record is None:
+        return "invalid" if drain._status_buf else "missing"
+    if drain.status_overflowed:
+        return "invalid"
+    if record == CWD_CONFINEMENT_READY_RECORD:
+        return "ready"
+    if record == CWD_CONFINEMENT_REFUSED_RECORD:
+        return "refused"
+    return "invalid"
 
 
 class HomeTreeTooLarge(Exception):
@@ -1448,6 +1522,7 @@ class DockerBackend:
         self, handle: _Handle, argv: Sequence[str], limits: Limits,
         cancel: Callable[[], bool] | None, stdin: bytes | None, *, prefix_wrap: bool,
         after_launch: Callable[[], None] | None = None, cwd: str | None = None,
+        stderr_status_record_max: int = 0,
     ) -> tuple[subprocess.Popen[bytes], _BoundedDrain, _BoundedDrain, threading.Thread, threading.Thread, str] | ExecuteResult:
         """Shared `docker exec` launch-drain-wait mechanics for `execute()`
         and `exec_in_attempt()` (#269) - everything up to, but NOT
@@ -1470,7 +1545,12 @@ class DockerBackend:
         `CONTAINER_WORKSPACE` working directory via `docker exec`'s own
         `-w` - `execute()` never passes this and keeps the default;
         `exec_in_attempt()`'s own docstring states the confinement a
-        caller must apply before passing one through here."""
+        caller must apply before passing one through here.
+
+        `stderr_status_record_max` (#338) is passed straight to the stderr
+        drain's `status_record_max` - only `exec_in_attempt()`'s confining
+        wrapper writes a leading status record, so every other caller
+        leaves it 0 and its stderr capture is unchanged."""
         exec_argv = [*self.docker_bin, "exec"]
         if stdin is not None:
             exec_argv.append("-i")
@@ -1498,7 +1578,7 @@ class DockerBackend:
         stdout_thread.start()
 
         assert proc.stderr is not None
-        stderr_drain = _BoundedDrain(proc.stderr, limits.max_captured_stderr_bytes)
+        stderr_drain = _BoundedDrain(proc.stderr, limits.max_captured_stderr_bytes, stderr_status_record_max)
         stderr_thread = threading.Thread(target=stderr_drain.run, daemon=True)
         stderr_thread.start()
 
@@ -1812,6 +1892,7 @@ class DockerBackend:
         self, handle: object, argv: Sequence[str], limits: Limits,
         cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,
         cwd: str | None = None, env: Mapping[str, str] | None = None,
+        confine_root: str | None = None,
     ) -> ExecuteResult:
         """Run `argv` inside the attempt's ALREADY-RUNNING container via a
         bare `docker exec`, WITHOUT ever stopping or removing it - added for
@@ -1880,15 +1961,77 @@ class DockerBackend:
         rather than waiting on a client whose remote session may outlive
         it.
 
-        `cwd` (#332 follow-up) sets `docker exec -w`, native support rather
-        than a shell `cd` - this method does not validate it; a caller
-        exposing `cwd` to anything the subject influences must confine it
-        (realpath-resolve inside the container, e.g. via
-        `_resolve_realpath_in_attempt()`, and check the result against a
-        known root) BEFORE calling this, exactly as `gate_witness.py`'s
-        `_decide_run_gate()` does for a subject-forwarded gate cwd - an
-        unconfined cwd here would let a caller run the (still
-        controller-chosen) argv against an arbitrary path.
+        `cwd` alone (no `confine_root`) sets `docker exec -w`, native
+        support rather than a shell `cd` - this method does not validate
+        it, so a caller exposing `cwd` to anything the subject influences
+        must confine it first (realpath-resolve inside the container, e.g.
+        via `resolve_realpath_in_attempt()`, and check the result against a
+        known root). This path is unchanged since #332 and stays the right
+        one for a `cwd` the subject never influences at all.
+
+        `cwd` WITH `confine_root` (#338) is for exactly the case the
+        paragraph above warns about: a `cwd` the subject can influence.
+        `gate_witness.py`'s `_decide_run_gate()` already resolves and
+        root-checks a subject-forwarded cwd via `_confine_requested_cwd()`
+        before calling here - but that check and this call are two
+        SEPARATE `docker exec`s, separated by real wall-clock time (lock
+        acquisition, `tree_digest_fn()`), during which the subject (same
+        container, owns the whole workspace tree) can swap an ancestor of
+        the already-resolved path for a symlink pointing outside the root.
+        `docker exec -w` re-resolves the path STRING fresh at the moment
+        IT runs, with no binding to the directory `_confine_requested_cwd`
+        actually observed - so passing its resolved string straight
+        through as plain `cwd` would carry the gap forward unfixed.
+
+        So when `confine_root` is given, this method does NOT pass `cwd`
+        to `docker exec -w` at all. Instead the wrapped argv opens `cwd`
+        ONCE, as fd 9, and from then on uses only that fd, never the name:
+        the check reads the kernel's own path for the open directory
+        (`readlink /proc/self/fd/9` - deliberately NOT `readlink -f`, which
+        would take that answer and walk it again by name), compares it with
+        `confine_root` (equal, or strictly below it), and the move is a
+        physical `cd -P /proc/self/fd/9` - a chdir to the directory fd 9
+        holds, so `$PWD` and the gate's real cwd are that directory's real
+        path, never the `/proc/self/fd/9` string a logical `cd` would leave
+        behind. The fd lives on a compound command (`{ ...; } 9<"$1"`),
+        never a bare `exec 9<"$1"` (dash treats `exec`'s own redirection
+        failure as fatal to the whole non-interactive shell, so a missing
+        cwd could not be refused cleanly), and closes when that block ends,
+        so the gate never inherits it.
+
+        What this guarantees, and what it does not. The directory the gate
+        starts in IS the directory the check examined, and at the moment of
+        the check that directory's own path was `confine_root` or below it.
+        It does NOT guarantee the directory stays below `confine_root`: a
+        subject who can rename it (or an ancestor) can move the open
+        directory itself elsewhere - between the check and the `cd`, or at
+        any time while the gate runs - and the gate's cwd moves with it,
+        because a held directory follows the directory, not the path. In
+        this backend's actual shape the workspace is the container's own
+        writable layer, so such a move stays inside the same container;
+        closing it fully needs a tree the subject cannot rename, which is
+        a placement change, not something one exec can do.
+        `_confine_requested_cwd` itself is NOT redundant: it is a cheap,
+        non-load-bearing early rejection (a fast error for an obviously
+        wrong cwd, before any exec is built at all).
+
+        STATUS comes from the wrapper, never from the gate. The wrapper's
+        first stderr bytes are one fixed record (`CWD_CONFINEMENT_READY_
+        RECORD` immediately before it execs the real argv - and it execs
+        only if that write succeeded - or `CWD_CONFINEMENT_REFUSED_RECORD`
+        instead, then exit 125), and the stderr drain takes that leading
+        record into its own bounded slot, outside the gate's retained
+        stderr and its cap. So: READY means the result is the gate's own,
+        its stderr excluding the record and its exit code untouched -
+        including a gate that itself exits 125 or prints either record.
+        REFUSED (with exit 125) is `reason="launch-failed"`,
+        `error=CWD_CONFINEMENT_REFUSED_SENTINEL`. A missing or malformed
+        record is also `"launch-failed"` (the gate is exec'd only after
+        READY is written, so without it the gate never ran), with
+        `CWD_CONFINEMENT_STATUS_MISSING`/`_INVALID` as `error` - never the
+        refusal, and never a gate result. A timeout or cancel keeps its own
+        reason whatever the record says: those already mean "not a
+        complete run" and still need the in-container stop confirmation.
 
         `env`, when given, runs the wrapped argv under `env -i <env
         pairs>`, replacing the exec'd process's whole environment rather
@@ -1906,18 +2049,55 @@ class DockerBackend:
             return ExecuteResult(reason="attempt-not-running", exit_code=None)
 
         marker_path = f"{CONTAINER_WORKSPACE}/.skillc-exec-pid-{uuid.uuid4().hex}"
+        confining = cwd is not None and confine_root is not None
+        # #338: open `$1` ONCE as fd 9, then use only the fd - see the
+        # docstring for the guarantee and its limit. `readlink` without
+        # `-f` is the kernel's own path for the open directory; `-f` would
+        # walk that string again by name. The trailing `.` keeps command
+        # substitution from stripping newlines out of the path itself, so
+        # a directory named "<root>\n" cannot compare equal to "<root>".
+        # The whole check's stderr goes to /dev/null - dash's own "cannot
+        # open" diagnostic included - so the status record below is the
+        # first thing on this exec's stderr, whatever happens.
+        confinement_check = (
+            "NL='\n'\n"
+            'if { {\n'
+            '  REAL=$(readlink /proc/self/fd/9 && echo .) &&\n'
+            '  case "$REAL" in\n'
+            '    "$2$NL.") ;;\n'
+            '    "$2"/*"$NL.") ;;\n'
+            '    *) false ;;\n'
+            '  esac &&\n'
+            '  cd -P /proc/self/fd/9\n'
+            '} 9<"$1"; } 2>/dev/null\n'
+            'then\n'
+            '  shift 2\n'
+            f"  printf '{CWD_CONFINEMENT_READY_RECORD.decode()[:-1]}\\n' >&2 || exit 125\n"
+            'else\n'
+            f"  printf '{CWD_CONFINEMENT_REFUSED_RECORD.decode()[:-1]}\\n' >&2\n"
+            '  exit 125\n'
+            'fi\n'
+        ) if confining else ""
         if env is not None:
             env_pairs = [f"{k}={v}" for k, v in env.items()]
-            wrapped_argv = ["sh", "-c", f'echo $$ > {marker_path}; exec env -i "$@"', "sh", *env_pairs, *argv]
+            script = f'{confinement_check}echo $$ > {marker_path}; exec env -i "$@"'
+            positional = [cwd, confine_root, *env_pairs, *argv] if confining else [*env_pairs, *argv]
         else:
-            wrapped_argv = ["sh", "-c", f'echo $$ > {marker_path}; exec "$@"', "sh", *argv]
+            script = f'{confinement_check}echo $$ > {marker_path}; exec "$@"'
+            positional = [cwd, confine_root, *argv] if confining else [*argv]
+        wrapped_argv = ["sh", "-c", script, "sh", *positional]
         in_container_pid: list[int | None] = [None]
 
         def _capture_pid() -> None:
             in_container_pid[0] = self._read_in_container_pid(handle, marker_path)
 
+        # Once `confining`, the outer `docker exec -w` stays at its default:
+        # passing `cwd` there too would be one more resolution of the path
+        # string, the thing this fix stops trusting.
         launched = self._launch_and_wait(
-            handle, wrapped_argv, limits, cancel, stdin, prefix_wrap=False, after_launch=_capture_pid, cwd=cwd,
+            handle, wrapped_argv, limits, cancel, stdin, prefix_wrap=False, after_launch=_capture_pid,
+            cwd=None if confining else cwd,
+            stderr_status_record_max=CWD_CONFINEMENT_RECORD_MAX if confining else 0,
         )
         if isinstance(launched, ExecuteResult):
             return launched  # launch-failed, built by _launch_and_wait itself
@@ -1951,9 +2131,26 @@ class DockerBackend:
         else:
             proc.wait()
 
-        return self._finish_result(
+        result = self._finish_result(
             handle, proc, stdout_drain, stderr_drain, stdout_thread, stderr_thread,
             limits, reason, signal_name=None, term_forwarding=None, stop_confirmed=stop_confirmed,
+        )
+        if not confining or result.reason != "exited":
+            return result
+        # #338: the wrapper's leading record, never the gate's output or its
+        # exit code, says whether the gate was exec'd at all.
+        status = _confinement_status(stderr_drain)
+        if status == "ready":
+            return result
+        if status == "refused" and result.exit_code == 125:
+            error = CWD_CONFINEMENT_REFUSED_SENTINEL
+        elif status == "missing":
+            error = CWD_CONFINEMENT_STATUS_MISSING
+        else:
+            error = CWD_CONFINEMENT_STATUS_INVALID
+        return ExecuteResult(
+            reason="launch-failed", exit_code=None, error=error,
+            stdout_incomplete=result.stdout_incomplete, stderr_incomplete=result.stderr_incomplete,
         )
 
     def resolve_realpath_in_attempt(self, handle: object, path: str, timeout: float = 2.0) -> str | None:

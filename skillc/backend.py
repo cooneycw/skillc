@@ -353,6 +353,7 @@ class ExecutionBackend(Protocol):
         self, handle: object, argv: Sequence[str], limits: Limits,
         cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,
         cwd: str | None = None, env: Mapping[str, str] | None = None,
+        confine_root: str | None = None,
     ) -> ExecuteResult:
         """Run `argv` inside the SAME running isolation `handle` already
         identifies, WITHOUT stopping or removing it - added for #269's
@@ -392,7 +393,27 @@ class ExecutionBackend(Protocol):
           byte-identity claim against a declared, reproducible environment.
           A backend that cannot honour either must say so through
           `describe()`'s `unobserved`, matching `stdin`'s own convention,
-          never silently ignore them."""
+          never silently ignore them.
+
+        `confine_root` (#338), given alongside `cwd`, closes the TOCTOU an
+        earlier `resolve_realpath_in_attempt()` check cannot: that check
+        and this call are two separate operations with real time between
+        them, during which a subject who owns the isolation's own tree can
+        swap an ancestor of the already-resolved `cwd` for something
+        outside this root. A backend honouring `confine_root` opens `cwd`
+        once, inside the SAME operation that then uses it, checks the
+        directory it actually opened against this root, and starts `argv`
+        in THAT directory - never re-resolving the name - refusing
+        (`reason="launch-failed"`) rather than silently falling back to an
+        unconfined `cwd` if it cannot. The guarantee is about identity at
+        the check, not ancestry forever: a subject that can rename the
+        opened directory can still move it out from under the root, and
+        the running `argv`'s cwd moves with it. Whether `argv` was started
+        must come from a status channel the backend owns, never from
+        anything `argv` itself can print. A backend that does not
+        implement this must say so through `describe()`'s `unobserved`,
+        exactly as for `cwd`/`env` above -
+        never silently ignore it and run `cwd` unconfined regardless."""
         ...
 
     def resolve_realpath_in_attempt(self, handle: object, path: str, timeout: float = 2.0) -> str | None:

@@ -58,6 +58,42 @@ and version plan.
   pair - closing the gap this fix exists for at the harness level as well
   as the schema level.
 
+- **Close the cwd-confinement TOCTOU in `exec_in_attempt()`** (Refs #338).
+  `GateWitness._confine_requested_cwd()` resolved and root-checked a
+  subject-forwarded `cwd` in one `docker exec`, then a later, separate
+  `docker exec -w <that string>` used it - with real time between them in
+  which the subject, who owns the workspace tree, could swap the directory
+  or an ancestor for a symlink pointing outside `workspace_root`.
+  `DockerBackend.exec_in_attempt()` gains `confine_root`: given with `cwd`,
+  the wrapper opens `cwd` once as fd 9 and then uses only the fd - it
+  checks the kernel's own path for the open directory (`readlink
+  /proc/self/fd/9`, not `readlink -f`, which would walk the answer again by
+  name) against `confine_root`, and moves there physically (`cd -P
+  /proc/self/fd/9`, so the gate's `PWD` is the real path, not the
+  `/proc/self/fd/9` string). The gate's start status now comes from the
+  wrapper, not the gate: the wrapper's first stderr bytes are one fixed
+  READY or REFUSED record, which the stderr drain takes into its own
+  bounded slot, apart from the gate's retained stderr and its cap. A gate
+  that prints the refusal text or exits 125 is reported as the gate's own
+  result; REFUSED is `launch-failed`; a missing or malformed record is
+  `launch-failed` with its own error, never a refusal and never a gate
+  result. `GateWitness._decide_run_gate()` passes `confine_root`, and its
+  early resolve is no longer the boundary. Limit, documented: the gate
+  starts in the directory that was checked, but a subject that can rename
+  that directory (or an ancestor) can still move it out from under the
+  root after the check, and the gate's cwd moves with it.
+  Evidence: deterministic fake-CLI tests for a directory swap, an ancestor
+  swap, a name swap after the open (the gate still lands in the opened
+  directory), a missing or non-directory cwd, a sibling named "root plus
+  newline", stdin/env/exit/output, a spoofed refusal, a zero stderr cap, a
+  missing status record and a timeout; each protection mutation-checked
+  red. `tests/test_cwd_confinement_live.py` repeats the swap on a real
+  daemon with a target genuinely outside `/work` (an earlier draft's
+  "outside" target was inside it), set up with the candidate's own
+  permissions; its `confine-root-omitted` break mode shows the real `-w`
+  following the swap. The real-Docker floor entry for that file is
+  deferred to a follow-up until the runner change lands.
+
 - **Replace every private mailbox-message citation in #334's own files with
   durable phrasing** (Refs #334, #100). `tests/test_private_citations.py`
   (issue #100's own CI guard) refused 50 citations of the form "mailbox
