@@ -1,0 +1,35 @@
+# Appended to the byte-identical tracked trial Dockerfile by build.py.
+# Same build graph, interpreter and inherited PATH as the final runtime.
+FROM trial AS profile-runtime-cache
+USER root
+WORKDIR /tmp/runtime-supply
+COPY metadata/ ./metadata/
+COPY runtime-policy.json runtime-build.py ./
+# Build-time downloads are intentional. Never inherit the runtime offline flag
+# while populating the cache, and never download a different Python interpreter.
+RUN UV_CACHE_DIR=/tmp/dependency-cache UV_PYTHON_DOWNLOADS=never UV_LINK_MODE=copy \
+    uv sync --locked --no-install-project --python /usr/bin/python3 --project ./metadata \
+    && /usr/bin/python3 runtime-build.py --write-descriptor /tmp/runtime-supply
+
+FROM trial AS profile-runtime-empty-cache
+USER root
+WORKDIR /work
+@RUNTIME_ENV@
+COPY --from=profile-runtime-cache /tmp/runtime-supply/runtime-supply.json /usr/local/share/skillc/runtime-supply.json
+RUN chmod 755 /usr/local /usr/local/share /usr/local/share/skillc \
+    && chmod 644 /usr/local/share/skillc/runtime-supply.json \
+    && mkdir -p /home/candidate/.cache/uv \
+    && chown -R candidate:candidate /home/candidate/.cache
+USER candidate
+
+FROM profile-runtime-empty-cache AS profile-runtime
+USER root
+COPY --from=profile-runtime-cache --chown=candidate:candidate /tmp/dependency-cache /home/candidate/.cache/uv
+USER candidate
+
+# Explicit target only. Same complete cache, with its required writes denied.
+FROM profile-runtime AS profile-runtime-cache-permissions
+USER root
+RUN chown -R root:root /home/candidate/.cache/uv \
+    && chmod -R a-w /home/candidate/.cache/uv
+USER candidate

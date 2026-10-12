@@ -1,0 +1,94 @@
+[
+  {
+    "error": "uv.lock digest",
+    "name": "missing-lock",
+    "op": "delete",
+    "path": "tests/fixtures/profile-cpp-codex-flow-check-ea6dbfa/uv.lock"
+  },
+  {
+    "error": "uv.lock digest",
+    "name": "modified-lock",
+    "op": "bytes",
+    "path": "tests/fixtures/profile-cpp-codex-flow-check-ea6dbfa/uv.lock",
+    "value": "modified"
+  },
+  {
+    "error": "pyproject.toml digest",
+    "name": "modified-pyproject",
+    "op": "bytes",
+    "path": "tests/fixtures/profile-cpp-codex-flow-check-ea6dbfa/pyproject.toml",
+    "value": "modified"
+  },
+  {
+    "error": "missing",
+    "name": "missing-subject",
+    "op": "delete",
+    "path": "evals/subjects/cpp-codex-flow-check-ea6dbfa/subject.json"
+  },
+  {
+    "error": "revision",
+    "field": [
+      "revision"
+    ],
+    "name": "wrong-subject",
+    "op": "json",
+    "path": "evals/subjects/cpp-codex-flow-check-ea6dbfa/subject.json",
+    "value": "0000000000000000000000000000000000000000"
+  },
+  {
+    "error": "revision",
+    "field": [
+      "subject",
+      "revision"
+    ],
+    "name": "wrong-inventory",
+    "op": "json",
+    "path": "evals/subjects/cpp-codex-flow-check-ea6dbfa/evidence/inventory.json",
+    "value": "0000000000000000000000000000000000000000"
+  },
+  {
+    "error": "uv pin",
+    "field": [
+      "uv",
+      "version"
+    ],
+    "name": "wrong-uv-pin",
+    "op": "json",
+    "path": "docker/trial/pinned-versions.json",
+    "value": "0.0.0"
+  },
+  {
+    "error": "missing",
+    "name": "missing-inventory",
+    "op": "delete",
+    "path": "evals/subjects/cpp-codex-flow-check-ea6dbfa/evidence/inventory.json"
+  },
+  {
+    "error": "trial stage",
+    "name": "empty-base",
+    "op": "bytes",
+    "path": "docker/trial/Dockerfile",
+    "value": ""
+  },
+  {
+    "error": "unexpected build input",
+    "name": "source-addition",
+    "op": "bytes",
+    "path": "metadata/SKILL.md",
+    "value": "source decoy"
+  },
+  {
+    "error": "unexpected build input",
+    "name": "venv-addition",
+    "op": "bytes",
+    "path": "metadata/.venv/bin/python",
+    "value": "venv decoy"
+  },
+  {
+    "error": "unexpected build input",
+    "name": "traversal",
+    "op": "bytes",
+    "path": "docker/trial/../../secret",
+    "value": "decoy"
+  }
+]

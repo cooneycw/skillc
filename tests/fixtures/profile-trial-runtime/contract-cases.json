@@ -1,0 +1,691 @@
+[
+  {
+    "contract": "policy",
+    "error": "identity",
+    "name": "revision",
+    "op": "set",
+    "path": [
+      "subject_revision"
+    ],
+    "value": "0000000000000000000000000000000000000000"
+  },
+  {
+    "contract": "policy",
+    "error": "identity",
+    "name": "pyproject",
+    "op": "set",
+    "path": [
+      "pyproject_sha256"
+    ],
+    "value": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+    "contract": "policy",
+    "error": "identity",
+    "name": "lock",
+    "op": "set",
+    "path": [
+      "lock_sha256"
+    ],
+    "value": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+    "contract": "policy",
+    "error": "fields",
+    "name": "unknown",
+    "op": "set",
+    "path": [
+      "extra"
+    ],
+    "value": "untrusted"
+  },
+  {
+    "contract": "policy",
+    "error": "fields",
+    "name": "missing",
+    "op": "delete",
+    "path": [
+      "runtime_id"
+    ],
+    "value": null
+  },
+  {
+    "contract": "policy",
+    "error": "identity",
+    "name": "boolean-schema",
+    "op": "set",
+    "path": [
+      "schema_version"
+    ],
+    "value": true
+  },
+  {
+    "contract": "policy",
+    "error": "fields",
+    "name": "empty",
+    "op": "set",
+    "path": [],
+    "value": {}
+  },
+  {
+    "contract": "descriptor",
+    "error": "identity",
+    "name": "revision",
+    "op": "set",
+    "path": [
+      "subject_revision"
+    ],
+    "value": "0000000000000000000000000000000000000000"
+  },
+  {
+    "contract": "descriptor",
+    "error": "identity",
+    "name": "pyproject",
+    "op": "set",
+    "path": [
+      "pyproject_sha256"
+    ],
+    "value": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+    "contract": "descriptor",
+    "error": "identity",
+    "name": "lock",
+    "op": "set",
+    "path": [
+      "lock_sha256"
+    ],
+    "value": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+    "contract": "descriptor",
+    "error": "fields",
+    "name": "unknown",
+    "op": "set",
+    "path": [
+      "extra"
+    ],
+    "value": "untrusted"
+  },
+  {
+    "contract": "descriptor",
+    "error": "fields",
+    "name": "missing",
+    "op": "delete",
+    "path": [
+      "runtime_id"
+    ],
+    "value": null
+  },
+  {
+    "contract": "descriptor",
+    "error": "identity",
+    "name": "boolean-schema",
+    "op": "set",
+    "path": [
+      "schema_version"
+    ],
+    "value": true
+  },
+  {
+    "contract": "descriptor",
+    "error": "fields",
+    "name": "empty",
+    "op": "set",
+    "path": [],
+    "value": {}
+  },
+  {
+    "contract": "receipt",
+    "error": "identity",
+    "name": "revision",
+    "op": "set",
+    "path": [
+      "subject_revision"
+    ],
+    "value": "0000000000000000000000000000000000000000"
+  },
+  {
+    "contract": "receipt",
+    "error": "identity",
+    "name": "pyproject",
+    "op": "set",
+    "path": [
+      "pyproject_sha256"
+    ],
+    "value": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+    "contract": "receipt",
+    "error": "identity",
+    "name": "lock",
+    "op": "set",
+    "path": [
+      "lock_sha256"
+    ],
+    "value": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+    "contract": "receipt",
+    "error": "fields",
+    "name": "unknown",
+    "op": "set",
+    "path": [
+      "extra"
+    ],
+    "value": "untrusted"
+  },
+  {
+    "contract": "receipt",
+    "error": "fields",
+    "name": "missing",
+    "op": "delete",
+    "path": [
+      "runtime_id"
+    ],
+    "value": null
+  },
+  {
+    "contract": "receipt",
+    "error": "identity",
+    "name": "boolean-schema",
+    "op": "set",
+    "path": [
+      "schema_version"
+    ],
+    "value": true
+  },
+  {
+    "contract": "receipt",
+    "error": "fields",
+    "name": "empty",
+    "op": "set",
+    "path": [],
+    "value": {}
+  },
+  {
+    "contract": "policy",
+    "error": "uv version",
+    "name": "uv-version",
+    "op": "set",
+    "path": [
+      "uv_version"
+    ],
+    "value": "0.0.0"
+  },
+  {
+    "contract": "policy",
+    "error": "environment|fields",
+    "name": "drop-HOME",
+    "op": "delete",
+    "path": [
+      "required_env",
+      "HOME"
+    ],
+    "value": null
+  },
+  {
+    "contract": "policy",
+    "error": "environment",
+    "name": "change-HOME",
+    "op": "set",
+    "path": [
+      "required_env",
+      "HOME"
+    ],
+    "value": "wrong"
+  },
+  {
+    "contract": "policy",
+    "error": "environment|fields",
+    "name": "drop-UV_CACHE_DIR",
+    "op": "delete",
+    "path": [
+      "required_env",
+      "UV_CACHE_DIR"
+    ],
+    "value": null
+  },
+  {
+    "contract": "policy",
+    "error": "environment",
+    "name": "change-UV_CACHE_DIR",
+    "op": "set",
+    "path": [
+      "required_env",
+      "UV_CACHE_DIR"
+    ],
+    "value": "wrong"
+  },
+  {
+    "contract": "policy",
+    "error": "environment|fields",
+    "name": "drop-UV_OFFLINE",
+    "op": "delete",
+    "path": [
+      "required_env",
+      "UV_OFFLINE"
+    ],
+    "value": null
+  },
+  {
+    "contract": "policy",
+    "error": "environment",
+    "name": "change-UV_OFFLINE",
+    "op": "set",
+    "path": [
+      "required_env",
+      "UV_OFFLINE"
+    ],
+    "value": "wrong"
+  },
+  {
+    "contract": "policy",
+    "error": "environment|fields",
+    "name": "drop-UV_LOCKED",
+    "op": "delete",
+    "path": [
+      "required_env",
+      "UV_LOCKED"
+    ],
+    "value": null
+  },
+  {
+    "contract": "policy",
+    "error": "environment",
+    "name": "change-UV_LOCKED",
+    "op": "set",
+    "path": [
+      "required_env",
+      "UV_LOCKED"
+    ],
+    "value": "wrong"
+  },
+  {
+    "contract": "policy",
+    "error": "environment|fields",
+    "name": "drop-UV_PYTHON",
+    "op": "delete",
+    "path": [
+      "required_env",
+      "UV_PYTHON"
+    ],
+    "value": null
+  },
+  {
+    "contract": "policy",
+    "error": "environment",
+    "name": "change-UV_PYTHON",
+    "op": "set",
+    "path": [
+      "required_env",
+      "UV_PYTHON"
+    ],
+    "value": "wrong"
+  },
+  {
+    "contract": "policy",
+    "error": "environment|fields",
+    "name": "drop-UV_PYTHON_DOWNLOADS",
+    "op": "delete",
+    "path": [
+      "required_env",
+      "UV_PYTHON_DOWNLOADS"
+    ],
+    "value": null
+  },
+  {
+    "contract": "policy",
+    "error": "environment",
+    "name": "change-UV_PYTHON_DOWNLOADS",
+    "op": "set",
+    "path": [
+      "required_env",
+      "UV_PYTHON_DOWNLOADS"
+    ],
+    "value": "wrong"
+  },
+  {
+    "contract": "policy",
+    "error": "environment|fields",
+    "name": "drop-UV_LINK_MODE",
+    "op": "delete",
+    "path": [
+      "required_env",
+      "UV_LINK_MODE"
+    ],
+    "value": null
+  },
+  {
+    "contract": "policy",
+    "error": "environment",
+    "name": "change-UV_LINK_MODE",
+    "op": "set",
+    "path": [
+      "required_env",
+      "UV_LINK_MODE"
+    ],
+    "value": "wrong"
+  },
+  {
+    "contract": "descriptor",
+    "error": "uv version",
+    "name": "uv-version",
+    "op": "set",
+    "path": [
+      "uv_version"
+    ],
+    "value": "0.0.0"
+  },
+  {
+    "contract": "descriptor",
+    "error": "environment|fields",
+    "name": "drop-HOME",
+    "op": "delete",
+    "path": [
+      "required_env",
+      "HOME"
+    ],
+    "value": null
+  },
+  {
+    "contract": "descriptor",
+    "error": "environment",
+    "name": "change-HOME",
+    "op": "set",
+    "path": [
+      "required_env",
+      "HOME"
+    ],
+    "value": "wrong"
+  },
+  {
+    "contract": "descriptor",
+    "error": "environment|fields",
+    "name": "drop-UV_CACHE_DIR",
+    "op": "delete",
+    "path": [
+      "required_env",
+      "UV_CACHE_DIR"
+    ],
+    "value": null
+  },
+  {
+    "contract": "descriptor",
+    "error": "environment",
+    "name": "change-UV_CACHE_DIR",
+    "op": "set",
+    "path": [
+      "required_env",
+      "UV_CACHE_DIR"
+    ],
+    "value": "wrong"
+  },
+  {
+    "contract": "descriptor",
+    "error": "environment|fields",
+    "name": "drop-UV_OFFLINE",
+    "op": "delete",
+    "path": [
+      "required_env",
+      "UV_OFFLINE"
+    ],
+    "value": null
+  },
+  {
+    "contract": "descriptor",
+    "error": "environment",
+    "name": "change-UV_OFFLINE",
+    "op": "set",
+    "path": [
+      "required_env",
+      "UV_OFFLINE"
+    ],
+    "value": "wrong"
+  },
+  {
+    "contract": "descriptor",
+    "error": "environment|fields",
+    "name": "drop-UV_LOCKED",
+    "op": "delete",
+    "path": [
+      "required_env",
+      "UV_LOCKED"
+    ],
+    "value": null
+  },
+  {
+    "contract": "descriptor",
+    "error": "environment",
+    "name": "change-UV_LOCKED",
+    "op": "set",
+    "path": [
+      "required_env",
+      "UV_LOCKED"
+    ],
+    "value": "wrong"
+  },
+  {
+    "contract": "descriptor",
+    "error": "environment|fields",
+    "name": "drop-UV_PYTHON",
+    "op": "delete",
+    "path": [
+      "required_env",
+      "UV_PYTHON"
+    ],
+    "value": null
+  },
+  {
+    "contract": "descriptor",
+    "error": "environment",
+    "name": "change-UV_PYTHON",
+    "op": "set",
+    "path": [
+      "required_env",
+      "UV_PYTHON"
+    ],
+    "value": "wrong"
+  },
+  {
+    "contract": "descriptor",
+    "error": "environment|fields",
+    "name": "drop-UV_PYTHON_DOWNLOADS",
+    "op": "delete",
+    "path": [
+      "required_env",
+      "UV_PYTHON_DOWNLOADS"
+    ],
+    "value": null
+  },
+  {
+    "contract": "descriptor",
+    "error": "environment",
+    "name": "change-UV_PYTHON_DOWNLOADS",
+    "op": "set",
+    "path": [
+      "required_env",
+      "UV_PYTHON_DOWNLOADS"
+    ],
+    "value": "wrong"
+  },
+  {
+    "contract": "descriptor",
+    "error": "environment|fields",
+    "name": "drop-UV_LINK_MODE",
+    "op": "delete",
+    "path": [
+      "required_env",
+      "UV_LINK_MODE"
+    ],
+    "value": null
+  },
+  {
+    "contract": "descriptor",
+    "error": "environment",
+    "name": "change-UV_LINK_MODE",
+    "op": "set",
+    "path": [
+      "required_env",
+      "UV_LINK_MODE"
+    ],
+    "value": "wrong"
+  },
+  {
+    "contract": "descriptor",
+    "error": "PATH",
+    "name": "relative-path",
+    "op": "set",
+    "path": [
+      "required_env",
+      "PATH"
+    ],
+    "value": "bin:/usr/bin"
+  },
+  {
+    "contract": "descriptor",
+    "error": "PATH",
+    "name": "empty-path",
+    "op": "set",
+    "path": [
+      "required_env",
+      "PATH"
+    ],
+    "value": "/bin::/usr/bin"
+  },
+  {
+    "contract": "descriptor",
+    "error": "interpreter",
+    "name": "python-command",
+    "op": "set",
+    "path": [
+      "python",
+      "executable"
+    ],
+    "value": "/tmp/python"
+  },
+  {
+    "contract": "descriptor",
+    "error": "Python",
+    "name": "old-python",
+    "op": "set",
+    "path": [
+      "python",
+      "version"
+    ],
+    "value": "3.10.0"
+  },
+  {
+    "contract": "descriptor",
+    "error": "cache tag",
+    "name": "wrong-abi",
+    "op": "set",
+    "path": [
+      "python",
+      "cache_tag"
+    ],
+    "value": "cpython-312"
+  },
+  {
+    "contract": "descriptor",
+    "error": "platform",
+    "name": "wrong-platform",
+    "op": "set",
+    "path": [
+      "python",
+      "platform"
+    ],
+    "value": "darwin"
+  },
+  {
+    "contract": "descriptor",
+    "error": "machine",
+    "name": "wrong-machine",
+    "op": "set",
+    "path": [
+      "python",
+      "machine"
+    ],
+    "value": "unknown"
+  },
+  {
+    "contract": "receipt",
+    "error": "image mismatch",
+    "name": "image",
+    "op": "set",
+    "path": [
+      "image_id"
+    ],
+    "value": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+    "contract": "receipt",
+    "error": "digest mismatch",
+    "name": "descriptor-bytes",
+    "op": "set",
+    "path": [
+      "descriptor_sha256"
+    ],
+    "value": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+    "contract": "receipt",
+    "error": "prepared recipe",
+    "name": "recipe",
+    "op": "set",
+    "path": [
+      "recipe_sha256"
+    ],
+    "value": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+    "contract": "receipt",
+    "error": "prepared base",
+    "name": "base",
+    "op": "set",
+    "path": [
+      "base_recipe_sha256"
+    ],
+    "value": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+    "contract": "receipt",
+    "error": "prepared build_context",
+    "name": "context",
+    "op": "set",
+    "path": [
+      "build_context_sha256"
+    ],
+    "value": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+    "contract": "receipt",
+    "error": "prepared source",
+    "name": "source",
+    "op": "set",
+    "path": [
+      "source_commit"
+    ],
+    "value": "0000000000000000000000000000000000000000"
+  },
+  {
+    "contract": "receipt",
+    "error": "full source",
+    "name": "short-source",
+    "op": "set",
+    "path": [
+      "source_commit"
+    ],
+    "value": "abc123"
+  },
+  {
+    "contract": "receipt",
+    "error": "target mismatch",
+    "name": "empty-cache-target",
+    "op": "set",
+    "path": [
+      "target"
+    ],
+    "value": "profile-runtime-empty-cache"
+  }
+]

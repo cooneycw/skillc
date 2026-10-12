@@ -8,6 +8,14 @@ and version plan.
 
 ## [Unreleased]
 
+- **Pinned CPP offline-runtime build preparation** (Refs #360). An optional
+  same-trial-stage image builder validates the declared CPP package metadata,
+  prepares a candidate-owned dependency cache and root-owned runtime descriptor,
+  and binds exact build inputs and observed image ID in an external receipt.
+  Committed offline controls reject pin, policy, identity and source/venv drift
+  before certification. Real consuming-path cache, permissions and baseline
+  purity acceptance remain pending; no default trial image changes.
+
 - **Live break controls credit only their targeted property** (Refs #341).
   Channel, witness, shim and cold-install checks use separate exceptions for
   independent observations. Shim cwd and environment failures no longer
