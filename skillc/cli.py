@@ -1767,7 +1767,7 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
         )
         receipt_path = args.runtime_supply_receipt
         if needs_supply and not receipt_path:
-            raise rs.Refused("supported CPP profile requires --runtime-supply-receipt")
+            raise rs.Refused("supported profile requires --runtime-supply-receipt")
         if receipt_path and not needs_supply:
             raise rs.Refused("runtime receipt supplied for an unrelated or absent profile")
         supply = rs.RuntimeSupply.from_path(Path(receipt_path)) if receipt_path else None
@@ -2531,7 +2531,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_calibration_run.add_argument("--timeout", type=float, default=30, help="per-container-call timeout, seconds")
     p_calibration_run.add_argument("--credential", help="explicit path to the client credential file")
     p_calibration_run.add_argument(
-        "--runtime-supply-receipt", help="controller-selected receipt for the supported pinned CPP runtime",
+        "--runtime-supply-receipt", help="controller-selected receipt for the supported pinned runtime",
     )
     p_calibration_run.add_argument(
         "--client-argv", default=None,

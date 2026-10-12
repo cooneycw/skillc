@@ -359,13 +359,22 @@ def test_calibration_cli_carries_the_declared_profile_to_the_attempt(
         dependencies[-1]["probes"] = [{"kind": "python-import", "modules": ["json"], "uv_project": "Work/kit"}]
         # A synthetic supported pin exercises the actual classifier with real
         # validated closures. It does not claim this fixture is CPP evidence.
-        monkeypatch.setattr(runtime_supply, "LOCATOR", SUBJECT_DICT["locator"])
-        monkeypatch.setattr(runtime_supply, "REVISION", revision)
-        monkeypatch.setattr(runtime_supply, "GATE", entrypoint)
-        monkeypatch.setattr(runtime_supply, "PROJECT", "Work/kit")
+        policy = runtime_supply.supported_policy()
+        policy.update(subject_locator=SUBJECT_DICT["locator"], subject_revision=revision,
+                      gate_entrypoint=entrypoint, project="Work/kit")
+        # Receipt validation still uses its independent package policy; replace
+        # only the selector's policy lookup in this synthetic routing fixture.
+        real_selector = runtime_supply.requires_supply
         digest = materialize.sha256_bytes(b"[project]\nname = 'kit'\n")
-        monkeypatch.setattr(runtime_supply, "METADATA", {"Work/kit/pyproject.toml":
-                                                       "sha256:" + "0" * 64 if fault == "changed-metadata" else digest})
+
+        def select_fixture(**kwargs):
+            with monkeypatch.context() as local:
+                local.setattr(runtime_supply, "supported_policy", lambda: policy)
+                local.setattr(runtime_supply, "metadata", lambda ignored: {"Work/kit/pyproject.toml":
+                             "sha256:" + "0" * 64 if fault == "changed-metadata" else digest})
+                return real_selector(**kwargs)
+
+        monkeypatch.setattr(runtime_supply, "requires_supply", select_fixture)
     _write_declaration(root / profile_name, revision, gate_entrypoint=entrypoint, dependencies=dependencies)
     inventory = p.validate(p.Profile.load(root / profile_name / "profile.json"),
                            p.GitTree(content_repo, revision))

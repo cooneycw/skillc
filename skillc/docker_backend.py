@@ -1423,13 +1423,14 @@ class DockerBackend:
              "platform=sys.platform,machine=platform.machine())))")]))
         if measured_python != declared["python"]:
             raise rs.Refused("actual Python identity differs from selected runtime")
+        policy = rs.supported_policy()
         uv = read(["uv", "--version"]).decode("utf-8", errors="strict").split()
-        if len(uv) < 2 or uv[:2] != ["uv", rs.UV_VERSION]:
+        if len(uv) < 2 or uv[:2] != ["uv", policy["uv_version"]]:
             raise rs.Refused("actual uv version differs from selected runtime")
         if verified_files:
-            if any(verified_files.get(path) != digest for path, digest in rs.METADATA.items()):
+            if any(verified_files.get(path) != digest for path, digest in rs.metadata(policy).items()):
                 raise rs.Refused("installed closure metadata does not match selected runtime")
-            project = f"{CONTAINER_HOME}/{rs.PROJECT}"
+            project = f"{CONTAINER_HOME}/{policy['project']}"
             if self.candidate_can_write_in_attempt(handle, project) is not True:
                 raise rs.Refused("selected project cannot create its candidate-owned venv")
             read(["/usr/bin/python3", "-c",

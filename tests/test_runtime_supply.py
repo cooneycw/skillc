@@ -3,6 +3,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import subprocess
+import venv
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +28,116 @@ def supply_for(descriptor: bytes = DESCRIPTOR) -> rs.RuntimeSupply:
     receipt = json.loads(RECEIPT)
     receipt["descriptor_sha256"] = hashlib.sha256(descriptor).hexdigest()
     return rs.RuntimeSupply(encoded(receipt))
+
+
+def expected_policy() -> dict[str, Any]:
+    descriptor = json.loads(DESCRIPTOR)  # independently committed expected pin
+    return {
+        **{key: descriptor[key] for key in ("schema_version", "runtime_id", "subject_revision",
+                                            "pyproject_sha256", "lock_sha256", "uv_version")},
+        "required_env": {key: value for key, value in descriptor["required_env"].items() if key != "PATH"},
+        "subject_locator": "github.com/cooneycw/claude-power-pack",
+        "project": "Projects/claude-power-pack", "gate_entrypoint": ".claude/scripts/flow-finish-gate.sh",
+    }
+
+
+def test_packaged_policy_keeps_independent_supported_pin() -> None:
+    assert rs.supported_policy() == expected_policy()
+
+
+@pytest.mark.parametrize("fault", [None, "missing", "malformed", "duplicate", "oversized", "unknown", "missing-field",
+                                  "bool-schema", "wrong-type", "bad-revision", "bad-digest", "bad-version",
+                                  "escaping-project", "absolute-gate", "bad-env", "extra-env"])
+def test_fixed_resource_loader_refuses_bad_policy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                fault: str | None) -> None:
+    policy = expected_policy()
+    changes = {"unknown": ("extra", 1), "bool-schema": ("schema_version", True),
+               "wrong-type": ("runtime_id", []), "bad-revision": ("subject_revision", "short"),
+               "bad-digest": ("lock_sha256", "short"), "bad-version": ("uv_version", "latest"),
+               "escaping-project": ("project", "../escape"), "absolute-gate": ("gate_entrypoint", "/gate")}
+    if fault in changes:
+        key, value = changes[fault]
+        policy[key] = value
+    if fault == "missing-field":
+        del policy["project"]
+    if fault == "bad-env":
+        policy["required_env"]["UV_OFFLINE"] = True
+    if fault == "extra-env":
+        policy["required_env"]["UV_PROJECT_ENVIRONMENT"] = "/external"
+    raw = encoded(policy)
+    if fault == "malformed":
+        raw = b"{bad"
+    elif fault == "duplicate":
+        raw = b'{"schema_version":1,"schema_version":1}'
+    elif fault == "oversized":
+        raw = b"x" * (rs.MAX_JSON + 1)
+    package = tmp_path / "package"
+    package.mkdir()
+    if fault != "missing":
+        (package / "runtime-policy.json").write_bytes(raw)
+    monkeypatch.setattr(rs.resources, "files", lambda name: package)
+    if fault is None:
+        assert rs.supported_policy() == expected_policy()
+    else:
+        with pytest.raises(rs.Refused):
+            rs.supported_policy()
+        with pytest.raises(rs.Refused):
+            rs.RuntimeSupply(RECEIPT)
+    # Unrelated no-gate classification needs no policy, even if package data is bad.
+    assert not rs.requires_supply(locator="unrelated", revision="a" * 40, gate_entrypoint=None, files={}, tools=[])
+
+
+def test_policy_path_cannot_come_from_cwd_or_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "runtime-policy.json").write_text("{}")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("SKILLC_RUNTIME_POLICY", str(tmp_path / "runtime-policy.json"))
+    assert rs.supported_policy() == expected_policy()
+
+
+@pytest.fixture(scope="session")
+def wheel_build_cache() -> str:
+    # Resolve only the build-tool cache before function fixtures replace HOME.
+    # Runtime trials never use this cache; credential isolation stays intact.
+    return subprocess.check_output(["uv", "cache", "dir"], text=True, timeout=10).strip()
+
+
+def test_installed_wheel_uses_its_policy_resource_and_refuses_its_loss(tmp_path: Path, wheel_build_cache: str) -> None:
+    """Build/install the real wheel offline, then import outside the checkout."""
+    root = Path(__file__).resolve().parents[1]
+    wheels = tmp_path / "wheels"
+    env = {key: value for key, value in os.environ.items() if key not in {"PYTHONPATH", "PYTHONHOME", "UV_PROJECT_ENVIRONMENT"}}
+    env["UV_CACHE_DIR"] = wheel_build_cache
+    built = subprocess.run(["uv", "build", "--offline", "--wheel", "--out-dir", str(wheels)], cwd=root,
+                           env=env, check=False, capture_output=True, timeout=60)
+    assert built.returncode == 0, built.stderr.decode(errors="replace")
+    wheel, = wheels.glob("*.whl")
+    with zipfile.ZipFile(wheel) as archive:
+        assert json.loads(archive.read("skillc/runtime-policy.json")) == expected_policy()
+    destination = tmp_path / "installed"
+    venv.EnvBuilder(with_pip=False).create(destination)
+    python = destination / "bin" / "python"
+    subprocess.run(["uv", "pip", "install", "--offline", "--no-deps", "--python", str(python), str(wheel)],
+                   env=env, check=True, capture_output=True, timeout=60)
+    other_cwd = tmp_path / "other"
+    other_cwd.mkdir()
+    script = ("import json,sys; from skillc import runtime_supply as r; "
+              "r.RuntimeSupply(sys.stdin.buffer.read()); "
+              "print(json.dumps(dict(policy=r.supported_policy(),module=r.__file__)))")
+    run = subprocess.run([str(python), "-I", "-c", script], input=RECEIPT, cwd=other_cwd,
+                         env=env, check=True, capture_output=True, timeout=10)
+    found = json.loads(run.stdout)
+    assert found["policy"] == expected_policy()
+    module = Path(found["module"])
+    assert module.is_relative_to(destination)
+    module.with_name("runtime-policy.json").unlink()
+    # Source policy still exists, but installed code cannot fall back to it.
+    refused = subprocess.run([str(python), "-I", "-c", script], input=RECEIPT, cwd=root,
+                             env=env, check=False, capture_output=True, timeout=10)
+    assert refused.returncode != 0 and b"controller runtime policy is missing" in refused.stderr
+    unrelated = subprocess.run([str(python), "-I", "-c",
+        "from skillc import runtime_supply as r; assert not r.requires_supply(locator='x',revision='x',gate_entrypoint=None,files={},tools=[])"],
+        cwd=other_cwd, env=env, check=False, capture_output=True, timeout=10)
+    assert unrelated.returncode == 0, unrelated.stderr
 
 
 @pytest.mark.parametrize("fault", [None, "image", "descriptor", "writable", "unknown-permission",
@@ -73,7 +187,7 @@ def test_backend_consumes_measured_runtime_and_refuses_bad_facts(
     monkeypatch.setattr(d.DockerBackend, "exec_in_attempt", execute)
     monkeypatch.setattr(d.DockerBackend, "candidate_can_write_in_attempt", writable)
     monkeypatch.setattr(d.DockerBackend, "image_id", lambda *args: "bad" if fault == "image" else supply.image_id)
-    verified = dict(rs.METADATA) if treated else {}
+    verified = rs.metadata(rs.supported_policy()) if treated else {}
     if fault == "metadata" and treated:
         verified[next(iter(verified))] = "changed"
     refused = fault is not None and (treated or fault not in {"metadata", "project", "venv"})
