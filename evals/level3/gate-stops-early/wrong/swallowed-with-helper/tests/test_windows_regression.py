@@ -1,5 +1,6 @@
-from tests.test_windows import helper  # noqa: F401 - collection dependency control
 from rangekit.windows import sliding_window
+
+from tests.test_windows import helper  # noqa: F401 - collection dependency control
 
 
 def test_the_last_window_is_not_dropped():
