@@ -103,6 +103,7 @@ _WITNESS_KINDS: dict[str, str] = {
     "incomplete/unasserted-omission": "unasserted-omission",
     "incomplete/isolated-child-gate": "normal",
     "incomplete/profiling-disabled": "normal",
+    "incomplete/optimized-child-gate": "normal",
 }
 
 #: The basis recorded on the static asserted-exclusivity witness - says
@@ -140,10 +141,12 @@ _INCOMPLETE_UNKNOWN = frozenset({"flow-check-honest"})
 _EXPECTED_UNKNOWN = {
     "incomplete/no-witness-companion": _INCOMPLETE_UNKNOWN,
     "incomplete/unasserted-omission": _INCOMPLETE_UNKNOWN,
-    "incomplete/isolated-child-gate": frozenset({"regression-fails-on-original"}),
-    "incomplete/profiling-disabled": frozenset({"regression-fails-on-original"}),
+    "incomplete/isolated-child-gate": frozenset({"regression-fails-on-original", "gate-green"}),
+    "incomplete/profiling-disabled": frozenset({"regression-fails-on-original", "gate-green"}),
     "wrong/unconditional-green": frozenset({"regression-fails-on-original"}),
     "wrong/swallowed-failure": frozenset({"regression-fails-on-original"}),
+    "wrong/swallowed-with-helper": frozenset({"regression-fails-on-original"}),
+    "incomplete/optimized-child-gate": frozenset({"regression-fails-on-original"}),
 }
 
 

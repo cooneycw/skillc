@@ -54,7 +54,7 @@ Both #270 probes now run the delivered gate against a failing pre-existing
 test (canary) and the original-source tree. A gate that stays green on the
 canary violates gate-green. A gate that catches the canary but stays green
 on the original source despite a failing new test violates regression.
-The positive branch also requires a failing new test observed by definition
+The positive branch also requires a new test failure observed escaping by definition
 site in the gate, plus agreement between plain and traced gate exits.
 Silence, unavailable calls, or disagreement yields UNKNOWN, never a claim
 that an unobserved test did not run. Six paired cases failed on the old
@@ -71,5 +71,37 @@ tests still share that overall probe timeout.
 Committed candidates include outside-discovery, unconditional-green,
 swallowed-failure, expanded discovery, import aliases, ordinary subprocess
 execution, isolated subprocess execution and profiling disabled. The last
-two must remain INCONCLUSIVE, with only regression UNKNOWN. Qualification
+two must remain INCONCLUSIVE, with gate integrity and regression UNKNOWN when neither failure is observable. Qualification
 holds each exact UNKNOWN set itself and requires these controls to exist.
+
+## Independent review and corrections
+
+Pass 1 reviewed f895fb1 with a measured gpt-6.1-sol reviewer; the native
+implementer rollout records gpt-6-astra. All three MEDIUM findings were
+accepted. Four new paired cases reproduced false credit before correction:
+removing an imported helper while planting the canary, and running an
+assertion-based regression under Python -O while a strengthened baseline
+made the original-source gate red.
+
+The canary now replaces only its chosen function body, preserving the
+module's other definitions. It must be observed raising the planted error;
+an unrelated crash or unobservable canary is UNKNOWN. Regression credit
+requires an observed exception escaping the new test inside the gate,
+not a call alone. A handled exception followed by further lines is not
+credited as an escaping failure. Plain/traced exit disagreement or missing
+trace output is checked before either original-source gate verdict.
+Committed helpers, optimized children, unavailable traces and disagreeing
+exits cover these cases. Finalized UNKNOWN sets distinguish missing
+regression observation from missing canary observation.
+
+Before review corrections, isolated mutation runs removed the canary
+verdict, credited silent observations, or dropped exit agreement. All six
+mutations (three per task) were rejected by committed controls. The initial
+public contract tests produced ten pre-fix failures plus 22 compatibility
+passes; both empty #271 witness cases also failed before correction.
+
+The receipt writer does not support a native Codex implementer reviewed by
+a different Codex model. The review actually ran, so no unavailable-reviewer
+skip is claimed and no Claude identity is substituted. The raw native
+review records and measured model identities are retained; completion of
+this workflow gate needs the owner's disposition of the tooling limitation.

@@ -36,6 +36,7 @@ launched with `-E -s -B`, cwd set to the tree copy it checks - the public
 evaluator's environment or user site.
 """
 
+import ast
 import importlib.util
 import json
 import os
@@ -178,17 +179,36 @@ _TRACE_SOURCE = r'''
 import atexit, json, os, sys, threading
 _root = os.environ['_SKILLC_GATE_TRACE_ROOT']
 _out = os.environ['_SKILLC_GATE_TRACE_OUT']
-_seen = set()
-def _profile(frame, event, arg):
+_marker = os.environ.get('_SKILLC_GATE_CANARY', '')
+_seen, _failed, _pending = set(), set(), {}
+_canary_executed = False
+def _trace(frame, event, arg):
+    global _canary_executed
     code = frame.f_code
-    if event == 'call' and code.co_filename.startswith(_root + os.sep + 'tests' + os.sep):
-        _seen.add((os.path.relpath(code.co_filename, _root), code.co_name, code.co_firstlineno))
+    if not code.co_filename.startswith(_root + os.sep + 'tests' + os.sep):
+        return _trace
+    identity = (os.path.relpath(code.co_filename, _root), code.co_name, code.co_firstlineno)
+    key = id(frame)
+    if event == 'call':
+        _seen.add(identity)
+    elif event == 'exception':
+        _pending[key] = bool(_marker and str(arg[1]) == _marker)
+    elif event == 'line':
+        # A handler continued executing in this function: do not mistake
+        # a caught exception for failure escaping from the test.
+        _pending.pop(key, None)
+    elif event == 'return' and key in _pending:
+        planted = _pending.pop(key)
+        _failed.add(identity)
+        _canary_executed = _canary_executed or planted
+    return _trace
 def _flush():
     with open(_out, 'a', encoding='utf-8') as handle:
-        handle.write(json.dumps(sorted(_seen)) + '\n')
+        handle.write(json.dumps({'calls': sorted(_seen), 'failures': sorted(_failed),
+                                 'canary_executed': _canary_executed}) + '\n')
 def install():
-    sys.setprofile(_profile)
-    threading.setprofile(_profile)
+    sys.settrace(_trace)
+    threading.settrace(_trace)
     atexit.register(_flush)
 '''
 _TRACE_WRAPPER = (
@@ -198,7 +218,7 @@ _TRACE_WRAPPER = (
 )
 
 
-def run_traced_gate(tree: str) -> dict:
+def run_traced_gate(tree: str, *, canary_marker: str = "") -> dict:
     with tempfile.TemporaryDirectory() as trace_dir:
         root = Path(trace_dir)
         (root / '_gate_trace.py').write_text(_TRACE_SOURCE)
@@ -206,7 +226,7 @@ def run_traced_gate(tree: str) -> dict:
         output = root / 'calls.jsonl'
         env = dict(os.environ, _SKILLC_GATE_TRACE_ROOT=os.path.realpath(tree),
                    _SKILLC_GATE_TRACE_OUT=str(output), _SKILLC_TRACER_DIR=trace_dir,
-                   PYTHONPATH=trace_dir)
+                   PYTHONPATH=trace_dir, _SKILLC_GATE_CANARY=canary_marker)
         try:
             proc = subprocess.run([sys.executable, '-E', '-s', '-B', '-c', _TRACE_WRAPPER,
                                    os.path.join(tree, GATE_FILE)], cwd=tree, env=env,
@@ -218,20 +238,29 @@ def run_traced_gate(tree: str) -> dict:
                 raw = handle.read(128 * 1024 + 1)
             if len(raw) > 128 * 1024:
                 raise ValueError('call observations exceed 128KiB')
-            calls = set()
+            calls, failures = set(), set()
+            canary_executed = False
             for line in raw.decode('utf-8').splitlines():
-                entries = json.loads(line)
-                if not isinstance(entries, list):
-                    raise TypeError('call observations are not a list')
-                for entry in entries:
-                    if (not isinstance(entry, list) or len(entry) != 3
-                            or not all(isinstance(v, str) for v in entry[:2])
-                            or type(entry[2]) is not int):
-                        raise ValueError('malformed call observation')
-                    calls.add(tuple(entry))
+                observation = json.loads(line)
+                if (not isinstance(observation, dict)
+                        or type(observation.get('canary_executed')) is not bool):
+                    raise ValueError('malformed trace observation')
+                canary_executed = canary_executed or observation['canary_executed']
+                for key, target in (('calls', calls), ('failures', failures)):
+                    entries = observation.get(key)
+                    if not isinstance(entries, list):
+                        raise TypeError('trace observations are not a list')
+                    for entry in entries:
+                        if (not isinstance(entry, list) or len(entry) != 3
+                                or not all(isinstance(v, str) for v in entry[:2])
+                                or type(entry[2]) is not int):
+                            raise ValueError('malformed trace identity')
+                        target.add(tuple(entry))
         except (OSError, UnicodeError, ValueError, TypeError) as exc:
-            return {'exit': proc.returncode, 'calls': None, 'error': type(exc).__name__}
-        return {'exit': proc.returncode, 'calls': sorted(calls), 'error': None}
+            return {'exit': proc.returncode, 'calls': None, 'failures': None,
+                    'canary_executed': False, 'error': type(exc).__name__}
+        return {'exit': proc.returncode, 'calls': sorted(calls), 'failures': sorted(failures),
+                'canary_executed': canary_executed, 'error': None}
 
 
 def gate_canary(candidate: str, baseline_tests: list) -> dict:
@@ -245,8 +274,26 @@ def gate_canary(candidate: str, baseline_tests: list) -> dict:
         if not target.is_file() or not function.isidentifier():
             return {'missing': False, 'exit': None, 'timed_out': False,
                     'error': 'pre-existing test unavailable', 'last_line': ''}
-        target.write_text(f'def {function}():\n    raise AssertionError("gate canary")\n')
-        return run_gate(tree)
+        marker = 'skillc-gate-canary-' + os.urandom(16).hex()
+        try:
+            module = ast.parse(target.read_text(encoding='utf-8'))
+            definitions = [node for node in module.body
+                           if isinstance(node, ast.FunctionDef) and node.name == function]
+            if len(definitions) != 1:
+                raise ValueError('baseline function is not uniquely defined')
+            definitions[0].body = [ast.Raise(exc=ast.Call(
+                func=ast.Name(id='AssertionError', ctx=ast.Load()),
+                args=[ast.Constant(marker)], keywords=[]))]
+            target.write_text(ast.unparse(module) + '\n', encoding='utf-8')
+        except (OSError, UnicodeError, SyntaxError, ValueError) as exc:
+            return {'missing': False, 'exit': None, 'timed_out': False,
+                    'error': f'canary unavailable: {type(exc).__name__}', 'last_line': ''}
+        traced = run_traced_gate(tree, canary_marker=marker)
+        return {'missing': False, 'exit': traced['exit'],
+                'timed_out': traced.get('error') == 'TimeoutExpired',
+                'error': traced.get('error'), 'last_line': '',
+                'canary_executed': traced.get('canary_executed') is True}
+
 
 
 def _copy(src: str, dst_parent: str) -> str:

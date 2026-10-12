@@ -186,8 +186,8 @@ real-runner campaign and #315 environment evidence remain outstanding.
 
 The delivered gate must also fail a canary in the pre-existing test. The
 original-source gate must fail when the direct probe finds a failing new
-regression, and positive call observations must identify at least one such
-test. Calls use definition file, function name and first line, so imported
+regression, and positive escaping-failure observations must identify at least one such
+test. Observations use definition file, function name and first line, so imported
 aliases map to their definition. Missing calls are UNKNOWN, not proof of
 non-execution. Plain and traced exits must agree before positive credit.
 
@@ -197,3 +197,12 @@ gate budget; the whole probe remains bounded at 90 seconds. Expanded
 discovery, import aliases and ordinary subprocesses are compatibility
 controls. Isolated children or disabled profiling are explicitly
 INCONCLUSIVE, even when the underlying regression was actually executed.
+
+Independent review strengthened the canary to preserve imports/helpers and
+require the planted failure to be observed. A regression must fail inside
+the gate, not merely be called: Python -O is a committed inconclusive
+control. Traced/plain exit agreement is required for both hybrid verdicts.
+An isolated or tracing-disabled child now leaves both gate-green and
+regression UNKNOWN because neither planted failure is observable. A
+coordinated forgery can still defeat candidate-process observations; this
+is explicitly not protected controller evidence.

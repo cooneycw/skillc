@@ -43,7 +43,7 @@ def run_file(path):
 
 def main():
     sys.path.insert(0, str(ROOT))
-    sys.setprofile(None)
+    sys.settrace(None)
     started = time.monotonic()
     total_ran = 0
     total_failures = 0

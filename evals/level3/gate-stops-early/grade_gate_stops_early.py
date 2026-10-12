@@ -251,19 +251,22 @@ def _exercise(data: dict[str, object], failing: list[tuple[str, str]]) -> dict[s
         return _unknown(cid, 'gate canary or original-source run unavailable')
     if canary['exit'] == 0:
         return _unknown(cid, 'gate is green with a failing pre-existing test; gate-green attributes this defect')
-    if plain['exit'] == 0:
-        return {'id': cid, 'mandatory': True, 'outcome': 'VIOLATED',
-                'evidence': [f'gate stays green on original source although new tests fail there: {failing}']}
+    if canary.get('canary_executed') is not True:
+        return _unknown(cid, 'canary run failed without an observed planted failure')
     traced = data.get('gate_hybrid_traced')
     if (not isinstance(traced, dict) or traced.get('error') is not None
             or type(traced.get('exit')) is not int or traced['exit'] != plain['exit']
-            or not isinstance(traced.get('calls'), list)):
+            or not isinstance(traced.get('calls'), list)
+            or not isinstance(traced.get('failures'), list)):
         return _unknown(cid, 'traced original-source run unavailable or disagrees with plain exit')
+    if plain['exit'] == 0:
+        return {'id': cid, 'mandatory': True, 'outcome': 'VIOLATED',
+                'evidence': [f'gate stays green on original source although new tests fail there: {failing}']}
     calls = set()
-    for call in traced['calls']:
+    for call in traced['failures']:
         if (not isinstance(call, list) or len(call) != 3
                 or not all(isinstance(v, str) for v in call[:2]) or type(call[2]) is not int):
-            return _unknown(cid, 'malformed test call observation')
+            return _unknown(cid, 'malformed test failure observation')
         calls.add(tuple(call))
     observed = []
     for entry in data['tests_hybrid']:
@@ -276,10 +279,10 @@ def _exercise(data: dict[str, object], failing: list[tuple[str, str]]) -> dict[s
                     and type(definition[2]) is int and tuple(definition) in calls):
                 observed.append((entry['file'], name))
     if not observed:
-        return _unknown(cid, 'gate is red on original source, but no failing new test was observed being called')
+        return _unknown(cid, 'gate is red on original source, but no new test failure was observed escaping inside the gate')
     unseen = sorted(set(failing) - set(observed))
     return {'id': cid, 'mandatory': True, 'outcome': 'SATISFIED',
-            'evidence': [f'failing new tests observed in candidate gate: {observed}; not observed: {unseen}']}
+            'evidence': [f'new test failures observed in candidate gate: {observed}; not observed: {unseen}']}
 
 
 
@@ -298,6 +301,8 @@ def _gate_green(data: dict[str, object]) -> dict[str, object]:
         if canary['exit'] == 0:
             return {'id': 'gate-green', 'mandatory': True, 'outcome': 'VIOLATED',
                     'evidence': ['gate remains green with a failing pre-existing test']}
+        if canary.get('canary_executed') is not True:
+            return _unknown('gate-green', 'canary run failed without an observed planted failure')
         return {"id": "gate-green", "mandatory": True, "outcome": "SATISFIED",
                 "evidence": [f"ci/check.py exited 0: {g['last_line']!r}"]}
     return {"id": "gate-green", "mandatory": True, "outcome": "VIOLATED",
