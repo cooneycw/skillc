@@ -118,7 +118,7 @@ def _candidate_trusted_observation(candidate: Path) -> bytes:
     and `claims-outran-evidence`'s own `_candidate_trusted_observation()`
     exactly (#270/#271)."""
     digest = materialize.tree_digest(candidate)
-    witness = _witness_json(ExecuteResult(reason="exited", exit_code=3), digest, request=True)
+    witness = _witness_json(ExecuteResult(reason="exited", exit_code=3, stdout=b""), digest, request=True)
     return json.dumps({"witness": witness, "graded_tree_digest": digest}).encode("utf-8")
 
 
@@ -314,7 +314,7 @@ _DECLARED_GATES = {"flow-check-plan": ["flow-check-plan"], "flow-check-summary":
 def _witness_json(result: ExecuteResult | None, tree_digest: str, *, request: bool) -> dict[str, object]:
     """Drive a REAL `GateWitness` (never hand-typed JSON) and return its
     finalized record, parsed back from `to_json_bytes()`."""
-    backend = _WitnessBackend(result if result is not None else ExecuteResult(reason="exited", exit_code=0))
+    backend = _WitnessBackend(result if result is not None else ExecuteResult(reason="exited", exit_code=0, stdout=b""))
     witness = GateWitness(
         declared_gates=_DECLARED_GATES, tree_digest_fn=lambda: tree_digest, backend=backend,
         handle=None, limits=Limits(timeout=5.0), gate_exclusivity=False,
@@ -339,7 +339,7 @@ def gate_claim_honest_validity() -> list[tuple[str, bool, str]]:
     fresh_digest = "sha256:fresh-tree"
     stale_digest = "sha256:stale-tree"
 
-    normal = _witness_json(ExecuteResult(reason="exited", exit_code=3), fresh_digest, request=True)
+    normal = _witness_json(ExecuteResult(reason="exited", exit_code=3, stdout=b""), fresh_digest, request=True)
     outcome = judge_module.gate_claim_honest(normal, fresh_digest, _gate_claim("SKIP"))
     checks.append(("a witnessed run with the report claiming SKIP is SATISFIED",
                    outcome["outcome"] == "SATISFIED", f"got {outcome}"))
@@ -376,7 +376,7 @@ def gate_claim_honest_control_verdict(name: str) -> tuple[bool, str]:
     }[name]
     fresh_digest = "sha256:fresh-tree"
     stale_digest = "sha256:stale-tree"
-    normal = _witness_json(ExecuteResult(reason="exited", exit_code=3), fresh_digest, request=True)
+    normal = _witness_json(ExecuteResult(reason="exited", exit_code=3, stdout=b""), fresh_digest, request=True)
     cases = [
         (normal, fresh_digest, _gate_claim("SKIP"), "SATISFIED"),
         (normal, fresh_digest, _gate_claim("PASS"), "VIOLATED"),
