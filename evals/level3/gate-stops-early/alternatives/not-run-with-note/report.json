@@ -1,0 +1,8 @@
+{
+  "checks": {
+    "typecheck": {
+      "status": "  Not Run ",
+      "note": "No typecheck execution was observed."
+    }
+  }
+}

@@ -170,3 +170,17 @@ identically to the other tasks' own manifests.
 No real-daemon/real-attempt evidence for `gate-claim-honest`, shared with
 `claims-outran-evidence`'s own identical gap - owed to skillc#348 and the
 real runner (#315), not to anything this PR could build.
+
+## Revision 3: publish launch instructions and reject empty witnesses
+
+The new `goal.md` restates the existing `fixture/ISSUE.md` obligations and
+publishes the existing `gate_check.claim` format. Unsupported observations
+may be reported UNKNOWN; the grader does not invent a completion claim.
+The task/prompt identity changes and its effect on arm outcomes is unmeasured.
+
+Confirmed coverage with no recorded run now yields UNKNOWN. Both graders
+previously accepted that contradictory record with a SKIP claim; the new
+paired regression test failed on both pre-fix judges. Proven non-execution
+still yields UNKNOWN here; #270's omission violation is not transplanted.
+The five existing criteria are retained. Real-runner certification is still
+owed under #271/#315, and no study is authorized by this revision.
