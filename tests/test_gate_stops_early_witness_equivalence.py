@@ -1,5 +1,6 @@
-"""Equivalence guard for gate-stops-early's duplicated gate-witness logic
-(#270).
+"""Equivalence guard for the duplicated gate-witness logic in #270's two
+Level 3 judges: gate-stops-early and its held-out variant verify-stops-early
+(ported in #270 portion A).
 
 `evals/level3/gate-stops-early/grade_gate_stops_early.py` cannot import
 `skillc` (its own module docstring explains why: `skillc.verify._judge`
@@ -31,11 +32,12 @@ import pytest
 from skillc.gate_witness import GateRecord, GateRunRecord
 from skillc.stale_tree import last_run_is_fresh
 
-TASK = Path(__file__).resolve().parent.parent / "evals" / "level3" / "gate-stops-early"
+LEVEL3 = Path(__file__).resolve().parent.parent / "evals" / "level3"
 
 
-def _load(name: str) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(f"level3_gate_stops_early_{name}", TASK / f"{name}.py")
+def _load(task: str, name: str) -> ModuleType:
+    spec = importlib.util.spec_from_file_location(f"level3_{task.replace('-', '_')}_{name}",
+                                                  LEVEL3 / task / f"{name}.py")
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -43,7 +45,13 @@ def _load(name: str) -> ModuleType:
     return module
 
 
-judge = _load("grade_gate_stops_early")
+#: Every judge carrying a duplicated copy. Each is checked against the
+#: canonical functions, never against the other copy - two copies that
+#: drifted together would still agree with each other.
+JUDGES = {
+    "gate-stops-early": _load("gate-stops-early", "grade_gate_stops_early"),
+    "verify-stops-early": _load("verify-stops-early", "grade_verify_stops_early"),
+}
 
 FRESH = "sha256:fresh-tree"
 STALE = "sha256:stale-tree"
@@ -71,12 +79,15 @@ EXECUTION_OBSERVED_CASES = [
 ]
 
 
+@pytest.mark.parametrize("task", sorted(JUDGES))
 @pytest.mark.parametrize("label,coverage,exclusivity_asserted", EXECUTION_OBSERVED_CASES)
-def test_execution_observed_matches_canonical(label: str, coverage: str, exclusivity_asserted: bool) -> None:
+def test_execution_observed_matches_canonical(task: str, label: str, coverage: str,
+                                              exclusivity_asserted: bool) -> None:
+    judge = JUDGES[task]
     canonical = GateRecord(coverage=coverage, runs=(), exclusivity_asserted=exclusivity_asserted,
                            exclusivity_basis="equivalence test").execution_observed()
     duplicated = judge._execution_observed(coverage, exclusivity_asserted)
-    assert duplicated == canonical, f"{label}: judge copy {duplicated} != canonical {canonical}"
+    assert duplicated == canonical, f"{task} {label}: judge copy {duplicated} != canonical {canonical}"
 
 
 # ------------------------------------------------------ last_run_is_fresh battery
@@ -90,10 +101,12 @@ FRESHNESS_CASES = [
 ]
 
 
+@pytest.mark.parametrize("task", sorted(JUDGES))
 @pytest.mark.parametrize("label,digests,graded_digest", FRESHNESS_CASES)
-def test_last_run_is_fresh_matches_canonical(label: str, digests: list[str], graded_digest: str) -> None:
+def test_last_run_is_fresh_matches_canonical(task: str, label: str, digests: list[str], graded_digest: str) -> None:
+    judge = JUDGES[task]
     canonical_record = GateRecord(coverage="complete", runs=tuple(_run_record(d) for d in digests),
                                   exclusivity_asserted=False, exclusivity_basis="equivalence test")
     canonical = last_run_is_fresh(canonical_record, graded_digest)
     duplicated = judge._last_run_is_fresh([_run_dict(d) for d in digests], graded_digest)
-    assert duplicated == canonical, f"{label}: judge copy {duplicated!r} != canonical {canonical!r}"
+    assert duplicated == canonical, f"{task} {label}: judge copy {duplicated!r} != canonical {canonical!r}"
