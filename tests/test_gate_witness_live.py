@@ -108,6 +108,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import uuid
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -358,6 +359,23 @@ def _run_gate_over_socket(socket_path: Path, gate: str) -> Mapping[str, object]:
     return reply["result"]
 
 
+def _prepare_candidate_workspace(backend: d.DockerBackend, handle: d._Handle) -> None:
+    """Hands `CONTAINER_WORKSPACE` to the candidate, as the real trial image
+    (`docker/trial/Dockerfile`, `WORKDIR /work` under `USER candidate`)
+    already does. On a bare `python:3.12-slim` Docker creates the `-w`
+    workdir root-owned, so the primary's marker writes failed with
+    `Permission denied` and this test timed out waiting for them (#355).
+    Runs AS ROOT (`exec -u 0`), before the primary starts; a no-op on the
+    trial image."""
+    owner = f"{d.CANDIDATE_UID}:{d.CANDIDATE_GID}"
+    setup = subprocess.run(
+        [*backend.docker_bin, "exec", "-u", "0", "--", handle.name,
+         "sh", "-c", 'mkdir -p "$1" && chown "$2" "$1"', "sh", d.CONTAINER_WORKSPACE, owner],
+        capture_output=True, timeout=backend.daemon_timeout, check=False,
+    )
+    assert setup.returncode == 0, f"could not prepare the candidate's workspace: {setup.stderr!r}"
+
+
 @pytest.mark.xfail(
     condition=BREAK_MODE != "none", strict=True, raises=_PropertyHeld,
     reason=f"SKILLC_GATE_WITNESS_LIVE_BREAK={BREAK_MODE} deliberately breaks one property",
@@ -380,75 +398,79 @@ def test_the_gate_witness_round_trips_correctly_against_a_real_daemon(monkeypatc
         image=LIVE_TEST_IMAGE, base_dir=base, network="none",
         trigger_decide=decide, trigger_socket_dir=trigger_dir,
     )
-    handle = backend.prepare("a-gw-live-conformance-000000001")
-    assert isinstance(handle, d._Handle)
-    assert handle.trigger_channel is not None
-    socket_path = d.trigger_socket_host_path_for(trigger_dir, handle.name)
-
-    witness = GateWitness(
-        declared_gates={
-            "concurrent-gate": tuple(_concurrent_gate_argv()),
-            "kill-timeout-gate": tuple(_kill_timeout_gate_argv()),
-        },
-        tree_digest_fn=tree_digest_fn,
-        backend=backend,
-        handle=handle,
-        limits=Limits(timeout=GATE_TIMEOUT, grace=GATE_GRACE),
-        gate_exclusivity=False,
-        exclusivity_basis="live conformance test - no exclusivity claim exercised here",
-    )
-    witness_holder.append(witness)
-
-    if BREAK_MODE == "stale-confirm-lie":
-        # Property 2's confirmation lies: reports a kill confirmed without
-        # ever independently checking. The test's own, separate `kill -0`
-        # below is the only thing that can catch this.
-        monkeypatch.setattr(d.DockerBackend, "_confirm_and_kill_in_container", lambda *a, **k: True)
-    elif BREAK_MODE == "gate-in-fresh-container":
-        # Property 1's own break: the gate runs in a DIFFERENT, freshly
-        # prepared container instead of the live one, so it cannot see
-        # the primary's marker - the concurrent-gate case must now report
-        # exit 1 (marker not found), not 0.
-        real_execute = d.DockerBackend.execute
-
-        def fresh_container_exec(self: d.DockerBackend, _handle: object, argv, limits, cancel=None, stdin=None):
-            fresh_handle = self.prepare("a-gw-live-fresh-container-000000002")
-            try:
-                self.install(fresh_handle, {})
-                return real_execute(self, fresh_handle, argv, limits, cancel, stdin)
-            finally:
-                self.destroy(fresh_handle)
-
-        monkeypatch.setattr(d.DockerBackend, "exec_in_attempt", fresh_container_exec)
-
-    primary_pid_holder: list[int] = []
-    if BREAK_MODE == "kill-wrong-pid":
-        # Property 2's own break: the kill-confirmation sequence targets
-        # the PRIMARY's own in-container pid instead of the gate's real
-        # one - read back via the SAME marker-file mechanism
-        # `exec_in_attempt()` itself uses, applied to the primary's own
-        # process this time (`PRIMARY_PID_MARKER`, written by the primary
-        # script itself - never discovered via `ps`/`procps`, which
-        # `python:3.12-slim` deliberately lacks; see `_primary_script()`'s
-        # own docstring for the codex:code_review finding this fixes).
-        real_read_pid = d.DockerBackend._read_in_container_pid
-
-        def targeting_the_primary(self: d.DockerBackend, handle_: d._Handle, marker_path: str, timeout: float = 2.0) -> int | None:
-            if primary_pid_holder:
-                return primary_pid_holder[0]
-            return real_read_pid(self, handle_, marker_path, timeout)
-
-        monkeypatch.setattr(d.DockerBackend, "_read_in_container_pid", targeting_the_primary)
-
-    primary_result: list[ExecuteResult] = []
-
-    def run_primary() -> None:
-        primary_result.append(
-            backend.execute(handle, ["python3", "-c", _primary_script()], Limits(timeout=PRIMARY_DURATION_SECONDS + 10)),
-        )
-
-    primary_thread = threading.Thread(target=run_primary)
+    # Per-run suffix and everything after `prepare()` inside the `try`
+    # (#355): a fixed name plus a setup step outside the `try` leaked the
+    # container, and the leak failed every later run on a name `Conflict`.
+    handle = backend.prepare(f"a-gw-live-conformance-{uuid.uuid4().hex[:12]}")
     try:
+        assert isinstance(handle, d._Handle)
+        assert handle.trigger_channel is not None
+        _prepare_candidate_workspace(backend, handle)
+        socket_path = d.trigger_socket_host_path_for(trigger_dir, handle.name)
+
+        witness = GateWitness(
+            declared_gates={
+                "concurrent-gate": tuple(_concurrent_gate_argv()),
+                "kill-timeout-gate": tuple(_kill_timeout_gate_argv()),
+            },
+            tree_digest_fn=tree_digest_fn,
+            backend=backend,
+            handle=handle,
+            limits=Limits(timeout=GATE_TIMEOUT, grace=GATE_GRACE),
+            gate_exclusivity=False,
+            exclusivity_basis="live conformance test - no exclusivity claim exercised here",
+        )
+        witness_holder.append(witness)
+
+        if BREAK_MODE == "stale-confirm-lie":
+            # Property 2's confirmation lies: reports a kill confirmed without
+            # ever independently checking. The test's own, separate `kill -0`
+            # below is the only thing that can catch this.
+            monkeypatch.setattr(d.DockerBackend, "_confirm_and_kill_in_container", lambda *a, **k: True)
+        elif BREAK_MODE == "gate-in-fresh-container":
+            # Property 1's own break: the gate runs in a DIFFERENT, freshly
+            # prepared container instead of the live one, so it cannot see
+            # the primary's marker - the concurrent-gate case must now report
+            # exit 1 (marker not found), not 0.
+            real_execute = d.DockerBackend.execute
+
+            def fresh_container_exec(self: d.DockerBackend, _handle: object, argv, limits, cancel=None, stdin=None):
+                fresh_handle = self.prepare(f"a-gw-live-fresh-container-{uuid.uuid4().hex[:12]}")
+                try:
+                    self.install(fresh_handle, {})
+                    return real_execute(self, fresh_handle, argv, limits, cancel, stdin)
+                finally:
+                    self.destroy(fresh_handle)
+
+            monkeypatch.setattr(d.DockerBackend, "exec_in_attempt", fresh_container_exec)
+
+        primary_pid_holder: list[int] = []
+        if BREAK_MODE == "kill-wrong-pid":
+            # Property 2's own break: the kill-confirmation sequence targets
+            # the PRIMARY's own in-container pid instead of the gate's real
+            # one - read back via the SAME marker-file mechanism
+            # `exec_in_attempt()` itself uses, applied to the primary's own
+            # process this time (`PRIMARY_PID_MARKER`, written by the primary
+            # script itself - never discovered via `ps`/`procps`, which
+            # `python:3.12-slim` deliberately lacks; see `_primary_script()`'s
+            # own docstring for the codex:code_review finding this fixes).
+            real_read_pid = d.DockerBackend._read_in_container_pid
+
+            def targeting_the_primary(self: d.DockerBackend, handle_: d._Handle, marker_path: str, timeout: float = 2.0) -> int | None:
+                if primary_pid_holder:
+                    return primary_pid_holder[0]
+                return real_read_pid(self, handle_, marker_path, timeout)
+
+            monkeypatch.setattr(d.DockerBackend, "_read_in_container_pid", targeting_the_primary)
+
+        primary_result: list[ExecuteResult] = []
+
+        def run_primary() -> None:
+            primary_result.append(
+                backend.execute(handle, ["python3", "-c", _primary_script()], Limits(timeout=PRIMARY_DURATION_SECONDS + 10)),
+            )
+
+        primary_thread = threading.Thread(target=run_primary)
         primary_thread.start()
         # Bounded poll for primary readiness, never a blind sleep (codex:
         # code_review finding: a fixed delay is both too short on a

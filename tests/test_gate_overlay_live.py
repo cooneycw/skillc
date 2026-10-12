@@ -110,6 +110,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import uuid
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -320,6 +321,29 @@ def _image_available(image: str) -> bool:
     return pull.returncode == 0
 
 
+def _prepare_candidate_dirs(backend: d.DockerBackend, handle: d._Handle) -> None:
+    """Gives the candidate the two directories the real trial image
+    (`docker/trial/Dockerfile`) already ships candidate-owned:
+    `CONTAINER_HOME`, where #334 delivers the subject script, and
+    `CONTAINER_WORKSPACE`, where the driver writes its result markers. A
+    bare `python:3.12-slim` has neither - `/home` is root-owned, and Docker
+    creates the `-w` workdir root-owned - so this runs AS ROOT (`exec -u 0`),
+    the same way production's `write_root_owned_file_in_attempt()` does,
+    then hands both to `CANDIDATE_UID:CANDIDATE_GID` (#355: this used to
+    `mkdir` as the container's own `--user`, the candidate, and failed with
+    `Permission denied` on every run against the default image). Fixture
+    setup only, run before anything the subject controls is installed; on
+    the trial image it is a no-op."""
+    owner = f"{d.CANDIDATE_UID}:{d.CANDIDATE_GID}"
+    setup = subprocess.run(
+        [*backend.docker_bin, "exec", "-u", "0", "--", handle.name,
+         "sh", "-c", 'mkdir -p "$1" "$2" && chown "$3" "$1" "$2"', "sh",
+         SUBJECT_ROOT, d.CONTAINER_WORKSPACE, owner],
+        capture_output=True, timeout=backend.daemon_timeout, check=False,
+    )
+    assert setup.returncode == 0, f"could not prepare the candidate's directories: {setup.stderr!r}"
+
+
 def _read_result_via_exec(backend: d.DockerBackend, handle: d._Handle, path: str) -> dict[str, object]:
     """Setup/infra read, not the property under test - a failure here
     (an unreadable marker, malformed JSON) is a plain `AssertionError`,
@@ -387,39 +411,36 @@ def test_the_shim_forwards_the_controllers_real_result_against_a_real_daemon() -
         image=LIVE_TEST_IMAGE, base_dir=base, network="none",
         trigger_decide=decide, trigger_socket_dir=trigger_dir,
     )
-    handle = backend.prepare("a-go-live-conformance-000000001")
-    assert isinstance(handle, d._Handle)
-    assert handle.trigger_channel is not None
-
-    # CONTAINER_HOME does not pre-exist on a bare python:3.12-slim (no
-    # "candidate" user/home is created outside the real trial image) -
-    # created here directly, matching the one explicit setup step a real
-    # deployment's own profile-closure delivery (#334) would already have
-    # performed before this overlay ever runs.
-    mkdir_home = subprocess.run(
-        [*backend.docker_bin, "exec", "--", handle.name, "mkdir", "-p", SUBJECT_ROOT],
-        capture_output=True, timeout=backend.daemon_timeout, check=False,
-    )
-    assert mkdir_home.returncode == 0, f"could not create {SUBJECT_ROOT!r}: {mkdir_home.stderr!r}"
-
-    stand_in = _stand_in_real_script()
-    backend.install(
-        handle, {SUBJECT_PATH: stand_in, SURFACE_EXECUTABLE_KEY: [SUBJECT_PATH]}, root=SUBJECT_ROOT,
-    )
-
-    if BREAK_MODE == "synthesizes-output":
-        shim_content = _broken_shim_synthesizes_output()
-    elif BREAK_MODE == "drops-cwd":
-        shim_content = _broken_shim_drops_cwd()
-    elif BREAK_MODE == "exits-zero-on-channel-failure":
-        shim_content = _broken_shim_exits_zero_on_channel_failure()
-    else:
-        # `none` and `wrong-env` both run the REAL, unmodified shim -
-        # `wrong-env`'s break is entirely on the witness's own
-        # `declared_env`, never on the shim itself.
-        shim_content = _REAL_SHIM_SOURCE
-
+    # A per-run suffix (#355): a fixed attempt id is a fixed container name,
+    # so a leaked container - or a concurrent run on the same host - made
+    # every later run fail on Docker's own name `Conflict` instead of on
+    # whatever actually went wrong.
+    handle = backend.prepare(f"a-go-live-conformance-{uuid.uuid4().hex[:12]}")
+    # EVERYTHING after `prepare()` sits inside the `try` (#355): a setup
+    # assert placed before it skipped the `finally` and leaked the container.
     try:
+        assert isinstance(handle, d._Handle)
+        assert handle.trigger_channel is not None
+
+        _prepare_candidate_dirs(backend, handle)
+
+        stand_in = _stand_in_real_script()
+        backend.install(
+            handle, {SUBJECT_PATH: stand_in, SURFACE_EXECUTABLE_KEY: [SUBJECT_PATH]}, root=SUBJECT_ROOT,
+        )
+
+        if BREAK_MODE == "synthesizes-output":
+            shim_content = _broken_shim_synthesizes_output()
+        elif BREAK_MODE == "drops-cwd":
+            shim_content = _broken_shim_drops_cwd()
+        elif BREAK_MODE == "exits-zero-on-channel-failure":
+            shim_content = _broken_shim_exits_zero_on_channel_failure()
+        else:
+            # `none` and `wrong-env` both run the REAL, unmodified shim -
+            # `wrong-env`'s break is entirely on the witness's own
+            # `declared_env`, never on the shim itself.
+            shim_content = _REAL_SHIM_SOURCE
+
         apply_flow_check_gate_overlay(
             backend, handle, subject_path=SUBJECT_PATH, harness_path=HARNESS_PATH,
             expected_real_digest=_digest(stand_in), expected_shim_digest=_digest(shim_content),
@@ -461,7 +482,12 @@ def test_the_shim_forwards_the_controllers_real_result_against_a_real_daemon() -
         ):
             result_path = f"{d.CONTAINER_WORKSPACE}/{result_name}"
             driver_src = _driver_script(result_path, None)
-            driver_outcome = backend.execute(
+            # `exec_in_attempt()`, never `execute()` (#355): `execute()` is
+            # one-shot per handle and stops the container before returning,
+            # so the marker read below - and every later driver run - hit
+            # a stopped container. `exec_in_attempt()` is the method built
+            # for several execs into one live attempt (#269).
+            driver_outcome = backend.exec_in_attempt(
                 handle, ["python3", "-c", driver_src, *argv_tail], Limits(timeout=30.0),
             )
             assert driver_outcome.reason == "exited", f"the driver process itself never completed for {gate!r}"
@@ -487,7 +513,7 @@ def test_the_shim_forwards_the_controllers_real_result_against_a_real_daemon() -
         channel_failure_driver_src = _driver_script(
             channel_failure_result_path, {"SKILLC_TRIGGER_SOCKET": "/does/not/exist/trigger.sock"},
         )
-        channel_failure_outcome = backend.execute(
+        channel_failure_outcome = backend.exec_in_attempt(
             handle,
             ["python3", "-c", channel_failure_driver_src, "--plan", "check", "--evidence", "flow-check"],
             Limits(timeout=30.0),
