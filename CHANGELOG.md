@@ -8,6 +8,17 @@ and version plan.
 
 ## [Unreleased]
 
+- **Live-test controls distinguish forbidden mount destinations and
+  validate closure refusal identity** (Refs #341). Cold-install checks use
+  a separate exception for each observed mount destination and for offline
+  sync; unknown, malformed and simultaneous mounts remain hard failures.
+  Closure preflight checks the same healthy acceptance predicate in every
+  mode, after checking a refusal's exact path and expected symptom. A
+  missed refusal produces strict XPASS rather than incorrectly certifying
+  the break. No-daemon controls exercise the actual markers and predicates,
+  including cross-property failures, shared-base mutations and an inverted
+  acceptance predicate. Real-Docker confirmation remains owed through #315.
+
 - **Calibration and discrimination declarations gain an optional
   `task.fixture` field** (Refs #287), fixing a real blocker found while
   preparing #287's pilot declaration: `calibration_run.py`'s

@@ -73,27 +73,30 @@ and unused.
                   for the wrong reason (`--offline` is what makes the
                   failure mode specific to the cache, not the network).
 
-`xfail(strict=True, raises=_PropertyHeld)` on every non-`none` mode - same
-SHAPE as `test_gate_witness_live.py` and `test_decide_reply_channel_live.
-py` (an unexpectedly-successful break is a hard failure, XPASS), but with
-a NARROWER `raises` than either of those two files (counter-model review,
-2026-10-07): `_PropertyHeld` is a dedicated exception, raised ONLY by the
-two properties actually under test (zero mounts; offline sync succeeds) -
-asserted UNCONDITIONALLY, the identical check in every mode, so it fails
-naturally when a break changes the real outcome and never because the
-test itself branched its own expectation by `BREAK_MODE`. Every OTHER
-check in this file (docker create/cp/start, image build, the cache-
-digest diagnostic) is a plain `assert` (base `AssertionError`), which the
-`xfail` marker does NOT match - so an unrelated infra failure (a docker
-daemon flake during a break run, say) is reported as an ordinary hard
-FAILURE, never masked as "the break worked." An earlier draft used
-`raises=AssertionError` with every check (setup and property alike)
-raising that same type, and separately branched the mount/sync
-assertions BY `BREAK_MODE` instead of asserting them unconditionally -
-both defeating the oracle: every mount-break mode would have XPASSed
-without ever showing the oracle caught anything, and a docker-level
-infra failure during any break run would have been indistinguishable
-from the break firing correctly.
+`xfail(strict=True)` on every non-`none` mode, `raises=` looked up per
+mode - same SHAPE as `test_gate_witness_live.py` and `test_decide_reply_
+channel_live.py` (an unexpectedly-successful break is a hard failure,
+XPASS), with a NARROWER `raises` than either (counter-model review,
+2026-10-07, further narrowed by issue #341 to one subtype PER property
+rather than one shared type for both): a distinct exception for each
+forbidden mount destination and `_OfflineSyncPropertyHeld` (`cold-cache`),
+each raised ONLY by its own property check via a `_require()` helper
+that takes which subtype to raise - asserted UNCONDITIONALLY,
+the identical check in every mode, so it fails naturally when a break
+changes the real outcome and never because the test itself branched its
+own expectation by `BREAK_MODE`. Every OTHER check in this file (docker
+create/cp/start, image build, the cache-digest diagnostic) is a plain
+`assert` (base `AssertionError`), which no `_PropertyHeld` subtype's
+`xfail` marker matches - so an unrelated infra failure (a docker daemon
+flake during a break run, say) is reported as an ordinary hard FAILURE,
+never masked as "the break worked." An earlier draft used `raises=
+AssertionError` with every check (setup and property alike) raising
+that same type, and separately branched the mount/sync assertions BY
+`BREAK_MODE` instead of asserting them unconditionally - both defeating
+the oracle: every mount-break mode would have XPASSed without ever
+showing the oracle caught anything, and a docker-level infra failure
+during any break run would have been indistinguishable from the break
+firing correctly.
 
 THE CLAIM'S EXACT BOUNDARY (orchestrator's condition, restated in the PR
 body and PROFILE.md too): this proves an OFFLINE install from a
@@ -109,12 +112,10 @@ was written and reviewed WITHOUT EVER RUNNING IT against a real daemon -
 no Docker in the implementation environment, confirmed and reported - and
 says so rather than implying otherwise. The `uv --offline` failure text
 asserted on IS independently confirmed (a real local `uv 0.9.7`, no
-Docker needed for that one check), and so is `_require`/`_PropertyHeld`'s
-own behavior (run directly, no pytest, no Docker: `_require(True, ...)`
-returns; `_require(False, ...)` raises `_PropertyHeld`; `_PropertyHeld` is
-confirmed NOT a subclass of `AssertionError`, so a plain `assert` failure
-does not satisfy `isinstance` against it) - but nothing involving an
-actual container has run.
+Docker needed for that one check). The no-daemon controls in
+`test_property_held_xfail_pattern.py` exercise the actual mount/cache
+predicates and strict markers, including shared-base mutations. They
+establish exception discrimination, not actual container behavior.
 
 Every container and image this file builds is removed in a `finally` -
 never left to the runner's own prune.
@@ -247,36 +248,82 @@ def _container_mounts(container: str) -> list[Any]:
 
 
 class _PropertyHeld(Exception):
-    """Raised when the ONE property a given `BREAK_MODE` is supposed to
-    violate still held - the opposite of what `xfail(strict=True)` below
-    expects. This is the ONLY exception type that marker's own `raises=`
-    matches - never bare `AssertionError` - so an unrelated infra/setup
-    failure (a failed `docker create`, a failed image build, an
-    unreadable report) raises plain `AssertionError` instead and is
-    reported as an ordinary hard FAILURE, never masked as "the break
-    worked" (counter-model review finding, 2026-10-07: the earlier draft
-    used `raises=AssertionError` with every check - setup and property
-    alike - raising that same type, so an unrelated Docker flake during
-    ANY break run would have been indistinguishable from the break firing
-    correctly)."""
+    """Shared base for the property-specific exceptions below (issue
+    #341: one subtype per independently-targeted property, so a
+    NEIGHBORING property's own failure cannot satisfy a break mode's own
+    `xfail(raises=...)` - counter-model review finding: the single-type
+    version closed the infra-vs-property gap but not the property-vs-
+    property one). Never raised directly."""
 
 
-def _require(condition: bool, message: str) -> None:
-    """The ONE property under test for the current `BREAK_MODE` -
-    asserted UNCONDITIONALLY, identically in the intact and the broken
-    path, so it fails naturally when (and only when) a break actually
-    changed the real outcome - never because the test branched its own
-    expectation BY `BREAK_MODE` (counter-model review finding: the
-    earlier draft asserted "mounts present" for the mount-break modes
-    instead of asserting "mounts empty" unconditionally, which made every
-    mount-break mode XPASS - the planted mount was confirmed present, not
-    shown to break anything a real caller would notice)."""
+class _SkillMountPropertyHeld(_PropertyHeld):
+    """An operator skill directory is mounted into the container."""
+
+
+class _HomeMountPropertyHeld(_PropertyHeld):
+    """An operator home is mounted into the container."""
+
+
+class _McpMountPropertyHeld(_PropertyHeld):
+    """An operator MCP configuration is mounted into the container."""
+
+
+class _SecretMountPropertyHeld(_PropertyHeld):
+    """An operator secret is mounted into the container."""
+
+
+class _OfflineSyncPropertyHeld(_PropertyHeld):
+    """An offline sync failed with the supplied cache."""
+
+
+_EXPECTED_PROPERTY_EXCEPTION: dict[str, type[_PropertyHeld]] = {
+    "skill-mount": _SkillMountPropertyHeld,
+    "home-mount": _HomeMountPropertyHeld,
+    "mcp-mount": _McpMountPropertyHeld,
+    "secret-mount": _SecretMountPropertyHeld,
+    "cold-cache": _OfflineSyncPropertyHeld,
+}
+
+# These checks depend on the observed destination, never on BREAK_MODE or
+# its expected-exception map. Mutating that map must not mutate the oracle.
+_MOUNT_PROPERTIES: dict[str, type[_PropertyHeld]] = {
+    "/root/.claude/skills": _SkillMountPropertyHeld,
+    "/root": _HomeMountPropertyHeld,
+    "/root/.mcp.json": _McpMountPropertyHeld,
+    "/root/.config/skillc/secret": _SecretMountPropertyHeld,
+}
+
+
+def _require(condition: bool, message: str, exc_type: type[_PropertyHeld]) -> None:
     if not condition:
-        raise _PropertyHeld(message)
+        raise exc_type(message)
+
+
+def _check_mounts(mounts: list[Any]) -> None:
+    """Require zero mounts, identifying a single known violation precisely.
+
+    Unknown or simultaneous violations stay hard failures: crediting the
+    first of several failures could hide a neighbor behind the intended one.
+    Only fixed container destinations are inspected; host sources are not
+    included in diagnostics.
+    """
+    assert all(isinstance(mount, dict) and isinstance(mount.get("Destination"), str) for mount in mounts), (
+        "malformed Docker mount observation"
+    )
+    destinations = [mount["Destination"] for mount in mounts]
+    assert all(target in _MOUNT_PROPERTIES for target in destinations), "unexpected mount destination"
+    assert len(destinations) <= 1, "multiple mounts violate independent properties"
+    for target, exc_type in _MOUNT_PROPERTIES.items():
+        _require(target not in destinations, f"forbidden mount at {target}", exc_type)
+
+
+def _check_offline_sync(returncode: int, stderr: str) -> None:
+    _require(returncode == 0, f"offline uv sync failed: {stderr}", _OfflineSyncPropertyHeld)
 
 
 @pytest.mark.xfail(
-    condition=BREAK_MODE != "none", strict=True, raises=_PropertyHeld,
+    condition=BREAK_MODE != "none", strict=True,
+    raises=_EXPECTED_PROPERTY_EXCEPTION.get(BREAK_MODE, _PropertyHeld),
     reason=f"SKILLC_COLDINSTALL_LIVE_BREAK={BREAK_MODE} deliberately breaks one property",
 )
 def test_profile_runs_cold_with_no_operator_mounts(tmp_path: Path) -> None:
@@ -296,15 +343,14 @@ def test_profile_runs_cold_with_no_operator_mounts(tmp_path: Path) -> None:
         # SETUP, not the property under test: a failure here is an
         # infra/environment problem, reported as an ordinary hard FAILURE
         # via plain `assert` (base AssertionError), never mistaken for a
-        # working break (`_PropertyHeld` is the only exception type the
-        # `xfail` marker above matches).
+        # working break (the marker matches only its targeted subtype).
         create = _run(
             ["docker", "create", "--network", "none", *_decoy_mount_args(tmp_path, BREAK_MODE),
              "--name", container, IMAGE_TAG, "sleep", "infinity"],
         )
         assert create.returncode == 0, f"docker create failed: {create.stderr}"
 
-        # THE SHARED MOUNT-EMPTINESS ORACLE, asserted UNCONDITIONALLY -
+        # THE MOUNT-EMPTINESS ORACLE, asserted UNCONDITIONALLY -
         # the same check for every mode, never branched by BREAK_MODE
         # (counter-model review finding). It holds for `none` and
         # `cold-cache` (zero mounts, by construction) and fails naturally
@@ -313,7 +359,7 @@ def test_profile_runs_cold_with_no_operator_mounts(tmp_path: Path) -> None:
         # discriminates, rather than merely confirming the test's own
         # setup did what it meant to.
         mounts = _container_mounts(container)
-        _require(mounts == [], f"expected zero mounts, found {len(mounts)}: {mounts}")
+        _check_mounts(mounts)
 
         cp_home = _run(["docker", "cp", f"{home}/.", f"{container}:/disposable-home"])
         assert cp_home.returncode == 0, f"docker cp (home) failed: {cp_home.stderr}"
@@ -369,7 +415,7 @@ def test_profile_runs_cold_with_no_operator_mounts(tmp_path: Path) -> None:
         # succeed) and fails naturally for `cold-cache` (there is no
         # cache to use, so the sync genuinely fails) - never branched to
         # expect a different outcome by mode.
-        _require(sync.returncode == 0, f"offline uv sync failed: {sync.stderr}")
+        _check_offline_sync(sync.returncode, sync.stderr)
 
         import_cmd = f"cd {in_container_cpp_dir} && uv run --locked python -c 'import lib.cicd; import lib.security'"
         import_check = _run(["docker", "exec", container, *env_prefix, "sh", "-c", import_cmd])
