@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -28,9 +29,9 @@ SNAPSHOT = Path(__file__).resolve().parent / "fixtures" / "profile-cpp-codex-flo
 DECLARATION = ROOT / "evals" / "subjects" / "cpp-codex-flow-check-ea6dbfa" / "profile.json"
 
 
-def _inventory_and_tree() -> tuple[dict[str, Any], p.DirTree]:
+def _inventory_and_tree(snapshot: Path = SNAPSHOT) -> tuple[dict[str, Any], p.DirTree]:
     prof = p.Profile.load(DECLARATION)
-    tree = p.DirTree(SNAPSHOT)
+    tree = p.DirTree(snapshot)
     return p.validate(prof, tree), tree
 
 
@@ -72,12 +73,13 @@ def test_install_and_installed_home_files_agree_on_every_byte(tmp_path: Path) ->
         assert (home / destination).read_bytes() == data, destination
 
 
-def test_red_case_a_tampered_source_is_refused_not_silently_delivered() -> None:
+def test_red_case_a_tampered_source_is_refused_not_silently_delivered(tmp_path: Path) -> None:
     """Mutation check: corrupt one source file after validation, before
     `installed_home_files` reads it - the digest check inherited from
     `install()`'s own preflight must still fire for the in-memory path."""
-    inventory, tree = _inventory_and_tree()
-    target = SNAPSHOT / "codex" / "skills" / "flow-check" / "scripts" / "gate-lib.sh"
+    snapshot = shutil.copytree(SNAPSHOT, tmp_path / "snapshot")
+    inventory, tree = _inventory_and_tree(snapshot)
+    target = snapshot / "codex" / "skills" / "flow-check" / "scripts" / "gate-lib.sh"
     original = target.read_bytes()
     try:
         target.write_bytes(original + b"\n# tampered\n")
@@ -85,6 +87,24 @@ def test_red_case_a_tampered_source_is_refused_not_silently_delivered() -> None:
             p.installed_home_files(inventory, tree)
     finally:
         target.write_bytes(original)
+
+
+def test_tamper_control_leaves_a_concurrent_snapshot_reader_intact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Read the shared fixture during the mutation, without a scheduling race."""
+    installed_home_files = p.installed_home_files
+    observations: list[bool] = []
+
+    def read_during_tamper(inventory: dict[str, Any], tree: p.Tree) -> dict[str, bytes]:
+        sibling_inventory, sibling_tree = _inventory_and_tree()
+        assert installed_home_files(sibling_inventory, sibling_tree)
+        observations.append(True)
+        return installed_home_files(inventory, tree)
+
+    monkeypatch.setattr(p, "installed_home_files", read_during_tamper)
+    test_red_case_a_tampered_source_is_refused_not_silently_delivered(tmp_path)
+    assert observations == [True]
 
 
 # ------------------------------------------------------------- inventory_digest
