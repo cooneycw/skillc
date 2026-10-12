@@ -17,6 +17,14 @@ file at all. Adding a file to the floor is a code change in the INSTALLED
 runner, so it takes effect only on the next explicit reinstall from a
 reviewed main sha (R1) - never implicitly at the next tick.
 
+Within a declared file, JUnit's `skipped type="pytest.xfail"` represents
+an expected test failure and makes the verdict FAILURE, even when sibling
+tests pass. This matters for `trialimage:no-uv`: Python, make, bash and git
+still pass while the uv property deliberately fails. Ordinary partial skips
+retain the per-file floor's existing behavior: a passing sibling can satisfy
+the file's execution floor. Thus SUCCESS is not proof that every individual
+property executed; inspect the named outcomes for campaign acceptance.
+
 **No machine identities appear in this repository.** `<agent-host>`,
 `<dedicated-user>`, `<server-url>` and similar are placeholders the operator
 fills in at install time, never committed values.
@@ -52,15 +60,42 @@ matters is in WHICH commits run at all, not in what R1 covers.
 
 ## Setup (operator, over SSH on `<agent-host>`)
 
+Do not assume this VM exists because the runner code is merged. Before the
+steps below, the operator must designate a **dedicated VM**, establish its
+SSH access through a private runbook, and arrange the hypervisor-owned
+isolation checks. A Docker daemon on an ordinary development machine is
+not a substitute. Keep VM names, addresses, accounts and credentials in
+that private runbook/configuration, never in this repository or issue comments.
+No Woodpecker server, shared CI agent or shared network change is part of
+this setup. If these prerequisites are missing, code preparation can finish
+but #315 and the real campaign remain pending.
+
 1. Install Docker, `git`, `uv`, and whatever this repo's own `make test`
-   needs (no new dependency - the VM is dedicated to this work already).
+   needs. The shell runner also uses `bash`, `python3`, `curl` (with
+   `--fail-with-body` support), `flock` and standard POSIX utilities. Make
+   them available on the dedicated service user's PATH, including `uv`;
+   an interactive operator's private shell PATH is not the systemd PATH.
 2. Create a dedicated, non-login OS user in the `docker` group
    (`<dedicated-user>` in the systemd units below).
+   Create the writable state/checkout parent and protected config directory:
+   ```
+   sudo install -d -m 0750 -o <dedicated-user> -g <dedicated-group> /var/lib/skillc-real-docker
+   sudo install -d -m 0700 -o <dedicated-user> -g <dedicated-group> /etc/skillc-real-docker
+   ```
+   The account's home/cache must also be writable so `uv sync` can build
+   the test environment. Confirm this user's Docker access and tool PATH
+   before running the runner, without copying an operator home into the VM.
 3. Install the runner:
    ```
    git clone https://github.com/cooneycw/skillc.git /opt/skillc-real-docker-runner
    cd /opt/skillc-real-docker-runner && git checkout <reviewed-main-sha>
    ```
+   Keep this installed copy separate from the writable test checkout. Use
+   full 40-character runner and tested commit SHAs. Install only after the
+   required runner/test fixes have merged, including #355's live-test repair,
+   #338's confinement proof and #348's production witness integration. Re-read
+   the installed floor and `break-lib.sh` after the final merge; the list
+   below is not a substitute for that exact installed version's population.
 4. Create `/etc/skillc-real-docker/config.env` (mode 600, owned by
    `<dedicated-user>`) from the template below.
 5. Create the GitHub token (see "Token", below) at the path
@@ -81,6 +116,9 @@ matters is in WHICH commits run at all, not in what R1 covers.
      refuses with "isolation not verified" (posts `error`, runs no tests).
    - With it ON: run the same command and confirm it proceeds past the
      preflight.
+   - With the hypervisor isolation still ON and the in-VM firewall flushed
+     by the operator: confirm it still proceeds. This distinguishes the
+     enforced boundary from the VM's own defence-in-depth firewall.
    - **Record both outcomes on this issue**, generically (no addresses) -
      this is the committed evidence that the detector actually detects
      something, on this specific host, not only in the unit tests.
@@ -93,31 +131,67 @@ matters is in WHICH commits run at all, not in what R1 covers.
    follow-up); a bare `witness`, `gateshim`, `coldinstall`, `trialimage`
    or `closure` mode has no such form and is refused.
    ```
-   run-real-docker <post-#300-main-sha> --break none                           # expect SUCCESS
-   run-real-docker <post-#300-main-sha> --break channel:omit-mount             # expect FAILURE
-   run-real-docker <post-#300-main-sha> --break channel:wrong-uid              # expect FAILURE
-   run-real-docker <post-#300-main-sha> --break channel:flip-decision          # expect FAILURE
-   run-real-docker <post-#300-main-sha> --break witness:stale-confirm-lie      # expect FAILURE
-   run-real-docker <post-#300-main-sha> --break witness:kill-wrong-pid         # expect FAILURE
-   run-real-docker <post-#300-main-sha> --break witness:gate-in-fresh-container # expect FAILURE
-   run-real-docker <post-#300-main-sha> --break gateshim:synthesizes-output    # expect FAILURE
-   run-real-docker <post-#300-main-sha> --break gateshim:drops-cwd             # expect FAILURE
-   run-real-docker <post-#300-main-sha> --break gateshim:exits-zero-on-channel-failure # expect FAILURE
-   run-real-docker <post-#300-main-sha> --break gateshim:wrong-env            # expect FAILURE
-   run-real-docker <post-#300-main-sha> --break coldinstall:skill-mount       # expect FAILURE
-   run-real-docker <post-#300-main-sha> --break coldinstall:home-mount        # expect FAILURE
-   run-real-docker <post-#300-main-sha> --break coldinstall:mcp-mount         # expect FAILURE
-   run-real-docker <post-#300-main-sha> --break coldinstall:secret-mount      # expect FAILURE
-   run-real-docker <post-#300-main-sha> --break coldinstall:cold-cache        # expect FAILURE
-   run-real-docker <post-#300-main-sha> --break trialimage:no-uv              # expect FAILURE
-   run-real-docker <post-#300-main-sha> --break closure:missing-closure      # expect FAILURE
-   run-real-docker <post-#300-main-sha> --break closure:tampered-closure     # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break none                           # expect SUCCESS
+   run-real-docker <reviewed-tested-sha> --break channel:omit-mount             # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break channel:wrong-uid              # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break channel:flip-decision          # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break witness:stale-confirm-lie      # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break witness:kill-wrong-pid         # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break witness:gate-in-fresh-container # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break gateshim:synthesizes-output    # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break gateshim:drops-cwd             # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break gateshim:exits-zero-on-channel-failure # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break gateshim:wrong-env            # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break coldinstall:skill-mount       # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break coldinstall:home-mount        # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break coldinstall:mcp-mount         # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break coldinstall:secret-mount      # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break coldinstall:cold-cache        # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break trialimage:no-uv              # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break closure:missing-closure      # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break closure:tampered-closure     # expect FAILURE
    ```
    Break-mode runs post only to `skillc/real-docker-control`
    (never the certifying `skillc/real-docker` context) and are labelled
    EXPECTED-RED. Record all nineteen results on this issue (the eighteen
    break-mode commands above, plus the `none` run itself).
 9. `systemctl enable --now skillc-real-docker.timer`.
+
+Keep the timer disabled until the operator accepts both isolation setup
+and the manual campaign. Starting it earlier can consume new main commits
+while the manual evidence run is still being prepared.
+
+### Retaining and interpreting campaign evidence
+
+Run the final merged floor and all declared break modes at one tested SHA,
+using one explicitly installed reviewed runner SHA. The current command
+examples above predate later floor additions: include #338's additional
+floor and the merged #348 production path in the final inventory. Report
+each issue's remaining acceptance separately; an aggregate green does not
+alone establish #334's real-script byte identity or complete witness coverage.
+
+For each invocation, retain the JUnit report, pytest output and runner
+output **outside `$WORK_CHECKOUT` before the next invocation**: the next
+run's `git clean -ffdx` deletes that checkout's reports. Use a private
+per-campaign/per-mode evidence directory with restrictive permissions.
+Record runner SHA, tested SHA, actual image identity, break mode, intended
+property, per-file execution counts, exact targeted test outcome and cleanup
+outcome. Keep the expected and actual commit-status contexts beside them.
+
+An expected-red status alone is insufficient. Check that each selected
+break reaches its intended property-specific strict XFAIL, while intact
+tests pass. A strict XPASS, ordinary setup failure, missing image, unrelated
+exception or unexpected skip is a campaign failure requiring investigation,
+not proof that the negative control worked. Preserve these results rather
+than overwriting them with a rerun. The `none` run must be SUCCESS on
+`skillc/real-docker`; break runs belong only on `skillc/real-docker-control`.
+Verify test-owned containers are removed, including after setup failures;
+the runner's final prune is not evidence that a test's own cleanup worked.
+
+Publish only leak-checked logical summaries and generic operator isolation
+attestation. No raw logs, VM identifiers, addresses, private paths or token
+contents belong on GitHub. This campaign invokes no paid model; any later
+live-study declaration needs its own exact approval and image identity.
 
 ## `config.env` template
 
@@ -193,6 +267,19 @@ two mutation checks (a classifier blind to the LAN probe, and one that
 folds `probe_error` into `unreachable` the way the original `|| echo
 unreachable` fallback effectively did).
 
+The socket probe accepts only an explicit timeout or `ENETUNREACH` /
+`EHOSTUNREACH` as unreachable. DNS lookup failures, permission errors,
+connection resets and unexpected OS errors are `probe_error`, even if the
+GitHub positive control succeeds. The Python 3.12 preflight image must
+support `socket.create_connection(..., all_errors=True)`: when a name resolves
+to multiple addresses, preserve every failed connection outcome. Any refused
+connection means reachable; otherwise any unexpected error means probe_error;
+only exclusively timeout/routing failures mean unreachable. A later timeout
+must not hide an earlier answering host or failed probe. The same test file executes the runner's
+actual embedded probe with controlled socket outcomes, including a mutation
+that restores the old broad `OSError` fallback. These offline controls prove
+the error classification, not the VM's network isolation.
+
 ## Trigger mechanism (R3 + R4)
 
 Two sources, both run with `--break none` only - break-mode runs are a
@@ -253,13 +340,15 @@ reported something, and ARE persisted.
 ## Known simplifications (stated, not hidden)
 
 - The bash scripts (`run-real-docker`, `poll-triggers`) are reviewed and
-  syntax-checked (`bash -n`), and their embedded Python decision logic has
-  been exercised directly against sample data, but the scripts **as whole
-  processes are not exercised end-to-end here** - this sandbox has no real
-  Docker daemon or GitHub token to run them against, the same honest
-  limitation `ci/docker-tests-control.sh`'s absent `good-all-ran.xml`
-  already states for a different control. Steps 7-8 above are how the
-  operator closes that gap on the real host.
+  syntax-checked (`bash -n`). `tests/test_real_docker_post.py` also runs the
+  actual `run-real-docker` shell process and installed posting modules with
+  fake external commands: valid SUCCESS, FAILURE and ERROR all reach posting
+  and cleanup with their matching final exit code; break runs use only the
+  control context. A helper crash, malformed output or status/exit mismatch
+  produces ERROR. These controls replace Docker, git, uv and curl I/O; they
+  do not demonstrate a real-daemon campaign or real GitHub publication.
+  `poll-triggers` remains covered by its decision-function tests rather
+  than a whole-process test. Steps 7-8 close the operator evidence gap.
 - `poll-triggers`' pagination cap (20 pages, 2000 comments) bounds a
   first-ever run against a repository with a very large, entirely
   unprocessed comment history; ordinary ticks stop within one page once
