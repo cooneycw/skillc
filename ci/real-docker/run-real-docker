@@ -177,16 +177,31 @@ fi
 # needs a port, and there is no "try the default web port" fallback that
 # would not just reintroduce the same ambiguity one layer up.
 _PROBE_SCRIPT='
-import socket, sys
+import errno, socket, sys
+
+def classify_errors(errors):
+    # A hostname may resolve to several addresses. One answering host is
+    # enough to disprove isolation, even if a later address times out.
+    if any(isinstance(exc, ConnectionRefusedError) for exc in errors):
+        return "reachable"
+    if errors and all(
+        isinstance(exc, TimeoutError) or (
+            isinstance(exc, OSError) and not isinstance(exc, socket.gaierror)
+            and exc.errno in (errno.ENETUNREACH, errno.EHOSTUNREACH)
+        ) for exc in errors
+    ):
+        return "unreachable"
+    return "probe_error"
+
 try:
     host, port, timeout = sys.argv[1], int(sys.argv[2]), float(sys.argv[3])
-    s = socket.create_connection((host, port), timeout=timeout)
+    s = socket.create_connection((host, port), timeout=timeout, all_errors=True)
     s.close()
     print("reachable")
-except ConnectionRefusedError:
-    print("reachable")  # a host answered and refused - still not isolated
-except OSError:
-    print("unreachable")  # timeout, no route, DNS failure, network unreachable
+except OSError as exc:
+    print(classify_errors([exc]))
+except ExceptionGroup as exc:
+    print(classify_errors(exc.exceptions))
 except Exception as exc:
     print(f"probe_error: {exc}", file=sys.stderr)
     sys.exit(2)
@@ -290,11 +305,31 @@ fi
 # ----------------------------------------------------- R1: compute + post
 
 cd "$INSTALLED_ROOT"  # never the checkout, for the posting step below
+POST_EXIT=0
 POST_OUTPUT="$(PYTHONPATH="$INSTALLED_ROOT" python3 "$INSTALLED_ROOT/ci/real_docker_post.py" \
-    "$REPORT_PATH" "$SHA" "$RUNNER_SHA")"
+    "$REPORT_PATH" "$SHA" "$RUNNER_SHA")" || POST_EXIT=$?
 POSTED_STATUS="$(echo "$POST_OUTPUT" | sed -n '1p')"
 DESCRIPTION="$(echo "$POST_OUTPUT" | sed -n '2p')"
 BODY="$(echo "$POST_OUTPUT" | sed -n '/^---$/,$p' | tail -n +2)"
+
+# FAILURE/ERROR are valid helper results with nonzero exits. Capture them
+# without set -e aborting before publication and cleanup. A crashed helper
+# or a malformed/mismatched status must never default to a green result.
+POST_VALID=false
+case "$POST_EXIT:$POSTED_STATUS" in
+    0:SUCCESS|1:FAILURE|2:ERROR)
+        if [ -n "$DESCRIPTION" ] && [ -n "$BODY" ] && \
+                [ "$(echo "$POST_OUTPUT" | sed -n '3p')" = "---" ]; then
+            POST_VALID=true
+        fi
+        ;;
+esac
+if [ "$POST_VALID" != "true" ]; then
+    POSTED_STATUS="ERROR"
+    DESCRIPTION="ERROR: verdict helper failed or returned malformed output (runner ${RUNNER_SHA:0:12})"
+    BODY="Verdict helper failed or returned malformed output. Full logs are retained on the runner host only."
+    echo "run-real-docker: $DESCRIPTION" >&2
+fi
 
 GH_STATE="success"
 [ "$POSTED_STATUS" = "FAILURE" ] && GH_STATE="failure"

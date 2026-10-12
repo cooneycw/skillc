@@ -489,6 +489,9 @@ def run_study(
             cli_version=str(client["version"]), task_root=task_root, surface=surface, prompt=prompt,
             timeout=budget, credential_explicit_path=credential_explicit_path,
             receipt_context=treatments[arm].receipt_context,
+            verify_home_files=treatments[arm].verify_home_files,
+            preflight_tools=treatments[arm].preflight_tools,
+            gate_entrypoint=treatments[arm].gate_entrypoint,
         )
 
     def on_outcome(outcome: mp.AttemptOutcome) -> None:
