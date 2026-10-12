@@ -8,6 +8,22 @@ and version plan.
 
 ## [Unreleased]
 
+- **The trial image builds on Docker 29, and the ea6dbfa fixture carries
+  CPP's `secrets.py` scanner module** (#356). Two real-daemon `make verify`
+  failures CI could not see, because it has no daemon. (1)
+  `docker/trial/Dockerfile`'s `COPY --from=ghcr.io/astral-sh/uv:${UV_VERSION}`
+  (from #343) is rejected by BuildKit on Docker 29 ("variable expansion is
+  not supported for --from"); `UV_VERSION` is now a global `ARG` feeding a
+  named `uv-bin` stage, and the copy names that stage. Same pin, 0.9.7.
+  (2) The cold-container test's `ImportError: cannot import name 'secrets'`
+  was not a copy-step filter: this repository's `secrets.*` ignore rule kept
+  `lib/security/modules/secrets.py` out of the committed fixture, silently.
+  The file is now vendored byte-identical to CPP `ea6dbfa`, under a narrow
+  `!tests/fixtures/**/secrets.py` exception.
+  `tests/test_profile_fixture_completeness.py` checks the fixture against
+  the pin's own evidence inventory (no git, no Docker, so it runs in CI) and
+  proves `secrets.*` still ignores secret-bearing files.
+
 - **Calibration and discrimination declarations gain an optional
   `task.fixture` field** (Refs #287), fixing a real blocker found while
   preparing #287's pilot declaration: `calibration_run.py`'s
