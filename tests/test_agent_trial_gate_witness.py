@@ -1,6 +1,6 @@
 """Production runner/witness composition through real fake-CLI processes.
 
-The fake Docker has no mounts, chroot or per-uid protection. This transport
+The fake Docker has no mounts, container interpreter or per-uid protection. This transport
 adapter virtualizes only those absent facilities; it never constructs a witness,
 answers a readiness nonce, or supplies a grading envelope. Real Docker proof is
 separate. The scripted client and receipt fixture are deterministic stand-ins.
@@ -35,6 +35,10 @@ from skillc.backend import Confirmation, ExecuteResult, Limits
 from skillc.collection_conformance import TrackingDockerBackend
 
 
+def failure_reason(result: Mapping[str, Any]) -> str:
+    return f"lifecycle: {result.get('reason')}; grading: {result.get('grading_blocked_reason')}"
+
+
 @dataclass(frozen=True)
 class VirtualMountBackend(TrackingDockerBackend):
     fault: str | None = None
@@ -53,6 +57,11 @@ class VirtualMountBackend(TrackingDockerBackend):
         args = list(argv)
         if at.TRIGGER_SOCKET_PATH in args:
             index = args.index(at.TRIGGER_SOCKET_PATH)
+            assert (len(args) == 6 and index == 3 and args[:2] == ["/usr/bin/python3", "-c"]
+                    and "witness_ready" in args[2]), "unexpected readiness invocation"
+            # The real image has this pinned interpreter; fake Docker executes
+            # host processes, whose Python can live elsewhere (python:slim CI).
+            args[0] = sys.executable
             args[index] = str(d.trigger_socket_host_path_for(self.trigger_socket_dir, handle.name))
             if self.fault == "nonce":
                 args[index + 1] = "wrong-controller-nonce"
@@ -173,8 +182,8 @@ def run_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, mode: str = "fr
 def test_actual_runner_constructs_and_delivers_controller_witness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                                                 receipt: bool) -> None:
     result, trusted, backend = run_case(tmp_path, monkeypatch, receipt=receipt)
-    assert result["disposition"] == "captured", result
-    assert len(backend.executed) == 1
+    assert result["disposition"] == "captured", failure_reason(result)
+    assert len(backend.executed) == 1, failure_reason(result)
     assert len(trusted) == 1
     witness = trusted[0]["witness"]
     assert witness["attempt_id"] == result["attempt_id"]
@@ -221,7 +230,7 @@ def test_actual_finalization_failure_never_delivers_trusted_envelope(
 
     monkeypatch.setattr(at._WitnessSession, "finish", twice)
     result, trusted, backend = run_case(tmp_path, monkeypatch, fault=fault)
-    assert len(backend.executed) == 1
+    assert len(backend.executed) == 1, failure_reason(result)
     assert sessions and sessions[0].failure
     assert len(backend.drained) == (1 if fault == "drain" else 0)
     assert trusted == []
@@ -234,7 +243,7 @@ def test_actual_gate_history_binds_each_call_to_its_own_snapshot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str,
 ) -> None:
     result, trusted, backend = run_case(tmp_path, monkeypatch, mode=mode)
-    assert result["disposition"] == "captured", result
+    assert result["disposition"] == "captured", failure_reason(result)
     assert len(backend.executed) == 1 and len(trusted) == 1
     record = trusted[0]
     summary = record["witness"]["gates"]["flow-check-summary"]
@@ -246,3 +255,60 @@ def test_actual_gate_history_binds_each_call_to_its_own_snapshot(
         assert len(summary["runs"]) == (2 if mode == "rerun" else 1)
         if mode == "rerun":
             assert summary["runs"][-1]["tree_digest_at_start"] == record["graded_tree_digest"]
+
+
+@pytest.mark.parametrize("fault", [None, "nonce", "channel"])
+def test_readiness_runs_without_a_host_container_interpreter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str | None,
+) -> None:
+    real_exec = d.DockerBackend.exec_in_attempt
+    interpreters: list[str] = []
+    measurements: list[ExecuteResult] = []
+
+    def host_without_container_python(self: d.DockerBackend, handle: object, argv: Sequence[str],
+                                      *args: Any, **kwargs: Any) -> ExecuteResult:
+        command = list(argv)
+        readiness = len(command) >= 3 and "witness_ready" in command[2]
+        if readiness:
+            interpreters.append(command[0])
+            if command[0] == "/usr/bin/python3":
+                # Make the real fake-CLI subprocess encounter the missing host
+                # executable, even on developer machines that happen to have it.
+                command[0] = str(tmp_path / "missing-host-container-python")
+        result = real_exec(self, handle, command, *args, **kwargs)
+        if readiness:
+            measurements.append(result)
+        return result
+
+    monkeypatch.setattr(d.DockerBackend, "exec_in_attempt", host_without_container_python)
+    result, trusted, backend = run_case(tmp_path, monkeypatch, fault=fault)
+    if fault is None:
+        assert result["disposition"] == "captured", failure_reason(result)
+        assert len(backend.executed) == len(trusted) == 1
+        assert measurements[0].exit_code == 0
+        reply = json.loads(measurements[0].stdout or b"")
+        assert reply["ok"] is True and len(reply["result"]["nonce"]) == 64
+    else:
+        assert result["disposition"] == "unavailable", failure_reason(result)
+        assert backend.executed == [] and trusted == []
+    assert interpreters == [sys.executable], failure_reason(result)
+
+
+@pytest.mark.parametrize("fault", ["interpreter", "mode", "script", "arity"])
+def test_readiness_translation_refuses_unexpected_invocations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str,
+) -> None:
+    backend = VirtualMountBackend(image="fake", base_dir=tmp_path)
+    handle = d._Handle("attempt", "container", {})
+    argv = ["/usr/bin/python3", "-c", "witness_ready", at.TRIGGER_SOCKET_PATH, "nonce", "5"]
+    if fault == "arity":
+        argv.pop()
+    else:
+        argv[{"interpreter": 0, "mode": 1, "script": 2}[fault]] = "unexpected"
+
+    def must_not_execute(*args: object, **kwargs: object) -> ExecuteResult:
+        pytest.fail("unexpected readiness argv reached external execution")
+
+    monkeypatch.setattr(d.DockerBackend, "exec_in_attempt", must_not_execute)
+    with pytest.raises(AssertionError, match="unexpected readiness invocation"):
+        backend.exec_in_attempt(handle, argv, Limits(timeout=1))
