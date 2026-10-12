@@ -36,3 +36,26 @@ a timing-dependent concurrent stress test.
 
 The separate two-file repair is now ready for independent review and full
 verification. It changes no production code or committed fixture bytes.
+
+## Independent repair review
+
+One substantive gpt-6.1-sol review of the two-file repair at 310b2c1 found
+no defects. The native implementer is gpt-6-astra. Actual reviewer rollout
+01a13257-c464-7821-a721-0be61724aa83 contains only gpt-6.1-sol contexts;
+no formatting resume or additional review ran. The reviewer inspected the
+diff/source without executing tests and affirmed both the private mutation
+refusal and the original-fixture reader's nonempty result, observed once.
+Root's own integration read likewise found no issue. This is a separate
+repair review, not a third substantive endpoint review.
+
+The official parser returned unparseable despite the explicit clean verdict
+and Red cases section; no report was rewritten to force acceptance. The
+actual receipt writer refused because it cannot find this native implementer
+as a Claude transcript. No official receipt, false skip or machine-gate pass
+is claimed. The original stream, rollout, report, patch and red evidence are
+archived in persistent private state. Root retains the native-review ruling
+and merge authority. Full verification and final-head CI remain required.
+
+Observed repair diff SHA256: 49600abc760057173db7eaeff0467dff79f33fac81f1ea46eb0a56e4a39747f5.
+Original report SHA256: c75f1ccc5cf826fa3d4b4a98fb82c965ed923eaec654424bbf7d4e29b7188c91.
+Original reviewer rollout SHA256: 57234d0e488b807b27cafa7190293b0e9a2df730054e4fe4cc494dd47d93c6aa.
