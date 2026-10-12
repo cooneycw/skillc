@@ -5,6 +5,7 @@ against the fake docker CLI and a scripted client (no real agent)."""
 from __future__ import annotations
 
 import copy
+import dataclasses
 import json
 import math
 import shutil
@@ -24,9 +25,9 @@ from test_calibration_run import (
     _fresh_codex_credential,
 )
 
+from skillc import agent_trial, demo, materialize, trial, verify
 from skillc import calibration_run as cr
 from skillc import collection_conformance as cc
-from skillc import demo, materialize, trial, verify
 from skillc import docker_backend as d
 from skillc import matched_pilot as mp
 from skillc import uptake_study as us
@@ -246,6 +247,55 @@ def test_the_arms_differ_only_in_the_install_and_selection_is_counted_and_tested
     assert test["p_value"] == pytest.approx(us.fisher_one_sided(3, 3, 0, 3))  # type: ignore[index]
     assert all(e["model_eligible"] is not False for e in report["attempts"])  # type: ignore[union-attr,attr-defined]
     assert "rewritten 3/3 vs published 0/3" in us.paste_back(report)
+
+
+@pytest.mark.parametrize("profile_arm", ["published", "rewritten"])
+def test_profile_closure_fields_reach_run_one_attempt_for_the_selected_arm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, profile_arm: str,
+) -> None:
+    """#346: observe beyond the real collection wrapper, without starting an
+    agent. The other uptake arm has no profile, not an empty-install baseline.
+    Closure construction and verification have their own tests; sentinel
+    fields here isolate the production callers' forwarding contract."""
+    declaration = us.parse_declaration(_data())
+    treatments = {"published": _treatment(tmp_path, monkeypatch, "published", "Run quality checks"),
+                  "rewritten": _treatment(tmp_path, monkeypatch, "rewritten", NEW)}
+    gate = ".claude/scripts/flow-finish-gate.sh"
+    gate_bytes = b"#!/bin/sh\nexit 0\n"
+    checks = {gate: materialize.sha256_bytes(gate_bytes)}
+    tools: tuple[dict[str, object], ...] = ({"id": "shell", "probes": [{"argv": ["sh", "--version"]}]},)
+    treatments[profile_arm] = dataclasses.replace(
+        treatments[profile_arm],
+        home_files={**treatments[profile_arm].home_files, gate: gate_bytes},
+        verify_home_files=checks, preflight_tools=tools, gate_entrypoint=gate,
+    )
+    seen: dict[str, dict[str, object]] = {}
+
+    def observe_attempt(**kwargs: object) -> dict[str, object]:
+        attempt_id = str(kwargs["attempt_id"])
+        seen[attempt_id] = kwargs
+        experiment = kwargs["experiment"]
+        assert isinstance(experiment, trial.Experiment)
+        return trial.finalize(experiment, attempt_id, disposition="unavailable",
+                              reason="forwarding test stops at the agent boundary")
+
+    monkeypatch.setattr(agent_trial, "run_one_attempt", observe_attempt)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    _, outcomes = us.run_study(
+        declaration, run_dir=run_dir, treatments=treatments, image_digest=_IMAGE_DIGEST,
+        backends=lambda: (object(), object()), argv_for=lambda _: [], root=ROOT,
+    )
+    assert len(seen) == len(outcomes) == 12
+    assert all(outcome.runner_note is None for outcome in outcomes)
+    for outcome in outcomes:
+        arm = outcome.scheduled.arm.split("__")[1]
+        call = seen[outcome.scheduled.attempt_id]
+        assert call["extra_home_files"] == treatments[arm].home_files
+        assert call["receipt_context"] is treatments[arm].receipt_context
+        assert call["verify_home_files"] == (checks if arm == profile_arm else {})
+        assert call["preflight_tools"] == (tools if arm == profile_arm else ())
+        assert call["gate_entrypoint"] == (gate if arm == profile_arm else None)
 
 
 def test_red_an_unapproved_declaration_leaves_no_store(tmp_path: Path) -> None:

@@ -19,6 +19,35 @@ and version plan.
   including cross-property failures, shared-base mutations and an inverted
   acceptance predicate. Real-Docker confirmation remains owed through #315.
 
+- **Uptake studies forward each arm's profile verification fields** (#346).
+  The prepared treatment's file digests, tool preflight probes and gate
+  entrypoint now reach the real attempt runner through the existing
+  collection wrapper. Treatments without a profile keep empty checks. A
+  regression observes the runner boundary for both named arm choices.
+
+- **The real-Docker isolation probe refuses DNS and local probe errors**
+  (Refs #315). Its embedded socket probe previously treated every `OSError`
+  as an unreachable LAN, including DNS and permission errors. Only explicit
+  timeouts and host/network routing failures now report unreachable;
+  successful and refused connections still report reachable. All resolved
+  address failures are retained, so a later timeout cannot hide an earlier
+  refusal or local error. Offline controls
+  execute the actual runner snippet and detect the broad-`OSError` mutation.
+  This detector does not replace operator-verified hypervisor isolation.
+
+- **Expected real-Docker failures cannot hide behind passing sibling tests**
+  (Refs #315). The installed verdict recognizes JUnit's `pytest.xfail`
+  entries as failures, so `trialimage:no-uv` stays red when its other tool
+  probes pass. Ordinary partial-skip semantics and the seven-file floor
+  remain unchanged; aggregate success does not prove every property ran.
+
+- **Real-Docker FAILURE and ERROR results reach status publication and cleanup**
+  (Refs #315). The shell runner now captures the posting helper's deliberate
+  nonzero exit codes instead of aborting under `set -e`. A helper crash,
+  malformed output or status/exit mismatch becomes ERROR. Offline process
+  controls cover the actual installed runner with fake external commands,
+  including expected-red context routing and removal of temporary curl config.
+
 - **Calibration and discrimination declarations gain an optional
   `task.fixture` field** (Refs #287), fixing a real blocker found while
   preparing #287's pilot declaration: `calibration_run.py`'s
