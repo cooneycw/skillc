@@ -103,8 +103,9 @@ passes; both empty #271 witness cases also failed before correction.
 The receipt writer does not support a native Codex implementer reviewed by
 a different Codex model. The review actually ran, so no unavailable-reviewer
 skip is claimed and no Claude identity is substituted. The raw native
-review records and measured model identities are retained; completion of
-this workflow gate needs the owner's disposition of the tooling limitation.
+review records and measured model identities are retained; the wave
+orchestrator accepted the audited record under its delegated gate authority,
+with the tooling limitation explicit and final-head CI still required.
 
 Pass 2 found that cleanup in finally or a non-suppressing context manager
 was incorrectly treated as handling an exception, losing healthy evidence.
@@ -143,3 +144,13 @@ for that directory; no intended source or fixture was excluded.
 
 A conservative relative-code-filename observation limitation was recorded
 in [Nit Store](https://github.com/cooneycw/skillc/issues/20#issuecomment-6133802905).
+
+## Review-record disposition
+
+The orchestrator accepted the measured independent native reviews under
+the user's existing wave gate authority. The receipt procedure requires a
+ruling for an honest state its writer cannot represent; it does not reserve
+that ruling to a fresh user approval. The initial request for another
+confirmation was withdrawn on that basis, not treated as answered by
+elapsed time. No generated receipt, unavailable-reviewer skip, or passing
+receipt-tool verdict is claimed. Final-head CI remains required.

@@ -17,7 +17,11 @@ The receipt writer supports Claude-to-Codex and Codex-to-Claude identities,
 but has no native Codex-to-Codex path. An actual write attempt refused
 because this native session has no Claude transcript. No substitute Claude
 identity, fabricated receipt or unavailable-reviewer skip was used. The
-workflow's receipt requirement still needs owner disposition.
+wave orchestrator accepted this audited record under the user's existing
+orchestrator-only gate authority. The procedure calls for a ruling on an
+unsupported honest state, not a new user approval. No automated receipt or
+machine-gate success is claimed; all substantive review and CI requirements
+remain in force. This is the recorded disposition for this bounded PR.
 
 ## Pass 1
 
