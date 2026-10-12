@@ -4,7 +4,7 @@
  "task": {
   "path": "evals/level3/report-outran-evidence",
   "grader_id": "report-outran-evidence",
-  "grader_revision": "2"
+  "grader_revision": "3"
  },
  "_comment": "NOT a run declaration (contrast evals/calibration-204/run-manifest.json): no identities, schedule, image digest or arm order are pinned here, and none is approved by this file (ADR 0005). claims-outran-evidence's own eligibility-manifest.json restated for this task's structurally distinct held-out variant - same shape, same caveats, different bug domain.",
  "obligation_tree": {

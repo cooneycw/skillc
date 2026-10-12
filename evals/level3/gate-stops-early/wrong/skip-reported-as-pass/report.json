@@ -1,1 +1,7 @@
-{"flow_check_summary": {"claim": "PASS"}}
+{
+  "checks": {
+    "typecheck": {
+      "status": "passed"
+    }
+  }
+}

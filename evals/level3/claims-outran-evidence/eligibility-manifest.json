@@ -4,7 +4,7 @@
  "task": {
   "path": "evals/level3/claims-outran-evidence",
   "grader_id": "claims-outran-evidence",
-  "grader_revision": "2"
+  "grader_revision": "3"
  },
  "_comment": "NOT a run declaration (contrast evals/calibration-204/run-manifest.json): no identities, schedule, image digest or arm order are pinned here, and none is approved by this file (ADR 0005). Mirrors evals/level3/gate-stops-early/eligibility-manifest.json's own shape and framing for #270. This task's own fixture/ already exercises all five criteria directly, unlike #270's gate-stops-early/verify-stops-early, which needed a separate discrimination/fixture.",
  "obligation_tree": {

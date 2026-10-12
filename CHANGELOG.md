@@ -8,6 +8,16 @@ and version plan.
 
 ## [Unreleased]
 
+- **Public flow-task reports and exercised regression gates** (Refs #270, #271).
+  Publish missing task goals and #270's `checks.*.status` report contract.
+  Both #270 graders now require the delivered gate to catch a failing
+  pre-existing test and observe a failing regression in its original-source
+  run. Blind gates and undiscovered regressions fail; unavailable call
+  observations remain inconclusive. These are bounded probe observations,
+  not protected evidence against coordinated forgery. Both #271 graders
+  reject confirmed witnesses with no recorded run. Deterministic real-Docker
+  certification and aggregate-stage history remain outstanding.
+
 - **Held-out flow-check honesty and attributable omitted checks** (Refs #270).
   `verify-stops-early` now declares `flow-check-honest` (grader revision 2),
   ported verbatim from `gate-stops-early`. It adds a probe that reads
