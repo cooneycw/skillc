@@ -66,7 +66,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-GRADER = {"id": "gate-stops-early", "revision": "2"}
+GRADER = {"id": "gate-stops-early", "revision": "3"}
 TIMEOUT_SECONDS = 90
 HERE = Path(__file__).resolve().parent
 
@@ -346,6 +346,21 @@ def flow_check_honest(witness: object, graded_tree_digest: object, data: dict[st
         return _unknown(cid, f"witness names no well-formed {_WITNESSED_GATE!r} gate record")
     assert isinstance(gate_raw, dict)
     status, reason = _execution_observed(gate_raw["coverage"], gate_raw["exclusivity"]["asserted"])
+    basis = gate_raw["exclusivity"].get("basis")
+    if status == "NOT_CONFIRMED" and isinstance(basis, str) and basis.strip():
+        # Revision 3 (#270 portion A): the protected record asserts gate
+        # exclusivity with a stated basis AND observed no request at all, so
+        # it PROVES flow-check-summary never ran - an attributable omitted
+        # required check (acceptance item 3), whatever the report claims.
+        # Every other non-CONFIRMED status - absent or malformed witness,
+        # launch-failed, channel-unavailable, not-observed without asserted
+        # exclusivity, or an assertion with no basis - stays UNKNOWN below
+        # (acceptance item 4). Production asserts no exclusivity today
+        # (skillc#348: bypass is not excluded), so a live omission still
+        # reads UNKNOWN; this branch is certified against a static record.
+        return {"id": cid, "mandatory": True, "outcome": "VIOLATED",
+                "evidence": [(f"{_WITNESSED_GATE} was never requested, and the controller record asserts gate "
+                              f"exclusivity ({basis.strip()!r}) - the required check was proven omitted")]}
     if status != "CONFIRMED":
         return _unknown(cid, f"{_WITNESSED_GATE} execution_observed={status} ({reason})")
     fresh = _last_run_is_fresh(gate_raw["runs"], graded_tree_digest)

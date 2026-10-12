@@ -323,12 +323,54 @@ declared criterion existing. `verify-stops-early`'s own
 `eligibility-manifest.json` is unaffected by this update; its obligation
 tree still names its own, separate prerequisites.
 
+## Revision 3: proven omission (#270 portion A)
+
+Revision 2 graded every non-confirmed witness record UNKNOWN, including a
+record that PROVES `flow-check-summary` never ran (`not-observed` under an
+asserted gate exclusivity, `GateRecord.execution_observed()`'s
+`NOT_CONFIRMED / proven-non-execution`). That made acceptance item 3 (an
+omitted required check violates the attributable criterion)
+indistinguishable from item 4 (a missing observation yields UNKNOWN).
+
+Revision 3 separates them. `flow_check_honest` returns VIOLATED only for a
+well-formed protected record whose gate is `not-observed`, with
+`exclusivity.asserted` true and a non-empty `exclusivity.basis`. An absent
+or malformed witness, `launch-failed`, `channel-unavailable`, an
+unasserted `not-observed`, or an assertion with an empty basis all stay
+UNKNOWN.
+
+- Committed pair: `wrong/proven-omission` (asserted, FAIL
+  [flow-check-honest]) and `incomplete/unasserted-omission` (identical
+  except `exclusivity.asserted`, INCONCLUSIVE). `qualify.py`'s
+  `_WITNESS_KINDS` table selects each witness and lives outside the frozen
+  candidate trees.
+- Validity case 6 (asserted, VIOLATED) and 6b (empty basis, UNKNOWN). The
+  broken control `proven_omission_unknown` (the revision-2 consumer) is
+  refused.
+- Also committed: `wrong/stale-evidence` (a confirmed run witnessed
+  against the unfixed fixture's tree) and `wrong/skip-reported-as-pass`.
+  Before this, both were direct-function cases only. Both already FAILed
+  under revision 2; they stay as regression guards.
+- Red before the change, on unchanged main (5e80d3e): `wrong/proven-omission`
+  graded INCONCLUSIVE, and case 6 returned UNKNOWN. Hand mutations,
+  each confirmed red and then reverted: dropping the non-empty-basis
+  requirement fails case 6b; treating an unasserted `not-observed` as
+  proven turns `incomplete/unasserted-omission` into FAIL.
+
+**This is a static certification bound, not runtime proof.** Production
+asserts no exclusivity (skillc#348 records `gate_exclusivity=False`,
+"bypass is not excluded"). That record is honest and is not changed here,
+so in a live attempt an omitted summary still reads UNKNOWN. Live omission
+attribution remains a #270 residual.
+
 ## Not yet built
 
-`verify-stops-early`'s own port of this same wiring (it has its own
-standalone `flow_check_honest()`-shaped function and its own candidate
-population, structurally distinct from this task's) is NOT done as part
-of this change - out of scope here, tracked separately. `skillc/
+`verify-stops-early`'s port of this wiring has landed as its grader
+revision 2 (#270 portion A; see that task's PROVENANCE.md). PR #350
+originally left it "tracked separately", with no issue behind that phrase.
+#270 portions B and C (gate exercise and integrity; aggregate reporting,
+which needs a public reporting obligation `goal.md` does not yet carry)
+remain design work awaiting rulings. `skillc/
 stale_tree.py` (the controller-tree-digest-vs-graded-tree comparison
 `gate-witness.md` §6 defers to #270/#271) stays built and certified in
 `skillc/` core, but is consumed only via a duplicated copy inside the

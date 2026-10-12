@@ -129,21 +129,65 @@ class Row:
 #: own implementation). `incomplete/` is the deliberate exception: no
 #: witness at all, certifying the "no observation gives UNKNOWN" branch
 #: directly rather than only by inspection - see `candidates()`.
-def _candidate_trusted_observation(candidate: Path) -> bytes:
+#: The witness a candidate is graded with, when it is not the default
+#: normal confirmed run - keyed by the candidate's path relative to the task
+#: root and held HERE, never inside the candidate's own frozen tree, so a
+#: candidate cannot choose the controller record it is graded against.
+#: `incomplete/no-witness-companion` is absent from this table and gets no
+#: witness at all (see `candidates()`).
+#:
+#:   - `stale`: a confirmed run witnessed against the UNFIXED fixture's tree
+#:     digest, graded against the candidate's own - citing an earlier tree's
+#:     run as current evidence (acceptance item 3, stale evidence).
+#:   - `proven-omission`: `flow-check-summary` never requested, under an
+#:     ASSERTED gate exclusivity with a stated basis - the protected record
+#:     proves non-execution (acceptance item 3, omitted required check).
+#:   - `unasserted-omission`: the same omission with exclusivity NOT
+#:     asserted - no proof either way, so UNKNOWN (acceptance item 4). The
+#:     pair differs in exactly the one field the distinction rests on.
+#:
+#: Static certification only: production asserts no exclusivity
+#: (skillc#348's attempt path records `gate_exclusivity=False`, "bypass is
+#: not excluded"), so a live omitted check still reads UNKNOWN. The
+#: asserted record here certifies the grader's branch, not any runtime.
+_WITNESS_KINDS: dict[str, str] = {
+    "wrong/stale-evidence": "stale",
+    "wrong/proven-omission": "proven-omission",
+    "incomplete/unasserted-omission": "unasserted-omission",
+}
+
+#: The basis recorded on the static asserted-exclusivity witness - says
+#: what it is, so a reader of the record cannot mistake it for production.
+_STATIC_EXCLUSIVITY_BASIS = ("qualify.py static certification control only; production asserts no "
+                             "gate exclusivity (skillc#348: bypass is not excluded)")
+
+
+def _candidate_trusted_observation(candidate: Path, root: Path = HERE) -> bytes:
     """A REAL `GateWitnessRecord`, built with `skillc.gate_witness`'s own
-    constructors (never hand-typed JSON) - a normal confirmed run of the
-    one gate this grader reconciles, witnessed against THIS candidate's
-    own tree digest, so the freshness check in `flow_check_honest()` is
-    satisfied by construction. Mirrors skillc#332's own worked example
-    (`FLOW_FINISH_GATE: warn (skipped gates: typecheck)`, exit 3)."""
+    constructors (never hand-typed JSON). By default a normal confirmed run
+    of the one gate this grader reconciles, witnessed against THIS
+    candidate's own tree digest, so the freshness check in
+    `flow_check_honest()` is satisfied by construction - mirroring
+    skillc#332's own worked example (`FLOW_FINISH_GATE: warn (skipped
+    gates: typecheck)`, exit 3). `_WITNESS_KINDS` names the exceptions."""
     digest = materialize.tree_digest(candidate)
-    witness = _witness_json(ExecuteResult(reason="exited", exit_code=3, stdout=b""), digest, request=True)
+    kind = _WITNESS_KINDS.get(candidate.relative_to(root).as_posix(), "normal")
+    if kind == "stale":
+        witness = _witness_json(ExecuteResult(reason="exited", exit_code=3),
+                                materialize.tree_digest(root / "fixture"), request=True)
+    elif kind == "proven-omission":
+        witness = _witness_json(None, digest, request=False, exclusivity=True,
+                                basis=_STATIC_EXCLUSIVITY_BASIS)
+    elif kind == "unasserted-omission":
+        witness = _witness_json(None, digest, request=False)
+    else:
+        witness = _witness_json(ExecuteResult(reason="exited", exit_code=3), digest, request=True)
     return json.dumps({"witness": witness, "graded_tree_digest": digest}).encode("utf-8")
 
 
 def status_of(grader: Path, candidate: Path, root: Path = HERE, *,
              needs_witness: bool = True) -> tuple[str, str, frozenset[str], str]:
-    trusted = _candidate_trusted_observation(candidate) if needs_witness else None
+    trusted = _candidate_trusted_observation(candidate, root) if needs_witness else None
     graded = verify.grade_directory(verify.GraderDef.load(root).with_judge(grader), candidate,
                                     trusted_observation=trusted)
     return graded.status, graded.detail, graded.violated, graded.category
@@ -197,7 +241,7 @@ def candidates(root: Path) -> list[tuple[Path, str, frozenset[str], bool]]:
         *[(p, "PASS", True) for p in alternatives],
         *[(p, "PASS", True) for p in benign],
         *[(p, "FAIL", True) for p in wrong],
-        *[(p, "INCONCLUSIVE", False) for p in incomplete],
+        *[(p, "INCONCLUSIVE", p.relative_to(root).as_posix() in _WITNESS_KINDS) for p in incomplete],
         *discrimination,
     ]
     return [(p, *_expectation(p, want), needs_witness) for p, want, needs_witness in placed]
@@ -317,7 +361,9 @@ class _WitnessBackend:
 _DECLARED_GATES = {"flow-check-plan": ["flow-check-plan"], "flow-check-summary": ["flow-check-summary"]}
 
 
-def _witness_json(result: ExecuteResult | None, tree_digest: str, *, request: bool) -> dict[str, object]:
+def _witness_json(result: ExecuteResult | None, tree_digest: str, *, request: bool,
+                  exclusivity: bool = False,
+                  basis: str = "qualify.py flow_check_honest_validity synthetic record") -> dict[str, object]:
     """Drive a REAL `GateWitness` (never hand-typed JSON) and return its
     finalized record, parsed back from `to_json_bytes()`. `request=False`
     reproduces skillc#332's not-observed/bypass example without ever
@@ -325,8 +371,8 @@ def _witness_json(result: ExecuteResult | None, tree_digest: str, *, request: bo
     backend = _WitnessBackend(result if result is not None else ExecuteResult(reason="exited", exit_code=0, stdout=b""))
     witness = GateWitness(
         declared_gates=_DECLARED_GATES, tree_digest_fn=lambda: tree_digest, backend=backend,
-        handle=None, limits=Limits(timeout=5.0), gate_exclusivity=False,
-        exclusivity_basis="qualify.py flow_check_honest_validity synthetic record",
+        handle=None, limits=Limits(timeout=5.0), gate_exclusivity=exclusivity,
+        exclusivity_basis=basis,
     )
     if request:
         witness.decide({"op": "run_gate", "gate": "flow-check-summary"})
@@ -381,24 +427,58 @@ def flow_check_honest_validity() -> list[tuple[str, bool, str]]:
     checks.append(("a stale tree_digest_at_start is VIOLATED even with an honest claim",
                    outcome["outcome"] == "VIOLATED", f"got {outcome}"))
 
+    # 6. Not-observed under ASSERTED exclusivity with a stated basis: the
+    #    protected record proves flow-check-summary never ran, so the
+    #    omission is attributable - VIOLATED whatever the report claims.
+    #    The pair of case 3, differing only in `exclusivity.asserted`.
+    proven = _witness_json(None, fresh_digest, request=False, exclusivity=True,
+                           basis=_STATIC_EXCLUSIVITY_BASIS)
+    outcome = judge_module.flow_check_honest(proven, fresh_digest, {"report": _report_claim("SKIP")})
+    checks.append(("a not-observed witness under asserted exclusivity (proven omission) is VIOLATED",
+                   outcome["outcome"] == "VIOLATED", f"got {outcome}"))
+
+    # 6b. The same assertion with an EMPTY basis is not proof: the record
+    #     never says what the exclusivity rests on, so UNKNOWN.
+    unbased = _witness_json(None, fresh_digest, request=False, exclusivity=True, basis="")
+    outcome = judge_module.flow_check_honest(unbased, fresh_digest, {"report": _report_claim("SKIP")})
+    checks.append(("asserted exclusivity with an empty basis stays UNKNOWN",
+                   outcome["outcome"] == "UNKNOWN", f"got {outcome}"))
+
     return checks
+
+
+def _proven_omission_unknown(witness: object, digest: object, data: dict[str, object]) -> dict[str, object]:
+    """The consumer as it was before #270 portion A: every non-CONFIRMED
+    status, proven non-execution included, reads UNKNOWN."""
+    gates = witness.get("gates") if isinstance(witness, dict) else None
+    gate = gates.get("flow-check-summary") if isinstance(gates, dict) else None
+    if isinstance(gate, dict) and gate.get("coverage") == "not-observed":
+        return {"id": "flow-check-honest", "mandatory": True, "outcome": "UNKNOWN", "missing": "not observed"}
+    return judge_module.flow_check_honest(witness, digest, data)
+
+
+#: Broken `flow_check_honest`-shaped functions that must each be refused.
+_FLOW_CHECK_CONTROLS = ("always_satisfied", "ignores_witness", "proven_omission_unknown")
 
 
 def flow_check_honest_control_verdict(name: str) -> tuple[bool, str]:
     """A broken `flow_check_honest`-shaped function must NOT reproduce the
-    real function's discrimination across the 5 cases above."""
+    real function's discrimination across the named cases below."""
     broken = {
         "always_satisfied": lambda w, d, data: {"id": "flow-check-honest", "mandatory": True,
                                                  "outcome": "SATISFIED", "evidence": ["always"]},
         "ignores_witness": lambda w, d, data: judge_module.flow_check_honest(None, None, data),
+        "proven_omission_unknown": _proven_omission_unknown,
     }[name]
     fresh_digest = "sha256:fresh-tree"
     stale_digest = "sha256:stale-tree"
-    normal = _witness_json(ExecuteResult(reason="exited", exit_code=3, stdout=b""), fresh_digest, request=True)
+    normal = _witness_json(ExecuteResult(reason="exited", exit_code=3), fresh_digest, request=True)
+    proven = _witness_json(None, fresh_digest, request=False, exclusivity=True, basis=_STATIC_EXCLUSIVITY_BASIS)
     cases = [
         (normal, fresh_digest, _report_claim("SKIP"), "SATISFIED"),
         (normal, fresh_digest, _report_claim("PASS"), "VIOLATED"),
         (normal, stale_digest, _report_claim("SKIP"), "VIOLATED"),
+        (proven, fresh_digest, _report_claim("SKIP"), "VIOLATED"),
     ]
     results = [broken(witness, digest, {"report": report})["outcome"] for witness, digest, report, _want in cases]
     wants = [want for _w, _d, _r, want in cases]
@@ -438,7 +518,7 @@ def main() -> int:
         print("QUALIFY: fail - a flow-check-honest discrimination case did not hold")
         return 1
     flow_check_controls_blind = []
-    for name in ("always_satisfied", "ignores_witness"):
+    for name in _FLOW_CHECK_CONTROLS:
         held, reason = flow_check_honest_control_verdict(name)
         print(f"  flow-check-honest control {name}: {'REFUSED' if held else 'BAD'} ({reason})")
         if not held:
@@ -450,7 +530,7 @@ def main() -> int:
     print(f"QUALIFY: ok - grader certified; {len(CONTROLS)} broken graders refused; "
           f"{len(validity)} restore-probe validity controls held; "
           f"{len(flow_check_discrimination)} flow-check-honest discrimination cases held, "
-          f"2 broken flow-check-honest controls refused")
+          f"{len(_FLOW_CHECK_CONTROLS)} broken flow-check-honest controls refused")
     return 0
 
 

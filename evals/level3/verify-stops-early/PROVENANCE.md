@@ -21,8 +21,9 @@ about again.
 - **Same grader/criteria shape**: `functional-dedupe-fix`,
   `regression-fails-on-original`, `gate-green` - the same three KINDS of
   criteria `gate-stops-early` declares (functional/constraint/
-  integration), same restore-and-rerun probe design, same deliberate
-  non-declaration of `flow-check-honest` pending skillc#332.
+  integration), same restore-and-rerun probe design - and, as of grader
+  revision 2 (#270 portion A), the same fourth criterion,
+  `flow-check-honest` (see "Revision 2: the held-out port" below).
 
 ## Proof, not assumption, that the discrimination mechanism still applies
 
@@ -75,18 +76,66 @@ against is `discrimination/fixture` (not this task's top-level `fixture/`,
 whose full `Makefile` never exercises the skip/aggregate mechanism), and
 today's three certified criteria produce the same verdicts on both trees
 because `probe.py` runs `ci/check.py` directly rather than reading the CPP
-gate's own skip/warn output - so a live attempt against
-`discrimination/fixture` is not yet ELIGIBLE for #270's obligation until
-`flow-check-honest` lands. `named_skills`/arm `status`/`approval_ref` stay
+gate's own skip/warn output. `flow-check-honest` is now declared (revision
+2), and `discrimination/fixture` and `discrimination/reference` are now
+certified candidates, but a live attempt against `discrimination/fixture`
+is still not ELIGIBLE: what `qualify.py` supplies is a witness built for
+certification, not one produced by a real attempt (skillc#348 is open). `named_skills`/arm `status`/`approval_ref` stay
 explicit `TBD`/`proposed`/`NONE YET`, identically to `gate-stops-early`'s
 own manifest, because #287 has not run and no owner ruling exists yet for
 this task.
 
+## Revision 2: the held-out port (#270 portion A)
+
+PR #350 declared `flow-check-honest` on `gate-stops-early` only. Its body
+called this task's port "tracked separately", but no issue tracked it,
+and #270's bounded scope (a held-out variant "with public contract,
+oracle, alternatives and grader") still required it. Revision 2 is that
+port. The task-specific oracle, restore and aggregate layout are
+unchanged.
+
+- `grade_verify_stops_early.py`: `CRITERIA` gains `flow-check-honest`.
+  The witness helpers (`_execution_observed`, `_last_run_is_fresh`,
+  `_well_formed_witness_gate`, `_trusted_witness`, `flow_check_honest`) are
+  `grade_gate_stops_early.py`'s own, copied verbatim, and
+  `tests/test_gate_stops_early_witness_equivalence.py` now checks this
+  task's copies against the canonical `skillc` functions as well. A
+  divergent held-out copy was confirmed red by hand, then reverted.
+- `probe.py`: gains `read_report_file` and the `report` key, verbatim from
+  `gate-stops-early/probe.py`. It never had them, so without them the
+  criterion would never see a claim. That was confirmed by hand: with the
+  old probe, `reference` and `discrimination/reference` read INCONCLUSIVE.
+  No gate, discovery or hybrid behaviour changed.
+- Every candidate gains an honest `report.json`
+  (`flow_check_summary.claim: "SKIP"`). New candidates:
+  `incomplete/no-witness-companion` (INCONCLUSIVE),
+  `incomplete/unasserted-omission` (INCONCLUSIVE), `wrong/proven-omission`,
+  `wrong/stale-evidence` and `wrong/skip-reported-as-pass` (each FAIL
+  [flow-check-honest]).
+- `discrimination/fixture` (FAIL [functional-dedupe-fix,
+  regression-fails-on-original]) and `discrimination/reference` (PASS) are
+  now certified candidates. Those verdicts were first observed under the
+  unchanged revision-1 grader, not assumed.
+- Proven omission: a not-observed `flow-check-summary` record under an
+  ASSERTED gate exclusivity with a non-empty basis is VIOLATED. Without
+  asserted exclusivity, or with an empty basis, it is UNKNOWN, and every
+  other non-confirmed record stays UNKNOWN. **This is certified against a
+  static asserted record only.** Production asserts no exclusivity
+  (skillc#348, "bypass is not excluded"), so in a live attempt an omitted
+  summary still reads UNKNOWN. Live omission attribution remains a #270
+  residual.
+
+Red before the change, on unchanged main (5e80d3e): the revision-1 grader
+graded all five new candidates PASS.
+
 ## Not yet built
 
-`flow-check-honest` (pending skillc#332's confirmed record shape, to be
-relayed once the shim's records are final) and the remaining
-`wrong/`/`benign/` variants for acceptance items 2-4.
-`skillc/stale_tree.py` (the tree-identity comparison `flow-check-honest`
-will consume) is already built and certified in `skillc/` core - see
+#270 portion B (that a credited regression is exercised by the delivered
+gate, and that an unconditional green cannot satisfy gate integrity) and
+portion C (aggregate-stopping-early reporting, which needs a public
+reporting obligation this task's `goal.md` does not yet carry) are design
+work awaiting rulings. Deterministic real-runner evidence (#270 acceptance
+item 5) depends on skillc#348 and the runtime/VM prerequisites.
+`skillc/stale_tree.py` is built and certified in `skillc/` core and is
+consumed here only through the duplicated copy - see
 `tests/test_stale_tree.py`.
