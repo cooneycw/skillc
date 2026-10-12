@@ -22,6 +22,13 @@ reports/
 *.key
 *.p12
 secrets.*
+# ...except a Python MODULE inside a vendored upstream snapshot (#356): CPP's
+# `lib/security/modules/secrets.py` is the secrets scanner, not a secret, and
+# `secrets.*` silently kept it out of tests/fixtures/profile-cpp-codex-flow-
+# check-ea6dbfa/, so the cold-container import failed. Scoped to fixtures and
+# to `.py` only; tests/test_profile_fixture_completeness.py proves the rule
+# still ignores secrets.json/.yaml and a top-level secrets.py.
+!tests/fixtures/**/secrets.py
 # .claude/security.yml is tracked on purpose (#159): it holds only planted
 # canary values. The ignore stays because CPP's gate flags its absence.
 .claude/security.yml
