@@ -120,3 +120,31 @@ def test_gate_failure_must_come_from_the_planted_test(tmp_path: Path, task: str,
         assert module["_gate_green"](data)["outcome"] == "VIOLATED"
     else:
         assert module["_regression"](data)["outcome"] == "UNKNOWN"
+
+
+@pytest.mark.parametrize("task", TASKS)
+@pytest.mark.parametrize("body,failed", [
+    ("raise AssertionError('failure')", True),
+    ("try:\n    raise AssertionError('failure')\nfinally:\n    cleanup = True", True),
+    ("with contextlib.nullcontext():\n    raise AssertionError('failure')", True),
+    ("try:\n    raise AssertionError('failure')\nexcept AssertionError:\n    pass", False),
+    ("with contextlib.suppress(AssertionError):\n    raise AssertionError('failure')", False),
+    ("try:\n    raise AssertionError('failure')\nfinally:\n    return None", False),
+    ("return None", False), ("return 3", False),
+])
+def test_trace_distinguishes_unwinding_from_handling(tmp_path: Path, task: str,
+                                                    body: str, failed: bool) -> None:
+    import textwrap
+
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "ci").mkdir()
+    (tmp_path / "tests/test_events.py").write_text(
+        "import contextlib\n\ndef test_event():\n" + textwrap.indent(body, "    ") + "\n")
+    (tmp_path / "ci/check.py").write_text(
+        "import runpy\nfrom pathlib import Path\n"
+        "fn = runpy.run_path(str(Path('tests/test_events.py').resolve()))['test_event']\n"
+        "try:\n    fn()\nexcept AssertionError:\n    raise SystemExit(1)\n")
+    probe = runpy.run_path(str(ROOT / task / "probe.py"))
+    observed = probe["run_traced_gate"](str(tmp_path))
+    assert observed["error"] is None
+    assert bool(observed["failures"]) is failed

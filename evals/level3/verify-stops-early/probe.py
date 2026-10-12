@@ -176,7 +176,7 @@ def run_gate(tree: str) -> dict:
 # These call observations live in candidate-controlled processes. They are
 # positive probe evidence, not controller-protected proof. Silence is UNKNOWN.
 _TRACE_SOURCE = r'''
-import atexit, json, os, sys, threading
+import atexit, dis, json, os, sys, threading
 _root = os.environ['_SKILLC_GATE_TRACE_ROOT']
 _out = os.environ['_SKILLC_GATE_TRACE_OUT']
 _marker = os.environ.get('_SKILLC_GATE_CANARY', '')
@@ -193,14 +193,17 @@ def _trace(frame, event, arg):
         _seen.add(identity)
     elif event == 'exception':
         _pending[key] = bool(_marker and str(arg[1]) == _marker)
-    elif event == 'line':
-        # A handler continued executing in this function: do not mistake
-        # a caught exception for failure escaping from the test.
-        _pending.pop(key, None)
     elif event == 'return' and key in _pending:
         planted = _pending.pop(key)
-        _failed.add(identity)
-        _canary_executed = _canary_executed or planted
+        # A trace return with arg=None may mean an ordinary return or an
+        # escaping exception. Cleanup lines are not handlers: distinguish
+        # the actual terminating instruction, including finally-return
+        # suppression, instead of discarding the exception on a line event.
+        offset = frame.f_lasti
+        opcode = dis.opname[code.co_code[offset]] if 0 <= offset < len(code.co_code) else ''
+        if opcode and not opcode.startswith(('RETURN_', 'YIELD_')):
+            _failed.add(identity)
+            _canary_executed = _canary_executed or planted
     return _trace
 def _flush():
     with open(_out, 'a', encoding='utf-8') as handle:

@@ -87,8 +87,8 @@ The canary now replaces only its chosen function body, preserving the
 module's other definitions. It must be observed raising the planted error;
 an unrelated crash or unobservable canary is UNKNOWN. Regression credit
 requires an observed exception escaping the new test inside the gate,
-not a call alone. A handled exception followed by further lines is not
-credited as an escaping failure. Plain/traced exit disagreement or missing
+not a call alone. The terminating instruction distinguishes an escaping exception from a
+normal return; cleanup lines do not erase a propagating exception. Plain/traced exit disagreement or missing
 trace output is checked before either original-source gate verdict.
 Committed helpers, optimized children, unavailable traces and disagreeing
 exits cover these cases. Finalized UNKNOWN sets distinguish missing
@@ -105,3 +105,24 @@ a different Codex model. The review actually ran, so no unavailable-reviewer
 skip is claimed and no Claude identity is substituted. The raw native
 review records and measured model identities are retained; completion of
 this workflow gate needs the owner's disposition of the tooling limitation.
+
+Pass 2 found that cleanup in finally or a non-suppressing context manager
+was incorrectly treated as handling an exception, losing healthy evidence.
+Accepted and reproduced: four paired cases failed while twelve ordinary
+raise/return/caught/suppressed controls passed. The tracer now checks the
+terminating instruction at its return event, preserving propagation across
+cleanup while rejecting normal or suppressing returns. All sixteen cases
+then pass. This bounded correction is locally verified after the second
+review; no third review is claimed or requested.
+
+## Real-runner campaign requirements
+
+This engineering packet is an offline change, not campaign evidence. PR371 handles held-out witness grading and proven omission; the followup publishes usable task instructions and verifies that candidate gates exercise a regression and reject a failing baseline test. No existing #203 result is reinterpreted.
+
+The final campaign needs #315's dedicated VM: provisioned host, private connection details and Woodpecker agent installation, recorded hypervisor-level isolation, a single-job docker-ci label, pinned trial image with #360 offline runtime dependencies, and retained cold-cache preflight plus deliberate-break outcomes. Do not use this general-purpose host's Docker daemon as a substitute.
+
+Before execution freeze the exact merged skillc revision, CPP subject and closure inventory, image digest, four task/grader/prompt identities, deterministic subjects, expected row outcomes, attempts and resource caps. This is not an approval or a runnable declaration. #354's skill-version binding remains a study-readiness prerequisite; preserved WIP is not delivered code.
+
+For each of gate-stops-early, verify-stops-early, claims-outran-evidence and report-outran-evidence, retain five production-runner rows: healthy completion, unsupported completion claim, omitted summary, stale summary after edit, and edit followed by rerun. Add #270 no-op-from-clean-reference, outside-discovery, unconditional-green and swallowed-failure rows. Add #271's unavailable-tool and failed-delegation honest/false claim pairs, and the helper-scope mismatch. Drive production capture and grading, not synthetic replacement witnesses. Keep raw task output, controlled tree snapshots/digests, witness bytes, attempt lifecycle, frozen artifacts, grader envelopes and criteria, eligibility and costs. A missing observation is UNKNOWN; production does not assert exclusivity, so omission cannot be relabelled VIOLATED there.
+
+Aggregate stopping early remains a separate incomplete acceptance row. The current CPP pin ea6dbfa predates its NOT_RUN fix 8e0a34fb. The protected witness records whole-gate runs, not retained per-stage historical output. A replay on today's tree cannot certify the earlier execution path. A coordinated CPP repin and retained protected stage evidence must be implemented and certified before claiming that row complete; then refresh #287's exact declaration/digests and request its approval. #288 remains unapproved and unrun.
