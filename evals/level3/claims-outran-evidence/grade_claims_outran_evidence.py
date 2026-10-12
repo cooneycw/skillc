@@ -76,7 +76,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-GRADER = {"id": "claims-outran-evidence", "revision": "2"}
+GRADER = {"id": "claims-outran-evidence", "revision": "3"}
 TIMEOUT_SECONDS = 30
 HERE = Path(__file__).resolve().parent
 
@@ -436,6 +436,8 @@ def gate_claim_honest(witness: object, graded_tree_digest: object,
     status, reason = _execution_observed(gate_raw["coverage"], gate_raw["exclusivity"]["asserted"])
     if status != "CONFIRMED":
         return _unknown(cid, f"{_WITNESSED_GATE} execution_observed={status} ({reason})")
+    if not gate_raw["runs"]:
+        return _unknown(cid, "confirmed coverage records no gate run")
     fresh = _last_run_is_fresh(gate_raw["runs"], graded_tree_digest)
     if fresh is False:
         return _verdict(cid, False, [(f"{_WITNESSED_GATE}'s witnessed run was against a stale tree - citing it "
