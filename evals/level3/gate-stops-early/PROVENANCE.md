@@ -357,6 +357,20 @@ UNKNOWN.
   requirement fails case 6b; treating an unasserted `not-observed` as
   proven turns `incomplete/unasserted-omission` into FAIL.
 
+Hardened after an independent cross-model review (Codex, model
+gpt-6-astra, full scope). All four were reproduced as red on the
+pre-fix commit and then fixed:
+- A `not-observed` record that nevertheless carries a run is not proof of
+  omission: UNKNOWN (validity case 7).
+- `complete` coverage with zero runs is UNKNOWN, never SATISFIED (case 8;
+  this also closes the same gap inherited from revision 2).
+- `qualify.py` certifies a row only when its status came from a real
+  verdict (`category == "verdict"`), so a crash cannot pass as a
+  missing-observation control.
+- `incomplete/no-witness-companion` and both `discrimination/` trees are
+  now required, and every `_WITNESS_KINDS` entry must name an existing
+  candidate, so a deleted population refuses instead of shrinking quietly.
+
 **This is a static certification bound, not runtime proof.** Production
 asserts no exclusivity (skillc#348 records `gate_exclusivity=False`,
 "bypass is not excluded"). That record is honest and is not changed here,

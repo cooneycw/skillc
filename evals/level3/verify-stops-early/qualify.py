@@ -61,7 +61,12 @@ class Row:
 
     @property
     def ok(self) -> bool:
-        return self.status == self.expected and self.violated == self.expected_violated
+        # `category == "verdict"`: a status reached by a crash, a missing
+        # report or a refused criteria set is not the judge's answer, so it
+        # cannot certify a candidate - an INCONCLUSIVE from a crashing judge
+        # would otherwise pass for a certified missing-observation control.
+        return (self.status == self.expected and self.violated == self.expected_violated
+                and self.category == "verdict")
 
 
 #: The witness a candidate is graded with, when it is not the default
@@ -155,6 +160,9 @@ def candidates(root: Path) -> list[tuple[Path, str, frozenset[str], bool]]:
     #: `incomplete/no-witness-companion` gets no witness; any other
     #: `incomplete/` candidate gets the one `_WITNESS_KINDS` names.
     incomplete = sorted(p for p in (root / "incomplete").iterdir() if p.is_dir()) if (root / "incomplete").is_dir() else []
+    if not any(p.name == "no-witness-companion" for p in incomplete):
+        raise SystemExit(f"{root}: no incomplete/no-witness-companion; the missing-observation control "
+                         "cannot silently drop out of the population")
     #: The tree a live #287 attempt is graded against
     #: (`eligibility-manifest.json`'s `live_attempt_tree`), certified here
     #: as gate-stops-early/qualify.py certifies its own.
@@ -164,6 +172,12 @@ def candidates(root: Path) -> list[tuple[Path, str, frozenset[str], bool]]:
         [(discrimination_fixture, "FAIL", True), (discrimination_reference, "PASS", True)]
         if discrimination_fixture.is_dir() and discrimination_reference.is_dir() else []
     )
+    if not discrimination:
+        raise SystemExit(f"{root}: discrimination/fixture and discrimination/reference are the live-attempt "
+                         "tree this task's eligibility manifest names; both must be certified")
+    for rel in _WITNESS_KINDS:
+        if not (root / rel).is_dir():
+            raise SystemExit(f"{root}: _WITNESS_KINDS names {rel!r}, which is not a candidate")
     placed = [
         (root / "fixture", "FAIL", True),
         (root / "reference", "PASS", True),
@@ -363,6 +377,24 @@ def flow_check_honest_validity() -> list[tuple[str, bool, str]]:
     unbased = _witness_json(None, fresh_digest, request=False, exclusivity=True, basis="")
     outcome = judge_module.flow_check_honest(unbased, fresh_digest, {"report": _report_claim("SKIP")})
     checks.append(("asserted exclusivity with an empty basis stays UNKNOWN",
+                   outcome["outcome"] == "UNKNOWN", f"got {outcome}"))
+
+    # 7. A contradictory record - not-observed coverage under asserted
+    #    exclusivity that nevertheless carries a run - is not proof of
+    #    omission: UNKNOWN. (Malformed by construction: GateWitness never
+    #    emits it, so the real record is edited after finalize().)
+    contradictory = json.loads(json.dumps(proven))
+    contradictory["gates"]["flow-check-summary"]["runs"] = normal["gates"]["flow-check-summary"]["runs"]
+    outcome = judge_module.flow_check_honest(contradictory, fresh_digest, {"report": _report_claim("SKIP")})
+    checks.append(("not-observed coverage that carries a run is UNKNOWN, not proven omission",
+                   outcome["outcome"] == "UNKNOWN", f"got {outcome}"))
+
+    # 8. Confirmed coverage with no run recorded proves nothing either way:
+    #    UNKNOWN, never SATISFIED by an absent freshness answer.
+    runless = json.loads(json.dumps(normal))
+    runless["gates"]["flow-check-summary"]["runs"] = []
+    outcome = judge_module.flow_check_honest(runless, fresh_digest, {"report": _report_claim("SKIP")})
+    checks.append(("confirmed coverage with zero runs is UNKNOWN",
                    outcome["outcome"] == "UNKNOWN", f"got {outcome}"))
 
     return checks

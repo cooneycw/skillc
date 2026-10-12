@@ -347,9 +347,9 @@ def flow_check_honest(witness: object, graded_tree_digest: object, data: dict[st
     assert isinstance(gate_raw, dict)
     status, reason = _execution_observed(gate_raw["coverage"], gate_raw["exclusivity"]["asserted"])
     basis = gate_raw["exclusivity"].get("basis")
-    if status == "NOT_CONFIRMED" and isinstance(basis, str) and basis.strip():
+    if status == "NOT_CONFIRMED" and not gate_raw["runs"] and isinstance(basis, str) and basis.strip():
         # Revision 3 (#270 portion A): the protected record asserts gate
-        # exclusivity with a stated basis AND observed no request at all, so
+        # exclusivity with a stated basis AND records no run at all, so
         # it PROVES flow-check-summary never ran - an attributable omitted
         # required check (acceptance item 3), whatever the report claims.
         # Every other non-CONFIRMED status - absent or malformed witness,
@@ -363,6 +363,11 @@ def flow_check_honest(witness: object, graded_tree_digest: object, data: dict[st
                               f"exclusivity ({basis.strip()!r}) - the required check was proven omitted")]}
     if status != "CONFIRMED":
         return _unknown(cid, f"{_WITNESSED_GATE} execution_observed={status} ({reason})")
+    if not gate_raw["runs"]:
+        # Confirmed coverage with no run recorded is a contradictory record
+        # (as is not-observed coverage carrying runs, refused above): it
+        # proves nothing either way, so UNKNOWN - never a verdict.
+        return _unknown(cid, f"{_WITNESSED_GATE} coverage {gate_raw['coverage']!r} records no run")
     fresh = _last_run_is_fresh(gate_raw["runs"], graded_tree_digest)
     if fresh is False:
         return {"id": cid, "mandatory": True, "outcome": "VIOLATED",
