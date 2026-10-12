@@ -217,22 +217,21 @@ def _check_primary(results: list[ExecuteResult], before: int, after: int) -> Non
 
 
 def _make_fresh_exec(real_exec: Callable[..., ExecuteResult], observations: list[tuple[int | None, str | None]]):
-    """Substitute only gate transport; preserve all current exec arguments.
-
-    #338's prospective confine_root argument must be integrated only after
-    that production dependency merges. This helper targets the current API.
-    """
+    """Substitute only gate transport, preserving the merged confinement API."""
     def fresh_container_exec(
         self: d.DockerBackend, _handle: object, argv: Sequence[str], limits: Limits,
         cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,
         cwd: str | None = None, env: Mapping[str, str] | None = None,
+        confine_root: str | None = None,
     ) -> ExecuteResult:
         fresh_handle = self.prepare(f"a-gw-live-fresh-container-{uuid.uuid4().hex[:12]}")
         try:
             assert isinstance(fresh_handle, d._Handle)
             _prepare_candidate_workspace(self, fresh_handle)
             self.install(fresh_handle, {})
-            result = real_exec(self, fresh_handle, argv, limits, cancel, stdin, cwd=cwd, env=env)
+            result = real_exec(
+                self, fresh_handle, argv, limits, cancel, stdin, cwd=cwd, env=env, confine_root=confine_root,
+            )
             assert result.reason == "exited" and result.error is None, "fresh gate transport failed"
             output = _read_file_via_exec(self, fresh_handle, f"{d.CONTAINER_WORKSPACE}/observations")
             assert output is not None, "fresh gate output unavailable"

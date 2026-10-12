@@ -136,3 +136,31 @@ Orchestrator expanded the gate after independent confirmation that closure-prefl
   append-only amendments; preserve those findings and explain them in the PR.
 - The serialized verification slot was released after completion. Refs #341
   remains appropriate until the separate real-runtime campaign is accepted.
+
+### Approved compatibility with merged #338
+
+- Main 76a68a6 merged as ddb6c83, preserving all production bytes and both
+  changelog entries. Prior dc0757f verification and CI714 remain historical.
+- Root approved only the fresh test transport's optional confine_root
+  acceptance/unchanged forwarding, current-helper controls and this record.
+  The actual merged GateWitness always supplies the keyword.
+- Before correction, the new explicit-root call failed with TypeError:
+  fresh_container_exec got an unexpected keyword argument confine_root
+  (1 failed, 35 deselected). The existing actual-helper control now covers
+  omitted/default None and explicit /work, including cleanup on setup, exec
+  and observation failures. A committed actual-source mutation accepts but
+  drops forwarding and must be rejected by that same call assertion.
+- Root retains the completed two-pass substantive review and will review the
+  bounded compatibility diff. No new independent review cycle or production
+  edits are authorized/needed for this mechanical adaptation. Current-base
+  full verification is queued after DD and CC, with Docker unavailable.
+- Compatibility focused green: 50 controls/citation tests passed; ruff and
+  mypy passed on both changed test files. The committed dropped-forwarding
+  mutation is rejected by the same actual-helper call assertion. Main guard
+  reports no tracked leak; the diff against merged main remains nine paths
+  with no production changes. Full current-base verification remains queued.
+- Root reviewed the bounded compatibility diff and found no findings,
+  recording the decision in the wave review-363.md. The prior independent
+  review remains the substantive review. Proceed only after CC releases the
+  serialized full-verification slot; keep old-base and new-head evidence
+  distinct and retain Refs #341 pending runtime acceptance.

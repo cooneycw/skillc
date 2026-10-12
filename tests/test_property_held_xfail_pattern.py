@@ -520,7 +520,8 @@ def _witness_namespace():
 
 
 @pytest.mark.parametrize("fault", [None, "setup", "exec", "read"])
-def test_actual_fresh_transport_forwards_arguments_and_always_cleans_up(monkeypatch, fault):
+@pytest.mark.parametrize("confine_root", [None, "/work"], ids=["default", "confined"])
+def test_actual_fresh_transport_forwards_arguments_and_always_cleans_up(monkeypatch, fault, confine_root):
     from types import SimpleNamespace
     from unittest.mock import Mock
 
@@ -538,16 +539,36 @@ def test_actual_fresh_transport_forwards_arguments_and_always_cleans_up(monkeypa
     callback = ns["_make_fresh_exec"](real_exec, observed)
     original = object()
     args, limits, cancel, data, env = ["python3", "-c", "pass"], Limits(timeout=2), lambda: False, b"input", {"HOME": "/declared"}
+    confinement = {} if confine_root is None else {"confine_root": confine_root}
     if fault:
         with pytest.raises(AssertionError if fault == "read" else RuntimeError):
-            callback(backend, original, args, limits, cancel, data, cwd="/work", env=env)
+            callback(backend, original, args, limits, cancel, data, cwd="/work", env=env, **confinement)
     else:
-        assert callback(backend, original, args, limits, cancel, data, cwd="/work", env=env) is result
-        real_exec.assert_called_once_with(backend, handle, args, limits, cancel, data, cwd="/work", env=env)
+        assert callback(backend, original, args, limits, cancel, data, cwd="/work", env=env, **confinement) is result
         assert observed == [(1, "PRIMARY_MARKER: absent\n")]
     backend.destroy.assert_called_once_with(handle)
     if fault == "setup":
         real_exec.assert_not_called()
+    else:
+        real_exec.assert_called_once_with(
+            backend, handle, args, limits, cancel, data, cwd="/work", env=env, confine_root=confine_root,
+        )
+
+
+def test_fresh_transport_control_rejects_dropped_confinement(monkeypatch):
+    import inspect
+
+    ns = _witness_namespace()
+    original = ns["_make_fresh_exec"]
+    source = inspect.getsource(original)
+    mutated = source.replace(", confine_root=confine_root", "")
+    assert mutated != source
+    exec(mutated, original.__globals__)  # noqa: S102 - mutate only this trusted test source
+    ns["_make_fresh_exec"] = original.__globals__["_make_fresh_exec"]
+    control = test_actual_fresh_transport_forwards_arguments_and_always_cleans_up
+    monkeypatch.setitem(control.__globals__, "_witness_namespace", lambda: ns)
+    with pytest.raises(AssertionError, match="expected call not found"):
+        control(monkeypatch, None, "/work")
 
 
 def test_actual_primary_bypasses_gate_transport_and_propagates_failure():
