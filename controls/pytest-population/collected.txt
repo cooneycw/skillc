@@ -1,0 +1,4 @@
+tests/test_example.py::test_pass
+tests/test_example.py::TestExample::test_skip[value::with.dots/and/slashes]
+
+2 tests collected in 0.01s

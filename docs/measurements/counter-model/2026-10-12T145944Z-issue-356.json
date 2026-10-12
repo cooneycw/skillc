@@ -1,0 +1,24 @@
+{
+  "branch": "issue-356-real-daemon-make-verify-is-red-trial-image-does-no",
+  "counts": {
+    "accepted": 0,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "925247ed257f8427bc3fb9af874c2777cdaa6da1",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "356",
+  "passes": 1,
+  "recorded_at": "2026-10-12T14:59:44Z",
+  "red_cases": {
+    "already_covered": 3,
+    "proposed": 4
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/12/rollout-2026-10-12T10-58-51-01a1309f-a43f-7f61-9785-f7613fd934a1.jsonl",
+    "thread_id": "01a1309f-a43f-7f61-9785-f7613fd934a1"
+  },
+  "schema": 1,
+  "status": "ran"
+}

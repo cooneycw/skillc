@@ -12,6 +12,24 @@
 # needs skillc/trial_bootstrap.py's seed and MCP config, composed per trial,
 # never baked into the image.
 #
+# Issue #343: the `cpp-codex-flow-check-ea6dbfa` profile declares `tool-uv`
+# and `tool-make-git-bash` as tool dependencies the TRIAL IMAGE supplies
+# (profile.json's own "supply" field for both), so without this pin every
+# profile-opted live attempt is refused at preflight once #334 wires that
+# check in. Same pin docker/profile-cold-install/Dockerfile already
+# reviewed and uses - reused rather than independently chosen, so the two
+# images never silently carry different uv versions.
+#
+# Declared in GLOBAL scope, before the first `FROM`, and consumed by the
+# named `uv-bin` stage below (issue #356): BuildKit on Docker 29 rejects
+# `COPY --from=<image>:${ARG}` outright ("variable expansion is not
+# supported for --from"), so the variable is expanded in a `FROM` line - the
+# one place a global ARG is allowed - and the copy names that stage instead.
+# docker/trial/check_pins.py reads this default wherever it sits.
+ARG UV_VERSION=0.9.7
+
+FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv-bin
+
 # Base pinned by tag; digest pinning happens at BUILD time (see README.md's
 # "Provenance" section) because a moving base tag is a build input, not an
 # identity claim - the identity claim is the digest of the image that RAN,
@@ -23,15 +41,6 @@ FROM node:22-bookworm-slim AS base
 # apart, without needing Docker to run.
 ARG CLAUDE_CODE_VERSION=2.1.283
 ARG CODEX_VERSION=0.157.1
-
-# Issue #343: the `cpp-codex-flow-check-ea6dbfa` profile declares `tool-uv`
-# and `tool-make-git-bash` as tool dependencies the TRIAL IMAGE supplies
-# (profile.json's own "supply" field for both), so without this pin every
-# profile-opted live attempt is refused at preflight once #334 wires that
-# check in. Same pin docker/profile-cold-install/Dockerfile already
-# reviewed and uses - reused rather than independently chosen, so the two
-# images never silently carry different uv versions.
-ARG UV_VERSION=0.9.7
 
 # apt mirrors fail transiently (#10 lesson D15). Retry a bounded number of
 # times before giving up, so CI turns red for a real build problem, not a
@@ -201,13 +210,10 @@ LABEL org.skillc.image=trial-image
 FROM base AS trial
 
 # Pinned uv binary - astral's documented multi-stage copy, the same exact
-# pin docker/profile-cold-install/Dockerfile already uses. `ARG` must be
-# re-declared here: Docker clears every ARG value at each new `FROM`, so
-# the default set on `base` is not visible in THIS stage without this line
-# (docker/trial/check_pins.py scans for the ORIGINAL `ARG UV_VERSION=...`
-# default above, on `base`, and is unaffected by this bare re-declaration).
-ARG UV_VERSION
-COPY --from=ghcr.io/astral-sh/uv:${UV_VERSION} /uv /uvx /usr/local/bin/
+# pin docker/profile-cold-install/Dockerfile already uses, taken from the
+# `uv-bin` stage at the top of this file (issue #356: a `--from` naming an
+# image with `${UV_VERSION}` in it does not build on Docker 29).
+COPY --from=uv-bin /uv /uvx /usr/local/bin/
 
 USER candidate
 WORKDIR /work
