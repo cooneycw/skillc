@@ -41,43 +41,70 @@ precede the fix. This record restates the approved plan; it does not post-date i
 
 ## Section C - the approved plan (portion A)
 
-1. `gate-stops-early` grader revision 2 -> 3. `flow_check_honest` returns VIOLATED
+- (1) `gate-stops-early` grader revision 2 -> 3. `flow_check_honest` returns VIOLATED
    only for a well-formed protected record with coverage `not-observed`,
    `exclusivity.asserted` true and a non-empty basis. Absent, malformed,
    `launch-failed` and `channel-unavailable` witnesses stay UNKNOWN, as do
    unasserted omissions and assertions with no basis.
-2. Paired committed candidates under both tasks: `wrong/proven-omission` (FAIL
+- (2) Paired committed candidates under both tasks: `wrong/proven-omission` (FAIL
    [flow-check-honest]) and `incomplete/unasserted-omission` (INCONCLUSIVE). The
    witness kind is chosen by a protected table in `qualify.py`, never by the frozen
    candidate tree.
-3. Validity case 6 (asserted, VIOLATED) and case 6b (empty basis, UNKNOWN), plus the
+- (3) Validity case 6 (asserted, VIOLATED) and case 6b (empty basis, UNKNOWN), plus the
    broken control `proven_omission_unknown`, which must be refused.
-4. Existing stale and false-PASS logic promoted to committed candidates under both
+- (4) Existing stale and false-PASS logic promoted to committed candidates under both
    tasks: `wrong/stale-evidence` and `wrong/skip-reported-as-pass`.
-5. `verify-stops-early` grader revision 1 -> 2. Port PR350's declared trusted-witness
+- (5) `verify-stops-early` grader revision 1 -> 2. Port PR350's declared trusted-witness
    criterion verbatim and keep the task-specific oracle. This includes a
    `report.json` for every candidate, `incomplete/no-witness-companion`, grader
    controls with four criteria, and the witness machinery in `qualify.py`.
-6. `tests/test_gate_stops_early_witness_equivalence.py`: both judges' duplicated
+- (6) `tests/test_gate_stops_early_witness_equivalence.py`: both judges' duplicated
    helpers are checked against the canonical `skillc` functions.
-7. Both tasks' `PROVENANCE.md` and `eligibility-manifest.json`: revision accounting,
+- (7) Both tasks' `PROVENANCE.md` and `eligibility-manifest.json`: revision accounting,
    the static-only asserted-exclusivity bound, and the residual.
 
-Files (granted lane, 35 portion-A paths; orchestrator `LANE: SET` at mailbox rev 7 added the last three):
-evals/level3/gate-stops-early/{grade_gate_stops_early.py, grader.json, qualify.py,
-PROVENANCE.md, eligibility-manifest.json, wrong/proven-omission/, wrong/stale-evidence/,
-wrong/skip-reported-as-pass/, incomplete/unasserted-omission/};
-evals/level3/verify-stops-early/{grade_verify_stops_early.py, grader.json, qualify.py,
-PROVENANCE.md, eligibility-manifest.json, grader-controls/always_pass.py,
-grader-controls/always_fail.py, the report.json of fixture, reference,
-alternatives/different-fix-approach, benign/extra-comment,
-wrong/regression-passes-on-unfixed, wrong/zero-tests, discrimination/fixture and
-discrimination/reference, incomplete/no-witness-companion/,
-incomplete/unasserted-omission/, wrong/proven-omission/, wrong/stale-evidence/,
-wrong/skip-reported-as-pass/}; tests/test_gate_stops_early_witness_equivalence.py;
-docs/flow-runs/issue-270.md; docs/flow-runs/issue-270.as-read.md.
-Added at rev 7 (held-out port coverage only, not portion B): evals/level3/verify-stops-early/probe.py (read_report_file and the `report` key, verbatim from the primary probe; no gate, discovery or hybrid change); evals/level3/verify-stops-early/discrimination/{fixture,reference}/expected.json (verdicts observed under the unchanged revision-1 grader, then certified).
-CHANGELOG.md is excluded until DD hands over its write window.
+Files: the orchestrator-granted lane, all 35 paths. It is 32 at mailbox rev 6, plus
+`verify-stops-early/probe.py` (only `read_report_file` and the `report` key, verbatim from the
+primary probe) and the two `discrimination/*/expected.json` at rev 7. Reformatted
+into the numbered form the compliance check parses on 2026-10-12, after the rebase
+onto #348 (f22d6c8). The path set is unchanged from the grant. CHANGELOG.md stays
+out until DD hands over its write window.
+
+1. `evals/level3/gate-stops-early/grade_gate_stops_early.py` - granted lane path
+2. `evals/level3/gate-stops-early/grader.json` - granted lane path
+3. `evals/level3/gate-stops-early/qualify.py` - granted lane path
+4. `evals/level3/gate-stops-early/PROVENANCE.md` - granted lane path
+5. `evals/level3/gate-stops-early/eligibility-manifest.json` - granted lane path
+6. `evals/level3/gate-stops-early/wrong/proven-omission/` - granted lane path
+7. `evals/level3/gate-stops-early/wrong/stale-evidence/` - granted lane path
+8. `evals/level3/gate-stops-early/wrong/skip-reported-as-pass/` - granted lane path
+9. `evals/level3/gate-stops-early/incomplete/unasserted-omission/` - granted lane path
+10. `evals/level3/verify-stops-early/grade_verify_stops_early.py` - granted lane path
+11. `evals/level3/verify-stops-early/grader.json` - granted lane path
+12. `evals/level3/verify-stops-early/qualify.py` - granted lane path
+13. `evals/level3/verify-stops-early/PROVENANCE.md` - granted lane path
+14. `evals/level3/verify-stops-early/eligibility-manifest.json` - granted lane path
+15. `evals/level3/verify-stops-early/grader-controls/always_pass.py` - granted lane path
+16. `evals/level3/verify-stops-early/grader-controls/always_fail.py` - granted lane path
+17. `evals/level3/verify-stops-early/fixture/report.json` - granted lane path
+18. `evals/level3/verify-stops-early/reference/report.json` - granted lane path
+19. `evals/level3/verify-stops-early/alternatives/different-fix-approach/report.json` - granted lane path
+20. `evals/level3/verify-stops-early/benign/extra-comment/report.json` - granted lane path
+21. `evals/level3/verify-stops-early/wrong/regression-passes-on-unfixed/report.json` - granted lane path
+22. `evals/level3/verify-stops-early/wrong/zero-tests/report.json` - granted lane path
+23. `evals/level3/verify-stops-early/discrimination/fixture/report.json` - granted lane path
+24. `evals/level3/verify-stops-early/discrimination/reference/report.json` - granted lane path
+25. `evals/level3/verify-stops-early/incomplete/no-witness-companion/` - granted lane path
+26. `evals/level3/verify-stops-early/incomplete/unasserted-omission/` - granted lane path
+27. `evals/level3/verify-stops-early/wrong/proven-omission/` - granted lane path
+28. `evals/level3/verify-stops-early/wrong/stale-evidence/` - granted lane path
+29. `evals/level3/verify-stops-early/wrong/skip-reported-as-pass/` - granted lane path
+30. `tests/test_gate_stops_early_witness_equivalence.py` - granted lane path
+31. `docs/flow-runs/issue-270.md` - granted lane path
+32. `docs/flow-runs/issue-270.as-read.md` - granted lane path
+33. `evals/level3/verify-stops-early/probe.py` - granted lane path
+34. `evals/level3/verify-stops-early/discrimination/fixture/expected.json` - granted lane path
+35. `evals/level3/verify-stops-early/discrimination/reference/expected.json` - granted lane path
 
 Out of scope here: portion B (gate exercise and integrity), portion C (aggregate
 reporting and the #270 public reporting obligation), #271 criteria, production
