@@ -116,6 +116,13 @@ class Row:
     expected_violated: frozenset[str] = frozenset()
     violated: frozenset[str] = frozenset()
     category: str = "verdict"
+    #: Criteria that answered UNKNOWN, and those the placement expects to:
+    #: `flow-check-honest` alone for an `incomplete/` candidate, none
+    #: otherwise - so an INCONCLUSIVE reached because the functional, restore
+    #: or gate observations went missing cannot pass for the intended
+    #: witness-only control (Codex re-review of #270 portion A).
+    unknown: frozenset[str] = frozenset()
+    expected_unknown: frozenset[str] = frozenset()
 
     @property
     def ok(self) -> bool:
@@ -124,7 +131,7 @@ class Row:
         # cannot certify a candidate - an INCONCLUSIVE from a crashing judge
         # would otherwise pass for a certified missing-observation control.
         return (self.status == self.expected and self.violated == self.expected_violated
-                and self.category == "verdict")
+                and self.category == "verdict" and self.unknown == self.expected_unknown)
 
 
 #: Every committed candidate but one carries a witness, delivered through
@@ -190,12 +197,17 @@ def _candidate_trusted_observation(candidate: Path, root: Path = HERE) -> bytes:
     return json.dumps({"witness": witness, "graded_tree_digest": digest}).encode("utf-8")
 
 
+#: The one criterion an `incomplete/` candidate may leave UNKNOWN.
+_INCOMPLETE_UNKNOWN = frozenset({"flow-check-honest"})
+
+
 def status_of(grader: Path, candidate: Path, root: Path = HERE, *,
-             needs_witness: bool = True) -> tuple[str, str, frozenset[str], str]:
+             needs_witness: bool = True) -> tuple[str, str, frozenset[str], str, frozenset[str]]:
     trusted = _candidate_trusted_observation(candidate, root) if needs_witness else None
     graded = verify.grade_directory(verify.GraderDef.load(root).with_judge(grader), candidate,
                                     trusted_observation=trusted)
-    return graded.status, graded.detail, graded.violated, graded.category
+    unknown = frozenset(str(c["id"]) for c in graded.criteria if c.get("outcome") == "UNKNOWN")
+    return graded.status, graded.detail, graded.violated, graded.category, unknown
 
 
 def _expectation(path: Path, placed: str) -> tuple[str, frozenset[str]]:
@@ -264,9 +276,10 @@ def candidates(root: Path) -> list[tuple[Path, str, frozenset[str], bool]]:
 def certify(grader: Path, root: Path = HERE) -> tuple[bool, list[Row]]:
     rows = []
     for path, expected, expected_violated, needs_witness in candidates(root):
-        status, detail, violated, category = status_of(grader, path, root, needs_witness=needs_witness)
+        status, detail, violated, category, unknown = status_of(grader, path, root, needs_witness=needs_witness)
         rows.append(Row(str(path.relative_to(root)), expected, status, detail,
-                        expected_violated, violated, category))
+                        expected_violated, violated, category, unknown,
+                        _INCOMPLETE_UNKNOWN if expected == "INCONCLUSIVE" else frozenset()))
     return all(r.ok for r in rows), rows
 
 
@@ -475,6 +488,26 @@ def flow_check_honest_validity() -> list[tuple[str, bool, str]]:
     outcome = judge_module.flow_check_honest(runless, fresh_digest, {"report": _report_claim("SKIP")})
     checks.append(("confirmed coverage with zero runs is UNKNOWN",
                    outcome["outcome"] == "UNKNOWN", f"got {outcome}"))
+
+    # 9. A broken probe does not erase a proven omission: the witness is
+    #    protected and independent of the probe, so through the real judge
+    #    flow-check-honest is still VIOLATED while every probe-dependent
+    #    criterion is UNKNOWN.
+    envelope = {"observations": "{not json", "timed_out": False,
+                "trusted": json.dumps({"witness": proven, "graded_tree_digest": fresh_digest})}
+    outcomes = {c["id"]: c["outcome"] for c in judge_module.judge(envelope)["criteria"]}
+    checks.append(("a broken probe with a proven-omission witness: flow-check-honest VIOLATED, the rest UNKNOWN",
+                   outcomes.pop("flow-check-honest") == "VIOLATED"
+                   and set(outcomes.values()) == {"UNKNOWN"}, f"got {outcomes}"))
+
+    # 10. An all-UNKNOWN verdict cannot certify an `incomplete/` row: only
+    #     flow-check-honest may be UNKNOWN there.
+    all_unknown = frozenset(str(c["id"]) for c in judge_module.judge(
+        {"observations": "{not json", "timed_out": False})["criteria"])
+    row = Row("incomplete/(all-unknown)", "INCONCLUSIVE", "INCONCLUSIVE", "all UNKNOWN",
+              unknown=all_unknown, expected_unknown=_INCOMPLETE_UNKNOWN)
+    checks.append(("an all-UNKNOWN verdict does not certify an incomplete/ row", not row.ok,
+                   f"Row.ok={row.ok} with unknown={sorted(all_unknown)}"))
 
     return checks
 

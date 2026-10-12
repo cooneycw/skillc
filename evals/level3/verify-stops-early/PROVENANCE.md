@@ -142,6 +142,16 @@ pre-fix commit and then fixed:
   now required, and every `_WITNESS_KINDS` entry must name an existing
   candidate, so a deleted population refuses instead of shrinking quietly.
 
+The final permitted re-review (same reviewer and scope) found two more,
+both reproduced red on c7c0fcb and fixed:
+- A broken probe no longer erases a proven omission. `judge()` evaluates
+  the protected witness independently of the probe, so flow-check-honest
+  can still be VIOLATED while the probe-dependent criteria are UNKNOWN
+  (validity case 9).
+- An `incomplete/` row certifies only when `flow-check-honest` alone is
+  UNKNOWN. An all-UNKNOWN verdict from a broken probe is rejected
+  (validity case 10).
+
 ## Not yet built
 
 #270 portion B (that a credited regression is exercised by the delivered

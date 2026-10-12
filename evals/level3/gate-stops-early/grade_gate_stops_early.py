@@ -388,8 +388,16 @@ def flow_check_honest(witness: object, graded_tree_digest: object, data: dict[st
 def judge(envelope: dict[str, object], *, blind_restore: bool = False) -> dict[str, object]:
     data = read_report(envelope)
     if data is None:
+        # The probe-dependent criteria have nothing to judge, but the trusted
+        # witness does not come from the probe: a protected record that
+        # proves omission still proves it when candidate code broke the probe
+        # (Codex re-review of #270 portion A). With no report data there is
+        # no claim, so every other witness path still reads UNKNOWN.
+        witness, graded_tree_digest = _trusted_witness(envelope)
         return {"grader": GRADER, "criteria": [
-            _unknown(c, "the probe produced no well-formed report") for c in CRITERIA
+            *(_unknown(c, "the probe produced no well-formed report") for c in CRITERIA
+              if c != "flow-check-honest"),
+            flow_check_honest(witness, graded_tree_digest, {}),
         ]}
     regression = _regression(data, blind=blind_restore)
     witness, graded_tree_digest = _trusted_witness(envelope)
