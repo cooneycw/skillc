@@ -166,3 +166,119 @@ used. The tested tree was HEAD `883643c` plus the archived guard/tests/docs
 diff `43dfc7e23ef02a1eea012f72f2551261582668e310c0a59688b451c8b31133ac`.
 The actual owned process exit was collected and the slot explicitly released
 to DD before any subsequent main sync. Real Docker acceptance remains pending.
+
+
+## Shared-live follow-up approval and temporary dependency base
+
+The orchestrator approved `gate-360-shared-live-phase-two.md` after DD's
+independent second review at `9caf33c452efb9c1da5b3b0714677d2e9f1db5d6`.
+This follow-up uses that reviewed, unmerged dependency commit in a fresh
+branch. Phase-one PR #368 is merged; its original worktree is preserved.
+No PR or full verification is authorized until DD merges and this branch
+synchronizes with current main, with a diff limited to the granted lane.
+
+The approved plan adds three closure runtime faults after real normal-image
+validation and before consuming preflight, specific diagnostic/property
+controls, bounded per-call controller evidence, baseline purity controls,
+and the existing runner family's mode routing. No production API, receipt
+schema, historical inputs, CI population, or paid/runtime campaign changes
+are included. No Docker build or run is authorized by this gate.
+
+A collection failure in DD's full run exposed the shared live test's removed
+`_read_observations` import. Before any follow-up edits, the orchestrator
+held both shared test files for DD's narrow compatibility migration. Worker-CC
+registered the other six granted files and starts with runner mode controls.
+The two tests return only after an explicit checkpoint and ownership handoff.
+
+
+### Runner mode regression evidence
+
+Before changing the resolver, the three new mode cases failed in both the
+sourceable resolver and actual runner process (6 failed, 70 passed). After
+adding the modes, all 76 runner controls pass, including unknown-mode and
+bare-mode rejection, explicit nonselected-family clearing, and non-certifying
+control-context routing. This is offline CLI evidence only. The shared live
+consuming test is still awaiting DD's compatibility checkpoint.
+
+
+### Corrected dependency handback and shared acceptance
+
+DD released both shared tests after the orchestrator reviewed compatibility
+checkpoint `380c0b885ee3391b4a5495f3f063dd7103aa9e30`. The follow-up branch
+fast-forwarded to it without changing DD files or losing the runner/docs work.
+The orchestrator restored the complete eight-file lane and the registry was
+updated before either shared test was edited. No CHANGELOG window is granted.
+
+The acceptance now selects the normal immutable runtime receipt, validates
+baseline and treated containers through the real readiness API, and plants
+runtime faults only after normal validation. The inherited and frozen policy
+paths use separate fresh treated attempts. It preserves real candidate-user
+delivery, exact preflight/overlay/harness routing and the same healthy
+predicates. A bounded test-only observer captures one actual controller gate
+result; subject replies cannot replace it. Specific runtime diagnostics use a
+separate fresh attempt with the actual declared import and selected policy.
+
+Baseline controls scan nonempty candidate-home/workspace roots with only the
+allowed uv-cache payload excluded. Recognized skill and cache-sibling decoys,
+symlink ancestry, missing roots and walk errors discriminate scan failures.
+Delivery ownership/writability, external-venv and required-policy refusals,
+stdlib/missing-module controls, exact post-gate metadata and shim/controller
+output parity remain distinct claims. The generic-image diagnostic observes
+current actual delivery; it does not reconstruct the historical bridge failure.
+
+Independent review pass 1 was measured as `codex/gpt-6.1-sol`, distinct from
+the measured `gpt-6-astra` implementer. It found a warmed frozen-policy path and
+an overly broad cache exclusion. New controls failed before the corrections
+(4 failed, 1 existing walk-error control passed), then passed. A neighboring
+`.venv-neighbor` diagnostic also failed its new control before tightening the
+path boundary. The original new runtime/scanner controls failed five cases
+before those helpers existed; this is new-check evidence, not a live regression.
+
+The initial integrated scoped snapshot passed 294 tests with one live skip.
+An isolated scanner mutation caused the committed SKILL.md decoy control to
+fail; an isolated healthy-predicate inversion caused all three targeted runtime
+controls to fail. Widening actual pytest markers produces neighboring-property
+XFAILs in the committed mutation control, demonstrating the forbidden credit.
+
+DD subsequently replaced internal policy constants with a packaged policy.
+The follow-up metadata checker now uses the independently verified closure
+digests rather than importing those internal constants. The public readiness
+API and receipt schema remain the dependency contract. DD's final merge/main
+sync and granted-only diff, independent final review, serialized full gate,
+current-head CI and actual Docker acceptance remain outstanding. Issue #360
+stays open; no real Docker/model execution or study claim has been made here.
+
+
+### Independent final review and scoped handoff
+
+Independent pass 2 completed with no defects found, measured again as
+`codex/gpt-6.1-sol` from its actual execution stream. It confirmed separate cold
+policy attempts, narrow cache exclusion and traversal refusal, specific typed
+runtime failures, bounded controller evidence, exact metadata and runner mode
+routing. The final scoped offline run passed 302 tests (86 property/control,
+76 runner and 140 image-contract cases); the live acceptance was previously
+collected and skipped with Docker explicitly unavailable. Ruff, mypy over the
+three changed test modules and diff whitespace checks pass. No full gate or
+current-base CI has been claimed for this dependency branch.
+
+The seven touched paths are inside the eight-file grant relative to reviewed
+DD checkpoint `380c0b8`; `tests/test_profile_trial_image.py` remains unchanged.
+The default main-relative lane check correctly still sees DD's unmerged files.
+That is the declared temporary dependency, not authorization to ship those
+files as part of this follow-up. Final DD integration and the main-relative
+lane check remain required before a full gate or PR.
+
+
+### Changelog window and post-merge full-check grant
+
+After DD published PR #369 and released future changelog edits, the
+orchestrator granted the complete nine-file lane, adding CHANGELOG.md.
+Worker-CC registered it before writing the entry. The entry describes the
+runnable tests and offline controls and explicitly leaves actual Docker
+acceptance owed. Reviewed implementation bytes are unchanged.
+
+The same grant assigns worker-CC the next serialized full verification slot
+only after the orchestrator confirms DD's merge and this branch synchronizes
+to current main, preserving the packaged-policy and qualifier compatibility
+fixes. Full verification and PR creation remain held until those conditions
+are met; no additional approval is needed after the merge handoff.

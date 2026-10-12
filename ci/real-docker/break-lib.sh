@@ -48,7 +48,10 @@ _BREAK_TRIALIMAGE_MODES="no-uv"
 #: tampered-closure delivers it with different bytes than the bound
 #: inventory's own digest expects. Both must make the real in-container
 #: preflight (`agent_trial._preflight_in_container`) refuse the attempt.
-_BREAK_CLOSURE_MODES="missing-closure tampered-closure"
+#: #360 runtime faults are planted only after normal runtime validation;
+#: consuming preflight must refuse the selected dependency with its specific
+#: cache-miss, cache-write, or project-venv permission diagnostic.
+_BREAK_CLOSURE_MODES="missing-closure tampered-closure empty-runtime-cache runtime-cache-permissions project-venv-permissions"
 
 # Resolves a --break argument to SEVEN lines on stdout: the NORMALIZED spec
 # ("none", or "<family>:<mode>" - a bare legacy channel mode is normalized

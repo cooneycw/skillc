@@ -141,10 +141,17 @@ Required live acceptance remains:
    the actual closure preflight and pinned helper through the overlay/witness.
    Repeat with the frozen `env -i` policy, without prior attempt warming. Require
    unchanged project/lock hashes and the receipt's actual image ID.
-3. Empty-cache target must yield a specific offline cache-miss diagnostic and
-   refuse `tool-pypi-runtime`. Permissions target must fail the same consuming
-   command on cache writes, while the complete candidate-owned cache passes.
-   Unrelated setup failures are hard errors, never credited expected failures.
+3. The shared closure acceptance selects the normal `profile-runtime` receipt
+   and validates the actual image, descriptor and environment through
+   `DockerBackend.runtime_environment` without warming uv. A test-only wrapper
+   then empties the cache, denies cache writes, or denies project-local `.venv`
+   creation before the first consuming preflight. Each mode must refuse
+   `tool-pypi-runtime` with its specific retained diagnostic. Break-image targets
+   remain separate image controls: their receipts are refused by production,
+   so that early refusal is not cache-failure evidence. Unrelated setup failures
+   remain hard errors. When preflight suppresses stderr, a separate fresh
+   diagnostic attempt runs the same unsuppressed import under the same policy
+   and fault; it cannot establish the positive cold path.
 4. Validate actual descriptor file and parent ownership/modes, measured Python
    identity, and missing/changed required environment keys. A system-python
    package decoy cannot satisfy the uv project contract.
@@ -155,3 +162,26 @@ Required live acceptance remains:
 
 Independent review, coordinated full verification and current-base CI remain
 required before merge. Use Refs #360 until real consuming acceptance is recorded.
+
+
+The shared live acceptance is
+`tests/test_profile_closure_preflight_live.py`. Its normal run first checks the
+current generic image's offline cache miss using real candidate delivery, then
+builds the selected supply and uses separate fresh baseline, inherited-policy,
+and frozen-policy attempts. Both treated arms validate an absent project venv
+before their first consuming preflight. The baseline scan covers candidate
+home and workspace, excluding only the declared `.cache/uv` payload; that
+payload remains governed by the closed image-build contract. Cache siblings,
+symlink ancestry and walk errors are not excluded.
+
+The runtime controls are selected with
+`SKILLC_CLOSURE_PREFLIGHT_LIVE_BREAK=empty-runtime-cache`,
+`runtime-cache-permissions`, or `project-venv-permissions`. Each preserves the
+normal receipt, then plants a fault in its disposable container. The scanner's
+recognized-directory skill decoy, cache-sibling decoy and traversal-error
+controls run offline in `tests/test_property_held_xfail_pattern.py`. Healthy
+subject output cannot replace missing controller evidence, and the observed
+shim bytes/exit must agree with the bounded actual controller call.
+
+These are runnable acceptance checks. Their real Docker results remain owed;
+o scoped offline pass establishes package availability or study eligibility.
