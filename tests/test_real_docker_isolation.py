@@ -5,9 +5,127 @@ the orchestrator review explicitly required."""
 
 from __future__ import annotations
 
+import errno
+import socket
+import sys
+from pathlib import Path
+from unittest.mock import Mock, patch
+
 import pytest
 
 from ci import real_docker_isolation as iso
+
+
+def _installed_probe_script() -> str:
+    runner = Path(__file__).resolve().parents[1] / "ci" / "real-docker" / "run-real-docker"
+    return runner.read_text().split("_PROBE_SCRIPT='", 1)[1].split("\n'", 1)[0]
+
+
+def _run_probe(
+    script: str, error: Exception | None, capsys: pytest.CaptureFixture[str],
+) -> str:
+    """Run the shipped snippet, replacing only socket I/O; no Docker or network.
+
+    A nonzero probe exit becomes probe_error in the shell's run_probe wrapper.
+    Do not replace the exception classification we are trying to certify.
+    """
+    with (
+        patch.object(socket, "create_connection", side_effect=error) as connect,
+        patch.object(sys, "argv", ["probe", "target.invalid", "443", "3"]),
+    ):
+        try:
+            exec(compile(script, "installed-runner-probe", "exec"), {})  # noqa: S102 - tracked probe under test
+        except SystemExit as exc:
+            assert exc.code == 2
+            capsys.readouterr()
+            return iso.PROBE_ERROR
+        if error is None:
+            connect.return_value.close.assert_called_once()
+    return capsys.readouterr().out.strip()
+
+
+@pytest.mark.parametrize(("error", "expected"), [
+    (None, iso.REACHABLE),
+    (ConnectionRefusedError(errno.ECONNREFUSED, "control"), iso.REACHABLE),
+    (TimeoutError(), iso.UNREACHABLE),
+    (OSError(errno.ETIMEDOUT, "control"), iso.UNREACHABLE),
+    (OSError(errno.ENETUNREACH, "control"), iso.UNREACHABLE),
+    (OSError(errno.EHOSTUNREACH, "control"), iso.UNREACHABLE),
+    (socket.gaierror(socket.EAI_NONAME, "control"), iso.PROBE_ERROR),
+    (socket.gaierror(socket.EAI_AGAIN, "control"), iso.PROBE_ERROR),
+    (PermissionError(errno.EACCES, "control"), iso.PROBE_ERROR),
+    (PermissionError(errno.EPERM, "control"), iso.PROBE_ERROR),
+    (OSError(errno.EIO, "control"), iso.PROBE_ERROR),
+    (ConnectionResetError(errno.ECONNRESET, "control"), iso.PROBE_ERROR),
+    (ValueError("control"), iso.PROBE_ERROR),
+])
+def test_actual_probe_distinguishes_isolation_from_probe_errors(
+    error: Exception | None, expected: str, capsys: pytest.CaptureFixture[str],
+) -> None:
+    observed = _run_probe(_installed_probe_script(), error, capsys)
+    assert observed == expected
+    result = iso.classify(lan_probe=observed, lan_configured=True, github_probe=iso.REACHABLE)
+    assert result.status == (iso.PROCEED if expected == iso.UNREACHABLE else iso.REFUSED)
+    # The same error on the positive control cannot establish a working probe.
+    if expected == iso.PROBE_ERROR:
+        assert iso.classify(
+            lan_probe=iso.UNREACHABLE, lan_configured=True, github_probe=observed,
+        ).status == iso.REFUSED
+
+
+def test_broad_oserror_mutation_of_actual_probe_is_detected(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    script = _installed_probe_script()
+    start = script.index("except OSError")
+    end = script.index("except Exception", start)
+    mutant = script[:start] + 'except OSError:\n    print("unreachable")\n' + script[end:]
+    for error in (socket.gaierror(socket.EAI_NONAME, "control"), PermissionError("control")):
+        assert _run_probe(script, error, capsys) == iso.PROBE_ERROR
+        observed = _run_probe(mutant, error, capsys)
+        assert observed == iso.UNREACHABLE
+        assert iso.classify(
+            lan_probe=observed, lan_configured=True, github_probe=iso.REACHABLE,
+        ).status == iso.PROCEED
+
+
+@pytest.mark.parametrize(("errors", "expected"), [
+    ([ConnectionRefusedError(), TimeoutError()], iso.REACHABLE),
+    ([TimeoutError(), ConnectionRefusedError()], iso.REACHABLE),
+    ([PermissionError(), TimeoutError()], iso.PROBE_ERROR),
+    ([TimeoutError(), PermissionError()], iso.PROBE_ERROR),
+    ([PermissionError(), ConnectionRefusedError()], iso.REACHABLE),
+    ([ConnectionRefusedError(), PermissionError()], iso.REACHABLE),
+    ([TimeoutError(), OSError(errno.ENETUNREACH, "control")], iso.UNREACHABLE),
+    ([OSError(errno.EHOSTUNREACH, "control"), TimeoutError()], iso.UNREACHABLE),
+    ([TimeoutError(), None], iso.REACHABLE),
+])
+def test_actual_connection_keeps_every_resolved_address_outcome(
+    errors: list[Exception | None], expected: str, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Exercise stdlib create_connection, replacing only DNS and sockets."""
+    sockets = []
+    for error in errors:
+        sock = Mock()
+        sock.connect.side_effect = error
+        sockets.append(sock)
+    addresses = [
+        (socket.AF_INET, socket.SOCK_STREAM, 0, "", (f"192.0.2.{i + 1}", 443))
+        for i in range(len(errors))
+    ]
+    with (
+        patch.object(socket, "getaddrinfo", return_value=addresses),
+        patch.object(socket, "socket", side_effect=sockets),
+        patch.object(sys, "argv", ["probe", "target.invalid", "443", "3"]),
+    ):
+        exec(compile(_installed_probe_script(), "installed-runner-probe", "exec"), {})  # noqa: S102
+    observed = capsys.readouterr().out.strip()
+    assert observed == expected
+    assert iso.classify(
+        lan_probe=observed, lan_configured=True, github_probe=iso.REACHABLE,
+    ).status == (iso.PROCEED if expected == iso.UNREACHABLE else iso.REFUSED)
+    for sock in sockets:
+        sock.close.assert_called_once()
 
 
 def test_lan_reachable_by_successful_connect_refuses() -> None:

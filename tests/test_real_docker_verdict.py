@@ -97,6 +97,60 @@ def test_a_clean_pass_is_success(tmp_path: Path) -> None:
     assert result.executed_by_file[DECLARED[0]] == 1
 
 
+@pytest.mark.parametrize(("skip_type", "expected"), [
+    ("pytest.xfail", c.FAILURE),
+    ("pytest.skip", c.SUCCESS),
+    ("", c.SUCCESS),
+])
+def test_a_targeted_xfail_is_not_hidden_by_passing_siblings(
+    tmp_path: Path, skip_type: str, expected: str,
+) -> None:
+    """#343's no-uv control: other tool probes still pass in the same file.
+
+    Ordinary partial skips retain the existing per-file-floor semantics;
+    this verdict never claims every individual property was demonstrated.
+    """
+    passed = [
+        f'<testcase classname="{name}" name="test_intact"/>'
+        for name in c.DECLARED_REAL_DOCKER_FILES
+    ]
+    target = "tests.test_trial_image_tools_live"
+    failed = (
+        f'<testcase classname="{target}" name="test_uv_is_present_at_the_pinned_version">'
+        f'<skipped type="{skip_type}" message="no-uv control"/></testcase>'
+    )
+    result = c.verdict(_write(tmp_path, "mixed-control.xml", _suite(*passed, failed)))
+    assert result.status == expected
+    if skip_type == "pytest.xfail":
+        assert result.failed_ids == (f"{target}::test_uv_is_present_at_the_pinned_version",)
+    else:
+        assert result.failed_ids == ()
+        assert result.executed_by_file[target] == 1
+
+
+def test_xfail_outside_the_declared_population_does_not_change_its_verdict(tmp_path: Path) -> None:
+    xml = _suite(
+        _PASS_CASE,
+        '<testcase classname="tests.other" name="test_other">'
+        '<skipped type="pytest.xfail"/></testcase>',
+    )
+    assert c.verdict(_write(tmp_path, "other-xfail.xml", xml), DECLARED).status == c.SUCCESS
+
+
+@pytest.mark.parametrize("failure", [
+    '<failure message="[XPASS(strict)] control unexpectedly passed"/>',
+    '<error message="setup failed before the intended property"/>',
+])
+def test_strict_xpass_and_setup_errors_remain_hard_failures(tmp_path: Path, failure: str) -> None:
+    xml = _suite(
+        _PASS_CASE,
+        f'<testcase classname="{DECLARED[0]}" name="test_control">{failure}</testcase>',
+    )
+    result = c.verdict(_write(tmp_path, "hard-failure.xml", xml), DECLARED)
+    assert result.status == c.FAILURE
+    assert result.failed_ids == (f"{DECLARED[0]}::test_control",)
+
+
 _IMAGE_BUILD_PASS_CASE = (
     '<testcase classname="tests.test_trial_image_build_live" '
     'name="test_image_runs_as_candidate" time="5.0"></testcase>'
