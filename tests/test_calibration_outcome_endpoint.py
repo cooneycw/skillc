@@ -22,8 +22,9 @@ SELECTED = ["functional-windows-fix", "regression-fails-on-original", "gate-gree
 
 def _data() -> dict[str, Any]:
     data = json.loads((ROOT / "evals/calibration-204/run-manifest.json").read_text())
+    grader = verify.GraderDef.load(ROOT / TASK)
     data["task"] = {"path": TASK, "fixture": "discrimination/fixture",
-                    "grader_id": "gate-stops-early", "grader_revision": "2"}
+                    "grader_id": grader.id, "grader_revision": grader.revision}
     data["shared"]["image"]["digest"] = "sha256:" + "cd" * 32
     data["attempts_per_arm"] = 1
     data["arm_order"]["sequence"] = calibration.derive_arm_order(
@@ -33,7 +34,7 @@ def _data() -> dict[str, Any]:
     files = cc.task_surface(ROOT / TASK / "discrimination/fixture")
     data["task_content"] = {
         "version": 1, "goal_digest": trial.sha256_bytes((ROOT / TASK / "goal.md").read_bytes()),
-        "grader_digest": verify.GraderDef.load(ROOT / TASK).digest(),
+        "grader_digest": grader.digest(),
         "fixture_digest": trial.sha256_bytes(trial.canonical([
             [path, executable, trial.sha256_bytes(body)] for path, body, executable in files
         ])),

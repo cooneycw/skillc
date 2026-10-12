@@ -123,3 +123,21 @@ The two-review provenance audit remains accepted; the official receipt is
 unsupported and no skip, third review or gate bypass is claimed. Root retains
 finish disposition and merge authority. This evidence-only record update
 follows the tested commit and changes no implementation or test inputs.
+
+### Merged task preparation integration
+
+Initial CI 736 failed only on the unchanged slugkit-pipeline qualification
+subprocess exceeding 180 seconds: 3673 passed, 27 skipped, 1 failed. Merged
+PR #371 (0844b5, CI 738 green) supplies the bounded timeout correction and
+committed hung-script control. Merge 58ade4e integrates it and preserves both
+CHANGELOG entries. Root owns further CHANGELOG authorship.
+
+The first focused check then refused the test fixture's stale revision 2
+against the actual revision 3 grader. The helper now derives id and revision
+from the same loaded grader used for its digest. Focused parser/discrimination/
+endpoint checks pass 189 tests; targeted ruff and mypy pass. No production
+endpoint logic changed. Draft declaration identities intentionally await the
+final merged public contract; both remain unapproved and non-runnable.
+Root owns the full-verification slot for that upstream work. A final identity
+refresh and full integration verification remain owed, as does finish receipt
+disposition. No CI rerun is used to replace the initial red.
