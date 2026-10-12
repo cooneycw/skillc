@@ -147,12 +147,13 @@ class FakeProbeBackend:
     def exec_in_attempt(
         self, handle: object, argv: Sequence[str], limits: Limits,
         cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,
-        cwd: str | None = None, env: object = None,
+        cwd: str | None = None, env: object = None, confine_root: str | None = None,
     ) -> ExecuteResult:
         """#269 added this to the `ExecutionBackend` Protocol; verify.py's
         probe path never calls it - unsupported here, same as
-        `ManagedBackend`'s own answer, satisfied only for structural typing."""
-        del handle, argv, limits, cancel, stdin, cwd, env
+        `ManagedBackend`'s own answer, satisfied only for structural typing.
+        `confine_root` (#338) added to the Protocol the same way."""
+        del handle, argv, limits, cancel, stdin, cwd, env, confine_root
         return ExecuteResult(reason="unsupported", exit_code=None)
 
     def resolve_realpath_in_attempt(self, handle: object, path: str, timeout: float = 2.0) -> str | None:
