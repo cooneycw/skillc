@@ -203,3 +203,30 @@ The three production Python files are unchanged from audited checkpoint
 merged upstream work, declaration/README identity refresh and flow evidence.
 No new substantive review or machine receipt is claimed. Full verification
 and final-head CI are the next required checks under the recorded ruling.
+
+### Separate shared-fixture repair integrated
+
+The unfiltered full run at ba8bd83 ended with exit 2: 1 failed, 3777 passed,
+15 skipped. The sole failure was the pre-existing profile inventory test
+reading a tracked shared snapshot while its sibling tamper control modified
+it. Both bytes were restored afterward. This result is retained and was not
+replaced by a blind retry. The finding was recorded at
+https://github.com/cooneycw/skillc/issues/20#issuecomment-6134188584.
+
+Root authorized a separate two-file repair. PR #374 copied the real snapshot
+to the tamper control's temporary directory and added a deterministic
+interleaved-reader regression, which failed before isolation. The original
+digest-refusal control remains effective. Its own independent review and
+native-review ruling are recorded in issue-287-fixture-isolation.md; that is
+a separate repair review, not another endpoint review. Repair local full
+verification passed 3715 tests with 15 skips; final CI 745 passed 3703 with
+27 skips, matching all 3730 identities. Superseded CI 743 was canceled and
+is unusable evidence, not an observed code failure.
+
+Merged repair 10584e7 is integrated via f14c07b. Both endpoint declarations
+still match actual revision 4, the improvement content hashes still match
+merged task bytes and both approvals remain null. Root's earlier integration
+audit independently checked those identities and both seeded 20-slot orders
+and found no issue. The original three production patches remain unchanged
+from the audited endpoint checkpoint. Final integrated full verification and
+exact-head CI remain required before root merges PR #372.

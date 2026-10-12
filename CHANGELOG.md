@@ -16,7 +16,7 @@ and version plan.
   outcome. Malformed evidence, changed approvals or stored identities refuse
   or stay inconclusive; existing nonempty legacy reports retain their endpoint.
   Discrimination remains separate. Pilot drafts stay unapproved; derived
-  closures, discrimination execution, final task/runtime identities, cost and
+  closures, discrimination execution, runtime identities, cost and
   live readiness are still owed. No study or paid execution is authorized.
 
 - **Public flow-task reports and exercised regression gates** (Refs #270, #271).
