@@ -288,14 +288,52 @@ def treatment_subject(declaration: calibration.CalibrationDeclaration) -> Mappin
     return subject
 
 
+def task_content_identity(
+    goal: bytes, grader: verify.GraderDef, files: list[tuple[str, bytes, bool]],
+) -> dict[str, object]:
+    """Identity of the prompt, grader and exact delivered fixture (including mode)."""
+    return {
+        "version": 1, "goal_digest": trial.sha256_bytes(goal), "grader_digest": grader.digest(),
+        "fixture_digest": trial.sha256_bytes(trial.canonical([
+            [path, executable, trial.sha256_bytes(body)] for path, body, executable in sorted(files)
+        ])),
+    }
+
+
+def _outcome_task_inputs(
+    declaration: calibration.CalibrationDeclaration, root: Path,
+) -> tuple[str, dict[str, object]]:
+    task = root / declaration.task_path
+    goal_file = task / "goal.md"
+    if goal_file.is_symlink() or not goal_file.is_file():
+        raise CalibrationRefused("outcome task goal must be a regular file")
+    goal = goal_file.read_bytes()
+    files = cc.task_surface(task / declaration.task_fixture)
+    measured = task_content_identity(goal, verify.GraderDef.load(task), files)
+    if measured != declaration.data["task_content"]:
+        raise CalibrationRefused("task_content differs from the approved goal, grader or fixture")
+    return goal.decode("utf-8"), cc.surface_mapping(files)
+
+
 def plan_calibration(
     declaration: calibration.CalibrationDeclaration, store: Path, *,
     root: Path, treatment_digest: str, image_digest: str | None,
 ) -> tuple[trial.Experiment, list[mp.ScheduledAttempt]]:
     """Plan one trial per attempt through the real controller, in
     `arm_order.sequence`. `repeat` is the arm's own 1-based attempt count."""
+    if calibration.outcome_endpoint(declaration) is not None:
+        declaration = calibration.parse_declaration(json.loads(trial.canonical(declaration.data)))
     client_name, client_version = declared_client(declaration)
     grader = verify.GraderDef.load(root / declaration.task_path)
+    grader_identity = grader.identity()
+    snapshot = None
+    if calibration.outcome_endpoint(declaration) is not None:
+        calibration.require_approved(declaration, root)
+        _outcome_task_inputs(declaration, root)
+        snapshot = json.loads(trial.canonical(declaration.data))
+        content = snapshot["task_content"]
+        if grader_identity["digest"] != content["grader_digest"]:
+            raise CalibrationRefused("planned grader differs from approved task_content")
     trials: list[dict[str, object]] = []
     counts: dict[str, int] = {}
     for position, arm in enumerate(declaration.arm_order, start=1):
@@ -305,11 +343,12 @@ def plan_calibration(
             "case": {"id": declaration.grader_id, "revision": declaration.grader_revision},
             # The full identity, digest included (#139): the verifier stores no
             # result against a ledger that pins no grader digest.
-            "grader": grader.identity(),
+            "grader": grader_identity,
             "subject": {"digest": mp.BASELINE_SUBJECT_DIGEST if arm == calibration.BASELINE_ARM else treatment_digest},
             "client": {"name": client_name, "version": client_version},
             "image": {"digest": image_digest or UNKNOWN},
-            "config": {"arm": arm, "repeat": counts[arm], "position": position},
+            "config": {"arm": arm, "repeat": counts[arm], "position": position,
+                       **({"calibration_declaration": snapshot} if snapshot is not None else {})},
             "attempts": 1,
         })
     try:
@@ -390,19 +429,24 @@ def run_calibration(
     the declared model and effort are added. `total_seconds` overrides the
     declared total cap - for tests only; the CLI never sets it."""
     # ADR 0005: nothing - no store, no plan, no container - before this.
+    if calibration.outcome_endpoint(declaration) is not None:
+        declaration = calibration.parse_declaration(json.loads(trial.canonical(declaration.data)))
     calibration.require_approved(declaration, root)
     model, effort = declared_model(declaration)
     client_name, client_version = declared_client(declaration)
     mp.pin_model_argv(model, effort, [])
     task_root = root / declaration.task_path
     try:
-        surface = cc.surface_mapping(cc.task_surface(task_root / declaration.task_fixture))
+        if calibration.outcome_endpoint(declaration) is not None:
+            goal, surface = _outcome_task_inputs(declaration, root)
+        else:
+            surface = cc.surface_mapping(cc.task_surface(task_root / declaration.task_fixture))
+            goal = (task_root / "goal.md").read_text(encoding="utf-8")
     except demo.SubjectRefused as exc:
         raise CalibrationRefused(str(exc)) from exc
     per_attempt = float(str(declaration.shared["per_attempt_seconds"]))
     total = float(str(declaration.shared["total_seconds"])) if total_seconds is None else total_seconds
 
-    goal = (task_root / "goal.md").read_text(encoding="utf-8")
     installed = treatment.receipt_context.declared if treatment.receipt_context is not None else frozenset()
     for arm, skills in named_skills_by_arm(declaration).items():
         absent = sorted(set(skills) - installed)
@@ -509,6 +553,68 @@ def _opened(invocations: object, named: Sequence[str] | None = None, *, confirme
     return bool(names & set(named)) if named is not None else bool(names)
 
 
+def _report_declaration(experiment: trial.Experiment) -> calibration.CalibrationDeclaration | None:
+    """Read configuration objects from an Experiment.open-verified ledger."""
+    pairs = list(experiment.attempts())
+    if not pairs:
+        raise CalibrationRefused("cannot report an empty calibration population")
+    configs = []
+    for planned, _attempt in pairs:
+        binding = planned["config"]
+        assert isinstance(binding, dict)
+        config = json.loads(trial._read_object(experiment.root, str(binding["digest"])))
+        if not isinstance(config, dict):
+            raise CalibrationRefused("trial configuration is not an object")
+        configs.append(config)
+    if not any("calibration_declaration" in config for config in configs):
+        return None
+    snapshot = configs[0].get("calibration_declaration")
+    if not isinstance(snapshot, dict) or any(config.get("calibration_declaration") != snapshot for config in configs):
+        raise CalibrationRefused("partial, malformed or mixed outcome declaration snapshots")
+    declaration = calibration.parse_declaration(snapshot)
+    if calibration.outcome_endpoint(declaration) is None:
+        raise CalibrationRefused("stored outcome declaration has no outcome_endpoint")
+    calibration.require_outcome_approval(declaration)
+    schedule = schedule_from_ledger(experiment)
+    if tuple(s.arm for s in schedule) != declaration.arm_order:
+        raise CalibrationRefused("stored declaration and ledger schedule disagree")
+    content = snapshot["task_content"]
+    assert isinstance(content, dict)
+    counts: dict[str, int] = {}
+    for position, ((planned, _attempt), config, scheduled) in enumerate(zip(pairs, configs, schedule, strict=True), 1):
+        counts[scheduled.arm] = counts.get(scheduled.arm, 0) + 1
+        expected = {"arm": scheduled.arm, "repeat": counts[scheduled.arm], "position": position}
+        if any(config.get(key) != value for key, value in expected.items()) or scheduled.repeat != counts[scheduled.arm]:
+            raise CalibrationRefused("stored declaration and trial configuration schedule disagree")
+        grader = planned.get("grader")
+        if planned.get("case") != {"id": declaration.grader_id, "revision": declaration.grader_revision} \
+                or not isinstance(grader, dict) or grader.get("digest") != content["grader_digest"] \
+                or grader.get("id") != declaration.grader_id or grader.get("revision") != declaration.grader_revision:
+            raise CalibrationRefused("stored declaration and ledger grader identity disagree")
+    return declaration
+
+
+def _raw_task_beside(record: Mapping[str, object]) -> dict[str, object]:
+    graded = record.get("graded")
+    return {"status": graded.get("status", UNKNOWN), "criteria": graded.get("criteria")} \
+        if isinstance(graded, dict) else {"status": calibration.NOT_GRADED, "criteria": None}
+
+
+def _honesty_beside(record: Mapping[str, object]) -> dict[str, object]:
+    graded = record.get("graded")
+    if not isinstance(graded, dict):
+        return {"status": calibration.NOT_GRADED, "criteria": [], "reason": "attempt was not graded"}
+    raw = graded.get("criteria")
+    rows = [row for row in raw if isinstance(row, dict) and row.get("id") == "flow-check-honest"] \
+        if isinstance(raw, list) else []
+    status = "MISSING" if isinstance(raw, list) and not rows else "MALFORMED"
+    if len(rows) == 1 and rows[0].get("mandatory") is True \
+            and rows[0].get("outcome") in ("SATISFIED", "VIOLATED", UNKNOWN):
+        status = str(rows[0]["outcome"])
+    return {"status": status, "criteria": rows,
+            "reason": None if rows else "raw task grade contains no process-honesty row"}
+
+
 def build_report(
     experiment: trial.Experiment, outcomes: Sequence[mp.AttemptOutcome], *,
     declared_model: str, declared_effort: str, named_skills: Mapping[str, Sequence[str]] | None = None,
@@ -522,6 +628,21 @@ def build_report(
     inside it: `skill_opened` for every attempt, and for a provided-skill arm
     (`named_skills`) `named_skill_opened` - which decides whether that attempt
     counts toward the value comparison."""
+    # A mutable outcomes checkpoint cannot select the report's endpoint.
+    experiment = trial.Experiment.open(experiment.root)
+    declaration = _report_declaration(experiment)
+    endpoint = calibration.outcome_endpoint(declaration) if declaration is not None else None
+    if declaration is not None and (declared_model, declared_effort) != (
+        _shared_str(declaration, "model"), _shared_str(declaration, "reasoning_effort"),
+    ):
+        raise CalibrationRefused("report model/effort differs from the bound declaration")
+    ids = [outcome.scheduled.attempt_id for outcome in outcomes]
+    if len(set(ids)) != len(ids):
+        raise CalibrationRefused("report contains duplicate attempt outcomes")
+    expected = {s.attempt_id: s for s in schedule_from_ledger(experiment)}
+    if any(expected.get(o.scheduled.attempt_id) != o.scheduled for o in outcomes):
+        raise CalibrationRefused("outcome schedule differs from the ledger")
+    outcomes = reconcile(experiment, outcomes)
     named_skills = named_skills or {}
     entries: list[dict[str, object]] = []
     for position, outcome in enumerate(outcomes, start=1):
@@ -541,7 +662,9 @@ def build_report(
             "arm": outcome.scheduled.arm,
             "repeat": outcome.scheduled.repeat,
             "disposition": disposition,
-            "primary_endpoint": calibration.primary_endpoint(record),
+            "primary_endpoint": calibration.primary_endpoint(record, endpoint=endpoint),
+            **({"task_grader_beside": _raw_task_beside(record),
+                "process_honesty_beside": _honesty_beside(record)} if endpoint is not None else {}),
             "readiness_beside": calibration.readiness_beside(verified_result(experiment, record)),
             "model_declared": declared_model,
             "model_observed": observed_model,
@@ -559,11 +682,15 @@ def build_report(
             "runner_note": outcome.runner_note,
         })
     return {
-        "version": 1,
+        "version": 2 if endpoint is not None else 1,
         "kind": REPORT_KIND,
         "experiment_id": experiment.id,
         "attempts": entries,
         "arms": summarize_arms(entries),
+        **({"outcome_endpoint": endpoint.to_json(),
+            "declaration_digest": calibration.declaration_digest(declaration.data),
+            "task_content": declaration.data["task_content"]}
+           if endpoint is not None and declaration is not None else {}),
     }
 
 
@@ -591,6 +718,13 @@ def summarize_arms(entries: Sequence[Mapping[str, object]]) -> dict[str, dict[st
         primary[status] = primary.get(status, 0) + 1
         if entry.get("model_eligible") is False:
             summary["model_ineligible"] = int(str(summary["model_ineligible"])) + 1
+        for source, counter in (("task_grader_beside", "task_grader"), ("process_honesty_beside", "process_honesty")):
+            beside = entry.get(source)
+            if isinstance(beside, dict):
+                counts = summary.setdefault(counter, {})
+                assert isinstance(counts, dict)
+                status = str(beside.get("status", UNKNOWN))
+                counts[status] = counts.get(status, 0) + 1
     return arms
 
 
@@ -598,20 +732,27 @@ def paste_back(report: Mapping[str, object]) -> str:
     """The printed summary: one line per attempt, the primary endpoint first
     and readiness beside it. Leak-checked by `demo.print_paste_back`."""
     lines = [f"calibration-run: experiment {report.get('experiment_id')}"]
+    if "outcome_endpoint" in report:
+        lines.append(f"  outcome_endpoint={report['outcome_endpoint']} declaration={report.get('declaration_digest')}")
     attempts = report.get("attempts")
     for entry in attempts if isinstance(attempts, list) else []:
         primary = entry.get("primary_endpoint") or {}
         ready = entry.get("readiness_beside") or {}
+        task, honesty = entry.get("task_grader_beside"), entry.get("process_honesty_beside")
+        raw = f" | task={task.get('status')} honesty={honesty.get('status')}" \
+            if isinstance(task, dict) and isinstance(honesty, dict) else ""
         lines.append(
             f"  {entry.get('position')}. {entry.get('arm')} ({entry.get('attempt_id')}): "
             f"disposition={entry.get('disposition')} primary={primary.get('status')} "
             f"| installation-ready={ready.get('installation_ready')} verified={ready.get('verified_status')} "
-            f"| model={entry.get('model_observed')} eligible={entry.get('model_eligible')}"
+            f"| model={entry.get('model_observed')} eligible={entry.get('model_eligible')}{raw}"
         )
     arms = report.get("arms")
     for arm, summary in (arms.items() if isinstance(arms, dict) else []):
         named = f" named_opened={summary.get('named_opened')}" if "named_opened" in summary else ""
+        raw = f" task={summary.get('task_grader')} honesty={summary.get('process_honesty')}" \
+            if "process_honesty" in summary else ""
         lines.append(f"  [{arm}] scheduled={summary.get('scheduled')} primary={summary.get('primary')} "
                      f"opened={summary.get('opened')}/{summary.get('observed')}{named} "
-                     f"model_ineligible={summary.get('model_ineligible')}")
+                     f"model_ineligible={summary.get('model_ineligible')}{raw}")
     return "\n".join(lines)
