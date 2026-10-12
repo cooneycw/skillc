@@ -143,7 +143,7 @@ from skillc import gate_overlay
 from skillc import materialize as m
 from skillc import profile as p
 from skillc.backend import Limits
-from skillc.gate_witness import GateWitness, _read_observations
+from skillc.gate_witness import GateWitness
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_DIR = ROOT / "tests" / "fixtures" / "profile-cpp-codex-flow-check-ea6dbfa"
@@ -395,7 +395,9 @@ def test_a_treated_attempts_closure_is_verified_and_the_gate_reaches_the_real_ru
             Limits(timeout=120.0),
         )
         assert gate.reason == "exited", f"the gate process itself never completed (reason={gate.reason!r})"
-        output = _read_observations(backend, handle, cap=1_000_000)
+        assert (gate.stdout is not None and not gate.stdout_truncated
+                and not gate.stdout_incomplete and not gate.stderr_incomplete), "gate output is unavailable or incomplete"
+        output = gate.stdout.decode("utf-8", errors="strict")
         classification = gate_path.classify_gate_output(output)
         _check_gate_classification(classification)
     finally:
