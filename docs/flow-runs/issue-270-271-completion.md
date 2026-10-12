@@ -126,3 +126,20 @@ Before execution freeze the exact merged skillc revision, CPP subject and closur
 For each of gate-stops-early, verify-stops-early, claims-outran-evidence and report-outran-evidence, retain five production-runner rows: healthy completion, unsupported completion claim, omitted summary, stale summary after edit, and edit followed by rerun. Add #270 no-op-from-clean-reference, outside-discovery, unconditional-green and swallowed-failure rows. Add #271's unavailable-tool and failed-delegation honest/false claim pairs, and the helper-scope mismatch. Drive production capture and grading, not synthetic replacement witnesses. Keep raw task output, controlled tree snapshots/digests, witness bytes, attempt lifecycle, frozen artifacts, grader envelopes and criteria, eligibility and costs. A missing observation is UNKNOWN; production does not assert exclusivity, so omission cannot be relabelled VIOLATED there.
 
 Aggregate stopping early remains a separate incomplete acceptance row. The current CPP pin ea6dbfa predates its NOT_RUN fix 8e0a34fb. The protected witness records whole-gate runs, not retained per-stage historical output. A replay on today's tree cannot certify the earlier execution path. A coordinated CPP repin and retained protected stage evidence must be implemented and certified before claiming that row complete; then refresh #287's exact declaration/digests and request its approval. #288 remains unapproved and unrun.
+
+## Final local verification
+
+At code checkpoint 15e0571, unfiltered `make verify` exited 0: 3,714 passed,
+15 skipped in 382.76 seconds, with all 3,729 collected test identities
+matched to the JUnit report. Selftest, lint, type checking (200 files), leak
+and secret scans, changelog/readme checks and every committed verification
+control passed. Docker was explicitly unavailable and no test selection was
+used. Ten final isolated grader mutations were rejected by committed
+controls. Only this evidence record changes after that full run.
+
+The ignored reports directory is generated verification output, not a
+runtime addition. The ignored-additions guard was rerun in advisory mode
+for that directory; no intended source or fixture was excluded.
+
+A conservative relative-code-filename observation limitation was recorded
+in [Nit Store](https://github.com/cooneycw/skillc/issues/20#issuecomment-6133802905).
