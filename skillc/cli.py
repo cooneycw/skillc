@@ -1693,7 +1693,7 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
     import secrets
     from datetime import UTC, datetime
 
-    from . import calibration, demo, trial_bootstrap
+    from . import calibration, demo, trial, trial_bootstrap
     from . import calibration_run as cr
     from . import collection_conformance as cc
     from . import matched_pilot as mp
@@ -1796,10 +1796,16 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
         print("skillc: interrupted; reporting every planned attempt from the private record", file=sys.stderr)
         interrupted = True
         experiment, outcomes = mp.read_outcomes(run_dir)
-    report = cr.build_report(
-        experiment, cr.reconcile(experiment, outcomes), declared_model=model, declared_effort=effort,
-        named_skills=cr.named_skills_by_arm(declaration),
-    )
+    try:
+        # build_report verifies the immutable ledger before reconciling a
+        # mutable checkpoint or selecting the launch-bound outcome endpoint.
+        report = cr.build_report(
+            experiment, outcomes, declared_model=model, declared_effort=effort,
+            named_skills=cr.named_skills_by_arm(declaration),
+        )
+    except (trial.Refused, ValueError, OSError) as exc:
+        print(f"skillc: cannot report calibration: {exc}", file=sys.stderr)
+        return 2
     (run_dir / cr.REPORT_FILENAME).write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8")
     try:
         demo.print_paste_back(demo.redact_known_host_paths(cr.paste_back(report), base=run_dir))
