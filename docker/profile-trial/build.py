@@ -495,6 +495,8 @@ def build_image(
             if not sep or key in config_env:
                 raise SupplyError("invalid image environment")
             config_env[key] = val
+        if "UV_PROJECT_ENVIRONMENT" in config_env:
+            raise SupplyError("image environment must not set UV_PROJECT_ENVIRONMENT")
         required = load_json(descriptor)["required_env"]
         if any(config_env.get(k) != v for k, v in required.items()):
             raise SupplyError("image configuration/descriptor environment mismatch")

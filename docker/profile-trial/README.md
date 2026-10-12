@@ -54,6 +54,11 @@ Docker's `--iidfile` identity must match image inspection. The builder creates,
 but never starts, a temporary container to extract the descriptor, then removes
 it even if descriptor validation fails. It checks final candidate USER and
 image environment against the descriptor before writing the external receipt.
+The observed image configuration must not set `UV_PROJECT_ENVIRONMENT`, even
+with an empty value: the supported runtime uses each project's own `.venv`.
+This absence is checked against image inspection, independently of descriptor
+claims. Candidate-writable project delivery and matching effective-environment
+refusal belong to the supporting runtime integration, not this build receipt.
 The output image is selected by immutable ID from that receipt. No default
 image or evaluation declaration changes automatically.
 

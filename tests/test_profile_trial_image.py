@@ -171,6 +171,7 @@ class FakeDocker:
         *,
         image_drift: bool = False,
         env_drift: bool = False,
+        project_environment: str | None = None,
         user: str = "candidate",
         descriptor: bytes | None = None,
     ) -> None:
@@ -178,6 +179,7 @@ class FakeDocker:
         self.image_id = _read("receipt.good.json")["image_id"]
         self.image_drift = image_drift
         self.env_drift = env_drift
+        self.project_environment = project_environment
         self.user = user
         self.descriptor = descriptor or (CASES / "descriptor.good.json").read_bytes()
         self.context: dict[str, bytes] = {}
@@ -197,6 +199,8 @@ class FakeDocker:
             env = _read("descriptor.good.json")["required_env"]
             if self.env_drift:
                 env.pop("UV_OFFLINE")
+            if self.project_environment is not None:
+                env["UV_PROJECT_ENVIRONMENT"] = self.project_environment
             return json.dumps(
                 [
                     {
@@ -504,3 +508,17 @@ def test_physical_comment_cannot_hide_recipe_instruction(anchor: str, instructio
             fragment,
             build.load_json((SUPPLY / "runtime-policy.json").read_bytes()),
         )
+
+
+@pytest.mark.parametrize("override", ["/external/dev-venv", ""])
+def test_observed_image_cannot_select_an_undeclared_project_environment(
+    tmp_path: Path, override: str,
+) -> None:
+    # Descriptor and all required values remain valid. Only the independently
+    # observed image Env carries the override, including the empty-value case.
+    fake = FakeDocker(project_environment=override)
+    output = tmp_path / "receipt.json"
+    with pytest.raises(build.SupplyError, match="UV_PROJECT_ENVIRONMENT"):
+        build.build_image(ROOT, output, run=fake)
+    assert not output.exists()
+    assert fake.calls[-1] == ["rm", "a" * 64]

@@ -137,3 +137,32 @@ venv-permission controls, baseline purity and real consuming-path acceptance
 remain owed to #360. The separate host-probe override defect remains #365.
 The historical bridge refusal's actual cause is still unproven. No Docker
 image build or model trial ran in this phase.
+
+### Approved image-environment guard amendment
+
+Root's later image-environment-guard grant adds one bounded change in the
+existing builder/test/docs lane: refuse any observed image `Config.Env`
+`UV_PROJECT_ENVIRONMENT` entry, including an empty value, before writing a
+receipt. Descriptor and receipt schemas do not change. DD retains delivery,
+selected-runtime preflight and effective-environment integration; #365 remains
+the separate host-probe issue. No shared live/runner or profile.py edit is granted.
+
+Both fake-Docker regression cases failed on the prior builder (no refusal),
+then passed after the guard. They leave the descriptor and all required values
+valid, proving the check reads independent image configuration. The existing
+absent-selector builds remain the positive control. Updated full verification
+is queued after AA's explicit release and before DD phase two; the earlier
+0f8214f green remains historical evidence, not evidence for this new guard.
+
+### Image-environment amendment verification completed
+
+The orchestrator reviewed the small guard diff with no findings. After AA's
+explicit exit-0/no-replacement slot release, unfiltered default-parallel
+`make verify` returned exit 0: 3,331 passed and 15 skipped in 236.49 seconds;
+all 3,346 collected identities matched the report. Remaining checks and
+negative controls passed, including the short-report/complete-report pair.
+The same unavailable Docker socket and unset selection/context variables were
+used. The tested tree was HEAD `883643c` plus the archived guard/tests/docs
+diff `43dfc7e23ef02a1eea012f72f2551261582668e310c0a59688b451c8b31133ac`.
+The actual owned process exit was collected and the slot explicitly released
+to DD before any subsequent main sync. Real Docker acceptance remains pending.
