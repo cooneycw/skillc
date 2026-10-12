@@ -99,3 +99,27 @@ native Codex implementer from a Claude transcript. The existing flow record,
 original evidence and DD audit are truthful records but do not satisfy the
 enrolled finish receipt gate. Root owns the finish disposition; do not treat
 repository make verify as a waiver of that separate requirement.
+
+### Full offline verification and draft handoff
+
+Full unfiltered make verify passed at 882b12d on integrated main 02f1565:
+3686 passed, 15 skipped; all 3701 collected identities matched the report.
+All 12 real-Docker cases skipped with an explicitly unavailable Docker socket
+and Docker context unset. Selftest, lint, full mypy, leak checks, changelog,
+README drift and gitleaks passed. Committed controls rejected the bad rule,
+empty good population, unknown selector, planted type error, leak, secret,
+invalid git-test reports and short pytest population; healthy twins passed.
+
+An earlier default-context full run was interrupted at roughly 13 percent
+(exit 130) after finding the local daemon reachable. It produced no completed
+JUnit report, and its progress-only log cannot establish whether any live
+Docker test body started. Collection did probe the daemon. That interrupted
+run is not verification evidence and supersedes the earlier checkpoint's
+no-real-Docker statement for subsequent activity. No paid study was run.
+
+Root authorized a tested draft PR with Refs #287 and the receipt limitation
+explicit. This records repository verification, not cleared finish or merge.
+The two-review provenance audit remains accepted; the official receipt is
+unsupported and no skip, third review or gate bypass is claimed. Root retains
+finish disposition and merge authority. This evidence-only record update
+follows the tested commit and changes no implementation or test inputs.
