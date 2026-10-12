@@ -83,3 +83,19 @@ Plan compliance correctly reports CLI (and now CHANGELOG) beyond the initial
 Section C file list and notes the appended record changed. These are explicit
 root-approved expansions at mailbox revisions 16 and 17, recorded above,
 not silent changes to the original gate. Retain that explanation in the PR.
+
+### Review provenance and finish limitation
+
+The orchestrator accepted DD's read-only provenance audit: both original
+substantive review turns were gpt-6.1-sol, and the reviewed four Python patches
+match this change. The formatting-only follow-up was gpt-6-astra with no
+recorded calls; it replaced only the clean-verdict sentence. The official
+whole-rollout helper correctly refuses the mixed model metadata. No successful
+receipt, fabricated skip or third substantive review is claimed.
+
+The installed receipt writer also supports only Claude-implements/Codex-reviews
+or Codex-implements/Claude-reviews. A direct read-only probe cannot derive this
+native Codex implementer from a Claude transcript. The existing flow record,
+original evidence and DD audit are truthful records but do not satisfy the
+enrolled finish receipt gate. Root owns the finish disposition; do not treat
+repository make verify as a waiver of that separate requirement.
