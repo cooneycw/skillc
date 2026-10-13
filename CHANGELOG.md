@@ -8,6 +8,17 @@ and version plan.
 
 ## [Unreleased]
 
+- **Offline cache-miss oracle matches uv's real output** (Refs #360). The
+  closure-preflight live test required the phrase "network is disabled",
+  which uv 0.9.7 never prints ("Network connectivity is disabled", wrapped
+  across lines), so its generic-image control failed on every real daemon
+  and the `empty-runtime-cache` break could never reach its own oracle. One
+  whitespace-normalised helper now checks uv's actual phrases, and the
+  offline tests use captured uv output
+  (`tests/fixtures/uv-offline-cache-miss-0.9.7.txt`) instead of a
+  paraphrase. Real Docker: `none` passes and `empty-runtime-cache` reaches
+  its targeted XFAIL; both failed at main before this change.
+
 - **Approval-bound common task outcomes for improvement preparation** (Refs #287).
   Opted-in two-arm calibration runs bind the selected criteria and exact
   prompt/grader/fixture identities to an approved declaration stored in hashed

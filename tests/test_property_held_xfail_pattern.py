@@ -52,6 +52,11 @@ import pytest
 
 pytest_plugins = ["pytester"]
 
+# uv 0.9.7's real offline cache-miss output, line wrapping included (#360).
+# An invented paraphrase here once matched an oracle uv never satisfied.
+_UV_OFFLINE_CACHE_MISS = (Path(__file__).parent / "fixtures" / "uv-offline-cache-miss-0.9.7.txt").read_text(
+    encoding="utf-8")
+
 
 _INNER_TEST_SOURCE = textwrap.dedent("""
     import pytest
@@ -682,7 +687,7 @@ def _drive_closure(ns, refusal, monkeypatch, output_fault=None) -> None:
     monkeypatch.setitem(test.__globals__, "replace", replace_backend)
     monkeypatch.setitem(test.__globals__, "GateWitness", witness)
     diagnostics = {
-        "empty-runtime-cache": "pydantic-core wasn't found in the cache and network is disabled",
+        "empty-runtime-cache": _UV_OFFLINE_CACHE_MISS,
         "runtime-cache-permissions": "Permission denied: /home/candidate/.cache/uv/.lock",
         "project-venv-permissions": "Permission denied: /home/candidate/Projects/claude-power-pack/.venv",
     }
@@ -835,7 +840,7 @@ def test_runtime_fault_requires_dependency_and_specific_diagnostic(mode) -> None
     check = ns["_check_runtime_preflight"]
     reason = "tool dependency 'tool-pypi-runtime' was not verified in-container"
     diagnostic = {
-        "empty-runtime-cache": "pydantic-core wasn't found in the cache and network is disabled",
+        "empty-runtime-cache": _UV_OFFLINE_CACHE_MISS,
         "runtime-cache-permissions": "Permission denied (os error 13): /home/candidate/.cache/uv/.lock",
         "project-venv-permissions": "Permission denied (os error 13): /home/candidate/Projects/claude-power-pack/.venv",
     }[mode]
@@ -892,7 +897,7 @@ def test_runtime_real_markers_exclude_neighbor_properties(pytester, widen) -> No
             mode = ns['BREAK_MODE']
             reason = "tool dependency 'tool-pypi-runtime' was not verified in-container"
             diagnostic = {
-                'empty-runtime-cache': "pydantic-core wasn't found in the cache and network is disabled",
+                'empty-runtime-cache': "Network connectivity is disabled, but the\\n      requested data wasn't found in the cache for: pydantic-core",
                 'runtime-cache-permissions': 'Permission denied: /home/candidate/.cache/uv/.lock',
                 'project-venv-permissions': 'Permission denied: /home/candidate/Projects/claude-power-pack/.venv',
             }[mode]
@@ -1044,7 +1049,7 @@ def test_runtime_diagnostic_uses_fresh_delivery_and_actual_import_command(monkey
     backend.prepare.side_effect = prepare
     backend.deliver_home_file.side_effect = lambda *args: events.append("delivered")
     backend.runtime_environment.side_effect = lambda *args: events.append("validated-then-faulted")
-    output = b"pydantic-core wasn't found in the cache and network is disabled"
+    output = _UV_OFFLINE_CACHE_MISS.encode("utf-8")
     def run(handle, argv, limits):
         events.append("import")
         assert "--offline --locked --project" in argv[-1]

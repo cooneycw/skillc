@@ -282,3 +282,46 @@ only after the orchestrator confirms DD's merge and this branch synchronizes
 to current main, preserving the packaged-policy and qualifier compatibility
 fixes. Full verification and PR creation remain held until those conditions
 are met; no additional approval is needed after the merge handoff.
+
+<!-- flow-run n=2 id=3bc0ddeb6b1f4450a3be58d4a89d6a0b -->
+## Run 2
+
+- Run-id:            3bc0ddeb6b1f4450a3be58d4a89d6a0b
+- Run-start:         7b800c6adb1790201425bbd11f1844c15e4bb0aa
+- Issue:             #360
+- Base SHA:          7b800c6adb1790201425bbd11f1844c15e4bb0aa
+- Necessity verdict: Needs reframing
+- Approval:          granted
+- Approver:          repository owner, interactive reply "proceed on 360" on 2026-10-13
+- Recorded at:       2026-10-13T21:00:00Z
+
+### Section B evidence
+
+Merged since filing: 5e80d3e (#368, pinned offline runtime image),
+f22d6c8 (#369, production runtime/witness path), 02f1565 (#370, the live
+acceptance test). Related, not duplicates: #365 (host-probe defect), the
+#20 nit on the preflight live test's fixed attempt id and daemon timeout.
+Sibling worktree issue-360-shared-live is clean with all commits merged.
+
+Measured 2026-10-13 against real Docker: the live test fails at main in
+`none` mode on two hosts because `_generic_offline_control` requires the
+phrase "network is disabled"; uv 0.9.7 actually emits "Network
+connectivity is disabled, but the requested data wasn't found in the cache"
+and wraps it across lines. With a whitespace-normalised oracle on uv's real
+phrases, `none` passes and `empty-runtime-cache` reaches its targeted XFAIL
+(on main it fails earlier, at the generic control).
+
+### Section C - the approved plan
+
+1. `tests/test_profile_closure_preflight_live.py` - add `_offline_cache_miss(text)` (whitespace-normalised; requires "Network connectivity is disabled" and "wasn't found in the cache") and use it at both offline-cache oracle sites.
+2. `tests/fixtures/uv-offline-cache-miss-0.9.7.txt` - uv 0.9.7's captured offline cache-miss output, verbatim including its line wrapping.
+3. `tests/test_property_held_xfail_pattern.py` - replace the fabricated "...and network is disabled" diagnostics with the captured real text.
+4. `tests/test_offline_cache_miss_oracle.py` - red/green cases for the helper: real wrapped output accepted; the old invented phrase, a cache-miss-only and a network-only message rejected.
+5. `CHANGELOG.md` - one entry.
+
+Scope: ~6 files, ~60-100 lines.
+
+Risks: the oracle is pinned to uv 0.9.7's wording, so a uv upgrade must
+re-confirm it (the fixture names the version); the cold-container test's
+single-phrase match is also wrap-sensitive but passes today and goes to the
+nit store, not this change.

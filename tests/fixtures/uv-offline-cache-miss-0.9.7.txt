@@ -1,0 +1,9 @@
+Using CPython 3.11.14 interpreter at: /usr/local/bin/python3
+Creating virtual environment at: /p/.venv
+  × Failed to download `pydantic-core==2.41.5`
+  ╰─▶ Network connectivity is disabled, but the
+      requested data wasn't found in the cache for:
+      `https://files.pythonhosted.org/packages/c8/be/8fed28dd0a180dca19e72c233cbf58efa36df055e5b9d90d64fd1740b828/pydantic_core-2.41.5-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl`
+  help: `pydantic-core` (v2.41.5) was included because `claude-power-pack`
+        (v8.0.0) depends on `pydantic` (v2.12.5) which depends on
+        `pydantic-core`

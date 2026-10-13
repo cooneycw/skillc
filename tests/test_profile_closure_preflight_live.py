@@ -228,6 +228,19 @@ _MODE_PROPERTY.update(zip(_RUNTIME_MODES, (
 _EXPECTED_RAISE = _MODE_PROPERTY.get(BREAK_MODE, _PropertyHeld)
 
 
+def _offline_cache_miss(text: str) -> bool:
+    """Whether uv's own offline cache-miss diagnostic is present (#360).
+
+    The phrases are uv 0.9.7's actual wording, captured in
+    tests/fixtures/uv-offline-cache-miss-0.9.7.txt. uv wraps its diagnostics,
+    so a phrase can span a line break; whitespace is collapsed before matching.
+    Both clauses are required: a cache miss alone, or disabled network alone,
+    names a different failure.
+    """
+    flat = " ".join(text.split())
+    return "Network connectivity is disabled" in flat and "wasn't found in the cache" in flat
+
+
 def _complete_output(result: ExecuteResult) -> bytes:
     assert result.reason == "exited", "controller call did not complete"
     assert (result.stdout is not None and len(result.stdout) <= _OUTPUT_CAP
@@ -241,7 +254,7 @@ def _check_runtime_preflight(refused: bool, reason: str, *, mode: str, diagnosti
     if refused:
         assert reason.startswith("tool dependency 'tool-pypi-runtime' "), "wrong refused dependency"
         if mode == "empty-runtime-cache":
-            assert ("wasn't found in the cache" in diagnostic and "network is disabled" in diagnostic), (
+            assert _offline_cache_miss(diagnostic), (
                 "missing specific offline cache diagnostic"
             )
         else:
@@ -431,7 +444,7 @@ def _generic_offline_control(home_files: Mapping[str, bytes], tools: Sequence[Ma
                 result = backend.exec_in_attempt(handle, ["sh", "-c", _import_command(tools)], _LIVE_LIMITS)
                 output = _complete_output(result).decode("utf-8", errors="strict")
                 assert result.exit_code not in (None, 0)
-                assert "wasn't found in the cache" in output and "network is disabled" in output, (
+                assert _offline_cache_miss(output), (
                     "generic image did not demonstrate the expected offline cache miss"
                 )
             finally:
