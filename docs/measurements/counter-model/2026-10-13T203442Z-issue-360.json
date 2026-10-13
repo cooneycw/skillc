@@ -1,0 +1,25 @@
+{
+  "branch": "issue-360-trial-image-cannot-satisfy-tool-pypi-runtime-offli",
+  "counts": {
+    "accepted": 1,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "7b800c6adb1790201425bbd11f1844c15e4bb0aa",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "360",
+  "passes": 2,
+  "recorded_at": "2026-10-13T20:34:42Z",
+  "red_cases": {
+    "already_covered": 0,
+    "proposed": 2
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/13/rollout-2026-10-13T16-33-32-01a136f8-6bff-7ba2-bbfc-97ec6bd902f4.jsonl",
+    "thread_id": "01a136f8-6bff-7ba2-bbfc-97ec6bd902f4"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
