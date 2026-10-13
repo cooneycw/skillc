@@ -216,6 +216,7 @@ a reader carry no `stages` key at all.
 {"requested_at": 1759700000.1, "completed_at": 1759700000.9, "exit_code": 1, "reason": "exited",
  "tree_digest_at_start": "sha256:a...", "stop_confirmed": null,
  "stages": {"status": "captured", "plan": "check", "runner_success": false, "failed_step": "lint",
+            "cwd": "/work", "workspace_root": "/work",
             "stages": {"lint": {"outcome": "failed", "runner_status": "failed", "reason": null},
                        "test": {"outcome": "not-run", "runner_status": "pending",
                                 "reason": "never reached: the run stopped after lint failed"},
@@ -223,6 +224,10 @@ a reader carry no `stages` key at all.
                                      "reason": "never reached: the run stopped after lint failed"}}}}
 ```
 
+- The witness adds `cwd` (the controller-resolved directory the gate ran in,
+  `null` when none was requested) and `workspace_root` to every captured
+  result. Stages from a neighbouring project under the workspace describe
+  that project, so a consumer requires the two to match.
 - The capture is bound to the run that produced it. A later rerun appends its
   own run with its own capture; replaying a gate never rewrites an earlier
   run, so replay is never evidence of an earlier execution.

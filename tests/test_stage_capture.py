@@ -15,12 +15,13 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
 from skillc import stage_capture
-from skillc.backend import ExecuteResult, Limits
-from skillc.gate_witness import GateWitness
+from skillc.backend import ExecuteResult, ExecutionBackend, Limits
+from skillc.gate_witness import GateWitness, StageReader
 
 ROOT = Path(__file__).resolve().parent.parent
 TASKS = ("gate-stops-early", "verify-stops-early")
@@ -61,7 +62,7 @@ def test_real_pinned_runner_output_yields_each_stage_outcome(task: str, shape: s
 @pytest.mark.parametrize("task", TASKS)
 def test_an_early_stop_names_the_failed_prerequisite(task: str) -> None:
     data, exit_code = _sample(task, "lint-failed")
-    capture = stage_capture.capture_stages(data, exit_code)
+    capture: Any = stage_capture.capture_stages(data, exit_code)
     assert capture["failed_step"] == "lint" and capture["runner_success"] is False
     for later in ("test", "typecheck"):
         stage = capture["stages"][later]
@@ -104,7 +105,7 @@ def test_every_unattributable_output_is_unavailable(label: str, data_exit: tuple
             "failed_step did not fail": _mutate(b'"failed_step": "lint"', b'"failed_step": "test"'),
             "success with a failed_step": _sample_with_failed_step(),
         }[label]
-    capture = stage_capture.capture_stages(*data_exit)
+    capture: Any = stage_capture.capture_stages(*data_exit)
     assert capture["status"] == "unavailable", (label, capture)
     assert why in str(capture["reason"])
 
@@ -122,7 +123,7 @@ def test_a_successful_run_reporting_a_failed_stage_is_unavailable() -> None:
     lines = data.decode().split("\n")
     index = next(i for i, line in enumerate(lines) if '"status": "success"' in line)
     lines[index] = lines[index].replace("success", "failed")
-    capture = stage_capture.capture_stages("\n".join(lines).encode(), exit_code)
+    capture: Any = stage_capture.capture_stages("\n".join(lines).encode(), exit_code)
     assert capture["status"] == "unavailable" and "failed stage" in str(capture["reason"])
 
 
@@ -141,7 +142,7 @@ def test_runner_not_run_and_subsumed_states_map_without_context() -> None:
     data, code = _document([{"id": "lint", "status": "failed"},
                             {"id": "test", "status": "not-run", "not_run_reason": "`verify` failed"},
                             {"id": "typecheck", "status": "pending"}], success=False, failed_step="lint")
-    capture = stage_capture.capture_stages(data, code)
+    capture: Any = stage_capture.capture_stages(data, code)
     assert _outcomes(capture) == {"lint": "failed", "test": "not-run", "typecheck": "not-run"}
     assert capture["stages"]["test"]["reason"] == "`verify` failed"
     data, code = _document([{"id": "lint", "status": "subsumed"}], success=True)
@@ -156,7 +157,7 @@ def test_runner_not_run_and_subsumed_states_map_without_context() -> None:
 ])
 def test_a_stage_without_this_runs_execution_is_unattributable(entry: dict, why: str) -> None:
     data, code = _document([entry, {"id": "test", "status": "success"}], success=True)
-    capture = stage_capture.capture_stages(data, code)
+    capture: Any = stage_capture.capture_stages(data, code)
     assert capture["status"] == "captured"
     assert capture["stages"]["lint"]["outcome"] is None and why in capture["stages"]["lint"]["reason"]
     assert capture["stages"]["test"]["outcome"] == "passed"
@@ -176,11 +177,11 @@ class _Backend:
 
 
 def _witness(results: dict[str, ExecuteResult], *, digests: list[str] | None = None,
-             reader: object = stage_capture.capture_stages) -> GateWitness:
+             reader: StageReader = stage_capture.capture_stages) -> GateWitness:
     order = iter(digests or ["sha256:t"] * 8)
     return GateWitness(
         declared_gates={"flow-check-plan": ["flow-check-plan"], "flow-check-summary": ["flow-check-summary"]},
-        tree_digest_fn=lambda: next(order), backend=_Backend(results), handle=None, limits=Limits(timeout=5.0),
+        tree_digest_fn=lambda: next(order), backend=cast(ExecutionBackend, _Backend(results)), handle=None, limits=Limits(timeout=5.0),
         gate_exclusivity=False, exclusivity_basis="test", stage_capture={"flow-check-plan": reader},
     )
 
@@ -242,7 +243,7 @@ def test_a_reader_that_raises_is_an_unavailable_capture_not_a_crash() -> None:
 
 def test_a_stage_reader_for_an_undeclared_gate_is_refused() -> None:
     with pytest.raises(ValueError, match="undeclared"):
-        GateWitness(declared_gates={"lint": ["lint"]}, tree_digest_fn=lambda: "t", backend=_Backend({}),
+        GateWitness(declared_gates={"lint": ["lint"]}, tree_digest_fn=lambda: "t", backend=cast(ExecutionBackend, _Backend({})),
                     handle=None, limits=Limits(timeout=5.0), gate_exclusivity=False, exclusivity_basis="",
                     stage_capture={"typo": stage_capture.capture_stages})
 

@@ -15,11 +15,12 @@ import runpy
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from skillc import stage_capture
-from skillc.backend import ExecuteResult, Limits
+from skillc.backend import ExecuteResult, ExecutionBackend, Limits
 from skillc.gate_witness import GateWitness
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -61,7 +62,7 @@ def _witness(plan: ExecuteResult | None, *, plan_tree: str = TREE, capture: bool
     digests = iter([plan_tree, TREE])
     witness = GateWitness(
         declared_gates={"flow-check-plan": ["flow-check-plan"], "flow-check-summary": ["flow-check-summary"]},
-        tree_digest_fn=lambda: next(digests), backend=_Backend(results), handle=None, limits=Limits(timeout=5.0),
+        tree_digest_fn=lambda: next(digests), backend=cast(ExecutionBackend, _Backend(results)), handle=None, limits=Limits(timeout=5.0),
         gate_exclusivity=False, exclusivity_basis="static #376 control", workspace_root=ROOT_DIR,
         stage_capture={"flow-check-plan": stage_capture.capture_stages} if capture else None,
     )
@@ -141,6 +142,7 @@ def test_missing_stale_malformed_or_contradictory_stage_evidence_is_unknown(task
         witness = _witness(ExecuteResult(reason="timeout", exit_code=None, stop_confirmed=True))
     elif label == "carried":
         sample = _sample(task, "all-passed")
+        assert sample.stdout is not None
         stdout = sample.stdout.replace(b'"id": "lint",', b'"id": "lint",\n      "carried_from_previous_run": true,', 1)
         witness = _witness(ExecuteResult(reason="exited", exit_code=0, stdout=stdout))
     else:
@@ -207,3 +209,26 @@ def test_a_contradictory_plan_record_is_unknown(task: str, label: str) -> None:
     else:
         gate["runs"][-1]["exit_code"] = None
     assert _judge(task)(witness, TREE, _report(**ALL_PASSED))["outcome"] == "UNKNOWN"
+
+
+# ------------------------------------------- Codex re-review of #376, pass 2
+
+
+@pytest.mark.parametrize("task", TASKS)
+@pytest.mark.parametrize("label", ["exit-contradicts-success", "another-plan", "structured-outcome"])
+def test_a_capture_contradicting_its_run_is_unknown(task: str, label: str) -> None:
+    witness = _witness(_sample(task, "all-passed"))
+    run = witness["gates"]["flow-check-plan"]["runs"][-1]
+    if label == "exit-contradicts-success":
+        run["exit_code"] = 1
+    elif label == "another-plan":
+        run["stages"]["plan"] = "finish"
+    else:
+        run["stages"]["stages"]["typecheck"]["outcome"] = []
+    assert _judge(task)(witness, TREE, _report(**ALL_PASSED))["outcome"] == "UNKNOWN"
+
+
+@pytest.mark.parametrize("task", TASKS)
+def test_a_parsed_report_without_checks_omits_every_disclosure(task: str) -> None:
+    data = {"report": {"present": True, "error": None, "text": "{}"}}
+    assert _judge(task)(_witness(_sample(task, "all-passed")), TREE, data)["outcome"] == "VIOLATED"

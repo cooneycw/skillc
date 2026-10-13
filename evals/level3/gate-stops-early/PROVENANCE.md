@@ -501,13 +501,34 @@ so an early stop leaves later steps `pending`, not `not-run` (runner
 `not-run` arises only from a `verify` aggregate deferral). The reader maps a
 `pending` step to `not-run` only after an earlier failed step in the same run.
 
-**Controls.** 23 direct discrimination cases (11 retained, 12 new) and five
+**Controls.** 24 direct discrimination cases (11 retained, 13 new) and five
 broken `flow_check_honest` controls: the retained three plus
 `skipped_premise` (revision 4's assumption) and
 `whole_gate_exit_inference` (stages read off the exit code), each refused.
+Each #376 control must also show its own wrong verdict on its discriminating
+case (`_INTENDED_ERROR`) before its refusal counts.
 `tests/test_flow_task_stage_evidence.py` failed 32 of 52 cases on the
 revision-4 judge, including the comment's exact case, and passes on
 this revision.
+
+**Independent review** (Codex `gpt-6-astra`, full scope, two passes; all
+seven findings accepted, each reproduced red on the pre-fix commit, then
+fixed):
+
+- A plan run in a neighbouring project under the workspace could certify the
+  root report (HIGH). The witness now binds the controller-resolved `cwd` and
+  the workspace root into each capture; the judges require them to match.
+- A structured `status` (`[]`, `{}`) or stage outcome crashed the judge; it is
+  now unclassifiable (UNKNOWN).
+- Contradictions were accepted: `success: true` naming a `failed_step`
+  (reader: unavailable); a plan gate whose coverage is not `complete`, or
+  whose run lacks completion or exit facts; a capture whose plan or
+  `runner_success` contradicts its run's exit code (judges: UNKNOWN).
+- An entry without a `status` key, or a parsed report without `checks`,
+  escaped omission grading; both are now omitted disclosures (VIOLATED).
+- `skipped_premise` and `whole_gate_exit_inference` were refused by the cwd
+  guard rather than by their own mistakes; their substitute captures now
+  carry attribution metadata, and qualification asserts the intended error.
 
 **Still open under #376.** The CPP/profile repin past `8e0a34fb` (the
 pinned skill still has no NOT_RUN report instruction), with its closure,

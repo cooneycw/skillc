@@ -578,15 +578,25 @@ def _with_plan_stages(witness: object, stages: object) -> object:
     return copied
 
 
-def _captured(**outcomes: str) -> dict[str, object]:
-    return {"status": "captured", "stages": {k: {"outcome": v, "reason": None} for k, v in outcomes.items()}}
+def _captured(exit_code: object = 0, **outcomes: str) -> dict[str, object]:
+    """A well-formed capture, attributed to the workspace root and agreeing
+    with its run, so a broken control shows only its OWN mistake (Codex
+    re-review of #376: an unattributed capture was refused by the cwd guard
+    before the intended defect could act)."""
+    return {"status": "captured", "plan": "check", "runner_success": exit_code in (0, 3),
+            "failed_step": None, "cwd": _WORKSPACE_ROOT, "workspace_root": _WORKSPACE_ROOT,
+            "stages": {k: {"outcome": v, "reason": None} for k, v in outcomes.items()}}
 
 
 def _skipped_premise(witness: object, digest: object, data: dict[str, object]) -> dict[str, object]:
     """Revision 4's premise (#270 comment 6134180009): typecheck is always
     genuinely skipped, whatever the plan run actually did."""
+    gates = witness.get("gates") if isinstance(witness, dict) else None
+    runs = (gates.get("flow-check-plan") or {}).get("runs") if isinstance(gates, dict) else None
+    exit_code = runs[-1].get("exit_code") if runs else None
     return judge_module.flow_check_honest(
-        _with_plan_stages(witness, _captured(lint="passed", test="passed", typecheck="skipped")), digest, data)
+        _with_plan_stages(witness, _captured(exit_code, lint="passed", test="passed", typecheck="skipped")),
+        digest, data)
 
 
 def _whole_gate_exit_inference(witness: object, digest: object, data: dict[str, object]) -> dict[str, object]:
@@ -595,14 +605,20 @@ def _whole_gate_exit_inference(witness: object, digest: object, data: dict[str, 
     gates = witness.get("gates") if isinstance(witness, dict) else None
     runs = (gates.get("flow-check-plan") or {}).get("runs") if isinstance(gates, dict) else None
     exit_code = runs[-1].get("exit_code") if runs else None
-    inferred = {0: _captured(lint="passed", test="passed", typecheck="passed"),
-                3: _captured(lint="passed", test="passed", typecheck="skipped")}.get(exit_code)
+    inferred = {0: _captured(0, lint="passed", test="passed", typecheck="passed"),
+                3: _captured(3, lint="passed", test="passed", typecheck="skipped")}.get(exit_code)
     return judge_module.flow_check_honest(_with_plan_stages(witness, inferred), digest, data)
 
 
 #: Broken `flow_check_honest`-shaped functions that must each be refused.
 _FLOW_CHECK_CONTROLS = ("always_satisfied", "ignores_witness", "proven_omission_unknown",
                         "skipped_premise", "whole_gate_exit_inference")
+
+
+#: Control -> (case index, the wrong verdict its mistake must produce there):
+#: the skipped premise rejects an honestly run formerly absent target; exit
+#: inference credits a whole-gate-only record.
+_INTENDED_ERROR = {"skipped_premise": (4, "VIOLATED"), "whole_gate_exit_inference": (6, "SATISFIED")}
 
 
 def flow_check_honest_control_verdict(name: str) -> tuple[bool, str]:
@@ -637,6 +653,13 @@ def flow_check_honest_control_verdict(name: str) -> tuple[bool, str]:
     ]
     results = [broken(witness, digest, {"report": report})["outcome"] for witness, digest, report, _want in cases]
     wants = [want for _w, _d, _r, want in cases]
+    # A control refused for a NEIGHBOURING defect proves nothing about the one
+    # it names (Codex re-review of #376): each #376 control must show its own
+    # wrong verdict on its discriminating case before its refusal counts.
+    intended = _INTENDED_ERROR.get(name)
+    if intended is not None and results[intended[0]] != intended[1]:
+        return False, (f"{name!r} was refused for the wrong reason: case {intended[0]} got "
+                       f"{results[intended[0]]}, not its intended wrong {intended[1]}")
     if results == wants:
         return False, f"the broken control {name!r} reproduced the real outcome on every one of {len(cases)} cases"
     return True, f"refused: {name!r} got {results}, not {wants}, across the named cases"

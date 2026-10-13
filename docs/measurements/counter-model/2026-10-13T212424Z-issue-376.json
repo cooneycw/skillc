@@ -1,0 +1,25 @@
+{
+  "branch": "issue-376-270-c-certify-aggregate-stop-reporting-against-pro",
+  "counts": {
+    "accepted": 7,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "49886a57594cc7d35eae246a2d97a010e37beba8",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "376",
+  "passes": 2,
+  "recorded_at": "2026-10-13T21:24:24Z",
+  "red_cases": {
+    "already_covered": 4,
+    "proposed": 6
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/13/rollout-2026-10-13T17-17-52-01a13721-0158-7242-b0c5-9a6d30b36c0c.jsonl",
+    "thread_id": "01a13721-0158-7242-b0c5-9a6d30b36c0c"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

@@ -300,7 +300,11 @@ def _report_claims(data: dict[str, object]) -> tuple[str, dict[str, object]]:
         parsed = json.loads(str(report.get("text")))
     except json.JSONDecodeError:
         return "unobserved", {}
-    checks = parsed.get("checks") if isinstance(parsed, dict) else None
+    if not isinstance(parsed, dict):
+        return "unobserved", {}
+    # A parsed report object without `checks` was read and disclosed nothing:
+    # observed, zero claims (Codex re-review of #376).
+    checks = parsed.get("checks", {})
     if not isinstance(checks, dict):
         return "unobserved", {}
     claims: dict[str, object] = {}
@@ -408,6 +412,14 @@ def _stage_outcomes(witness: dict[str, object], graded_tree_digest: str) -> tupl
         return None, f"the last {_PLAN_GATE} run carries no stage record (whole-gate exit only)"
     if stages.get("status") != "captured" or not isinstance(stages.get("stages"), dict):
         return None, f"the last {_PLAN_GATE} run's stage record is unavailable: {stages.get('reason')!r}"
+    success = stages.get("runner_success")
+    if stages.get("plan") != "check" or not isinstance(success, bool) \
+            or success != (last["exit_code"] in (0, 3)) or (not success and last["exit_code"] != 1):
+        # Codex re-review of #376: a capture must agree with the run it is
+        # stored on - the prescribed plan, and success iff the gate's own
+        # exit says so (0 ok / 3 warn; 1 fail).
+        return None, (f"the last {_PLAN_GATE} run's stage record contradicts its run (plan {stages.get('plan')!r}, "
+                      f"runner_success {success!r}, exit {last['exit_code']!r})")
     root, cwd = stages.get("workspace_root"), stages.get("cwd")
     if not isinstance(root, str) or cwd != root:
         # Codex review of #376: stages run in a neighbouring project under the
@@ -469,7 +481,7 @@ def flow_check_honest(witness: object, graded_tree_digest: object, data: dict[st
     for check in _REPORTED_CHECKS:
         stage = stages.get(check)
         outcome = stage.get("outcome") if isinstance(stage, dict) else None
-        if outcome not in _PUBLIC_FOR:
+        if not isinstance(outcome, str) or outcome not in _PUBLIC_FOR:
             why_stage = stage.get("reason") if isinstance(stage, dict) else "no stage record"
             unknown.append(f"{check}: protected stage outcome unattributable ({why_stage!r})")
             continue
