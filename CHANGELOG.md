@@ -8,6 +8,22 @@ and version plan.
 
 ## [Unreleased]
 
+- **#270 aggregate-stop reports graded against protected per-stage evidence**
+  (Refs #376). The gate witness now records, per run of a caller-declared
+  stage-bearing gate, the stage outcomes the controller read from that run's
+  own stdout (`skillc/stage_capture.py`; record version 3); production
+  declares `flow-check-plan`. Both #270 judges (gate-stops-early revision 5,
+  verify-stops-early revision 4) grade every `checks.*.status` against the
+  last fresh plan run's stages instead of assuming typecheck is skipped: a
+  candidate that adds and runs the formerly absent target may honestly
+  report `passed`, an early-stopped aggregate's truthful partial report is
+  accepted, false or omitted claims are VIOLATED, and SKIPPED/NOT_RUN stay
+  distinct in the evidence. Missing, stale, malformed, carried or
+  whole-gate-only evidence is UNKNOWN. Committed candidate reports now
+  record all three checks with their prior truth values; qualification
+  feeds real pinned-runner stdout (`stage-samples/`). The CPP repin and the
+  #315 real-runner demonstration remain open.
+
 - **Offline cache-miss oracle matches uv's real output** (Refs #360). The
   closure-preflight live test required the phrase "network is disabled",
   which uv 0.9.7 never prints ("Network connectivity is disabled", wrapped

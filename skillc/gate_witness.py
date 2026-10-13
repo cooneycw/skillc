@@ -80,6 +80,16 @@ status, or any tree digest. The witness stays trustworthy regardless of
 what the reply contains, because the RECORD is controller-written and never
 derived from anything the subject sees or sends back.
 
+PER-STAGE OUTCOMES ARE READ AT RUN TIME, BY THE CONTROLLER (#376). A gate
+the caller names in `stage_capture` is an aggregate whose stages matter on
+their own: the controller applies that gate's reader to the stdout IT
+captured, the moment the run resolves, and stores the result on that run
+(`GateRunRecord.stages`). It is bound to that run's exit code and tree
+digest, and nothing later - a replay, a rerun, anything the subject sends -
+can rewrite it. A run that did not exit normally, or whose output was
+incomplete, records an `unavailable` capture, never an empty success. See
+`skillc/stage_capture.py` for the reader and its states.
+
 Stdlib only (`threading`, `time`, `json`), per AGENTS.md.
 """
 
@@ -93,6 +103,7 @@ from threading import Lock
 
 from .backend import ExecuteResult, ExecutionBackend, Limits
 from .decide_reply_channel import ChannelRefusal
+from .stage_capture import unavailable as _stages_unavailable
 
 #: Computes the CURRENT tree's content identity, called by this module
 #: immediately before each `exec_in_attempt()` call - never supplied by the subject.
@@ -102,6 +113,11 @@ from .decide_reply_channel import ChannelRefusal
 #: export()-backed version is a live-Docker question this module does not
 #: simulate).
 TreeDigestFn = Callable[[], str]
+
+#: Reads one resolved run's per-stage outcomes from the controller-captured
+#: stdout and exit code (#376); `skillc.stage_capture.capture_stages` is the
+#: production reader for the flow-check plan gate.
+StageReader = Callable[[bytes | None, int | None], Mapping[str, object]]
 
 #: Default cap on the stdout/stderr text returned to the subject in a
 #: `run_gate` reply - a flow-check loop needs enough to act on a failure,
@@ -136,6 +152,10 @@ class _Run:
     #: the in-container process was independently confirmed dead, `False`
     #: otherwise - never a guess either way.
     stop_confirmed: bool | None = None
+    #: #376: the per-stage capture for a gate named in `stage_capture`,
+    #: read from this run's own controller-held stdout when it resolved;
+    #: `None` for every other gate.
+    stages: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -149,9 +169,11 @@ class GateRunRecord:
     reason: str | None
     tree_digest_at_start: str
     stop_confirmed: bool | None
+    #: #376: present only for a stage-bearing gate's runs - see `_Run.stages`.
+    stages: Mapping[str, object] | None = None
 
     def to_json(self) -> dict[str, object]:
-        return {
+        data: dict[str, object] = {
             "requested_at": self.requested_at,
             "completed_at": self.completed_at,
             "exit_code": self.exit_code,
@@ -159,6 +181,9 @@ class GateRunRecord:
             "tree_digest_at_start": self.tree_digest_at_start,
             "stop_confirmed": self.stop_confirmed,
         }
+        if self.stages is not None:
+            data["stages"] = dict(self.stages)
+        return data
 
 
 @dataclass(frozen=True)
@@ -225,7 +250,7 @@ class GateWitnessRecord:
     def to_json_bytes(self) -> bytes:
         return json.dumps({
             "kind": "gate-witness",
-            "version": 2,
+            "version": 3,
             "attempt_id": self.attempt_id,
             "declared_gates": list(self.declared_gates),
             "gates": {gate: record.to_json() for gate, record in self.gates.items()},
@@ -267,6 +292,7 @@ class GateWitness:
         reply_byte_cap: int = DEFAULT_REPLY_BYTE_CAP,
         declared_env: Mapping[str, Mapping[str, str]] | None = None,
         workspace_root: str | None = None,
+        stage_capture: Mapping[str, StageReader] | None = None,
     ) -> None:
         if not declared_gates:
             raise ValueError(
@@ -290,6 +316,13 @@ class GateWitness:
             if unknown_env_gates:
                 raise ValueError(f"declared_env names undeclared gate(s): {sorted(unknown_env_gates)}")
         self._declared_env: dict[str, Mapping[str, str]] = dict(declared_env) if declared_env else {}
+        #: #376: per-gate stage readers, declared by the CALLER like the argv.
+        #: A typo'd gate name is refused eagerly, as for `declared_env`.
+        if stage_capture:
+            unknown_stage_gates = set(stage_capture) - set(self._declared_argv)
+            if unknown_stage_gates:
+                raise ValueError(f"stage_capture names undeclared gate(s): {sorted(unknown_stage_gates)}")
+        self._stage_capture: dict[str, StageReader] = dict(stage_capture) if stage_capture else {}
         #: #332: the one root a subject-forwarded `cwd` must resolve inside
         #: (after a REAL in-container `realpath`, never a string-prefix
         #: check on the unresolved input - a symlink could point outside
@@ -435,6 +468,7 @@ class GateWitness:
                     result.stdout is None or result.stdout_truncated
                     or result.stdout_incomplete or result.stderr_incomplete
                 )
+                stages = self._read_stages(gate, result, output_bad)
                 with self._lock:
                     if result.reason == "unsupported":
                         self.channel_unavailable = True
@@ -447,6 +481,7 @@ class GateWitness:
                     run.exit_code = result.exit_code
                     run.reason = result.reason
                     run.stop_confirmed = result.stop_confirmed
+                    run.stages = stages
                 if output_bad:
                     raise ChannelRefusal("gate-witness: controller output is missing or incomplete")
                 return {
@@ -461,6 +496,22 @@ class GateWitness:
             # wedge this gate's in-flight claim forever.
             with self._lock:
                 self._in_flight[gate] = False
+
+    def _read_stages(self, gate: str, result: ExecuteResult, output_bad: bool) -> Mapping[str, object] | None:
+        """#376: the run's stage capture, or `None` for a gate with no reader.
+        Only a normally exited run with complete output is read; anything
+        else, including a reader that raises, is an `unavailable` capture."""
+        reader = self._stage_capture.get(gate)
+        if reader is None:
+            return None
+        if result.reason != "exited":
+            return _stages_unavailable(f"run did not exit normally (reason {result.reason!r})")
+        if output_bad:
+            return _stages_unavailable("controller output is missing or incomplete")
+        try:
+            return dict(reader(result.stdout, result.exit_code))
+        except Exception as exc:  # noqa: BLE001 - a reader defect is evidence of nothing
+            return _stages_unavailable(f"stage reader failed ({type(exc).__name__})")
 
     def finalize(self, attempt_id: str) -> GateWitnessRecord:
         """Design doc §5's coverage derivation, over every declared gate -
@@ -488,6 +539,9 @@ class GateWitness:
                         exit_code=r.exit_code, reason=r.reason,
                         tree_digest_at_start=r.tree_digest_at_start,
                         stop_confirmed=r.stop_confirmed,
+                        stages=(r.stages if r.stages is not None
+                                else _stages_unavailable("run never resolved") if gate in self._stage_capture
+                                else None),
                     )
                     for r in runs
                 )

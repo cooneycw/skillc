@@ -1,6 +1,6 @@
 {
  "id": "verify-stops-early",
- "revision": "3",
+ "revision": "4",
  "criteria": [
   "functional-dedupe-fix",
   "regression-fails-on-original",

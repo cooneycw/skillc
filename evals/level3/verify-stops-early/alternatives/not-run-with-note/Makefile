@@ -1,7 +1,4 @@
-verify: typecheck lint test
-
-typecheck:
-	python3 ci/typecheck.py
+verify: lint test
 
 lint:
 	python3 ci/lint.py

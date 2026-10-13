@@ -1,0 +1,106 @@
+FLOW_FINISH_GATE_COUNTER_MODEL: not-applicable: plan 'check' (/flow:check) produces no PR, so there is nothing to enrol
+flow-finish-gate: running deterministic gate (lib.cicd run --plan check, CPP at <CPP_DIR>)
+{
+  "success": false,
+  "run_id": "check-f6af613a",
+  "plan": "check",
+  "steps_completed": 1,
+  "steps_total": 3,
+  "failed_step": "test",
+  "error": "Traceback (most recent call last):\n  File \"/tmp/claude-1000/-home-cooneycw-Projects/23a2ff01-2d6c-4f8b-9f56-8fbeb3a9cfb5/scratchpad/cap/verify-stops-early/tree-test-failed/ci/check.py\", line 37, in run_file\n    fn()\n  File \"/tmp/claude-1000/-home-cooneycw-Projects/23a2ff01-2d6c-4f8b-9f56-8fbeb3a9cfb5/scratchpad/cap/verify-stops-early/tree-test-failed/tests/test_dedupe.py\", line 9, in test_planted_failure\n    assert False\n           ^^^^^\nAssertionError\nmake: *** [Makefile:10: test] Error 1\n",
+  "tests": {
+    "test": {
+      "passed": 2,
+      "failed": 1,
+      "skipped": 0,
+      "errors": 0,
+      "xfailed": 0,
+      "xpassed": 0,
+      "executed": 3,
+      "framework": "unittest",
+      "invocations": 1,
+      "empty_invocations": 0,
+      "summary_streams": [
+        "stdout"
+      ],
+      "failed_ids": []
+    }
+  },
+  "coverage": {
+    "lint": {
+      "state": "unknown",
+      "units": null,
+      "unit_name": "unit",
+      "tool": "unknown",
+      "scope": "stage",
+      "component": "",
+      "evidence": "",
+      "invocations": 0,
+      "empty_invocations": 0,
+      "streams": [
+        "stdout",
+        "stderr"
+      ]
+    }
+  },
+  "gates": [
+    "lint",
+    "test",
+    "typecheck"
+  ],
+  "subsumed_gates": {},
+  "subsumption_refusals": [],
+  "dropped_gates": [],
+  "step_details": [
+    {
+      "id": "lint",
+      "status": "success",
+      "duration_seconds": 0.0,
+      "coverage": {
+        "state": "unknown",
+        "units": null,
+        "unit_name": "unit",
+        "tool": "unknown",
+        "scope": "stage",
+        "component": "",
+        "evidence": "",
+        "invocations": 0,
+        "empty_invocations": 0,
+        "streams": [
+          "stdout",
+          "stderr"
+        ]
+      }
+    },
+    {
+      "id": "test",
+      "status": "failed",
+      "duration_seconds": 0.0,
+      "tests": {
+        "passed": 2,
+        "failed": 1,
+        "skipped": 0,
+        "errors": 0,
+        "xfailed": 0,
+        "xpassed": 0,
+        "executed": 3,
+        "framework": "unittest",
+        "invocations": 1,
+        "empty_invocations": 0,
+        "summary_streams": [
+          "stdout"
+        ],
+        "failed_ids": []
+      },
+      "error": "Traceback (most recent call last):\n  File \"/tmp/claude-1000/-home-cooneycw-Projects/23a2ff01-2d6c-4f8b-9f56-8fbeb3a9cfb5/scratchpad/cap/verify-stops-early/tree-test-failed/ci/check.py\", line 37, in run_file\n    fn()\n  File \"/tmp/claude-1000/-home-cooneycw-Projects/23a2ff01-2d6c-4f8b-9f56-8fbeb3a9cfb5/scratchpad/cap/verify-stops-early/tree-test-failed/tests/test_dedupe.py\", line 9, in test_planted_failure\n    assert False\n           ^^^^^\nAssertionError\nmake: *** [Makefile:10: test] Error 1\n",
+      "exit_code": 2,
+      "attempt": 1
+    },
+    {
+      "id": "typecheck",
+      "status": "pending"
+    }
+  ]
+}
+FAILED_IDS: none readable - a test failed and the runner output did not name it; the failing test is NOT identified (issue #1258).
+FLOW_FINISH_GATE: fail

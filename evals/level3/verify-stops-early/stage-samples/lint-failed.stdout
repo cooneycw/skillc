@@ -1,0 +1,70 @@
+FLOW_FINISH_GATE_COUNTER_MODEL: not-applicable: plan 'check' (/flow:check) produces no PR, so there is nothing to enrol
+flow-finish-gate: running deterministic gate (lib.cicd run --plan check, CPP at <CPP_DIR>)
+{
+  "success": false,
+  "run_id": "check-e1368ee8",
+  "plan": "check",
+  "steps_completed": 0,
+  "steps_total": 3,
+  "failed_step": "lint",
+  "error": "make: *** [Makefile:7: lint] Error 1\n",
+  "coverage": {
+    "lint": {
+      "state": "unknown",
+      "units": null,
+      "unit_name": "unit",
+      "tool": "unknown",
+      "scope": "stage",
+      "component": "",
+      "evidence": "",
+      "invocations": 0,
+      "empty_invocations": 0,
+      "streams": [
+        "stdout",
+        "stderr"
+      ]
+    }
+  },
+  "gates": [
+    "lint",
+    "test",
+    "typecheck"
+  ],
+  "subsumed_gates": {},
+  "subsumption_refusals": [],
+  "dropped_gates": [],
+  "step_details": [
+    {
+      "id": "lint",
+      "status": "failed",
+      "duration_seconds": 0.0,
+      "coverage": {
+        "state": "unknown",
+        "units": null,
+        "unit_name": "unit",
+        "tool": "unknown",
+        "scope": "stage",
+        "component": "",
+        "evidence": "",
+        "invocations": 0,
+        "empty_invocations": 0,
+        "streams": [
+          "stdout",
+          "stderr"
+        ]
+      },
+      "error": "make: *** [Makefile:7: lint] Error 1\n",
+      "exit_code": 2,
+      "attempt": 1
+    },
+    {
+      "id": "test",
+      "status": "pending"
+    },
+    {
+      "id": "typecheck",
+      "status": "pending"
+    }
+  ]
+}
+FLOW_FINISH_GATE: fail

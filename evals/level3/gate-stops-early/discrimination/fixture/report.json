@@ -1,5 +1,11 @@
 {
   "checks": {
+    "lint": {
+      "status": "passed"
+    },
+    "test": {
+      "status": "passed"
+    },
     "typecheck": {
       "status": "not run"
     }

@@ -180,7 +180,7 @@ impossible even though reruns are allowed.
 ```json
 {
   "kind": "gate-witness",
-  "version": 2,
+  "version": 3,
   "attempt_id": "a-...",
   "declared_gates": ["lint", "typecheck"],
   "gates": {
@@ -200,6 +200,47 @@ impossible even though reruns are allowed.
 `gates[gate]` is present for every name in `declared_gates`, always - a
 declared gate absent from `gates` would be exactly the "absence is not a
 record" gap this design exists to close.
+
+### 2a. Per-stage outcomes of a run (#376, record version 3)
+
+A whole-gate run says that an aggregate executed and how it exited. It does
+not say what each of its stages did: an exit 0 is silent about a skipped
+stage, and an exit 1 is silent about which later stages were never reached.
+A gate the CALLER names in `stage_capture` (`{gate: reader}`, refused if it
+names an undeclared gate) is read per stage, by the controller, when each of
+its runs resolves: the reader receives that run's own controller-held stdout
+and exit code and its result is stored on that run as `stages`. Gates without
+a reader carry no `stages` key at all.
+
+```json
+{"requested_at": 1759700000.1, "completed_at": 1759700000.9, "exit_code": 1, "reason": "exited",
+ "tree_digest_at_start": "sha256:a...", "stop_confirmed": null,
+ "stages": {"status": "captured", "plan": "check", "runner_success": false, "failed_step": "lint",
+            "stages": {"lint": {"outcome": "failed", "runner_status": "failed", "reason": null},
+                       "test": {"outcome": "not-run", "runner_status": "pending",
+                                "reason": "never reached: the run stopped after lint failed"},
+                       "typecheck": {"outcome": "not-run", "runner_status": "pending",
+                                     "reason": "never reached: the run stopped after lint failed"}}}}
+```
+
+- The capture is bound to the run that produced it. A later rerun appends its
+  own run with its own capture; replaying a gate never rewrites an earlier
+  run, so replay is never evidence of an earlier execution.
+- A run that did not exit normally, whose output was missing or incomplete,
+  that never resolved, or whose reader raised, records
+  `{"status": "unavailable", "reason": ...}` - never an empty success.
+- The production attempt (`skillc/agent_trial.py`) declares
+  `flow-check-plan` with `skillc.stage_capture.capture_stages`, which reads
+  the pinned CPP runner's single JSON document (`step_details`) and its
+  verdict line. Its stage states (`passed`, `failed`, `skipped`, `not-run`,
+  or `null` = unattributable) and its refusals are documented in that module.
+  At the pinned `check` plan, an early stop leaves later steps `pending`; the
+  reader maps those to `not-run` only when an earlier step failed in the same
+  run.
+- Stage commands belong to the subject (its Makefile). The runner streams
+  their output to stderr; a second JSON document on stdout makes the capture
+  `unavailable`. This bounds, but does not eliminate, a coordinated forgery
+  of the whole stream.
 
 ## 3. Request/response vocabulary
 
@@ -538,6 +579,10 @@ only the record this one now names, with its revised §2 shape.
   `execution_observed`/`coverage`/`exit_code` per gate (now per RUN, plural)
   - this design commits only to what the witness itself may honestly
     report.
+- Per-stage outcomes (§2a) on stage-bearing gates. A consumer reads only the
+  last run's capture, checks that run's own tree digest itself, and treats an
+  `unavailable` capture or a `null` stage outcome as no evidence - a
+  whole-gate exit code is never a stage outcome.
 - The tree-identity comparison described but not performed in §6 - a grader
   that wants to refuse crediting a gate run against a stale tree does the
   comparison itself, against that run's own `tree_digest_at_start`.

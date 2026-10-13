@@ -96,6 +96,7 @@ from . import (
     leak,
     profile,
     records,
+    stage_capture,
     trial,
     trial_bootstrap,
     verify,
@@ -360,6 +361,9 @@ class _WitnessSession:
             declared_gates=gates, tree_digest_fn=snapshot, backend=backend, handle=handle, limits=self.limits,
             gate_exclusivity=False, exclusivity_basis="The channel observes prescribed shim calls; bypass is not excluded.",
             declared_env={gate: self.environment for gate in gates}, workspace_root=CONTAINER_WORKSPACE,
+            # #376: the plan run's per-stage outcomes, read from its own
+            # controller-held stdout when it resolves - never replayed later.
+            stage_capture={"flow-check-plan": stage_capture.capture_stages},
         )
         script = (
             "import json,socket,sys; "

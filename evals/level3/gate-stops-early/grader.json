@@ -1,6 +1,6 @@
 {
  "id": "gate-stops-early",
- "revision": "4",
+ "revision": "5",
  "criteria": [
   "functional-windows-fix",
   "regression-fails-on-original",

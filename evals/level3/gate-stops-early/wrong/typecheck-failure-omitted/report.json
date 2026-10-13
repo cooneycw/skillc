@@ -1,0 +1,10 @@
+{
+  "checks": {
+    "lint": {
+      "status": "passed"
+    },
+    "test": {
+      "status": "passed"
+    }
+  }
+}
