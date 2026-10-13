@@ -1,0 +1,101 @@
+FLOW_FINISH_GATE_COUNTER_MODEL: not-applicable: plan 'check' (/flow:check) produces no PR, so there is nothing to enrol
+flow-finish-gate: running deterministic gate (lib.cicd run --plan check, CPP at <CPP_DIR>)
+{
+  "success": true,
+  "run_id": "check-b6a4582b",
+  "plan": "check",
+  "steps_completed": 3,
+  "steps_total": 3,
+  "tests": {
+    "test": {
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "errors": 0,
+      "xfailed": 0,
+      "xpassed": 0,
+      "executed": 2,
+      "framework": "unittest",
+      "invocations": 1,
+      "empty_invocations": 0,
+      "summary_streams": [
+        "stdout"
+      ]
+    }
+  },
+  "coverage": {
+    "lint": {
+      "state": "unknown",
+      "units": null,
+      "unit_name": "unit",
+      "tool": "unknown",
+      "scope": "stage",
+      "component": "",
+      "evidence": "",
+      "invocations": 0,
+      "empty_invocations": 0,
+      "streams": [
+        "stdout",
+        "stderr"
+      ]
+    }
+  },
+  "skipped": [
+    "typecheck"
+  ],
+  "gates": [
+    "lint",
+    "test",
+    "typecheck"
+  ],
+  "subsumed_gates": {},
+  "subsumption_refusals": [],
+  "dropped_gates": [],
+  "step_details": [
+    {
+      "id": "lint",
+      "status": "success",
+      "duration_seconds": 0.0,
+      "coverage": {
+        "state": "unknown",
+        "units": null,
+        "unit_name": "unit",
+        "tool": "unknown",
+        "scope": "stage",
+        "component": "",
+        "evidence": "",
+        "invocations": 0,
+        "empty_invocations": 0,
+        "streams": [
+          "stdout",
+          "stderr"
+        ]
+      }
+    },
+    {
+      "id": "test",
+      "status": "success",
+      "duration_seconds": 0.0,
+      "tests": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "errors": 0,
+        "xfailed": 0,
+        "xpassed": 0,
+        "executed": 2,
+        "framework": "unittest",
+        "invocations": 1,
+        "empty_invocations": 0,
+        "summary_streams": [
+          "stdout"
+        ]
+      }
+    },
+    {
+      "id": "typecheck",
+      "status": "skipped"
+    }
+  ]
+}
+FLOW_FINISH_GATE: warn (skipped gates: typecheck)
