@@ -48,3 +48,30 @@ Scope: parked 16-file implementation with bounded corrections, rebase, focused/m
 Conditions: direct proc-fd inspection and physical fd chdir; no atomicity or perpetual ancestry claim. Wrapper-owned bounded READY/REFUSED leading record, independently captured from user retention cap. Ordinary output and exit 125 preserved; missing/invalid status cannot fabricate refusal/success. Live target genuinely outside; setup failures remain hard failures. Mutation-check enforcement, assert GateWitness forwarding, preserve timeout/cleanup. Real-Docker runner must include new break before merge. Merge requires explicit orchestrator clearance.
 
 Risks: shell/proc-fd semantics need real-daemon evidence; moving an open directory can change ancestry, to be documented and recorded in Nit Store after deduplication.
+
+<!-- flow-run n=2 id=d2e4e609a88b4068a9899740f0751d96 -->
+## Run 2
+
+- Run-id:            d2e4e609a88b4068a9899740f0751d96
+- Run-start:         7b800c6adb1790201425bbd11f1844c15e4bb0aa
+- Issue:             #338
+- Base SHA:          7b800c6
+- Necessity verdict: Partially addressed
+- Approval:          granted
+- Approver:          repository owner (interactive /flow:auto session; merge deferred to orchestrator - stop at open PR)
+- Recorded at:       2026-10-13T21:00:00Z
+
+### Section B evidence
+Fix, live test and fake-CLI red cases merged in #361 (76a68a6). Remaining per issue comments 2026-10-12 and #315 operator record 2026-10-13: eighth real-Docker floor entry, matching verdict fixtures, cwd break registration. Post-#361 commits on runner/floor paths: 9bda3c5 (#363), f22d6c8 (#369), 02f1565 (#370) - none adds a cwd entry. #315 PRs: #377 merged (docs only), #357 merged (XFAIL verdict handling, preserved). No open #315 PR. Duplicates/superseding: none (#332, #315, #20 checked).
+
+### Section C - the approved plan
+1. `ci/check_real_docker_ran.py` - add tests.test_cwd_confinement_live as the eighth floor entry.
+2. `tests/test_real_docker_verdict.py` - eight-file floor fixture/size pins; cwd-file-all-skipped is FAILURE test.
+3. `ci/real-docker/break-lib.sh` - cwd family (cwd:confine-root-omitted, no bare form); resolve_break_spec emits eight lines.
+4. `ci/real-docker/run-real-docker` - read line 8, always export SKILLC_CWD_CONFINEMENT_LIVE_BREAK, usage line.
+5. `ci/real-docker/README.md` - step 8 adds the cwd run, count 22 -> 23, drop the pending-#338 caveat.
+6. `tests/test_run_real_docker_break.py` - eight-value tuples, cwd family resolve/refuse/context/runner-variable tests.
+7. `tests/test_property_held_xfail_pattern.py` - no-daemon marker control for the cwd live file (target XFAIL; refusal/infra/wrong-landing hard FAIL; widened-marker mutation).
+8. `CHANGELOG.md` - one entry.
+
+Scope: ~8 files, ~150-250 lines. Risks: positional-line shift across all families in resolve_break_spec; control couples to the live file's helpers. Refs #338 only; campaign/VM certification out of scope.

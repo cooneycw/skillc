@@ -24,6 +24,18 @@ and version plan.
   feeds real pinned-runner stdout (`stage-samples/`). The CPP repin and the
   #315 real-runner demonstration remain open.
 
+- **The real-Docker runner certifies #338's cwd-confinement proof** (Refs #338).
+  `tests.test_cwd_confinement_live` is now the eighth floor entry in
+  `ci/check_real_docker_ran.py`, so a run where it only skips is FAILURE, not
+  SUCCESS. `run-real-docker --break cwd:confine-root-omitted` selects its
+  break mode through a new `cwd` family in `break-lib.sh` (no bare spelling),
+  posts only to the control context, and the runner now sets all seven break
+  variables explicitly. A no-daemon marker control drives the live test with
+  a scripted backend: only a swap the gate demonstrably followed outside the
+  root may XFAIL; a refusal, a different landing, a broken happy path or a
+  setup failure stays a hard failure. The real-daemon campaign and the #315
+  VM certification are still owed.
+
 - **Offline cache-miss oracle matches uv's real output** (Refs #360). The
   closure-preflight live test required the phrase "network is disabled",
   which uv 0.9.7 never prints ("Network connectivity is disabled", wrapped
