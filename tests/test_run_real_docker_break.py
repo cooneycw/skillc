@@ -59,7 +59,7 @@ def _run_runner(*args: str) -> subprocess.CompletedProcess[str]:
 def test_none_resolves_to_none_for_all_families() -> None:
     result = _resolve("none")
     assert result.returncode == 0
-    assert result.stdout.splitlines() == ["none", "none", "none", "none", "none", "none", "none"]
+    assert result.stdout.splitlines() == ["none", "none", "none", "none", "none", "none", "none", "none"]
 
 
 @pytest.mark.parametrize("mode", ["omit-mount", "wrong-uid", "flip-decision"])
@@ -67,7 +67,7 @@ def test_namespaced_channel_modes_set_only_the_channel_value(mode: str) -> None:
     result = _resolve(f"channel:{mode}")
     assert result.returncode == 0
     assert result.stdout.splitlines() == [
-        f"channel:{mode}", mode, "none", "none", "none", "none", "none",
+        f"channel:{mode}", mode, "none", "none", "none", "none", "none", "none",
     ]
 
 
@@ -76,7 +76,7 @@ def test_namespaced_witness_modes_set_only_the_witness_value(mode: str) -> None:
     result = _resolve(f"witness:{mode}")
     assert result.returncode == 0
     assert result.stdout.splitlines() == [
-        f"witness:{mode}", "none", mode, "none", "none", "none", "none",
+        f"witness:{mode}", "none", mode, "none", "none", "none", "none", "none",
     ]
 
 
@@ -87,7 +87,7 @@ def test_namespaced_gateshim_modes_set_only_the_gateshim_value(mode: str) -> Non
     result = _resolve(f"gateshim:{mode}")
     assert result.returncode == 0
     assert result.stdout.splitlines() == [
-        f"gateshim:{mode}", "none", "none", mode, "none", "none", "none",
+        f"gateshim:{mode}", "none", "none", mode, "none", "none", "none", "none",
     ]
 
 
@@ -96,7 +96,7 @@ def test_namespaced_coldinstall_modes_set_only_the_coldinstall_value(mode: str) 
     result = _resolve(f"coldinstall:{mode}")
     assert result.returncode == 0
     assert result.stdout.splitlines() == [
-        f"coldinstall:{mode}", "none", "none", "none", mode, "none", "none",
+        f"coldinstall:{mode}", "none", "none", "none", mode, "none", "none", "none",
     ]
 
 
@@ -105,7 +105,7 @@ def test_namespaced_trialimage_modes_set_only_the_trialimage_value(mode: str) ->
     result = _resolve(f"trialimage:{mode}")
     assert result.returncode == 0
     assert result.stdout.splitlines() == [
-        f"trialimage:{mode}", "none", "none", "none", "none", mode, "none",
+        f"trialimage:{mode}", "none", "none", "none", "none", mode, "none", "none",
     ]
 
 
@@ -117,7 +117,17 @@ def test_namespaced_closure_modes_set_only_the_closure_value(mode: str) -> None:
     result = _resolve(f"closure:{mode}")
     assert result.returncode == 0
     assert result.stdout.splitlines() == [
-        f"closure:{mode}", "none", "none", "none", "none", "none", mode,
+        f"closure:{mode}", "none", "none", "none", "none", "none", mode, "none",
+    ]
+
+
+@pytest.mark.parametrize("mode", ["confine-root-omitted"])
+def test_namespaced_cwd_modes_set_only_the_cwd_value(mode: str) -> None:
+    """#338: the eighth line is SKILLC_CWD_CONFINEMENT_LIVE_BREAK's value."""
+    result = _resolve(f"cwd:{mode}")
+    assert result.returncode == 0
+    assert result.stdout.splitlines() == [
+        f"cwd:{mode}", "none", "none", "none", "none", "none", "none", mode,
     ]
 
 
@@ -132,7 +142,7 @@ def test_bare_legacy_channel_modes_are_still_accepted_and_normalized(mode: str) 
     result = _resolve(mode)
     assert result.returncode == 0
     assert result.stdout.splitlines() == [
-        f"channel:{mode}", mode, "none", "none", "none", "none", "none",
+        f"channel:{mode}", mode, "none", "none", "none", "none", "none", "none",
     ]
 
 
@@ -188,6 +198,16 @@ def test_a_bare_closure_mode_is_refused_not_silently_accepted(mode: str) -> None
     assert result.stdout == ""
 
 
+def test_a_bare_cwd_mode_is_refused_not_silently_accepted() -> None:
+    """Same red case, the cwd family (#338): no bare form was ever
+    documented for it, so a bare spelling must be refused rather than
+    silently treated as a channel mode of the same name."""
+    result = _resolve("confine-root-omitted")
+    assert result.returncode == 2
+    assert "unknown channel break mode 'confine-root-omitted'" in result.stderr
+    assert result.stdout == ""
+
+
 def test_an_unknown_mode_in_a_known_family_is_refused() -> None:
     result = _resolve("channel:bogus")
     assert result.returncode == 2
@@ -210,6 +230,12 @@ def test_an_unknown_mode_in_the_closure_family_is_refused() -> None:
     result = _resolve("closure:bogus")
     assert result.returncode == 2
     assert "unknown closure break mode 'bogus'" in result.stderr
+
+
+def test_an_unknown_mode_in_the_cwd_family_is_refused() -> None:
+    result = _resolve("cwd:bogus")
+    assert result.returncode == 2
+    assert "unknown cwd break mode 'bogus'" in result.stderr
 
 
 def test_an_unknown_family_is_refused() -> None:
@@ -290,6 +316,7 @@ def test_none_resolves_to_the_certifying_context() -> None:
         "closure:empty-runtime-cache",
         "closure:runtime-cache-permissions",
         "closure:project-venv-permissions",
+        "cwd:confine-root-omitted",
     ],
 )
 def test_every_break_mode_resolves_to_the_control_context_never_the_certifying_one(normalized_spec: str) -> None:
@@ -331,6 +358,7 @@ def test_the_real_runner_refuses_an_unknown_break_spec_before_touching_any_confi
         "closure:empty-runtime-cache",
         "closure:runtime-cache-permissions",
         "closure:project-venv-permissions",
+        "cwd:confine-root-omitted",
     ],
 )
 def test_the_real_runner_accepts_valid_break_specs_and_reaches_the_config_check(break_arg: str) -> None:
@@ -346,14 +374,15 @@ def test_the_real_runner_accepts_valid_break_specs_and_reaches_the_config_check(
     assert "--break must be" not in result.stderr
 
 
-def test_the_real_runner_always_sets_all_six_break_variables_explicitly() -> None:
+def test_the_real_runner_always_sets_all_seven_break_variables_explicitly() -> None:
     """Regression guard for the inherited-environment contamination fix
-    (codex:code_review, HIGH): the pytest invocation must set ALL SIX of
+    (codex:code_review, HIGH): the pytest invocation must set ALL SEVEN of
     SKILLC_LIVE_TEST_BREAK, SKILLC_GATE_WITNESS_LIVE_BREAK, (#332 follow-up)
     SKILLC_GATE_SHIM_LIVE_BREAK, (#266 follow-up)
     SKILLC_COLDINSTALL_LIVE_BREAK, (#343 follow-up)
-    SKILLC_TRIAL_IMAGE_BREAK, and (#334 follow-up)
-    SKILLC_CLOSURE_PREFLIGHT_LIVE_BREAK explicitly on every run, from
+    SKILLC_TRIAL_IMAGE_BREAK, (#334 follow-up)
+    SKILLC_CLOSURE_PREFLIGHT_LIVE_BREAK, and (#338 follow-up)
+    SKILLC_CWD_CONFINEMENT_LIVE_BREAK explicitly on every run, from
     resolve_break_spec's own always-all-present output - never leaving any
     of them to whatever the runner's own process environment happened to
     inherit, which is what let a stale SKILLC_LIVE_TEST_BREAK survive into
@@ -363,7 +392,7 @@ def test_the_real_runner_always_sets_all_six_break_variables_explicitly() -> Non
     behavioral guarantee - that resolve_break_spec never emits an empty
     value for any family - is covered by the shape assertions above
     instead; this is a narrower guard against reverting the invocation
-    itself to a form that drops one of the six variables."""
+    itself to a form that drops one of the seven variables."""
     text = RUNNER_PATH.read_text(encoding="utf-8")
     assert 'SKILLC_LIVE_TEST_BREAK="$CHANNEL_BREAK_VALUE"' in text
     assert 'SKILLC_GATE_WITNESS_LIVE_BREAK="$WITNESS_BREAK_VALUE"' in text
@@ -371,3 +400,4 @@ def test_the_real_runner_always_sets_all_six_break_variables_explicitly() -> Non
     assert 'SKILLC_COLDINSTALL_LIVE_BREAK="$COLDINSTALL_BREAK_VALUE"' in text
     assert 'SKILLC_TRIAL_IMAGE_BREAK="$TRIALIMAGE_BREAK_VALUE"' in text
     assert 'SKILLC_CLOSURE_PREFLIGHT_LIVE_BREAK="$CLOSURE_BREAK_VALUE"' in text
+    assert 'SKILLC_CWD_CONFINEMENT_LIVE_BREAK="$CWD_BREAK_VALUE"' in text

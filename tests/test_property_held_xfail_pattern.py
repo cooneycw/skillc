@@ -45,6 +45,7 @@ in this family (`check_pins.py`, `check_interpreters.py`, `check_helpers.py`).
 
 from __future__ import annotations
 
+import re
 import textwrap
 from pathlib import Path
 
@@ -367,6 +368,87 @@ def test_image_tools_real_marker_excludes_infrastructure(pytester: pytest.Pytest
     result.stdout.fnmatch_lines(["*test_target XFAIL*", "*test_wrong_version XFAIL*", "*test_intact FAILED*"])
     result.stdout.fnmatch_lines([f"*test_infra {'XFAIL' if widen else 'FAILED'}*"])
     result.stdout.fnmatch_lines(["*XPASS(strict)*"])
+
+
+_CWD_KINDS = ("target", "refused", "wrong_landing", "happy_path_broken", "swap_not_outside", "infra")
+
+
+def _cwd_control_source(*, widen: bool) -> str:
+    """#338's cwd-confinement control: the actual test function, driven with
+    a scripted backend in `confine-root-omitted` mode. Only the swap that
+    the real `-w` demonstrably followed outside the root may XFAIL; a
+    refusal (the break never planted), a landing anywhere else, a broken
+    happy path, a swap that never left the root, or an unrelated setup
+    failure must each stay a hard failure. The mutation widens the actual
+    marker's `raises` to `Exception`, which must turn those into XFAILs."""
+    source = _live_control_source(
+        "test_cwd_confinement_live.py", "SKILLC_CWD_CONFINEMENT_LIVE_BREAK", ("confine-root-omitted",),
+        "test_a_swapped_cwd_is_refused_against_a_real_daemon", widen=False,
+    )
+    if widen:
+        source += textwrap.dedent("""
+            for ns, marker in MODULES.values():
+                marker.kwargs['raises'] = Exception
+        """)
+    return source + textwrap.dedent("""
+        import tempfile
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        _BASE = tempfile.TemporaryDirectory()
+        # Only the live test's own `tempfile` name is replaced: patching
+        # tempfile.mkdtemp module-wide also redirects TemporaryDirectory,
+        # whose cleanup then deletes _BASE under every later case.
+        _TEMPFILE = SimpleNamespace(
+            mkdtemp=lambda prefix='': _BASE.name, TemporaryDirectory=tempfile.TemporaryDirectory,
+        )
+
+        def observe(ns, kind):
+            if kind == 'infra':
+                raise AssertionError('unrelated setup failure')
+            d = ns['d']
+            root = d.CONTAINER_WORKSPACE
+            sub, outside = root + '/trial/sub', '/tmp/outside-root'
+            handle = d._Handle(attempt_id='control', name='control', env={}, trigger_channel=object())
+            backend = Mock()
+            backend.prepare.return_value = handle
+            backend.resolve_realpath_in_attempt.side_effect = [
+                sub, sub if kind == 'swap_not_outside' else outside,
+            ]
+            happy = ('exited', 0, None, '/elsewhere' if kind == 'happy_path_broken' else sub)
+            second = {
+                'target': ('exited', 0, None, outside),
+                'refused': ('launch-failed', None, d.CWD_CONFINEMENT_REFUSED_SENTINEL, ''),
+                'wrong_landing': ('exited', 0, None, '/tmp/elsewhere'),
+            }.get(kind, ('exited', 0, None, outside))
+            test = ns['test_a_swapped_cwd_is_refused_against_a_real_daemon']
+            with patch.object(d, 'DockerBackend', return_value=backend), \\
+                    patch.dict(test.__globals__, {
+                        'tempfile': _TEMPFILE,
+                        '_image_available': lambda image: True,
+                        '_exec_setup': lambda *args: None,
+                        '_gate_cwd': Mock(side_effect=[happy, second]),
+                    }):
+                test()
+
+        for kind in KINDS:
+            add_case('test_' + kind, 'confine-root-omitted', lambda ns, k=kind: observe(ns, k))
+    """).replace("KINDS", repr(_CWD_KINDS))
+
+
+@pytest.mark.parametrize("widen", [False, True], ids=["specific", "mutated-exception"])
+def test_cwd_confinement_real_marker_requires_the_followed_swap(pytester: pytest.Pytester, widen: bool) -> None:
+    pytester.makepyfile(_cwd_control_source(widen=widen))
+    result = pytester.runpytest("-v", "--tb=line")
+    result.assert_outcomes(xfailed=len(_CWD_KINDS) if widen else 1, failed=0 if widen else len(_CWD_KINDS) - 1)
+    if not widen:
+        # Each hard failure must be the live test's own assertion, never a
+        # scaffolding error from this control - otherwise every FAILED below
+        # would be blind to the property it claims to separate.
+        errors = re.findall(r"^E\s+(\w+)", result.stdout.str(), flags=re.MULTILINE)
+        assert errors == ["AssertionError"] * (len(_CWD_KINDS) - 1), errors
+    result.stdout.fnmatch_lines(["*test_target XFAIL*"])
+    for kind in _CWD_KINDS[1:]:
+        result.stdout.fnmatch_lines([f"*test_{kind} {'XFAIL' if widen else 'FAILED'}*"])
 
 
 _FAMILIES = {
