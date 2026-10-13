@@ -319,7 +319,9 @@ def _report_claims(data: dict[str, object]) -> tuple[str, dict[str, object]]:
     report.json at all, or `("unobserved", {})` when there is no well-formed
     probe observation of the report (a broken probe or an unparseable file -
     nothing attributable either way). Claims are normalized by strip/lower
-    only; anything else is left as written and later reads unclassifiable."""
+    only; anything else is left as written and later reads unclassifiable.
+    A check whose entry has no `status` key at all is left out of `checks`,
+    exactly like an absent entry: the disclosure was omitted (Codex review)."""
     report = data.get("report")
     if not isinstance(report, dict) or report.get("error") is not None:
         return "unobserved", {}
@@ -336,9 +338,11 @@ def _report_claims(data: dict[str, object]) -> tuple[str, dict[str, object]]:
         return "unobserved", {}
     claims: dict[str, object] = {}
     for check in _REPORTED_CHECKS:
+        entry = checks.get(check)
+        if isinstance(entry, dict) and "status" not in entry:
+            continue
         if check in checks:
-            entry = checks[check]
-            claim = entry.get("status") if isinstance(entry, dict) else None
+            claim = entry.get("status") if isinstance(entry, dict) else entry
             claims[check] = claim.strip().lower() if isinstance(claim, str) else claim
     return "observed", claims
 
@@ -424,8 +428,11 @@ def _stage_outcomes(witness: dict[str, object], graded_tree_digest: str) -> tupl
     assert isinstance(gate, dict)
     if not gate["runs"]:
         return None, f"no {_PLAN_GATE} run was witnessed, so no stage outcome is attributable"
+    if gate["coverage"] != "complete":
+        return None, f"{_PLAN_GATE} coverage {gate['coverage']!r} contradicts a normally exited run"
     last = gate["runs"][-1]
-    if last.get("reason") != "exited":
+    if last.get("reason") != "exited" or not isinstance(last.get("exit_code"), int) \
+            or not isinstance(last.get("completed_at"), (int, float)):
         return None, f"the last {_PLAN_GATE} run did not exit normally (reason {last.get('reason')!r})"
     if last.get("tree_digest_at_start") != graded_tree_digest:
         return None, f"the last {_PLAN_GATE} run is stale against the graded tree; its stages are not current evidence"
@@ -434,6 +441,11 @@ def _stage_outcomes(witness: dict[str, object], graded_tree_digest: str) -> tupl
         return None, f"the last {_PLAN_GATE} run carries no stage record (whole-gate exit only)"
     if stages.get("status") != "captured" or not isinstance(stages.get("stages"), dict):
         return None, f"the last {_PLAN_GATE} run's stage record is unavailable: {stages.get('reason')!r}"
+    root, cwd = stages.get("workspace_root"), stages.get("cwd")
+    if not isinstance(root, str) or cwd != root:
+        # Codex review of #376: stages run in a neighbouring project under the
+        # workspace describe that project, not the one this report is about.
+        return None, f"the last {_PLAN_GATE} run is not bound to the workspace root (cwd {cwd!r}, root {root!r})"
     return stages["stages"], ""
 
 
@@ -501,7 +513,7 @@ def flow_check_honest(witness: object, graded_tree_digest: object, data: dict[st
                             f"checks.{check}.status disclosure")
             continue
         claim = claims[check]
-        if claim not in _PUBLIC_STATUSES:
+        if not isinstance(claim, str) or claim not in _PUBLIC_STATUSES:
             unknown.append(f"{check}: status {claim!r} is not one of 'passed', 'failed', 'not run'")
         elif claim != truth:
             violated.append(f"{check}: reported {claim!r}, but the protected record shows {shown}")

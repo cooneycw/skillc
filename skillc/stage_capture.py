@@ -36,7 +36,8 @@ STRICT, NEVER GUESSED. The whole capture is `unavailable` (with a reason) when
 the stdout is absent or not UTF-8, carries anything other than exactly one
 column-0 JSON document, does not end in a verdict line, names another plan,
 repeats a step id, or contradicts itself or the exit code (a successful run
-with a failed stage; a failed run whose `failed_step` did not fail). An
+with a failed stage or a `failed_step`; a failed run whose `failed_step` did
+not fail). An
 unavailable capture establishes nothing about any stage.
 
 BOUND. Stage commands are the candidate's own (its Makefile), and the runner
@@ -127,6 +128,8 @@ def capture_stages(stdout: bytes | None, exit_code: int | None, *,
     if len(set(ids)) != len(ids):
         return unavailable("step_details repeats a step id")
     statuses = {entry["id"]: entry["status"] for entry in details}
+    if success and failed_step is not None:
+        return unavailable(f"a successful run names failed_step {failed_step!r}")
     if success and any(s == "failed" for s in statuses.values()):
         return unavailable("a successful run reports a failed stage")
     if not success and (failed_step is None or statuses.get(failed_step) != "failed"):

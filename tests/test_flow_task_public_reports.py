@@ -22,7 +22,7 @@ def _fresh_witness() -> dict:
     """A fresh summary run plus a plan run whose protected stage record
     (#376) shows lint and test passed and typecheck genuinely SKIPPED."""
     run = GateRunRecord(1.0, 2.0, 3, "exited", "sha256:current", None)
-    stages = {"status": "captured", "stages": {
+    stages = {"status": "captured", "cwd": "/work", "workspace_root": "/work", "stages": {
         "lint": {"outcome": "passed", "reason": None}, "test": {"outcome": "passed", "reason": None},
         "typecheck": {"outcome": "skipped", "reason": None}}}
     plan = GateRecord("complete", (GateRunRecord(1.0, 2.0, 3, "exited", "sha256:current", None, stages),),

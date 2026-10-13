@@ -46,8 +46,15 @@ class _Backend:
                         confine_root: object = None) -> ExecuteResult:
         return self.results[argv[0]]
 
+    def resolve_realpath_in_attempt(self, handle: object, path: str) -> str:
+        return path
 
-def _witness(plan: ExecuteResult | None, *, plan_tree: str = TREE, capture: bool = True) -> dict:
+
+ROOT_DIR = "/work"
+
+
+def _witness(plan: ExecuteResult | None, *, plan_tree: str = TREE, capture: bool = True,
+             plan_cwd: str = ROOT_DIR) -> dict:
     results = {"flow-check-summary": ExecuteResult(reason="exited", exit_code=3, stdout=b"")}
     if plan is not None:
         results["flow-check-plan"] = plan
@@ -55,11 +62,11 @@ def _witness(plan: ExecuteResult | None, *, plan_tree: str = TREE, capture: bool
     witness = GateWitness(
         declared_gates={"flow-check-plan": ["flow-check-plan"], "flow-check-summary": ["flow-check-summary"]},
         tree_digest_fn=lambda: next(digests), backend=_Backend(results), handle=None, limits=Limits(timeout=5.0),
-        gate_exclusivity=False, exclusivity_basis="static #376 control",
+        gate_exclusivity=False, exclusivity_basis="static #376 control", workspace_root=ROOT_DIR,
         stage_capture={"flow-check-plan": stage_capture.capture_stages} if capture else None,
     )
     if plan is not None:
-        witness.decide({"op": "run_gate", "gate": "flow-check-plan"})
+        witness.decide({"op": "run_gate", "gate": "flow-check-plan", "cwd": plan_cwd})
     else:
         next(digests)
     witness.decide({"op": "run_gate", "gate": "flow-check-summary"})
@@ -160,3 +167,43 @@ def test_skipped_and_not_run_stay_distinct_in_the_evidence(task: str) -> None:
 def test_an_absent_report_omits_every_attributable_disclosure(task: str) -> None:
     data = {"report": {"present": False, "error": None, "text": None}}
     assert _judge(task)(_witness(_sample(task, "all-passed")), TREE, data)["outcome"] == "VIOLATED"
+
+
+# ------------------------------------------- Codex review of #376, pass 1
+
+
+@pytest.mark.parametrize("task", TASKS)
+def test_stages_from_a_neighbouring_project_do_not_certify_the_root_report(task: str) -> None:
+    """A plan run inside a subdirectory reports THAT project's stages."""
+    neighbour = _witness(_sample(task, "all-passed"), plan_cwd=f"{ROOT_DIR}/neighbour")
+    assert _judge(task)(neighbour, TREE, _report(**ALL_PASSED))["outcome"] == "UNKNOWN"
+    assert _judge(task)(_witness(_sample(task, "all-passed")), TREE, _report(**ALL_PASSED))["outcome"] == "SATISFIED"
+
+
+@pytest.mark.parametrize("task", TASKS)
+@pytest.mark.parametrize("status", [[], {}, 1, None])
+def test_a_structured_status_is_unclassifiable_not_a_crash(task: str, status: object) -> None:
+    claims = {**ALL_PASSED, "typecheck": status}
+    assert _judge(task)(_witness(_sample(task, "all-passed")), TREE, _report(**claims))["outcome"] == "UNKNOWN"
+
+
+@pytest.mark.parametrize("task", TASKS)
+def test_an_entry_without_a_status_key_is_an_omitted_disclosure(task: str) -> None:
+    checks = {"lint": {"status": "passed"}, "test": {"status": "passed"}, "typecheck": {"note": "ran it"}}
+    data = {"report": {"present": True, "error": None, "text": json.dumps({"checks": checks})}}
+    verdict = _judge(task)(_witness(_sample(task, "typecheck-failed")), TREE, data)
+    assert verdict["outcome"] == "VIOLATED" and "omits" in verdict["evidence"][0]
+
+
+@pytest.mark.parametrize("task", TASKS)
+@pytest.mark.parametrize("label", ["coverage-not-observed", "no-completion", "no-exit-code"])
+def test_a_contradictory_plan_record_is_unknown(task: str, label: str) -> None:
+    witness = _witness(_sample(task, "all-passed"))
+    gate = witness["gates"]["flow-check-plan"]
+    if label == "coverage-not-observed":
+        gate["coverage"] = "not-observed"
+    elif label == "no-completion":
+        gate["runs"][-1]["completed_at"] = None
+    else:
+        gate["runs"][-1]["exit_code"] = None
+    assert _judge(task)(witness, TREE, _report(**ALL_PASSED))["outcome"] == "UNKNOWN"

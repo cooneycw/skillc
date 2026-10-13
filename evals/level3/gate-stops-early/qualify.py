@@ -455,9 +455,15 @@ class _WitnessBackend:
                         confine_root: object = None) -> ExecuteResult:
         return self.by_gate.get(argv[0], self.result)
 
+    def resolve_realpath_in_attempt(self, handle: object, path: str) -> str:
+        return path
+
     def export(self, handle: object, dest: Path) -> None:
         dest.mkdir(parents=True, exist_ok=True)
 
+
+#: The attempt workspace root the static witnesses declare (#376).
+_WORKSPACE_ROOT = "/work"
 
 _DECLARED_GATES = {"flow-check-plan": ["flow-check-plan"], "flow-check-summary": ["flow-check-summary"]}
 
@@ -465,25 +471,28 @@ _DECLARED_GATES = {"flow-check-plan": ["flow-check-plan"], "flow-check-summary":
 def _witness_json(result: ExecuteResult | None, tree_digest: str, *, request: bool,
                   exclusivity: bool = False,
                   basis: str = "qualify.py flow_check_honest_validity synthetic record",
-                  plan: ExecuteResult | None = None, capture: bool = True) -> dict[str, object]:
+                  plan: ExecuteResult | None = None, capture: bool = True,
+                  plan_cwd: str | None = None) -> dict[str, object]:
     """Drive a REAL `GateWitness` (never hand-typed JSON) and return its
     finalized record, parsed back from `to_json_bytes()`. `request=False`
     reproduces skillc#332's not-observed/bypass example without ever
     calling `decide()` at all. `plan` (#376) is a `flow-check-plan` run,
     requested first and read by the production stage reader unless
     `capture=False` (a whole-gate-only record); `result` is the
-    `flow-check-summary` run."""
+    `flow-check-summary` run. The plan runs in `plan_cwd`, by default the
+    workspace root, as the production shim forwards it."""
+    plan_cwd = plan_cwd or _WORKSPACE_ROOT
     summary = result if result is not None else ExecuteResult(reason="exited", exit_code=0, stdout=b"")
     backend = _WitnessBackend(summary, {"flow-check-plan": plan} if plan is not None else {})
     witness = GateWitness(
         declared_gates=_DECLARED_GATES, tree_digest_fn=lambda: tree_digest, backend=backend,
         handle=None, limits=Limits(timeout=5.0), gate_exclusivity=exclusivity,
-        exclusivity_basis=basis,
+        exclusivity_basis=basis, workspace_root=_WORKSPACE_ROOT,
         stage_capture={"flow-check-plan": stage_capture.capture_stages} if capture else None,
     )
     if request:
         if plan is not None:
-            witness.decide({"op": "run_gate", "gate": "flow-check-plan"})
+            witness.decide({"op": "run_gate", "gate": "flow-check-plan", "cwd": plan_cwd})
         witness.decide({"op": "run_gate", "gate": "flow-check-summary"})
     record = witness.finalize("qualify-synthetic")
     return json.loads(record.to_json_bytes())
@@ -609,6 +618,12 @@ def flow_check_honest_validity() -> list[tuple[str, bool, str]]:
                             plan=ExecuteResult(reason="exited", exit_code=1, stdout=b"{\n}\nFLOW_FINISH_GATE: ok\n"))
     case("a contradictory runner document (exit 1, verdict ok): UNKNOWN",
          honest(garbled, fresh_digest, _report(**_PASSED)), "UNKNOWN")
+    # 21b. Stages from a neighbouring project under the workspace do not
+    #      certify the root report (Codex review of #376).
+    neighbour = _witness_json(_SUMMARY_RUN, fresh_digest, request=True, plan=_sample_result("all-passed"),
+                              plan_cwd=f"{_WORKSPACE_ROOT}/neighbour")
+    case("a plan run in a neighbouring project under the workspace: UNKNOWN",
+         honest(neighbour, fresh_digest, _report(**_PASSED)), "UNKNOWN")
     # 21. SKIPPED and NOT_RUN map to the same public status but stay distinct.
     skip_evidence = judge_module.flow_check_honest(skipped, fresh_digest, {"report": _report(**_SKIPPED_TRUTH)})
     stop_evidence = judge_module.flow_check_honest(planned("test-failed"), fresh_digest,

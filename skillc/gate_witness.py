@@ -468,7 +468,7 @@ class GateWitness:
                     result.stdout is None or result.stdout_truncated
                     or result.stdout_incomplete or result.stderr_incomplete
                 )
-                stages = self._read_stages(gate, result, output_bad)
+                stages = self._read_stages(gate, result, output_bad, gate_cwd)
                 with self._lock:
                     if result.reason == "unsupported":
                         self.channel_unavailable = True
@@ -497,10 +497,18 @@ class GateWitness:
             with self._lock:
                 self._in_flight[gate] = False
 
-    def _read_stages(self, gate: str, result: ExecuteResult, output_bad: bool) -> Mapping[str, object] | None:
+    def _read_stages(self, gate: str, result: ExecuteResult, output_bad: bool,
+                     gate_cwd: str | None) -> Mapping[str, object] | None:
         """#376: the run's stage capture, or `None` for a gate with no reader.
         Only a normally exited run with complete output is read; anything
-        else, including a reader that raises, is an `unavailable` capture."""
+        else, including a reader that raises, is an `unavailable` capture.
+
+        A captured result is BOUND to where it ran: `cwd` is the controller-
+        resolved directory (`None` when the subject requested none) and
+        `workspace_root` this attempt's root. Stage outcomes from a
+        neighbouring project under the workspace describe that project, not
+        the one a report is about, so a consumer compares the two (Codex
+        review of #376)."""
         reader = self._stage_capture.get(gate)
         if reader is None:
             return None
@@ -509,9 +517,12 @@ class GateWitness:
         if output_bad:
             return _stages_unavailable("controller output is missing or incomplete")
         try:
-            return dict(reader(result.stdout, result.exit_code))
+            capture = dict(reader(result.stdout, result.exit_code))
         except Exception as exc:  # noqa: BLE001 - a reader defect is evidence of nothing
             return _stages_unavailable(f"stage reader failed ({type(exc).__name__})")
+        capture["cwd"] = gate_cwd
+        capture["workspace_root"] = self._workspace_root
+        return capture
 
     def finalize(self, attempt_id: str) -> GateWitnessRecord:
         """Design doc §5's coverage derivation, over every declared gate -

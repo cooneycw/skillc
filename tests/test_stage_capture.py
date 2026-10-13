@@ -89,6 +89,7 @@ def _mutate(old: bytes, new: bytes, task: str = "gate-stops-early", shape: str =
     ("exit contradicts verdict", None, "contradicts verdict"),
     ("success contradicts verdict", None, "contradicts verdict"),
     ("failed_step did not fail", None, "failed_step"),
+    ("success with a failed_step", None, "names failed_step"),
 ])
 def test_every_unattributable_output_is_unavailable(label: str, data_exit: tuple | None, why: str) -> None:
     if data_exit is None:
@@ -101,10 +102,19 @@ def test_every_unattributable_output_is_unavailable(label: str, data_exit: tuple
             "exit contradicts verdict": (lint_failed, 0),
             "success contradicts verdict": _mutate(b'"success": false', b'"success": true'),
             "failed_step did not fail": _mutate(b'"failed_step": "lint"', b'"failed_step": "test"'),
+            "success with a failed_step": _sample_with_failed_step(),
         }[label]
     capture = stage_capture.capture_stages(*data_exit)
     assert capture["status"] == "unavailable", (label, capture)
     assert why in str(capture["reason"])
+
+
+def _sample_with_failed_step() -> tuple[bytes, int]:
+    """The real all-passed output, still `success: true` with every stage
+    successful, but naming a `failed_step` (Codex review of #376)."""
+    data, exit_code = _sample("gate-stops-early", "all-passed")
+    assert b'  "success": true,\n' in data
+    return data.replace(b'  "success": true,\n', b'  "success": true,\n  "failed_step": "lint",\n', 1), exit_code
 
 
 def test_a_successful_run_reporting_a_failed_stage_is_unavailable() -> None:
@@ -189,6 +199,8 @@ def test_the_plan_runs_stages_come_from_its_own_controller_held_stdout() -> None
     assert record["version"] == 3
     (run,) = record["gates"]["flow-check-plan"]["runs"]
     assert _outcomes(run["stages"]) == {"lint": "failed", "test": "not-run", "typecheck": "not-run"}
+    # Bound to where it ran: no cwd requested, no workspace root configured.
+    assert (run["stages"]["cwd"], run["stages"]["workspace_root"]) == (None, None)
     # A gate with no declared reader carries no stage record at all.
     assert "stages" not in record["gates"]["flow-check-summary"]["runs"][0]
 
