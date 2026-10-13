@@ -95,3 +95,39 @@ ran 69 offline isolation, verdict and posting tests successfully. No Docker
 or network operation was used for that review. This records the actual review;
 the flow receipt helper's Claude/Codex identity pairing cannot represent this
 Codex/Codex review without fabricating a Claude session identity.
+
+<!-- flow-run n=2 id=7589116d38ba478abdcdf5b53cd10497 -->
+## Run 2
+
+- Run-id:            7589116d38ba478abdcdf5b53cd10497
+- Run-start:         1b40509ba97ba12de92e07a6b108496be8b2ace2
+- Issue:             #315
+- Base SHA:          1b40509ba97ba12de92e07a6b108496be8b2ace2
+- Necessity verdict: Partially addressed
+- Approval:          granted
+- Approver:          repository owner, interactive reply "approved" on 2026-10-13
+- Recorded at:       2026-10-13T00:00:00Z
+
+### Section B evidence
+
+Runner and controls merged: ef04faf (#328), 87190e1 (#331), 8330729 (#357);
+families 50b5098 (#329), 9c79510 (#339), 5cf1586 (#340), e43445a (#347),
+0518cc0 (#349), 02f1565 (#370). The hypervisor-level firewall was put in place
+by the operator outside this repository (closed 2026-10-12). The dedicated host
+was bare on 2026-10-13: Docker only, no uv, no service user, no installed
+runner, no units, empty DOCKER-USER chain. Campaign blocked: #338's follow-up
+(eighth floor entry, verdict fixtures, cwd break) unmerged; #375 open; unpushed
+sibling worktrees for #341, #346, #360 touch ci/real-docker. No duplicates;
+#309's Woodpecker design superseded by the 2026-10-06 ruling.
+
+### Section C - the approved plan
+
+1. `docs/flow-runs/issue-315.md` - append this run's record; the remaining work is operator setup on the dedicated host (README steps 1-7: tools, service user, provisional runner install, config, disabled units, in-VM defence-in-depth DROP rules, three-way isolation check), recorded generically on the issue.
+
+Scope: one repository file, ~40 lines; everything else is host state outside
+the repository.
+
+Risks: the isolation OFF case briefly exposes the LAN to the host; the runner
+may require the owner-created GitHub token before the preflight can post; the
+provisional runner pin must be refreshed before the campaign. #315 stays open
+for the campaign.
