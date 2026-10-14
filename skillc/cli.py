@@ -1855,8 +1855,12 @@ def cmd_level3_campaign(args: argparse.Namespace) -> int:
             return 2
         rows = [r for r in rows if r.id in wanted]
     git = ["git", "-C", str(cr.ROOT)]
-    dirty = subprocess.run([*git, "status", "--porcelain"], capture_output=True, text=True, check=False)
-    head = subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True, check=False)
+    try:
+        dirty = subprocess.run([*git, "status", "--porcelain"], capture_output=True, text=True, check=False)
+        head = subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True, check=False)
+    except OSError as exc:
+        print(f"skillc: cannot read the skillc checkout's git state ({exc}); the run binds its HEAD", file=sys.stderr)
+        return 2
     if dirty.returncode != 0 or head.returncode != 0 or dirty.stdout.strip():
         print("skillc: the skillc checkout must be a clean git tree; the run binds its HEAD", file=sys.stderr)
         return 2

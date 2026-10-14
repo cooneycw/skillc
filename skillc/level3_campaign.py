@@ -252,12 +252,13 @@ def actor_argv(row: Row, gate_entrypoint: str, interpreter: str = "/usr/bin/pyth
 
 
 def dummy_credential(path: Path) -> Path:
-    """A syntactically valid, never-signed Codex credential with an hour of
-    life. It satisfies the delivery precondition and authorises nothing."""
+    """A syntactically valid, never-signed Codex credential. It satisfies the
+    delivery precondition and authorises nothing; its 30-day life outlasts
+    any campaign, since every attempt re-reads it."""
     def seg(data: bytes) -> str:
         return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
     header = seg(json.dumps({"alg": "none"}).encode())
-    payload = seg(json.dumps({"exp": int(time.time() + 3600)}).encode())
+    payload = seg(json.dumps({"exp": int(time.time() + 30 * 86400)}).encode())
     token = f"{header}.{payload}.unsigned"
     path.write_text(json.dumps({"tokens": {"access_token": token}, "skillc_campaign": "dummy"}), encoding="utf-8")
     path.chmod(0o600)
@@ -292,8 +293,16 @@ def plan(manifest: Manifest, store: Path, root: Path, *, image_digest: str, trea
             "attempts": 1,
         })
     experiment = trial.plan({"experiment": "level3-campaign", "trials": trials}, store)
-    by_label = {str(t["label"]): str(a["attempt_id"]) for t, a in experiment.attempts()}
-    return experiment, by_label
+    pairs = list(experiment.attempts())
+    if len(pairs) != len(rows):
+        raise CampaignRefused(f"the plan issued {len(pairs)} attempts for {len(rows)} rows")
+    by_row: dict[str, str] = {}
+    for row, (planned, attempt) in zip(rows, pairs, strict=True):
+        # `trial.plan` names each trial `t<n>-<label>`, in plan order.
+        if not str(planned.get("trial_id", "")).endswith(f"-{row.id}"):
+            raise CampaignRefused(f"planned trial {planned.get('trial_id')!r} is not row {row.id!r}")
+        by_row[row.id] = str(attempt["attempt_id"])
+    return experiment, by_row
 
 
 def run_rows(

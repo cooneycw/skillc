@@ -8,6 +8,18 @@ and version plan.
 
 ## [Unreleased]
 
+- **Deterministic production-path campaign for the #270 Level-3 tasks** (Refs
+  #375, #376). `skillc level3-campaign` runs each row of a frozen manifest
+  (`evals/level3/campaign-375/`) as one real attempt through the production
+  treatment, closure, preflight, gate witness, capture and grading path, with a
+  scripted actor in place of the model. The agent runs on network `none` and
+  only a generated dummy credential is delivered. 42 rows: healthy,
+  alternatives, a no-op, the gate-exercise/integrity cheats, UNKNOWN-preserving
+  controls and #376's aggregate-stop reports. Expected outcomes are derived from
+  each candidate's committed contract by `freeze.py`, with two declared
+  production deltas, and the test suite fails if the manifest drifts from it.
+  The run itself happens on #315's isolated runner.
+
 - **Real-Docker live tests run on an explicit 30 s daemon budget** (#390). The
   six `DockerBackend` constructions in `tests/*_live.py` had no
   `daemon_timeout`, so container start ran on the 5 s module default. On
