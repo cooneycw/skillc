@@ -27,11 +27,11 @@ spec.loader.exec_module(build)
 
 def test_selected_pin_prepares_without_docker(tmp_path: Path) -> None:
     prepared = build.prepare(ROOT, tmp_path / "context")
-    assert prepared["policy"]["runtime_id"] == "cpp-codex-flow-check-ea6dbfa"
+    assert prepared["policy"]["runtime_id"] == "cpp-codex-flow-check-86641e8"
     assert prepared["recipe_sha256"] == build.sha256((tmp_path / "context/Dockerfile").read_bytes())
     for name in ("pyproject.toml", "uv.lock"):
         assert (tmp_path / "context/metadata" / name).read_bytes() == (
-            ROOT / "tests/fixtures/profile-cpp-codex-flow-check-ea6dbfa" / name
+            ROOT / "tests/fixtures/profile-cpp-codex-flow-check-86641e8" / name
         ).read_bytes()
 
 

@@ -256,6 +256,11 @@ different layout, helper home and dependency mix with no code change.
   the same skill re-declared at CPP's current pin for #287 (#265's profile
   changed substantially on CPP main; a later pin is a new profile, not an
   edit to the first one).
+- [cpp-codex-flow-check-86641e8](../../../evals/subjects/cpp-codex-flow-check-86641e8/PROFILE.md) -
+  the same skill repinned for #376 at CPP `86641e8`, which carries `8e0a34fb`
+  (NOT_RUN as its own report state). The live runtime supply and the #287
+  draft declarations select this profile; the `ea6dbfa` profile and its
+  evidence are unchanged history.
 
 
 ## Host installation (#266)
