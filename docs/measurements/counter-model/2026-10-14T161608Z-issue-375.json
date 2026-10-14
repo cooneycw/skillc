@@ -1,0 +1,25 @@
+{
+  "branch": "issue-375-270-b-complete-gate-exercise-and-integrity-certifi",
+  "counts": {
+    "accepted": 5,
+    "deferred": 1,
+    "rejected": 0
+  },
+  "head": "93af1804862fd1adcf70f033b5abdef7468938c8",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "375",
+  "passes": 2,
+  "recorded_at": "2026-10-14T16:16:08Z",
+  "red_cases": {
+    "already_covered": 16,
+    "proposed": 19
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/14/rollout-2026-10-14T12-11-19-01a13b2e-b80c-7111-ae98-aa586a33990f.jsonl",
+    "thread_id": "01a13b2e-b80c-7111-ae98-aa586a33990f"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
