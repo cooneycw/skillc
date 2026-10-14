@@ -48,8 +48,11 @@ def _bindings(tree: ast.Module) -> tuple[set[str], set[str]]:
     """Names bound to the `skillc.docker_backend` module, and names bound to
     its `DockerBackend` class or a subclass: imports (with `as`), simple
     assignments and class definitions. A same-named class that does not derive
-    from it is not counted. Dynamic construction (`getattr`, a factory defined
-    in another module) is outside what a source scan can resolve."""
+    from it is not counted. Bindings are per file, not per scope: a file that
+    binds the real class in one function and defines an unrelated
+    `DockerBackend` in another reads the second as the backend - a loud false
+    red, never a silent green. Dynamic construction (`getattr`, a factory
+    defined in another module) is outside what a source scan can resolve."""
     modules: set[str] = set()
     classes: set[str] = set()
     for node in ast.walk(tree):
@@ -82,10 +85,16 @@ def _bindings(tree: ast.Module) -> tuple[set[str], set[str]]:
                 if any(is_backend(base) for base in node.bases):
                     classes.add(node.name)
                     changed = True
-            elif isinstance(node, ast.Assign) and is_backend(node.value):
+            elif isinstance(node, ast.Assign):
+                value = node.value
+                is_module = (isinstance(value, ast.Name) and value.id in modules) \
+                    or ast.unparse(value) == BACKEND_MODULE
+                bound = modules if is_module else classes if is_backend(value) else None
+                if bound is None:
+                    continue
                 for target in node.targets:
-                    if isinstance(target, ast.Name) and target.id not in classes:
-                        classes.add(target.id)
+                    if isinstance(target, ast.Name) and target.id not in bound:
+                        bound.add(target.id)
                         changed = True
     return modules, classes
 
@@ -147,9 +156,12 @@ def test_red_case_aliased_constructions_are_resolved() -> None:
         "a = DB(image='x', base_dir=None)\n"
         "b = Backend(image='x', base_dir=None)\n"
         "c = dbm.DockerBackend(image='x', base_dir=None, daemon_timeout=30.0)\n"
+        "alias = dbm\n"
+        "e = alias.DockerBackend(image='x', base_dir=None)\n"
     )
     assert _constructions(planted, "planted_live.py") == [
         ("planted_live.py:4", False), ("planted_live.py:5", False), ("planted_live.py:6", True),
+        ("planted_live.py:8", False),
     ]
 
 
