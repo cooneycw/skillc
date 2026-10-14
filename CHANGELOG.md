@@ -8,6 +8,19 @@ and version plan.
 
 ## [Unreleased]
 
+- **Fake-Docker tests run on the test-only daemon budget, not production's 5s**
+  (Refs #385). `tests/test_docker_backend.py`'s `_backend()`, every other
+  direct `DockerBackend` construction over the fake CLI, and `test_reap.py`'s
+  `reap.snapshot`/`reap.reap` calls now use the existing
+  `conftest.FAKE_DOCKER_DAEMON_TIMEOUT` (30s): one fake `docker run -d` on a
+  loaded host had exceeded 5s and failed an unrelated test in setup. The
+  fixture gains a `.delay-SUBCOMMAND` sentinel that reproduces that overrun on
+  demand. The one test found needing the bound to fire
+  (`test_confirm_and_kill_in_container_returns_false_when_the_kill_exec_cannot_be_reached`)
+  keeps an explicit 1s budget and now fails if it ever inherits the large
+  one. Production's `DAEMON_TIMEOUT` is unchanged; `test_calibration_run.py`
+  keeps its documented 120s.
+
 - **#270 aggregate-stop reports graded against protected per-stage evidence**
   (Refs #376). The gate witness now records, per run of a caller-declared
   stage-bearing gate, the stage outcomes the controller read from that run's
