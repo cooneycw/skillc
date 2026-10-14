@@ -1,0 +1,25 @@
+{
+  "branch": "issue-385-fake-docker-setup-calls-run-on-the-production-5s-d",
+  "counts": {
+    "accepted": 1,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "eb0978c30a32fe769a079251d782cbeef3066bb7",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "385",
+  "passes": 2,
+  "recorded_at": "2026-10-14T11:25:49Z",
+  "red_cases": {
+    "already_covered": 2,
+    "proposed": 2
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/14/rollout-2026-10-14T07-24-45-01a13a28-585e-7c70-ae7e-2c28d4be2bd1.jsonl",
+    "thread_id": "01a13a28-585e-7c70-ae7e-2c28d4be2bd1"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
