@@ -1,0 +1,25 @@
+{
+  "branch": "issue-382-make-the-three-remaining-load-sensitive-docker-bac",
+  "counts": {
+    "accepted": 2,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "8125e3f4a1fa66ca3bf51eeb3bc872b4ec502eff",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "382",
+  "passes": 2,
+  "recorded_at": "2026-10-14T10:54:46Z",
+  "red_cases": {
+    "already_covered": 3,
+    "proposed": 6
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/14/rollout-2026-10-14T06-52-40-01a13a0a-fb6a-7c83-acef-28f5faa476b6.jsonl",
+    "thread_id": "01a13a0a-fb6a-7c83-acef-28f5faa476b6"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
