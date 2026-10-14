@@ -25,7 +25,6 @@
   "image": "the runtime-supply receipt's image id, bound at run time (README)",
   "caps": {
    "per_attempt_seconds": 900,
-   "gate_seconds": 240,
    "agent_network": "none",
    "container": {
     "memory": "1g",
@@ -53,7 +52,7 @@
     "grader_revision": "4"
    }
   },
-  "harness_digest": "sha256:4585cd09dc9549c31c31cabb03fc9540cadc77f83f48c4c103dac8ae9bd06f0c"
+  "harness_digest": "sha256:9d36ee55348401a01a1afa744feca4ab7221d152328d1e695a8c9f222787753e"
  },
  "rows": [
   {

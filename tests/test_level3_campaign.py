@@ -100,7 +100,8 @@ def test_frozen_identities_hold_on_this_tree() -> None:
     (lambda m: m["frozen"].update(harness_digest="sha256:00"), "scripted actor"),
     (lambda m: m["rows"][0].update(candidate="alternatives/does-not-exist"), "does not exist"),
     (lambda m: m["rows"][0].update(candidate_digest="sha256:00"), "bytes or modes moved"),
-    (lambda m: m["frozen"]["caps"].update(gate_seconds=1), "cap gate_seconds"),
+    (lambda m: m["frozen"]["client"].update(name="claude"), "only the codex surface"),
+    (lambda m: m["frozen"]["client"].update(version="999.0.0"), "client version"),
     (lambda m: m["frozen"]["caps"].update(per_attempt_seconds=60), "cap per_attempt_seconds"),
     (lambda m: m["frozen"]["caps"].update(agent_network="bridge"), "cap agent_network"),
     (lambda m: m["frozen"]["caps"]["container"].update(memory="2g"), "cap container"),
@@ -172,7 +173,7 @@ def test_candidate_delivery_excludes_answer_keys_and_keeps_modes() -> None:
     task_root = ROOT / "evals" / "level3" / row.task
     files = lc.row_home_files(row, task_root)
     assert set(files) == {f"{lc.HOME_DIR}/actor.py", f"{lc.HOME_DIR}/fake_agent_client.py",
-                          f"{lc.HOME_DIR}/candidate.tar"}
+                          f"{lc.HOME_DIR}/candidate.tar", f"{lc.HOME_DIR}/remove.json"}
     with tarfile.open(fileobj=io.BytesIO(files[f"{lc.HOME_DIR}/candidate.tar"])) as archive:
         members = {m.name: m for m in archive.getmembers()}
     surface = cc.task_surface(task_root / row.candidate)
@@ -181,6 +182,20 @@ def test_candidate_delivery_excludes_answer_keys_and_keeps_modes() -> None:
     for path, _, executable in surface:
         assert members[path].mode == (0o755 if executable else 0o644), path
     assert any(executable for _, _, executable in surface), "the population must exercise a mode"
+
+
+def test_deletions_make_the_workspace_exactly_the_candidate_surface() -> None:
+    manifest = lc.load_manifest(MANIFEST)
+    for task in FREEZE.TASKS:
+        row = next(r for r in manifest.rows if r.task == task and r.candidate == "alternatives/not-run-with-note")
+        task_root = ROOT / "evals" / "level3" / task
+        removed = lc.removed_paths(task_root, row)
+        assert "ci/typecheck.py" in removed, "this candidate deliberately has no typecheck gate"
+        fixture = {p for p, _, _ in cc.task_surface(task_root / "fixture")}
+        kept = {p for p, _, _ in lc.candidate_files(task_root, row)}
+        assert (fixture - set(removed)) | kept == kept | (fixture & kept)
+        assert set(removed) == fixture - kept
+        assert json.loads(lc.row_home_files(row, task_root)[f"{lc.HOME_DIR}/remove.json"]) == removed
 
 
 def test_a_mode_change_alone_moves_the_surface_digest() -> None:
@@ -211,13 +226,15 @@ def test_a_noop_row_delivers_no_candidate() -> None:
 
 _GATE = """#!/bin/sh
 if [ -f placed.txt ]; then state=placed; else state=unplaced; fi
+if [ -f dropped.txt ]; then state="$state kept-dropped"; fi
 echo "$* $state" >> "$HOME/gate.log"
 """
 
 
 @pytest.mark.parametrize("mode, calls, placed", [
     ("fresh", ["--plan check --evidence flow-check placed", "--check-summary placed"], True),
-    ("stale", ["--plan check --evidence flow-check unplaced", "--check-summary unplaced"], True),
+    ("stale", ["--plan check --evidence flow-check unplaced kept-dropped", "--check-summary unplaced kept-dropped"],
+     True),
     ("plan-only", ["--plan check --evidence flow-check placed"], True),
     ("noop", [], False),
 ])
@@ -226,6 +243,7 @@ def test_the_actor_sequences_edits_and_gate_calls(tmp_path: Path, mode: str, cal
     (home / lc.HOME_DIR).mkdir(parents=True)
     work.mkdir()
     (work / "fixture.txt").write_text("fixture\n")
+    (work / "dropped.txt").write_text("a fixture file the candidate deletes\n")
     entry = ".claude/scripts/flow-finish-gate.sh"
     (home / entry).parent.mkdir(parents=True)
     (home / entry).write_text(_GATE)
@@ -233,6 +251,7 @@ def test_the_actor_sequences_edits_and_gate_calls(tmp_path: Path, mode: str, cal
     (home / lc.HOME_DIR / "actor.py").write_text(lc.ACTOR_SOURCE)
     (home / lc.HOME_DIR / "fake_agent_client.py").write_bytes(lc.FAKE_CLIENT.read_bytes())
     (home / lc.HOME_DIR / "candidate.tar").write_bytes(lc._tarball([("placed.txt", b"candidate\n", False)]))
+    (home / lc.HOME_DIR / "remove.json").write_text(json.dumps(["dropped.txt", "never-existed.txt"]))
     prompt = "Fix it.\n\n" + trial_bootstrap.compose_canary_instruction(None, "0123abcd")
     row = lc.Row("r", "gate-stops-early", "fixture" if mode == "noop" else "x", mode, None, "PASS", {"g": "SATISFIED"})
     argv = lc.actor_argv(row, entry, interpreter=sys.executable)
@@ -242,6 +261,7 @@ def test_the_actor_sequences_edits_and_gate_calls(tmp_path: Path, mode: str, cal
     log = (home / "gate.log").read_text().splitlines() if (home / "gate.log").exists() else []
     assert log == calls
     assert (work / "placed.txt").exists() is placed
+    assert (work / "dropped.txt").exists() is not placed, "a placed candidate carries its deletions"
     assert (work / "fixture.txt").read_text() == "fixture\n"
     assert (work / "agent-touched.txt").exists(), "the liveness marker is the no-op's only change"
     assert (home / lc.TRANSCRIPT_RELPATH).is_file()

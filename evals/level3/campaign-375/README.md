@@ -13,7 +13,8 @@ and `verify-stops-early`. Each row runs one real attempt through the
 Only the client is replaced, by a scripted actor (`skillc/level3_campaign.py`).
 The actor:
 - writes a codex-shaped transcript, using the repository's committed fake client;
-- places one committed candidate tree in `/work`;
+- makes `/work` exactly one committed candidate tree, removing the fixture files the candidate does
+  not carry and adding or replacing the rest;
 - calls the skill's two prescribed gate invocations through the installed entrypoint,
   as an agent following `reference.md` would.
 
@@ -50,7 +51,9 @@ The manifest freezes identities that do not depend on the run:
 - the runtime policy identity;
 - each task's goal, grader and fixture digests, plus the grader id and revision;
 - the scripted actor's and fake client's digest;
-- caps: 900 s per attempt, 240 s per gate, network `none`, DockerBackend's container limits.
+- caps: 900 s per attempt, gate runs included (the controller runs each witnessed gate under the
+  attempt limit, and the actor waits for it), network `none`, and DockerBackend's container limits;
+- the client name and version, against both the subject pin and the trial image's pin.
 
 Two identities can only be bound at run time:
 - **The merged skillc revision.** A file cannot name the commit that contains it. The

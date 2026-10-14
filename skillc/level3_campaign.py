@@ -59,7 +59,8 @@ ACTOR_MODES = frozenset({"fresh", "stale", "plan-only", "noop"})
 HOME_DIR = ".skillc-campaign"
 TRANSCRIPT_RELPATH = ".codex/sessions/2026/01/01/rollout-skillc-campaign.jsonl"
 FAKE_CLIENT = cr.ROOT / "tests" / "fixtures" / "agent-trial" / "fake_agent_client.py"
-GATE_SECONDS = 240
+#: Bounds the whole attempt, gate runs included: the controller executes
+#: each witnessed gate under the attempt's limit, and the actor waits for it.
 PER_ATTEMPT_SECONDS = 900
 #: The agent needs no egress: no model is contacted, and with no network a
 #: paid call is impossible rather than merely unintended.
@@ -72,24 +73,33 @@ DEFAULT_PRIVATE_ROOT = Path.home() / ".local" / "share" / "skillc" / "level3-cam
 #: to HOME), then the prompt that `run_one_attempt` appends last. Gate exit codes are not the actor's to
 #: judge: the controller witness records every run.
 ACTOR_SOURCE = '''\
-import os, subprocess, sys, tarfile
+import json, os, subprocess, sys, tarfile
 mode, entry, prompt = sys.argv[1], sys.argv[2], sys.argv[-1]
 home = os.environ["HOME"]
 here = os.path.join(home, "@HOME_DIR@")
 gate = os.path.join(home, entry)
 
 def place():
+    # Exactly the candidate surface: drop the fixture paths the candidate does
+    # not carry (the controller lists them), then add or replace its files.
+    with open(os.path.join(here, "remove.json"), encoding="utf-8") as listing:
+        for relpath in json.load(listing):
+            target = os.path.join(os.getcwd(), relpath)
+            if os.path.lexists(target):
+                os.remove(target)
     with tarfile.open(os.path.join(here, "candidate.tar")) as archive:
         # The controller built this archive from the task surface; the data
         # filter is extra hardening where this interpreter has it (3.11.4+).
         archive.extractall(os.getcwd(), **({"filter": "data"} if hasattr(tarfile, "data_filter") else {}))
 
 def run_gate(*args):
+    # No timeout of its own: the controller runs the real gate under the
+    # attempt's limit, and the actor must never advance while it is running.
     try:
-        done = subprocess.run([gate, *args], timeout=@GATE_SECONDS@)
+        done = subprocess.run([gate, *args])
         print(f"skillc-campaign: {gate} {' '.join(args)} exited {done.returncode}", file=sys.stderr)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        print(f"skillc-campaign: {gate} {' '.join(args)} did not complete: {exc}", file=sys.stderr)
+    except OSError as exc:
+        print(f"skillc-campaign: {gate} {' '.join(args)} could not start: {exc}", file=sys.stderr)
 
 def client():
     subprocess.run([sys.executable, os.path.join(here, "fake_agent_client.py"), "--format", "codex-fake",
@@ -108,7 +118,7 @@ else:
     run_gate("--plan", "check", "--evidence", "flow-check")
     if mode == "fresh":
         run_gate("--check-summary")
-'''.replace("@HOME_DIR@", HOME_DIR).replace("@GATE_SECONDS@", str(GATE_SECONDS)).replace(
+'''.replace("@HOME_DIR@", HOME_DIR).replace(
     "@TRANSCRIPT@", TRANSCRIPT_RELPATH)
 
 
@@ -208,7 +218,7 @@ def container_limits() -> dict[str, object]:
 
 def caps() -> dict[str, object]:
     """Every cap as the code executes it; the manifest must equal this exactly."""
-    return {"per_attempt_seconds": PER_ATTEMPT_SECONDS, "gate_seconds": GATE_SECONDS, "agent_network": AGENT_NETWORK,
+    return {"per_attempt_seconds": PER_ATTEMPT_SECONDS, "agent_network": AGENT_NETWORK,
             "container": container_limits()}
 
 
@@ -248,6 +258,14 @@ def check_frozen(manifest: Manifest, root: Path) -> list[str]:
     pinned = json.loads((profile_dir / "subject.json").read_text(encoding="utf-8"))
     if pinned.get("revision") != subject["revision"]:
         problems.append(f"subject profile {subject['profile']}: revision {pinned.get('revision')} != frozen")
+    client = frozen["client"]
+    pinned_cli = json.loads((root / "docker" / "trial" / "pinned-versions.json").read_text(encoding="utf-8"))
+    if client.get("name") != "codex":
+        problems.append(f"client {client.get('name')!r}: the campaign runs only the codex surface")
+    for source, version in (("subject pin", pinned.get("client", {}).get("version")),
+                            ("trial image pin", pinned_cli.get("codex", {}).get("version"))):
+        if client.get("version") != version:
+            problems.append(f"client version {client.get('version')!r} != {source} {version!r}")
     policy = json.loads((root / "skillc" / "runtime-policy.json").read_text(encoding="utf-8"))
     for key, value in frozen["runtime"].items():
         if policy.get(key) != value:
@@ -291,7 +309,15 @@ def row_home_files(row: Row, task_root: Path) -> dict[str, bytes]:
         if surface_digest(surface) != row.candidate_digest:
             raise CampaignRefused(f"row {row.id}: delivered candidate differs from its frozen surface digest")
         files[f"{HOME_DIR}/candidate.tar"] = _tarball(surface)
+        files[f"{HOME_DIR}/remove.json"] = json.dumps(removed_paths(task_root, row)).encode()
     return files
+
+
+def removed_paths(task_root: Path, row: Row) -> list[str]:
+    """Fixture paths the candidate does not carry: the deletions that make
+    the workspace exactly the committed candidate surface."""
+    kept = {path for path, _, _ in candidate_files(task_root, row)}
+    return sorted(path for path, _, _ in cc.task_surface(task_root / "fixture") if path not in kept)
 
 
 def actor_argv(row: Row, gate_entrypoint: str, interpreter: str = "/usr/bin/python3") -> list[str]:
