@@ -1,0 +1,25 @@
+{
+  "branch": "issue-390-real-docker-live-tests-start-containers-on-the-5s",
+  "counts": {
+    "accepted": 2,
+    "deferred": 1,
+    "rejected": 0
+  },
+  "head": "422197372287968e5fc410662c82d9e13d3a4106",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "390",
+  "passes": 2,
+  "recorded_at": "2026-10-14T13:22:16Z",
+  "red_cases": {
+    "already_covered": 5,
+    "proposed": 6
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/14/rollout-2026-10-14T09-20-31-01a13a92-5862-7d91-862a-21098ce016a5.jsonl",
+    "thread_id": "01a13a92-5862-7d91-862a-21098ce016a5"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
