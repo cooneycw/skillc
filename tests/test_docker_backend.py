@@ -695,6 +695,35 @@ def test_install_refuses_before_copying_anything_when_the_parent_probe_fails(
         backend.destroy(handle)
 
 
+def test_install_refuses_when_the_parent_directory_copy_fails(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The directory tar is copied before any file; if it fails, no file is
+    copied into a parent the candidate would not own."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-nested-parents-05")
+    assert isinstance(handle, d._Handle)
+    real_run = subprocess.run
+    file_copies: list[bytes] = []
+
+    def failing_dir_copy(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        payload = kwargs.get("input")
+        if "cp" in argv and isinstance(payload, bytes):
+            if all(m.isdir() for m in _tar_members(payload)):
+                return subprocess.CompletedProcess(argv, 1, b"", b"no space left")
+            file_copies.append(payload)
+        return real_run(argv, **kwargs)  # type: ignore[call-overload]
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(subprocess, "run", failing_dir_copy)
+            with pytest.raises(BackendUnavailable, match="nested parent directories"):
+                backend.install(handle, {"tests/x.py": b"x"})
+        assert file_copies == []
+    finally:
+        backend.destroy(handle)
+
+
 @pytest.mark.parametrize("stdout", [b"zero\n", b"7\n", b"-1\n"])
 def test_absent_parents_refuses_an_unreadable_or_out_of_range_answer(
     base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch, stdout: bytes,
