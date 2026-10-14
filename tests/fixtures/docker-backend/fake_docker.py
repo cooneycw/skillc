@@ -174,6 +174,12 @@ not a docker clone:
         structurally, not by convention. Reuses the SAME `.down` sentinel as
         `version`: an unreachable daemon cannot list anything either, and a
         caller must read that failure as UNKNOWN, never as an empty result.
+
+A `.delay-SUBCOMMAND` sentinel (its content is the delay in seconds) makes
+EVERY invocation of that subcommand sleep before doing anything else, `.down`
+included - a slow daemon by construction rather than by host load (issue
+#385). A loaded host is what pushed one fake `run -d` past production's 5s
+`DAEMON_TIMEOUT`, and load alone does not reproduce that on demand.
 """
 
 from __future__ import annotations
@@ -934,6 +940,9 @@ def main(argv: list[str]) -> int:
         return 2
     state_dir = Path(argv[1])
     subcommand, rest = argv[2], argv[3:]
+    delay = state_dir / f".delay-{subcommand}"
+    if delay.is_file():
+        time.sleep(float(delay.read_text(encoding="utf-8").strip()))
     # `.down` simulates an unreachable daemon for EVERY subcommand, not just
     # `version` - a real unreachable daemon fails every CLI call the same
     # way, and DockerBackend._inspect_status() distinguishes this from "no

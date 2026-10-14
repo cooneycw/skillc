@@ -29,6 +29,7 @@ import time
 from pathlib import Path
 
 import pytest
+from conftest import FAKE_DOCKER_DAEMON_TIMEOUT
 
 from skillc import collection_conformance as cc
 from skillc import configuration_compare as ccmp
@@ -49,7 +50,7 @@ def _docker_bin(state_dir: Path) -> list[str]:
 
 
 def _backend(base: Path, docker_state: Path) -> d.DockerBackend:
-    return d.DockerBackend(image=_BACKEND_IMAGE, base_dir=base, docker_bin=_docker_bin(docker_state))
+    return d.DockerBackend(image=_BACKEND_IMAGE, base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
 
 
 def _skill_md(name: str) -> str:

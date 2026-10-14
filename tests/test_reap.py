@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from conftest import FAKE_DOCKER_DAEMON_TIMEOUT
 
 from skillc import reap
 from skillc.docker_backend import ATTEMPT_LABEL_KEY, OWNER_LABEL_KEY, OWNER_LABEL_VALUE
@@ -45,7 +46,7 @@ def _owned_labels(attempt_id: str) -> dict[str, str]:
 def test_snapshot_partitions_owned_from_foreign(docker_state: Path) -> None:
     _run(docker_state, "ours", _owned_labels("att-1"))
     _run(docker_state, "foreign-lookalike", {"some.other.label": "x"})
-    snap = reap.snapshot(_docker_bin(docker_state))
+    snap = reap.snapshot(_docker_bin(docker_state), timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     assert snap.reachable is True
     assert snap.owned == frozenset({"ours"})
     assert snap.foreign == frozenset({"foreign-lookalike"})
@@ -54,7 +55,7 @@ def test_snapshot_partitions_owned_from_foreign(docker_state: Path) -> None:
 def test_snapshot_is_unreachable_never_empty_when_the_daemon_is_down(docker_state: Path) -> None:
     docker_state.mkdir(parents=True)
     (docker_state / ".down").touch()
-    snap = reap.snapshot(_docker_bin(docker_state))
+    snap = reap.snapshot(_docker_bin(docker_state), timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     assert snap.reachable is False
     assert snap.owned == frozenset()
     assert snap.foreign == frozenset()
@@ -63,9 +64,9 @@ def test_snapshot_is_unreachable_never_empty_when_the_daemon_is_down(docker_stat
 # ------------------------------------------------------------------ diff()
 
 def test_diff_flags_a_leak_in_one_direction(docker_state: Path) -> None:
-    before = reap.snapshot(_docker_bin(docker_state))
+    before = reap.snapshot(_docker_bin(docker_state), timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     _run(docker_state, "left-running", _owned_labels("att-1"))
-    after = reap.snapshot(_docker_bin(docker_state))
+    after = reap.snapshot(_docker_bin(docker_state), timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     result = reap.diff(before, after)
     assert result.comparable is True
     assert result.leaked == frozenset({"left-running"})
@@ -74,9 +75,9 @@ def test_diff_flags_a_leak_in_one_direction(docker_state: Path) -> None:
 
 def test_diff_flags_a_foreign_disappearance_in_the_other_direction(docker_state: Path) -> None:
     _run(docker_state, "foreign-1", {"some.other.label": "x"})
-    before = reap.snapshot(_docker_bin(docker_state))
+    before = reap.snapshot(_docker_bin(docker_state), timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     subprocess.run([*_docker_bin(docker_state), "rm", "-f", "foreign-1"], check=True, capture_output=True)
-    after = reap.snapshot(_docker_bin(docker_state))
+    after = reap.snapshot(_docker_bin(docker_state), timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     result = reap.diff(before, after)
     assert result.comparable is True
     assert result.foreign_vanished == frozenset({"foreign-1"})
@@ -84,10 +85,10 @@ def test_diff_flags_a_foreign_disappearance_in_the_other_direction(docker_state:
 
 
 def test_diff_is_not_comparable_across_an_unreachable_snapshot(docker_state: Path) -> None:
-    before = reap.snapshot(_docker_bin(docker_state))
+    before = reap.snapshot(_docker_bin(docker_state), timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     docker_state.mkdir(parents=True, exist_ok=True)
     (docker_state / ".down").touch()
-    after = reap.snapshot(_docker_bin(docker_state))
+    after = reap.snapshot(_docker_bin(docker_state), timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     result = reap.diff(before, after)
     assert result.comparable is False
     assert result.leaked == frozenset()
@@ -100,15 +101,15 @@ def test_a_container_left_running_on_purpose_is_detected_and_reaped(docker_state
     """Control #1 (#79's own wording): a container left running is detected,
     and reaping removes it."""
     _run(docker_state, "orphan", _owned_labels("att-1"))
-    before = reap.snapshot(_docker_bin(docker_state))
+    before = reap.snapshot(_docker_bin(docker_state), timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     assert "orphan" in before.owned
 
-    report = reap.reap(_docker_bin(docker_state), ["att-1"])
+    report = reap.reap(_docker_bin(docker_state), ["att-1"], timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     assert report.daemon_reachable is True
     assert report.outcome_for("att-1") == "reaped"
     assert report.reaped == ("att-1",)
 
-    after = reap.snapshot(_docker_bin(docker_state))
+    after = reap.snapshot(_docker_bin(docker_state), timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     assert "orphan" not in after.owned
 
 
@@ -119,21 +120,21 @@ def test_a_foreign_lookalike_is_never_touched(docker_state: Path) -> None:
     _run(docker_state, "skillc-att-1", {"some.other.label": "x"})  # looks like ours, is not
     _run(docker_state, "att-1-orphan", _owned_labels("att-1"))
 
-    report = reap.reap(_docker_bin(docker_state), ["att-1"])
+    report = reap.reap(_docker_bin(docker_state), ["att-1"], timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     assert report.outcome_for("att-1") == "reaped"
 
-    after = reap.snapshot(_docker_bin(docker_state))
+    after = reap.snapshot(_docker_bin(docker_state), timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     assert "skillc-att-1" in after.foreign  # untouched: still exists
     assert "att-1-orphan" not in after.owned  # the real one is gone
 
 
 def test_an_already_absent_attempt_is_idempotent_not_an_error(docker_state: Path) -> None:
-    report = reap.reap(_docker_bin(docker_state), ["never-existed"])
+    report = reap.reap(_docker_bin(docker_state), ["never-existed"], timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     assert report.daemon_reachable is True
     assert report.outcome_for("never-existed") == "already-absent"
 
     # Calling it again changes nothing.
-    report2 = reap.reap(_docker_bin(docker_state), ["never-existed"])
+    report2 = reap.reap(_docker_bin(docker_state), ["never-existed"], timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     assert report2.outcome_for("never-existed") == "already-absent"
 
 
@@ -141,11 +142,11 @@ def test_reaping_two_attempts_only_removes_the_named_ones(docker_state: Path) ->
     _run(docker_state, "keep-me", _owned_labels("att-keep"))
     _run(docker_state, "reap-me", _owned_labels("att-reap"))
 
-    report = reap.reap(_docker_bin(docker_state), ["att-reap"])
+    report = reap.reap(_docker_bin(docker_state), ["att-reap"], timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     assert report.outcome_for("att-reap") == "reaped"
     assert report.outcome_for("att-keep") is None  # never asked about
 
-    after = reap.snapshot(_docker_bin(docker_state))
+    after = reap.snapshot(_docker_bin(docker_state), timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     assert after.owned == frozenset({"keep-me"})
 
 
@@ -157,7 +158,7 @@ def test_unknown_never_reaps_when_the_daemon_is_unreachable(docker_state: Path) 
     _run(docker_state, "orphan", _owned_labels("att-1"))
     (docker_state / ".down").touch()
 
-    report = reap.reap(_docker_bin(docker_state), ["att-1"])
+    report = reap.reap(_docker_bin(docker_state), ["att-1"], timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     assert report.daemon_reachable is False
     assert report.outcome_for("att-1") == "unknown"
     assert report.unknown == ("att-1",)
@@ -165,7 +166,7 @@ def test_unknown_never_reaps_when_the_daemon_is_unreachable(docker_state: Path) 
     assert report.left_running == ()
 
     (docker_state / ".down").unlink()
-    still = reap.snapshot(_docker_bin(docker_state))
+    still = reap.snapshot(_docker_bin(docker_state), timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     assert "orphan" in still.owned  # nothing was actually removed
 
 
@@ -200,7 +201,7 @@ def test_unknown_and_left_running_are_kept_distinct_in_one_call(
         )
 
     monkeypatch.setattr(reap.subprocess, "run", _flaky_run)
-    report = reap.reap(_docker_bin(docker_state), ["att-stuck", "att-unreachable"])
+    report = reap.reap(_docker_bin(docker_state), ["att-stuck", "att-unreachable"], timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
 
     assert report.outcome_for("att-stuck") == "left-running"
     assert report.outcome_for("att-unreachable") == "unknown"
@@ -216,7 +217,7 @@ def test_a_container_that_cannot_be_confirmed_removed_is_left_running(docker_sta
     _run(docker_state, "stuck-one", _owned_labels("att-1"))
     (docker_state / ".stuck-stuck-one").touch()
 
-    report = reap.reap(_docker_bin(docker_state), ["att-1"])
+    report = reap.reap(_docker_bin(docker_state), ["att-1"], timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     assert report.outcome_for("att-1") == "left-running"
     assert report.reaped == ()
 
@@ -226,7 +227,7 @@ def test_reap_refuses_an_empty_attempt_population(docker_state: Path) -> None:
     `daemon_reachable=True` having checked nothing at all - refused now,
     the same rule this codebase applies to an empty record population."""
     with pytest.raises(ValueError, match="empty"):
-        reap.reap(_docker_bin(docker_state), [])
+        reap.reap(_docker_bin(docker_state), [], timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
 
 
 def test_reap_removes_by_container_id_never_by_name(
@@ -257,7 +258,7 @@ def test_reap_removes_by_container_id_never_by_name(
         )
 
     monkeypatch.setattr(reap.subprocess, "run", _spy)
-    report = reap.reap(_docker_bin(docker_state), ["att-1"])
+    report = reap.reap(_docker_bin(docker_state), ["att-1"], timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     assert report.outcome_for("att-1") == "reaped"
 
     rm_calls = [c for c in calls if "rm" in c]

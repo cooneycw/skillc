@@ -21,6 +21,7 @@ import time
 from pathlib import Path
 
 import pytest
+from conftest import FAKE_DOCKER_DAEMON_TIMEOUT
 
 from skillc import agent_trial as at
 from skillc import docker_backend as d
@@ -56,7 +57,7 @@ def store(tmp_path: Path) -> Path:
 
 
 def _backend(base: Path, docker_state: Path) -> d.DockerBackend:
-    return d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+    return d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
 
 
 def _planned(store: Path) -> tuple[t.Experiment, str]:
@@ -798,7 +799,7 @@ def test_the_overlay_fires_when_gate_entrypoint_is_declared_and_delivered(
 
     monkeypatch.setattr(at.gate_overlay, "apply_flow_check_gate_overlay", fake_overlay)
 
-    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     experiment, attempt_id = _planned(store)
     cred_path = _fresh_credential(tmp_path, "codex")
     home = _mapped_home(docker_state, attempt_id)
@@ -847,7 +848,7 @@ def test_the_overlay_is_skipped_when_gate_entrypoint_is_not_declared(
 
     monkeypatch.setattr(at.gate_overlay, "apply_flow_check_gate_overlay", fake_overlay)
 
-    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     experiment, attempt_id = _planned(store)
     cred_path = _fresh_credential(tmp_path, "codex")
     home = _mapped_home(docker_state, attempt_id)
@@ -886,7 +887,7 @@ def test_red_case_gate_entrypoint_declared_but_not_delivered_is_refused(
 
     monkeypatch.setattr(at.gate_overlay, "apply_flow_check_gate_overlay", fake_overlay)
 
-    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     experiment, attempt_id = _planned(store)
     cred_path = _fresh_credential(tmp_path, "codex")
     home = _mapped_home(docker_state, attempt_id)
@@ -918,7 +919,7 @@ def test_the_overlay_is_skipped_when_the_closure_has_no_gate_script(
 
     monkeypatch.setattr(at.gate_overlay, "apply_flow_check_gate_overlay", fake_overlay)
 
-    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     experiment, attempt_id = _planned(store)
     cred_path = _fresh_credential(tmp_path, "codex")
     home = _mapped_home(docker_state, attempt_id)

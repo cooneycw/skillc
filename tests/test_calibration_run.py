@@ -44,6 +44,10 @@ TREATMENT_ARM = "full-cpp"
 #: (pipeline 454): `confirm_stopped` read UNKNOWN, and "UNKNOWN never reaps"
 #: quarantined the verifier for the rest of the process. The fake daemon is
 #: local, so a generous bound costs nothing and says nothing about a real one.
+#: Deliberately ABOVE the suite-wide `conftest.FAKE_DOCKER_DAEMON_TIMEOUT`
+#: (30s, issue #385): this is the one fake-CLI path with a recorded overrun,
+#: and lowering its margin to the shared value would trade a known-loaded
+#: path for uniformity. `test_uptake_study.py` reuses it for the same runner.
 _FAKE_DAEMON_TIMEOUT = 120.0
 
 

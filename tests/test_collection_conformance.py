@@ -25,6 +25,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from conftest import FAKE_DOCKER_DAEMON_TIMEOUT
 
 from skillc import agent_trial, demo, materialize, reap, trial
 from skillc import collection_conformance as cc
@@ -65,7 +66,7 @@ _BACKEND_IMAGE_DIGEST = f"sha256:fake-digest-for-{_BACKEND_IMAGE}"
 
 
 def _backend(base: Path, docker_state: Path) -> d.DockerBackend:
-    return d.DockerBackend(image=_BACKEND_IMAGE, base_dir=base, docker_bin=_docker_bin(docker_state))
+    return d.DockerBackend(image=_BACKEND_IMAGE, base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
 
 
 def _skill_md(name: str) -> str:
