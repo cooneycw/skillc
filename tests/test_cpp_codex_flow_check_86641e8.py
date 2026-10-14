@@ -78,13 +78,33 @@ def test_the_repin_is_what_carries_not_run() -> None:
     assert not NOT_RUN_ROW.search(old)
 
 
-def test_the_snapshot_trims_the_same_paths_as_the_ea6dbfa_snapshot() -> None:
-    def paths(root: Path) -> set[str]:
-        return {q.relative_to(root).as_posix() for q in root.rglob("*") if q.is_file()}
+#: Generated beside a fixture when a live test runs `uv`/python in it; never
+#: snapshot source, so they must not decide the path-set verdict either way.
+GENERATED_PARTS = frozenset({".venv", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"})
 
-    new = paths(SNAPSHOT)
-    assert new == paths(OLD_SNAPSHOT)
+
+def _source_paths(root: Path) -> set[str]:
+    return {q.relative_to(root).as_posix() for q in root.rglob("*")
+            if q.is_file() and not GENERATED_PARTS.intersection(q.relative_to(root).parts)}
+
+
+def test_the_snapshot_trims_the_same_paths_as_the_ea6dbfa_snapshot() -> None:
+    new = _source_paths(SNAPSHOT)
+    assert new == _source_paths(OLD_SNAPSHOT)
     assert len(new) == 97
+
+
+def test_generated_files_do_not_change_the_path_set_but_a_source_file_does(tmp_path: Path) -> None:
+    (tmp_path / "lib").mkdir()
+    (tmp_path / "lib" / "a.py").write_text("x = 1\n")
+    (tmp_path / ".venv" / "bin").mkdir(parents=True)
+    (tmp_path / ".venv" / "bin" / "python").write_text("")
+    (tmp_path / "lib" / "__pycache__").mkdir()
+    (tmp_path / "lib" / "__pycache__" / "a.cpython-312.pyc").write_bytes(b"\0")
+    assert _source_paths(tmp_path) == {"lib/a.py"}
+
+    (tmp_path / "lib" / "extra.py").write_text("")
+    assert _source_paths(tmp_path) == {"lib/a.py", "lib/extra.py"}
 
 
 def test_the_ea6dbfa_profile_evidence_is_unchanged() -> None:
