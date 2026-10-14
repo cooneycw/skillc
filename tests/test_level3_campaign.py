@@ -99,6 +99,11 @@ def test_frozen_identities_hold_on_this_tree() -> None:
     (lambda m: m["frozen"]["runtime"].update(runtime_id="cpp-codex-flow-check-ea6dbfa"), "runtime policy runtime_id"),
     (lambda m: m["frozen"].update(harness_digest="sha256:00"), "scripted actor"),
     (lambda m: m["rows"][0].update(candidate="alternatives/does-not-exist"), "does not exist"),
+    (lambda m: m["rows"][0].update(candidate_digest="sha256:00"), "bytes or modes moved"),
+    (lambda m: m["frozen"]["caps"].update(gate_seconds=1), "cap gate_seconds"),
+    (lambda m: m["frozen"]["caps"].update(per_attempt_seconds=60), "cap per_attempt_seconds"),
+    (lambda m: m["frozen"]["caps"].update(agent_network="bridge"), "cap agent_network"),
+    (lambda m: m["frozen"]["caps"]["container"].update(memory="2g"), "cap container"),
 ])
 def test_red_case_each_frozen_identity_can_report_a_move(tmp_path: Path, mutate: Any, named: str) -> None:
     data = _committed()
@@ -118,6 +123,8 @@ def test_red_case_each_frozen_identity_can_report_a_move(tmp_path: Path, mutate:
     lambda m: m["rows"][0].update(task="gate-ran-nothing"),
     lambda m: m["rows"][0]["expected"]["criteria"].update({"gate-green": "PROBABLY"}),
     lambda m: m.update(kind="calibration-declaration"),
+    lambda m: m["rows"][0].update(candidate_digest=None),
+    lambda m: m["rows"][8].update(candidate_digest="sha256:00"),
 ])
 def test_malformed_manifests_are_refused(tmp_path: Path, mutate: Any) -> None:
     data = _committed()
@@ -134,7 +141,7 @@ def test_malformed_manifests_are_refused(tmp_path: Path, mutate: Any) -> None:
 def _row(**expected: str) -> lc.Row:
     criteria = {"functional-windows-fix": "SATISFIED", "regression-fails-on-original": "SATISFIED",
                 "gate-green": "SATISFIED", "flow-check-honest": "SATISFIED", **expected}
-    return lc.Row("gse.reference", "gate-stops-early", "reference", "fresh", "PASS", criteria)
+    return lc.Row("gse.reference", "gate-stops-early", "reference", "fresh", "sha256:00", "PASS", criteria)
 
 
 def _graded(status: str = "PASS", **outcomes: str) -> dict[str, Any]:
@@ -176,6 +183,23 @@ def test_candidate_delivery_excludes_answer_keys_and_keeps_modes() -> None:
     assert any(executable for _, _, executable in surface), "the population must exercise a mode"
 
 
+def test_a_mode_change_alone_moves_the_surface_digest() -> None:
+    files = [("ci/check.py", b"print(1)\n", True), ("Makefile", b"check:\n", False)]
+    flipped = [("ci/check.py", b"print(1)\n", False), ("Makefile", b"check:\n", False)]
+    assert lc.surface_digest(files) != lc.surface_digest(flipped)
+    assert lc.surface_digest(files) == lc.surface_digest(list(reversed(files)))
+
+
+def test_delivery_refuses_a_candidate_that_differs_from_its_frozen_digest() -> None:
+    manifest = lc.load_manifest(MANIFEST)
+    row = next(r for r in manifest.rows if r.id == "gse.reference")
+    task_root = ROOT / "evals" / "level3" / row.task
+    assert f"{lc.HOME_DIR}/candidate.tar" in lc.row_home_files(row, task_root)
+    moved = lc.Row(row.id, row.task, row.candidate, row.actor, "sha256:00", row.expected_status, row.expected_criteria)
+    with pytest.raises(lc.CampaignRefused, match="frozen surface digest"):
+        lc.row_home_files(moved, task_root)
+
+
 def test_a_noop_row_delivers_no_candidate() -> None:
     manifest = lc.load_manifest(MANIFEST)
     row = next(r for r in manifest.rows if r.actor == "noop")
@@ -210,7 +234,7 @@ def test_the_actor_sequences_edits_and_gate_calls(tmp_path: Path, mode: str, cal
     (home / lc.HOME_DIR / "fake_agent_client.py").write_bytes(lc.FAKE_CLIENT.read_bytes())
     (home / lc.HOME_DIR / "candidate.tar").write_bytes(lc._tarball([("placed.txt", b"candidate\n", False)]))
     prompt = "Fix it.\n\n" + trial_bootstrap.compose_canary_instruction(None, "0123abcd")
-    row = lc.Row("r", "gate-stops-early", "fixture" if mode == "noop" else "x", mode, "PASS", {"g": "SATISFIED"})
+    row = lc.Row("r", "gate-stops-early", "fixture" if mode == "noop" else "x", mode, None, "PASS", {"g": "SATISFIED"})
     argv = lc.actor_argv(row, entry, interpreter=sys.executable)
     argv[1] = str(home / lc.HOME_DIR / "actor.py")
     subprocess.run([*argv, prompt], cwd=work, env={"HOME": str(home), "PATH": "/usr/bin:/bin"}, check=True)
@@ -255,11 +279,13 @@ def test_the_command_accepts_no_credential_and_refuses_moved_identities(tmp_path
     assert "frozen identity moved" in capsys.readouterr().err
 
 
-def test_the_command_runs_the_agent_on_network_none() -> None:
-    source = Path(cli.__file__).read_text(encoding="utf-8")
-    body = source.split("def cmd_level3_campaign", 1)[1].split("\ndef ", 1)[0]
-    assert 'network="none"' in body
-    assert "AGENT_NETWORK" not in body.replace("not AGENT_NETWORK", "")
+def test_the_campaign_backends_give_the_agent_no_network(tmp_path: Path) -> None:
+    agent, grading = lc.campaign_backends(image="img", base=tmp_path, docker_bin=("docker",),
+                                          daemon_timeout=30, runtime_supply=None)
+    assert agent.network == "none" and grading.network == "none"
+    assert cc.AGENT_NETWORK != "none", "the production default this deliberately overrides"
+    body = Path(cli.__file__).read_text(encoding="utf-8").split("def cmd_level3_campaign", 1)[1].split("\ndef ", 1)[0]
+    assert "lc.campaign_backends(" in body and "TrackingDockerBackend(" not in body
 
 
 # --------------------------------------------------------------- wiring
@@ -299,7 +325,7 @@ def test_run_rows_hands_the_production_treatment_through(tmp_path: Path, monkeyp
         assert call["base_argv"] == lc.actor_argv(row, treatment.gate_entrypoint)
         assert call["task_root"] == ROOT / "evals" / "level3" / row.task
         assert json.loads(Path(call["credential_explicit_path"]).read_text())["skillc_campaign"] == "dummy"
-        assert call["client"] == "codex" and call["timeout"] == manifest.per_attempt_seconds
+        assert call["client"] == "codex" and call["timeout"] == lc.PER_ATTEMPT_SECONDS
     assert [r["verdict"] for r in report["rows"]] == ["MATCH", "MISMATCH"]
     assert report["matched"] == 1 and report["population"] == 2
 

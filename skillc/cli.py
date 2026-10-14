@@ -1894,13 +1894,8 @@ def cmd_level3_campaign(args: argparse.Namespace) -> int:
     docker_bin = tuple(args.docker_bin.split()) if args.docker_bin else ("docker",)
 
     def backends() -> tuple[cc.TrackingDockerBackend, cc.TrackingDockerBackend]:
-        # Network `none`, not AGENT_NETWORK: no model is contacted, so the
-        # agent needs no egress, and having none makes a paid call impossible.
-        agent = cc.TrackingDockerBackend(image=supply.image_id, base_dir=run_dir, docker_bin=docker_bin,
-                                         daemon_timeout=args.timeout, network="none", runtime_supply=supply)
-        grading = cc.TrackingDockerBackend(image=supply.image_id, base_dir=run_dir, docker_bin=docker_bin,
-                                           daemon_timeout=args.timeout)
-        return agent, grading
+        return lc.campaign_backends(image=supply.image_id, base=run_dir, docker_bin=docker_bin,  # type: ignore[no-any-return]
+                                    daemon_timeout=args.timeout, runtime_supply=supply)
 
     report_path = run_dir / "campaign-report.json"
     bound = {"skillc_revision": head.stdout.strip(), "image_digest": supply.image_id,

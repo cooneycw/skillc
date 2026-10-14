@@ -25,6 +25,7 @@ reason to relabel the expectation.
 from __future__ import annotations
 
 import base64
+import dataclasses
 import hashlib
 import io
 import json
@@ -59,6 +60,10 @@ HOME_DIR = ".skillc-campaign"
 TRANSCRIPT_RELPATH = ".codex/sessions/2026/01/01/rollout-skillc-campaign.jsonl"
 FAKE_CLIENT = cr.ROOT / "tests" / "fixtures" / "agent-trial" / "fake_agent_client.py"
 GATE_SECONDS = 240
+PER_ATTEMPT_SECONDS = 900
+#: The agent needs no egress: no model is contacted, and with no network a
+#: paid call is impossible rather than merely unintended.
+AGENT_NETWORK = "none"
 DEFAULT_PRIVATE_ROOT = Path.home() / ".local" / "share" / "skillc" / "level3-campaigns"
 
 #: Runs inside the trial container with its own interpreter; stdlib only. Its
@@ -117,6 +122,7 @@ class Row:
     task: str
     candidate: str  # a directory under the task, or "fixture" for the no-op
     actor: str
+    candidate_digest: str | None  # the delivered surface (paths, bytes, modes); None for the no-op
     expected_status: str
     expected_criteria: Mapping[str, str]
 
@@ -133,10 +139,6 @@ class Manifest:
     @property
     def client_version(self) -> str:
         return str(self.data["frozen"]["client"]["version"])
-
-    @property
-    def per_attempt_seconds(self) -> float:
-        return float(self.data["frozen"]["caps"]["per_attempt_seconds"])
 
 
 def _need(value: object, kind: type, label: str) -> Any:
@@ -174,7 +176,10 @@ def load_manifest(path: Path) -> Manifest:
         candidate = _need(raw.get("candidate"), str, f"{row_id}.candidate")
         if (candidate == "fixture") != (actor == "noop"):
             raise CampaignRefused(f"row {row_id!r}: only a noop row grades the untouched fixture")
-        rows.append(Row(row_id, task, candidate, actor, status, dict(criteria)))
+        digest = raw.get("candidate_digest")
+        if (digest is None) != (actor == "noop") or (digest is not None and not isinstance(digest, str)):
+            raise CampaignRefused(f"row {row_id!r}: a candidate row freezes its surface digest; a no-op has none")
+        rows.append(Row(row_id, task, candidate, actor, digest, status, dict(criteria)))
     if not rows:
         raise CampaignRefused("manifest declares no rows; an empty population certifies nothing")
     return Manifest(data, tuple(rows))
@@ -186,6 +191,37 @@ def task_identity(task_root: Path) -> dict[str, object]:
     grader = verify.GraderDef.load(task_root)
     identity = cr.task_content_identity(goal, grader, cc.task_surface(task_root / "fixture"))
     return {**identity, "grader_id": grader.id, "grader_revision": grader.revision}
+
+
+def surface_digest(files: Sequence[tuple[str, bytes, bool]]) -> str:
+    """One digest over every delivered path, its bytes and its executable bit."""
+    return trial.sha256_bytes(trial.canonical([[path, executable, trial.sha256_bytes(body)]
+                                               for path, body, executable in sorted(files)]))
+
+
+def container_limits() -> dict[str, object]:
+    """The container limits every attempt runs under: `DockerBackend`'s own
+    defaults, which the campaign does not override."""
+    defaults = {f.name: f.default for f in dataclasses.fields(DockerBackend)}
+    return {k: defaults[k] for k in ("memory", "pids_limit", "cpus", "shm_size", "disk_limit")}
+
+
+def caps() -> dict[str, object]:
+    """Every cap as the code executes it; the manifest must equal this exactly."""
+    return {"per_attempt_seconds": PER_ATTEMPT_SECONDS, "gate_seconds": GATE_SECONDS, "agent_network": AGENT_NETWORK,
+            "container": container_limits()}
+
+
+def campaign_backends(*, image: str, base: Path, docker_bin: Sequence[str], daemon_timeout: float,
+                      runtime_supply: object) -> tuple[Any, Any]:
+    """`(agent, grading)` for one attempt: `collection_conformance.agent_backends`
+    with the agent on `AGENT_NETWORK` ("none") instead of its egress network."""
+    agent = cc.TrackingDockerBackend(image=image, base_dir=base, docker_bin=docker_bin,
+                                     daemon_timeout=daemon_timeout, network=AGENT_NETWORK,
+                                     runtime_supply=runtime_supply)  # type: ignore[arg-type]
+    grading = cc.TrackingDockerBackend(image=image, base_dir=base, docker_bin=docker_bin,
+                                       daemon_timeout=daemon_timeout)
+    return agent, grading
 
 
 def candidate_files(task_root: Path, row: Row) -> list[tuple[str, bytes, bool]]:
@@ -216,12 +252,19 @@ def check_frozen(manifest: Manifest, root: Path) -> list[str]:
     for key, value in frozen["runtime"].items():
         if policy.get(key) != value:
             problems.append(f"runtime policy {key}: {policy.get(key)!r} != frozen {value!r}")
+    for key, value in caps().items():
+        if frozen["caps"].get(key) != value:
+            problems.append(f"cap {key}: frozen {frozen['caps'].get(key)!r} != executed {value!r}")
     if frozen.get("harness_digest") != harness_digest():
         problems.append("the scripted actor or fake client changed since the manifest was frozen")
     for row in manifest.rows:
         task_root = root / "evals" / "level3" / row.task
-        if row.actor != "noop" and not (task_root / row.candidate).is_dir():
+        if row.actor == "noop":
+            continue
+        if not (task_root / row.candidate).is_dir():
             problems.append(f"row {row.id}: candidate {row.task}/{row.candidate} does not exist")
+        elif surface_digest(candidate_files(task_root, row)) != row.candidate_digest:
+            problems.append(f"row {row.id}: candidate {row.task}/{row.candidate} bytes or modes moved")
     return problems
 
 
@@ -242,7 +285,12 @@ def _tarball(files: list[tuple[str, bytes, bool]]) -> bytes:
 def row_home_files(row: Row, task_root: Path) -> dict[str, bytes]:
     files = {f"{HOME_DIR}/actor.py": ACTOR_SOURCE.encode(), f"{HOME_DIR}/fake_agent_client.py": FAKE_CLIENT.read_bytes()}
     if row.actor != "noop":
-        files[f"{HOME_DIR}/candidate.tar"] = _tarball(candidate_files(task_root, row))
+        surface = candidate_files(task_root, row)
+        # Bound at delivery, not only at the pre-run check: the archive built
+        # here is the one the frozen digest describes, or nothing is sent.
+        if surface_digest(surface) != row.candidate_digest:
+            raise CampaignRefused(f"row {row.id}: delivered candidate differs from its frozen surface digest")
+        files[f"{HOME_DIR}/candidate.tar"] = _tarball(surface)
     return files
 
 
@@ -289,7 +337,8 @@ def plan(manifest: Manifest, store: Path, root: Path, *, image_digest: str, trea
         trials.append({
             "label": row.id, "case": {"id": row.task, "revision": grader.revision}, "grader": grader.identity(),
             "subject": {"digest": treatment_digest}, "client": {"name": "codex", "version": manifest.client_version},
-            "image": {"digest": image_digest}, "config": {"candidate": row.candidate, "actor": row.actor},
+            "image": {"digest": image_digest},
+            "config": {"candidate": row.candidate, "actor": row.actor, "candidate_digest": row.candidate_digest},
             "attempts": 1,
         })
     experiment = trial.plan({"experiment": "level3-campaign", "trials": trials}, store)
@@ -331,7 +380,7 @@ def run_rows(
             extra_home_files={**treatment.home_files, **row_home_files(row, task_root)},
             client="codex", cli_version=manifest.client_version, task_root=task_root,
             surface=cc.surface_mapping(cc.task_surface(task_root / "fixture")), prompt=goal,
-            timeout=manifest.per_attempt_seconds, credential_explicit_path=credential,
+            timeout=PER_ATTEMPT_SECONDS, credential_explicit_path=credential,
             receipt_context=treatment.receipt_context, verify_home_files=treatment.verify_home_files,
             preflight_tools=treatment.preflight_tools, gate_entrypoint=treatment.gate_entrypoint,
         )

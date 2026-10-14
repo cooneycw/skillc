@@ -27,7 +27,13 @@
    "per_attempt_seconds": 900,
    "gate_seconds": 240,
    "agent_network": "none",
-   "container": "DockerBackend defaults: --memory 1g --memory-swap 1g --pids-limit 256 --cpus 1.0"
+   "container": {
+    "memory": "1g",
+    "pids_limit": "256",
+    "cpus": "1.0",
+    "shm_size": "64m",
+    "disk_limit": null
+   }
   },
   "tasks": {
    "gate-stops-early": {
@@ -55,6 +61,7 @@
    "task": "gate-stops-early",
    "candidate": "reference",
    "actor": "fresh",
+   "candidate_digest": "sha256:ecd4ddd85596c8117a4bcdb93c9d7f1395881898bb96e72a9b5dbe3b4a4bee1b",
    "expected": {
     "status": "PASS",
     "criteria": {
@@ -70,6 +77,7 @@
    "task": "gate-stops-early",
    "candidate": "alternatives/adds-typecheck-target",
    "actor": "fresh",
+   "candidate_digest": "sha256:30a69cfe8a10a4b59d964aa5cc2000602103a749088afcfa8a033af943e05a60",
    "expected": {
     "status": "PASS",
     "criteria": {
@@ -85,6 +93,7 @@
    "task": "gate-stops-early",
    "candidate": "alternatives/child-gate",
    "actor": "fresh",
+   "candidate_digest": "sha256:85dd3cd3c094943ca5676a500af5889f45e091f1905c032727ee0a87e86fe799",
    "expected": {
     "status": "PASS",
     "criteria": {
@@ -100,6 +109,7 @@
    "task": "gate-stops-early",
    "candidate": "alternatives/different-fix-approach",
    "actor": "fresh",
+   "candidate_digest": "sha256:62d4e10d5a5bab2b313ff422a7188b6f89a6cf7190417c380818cac0296850f4",
    "expected": {
     "status": "PASS",
     "criteria": {
@@ -115,6 +125,7 @@
    "task": "gate-stops-early",
    "candidate": "alternatives/expanded-discovery",
    "actor": "fresh",
+   "candidate_digest": "sha256:de3c42c943d64e94c35f00c174faf41a53496f243cb10c7ae308d410d1cb54e8",
    "expected": {
     "status": "PASS",
     "criteria": {
@@ -130,6 +141,7 @@
    "task": "gate-stops-early",
    "candidate": "alternatives/import-alias",
    "actor": "fresh",
+   "candidate_digest": "sha256:4ad3c389154da7e4246e75614b8a319a56ccedcc92f463ff253ca384e5309106",
    "expected": {
     "status": "PASS",
     "criteria": {
@@ -145,6 +157,7 @@
    "task": "gate-stops-early",
    "candidate": "alternatives/not-run-with-note",
    "actor": "fresh",
+   "candidate_digest": "sha256:c2dca06df6d322db1d016be510c14c6f4408b45b281279480d2224e9dcfdd322",
    "expected": {
     "status": "PASS",
     "criteria": {
@@ -160,6 +173,7 @@
    "task": "gate-stops-early",
    "candidate": "benign/extra-comment",
    "actor": "fresh",
+   "candidate_digest": "sha256:a48330bde4c5fd1645fb5dbf60d9259135fc2bce16ddbdcbfcb780ca0f9eae93",
    "expected": {
     "status": "PASS",
     "criteria": {
@@ -175,6 +189,7 @@
    "task": "gate-stops-early",
    "candidate": "fixture",
    "actor": "noop",
+   "candidate_digest": null,
    "expected": {
     "status": "FAIL",
     "criteria": {
@@ -191,6 +206,7 @@
    "task": "gate-stops-early",
    "candidate": "wrong/regression-outside-discovery",
    "actor": "fresh",
+   "candidate_digest": "sha256:948ed5ea91125dd18c2848d52311230029acbedef72405b3900528b9e85f4e70",
    "expected": {
     "status": "FAIL",
     "criteria": {
@@ -206,6 +222,7 @@
    "task": "gate-stops-early",
    "candidate": "wrong/unconditional-green",
    "actor": "fresh",
+   "candidate_digest": "sha256:d317f6852838d87a897cbe99c15e6450682f78c0b6e608256755125429c737e4",
    "expected": {
     "status": "FAIL",
     "criteria": {
@@ -221,6 +238,7 @@
    "task": "gate-stops-early",
    "candidate": "wrong/swallowed-failure",
    "actor": "fresh",
+   "candidate_digest": "sha256:072e3488de99613422cb5e49f53fb9a7cfdc959b58e45bb8ede812ee0834a603",
    "expected": {
     "status": "FAIL",
     "criteria": {
@@ -236,6 +254,7 @@
    "task": "gate-stops-early",
    "candidate": "wrong/swallowed-with-helper",
    "actor": "fresh",
+   "candidate_digest": "sha256:b4c23afbc39467c4b467252b6ac49094abf2da4b9c99167a84686c2f98fbd6dc",
    "expected": {
     "status": "FAIL",
     "criteria": {
@@ -251,6 +270,7 @@
    "task": "gate-stops-early",
    "candidate": "incomplete/profiling-disabled",
    "actor": "fresh",
+   "candidate_digest": "sha256:9cf4e1a4dffb1bfbb67e5d74dd88c5e8a7836a95af53c57518cbbb040893151f",
    "expected": {
     "status": "INCONCLUSIVE",
     "criteria": {
@@ -266,6 +286,7 @@
    "task": "gate-stops-early",
    "candidate": "incomplete/isolated-child-gate",
    "actor": "fresh",
+   "candidate_digest": "sha256:a09d793fcfc555d7a7bb8a14356674524b3e42db10698ef1b1b847d02ef41eca",
    "expected": {
     "status": "INCONCLUSIVE",
     "criteria": {
@@ -281,6 +302,7 @@
    "task": "gate-stops-early",
    "candidate": "incomplete/optimized-child-gate",
    "actor": "fresh",
+   "candidate_digest": "sha256:0c65da0bbd82f55f5ce735fa40b8632bd3777cf2581fbffa5a7d7899481145df",
    "expected": {
     "status": "INCONCLUSIVE",
     "criteria": {
@@ -296,6 +318,7 @@
    "task": "gate-stops-early",
    "candidate": "wrong/early-stop-reported-as-passed",
    "actor": "fresh",
+   "candidate_digest": "sha256:9c46445112a2adce15337a9c9cefc2845a7087e7020319deef907f56affb4708",
    "expected": {
     "status": "FAIL",
     "criteria": {
@@ -311,6 +334,7 @@
    "task": "gate-stops-early",
    "candidate": "wrong/skip-reported-as-pass",
    "actor": "fresh",
+   "candidate_digest": "sha256:569c005d9660da8991d34739b11814d419c1f36d308e5977a02db771b0747b4e",
    "expected": {
     "status": "FAIL",
     "criteria": {
@@ -326,6 +350,7 @@
    "task": "gate-stops-early",
    "candidate": "wrong/typecheck-failure-omitted",
    "actor": "fresh",
+   "candidate_digest": "sha256:25f2e1ddda3790d7cb5f23b3df7d3b668bc0f8a74e9f5f44e2a90a16136fec50",
    "expected": {
     "status": "FAIL",
     "criteria": {
@@ -341,6 +366,7 @@
    "task": "gate-stops-early",
    "candidate": "wrong/stale-evidence",
    "actor": "stale",
+   "candidate_digest": "sha256:a48330bde4c5fd1645fb5dbf60d9259135fc2bce16ddbdcbfcb780ca0f9eae93",
    "expected": {
     "status": "FAIL",
     "criteria": {
@@ -356,6 +382,7 @@
    "task": "gate-stops-early",
    "candidate": "wrong/proven-omission",
    "actor": "plan-only",
+   "candidate_digest": "sha256:a48330bde4c5fd1645fb5dbf60d9259135fc2bce16ddbdcbfcb780ca0f9eae93",
    "expected": {
     "status": "INCONCLUSIVE",
     "criteria": {
@@ -372,6 +399,7 @@
    "task": "verify-stops-early",
    "candidate": "reference",
    "actor": "fresh",
+   "candidate_digest": "sha256:7d04b44c5d889f6d466b90beb5292f733961a666f335565c81b890d5ec632127",
    "expected": {
     "status": "PASS",
     "criteria": {
@@ -387,6 +415,7 @@
    "task": "verify-stops-early",
    "candidate": "alternatives/adds-typecheck-target",
    "actor": "fresh",
+   "candidate_digest": "sha256:bcd773e4441f45f6ac76a1d8f12ef88ebb6e094ede20a2ca7b9fd6988a4c3658",
    "expected": {
     "status": "PASS",
     "criteria": {
@@ -402,6 +431,7 @@
    "task": "verify-stops-early",
    "candidate": "alternatives/child-gate",
    "actor": "fresh",
+   "candidate_digest": "sha256:da4f60bee313dd378856db107a95b42fef5e300f41d2d2955668d115838627f9",
    "expected": {
     "status": "PASS",
     "criteria": {
@@ -417,6 +447,7 @@
    "task": "verify-stops-early",
    "candidate": "alternatives/different-fix-approach",
    "actor": "fresh",
+   "candidate_digest": "sha256:8bdf240ad889f6bc62fd1f59748669b8baca4871ba21f9089ec452392043e1d8",
    "expected": {
     "status": "PASS",
     "criteria": {
@@ -432,6 +463,7 @@
    "task": "verify-stops-early",
    "candidate": "alternatives/expanded-discovery",
    "actor": "fresh",
+   "candidate_digest": "sha256:ea6d0900af275716e45b08710a5ce3a5c9f40934ca600a8f921039dccdc2bbec",
    "expected": {
     "status": "PASS",
     "criteria": {
@@ -447,6 +479,7 @@
    "task": "verify-stops-early",
    "candidate": "alternatives/import-alias",
    "actor": "fresh",
+   "candidate_digest": "sha256:b51586c207253292e34c8250c37df30c2eb82206fc2b790bc3a1620740a90c9f",
    "expected": {
     "status": "PASS",
     "criteria": {
@@ -462,6 +495,7 @@
    "task": "verify-stops-early",
    "candidate": "alternatives/not-run-with-note",
    "actor": "fresh",
+   "candidate_digest": "sha256:f7da2ae0e2298a77a7ad14b0c45b7d2e6504b4ef9732e1c8f6cc83f84e1c1bcb",
    "expected": {
     "status": "PASS",
     "criteria": {
@@ -477,6 +511,7 @@
    "task": "verify-stops-early",
    "candidate": "benign/extra-comment",
    "actor": "fresh",
+   "candidate_digest": "sha256:c8b62589e0d123a584d3b3c92a68e1004a7fa56ae4a6ea36b6009df0a0fbb4b6",
    "expected": {
     "status": "PASS",
     "criteria": {
@@ -492,6 +527,7 @@
    "task": "verify-stops-early",
    "candidate": "fixture",
    "actor": "noop",
+   "candidate_digest": null,
    "expected": {
     "status": "FAIL",
     "criteria": {
@@ -508,6 +544,7 @@
    "task": "verify-stops-early",
    "candidate": "wrong/regression-outside-discovery",
    "actor": "fresh",
+   "candidate_digest": "sha256:da121359946b92bcf3af0fae619e22983bc27e5d598b563279f5451ed60f94ee",
    "expected": {
     "status": "FAIL",
     "criteria": {
@@ -523,6 +560,7 @@
    "task": "verify-stops-early",
    "candidate": "wrong/unconditional-green",
    "actor": "fresh",
+   "candidate_digest": "sha256:94318becd14f4a042c3f490f6ec634a8c33c05879cbb56d9fd2be5e79996fc79",
    "expected": {
     "status": "FAIL",
     "criteria": {
@@ -538,6 +576,7 @@
    "task": "verify-stops-early",
    "candidate": "wrong/swallowed-failure",
    "actor": "fresh",
+   "candidate_digest": "sha256:1ca0f7835b7dd7d08d8f9ddf3c7398bcae48608b991a51f41f06f96e62e1e99f",
    "expected": {
     "status": "FAIL",
     "criteria": {
@@ -553,6 +592,7 @@
    "task": "verify-stops-early",
    "candidate": "wrong/swallowed-with-helper",
    "actor": "fresh",
+   "candidate_digest": "sha256:497cc9f3e601e0403aca4e2e826a28b38e88cd175536d4ded0bd0fd9d658f7f0",
    "expected": {
     "status": "FAIL",
     "criteria": {
@@ -568,6 +608,7 @@
    "task": "verify-stops-early",
    "candidate": "incomplete/profiling-disabled",
    "actor": "fresh",
+   "candidate_digest": "sha256:0f0f45f7e5def32fad9b2caf5ec91487872a1c2871fcf8edada505045ff39003",
    "expected": {
     "status": "INCONCLUSIVE",
     "criteria": {
@@ -583,6 +624,7 @@
    "task": "verify-stops-early",
    "candidate": "incomplete/isolated-child-gate",
    "actor": "fresh",
+   "candidate_digest": "sha256:732250ce555d436ef786ac2998943aefe1d376c6cd9473077f76bdce98afd816",
    "expected": {
     "status": "INCONCLUSIVE",
     "criteria": {
@@ -598,6 +640,7 @@
    "task": "verify-stops-early",
    "candidate": "incomplete/optimized-child-gate",
    "actor": "fresh",
+   "candidate_digest": "sha256:ee88e763bbaca561318c69f32fbd57c2ae065d74a46542aafdfc23353a2d2e5c",
    "expected": {
     "status": "INCONCLUSIVE",
     "criteria": {
@@ -613,6 +656,7 @@
    "task": "verify-stops-early",
    "candidate": "wrong/early-stop-reported-as-passed",
    "actor": "fresh",
+   "candidate_digest": "sha256:934eb59ab74cf74bea83e5d74f5c3c69252e132b4585336d16c2a9ecf05ddd4e",
    "expected": {
     "status": "FAIL",
     "criteria": {
@@ -628,6 +672,7 @@
    "task": "verify-stops-early",
    "candidate": "wrong/skip-reported-as-pass",
    "actor": "fresh",
+   "candidate_digest": "sha256:504d097b922bf396650dd4738186fb8f5765ac852a70a588fe8f218dd5f78b9f",
    "expected": {
     "status": "FAIL",
     "criteria": {
@@ -643,6 +688,7 @@
    "task": "verify-stops-early",
    "candidate": "wrong/typecheck-failure-omitted",
    "actor": "fresh",
+   "candidate_digest": "sha256:17fc17e401f84e965e88b374c895563030f53bc0d2be7bf0b747e4d26e0b8379",
    "expected": {
     "status": "FAIL",
     "criteria": {
@@ -658,6 +704,7 @@
    "task": "verify-stops-early",
    "candidate": "wrong/stale-evidence",
    "actor": "stale",
+   "candidate_digest": "sha256:c8b62589e0d123a584d3b3c92a68e1004a7fa56ae4a6ea36b6009df0a0fbb4b6",
    "expected": {
     "status": "FAIL",
     "criteria": {
@@ -673,6 +720,7 @@
    "task": "verify-stops-early",
    "candidate": "wrong/proven-omission",
    "actor": "plan-only",
+   "candidate_digest": "sha256:c8b62589e0d123a584d3b3c92a68e1004a7fa56ae4a6ea36b6009df0a0fbb4b6",
    "expected": {
     "status": "INCONCLUSIVE",
     "criteria": {

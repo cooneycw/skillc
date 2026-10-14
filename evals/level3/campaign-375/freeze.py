@@ -110,7 +110,10 @@ def manifest() -> dict[str, object]:
         for candidate, actor in POPULATION:
             expected, why = expected_for(task, candidate)
             row: dict[str, object] = {"id": f"{prefix}.{candidate.replace('/', '.')}", "task": task,
-                                      "candidate": candidate, "actor": actor, "expected": expected}
+                                      "candidate": candidate, "actor": actor, "candidate_digest": None
+                                      if actor == "noop" else lc.surface_digest(
+                                          lc.cc.task_surface(ROOT / "evals" / "level3" / task / candidate)),
+                                      "expected": expected}
             if why:
                 row["production_delta"] = why
             rows.append(row)
@@ -124,8 +127,7 @@ def manifest() -> dict[str, object]:
                        "argv": "scripted actor; no model is contacted"},
             "runtime": {k: policy[k] for k in ("runtime_id", "subject_revision", "pyproject_sha256", "lock_sha256")},
             "image": "the runtime-supply receipt's image id, bound at run time (README)",
-            "caps": {"per_attempt_seconds": 900, "gate_seconds": lc.GATE_SECONDS, "agent_network": "none",
-                     "container": "DockerBackend defaults: --memory 1g --memory-swap 1g --pids-limit 256 --cpus 1.0"},
+            "caps": lc.caps(),
             "tasks": {task: lc.task_identity(ROOT / "evals" / "level3" / task) for task in TASKS},
             "harness_digest": lc.harness_digest(),
         },
