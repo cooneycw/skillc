@@ -26,8 +26,10 @@ import tarfile
 import tempfile
 import threading
 import time
+import types
 from collections.abc import Iterator, Mapping
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -91,7 +93,9 @@ def _assert_one_shared_deadline(timeouts: list[float | None], bound: float) -> N
     No wall-clock ceiling is involved (issue #382)."""
     assert len(timeouts) == 2, f"expected exactly the stdout and stderr drain joins, saw {timeouts!r}"
     first, second = timeouts
-    assert first is not None and 0.0 < first <= bound, (
+    # 0.0 is legitimate: scheduling may exhaust the deadline before the first
+    # join's own `max(0.0, ...)` is even evaluated (Codex review of #382).
+    assert first is not None and 0.0 <= first <= bound, (
         f"the first drain join must be bounded by the one deadline ({bound}s), got {first!r}"
     )
     assert second is not None and second <= 0.1, (
@@ -1521,11 +1525,13 @@ def test_execute_never_prefixes_the_argv_when_no_supervisor_is_actually_running(
 
 
 @pytest.mark.parametrize(
-    "delays,subject_delay", [({}, 0.0), ({}, 1.0), ({"exec": 1.0}, 0.0)],
-    ids=["nominal", "slow-subject", "slow-exec"],
+    "delays,subject_delay,stall_first_poll",
+    [({}, 0.0, False), ({}, 1.0, False), ({"exec": 1.0}, 0.0, False), ({}, 0.0, True)],
+    ids=["nominal", "slow-subject", "slow-exec", "stalled-first-poll"],
 )
 def test_execute_forwards_term_through_a_capable_image_and_reports_exited_within_grace(
     base: Path, docker_state: Path, tmp_path: Path, delays: dict[str, float], subject_delay: float,
+    stall_first_poll: bool, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Red case 1 (issue #158): with the fake's "supervisor present and
     survives TERM" mode fully on (BOTH `.supervisor-NAME` - the binary - AND
@@ -1546,12 +1552,17 @@ def test_execute_forwards_term_through_a_capable_image_and_reports_exited_within
     loaded runner TERM could arrive before the subject installed its
     handler, or before the fake `docker exec` had registered it for
     forwarding - either way the sentinel was never written (push pipeline
-    457). TERM is now held until both have happened: `cancel` is polled by
-    `execute()`'s wait loop AFTER the deadline check, so a `cancel` that
-    blocks until the subject is ready and then returns False defers the
-    stop without changing it - the run still ends as `reason == "timeout"`.
-    `slow-subject` delays the handler by 1s and `slow-exec` delays the fake
-    exec's registration by 1s; both failed the old test and pass this one.
+    457). TERM is now held until both have happened. `execute()`'s wait loop
+    polls `cancel`; this test's `cancel` blocks until the subject is ready
+    and then returns False, so the stop is deferred, not changed - the run
+    still ends as `reason == "timeout"`. The loop checks its deadline BEFORE
+    `cancel`, so a controller descheduled past the deadline would skip the
+    gate (Codex review of #382): `docker_backend`'s clock is therefore held
+    still for the duration of `_launch_and_wait` until the gate opens, and
+    the real timeout runs from there. `slow-subject` delays the handler by
+    1s, `slow-exec` delays the fake exec's registration by 1s - both failed
+    the old test - and `stalled-first-poll` stalls 2.5s straight after the
+    deadline is computed, which skips the gate without the held clock.
     `grace` (10s) and the suite-default `daemon_timeout` only bound how long
     a slow host may take; nothing here passes faster for being given more."""
     backend = d.DockerBackend(
@@ -1579,6 +1590,30 @@ def test_execute_forwards_term_through_a_capable_image_and_reports_exited_within
     state_file = docker_state / f"{handle.name}.json"
     gate = {"open": False, "gave_up": False}
     gate_deadline = time.monotonic() + 30
+    real_monotonic = time.monotonic
+    clock: dict[str, float | None] = {"held_at": None}
+    held_reads = [0]
+
+    def monotonic() -> float:
+        held_at = clock["held_at"]
+        if held_at is None:
+            return real_monotonic()
+        held_reads[0] += 1
+        if stall_first_poll and held_reads[0] == 2:
+            time.sleep(2.5)  # descheduled between computing the deadline and checking it
+        return held_at
+
+    real_launch_and_wait = d.DockerBackend._launch_and_wait
+
+    def launch_and_wait_on_held_clock(self: d.DockerBackend, *args: Any, **kwargs: Any) -> Any:
+        clock["held_at"] = real_monotonic()
+        try:
+            return real_launch_and_wait(self, *args, **kwargs)
+        finally:
+            clock["held_at"] = None
+
+    monkeypatch.setattr(d, "time", types.SimpleNamespace(monotonic=monotonic, sleep=time.sleep))
+    monkeypatch.setattr(d.DockerBackend, "_launch_and_wait", launch_and_wait_on_held_clock)
 
     def hold_term_until_forwardable() -> bool:
         """Block until the handler is installed AND the fake has registered
@@ -1591,6 +1626,7 @@ def test_execute_forwards_term_through_a_capable_image_and_reports_exited_within
                 state, pid = {}, None
             if state.get("supervisor_registered") is True and state.get("exec_pid") == pid:
                 gate["open"] = True
+                clock["held_at"] = None  # release the clock: the real timeout runs from here
             elif time.monotonic() >= gate_deadline:
                 gate["gave_up"] = True
                 return True  # stop the run; the assertion below names why
@@ -1599,9 +1635,7 @@ def test_execute_forwards_term_through_a_capable_image_and_reports_exited_within
         return False
 
     result = backend.execute(
-        # 2s, not 0.3s: the loop checks the deadline BEFORE `cancel`, so a
-        # first iteration stalled past the deadline would skip the gate.
-        handle, [sys.executable, "-c", script], Limits(timeout=2.0, grace=10.0),
+        handle, [sys.executable, "-c", script], Limits(timeout=0.3, grace=10.0),
         cancel=hold_term_until_forwardable,
     )
     assert not gate["gave_up"], (
