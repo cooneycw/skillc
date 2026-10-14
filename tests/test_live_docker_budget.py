@@ -41,33 +41,71 @@ FAKE_DOCKER = ROOT / "tests" / "fixtures" / "docker-backend" / "fake_docker.py"
 CONSTRUCTION_FLOOR = 6
 
 
-def _backend_classes(tree: ast.Module) -> set[str]:
-    """`DockerBackend` plus every class this module derives from it."""
-    names = {"DockerBackend"}
+BACKEND_MODULE = "skillc.docker_backend"
+
+
+def _bindings(tree: ast.Module) -> tuple[set[str], set[str]]:
+    """Names bound to the `skillc.docker_backend` module, and names bound to
+    its `DockerBackend` class or a subclass: imports (with `as`), simple
+    assignments and class definitions. A same-named class that does not derive
+    from it is not counted. Dynamic construction (`getattr`, a factory defined
+    in another module) is outside what a source scan can resolve."""
+    modules: set[str] = set()
+    classes: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == BACKEND_MODULE and alias.asname:
+                    modules.add(alias.asname)
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if node.module == "skillc" and alias.name == "docker_backend":
+                    modules.add(alias.asname or alias.name)
+                elif node.module == BACKEND_MODULE and alias.name == "DockerBackend":
+                    classes.add(alias.asname or alias.name)
+
+    def is_backend(expr: ast.expr) -> bool:
+        if isinstance(expr, ast.Name):
+            return expr.id in classes
+        if isinstance(expr, ast.Attribute) and expr.attr == "DockerBackend":
+            value = expr.value
+            if isinstance(value, ast.Name):
+                return value.id in modules
+            return ast.unparse(value) == BACKEND_MODULE
+        return False
+
     changed = True
     while changed:
         changed = False
         for node in ast.walk(tree):
-            if isinstance(node, ast.ClassDef) and node.name not in names:
-                for base in node.bases:
-                    base_name = base.attr if isinstance(base, ast.Attribute) else getattr(base, "id", None)
-                    if base_name in names:
-                        names.add(node.name)
+            if isinstance(node, ast.ClassDef) and node.name not in classes:
+                if any(is_backend(base) for base in node.bases):
+                    classes.add(node.name)
+                    changed = True
+            elif isinstance(node, ast.Assign) and is_backend(node.value):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id not in classes:
+                        classes.add(target.id)
                         changed = True
-    return names
+    return modules, classes
 
 
 def _constructions(source: str, filename: str) -> list[tuple[str, bool]]:
     """(file:line, passes daemon_timeout) for each backend construction."""
     tree = ast.parse(source, filename=filename)
-    classes = _backend_classes(tree)
+    modules, classes = _bindings(tree)
     found = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         func = node.func
-        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
-        if name in classes:
+        constructs = (
+            (isinstance(func, ast.Name) and func.id in classes)
+            or (isinstance(func, ast.Attribute) and func.attr == "DockerBackend"
+                and ((isinstance(func.value, ast.Name) and func.value.id in modules)
+                     or ast.unparse(func.value) == BACKEND_MODULE))
+        )
+        if constructs:
             found.append((f"{filename}:{node.lineno}",
                           any(kw.arg == "daemon_timeout" for kw in node.keywords)))
     return sorted(found, key=lambda item: int(item[0].rsplit(":", 1)[1]))
@@ -97,6 +135,31 @@ def test_red_case_a_construction_without_the_budget_is_named() -> None:
     )
     found = _constructions(planted, "planted_live.py")
     assert found == [("planted_live.py:4", True), ("planted_live.py:5", False)]
+
+
+def test_red_case_aliased_constructions_are_resolved() -> None:
+    """Counter-model finding (#390): a name-only scan let an imported or
+    assigned alias through. Each spelling below binds the real class."""
+    planted = (
+        "import skillc.docker_backend as dbm\n"
+        "from skillc.docker_backend import DockerBackend as DB\n"
+        "Backend = dbm.DockerBackend\n"
+        "a = DB(image='x', base_dir=None)\n"
+        "b = Backend(image='x', base_dir=None)\n"
+        "c = dbm.DockerBackend(image='x', base_dir=None, daemon_timeout=30.0)\n"
+    )
+    assert _constructions(planted, "planted_live.py") == [
+        ("planted_live.py:4", False), ("planted_live.py:5", False), ("planted_live.py:6", True),
+    ]
+
+
+def test_a_same_named_class_that_is_not_the_backend_is_not_counted() -> None:
+    planted = (
+        "class DockerBackend:\n"
+        "    def __init__(self, **kwargs): ...\n"
+        "x = DockerBackend(image='x')\n"
+    )
+    assert _constructions(planted, "planted_live.py") == []
 
 
 def _fake_backend(base: Path, state: Path, budget: float) -> d.DockerBackend:
