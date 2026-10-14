@@ -13,6 +13,7 @@ this session. This proves the lifecycle state machine, argv composition and
 
 from __future__ import annotations
 
+import importlib.util
 import io
 import json
 import os
@@ -26,8 +27,10 @@ import tarfile
 import tempfile
 import threading
 import time
+import types
 from collections.abc import Iterator, Mapping
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -45,6 +48,61 @@ FAKE_DOCKER = Path(__file__).resolve().parent / "fixtures" / "docker-backend" / 
 
 def _docker_bin(state_dir: Path) -> list[str]:
     return [sys.executable, str(FAKE_DOCKER), "--state", str(state_dir)]
+
+
+def _slowed_docker_bin(state_dir: Path, tmp_path: Path, delays: Mapping[str, float]) -> list[str]:
+    """The fake CLI, delayed by a fixed number of seconds before the named
+    subcommands run: a slow daemon by construction rather than by host load
+    (issue #382). A loaded runner is what turned the timing-bound tests red
+    on CI, and load alone does not reproduce it on demand."""
+    if not delays:
+        return _docker_bin(state_dir)
+    wrapper = tmp_path / "slowed_docker.py"
+    wrapper.write_text(
+        "import runpy, sys, time\n"
+        f"time.sleep({dict(delays)!r}.get(sys.argv[3], 0.0))\n"
+        f"sys.argv = [{str(FAKE_DOCKER)!r}, *sys.argv[1:]]\n"
+        f"runpy.run_path({str(FAKE_DOCKER)!r}, run_name='__main__')\n",
+        encoding="utf-8",
+    )
+    return [sys.executable, str(wrapper), "--state", str(state_dir)]
+
+
+def _spy_on_drain_joins(monkeypatch: pytest.MonkeyPatch) -> list[float | None]:
+    """Record the `timeout` handed to each `_BoundedDrain` thread's `join()`,
+    in call order (issue #382). Joins of any other thread are not recorded.
+    Reads CPython's private `Thread._target`: if that ever stops working the
+    list stays empty, and `_assert_one_shared_deadline` refuses an empty list."""
+    timeouts: list[float | None] = []
+    real_join = threading.Thread.join
+
+    def join(thread: threading.Thread, timeout: float | None = None) -> None:
+        if isinstance(getattr(getattr(thread, "_target", None), "__self__", None), d._BoundedDrain):
+            timeouts.append(timeout)
+        real_join(thread, timeout)
+
+    monkeypatch.setattr(threading.Thread, "join", join)
+    return timeouts
+
+
+def _assert_one_shared_deadline(timeouts: list[float | None], bound: float) -> None:
+    """Both drains are held open past the join, so the first join waits out
+    the whole deadline. Against ONE shared deadline the second join is then
+    handed `max(0.0, deadline - now)`, which is 0.0: host load can only push
+    `now` later, never the timeout higher. Sequential joins, the regression
+    these tests exist to catch, hand the second join the full bound again.
+    No wall-clock ceiling is involved (issue #382)."""
+    assert len(timeouts) == 2, f"expected exactly the stdout and stderr drain joins, saw {timeouts!r}"
+    first, second = timeouts
+    # 0.0 is legitimate: scheduling may exhaust the deadline before the first
+    # join's own `max(0.0, ...)` is even evaluated (Codex review of #382).
+    assert first is not None and 0.0 <= first <= bound, (
+        f"the first drain join must be bounded by the one deadline ({bound}s), got {first!r}"
+    )
+    assert second is not None and second <= 0.1, (
+        f"the second drain join got timeout={second!r} after the first had already waited out the deadline - "
+        "it was given its own bound instead of the remainder of one shared deadline"
+    )
 
 
 @pytest.fixture
@@ -866,8 +924,10 @@ def test_read_home_tree_finds_multiple_files_under_the_directory(base: Path, doc
 
 @needs_setsid
 @pytest.mark.skipif(shutil.which("cat") is None, reason="needs cat to block the detached grandchild on a FIFO")
+@pytest.mark.parametrize("delays", [{}, {"cp": 1.2}], ids=["nominal", "slow-cp"])
 def test_read_home_tree_joins_stdout_and_stderr_against_one_shared_deadline(
-    base: Path, docker_state: Path, tmp_path: Path,
+    base: Path, docker_state: Path, tmp_path: Path, delays: dict[str, float],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """issue #20 Nit Store: read_home_tree's own stdout/stderr drain joins
     had the identical sequential-join shape execute()'s just got fixed for
@@ -892,10 +952,19 @@ def test_read_home_tree_joins_stdout_and_stderr_against_one_shared_deadline(
     so a still-open pipe under that size reads back EMPTY instead of
     partial) - a separate, pre-existing bug this test does not attempt to
     characterize or fix. `read_home_tree()` is expected to raise under that
-    bug; only the ELAPSED TIME is this test's own claim."""
-    daemon_timeout = 1.0
+    bug; only the JOIN SHAPE is this test's own claim.
+
+    Issue #382: this used to assert `elapsed < daemon_timeout + 0.8` with a
+    1.0s `daemon_timeout` on every fake-CLI call, and once failed in SETUP -
+    `deliver_home_file`'s `docker cp` exceeded 1.0s on a loaded host. It now
+    asserts the join shape directly (`_assert_one_shared_deadline`), which
+    host load cannot move, at the suite-default `daemon_timeout`. `slow-cp`
+    delays every fake `docker cp` by 1.2s, the setup failure by
+    construction; it failed the old test and passes this one."""
+    daemon_timeout = 5.0
     backend = d.DockerBackend(
-        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=daemon_timeout,
+        image="fake-image:1", base_dir=base, docker_bin=_slowed_docker_bin(docker_state, tmp_path, delays),
+        daemon_timeout=daemon_timeout,
     )
     handle = backend.prepare("a-lc-000000000018b")
     assert isinstance(handle, d._Handle)
@@ -905,13 +974,12 @@ def test_read_home_tree_joins_stdout_and_stderr_against_one_shared_deadline(
     docker_state.mkdir(parents=True, exist_ok=True)
     sentinel = docker_state / f".cp-hold-open-{handle.name}"
     sentinel.write_text(str(fifo), encoding="utf-8")
-    started = time.monotonic()
+    joins = _spy_on_drain_joins(monkeypatch)
     try:
         try:
             backend.read_home_tree(handle, ".claude/projects")
         except tarfile.ReadError:
             pass  # issue #189, not this test's own claim - see the docstring above
-        elapsed = time.monotonic() - started
     finally:
         sentinel.unlink(missing_ok=True)
         try:
@@ -919,14 +987,7 @@ def test_read_home_tree_joins_stdout_and_stderr_against_one_shared_deadline(
                 pass
         except OSError:
             pass
-    # ONE shared deadline (~1.3s measured) vs the pre-fix sequential joins
-    # (~2.3s measured) - 0.8s margin is tight enough to actually catch a
-    # regression back to sequential joins (mutation-checked: a bound of
-    # daemon_timeout + 2.0 here passed even with the joins reverted to
-    # sequential, which is not evidence at all), not merely wide enough to
-    # never fail.
-    bound = daemon_timeout + 0.8
-    assert elapsed < bound, f"read_home_tree() took {elapsed:.2f}s, expected under {bound:.2f}s"
+    _assert_one_shared_deadline(joins, daemon_timeout)
     backend.destroy(handle)
 
 
@@ -1146,8 +1207,10 @@ def test_execute_does_not_annotate_stderr_truncation_under_the_cap(base: Path, d
 
 @needs_setsid
 @pytest.mark.skipif(shutil.which("cat") is None, reason="needs cat to block the detached grandchild on a FIFO")
+@pytest.mark.parametrize("delays", [{}, {"exec": 1.5}], ids=["nominal", "slow-exec"])
 def test_execute_reports_stdout_incomplete_when_the_drain_never_reaches_eof(
-    base: Path, docker_state: Path, tmp_path: Path,
+    base: Path, docker_state: Path, tmp_path: Path, delays: dict[str, float],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Red case for issue #133 item 3: the pre-fix code read
     `stdout_drain.captured_bytes()` unconditionally after `stdout_thread.join(
@@ -1170,10 +1233,18 @@ def test_execute_reports_stdout_incomplete_when_the_drain_never_reaches_eof(
     and exits cleanly instead of leaking a process; it runs whether or not
     the assertions below it pass. Fails on the pre-fix code (pre-#164),
     which reported `stdout_truncated=False` here - indistinguishable from a
-    clean, complete, empty capture."""
-    grace, daemon_timeout = 1.0, 1.0
+    clean, complete, empty capture.
+
+    Issue #382: the joins' shared deadline used to be checked with an
+    absolute `elapsed < 3.5` ceiling, ~1s above the ~2.46s the fixed code
+    takes, and a loaded runner crossed it (push pipeline 457: 3.92s). The
+    join shape is now asserted directly (`_assert_one_shared_deadline`),
+    which host load cannot move. `slow-exec` delays the fake `docker exec`
+    by 1.5s; it failed the old ceiling and passes this assertion."""
+    grace, daemon_timeout = 0.5, 5.0
     backend = d.DockerBackend(
-        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=daemon_timeout,
+        image="fake-image:1", base_dir=base, docker_bin=_slowed_docker_bin(docker_state, tmp_path, delays),
+        daemon_timeout=daemon_timeout,
     )
     handle = backend.prepare("a-lc-000000000024b")
     assert isinstance(handle, d._Handle)
@@ -1181,31 +1252,16 @@ def test_execute_reports_stdout_incomplete_when_the_drain_never_reaches_eof(
     fifo = tmp_path / "hold-open.fifo"
     os.mkfifo(fifo)
     argv = ["sh", "-c", f"setsid sh -c 'exec cat {fifo}' </dev/null & true"]
-    # The nominal-worst-case-sum formula this bound used before overstated
-    # what the fixed path actually costs (kill_container and the
-    # observations docker-cp write-back both finish well under their own
-    # daemon_timeout on a healthy host) - a bound built from it was loose
-    # enough to pass even with the drain joins reverted to sequential
-    # (issue #20, mutation-checked: reverting them here, that formula's own
-    # 6.0s+ bound still passed at the reverted code's ~4.45s). Measured
-    # directly instead, repeatably: ~2.46s with the joins against ONE
-    # shared deadline (grace + daemon_timeout, not each thread against its
-    # own full bound sequentially), ~4.45s reverted to sequential. This
-    # bound sits between the two, mutation-checked to actually catch the
-    # regression.
-    bound = 3.5
-    started = time.monotonic()
+    joins = _spy_on_drain_joins(monkeypatch)
     try:
-        result = backend.execute(handle, argv, Limits(timeout=5, grace=grace))
-        elapsed = time.monotonic() - started
+        result = backend.execute(handle, argv, Limits(timeout=30, grace=grace))
         assert result.reason == "exited"
         assert result.stdout_incomplete is True
         assert result.stderr_incomplete is True
         assert result.stdout_truncated is False, "capped-and-discarded is a different fact from never-reached-EOF"
-        assert elapsed < bound, (
-            f"execute() took {elapsed:.2f}s, expected under {bound:.2f}s - it waited for the "
-            "detached grandchild instead of giving up, or the drain joins regressed to sequential"
-        )
+        # A bounded first join is "gave up instead of waiting for the
+        # detached grandchild"; a zero second join is "one shared deadline".
+        _assert_one_shared_deadline(joins, grace + daemon_timeout)
     finally:
         try:
             with open(fifo, "wb"):
@@ -1419,6 +1475,45 @@ def test_removing_a_container_without_a_preceding_kill_still_reaps_a_live_exec_s
         exec_proc.wait(timeout=5)
 
 
+def test_a_late_exec_cleanup_never_resurrects_a_removed_container(tmp_path: Path) -> None:
+    """Issue #382 (found on a serial run): the fake `docker exec`'s cleanup
+    (`_rewrite_state` clearing `exec_pid`) and `docker rm -f` (`cmd_rm`) are
+    separate OS processes. `cmd_rm` used to unlink the state file WITHOUT the
+    per-name lock, so a cleanup that had already read the file wrote it back
+    after the removal - resurrecting the container, which `confirm_absent()`
+    then honestly reported as NOT_CONFIRMED (the
+    `test_removing_a_container_without_a_preceding_kill_still_reaps_a_live_exec_session`
+    red). Reproduced deterministically by holding the cleanup open between
+    its read and its write while `rm -f` runs."""
+    spec = importlib.util.spec_from_file_location("fake_docker_under_test", FAKE_DOCKER)
+    assert spec is not None and spec.loader is not None
+    fake = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fake)
+    state_dir, name = tmp_path / "state", "skillc-a-resurrect"
+    state_dir.mkdir()
+    fake._write_state(state_dir, name, "running", "fake-image:1", {}, {}, "id-1")
+    fake._container_root(state_dir, name).mkdir(parents=True)
+    cleanup_has_read, release_cleanup = threading.Event(), threading.Event()
+
+    def clear_exec_pid_slowly(data: dict[str, object]) -> dict[str, object]:
+        cleanup_has_read.set()
+        release_cleanup.wait(timeout=5)
+        return {k: v for k, v in data.items() if k != "exec_pid"}
+
+    cleanup = threading.Thread(target=fake._rewrite_state, args=(state_dir, name, clear_exec_pid_slowly))
+    cleanup.start()
+    try:
+        assert cleanup_has_read.wait(timeout=5), "the cleanup never read the state file - the test proves nothing"
+        remover = threading.Thread(target=fake.cmd_rm, args=(state_dir, ["-f", name]))
+        remover.start()
+    finally:
+        release_cleanup.set()
+        cleanup.join(timeout=10)
+    remover.join(timeout=10)
+    assert not cleanup.is_alive() and not remover.is_alive()
+    assert not fake._state_file(state_dir, name).exists(), "a late exec cleanup resurrected the removed container"
+
+
 def test_execute_never_prefixes_the_argv_when_the_image_lacks_forwarding_support(
     base: Path, docker_state: Path,
 ) -> None:
@@ -1469,8 +1564,14 @@ def test_execute_never_prefixes_the_argv_when_no_supervisor_is_actually_running(
     backend.destroy(handle)
 
 
+@pytest.mark.parametrize(
+    "delays,subject_delay,stall_first_poll",
+    [({}, 0.0, False), ({}, 1.0, False), ({"exec": 1.0}, 0.0, False), ({}, 0.0, True)],
+    ids=["nominal", "slow-subject", "slow-exec", "stalled-first-poll"],
+)
 def test_execute_forwards_term_through_a_capable_image_and_reports_exited_within_grace(
-    base: Path, docker_state: Path, tmp_path: Path,
+    base: Path, docker_state: Path, tmp_path: Path, delays: dict[str, float], subject_delay: float,
+    stall_first_poll: bool, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Red case 1 (issue #158): with the fake's "supervisor present and
     survives TERM" mode fully on (BOTH `.supervisor-NAME` - the binary - AND
@@ -1485,9 +1586,27 @@ def test_execute_forwards_term_through_a_capable_image_and_reports_exited_within
     supervisor to relay anything - never receives TERM at all (the
     companion red case
     `test_a_container_level_kill_does_not_reach_the_execd_subject_but_still_kills_it`,
-    above, is exactly that scenario without either sentinel)."""
+    above, is exactly that scenario without either sentinel).
+
+    Issue #382: the timeout (0.3s) used to fire whenever it fired, so on a
+    loaded runner TERM could arrive before the subject installed its
+    handler, or before the fake `docker exec` had registered it for
+    forwarding - either way the sentinel was never written (push pipeline
+    457). TERM is now held until both have happened. `execute()`'s wait loop
+    polls `cancel`; this test's `cancel` blocks until the subject is ready
+    and then returns False, so the stop is deferred, not changed - the run
+    still ends as `reason == "timeout"`. The loop checks its deadline BEFORE
+    `cancel`, so a controller descheduled past the deadline would skip the
+    gate (Codex review of #382): `docker_backend`'s clock is therefore held
+    still for the duration of `_launch_and_wait` until the gate opens, and
+    the real timeout runs from there. `slow-subject` delays the handler by
+    1s, `slow-exec` delays the fake exec's registration by 1s - both failed
+    the old test - and `stalled-first-poll` stalls 2.5s straight after the
+    deadline is computed, which skips the gate without the held clock.
+    `grace` (10s) and the suite-default `daemon_timeout` only bound how long
+    a slow host may take; nothing here passes faster for being given more."""
     backend = d.DockerBackend(
-        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=1.0,
+        image="fake-image:1", base_dir=base, docker_bin=_slowed_docker_bin(docker_state, tmp_path, delays),
     )
     handle = backend.prepare("a-lc-000000000035")
     assert isinstance(handle, d._Handle)
@@ -1496,17 +1615,74 @@ def test_execute_forwards_term_through_a_capable_image_and_reports_exited_within
     (docker_state / f".supervisor-running-{handle.name}").touch()
 
     sentinel = tmp_path / "term-received"
+    ready = tmp_path / "subject-ready"
     script = (
-        "import signal, sys, time\n"
+        "import os, signal, sys, time\n"
+        f"time.sleep({subject_delay!r})\n"
         "def handler(signum, frame):\n"
         f"    open({str(sentinel)!r}, 'w').write('term')\n"
         "    sys.exit(0)\n"
         "signal.signal(signal.SIGTERM, handler)\n"
-        "time.sleep(20)\n"
+        f"open({str(ready)!r} + '.tmp', 'w').write(str(os.getpid()))\n"
+        f"os.replace({str(ready)!r} + '.tmp', {str(ready)!r})\n"
+        "time.sleep(60)\n"
     )
+    state_file = docker_state / f"{handle.name}.json"
+    gate = {"open": False, "gave_up": False}
+    gate_deadline = time.monotonic() + 30
+    real_monotonic = time.monotonic
+    clock: dict[str, float | None] = {"held_at": None}
+    held_reads = [0]
+
+    def monotonic() -> float:
+        held_at = clock["held_at"]
+        if held_at is None:
+            return real_monotonic()
+        held_reads[0] += 1
+        if stall_first_poll and held_reads[0] == 2:
+            time.sleep(2.5)  # descheduled between computing the deadline and checking it
+        return held_at
+
+    real_launch_and_wait = d.DockerBackend._launch_and_wait
+
+    def launch_and_wait_on_held_clock(self: d.DockerBackend, *args: Any, **kwargs: Any) -> Any:
+        clock["held_at"] = real_monotonic()
+        try:
+            return real_launch_and_wait(self, *args, **kwargs)
+        finally:
+            clock["held_at"] = None
+
+    monkeypatch.setattr(d, "time", types.SimpleNamespace(monotonic=monotonic, sleep=time.sleep))
+    monkeypatch.setattr(d.DockerBackend, "_launch_and_wait", launch_and_wait_on_held_clock)
+
+    def hold_term_until_forwardable() -> bool:
+        """Block until the handler is installed AND the fake has registered
+        this subject for forwarding, then never cancel."""
+        while not gate["open"]:
+            try:
+                pid = int(ready.read_text(encoding="utf-8"))
+                state = json.loads(state_file.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                state, pid = {}, None
+            if state.get("supervisor_registered") is True and state.get("exec_pid") == pid:
+                gate["open"] = True
+                clock["held_at"] = None  # release the clock: the real timeout runs from here
+            elif time.monotonic() >= gate_deadline:
+                gate["gave_up"] = True
+                return True  # stop the run; the assertion below names why
+            else:
+                time.sleep(0.01)
+        return False
+
     result = backend.execute(
-        handle, [sys.executable, "-c", script], Limits(timeout=0.3, grace=2.0),
+        handle, [sys.executable, "-c", script], Limits(timeout=0.3, grace=10.0),
+        cancel=hold_term_until_forwardable,
     )
+    assert not gate["gave_up"], (
+        "the subject never became forwardable within 30s - no installed handler, or never registered "
+        "with the supervisor; this is not the forwarding claim failing"
+    )
+    assert gate["open"], "the timeout fired before the readiness gate was ever consulted - TERM was not held"
     assert result.reason == "timeout"
     assert sentinel.exists(), "the subject should have received a real, forwarded TERM"
     assert result.signal == "SIGTERM"
