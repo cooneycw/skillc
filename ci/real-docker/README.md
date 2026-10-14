@@ -183,9 +183,9 @@ while the manual evidence run is still being prepared.
 ### Retaining and interpreting campaign evidence
 
 Run the final merged floor and all declared break modes at one tested SHA,
-using one explicitly installed reviewed runner SHA. The floor is the eight
+using one explicitly installed reviewed runner SHA. The floor is the nine
 files in `ci/check_real_docker_ran.py` (including #338's cwd-confinement
-file); also include the merged #348 production path in the final inventory. Report
+file and #393's nested-directory ownership file); also include the merged #348 production path in the final inventory. Report
 each issue's remaining acceptance separately; an aggregate green does not
 alone establish #334's real-script byte identity or complete witness coverage.
 

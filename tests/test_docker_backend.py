@@ -573,6 +573,173 @@ def test_install_accepts_raw_bytes_surface_values(
     backend.destroy(handle)
 
 
+def _observe_install_calls(
+    monkeypatch: pytest.MonkeyPatch, calls: list[tuple[list[str], bytes | None]], probe_fails: bool = False,
+) -> None:
+    real_run = subprocess.run
+
+    def observed_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        payload = kwargs.get("input")
+        calls.append((list(argv), payload if isinstance(payload, bytes) else None))
+        if probe_fails and _is_parent_probe(argv):
+            return subprocess.CompletedProcess(argv, 1, b"", b"probe exploded")
+        return real_run(argv, **kwargs)  # type: ignore[call-overload]
+
+    monkeypatch.setattr(subprocess, "run", observed_run)
+
+
+def _is_parent_probe(argv: list[str]) -> bool:
+    return "exec" in argv and any(a.startswith("i=0; for p do") for a in argv)
+
+
+def _tar_members(payload: bytes) -> list[tarfile.TarInfo]:
+    with tarfile.open(fileobj=io.BytesIO(payload)) as archive:
+        return archive.getmembers()
+
+
+def test_missing_parent_candidates_lists_every_ancestor_parents_first() -> None:
+    assert d._missing_parent_candidates(["top.py", "tests/unit/x.py", "tests/y.py", "ci/deep/gate.sh"]) == [
+        "ci", "tests", "ci/deep", "tests/unit",
+    ]
+    assert d._missing_parent_candidates(["flat.py", "other"]) == []
+
+
+def test_owned_tar_dirs_are_candidate_owned_directories_in_order() -> None:
+    members = _tar_members(d._owned_tar_dirs(["tests", "tests/unit"]))
+    assert [m.name for m in members] == ["tests", "tests/unit"]
+    for m in members:
+        assert m.isdir()
+        assert (m.uid, m.gid, m.mode) == (d.CANDIDATE_UID, d.CANDIDATE_GID, 0o755)
+
+
+def test_install_delivers_only_absent_nested_parents_as_owned_directories_first(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """#393: a one-file tar for `tests/unit/x.py` names no directory, so a
+    real `docker cp` creates `tests/` and `tests/unit/` owned by root and
+    the candidate cannot add a file there. The absent ancestors now go in
+    first, as candidate-owned directory entries - and ONLY the absent ones:
+    `pre/` already exists, and a directory entry landing on it would rewrite
+    its owner and mode on a real daemon. Fails on the pre-fix code (no
+    probe, no directory tar). The ownership itself is real-Docker evidence:
+    `tests/test_install_nested_dirs_live.py`."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-nested-parents-01")
+    assert isinstance(handle, d._Handle)
+    (docker_state / f"{handle.name}.fsroot" / "work" / "pre").mkdir(parents=True)
+    host_dir = tmp_path / "kit"
+    host_dir.mkdir()
+    (host_dir / "a.sh").write_text("true\n")
+    calls: list[tuple[list[str], bytes | None]] = []
+    try:
+        with monkeypatch.context() as patch:
+            _observe_install_calls(patch, calls)
+            readiness = backend.install(handle, {
+                "tests/unit/x.py": b"x", "pre/y.py": b"y", "tools/kit": host_dir, "flat.py": b"f",
+            })
+        assert readiness["entries"] == {
+            "tests/unit/x.py": "installed", "pre/y.py": "installed", "tools/kit": "installed", "flat.py": "installed",
+        }
+        assert list(readiness["entries"]) == ["tests/unit/x.py", "pre/y.py", "tools/kit", "flat.py"]
+        probes = [argv for argv, _ in calls if _is_parent_probe(argv)]
+        assert len(probes) == 1
+        probe = probes[0][len(backend.docker_bin):]
+        assert probe[:4] == ["exec", "-u", "0", "--"]
+        assert sorted(probe[-4:]) == ["/work/pre", "/work/tests", "/work/tests/unit", "/work/tools"]
+        copies = [payload for argv, payload in calls if "cp" in argv and payload is not None]
+        dirs = _tar_members(copies[0])
+        assert [m.name for m in dirs] == ["tests", "tools", "tests/unit"]
+        assert all(m.isdir() and m.uid == d.CANDIDATE_UID for m in dirs)
+        assert len(copies) == 1 + 4
+        dest = tmp_path / "export"
+        backend.export(handle, dest)
+        assert (dest / "tests/unit/x.py").read_bytes() == b"x"
+        assert (dest / "tools/kit/a.sh").is_file()
+    finally:
+        backend.destroy(handle)
+
+
+def test_install_of_a_flat_surface_makes_no_parent_probe(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-nested-parents-02")
+    assert isinstance(handle, d._Handle)
+    calls: list[tuple[list[str], bytes | None]] = []
+    try:
+        with monkeypatch.context() as patch:
+            _observe_install_calls(patch, calls)
+            backend.install(handle, {"a.py": b"a", "b.py": b"b", "gone/x.py": "/no/such/host/path"})
+        assert not [argv for argv, _ in calls if _is_parent_probe(argv)]
+        assert len([p for argv, p in calls if "cp" in argv and p is not None]) == 2
+    finally:
+        backend.destroy(handle)
+
+
+def test_install_refuses_before_copying_anything_when_the_parent_probe_fails(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unanswered probe is never guessed: "absent" would rewrite an
+    existing directory, "present" would leave a root-owned one."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-nested-parents-03")
+    assert isinstance(handle, d._Handle)
+    calls: list[tuple[list[str], bytes | None]] = []
+    try:
+        with monkeypatch.context() as patch:
+            _observe_install_calls(patch, calls, probe_fails=True)
+            with pytest.raises(BackendUnavailable, match="parent probe failed"):
+                backend.install(handle, {"tests/x.py": b"x"})
+        assert not [p for argv, p in calls if "cp" in argv and p is not None]
+    finally:
+        backend.destroy(handle)
+
+
+def test_install_refuses_when_the_parent_directory_copy_fails(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The directory tar is copied before any file; if it fails, no file is
+    copied into a parent the candidate would not own."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-nested-parents-05")
+    assert isinstance(handle, d._Handle)
+    real_run = subprocess.run
+    file_copies: list[bytes] = []
+
+    def failing_dir_copy(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        payload = kwargs.get("input")
+        if "cp" in argv and isinstance(payload, bytes):
+            if all(m.isdir() for m in _tar_members(payload)):
+                return subprocess.CompletedProcess(argv, 1, b"", b"no space left")
+            file_copies.append(payload)
+        return real_run(argv, **kwargs)  # type: ignore[call-overload]
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(subprocess, "run", failing_dir_copy)
+            with pytest.raises(BackendUnavailable, match="nested parent directories"):
+                backend.install(handle, {"tests/x.py": b"x"})
+        assert file_copies == []
+    finally:
+        backend.destroy(handle)
+
+
+@pytest.mark.parametrize("stdout", [b"zero\n", b"7\n", b"-1\n"])
+def test_absent_parents_refuses_an_unreadable_or_out_of_range_answer(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch, stdout: bytes,
+) -> None:
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-nested-parents-04")
+    assert isinstance(handle, d._Handle)
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(subprocess, "run", lambda argv, **kw: subprocess.CompletedProcess(argv, 0, stdout, b""))
+            with pytest.raises(BackendUnavailable, match="parent probe answered"):
+                backend._absent_parents(handle, "/work", ["tests", "tests/unit"])
+    finally:
+        backend.destroy(handle)
+
+
 def test_install_counts_a_non_path_surface_value_without_copying_it(
     base: Path, docker_state: Path,
 ) -> None:
