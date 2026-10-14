@@ -53,9 +53,9 @@ correction: an earlier draft of this file used `/work/.outside-root`,
 which is inside `/work` and so could never have been refused). The
 workspace tree is installed through `backend.install()` as a host
 DIRECTORY, so its directories are candidate-owned - exactly what a
-subject's installed surface gives it (a bytes entry alone would leave its
-parent directories root-owned, and the candidate could not swap
-anything). Every setup step after that - creating the outside target,
+subject's installed surface gives it (before #393 a nested bytes entry's
+parent directories were root-owned, and the candidate could not swap
+anything; they are candidate-owned now). Every setup step after that - creating the outside target,
 the swap itself - is a plain `docker exec` running as the container's
 own (candidate) user, never root: the subject's own power, nothing
 more. Every setup step is checked and a

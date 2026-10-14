@@ -649,6 +649,34 @@ def _owned_tar_bytes(arcname: str, data: bytes, mode: int = 0o644) -> bytes:
     return buf.getvalue()
 
 
+def _owned_tar_dirs(arcnames: Sequence[str]) -> bytes:
+    """A tar stream of DIRECTORY entries only, each candidate-owned mode
+    0755, in the given order (parents first) - #393's missing-parent
+    delivery. Never pass a directory that already exists in the container:
+    extracting a directory entry over an existing one rewrites ITS owner and
+    mode (verified on a real daemon), which is why `install()` sends only
+    the parents its existence probe reported absent."""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+        for arcname in arcnames:
+            info = tarfile.TarInfo(name=arcname)
+            info.type = tarfile.DIRTYPE
+            info.mode = 0o755
+            tar.addfile(_owned_tarinfo(info))
+    return buf.getvalue()
+
+
+def _missing_parent_candidates(keys: Sequence[str]) -> list[str]:
+    """Every proper ancestor directory of every key, relative, parents
+    before children and each once: `tests/unit/x.py` -> `tests`,
+    `tests/unit`. A top-level key contributes nothing."""
+    ancestors: set[str] = set()
+    for key in keys:
+        parents = PurePosixPath(key).parents
+        ancestors.update(str(p) for p in parents if str(p) != ".")
+    return sorted(ancestors, key=lambda a: (a.count("/"), a))
+
+
 class _BoundedDrain:
     """Drains `pipe` (stdout or stderr - one instance each) to EOF on its own
     thread, so the subject can never block on a full pipe buffer - the
@@ -1132,6 +1160,20 @@ class DockerBackend:
         ownership be set to the fixed candidate identity regardless of what
         the host file is actually owned by.
 
+        NESTED PARENTS (#393): the tar stream for key `tests/x.py` names
+        the file but not `tests/`, and `docker cp` creates a missing parent
+        itself, owned by ROOT - the candidate could edit `x.py` but never
+        add a file beside it. So before any entry is copied, one read-only
+        probe (`_absent_parents`) asks which ancestors of the copied keys
+        do not exist yet, and exactly those are delivered first as
+        candidate-owned directory entries (`_owned_tar_dirs`). Only the
+        absent ones: a directory entry extracted over an EXISTING directory
+        rewrites its owner and mode, so existing directories are never
+        sent. This works whoever owns `root` (a plain image's `/work` is
+        root-owned, so creating the parents AS the candidate would not).
+        A probe that cannot answer raises `BackendUnavailable`; a surface
+        with no nested keys makes no probe.
+
         PER-ENTRY READINESS (issue #133 item 4): `discovery_canary` used to
         be all-or-nothing - VIOLATED only when NOTHING installed, so one
         missing entry among several was invisible whenever at least one
@@ -1176,6 +1218,7 @@ class DockerBackend:
         installed = 0
         executable_rels = surface.get(SURFACE_EXECUTABLE_KEY)
         executable_set = set(executable_rels) if isinstance(executable_rels, (list, tuple, set)) else set()
+        payloads: dict[str, bytes] = {}
         for key, value in declared.items():
             if isinstance(value, bytes):
                 # Raw in-memory content, no host file backing it - the
@@ -1197,6 +1240,16 @@ class DockerBackend:
             else:
                 entries[key] = "not-a-path"
                 continue
+            payloads[key] = payload
+
+        # NESTED PARENTS (#393) - see the method docstring. Only entries
+        # that will actually be copied contribute; a flat surface makes no
+        # probe and no extra copy.
+        missing_parents = self._absent_parents(handle, effective_root, _missing_parent_candidates(list(payloads)))
+        if missing_parents:
+            self._copy_into(handle, effective_root, _owned_tar_dirs(missing_parents), "nested parent directories")
+
+        for key, payload in payloads.items():
             try:
                 copied = subprocess.run(
                     [*self.docker_bin, "cp", "-", f"{handle.name}:{effective_root}"],
@@ -1219,6 +1272,7 @@ class DockerBackend:
         # certify readiness for something that was never materialized. Since
         # #133 item 4, a missing entry among several successes is no longer
         # invisible either - see the method docstring's "PER-ENTRY READINESS".
+        entries = {k: entries[k] for k in declared if k in entries}  # declared order, as before #393
         missing = [k for k in entries if entries[k] == "missing"]
         readiness: dict[str, object] = {
             "discovery_canary": "SATISFIED" if (declared and installed and not missing) else "VIOLATED",
@@ -1252,6 +1306,60 @@ class DockerBackend:
             if canary_copied is not None and canary_copied.returncode == 0:
                 readiness["canary_path"] = CANARY_RESULT_FILENAME
         return readiness
+
+    def _absent_parents(self, handle: _Handle, root: str, relatives: Sequence[str]) -> list[str]:
+        """Which of `relatives` (directories under `root`, parents first)
+        do NOT yet exist in the container - asked with ONE read-only exec,
+        as root so that a directory the candidate cannot traverse still
+        reads as present (and so is never rewritten). Anything already
+        present, including a symlink, is excluded. Raises
+        `BackendUnavailable` when the probe cannot answer: an unknown
+        answer must not be guessed either way - guessing "absent" would
+        rewrite an existing directory, guessing "present" would leave a
+        root-owned one (#393)."""
+        if not relatives:
+            return []
+        absolute = [str(PurePosixPath(root) / rel) for rel in relatives]
+        try:
+            probed = subprocess.run(
+                [*self.docker_bin, "exec", "-u", "0", "--", handle.name, "sh", "-c",
+                 'i=0; for p do if [ -e "$p" ] || [ -L "$p" ]; then echo "$i"; fi; i=$((i+1)); done', "sh",
+                 *absolute],
+                capture_output=True, env=handle.env, check=False, timeout=self.daemon_timeout,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise BackendUnavailable(f"install parent probe failed for {handle.attempt_id!r}: {exc}") from exc
+        if probed.returncode != 0:
+            raise BackendUnavailable(
+                f"install parent probe failed for {handle.attempt_id!r}: "
+                f"{probed.stderr.decode('utf-8', errors='replace').strip()}"
+            )
+        # Indices, never echoed paths: an index cannot be mangled by a path
+        # holding a newline, and means the same whatever the path looks like.
+        try:
+            present = {int(line) for line in probed.stdout.decode("ascii").split()}
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise BackendUnavailable(f"install parent probe answered unreadably for {handle.attempt_id!r}") from exc
+        if not present <= set(range(len(relatives))):
+            raise BackendUnavailable(f"install parent probe answered out of range for {handle.attempt_id!r}")
+        return [rel for i, rel in enumerate(relatives) if i not in present]
+
+    def _copy_into(self, handle: _Handle, root: str, payload: bytes, what: str) -> None:
+        """`docker cp - NAME:root` for one owned tar stream; raises
+        `BackendUnavailable` naming `what` on any failure."""
+        try:
+            copied = subprocess.run(
+                [*self.docker_bin, "cp", "-", f"{handle.name}:{root}"],
+                input=payload, capture_output=True, env=handle.env, check=False,
+                timeout=self.daemon_timeout,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise BackendUnavailable(f"docker cp failed installing {what} for {handle.attempt_id!r}: {exc}") from exc
+        if copied.returncode != 0:
+            raise BackendUnavailable(
+                f"docker cp failed installing {what} for {handle.attempt_id!r}: "
+                f"{copied.stderr.decode('utf-8', errors='replace').strip()}"
+            )
 
     def _workspace_baseline(self, handle: _Handle, root: str = CONTAINER_WORKSPACE) -> tuple[frozenset[str], bool]:
         """Every top-level entry already present under `root` (#332

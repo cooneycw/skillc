@@ -8,6 +8,23 @@ and version plan.
 
 ## [Unreleased]
 
+- **Installed fixture subdirectories belong to the candidate** (#393).
+  `DockerBackend.install()` sent each surface entry as a one-file tar with no
+  directory entries, so `docker cp` created a missing parent such as `tests/`
+  owned by root: the candidate could edit installed files but not add one
+  beside them (`touch /work/tests/new.py`: `Permission denied`). Nested path
+  keys had the same gap one level up. `install()` now asks, in one read-only
+  exec, which ancestors of the copied keys are absent, and delivers exactly
+  those first as candidate-owned directories. Existing directories are never
+  sent, because a real daemon rewrites an existing directory's owner and mode
+  when a directory entry lands on it. A probe that cannot answer refuses the
+  install. `tests/test_install_nested_dirs_live.py` fails on the old code
+  with `Permission denied`, and fails again if every ancestor is reported
+  absent (a pre-existing root 0700 directory becomes `10001:10001 755`).
+  `deliver_home_file` already created its parents as the candidate and is
+  unchanged. Live evidence from calibration-203 / 203-low ran
+  `gate-ran-nothing`, whose reference adds `tests/unit/__init__.py`, under
+  this defect; see #393 for how that reading is qualified.
 - **Real-Docker live tests run on an explicit 30 s daemon budget** (#390). The
   six `DockerBackend` constructions in `tests/*_live.py` had no
   `daemon_timeout`, so container start ran on the 5 s module default. On
