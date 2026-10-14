@@ -117,6 +117,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 import pytest
+from conftest import LIVE_DOCKER_DAEMON_TIMEOUT
 
 from skillc import docker_backend as d
 from skillc.backend import ExecuteResult, Limits
@@ -494,6 +495,7 @@ def test_the_gate_witness_round_trips_correctly_against_a_real_daemon(monkeypatc
 
     backend = d.DockerBackend(
         image=LIVE_TEST_IMAGE, base_dir=base, network="none",
+        daemon_timeout=LIVE_DOCKER_DAEMON_TIMEOUT,
         trigger_decide=decide, trigger_socket_dir=trigger_dir,
     )
     # Per-run suffix and everything after `prepare()` inside the `try`

@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from conftest import LIVE_DOCKER_DAEMON_TIMEOUT
 
 from skillc import agent_trial as at
 from skillc import docker_backend as d
@@ -435,6 +436,7 @@ def _generic_offline_control(home_files: Mapping[str, bytes], tools: Sequence[Ma
         assert build.returncode == 0, "generic image build failed"
         with tempfile.TemporaryDirectory(prefix="sk-360-generic-") as temp:
             backend = d.DockerBackend(image=tag, base_dir=Path(temp), network="none", witness_io=True,
+                                      daemon_timeout=LIVE_DOCKER_DAEMON_TIMEOUT,
                                       env={"UV_PYTHON": "/usr/bin/python3", "UV_PYTHON_DOWNLOADS": "never"})
             handle = backend.prepare("a-360-generic-" + uuid.uuid4().hex)
             try:
@@ -506,6 +508,7 @@ def test_a_treated_attempts_closure_is_verified_and_the_gate_reaches_the_real_ru
     backend = _RuntimeBackend(
         image=supply.image_id, base_dir=base, network="none",
         runtime_supply=supply, witness_io=True, fault=BREAK_MODE,
+        daemon_timeout=LIVE_DOCKER_DAEMON_TIMEOUT,
         trigger_decide=decide, trigger_socket_dir=trigger_dir,
     )
     try:
