@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from conftest import FAKE_DOCKER_DAEMON_TIMEOUT
 from test_agent_trial import (
     GRADER_ROOT,
     _docker_bin,
@@ -119,9 +120,9 @@ def run_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, mode: str = "fr
     state = tmp_path / "docker-state"
     monkeypatch.setattr(at, "_FLOW_CHECK_GATE_HARNESS_ROOT", "/home/candidate/.protected-harness")
     with tempfile.TemporaryDirectory(prefix="sk-witness-") as channel_dir:
-        backend = VirtualMountBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(state),
+        backend = VirtualMountBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(state), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT,
                                       trigger_socket_dir=Path(channel_dir), fault=fault)
-        grading = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(state))
+        grading = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(state), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
         home = _mapped_home(state, attempt)
         fake = _fake_argv(fmt="codex-fake", home=home,
                          transcript_relpath=".codex/sessions/2026/01/01/rollout-witness.jsonl",

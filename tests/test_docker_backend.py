@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from conftest import FAKE_DOCKER_DAEMON_TIMEOUT
 
 from skillc import docker_backend as d
 from skillc import lifecycle as lc
@@ -117,8 +118,17 @@ def docker_state(tmp_path: Path) -> Path:
     return tmp_path / "docker-state"
 
 
-def _backend(base: Path, docker_state: Path) -> d.DockerBackend:
-    return d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+def _backend(
+    base: Path, docker_state: Path, daemon_timeout: float = FAKE_DOCKER_DAEMON_TIMEOUT,
+) -> d.DockerBackend:
+    """A backend over the fake CLI, bounded by the TEST-only daemon budget
+    (issue #385) - production's 5s bounds a real daemon, and one fake process
+    spawn on a loaded host can exceed it. A test that needs the bound to FIRE
+    passes its own small `daemon_timeout`, so its claim and runtime do not
+    depend on this default."""
+    return d.DockerBackend(
+        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=daemon_timeout,
+    )
 
 
 def _sentinel(docker_state: Path, name: str) -> None:
@@ -182,7 +192,7 @@ def test_describe_states_disk_limit_is_unset_by_default(base: Path, docker_state
 
 def test_describe_states_the_configured_disk_limit(base: Path, docker_state: Path) -> None:
     backend = d.DockerBackend(
-        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), disk_limit="3g",
+        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT, disk_limit="3g",
     )
     description = backend.describe()
     assert any("size=3g" in claim for claim in description.isolation)
@@ -478,7 +488,7 @@ def test_prepare_raises_when_docker_run_itself_fails(base: Path, docker_state: P
 
 def test_prepare_raises_when_the_docker_binary_is_missing(base: Path) -> None:
     backend = d.DockerBackend(
-        image="fake-image:1", base_dir=base, docker_bin=["/nonexistent/docker-binary-xyz"],
+        image="fake-image:1", base_dir=base, docker_bin=["/nonexistent/docker-binary-xyz"], daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT,
     )
     with pytest.raises(BackendUnavailable):
         backend.prepare("a-lc-000000000003")
@@ -1438,7 +1448,7 @@ def test_removing_a_container_without_a_preceding_kill_still_reaps_a_live_exec_s
     kill entirely, to prove `rm -f` alone - with no preceding `kill` at all
     - still reaps a live exec'd session, exactly as real container removal
     does."""
-    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     handle = backend.prepare("a-lc-000000000031")
     assert isinstance(handle, d._Handle)
     backend.install(handle, {})
@@ -1607,6 +1617,7 @@ def test_execute_forwards_term_through_a_capable_image_and_reports_exited_within
     a slow host may take; nothing here passes faster for being given more."""
     backend = d.DockerBackend(
         image="fake-image:1", base_dir=base, docker_bin=_slowed_docker_bin(docker_state, tmp_path, delays),
+        daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT,
     )
     handle = backend.prepare("a-lc-000000000035")
     assert isinstance(handle, d._Handle)
@@ -1710,7 +1721,7 @@ def test_execute_reports_launch_failed_when_the_docker_binary_is_missing(
     handle = backend.prepare("a-lc-000000000011")
     backend.install(handle, {})
     broken = d.DockerBackend(
-        image="fake-image:1", base_dir=base, docker_bin=["/nonexistent/docker-binary-xyz"],
+        image="fake-image:1", base_dir=base, docker_bin=["/nonexistent/docker-binary-xyz"], daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT,
     )
     result = broken.execute(handle, ["true"], Limits(timeout=1))
     assert result.reason == "launch-failed"
@@ -1953,7 +1964,7 @@ def _trigger_backend(base: Path, docker_state: Path, trigger_socket_dir: Path) -
     def decide(request: Mapping[str, object]) -> Mapping[str, object]:
         return {"decision": "fail" if request.get("client_seq") == 3 else "pass"}
     return d.DockerBackend(
-        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), trigger_decide=decide,
+        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT, trigger_decide=decide,
         trigger_socket_dir=trigger_socket_dir,
     )
 
@@ -2759,6 +2770,29 @@ def test_remove_file_in_attempt_on_a_path_that_never_existed_is_still_true(
     absent", not merely "the remove command did not error"."""
     backend = _backend(base, docker_state)
     handle = backend.prepare("a-rm-0000000000002")
+    backend.install(handle, {})
+    try:
+        assert backend.remove_file_in_attempt(handle, f"{d.CONTAINER_WORKSPACE}/never-existed") is True
+    finally:
+        backend.destroy(handle)
+
+
+def test_a_fake_setup_call_slower_than_the_production_daemon_timeout_still_succeeds(
+    base: Path, docker_state: Path,
+) -> None:
+    """Regression for issue #385: the test above failed in SETUP on a loaded
+    host, its fake `docker run -d` timing out after production's 5s
+    `DAEMON_TIMEOUT` - a bound for a real daemon, not for a fake CLI that is
+    a fresh Python process per call. `_backend()` now builds every fake
+    backend with `conftest.FAKE_DOCKER_DAEMON_TIMEOUT`. The slow host is
+    reproduced by construction (`.delay-run`), never by load. Fails on the
+    pre-fix `_backend()` with `BackendUnavailable` from `prepare()`."""
+    delay = d.DAEMON_TIMEOUT + 1.0
+    assert delay < FAKE_DOCKER_DAEMON_TIMEOUT
+    docker_state.mkdir(parents=True, exist_ok=True)
+    (docker_state / ".delay-run").write_text(str(delay), encoding="utf-8")
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-rm-0000000000385")
     backend.install(handle, {})
     try:
         assert backend.remove_file_in_attempt(handle, f"{d.CONTAINER_WORKSPACE}/never-existed") is True

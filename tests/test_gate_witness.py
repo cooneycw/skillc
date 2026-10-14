@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
+from conftest import FAKE_DOCKER_DAEMON_TIMEOUT
 
 from skillc import docker_backend as d
 from skillc.backend import BackendDescription, Confirmation, ExecuteResult, Limits
@@ -836,7 +837,7 @@ def test_real_gates_run_with_real_exit_codes_while_the_primary_subject_keeps_run
     (nit-stored during #183's own work)."""
     base = tmp_path / "work"
     base.mkdir()
-    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(tmp_path / "docker-state"))
+    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(tmp_path / "docker-state"), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     handle = backend.prepare("a-gw-0000000000001")
     backend.install(handle, {})
     try:
@@ -915,7 +916,7 @@ def test_exec_in_attempt_is_refused_once_the_primary_has_already_stopped(tmp_pat
     #304, not fixed here)."""
     base = tmp_path / "work"
     base.mkdir()
-    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(tmp_path / "docker-state"))
+    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(tmp_path / "docker-state"), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     handle = backend.prepare("a-gw-0000000000002")
     backend.install(handle, {})
     try:
@@ -948,7 +949,7 @@ def test_confirmed_kill_needs_no_standalone_kill_binary_on_path(tmp_path: Path, 
     base = tmp_path / "work"
     base.mkdir()
     monkeypatch.setenv("PATH", str(minimal_bin))
-    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(tmp_path / "docker-state"))
+    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(tmp_path / "docker-state"), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     handle = backend.prepare("a-gw-0000000000005")
     backend.install(handle, {})
     try:
@@ -967,7 +968,7 @@ def test_exec_in_attempt_never_stops_the_container_on_its_own_timeout(tmp_path: 
     this method must never stop it even on its own internal timeout."""
     base = tmp_path / "work"
     base.mkdir()
-    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(tmp_path / "docker-state"))
+    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(tmp_path / "docker-state"), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     handle = backend.prepare("a-gw-0000000000003")
     backend.install(handle, {})
     try:
@@ -991,14 +992,28 @@ def test_confirm_and_kill_in_container_returns_false_when_the_kill_exec_cannot_b
     `True` when it cannot reach the daemon at all."""
     base = tmp_path / "work"
     base.mkdir()
-    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(tmp_path / "docker-state"))
+    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(tmp_path / "docker-state"), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     handle = backend.prepare("a-gw-0000000000004")
     backend.install(handle, {})
     try:
-        broken = dataclasses.replace(backend, docker_bin=[sys.executable, "/nonexistent/fake_docker.py"])
+        # The post-KILL poll runs until `daemon_timeout` expires - this test
+        # needs that bound to FIRE, so it carries its own small one rather
+        # than the setup calls' FAKE_DOCKER_DAEMON_TIMEOUT (issue #385).
+        broken = dataclasses.replace(
+            backend, docker_bin=[sys.executable, "/nonexistent/fake_docker.py"], daemon_timeout=1.0,
+        )
         assert isinstance(handle, d._Handle)
+        started = time.monotonic()
         confirmed = broken._confirm_and_kill_in_container(handle, pid=999999, grace=0.1)
+        elapsed = time.monotonic() - started
         assert confirmed is False
+        # Negative control for issue #385: had this broken backend inherited
+        # the large setup budget by mistake, the poll would wait it out in
+        # full and still answer False - the verdict alone cannot tell. ~1s
+        # here against a 30s budget is no wall-clock race.
+        assert elapsed < FAKE_DOCKER_DAEMON_TIMEOUT, (
+            f"the kill-confirm poll ran {elapsed:.1f}s - its own small daemon_timeout did not bound it"
+        )
     finally:
         backend.destroy(handle)
 
