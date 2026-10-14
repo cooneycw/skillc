@@ -1,6 +1,6 @@
 """Live-Docker tool-probe conformance test for #343: proves the trial
 image's declared tool dependencies (`tool-uv`, `tool-make-git-bash` in
-`cpp-codex-flow-check-ea6dbfa/profile.json`) actually resolve inside a REAL
+`cpp-codex-flow-check-86641e8/profile.json`) actually resolve inside a REAL
 built image, against a REAL `docker build`/`docker run` - not only
 `docker/trial/check_pins.py`'s or `check_interpreters.py`'s no-daemon text
 checks, neither of which covers this surface (`check_interpreters.py` is
@@ -13,7 +13,8 @@ and verifies the profile closure, then preflights declared tools in-
 container") is not merged yet, and that issue's own dependency `id` fields
 (`tool-uv`, `tool-make-git-bash`) are not real binary names `shutil.which`
 could resolve - confirmed by reading `evals/subjects/cpp-codex-flow-check-
-ea6dbfa/profile.json` directly. Switch this file to call #334's evaluator
+ea6dbfa/profile.json` directly (its tool probes are carried unchanged into
+the 86641e8 repin this file now targets, #376). Switch this file to call #334's evaluator
 once it lands, rather than re-deriving the same probe commands twice.
 
 SKIPPED, NOT FAILED, WHEN NO DOCKER DAEMON IS AVAILABLE - same convention as
@@ -153,7 +154,7 @@ def test_python3_satisfies_the_profiles_version_floor(built_image: str) -> None:
 
 @pytest.mark.parametrize("tool", ["make", "bash", "git"])
 def test_declared_tool_dependency_is_present(built_image: str, tool: str) -> None:
-    """`cpp-codex-flow-check-ea6dbfa/profile.json`'s own `tool-make-git-
+    """`cpp-codex-flow-check-86641e8/profile.json`'s own `tool-make-git-
     bash` dependency, by probe command - plain `assert`, same reasoning as
     the python3 check above: none of these three is the targeted property
     of `trialimage:no-uv`, and all three are installed on the shared `base`
