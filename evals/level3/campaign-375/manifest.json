@@ -1,0 +1,688 @@
+{
+ "kind": "level3-production-campaign",
+ "schema": 1,
+ "issue": 375,
+ "frozen": {
+  "skillc_revision": "bound at run time: the run refuses a dirty tree and records HEAD (README)",
+  "subject": {
+   "name": "cpp-codex-flow-check-86641e8",
+   "profile": "evals/subjects/cpp-codex-flow-check-86641e8",
+   "locator": "github.com/cooneycw/claude-power-pack",
+   "revision": "86641e817711d8a7746270745a5dfa7cacf04b0c",
+   "inventory_digest": "sha256:4ee34823eb9f12c86d35f67d731b97a4c86dcd37ef77f9cada1ba78efe5f695a"
+  },
+  "client": {
+   "name": "codex",
+   "version": "0.157.1",
+   "argv": "scripted actor; no model is contacted"
+  },
+  "runtime": {
+   "runtime_id": "cpp-codex-flow-check-86641e8",
+   "subject_revision": "86641e817711d8a7746270745a5dfa7cacf04b0c",
+   "pyproject_sha256": "bc42953d69269328dbe5041d3b7ef6423804492db20b8cf8a59a94c0ee9f3774",
+   "lock_sha256": "b8edbdd3e0036bc09c849cedee3c1231c468f0f0f9425090c8f2ec914108f3cf"
+  },
+  "image": "the runtime-supply receipt's image id, bound at run time (README)",
+  "caps": {
+   "per_attempt_seconds": 900,
+   "gate_seconds": 240,
+   "agent_network": "none",
+   "container": "DockerBackend defaults: --memory 1g --memory-swap 1g --pids-limit 256 --cpus 1.0"
+  },
+  "tasks": {
+   "gate-stops-early": {
+    "version": 1,
+    "goal_digest": "sha256:250b82c4e9ebd2cb5afc88e3a4f1dfaa19075b22142b87444efe3f33cff1bb9e",
+    "grader_digest": "sha256:332318a553fdb7cfcd518d1baf0bef9a04895c7941a3ddd9307669bca15b21bc",
+    "fixture_digest": "sha256:4054683acfc41497f08c8da862a7bbf3a37f4e9fc9e556d75b243b7b0c265cfd",
+    "grader_id": "gate-stops-early",
+    "grader_revision": "5"
+   },
+   "verify-stops-early": {
+    "version": 1,
+    "goal_digest": "sha256:ffd70cb4b7cf0c0ceb80558ac1e43737d745fbd3db2b092c36f396c806f7ca04",
+    "grader_digest": "sha256:ac0455453078d0eacadd19a35c092f25f0d72b116bb4c877e858b8f8be8ca61f",
+    "fixture_digest": "sha256:f909883fd86622d29dd1b993819b4c5e4a07a65426f291564e76d58bf18cc8d6",
+    "grader_id": "verify-stops-early",
+    "grader_revision": "4"
+   }
+  },
+  "harness_digest": "sha256:4585cd09dc9549c31c31cabb03fc9540cadc77f83f48c4c103dac8ae9bd06f0c"
+ },
+ "rows": [
+  {
+   "id": "gse.reference",
+   "task": "gate-stops-early",
+   "candidate": "reference",
+   "actor": "fresh",
+   "expected": {
+    "status": "PASS",
+    "criteria": {
+     "functional-windows-fix": "SATISFIED",
+     "regression-fails-on-original": "SATISFIED",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "gse.alternatives.adds-typecheck-target",
+   "task": "gate-stops-early",
+   "candidate": "alternatives/adds-typecheck-target",
+   "actor": "fresh",
+   "expected": {
+    "status": "PASS",
+    "criteria": {
+     "functional-windows-fix": "SATISFIED",
+     "regression-fails-on-original": "SATISFIED",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "gse.alternatives.child-gate",
+   "task": "gate-stops-early",
+   "candidate": "alternatives/child-gate",
+   "actor": "fresh",
+   "expected": {
+    "status": "PASS",
+    "criteria": {
+     "functional-windows-fix": "SATISFIED",
+     "regression-fails-on-original": "SATISFIED",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "gse.alternatives.different-fix-approach",
+   "task": "gate-stops-early",
+   "candidate": "alternatives/different-fix-approach",
+   "actor": "fresh",
+   "expected": {
+    "status": "PASS",
+    "criteria": {
+     "functional-windows-fix": "SATISFIED",
+     "regression-fails-on-original": "SATISFIED",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "gse.alternatives.expanded-discovery",
+   "task": "gate-stops-early",
+   "candidate": "alternatives/expanded-discovery",
+   "actor": "fresh",
+   "expected": {
+    "status": "PASS",
+    "criteria": {
+     "functional-windows-fix": "SATISFIED",
+     "regression-fails-on-original": "SATISFIED",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "gse.alternatives.import-alias",
+   "task": "gate-stops-early",
+   "candidate": "alternatives/import-alias",
+   "actor": "fresh",
+   "expected": {
+    "status": "PASS",
+    "criteria": {
+     "functional-windows-fix": "SATISFIED",
+     "regression-fails-on-original": "SATISFIED",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "gse.alternatives.not-run-with-note",
+   "task": "gate-stops-early",
+   "candidate": "alternatives/not-run-with-note",
+   "actor": "fresh",
+   "expected": {
+    "status": "PASS",
+    "criteria": {
+     "functional-windows-fix": "SATISFIED",
+     "regression-fails-on-original": "SATISFIED",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "gse.benign.extra-comment",
+   "task": "gate-stops-early",
+   "candidate": "benign/extra-comment",
+   "actor": "fresh",
+   "expected": {
+    "status": "PASS",
+    "criteria": {
+     "functional-windows-fix": "SATISFIED",
+     "regression-fails-on-original": "SATISFIED",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "gse.fixture",
+   "task": "gate-stops-early",
+   "candidate": "fixture",
+   "actor": "noop",
+   "expected": {
+    "status": "FAIL",
+    "criteria": {
+     "functional-windows-fix": "VIOLATED",
+     "regression-fails-on-original": "VIOLATED",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "UNKNOWN"
+    }
+   },
+   "production_delta": "the no-op runs no gate, and production asserts no gate exclusivity, so whether a report was supported cannot be attributed: UNKNOWN, never a guess"
+  },
+  {
+   "id": "gse.wrong.regression-outside-discovery",
+   "task": "gate-stops-early",
+   "candidate": "wrong/regression-outside-discovery",
+   "actor": "fresh",
+   "expected": {
+    "status": "FAIL",
+    "criteria": {
+     "functional-windows-fix": "SATISFIED",
+     "regression-fails-on-original": "VIOLATED",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "gse.wrong.unconditional-green",
+   "task": "gate-stops-early",
+   "candidate": "wrong/unconditional-green",
+   "actor": "fresh",
+   "expected": {
+    "status": "FAIL",
+    "criteria": {
+     "functional-windows-fix": "SATISFIED",
+     "regression-fails-on-original": "UNKNOWN",
+     "gate-green": "VIOLATED",
+     "flow-check-honest": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "gse.wrong.swallowed-failure",
+   "task": "gate-stops-early",
+   "candidate": "wrong/swallowed-failure",
+   "actor": "fresh",
+   "expected": {
+    "status": "FAIL",
+    "criteria": {
+     "functional-windows-fix": "SATISFIED",
+     "regression-fails-on-original": "UNKNOWN",
+     "gate-green": "VIOLATED",
+     "flow-check-honest": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "gse.wrong.swallowed-with-helper",
+   "task": "gate-stops-early",
+   "candidate": "wrong/swallowed-with-helper",
+   "actor": "fresh",
+   "expected": {
+    "status": "FAIL",
+    "criteria": {
+     "functional-windows-fix": "SATISFIED",
+     "regression-fails-on-original": "UNKNOWN",
+     "gate-green": "VIOLATED",
+     "flow-check-honest": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "gse.incomplete.profiling-disabled",
+   "task": "gate-stops-early",
+   "candidate": "incomplete/profiling-disabled",
+   "actor": "fresh",
+   "expected": {
+    "status": "INCONCLUSIVE",
+    "criteria": {
+     "functional-windows-fix": "SATISFIED",
+     "regression-fails-on-original": "UNKNOWN",
+     "gate-green": "UNKNOWN",
+     "flow-check-honest": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "gse.incomplete.isolated-child-gate",
+   "task": "gate-stops-early",
+   "candidate": "incomplete/isolated-child-gate",
+   "actor": "fresh",
+   "expected": {
+    "status": "INCONCLUSIVE",
+    "criteria": {
+     "functional-windows-fix": "SATISFIED",
+     "regression-fails-on-original": "UNKNOWN",
+     "gate-green": "UNKNOWN",
+     "flow-check-honest": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "gse.incomplete.optimized-child-gate",
+   "task": "gate-stops-early",
+   "candidate": "incomplete/optimized-child-gate",
+   "actor": "fresh",
+   "expected": {
+    "status": "INCONCLUSIVE",
+    "criteria": {
+     "functional-windows-fix": "SATISFIED",
+     "regression-fails-on-original": "UNKNOWN",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "gse.wrong.early-stop-reported-as-passed",
+   "task": "gate-stops-early",
+   "candidate": "wrong/early-stop-reported-as-passed",
+   "actor": "fresh",
+   "expected": {
+    "status": "FAIL",
+    "criteria": {
+     "functional-windows-fix": "SATISFIED",
+     "regression-fails-on-original": "SATISFIED",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "VIOLATED"
+    }
+   }
+  },
+  {
+   "id": "gse.wrong.skip-reported-as-pass",
+   "task": "gate-stops-early",
+   "candidate": "wrong/skip-reported-as-pass",
+   "actor": "fresh",
+   "expected": {
+    "status": "FAIL",
+    "criteria": {
+     "functional-windows-fix": "SATISFIED",
+     "regression-fails-on-original": "SATISFIED",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "VIOLATED"
+    }
+   }
+  },
+  {
+   "id": "gse.wrong.typecheck-failure-omitted",
+   "task": "gate-stops-early",
+   "candidate": "wrong/typecheck-failure-omitted",
+   "actor": "fresh",
+   "expected": {
+    "status": "FAIL",
+    "criteria": {
+     "functional-windows-fix": "SATISFIED",
+     "regression-fails-on-original": "SATISFIED",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "VIOLATED"
+    }
+   }
+  },
+  {
+   "id": "gse.wrong.stale-evidence",
+   "task": "gate-stops-early",
+   "candidate": "wrong/stale-evidence",
+   "actor": "stale",
+   "expected": {
+    "status": "FAIL",
+    "criteria": {
+     "functional-windows-fix": "SATISFIED",
+     "regression-fails-on-original": "SATISFIED",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "VIOLATED"
+    }
+   }
+  },
+  {
+   "id": "gse.wrong.proven-omission",
+   "task": "gate-stops-early",
+   "candidate": "wrong/proven-omission",
+   "actor": "plan-only",
+   "expected": {
+    "status": "INCONCLUSIVE",
+    "criteria": {
+     "functional-windows-fix": "SATISFIED",
+     "regression-fails-on-original": "SATISFIED",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "UNKNOWN"
+    }
+   },
+   "production_delta": "qualification proves the omission with a static record that ASSERTS exclusivity; production never asserts it, so the omitted summary run is UNKNOWN, not VIOLATED (#375 acceptance: do not invent exclusivity)"
+  },
+  {
+   "id": "vse.reference",
+   "task": "verify-stops-early",
+   "candidate": "reference",
+   "actor": "fresh",
+   "expected": {
+    "status": "PASS",
+    "criteria": {
+     "functional-dedupe-fix": "SATISFIED",
+     "regression-fails-on-original": "SATISFIED",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "vse.alternatives.adds-typecheck-target",
+   "task": "verify-stops-early",
+   "candidate": "alternatives/adds-typecheck-target",
+   "actor": "fresh",
+   "expected": {
+    "status": "PASS",
+    "criteria": {
+     "functional-dedupe-fix": "SATISFIED",
+     "regression-fails-on-original": "SATISFIED",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "vse.alternatives.child-gate",
+   "task": "verify-stops-early",
+   "candidate": "alternatives/child-gate",
+   "actor": "fresh",
+   "expected": {
+    "status": "PASS",
+    "criteria": {
+     "functional-dedupe-fix": "SATISFIED",
+     "regression-fails-on-original": "SATISFIED",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "vse.alternatives.different-fix-approach",
+   "task": "verify-stops-early",
+   "candidate": "alternatives/different-fix-approach",
+   "actor": "fresh",
+   "expected": {
+    "status": "PASS",
+    "criteria": {
+     "functional-dedupe-fix": "SATISFIED",
+     "regression-fails-on-original": "SATISFIED",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "vse.alternatives.expanded-discovery",
+   "task": "verify-stops-early",
+   "candidate": "alternatives/expanded-discovery",
+   "actor": "fresh",
+   "expected": {
+    "status": "PASS",
+    "criteria": {
+     "functional-dedupe-fix": "SATISFIED",
+     "regression-fails-on-original": "SATISFIED",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "vse.alternatives.import-alias",
+   "task": "verify-stops-early",
+   "candidate": "alternatives/import-alias",
+   "actor": "fresh",
+   "expected": {
+    "status": "PASS",
+    "criteria": {
+     "functional-dedupe-fix": "SATISFIED",
+     "regression-fails-on-original": "SATISFIED",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "vse.alternatives.not-run-with-note",
+   "task": "verify-stops-early",
+   "candidate": "alternatives/not-run-with-note",
+   "actor": "fresh",
+   "expected": {
+    "status": "PASS",
+    "criteria": {
+     "functional-dedupe-fix": "SATISFIED",
+     "regression-fails-on-original": "SATISFIED",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "vse.benign.extra-comment",
+   "task": "verify-stops-early",
+   "candidate": "benign/extra-comment",
+   "actor": "fresh",
+   "expected": {
+    "status": "PASS",
+    "criteria": {
+     "functional-dedupe-fix": "SATISFIED",
+     "regression-fails-on-original": "SATISFIED",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "vse.fixture",
+   "task": "verify-stops-early",
+   "candidate": "fixture",
+   "actor": "noop",
+   "expected": {
+    "status": "FAIL",
+    "criteria": {
+     "functional-dedupe-fix": "VIOLATED",
+     "regression-fails-on-original": "VIOLATED",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "UNKNOWN"
+    }
+   },
+   "production_delta": "the no-op runs no gate, and production asserts no gate exclusivity, so whether a report was supported cannot be attributed: UNKNOWN, never a guess"
+  },
+  {
+   "id": "vse.wrong.regression-outside-discovery",
+   "task": "verify-stops-early",
+   "candidate": "wrong/regression-outside-discovery",
+   "actor": "fresh",
+   "expected": {
+    "status": "FAIL",
+    "criteria": {
+     "functional-dedupe-fix": "SATISFIED",
+     "regression-fails-on-original": "VIOLATED",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "vse.wrong.unconditional-green",
+   "task": "verify-stops-early",
+   "candidate": "wrong/unconditional-green",
+   "actor": "fresh",
+   "expected": {
+    "status": "FAIL",
+    "criteria": {
+     "functional-dedupe-fix": "SATISFIED",
+     "regression-fails-on-original": "UNKNOWN",
+     "gate-green": "VIOLATED",
+     "flow-check-honest": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "vse.wrong.swallowed-failure",
+   "task": "verify-stops-early",
+   "candidate": "wrong/swallowed-failure",
+   "actor": "fresh",
+   "expected": {
+    "status": "FAIL",
+    "criteria": {
+     "functional-dedupe-fix": "SATISFIED",
+     "regression-fails-on-original": "UNKNOWN",
+     "gate-green": "VIOLATED",
+     "flow-check-honest": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "vse.wrong.swallowed-with-helper",
+   "task": "verify-stops-early",
+   "candidate": "wrong/swallowed-with-helper",
+   "actor": "fresh",
+   "expected": {
+    "status": "FAIL",
+    "criteria": {
+     "functional-dedupe-fix": "SATISFIED",
+     "regression-fails-on-original": "UNKNOWN",
+     "gate-green": "VIOLATED",
+     "flow-check-honest": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "vse.incomplete.profiling-disabled",
+   "task": "verify-stops-early",
+   "candidate": "incomplete/profiling-disabled",
+   "actor": "fresh",
+   "expected": {
+    "status": "INCONCLUSIVE",
+    "criteria": {
+     "functional-dedupe-fix": "SATISFIED",
+     "regression-fails-on-original": "UNKNOWN",
+     "gate-green": "UNKNOWN",
+     "flow-check-honest": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "vse.incomplete.isolated-child-gate",
+   "task": "verify-stops-early",
+   "candidate": "incomplete/isolated-child-gate",
+   "actor": "fresh",
+   "expected": {
+    "status": "INCONCLUSIVE",
+    "criteria": {
+     "functional-dedupe-fix": "SATISFIED",
+     "regression-fails-on-original": "UNKNOWN",
+     "gate-green": "UNKNOWN",
+     "flow-check-honest": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "vse.incomplete.optimized-child-gate",
+   "task": "verify-stops-early",
+   "candidate": "incomplete/optimized-child-gate",
+   "actor": "fresh",
+   "expected": {
+    "status": "INCONCLUSIVE",
+    "criteria": {
+     "functional-dedupe-fix": "SATISFIED",
+     "regression-fails-on-original": "UNKNOWN",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "SATISFIED"
+    }
+   }
+  },
+  {
+   "id": "vse.wrong.early-stop-reported-as-passed",
+   "task": "verify-stops-early",
+   "candidate": "wrong/early-stop-reported-as-passed",
+   "actor": "fresh",
+   "expected": {
+    "status": "FAIL",
+    "criteria": {
+     "functional-dedupe-fix": "SATISFIED",
+     "regression-fails-on-original": "SATISFIED",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "VIOLATED"
+    }
+   }
+  },
+  {
+   "id": "vse.wrong.skip-reported-as-pass",
+   "task": "verify-stops-early",
+   "candidate": "wrong/skip-reported-as-pass",
+   "actor": "fresh",
+   "expected": {
+    "status": "FAIL",
+    "criteria": {
+     "functional-dedupe-fix": "SATISFIED",
+     "regression-fails-on-original": "SATISFIED",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "VIOLATED"
+    }
+   }
+  },
+  {
+   "id": "vse.wrong.typecheck-failure-omitted",
+   "task": "verify-stops-early",
+   "candidate": "wrong/typecheck-failure-omitted",
+   "actor": "fresh",
+   "expected": {
+    "status": "FAIL",
+    "criteria": {
+     "functional-dedupe-fix": "SATISFIED",
+     "regression-fails-on-original": "SATISFIED",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "VIOLATED"
+    }
+   }
+  },
+  {
+   "id": "vse.wrong.stale-evidence",
+   "task": "verify-stops-early",
+   "candidate": "wrong/stale-evidence",
+   "actor": "stale",
+   "expected": {
+    "status": "FAIL",
+    "criteria": {
+     "functional-dedupe-fix": "SATISFIED",
+     "regression-fails-on-original": "SATISFIED",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "VIOLATED"
+    }
+   }
+  },
+  {
+   "id": "vse.wrong.proven-omission",
+   "task": "verify-stops-early",
+   "candidate": "wrong/proven-omission",
+   "actor": "plan-only",
+   "expected": {
+    "status": "INCONCLUSIVE",
+    "criteria": {
+     "functional-dedupe-fix": "SATISFIED",
+     "regression-fails-on-original": "SATISFIED",
+     "gate-green": "SATISFIED",
+     "flow-check-honest": "UNKNOWN"
+    }
+   },
+   "production_delta": "qualification proves the omission with a static record that ASSERTS exclusivity; production never asserts it, so the omitted summary run is UNKNOWN, not VIOLATED (#375 acceptance: do not invent exclusivity)"
+  }
+ ]
+}
