@@ -3,27 +3,27 @@
     "error": "uv.lock digest",
     "name": "missing-lock",
     "op": "delete",
-    "path": "tests/fixtures/profile-cpp-codex-flow-check-ea6dbfa/uv.lock"
+    "path": "tests/fixtures/profile-cpp-codex-flow-check-86641e8/uv.lock"
   },
   {
     "error": "uv.lock digest",
     "name": "modified-lock",
     "op": "bytes",
-    "path": "tests/fixtures/profile-cpp-codex-flow-check-ea6dbfa/uv.lock",
+    "path": "tests/fixtures/profile-cpp-codex-flow-check-86641e8/uv.lock",
     "value": "modified"
   },
   {
     "error": "pyproject.toml digest",
     "name": "modified-pyproject",
     "op": "bytes",
-    "path": "tests/fixtures/profile-cpp-codex-flow-check-ea6dbfa/pyproject.toml",
+    "path": "tests/fixtures/profile-cpp-codex-flow-check-86641e8/pyproject.toml",
     "value": "modified"
   },
   {
     "error": "missing",
     "name": "missing-subject",
     "op": "delete",
-    "path": "evals/subjects/cpp-codex-flow-check-ea6dbfa/subject.json"
+    "path": "evals/subjects/cpp-codex-flow-check-86641e8/subject.json"
   },
   {
     "error": "revision",
@@ -32,7 +32,7 @@
     ],
     "name": "wrong-subject",
     "op": "json",
-    "path": "evals/subjects/cpp-codex-flow-check-ea6dbfa/subject.json",
+    "path": "evals/subjects/cpp-codex-flow-check-86641e8/subject.json",
     "value": "0000000000000000000000000000000000000000"
   },
   {
@@ -43,7 +43,7 @@
     ],
     "name": "wrong-inventory",
     "op": "json",
-    "path": "evals/subjects/cpp-codex-flow-check-ea6dbfa/evidence/inventory.json",
+    "path": "evals/subjects/cpp-codex-flow-check-86641e8/evidence/inventory.json",
     "value": "0000000000000000000000000000000000000000"
   },
   {
@@ -61,7 +61,7 @@
     "error": "missing",
     "name": "missing-inventory",
     "op": "delete",
-    "path": "evals/subjects/cpp-codex-flow-check-ea6dbfa/evidence/inventory.json"
+    "path": "evals/subjects/cpp-codex-flow-check-86641e8/evidence/inventory.json"
   },
   {
     "error": "trial stage",

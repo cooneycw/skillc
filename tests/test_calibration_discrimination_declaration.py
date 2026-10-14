@@ -37,9 +37,9 @@ TASK = ROOT / "evals" / "level3" / "slugkit-pipeline"
 GRADER = verify.GraderDef.load(TASK)
 
 INTACT_SUBJECT = {
-    "name": "cpp-codex-flow-check-ea6dbfa",
+    "name": "cpp-codex-flow-check-86641e8",
     "locator": "github.com/cooneycw/claude-power-pack",
-    "revision": "ea6dbfa45f9308ee6ba60f032d8e7031bd6938a1",
+    "revision": "86641e817711d8a7746270745a5dfa7cacf04b0c",
 }
 DERIVED_REVISION = calibration._expected_degraded_revision(INTACT_SUBJECT)
 MUTATED_DIGEST = "sha256:" + "a" * 64

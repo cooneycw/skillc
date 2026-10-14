@@ -1,7 +1,7 @@
 # Pinned CPP offline runtime supply (Refs #360)
 
 This optional image supplies the PyPI dependencies of the one declared
-`cpp-codex-flow-check-ea6dbfa` profile. Its package cache is built using the
+`cpp-codex-flow-check-86641e8` profile (repinned from `ea6dbfa` for #376). Its package cache is built using the
 trial stage's own Python and pinned uv 0.9.7. It leaves the generic trial image
 and historical subject, profile, fixture and evidence bytes unchanged.
 
@@ -68,7 +68,7 @@ The root-owned descriptor lives at
 `/usr/local/share/skillc/runtime-supply.json`. Its exact fields are:
 
 - `schema_version`: integer 1, never a Boolean.
-- `runtime_id`: `cpp-codex-flow-check-ea6dbfa`.
+- `runtime_id`: `cpp-codex-flow-check-86641e8`.
 - `subject_revision`: full pinned 40-character lowercase Git revision.
 - `pyproject_sha256`, `lock_sha256`: raw lowercase 64-character SHA-256 values.
 - `uv_version`: measured `0.9.7`.
