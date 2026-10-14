@@ -13,9 +13,10 @@ proves the isolation claim: the SAME installed output, running inside a
 REAL container with `--network none` and ZERO bind mounts - the
 disposable installed home enters only via `docker cp`.
 
-TARGET PROFILE: `evals/subjects/cpp-codex-flow-check-ea6dbfa/` (CPP
-`ea6dbfa`, skillc #330's re-declaration) - the pin the #287 study actually
-runs, confirmed by the orchestrator. NOT the older `cpp-codex-flow-check/`
+TARGET PROFILE: `evals/subjects/cpp-codex-flow-check-86641e8/` (CPP
+`86641e8`, #376's repin of skillc #330's `ea6dbfa` re-declaration) - the pin
+the #287 study runs (the orchestrator confirmed `ea6dbfa`; #376 moved it to
+`86641e8`). NOT the older `cpp-codex-flow-check/`
 @ `85e9b03` an earlier plan draft named - skillc #330 declared this as a
 SEPARATE, untouched profile precisely so this test could move pins
 without disturbing #264's case-contract citations against the old one.
@@ -24,7 +25,7 @@ TWO PHASES, the same split `docs/specs/evaluation-facility/profiles.md`'s
 "Human-only real-pin proof" section already used by hand:
 
 - HOST PHASE (no network needed - the committed
-  `tests/fixtures/profile-cpp-codex-flow-check-ea6dbfa/` snapshot is used
+  `tests/fixtures/profile-cpp-codex-flow-check-86641e8/` snapshot is used
   directly via `DirTree`, never a live GitHub fetch): `profile.validate()`
   + `profile.install()` into a fresh throwaway host directory. Pure
   Python, proves nothing about isolation on its own - `tests/test_profile_
@@ -146,8 +147,8 @@ from skillc import docker_backend as d
 from skillc import profile as p
 
 ROOT = Path(__file__).resolve().parents[1]
-FIXTURE_DIR = ROOT / "tests" / "fixtures" / "profile-cpp-codex-flow-check-ea6dbfa"
-PROFILE_JSON = ROOT / "evals" / "subjects" / "cpp-codex-flow-check-ea6dbfa" / "profile.json"
+FIXTURE_DIR = ROOT / "tests" / "fixtures" / "profile-cpp-codex-flow-check-86641e8"
+PROFILE_JSON = ROOT / "evals" / "subjects" / "cpp-codex-flow-check-86641e8" / "profile.json"
 DOCKERFILE = ROOT / "docker" / "profile-cold-install" / "Dockerfile"
 TINY_PROJECT = ROOT / "tests" / "fixtures" / "cold-install" / "tiny-project"
 

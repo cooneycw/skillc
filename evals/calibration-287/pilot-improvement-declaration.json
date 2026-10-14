@@ -27,12 +27,12 @@
   {
    "name": "intact",
    "subject": {
-    "name": "cpp-codex-flow-check-ea6dbfa",
+    "name": "cpp-codex-flow-check-86641e8",
     "locator": "github.com/cooneycw/claude-power-pack",
-    "revision": "ea6dbfa45f9308ee6ba60f032d8e7031bd6938a1",
-    "profile": "evals/subjects/cpp-codex-flow-check-ea6dbfa"
+    "revision": "86641e817711d8a7746270745a5dfa7cacf04b0c",
+    "profile": "evals/subjects/cpp-codex-flow-check-86641e8"
    },
-   "treatment": "the cpp-codex-flow-check-ea6dbfa profile installed, unmodified (skillc#265/#330, merged 841689b; skillc profile diagnose/validate both report 0 problems at this pin). The SAME subject as pilot-discrimination-declaration.json's 'intact' arm - this is what P2 means by 'the intact arm runs in both pilot declarations': one subject identity, two separate 10-attempt pilot schedules, never shared attempts (attempt-sharing was explicitly declined, comment 6025311708)."
+   "treatment": "the cpp-codex-flow-check-86641e8 profile installed, unmodified (skillc#376 repin of the #265/#330 ea6dbfa profile to CPP 86641e8, which carries 8e0a34fb's NOT_RUN report state; skillc profile diagnose/validate both report 0 problems at this pin). The SAME subject as pilot-discrimination-declaration.json's 'intact' arm - this is what P2 means by 'the intact arm runs in both pilot declarations': one subject identity, two separate 10-attempt pilot schedules, never shared attempts (attempt-sharing was explicitly declined, comment 6025311708)."
   },
   {
    "name": "baseline",

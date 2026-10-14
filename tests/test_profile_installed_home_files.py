@@ -6,8 +6,8 @@ reach (`lifecycle.run_through_backend`'s `install(handle, surface)` step
 only ever reaches `CONTAINER_WORKSPACE`; home is reached through its
 `before_execute` hook instead).
 
-The real ea6dbfa-pin fixture (`tests/fixtures/profile-cpp-codex-flow-check-
-ea6dbfa/`) is used rather than a synthetic one, so this exercises the exact
+The real live-pin fixture (`tests/fixtures/profile-cpp-codex-flow-check-
+86641e8/`, repinned from ea6dbfa for #376) is used rather than a synthetic one, so this exercises the exact
 closure skillc#334 must deliver - not a stand-in shaped to make the test
 pass.
 """
@@ -25,8 +25,8 @@ import pytest
 from skillc import profile as p
 
 ROOT = Path(__file__).resolve().parent.parent
-SNAPSHOT = Path(__file__).resolve().parent / "fixtures" / "profile-cpp-codex-flow-check-ea6dbfa"
-DECLARATION = ROOT / "evals" / "subjects" / "cpp-codex-flow-check-ea6dbfa" / "profile.json"
+SNAPSHOT = Path(__file__).resolve().parent / "fixtures" / "profile-cpp-codex-flow-check-86641e8"
+DECLARATION = ROOT / "evals" / "subjects" / "cpp-codex-flow-check-86641e8" / "profile.json"
 
 
 def _inventory_and_tree(snapshot: Path = SNAPSHOT) -> tuple[dict[str, Any], p.DirTree]:
@@ -126,9 +126,9 @@ def test_inventory_digest_matches_the_committed_evidence_file() -> None:
     recomputed against this file's own DirTree fixture (which reports
     source_kind='snapshot', not 'git', and would disagree on exactly those
     two fields even when every file's content is identical)."""
-    committed = json.loads((ROOT / "evals" / "subjects" / "cpp-codex-flow-check-ea6dbfa"
+    committed = json.loads((ROOT / "evals" / "subjects" / "cpp-codex-flow-check-86641e8"
                             / "evidence" / "inventory.json").read_text(encoding="utf-8"))
-    assert p.inventory_digest(committed) == "sha256:eb9cad6f8bb74c92fab4aa002bd6f2a55f3e8eb15ff25adcd582fea21071b1ab"
+    assert p.inventory_digest(committed) == "sha256:4ee34823eb9f12c86d35f67d731b97a4c86dcd37ef77f9cada1ba78efe5f695a"
 
 
 def test_red_case_a_duplicate_destination_across_entries_is_refused() -> None:

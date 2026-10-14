@@ -21,6 +21,18 @@ and version plan.
   one. Production's `DAEMON_TIMEOUT` is unchanged; `test_calibration_run.py`
   keeps its documented 120s.
 
+- **CPP flow-check subject repinned to `86641e8`** (Refs #376). A new,
+  separate profile `evals/subjects/cpp-codex-flow-check-86641e8/` with its
+  own snapshot fixture: CPP `86641e8` carries `8e0a34fb`, which gives NOT_RUN
+  its own flow-check report state, and is the next study pin CPP recorded.
+  Same 96-file closure shape as `ea6dbfa` (21 files changed, none added or
+  removed); `pyproject.toml`/`uv.lock` are byte-identical. The runtime
+  supply policy, the profile-trial image builder, the live tests and both
+  #287 draft declarations (approvals still `null`; the degraded arm's
+  `mutated_digest` recomputed) now select it. The `ea6dbfa` profile, its
+  evidence and the results recorded against it are unchanged. No image was
+  built here; the #315 re-certification follows the merge.
+
 - **#270 aggregate-stop reports graded against protected per-stage evidence**
   (Refs #376). The gate witness now records, per run of a caller-declared
   stage-bearing gate, the stage outcomes the controller read from that run's
