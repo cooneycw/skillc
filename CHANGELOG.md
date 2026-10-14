@@ -8,6 +8,17 @@ and version plan.
 
 ## [Unreleased]
 
+- **Real-Docker live tests run on an explicit 30 s daemon budget** (#390). The
+  six `DockerBackend` constructions in `tests/*_live.py` had no
+  `daemon_timeout`, so container start ran on the 5 s module default. On
+  #315's dedicated runner a real `docker run -d` stalled for 7.61 s once in
+  27 measured starts (typical 0.13-0.62 s), right after an image build. That
+  stall failed two campaign-1 negative controls in setup, before their planted
+  fault. They now pass `conftest.LIVE_DOCKER_DAEMON_TIMEOUT`.
+  `tests/test_live_docker_budget.py` fails on any live construction without a
+  budget (it named all six before the fix), and shows that a start slower
+  than the budget is still refused. Production's `DAEMON_TIMEOUT` and the
+  real-Docker runner are unchanged.
 - **Fake-Docker tests run on the test-only daemon budget, not production's 5s**
   (Refs #385). `tests/test_docker_backend.py`'s `_backend()`, every other
   direct `DockerBackend` construction over the fake CLI, and `test_reap.py`'s
