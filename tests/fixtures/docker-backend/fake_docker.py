@@ -184,6 +184,7 @@ included - a slow daemon by construction rather than by host load (issue
 
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import json
 import os
@@ -195,7 +196,7 @@ import tarfile
 import tempfile
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 #: Must match docker_backend.CONTAINER_WORKSPACE. Kept as a separate literal
@@ -319,15 +320,29 @@ def _rewrite_state(
     `"exited"` is never silently overwritten back to `"running"` by a
     write that started earlier but finished later.
     """
+    with _state_lock(state_dir, name):
+        path = _state_file(state_dir, name)
+        if not path.is_file():
+            # Removed (`cmd_rm`, under this same lock) before this writer got
+            # the lock: writing now would RESURRECT a container `rm -f` already
+            # removed (issue #382). There is nothing left to update.
+            return {}
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data = mutate(data)
+        _atomic_write_json(path, data)
+        return data
+
+
+@contextlib.contextmanager
+def _state_lock(state_dir: Path, name: str) -> Iterator[None]:
+    """The exclusive per-name lock every state-file writer and remover takes.
+    `cmd_rm` used to unlink without it, so an `exec` cleanup that had already
+    read the file wrote it back after the removal (issue #382)."""
     lock_path = state_dir / f".lock-{name}"
     with open(lock_path, "a+") as lock_file:
         fcntl.flock(lock_file, fcntl.LOCK_EX)
         try:
-            path = _state_file(state_dir, name)
-            data = json.loads(path.read_text(encoding="utf-8"))
-            data = mutate(data)
-            _atomic_write_json(path, data)
-            return data
+            yield
         finally:
             fcntl.flock(lock_file, fcntl.LOCK_UN)
 
@@ -477,17 +492,18 @@ def cmd_rm(state_dir: Path, rest: list[str]) -> int:
     path = _state_file(state_dir, name)
     if _stuck(state_dir, name):
         return 0  # lies: reports success, leaves the state file in place
-    if not path.is_file():
-        print("Error: No such container: " + ref, file=sys.stderr)
-        return 1
-    data = json.loads(path.read_text(encoding="utf-8"))
-    pid = data.get("exec_pid")
-    if isinstance(pid, int):
-        try:
-            os.killpg(pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            pass
-    path.unlink()
+    with _state_lock(state_dir, name):
+        if not path.is_file():
+            print("Error: No such container: " + ref, file=sys.stderr)
+            return 1
+        data = json.loads(path.read_text(encoding="utf-8"))
+        pid = data.get("exec_pid")
+        if isinstance(pid, int):
+            try:
+                os.killpg(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+        path.unlink()
     shutil.rmtree(_container_root(state_dir, name), ignore_errors=True)
     return 0
 
