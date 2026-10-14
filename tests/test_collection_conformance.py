@@ -1345,7 +1345,7 @@ def test_attributable_leftovers_finds_a_real_container_on_the_fake_daemon(
 ) -> None:
     """The check against a daemon that really holds the container: prepared
     and never destroyed, it is found by its attempt label."""
-    backend = cc.TrackingDockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+    backend = cc.TrackingDockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     handle = backend.prepare("a-kept")
     try:
         found = cc.attributable_leftovers(_docker_bin(docker_state), backend.prepared_ids, 5)
