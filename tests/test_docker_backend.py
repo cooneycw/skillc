@@ -17,6 +17,7 @@ import io
 import json
 import os
 import shutil
+import signal
 import socket as socket_module
 import stat
 import subprocess
@@ -1340,8 +1341,36 @@ def test_a_container_level_kill_does_not_reach_the_execd_subject_but_still_kills
     assert backend.confirm_absent(handle) is Confirmation.CONFIRMED
 
 
+def _alive(pid: int) -> bool:
+    """`os.kill(pid, 0)` alone reads a zombie as alive: a SIGKILLed process
+    keeps its pid until its PARENT reaps it. Same idiom as
+    `tests/test_verify.py`/`tests/test_trial.py`."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    # A zombie still answers kill(0); read its state instead.
+    try:
+        state = Path(f"/proc/{pid}/stat").read_text().split(")")[-1].split()[0]
+    except OSError:
+        return False
+    return state != "Z"
+
+
+def _dies_within(pid: int, seconds: float) -> bool:
+    """SIGKILL delivery is asynchronous: the target must still be scheduled
+    to exit. Poll to a deadline instead of reading one instant."""
+    deadline = time.monotonic() + seconds
+    while _alive(pid):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.01)
+    return True
+
+
+@pytest.mark.parametrize("parent_stopped", [False, True], ids=["parent-running", "parent-stopped"])
 def test_removing_a_container_without_a_preceding_kill_still_reaps_a_live_exec_session(
-    base: Path, docker_state: Path, tmp_path: Path,
+    base: Path, docker_state: Path, tmp_path: Path, parent_stopped: bool,
 ) -> None:
     """Separate test for the remove path (issue #158 fidelity fix, second
     pass): `DockerBackend` itself always issues a `docker kill` before
@@ -1370,12 +1399,22 @@ def test_removing_a_container_without_a_preceding_kill_still_reaps_a_live_exec_s
         pid = int(pidfile.read_text())
         os.kill(pid, 0)  # alive - never touched by any docker kill call in this test
 
+        if parent_stopped:
+            os.kill(exec_proc.pid, signal.SIGSTOP)
         backend.destroy(handle)  # rm -f, with no preceding docker kill at all
 
-        with pytest.raises(ProcessLookupError):
-            os.kill(pid, 0)
+        # Killed, not necessarily reaped: the subject is the fake `docker
+        # exec` process's child, so it stays a zombie until that parent's
+        # `proc.wait()` runs. Under CI load that lag made a bare
+        # `os.kill(pid, 0)` read the killed subject as alive (push pipelines
+        # 457 and 759). `parent-stopped` holds the parent so the zombie
+        # persists deterministically; a subject `rm -f` never signals still
+        # sleeps 20s and fails the 5s deadline.
+        assert _dies_within(pid, 5), f"subject {pid} survived container removal"
         assert backend.confirm_absent(handle) is Confirmation.CONFIRMED
     finally:
+        if parent_stopped:
+            os.kill(exec_proc.pid, signal.SIGCONT)
         exec_proc.kill()
         exec_proc.wait(timeout=5)
 
