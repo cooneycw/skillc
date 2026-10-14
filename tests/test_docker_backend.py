@@ -13,6 +13,7 @@ this session. This proves the lifecycle state machine, argv composition and
 
 from __future__ import annotations
 
+import importlib.util
 import io
 import json
 import os
@@ -1472,6 +1473,45 @@ def test_removing_a_container_without_a_preceding_kill_still_reaps_a_live_exec_s
             os.kill(exec_proc.pid, signal.SIGCONT)
         exec_proc.kill()
         exec_proc.wait(timeout=5)
+
+
+def test_a_late_exec_cleanup_never_resurrects_a_removed_container(tmp_path: Path) -> None:
+    """Issue #382 (found on a serial run): the fake `docker exec`'s cleanup
+    (`_rewrite_state` clearing `exec_pid`) and `docker rm -f` (`cmd_rm`) are
+    separate OS processes. `cmd_rm` used to unlink the state file WITHOUT the
+    per-name lock, so a cleanup that had already read the file wrote it back
+    after the removal - resurrecting the container, which `confirm_absent()`
+    then honestly reported as NOT_CONFIRMED (the
+    `test_removing_a_container_without_a_preceding_kill_still_reaps_a_live_exec_session`
+    red). Reproduced deterministically by holding the cleanup open between
+    its read and its write while `rm -f` runs."""
+    spec = importlib.util.spec_from_file_location("fake_docker_under_test", FAKE_DOCKER)
+    assert spec is not None and spec.loader is not None
+    fake = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fake)
+    state_dir, name = tmp_path / "state", "skillc-a-resurrect"
+    state_dir.mkdir()
+    fake._write_state(state_dir, name, "running", "fake-image:1", {}, {}, "id-1")
+    fake._container_root(state_dir, name).mkdir(parents=True)
+    cleanup_has_read, release_cleanup = threading.Event(), threading.Event()
+
+    def clear_exec_pid_slowly(data: dict[str, object]) -> dict[str, object]:
+        cleanup_has_read.set()
+        release_cleanup.wait(timeout=5)
+        return {k: v for k, v in data.items() if k != "exec_pid"}
+
+    cleanup = threading.Thread(target=fake._rewrite_state, args=(state_dir, name, clear_exec_pid_slowly))
+    cleanup.start()
+    try:
+        assert cleanup_has_read.wait(timeout=5), "the cleanup never read the state file - the test proves nothing"
+        remover = threading.Thread(target=fake.cmd_rm, args=(state_dir, ["-f", name]))
+        remover.start()
+    finally:
+        release_cleanup.set()
+        cleanup.join(timeout=10)
+    remover.join(timeout=10)
+    assert not cleanup.is_alive() and not remover.is_alive()
+    assert not fake._state_file(state_dir, name).exists(), "a late exec cleanup resurrected the removed container"
 
 
 def test_execute_never_prefixes_the_argv_when_the_image_lacks_forwarding_support(
