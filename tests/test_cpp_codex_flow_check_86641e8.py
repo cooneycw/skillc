@@ -46,8 +46,8 @@ OLD_INVENTORY_DIGEST = "sha256:eb9cad6f8bb74c92fab4aa002bd6f2a55f3e8eb15ff25adcd
 #: The discrimination declaration's mutated_digest before #376 (ea6dbfa).
 OLD_MUTATED_DIGEST = "sha256:9149e393bb1d9e40adb97dca85774e23f77317a21e6bff832c160055c726234d"
 
-NOT_RUN_STATE = re.compile(r"^- \*\*NOT_RUN\*\* - Never executed because an earlier step", re.M)
-NOT_RUN_ROW = re.compile(r"^\| (Tests|Typecheck) \(`make \w+`\) \| PASS/FAIL/SKIP/NOT_RUN \|", re.M)
+NOT_RUN_STATE = re.compile(r"^- \*\*NOT_RUN\*\* - Never executed because an earlier step", re.MULTILINE)
+NOT_RUN_ROW = re.compile(r"^\| (Tests|Typecheck) \(`make \w+`\) \| PASS/FAIL/SKIP/NOT_RUN \|", re.MULTILINE)
 
 
 def _json(path: Path) -> Any:
