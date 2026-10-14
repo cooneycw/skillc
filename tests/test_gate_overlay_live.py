@@ -120,6 +120,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
+from conftest import LIVE_DOCKER_DAEMON_TIMEOUT
 
 from skillc import docker_backend as d
 from skillc.backend import Limits
@@ -469,6 +470,7 @@ def test_the_shim_forwards_the_controllers_real_result_against_a_real_daemon() -
 
     backend = d.DockerBackend(
         image=LIVE_TEST_IMAGE, base_dir=base, network="none",
+        daemon_timeout=LIVE_DOCKER_DAEMON_TIMEOUT,
         trigger_decide=decide, trigger_socket_dir=trigger_dir,
     )
     # A per-run suffix (#355): a fixed attempt id is a fixed container name,

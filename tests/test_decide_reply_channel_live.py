@@ -119,6 +119,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
+from conftest import LIVE_DOCKER_DAEMON_TIMEOUT
 
 from skillc import docker_backend as d
 from skillc.backend import Confirmation, Limits
@@ -256,6 +257,7 @@ def live_backend(monkeypatch: pytest.MonkeyPatch) -> d.DockerBackend:
     base = Path(tempfile.mkdtemp(prefix="sk-live-base-"))
     return d.DockerBackend(
         image=LIVE_TEST_IMAGE, base_dir=base, network="none",
+        daemon_timeout=LIVE_DOCKER_DAEMON_TIMEOUT,
         trigger_decide=None if BREAK_MODE == "omit-mount" else _decide,
         trigger_socket_dir=Path(tempfile.mkdtemp(prefix="sk-live-trig-")),
     )

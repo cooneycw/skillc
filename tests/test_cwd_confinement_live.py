@@ -78,6 +78,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from conftest import LIVE_DOCKER_DAEMON_TIMEOUT
 
 from skillc import docker_backend as d
 from skillc.backend import Limits
@@ -163,7 +164,8 @@ def test_a_swapped_cwd_is_refused_against_a_real_daemon() -> None:
         pytest.skip(f"image {LIVE_TEST_IMAGE!r} is not available locally and could not be pulled")
 
     base = Path(tempfile.mkdtemp(prefix="sk-cwd-live-base-"))
-    backend = d.DockerBackend(image=LIVE_TEST_IMAGE, base_dir=base, network="none")
+    backend = d.DockerBackend(image=LIVE_TEST_IMAGE, base_dir=base, network="none",
+                              daemon_timeout=LIVE_DOCKER_DAEMON_TIMEOUT)
     handle = backend.prepare("a-cwd-live-confinement-0000001")
     assert isinstance(handle, d._Handle)
     backend.install(handle, {})
