@@ -1617,6 +1617,7 @@ def test_execute_forwards_term_through_a_capable_image_and_reports_exited_within
     a slow host may take; nothing here passes faster for being given more."""
     backend = d.DockerBackend(
         image="fake-image:1", base_dir=base, docker_bin=_slowed_docker_bin(docker_state, tmp_path, delays),
+        daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT,
     )
     handle = backend.prepare("a-lc-000000000035")
     assert isinstance(handle, d._Handle)
