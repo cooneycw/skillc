@@ -5,7 +5,7 @@ profile's committed inventory digest exactly as #323 binds
 `attempts_per_arm`. Absent (every declaration before #334) is unchanged:
 selected skill files only.
 
-Uses the REAL committed `cpp-codex-flow-check-ea6dbfa` profile and its
+Uses the REAL committed `cpp-codex-flow-check-86641e8` profile and its
 committed `evidence/inventory.json` digest - the exact value
 `test_profile_installed_home_files.py::test_inventory_digest_matches_the_committed_evidence_file`
 also pins - rather than a synthetic stand-in, so a drift in either place
@@ -25,13 +25,13 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 TASK = ROOT / "evals" / "level3" / "slugkit-pipeline"
 GRADER = verify.GraderDef.load(TASK)
-PROFILE_PATH = "evals/subjects/cpp-codex-flow-check-ea6dbfa"
-COMMITTED_INVENTORY_DIGEST = "sha256:eb9cad6f8bb74c92fab4aa002bd6f2a55f3e8eb15ff25adcd582fea21071b1ab"
+PROFILE_PATH = "evals/subjects/cpp-codex-flow-check-86641e8"
+COMMITTED_INVENTORY_DIGEST = "sha256:4ee34823eb9f12c86d35f67d731b97a4c86dcd37ef77f9cada1ba78efe5f695a"
 
 SUBJECT = {
-    "name": "cpp-codex-flow-check-ea6dbfa",
+    "name": "cpp-codex-flow-check-86641e8",
     "locator": "github.com/cooneycw/claude-power-pack",
-    "revision": "ea6dbfa45f9308ee6ba60f032d8e7031bd6938a1",
+    "revision": "86641e817711d8a7746270745a5dfa7cacf04b0c",
     "profile": PROFILE_PATH,
 }
 

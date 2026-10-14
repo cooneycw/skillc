@@ -51,8 +51,8 @@ from skillc.backend import ExecuteResult, Limits
 from skillc.gate_witness import GateWitness
 
 ROOT = Path(__file__).resolve().parents[1]
-FIXTURE_DIR = ROOT / "tests" / "fixtures" / "profile-cpp-codex-flow-check-ea6dbfa"
-PROFILE_JSON = ROOT / "evals" / "subjects" / "cpp-codex-flow-check-ea6dbfa" / "profile.json"
+FIXTURE_DIR = ROOT / "tests" / "fixtures" / "profile-cpp-codex-flow-check-86641e8"
+PROFILE_JSON = ROOT / "evals" / "subjects" / "cpp-codex-flow-check-86641e8" / "profile.json"
 TRIAL_DOCKERFILE_DIR = ROOT / "docker" / "trial"
 TINY_PROJECT = ROOT / "tests" / "fixtures" / "cold-install" / "tiny-project"
 

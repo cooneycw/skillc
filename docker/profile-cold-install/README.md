@@ -28,7 +28,7 @@ claim, not this image's.
 Two named stages, built from the same `Dockerfile`:
 
 ```bash
-FIXTURE_DIR=tests/fixtures/profile-cpp-codex-flow-check-ea6dbfa
+FIXTURE_DIR=tests/fixtures/profile-cpp-codex-flow-check-86641e8
 
 # The normal image - plain `docker build` lands on `cached` because it is
 # the LAST stage, but naming it explicitly is clearer at the call site.
