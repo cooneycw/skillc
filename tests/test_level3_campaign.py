@@ -335,6 +335,7 @@ def test_run_rows_hands_the_production_treatment_through(tmp_path: Path, monkeyp
     report = lc.run_rows(manifest, root=ROOT, run_dir=tmp_path, treatment=treatment, backends=backends,  # type: ignore[arg-type]
                          image_digest="sha256:img", rows=rows)
     assert made == ["pair", "pair"], "a fresh backend pair per attempt"
+    assert treatment.gate_entrypoint is not None
     for call, row in zip(calls, rows, strict=True):
         assert call["verify_home_files"] == treatment.verify_home_files
         assert call["preflight_tools"] == treatment.preflight_tools
