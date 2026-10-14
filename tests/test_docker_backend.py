@@ -47,6 +47,24 @@ def _docker_bin(state_dir: Path) -> list[str]:
     return [sys.executable, str(FAKE_DOCKER), "--state", str(state_dir)]
 
 
+def _slowed_docker_bin(state_dir: Path, tmp_path: Path, delays: Mapping[str, float]) -> list[str]:
+    """The fake CLI, delayed by a fixed number of seconds before the named
+    subcommands run: a slow daemon by construction rather than by host load
+    (issue #382). A loaded runner is what turned the timing-bound tests red
+    on CI, and load alone does not reproduce it on demand."""
+    if not delays:
+        return _docker_bin(state_dir)
+    wrapper = tmp_path / "slowed_docker.py"
+    wrapper.write_text(
+        "import runpy, sys, time\n"
+        f"time.sleep({dict(delays)!r}.get(sys.argv[3], 0.0))\n"
+        f"sys.argv = [{str(FAKE_DOCKER)!r}, *sys.argv[1:]]\n"
+        f"runpy.run_path({str(FAKE_DOCKER)!r}, run_name='__main__')\n",
+        encoding="utf-8",
+    )
+    return [sys.executable, str(wrapper), "--state", str(state_dir)]
+
+
 @pytest.fixture
 def base(tmp_path: Path) -> Path:
     path = tmp_path / "work"
@@ -866,8 +884,9 @@ def test_read_home_tree_finds_multiple_files_under_the_directory(base: Path, doc
 
 @needs_setsid
 @pytest.mark.skipif(shutil.which("cat") is None, reason="needs cat to block the detached grandchild on a FIFO")
+@pytest.mark.parametrize("delays", [{}, {"cp": 1.2}], ids=["nominal", "slow-cp"])
 def test_read_home_tree_joins_stdout_and_stderr_against_one_shared_deadline(
-    base: Path, docker_state: Path, tmp_path: Path,
+    base: Path, docker_state: Path, tmp_path: Path, delays: dict[str, float],
 ) -> None:
     """issue #20 Nit Store: read_home_tree's own stdout/stderr drain joins
     had the identical sequential-join shape execute()'s just got fixed for
@@ -895,7 +914,8 @@ def test_read_home_tree_joins_stdout_and_stderr_against_one_shared_deadline(
     bug; only the ELAPSED TIME is this test's own claim."""
     daemon_timeout = 1.0
     backend = d.DockerBackend(
-        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=daemon_timeout,
+        image="fake-image:1", base_dir=base, docker_bin=_slowed_docker_bin(docker_state, tmp_path, delays),
+        daemon_timeout=daemon_timeout,
     )
     handle = backend.prepare("a-lc-000000000018b")
     assert isinstance(handle, d._Handle)
@@ -1146,8 +1166,9 @@ def test_execute_does_not_annotate_stderr_truncation_under_the_cap(base: Path, d
 
 @needs_setsid
 @pytest.mark.skipif(shutil.which("cat") is None, reason="needs cat to block the detached grandchild on a FIFO")
+@pytest.mark.parametrize("delays", [{}, {"exec": 1.5}], ids=["nominal", "slow-exec"])
 def test_execute_reports_stdout_incomplete_when_the_drain_never_reaches_eof(
-    base: Path, docker_state: Path, tmp_path: Path,
+    base: Path, docker_state: Path, tmp_path: Path, delays: dict[str, float],
 ) -> None:
     """Red case for issue #133 item 3: the pre-fix code read
     `stdout_drain.captured_bytes()` unconditionally after `stdout_thread.join(
@@ -1173,7 +1194,8 @@ def test_execute_reports_stdout_incomplete_when_the_drain_never_reaches_eof(
     clean, complete, empty capture."""
     grace, daemon_timeout = 1.0, 1.0
     backend = d.DockerBackend(
-        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=daemon_timeout,
+        image="fake-image:1", base_dir=base, docker_bin=_slowed_docker_bin(docker_state, tmp_path, delays),
+        daemon_timeout=daemon_timeout,
     )
     handle = backend.prepare("a-lc-000000000024b")
     assert isinstance(handle, d._Handle)
@@ -1469,8 +1491,12 @@ def test_execute_never_prefixes_the_argv_when_no_supervisor_is_actually_running(
     backend.destroy(handle)
 
 
+@pytest.mark.parametrize(
+    "delays,subject_delay", [({}, 0.0), ({}, 1.0), ({"exec": 1.0}, 0.0)],
+    ids=["nominal", "slow-subject", "slow-exec"],
+)
 def test_execute_forwards_term_through_a_capable_image_and_reports_exited_within_grace(
-    base: Path, docker_state: Path, tmp_path: Path,
+    base: Path, docker_state: Path, tmp_path: Path, delays: dict[str, float], subject_delay: float,
 ) -> None:
     """Red case 1 (issue #158): with the fake's "supervisor present and
     survives TERM" mode fully on (BOTH `.supervisor-NAME` - the binary - AND
@@ -1487,7 +1513,8 @@ def test_execute_forwards_term_through_a_capable_image_and_reports_exited_within
     `test_a_container_level_kill_does_not_reach_the_execd_subject_but_still_kills_it`,
     above, is exactly that scenario without either sentinel)."""
     backend = d.DockerBackend(
-        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=1.0,
+        image="fake-image:1", base_dir=base, docker_bin=_slowed_docker_bin(docker_state, tmp_path, delays),
+        daemon_timeout=1.0,
     )
     handle = backend.prepare("a-lc-000000000035")
     assert isinstance(handle, d._Handle)
@@ -1498,6 +1525,7 @@ def test_execute_forwards_term_through_a_capable_image_and_reports_exited_within
     sentinel = tmp_path / "term-received"
     script = (
         "import signal, sys, time\n"
+        f"time.sleep({subject_delay!r})\n"
         "def handler(signum, frame):\n"
         f"    open({str(sentinel)!r}, 'w').write('term')\n"
         "    sys.exit(0)\n"
