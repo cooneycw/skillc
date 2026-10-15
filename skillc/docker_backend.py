@@ -1052,8 +1052,15 @@ class DockerBackend:
             return None, None
         trigger_socket_host_path = trigger_socket_host_path_for(self.trigger_socket_dir, name)
         _ensure_private_trigger_dir(trigger_socket_host_path.parent)
+        # retain_socket_path (#394): finalizing the log (`trigger_log()`,
+        # which the gate witness calls right after the confirmed stop) must
+        # not delete this container's bind-mount source - every later
+        # `docker cp` against the stopped container, the capture export
+        # included, would then fail. `destroy()` removes it after the
+        # container is gone.
         channel = DecideReplyChannel(
             trigger_socket_host_path, self.trigger_decide, attempt_id, socket_mode=TRIGGER_SOCKET_MODE,
+            retain_socket_path=True,
         )
         channel.start()
         return channel, trigger_socket_host_path
@@ -2690,10 +2697,18 @@ class DockerBackend:
         raises (`DecideReplyChannel.close()`'s own idempotent contract), so
         a caller that forgot to retrieve the log before tearing down still
         leaves no listening thread behind; it only loses the log it never
-        asked for."""
+        asked for.
+
+        The container goes FIRST, the channel's socket file second (#394):
+        the socket is this container's bind-mount source, and a stopped
+        container whose source has vanished answers every `docker cp` with
+        "Could not find the file", so the file must outlive the container,
+        not the listener (`_start_trigger_channel`'s `retain_socket_path`).
+        The listener always stops here; the file is released only once the
+        daemon CONFIRMS the container is gone. A failed or timed-out removal
+        leaves both, so the container stays readable for diagnosis and a
+        later `destroy()` (safe to repeat) or the reaper finishes the job."""
         assert isinstance(handle, _Handle)
-        if handle.trigger_channel is not None:
-            handle.trigger_channel.close()
         try:
             subprocess.run(
                 [*self.docker_bin, "rm", "-f", handle.name],
@@ -2701,6 +2716,15 @@ class DockerBackend:
             )
         except (OSError, subprocess.TimeoutExpired):
             pass  # best-effort; confirm_absent() independently verifies the outcome
+        channel = handle.trigger_channel
+        if channel is not None:
+            if self.confirm_absent(handle) is Confirmation.CONFIRMED:
+                channel.close()
+            else:
+                try:
+                    channel.log_or_finalize()  # stop listening; keep the bind source
+                except RuntimeError:
+                    pass  # best-effort, matching close(); the log read reports its own failure
 
     def confirm_absent(self, handle: object) -> Confirmation:
         """Step 9: ask the daemon whether this attempt's container is

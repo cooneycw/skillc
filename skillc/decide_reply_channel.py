@@ -202,9 +202,28 @@ class DecideReplyChannel:
         self, socket_path: Path, decide: DecideFn, attempt_id: str, *,
         socket_mode: int = 0o600, handler_drain_timeout: float = 5.0,
         max_concurrent_handlers: int = 32, max_request_bytes: int = 64 * 1024,
-        request_timeout: float = 5.0,
+        request_timeout: float = 5.0, retain_socket_path: bool = False,
     ) -> None:
         self._socket_path = socket_path
+        #: #394: `True` makes `stop_and_finalize()` stop LISTENING but leave
+        #: the socket file in place; `release_socket_path()` (or `close()`)
+        #: removes it later. A caller that bind-mounts this path into a
+        #: container needs the file to exist for as long as the CONTAINER
+        #: does, not merely as long as the listener: `docker cp` against a
+        #: stopped container re-resolves its bind mounts, and with the
+        #: source gone the daemon reports every path as missing ("Could not
+        #: find the file /work/."), so nothing can be captured after the
+        #: channel is finalized. `False` (the default) keeps the original
+        #: unlink-on-finalize behaviour for every caller that mounts nothing.
+        self._retain_socket_path = retain_socket_path
+        #: `(st_dev, st_ino, st_ctime_ns)` of the socket file this channel
+        #: bound, so `release_socket_path()` removes OUR file and never a
+        #: later channel's socket at the same path (one whose
+        #: `_clear_stale_path()` replaced ours once our listener was
+        #: closed). The inode number alone is not enough: a filesystem
+        #: reuses a freed inode immediately, which this module's own unit
+        #: test hit on its first run.
+        self._bound_identity: tuple[int, int, int] | None = None
         self._decide = decide
         #: Carried into `TrustedLog.witnessed()` by this channel's own
         #: `trusted_log()` below, never re-supplied by a caller - this
@@ -301,6 +320,10 @@ class DecideReplyChannel:
             server.channel = self
             try:
                 os.chmod(self._socket_path, self._socket_mode)
+                # Recorded under the same lock, before anyone else can
+                # replace the path (#394, `release_socket_path`).
+                st = self._socket_path.lstat()
+                self._bound_identity = (st.st_dev, st.st_ino, st.st_ctime_ns)
             except OSError:
                 # `_Server.__init__` already self-closes on a bind/listen
                 # failure (stdlib `TCPServer.__init__`'s own try/except),
@@ -434,12 +457,54 @@ class DecideReplyChannel:
                 f"handler_drain_timeout={self._handler_drain_timeout}s - the log cannot be "
                 f"trusted as finalized while a decision may still be appended to it"
             )
-        try:
-            self._socket_path.unlink()
-        except OSError:
-            pass
+        if not self._retain_socket_path:
+            self.release_socket_path()
         with self._lock:
             return list(self._log)
+
+    def release_socket_path(self) -> None:
+        """Removes the socket file this channel bound - and only that file.
+        A no-op when nothing was bound or it is already gone, and a REFUSAL
+        (silently, best-effort) when the path now holds a different file:
+        with the listener closed, a later channel's `_clear_stale_path()`
+        may legitimately have replaced ours at the same path, and unlinking
+        it would cut that live attempt off. Never raises; the next bind at
+        this path clears a leftover orphan anyway (`_clear_stale_path`).
+
+        Called by `stop_and_finalize()` itself in the default mode; with
+        `retain_socket_path=True` (#394) the caller owns WHEN - after the
+        container that mounts this path is gone."""
+        if self._bound_identity is None:
+            return
+        identity, self._bound_identity = self._bound_identity, None
+        # Under the same per-path lock `start()` holds across its
+        # decide-and-bind, so a channel mid-start cannot be misread here.
+        lock_path = self._socket_path.with_name(self._socket_path.name + ".lock")
+        try:
+            with open(lock_path, "wb") as lock_file:
+                fcntl.flock(lock_file, fcntl.LOCK_EX)
+                try:
+                    st = self._socket_path.lstat()
+                    if (st.st_dev, st.st_ino, st.st_ctime_ns) != identity or self._someone_is_listening():
+                        return
+                    self._socket_path.unlink()
+                finally:
+                    fcntl.flock(lock_file, fcntl.LOCK_UN)
+        except OSError:
+            pass
+
+    def _someone_is_listening(self) -> bool:
+        """`True` when a live listener accepts at this path - which, after
+        this channel's own listener is closed, can only be someone else's."""
+        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            probe.settimeout(0.2)
+            probe.connect(str(self._socket_path))
+        except OSError:
+            return False
+        finally:
+            probe.close()
+        return True
 
     def log_or_finalize(self) -> list[LoggedDecision]:
         """Idempotent variant of `stop_and_finalize()`, for a caller that
@@ -473,10 +538,14 @@ class DecideReplyChannel:
         and safe after `stop_and_finalize()` (no-op). For a caller that
         needs to guarantee the listening thread is gone without caring
         about the log itself (`DockerBackend.prepare()`'s own failure
-        path, `destroy()`'s best-effort contract)."""
-        if not self._started or self._finalized:
+        path, `destroy()`'s best-effort contract). Also releases a socket
+        file `retain_socket_path=True` kept past finalization (#394), so
+        it is the one teardown call such a caller needs."""
+        if not self._started:
             return
-        self.stop_and_finalize()
+        if not self._finalized:
+            self.stop_and_finalize()
+        self.release_socket_path()
 
 
 @dataclass(frozen=True)

@@ -336,3 +336,92 @@ def test_the_channel_round_trips_correctly_against_a_real_daemon(live_backend: d
     _check_decisions(reported["decisions"])
     assert log is not None
     _check_decisions([entry.result["decision"] for entry in log])
+
+
+# ----------------------------------------- #394: a stopped attempt stays readable
+
+
+_WORKSPACE_PAYLOAD = b"installed before execute; must survive the stop\n"
+
+
+def _finalized_attempt(
+    backend: d.DockerBackend, label: str,
+) -> tuple[d._Handle, list[object]]:
+    """Run one attempt through the PRODUCTION order up to the reads that
+    follow a stop: install, execute, confirm the stop, then finalize the
+    channel (`trigger_log()`, which the gate witness calls from
+    `observe_before_teardown`) - and only THEN return, so the caller's
+    `export()` runs against a stopped container whose channel is already
+    finalized. The existing round-trip test above exports BEFORE
+    `trigger_log()`, which is why the #315 floor never saw #394."""
+    handle = backend.prepare(f"a-live-394-{label}-{uuid.uuid4().hex[:12]}")
+    assert isinstance(handle, d._Handle)
+    try:
+        assert handle.trigger_channel is not None
+        backend.install(handle, {"tests/seed.txt": _WORKSPACE_PAYLOAD})
+        result = backend.execute(handle, ["true"], Limits(timeout=15))
+        assert result.reason == "exited", result.error
+        assert backend.confirm_stopped(handle) is Confirmation.CONFIRMED
+        log = backend.trigger_log(handle)
+        assert log == []
+    except BaseException:
+        backend.destroy(handle)
+        raise
+    return handle, list(log)
+
+
+def test_a_stopped_attempt_is_still_exportable_after_its_channel_is_finalized() -> None:
+    """#394's regression control, in a file the #315 floor already counts.
+
+    Production order on a REAL daemon: a witnessed attempt's channel is
+    finalized (`trigger_log()`) after the stop is confirmed and BEFORE the
+    capture `export()`. Before the fix, finalizing unlinked the host-side
+    socket the container bind-mounts, and `docker cp` against a STOPPED
+    container re-resolves its bind mounts - with the source gone, the
+    daemon reports `Could not find the file /work/.` for every path, so no
+    witnessed attempt on the runner could ever be captured.
+
+    TWO LEGS, ONE TEST, so the green is evidence rather than an accident of
+    this daemon:
+
+    - control (negative): one stopped, finalized attempt is exported once
+      (it must succeed), then its socket source is removed by hand and the
+      export MUST fail with the daemon's not-found error. This is the known-bad input: it proves this daemon
+      has the hazard at all, so the main leg below is able to fail. If a
+      future Docker stops exhibiting it, this leg goes red on purpose - the
+      main leg would then pass whatever the code did.
+    - main: the unmodified production order. The export must succeed and
+      return the installed file. Fails on the pre-fix code (shown on the
+      #315 runner, see the PR)."""
+    if not _image_available(LIVE_TEST_IMAGE):
+        pytest.skip(f"image {LIVE_TEST_IMAGE!r} is not available locally and could not be pulled")
+    backend = d.DockerBackend(
+        image=LIVE_TEST_IMAGE, base_dir=Path(tempfile.mkdtemp(prefix="sk-live-394-base-")), network="none",
+        daemon_timeout=LIVE_DOCKER_DAEMON_TIMEOUT, trigger_decide=lambda _request: {"decision": "pass"},
+        trigger_socket_dir=Path(tempfile.mkdtemp(prefix="sk-live-394-trig-")),
+    )
+
+    control, _ = _finalized_attempt(backend, "control")
+    try:
+        # Attribution (counter-model review): the SAME stopped, finalized
+        # container must export cleanly first, so the failure below can only
+        # come from removing its socket - not from a workspace that was never
+        # there.
+        before = Path(tempfile.mkdtemp(prefix="live394-precheck-"))
+        backend.export(control, before)
+        assert (before / "tests" / "seed.txt").read_bytes() == _WORKSPACE_PAYLOAD
+        d.trigger_socket_host_path_for(backend.trigger_socket_dir, control.name).unlink()
+        with pytest.raises(OSError, match="Could not find the file"):
+            backend.export(control, Path(tempfile.mkdtemp(prefix="sk-live-394-control-")))
+    finally:
+        backend.destroy(control)
+
+    handle, _ = _finalized_attempt(backend, "main")
+    try:
+        export_dir = Path(tempfile.mkdtemp(prefix="sk-live-394-export-"))
+        backend.export(handle, export_dir)
+        assert (export_dir / "tests" / "seed.txt").read_bytes() == _WORKSPACE_PAYLOAD
+    finally:
+        backend.destroy(handle)
+    assert backend.confirm_absent(handle) is Confirmation.CONFIRMED
+    assert not d.trigger_socket_host_path_for(backend.trigger_socket_dir, handle.name).exists()

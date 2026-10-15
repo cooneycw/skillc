@@ -8,6 +8,18 @@ and version plan.
 
 ## [Unreleased]
 
+- **Witnessed live attempts capture again after the stop** (#394). The gate
+  witness finalizes the decide-and-reply channel (`trigger_log()`) right after
+  the confirmed stop, and finalizing unlinked the host socket the container
+  bind-mounts. `docker cp` against a stopped container re-resolves its bind
+  mounts, so with the source gone the daemon reported `Could not find the file
+  /work/.` and every witnessed attempt on the #315 runner ended `inconclusive`,
+  never graded. The filesystem was intact throughout. `DockerBackend` now keeps
+  the socket file until `destroy()` has removed the container
+  (`DecideReplyChannel(retain_socket_path=True)`, `release_socket_path()`).
+  `tests/test_decide_reply_channel_live.py` gains a production-order test whose
+  main leg fails on the old code with that exact error and whose control leg
+  removes the socket by hand and requires the export to fail.
 - **Installed fixture subdirectories belong to the candidate** (#393).
   `DockerBackend.install()` sent each surface entry as a one-file tar with no
   directory entries, so `docker cp` created a missing parent such as `tests/`

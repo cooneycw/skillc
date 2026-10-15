@@ -38,6 +38,7 @@ from conftest import FAKE_DOCKER_DAEMON_TIMEOUT
 from skillc import docker_backend as d
 from skillc import lifecycle as lc
 from skillc.backend import BackendUnavailable, Confirmation, ExecutionBackend, Limits
+from skillc.decide_reply_channel import DecideReplyChannel
 
 needs_setsid = pytest.mark.skipif(
     shutil.which("setsid") is None or shutil.which("sh") is None,
@@ -2234,6 +2235,63 @@ def test_destroy_closes_the_trigger_channel_even_when_the_caller_never_finalized
     backend.destroy(handle)  # no trigger_log() call first
     assert not sock_path.exists()
     assert backend.trigger_log(handle) == []  # bypass: never connected
+
+
+def test_the_trigger_socket_outlives_trigger_log_and_goes_only_after_the_container(
+    base: Path, docker_state: Path, trigger_socket_dir: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#394: the gate witness finalizes the channel (`trigger_log()`) right
+    after the confirmed stop and BEFORE the capture export. The socket is
+    the container's bind-mount source, and real Docker cannot `docker cp`
+    out of a stopped container whose source is gone - so finalizing must
+    leave the file, and `destroy()` must remove the container before it
+    removes the file. (The daemon behaviour itself is proven on real Docker
+    in `test_decide_reply_channel_live.py`; the fake CLI has no mounts.)"""
+    backend = _trigger_backend(base, docker_state, trigger_socket_dir)
+    handle = backend.prepare("a-lc-000000000394")
+    assert isinstance(handle, d._Handle)
+    sock_path = d.trigger_socket_host_path_for(backend.trigger_socket_dir, handle.name)
+    assert backend.trigger_log(handle) == []
+    assert sock_path.exists(), "finalizing the log removed the container's bind-mount source"
+
+    seen: dict[str, object] = {}
+    real_close = DecideReplyChannel.close
+
+    def spying_close(self: DecideReplyChannel) -> None:
+        seen["container_at_close"] = backend.confirm_absent(handle)
+        real_close(self)
+
+    monkeypatch.setattr(DecideReplyChannel, "close", spying_close)
+    backend.destroy(handle)
+    assert seen["container_at_close"] is Confirmation.CONFIRMED
+    assert not sock_path.exists()
+
+
+def test_a_failed_removal_keeps_the_trigger_socket_but_stops_the_listener(
+    base: Path, docker_state: Path, trigger_socket_dir: Path,
+) -> None:
+    """Counter-model finding (#394): when `docker rm -f` does not remove the
+    container, its bind source must survive (the container is still there
+    and still needs it), while the listener stops. A later `destroy()` that
+    does remove it then releases the file."""
+    backend = _trigger_backend(base, docker_state, trigger_socket_dir)
+    handle = backend.prepare("a-lc-000000000395")
+    assert isinstance(handle, d._Handle)
+    sock_path = d.trigger_socket_host_path_for(backend.trigger_socket_dir, handle.name)
+    _sentinel(docker_state, f".stuck-{handle.name}")
+    backend.destroy(handle)
+    assert backend.confirm_absent(handle) is Confirmation.NOT_CONFIRMED
+    assert sock_path.exists(), "released the bind source of a container that still exists"
+    probe = socket_module.socket(socket_module.AF_UNIX, socket_module.SOCK_STREAM)
+    try:
+        with pytest.raises(ConnectionRefusedError):
+            probe.connect(str(sock_path))
+    finally:
+        probe.close()
+    (docker_state / f".stuck-{handle.name}").unlink()
+    backend.destroy(handle)
+    assert backend.confirm_absent(handle) is Confirmation.CONFIRMED
+    assert not sock_path.exists()
 
 
 def test_confirm_stopped_is_unknown_on_an_unrecognized_inspect_error(
