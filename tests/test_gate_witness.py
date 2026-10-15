@@ -19,7 +19,7 @@ import socket
 import sys
 import threading
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -821,25 +821,56 @@ def _docker_bin(state_dir: Path) -> list[str]:
     return [sys.executable, str(FAKE_DOCKER), "--state", str(state_dir)]
 
 
-def test_real_gates_run_with_real_exit_codes_while_the_primary_subject_keeps_running(
+# The primary subject holds until the test writes this marker (#387). A fixed
+# `sleep(1.5)` raced the gates it had to outlive: on a loaded host they ran
+# past it, `execute()` stopped the container on the primary's normal exit, and
+# a later gate read `attempt-not-running` or the fake's exit 1 - a false red
+# about a property that held. The deadline only bounds a release that never
+# comes, and exits 3 so that case can never read as a clean "exited" 0.
+def _primary_hold_script(deadline: float) -> str:
+    return (
+        "import pathlib, sys, time\n"
+        f"deadline = time.monotonic() + {deadline!r}\n"
+        "release = pathlib.Path('/work/release')\n"
+        "while not release.exists():\n"
+        "    if time.monotonic() > deadline:\n"
+        "        sys.exit(3)\n"
+        "    time.sleep(0.05)\n"
+    )
+
+
+@dataclass
+class _HeldPrimaryRun:
+    """What `_run_gates_against_a_held_primary` observed, recorded rather than
+    asserted so a red case can show the check below reporting a failure."""
+
+    lint: dict[str, object] | None = None
+    typecheck: dict[str, object] | None = None
+    fix: ExecuteResult | None = None
+    relint: dict[str, object] | None = None
+    release: ExecuteResult | None = None
+    primary: list[ExecuteResult] = field(default_factory=list)
+    record: GateWitnessRecord | None = None
+
+
+def _gate_result(reply: dict[str, object]) -> dict[str, object] | None:
+    result = reply.get("result")
+    return result if isinstance(result, dict) else None
+
+
+def _run_gates_against_a_held_primary(
     tmp_path: Path,
-) -> None:
-    """#269's own acceptance bar ("Show real deterministic processes
-    succeeding, failing and being interrupted through the protected path.
-    No live model is required.") PLUS the orchestrator's correction: a gate
-    exec must never touch the attempt's own primary process. Drives TWO
-    gates and a RERUN through a REAL `DockerBackend` (fake CLI) while a
-    REAL, separately-running primary subject process is still inside the
-    SAME container via `execute()` - proving `exec_in_attempt()` never
-    stops it, which was exactly the bug this design found. `python3` (bare,
-    not `sys.executable`) avoids the pre-existing `/work/` substring
-    collision in `fake_docker.py`'s simulated-container path remapping
-    (nit-stored during #183's own work)."""
+    *,
+    gate_delay: float = 0.0,
+    after_lint: Callable[[d.DockerBackend, object], None] | None = None,
+    hold_deadline: float = 20.0,
+) -> _HeldPrimaryRun:
     base = tmp_path / "work"
     base.mkdir()
     backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(tmp_path / "docker-state"), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     handle = backend.prepare("a-gw-0000000000001")
     backend.install(handle, {})
+    run = _HeldPrimaryRun()
     try:
         lint_argv = [
             "python3", "-c",
@@ -857,54 +888,113 @@ def test_real_gates_run_with_real_exit_codes_while_the_primary_subject_keeps_run
         channel = DecideReplyChannel(sock_path, witness.decide, "a1")
         channel.start()
 
-        primary_result: list[ExecuteResult] = []
-
         def run_primary() -> None:
-            primary_result.append(
-                backend.execute(handle, ["python3", "-c", "import time; time.sleep(1.5)"], Limits(timeout=10.0))
+            run.primary.append(
+                backend.execute(handle, ["python3", "-c", _primary_hold_script(hold_deadline)], Limits(timeout=30.0))
             )
 
         primary_thread = threading.Thread(target=run_primary)
         primary_thread.start()
         time.sleep(0.3)  # let the primary genuinely start before gates run against it
         try:
-            lint_reply = _send(sock_path, {"op": "run_gate", "gate": "lint"})
-            assert _ok_result(lint_reply)["exit_code"] == 1
-
-            typecheck_reply = _send(sock_path, {"op": "run_gate", "gate": "typecheck"})
-            assert _ok_result(typecheck_reply)["exit_code"] == 0
+            run.lint = _gate_result(_send(sock_path, {"op": "run_gate", "gate": "lint"}))
+            if after_lint is not None:
+                after_lint(backend, handle)
+            time.sleep(gate_delay)
+            run.typecheck = _gate_result(_send(sock_path, {"op": "run_gate", "gate": "typecheck"}))
 
             # Subject "fixes" lint (creates the marker file lint_argv checks
             # for) via its OWN exec_in_attempt call - the SAME mechanism, a
             # separate in-place exec against the still-running container -
             # then reruns the gate: a sequential rerun, not refused.
-            fix = backend.exec_in_attempt(
+            run.fix = backend.exec_in_attempt(
                 handle, ["python3", "-c", "open('/work/fixed', 'w').close()"], Limits(timeout=5.0),
             )
-            assert fix.reason == "exited" and fix.exit_code == 0
-            relint_reply = _send(sock_path, {"op": "run_gate", "gate": "lint"})
-            assert _ok_result(relint_reply)["exit_code"] == 0
+            run.relint = _gate_result(_send(sock_path, {"op": "run_gate", "gate": "lint"}))
         finally:
+            # Release the primary only after every gate has run, through the
+            # same in-place exec path, so its lifetime covers all of them.
+            run.release = backend.exec_in_attempt(
+                handle, ["python3", "-c", "open('/work/release', 'w').close()"], Limits(timeout=5.0),
+            )
             channel.stop_and_finalize()
-        primary_thread.join(timeout=10.0)
-
-        # The primary ran its own full 1.5s and exited cleanly - proof that
-        # no gate exec stopped or killed the container out from under it.
-        assert len(primary_result) == 1
-        assert primary_result[0].reason == "exited"
-        assert primary_result[0].exit_code == 0
-
-        record = witness.finalize("a-1")
-        assert record.gates["typecheck"].coverage == "complete"
-        assert record.gates["typecheck"].runs[0].exit_code == 0
-        assert len(record.gates["lint"].runs) == 2
-        assert record.gates["lint"].runs[0].exit_code == 1
-        assert record.gates["lint"].runs[1].exit_code == 0
-        assert record.gates["lint"].coverage == "complete"
-        for gate in ("lint", "typecheck"):
-            assert record.gates[gate].execution_observed() == ("CONFIRMED", None)
+            primary_thread.join(timeout=30.0)
+        run.record = witness.finalize("a-1")
     finally:
         backend.destroy(handle)
+    return run
+
+
+def _held_primary_violations(run: _HeldPrimaryRun) -> list[str]:
+    """Every property the held-primary scenario must show, as a list of the
+    ones that failed - empty means the gates ran with real exit codes and no
+    gate exec stopped the primary."""
+    violations: list[str] = []
+    for name, result, want in (
+        ("lint", run.lint, 1), ("typecheck", run.typecheck, 0), ("relint", run.relint, 0),
+    ):
+        if result is None or result.get("exit_code") != want:
+            violations.append(f"{name}: wanted exit_code {want}, got {result!r}")
+    for name, step in (("fix", run.fix), ("release", run.release)):
+        if step is None or step.reason != "exited" or step.exit_code != 0:
+            violations.append(f"{name}: wanted exited/0, got {step!r}")
+    # The primary exits on its own, cleanly, only after release - proof that
+    # no gate exec stopped or killed the container out from under it.
+    if len(run.primary) != 1 or run.primary[0].reason != "exited" or run.primary[0].exit_code != 0:
+        violations.append(f"primary: wanted one exited/0 result, got {run.primary!r}")
+    record = run.record
+    if record is None:
+        violations.append("record: never finalized")
+        return violations
+    if [r.exit_code for r in record.gates["lint"].runs] != [1, 0]:
+        violations.append(f"record lint runs: {record.gates['lint'].runs!r}")
+    if [r.exit_code for r in record.gates["typecheck"].runs] != [0]:
+        violations.append(f"record typecheck runs: {record.gates['typecheck'].runs!r}")
+    for gate in ("lint", "typecheck"):
+        if record.gates[gate].coverage != "complete":
+            violations.append(f"record {gate} coverage: {record.gates[gate].coverage}")
+        if record.gates[gate].execution_observed() != ("CONFIRMED", None):
+            violations.append(f"record {gate} execution: {record.gates[gate].execution_observed()}")
+    return violations
+
+
+@pytest.mark.parametrize("gate_delay", [0.0, 2.0], ids=["no-delay", "slow-gates"])
+def test_real_gates_run_with_real_exit_codes_while_the_primary_subject_keeps_running(
+    tmp_path: Path, gate_delay: float,
+) -> None:
+    """#269's own acceptance bar ("Show real deterministic processes
+    succeeding, failing and being interrupted through the protected path.
+    No live model is required.") PLUS the orchestrator's correction: a gate
+    exec must never touch the attempt's own primary process. Drives TWO
+    gates and a RERUN through a REAL `DockerBackend` (fake CLI) while a
+    REAL, separately-running primary subject process is still inside the
+    SAME container via `execute()` - proving `exec_in_attempt()` never
+    stops it, which was exactly the bug this design found. `python3` (bare,
+    not `sys.executable`) avoids the pre-existing `/work/` substring
+    collision in `fake_docker.py`'s simulated-container path remapping
+    (nit-stored during #183's own work).
+
+    `slow-gates` is #387's reproduction: a 2s pause between gates failed the
+    old fixed 1.5s primary with `attempt-not-running` on every run. The
+    primary is now held until released, so gate duration cannot race it."""
+    run = _run_gates_against_a_held_primary(tmp_path, gate_delay=gate_delay)
+    assert _held_primary_violations(run) == []
+
+
+def test_a_gate_step_that_stops_the_container_fails_the_held_primary_check(tmp_path: Path) -> None:
+    """#387's red case: holding the primary must not blind the check. A
+    container stopped between gates - what a gate exec that touched the
+    primary would do - still reads as a failure of the primary and of every
+    later gate. The short hold bounds the run: the fake's `kill` signals
+    only the most recent exec's process group, so the held primary outlives
+    the stop and ends on its deadline (exit 3) rather than at the kill."""
+    run = _run_gates_against_a_held_primary(
+        tmp_path, hold_deadline=3.0,
+        after_lint=lambda backend, handle: backend._kill_container(handle, "KILL"),  # type: ignore[arg-type]
+    )
+    violations = _held_primary_violations(run)
+    assert any(v.startswith("primary:") for v in violations), violations
+    assert any(v.startswith("typecheck:") for v in violations), violations
 
 
 def test_exec_in_attempt_is_refused_once_the_primary_has_already_stopped(tmp_path: Path) -> None:

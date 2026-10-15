@@ -1,0 +1,25 @@
+{
+  "branch": "issue-387-test-gate-witness-the-1-5s-primary-can-exit-before",
+  "counts": {
+    "accepted": 0,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "2125375e9be5a328ebd533cca8fd804260f33579",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "387",
+  "passes": 1,
+  "recorded_at": "2026-10-15T13:08:46Z",
+  "red_cases": {
+    "already_covered": 4,
+    "proposed": 4
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/15/rollout-2026-10-15T09-07-32-01a13fac-cede-7850-b835-589e0e6e336a.jsonl",
+    "thread_id": "01a13fac-cede-7850-b835-589e0e6e336a"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
