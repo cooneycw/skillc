@@ -1,0 +1,25 @@
+{
+  "branch": "issue-399-test-calibration-run-two-34s-fake-docker-tests-tim",
+  "counts": {
+    "accepted": 0,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "a100da5cfc77331892c7c6c71e35056c8b08afff",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "399",
+  "passes": 1,
+  "recorded_at": "2026-10-15T19:36:11Z",
+  "red_cases": {
+    "already_covered": 2,
+    "proposed": 2
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/15/rollout-2026-10-15T15-35-41-01a14110-2d7f-7b43-8c93-4929e5edcdca.jsonl",
+    "thread_id": "01a14110-2d7f-7b43-8c93-4929e5edcdca"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
