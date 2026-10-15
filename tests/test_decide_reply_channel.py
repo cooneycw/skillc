@@ -380,6 +380,60 @@ def test_close_after_start_stops_the_listener_without_raising(tmp_path: Path) ->
     channel.close()
 
 
+# ------------------------------------- #394: socket lifetime beyond finalize
+
+
+def test_finalize_still_unlinks_the_socket_by_default(tmp_path: Path) -> None:
+    """Every caller that bind-mounts nothing keeps the pre-#394 behaviour."""
+    sock_path = tmp_path / "trigger.sock"
+    channel = DecideReplyChannel(sock_path, _decide_fixed({}), "a1")
+    channel.start()
+    channel.stop_and_finalize()
+    assert not sock_path.exists()
+
+
+def test_a_retained_socket_survives_finalize_and_is_released_by_close(tmp_path: Path) -> None:
+    """#394: with `retain_socket_path=True` the listener stops at finalize
+    but the FILE stays - it is a container's bind-mount source, and a
+    stopped container whose source is gone answers every `docker cp` with
+    "Could not find the file". `close()` is the one teardown call that
+    removes it."""
+    sock_path = tmp_path / "trigger.sock"
+    channel = DecideReplyChannel(sock_path, _decide_fixed({}), "a1", retain_socket_path=True)
+    channel.start()
+    _send(sock_path, {"op": "disruption_check", "client_seq": 1})
+    assert len(channel.log_or_finalize()) == 1
+    assert sock_path.exists()
+    probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        with pytest.raises(ConnectionRefusedError):
+            probe.connect(str(sock_path))  # retained, but nothing is listening
+    finally:
+        probe.close()
+    channel.close()
+    assert not sock_path.exists()
+    channel.close()  # still idempotent
+
+
+def test_release_never_removes_a_socket_another_channel_bound_at_the_same_path(tmp_path: Path) -> None:
+    """Once our listener is closed, a later channel may legitimately replace
+    our orphan at the same path (`_clear_stale_path`). Releasing ours must
+    not cut that live channel off - only the inode we bound is ours."""
+    sock_path = tmp_path / "trigger.sock"
+    first = DecideReplyChannel(sock_path, _decide_fixed({}), "a1", retain_socket_path=True)
+    first.start()
+    first.stop_and_finalize()
+    second = DecideReplyChannel(sock_path, _decide_fixed({}), "a2")
+    second.start()
+    try:
+        first.close()
+        assert sock_path.exists()
+        assert _send(sock_path, {"op": "disruption_check", "client_seq": 1})["ok"] is True
+    finally:
+        second.close()
+    assert not sock_path.exists()
+
+
 def test_start_refuses_a_path_too_close_to_the_af_unix_limit(tmp_path: Path) -> None:
     """The kernel's own `sun_path` bind (108 bytes on Linux) produces a
     bare, unexplained `OSError: AF_UNIX path too long` with no path and no
@@ -795,3 +849,21 @@ def test_mutating_the_original_nested_object_after_logging_does_not_rewrite_the_
     stored_detail = log[0].result["detail"]
     assert isinstance(stored_detail, dict)
     assert stored_detail["nested"] == [1, 2, 3]  # the stored entry is unaffected
+
+
+def test_release_never_removes_a_finalized_replacement_at_the_same_path(tmp_path: Path) -> None:
+    """Counter-model red case (#394): isolates the IDENTITY check from the
+    listener check. The replacement is itself finalized and retained, so
+    nothing listens on the path; only the bound file's identity tells it
+    apart from ours."""
+    sock_path = tmp_path / "trigger.sock"
+    first = DecideReplyChannel(sock_path, _decide_fixed({}), "a1", retain_socket_path=True)
+    first.start()
+    first.stop_and_finalize()
+    second = DecideReplyChannel(sock_path, _decide_fixed({}), "a2", retain_socket_path=True)
+    second.start()
+    second.stop_and_finalize()
+    first.close()
+    assert sock_path.exists(), "released a socket file this channel never bound"
+    second.close()
+    assert not sock_path.exists()
