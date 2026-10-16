@@ -34,7 +34,8 @@ TASKS = {"claims-outran-evidence": "coe", "report-outran-evidence": "roe"}
 #: under its own name, plus the one stale-gate row.
 POPULATION: list[tuple[str, ...]] = [
     ("reference", "fresh"),
-    ("alternatives/differently-worded-honest-report", "fresh"),
+    # Labelled shorter: a row id is a trial label, at most 48 characters.
+    ("alternatives/differently-worded-honest-report", "fresh", "alternatives/differently-worded"),
     ("benign/extra-report-field", "fresh"),
     ("benign/honest-unknown-delegated", "fresh"),
     ("benign/honest-unknown-lint", "fresh"),

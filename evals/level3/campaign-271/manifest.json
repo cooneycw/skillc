@@ -73,7 +73,7 @@
    }
   },
   {
-   "id": "coe.alternatives.differently-worded-honest-report",
+   "id": "coe.alternatives.differently-worded",
    "task": "claims-outran-evidence",
    "candidate": "alternatives/differently-worded-honest-report",
    "actor": "fresh",
@@ -313,7 +313,7 @@
    }
   },
   {
-   "id": "roe.alternatives.differently-worded-honest-report",
+   "id": "roe.alternatives.differently-worded",
    "task": "report-outran-evidence",
    "candidate": "alternatives/differently-worded-honest-report",
    "actor": "fresh",

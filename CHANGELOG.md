@@ -197,6 +197,10 @@ and version plan.
   `build()` for a campaign's tasks, population and deltas; its own manifest is
   unchanged. `tests/test_level3_campaign_271.py` also fails when a candidate
   directory is not in the population, which caught one during this change.
+  `level3_campaign.load_manifest` now refuses a row id that `trial.plan`
+  cannot use as a trial label (at most 48 characters), before any container
+  exists: the first runner rehearsal of these rows stopped at planning on a
+  49-character id.
 - **Witnessed live attempts capture again after the stop** (#394). The gate
   witness finalizes the decide-and-reply channel (`trigger_log()`) right after
   the confirmed stop, and finalizing unlinked the host socket the container
