@@ -1,0 +1,25 @@
+{
+  "branch": "issue-392-poll-triggers-passes-github-comment-pages-through",
+  "counts": {
+    "accepted": 0,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "410801b83c434dac00ba44d97f7cef10cc36fe5d",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "392",
+  "passes": 1,
+  "recorded_at": "2026-10-16T21:37:34Z",
+  "red_cases": {
+    "already_covered": 11,
+    "proposed": 11
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/16/rollout-2026-10-16T17-36-25-01a146a5-125e-7460-8df9-1ffd52fa4805.jsonl",
+    "thread_id": "01a146a5-125e-7460-8df9-1ffd52fa4805"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

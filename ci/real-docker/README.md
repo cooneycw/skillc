@@ -366,8 +366,19 @@ reported something, and ARE persisted.
   control context. A helper crash, malformed output or status/exit mismatch
   produces ERROR. These controls replace Docker, git, uv and curl I/O; they
   do not demonstrate a real-daemon campaign or real GitHub publication.
-  `poll-triggers` remains covered by its decision-function tests rather
-  than a whole-process test. Steps 7-8 close the operator evidence gap.
+  `tests/test_real_docker_poll_triggers.py` (#392) does the same for
+  `poll-triggers`: fake `curl` serves comment pages and a recorder stands in
+  for the installed `run-real-docker`. It pins an oversized page (over the
+  128 KiB argv limit) as an idle tick, newest-first fetching, stopping at a
+  known id, the 20-page cap, one run per decision, and a failed or
+  unparseable page ending the tick before any decision. It does not
+  demonstrate real GitHub pagination. Steps 7-8 close the operator evidence
+  gap.
+- `poll-triggers` never puts GitHub content on a command line (#392).
+  Comment pages, the accumulated set, processed ids and the selection pass
+  between steps as files in a per-tick temporary directory. One page of this
+  repository's comments exceeds Linux's 128 KiB per-argument limit, which
+  made every tick fail with `Argument list too long` while argv carried them.
 - `poll-triggers`' pagination cap (20 pages, 2000 comments) bounds a
   first-ever run against a repository with a very large, entirely
   unprocessed comment history; ordinary ticks stop within one page once

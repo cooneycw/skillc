@@ -8,6 +8,17 @@ and version plan.
 
 ## [Unreleased]
 
+- **The real-Docker timer tick survives a large comment history** (#392).
+  `ci/real-docker/poll-triggers` handed each page of GitHub issue comments to
+  `python3 -c` as a command-line argument. Linux caps one argument at 128 KiB,
+  and one page of this repository's newest 100 comments is about 162 KB, so
+  every timer tick died with `Argument list too long` before deciding anything.
+  Pages, the accumulated set, processed ids and the trigger selection now pass
+  between steps as files in a per-tick temporary directory. The new
+  `tests/test_real_docker_poll_triggers.py` runs the whole script against fake
+  `curl`; its oversized-page case fails on the old script with that exact
+  error, and it adds the first whole-process controls for newest-first
+  fetching, stop-at-known-id, the 20-page cap and fetch/parse failures.
 - **Witnessed live attempts capture again after the stop** (#394). The gate
   witness finalizes the decide-and-reply channel (`trigger_log()`) right after
   the confirmed stop, and finalizing unlinked the host socket the container
