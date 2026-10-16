@@ -1,0 +1,25 @@
+{
+  "branch": "issue-400-level-3-freshness-check-compares-a-pre-gate-digest",
+  "counts": {
+    "accepted": 1,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "f03fe5a2a911bdd7260676e896de5bebdb47a79d",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "400",
+  "passes": 2,
+  "recorded_at": "2026-10-16T21:43:04Z",
+  "red_cases": {
+    "already_covered": 3,
+    "proposed": 3
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/16/rollout-2026-10-16T17-42-24-01a146aa-8b90-7810-ad0f-a88e82c0647c.jsonl",
+    "thread_id": "01a146aa-8b90-7810-ad0f-a88e82c0647c"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

@@ -139,7 +139,10 @@ def run_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, mode: str = "fr
             "pathlib.Path('gate-witness.json').write_text('{\"forged\":true}')\n"
             "def ask(gate):\n"
             " with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as sock:\n"
-            "  sock.settimeout(5)\n"
+            # #400: the attempt's own limit (`Limits(timeout=15)` below). At 5s a
+            # gate reply slowed by host load timed the actor out before its
+            # post-gate edit, and `stale` saw equal digests: a false red.
+            "  sock.settimeout(15)\n"
             f"  sock.connect({socket_path!r})\n"
             "  sock.sendall((json.dumps(dict(op='run_gate',gate=gate,cwd='/work'))+'\\n').encode())\n"
             "  sock.shutdown(socket.SHUT_WR)\n"
@@ -199,8 +202,9 @@ def test_actual_runner_constructs_and_delivers_controller_witness(tmp_path: Path
 
 #: #400: a gate that imports the candidate's Python, as the real plan gate's
 #: test run does. Unless bytecode writing is off, the import leaves
-#: `src/__pycache__/*.pyc` in the tree it was judged against.
-_IMPORTING_GATE = (b"#!/bin/bash\npython3 -c 'import sys; sys.path.insert(0, \"src\"); import slugify'\n"
+#: `src/__pycache__/*.pyc` in the tree it was judged against. `set -e` makes
+#: a failed import fail the gate rather than pass without exercising it.
+_IMPORTING_GATE = (b"#!/bin/bash\nset -e\npython3 -c 'import sys; sys.path.insert(0, \"src\"); import slugify'\n"
                    b"printf 'controller gate output\\n'\n")
 
 

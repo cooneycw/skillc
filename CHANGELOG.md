@@ -20,6 +20,10 @@ and version plan.
   source edit still reads stale. `tests/test_agent_trial_gate_witness.py`
   gains a run whose gate imports the candidate. It fails on the old code with
   the plan run's digest differing from the graded one.
+  The same file's scripted actor now waits 15s for a gate reply, the attempt's
+  own limit, instead of 5s. Under host load a slow reply timed the actor out
+  before its post-gate edit, so the `stale` case saw equal digests and failed
+  even though nothing was wrong.
 - **Witnessed live attempts capture again after the stop** (#394). The gate
   witness finalizes the decide-and-reply channel (`trigger_log()`) right after
   the confirmed stop, and finalizing unlinked the host socket the container
