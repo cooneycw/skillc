@@ -113,7 +113,8 @@ class VirtualMountBackend(TrackingDockerBackend):
 
 
 def run_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, mode: str = "fresh",
-             fault: str | None = None, receipt: bool = False, gate: bool = True) -> tuple[dict, list, VirtualMountBackend]:
+             fault: str | None = None, receipt: bool = False, gate: bool = True,
+             script: bytes = b"#!/bin/bash\nprintf 'controller gate output\\n'\n") -> tuple[dict, list, VirtualMountBackend]:
     base = tmp_path / "work"
     base.mkdir()
     experiment, attempt = _planned(trial.open_store(tmp_path / "store", forbidden=[]))
@@ -166,7 +167,6 @@ def run_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, mode: str = "fr
                                                      "codex-skills", {})
             monkeypatch.setattr(at, "_build_discovery_receipt", lambda **kw: _receipt(
                 experiment, attempt, subject={**INSTALL_RECEIPT["subject"], "digest": "sha256:00"}, image={"digest": "sha256:01"}))
-        script = b"#!/bin/bash\nprintf 'controller gate output\\n'\n"
         entry = ".claude/scripts/flow-finish-gate.sh"
         result = at.run_one_attempt(
             backend=backend, experiment=experiment, attempt_id=attempt, client="codex",
@@ -195,6 +195,37 @@ def test_actual_runner_constructs_and_delivers_controller_witness(tmp_path: Path
         assert gate["coverage"] == "complete"
         assert len(gate["runs"]) == 1
         assert gate["runs"][0]["tree_digest_at_start"] == trusted[0]["graded_tree_digest"]
+
+
+#: #400: a gate that imports the candidate's Python, as the real plan gate's
+#: test run does. Unless bytecode writing is off, the import leaves
+#: `src/__pycache__/*.pyc` in the tree it was judged against.
+_IMPORTING_GATE = (b"#!/bin/bash\npython3 -c 'import sys; sys.path.insert(0, \"src\"); import slugify'\n"
+                   b"printf 'controller gate output\\n'\n")
+
+
+def test_gate_that_imports_python_leaves_an_honest_run_fresh(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#400: an honest run whose gate imports Python must stay fresh against
+    the graded tree. The declared gate env sets PYTHONDONTWRITEBYTECODE=1, as
+    grading's own env does (`verify._env`); without it the bytecode makes every
+    honest run read stale. The `stale` mode of
+    `test_actual_gate_history_binds_each_call_to_its_own_snapshot` is the red
+    case: a genuine post-gate edit still differs."""
+    result, trusted, _ = run_case(tmp_path, monkeypatch, script=_IMPORTING_GATE)
+    assert result["disposition"] == "captured", failure_reason(result)
+    assert len(trusted) == 1
+    record = trusted[0]
+    for name, gate in record["witness"]["gates"].items():
+        assert gate["coverage"] == "complete", name
+        assert gate["runs"][-1]["exit_code"] == 0, name
+        assert gate["runs"][-1]["tree_digest_at_start"] == record["graded_tree_digest"], name
+
+
+def test_declared_gate_env_disables_bytecode_and_keeps_the_measured_env() -> None:
+    session = at._WitnessSession(attempt_id="a", limits=Limits(timeout=1))
+    session.environment = {"PATH": "/usr/bin", "HOME": "/home/candidate"}
+    env = session.gate_environment()
+    assert env == {"PATH": "/usr/bin", "HOME": "/home/candidate", "PYTHONDONTWRITEBYTECODE": "1"}
 
 
 def test_actual_runner_without_gate_preserves_ordinary_grading(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
