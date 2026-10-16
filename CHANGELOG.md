@@ -188,6 +188,15 @@ and version plan.
   own limit, instead of 5s. Under host load a slow reply timed the actor out
   before its post-gate edit, so the `stale` case saw equal digests and failed
   even though nothing was wrong.
+- **A production-path campaign for #271's reporting tasks** (#271).
+  `evals/level3/campaign-271/` freezes 28 rows over `claims-outran-evidence`
+  and `report-outran-evidence` for the same scripted-actor harness as #375's
+  campaign: every committed candidate of both tasks, the no-witness candidate
+  as a `plan-only` run, and a `reference-stale-gate` row per task as the
+  production red case for gate freshness. `campaign-375/freeze.py` now exposes
+  `build()` for a campaign's tasks, population and deltas; its own manifest is
+  unchanged. `tests/test_level3_campaign_271.py` also fails when a candidate
+  directory is not in the population, which caught one during this change.
 - **Witnessed live attempts capture again after the stop** (#394). The gate
   witness finalizes the decide-and-reply channel (`trigger_log()`) right after
   the confirmed stop, and finalizing unlinked the host socket the container

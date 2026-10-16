@@ -86,30 +86,46 @@ def _status(criteria: dict[str, str]) -> str:
     return "FAIL" if "VIOLATED" in values else "INCONCLUSIVE" if "UNKNOWN" in values else "PASS"
 
 
-def expected_for(task: str, candidate: str) -> tuple[dict[str, object], str | None]:
+def expected_for(task: str, candidate: str, *, label: str | None = None,
+                 deltas: dict[str, tuple[dict[str, str], str]] | None = None,
+                 qualify_unknown: dict[str, frozenset[str]] | None = None) -> tuple[dict[str, object], str | None]:
+    """`label` keys the production delta (default: the candidate itself);
+    `qualify_unknown` stands in for a task whose `qualify.py` declares no
+    `_EXPECTED_UNKNOWN` table (default: read that table)."""
     task_root = ROOT / "evals" / "level3" / task
     criteria_ids = json.loads((task_root / "grader.json").read_text(encoding="utf-8"))["criteria"]
     committed = json.loads((task_root / candidate / "expected.json").read_text(encoding="utf-8"))
-    unknown = _qualify(task)._EXPECTED_UNKNOWN.get(candidate, frozenset())
+    table = _qualify(task)._EXPECTED_UNKNOWN if qualify_unknown is None else qualify_unknown
+    unknown = table.get(candidate, frozenset())
     criteria = {c: "VIOLATED" if c in committed["violated"] else "UNKNOWN" if c in unknown else "SATISFIED"
                 for c in criteria_ids}
     if _status(criteria) != committed["status"]:
         raise SystemExit(f"{task}/{candidate}: derived status {_status(criteria)} != committed {committed['status']}")
-    delta, why = PRODUCTION_DELTAS.get(candidate, ({}, None))
+    delta, why = (PRODUCTION_DELTAS if deltas is None else deltas).get(label or candidate, ({}, None))
     criteria.update(delta)
     return {"status": _status(criteria), "criteria": criteria}, why
 
 
-def manifest() -> dict[str, object]:
+def build(*, issue: int, tasks: dict[str, str],
+          population: list[tuple[str, ...]] | dict[str, list[tuple[str, ...]]],
+          deltas: dict[str, tuple[dict[str, str], str]],
+          qualify_unknown: dict[str, frozenset[str]] | None = None) -> dict[str, object]:
+    """A campaign manifest over `tasks` x `population`. A population entry is
+    `(candidate, actor)`, or `(candidate, actor, label)` when one candidate
+    runs under a second actor; the label names the row and keys its delta.
+    A dict population gives each task its own list."""
     subject_dir = ROOT / SUBJECT_PROFILE
     subject = json.loads((subject_dir / "subject.json").read_text(encoding="utf-8"))
     inventory = json.loads((subject_dir / "evidence" / "inventory.json").read_text(encoding="utf-8"))
     policy = json.loads((ROOT / "skillc" / "runtime-policy.json").read_text(encoding="utf-8"))
     rows = []
-    for task, prefix in TASKS.items():
-        for candidate, actor in POPULATION:
-            expected, why = expected_for(task, candidate)
-            row: dict[str, object] = {"id": f"{prefix}.{candidate.replace('/', '.')}", "task": task,
+    for task, prefix in tasks.items():
+        for entry in population[task] if isinstance(population, dict) else population:
+            candidate, actor = entry[0], entry[1]
+            label = entry[2] if len(entry) > 2 else candidate
+            expected, why = expected_for(task, candidate, label=label, deltas=deltas,
+                                         qualify_unknown=qualify_unknown)
+            row: dict[str, object] = {"id": f"{prefix}.{label.replace('/', '.')}", "task": task,
                                       "candidate": candidate, "actor": actor, "candidate_digest": None
                                       if actor == "noop" else lc.surface_digest(
                                           lc.cc.task_surface(ROOT / "evals" / "level3" / task / candidate)),
@@ -118,7 +134,7 @@ def manifest() -> dict[str, object]:
                 row["production_delta"] = why
             rows.append(row)
     return {
-        "kind": lc.KIND, "schema": lc.SCHEMA, "issue": 375,
+        "kind": lc.KIND, "schema": lc.SCHEMA, "issue": issue,
         "frozen": {
             "skillc_revision": "bound at run time: the run refuses a dirty tree and records HEAD (README)",
             "subject": {"name": subject_dir.name, "profile": SUBJECT_PROFILE, "locator": subject["locator"],
@@ -128,11 +144,15 @@ def manifest() -> dict[str, object]:
             "runtime": {k: policy[k] for k in ("runtime_id", "subject_revision", "pyproject_sha256", "lock_sha256")},
             "image": "the runtime-supply receipt's image id, bound at run time (README)",
             "caps": lc.caps(),
-            "tasks": {task: lc.task_identity(ROOT / "evals" / "level3" / task) for task in TASKS},
+            "tasks": {task: lc.task_identity(ROOT / "evals" / "level3" / task) for task in tasks},
             "harness_digest": lc.harness_digest(),
         },
         "rows": rows,
     }
+
+
+def manifest() -> dict[str, object]:
+    return build(issue=375, tasks=TASKS, population=list(POPULATION), deltas=PRODUCTION_DELTAS)
 
 
 if __name__ == "__main__":
