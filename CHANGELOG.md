@@ -8,6 +8,24 @@ and version plan.
 
 ## [Unreleased]
 
+- **The gate shim forwards the real gate's stderr byte-for-byte** (Refs #334,
+  #332). `GateWitness` replied with `ExecuteResult.error` as the subject's
+  stderr. `error` is a summary: filled only for a nonzero exit, stripped, and
+  annotated when capped. So a passing gate's stderr never reached the subject,
+  and a failing gate's lost its trailing newline. On gate-stops-early's
+  discrimination fixture the real runner writes about 960 bytes of stderr,
+  including its `quality gate SKIPPED` warnings. `ExecuteResult` gains `stderr`
+  (the raw drain bytes) and `stderr_truncated`. `DockerBackend` fills both on
+  every exit, and the witness forwards the raw bytes, refusing a capped stderr
+  as it already refuses a capped stdout. A backend that reports no raw stderr
+  still forwards `error`. `tests/test_profile_closure_preflight_live.py` now
+  runs the real installed gate on `discrimination/fixture` and requires the
+  subject's stdout, stderr and exit code to equal the controller's capture of
+  that one real run, after the `warn (skipped gates: typecheck)`/exit 3 verdict
+  and complete witness coverage. The new runner break mode
+  `closure:shim-alters-output` drops one forwarded stderr byte and must fail
+  only that property. The witness unit test fails on the old forwarding with
+  exactly the defect: `b''` on exit 0, and the stripped text on exit 3.
 - **The real-Docker timer tick survives a large comment history** (#392).
   `ci/real-docker/poll-triggers` handed each page of GitHub issue comments to
   `python3 -c` as a command-line argument. Linux caps one argument at 128 KiB,

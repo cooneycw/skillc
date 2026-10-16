@@ -153,12 +153,13 @@ but #315 and the real campaign remain pending.
    run-real-docker <reviewed-tested-sha> --break closure:empty-runtime-cache  # expect FAILURE
    run-real-docker <reviewed-tested-sha> --break closure:runtime-cache-permissions # expect FAILURE
    run-real-docker <reviewed-tested-sha> --break closure:project-venv-permissions  # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break closure:shim-alters-output   # expect FAILURE
    run-real-docker <reviewed-tested-sha> --break cwd:confine-root-omitted     # expect FAILURE
    ```
    Break-mode runs post only to `skillc/real-docker-control`
    (never the certifying `skillc/real-docker` context) and are labelled
-   EXPECTED-RED. Record all twenty-three results on this issue (the
-   twenty-two break-mode commands above, plus the `none` run itself).
+   EXPECTED-RED. Record all twenty-four results on this issue (the
+   twenty-three break-mode commands above, plus the `none` run itself).
 
    The `cwd` control (#338) runs the same swapped-cwd exec without
    `confine_root`. Its expected red is a strict XFAIL that is reached only
@@ -174,6 +175,13 @@ but #315 and the real campaign remain pending.
    fault must produce strict XPASS. These controls do not establish the cause
    of the historical bridge-network failure. A normal-target receipt is
    required; a break-image receipt cannot stand in for an observed cache fault.
+
+   `closure:shim-alters-output` (#334) installs a gate shim that drops the
+   last byte of the forwarded stderr. Its expected red is a strict XFAIL of
+   the byte-identity property only, reached after hard assertions that the
+   real gate produced the discrimination fixture's `warn (skipped gates:
+   typecheck)`/exit 3 verdict with whole captures and complete witness
+   coverage.
 9. `systemctl enable --now skillc-real-docker.timer`.
 
 Keep the timer disabled until the operator accepts both isolation setup
@@ -187,7 +195,10 @@ using one explicitly installed reviewed runner SHA. The floor is the nine
 files in `ci/check_real_docker_ran.py` (including #338's cwd-confinement
 file and #393's nested-directory ownership file); also include the merged #348 production path in the final inventory. Report
 each issue's remaining acceptance separately; an aggregate green does not
-alone establish #334's real-script byte identity or complete witness coverage.
+alone establish another issue's acceptance. #334's real-script byte identity
+and complete witness coverage are asserted by the `none` run of
+`tests/test_profile_closure_preflight_live.py`, with
+`closure:shim-alters-output` as their control.
 
 For each invocation, retain the JUnit report, pytest output and runner
 output **outside `$WORK_CHECKOUT` before the next invocation**: the next

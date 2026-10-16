@@ -111,7 +111,7 @@ def test_namespaced_trialimage_modes_set_only_the_trialimage_value(mode: str) ->
 
 @pytest.mark.parametrize("mode", [
     "missing-closure", "tampered-closure", "empty-runtime-cache",
-    "runtime-cache-permissions", "project-venv-permissions",
+    "runtime-cache-permissions", "project-venv-permissions", "shim-alters-output",
 ])
 def test_namespaced_closure_modes_set_only_the_closure_value(mode: str) -> None:
     result = _resolve(f"closure:{mode}")
@@ -187,6 +187,7 @@ def test_a_bare_trialimage_mode_is_refused_not_silently_accepted() -> None:
 
 @pytest.mark.parametrize("mode", [
     "missing-closure", "empty-runtime-cache", "runtime-cache-permissions", "project-venv-permissions",
+    "shim-alters-output",
 ])
 def test_a_bare_closure_mode_is_refused_not_silently_accepted(mode: str) -> None:
     """Same red case, the closure family: no bare form was ever
@@ -316,6 +317,7 @@ def test_none_resolves_to_the_certifying_context() -> None:
         "closure:empty-runtime-cache",
         "closure:runtime-cache-permissions",
         "closure:project-venv-permissions",
+        "closure:shim-alters-output",
         "cwd:confine-root-omitted",
     ],
 )
@@ -358,6 +360,7 @@ def test_the_real_runner_refuses_an_unknown_break_spec_before_touching_any_confi
         "closure:empty-runtime-cache",
         "closure:runtime-cache-permissions",
         "closure:project-venv-permissions",
+        "closure:shim-alters-output",
         "cwd:confine-root-omitted",
     ],
 )

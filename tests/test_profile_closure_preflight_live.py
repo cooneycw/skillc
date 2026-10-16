@@ -7,6 +7,12 @@ then run the actual selected preflight, overlay, shim and controller witness.
 The controller's actual bounded per-call bytes feed the real runner classifier.
 The baseline gets the same image/policy and no source, skills or prepared venv.
 
+The gate runs on gate-stops-early's discrimination fixture, and the subject's
+stdout, stderr and exit code must equal the controller's capture of that one
+real run byte-for-byte, with the witness reporting complete coverage (#334's
+item moved from #332). `shim-alters-output` installs a shim that drops one
+stderr byte; only that identity property may earn its xfail.
+
 File faults retain #341's exact path/symptom oracle. Runtime faults are planted
 only AFTER normal receipt/image/environment and project-writability validation,
 BEFORE the first consuming preflight. Each fault has its own typed property
@@ -55,7 +61,14 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_DIR = ROOT / "tests" / "fixtures" / "profile-cpp-codex-flow-check-86641e8"
 PROFILE_JSON = ROOT / "evals" / "subjects" / "cpp-codex-flow-check-86641e8" / "profile.json"
 TRIAL_DOCKERFILE_DIR = ROOT / "docker" / "trial"
-TINY_PROJECT = ROOT / "tests" / "fixtures" / "cold-install" / "tiny-project"
+#: #334 acceptance item moved from #332: the gate runs on the tree whose real
+#: verdict is known - typecheck absent, so the real runner ends in
+#: `FLOW_FINISH_GATE: warn (skipped gates: typecheck)`, exit 3, and writes its
+#: SKIPPED warnings to stderr (both streams are therefore non-empty).
+GATE_PROJECT = ROOT / "evals" / "level3" / "gate-stops-early" / "discrimination" / "fixture"
+_GATE_PROJECT_DIR = "discrimination"
+_DISCRIMINATION_VERDICT = b"FLOW_FINISH_GATE: warn (skipped gates: typecheck)\n"
+_DISCRIMINATION_EXIT = 3
 
 #: Pure text classifier, pin-agnostic - imported the SAME way
 #: `test_profile_install_cold_container_live.py` already does (from the
@@ -70,7 +83,8 @@ IMAGE_TAG = f"skillc-trial-test:334-closure-preflight-{int(time.time())}"
 
 BREAK_MODE = os.environ.get("SKILLC_CLOSURE_PREFLIGHT_LIVE_BREAK", "none")
 _VALID_BREAK_MODES = ("none", "missing-closure", "tampered-closure",
-                      "empty-runtime-cache", "runtime-cache-permissions", "project-venv-permissions")
+                      "empty-runtime-cache", "runtime-cache-permissions", "project-venv-permissions",
+                      "shim-alters-output")
 
 if BREAK_MODE not in _VALID_BREAK_MODES:
     raise RuntimeError(f"SKILLC_CLOSURE_PREFLIGHT_LIVE_BREAK={BREAK_MODE!r} must be one of {_VALID_BREAK_MODES}")
@@ -126,6 +140,10 @@ class _GateReachesRealRunnerPropertyHeld(_PropertyHeld):
     """Once accepted, the gate did not reach the real `lib.cicd` runner."""
 
 
+class _ForwardingIdentityPropertyHeld(_PropertyHeld):
+    """What the subject saw differs from the controller's real gate run."""
+
+
 #: Which property THIS mode's xfail credits - computed once, at module
 #: load, from the single BREAK_MODE this process was invoked with (issue
 #: #341: a mode's own marker must name its OWN specific subtype, never
@@ -134,6 +152,7 @@ class _GateReachesRealRunnerPropertyHeld(_PropertyHeld):
 _MODE_PROPERTY: dict[str, type[_PropertyHeld]] = {
     "missing-closure": _PreflightVerdictPropertyHeld,
     "tampered-closure": _PreflightVerdictPropertyHeld,
+    "shim-alters-output": _ForwardingIdentityPropertyHeld,
 }
 _EXPECTED_RAISE = _MODE_PROPERTY.get(BREAK_MODE, _PropertyHeld)
 
@@ -181,6 +200,37 @@ def _check_gate_classification(classification: str) -> None:
         f"flow-finish-gate.sh must reach the real lib.cicd runner, not the Makefile fallback or "
         f"something unclassifiable - classified as {classification!r}",
     )
+
+
+def _check_forwarding_identity(subject: ExecuteResult, controller: ExecuteResult) -> None:
+    """#334's byte-identity item (moved from #332): the subject's own stdout,
+    stderr and exit code equal the controller's capture of the ONE real run
+    they were forwarded from. Never a second "direct" run: the real runner
+    prints a fresh `run_id` each time, so two honest runs differ. The plain
+    asserts first establish that the real gate reached the fixture's known
+    verdict with whole captures; an unrelated failure there can never earn
+    this property's xfail."""
+    assert controller.exit_code == _DISCRIMINATION_EXIT, "the real gate did not reach the fixture's warn exit"
+    assert controller.stdout is not None and controller.stdout.endswith(_DISCRIMINATION_VERDICT), (
+        "the real gate did not reach the fixture's skipped-typecheck verdict"
+    )
+    assert controller.stderr and not controller.stderr_truncated, "the real gate's stderr is absent or capped"
+    assert subject.stderr is not None and not subject.stderr_truncated, "the subject's stderr was not captured whole"
+    _require(
+        _ForwardingIdentityPropertyHeld,
+        (subject.stdout, subject.stderr, subject.exit_code)
+        == (controller.stdout, controller.stderr, controller.exit_code),
+        "the subject did not see the real gate's stdout, stderr and exit code byte-for-byte",
+    )
+
+
+def _altered_shim_source() -> bytes:
+    """`shim-alters-output`: the real shim, dropping the last byte of the
+    forwarded stderr - the exact loss the pre-#334 `error`-based reply caused
+    on a nonzero exit. Everything else the shim does is untouched."""
+    original = b"sys.stderr.write(stderr)"
+    assert _SHIM_SOURCE.count(original) == 1, "the shim's stderr write moved; update this break mode"
+    return _SHIM_SOURCE.replace(original, b"sys.stderr.write(stderr[:-1])")
 
 
 def _closure_inputs() -> tuple[dict[str, bytes], dict[str, str], tuple[dict[str, object], ...], str]:
@@ -335,7 +385,7 @@ class _RuntimeBackend(d.DockerBackend):
 
 def _plant_runtime_fault(backend: d.DockerBackend, handle: object, mode: str) -> None:
     if mode not in _RUNTIME_MODES:
-        assert mode in ("none", "missing-closure", "tampered-closure")
+        assert mode in ("none", "missing-closure", "tampered-closure", "shim-alters-output")
         return
     if mode == "empty-runtime-cache":
         command = ["/usr/bin/python3", "-c", "import shutil,sys; shutil.rmtree(sys.argv[1])", _CACHE]
@@ -496,6 +546,7 @@ def test_a_treated_attempts_closure_is_verified_and_the_gate_reaches_the_real_ru
     else:
         delivered = dict(home_files)
 
+    shim_source = _altered_shim_source() if BREAK_MODE == "shim-alters-output" else _SHIM_SOURCE
     _generic_offline_control(home_files, preflight_tools)
     supply = _build_trial_image(IMAGE_TAG)
     base = Path(tempfile.mkdtemp(prefix="sk-334-live-base-"))
@@ -520,8 +571,8 @@ def test_a_treated_attempts_closure_is_verified_and_the_gate_reaches_the_real_ru
             handle = backend.prepare("a-360-treated-" + uuid.uuid4().hex)
             try:
                 surface = {
-                    f"tiny-project/{f.relative_to(TINY_PROJECT).as_posix()}": f
-                    for f in TINY_PROJECT.rglob("*") if f.is_file()
+                    f"{_GATE_PROJECT_DIR}/{f.relative_to(GATE_PROJECT).as_posix()}": f
+                    for f in GATE_PROJECT.rglob("*") if f.is_file()
                 }
                 backend.install(handle, surface)
 
@@ -553,8 +604,8 @@ def test_a_treated_attempts_closure_is_verified_and_the_gate_reaches_the_real_ru
                         subject_path=gate_entrypoint,
                         harness_path=at._FLOW_CHECK_GATE_HARNESS_PATH,
                         expected_real_digest=real_digest[len("sha256:"):],
-                        expected_shim_digest=hashlib.sha256(_SHIM_SOURCE).hexdigest(),
-                        shim_content=_SHIM_SOURCE,
+                        expected_shim_digest=hashlib.sha256(shim_source).hexdigest(),
+                        shim_content=shim_source,
                     )
                 except (at.HomeFileVerificationRefused, gate_overlay.OverlayRefused) as exc:
                     refused = True
@@ -575,7 +626,10 @@ def test_a_treated_attempts_closure_is_verified_and_the_gate_reaches_the_real_ru
                 # script directly.
                 witness = GateWitness(
                     declared_gates={_GATE_NAME: (_HARNESS_ABS, *_GATE_ARGV_TAIL)},
-                    declared_env={_GATE_NAME: frozen_env}, reply_byte_cap=_OUTPUT_CAP,
+                    # The production reply cap (agent_trial constructs its
+                    # witness with the default): byte identity is claimed
+                    # for what a live attempt's subject would actually see.
+                    declared_env={_GATE_NAME: frozen_env},
                     tree_digest_fn=lambda: "live-conformance-digest",
                     backend=backend, handle=handle, limits=_LIVE_LIMITS,
                     gate_exclusivity=False, exclusivity_basis="#334 live conformance test - no exclusivity claim exercised here",
@@ -586,7 +640,7 @@ def test_a_treated_attempts_closure_is_verified_and_the_gate_reaches_the_real_ru
                 gate_argv = " ".join(_GATE_ARGV_TAIL)
                 gate = backend.execute(
                     handle,
-                    ["bash", "-c", f"cd {d.CONTAINER_WORKSPACE}/tiny-project && exec {subject_abs} {gate_argv}"],
+                    ["bash", "-c", f"cd {d.CONTAINER_WORKSPACE}/{_GATE_PROJECT_DIR} && exec {subject_abs} {gate_argv}"],
                     _LIVE_LIMITS,
                 )
                 assert gate.reason == "exited", f"the gate process itself never completed (reason={gate.reason!r})"
@@ -595,10 +649,12 @@ def test_a_treated_attempts_closure_is_verified_and_the_gate_reaches_the_real_ru
                 assert len(backend.gate_outputs) == 1, "missing actual controller gate call"
                 controller = backend.gate_outputs[0]
                 output = _complete_output(controller).decode("utf-8", errors="strict")
-                assert gate.stdout == controller.stdout and gate.exit_code == controller.exit_code, "shim forwarding differs"
                 _check_metadata(backend, handle, verify_home_files)
                 classification = gate_path.classify_gate_output(output)
                 _check_gate_classification(classification)
+                record = witness.finalize("a-334-witness")
+                assert record.gates[_GATE_NAME].coverage == "complete", "the forwarded gate was not witnessed"
+                _check_forwarding_identity(gate, controller)
             finally:
                 backend.destroy(handle)
     finally:

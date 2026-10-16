@@ -75,6 +75,11 @@ hiding the gate's own exit code would break the workflow under test - a
 flow-check loop that cannot see a gate's failure cannot fix it and rerun.
 The subject gets back `exit_code`, `reason`, and stdout/stderr truncated to
 a declared byte cap - exactly what it would see running the gate itself.
+Stderr is the backend's raw `ExecuteResult.stderr` on every exit (#334): it
+used to be `error`, which is filled only for a nonzero exit and is stripped,
+so a passing gate's stderr never reached the subject and a failing gate's
+lost its trailing newline. A backend that reports no raw stderr still
+forwards `error`; that summary is not a byte-identity claim.
 What it does NOT get: the witness's own coverage state, any other gate's
 status, or any tree digest. The witness stays trustworthy regardless of
 what the reply contains, because the RECORD is controller-written and never
@@ -467,6 +472,8 @@ class GateWitness:
                 output_bad = result.reason == "exited" and (
                     result.stdout is None or result.stdout_truncated
                     or result.stdout_incomplete or result.stderr_incomplete
+                    # #334: a capped raw stderr cannot be forwarded as whole.
+                    or result.stderr_truncated
                 )
                 stages = self._read_stages(gate, result, output_bad, gate_cwd)
                 with self._lock:
@@ -489,7 +496,10 @@ class GateWitness:
                     "exit_code": result.exit_code,
                     "reason": result.reason,
                     "stdout": (result.stdout or b"")[:self._reply_byte_cap].decode("utf-8", errors="replace"),
-                    "stderr": (result.error or "")[:self._reply_byte_cap],
+                    "stderr": (
+                        result.stderr[:self._reply_byte_cap].decode("utf-8", errors="replace")
+                        if result.stderr is not None else (result.error or "")[:self._reply_byte_cap]
+                    ),
                 }
         finally:
             # Includes a failed snapshot and backend exceptions; neither may

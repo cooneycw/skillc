@@ -704,6 +704,39 @@ def test_the_reply_stderr_comes_from_the_backends_error_field() -> None:
     assert reply["stderr"] == "boom"
 
 
+@pytest.mark.parametrize("exit_code", [0, 3])
+def test_the_reply_stderr_is_the_raw_stream_when_the_backend_reports_one(exit_code: int) -> None:
+    """#334: the shape DockerBackend returns - `error` is the stripped
+    nonzero-exit summary, `stderr` the raw drain. The reply must carry the
+    raw bytes on every exit: before the fix a passing gate's stderr never
+    reached the subject and a failing gate's lost its trailing newline."""
+    raw = b"  [3/3] typecheck: SKIPPED\nWARNING: quality gates did NOT run: typecheck\n"
+    result = ExecuteResult(
+        reason="exited", exit_code=exit_code, stdout=b"FLOW_FINISH_GATE: warn\n",
+        error=raw.decode().strip() if exit_code else None, stderr=raw,
+    )
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest,
+        backend=_FakeBackend(results={("lint",): result}), handle=None, limits=_limits(),
+        gate_exclusivity=False, exclusivity_basis="",
+    )
+    reply = witness.decide({"op": "run_gate", "gate": "lint"})
+    assert isinstance(reply["stderr"], str) and reply["stderr"].encode() == raw
+    assert reply["exit_code"] == exit_code
+
+
+def test_a_truncated_raw_stderr_is_refused_rather_than_forwarded_as_whole() -> None:
+    result = ExecuteResult(reason="exited", exit_code=0, stdout=b"ok\n", stderr=b"prefix", stderr_truncated=True)
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest,
+        backend=_FakeBackend(results={("lint",): result}), handle=None, limits=_limits(),
+        gate_exclusivity=False, exclusivity_basis="",
+    )
+    with pytest.raises(ChannelRefusal, match="output"):
+        witness.decide({"op": "run_gate", "gate": "lint"})
+    assert witness.finalize("attempt").gates["lint"].coverage == "channel-unavailable"
+
+
 # --------------------------------------------------------------- JSON shape
 
 
