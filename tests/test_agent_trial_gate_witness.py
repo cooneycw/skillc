@@ -112,6 +112,14 @@ class VirtualMountBackend(TrackingDockerBackend):
         return Confirmation.UNKNOWN if self.fault == "stop" else actual
 
 
+#: `run_case`'s whole-attempt limit, and the scripted actor's wait for each
+#: gate reply, kept equal (#407). 60s, not 15s (#437): under the suite's own
+#: parallel load an honest attempt reached 15s before its later gate calls were
+#: witnessed. These tests assert witness history binding, never timing, so
+#: this bound is not a property under test.
+RUN_CASE_TIMEOUT = 60
+
+
 def run_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, mode: str = "fresh",
              fault: str | None = None, receipt: bool = False, gate: bool = True,
              script: bytes = b"#!/bin/bash\nprintf 'controller gate output\\n'\n",
@@ -140,10 +148,10 @@ def run_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, mode: str = "fr
             "pathlib.Path('gate-witness.json').write_text('{\"forged\":true}')\n"
             "def ask(gate):\n"
             " with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as sock:\n"
-            # #400: the attempt's own limit (`Limits(timeout=15)` below). At 5s a
+            # #400: the attempt's own limit (`RUN_CASE_TIMEOUT`). At 5s a
             # gate reply slowed by host load timed the actor out before its
             # post-gate edit, and `stale` saw equal digests: a false red.
-            "  sock.settimeout(15)\n"
+            f"  sock.settimeout({RUN_CASE_TIMEOUT})\n"
             f"  sock.connect({socket_path!r})\n"
             "  sock.sendall((json.dumps(dict(op='run_gate',gate=gate,cwd='/work'))+'\\n').encode())\n"
             "  sock.shutdown(socket.SHUT_WR)\n"
@@ -178,7 +186,7 @@ def run_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, mode: str = "fr
         result = at.run_one_attempt(
             backend=backend, experiment=experiment, attempt_id=attempt, client="codex",
             base_argv=[sys.executable, str(actor), *fake[1:]], prompt="Fix the slug helper.", skill_name=None,
-            surface={}, limits=Limits(timeout=15), base=base, credential_explicit_path=_fresh_credential(tmp_path, "codex"),
+            surface={}, limits=Limits(timeout=RUN_CASE_TIMEOUT), base=base, credential_explicit_path=_fresh_credential(tmp_path, "codex"),
             extra_home_files={entry: script} if gate else {},
             verify_home_files={entry: "sha256:" + hashlib.sha256(script).hexdigest()} if gate else {},
             gate_entrypoint=entry if gate else None, receipt_context=context,
