@@ -73,11 +73,21 @@ SPLIT_SCRIPTS = {script: parts for script in QUALIFY_SCRIPTS if (parts := _decla
 #: so a serial run never executes them in the order the full run does, and a
 #: part that relied on another having run first fails alone.
 _PART_ORDER_SEED = 446
+
+
+def _shuffled_parts(script: Path, parts: list[str]) -> list[str]:
+    """`parts` in a fixed per-script order that is never the declared one.
+    Seeded by the script's own name, so adding an unrelated task cannot move
+    it (#446 counter-model review)."""
+    order = list(parts)
+    random.Random(f"{_PART_ORDER_SEED}:{_task_name(script)}").shuffle(order)
+    return order[1:] + order[:1] if order == parts else order
+
+
 _PARAMS = [
     *[(script, None) for script in QUALIFY_SCRIPTS if script not in SPLIT_SCRIPTS],
-    *[(script, part) for script, parts in SPLIT_SCRIPTS.items() for part in parts],
+    *[(script, part) for script, parts in SPLIT_SCRIPTS.items() for part in _shuffled_parts(script, parts)],
 ]
-random.Random(_PART_ORDER_SEED).shuffle(_PARAMS)
 
 
 def _param_id(script: Path, part: str | None) -> str:
@@ -169,7 +179,11 @@ def test_split_scripts_list_exactly_their_declared_parts() -> None:
 
 def test_part_order_is_not_the_full_run_order() -> None:
     """The shuffle is what makes a serial run catch a part that depends on an
-    earlier one; pin that it actually reorders each split script's parts."""
+    earlier one; pin that it actually reorders each split script's parts,
+    including when the seeded shuffle alone would return the declared order."""
+    assert _shuffled_parts(Path("x/qualify.py"), ["only"]) == ["only"]
+    for parts in (["a", "b"], ["certify", "control:x", "validity"]):
+        assert _shuffled_parts(Path("t/qualify.py"), parts) != parts
     for script, declared in SPLIT_SCRIPTS.items():
         order = [part for s, part in _PARAMS if s == script and part is not None]
         assert sorted(order) == sorted(declared) and order != declared, (
