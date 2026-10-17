@@ -545,7 +545,8 @@ def test_a_client_from_outside_the_attempt_subnet_is_refused_and_logged_apart(tm
         proc.wait(timeout=5)
     summary = eg.summarize_log(log.read_bytes())
     assert summary["allowed"] == {} and summary["denied"] == {}
-    assert summary["peer_rejected"] >= 1
+    rejected = summary["peer_rejected"]
+    assert isinstance(rejected, int) and rejected >= 1
 
 
 @pytest.mark.parametrize("payload, flagged", [
