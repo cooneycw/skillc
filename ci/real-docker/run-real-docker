@@ -32,6 +32,8 @@ usage() {
 
 # shellcheck disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/break-lib.sh"
+# shellcheck source=cleanup-lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/cleanup-lib.sh"
 
 [ $# -ge 1 ] || usage
 SHA="$1"; shift
@@ -108,7 +110,8 @@ chmod 600 "$CURL_CFG"
     echo "header = \"Authorization: token $(cat "$GITHUB_TOKEN_FILE")\""
     echo "header = \"Accept: application/vnd.github+json\""
 } > "$CURL_CFG"
-trap 'rm -f "$CURL_CFG"' EXIT
+SNAPSHOT_FILE="$(mktemp)"
+trap 'rm -f "$CURL_CFG" "$SNAPSHOT_FILE"' EXIT
 
 # ---------------------------------------------------------------- posting
 #
@@ -162,6 +165,9 @@ if ! flock -w "${LOCK_WAIT_SECONDS:-240}" 9; then
     echo "run-real-docker: could not acquire the lock within ${LOCK_WAIT_SECONDS:-240}s - never started" >&2
     exit 3
 fi
+
+# #414: what exists now is not this run's to remove (cleanup-lib.sh).
+snapshot_runner_artifacts "$SNAPSHOT_FILE"
 
 # ----------------------------------------------------- R6: isolation preflight
 #
@@ -302,6 +308,7 @@ fi
         SKILLC_TRIAL_IMAGE_BREAK="$TRIALIMAGE_BREAK_VALUE" \
         SKILLC_CLOSURE_PREFLIGHT_LIVE_BREAK="$CLOSURE_BREAK_VALUE" \
         SKILLC_CWD_CONFINEMENT_LIVE_BREAK="$CWD_BREAK_VALUE" \
+        SKILLC_REAL_DOCKER_RUN_LOCK_HELD=1 \
         uv run --no-sync pytest -m real_docker --junit-xml="$REPORT_PATH"
 ) || true  # a test failure is EXPECTED input to the verdict step below
 
@@ -356,8 +363,9 @@ fi
 
 # ------------------------------------------------------------- cleanup
 
-docker container prune -f >/dev/null 2>&1 || true
-docker image prune -f >/dev/null 2>&1 || true
+# #414: only this run's own stopped containers and dangling images - never a
+# host-wide prune, which deleted co-tenant campaigns' receipt-named images.
+remove_runner_artifacts "$SNAPSHOT_FILE"
 
 echo "run-real-docker: $POSTED_STATUS (break=$BREAK_MODE, sha=${SHA:0:12}, runner=${RUNNER_SHA:0:12})"
 # Exit codes: 0 SUCCESS, 1 FAILURE, 2 ERROR (a run that started and reported

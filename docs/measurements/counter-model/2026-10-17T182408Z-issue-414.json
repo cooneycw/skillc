@@ -1,0 +1,28 @@
+{
+  "branch": "issue-414-real-docker-runner-s-docker-image-prune-f-deletes",
+  "counts": {
+    "accepted": 4,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "extra_passes_reason": "requested by skillc-400 (orchestrator, owner-delegated): the pass-2 HIGH fix (gating destructive snapshot cleanup on SKILLC_REAL_DOCKER_RUN_LOCK_HELD) was never reviewed, and it controls when a destructive cleanup may run",
+  "head": "c709167cf9cf177f906ba251c43fbcd512180d95",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "414",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 3,
+  "recorded_at": "2026-10-17T18:24:08Z",
+  "red_cases": {
+    "already_covered": 6,
+    "proposed": 9
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/17/rollout-2026-10-17T14-21-37-01a14b19-14e8-7172-bf7c-ee07d1289aae.jsonl",
+    "thread_id": "01a14b19-14e8-7172-bf7c-ee07d1289aae"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

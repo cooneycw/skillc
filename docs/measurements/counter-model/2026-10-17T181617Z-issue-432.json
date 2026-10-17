@@ -1,0 +1,27 @@
+{
+  "branch": "issue-432-build-treatment-refuses-every-full-collection-prof",
+  "counts": {
+    "accepted": 0,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "4fe9887cb9d904794708ef719bde9b1ccd5bc8a9",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "432",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 1,
+  "recorded_at": "2026-10-17T18:16:17Z",
+  "red_cases": {
+    "already_covered": 3,
+    "proposed": 3
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/17/rollout-2026-10-17T14-15-32-01a14b13-84eb-7d21-8800-1ad459fcf062.jsonl",
+    "thread_id": "01a14b13-84eb-7d21-8800-1ad459fcf062"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

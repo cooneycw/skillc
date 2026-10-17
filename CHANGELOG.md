@@ -18,7 +18,36 @@ and version plan.
   `[rerun]` fails on the old bound (the witness drain is refused, so no
   witness is graded) and passes on the new one. #407's slow-second-call
   `[stale]` reproduction still reads stale.
-
+- **A profile narrower than its install builds again** (#432). #424's
+  cross-check in `calibration_run.build_treatment` required the profile
+  inventory's skill pins to EQUAL the pins of every installed skill. A real
+  CPP profile selects one skill (`flow-check`) while its subject installs the
+  whole collection (74 skills at 86641e8), so every profiled treatment was
+  refused, blocking the Level-3 campaigns and the #287 calibration arms. The
+  check is now per path and a subset: each inventory pin needs an installed
+  pin at the same path with equal `body_digest` and `description_digest`, and
+  a pin for an uninstalled path is refused. `Treatment.skill_digests` is
+  unchanged: every installed skill, pinned from its installed bytes.
+  `tests/test_calibration_run_real_profile.py` runs the real profile with its
+  full install when a local claude-power-pack checkout holds 86641e8, and
+  skips with the missing prerequisite named otherwise.
+- **The real-Docker runner no longer deletes other workloads' images** (#414).
+  `run-real-docker` ended every run with host-wide `docker container prune -f`
+  and `docker image prune -f`. `docker/profile-trial/build.py` built its
+  campaign image untagged and receipts named it only by ID, so the first runner
+  run after a build deleted the image from under every receipt; the #375
+  campaign refused 42/42 rows. Two changes (owner-delegated ruling, option 3):
+  `build.py` tags its output `skillc-profile-runtime:<runtime_id>-<commit[:12]>`
+  before writing the receipt, and the runner's cleanup (`ci/real-docker/
+  cleanup-lib.sh`) removes only dangling `org.skillc.image` images and stopped
+  `skillc.managed=true` containers created during its own run, by a pre-run
+  snapshot, never with `-f`. A label alone is not ownership, since campaign
+  images and containers carry the same labels. `build.release_build()` undoes
+  only what one build added, and replaces the closure live test's `docker image
+  rm -f <id>` teardown, which removed a co-tenant's identical build regardless
+  of tags. New real-Docker floor file `tests/test_real_docker_cleanup_live.py`
+  (floor 9 -> 10, runner population 14 -> 16 tests): a `build.py` image
+  survives the cleanup, and the runner's own dangling image is still removed.
 - **A baseline trial's skill-evidence is refused as a contaminated baseline**
   (#427, the records half of #424). A trial whose `subject.digest` is the
   baseline (sha256 of zero bytes) installs no skills. A `skill-evidence` entry
