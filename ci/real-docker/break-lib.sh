@@ -51,7 +51,9 @@ _BREAK_TRIALIMAGE_MODES="no-uv"
 #: #360 runtime faults are planted only after normal runtime validation;
 #: consuming preflight must refuse the selected dependency with its specific
 #: cache-miss, cache-write, or project-venv permission diagnostic.
-_BREAK_CLOSURE_MODES="missing-closure tampered-closure empty-runtime-cache runtime-cache-permissions project-venv-permissions"
+#: shim-alters-output (#334) installs a gate shim that drops one byte of the
+#: forwarded stderr; the subject-vs-controller byte-identity check must fail.
+_BREAK_CLOSURE_MODES="missing-closure tampered-closure empty-runtime-cache runtime-cache-permissions project-venv-permissions shim-alters-output"
 
 #: #338's cwd-confinement break mode - no bare form, same as witness.
 #: confine-root-omitted runs the identical swapped-cwd exec WITHOUT

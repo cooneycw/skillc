@@ -253,6 +253,15 @@ class ExecuteResult:
     #: Controller drain bytes, never read from a candidate artifact. None means
     #: unavailable; callers must also check truncation and incomplete flags.
     stdout: bytes | None = field(default=None, repr=False)
+    #: Controller drain bytes of the process's own stderr (#334), exactly as
+    #: read - never decoded, stripped, annotated or gated on the exit code,
+    #: unlike `error`, which is a human-facing summary filled only for a
+    #: nonzero exit. A forwarder that must reproduce the stream reads this,
+    #: never `error`. None means this backend does not report it; a reported
+    #: capture is whole only when `stderr_truncated` and `stderr_incomplete`
+    #: are both False.
+    stderr: bytes | None = field(default=None, repr=False)
+    stderr_truncated: bool = False
 
 
 @dataclass(frozen=True)

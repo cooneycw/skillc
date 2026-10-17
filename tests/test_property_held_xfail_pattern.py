@@ -732,7 +732,7 @@ def test_cold_cache_complete_function_reaches_the_healthy_predicate(pytester: py
     result.stdout.fnmatch_lines(["*XPASS(strict)*"])
 
 
-def _drive_closure(ns, refusal, monkeypatch, output_fault=None) -> None:
+def _drive_closure(ns, refusal, monkeypatch, output_fault=None, subject_fault=None) -> None:
     from unittest.mock import Mock, patch
 
     from skillc.backend import ExecuteResult
@@ -740,15 +740,23 @@ def _drive_closure(ns, refusal, monkeypatch, output_fault=None) -> None:
     files = {entrypoint: b"real", ns["_TARGET_RELPATH"]: b"library"}
     digests = {path: "sha256:" + "a" * 64 for path in files}
     backend = Mock()
-    stdout = b"flow-finish-gate: running deterministic gate (lib.cicd run --plan check)\n"
+    stdout = (b"flow-finish-gate: running deterministic gate (lib.cicd run --plan check)\n"
+              + ns["_DISCRIMINATION_VERDICT"])
+    stderr = b"  [3/3] typecheck: SKIPPED\nFLOW_FINISH_GATE_EXIT=3\n"
+    exit_code = 0 if output_fault == "wrong-verdict" else ns["_DISCRIMINATION_EXIT"]
     backend.execute.return_value = ExecuteResult(
-        reason="exited", exit_code=0,
+        reason="exited", exit_code=exit_code,
         stdout=None if output_fault == "missing" else b"\xff" if output_fault == "invalid" else stdout,
         stdout_truncated=output_fault == "truncated",
         stdout_incomplete=output_fault == "stdout-incomplete",
         stderr_incomplete=output_fault == "stderr-incomplete",
+        stderr=stderr[:4] if output_fault == "stderr-truncated" else stderr,
+        stderr_truncated=output_fault == "stderr-truncated",
     )
     witness = Mock()
+    witness.return_value.finalize.return_value.gates = {
+        ns["_GATE_NAME"]: Mock(coverage="not-observed" if output_fault == "unwitnessed" else "complete"),
+    }
     test = ns["test_a_treated_attempts_closure_is_verified_and_the_gate_reaches_the_real_runner"]
     monkeypatch.setitem(test.__globals__, "_closure_inputs", lambda: (files, digests, (), entrypoint))
     supply = Mock(image_id="sha256:" + "a" * 64)
@@ -756,7 +764,12 @@ def _drive_closure(ns, refusal, monkeypatch, output_fault=None) -> None:
     backend.runtime_environment.return_value = {"HOME": "/home/candidate"}
     backend.gate_outputs = [backend.execute.return_value]
     # Healthy/forged subject output cannot replace broken controller bytes.
-    backend.execute.return_value = ExecuteResult(reason="exited", exit_code=0, stdout=stdout)
+    # `subject_fault` changes only what the subject saw (#334 byte identity).
+    backend.execute.return_value = ExecuteResult(
+        reason="exited", exit_code=ns["_DISCRIMINATION_EXIT"] + (subject_fault == "exit"),
+        stdout=stdout + b" " * (subject_fault == "stdout"),
+        stderr=None if subject_fault == "uncaptured" else stderr[:-1] if subject_fault == "stderr" else stderr,
+    )
     monkeypatch.setitem(test.__globals__, "_build_trial_image", lambda *args: supply)
     monkeypatch.setitem(test.__globals__, "_baseline_acceptance", lambda *args: None)
     for helper in ("_environment_controls", "_generic_offline_control", "_observe_delivery", "_check_metadata"):
@@ -796,7 +809,11 @@ def _drive_closure(ns, refusal, monkeypatch, output_fault=None) -> None:
     assert f"exec {ns['d'].CONTAINER_HOME}/{entrypoint} " in backend.execute.call_args.args[1][-1]
 
 
-@pytest.mark.parametrize("fault", [None, "missing", "truncated", "stdout-incomplete", "stderr-incomplete", "invalid"])
+_CLOSURE_OUTPUT_FAULTS = (None, "missing", "truncated", "stdout-incomplete", "stderr-incomplete", "invalid",
+                          "stderr-truncated", "wrong-verdict", "unwitnessed")
+
+
+@pytest.mark.parametrize("fault", _CLOSURE_OUTPUT_FAULTS)
 def test_closure_consumes_complete_controller_output_not_forged_artifacts(monkeypatch, fault) -> None:
     import runpy
     from unittest.mock import patch
@@ -873,17 +890,60 @@ def test_closure_output_faults_cannot_receive_targeted_xfail_credit(pytester: py
             with pytest.MonkeyPatch.context() as mp:
                 controls['_drive_closure'](ns, None, mp, fault)
         for mode in MODES:
-            for fault in (None, 'missing', 'truncated', 'stdout-incomplete', 'stderr-incomplete', 'invalid'):
+            for fault in {_CLOSURE_OUTPUT_FAULTS!r}:
                 add_case('test_' + str(fault).replace('-', '_') + '_' + mode.replace('-', '_'), mode,
                          lambda ns, f=fault: observe(ns, f))
     """)
     pytester.makepyfile(source)
     result = pytester.runpytest("-v", "--tb=short")
-    result.assert_outcomes(failed=12)
+    result.assert_outcomes(failed=2 * len(_CLOSURE_OUTPUT_FAULTS))
     result.stdout.fnmatch_lines(["*XPASS(strict)*"])
     for mode in _CLOSURE_MODES:
-        for fault in ("missing", "truncated", "stdout_incomplete", "stderr_incomplete", "invalid"):
+        for fault in (str(f).replace("-", "_") for f in _CLOSURE_OUTPUT_FAULTS if f is not None):
             result.stdout.fnmatch_lines([f"*test_{fault}_{mode.replace('-', '_')} FAILED*"])
+
+
+_IDENTITY_TARGETS = ("stderr", "stdout", "exit")
+
+
+@pytest.mark.parametrize("widen", [False, True], ids=["specific", "mutated-base"])
+def test_closure_forwarding_identity_real_marker(pytester: pytest.Pytester, widen: bool) -> None:
+    """#334: `shim-alters-output` drives the actual test function. Only a
+    subject that saw different stdout, stderr or exit code than the
+    controller's real run may XFAIL. An identical subject (the break never
+    planted) is strict XPASS; an uncaptured subject stream, a wrong real
+    verdict, an unwitnessed gate, a capped controller stderr and the
+    neighbouring runner property each stay hard failures, even beside an
+    altered stderr. Widening the actual marker to the shared base must
+    turn the neighbour into an XFAIL."""
+    source = _live_control_source(
+        "test_profile_closure_preflight_live.py", "SKILLC_CLOSURE_PREFLIGHT_LIVE_BREAK", ("shim-alters-output",),
+        "test_a_treated_attempts_closure_is_verified_and_the_gate_reaches_the_real_runner", widen=widen,
+    ) + textwrap.dedent(f"""
+        controls = runpy.run_path({str(Path(__file__).resolve())!r})
+        def observe(ns, output_fault, subject_fault):
+            with pytest.MonkeyPatch.context() as mp:
+                controls['_drive_closure'](ns, None, mp, output_fault, subject_fault)
+        mode = 'shim-alters-output'
+        for target in {_IDENTITY_TARGETS!r}:
+            add_case('test_target_' + target, mode, lambda ns, t=target: observe(ns, None, t))
+        add_case('test_intact', mode, lambda ns: observe(ns, None, None))
+        add_case('test_uncaptured', mode, lambda ns: observe(ns, None, 'uncaptured'))
+        for fault in ('wrong-verdict', 'unwitnessed', 'stderr-truncated'):
+            add_case('test_' + fault.replace('-', '_'), mode, lambda ns, f=fault: observe(ns, f, 'stderr'))
+        add_case('test_neighbor_runner', mode,
+                 lambda ns: ns['_check_gate_classification']('makefile-fallback'))
+        add_case('test_infra', mode, infra)
+    """)
+    pytester.makepyfile(source)
+    result = pytester.runpytest("-v", "--tb=short")
+    result.assert_outcomes(xfailed=4 if widen else 3, failed=6 if widen else 7)
+    for target in _IDENTITY_TARGETS:
+        result.stdout.fnmatch_lines([f"*test_target_{target} XFAIL*"])
+    for case in ("intact", "uncaptured", "wrong_verdict", "unwitnessed", "stderr_truncated", "infra"):
+        result.stdout.fnmatch_lines([f"*test_{case} FAILED*"])
+    result.stdout.fnmatch_lines([f"*test_neighbor_runner {'XFAIL' if widen else 'FAILED'}*"])
+    result.stdout.fnmatch_lines(["*XPASS(strict)*"])
 
 
 @pytest.mark.parametrize("error", [FileNotFoundError("absent"), PermissionError("denied"), RuntimeError("unrelated")])

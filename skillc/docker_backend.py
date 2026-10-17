@@ -2087,6 +2087,10 @@ class DockerBackend:
             stdout_incomplete=stdout_incomplete, stderr_incomplete=stderr_incomplete,
             term_forwarding=term_forwarding, observations_capture=observations_capture,
             stop_confirmed=stop_confirmed, stdout=stdout,
+            # #334: the raw stream on EVERY exit, beside the summary in
+            # `error` (nonzero exits only, stripped, annotated), so a gate's
+            # stderr can be forwarded byte-for-byte.
+            stderr=stderr, stderr_truncated=stderr_drain.truncated,
         )
 
     def exec_in_attempt(

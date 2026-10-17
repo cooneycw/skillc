@@ -2813,6 +2813,34 @@ def test_exec_in_attempt_confine_root_keeps_stdin_env_exit_and_output(
     assert _observations(backend, handle) == "from-stdin|declared|/usr/bin:/bin\n"
 
 
+@pytest.mark.parametrize("exit_code", [0, 3])
+def test_exec_in_attempt_reports_the_gates_raw_stderr_on_every_exit(
+    base: Path, docker_state: Path, exit_code: int,
+) -> None:
+    """#334: `stderr` is the gate's own bytes on every exit - whitespace and
+    trailing newline kept, the wrapper's status record removed - while
+    `error` stays the stripped nonzero-exit summary. Before the fix there
+    was no raw field, so a forwarder could only read `error`: None on exit
+    0, newline lost on exit 3."""
+    backend, handle = _confined_handle(base, docker_state, f"a-cwd-0000000002{exit_code}")
+    _real_dir(docker_state, handle, "work", "trial", "sub").mkdir(parents=True)
+
+    result = backend.exec_in_attempt(
+        handle, ["sh", "-c", f"printf '  progress\\nWARNING: skipped\\n' >&2; exit {exit_code}"],
+        Limits(timeout=5.0), cwd=_SUB, confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert (result.reason, result.exit_code) == ("exited", exit_code)
+    assert result.stderr == b"  progress\nWARNING: skipped\n"
+    assert result.stderr_truncated is False
+    assert result.error == (None if exit_code == 0 else "progress\nWARNING: skipped")
+
+    capped = backend.exec_in_attempt(
+        handle, ["sh", "-c", "printf 0123456789 >&2"], Limits(timeout=5.0, max_captured_stderr_bytes=4),
+        cwd=_SUB, confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert (capped.stderr, capped.stderr_truncated) == (b"0123", True)
+
+
 def test_exec_in_attempt_confine_root_gate_printing_a_refusal_is_still_the_gates_result(
     base: Path, docker_state: Path,
 ) -> None:
