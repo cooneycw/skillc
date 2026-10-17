@@ -73,8 +73,14 @@ constructor argument. Without that assertion, silence stays `UNKNOWN`
 THE REPLY CARRIES THE REAL RESULT (design correction, orchestrator review):
 hiding the gate's own exit code would break the workflow under test - a
 flow-check loop that cannot see a gate's failure cannot fix it and rerun.
-The subject gets back `exit_code`, `reason`, and stdout/stderr truncated to
-a declared byte cap - exactly what it would see running the gate itself.
+The subject gets back `exit_code`, `reason`, and the gate's whole stdout and
+stderr - exactly what it would see running the gate itself. By default each
+stream is forwarded up to the capture bound the gate ran under
+(`Limits.max_captured_stdout_bytes`/`max_captured_stderr_bytes`, #404), and a
+capture that hit that bound is refused rather than forwarded, so a default
+reply is never a silent prefix. It used to be cut at 4,096 bytes: the real
+gate prints its `FLOW_FINISH_GATE:` verdict last, so any failing run past that
+size reached the subject without its verdict line.
 Stderr is the backend's raw `ExecuteResult.stderr` on every exit (#334): it
 used to be `error`, which is filled only for a nonzero exit and is stripped,
 so a passing gate's stderr never reached the subject and a failing gate's
@@ -123,11 +129,6 @@ TreeDigestFn = Callable[[], str]
 #: stdout and exit code (#376); `skillc.stage_capture.capture_stages` is the
 #: production reader for the flow-check plan gate.
 StageReader = Callable[[bytes | None, int | None], Mapping[str, object]]
-
-#: Default cap on the stdout/stderr text returned to the subject in a
-#: `run_gate` reply - a flow-check loop needs enough to act on a failure,
-#: never an unbounded echo of whatever the gate printed.
-DEFAULT_REPLY_BYTE_CAP = 4096
 
 #: `reason` values meaning NO PROCESS EVER STARTED (codex `code_review`
 #: correction) - distinct from `"timeout"`/`"operator-cancelled"`, which
@@ -294,7 +295,11 @@ class GateWitness:
         *,
         gate_exclusivity: bool,
         exclusivity_basis: str,
-        reply_byte_cap: int = DEFAULT_REPLY_BYTE_CAP,
+        #: None (the default, #404): each stream up to its capture bound in
+        #: `limits`, which is never a truncation - a capped capture is refused.
+        #: An explicit value below that bound DOES cut the reply silently; it
+        #: exists for tests, not for a live attempt.
+        reply_byte_cap: int | None = None,
         declared_env: Mapping[str, Mapping[str, str]] | None = None,
         workspace_root: str | None = None,
         stage_capture: Mapping[str, StageReader] | None = None,
@@ -341,7 +346,8 @@ class GateWitness:
         self._limits = limits
         self._gate_exclusivity = gate_exclusivity
         self._exclusivity_basis = exclusivity_basis
-        self._reply_byte_cap = reply_byte_cap
+        self._stdout_reply_cap = limits.max_captured_stdout_bytes if reply_byte_cap is None else reply_byte_cap
+        self._stderr_reply_cap = limits.max_captured_stderr_bytes if reply_byte_cap is None else reply_byte_cap
         self._lock = Lock()
         #: Snapshot and execution share one order across different gates.
         self._exec_lock = Lock()
@@ -495,10 +501,10 @@ class GateWitness:
                     "accepted": True,
                     "exit_code": result.exit_code,
                     "reason": result.reason,
-                    "stdout": (result.stdout or b"")[:self._reply_byte_cap].decode("utf-8", errors="replace"),
+                    "stdout": (result.stdout or b"")[:self._stdout_reply_cap].decode("utf-8", errors="replace"),
                     "stderr": (
-                        result.stderr[:self._reply_byte_cap].decode("utf-8", errors="replace")
-                        if result.stderr is not None else (result.error or "")[:self._reply_byte_cap]
+                        result.stderr[:self._stderr_reply_cap].decode("utf-8", errors="replace")
+                        if result.stderr is not None else (result.error or "")[:self._stderr_reply_cap]
                     ),
                 }
         finally:

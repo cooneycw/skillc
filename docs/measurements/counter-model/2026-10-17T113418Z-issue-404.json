@@ -1,0 +1,25 @@
+{
+  "branch": "issue-404-gate-witness-silently-truncates-forwarded-gate-out",
+  "counts": {
+    "accepted": 0,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "40611f240463e25306a52c8150c4566c6ba62d01",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "404",
+  "passes": 1,
+  "recorded_at": "2026-10-17T11:34:18Z",
+  "red_cases": {
+    "already_covered": 3,
+    "proposed": 3
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/17/rollout-2026-10-17T07-33-18-01a149a3-42a6-7772-b527-0c83212a8e9d.jsonl",
+    "thread_id": "01a149a3-42a6-7772-b527-0c83212a8e9d"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
