@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
@@ -114,7 +116,11 @@ def _run_control(base: Path, docker_state: Path, **overrides: object) -> demo.Co
     `docker` - the same seeds, a sub-second limit and a few-second sleep in
     place of the operator's 3s/30s and 60s."""
     kwargs: dict[str, object] = {
-        "image": "fake-image:1", "docker_bin": _docker_bin(docker_state), "base": base, "timeout": 5,
+        # `timeout` is every seed's DAEMON budget, never a property bound (#412
+        # audit: each seed's property rides timeout_limit, cancel_sleep or its
+        # own Limits). 30 s, the production default, not 5: on CI 806 a 5 s
+        # teardown `rm -f` red the cancellation seed after its property held.
+        "image": "fake-image:1", "docker_bin": _docker_bin(docker_state), "base": base, "timeout": 30,
         "timeout_limit": 0.5, "timeout_sleep": 5.0, "cancel_sleep": 4.0,
     }
     kwargs.update(overrides)
@@ -1196,15 +1202,52 @@ def test_run_control_is_not_ok_when_timeout_enforcement_is_disabled(
     assert "[NOT CAUGHT] timeout" in result.paste_back
 
 
+#: Long on purpose (#412): a HANDLED SIGINT cuts the exec at about 0.2 s, so
+#: the healthy run is unchanged; only a broken handler pays the full sleep,
+#: and half of it (10 s) is the cleanup headroom the timing check allows.
+_CANCEL_SLEEP = 20.0
+_EXITED_AFTER_SIGINT = re.compile(r"child exited (\d+(?:\.\d+)?)s after SIGINT")
+#: A child that ignores SIGINT entirely, so its exec runs to its natural end.
+_SIGINT_IGNORING_CHILD = [
+    sys.executable, "-c",
+    "import signal, runpy, sys; signal.signal(signal.SIGINT, signal.SIG_IGN); "
+    "sys.argv = ['skillc', *sys.argv[1:]]; runpy.run_module('skillc.cli', run_name='__main__', alter_sys=True)",
+]
+
+
+def _exited_after_sigint(evidence: str) -> float:
+    """The seed's own measurement of how long the child ran after SIGINT,
+    read from its evidence (#412). It FAILS, never skips, when the wording is
+    absent: a renamed field or an `unknown` reading must not silently disarm
+    the check that the interrupt, not the exec's natural end, stopped it."""
+    match = _EXITED_AFTER_SIGINT.search(evidence)
+    assert match, f"the seed no longer reports the child's exit time after SIGINT: {evidence!r}"
+    return float(match.group(1))
+
+
 def test_cancellation_seed_is_caught_and_leaves_the_foreign_container_untouched(
     base: Path, docker_state: Path,
 ) -> None:
     """A real SIGINT to a real child `skillc demo --cancel-target` process
-    group, mid-exec, against the fake `docker`."""
+    group, mid-exec, against the fake `docker`.
+
+    `timeout=30`, the production default, not 5 (#412): the same value is the
+    foreign backend's `daemon_timeout`, and on CI pipeline 806 its teardown
+    `rm -f` overran 5 s AFTER the property held (`foreign_removed=not-confirmed`).
+    The child must exit within half its exec's sleep after SIGINT."""
     seed = demo.run_cancellation_control(
-        image="fake-image:1", docker_bin=_docker_bin(docker_state), base=base, timeout=5, sleep=4,
+        image="fake-image:1", docker_bin=_docker_bin(docker_state), base=base, timeout=30, sleep=_CANCEL_SLEEP,
     )
     assert seed.caught is True, seed.evidence
+    # Half the sleep, not all of it (counter-model review): the exec's sleep
+    # starts when it goes live, but this is measured from SIGINT, so "< sleep"
+    # alone would also pass a child the exec was about to outlive anyway. A
+    # handled SIGINT exits in about 0.2 s; load only widens the gap BEFORE
+    # SIGINT, which this reading does not include, so it cannot false-red.
+    assert _exited_after_sigint(seed.evidence) < _CANCEL_SLEEP / 2, (
+        f"the child ran on after SIGINT for most of its {_CANCEL_SLEEP}s exec - the interrupt did not stop it: "
+        f"{seed.evidence}"
+    )
     assert "exec observed live" in seed.evidence
     assert "interrupt_line=present exit=1" in seed.evidence
     assert "independent=already-absent" in seed.evidence
@@ -1212,6 +1255,43 @@ def test_cancellation_seed_is_caught_and_leaves_the_foreign_container_untouched(
     assert "foreign_removed=confirmed" in seed.evidence
     # The seed tears its own foreign container down afterwards.
     assert not reap.snapshot(_docker_bin(docker_state)).owned
+
+
+def test_red_a_child_that_ignores_sigint_fails_the_interrupt_timing_check(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The red case for the timing assertion above (#412): a child that never
+    handles SIGINT runs its exec to the natural end. Its exit is measured from
+    SIGINT while the sleep started at exec-live, so a slow parent between the
+    two shortens the reading (counter-model review), so a 2.0 s delay is
+    injected there deliberately: the ignoring child must still read at least
+    half its sleep - the same rule the healthy test applies - and drifting
+    under it under load turns THIS test red, never silently green."""
+    sleep, live_to_sigint_delay = 10.0, 2.0
+    real_is_live = demo._exec_is_live
+
+    def _late(*args: object, **kwargs: object) -> bool:
+        live = real_is_live(*args, **kwargs)  # type: ignore[arg-type]
+        if live:
+            time.sleep(live_to_sigint_delay)
+        return live
+
+    monkeypatch.setattr(demo, "_exec_is_live", _late)
+    seed = demo.run_cancellation_control(
+        image="fake-image:1", docker_bin=_docker_bin(docker_state), base=base, timeout=30, sleep=sleep,
+        child_command=_SIGINT_IGNORING_CHILD,
+    )
+    assert seed.caught is False, seed.evidence
+    assert _exited_after_sigint(seed.evidence) >= sleep / 2, seed.evidence
+
+
+@pytest.mark.parametrize("evidence", [
+    "child exited unknown after SIGINT (exec would have run 4s)",
+    "the child left 0.2s after the interrupt",
+])
+def test_red_the_timing_check_fails_loudly_when_the_evidence_wording_drifts(evidence: str) -> None:
+    with pytest.raises(AssertionError, match="no longer reports the child's exit time"):
+        _exited_after_sigint(evidence)
 
 
 def test_cancellation_seed_is_not_caught_when_the_interrupt_sweep_is_unscoped(
