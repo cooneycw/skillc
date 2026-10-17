@@ -604,6 +604,9 @@ def cmd_kill(state_dir: Path, rest: list[str]) -> int:
     return 0
 
 
+EGRESS_PROXY_LOG_PATH = "/tmp/skillc-egress-proxy.log"
+
+
 def _remap_absolute(state_dir: Path, name: str, value: str) -> str:
     """A real `docker exec` resolves an absolute argv path inside the
     container's OWN filesystem; this fake has no real chroot, only a `cwd=`
@@ -624,6 +627,11 @@ def _remap_absolute(state_dir: Path, name: str, value: str) -> str:
     pointing a discovery listing at a literal host path that is not this
     fake's simulated filesystem at all, rather than at `deliver_home_file`'s
     own `<fsroot>/home/candidate`."""
+    if value == EGRESS_PROXY_LOG_PATH:
+        # #442: the one file outside the workspace and home a caller reads
+        # from a container - the egress proxy's log. Exactly this path, so no
+        # other absolute /tmp path changes meaning.
+        return str(_in_container(state_dir, name, value))
     for prefix in (WORK_CONTAINER_PATH, HOME_CONTAINER_PATH):
         mapped = str(_in_container(state_dir, name, prefix))
         if value == prefix:
@@ -993,7 +1001,7 @@ def cmd_run(state_dir: Path, rest: list[str]) -> int:
             # real one would start with, plus one allowed CONNECT, so a reader
             # of it has something to read. `.egress-log-unreadable` makes the
             # later `cat` fail instead.
-            log = _in_container(state_dir, name, "/tmp/skillc-egress-proxy.log")
+            log = _in_container(state_dir, name, EGRESS_PROXY_LOG_PATH)
             log.parent.mkdir(parents=True, exist_ok=True)
             log.write_text(
                 json.dumps({"event": "start", "allowlist": json.loads(argv[-2]), "digest": argv[-1]}) + "\n"
