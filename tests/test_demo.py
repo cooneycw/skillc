@@ -1210,8 +1210,10 @@ _EXITED_AFTER_SIGINT = re.compile(r"child exited (\d+(?:\.\d+)?)s after SIGINT")
 #: A child that ignores SIGINT entirely, so its exec runs to its natural end.
 _SIGINT_IGNORING_CHILD = [
     sys.executable, "-c",
-    "import signal, runpy, sys; signal.signal(signal.SIGINT, signal.SIG_IGN); "
-    "sys.argv = ['skillc', *sys.argv[1:]]; runpy.run_module('skillc.cli', run_name='__main__', alter_sys=True)",
+    (
+        "import signal, runpy, sys; signal.signal(signal.SIGINT, signal.SIG_IGN); "
+        "sys.argv = ['skillc', *sys.argv[1:]]; runpy.run_module('skillc.cli', run_name='__main__', alter_sys=True)"
+    ),
 ]
 
 
