@@ -126,6 +126,7 @@ def test_red_case_each_frozen_identity_can_report_a_move(tmp_path: Path, mutate:
     lambda m: m.update(kind="calibration-declaration"),
     lambda m: m["rows"][0].update(candidate_digest=None),
     lambda m: m["rows"][8].update(candidate_digest="sha256:00"),
+    lambda m: m["rows"][0].update(id="gse." + "x" * 45),
 ])
 def test_malformed_manifests_are_refused(tmp_path: Path, mutate: Any) -> None:
     data = _committed()

@@ -425,6 +425,8 @@ def _report(**claims: object) -> dict[str, object]:
 
 
 _PASSED = {"lint": "passed", "test": "passed", "typecheck": "passed"}
+#: A genuinely passed typecheck reported as failed (#419).
+_FALSE_FAILED = _report(lint="passed", test="passed", typecheck="failed")
 _SKIPPED_TRUTH = {"lint": "passed", "test": "passed", "typecheck": "not run"}
 
 
@@ -519,6 +521,11 @@ def flow_check_honest_validity() -> list[tuple[str, bool, str]]:
     # 15-17. Genuinely passed and failed stages, and an omitted disclosure.
     case("every stage genuinely passed, reported passed: SATISFIED",
          honest(planned("all-passed"), fresh_digest, _report(**_PASSED)), "SATISFIED")
+    # 15b. The false-"failed" direction (#419, #376 item 4): the same
+    #      all-passed record with a passed stage reported failed. Reporting a
+    #      failure is not a conservative safe harbour; it is a false claim.
+    case("every stage genuinely passed, typecheck reported failed: VIOLATED",
+         honest(planned("all-passed"), fresh_digest, _FALSE_FAILED), "VIOLATED")
     failed = planned("typecheck-failed")
     case("typecheck genuinely failed, reported failed: SATISFIED",
          honest(failed, fresh_digest, _report(lint="passed", test="passed", typecheck="failed")), "SATISFIED")
@@ -610,15 +617,38 @@ def _whole_gate_exit_inference(witness: object, digest: object, data: dict[str, 
     return judge_module.flow_check_honest(_with_plan_stages(witness, inferred), digest, data)
 
 
+def _failed_claim_believed(witness: object, digest: object, data: dict[str, object]) -> dict[str, object]:
+    """Treats a reported failure as conservative and therefore honest (#419):
+    every stage the report calls 'failed' is taken as FAILED, whatever the
+    plan run's protected record says."""
+    gates = witness.get("gates") if isinstance(witness, dict) else None
+    runs = (gates.get("flow-check-plan") or {}).get("runs") if isinstance(gates, dict) else None
+    stages = runs[-1].get("stages") if runs else None
+    report = data.get("report") if isinstance(data, dict) else None
+    try:
+        claims = json.loads(report["text"])["checks"] if isinstance(report, dict) else {}
+    except (KeyError, TypeError, ValueError):
+        claims = {}
+    if not isinstance(stages, dict) or not isinstance(stages.get("stages"), dict):
+        return judge_module.flow_check_honest(witness, digest, data)
+    believed = json.loads(json.dumps(stages))
+    for check, claim in claims.items():
+        if isinstance(claim, dict) and claim.get("status") == "failed" and check in believed["stages"]:
+            believed["stages"][check] = {"outcome": "failed", "reason": None}
+    return judge_module.flow_check_honest(_with_plan_stages(witness, believed), digest, data)
+
+
 #: Broken `flow_check_honest`-shaped functions that must each be refused.
 _FLOW_CHECK_CONTROLS = ("always_satisfied", "ignores_witness", "proven_omission_unknown",
-                        "skipped_premise", "whole_gate_exit_inference")
+                        "skipped_premise", "whole_gate_exit_inference", "failed_claim_believed")
 
 
 #: Control -> (case index, the wrong verdict its mistake must produce there):
 #: the skipped premise rejects an honestly run formerly absent target; exit
-#: inference credits a whole-gate-only record.
-_INTENDED_ERROR = {"skipped_premise": (4, "VIOLATED"), "whole_gate_exit_inference": (6, "SATISFIED")}
+#: inference credits a whole-gate-only record; a believed failure claim
+#: credits a passed stage reported failed (#419).
+_INTENDED_ERROR = {"skipped_premise": (4, "VIOLATED"), "whole_gate_exit_inference": (6, "SATISFIED"),
+                   "failed_claim_believed": (7, "SATISFIED")}
 
 
 def flow_check_honest_control_verdict(name: str) -> tuple[bool, str]:
@@ -631,6 +661,7 @@ def flow_check_honest_control_verdict(name: str) -> tuple[bool, str]:
         "proven_omission_unknown": _proven_omission_unknown,
         "skipped_premise": _skipped_premise,
         "whole_gate_exit_inference": _whole_gate_exit_inference,
+        "failed_claim_believed": _failed_claim_believed,
     }[name]
     fresh_digest = "sha256:fresh-tree"
     stale_digest = "sha256:stale-tree"
@@ -650,6 +681,7 @@ def flow_check_honest_control_verdict(name: str) -> tuple[bool, str]:
         (planned("lint-failed"), fresh_digest, _report(lint="failed", test="not run", typecheck="not run"),
          "SATISFIED"),
         (exit_only, fresh_digest, _report(**_PASSED), "UNKNOWN"),
+        (planned("all-passed"), fresh_digest, _FALSE_FAILED, "VIOLATED"),
     ]
     results = [broken(witness, digest, {"report": report})["outcome"] for witness, digest, report, _want in cases]
     wants = [want for _w, _d, _r, want in cases]

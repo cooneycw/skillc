@@ -28,6 +28,64 @@ and version plan.
   red case fails on the old code with `('exited', 1)`. Each proof's control
   goes red when that proof is mutated away. Real-daemon proof: #426.
 
+- **The host import probe only sees the declared project** (#365). A
+  `python-import` probe with `uv_project` ran `uv run --project <home>/<proj>`
+  with the operator's whole environment. With `UV_PROJECT_ENVIRONMENT` pointing
+  at another venv (a test runner's dev env, say), uv imported THERE, and the
+  ambient `PYTHONPATH` was appended after the project dir. Either way the probe
+  could report `satisfied` for a module the installed project does not have.
+  `profile._isolated_probe_env()` now drops every `UV_*` outside
+  `runtime_supply.ENV_KEYS` (the uv settings the supported runtime already
+  accepts), drops `VIRTUAL_ENV` and `PYTHONHOME`, and sets `PYTHONPATH` to the
+  project dir only. The probe also runs IN the project dir (made absolute): `python
+  -c` searches its working directory first, so a module in the caller's
+  directory used to satisfy the probe, or a broken one there to shadow the
+  project's. The user site needed nothing: uv's project venv disables it,
+  and a test shows a user-site module does not satisfy the probe while the same
+  placement does import under the base interpreter. The container-side probe is
+  unchanged.
+  **Behaviour change:** other `UV_*` settings such as `UV_INDEX_URL` or
+  `UV_EXTRA_INDEX_URL` no longer reach the probe's `uv run`. A probe whose
+  project needs a sync from a custom index can now report `violated` where it
+  passed before. That is deliberate: the probe fails closed rather than borrow
+  configuration the installed project does not declare. Likewise, an operator
+  who relied on an ambient `PYTHONPATH` reaching the probe will see `violated`.
+  Tests in `tests/test_profile_probes.py`: the `UV_PROJECT_ENVIRONMENT`,
+  `PYTHONPATH` and caller-directory reds reported `satisfied` on the old code,
+  and the caller-directory shadow reported `violated`. A control with the module
+  in the declared project passes before and after.
+- **Planned trials pin the skills they install** (#424, follow-up to #354).
+  #354's `skill_digests` lock never engaged: neither planner declared it, so
+  every calibration and uptake trial was planned unpinned and a substituted
+  skill's `skill-evidence` still validated clean. `build_treatment` now
+  derives each skill's pin from the `SKILL.md` bytes it installs (one shared
+  rule, `profile.skill_md_digests`) and, for a profiled treatment, refuses any
+  disagreement with the inventory's own pins. `plan_calibration` declares the
+  pins on every treated trial; `plan_study` declares each arm's own, so
+  `published` and `rewritten` pin different descriptions. A treated arm with
+  no pins is refused rather than planned unpinned. Baseline trials stay
+  unpinned; the baseline-contamination rule is #427.
+- **A false "failed" claim is now a committed control for both #270 tasks**
+  (#419, from #376 item 4). Every committed "reported failed" case was a
+  genuine failure, so nothing showed that a report calling a PASSED stage
+  `failed` is rejected. Both `qualify.py` files gain the case "every stage
+  genuinely passed, typecheck reported failed: VIOLATED", next to its
+  SATISFIED healthy twin. They also gain a broken control,
+  `failed_claim_believed`, that takes any reported failure as true. It is
+  refused only if it shows SATISFIED on that case. With the graders' comparison
+  mutated to never count a `failed` claim as a violation, qualification fails
+  on the new case. Graders, `grader.json` and campaign-375's frozen
+  identities are unchanged.
+- **`skill-evidence` digests can be pinned, and a stale one is refused**
+  (Closes #354, follow-up to #268). A trial may declare `skill_digests`, the
+  `body_digest`/`description_digest` it plans to test for each skill path.
+  `ledger-binding` then refuses a `skill-evidence` entry that is unpinned,
+  omits a digest, or carries one that differs from the pin. `trial.plan`
+  accepts the field and `profile.skill_digest_pins` derives it from a #265
+  inventory. Trials that pin nothing behave as before. Controls: three bad and
+  one good bundle, three bad and one good ledger; each check was removed in
+  turn to confirm its case goes blind. The ledger-pin approach comes from the
+  unmerged first #268 run.
 - **The witness envelope a result was graded against is retained** (#418).
   A witnessed grade sealed `{"witness": ..., "graded_tree_digest": ...}`,
   passed it to grading, and recorded only its digest. The bytes were never
@@ -150,6 +208,19 @@ and version plan.
   own limit, instead of 5s. Under host load a slow reply timed the actor out
   before its post-gate edit, so the `stale` case saw equal digests and failed
   even though nothing was wrong.
+- **A production-path campaign for #271's reporting tasks** (#271).
+  `evals/level3/campaign-271/` freezes 28 rows over `claims-outran-evidence`
+  and `report-outran-evidence` for the same scripted-actor harness as #375's
+  campaign: every committed candidate of both tasks, the no-witness candidate
+  as a `plan-only` run, and a `reference-stale-gate` row per task as the
+  production red case for gate freshness. `campaign-375/freeze.py` now exposes
+  `build()` for a campaign's tasks, population and deltas; its own manifest is
+  unchanged. `tests/test_level3_campaign_271.py` also fails when a candidate
+  directory is not in the population, which caught one during this change.
+  `level3_campaign.load_manifest` now refuses a row id that `trial.plan`
+  cannot use as a trial label (at most 48 characters), before any container
+  exists: the first runner rehearsal of these rows stopped at planning on a
+  49-character id.
 - **Witnessed live attempts capture again after the stop** (#394). The gate
   witness finalizes the decide-and-reply channel (`trigger_log()`) right after
   the confirmed stop, and finalizing unlinked the host socket the container

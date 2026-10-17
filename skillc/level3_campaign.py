@@ -171,6 +171,10 @@ def load_manifest(path: Path) -> Manifest:
         row_id = _need(raw.get("id"), str, "row.id")
         if row_id in seen:
             raise CampaignRefused(f"row {row_id!r} is declared twice")
+        if not trial._LABEL_RE.fullmatch(row_id):
+            # The row id becomes the trial label; refuse here, before any
+            # container exists, what `trial.plan` would refuse mid-run.
+            raise CampaignRefused(f"row id {row_id!r} is not a plannable trial label ({trial._LABEL_RE.pattern})")
         seen.add(row_id)
         task = _need(raw.get("task"), str, f"{row_id}.task")
         if task not in frozen["tasks"]:

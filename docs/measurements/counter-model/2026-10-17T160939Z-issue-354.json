@@ -1,0 +1,27 @@
+{
+  "branch": "issue-354-salvage-pin-skill-digests",
+  "counts": {
+    "accepted": 1,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "badf2d2d1540784f41ba4378b968e5acb0b23a99",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "354",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 2,
+  "recorded_at": "2026-10-17T16:09:39Z",
+  "red_cases": {
+    "already_covered": 0,
+    "proposed": 0
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/17/rollout-2026-10-17T12-08-19-01a14a9f-0c57-7230-8271-afc0d1e45e6a.jsonl",
+    "thread_id": "01a14a9f-0c57-7230-8271-afc0d1e45e6a"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
