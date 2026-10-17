@@ -62,6 +62,7 @@ import os
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import tempfile
 import threading
@@ -232,7 +233,50 @@ class LocalGitRemote:
     def __init__(self, path: Path) -> None:
         self.path = path
 
+    def _check_ownership(self) -> None:
+        """FAIL CLOSED unless nobody but this controller uid can write what
+        git will read (orchestrator ruling on #276's pass-2 findings).
+
+        - every ancestor directory is owned by this uid or root and is not
+          group/other-writable, unless it is sticky (as /tmp is), where only
+          an entry's owner can rename it - so the remote cannot be swapped
+          out from above;
+        - the git dir and every entry under it is a real file or directory
+          (never a symlink: lstat, no following), owned by this uid, and not
+          group- or other-writable.
+
+        Defence in depth for the CONTRACT in the class docstring, not a
+        boundary for a remote the subject can write: such a remote is
+        refused here before any git runs."""
+        uid = os.getuid()
+        root = Path(os.path.abspath(self.path))
+        child_uid = None
+        for ancestor in [root, *root.parents][1:]:
+            info = os.lstat(ancestor)
+            if stat.S_ISLNK(info.st_mode) or info.st_uid not in (uid, 0):
+                raise RemoteUntrusted(f"an ancestor directory of the remote is a link or not owned by "
+                                      f"this controller (uid {info.st_uid})")
+            if info.st_mode & 0o022 and not (info.st_mode & stat.S_ISVTX and child_uid in (None, uid)):
+                raise RemoteUntrusted("an ancestor directory of the remote is writable by another uid")
+            child_uid = info.st_uid
+        count = 0
+        for current, dirs, files in os.walk(root, followlinks=False):
+            for name in [None, *dirs, *files]:
+                entry = Path(current) if name is None else Path(current) / name
+                info = os.lstat(entry)
+                count += 1
+                if count > 100_000:
+                    raise RemoteUntrusted("the remote has too many entries to check")
+                if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
+                    raise RemoteUntrusted(f"{entry.relative_to(root)} is not a plain file or directory")
+                if info.st_uid != uid:
+                    raise RemoteUntrusted(f"{entry.relative_to(root)} is owned by uid {info.st_uid}, "
+                                          "not this controller")
+                if info.st_mode & 0o022:
+                    raise RemoteUntrusted(f"{entry.relative_to(root)} is writable by another uid")
+
     def _check_trusted(self, env: Mapping[str, str]) -> None:
+        self._check_ownership()
         for name in _UNTRUSTED_PATHS:
             if (self.path / name).exists():
                 raise RemoteUntrusted(f"the remote carries {name}")
@@ -256,7 +300,8 @@ class LocalGitRemote:
                 ["git", "-c", f"user.name={SERVICE_IDENTITY[0]}", "-c", f"user.email={SERVICE_IDENTITY[1]}",
                  "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
                  "--git-dir", str(self.path), *args],
-                input=stdin, env=env, capture_output=True, timeout=30, check=check)
+                input=stdin, env=env, capture_output=True, timeout=30, check=check,
+                umask=0o022)  # what the controller writes stays controller-only
 
     @staticmethod
     def _answer(proc: subprocess.CompletedProcess[bytes], what: str) -> bool:

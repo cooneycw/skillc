@@ -254,6 +254,21 @@ remote can swap its config between that check and the git command that reads
 it, so `LocalGitRemote` carries a contract: it is pointed only at a remote
 the subject cannot write (counter-model review, pass 2).
 
+The contract is ENFORCED, and fails closed (orchestrator ruling). Before any
+git runs, `LocalGitRemote` refuses the remote (`RemoteUntrusted`) in any of
+these cases:
+- an ancestor directory is a link, or is not owned by the controller or root,
+  or is writable by another uid without being sticky;
+- any entry under the git dir is a symlink, or anything other than a plain
+  file or directory;
+- any entry is owned by another uid;
+- any entry is group- or other-writable.
+
+Checks use `lstat`, never following links. The controller's own git calls
+run under umask 022, so what it writes stays controller-only. This PR has no
+code path in which the controller runs git against a remote the subject can
+write.
+
 A live attempt's remote is subject-writable by design. It must be reached
 through a `GitRemote` that runs git inside the attempt's own containment,
 which is #434's wiring. There, hostile metadata can only run code as the

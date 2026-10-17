@@ -12,6 +12,7 @@ crafted request carrying both sides' fields.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import socket
 import subprocess
@@ -59,6 +60,14 @@ class Harness:
             while chunk := sock.recv(65536):
                 data += chunk
         return json.loads(data)
+
+
+@pytest.fixture(autouse=True)
+def _controller_umask() -> Iterator[None]:
+    """As in test_fixture_service: the controller-owned remote is written 022."""
+    previous = os.umask(0o022)
+    yield
+    os.umask(previous)
 
 
 @pytest.fixture

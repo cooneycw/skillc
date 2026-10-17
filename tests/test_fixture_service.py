@@ -90,6 +90,15 @@ class World:
         return fs.FixtureService(self.declaration(**overrides), self.remote, "attempt-1")
 
 
+@pytest.fixture(autouse=True)
+def _controller_umask() -> Any:
+    """A controller-owned remote is written 022 (LocalGitRemote refuses a
+    group- or other-writable one); a host umask of 002 must not leak in."""
+    previous = os.umask(0o022)
+    yield
+    os.umask(previous)
+
+
 @pytest.fixture
 def world(tmp_path: Path) -> World:
     return World(tmp_path)
@@ -596,3 +605,75 @@ def test_an_update_ref_failure_on_an_unmoved_base_is_an_error_not_base_moved(
     event = last_event(service)
     assert event["decision"] == "error" and world.main() == before
     assert service.finalize("attempt-1").coverage_complete is False
+
+
+# --- ruling on pass 2: the LocalGitRemote contract, enforced fail-closed ----------
+
+@pytest.mark.parametrize("target,mode", [("config", 0o664), ("config", 0o646), (".", 0o775), ("objects", 0o777),
+                                         ("hooks", 0o757)])
+def test_a_remote_writable_by_another_uid_is_refused_before_any_git_runs(
+        world: World, monkeypatch: pytest.MonkeyPatch, target: str, mode: int) -> None:
+    (world.bare / target).chmod(mode)
+    ran: list[tuple[str, ...]] = []
+    real_run = subprocess.run
+
+    def spy(argv: Any, *args: Any, **kwargs: Any) -> Any:
+        ran.append(tuple(argv))
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(fs.subprocess, "run", spy)
+    with pytest.raises(fs.RemoteUntrusted, match="writable by another uid"):
+        fs.LocalGitRemote(world.bare).resolve("refs/heads/main")
+    assert not [a for a in ran if a and a[0] == "git"]
+
+
+def test_a_remote_file_owned_by_another_uid_is_refused(world: World, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A file the subject's uid owns, inside an otherwise controller-owned tree
+    # (only lstat is altered: chown needs root).
+    real_lstat = os.lstat
+    config = os.path.abspath(world.bare / "config")
+
+    def lstat(path: Any, *args: Any, **kwargs: Any) -> os.stat_result:
+        info = real_lstat(path, *args, **kwargs)
+        if os.path.abspath(path) == config:
+            fields = list(info)
+            fields[4] = info.st_uid + 1  # st_uid
+            return os.stat_result(fields)
+        return info
+
+    monkeypatch.setattr(fs.os, "lstat", lstat)
+    with pytest.raises(fs.RemoteUntrusted, match="config is owned by uid"):
+        fs.LocalGitRemote(world.bare).resolve("refs/heads/main")
+
+
+def test_a_remote_under_an_ancestor_owned_by_another_uid_is_refused(world: World,
+                                                                   monkeypatch: pytest.MonkeyPatch) -> None:
+    real_uid = os.getuid()
+    monkeypatch.setattr(fs.os, "getuid", lambda: real_uid + 1)
+    with pytest.raises(fs.RemoteUntrusted, match="ancestor directory of the remote is a link or not owned"):
+        fs.LocalGitRemote(world.bare).resolve("refs/heads/main")
+
+
+def test_a_symlink_inside_the_remote_is_refused(world: World, tmp_path: Path) -> None:
+    (tmp_path / "outside").write_text("x")
+    (world.bare / "info" / "linked").symlink_to(tmp_path / "outside")
+    with pytest.raises(fs.RemoteUntrusted, match="not a plain file"):
+        fs.LocalGitRemote(world.bare).resolve("refs/heads/main")
+
+
+def test_an_ancestor_writable_by_another_uid_is_refused(world: World, tmp_path: Path) -> None:
+    tmp_path.chmod(0o777)  # not sticky: anyone could rename the remote away
+    try:
+        with pytest.raises(fs.RemoteUntrusted, match="ancestor"):
+            fs.LocalGitRemote(world.bare).resolve("refs/heads/main")
+    finally:
+        tmp_path.chmod(0o700)
+
+
+def test_the_service_refuses_a_subject_writable_remote_as_an_error_event(world: World) -> None:
+    service = world.service()
+    (world.bare / "config").chmod(0o666)
+    ask(service, "pr", "create", "--title", "a", "--body", "b")
+    event = last_event(service)
+    assert event["decision"] == "error" and "RemoteUntrusted" in event["reason"]
+    assert service.finalize("attempt-1").remote_integrity == "UNKNOWN"
