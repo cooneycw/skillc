@@ -1,0 +1,27 @@
+{
+  "branch": "issue-410-test-a-screen-scores-selectivity-not-just-recall-n",
+  "counts": {
+    "accepted": 0,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "bb247399219ca2bfcc775d6fd8808081c06d734b",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "410",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 1,
+  "recorded_at": "2026-10-17T13:18:33Z",
+  "red_cases": {
+    "already_covered": 4,
+    "proposed": 4
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/17/rollout-2026-10-17T09-18-08-01a14a03-3d07-7563-ad43-003c6fca7a26.jsonl",
+    "thread_id": "01a14a03-3d07-7563-ad43-003c6fca7a26"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
