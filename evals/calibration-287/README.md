@@ -55,6 +55,17 @@ The pin is CPP `86641e8` (orchestrator ruling,
   - The scan's verdicts are NO_TEXTUAL_SURVIVOR, SURVIVES, NEEDS_REVIEW and
     UNKNOWN, each with a committed case in
     `tests/test_calibration_287_scan_mutation_closure.py`.
+  - **Coverage: the profile closure only, not the full install.** This
+    evidence covers the profile's 97-file closure (`flow-check` and its
+    dependencies). The subject selects ALL skills, so a run installs more than
+    that. **The check that covers the real delivered treatment is the runner's
+    full-delivery scan** (#287 P2, `calibration_run.require_no_delivered_survivor`).
+    Before planning, it reads every file the degraded arm actually delivers and
+    refuses the removed sentence or any 3+-word piece of it. The runner also
+    requires this evidence to have been run at the same `mutated_digest`, on the
+    same `removed_text`, over the intact profile's own inventory. Both checks
+    are textual and necessary, not sufficient: the discrimination pilot remains
+    the evidence that the degraded arm is degraded.
   The degraded snapshot was built with `degrade-subject --checkout`, which labels
   its source `snapshot:`. The declaration's derived label assumes the `git:`
   source, so the run-time mutation check (P2) must build from the pinned

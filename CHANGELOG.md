@@ -8,6 +8,42 @@ and version plan.
 
 ## [Unreleased]
 
+- **Live agent containers reach only their model provider** (#442). Live
+  attempts ran on Docker's default bridge with open egress (#11), and skillc's
+  graders are public. `DockerBackend(egress=True)` now gives each live attempt
+  its own `--internal` network (no route out, no external DNS) and a per-attempt
+  allowlisting CONNECT proxy to `chatgpt.com` and `auth.openai.com` only,
+  measured with the pinned codex. The proxy log is captured as the attempt's
+  `egress-proxy-log` manifest stream. Server-side channels, which container
+  egress cannot reach, are closed in the codex argv: `--strict-config -c
+  web_search="disabled" --disable apps --disable plugins --disable
+  remote_plugin` (measured: by default the client lists 16 OpenAI-curated
+  remote plugins to the model, GitHub among them). `run_one_attempt` refuses a
+  live codex attempt missing any of them, or on an open network with no egress
+  policy, before any container exists. After the run, any server-side tool use
+  in the transcript blocks grading as "not credited", and the attempt stays in
+  every report. The real-Docker runner's floor gains
+  `tests/test_agent_egress_live.py` with an `egress:` break family
+  (`allow-all`, `bridge-network`, `dns-hosts`).
+
+- **#287 P2: discrimination runs, whole-declaration approval, and rehearsal**
+  (Refs #287).
+  - **Approval binds the whole declaration** (orchestrator ruling D-P2a):
+    `approval.declaration_digest` must equal the declaration's canonical digest,
+    for both kinds, so a client, model, effort, image, cap or seed changed after
+    approval is refused. The four committed pre-rule approvals are pinned by their
+    own digests, so they keep their meaning; editing one drops it out of the pin.
+  - **`skillc calibration-run` runs a `discrimination-declaration`.** The
+    degraded arm is derived in memory from the intact treatment after the
+    run-time mutation check (`removed_text` exactly once, degraded bytes hash to
+    `mutated_digest`). It is tied to P1's textual evidence at that same digest.
+  - **The report applies `tolerance.non_evaluable_per_arm`:** more non-evaluable
+    attempts than the tolerance makes that arm UNKNOWN, naming the count.
+  - **`--rehearse`** runs the real approval, plan, store, cap-enforcing schedule
+    and report with a deterministic in-process attempt (no container, client or
+    model), for either kind, and exits 1 unless every declared slot is accounted
+    for. Fixtures are synthetic until P3.
+
 - **#287 P1: sizing, measured cost inputs and mutation evidence at CPP 86641e8**
   (Refs #287). This transplants the parked `prep-287-pilot-declarations@571d763`
   statistics (exact one-sided Fisher, the P1-P6 pilot-to-main sizing simulation)
