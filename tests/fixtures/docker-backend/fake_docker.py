@@ -586,6 +586,7 @@ def cmd_kill(state_dir: Path, rest: list[str]) -> int:
         except (ProcessLookupError, PermissionError):
             pass
     _rewrite_state(state_dir, name, lambda d: {**d, "status": "exited"})
+    _record_event(state_dir, name, "die")
     return 0
 
 
@@ -655,10 +656,36 @@ def cmd_exec(state_dir: Path, rest: list[str]) -> int:
     if not path.is_file():
         print("Error: No such container: " + name, file=sys.stderr)
         return 1
+    # #317: `execute()` prefixes its argv with a token prelude,
+    # `sh -c 'exec "$@"' skillc-exec-<uuid> [WRAP] ARGV`.
+    # `.stop-before-exec-NAME` (consumed) stops the container just before this
+    # exec's running check - the deterministic form of the race between
+    # execute()'s entry inspect and the real exec. It never fires on the
+    # forwarding probe. It fires on any other exec, prelude or not, so the
+    # same race can be staged against code that has no prelude at all.
+    prelude_exec = len(argv) > 3 and argv[:3] == ["sh", "-c", 'exec "$@"'] and argv[3].startswith("skillc-exec-")
+    # #317: the probe may carry a per-call `$0` token after its script.
+    probe_script = ["sh", "-c", f"test -x {SKILLC_WRAP_PATH} && test -S {SKILLC_CONTROL_SOCKET_PATH}"]
+    forwarding_probe = argv[:3] == probe_script and (
+        len(argv) == 3 or (len(argv) == 4 and argv[3].startswith("skillc-probe-"))
+    )
+    stop_before = state_dir / f".stop-before-exec-{name}"
+    if not forwarding_probe and stop_before.exists():
+        stop_before.unlink()
+        _rewrite_state(state_dir, name, lambda d: {**d, "status": "exited"})
+        _record_event(state_dir, name, "die")
     data = json.loads(path.read_text(encoding="utf-8"))
     if data.get("status") != "running":
         print(f"Error: Container {name} is not running", file=sys.stderr)
         return 1
+    # #317: a real daemon records an exec only once it is created in a
+    # running container; the refusal above recorded nothing. Measured on
+    # Docker 29.8.2 (#426): the argv is space-joined, and an argless command
+    # keeps a trailing space (`exec_create: true `).
+    exec_argv = rest[i + 1:]
+    command = " ".join(exec_argv) + (" " if len(exec_argv) == 1 else "")
+    _record_event(state_dir, name, f"exec_create: {command}")
+    _record_event(state_dir, name, f"exec_start: {command}")
 
     # Issue #158's capability probe: `_forwarding_available` runs exactly
     # this argv shape (`sh -c "test -x WRAP && test -S SOCKET"`) against the
@@ -673,7 +700,7 @@ def cmd_exec(state_dir: Path, rest: list[str]) -> int:
     # `sh`/`test` - `_supervisor_capable` (the binary) and
     # `_supervisor_running` (the socket) - matching the two-part fact the
     # real probe checks, not conflating them into one.
-    if argv == ["sh", "-c", f"test -x {SKILLC_WRAP_PATH} && test -S {SKILLC_CONTROL_SOCKET_PATH}"]:
+    if forwarding_probe:
         capable = _supervisor_capable(state_dir, name) and _supervisor_running(state_dir, name)
         return 0 if capable else 1
 
@@ -690,6 +717,14 @@ def cmd_exec(state_dir: Path, rest: list[str]) -> int:
     if wrapped:
         argv = argv[1:]
         if not argv:
+            print("fake_docker: exec requires a subject argv after skillc-wrap", file=sys.stderr)
+            return 2
+    elif prelude_exec and len(argv) > 4 and argv[4] == SKILLC_WRAP_PATH:
+        # #317: the same skillc-wrap prefix, inside execute()'s token
+        # prelude - the real prelude shell runs, the wrap is simulated.
+        wrapped = True
+        argv = [*argv[:4], *argv[5:]]
+        if len(argv) == 4:
             print("fake_docker: exec requires a subject argv after skillc-wrap", file=sys.stderr)
             return 2
 
@@ -724,6 +759,13 @@ def cmd_exec(state_dir: Path, rest: list[str]) -> int:
     )
     try:
         proc.wait()
+        if not forwarding_probe and (state_dir / f".stop-after-exec-{name}").exists():
+            # #317 negative control: the subject really ran (the daemon
+            # recorded its exec), then the container stopped before execute()'s
+            # re-check - a real run that must never read as "never started".
+            (state_dir / f".stop-after-exec-{name}").unlink()
+            _rewrite_state(state_dir, name, lambda d: {**d, "status": "exited"})
+            _record_event(state_dir, name, "die")
     finally:
         if path.is_file():
             # Mutates whatever is CURRENTLY on disk, never the `data` this
@@ -944,9 +986,51 @@ def cmd_run(state_dir: Path, rest: list[str]) -> int:
     return proc.returncode
 
 
+def _record_event(state_dir: Path, name: str, action: str) -> None:
+    """#317: the daemon's own event record for NAME, in the shape `docker
+    events --format '{{json .}}'` prints - `Action` is `exec_create: <cmd>` /
+    `exec_start: <cmd>` (argv joined by spaces) or `die`, with `timeNano`.
+    Only this fake writes it; nothing a subject runs can reach it."""
+    event = {"Type": "container", "Action": action, "Actor": {"ID": name}, "timeNano": time.time_ns()}
+    with open(state_dir / f"{name}.events.jsonl", "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(event) + "\n")
+
+
+def cmd_events(state_dir: Path, rest: list[str]) -> int:
+    """`events --since S --until U --filter container=NAME --format F`: NAME's
+    recorded events at or after S (fractional unix seconds), then exit (the
+    `--until` form never streams)."""
+    since_ns, name = 0, None
+    i = 0
+    while i < len(rest):
+        if rest[i] == "--since":
+            secs, _, frac = rest[i + 1].partition(".")
+            since_ns = int(secs) * 1_000_000_000 + int((frac or "0").ljust(9, "0")[:9])
+            i += 2
+        elif rest[i] == "--filter":
+            key, _, value = rest[i + 1].partition("=")
+            if key == "container":
+                name = value
+            i += 2
+        elif rest[i] in ("--until", "--format"):
+            i += 2
+        else:
+            print(f"fake_docker: unknown events argument {rest[i]!r}", file=sys.stderr)
+            return 2
+    if name is None:
+        print("fake_docker: events requires --filter container=NAME", file=sys.stderr)
+        return 2
+    path = state_dir / f"{name}.events.jsonl"
+    if path.is_file():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.strip() and json.loads(line)["timeNano"] >= since_ns:
+                print(line)
+    return 0
+
+
 SUBCOMMANDS = {
     "run": cmd_run, "inspect": cmd_inspect, "rm": cmd_rm, "version": cmd_version,
-    "kill": cmd_kill, "exec": cmd_exec, "cp": cmd_cp, "ps": cmd_ps,
+    "kill": cmd_kill, "exec": cmd_exec, "cp": cmd_cp, "ps": cmd_ps, "events": cmd_events,
 }
 
 
