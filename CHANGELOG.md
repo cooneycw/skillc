@@ -8,6 +8,16 @@ and version plan.
 
 ## [Unreleased]
 
+- **`skill-evidence` digests can be pinned, and a stale one is refused**
+  (Closes #354, follow-up to #268). A trial may declare `skill_digests`, the
+  `body_digest`/`description_digest` it plans to test for each skill path.
+  `ledger-binding` then refuses a `skill-evidence` entry that is unpinned,
+  omits a digest, or carries one that differs from the pin. `trial.plan`
+  accepts the field and `profile.skill_digest_pins` derives it from a #265
+  inventory. Trials that pin nothing behave as before. Controls: three bad and
+  one good bundle, three bad and one good ledger; each check was removed in
+  turn to confirm its case goes blind. The ledger-pin approach comes from the
+  unmerged first #268 run.
 - **The witness envelope a result was graded against is retained** (#418).
   A witnessed grade sealed `{"witness": ..., "graded_tree_digest": ...}`,
   passed it to grading, and recorded only its digest. The bytes were never
