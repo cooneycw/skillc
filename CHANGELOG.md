@@ -8,6 +8,23 @@ and version plan.
 
 ## [Unreleased]
 
+- **The real-Docker runner no longer deletes other workloads' images** (#414).
+  `run-real-docker` ended every run with host-wide `docker container prune -f`
+  and `docker image prune -f`. `docker/profile-trial/build.py` built its
+  campaign image untagged and receipts named it only by ID, so the first runner
+  run after a build deleted the image from under every receipt; the #375
+  campaign refused 42/42 rows. Two changes (owner-delegated ruling, option 3):
+  `build.py` tags its output `skillc-profile-runtime:<runtime_id>-<commit[:12]>`
+  before writing the receipt, and the runner's cleanup (`ci/real-docker/
+  cleanup-lib.sh`) removes only dangling `org.skillc.image` images and stopped
+  `skillc.managed=true` containers created during its own run, by a pre-run
+  snapshot, never with `-f`. A label alone is not ownership, since campaign
+  images and containers carry the same labels. `build.release_build()` undoes
+  only what one build added, and replaces the closure live test's `docker image
+  rm -f <id>` teardown, which removed a co-tenant's identical build regardless
+  of tags. New real-Docker floor file `tests/test_real_docker_cleanup_live.py`
+  (floor 9 -> 10, runner population 14 -> 16 tests): a `build.py` image
+  survives the cleanup, and the runner's own dangling image is still removed.
 - **A baseline trial's skill-evidence is refused as a contaminated baseline**
   (#427, the records half of #424). A trial whose `subject.digest` is the
   baseline (sha256 of zero bytes) installs no skills. A `skill-evidence` entry

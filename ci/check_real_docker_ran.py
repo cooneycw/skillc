@@ -62,6 +62,7 @@ DECLARED_REAL_DOCKER_FILES: tuple[str, ...] = (
     "tests.test_profile_closure_preflight_live",
     "tests.test_cwd_confinement_live",
     "tests.test_install_nested_dirs_live",
+    "tests.test_real_docker_cleanup_live",
 )
 
 ERROR = "ERROR"
