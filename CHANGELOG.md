@@ -8,6 +8,18 @@ and version plan.
 
 ## [Unreleased]
 
+- **Bytecode caches are no longer captured** (#408). #400 ran witnessed gates
+  with `PYTHONDONTWRITEBYTECODE=1`, but a gate whose child runs as
+  `python -I` ignores every `PYTHON*` variable and still wrote
+  `__pycache__/*.pyc`, so the honest `incomplete.isolated-child-gate` rows of
+  the #375 campaign read stale (40/42). Capture now excludes a `.pyc` directly
+  under `__pycache__/`, recorded as an exclusion. CPython never imports such a
+  file without its source, so it is a build product. It is neither digested nor
+  delivered to grading, so a cache planted after a gate cannot move a freshness
+  digest or load in place of its source (PEP 552 unchecked-hash). A sourceless
+  `mod.pyc` beside the code is still captured. `tests/test_capture_bytecode_cache.py`
+  runs the real isolated-child-gate gate for both tasks: on the old code it
+  writes bytecode and moves the digest.
 - **#400's fix is tested against the real Level-3 gates** (#400 follow-up).
   `tests/test_agent_trial_gate_env.py` runs each task's real reference gate
   stages (lint, check, typecheck) under the env production hands the witness,
