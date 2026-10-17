@@ -8,6 +8,17 @@ and version plan.
 
 ## [Unreleased]
 
+- **The gate-witness tests' attempt limit is 60s, not 15s** (#437). Under
+  `make verify`'s parallel load, `run_case`'s 15s whole-attempt limit (and the
+  scripted actor's equal socket wait, #407) could expire before an honest
+  attempt's later gate calls were witnessed. That gave a false red on
+  `test_actual_gate_history_binds_each_call_to_its_own_snapshot[rerun]` in
+  #432's gate. Both now share `RUN_CASE_TIMEOUT = 60`. The tests assert
+  witness history binding, never timing. Red: with a gate call delayed 20s,
+  `[rerun]` fails on the old bound (the witness drain is refused, so no
+  witness is graded) and passes on the new one. #407's slow-second-call
+  `[stale]` reproduction still reads stale.
+
 - **A baseline trial's skill-evidence is refused as a contaminated baseline**
   (#427, the records half of #424). A trial whose `subject.digest` is the
   baseline (sha256 of zero bytes) installs no skills. A `skill-evidence` entry
