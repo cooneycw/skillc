@@ -569,6 +569,11 @@ _EXEC_TOKEN_PREFIX = "skillc-exec-"
 #: answer is "unknown" and the real result stands.
 _EXEC_EVENTS_MAX_BYTES = 1024 * 1024
 
+#: How much earlier than the controller's own window start `--since` reaches.
+#: The decision orders events by the DAEMON's clock only; controller time just
+#: chooses where to start reading, generously.
+_EXEC_EVENTS_SINCE_MARGIN_NS = 2_000_000_000
+
 #: Wall-clock nanoseconds for the event window, bound at import: the window is
 #: compared against the daemon's own `timeNano`, so it must stay real time even
 #: where a caller replaces this module's `time` for its own pacing.
@@ -1904,9 +1909,8 @@ class DockerBackend:
         THE CONSERVATIVE PROPERTY: a daemon whose events are dropped,
         reformatted, unreadable or oversized fails one of the proofs, and the
         real result stands. A mismatch with the real daemon can only FAIL to
-        reclassify, never misreclassify. #426 owes the real-daemon JSON;
-        until then the fake CLI's event shape is an assumption, held on the
-        safe side.
+        reclassify, never misreclassify. The event shape the fake CLI models
+        was measured on Docker 29.8.2 (#426).
 
         Whether the subject exits on its own or is killed for timeout/
         cancellation, this attempt's container is always stopped before
@@ -2066,39 +2070,46 @@ class DockerBackend:
            `_EXEC_EVENTS_MAX_BYTES` and the query deadline, and every exec
            event in it has a readable command;
         3. it holds THIS call's forwarding-probe exec event - its command is
-           the probe's exact command plus this call's own probe token -
-           at or after `window_start_ns`: the buffer reaches back to just
-           before our launch, in a format whose command field is readable;
-        4. it holds this container's `die` at or after that probe event: the
-           window runs through the stop;
-        5. no `exec_create`/`exec_start` since `window_start_ns` carries this
-           call's exec token.
+           the probe's exact command plus this call's own probe token, which
+           no other call can produce: the buffer reaches back to just before
+           our launch, in a format whose command field is readable;
+        4. it holds this container's `die` AFTER that probe event in the
+           daemon's own stream: the window runs through the stop;
+        5. no `exec_create`/`exec_start` anywhere in the answer carries this
+           call's exec token (it is unique to this call).
+
+        Ordering uses only the daemon's own `timeNano`; the controller's clock
+        only chooses where `docker events --since` starts reading, with
+        `_EXEC_EVENTS_SINCE_MARGIN_NS` to spare, so the rule holds even if the
+        controller and the daemon keep different clocks.
 
         Every input is the daemon's; none is the subject's output, files or
-        streams. Docker's event buffer drops its OLDEST entries first, so a
-        retained probe and a later retained `die` bracket a complete window.
-        A daemon whose events are dropped, reformatted or unreadable fails
-        2-4 and keeps the real result: a mismatch can only fail to
-        reclassify, never misreclassify (#426 owes the real-daemon JSON and
-        the buffer's ordering)."""
+        streams. Measured on Docker 29.8.2 (#426): a refused exec records no
+        event at all; the command lives only in `Action`, space-joined, with
+        the `$0` token verbatim; `timeNano` is the host clock. The daemon keeps
+        a GLOBAL 256-event ring that drops its OLDEST entries first, so on a
+        busy host the probe (older) is evicted before any later token event:
+        eviction fails proof 3 and keeps the real result. A daemon whose events
+        are dropped, reformatted or unreadable fails 2-4 the same way: a
+        mismatch can only fail to reclassify, never misreclassify."""
         reachable, absent, status = self._inspect(handle)
         if not reachable or absent or status not in ("exited", "dead"):
             return False
-        events = self._exec_events(handle, window_start_ns)
+        events = self._exec_events(handle, window_start_ns - _EXEC_EVENTS_SINCE_MARGIN_NS)
         if events is None:
             return False
         execs = [(ns, command) for ns, kind, command in events if kind in ("exec_create", "exec_start")]
         if any(command is None for _, command in execs):
             return False
         probe_command = f"{_FORWARDING_PROBE_COMMAND} {_FORWARDING_PROBE_TOKEN_PREFIX}{call_id}"
-        probe_ns = [ns for ns, command in execs if ns >= window_start_ns and command == probe_command]
+        probe_ns = [ns for ns, command in execs if command == probe_command]
         if not probe_ns:
             return False
         lower = min(probe_ns)
-        if not any(kind == "die" and ns >= lower for ns, kind, _ in events):
+        if not any(kind == "die" and ns > lower for ns, kind, _ in events):
             return False
         token = f"{_EXEC_TOKEN_PREFIX}{call_id}"
-        return not any(ns >= window_start_ns and command is not None and token in command for ns, command in execs)
+        return not any(command is not None and token in command for _, command in execs)
 
     def _exec_events(self, handle: _Handle, since_ns: int) -> list[tuple[int, str, str | None]] | None:
         """This container's daemon events since `since_ns` as

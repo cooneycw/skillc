@@ -2025,8 +2025,8 @@ def _probe(command: str | None) -> bool:
     return command is not None and command.startswith(d._FORWARDING_PROBE_COMMAND + " ")
 
 
-@pytest.mark.parametrize("fault", ["query-fails", "probe-missing", "probe-older-only", "probe-unparseable",
-                                   "die-missing", "paused", "another-calls-probe", "exec-unreadable"])
+@pytest.mark.parametrize("fault", ["query-fails", "probe-missing", "probe-unparseable", "die-missing",
+                                   "die-before-probe", "paused", "another-calls-probe", "exec-unreadable"])
 def test_a_refused_exec_without_complete_daemon_proof_keeps_the_real_result(
     base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch, fault: str,
 ) -> None:
@@ -2040,13 +2040,16 @@ def test_a_refused_exec_without_complete_daemon_proof_keeps_the_real_result(
     if fault == "query-fails":
         monkeypatch.setattr(d.DockerBackend, "_exec_events", lambda self, h, since: None)
     elif fault == "probe-missing":
+        # Buffer loss at the lower bound. #426: the real daemon keeps a GLOBAL
+        # 256-event ring that evicts oldest-first, so on a busy host the probe
+        # is what goes first - this case.
         _edit_events(monkeypatch, lambda ev, since: [e for e in ev if not _probe(e[2])])
-    elif fault == "probe-older-only":
-        # Buffer loss at the lower bound: this call's probe event survives only
-        # with a timestamp before the window, so the window is not covered.
+    elif fault == "die-before-probe":
+        # The only die precedes this call's probe in the daemon's stream: the
+        # window does not run through a stop after our launch.
         _edit_events(monkeypatch, lambda ev, since: [
-            *[(since - 10_000_000_000, k, c) for _, k, c in ev if _probe(c)],
-            *[e for e in ev if not _probe(e[2])]])
+            *[(min(ns for ns, _, c in ev if _probe(c)) - 1, k, c) for _, k, c in ev if k == "die"],
+            *[e for e in ev if e[1] != "die"]])
     elif fault == "probe-unparseable":
         _edit_events(monkeypatch, lambda ev, since: [(ns, k, None if _probe(c) else c) for ns, k, c in ev])
     elif fault == "die-missing":
@@ -2072,6 +2075,24 @@ def test_a_refused_exec_without_complete_daemon_proof_keeps_the_real_result(
         monkeypatch.setattr(d.DockerBackend, "_inspect", paused)
     result = backend.execute(handle, ["true"], Limits(timeout=5.0))
     assert result.reason == "exited" and result.exit_code not in (0, None)
+    backend.destroy(handle)
+
+
+@pytest.mark.parametrize("skew_ns", [-3_600_000_000_000, 3_600_000_000_000])
+@pytest.mark.parametrize("refused", [True, False])
+def test_the_decision_never_compares_the_daemons_clock_with_the_controllers(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch, skew_ns: int, refused: bool,
+) -> None:
+    """Approver condition: every daemon timestamp shifted an hour either way
+    (a daemon on another host) changes neither verdict - the refused exec is
+    still never-started, and a subject that ran and stopped its container
+    still keeps its result. Ordering is the daemon's own."""
+    backend, handle = _ready(base, docker_state, f"a-lc-0000000002{int(refused)}{int(skew_ns > 0)}")
+    _sentinel(docker_state, f".{'stop-before' if refused else 'stop-after'}-exec-{handle.name}")
+    _edit_events(monkeypatch, lambda ev, since: [(ns + skew_ns, k, c) for ns, k, c in ev])
+    argv = ["true"] if refused else ["sh", "-c", f"echo '{_DAEMON_WORDING}' >&2; exit 1"]
+    result = backend.execute(handle, argv, Limits(timeout=5.0))
+    assert result.reason == ("attempt-not-running" if refused else "exited")
     backend.destroy(handle)
 
 

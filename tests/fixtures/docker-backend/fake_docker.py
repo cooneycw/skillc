@@ -679,8 +679,11 @@ def cmd_exec(state_dir: Path, rest: list[str]) -> int:
         print(f"Error: Container {name} is not running", file=sys.stderr)
         return 1
     # #317: a real daemon records an exec only once it is created in a
-    # running container; the refusal above recorded nothing.
-    command = " ".join(rest[i + 1:])
+    # running container; the refusal above recorded nothing. Measured on
+    # Docker 29.8.2 (#426): the argv is space-joined, and an argless command
+    # keeps a trailing space (`exec_create: true `).
+    exec_argv = rest[i + 1:]
+    command = " ".join(exec_argv) + (" " if len(exec_argv) == 1 else "")
     _record_event(state_dir, name, f"exec_create: {command}")
     _record_event(state_dir, name, f"exec_start: {command}")
 
