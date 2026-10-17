@@ -574,8 +574,17 @@ def test_a_malformed_screen_is_refused(mutate: object, match: str) -> None:
 def test_a_screen_scores_selectivity_not_just_recall(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """variant-a selects only when asked (+1.00); variant-b selects everywhere
     (0.00, no better than published's 0.00). Red case: a recall-only score
-    would rank variant-b level with variant-a."""
-    declaration = us.parse_declaration(_screen_data())
+    would rank variant-b level with variant-a.
+
+    Two attempts per cell, not the production floor of three (#410): every
+    attempt runs the real install and grading path through the fake docker
+    CLI, about 2 s each, so 18 attempts measured 37 s quiet and passed the
+    120 s pytest-timeout under host load. Twelve keep every arm and case, and
+    2/2 still distinguishes a per-attempt count from "any attempt selected".
+    The floor itself stays pinned by the 3-30 refusal case above."""
+    monkeypatch.setattr(us, "MIN_ATTEMPTS", 2)
+    declaration = us.parse_declaration(_screen_data(attempts_per_arm=2))
+    assert all(c.attempts_per_arm == 2 for c in declaration.cases)
     treatments = {"published": _treatment(tmp_path, monkeypatch, "published", "Run quality checks"),
                   "variant-a": _treatment(tmp_path, monkeypatch, "variant-a", f"{NEW} (variant-a)"),
                   "variant-b": _treatment(tmp_path, monkeypatch, "variant-b", f"{NEW} (variant-b)")}
@@ -603,10 +612,10 @@ def test_a_screen_scores_selectivity_not_just_recall(tmp_path: Path, monkeypatch
     report = us.build_report(experiment, us.reconcile(experiment, outcomes), declaration)
     scores = report["scores"]
     assert report["primary_test"] is None and report["screen"] is True
-    assert scores["variant-a"] == {"select": "3/3", "abstain": "0/3", "score": 1.0}  # type: ignore[index]
-    assert scores["variant-b"] == {"select": "3/3", "abstain": "3/3", "score": 0.0}  # type: ignore[index]
-    assert scores["published"] == {"select": "0/3", "abstain": "0/3", "score": 0.0}  # type: ignore[index]
-    assert "score [variant-a] select=3/3 abstain=0/3 score=+1.00" in us.paste_back(report)
+    assert scores["variant-a"] == {"select": "2/2", "abstain": "0/2", "score": 1.0}  # type: ignore[index]
+    assert scores["variant-b"] == {"select": "2/2", "abstain": "2/2", "score": 0.0}  # type: ignore[index]
+    assert scores["published"] == {"select": "0/2", "abstain": "0/2", "score": 0.0}  # type: ignore[index]
+    assert "score [variant-a] select=2/2 abstain=0/2 score=+1.00" in us.paste_back(report)
 
 
 @pytest.mark.parametrize("value", [[], {}, None])
