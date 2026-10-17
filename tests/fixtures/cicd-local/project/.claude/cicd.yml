@@ -1,0 +1,23 @@
+# CPP's real .claude/cicd.yml schema at 86641e8 (lib/cicd/config.py HealthConfig),
+# not templates/cicd.yml.example's shape (claude-power-pack#1476).
+health:
+  endpoints:
+    - url: http://127.0.0.1:18080/health
+      name: calc service
+      expected_status: 200
+      expected_body: '"status": "ok"'
+      timeout: 5
+  smoke_tests:
+    - name: unit suite
+      command: PYTHONPATH=src python3 -m unittest discover -s tests -p "check_*.py"
+      expected_exit: 0
+    - name: service answers
+      command: curl -fsS http://127.0.0.1:18080/health
+      expected_output: '"ok"'
+  deploy_verification:
+    enabled: true
+    baseline_file: .claude/deploy-baseline.json
+
+# Provider pipelines are generated as text only; nothing here executes them.
+pipeline:
+  provider: both

@@ -1,0 +1,18 @@
+# templates/cicd.yml.example's health and smoke examples at claude-power-pack
+# 86641e8 (lines 55-72), uncommented, pointed at this fixture's service. This is
+# the shape a user following the template writes. lib/cicd/config.py ignores
+# both blocks (extra="ignore"), so this yields ZERO probes: claude-power-pack#1476.
+health:
+  url: http://127.0.0.1:18080/health
+  timeout: 30
+  expected_status: 200
+  expected_body: '"status": "ok"'
+  deploy_verification:
+    enabled: true
+    baseline_file: .claude/deploy-baseline.json
+
+smoke:
+  tests:
+    - name: "Service answers"
+      url: http://127.0.0.1:18080/health
+      expected_status: 200

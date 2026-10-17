@@ -122,14 +122,14 @@ but #315 and the real campaign remain pending.
    - **Record both outcomes on this issue**, generically (no addresses) -
      this is the committed evidence that the detector actually detects
      something, on this specific host, not only in the unit tests.
-8. **#183/#269/#332/#266/#343/#334/#338/#442 break-mode verification (R2):** `--break` takes
+8. **#183/#269/#332/#266/#343/#334/#338/#442/#280 break-mode verification (R2):** `--break` takes
    `none` or `<family>:<mode>`, resolved from a closed table in
    `break-lib.sh` - an unknown family or mode is refused with exit 2
    before any checkout or docker operation. The three bare `channel`
    spellings below (no `channel:` prefix) also still work, kept for
    compatibility with runs recorded before family prefixes existed (#315
    follow-up); a bare `witness`, `gateshim`, `coldinstall`, `trialimage`,
-   `closure`, `cwd` or `egress` mode has no such form and is refused.
+   `closure`, `cwd`, `egress` or `cicdprofile` mode has no such form and is refused.
    ```
    run-real-docker <reviewed-tested-sha> --break none                           # expect SUCCESS
    run-real-docker <reviewed-tested-sha> --break channel:omit-mount             # expect FAILURE
@@ -158,6 +158,11 @@ but #315 and the real campaign remain pending.
    run-real-docker <reviewed-tested-sha> --break egress:allow-all             # expect FAILURE
    run-real-docker <reviewed-tested-sha> --break egress:bridge-network        # expect FAILURE
    run-real-docker <reviewed-tested-sha> --break egress:dns-hosts             # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break cicdprofile:no-curl          # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break cicdprofile:old-curl         # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break cicdprofile:service-down     # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break cicdprofile:no-probes        # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break cicdprofile:broken-build     # expect FAILURE
    ```
 
    The `egress` controls (#442) run `tests/test_agent_egress_live.py` from
@@ -173,8 +178,19 @@ but #315 and the real campaign remain pending.
    (measured on this runner), so such a break could never break anything.
    Break-mode runs post only to `skillc/real-docker-control`
    (never the certifying `skillc/real-docker` context) and are labelled
-   EXPECTED-RED. Record all twenty-seven results on this issue (the
-   twenty-six break-mode commands above, plus the `none` run itself).
+   EXPECTED-RED. Record all thirty-two results on this issue (the
+   thirty-one break-mode commands above, plus the `none` run itself).
+
+   The `cicdprofile` controls (#280) run `tests/test_cicd_profile_live.py`
+   with one planted input each: curl removed (`no-curl`) or replaced by a
+   6.1.0 stub (`old-curl`) after runtime validation, so the in-container
+   preflight must refuse `tool-curl`; the loopback health service never
+   started (`service-down`), so the healthy-deploy property must fail; the
+   project's cicd.yml in `templates/cicd.yml.example`'s ignored shape
+   (`no-probes`, claude-power-pack#1476), so the configured-probes property
+   must fail; and a build recipe of `false` (`broken-build`), so the
+   build-artifact property must fail. Each is strict XFAIL on its own
+   property exception only.
 
    The `cwd` control (#338) runs the same swapped-cwd exec without
    `confine_root`. Its expected red is a strict XFAIL that is reached only
