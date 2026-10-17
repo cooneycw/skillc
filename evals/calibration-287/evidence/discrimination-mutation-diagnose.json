@@ -1,0 +1,456 @@
+{
+ "evidence_schema": 2,
+ "purpose": "skillc#287 pilot discrimination declaration, mutation.diagnose_evidence for gate-stops-early's degraded arm (cpp-codex-flow-check-86641e8, flow-check skill, reference.md).",
+ "removed_text": "A\n  `skipped gates:` name is a SKIP row and a `zero coverage:` or no-tests name is\n  a WARN row - never a PASS.",
+ "mutated_digest": "sha256:edb26e56feac59ec548bc44afbbfeec54d970e95110c4506fa4be0cd9e8436ea",
+ "measured_degraded_reference_digest": "sha256:edb26e56feac59ec548bc44afbbfeec54d970e95110c4506fa4be0cd9e8436ea",
+ "mutated_digest_matches": true,
+ "closure_file_count": 97,
+ "closure_source": "evals/subjects/cpp-codex-flow-check-86641e8/evidence/inventory.json",
+ "diagnose": {
+  "intact": {
+   "diagnostic_schema": 1,
+   "profile": "cpp-codex-flow-check",
+   "revision": "86641e817711d8a7746270745a5dfa7cacf04b0c",
+   "selection": [
+    "flow-check"
+   ],
+   "structural": [],
+   "complete": true,
+   "skills": {
+    "flow-check": {
+     "status": "intact",
+     "problems": []
+    }
+   },
+   "problems": [],
+   "problem_count": 0
+  },
+  "degraded": {
+   "diagnostic_schema": 1,
+   "profile": "cpp-codex-flow-check",
+   "revision": "snapshot:sha256:1fdd84e4b937f055ceb49e5991e2b19acf45fa1030336b106ac3d0ef8e1d369b",
+   "selection": [
+    "flow-check"
+   ],
+   "structural": [],
+   "complete": true,
+   "skills": {
+    "flow-check": {
+     "status": "intact",
+     "problems": []
+    }
+   },
+   "problems": [],
+   "problem_count": 0
+  },
+  "both_complete_with_zero_problems": true,
+  "conclusion": "Both reports must show 0 problems and complete=true. Removing one prose sentence never breaks a declared reference, so a clean diagnose is necessary but cannot by itself show whether the removed instruction still appears elsewhere: the occurrence scan answers that."
+ },
+ "occurrence_scan": {
+  "phrases": [
+   "never a PASS",
+   "skipped gates",
+   "SKIP row"
+  ],
+  "coverage_errors": {
+   "intact": [],
+   "degraded": []
+  },
+  "positive_control_held": true,
+  "full_copies_of_removed_sentence": {
+   "intact": [
+    "codex/skills/flow-check/reference.md"
+   ],
+   "degraded": []
+  },
+  "intact_hit_count": 25,
+  "intact_hits": [
+   {
+    "file": "codex/skills/flow-check/lib/cicd/runner.py",
+    "line": 428,
+    "phrase": "skipped gates",
+    "text": "# reads this to report `warn` and NAME the skipped gates rather than flatten",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "codex/skills/flow-check/lib/cicd/steps.py",
+    "line": 923,
+    "phrase": "skipped gates",
+    "text": "# the #628 false green, so the runner names skipped gates and",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "codex/skills/flow-check/lib/cicd/steps.py",
+    "line": 1693,
+    "phrase": "skipped gates",
+    "text": "steps, and its skip is reported by #628's `warn (skipped gates: ...)` with",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "codex/skills/flow-check/reference.md",
+    "line": 72,
+    "phrase": "skipped gates",
+    "text": "`skipped gates:` name is a SKIP row and a `zero coverage:` or no-tests name is",
+    "agent_facing": true,
+    "classification": "removed sentence itself"
+   },
+   {
+    "file": "codex/skills/flow-check/reference.md",
+    "line": 72,
+    "phrase": "SKIP row",
+    "text": "`skipped gates:` name is a SKIP row and a `zero coverage:` or no-tests name is",
+    "agent_facing": true,
+    "classification": "removed sentence itself"
+   },
+   {
+    "file": "codex/skills/flow-check/reference.md",
+    "line": 73,
+    "phrase": "never a PASS",
+    "text": "a WARN row - never a PASS.",
+    "agent_facing": true,
+    "classification": "removed sentence itself"
+   },
+   {
+    "file": "codex/skills/flow-check/reference.md",
+    "line": 78,
+    "phrase": "never a PASS",
+    "text": "never a PASS, and never left out of the table. Its detail is the entry's",
+    "agent_facing": true,
+    "classification": "agent-facing, reviewed as a different instruction"
+   },
+   {
+    "file": "codex/skills/flow-check/reference.md",
+    "line": 85,
+    "phrase": "SKIP row",
+    "text": "SKIP rows.",
+    "agent_facing": true,
+    "classification": "agent-facing, reviewed as a different instruction"
+   },
+   {
+    "file": "codex/skills/flow-check/scripts/flow-finish-gate.sh",
+    "line": 75,
+    "phrase": "skipped gates",
+    "text": "#           SKIPPED (issue #628 - `warn (skipped gates: ...)`),",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "codex/skills/flow-check/scripts/flow-finish-gate.sh",
+    "line": 705,
+    "phrase": "skipped gates",
+    "text": "# NAME the skipped gates rather than flatten the run to a bare `ok` - the",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "codex/skills/flow-check/scripts/flow-finish-gate.sh",
+    "line": 977,
+    "phrase": "skipped gates",
+    "text": "# failing step or skipped gates are more serious, but must not erase a flake",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "codex/skills/flow-check/scripts/flow-finish-gate.sh",
+    "line": 1048,
+    "phrase": "skipped gates",
+    "text": "# `warn (skipped gates: X)` means \"could not run, and here is why\" - a",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "codex/skills/flow-check/scripts/flow-finish-gate.sh",
+    "line": 1117,
+    "phrase": "skipped gates",
+    "text": "verdict \"warn (skipped gates: $SKIPPED_GATES)\"",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "codex/skills/flow-check/scripts/flow-finish-gate.sh",
+    "line": 1207,
+    "phrase": "skipped gates",
+    "text": "# NEITHER is reported as `warn` with the skipped gates named - never a bare `ok`.",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "codex/skills/flow-check/scripts/flow-finish-gate.sh",
+    "line": 1552,
+    "phrase": "skipped gates",
+    "text": "verdict \"warn (skipped gates: $SKIPPED_GATES)\"",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "scripts/flow-finish-gate.sh",
+    "line": 75,
+    "phrase": "skipped gates",
+    "text": "#           SKIPPED (issue #628 - `warn (skipped gates: ...)`),",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "scripts/flow-finish-gate.sh",
+    "line": 705,
+    "phrase": "skipped gates",
+    "text": "# NAME the skipped gates rather than flatten the run to a bare `ok` - the",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "scripts/flow-finish-gate.sh",
+    "line": 977,
+    "phrase": "skipped gates",
+    "text": "# failing step or skipped gates are more serious, but must not erase a flake",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "scripts/flow-finish-gate.sh",
+    "line": 1048,
+    "phrase": "skipped gates",
+    "text": "# `warn (skipped gates: X)` means \"could not run, and here is why\" - a",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "scripts/flow-finish-gate.sh",
+    "line": 1117,
+    "phrase": "skipped gates",
+    "text": "verdict \"warn (skipped gates: $SKIPPED_GATES)\"",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "scripts/flow-finish-gate.sh",
+    "line": 1207,
+    "phrase": "skipped gates",
+    "text": "# NEITHER is reported as `warn` with the skipped gates named - never a bare `ok`.",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "scripts/flow-finish-gate.sh",
+    "line": 1552,
+    "phrase": "skipped gates",
+    "text": "verdict \"warn (skipped gates: $SKIPPED_GATES)\"",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "lib/cicd/runner.py",
+    "line": 428,
+    "phrase": "skipped gates",
+    "text": "# reads this to report `warn` and NAME the skipped gates rather than flatten",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "lib/cicd/steps.py",
+    "line": 923,
+    "phrase": "skipped gates",
+    "text": "# the #628 false green, so the runner names skipped gates and",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "lib/cicd/steps.py",
+    "line": 1693,
+    "phrase": "skipped gates",
+    "text": "steps, and its skip is reported by #628's `warn (skipped gates: ...)` with",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   }
+  ],
+  "degraded_hit_count": 22,
+  "degraded_hits": [
+   {
+    "file": "codex/skills/flow-check/lib/cicd/runner.py",
+    "line": 428,
+    "phrase": "skipped gates",
+    "text": "# reads this to report `warn` and NAME the skipped gates rather than flatten",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "codex/skills/flow-check/lib/cicd/steps.py",
+    "line": 923,
+    "phrase": "skipped gates",
+    "text": "# the #628 false green, so the runner names skipped gates and",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "codex/skills/flow-check/lib/cicd/steps.py",
+    "line": 1693,
+    "phrase": "skipped gates",
+    "text": "steps, and its skip is reported by #628's `warn (skipped gates: ...)` with",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "codex/skills/flow-check/reference.md",
+    "line": 76,
+    "phrase": "never a PASS",
+    "text": "never a PASS, and never left out of the table. Its detail is the entry's",
+    "agent_facing": true,
+    "classification": "agent-facing, reviewed as a different instruction"
+   },
+   {
+    "file": "codex/skills/flow-check/reference.md",
+    "line": 83,
+    "phrase": "SKIP row",
+    "text": "SKIP rows.",
+    "agent_facing": true,
+    "classification": "agent-facing, reviewed as a different instruction"
+   },
+   {
+    "file": "codex/skills/flow-check/scripts/flow-finish-gate.sh",
+    "line": 75,
+    "phrase": "skipped gates",
+    "text": "#           SKIPPED (issue #628 - `warn (skipped gates: ...)`),",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "codex/skills/flow-check/scripts/flow-finish-gate.sh",
+    "line": 705,
+    "phrase": "skipped gates",
+    "text": "# NAME the skipped gates rather than flatten the run to a bare `ok` - the",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "codex/skills/flow-check/scripts/flow-finish-gate.sh",
+    "line": 977,
+    "phrase": "skipped gates",
+    "text": "# failing step or skipped gates are more serious, but must not erase a flake",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "codex/skills/flow-check/scripts/flow-finish-gate.sh",
+    "line": 1048,
+    "phrase": "skipped gates",
+    "text": "# `warn (skipped gates: X)` means \"could not run, and here is why\" - a",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "codex/skills/flow-check/scripts/flow-finish-gate.sh",
+    "line": 1117,
+    "phrase": "skipped gates",
+    "text": "verdict \"warn (skipped gates: $SKIPPED_GATES)\"",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "codex/skills/flow-check/scripts/flow-finish-gate.sh",
+    "line": 1207,
+    "phrase": "skipped gates",
+    "text": "# NEITHER is reported as `warn` with the skipped gates named - never a bare `ok`.",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "codex/skills/flow-check/scripts/flow-finish-gate.sh",
+    "line": 1552,
+    "phrase": "skipped gates",
+    "text": "verdict \"warn (skipped gates: $SKIPPED_GATES)\"",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "scripts/flow-finish-gate.sh",
+    "line": 75,
+    "phrase": "skipped gates",
+    "text": "#           SKIPPED (issue #628 - `warn (skipped gates: ...)`),",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "scripts/flow-finish-gate.sh",
+    "line": 705,
+    "phrase": "skipped gates",
+    "text": "# NAME the skipped gates rather than flatten the run to a bare `ok` - the",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "scripts/flow-finish-gate.sh",
+    "line": 977,
+    "phrase": "skipped gates",
+    "text": "# failing step or skipped gates are more serious, but must not erase a flake",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "scripts/flow-finish-gate.sh",
+    "line": 1048,
+    "phrase": "skipped gates",
+    "text": "# `warn (skipped gates: X)` means \"could not run, and here is why\" - a",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "scripts/flow-finish-gate.sh",
+    "line": 1117,
+    "phrase": "skipped gates",
+    "text": "verdict \"warn (skipped gates: $SKIPPED_GATES)\"",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "scripts/flow-finish-gate.sh",
+    "line": 1207,
+    "phrase": "skipped gates",
+    "text": "# NEITHER is reported as `warn` with the skipped gates named - never a bare `ok`.",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "scripts/flow-finish-gate.sh",
+    "line": 1552,
+    "phrase": "skipped gates",
+    "text": "verdict \"warn (skipped gates: $SKIPPED_GATES)\"",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "lib/cicd/runner.py",
+    "line": 428,
+    "phrase": "skipped gates",
+    "text": "# reads this to report `warn` and NAME the skipped gates rather than flatten",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "lib/cicd/steps.py",
+    "line": 923,
+    "phrase": "skipped gates",
+    "text": "# the #628 false green, so the runner names skipped gates and",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   },
+   {
+    "file": "lib/cicd/steps.py",
+    "line": 1693,
+    "phrase": "skipped gates",
+    "text": "steps, and its skip is reported by #628's `warn (skipped gates: ...)` with",
+    "agent_facing": false,
+    "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
+   }
+  ],
+  "removed_clauses_in_degraded": [],
+  "removed_sentence_fragments_in_degraded": [],
+  "unreviewed_agent_facing_in_degraded": [],
+  "verdict": "NO_TEXTUAL_SURVIVOR",
+  "verdict_meaning": "NO_TEXTUAL_SURVIVOR means only: at the verified mutated_digest, no full copy, no removed clause and no 3+-word fragment of the removed sentence was found in any installed non-exempt file, under these matching rules. It is a NECESSARY but NOT SUFFICIENT textual check, NOT evidence that the obligation is absent: a text scan cannot rule out a paraphrase or another surface form. The evidence that the degraded arm is degraded is the pre-registered discrimination pilot (P1-P6: no main study if no difference is detectable), per #287 comment 6034325559's risk note.",
+  "textual_check_passed": true
+ }
+}
