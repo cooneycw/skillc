@@ -1,0 +1,27 @@
+{
+  "branch": "issue-367-failed-channel-finalization-can-later-return-a-sti",
+  "counts": {
+    "accepted": 0,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "78fe595b5749470100308ee104b668957c167b7c",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "367",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 1,
+  "recorded_at": "2026-10-17T13:17:26Z",
+  "red_cases": {
+    "already_covered": 4,
+    "proposed": 5
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/17/rollout-2026-10-17T09-16-18-01a14a01-8f8f-7672-b215-5ab137fe0e7b.jsonl",
+    "thread_id": "01a14a01-8f8f-7672-b215-5ab137fe0e7b"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
