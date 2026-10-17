@@ -1,0 +1,27 @@
+{
+  "branch": "issue-416-prepare-a-timed-out-cleanup-docker-rm-f-escapes-as",
+  "counts": {
+    "accepted": 1,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "371d19cff8848e32cb8df0139f71612ae36a4732",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "416",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 2,
+  "recorded_at": "2026-10-17T14:11:36Z",
+  "red_cases": {
+    "already_covered": 4,
+    "proposed": 4
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/17/rollout-2026-10-17T10-09-50-01a14a32-90c3-7aa0-b5ce-c996fe85ff14.jsonl",
+    "thread_id": "01a14a32-90c3-7aa0-b5ce-c996fe85ff14"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

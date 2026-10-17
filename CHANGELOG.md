@@ -8,6 +8,18 @@ and version plan.
 
 ## [Unreleased]
 
+- **A failed `prepare()` always raises `BackendUnavailable`** (#416). When
+  `docker run -d` timed out or exited nonzero, `DockerBackend.prepare()` ran a
+  bounded best-effort `docker rm -f` before raising. That cleanup was unguarded,
+  so a cleanup that also hit its bound raised `subprocess.TimeoutExpired` out of
+  `prepare()` in place of the promised `BackendUnavailable`. A daemon slow enough
+  to time out `run` is the likeliest to be slow on `rm`, and this was the real
+  cause of a `test_live_docker_budget` red that was being read as a timing flake.
+  The cleanup now goes through `_best_effort_rm()`, which reports its failure as
+  a clause in the `BackendUnavailable` message. Three fake-CLI tests in
+  `tests/test_docker_backend.py`: `.delay-run`+`.delay-rm` and `.refuse-run`+
+  `.delay-rm` both escaped `TimeoutExpired` on the old code; a `.delay-run`-only
+  control shows a successful cleanup adds no clause.
 - **A failed channel drain stays failed on every later read** (#367).
   `DecideReplyChannel.stop_and_finalize()` set its finalized flag before
   waiting for in-flight handlers. So after a drain timeout, a later
