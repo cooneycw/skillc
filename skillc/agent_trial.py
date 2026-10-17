@@ -406,8 +406,9 @@ class _WitnessSession:
                      if e.get("event") in ("stop-confirmed", "stop-unconfirmed")]
             if stops[-1:] != ["stop-confirmed"] or not self.ready or self.witness is None:
                 raise HomeFileVerificationRefused("witness finalization requires confirmed stop and readiness")
-            # #367: first result is authoritative; NEVER retry a failed drain
-            # through log_or_finalize's prematurely set finalized flag.
+            # #367: first result is authoritative. The channel now enforces
+            # it too: after a failed drain, trigger_log() re-raises that
+            # failure on every read, caught below as a refusal.
             if backend.trigger_log(handle) is None:
                 raise HomeFileVerificationRefused("witness channel was unavailable at finalization")
             record = self.witness.finalize(self.attempt_id)

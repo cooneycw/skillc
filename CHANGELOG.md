@@ -8,6 +8,18 @@ and version plan.
 
 ## [Unreleased]
 
+- **A failed channel drain stays failed on every later read** (#367).
+  `DecideReplyChannel.stop_and_finalize()` set its finalized flag before
+  waiting for in-flight handlers. So after a drain timeout, a later
+  `log_or_finalize()` returned the log anyway: `[]` while the handler was
+  wedged (`trusted_log()` read `no-controller-witness`), then one entry once it
+  finished. A "finalized" log that grew. The channel now records shutdown
+  attempted separately from a successful finalize. A drain failure re-raises as
+  a `RuntimeError` from `stop_and_finalize()`, `log_or_finalize()` and
+  `trusted_log()` on every call, permanently. A successful finalize returns a
+  copy of one frozen snapshot each time. `close()` after a failure releases the
+  socket without raising. The Event-synchronised negative control fails on the
+  pre-fix code at the first post-failure `log_or_finalize()` (`DID NOT RAISE`).
 - **Bytecode caches are no longer captured** (#408). #400 ran witnessed gates
   with `PYTHONDONTWRITEBYTECODE=1`, but a gate whose child runs as
   `python -I` ignores every `PYTHON*` variable and still wrote

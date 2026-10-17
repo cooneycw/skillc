@@ -251,7 +251,15 @@ class DecideReplyChannel:
         self._server: _Server | None = None
         self._thread: threading.Thread | None = None
         self._started = False
-        self._finalized = False
+        #: #367: ATTEMPTING shutdown and FINALIZING the log are different
+        #: facts. `_shutdown_attempted` is set before the drain (a second
+        #: shutdown must never run); `_finalized_log` only once the drain
+        #: succeeded; `_finalize_failure` keeps a failed drain's error so
+        #: every later read re-raises it rather than returning a log a
+        #: still-running handler may yet append to.
+        self._shutdown_attempted = False
+        self._finalized_log: list[LoggedDecision] | None = None
+        self._finalize_failure: RuntimeError | None = None
         #: Counts handler threads currently inside `_Handler.handle()` -
         #: `stop_and_finalize()` drains this to zero (bounded by
         #: `handler_drain_timeout`) before snapshotting the log, because
@@ -436,12 +444,18 @@ class DecideReplyChannel:
         = True` means `server_close()` will not wait for them either (see
         `_active_handlers`'s own comment). Raises `RuntimeError` rather than
         returning a log that might still grow if the drain times out - a
-        silently short snapshot would read as complete when it is not."""
+        silently short snapshot would read as complete when it is not. That
+        failure is permanent (#367): every later read re-raises it, even
+        after the stuck handler eventually finishes."""
         if not self._started:
             raise RuntimeError("stop_and_finalize() called before start()")
-        if self._finalized:
+        if self._finalize_failure is not None:
+            raise RuntimeError(
+                f"this channel's finalization already failed: {self._finalize_failure}"
+            ) from self._finalize_failure
+        if self._shutdown_attempted:
             raise RuntimeError("this channel has already been finalized")
-        self._finalized = True
+        self._shutdown_attempted = True
         assert self._server is not None
         self._server.shutdown()
         self._server.server_close()
@@ -452,15 +466,17 @@ class DecideReplyChannel:
                 lambda: self._active_handlers == 0, timeout=self._handler_drain_timeout,
             )
         if not drained:
-            raise RuntimeError(
+            self._finalize_failure = RuntimeError(
                 f"stop_and_finalize(): {self._active_handlers} handler(s) still running past "
                 f"handler_drain_timeout={self._handler_drain_timeout}s - the log cannot be "
                 f"trusted as finalized while a decision may still be appended to it"
             )
+            raise self._finalize_failure
         if not self._retain_socket_path:
             self.release_socket_path()
         with self._lock:
-            return list(self._log)
+            self._finalized_log = list(self._log)
+        return list(self._finalized_log)
 
     def release_socket_path(self) -> None:
         """Removes the socket file this channel bound - and only that file.
@@ -511,12 +527,22 @@ class DecideReplyChannel:
         may need the log from more than one path - the documented
         confirm-then-finalize call, and a defensive teardown (e.g.
         `DockerBackend.destroy()`) that must not crash if the first already
-        ran. Returns the same finalized log on every call after the first,
-        rather than raising. Still raises if called before `start()` - that
-        remains a real misuse, not a case this method papers over."""
-        if self._finalized:
-            with self._lock:
-                return list(self._log)
+        ran. Returns the same finalized log on every call after the first
+        (a fresh copy of one frozen snapshot each time), rather than
+        raising. Still raises if called before `start()` - that remains a
+        real misuse, not a case this method papers over.
+
+        A FAILED finalization is not a finalized log (#367): after a drain
+        timeout this re-raises that `RuntimeError` on every call, however
+        long afterwards, so no reader can mistake a refused log for absence
+        or a partial one for complete. It stays a `RuntimeError` so a
+        best-effort caller (`DockerBackend.destroy()`) still catches it."""
+        if self._finalize_failure is not None:
+            raise RuntimeError(
+                f"this channel's finalization failed: {self._finalize_failure}"
+            ) from self._finalize_failure
+        if self._finalized_log is not None:
+            return list(self._finalized_log)
         return self.stop_and_finalize()
 
     def trusted_log(self) -> TrustedLog:
@@ -540,10 +566,13 @@ class DecideReplyChannel:
         about the log itself (`DockerBackend.prepare()`'s own failure
         path, `destroy()`'s best-effort contract). Also releases a socket
         file `retain_socket_path=True` kept past finalization (#394), so
-        it is the one teardown call such a caller needs."""
+        it is the one teardown call such a caller needs. After a FAILED
+        finalization (#367) it only releases the socket - it never waits on
+        the stuck handler again and never raises; the log reads keep
+        reporting that failure."""
         if not self._started:
             return
-        if not self._finalized:
+        if not self._shutdown_attempted:
             self.stop_and_finalize()
         self.release_socket_path()
 
