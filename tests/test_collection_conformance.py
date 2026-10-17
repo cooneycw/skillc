@@ -30,6 +30,7 @@ from conftest import FAKE_DOCKER_DAEMON_TIMEOUT
 from skillc import agent_trial, demo, materialize, reap, trial
 from skillc import collection_conformance as cc
 from skillc import docker_backend as d
+from skillc import egress as eg
 
 FAKE_DOCKER = Path(__file__).resolve().parent / "fixtures" / "docker-backend" / "fake_docker.py"
 FAKE_CLIENT = Path(__file__).resolve().parent / "fixtures" / "agent-trial" / "fake_agent_client.py"
@@ -102,6 +103,24 @@ def _no_network_subject(monkeypatch: pytest.MonkeyPatch) -> None:
     supplies its own subject via `monkeypatch.setattr(demo, "load_demo_subject", ...)`
     and a local `checkout=`, mirroring `tests/test_demo.py`'s own fixture."""
     monkeypatch.setattr(demo, "DEFAULT_SUBJECT", "unused-in-tests")
+
+
+def _server_side_shim(tmp_path: Path) -> list[str]:
+    """#442: a live codex attempt is refused unless its argv pins every
+    server-side channel off, and the fake client does not take those flags
+    (its bytes are frozen into the Level-3 campaign manifests). This shim
+    accepts them, drops exactly them, and runs the fake client on the rest."""
+    shim = tmp_path / "server_side_shim.py"
+    shim.write_text(
+        "import runpy, sys\n"
+        f"pinned = {list(eg.CODEX_SERVER_SIDE_OFF)!r}\n"
+        "args = sys.argv[1:]\n"
+        "assert args[:len(pinned)] == pinned, args\n"
+        "sys.argv = [args[len(pinned)], *args[len(pinned) + 1:]]\n"
+        "runpy.run_path(sys.argv[0], run_name='__main__')\n",
+        encoding="utf-8",
+    )
+    return [sys.executable, str(shim), *eg.CODEX_SERVER_SIDE_OFF]
 
 
 def _codex_argv(
@@ -1005,8 +1024,9 @@ def test_agent_backend_has_egress_and_the_grading_backend_does_not(base: Path, d
     agent, grading = cc.agent_backends(
         image="fake-image:1", base=base, docker_bin=_docker_bin(docker_state), daemon_timeout=5,
     )
-    assert agent.network == cc.AGENT_NETWORK != "none"
-    assert grading.network == "none"
+    # #442: the agent's egress is the provider-only policy, never an open network.
+    assert agent.egress is True and agent.network == "none"
+    assert grading.egress is False and grading.network == "none"
 
 
 def _describe_text(backend: d.DockerBackend) -> tuple[str, str]:
@@ -1018,7 +1038,14 @@ def test_describe_never_claims_blocked_egress_on_an_open_network(base: Path, doc
     agent, grading = cc.agent_backends(
         image="fake-image:1", base=base, docker_bin=_docker_bin(docker_state), daemon_timeout=5,
     )
-    open_isolation, open_unobserved = _describe_text(agent)
+    # #442: the live agent states its provider-only policy and what it does
+    # NOT cover, never "blocked" and never "open".
+    egress_isolation, egress_unobserved = _describe_text(agent)
+    assert "client-side fetches only" in egress_isolation and "egress OPEN" not in egress_isolation
+    assert "egress actually blocked" not in egress_unobserved
+    # An open network with no policy still says so plainly.
+    opened = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), network="bridge")
+    open_isolation, open_unobserved = _describe_text(opened)
     assert "egress OPEN" in open_isolation
     assert "egress actually blocked" not in open_unobserved
     # The control: the contained backend still states its unverified claim.
@@ -1070,7 +1097,8 @@ def test_cli_wires_the_agent_timeout_backends_and_run_root(
         backend = kwargs["backend"]
         assert isinstance(backend, d.DockerBackend)
         return cc.CollectionAgentResult(
-            str(kwargs["subject_name"]), "v1", "codex", {"disposition": "unavailable"}, agent_network=backend.network,
+            str(kwargs["subject_name"]), "v1", "codex", {"disposition": "unavailable"},
+            agent_network=cc.agent_network_label(backend),
         )
 
     monkeypatch.setattr(cc, "acquire_collection", fake_acquire)
@@ -1090,13 +1118,13 @@ def test_cli_wires_the_agent_timeout_backends_and_run_root(
     assert list(first["base_argv"]) == list(cc.DEFAULT_CLIENT_ARGV)  # type: ignore[call-overload]
     agent, grading = first["backend"], first["grading_backend"]
     assert isinstance(agent, d.DockerBackend) and isinstance(grading, d.DockerBackend)
-    assert agent.network == cc.AGENT_NETWORK and grading.network == "none"
+    assert agent.egress is True and agent.network == "none" and grading.network == "none"
     assert first["base"] != second["base"]
     for run in (first, second):
         run_root = run["base"]
         assert isinstance(run_root, Path) and run_root.parent == base
         assert not (run_root / "subject-a-checkout").exists()
-    assert "agent_network=bridge" in capsys.readouterr().out
+    assert f"agent_network={cc.AGENT_NETWORK_POLICY}" in capsys.readouterr().out
 
     seen.clear()
     assert cli.main([*argv, "--agent-timeout", "42"]) == 1
@@ -1780,7 +1808,7 @@ def test_cli_collection_run_resolves_its_own_image_digest_and_reaches_pass(
         "--base", str(base),
         "--image", _BACKEND_IMAGE,
         "--docker-bin", " ".join(_docker_bin(docker_state)),
-        "--client-argv", " ".join(client_argv),
+        "--client-argv", " ".join([*_server_side_shim(tmp_path), *client_argv[1:]]),
         "--credential", str(_fresh_codex_credential(tmp_path)),
         "--timeout", "5",
     ]

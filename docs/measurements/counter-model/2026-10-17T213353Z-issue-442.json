@@ -1,0 +1,27 @@
+{
+  "branch": "issue-442-live-agent-containers-provider-only-network-egress",
+  "counts": {
+    "accepted": 13,
+    "deferred": 1,
+    "rejected": 0
+  },
+  "head": "78b7d5e88c7f5e6e65cb91d778e114ed54e5d2e3",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "442",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 2,
+  "recorded_at": "2026-10-17T21:33:53Z",
+  "red_cases": {
+    "already_covered": 20,
+    "proposed": 25
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/17/rollout-2026-10-17T17-25-47-01a14bc1-b051-7b80-9a09-5618c618d40d.jsonl",
+    "thread_id": "01a14bc1-b051-7b80-9a09-5618c618d40d"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
