@@ -497,9 +497,16 @@ def put_object(experiment: Experiment, data: bytes) -> str:
     return _put_object(experiment.root, data)
 
 
+_OBJECT_DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+
+
 def read_object(experiment: Experiment, digest: str) -> bytes:
     """The stored bytes named `digest`, refused when absent, a symlink, or no
-    longer hashing to that name (#418) - never a silent miss."""
+    longer hashing to that name (#418) - never a silent miss. `digest` must be
+    exactly `sha256:` and 64 lowercase hex digits, checked before any path is
+    built, so a recorded value can never name a file outside `objects/`."""
+    if not isinstance(digest, str) or not _OBJECT_DIGEST.fullmatch(digest):
+        raise Refused(f"not an object digest: {digest!r}")
     return _read_object(experiment.root, digest)
 
 

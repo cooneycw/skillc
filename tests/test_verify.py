@@ -1280,8 +1280,9 @@ def test_a_damaged_or_missing_envelope_is_refused_on_read(
         verify.read_trusted_observation(experiment, result)
 
 
-@pytest.mark.parametrize("raw", [b'{"runtime_service": "controller-owned"}', b"controller stopped\n", b"[1, 2]"],
-                         ids=["json-object", "plain-text", "json-array"])
+@pytest.mark.parametrize("raw", [b'{"runtime_service": "controller-owned"}', b"controller stopped\n", b"[1, 2]",
+                                 b'{"witness": null, "graded_tree_digest": 17}'],
+                         ids=["json-object", "plain-text", "json-array", "envelope-shaped-but-empty"])
 def test_raw_trusted_service_bytes_are_retained_too(store: Path, base: Path, grading: Path, raw: bytes) -> None:
     """Every recorded trusted-observation digest resolves, not only a gate
     witness's, and a service log comes back as its exact bytes, JSON or not
@@ -1293,6 +1294,26 @@ def test_raw_trusted_service_bytes_are_retained_too(store: Path, base: Path, gra
     assert verify.read_trusted_observation(experiment, result) == raw
     with pytest.raises(verify.Refused, match="witness envelope"):
         verify.read_witness_envelope(experiment, result)
+
+
+@pytest.mark.parametrize("digest", ["/etc/hostname", "sha256:../../ledger.json", "sha256:" + "A" * 64,
+                                    "sha256:" + "0" * 63])
+def test_a_digest_that_is_not_an_object_name_is_refused_before_any_read(
+    store: Path, base: Path, grading: Path, monkeypatch: pytest.MonkeyPatch, digest: str,
+) -> None:
+    """Counter-model finding: a recorded digest becomes a path, so its format
+    is checked first - an absolute path or a traversal never reaches the
+    filesystem, and both recorded copies agreeing does not make it valid."""
+    experiment, attempt_id = _captured(store, base, REFERENCE)
+    result, _ = verify._grade_and_store(experiment, attempt_id, GRADER, grading,
+                                        gate_witness=_witness_record(attempt_id))
+    verification = result["verification"]
+    assert isinstance(verification, dict)
+    verification["containment"]["trusted_observation_digest"] = digest
+    verification["verdicts"]["deterministic"]["trusted_observation_digest"] = digest
+    monkeypatch.setattr(t, "_read_object", lambda *a, **k: pytest.fail("a malformed digest reached the store"))
+    with pytest.raises(verify.Refused, match="not an object digest"):
+        verify.read_trusted_observation(experiment, result)
 
 
 def test_a_store_write_that_disagrees_with_the_graded_digest_writes_no_result(

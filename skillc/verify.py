@@ -70,6 +70,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import secrets
 import signal
 import stat
@@ -1427,7 +1428,12 @@ def read_witness_envelope(experiment: trial.Experiment,
         envelope = json.loads(raw)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise Refused(f"trusted observation is not a JSON witness envelope: {exc}") from exc
-    if not isinstance(envelope, dict) or set(envelope) != {"witness", "graded_tree_digest"}:
+    witness = envelope.get("witness") if isinstance(envelope, dict) else None
+    if (not isinstance(envelope, dict) or set(envelope) != {"witness", "graded_tree_digest"}
+            or not isinstance(witness, dict) or witness.get("kind") != "gate-witness"
+            or not isinstance(witness.get("attempt_id"), str) or not isinstance(witness.get("gates"), dict)
+            or not isinstance(envelope["graded_tree_digest"], str)
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", envelope["graded_tree_digest"])):
         raise Refused("trusted observation is not a gate witness envelope")
     return envelope
 
