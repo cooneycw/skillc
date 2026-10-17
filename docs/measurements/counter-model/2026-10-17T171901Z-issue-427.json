@@ -1,0 +1,27 @@
+{
+  "branch": "issue-427-ledger-binding-a-baseline-trial-subject-baseline-s",
+  "counts": {
+    "accepted": 0,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "6851a9d4acbfc373c16cf7e25f22ba740745dcdf",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "427",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 1,
+  "recorded_at": "2026-10-17T17:19:01Z",
+  "red_cases": {
+    "already_covered": 3,
+    "proposed": 3
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/17/rollout-2026-10-17T13-17-51-01a14ade-b244-7bb2-b25a-f12d670f57d5.jsonl",
+    "thread_id": "01a14ade-b244-7bb2-b25a-f12d670f57d5"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
