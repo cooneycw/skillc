@@ -119,6 +119,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import ipaddress
 import json
 import os
 import re
@@ -1058,13 +1059,18 @@ class DockerBackend:
             egress_network, egress_proxy, proxy_ip = self._start_egress(name, attempt_id, env)
             egress_args = {"network": egress_network, "extra_env": eg.agent_proxy_env(proxy_ip),
                            "dns": eg.AGENT_DNS}
+        channel: DecideReplyChannel | None = None
         try:
             channel, trigger_socket_host_path = self._start_trigger_channel(name, attempt_id)
+            argv = self._keepalive_run_argv(name, attempt_id, trigger_socket_host_path, **egress_args)  # type: ignore[arg-type]
         except BaseException:
-            # #442: egress is already up; a refused channel must not strand it.
+            # #442: egress is already up; nothing between acquiring it and
+            # handing back a handle may strand it - a refused channel, an
+            # invalid argv value, an interrupt. The original exception stands.
+            if channel is not None:
+                channel.close()
             self._stop_egress(egress_proxy, egress_network, env)
             raise
-        argv = self._keepalive_run_argv(name, attempt_id, trigger_socket_host_path, **egress_args)  # type: ignore[arg-type]
         try:
             started = subprocess.run(
                 argv, capture_output=True, text=True, env=env, check=False, timeout=self.daemon_timeout,
@@ -1083,6 +1089,13 @@ class DockerBackend:
             raise BackendUnavailable(
                 f"docker run failed to start a container for {attempt_id!r}: {exc}{cleanup_note}"
             ) from exc
+        except BaseException:
+            # #442: an interrupt mid-`run` still removes what this call made.
+            if channel is not None:
+                channel.close()
+            self._best_effort_rm(name, env)
+            self._stop_egress(egress_proxy, egress_network, env)
+            raise
         if started.returncode != 0:
             if channel is not None:
                 channel.close()
@@ -1120,9 +1133,16 @@ class DockerBackend:
             created_network = True
             self._egress_call(eg.create_network_argv(self.docker_bin, network, labels), env,
                               f"create internal network {network}")
+            subnet = self._egress_call(eg.network_subnet_argv(self.docker_bin, network), env,
+                                       f"read {network}'s subnet").strip()
+            try:
+                ipaddress.ip_network(subnet)
+            except ValueError as exc:
+                raise BackendUnavailable(f"egress network {network} has no usable subnet: {subnet!r}") from exc
             created_proxy = True  # `run -d` can create a container even when it fails to start
             self._egress_call(eg.proxy_run_argv(self.docker_bin, image=self.image, name=proxy, labels=labels,
-                                                container_user=_container_user(), hosts=self.egress_hosts),
+                                                container_user=_container_user(), subnet=subnet,
+                                                hosts=self.egress_hosts),
                               env, f"start egress proxy {proxy}")
             self._egress_call(eg.network_connect_argv(self.docker_bin, network, proxy), env,
                               f"connect {proxy} to {network}")
@@ -1133,6 +1153,11 @@ class DockerBackend:
         except BackendUnavailable as exc:
             note = self._stop_egress(proxy if created_proxy else None, network if created_network else None, env)
             raise BackendUnavailable(f"{exc}{note}") from exc
+        except BaseException:
+            # Anything else - an interrupt, a bug - still removes what was
+            # made, and the original exception propagates unchanged.
+            self._stop_egress(proxy if created_proxy else None, network if created_network else None, env)
+            raise
         return network, proxy, address
 
     def _stop_egress(self, proxy: str | None, network: str | None, env: Mapping[str, str]) -> str:

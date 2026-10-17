@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping, Sequence
 
 #: The only hosts a live agent's proxy forwards to, on port 443. Measured
@@ -81,10 +82,13 @@ def allowlist_digest(hosts: Sequence[str] = ALLOWED_HOSTS) -> str:
 
 
 #: The proxy itself: stdlib only, run by the trial image's own `python3`, so
-#: there is no second image to pin. argv: port, log path, allowlist JSON.
+#: there is no second image to pin. argv: port, log path, allowlist JSON,
+#: allowlist digest, the attempt network's subnet. A client from outside that
+#: subnet - a neighbouring container on the shared bridge - is refused and
+#: logged as `peer-rejected`, never counted as this attempt's traffic.
 #: `decide()` is the whole policy and is exercised in-process by the tests.
 PROXY_SOURCE = r'''
-import asyncio, json, sys, time
+import asyncio, ipaddress, json, sys, time
 
 def decide(target, hosts):
     """CONNECT host:443 for an exactly-listed host; everything else refused."""
@@ -111,6 +115,7 @@ async def _pipe(reader, writer):
 
 def main():
     port, log_path, allow = int(sys.argv[1]), sys.argv[2], json.loads(sys.argv[3])
+    peers = ipaddress.ip_network(sys.argv[5])
     hosts = frozenset(h.lower() for h in allow["hosts"])
     log = open(log_path, "a", buffering=1)
     log.write(json.dumps({"event": "start", "allowlist": allow, "digest": sys.argv[4]}) + "\n")
@@ -120,6 +125,15 @@ def main():
                               "decision": decision}) + "\n")
 
     async def handle(cr, cw):
+        peer = (cw.get_extra_info("peername") or ("",))[0]
+        try:
+            from_attempt = ipaddress.ip_address(peer) in peers
+        except ValueError:
+            from_attempt = False
+        if not from_attempt:
+            record("-", "peer:" + str(peer), "peer-rejected")
+            cw.close()
+            return
         try:
             head = await asyncio.wait_for(cr.readuntil(b"\r\n\r\n"), 30)
             method, target, _ = head.split(b"\r\n", 1)[0].decode("latin1").split(" ", 2)
@@ -177,7 +191,7 @@ def create_network_argv(docker_bin: Sequence[str], network: str, labels: Mapping
 
 def proxy_run_argv(
     docker_bin: Sequence[str], *, image: str, name: str, labels: Mapping[str, str], container_user: str,
-    hosts: Sequence[str] = ALLOWED_HOSTS,
+    subnet: str, hosts: Sequence[str] = ALLOWED_HOSTS,
 ) -> list[str]:
     """The proxy container, started detached on the default bridge (it needs
     DNS and egress to reach the allowed hosts); `network connect` then joins it
@@ -191,12 +205,17 @@ def proxy_run_argv(
         "--network", "bridge", "--user", container_user, "--init",
         "--memory", "256m", "--memory-swap", "256m", "--pids-limit", "64", "--cpus", "0.5",
         "--", image, "python3", "-c", PROXY_SOURCE, str(PROXY_PORT), PROXY_LOG_PATH, allow,
-        allowlist_digest(hosts),
+        allowlist_digest(hosts), subnet,
     ]
 
 
 def network_connect_argv(docker_bin: Sequence[str], network: str, container: str) -> list[str]:
     return [*docker_bin, "network", "connect", network, container]
+
+
+def network_subnet_argv(docker_bin: Sequence[str], network: str) -> list[str]:
+    """The attempt network's subnet: the only clients the proxy serves."""
+    return [*docker_bin, "network", "inspect", "-f", "{{(index .IPAM.Config 0).Subnet}}", network]
 
 
 def proxy_address_argv(docker_bin: Sequence[str], network: str, container: str) -> list[str]:
@@ -234,6 +253,7 @@ def summarize_log(raw: bytes) -> dict[str, object]:
     allowed: dict[str, int] = {}
     denied: dict[str, int] = {}
     upstream_failed: dict[str, int] = {}
+    peer_rejected = 0
     digest: str | None = None
     unparsed = 0
     for line in raw.decode("utf-8", "replace").splitlines():
@@ -246,6 +266,9 @@ def summarize_log(raw: bytes) -> dict[str, object]:
             digest = entry.get("digest")
             continue
         decision = str(entry.get("decision"))
+        if decision == "peer-rejected":
+            peer_rejected += 1
+            continue
         bucket = (allowed if decision == "allowed" else denied if decision == "denied"
                   else upstream_failed if decision.startswith("upstream-failed") else None)
         if bucket is None:
@@ -254,7 +277,7 @@ def summarize_log(raw: bytes) -> dict[str, object]:
         target = str(entry.get("target"))
         bucket[target] = bucket.get(target, 0) + 1
     return {"allowlist_digest": digest, "allowed": allowed, "denied": denied, "upstream_failed": upstream_failed,
-            "unparsed_lines": unparsed}
+            "peer_rejected": peer_rejected, "unparsed_lines": unparsed}
 
 
 #: The codex client's server-side channels, pinned OFF for every live attempt
@@ -268,6 +291,9 @@ def summarize_log(raw: bytes) -> dict[str, object]:
 #: RE-MEASURE ON EVERY CLIENT BUMP: a later client can add a server-side feature
 #: these flags do not name.
 CODEX_SERVER_SIDE_DISABLED_FEATURES: tuple[str, ...] = ("apps", "plugins", "remote_plugin")
+#: A feature name that could carry a server-side channel; enabling one is
+#: refused even when it is not among the three pinned off.
+_SERVER_SIDE_FEATURE = re.compile(r"search|plugin|app|connector|remote", re.IGNORECASE)
 CODEX_WEB_SEARCH_OFF = 'web_search="disabled"'
 CODEX_SERVER_SIDE_OFF: tuple[str, ...] = (
     "--strict-config", "-c", CODEX_WEB_SEARCH_OFF,
@@ -326,7 +352,16 @@ def missing_server_side_flags(argv: Sequence[str]) -> list[str]:
             if key == "web_search":
                 web = f"{key}={raw}"
             elif key.startswith("features."):
-                features[key.removeprefix("features.")] = raw.lower() == "true"
+                features[key.removeprefix("features.")] = raw.strip("\"'").lower() == "true"
+            elif key == "features":
+                # A whole-table assignment (`features={...}`) may REPLACE the
+                # table, dropping every earlier `--disable` back to the client
+                # default (on) whatever the table itself names. Its merge
+                # semantics are not measured, so it is refused outright
+                # (counter-model review), and what it names is still applied.
+                problems.append(f"features is assigned as a whole table ({raw!r}); it may reset the pinned features")
+                for name, flag in re.findall(r"([A-Za-z0-9_]+)=(true|false)", raw):
+                    features[name] = flag == "true"
         else:
             features[value] = kind == "enable"
     if web is None:
@@ -338,4 +373,10 @@ def missing_server_side_flags(argv: Sequence[str]) -> list[str]:
             problems.append(f"--disable {feature} is missing (a server-side remote plugin channel stays open)")
         elif features[feature]:
             problems.append(f"{feature} is re-enabled later in the argv (the last setting wins)")
+    for feature, enabled in sorted(features.items()):
+        # Any OTHER feature that could open a server-side channel - the
+        # deprecated `web_search_request`/`web_search_cached`, a future
+        # `standalone_web_search`, connectors - may not be switched on.
+        if enabled and feature not in CODEX_SERVER_SIDE_DISABLED_FEATURES and _SERVER_SIDE_FEATURE.search(feature):
+            problems.append(f"feature {feature!r} is enabled; it may open a server-side channel")
     return problems

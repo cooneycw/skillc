@@ -152,8 +152,11 @@ off here, and #288 runs codex only.
 The real-Docker controls (`tests/test_agent_egress_live.py`, in the runner's
 floor) check from inside a live-configured container that the provider is
 reachable through the proxy, GitHub is refused by it, and a proxy-ignoring
-client has no route and no DNS. The `egress:allow-all` and
-`egress:bridge-network` break modes each make exactly one of those fail.
+client has no route and resolves no name. The `egress:allow-all`,
+`egress:bridge-network` and `egress:dns-hosts` break modes each make exactly one
+of those fail. The proxy serves only clients from the attempt network's own
+subnet, so a neighbouring container on the shared bridge cannot add to an
+attempt's log.
 
 ## A per-trial seed is bound to exactly one project and one CLI version
 

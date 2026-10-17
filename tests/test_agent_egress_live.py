@@ -18,8 +18,10 @@ the container was started with, as the real client does):
 
 DNS is closed by the internal network itself: measured on the runner (Docker
 29.8.2), an `--internal` network does not resolve external names even with
-`--dns 8.8.8.8`. `--dns 0.0.0.0` is defence in depth, so there is no DNS break
-mode (it could never break anything).
+`--dns 8.8.8.8`. `--dns 0.0.0.0` is defence in depth. A DNS-server break could
+therefore never break anything, so the resolution check's own negative control
+maps the name in `/etc/hosts` instead: a real lookup that succeeds in the real
+container.
 
 `SKILLC_EGRESS_LIVE_BREAK` selects one negative control, each breaking exactly
 one property, which must then FAIL to hold (strict xfail on that property's
@@ -28,8 +30,10 @@ own exception type, so an unrelated setup failure stays a hard failure):
     none            (default) every property holds.
     allow-all       the proxy also forwards github.com and
                     raw.githubusercontent.com: `denial` must fail.
-    bridge-network  the agent is ALSO attached to the default bridge:
-                    `isolation` must fail.
+    bridge-network  the agent is ALSO attached to the default bridge: the
+                    direct-route half of `isolation` must fail.
+    dns-hosts       github.com is mapped in the agent's /etc/hosts (no route
+                    added): the name-resolution half of `isolation` must fail.
 
 `provider` holds in every mode. Every container and network this file
 creates is removed by `destroy()` in a `finally`.
@@ -56,7 +60,7 @@ from skillc import egress as eg
 
 LIVE_TEST_IMAGE = os.environ.get("SKILLC_LIVE_TEST_IMAGE", "python:3.12-slim")
 BREAK_MODE = os.environ.get("SKILLC_EGRESS_LIVE_BREAK", "none")
-_VALID_BREAK_MODES = ("none", "allow-all", "bridge-network")
+_VALID_BREAK_MODES = ("none", "allow-all", "bridge-network", "dns-hosts")
 if BREAK_MODE not in _VALID_BREAK_MODES:
     raise RuntimeError(f"SKILLC_EGRESS_LIVE_BREAK={BREAK_MODE!r} must be one of {_VALID_BREAK_MODES}")
 
@@ -73,8 +77,13 @@ class _DenialFailed(Exception):
 
 
 class _IsolationFailed(Exception):
-    """A proxy-ignoring client DID get out. The only exception the
-    `bridge-network` xfail matches."""
+    """A proxy-ignoring client DID get a direct route out. The only exception
+    the `bridge-network` xfail matches."""
+
+
+class _ResolutionFailed(Exception):
+    """A name DID resolve inside the agent. The only exception the
+    `dns-hosts` xfail matches."""
 
 
 def _require(condition: bool, error: type[Exception], message: str) -> None:
@@ -118,6 +127,13 @@ def attempt() -> Iterator[tuple[d.DockerBackend, d._Handle]]:
                 joined = subprocess.run(["docker", "network", "connect", "bridge", handle.name],
                                         capture_output=True, timeout=30, check=False)
                 assert joined.returncode == 0, "setup: could not attach the agent to bridge for the break"
+            if BREAK_MODE == "dns-hosts":
+                # A real lookup that succeeds inside the real container, with no
+                # route added: the DNS property alone must fail.
+                mapped = subprocess.run(["docker", "exec", "-u", "0", handle.name, "sh", "-c",
+                                         f"echo '{GITHUB_ADDRESS} github.com' >> /etc/hosts"],
+                                        capture_output=True, timeout=30, check=False)
+                assert mapped.returncode == 0, "setup: could not map github.com for the break"
             yield backend, handle
         finally:
             backend.destroy(handle)
@@ -196,15 +212,25 @@ def test_the_proxy_denies_github(attempt: tuple[d.DockerBackend, d._Handle]) -> 
     assert {"github.com:443", "raw.githubusercontent.com:443"} <= set(denied)
 
 
-@pytest.mark.xfail(BREAK_MODE == "bridge-network", raises=_IsolationFailed, strict=True,
-                   reason="bridge-network gives the agent a direct route, so isolation must fail")
-def test_a_client_that_ignores_the_proxy_has_no_way_out(attempt: tuple[d.DockerBackend, d._Handle]) -> None:
+@pytest.mark.xfail(BREAK_MODE == "dns-hosts", raises=_ResolutionFailed, strict=True,
+                   reason="dns-hosts maps github.com in the container, so resolution must succeed")
+def test_a_client_that_ignores_the_proxy_cannot_resolve_names(attempt: tuple[d.DockerBackend, d._Handle]) -> None:
     _backend, handle = attempt
     resolve = _probe(handle, "resolve", "github.com", use_proxy=False)
+    if BREAK_MODE == "dns-hosts":
+        assert resolve["result"] == "resolved", "setup: dns-hosts did not make github.com resolve"
+    if resolve["result"] == "error":
+        assert resolve.get("error") == "gaierror", "inconclusive: resolution failed for a non-DNS reason"
+    _require(resolve["result"] == "error", _ResolutionFailed, "github.com must not resolve inside the agent")
+
+
+@pytest.mark.xfail(BREAK_MODE == "bridge-network", raises=_IsolationFailed, strict=True,
+                   reason="bridge-network gives the agent a direct route, so isolation must fail")
+def test_a_client_that_ignores_the_proxy_has_no_route_out(attempt: tuple[d.DockerBackend, d._Handle]) -> None:
+    _backend, handle = attempt
     direct = _probe(handle, "direct", GITHUB_ADDRESS, use_proxy=False)
     if BREAK_MODE == "bridge-network":
         assert direct["result"] == "connected", "setup: bridge-network gave no direct route"
-    _require(resolve["result"] == "error", _IsolationFailed, "github.com must not resolve inside the agent")
     if direct["result"] == "error":
         # Only "no route" is isolation. A refusal or a timeout means a route
         # existed and the far end did not answer - an outage there would read
@@ -212,5 +238,4 @@ def test_a_client_that_ignores_the_proxy_has_no_way_out(attempt: tuple[d.DockerB
         error = str(direct.get("error"))
         assert "Errno 101" in error or "Errno 113" in error or "unreachable" in error.lower(), \
             "inconclusive: the direct connection failed for a reason other than no route"
-        assert "gaierror" in str(resolve.get("error")), "inconclusive: resolution failed for a non-DNS reason"
     _require(direct["result"] == "error", _IsolationFailed, "a direct connection to GitHub must have no route")

@@ -131,7 +131,7 @@ def test_namespaced_cwd_modes_set_only_the_cwd_value(mode: str) -> None:
     ]
 
 
-@pytest.mark.parametrize("mode", ["allow-all", "bridge-network"])
+@pytest.mark.parametrize("mode", ["allow-all", "bridge-network", "dns-hosts"])
 def test_namespaced_egress_modes_set_only_the_egress_value(mode: str) -> None:
     """#442: the ninth line is SKILLC_EGRESS_LIVE_BREAK's value."""
     result = _resolve(f"egress:{mode}")
@@ -148,10 +148,10 @@ def test_a_bare_egress_mode_is_refused_not_silently_accepted() -> None:
     assert result.stdout == ""
 
 
-def test_there_is_no_egress_dns_break_mode() -> None:
+def test_there_is_no_egress_dns_server_break_mode() -> None:
     """#442: an --internal network resolves no external name even with --dns
-    set (measured on the runner), so a DNS break could never break anything;
-    the family must not offer one."""
+    set (measured on the runner), so a DNS-server break could never break
+    anything; the family offers dns-hosts instead, never dns-on."""
     result = _resolve("egress:dns-on")
     assert result.returncode == 2
 
@@ -346,6 +346,7 @@ def test_none_resolves_to_the_certifying_context() -> None:
         "cwd:confine-root-omitted",
         "egress:allow-all",
         "egress:bridge-network",
+        "egress:dns-hosts",
     ],
 )
 def test_every_break_mode_resolves_to_the_control_context_never_the_certifying_one(normalized_spec: str) -> None:
@@ -391,6 +392,7 @@ def test_the_real_runner_refuses_an_unknown_break_spec_before_touching_any_confi
         "cwd:confine-root-omitted",
         "egress:allow-all",
         "egress:bridge-network",
+        "egress:dns-hosts",
     ],
 )
 def test_the_real_runner_accepts_valid_break_specs_and_reaches_the_config_check(break_arg: str) -> None:

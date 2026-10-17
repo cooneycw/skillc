@@ -65,10 +65,12 @@ _BREAK_CWD_MODES="confine-root-omitted"
 #: #442's provider-only egress break modes - no bare form, same as witness.
 #: allow-all widens the per-attempt proxy to GitHub, so the "proxy denies
 #: GitHub" property must fail; bridge-network also attaches the agent to the
-#: default bridge, so the "a proxy-ignoring client has no way out" property
-#: must fail. There is no DNS mode: an --internal network resolves no external
-#: name even with --dns set (measured on the runner), so it could never break.
-_BREAK_EGRESS_MODES="allow-all bridge-network"
+#: default bridge, so the "a proxy-ignoring client has no route out" property
+#: must fail; dns-hosts maps github.com in the agent's /etc/hosts (no route
+#: added), so the "names do not resolve" property must fail. There is no
+#: DNS-server mode: an --internal network resolves no external name even with
+#: --dns set (measured on the runner), so it could never break anything.
+_BREAK_EGRESS_MODES="allow-all bridge-network dns-hosts"
 
 # Resolves a --break argument to NINE lines on stdout: the NORMALIZED spec
 # ("none", or "<family>:<mode>" - a bare legacy channel mode is normalized

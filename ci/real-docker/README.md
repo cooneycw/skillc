@@ -157,6 +157,7 @@ but #315 and the real campaign remain pending.
    run-real-docker <reviewed-tested-sha> --break cwd:confine-root-omitted     # expect FAILURE
    run-real-docker <reviewed-tested-sha> --break egress:allow-all             # expect FAILURE
    run-real-docker <reviewed-tested-sha> --break egress:bridge-network        # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break egress:dns-hosts             # expect FAILURE
    ```
 
    The `egress` controls (#442) run `tests/test_agent_egress_live.py` from
@@ -164,14 +165,16 @@ but #315 and the real campaign remain pending.
    egress=True)`: a per-attempt `--internal` network, no DNS, the allowlisting
    proxy). `allow-all` widens that proxy to GitHub, so the denial property must
    fail; `bridge-network` also attaches the agent to the default bridge, so the
-   "a proxy-ignoring client has no way out" property must fail. The provider
-   check passes in both. There is no DNS mode: an `--internal` network resolves
-   no external name even with `--dns` set (measured on this runner), so such a
-   break could never break anything.
+   "no route out" property must fail; `dns-hosts` maps `github.com` in the
+   agent's `/etc/hosts` with no route added, so the "names do not resolve"
+   property must fail. Each break fails exactly one of the four tests; the
+   provider check passes in all three. There is no DNS-server mode: an
+   `--internal` network resolves no external name even with `--dns` set
+   (measured on this runner), so such a break could never break anything.
    Break-mode runs post only to `skillc/real-docker-control`
    (never the certifying `skillc/real-docker` context) and are labelled
-   EXPECTED-RED. Record all twenty-six results on this issue (the
-   twenty-five break-mode commands above, plus the `none` run itself).
+   EXPECTED-RED. Record all twenty-seven results on this issue (the
+   twenty-six break-mode commands above, plus the `none` run itself).
 
    The `cwd` control (#338) runs the same swapped-cwd exec without
    `confine_root`. Its expected red is a strict XFAIL that is reached only

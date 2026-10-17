@@ -1004,7 +1004,7 @@ def cmd_run(state_dir: Path, rest: list[str]) -> int:
             log = _in_container(state_dir, name, EGRESS_PROXY_LOG_PATH)
             log.parent.mkdir(parents=True, exist_ok=True)
             log.write_text(
-                json.dumps({"event": "start", "allowlist": json.loads(argv[-2]), "digest": argv[-1]}) + "\n"
+                json.dumps({"event": "start", "allowlist": json.loads(argv[-3]), "digest": argv[-2]}) + "\n"
                 + json.dumps({"t": 0, "method": "CONNECT", "target": "chatgpt.com:443", "decision": "allowed"}) + "\n",
                 encoding="utf-8",
             )
@@ -1121,10 +1121,14 @@ def cmd_network(state_dir: Path, rest: list[str]) -> int:
         _atomic_write_json(path, data)
         return 0
     if verb == "inspect":
-        if not _network_file(state_dir, args[0]).is_file():
-            print(f"Error response from daemon: network {args[0]} not found", file=sys.stderr)
+        name = args[-1]
+        if not _network_file(state_dir, name).is_file():
+            print(f"Error response from daemon: network {name} not found", file=sys.stderr)
             return 1
-        print(_network_file(state_dir, args[0]).read_text(encoding="utf-8"))
+        if "-f" in args:
+            print("10.99.0.0/24")  # the only template asked of a network: its subnet
+        else:
+            print(_network_file(state_dir, name).read_text(encoding="utf-8"))
         return 0
     if verb == "rm":
         if (state_dir / ".refuse-network-rm").exists():

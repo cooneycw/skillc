@@ -133,7 +133,7 @@ def test_the_real_proxy_tunnels_an_allowed_host_refuses_the_rest_and_logs_both(t
     source = eg.PROXY_SOURCE.replace('port != "443"', f'port != "{up_port}"')
     assert source.replace(f'port != "{up_port}"', 'port != "443"') == eg.PROXY_SOURCE
     allow = json.dumps({"hosts": ["127.0.0.1"]})
-    proc = subprocess.Popen([sys.executable, "-c", source, str(port), str(log), allow, "sha256:test"])
+    proc = subprocess.Popen([sys.executable, "-c", source, str(port), str(log), allow, "sha256:test", "127.0.0.0/8"])
     try:
         for _ in range(100):
             try:
@@ -274,6 +274,12 @@ def test_red_case_a_live_codex_argv_missing_one_server_side_flag_is_refused_befo
     (['--config=web_search="cached"'], "web_search is set to"),
     (["-c", "features.remote_plugin=true"], "remote_plugin is re-enabled"),
     (["-c"], "has no value"),
+    # Second counter-model pass: a whole-table override and channel-like
+    # features outside the three pinned off.
+    (["-c", "features={apps=true,plugins=true,remote_plugin=true}"], "assigned as a whole table"),
+    (["-c", "features={shell_tool=false}"], "assigned as a whole table"),
+    (["--enable", "web_search_request"], "'web_search_request' is enabled"),
+    (["-c", "features.standalone_web_search=true"], "'standalone_web_search' is enabled"),
 ])
 def test_red_case_a_later_flag_that_reopens_a_channel_is_refused(tail: list[str], named: str) -> None:
     problems = eg.missing_server_side_flags([*cc.DEFAULT_CLIENT_ARGVS["codex"], *tail])
@@ -509,3 +515,70 @@ def test_teardown_is_not_confirmed_while_the_attempt_network_remains(base: Path,
     (docker_state / ".refuse-network-rm").unlink()
     backend.destroy(handle)
     assert backend.confirm_absent(handle) is d.Confirmation.CONFIRMED
+
+
+def test_a_client_from_outside_the_attempt_subnet_is_refused_and_logged_apart(tmp_path: Path) -> None:
+    """Counter-model review: the proxy sits on the shared bridge too, so a
+    neighbouring container could reach it. A peer outside the attempt
+    network's subnet is refused before any request is read, and logged as a
+    rejected peer - never counted as this attempt's allowed or denied traffic."""
+    port, log = _free_port(), tmp_path / "proxy.log"
+    allow = json.dumps({"hosts": list(eg.ALLOWED_HOSTS)})
+    proc = subprocess.Popen([sys.executable, "-c", eg.PROXY_SOURCE, str(port), str(log), allow, "sha256:t",
+                             "10.99.0.0/24"])
+    try:
+        for _ in range(100):
+            try:
+                socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
+                break
+            except OSError:
+                time.sleep(0.05)
+        # Closed unread: an empty read, or a reset for the unread request -
+        # either way no answer, and never a 200 tunnel.
+        try:
+            answer = _connect(port, "chatgpt.com:443")
+        except ConnectionResetError:
+            answer = b""
+        assert answer == b"", "a neighbour must get no answer at all"
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)
+    summary = eg.summarize_log(log.read_bytes())
+    assert summary["allowed"] == {} and summary["denied"] == {}
+    assert summary["peer_rejected"] >= 1
+
+
+@pytest.mark.parametrize("payload, flagged", [
+    ({"type": "function_call", "namespace": "web", "name": "run"}, True),
+    ({"type": "function_call", "namespace": "image_gen", "name": "text2im"}, True),
+    ({"type": "function_call", "namespace": "functions", "name": "exec_command"}, False),
+])
+def test_the_census_matches_a_server_side_namespace_exactly(payload: dict[str, object], flagged: bool) -> None:
+    """Second counter-model pass: a call whose namespace is its own field has
+    no punctuation for a name pattern to find; the namespace is matched as a
+    whole, and an ordinary local namespace stays clean."""
+    line = json.dumps({"type": "response_item", "payload": payload}).encode()
+    assert bool(at.server_side_tool_uses(line, None)) is flagged
+
+
+@pytest.mark.parametrize("where", ["argv", "connect"])
+def test_an_interrupted_egress_setup_leaves_nothing_behind(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch, where: str,
+) -> None:
+    """Second counter-model pass: not only `BackendUnavailable` - an interrupt
+    or a bug between acquiring egress and handing back a handle still removes
+    the network and the proxy, and the original exception propagates."""
+    if where == "argv":
+        def broken(*args: object, **kwargs: object) -> list[str]:
+            raise TypeError("an invalid argv value (fault injection)")
+        monkeypatch.setattr(d.DockerBackend, "_keepalive_run_argv", broken)
+        expected: type[BaseException] = TypeError
+    else:
+        def interrupted(*args: object, **kwargs: object) -> list[str]:
+            raise KeyboardInterrupt
+        monkeypatch.setattr(eg, "network_connect_argv", interrupted)
+        expected = KeyboardInterrupt
+    with pytest.raises(expected):
+        _egress_backend(base, docker_state).prepare("a-interrupted")
+    assert not list((docker_state / "networks").glob("*.json"))
+    assert not any(p.name.endswith("-proxy.json") for p in docker_state.glob("*.json"))

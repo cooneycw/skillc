@@ -25,7 +25,7 @@ usage() {
     echo "            trialimage (no-uv - #343)" >&2
     echo "            closure (missing-closure, tampered-closure - #334)" >&2
     echo "            cwd (confine-root-omitted - #338)" >&2
-    echo "            egress (allow-all, bridge-network - #442)" >&2
+    echo "            egress (allow-all, bridge-network, dns-hosts - #442)" >&2
     echo "  the bare channel mode spellings (no 'channel:' prefix) are also accepted," >&2
     echo "  kept for compatibility with runs recorded before family prefixes existed." >&2
     exit 2

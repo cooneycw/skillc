@@ -305,6 +305,13 @@ _SERVER_SIDE_TYPE = re.compile(r"web_search|mcp_|image_generation|tool_search|re
 _SERVER_SIDE_NAME = re.compile(r"mcp__|@openai-curated|openai-curated-remote|^(apps?|plugins?|web|browser|image_gen)[._:]",
                                re.IGNORECASE)
 _CALL_TYPES = frozenset({"function_call", "custom_tool_call", "local_shell_call", "mcp_tool_call"})
+#: A call's own `namespace` field naming a server-side tool family, matched
+#: EXACTLY (counter-model review: `namespace: "web"` with `name: "run"` has no
+#: punctuation for a name pattern to find).
+_SERVER_SIDE_NAMESPACES = frozenset({
+    "web", "web_search", "browser", "image_gen", "image_generation", "apps", "app", "plugins", "plugin",
+    "connector", "connectors", "mcp", "remote_plugin", "tool_search", "computer",
+})
 
 
 def server_side_tool_uses(
@@ -345,6 +352,9 @@ def server_side_tool_uses(
             for name in names:
                 if _SERVER_SIDE_NAME.search(name):
                     found.add(f"{top}/{kind}:{name}")
+            namespace = payload.get("namespace")
+            if isinstance(namespace, str) and namespace.lower() in _SERVER_SIDE_NAMESPACES:
+                found.add(f"{top}/{kind}:{namespace}/{payload.get('name')}")
     return sorted(found)
 
 
