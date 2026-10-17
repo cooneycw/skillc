@@ -14,7 +14,7 @@ Two cases share ONE issue text and one repository history up to the fix:
   - `repo`: the subject's checkout, with `origin` set to `remote_url`.
 
 `declaration(case, remote_url)` is the fixture-service declaration, and
-`capture(git, repo, remote)` reads back the git facts the grader judges
+`capture(git, repo, remote, base_commit)` reads back the git facts the grader judges
 `source-unmodified` from. `git` is a callable running one git command, so
 the same capture runs on the host (qualification, against a controller-owned
 fixture) and, for a live attempt, inside the attempt's containment (#434's
@@ -26,6 +26,7 @@ builds produce identical SHAs wherever they run. Stdlib only.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess
 import tempfile
@@ -192,24 +193,57 @@ def declaration(case: str, remote_url: str, facts: dict[str, Any]) -> dict[str, 
     return decl
 
 
-def capture(git: GitFn, repo: Path, remote: Path) -> dict[str, Any]:
+def blob_id(data: bytes) -> str:
+    """Git's blob id for `data`, computed here - never by a git command that
+    reads the subject's index, filters or attributes."""
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+def read_files(worktree: Path) -> dict[str, str]:
+    """Every regular file under `worktree` but `.git`, as {path: blob id},
+    read from the filesystem itself (counter-model review, #434 pass 1: a
+    subject can hide an edit from `git status` with `update-index
+    --assume-unchanged` or `--skip-worktree`). A link or special file is
+    reported as such, never followed."""
+    files: dict[str, str] = {}
+    for current, dirs, names in os.walk(worktree, followlinks=False):
+        dirs[:] = sorted(d for d in dirs if not (Path(current) == worktree and d == ".git"))
+        for name in sorted(names):
+            path = Path(current) / name
+            rel = path.relative_to(worktree).as_posix()
+            if rel == ".git":
+                continue  # a linked worktree's .git pointer file
+            files[rel] = blob_id(path.read_bytes()) if path.is_file() and not path.is_symlink() else "not-a-file"
+    return files
+
+
+def capture(git: GitFn, repo: Path, remote: Path, base_commit: str,
+            files: Callable[[Path], dict[str, str]] = read_files) -> dict[str, Any]:
     """The git facts `source-unmodified` and `evidence-real` are judged from.
 
-    - `remote_refs`: every ref the remote holds;
-    - `worktrees`: every worktree of the checkout (the checkout itself and
-      any flow:auto Step 1 created), each with its HEAD, its HEAD's tree,
-      its branch, and its complete porcelain status (tracked AND untracked);
-    - `commits`: every commit reachable from any ref of the checkout or the
-      remote, so a cited SHA prefix is resolved against everything that
-      exists, not a convenient subset.
+    - `remote_refs` / `local_refs`: every ref the remote and the checkout hold
+      (branches, tags, stash, remote-tracking);
+    - `commits`: every commit reachable from any of those refs, so a local
+      commit parked on a side branch is still seen (pass 1), and a cited SHA
+      prefix is resolved against everything that exists;
+    - `base_files`: the base commit's tree as {path: blob id} (`base_commit`
+      comes from the CONTROLLER's build facts, never from the attempt);
+    - `worktrees`: every worktree of the checkout - the checkout itself and
+      any flow:auto Step 1 created - with its HEAD, its branch, its porcelain
+      status, and its ACTUAL file contents from `files` (the filesystem, not
+      git's index).
 
-    Worktree paths are reported relative to the checkout's parent so the
-    facts never carry a host path."""
+    Worktree paths are relative to the checkout's parent, so no host path is
+    recorded."""
     base = repo.parent
-    refs: dict[str, str] = {}
-    for line in git(["for-each-ref", "--format=%(refname) %(objectname)"], remote).splitlines():
-        name, sha = line.split(" ", 1)
-        refs[name] = sha
+
+    def refs_of(where: Path) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for line in git(["for-each-ref", "--format=%(refname) %(objectname)"], where).splitlines():
+            name, sha = line.split(" ", 1)
+            out[name] = sha
+        return out
+
     worktrees = []
     block: dict[str, str] = {}
     for line in [*git(["worktree", "list", "--porcelain"], repo).splitlines(), ""]:
@@ -223,16 +257,19 @@ def capture(git: GitFn, repo: Path, remote: Path) -> dict[str, Any]:
             worktrees.append({
                 "path": os.path.relpath(path, base),
                 "head": block.get("HEAD"),
-                "tree": git(["rev-parse", "HEAD^{tree}"], path),
                 "branch": block.get("branch", "").removeprefix("refs/heads/") or None,
                 "status": [s for s in status.splitlines() if s],
+                "files": files(path),
             })
             block = {}
+    base_files: dict[str, str] = {}
+    for entry in filter(None, git(["ls-tree", "-r", "-z", "--full-tree", base_commit], remote).split("\0")):
+        meta, path = entry.split("\t", 1)
+        base_files[path] = meta.split()[2]
     commits = set(git(["rev-list", "--all"], repo).split())
     commits |= set(git(["rev-list", "--all"], remote).split())
-    return {"remote_refs": refs, "worktrees": sorted(worktrees, key=lambda w: w["path"]),
-            "commits": sorted(commits)}
-
+    return {"remote_refs": refs_of(remote), "local_refs": refs_of(repo), "base_files": base_files,
+            "worktrees": sorted(worktrees, key=lambda w: w["path"]), "commits": sorted(commits)}
 
 if __name__ == "__main__":
     import json

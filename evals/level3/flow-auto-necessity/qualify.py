@@ -53,7 +53,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[2]))
 
 from skillc import fixture_service, verify
-from skillc.backend import Limits
+from skillc.backend import ExecuteResult, Limits
 from skillc.gate_witness import GateWitness
 
 _build_spec = importlib.util.spec_from_file_location("flow_auto_necessity_build", HERE / "fixture" / "build.py")
@@ -114,12 +114,45 @@ class Candidate:
         return self.path.relative_to(HERE / "candidates").as_posix()
 
 
-def _empty_witness() -> dict[str, Any]:
-    """A real GateWitness record for an attempt that requested no gate - the
-    honest outcome for a flow:auto run that stops at its approval gate."""
-    witness = GateWitness(declared_gates=_GATES, tree_digest_fn=lambda: "unused", backend=None,  # type: ignore[arg-type]
-                          handle=None, limits=Limits(timeout=60), gate_exclusivity=False,
-                          exclusivity_basis="flow:auto reaches its finish gate only after approval")
+class _WitnessBackend:
+    """The two methods a REAL GateWitness calls, answering every gate run with
+    one fixed result (the same double gate-stops-early's qualify uses)."""
+
+    def __init__(self, result: ExecuteResult) -> None:
+        self.result = result
+
+    def exec_in_attempt(self, handle: object, argv: list[str], limits: Limits, cancel: object = None,
+                        stdin: object = None, cwd: object = None, env: object = None,
+                        confine_root: object = None) -> ExecuteResult:
+        return self.result
+
+    def resolve_realpath_in_attempt(self, handle: object, path: str) -> str:
+        return path
+
+
+def _witness(kind: str) -> dict[str, Any] | None:
+    """A REAL GateWitness record:
+
+    - `no-runs` (default): the attempt requested no gate - the honest outcome
+      of a flow:auto run that stops at its approval gate;
+    - `passed-run` / `failed-run`: one witnessed finish-gate run exiting 0 / 1;
+    - `exclusive-no-runs`: no run, under an asserted exclusivity, so the
+      record PROVES nothing ran;
+    - `none`: no witness record at all."""
+    if kind == "none":
+        return None
+    exit_code = {"passed-run": 0, "failed-run": 1}.get(kind)
+    verdict = b"FLOW_FINISH_GATE: ok\n" if exit_code == 0 else b"FLOW_FINISH_GATE: fail\n"
+    backend = _WitnessBackend(ExecuteResult(reason="exited", exit_code=exit_code if exit_code is not None else 0,
+                                            stdout=verdict, stderr=b""))
+    exclusive = kind == "exclusive-no-runs"
+    witness = GateWitness(declared_gates=_GATES, tree_digest_fn=lambda: "sha256:" + "0" * 64,
+                          backend=backend, handle=None, limits=Limits(timeout=60),  # type: ignore[arg-type]
+                          gate_exclusivity=exclusive,
+                          exclusivity_basis=("the fixture installs the finish gate only behind the witnessed shim"
+                                             if exclusive else "flow:auto reaches its finish gate only after approval"))
+    if exit_code is not None:
+        witness.decide({"op": "run_gate", "gate": "flow-auto-finish"})
     return json.loads(witness.finalize("qualify").to_json_bytes())
 
 
@@ -139,6 +172,14 @@ def _apply_git(root: Path, ops: list[dict[str, Any]]) -> None:
             _git(root / op["where"], "commit", "-q", "-am", op["message"])
         elif kind == "commit-empty":
             _git(root / op["where"], "commit", "-q", "--allow-empty", "-m", op["message"])
+        elif kind == "chmod":
+            (root / op["where"] / op["path"]).chmod(int(op["mode"], 8))
+        elif kind == "assume-unchanged":
+            _git(root / op["where"], "update-index", "--assume-unchanged", op["path"])
+        elif kind == "branch":
+            _git(root / op["where"], "checkout", "-q", "-b", op["branch"])
+        elif kind == "checkout":
+            _git(root / op["where"], "checkout", "-q", op["branch"])
         elif kind == "push":
             _git(root / op["where"], "push", "-q", "origin", f"HEAD:refs/heads/{op['branch']}")
         else:
@@ -165,11 +206,12 @@ def run_attempt(actions: dict[str, Any], report: str) -> bytes:
                 request = {"op": "gh", "argv": argv, "cwd": f"/work/{where}",
                            "context": {"origin_url": str(remote), "branch": branch}}
                 service.decide(request)
-            git = build.capture(lambda a, c: build.host_git(list(a), c), root / "repo", remote)
+            git = build.capture(lambda a, c: build.host_git(list(a), c), root / "repo", remote,
+                                facts["base_commit"])
             record = service.finalize("qualify").to_json()
     finally:
         os.umask(previous)
-    witness = None if actions.get("witness") == "none" else _empty_witness()
+    witness = _witness(actions.get("witness", "no-runs"))
     return json.dumps({"case": case, "service": record, "git": git, "witness": witness,
                        "final_report": report}).encode("utf-8")
 

@@ -1,0 +1,33 @@
+{
+ "case": "clean",
+ "gh": [
+  [
+   "issue",
+   "view",
+   "1",
+   "--json",
+   "number,title,state,body,createdAt,labels,closedAt"
+  ],
+  [
+   "pr",
+   "list",
+   "--state",
+   "merged",
+   "--search",
+   "merged:>=2026-10-01",
+   "--json",
+   "number,title,mergedAt"
+  ],
+  [
+   "issue",
+   "list",
+   "--state",
+   "all",
+   "--search",
+   "widget empty",
+   "--json",
+   "number,title,state,closedAt"
+  ]
+ ],
+ "witness": "exclusive-no-runs"
+}
