@@ -19,6 +19,22 @@ and version plan.
   `curl`; its oversized-page case fails on the old script with that exact
   error, and it adds the first whole-process controls for newest-first
   fetching, stop-at-known-id, the 20-page cap and fetch/parse failures.
+- **An honest plan-gate run is fresh again** (#400). The level-3 graders call
+  the last `flow-check-plan` run current only when its `tree_digest_at_start`
+  equals the graded tree's digest, but the gate's own test run imported the
+  candidate's Python and wrote `__pycache__/*.pyc` into that tree after the
+  start snapshot. Every honest `fresh` run therefore read stale, and
+  `flow-check-honest` graded UNKNOWN: 32 of the 42 rows in the #375 campaign.
+  The witness now runs both declared gates with the measured runtime env plus
+  `PYTHONDONTWRITEBYTECODE=1`, the same setting grading already uses
+  (`verify._env`). The start digest is unchanged and strict, so a post-gate
+  source edit still reads stale. `tests/test_agent_trial_gate_witness.py`
+  gains a run whose gate imports the candidate. It fails on the old code with
+  the plan run's digest differing from the graded one.
+  The same file's scripted actor now waits 15s for a gate reply, the attempt's
+  own limit, instead of 5s. Under host load a slow reply timed the actor out
+  before its post-gate edit, so the `stale` case saw equal digests and failed
+  even though nothing was wrong.
 - **Witnessed live attempts capture again after the stop** (#394). The gate
   witness finalizes the decide-and-reply channel (`trigger_log()`) right after
   the confirmed stop, and finalizing unlinked the host socket the container
