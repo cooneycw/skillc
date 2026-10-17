@@ -1,0 +1,27 @@
+{
+  "branch": "issue-431-270-item-2-a-clean-project-case-already-correct-no",
+  "counts": {
+    "accepted": 10,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "4bab8d3fd4da032d87f9c31c23e1dac8a1d7e651",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "431",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 2,
+  "recorded_at": "2026-10-17T18:24:59Z",
+  "red_cases": {
+    "already_covered": 0,
+    "proposed": 0
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/17/rollout-2026-10-17T14-22-50-01a14b1a-3434-7390-ad8d-2afb603e5a2e.jsonl",
+    "thread_id": "01a14b1a-3434-7390-ad8d-2afb603e5a2e"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

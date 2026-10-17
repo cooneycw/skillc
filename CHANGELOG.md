@@ -8,6 +8,13 @@ and version plan.
 
 ## [Unreleased]
 
+- **Research: how to build #270's clean-project case, and where Kyle fits** (#431).
+  `docs/research/clean-project-case-2026-10.md` checks the benchmark literature for cases where the
+  right action is to change nothing (FixedBench, ImpossibleBench, BouncerBench, SkillsBench, the
+  SWE-bench family), with pins and licences. It recommends two sibling clean-project tasks that share
+  the must-act tasks' goal text and run on the existing `fresh` actor, so no frozen #375 identity
+  moves. It also ranks where Kyle could help skillc's evals, with the contamination risks. Research
+  only; nothing was run.
 - **The host import probe only sees the declared project** (#365). A
   `python-import` probe with `uv_project` ran `uv run --project <home>/<proj>`
   with the operator's whole environment. With `UV_PROJECT_ENVIRONMENT` pointing

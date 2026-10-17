@@ -26,6 +26,10 @@
   hidden-test integrity, cost on paper, licences), checked against skillc's
   contracts, with the upstream HEADs re-pinned. This is research only, because
   #210's build gate has not opened (#212 recommends REDESIGN).
+- [A clean-project case and Kyle in skillc's evals, October 17, 2026](clean-project-case-2026-10.md):
+  how #270 item 2's "clean project needing no modification" should be built, against FixedBench,
+  ImpossibleBench, BouncerBench, SkillsBench and the SWE-bench family (#431); and where Kyle could
+  help or contaminate skillc's evals. Research only; nothing was run.
 
 ## Provenance and limits
 
