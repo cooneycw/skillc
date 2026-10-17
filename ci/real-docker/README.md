@@ -383,9 +383,14 @@ receipt-named images on every tick.
 
 `build.py` now tags its output `skillc-profile-runtime:<runtime_id>-<source
 commit, 12 chars>` (plus `-<target>` for non-default targets), so a built
-image is never dangling. `build.release_build()` undoes only what one build
+image is never dangling. Builds are NOT image-ID-reproducible here: two builds
+from identical inputs give different IDs (measured), so a rebuild at the same
+commit RE-POINTS that tag. The previously tagged image stays present (receipts
+name it by ID, so they still resolve) but becomes dangling, and only a run-scoped
+cleanup leaves it alone - it predates every later run's snapshot. `build.release_build()` undoes only what one build
 added: an image ID that existed before the build is never touched, and a tag
-the build moved is restored. Tests that build through `build.py` use it
+the build moved - the rebuild case above - is pointed back at the image it named
+before. It runs only under run.lock; elsewhere a test keeps its tagged build. Tests that build through `build.py` use it
 instead of `docker image rm -f <id>`, which ignored tags and removed a
 co-tenant's identical build.
 
