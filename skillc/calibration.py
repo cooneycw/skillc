@@ -149,8 +149,8 @@ DISCRIMINATION_ARMS = ("intact", "degraded")
 #: revision with exactly `removed_text` removed); this module checks only
 #: its FORMAT. Verifying it against the real intact file, and that
 #: `removed_text` occurs in it exactly once, are run-time preconditions of
-#: every live attempt (stated here, enforced at materialize/run time,
-#: beside the inventory re-validation precondition - not built yet).
+#: every live attempt, enforced by `require_degraded_mutation` (#287 P2)
+#: against the acquired intact bytes before any attempt is planned.
 MUTATION_KEYS = frozenset({"skill", "path", "removed_text", "diagnose_evidence", "mutated_digest"})
 
 #: `sha256:` + 64 lowercase hex characters - `materialize.tree_digest`'s own
@@ -715,6 +715,35 @@ def parse_discrimination_declaration(data: Mapping[str, object]) -> Discriminati
         tolerance_non_evaluable_per_arm=non_evaluable, approval=fields.approval, data=dict(data),
         task_fixture=fields.task_fixture,
     )
+
+
+def require_degraded_mutation(intact_bytes: bytes, mutation: Mapping[str, object]) -> bytes:
+    """The run-time mutation check (#287 P2): the degraded file a discrimination
+    run installs is derived from the ACQUIRED intact file's bytes, and must be
+    the exact file the approval and P1's textual scan describe. `removed_text`
+    must occur EXACTLY once (zero means the declared mutation does not apply to
+    these bytes; more than one means removing "it" is ambiguous), and the bytes
+    with it removed must hash to `mutation.mutated_digest`. Returns those
+    degraded bytes; refuses otherwise.
+
+    This is what binds `mutation.skill`/`path` to real content: an approval's
+    `mutated_digest` alone names a digest, not which file produced it."""
+    removed = mutation.get("removed_text")
+    declared = mutation.get("mutated_digest")
+    if not isinstance(removed, str) or not removed or not isinstance(declared, str):
+        raise _refuse("mutation must name a non-empty removed_text and a mutated_digest")
+    needle = removed.encode("utf-8")
+    count = intact_bytes.count(needle)
+    if count != 1:
+        raise _refuse(f"mutation.removed_text occurs {count} time(s) in the acquired intact "
+                      f"{mutation.get('skill')}/{mutation.get('path')}, not exactly once; the declared "
+                      f"mutation does not describe these bytes")
+    degraded = intact_bytes.replace(needle, b"", 1)
+    measured = trial.sha256_bytes(degraded)
+    if measured != declared:
+        raise _refuse(f"the degraded {mutation.get('skill')}/{mutation.get('path')} hashes to {measured}, not "
+                      f"the declared mutated_digest {declared}; refusing a degraded arm other than the approved one")
+    return degraded
 
 
 def load_discrimination_declaration(path: Path) -> DiscriminationDeclaration:
