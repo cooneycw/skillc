@@ -29,6 +29,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
@@ -39,9 +40,11 @@ PHRASES = ("never a PASS", "skipped gates", "SKIP row")
 #: flow-finish-gate.sh EMITS) - never a second, interpretive copy of the
 #: instruction. Classification from #270's PROVENANCE.md finding ("The #287
 #: case-pairing (discrimination) obligation" section), extended in #287 P1 to
-#: the same files installed as dependencies (`scripts/`, `lib/cicd/`). LIMIT:
-#: this exemption is per FILE, so it does not prove every occurrence inside an
-#: exempt file is non-interpretive.
+#: the same files installed as dependencies (`scripts/`, `lib/cicd/`). The
+#: exemption is bound to VERIFIED CONTENT: it applies only while the file's
+#: bytes hash to the digest the inventory recorded at the pin (the content that
+#: was reviewed). An exempt file that changed, for example to print the removed
+#: interpretation to the agent, loses its exemption and its hits need review.
 NON_AGENT_FACING_FILES = frozenset({
     "codex/skills/flow-check/lib/cicd/runner.py",
     "codex/skills/flow-check/lib/cicd/steps.py",
@@ -84,20 +87,23 @@ def closure_sources(inventory_path: Path) -> list[str]:
     return [str(e["source"]) for e in closure_entries(inventory_path) if e.get("source")]
 
 
-def _read(root: Path, entry: dict[str, object]) -> tuple[str, str | None, str | None]:
-    """(label, text or None, coverage error or None)."""
+def _read(root: Path, entry: dict[str, object]) -> tuple[str, str | None, str | None, bool]:
+    """(label, text or None, coverage error or None, content matches the
+    inventory's recorded digest)."""
     source = entry.get("source")
     if source:
         path = root / str(source)
         if not path.is_file():
-            return str(source), None, "missing"
+            return str(source), None, "missing", False
+        data = path.read_bytes()
+        verified = entry.get("digest") == "sha256:" + hashlib.sha256(data).hexdigest()
         try:
-            return str(source), path.read_text(encoding="utf-8"), None
+            return str(source), data.decode("utf-8"), None, verified
         except UnicodeDecodeError:
-            return str(source), None, "undecodable"
+            return str(source), None, "undecodable", False
     if isinstance(entry.get("content"), str):
-        return f"synthetic:{entry.get('destination')}", str(entry["content"]), None
-    return f"unnamed:{entry.get('destination')}", None, "no source and no inline content"
+        return f"synthetic:{entry.get('destination')}", str(entry["content"]), None, False
+    return f"unnamed:{entry.get('destination')}", None, "no source and no inline content", False
 
 
 def scan(root: Path, entries: list[dict[str, object]]) -> tuple[list[dict[str, object]], list[dict[str, str]],
@@ -108,7 +114,7 @@ def scan(root: Path, entries: list[dict[str, object]]) -> tuple[list[dict[str, o
     errors: list[dict[str, str]] = []
     full_copies: list[str] = []
     for entry in entries:
-        label, text, error = _read(root, entry)
+        label, text, error, verified = _read(root, entry)
         if error:
             errors.append({"file": label, "error": error})
             continue
@@ -119,7 +125,8 @@ def scan(root: Path, entries: list[dict[str, object]]) -> tuple[list[dict[str, o
             for phrase in PHRASES:
                 if phrase not in line:
                     continue
-                agent_facing = label not in NON_AGENT_FACING_FILES
+                exempt = label in NON_AGENT_FACING_FILES
+                agent_facing = not (exempt and verified)
                 stripped = line.strip()
                 is_removed_sentence = label == REFERENCE_MD and (
                     ("skipped gates" in line and "SKIP row" in line) or stripped == "a WARN row - never a PASS."
@@ -131,6 +138,7 @@ def scan(root: Path, entries: list[dict[str, object]]) -> tuple[list[dict[str, o
                     "classification": (
                         "removed sentence itself" if is_removed_sentence
                         else "agent-facing, reviewed as a different instruction" if agent_facing and reviewed
+                        else "exempt file changed from its inventoried content: UNREVIEWED" if exempt and not verified
                         else "agent-facing, UNREVIEWED" if agent_facing
                         else "non-agent-facing: implementation comment or the literal verdict string the "
                              "script EMITS, never an interpretive instruction the agent reads"
@@ -174,13 +182,17 @@ def main(argv: list[str] | None = None) -> int:
     degraded_diag = json.loads(args.degraded_diagnose.read_text(encoding="utf-8"))
 
     positive_control_held = REFERENCE_MD in intact_copies
-    unreviewed = [h for h in degraded_hits if h["classification"] == "agent-facing, UNREVIEWED"]
+    unreviewed = [h for h in degraded_hits if str(h["classification"]).endswith("UNREVIEWED")]
+    #: A degraded line that is still a FRAGMENT of the removed sentence (a
+    #: partial removal: dropping only the leading "A", or keeping one clause)
+    #: is the obligation surviving, not a clean removal.
+    fragments = [h for h in degraded_hits if h["classification"] == "removed sentence itself"]
     # One verdict, four values, checked in order. Only HOLDS exits 0.
     if intact_errors or degraded_errors or not positive_control_held \
             or not (_diagnose_ok(intact_diag) and _diagnose_ok(degraded_diag)):
         verdict = "UNKNOWN"      # coverage or the control failed: absence of evidence, not of the instruction
-    elif degraded_copies:
-        verdict = "SURVIVES"     # the full removed sentence is still installed somewhere
+    elif degraded_copies or fragments:
+        verdict = "SURVIVES"     # the removed sentence, whole or in part, is still installed
     elif unreviewed:
         verdict = "NEEDS_REVIEW"  # an unreviewed agent-facing line shares a phrase; not shown to survive
     else:
@@ -215,6 +227,7 @@ def main(argv: list[str] | None = None) -> int:
             "intact_hits": intact_hits,
             "degraded_hit_count": len(degraded_hits),
             "degraded_hits": degraded_hits,
+            "removed_sentence_fragments_in_degraded": fragments,
             "unreviewed_agent_facing_in_degraded": unreviewed,
             "verdict": verdict,
             "claim_holds": verdict == "HOLDS",

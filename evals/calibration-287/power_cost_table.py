@@ -48,6 +48,8 @@ from __future__ import annotations
 
 import json
 import math
+import re
+import statistics
 from pathlib import Path
 
 ALPHA = 0.05
@@ -76,10 +78,31 @@ MEASURED_MEAN_TOKENS_PER_ATTEMPT = round(
     sum(n * mean for _c, n, mean in MEASURED_TOKEN_CELLS) / sum(n for _c, n, _m in MEASURED_TOKEN_CELLS))
 LARGEST_CELL_MEAN_TOKENS_PER_ATTEMPT = max(mean for _c, _n, mean in MEASURED_TOKEN_CELLS)
 
-#: Per-attempt wall time: UNKNOWN until #375's pre-registered final run posts
-#: its timings (orchestrator ruling: mark UNKNOWN rather than estimate).
-WALL_SECONDS_PER_ATTEMPT: float | None = None
-WALL_SECONDS_SOURCE = "UNKNOWN: pending #375's final-run timings"
+#: Per-attempt wall time, MEASURED but SCRIPTED: #375's pre-registered final
+#: run (42 rows, scripted actors, no model; issuecomment-6240849747), extracted
+#: to `evidence/l375-final-scripted-timings.txt`. It measures the container,
+#: gate and grading path on these exact Level-3 tasks, not a live agent's
+#: thinking time, so a LIVE per-attempt wall time stays UNKNOWN.
+SCRIPTED_TIMINGS_FILE = Path(__file__).with_name("evidence") / "l375-final-scripted-timings.txt"
+
+
+def scripted_timings(path: Path = SCRIPTED_TIMINGS_FILE) -> list[float]:
+    """Seconds per row, from the committed extract ('... NN.Ns)' per line)."""
+    out = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        m = re.search(r", ([0-9]+(?:\.[0-9]+)?)s\)$", line)
+        if m and not line.startswith("#"):
+            out.append(float(m.group(1)))
+    return out
+
+
+_T = scripted_timings()
+SCRIPTED_SECONDS = {"rows": len(_T), "min": min(_T), "median": round(statistics.median(_T), 2),
+                    "mean": round(statistics.mean(_T), 1), "max": max(_T)}
+WALL_SECONDS_PER_ATTEMPT: float | None = None  # LIVE: UNKNOWN
+WALL_SECONDS_SOURCE = ("LIVE: UNKNOWN; SCRIPTED (#375 final run, evidence/l375-final-scripted-timings.txt): "
+                       f"{SCRIPTED_SECONDS['rows']} rows, min {SCRIPTED_SECONDS['min']}s, median "
+                       f"{SCRIPTED_SECONDS['median']}s, max {SCRIPTED_SECONDS['max']}s")
 
 #: No dollar figure: the cost cap is superseded (owner, #287 comment
 #: 6021089903: size for power, report tokens for transparency), and no
@@ -138,6 +161,7 @@ def build_table() -> list[dict[str, object]]:
                 "tokens_at_largest_cell_mean": total_tokens(total_attempts, LARGEST_CELL_MEAN_TOKENS_PER_ATTEMPT),
                 "wall_seconds": "UNKNOWN" if WALL_SECONDS_PER_ATTEMPT is None
                 else total_attempts * WALL_SECONDS_PER_ATTEMPT,
+                "scripted_floor_seconds_at_median": round(total_attempts * SCRIPTED_SECONDS["median"]),
             }
         )
     return rows
@@ -162,8 +186,9 @@ def main() -> None:
             "Computed by evals/calibration-287/power_cost_table.py (run it to reproduce - "
             "math.comb is exact integer arithmetic, no approximation). alpha=0.05, one-sided "
             "Fisher's exact, better arm pinned at n/n (the most favorable observable outcome). "
-            "Token inputs are MEASURED and cited; wall time is UNKNOWN until #375's final run "
-            "posts timings; no dollar figure (cost cap superseded, #287 comment 6021089903)."
+            "Token inputs are MEASURED and cited. Live wall time is UNKNOWN; #375's final run gives "
+            "SCRIPTED per-attempt seconds on these tasks, a floor that excludes model time. No "
+            "dollar figure (cost cap superseded, #287 comment 6021089903)."
         ),
         "alpha": ALPHA,
         "measured_token_cells": [list(c) for c in MEASURED_TOKEN_CELLS],
@@ -173,6 +198,7 @@ def main() -> None:
         "upper_bound_tokens_per_attempt": "UNKNOWN",
         "wall_seconds_per_attempt": "UNKNOWN" if WALL_SECONDS_PER_ATTEMPT is None else WALL_SECONDS_PER_ATTEMPT,
         "wall_seconds_source": WALL_SECONDS_SOURCE,
+        "scripted_seconds_per_attempt": SCRIPTED_SECONDS,
         "declarations": DECLARATIONS,
         "arms_per_declaration": ARMS_PER_DECLARATION,
         "rows": rows,

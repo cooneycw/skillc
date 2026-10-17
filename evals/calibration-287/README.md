@@ -26,7 +26,10 @@ The pin is CPP `86641e8` (orchestrator ruling,
   `gate-stops-early`, so this is the nearest measured figure for this client,
   model and effort, not an estimate for this task.
   `tests/test_calibration_287_power_table.py` ties each cited cell to the
-  report. **Wall time is UNKNOWN** until #375's final run posts timings. There
+  report. **Live wall time is UNKNOWN.** #375's pre-registered final run gives
+  SCRIPTED per-attempt seconds on these exact tasks (42 rows: min 32.6 s, median
+  36.15 s, max 79.9 s; `evidence/l375-final-scripted-timings.txt`), a floor that
+  excludes model time, used as exactly that. There
   is no dollar figure: the cost cap is superseded (owner,
   [comment 6021089903](https://github.com/cooneycw/skillc/issues/287#issuecomment-6021089903)).
 - **Mutation evidence, retaken at 86641e8:**

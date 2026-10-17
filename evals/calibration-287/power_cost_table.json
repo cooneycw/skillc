@@ -1,5 +1,5 @@
 {
-  "_comment": "Computed by evals/calibration-287/power_cost_table.py (run it to reproduce - math.comb is exact integer arithmetic, no approximation). alpha=0.05, one-sided Fisher's exact, better arm pinned at n/n (the most favorable observable outcome). Token inputs are MEASURED and cited; wall time is UNKNOWN until #375's final run posts timings; no dollar figure (cost cap superseded, #287 comment 6021089903).",
+  "_comment": "Computed by evals/calibration-287/power_cost_table.py (run it to reproduce - math.comb is exact integer arithmetic, no approximation). alpha=0.05, one-sided Fisher's exact, better arm pinned at n/n (the most favorable observable outcome). Token inputs are MEASURED and cited. Live wall time is UNKNOWN; #375's final run gives SCRIPTED per-attempt seconds on these tasks, a floor that excludes model time. No dollar figure (cost cap superseded, #287 comment 6021089903).",
   "alpha": 0.05,
   "measured_token_cells": [
     [
@@ -28,7 +28,14 @@
   "largest_cell_mean_tokens_per_attempt": 175000,
   "upper_bound_tokens_per_attempt": "UNKNOWN",
   "wall_seconds_per_attempt": "UNKNOWN",
-  "wall_seconds_source": "UNKNOWN: pending #375's final-run timings",
+  "wall_seconds_source": "LIVE: UNKNOWN; SCRIPTED (#375 final run, evidence/l375-final-scripted-timings.txt): 42 rows, min 32.6s, median 36.15s, max 79.9s",
+  "scripted_seconds_per_attempt": {
+    "rows": 42,
+    "min": 32.6,
+    "median": 36.15,
+    "mean": 37.3,
+    "max": 79.9
+  },
   "declarations": 2,
   "arms_per_declaration": 2,
   "rows": [
@@ -41,7 +48,8 @@
       "total_attempts_both_declarations": 40,
       "tokens_at_measured_mean": 5620000,
       "tokens_at_largest_cell_mean": 7000000,
-      "wall_seconds": "UNKNOWN"
+      "wall_seconds": "UNKNOWN",
+      "scripted_floor_seconds_at_median": 1446
     },
     {
       "n_per_arm": 15,
@@ -52,7 +60,8 @@
       "total_attempts_both_declarations": 60,
       "tokens_at_measured_mean": 8430000,
       "tokens_at_largest_cell_mean": 10500000,
-      "wall_seconds": "UNKNOWN"
+      "wall_seconds": "UNKNOWN",
+      "scripted_floor_seconds_at_median": 2169
     },
     {
       "n_per_arm": 20,
@@ -63,7 +72,8 @@
       "total_attempts_both_declarations": 80,
       "tokens_at_measured_mean": 11240000,
       "tokens_at_largest_cell_mean": 14000000,
-      "wall_seconds": "UNKNOWN"
+      "wall_seconds": "UNKNOWN",
+      "scripted_floor_seconds_at_median": 2892
     },
     {
       "n_per_arm": 30,
@@ -74,7 +84,8 @@
       "total_attempts_both_declarations": 120,
       "tokens_at_measured_mean": 16860000,
       "tokens_at_largest_cell_mean": 21000000,
-      "wall_seconds": "UNKNOWN"
+      "wall_seconds": "UNKNOWN",
+      "scripted_floor_seconds_at_median": 4338
     }
   ]
 }

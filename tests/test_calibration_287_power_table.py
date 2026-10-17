@@ -138,3 +138,24 @@ def test_totals_scale_per_attempt_across_both_two_arm_declarations():
     assert row["total_attempts_both_declarations"] == 40
     assert row["tokens_at_measured_mean"] == 40 * 140_500
     assert row["wall_seconds"] == "UNKNOWN"
+    assert row["scripted_floor_seconds_at_median"] == round(40 * pct.SCRIPTED_SECONDS["median"])
+
+
+def test_scripted_timings_are_the_42_rows_of_375s_final_run():
+    """The scripted floor is computed from the committed extract, never typed:
+    42 rows (21 per task), every one a MATCH, and the stats follow from them."""
+    lines = [ln for ln in pct.SCRIPTED_TIMINGS_FILE.read_text(encoding="utf-8").splitlines() if not ln.startswith("#")]
+    assert len(lines) == 42 and all(": MATCH (" in ln for ln in lines)
+    assert sum(ln.startswith("gse.") for ln in lines) == sum(ln.startswith("vse.") for ln in lines) == 21
+    t = pct.scripted_timings()
+    assert pct.SCRIPTED_SECONDS == {"rows": 42, "min": min(t), "median": round(sorted(t)[20] / 2 + sorted(t)[21] / 2, 2),
+                                    "mean": round(sum(t) / 42, 1), "max": max(t)}
+
+
+def test_a_dropped_timing_row_is_detected(tmp_path):
+    """Red case: the same parser on an extract missing a row yields 41, which
+    the 42-row check above would refuse."""
+    text = pct.SCRIPTED_TIMINGS_FILE.read_text(encoding="utf-8").splitlines()
+    short = tmp_path / "t.txt"
+    short.write_text("\n".join(text[:-1]) + "\n", encoding="utf-8")
+    assert len(pct.scripted_timings(short)) == 41

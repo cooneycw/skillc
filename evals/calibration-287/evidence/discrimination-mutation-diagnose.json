@@ -444,6 +444,7 @@
     "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
    }
   ],
+  "removed_sentence_fragments_in_degraded": [],
   "unreviewed_agent_facing_in_degraded": [],
   "verdict": "HOLDS",
   "claim_holds": true
