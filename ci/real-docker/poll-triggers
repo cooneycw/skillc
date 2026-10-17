@@ -36,7 +36,14 @@ chmod 600 "$CURL_CFG"
     echo "header = \"Authorization: token $(cat "$GITHUB_TOKEN_FILE")\""
     echo "header = \"Accept: application/vnd.github+json\""
 } > "$CURL_CFG"
-trap 'rm -f "$CURL_CFG"' EXIT
+# #392: everything whose size depends on GitHub content (comment pages, the
+# accumulated set, processed ids, the selection) lives in files here and
+# reaches Python by PATH, never as an argv string. Linux caps one argv string
+# at 128 KiB (MAX_ARG_STRLEN), and a single page of this repository's newest
+# 100 comments is larger than that - passing pages on argv made every tick
+# die with "Argument list too long" before deciding anything.
+WORK_DIR="$(mktemp -d)"
+trap 'rm -f "$CURL_CFG"; rm -rf "$WORK_DIR"' EXIT
 
 [ -f "$STATE_FILE" ] || echo '{"last_main_sha": null, "processed_comment_ids": []}' > "$STATE_FILE"
 
@@ -47,7 +54,7 @@ gh_get() {
 # ------------------------------------------------------------- decide what to run
 
 CURRENT_MAIN_SHA="$(gh_get "https://api.github.com/repos/$GITHUB_REPO/commits/main" | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])')"
-LAST_MAIN_SHA="$(python3 -c 'import json; print(json.load(open("'"$STATE_FILE"'")).get("last_main_sha") or "")')"
+LAST_MAIN_SHA="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("last_main_sha") or "")' "$STATE_FILE")"
 MAIN_SHA_TO_RUN=""
 [ "$CURRENT_MAIN_SHA" != "$LAST_MAIN_SHA" ] && MAIN_SHA_TO_RUN="$CURRENT_MAIN_SHA"
 
@@ -64,45 +71,57 @@ OWNER_LOGIN="$(gh_get "https://api.github.com/repos/$GITHUB_REPO" | python3 -c '
 # so there is no need to read further. A hard page cap (20 pages = up to
 # 2000 comments) bounds a first-ever run against a very old, very
 # unprocessed state without pagination running away.
-PROCESSED_IDS_JSON="$(python3 -c 'import json; print(json.dumps(json.load(open("'"$STATE_FILE"'")).get("processed_comment_ids", [])))')"
-ALL_COMMENTS_JSON="[]"
+PROCESSED_FILE="$WORK_DIR/processed.json"
+COMMENTS_FILE="$WORK_DIR/comments.json"
+PAGE_FILE="$WORK_DIR/page.json"
+SELECTION_FILE="$WORK_DIR/selection.json"
+python3 -c 'import json,sys; json.dump(json.load(open(sys.argv[1])).get("processed_comment_ids", []), open(sys.argv[2], "w"))' \
+    "$STATE_FILE" "$PROCESSED_FILE"
+echo '[]' > "$COMMENTS_FILE"
 PAGE=1
 while [ "$PAGE" -le 20 ]; do
-    PAGE_JSON="$(gh_get "https://api.github.com/repos/$GITHUB_REPO/issues/comments?sort=created&direction=desc&per_page=100&page=$PAGE")"
-    PAGE_LEN="$(echo "$PAGE_JSON" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
-    [ "$PAGE_LEN" -eq 0 ] && break  # no more comments at all
+    # A failed fetch exits non-zero here and `set -e` ends the tick before
+    # any decision - never read as an empty page.
+    gh_get "https://api.github.com/repos/$GITHUB_REPO/issues/comments?sort=created&direction=desc&per_page=100&page=$PAGE" > "$PAGE_FILE"
 
-    ALL_COMMENTS_JSON="$(python3 -c '
+    # Prints "<page length> <stop>"; appends the page to COMMENTS_FILE. A
+    # plain command substitution, so `set -e` sees a failed parse (an
+    # unparseable page) and ends the tick rather than paginating on.
+    PAGE_STATUS="$(python3 -c '
 import json, sys
-accumulated, page, processed = json.loads(sys.argv[1]), json.loads(sys.argv[2]), set(json.loads(sys.argv[3]))
+comments_path, page_path, processed_path = sys.argv[1:4]
+accumulated = json.load(open(comments_path))
+page = json.load(open(page_path))
+processed = set(json.load(open(processed_path)))
 accumulated.extend(page)
+json.dump(accumulated, open(comments_path, "w"))
 # True once this PAGE contains an id already processed - desc order means
 # every comment after it, on this and any later page, is already known.
 hit_known = any(c.get("id") in processed for c in page)
-print(json.dumps({"accumulated": accumulated, "stop": hit_known}))
-' "$ALL_COMMENTS_JSON" "$PAGE_JSON" "$PROCESSED_IDS_JSON")"
-    SHOULD_STOP="$(echo "$ALL_COMMENTS_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["stop"])')"
-    ALL_COMMENTS_JSON="$(echo "$ALL_COMMENTS_JSON" | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["accumulated"]))')"
+print(len(page), hit_known)
+' "$COMMENTS_FILE" "$PAGE_FILE" "$PROCESSED_FILE")"
+    read -r PAGE_LEN SHOULD_STOP <<< "$PAGE_STATUS"
 
+    [ "$PAGE_LEN" -eq 0 ] && break  # no more comments at all
     [ "$SHOULD_STOP" = "True" ] && break
     [ "$PAGE_LEN" -lt 100 ] && break  # short page: no more pages exist
     PAGE=$((PAGE + 1))
 done
 
-SELECTION_OUTPUT="$(PYTHONPATH="$INSTALLED_ROOT" python3 -c '
+PYTHONPATH="$INSTALLED_ROOT" python3 -c '
 import json, sys
 from ci.real_docker_trigger import select_requested_shas
 
-comments = json.loads(sys.argv[1])
+comments = json.load(open(sys.argv[1]))
 owner_login = sys.argv[2]
-processed = frozenset(json.loads(sys.argv[3]))
+processed = frozenset(json.load(open(sys.argv[3])))
 
 result = select_requested_shas(comments, owner_login=owner_login, processed_ids=processed)
-print(json.dumps({
+json.dump({
     "requests": list(result.requests),
     "newly_seen_ids": list(result.newly_seen_ids),
-}))
-' "$ALL_COMMENTS_JSON" "$OWNER_LOGIN" "$PROCESSED_IDS_JSON")"
+}, open(sys.argv[4], "w"))
+' "$COMMENTS_FILE" "$OWNER_LOGIN" "$PROCESSED_FILE" "$SELECTION_FILE"
 
 # ------------------------------------------------------- run, sequentially
 #
@@ -136,14 +155,14 @@ json.dump(state, open(sys.argv[1], "w"))
 python3 -c '
 import json, sys
 state = json.load(open(sys.argv[1]))
-selection = json.loads(sys.argv[2])
+selection = json.load(open(sys.argv[2]))
 triggered_ids = {cid for cid, _sha in selection["requests"]}
 non_triggering = [i for i in selection["newly_seen_ids"] if i not in triggered_ids]
 existing = set(state.get("processed_comment_ids", []))
 existing.update(non_triggering)
 state["processed_comment_ids"] = sorted(existing)
 json.dump(state, open(sys.argv[1], "w"))
-' "$STATE_FILE" "$SELECTION_OUTPUT"
+' "$STATE_FILE" "$SELECTION_FILE"
 
 run_one() {
     # Echoes the exit code; never raises under `set -e` in the caller.
@@ -162,7 +181,7 @@ if [ -n "$MAIN_SHA_TO_RUN" ]; then
     fi
 fi
 
-REQUESTS_JSON="$(echo "$SELECTION_OUTPUT" | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["requests"]))')"
+REQUESTS_JSON="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["requests"]))' "$SELECTION_FILE")"
 REQUEST_COUNT="$(echo "$REQUESTS_JSON" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
 i=0
 while [ "$i" -lt "$REQUEST_COUNT" ]; do

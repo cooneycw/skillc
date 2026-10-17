@@ -84,19 +84,36 @@ import shlex
 import tempfile
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
+from types import MappingProxyType
 from typing import Any
 
-from . import credential, demo, gate_overlay, leak, profile, records, trial, trial_bootstrap, verify
+from . import (
+    credential,
+    demo,
+    gate_overlay,
+    leak,
+    profile,
+    records,
+    stage_capture,
+    trial,
+    trial_bootstrap,
+    verify,
+    witness_capture,
+)
+from . import runtime_supply as rs
 from . import transcript_adapter as ta
 from .backend import BackendUnavailable, Confirmation, ExecutionBackend, Limits
+from .decide_reply_channel import ChannelRefusal
 from .docker_backend import (
     CANARY_RESULT_FILENAME,
     CONTAINER_HOME,
     CONTAINER_WORKSPACE,
+    TRIGGER_SOCKET_PATH,
     DockerBackend,
 )
+from .gate_witness import GateWitness, GateWitnessRecord
 from .lifecycle import run_through_backend
 from .trial_bootstrap import CanaryNotSatisfied, MCPServerSpec, PromptDeliveryError
 
@@ -303,6 +320,107 @@ _FLOW_CHECK_GATE_SHIM_SOURCE = (
 )
 
 
+
+@dataclass
+class _WitnessSession:
+    """One controller-owned holder; the subject can never supply its record."""
+
+    attempt_id: str
+    limits: Limits
+    witness: GateWitness | None = field(default=None, repr=False)
+    record: GateWitnessRecord | None = field(default=None, repr=False)
+    environment: Mapping[str, str] = field(default_factory=dict, repr=False)
+    nonce: str = field(default_factory=lambda: secrets.token_hex(32), repr=False)
+    ready: bool = False
+    finalization_started: bool = False
+    failure: str | None = None
+
+    def decide(self, request: Mapping[str, object]) -> Mapping[str, object]:
+        if self.failure is not None or self.finalization_started:
+            raise ChannelRefusal("witness session no longer accepts requests")
+        if self.witness is None:
+            raise ChannelRefusal("witness session has no bound controller")
+        if request.get("op") == "witness_ready":
+            if self.ready or set(request) != {"op", "nonce"} or request.get("nonce") != self.nonce:
+                raise ChannelRefusal("witness readiness request refused")
+            return {"nonce": self.nonce}
+        if not self.ready:
+            raise ChannelRefusal("witness session is not ready for gates")
+        return self.witness.decide(request)
+
+    def gate_environment(self) -> Mapping[str, str]:
+        """The measured runtime env plus `PYTHONDONTWRITEBYTECODE=1`, as
+        grading's own env sets it (`verify._env`). #400: a gate that imports
+        Python otherwise writes `__pycache__/*.pyc` into the tree it is judged
+        against, and every honest run's `tree_digest_at_start` reads stale.
+        The start digest stays strict: any other edit still differs."""
+        return MappingProxyType({**self.environment, "PYTHONDONTWRITEBYTECODE": "1"})
+
+    def bind_and_check(self, backend: DockerBackend, handle: object) -> None:
+        def snapshot() -> str:
+            with tempfile.TemporaryDirectory(prefix="skillc-gate-export-") as directory:
+                backend.export(handle, Path(directory))
+                return witness_capture.capture_digest(Path(directory))
+
+        harness = f"{_FLOW_CHECK_GATE_HARNESS_ROOT}/{_FLOW_CHECK_GATE_HARNESS_PATH}"
+        gates = {"flow-check-plan": ["bash", harness, "--plan", "check", "--evidence", "flow-check"],
+                 "flow-check-summary": ["bash", harness, "--check-summary"]}
+        self.witness = GateWitness(
+            declared_gates=gates, tree_digest_fn=snapshot, backend=backend, handle=handle, limits=self.limits,
+            gate_exclusivity=False, exclusivity_basis="The channel observes prescribed shim calls; bypass is not excluded.",
+            declared_env={gate: self.gate_environment() for gate in gates}, workspace_root=CONTAINER_WORKSPACE,
+            # #376: the plan run's per-stage outcomes, read from its own
+            # controller-held stdout when it resolves - never replayed later.
+            stage_capture={"flow-check-plan": stage_capture.capture_stages},
+        )
+        script = (
+            "import json,socket,sys; "
+            "s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.settimeout(float(sys.argv[3])); "
+            "s.connect(sys.argv[1]); "
+            "s.sendall((json.dumps(dict(op='witness_ready',nonce=sys.argv[2]))+'\\n').encode()); "
+            "s.shutdown(socket.SHUT_WR); f=s.makefile('rb'); raw=f.readline(4097); "
+            "assert len(raw)<=4096 and raw.endswith(b'\\n') and not f.read(1); "
+            "sys.stdout.buffer.write(raw); s.close()"
+        )
+        limits = replace(self.limits, timeout=min(self.limits.timeout, 5), max_captured_stdout_bytes=4096)
+        try:
+            reply = rs.load_json(backend.controller_output(
+                handle, ["/usr/bin/python3", "-c", script, TRIGGER_SOCKET_PATH, self.nonce, str(limits.timeout)], limits,
+            ))
+            if reply != {"ok": True, "result": {"nonce": self.nonce}}:
+                raise HomeFileVerificationRefused("witness readiness reply did not match controller nonce")
+        except Exception:
+            self.failure = "witness readiness failed"
+            self.witness.channel_unavailable = True
+            raise
+        self.ready = True
+
+    def finish(self, backend: DockerBackend, handle: object, experiment: trial.Experiment) -> None:
+        if self.finalization_started:
+            if self.failure is not None:
+                raise HomeFileVerificationRefused(self.failure)
+            return
+        self.finalization_started = True
+        try:
+            stops = [e["event"] for e in experiment.events(self.attempt_id)
+                     if e.get("event") in ("stop-confirmed", "stop-unconfirmed")]
+            if stops[-1:] != ["stop-confirmed"] or not self.ready or self.witness is None:
+                raise HomeFileVerificationRefused("witness finalization requires confirmed stop and readiness")
+            # #367: first result is authoritative. The channel now enforces
+            # it too: after a failed drain, trigger_log() re-raises that
+            # failure on every read, caught below as a refusal.
+            if backend.trigger_log(handle) is None:
+                raise HomeFileVerificationRefused("witness channel was unavailable at finalization")
+            record = self.witness.finalize(self.attempt_id)
+            if any(g.coverage == "channel-unavailable" for g in record.gates.values()):
+                raise HomeFileVerificationRefused("witness output or channel coverage is unavailable")
+            self.record = record
+        except Exception:
+            self.failure = "witness stop, channel drain or output finalization failed"
+            if self.witness is not None:
+                self.witness.channel_unavailable = True
+            raise
+
 def _workspace_snapshot(backend: DockerBackend, handle: object) -> dict[str, str]:
     """A `{relpath: sha256-hex}` content snapshot of every file currently
     under `CONTAINER_WORKSPACE`, via `export()` - never via an exec, since
@@ -345,11 +463,9 @@ def _preflight_in_container(
     pass every attempt by construction - the same blind instrument that
     let exit 127 through in the first place.
 
-    `exec_in_attempt`'s `ExecuteResult` carries no stdout text (only a
-    byte COUNT - see its own docstring); the real captured text reaches
-    `CONTAINER_WORKSPACE/observations` through the SAME write-back
-    `verify.py`/`gate_witness.py` already rely on (#76), read back here
-    via `export()`. Every check - digests and every probe - shares ONE
+    Witnessed attempts consume the controller's retained stdout, never a
+    candidate observations artifact. Ordinary callers retain the existing
+    workspace write-back convention. Every check - digests and every probe - shares ONE
     combined exec, regardless of how many files, tools or probes are
     declared. TWO exports are needed, not one: a
     BASELINE snapshot taken before the exec even runs, and one taken
@@ -415,9 +531,10 @@ def _preflight_in_container(
                 # trial image's system interpreter rather than the
                 # checkout's own isolated venv.
                 project_dir = f"{CONTAINER_HOME}/{uv_project}"
+                policy = "--offline --locked " if getattr(backend, "runtime_supply", None) is not None else ""
                 check_cmd = (
                     f'PYTHONPATH={shlex.quote(project_dir)}:${{PYTHONPATH:-}} '
-                    f'uv run --project {shlex.quote(project_dir)} python -c {shlex.quote(script_body)}'
+                    f'uv run {policy}--project {shlex.quote(project_dir)} python -c {shlex.quote(script_body)}'
                 )
             script_lines.append(
                 f'if {check_cmd} >/dev/null 2>&1; then '
@@ -442,7 +559,13 @@ def _preflight_in_container(
             ) from exc
         tmp_root = Path(tmp)
         observations = tmp_root / "observations"
-        output = observations.read_text(encoding="utf-8", errors="replace") if observations.is_file() else ""
+        if getattr(backend, "witness_io", False):
+            if (result.reason != "exited" or result.stdout is None or result.stdout_truncated
+                    or result.stdout_incomplete or result.stderr_incomplete):
+                raise HomeFileVerificationRefused("preflight retained output is missing or incomplete")
+            output = result.stdout.decode("utf-8", errors="strict")
+        else:
+            output = observations.read_text(encoding="utf-8", errors="replace") if observations.is_file() else ""
         after_exec = {
             path.relative_to(tmp_root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
             for path in tmp_root.rglob("*") if path.is_file()
@@ -544,6 +667,7 @@ def _make_before_execute(
     extra_home_files: Mapping[str, bytes], verify_home_files: Mapping[str, str] | None = None,
     preflight_tools: Sequence[Mapping[str, object]] | None = None, limits: Limits | None = None,
     gate_entrypoint: str | None = None,
+    runtime_ready: Callable[[DockerBackend, object], None] | None = None,
 ) -> Callable[[ExecutionBackend, object], None]:
     """`delivered_credential_bytes` is an OUT-parameter (a single-entry dict
     the caller reads afterward) - `observe_before_teardown` needs these
@@ -612,6 +736,9 @@ def _make_before_execute(
         # decided by the caller's own intent, not by dict ordering luck.
         for relpath, data in extra_home_files.items():
             backend.deliver_home_file(handle, relpath, data)
+
+        if runtime_ready is not None:
+            runtime_ready(backend, handle)
 
         if resolved_verify_home_files or resolved_preflight_tools:
             assert limits is not None  # checked above, before any delivery happened
@@ -1691,6 +1818,21 @@ def run_one_attempt(
     text - leak-checking and persisting what this returns is the CALLER's
     job (`selection_probe.py`'s own retention, not a general capability every
     caller inherits for free)."""
+    witness_session = _WitnessSession(attempt_id, limits) if gate_entrypoint is not None else None
+    selected_supply = backend.runtime_supply if isinstance(backend, DockerBackend) else None
+    if witness_session is not None or selected_supply is not None:
+        if not isinstance(backend, DockerBackend):
+            raise HomeFileVerificationRefused("witnessing requires a supported Docker backend")
+        if grading_backend is backend:
+            raise ValueError("grading_backend must be a SEPARATE instance from the original agent backend")
+        if witness_session is not None and backend.trigger_decide is not None:
+            raise HomeFileVerificationRefused("witnessing conflicts with an existing trigger callback")
+        try:
+            backend = replace(backend, witness_io=True,
+                              trigger_decide=witness_session.decide if witness_session else backend.trigger_decide)
+        except (TypeError, ValueError) as exc:
+            raise HomeFileVerificationRefused("backend cannot preserve its type while enabling witness IO") from exc
+
     if client not in CLIENT_SPECS:
         raise credential.CredentialRefused(f"unknown client {client!r}: expected one of {sorted(CLIENT_SPECS)}")
     spec = CLIENT_SPECS[client]
@@ -1717,6 +1859,17 @@ def run_one_attempt(
 
     ctx = _AttemptContext(workdir=resolved_workdir, mcp_servers=resolved_mcp_servers, cli_version=resolved_cli_version)
     delivered_credential_bytes: dict[str, bytes] = {}
+    def runtime_ready(measured_backend: DockerBackend, handle: object) -> None:
+        if selected_supply is not None:
+            env = measured_backend.runtime_environment(handle, limits, verify_home_files or {})
+        elif witness_session is not None:
+            bounded = replace(limits, timeout=min(limits.timeout, 5), max_captured_stdout_bytes=rs.MAX_JSON + 1)
+            env = rs.environment(measured_backend.controller_output(handle, ["env", "-0"], bounded))
+        else:
+            return
+        if witness_session is not None:
+            witness_session.environment = MappingProxyType(dict(env))
+
     before_execute = _make_before_execute(
         spec=spec, ctx=ctx, credential_explicit_path=credential_explicit_path,
         minimum_credential_seconds=minimum_credential_seconds,
@@ -1724,7 +1877,16 @@ def run_one_attempt(
         extra_home_files=extra_home_files or {},
         verify_home_files=verify_home_files, preflight_tools=preflight_tools, limits=limits,
         gate_entrypoint=gate_entrypoint,
+        runtime_ready=runtime_ready if witness_session is not None or selected_supply is not None else None,
     )
+    if witness_session is not None:
+        install_and_verify = before_execute
+
+        def before_execute(ready_backend: ExecutionBackend, handle: object) -> None:
+            install_and_verify(ready_backend, handle)
+            assert isinstance(ready_backend, DockerBackend)
+            witness_session.bind_and_check(ready_backend, handle)
+
     retained_transcript: dict[str, object] | None = {} if retain_transcript else None
     # #202: the transcript goes into the attempt's OWN store for every caller,
     # leak-checked first. Empty only when the hook itself failed before it
@@ -1735,6 +1897,17 @@ def run_one_attempt(
         delivered_credential_bytes=delivered_credential_bytes,
         retained_transcript=retained_transcript, stored_transcript=stored_transcript,
     )
+
+    if witness_session is not None:
+        observe_transcript = observe_before_teardown
+
+        def observe_before_teardown(observed_backend: ExecutionBackend, handle: object) -> Mapping[str, object]:
+            assert isinstance(observed_backend, DockerBackend)
+            try:
+                witness_session.finish(observed_backend, handle, experiment)
+            except Exception:  # noqa: BLE001 - preserve transcript; grading checks this latched failure
+                witness_session.failure = witness_session.failure or "witness finalization failed"
+            return observe_transcript(observed_backend, handle)
 
     def transcript_for_capture() -> trial.TranscriptEvidence:
         return stored_transcript.get("evidence") or trial.TranscriptEvidence(
@@ -1754,7 +1927,9 @@ def run_one_attempt(
     grading_seconds: float | None = None
     observation = record.get("observation")
     if grader is not None:
-        if record.get("disposition") != "captured":
+        if witness_session is not None and (witness_session.failure or witness_session.record is None):
+            grading_blocked_reason = witness_session.failure or "controller witness was never finalized"
+        elif record.get("disposition") != "captured":
             grading_blocked_reason = f"attempt disposition is {record.get('disposition')!r}, not captured"
         elif not isinstance(observation, dict) or observation.get("status") == "unknown":
             grading_blocked_reason = "the transcript observation is unknown - never graded on an unconfirmed attempt"
@@ -1812,6 +1987,7 @@ def run_one_attempt(
                     trial.add_receipt(experiment, receipt)
                     stored, graded_result = verify._grade_and_store(
                         experiment, attempt_id, grader, base, backend=grading_backend,
+                        gate_witness=witness_session.record if witness_session else None,
                     )
                 else:
                     # The observation stands in for the installation receipt
@@ -1820,6 +1996,7 @@ def run_one_attempt(
                     # unchanged) - accounting only, readiness stays UNKNOWN.
                     stored, graded_result = verify.grade_agent_attempt(
                         experiment, attempt_id, grader, base, observation, backend=grading_backend,
+                        gate_witness=witness_session.record if witness_session else None,
                     )
             except Exception as exc:
                 # The attempt ran and was observed; a grading failure (a

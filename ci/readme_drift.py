@@ -55,7 +55,8 @@ def readme_commands(readme_text: str) -> set[str] | None:
         return None
     return {
         m.group(1) for line in block.splitlines()
-        if (m := re.match(r"^skillc ([a-z][a-z-]*)\b", line.strip()))
+        # Digits too (#375: `level3-campaign`); `[a-z-]*` read it as `level`.
+        if (m := re.match(r"^skillc ([a-z][a-z0-9-]*)\b", line.strip()))
     }
 
 

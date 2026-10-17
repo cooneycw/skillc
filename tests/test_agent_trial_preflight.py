@@ -326,3 +326,44 @@ def test_a_python_import_probe_with_uv_project_runs_through_uv_run() -> None:
     assert "uv run --project" in script
     assert f"{at.CONTAINER_HOME}/Projects/claude-power-pack" in script
     assert "python3 -c" not in script
+
+
+@pytest.mark.parametrize("fault", [None, "missing", "truncated", "incomplete"])
+def test_witness_preflight_reads_retained_output_not_candidate_artifact(fault: str | None) -> None:
+    good = f"{at._TOOLS_MARKER}\nPROBE:0:IMPORT_OK\n"
+
+    class RetainedBackend(_StubBackend):
+        witness_io = True
+        runtime_supply = None
+
+        def exec_in_attempt(self, handle: object, argv: list[str], limits: Limits) -> ExecuteResult:
+            self.exec_calls.append(argv)
+            self._exec_ran = True
+            return ExecuteResult(reason="exited", exit_code=0,
+                                 stdout=None if fault == "missing" else good.encode(),
+                                 stdout_truncated=fault == "truncated", stdout_incomplete=fault == "incomplete")
+
+    backend: Any = RetainedBackend(observations=good if fault else "forged",
+                                  baseline_files={"observations": (good if fault else "forged").encode()})
+    if fault:
+        with pytest.raises(at.HomeFileVerificationRefused, match="retained"):
+            at._preflight_in_container(backend, object(), LIMITS, {}, [_import_tool("pypi", modules=["json"])])
+    else:
+        at._preflight_in_container(backend, object(), LIMITS, {}, [_import_tool("pypi", modules=["json"])])
+        assert backend.remove_calls == []
+
+
+@pytest.mark.parametrize("selected", [False, True])
+def test_only_selected_runtime_adds_explicit_offline_locked_import_flags(selected: bool) -> None:
+    from test_runtime_supply import RECEIPT
+
+    from skillc.runtime_supply import RuntimeSupply
+
+    backend: Any = _StubBackend(observations=f"{at._TOOLS_MARKER}\nPROBE:0:IMPORT_OK\n")
+    backend.runtime_supply = RuntimeSupply(RECEIPT) if selected else None
+    tool = _import_tool("pypi", modules=["json"])
+    tool["probes"][0]["uv_project"] = "Projects/claude-power-pack"
+    at._preflight_in_container(backend, object(), LIMITS, {}, [tool])
+    script = backend.exec_calls[0][-1]
+    assert ("uv run --offline --locked --project" in script) is selected
+    assert ("uv run --project" in script) is (not selected)

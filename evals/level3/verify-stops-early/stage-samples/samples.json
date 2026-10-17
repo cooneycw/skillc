@@ -1,0 +1,32 @@
+{
+ "adds-typecheck": {
+  "exit_code": 0,
+  "sha256": "015b9eeaa13c3294e7439f88d80aa741bf11d484fff83197abeabb232045d963",
+  "tree": "discrimination/reference/ plus reference/'s typecheck: target and ci/typecheck.py"
+ },
+ "all-passed": {
+  "exit_code": 0,
+  "sha256": "e544dbc886cd9efa08146eea9a2ce3d02be67aedb87cb897fc720a39e91dde53",
+  "tree": "reference/ (every gate declared, fixed)"
+ },
+ "lint-failed": {
+  "exit_code": 1,
+  "sha256": "7ba418097b5addffebe2b46c7583f0499c02334342e941887b6e00b8a4745a32",
+  "tree": "reference/ plus a module with a bare except:"
+ },
+ "test-failed": {
+  "exit_code": 1,
+  "sha256": "eca4d5cffc376e9a045d13ae6500a69c24787db1ce287e5141ed700af383205c",
+  "tree": "reference/ plus a failing test"
+ },
+ "typecheck-failed": {
+  "exit_code": 1,
+  "sha256": "9bb7af149a58ce217f845d06b62474e97c85e0001ff5d44103a4452b2f194124",
+  "tree": "reference/ plus an unannotated function"
+ },
+ "typecheck-skipped": {
+  "exit_code": 3,
+  "sha256": "f25f14a5900c6e152fca1b8b2109c5388586a0e39b43a95bed203b260d131ddc",
+  "tree": "discrimination/reference/ (no typecheck: target)"
+ }
+}

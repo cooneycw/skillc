@@ -10,6 +10,7 @@ the next time it goes red in CI on something nobody ran locally.
 from __future__ import annotations
 
 import re
+import shlex
 from pathlib import Path
 
 import yaml
@@ -31,6 +32,7 @@ CI_STEP_MAKE_TARGETS: dict[str, tuple[str, ...]] = {
     "changelog-check": ("changelog-check",),
     "readme-drift": ("readme-drift",),
     "git-tests-control": ("git-tests-control",),
+    "pytest-population-control": ("pytest-population-control",),
 }
 
 
@@ -185,3 +187,112 @@ def test_leak_exclude_parsers_are_never_vacuously_empty() -> None:
     ci_paths = _ci_leak_exclude_paths(CI_YML.read_text(encoding="utf-8"))
     assert make_paths, "the Makefile parser found no --exclude paths at all - probably broken, not really empty"
     assert ci_paths, "the ci.yml parser found no --exclude paths at all - probably broken, not really empty"
+
+
+# ----------------------------------------------- parallel population gate (#364)
+
+
+def _parallel_contract(ci_text: str, make_text: str) -> bool:
+    config = yaml.safe_load(ci_text)
+    gate = next(step for step in config["steps"] if step["name"] == "gate")
+    run = next(command for command in gate["commands"] if "--junit-xml=" in command)
+    make_run = next(line for line in make_text.splitlines() if "--junit-xml=" in line and "uv run" in line)
+    make_run = make_run.replace("$(PYTEST_WORKERS)", "auto")
+    def args(command: str) -> list[str]:
+        words = shlex.split(command.replace("$(PYTEST_ARGS)", ""))
+        words = words[words.index("pytest") + 1:]
+        for boundary in ("|", ">"):
+            if boundary in words:
+                words = words[:words.index(boundary)]
+        return ["--junit-xml=REPORT" if word.startswith("--junit-xml=") else word
+                for word in words]
+
+    collect = next((command for command in gate["commands"] if "--collect-only" in command), "")
+    make_collect = next((line for line in make_text.splitlines() if "--collect-only" in line), "")
+    if not collect or not make_collect:
+        return False
+    expected = ["-n", "auto", "--maxprocesses=8", "--dist=loadgroup", "-rA", "--durations=0", "--junit-xml=REPORT"]
+    return (args(run) == args(make_run) == expected
+            and "PYTEST_WORKERS ?= auto" in make_text
+            and "PYTEST_ARGS ?=\n" in make_text
+            and args(collect) == args(make_collect) == ["--collect-only", "-q"]
+            and "python3 ci/check_pytest_population.py" in make_text
+            and "pytest-population-control: test" in make_text
+            and "pytest-population-control" in make_text.split("verify:", 1)[1]
+            and any(step["name"] == "pytest-population-control"
+                    and step["depends_on"] == ["gate"]
+                    and "python3 ci/check_pytest_population.py pytest-collected.txt pytest-report.xml"
+                    in step["commands"]
+                    and "bash ci/pytest-population-control.sh" in step["commands"]
+                    for step in config["steps"]))
+
+
+def test_ci_and_local_parallel_population_contract() -> None:
+    assert _parallel_contract(CI_YML.read_text(), MAKEFILE.read_text())
+
+
+def test_parallel_contract_rejects_serial_or_missing_control() -> None:
+    ci_text, make_text = CI_YML.read_text(), MAKEFILE.read_text()
+    for old, new in (("-n auto", "-n 0"),
+                     ("pytest --collect-only -q", "pytest --version"),
+                     ("python3 ci/check_pytest_population.py", "true")):
+        changed = ci_text.replace(old, new)
+        assert changed != ci_text
+        assert not _parallel_contract(changed, make_text)
+    for old, new in (("PYTEST_WORKERS ?= auto", "PYTEST_WORKERS ?= 0"),
+                     ("pytest --collect-only -q", "pytest --version"),
+                     ("python3 ci/check_pytest_population.py", "true")):
+        changed = make_text.replace(old, new)
+        assert changed != make_text
+        assert not _parallel_contract(ci_text, changed)
+
+
+def test_parallel_contract_rejects_ci_only_selection_and_worker_overrides() -> None:
+    ci_text, make_text = CI_YML.read_text(), MAKEFILE.read_text()
+    for option in ("--ignore=tests/test_docker_backend.py", "-n 0"):
+        changed = ci_text.replace("pytest --collect-only -q", "pytest --collect-only -q " + option)
+        changed = changed.replace("--junit-xml=pytest-report.xml", "--junit-xml=pytest-report.xml " + option)
+        assert not _parallel_contract(changed, make_text)
+
+
+def _records_gate_host_state(ci_text: str) -> bool:
+    """#412: the gate step's FIRST command prints the CI VM's `nproc` and
+    `/proc/loadavg` and sets an EXIT trap that prints them again, so a timing red is
+    attributable to the machine's state from the CI log alone."""
+    gate = next(step for step in yaml.safe_load(ci_text)["steps"] if step["name"] == "gate")
+    first = gate["commands"][0]
+    start, sep, rest = first.partition("; trap '")
+    body, sep2, _ = rest.partition("' EXIT")
+    measured = ("$(nproc)", "$(cat /proc/loadavg)")
+    return (bool(sep and sep2) and "gate-host start" in start and all(m in start for m in measured)
+            and "gate-host end" in body and all(m in body for m in measured))
+
+
+def test_the_gate_records_the_ci_hosts_state_at_start_and_exit() -> None:
+    assert _records_gate_host_state(CI_YML.read_text())
+
+
+def test_gate_host_state_check_rejects_a_missing_trap_or_a_late_start_line() -> None:
+    ci_text = CI_YML.read_text()
+    first = next(s for s in yaml.safe_load(ci_text)["steps"] if s["name"] == "gate")["commands"][0]
+    no_trap = ci_text.replace(first, first.split("; trap", 1)[0])
+    assert no_trap != ci_text and not _records_gate_host_state(no_trap)
+    moved = ci_text.replace("      - " + first + "\n", "", 1).replace(
+        "      - pip install uv\n", "      - pip install uv\n      - " + first + "\n", 1)
+    assert moved != ci_text and not _records_gate_host_state(moved)
+    # Counter-model review: measurements present only in the START line must
+    # not satisfy the check - the trap body is checked on its own.
+    body = first.split("; trap '", 1)[1].split("' EXIT", 1)[0]
+    unmeasured_end = ci_text.replace(body, 'echo "gate-host end"', 1)
+    assert unmeasured_end != ci_text and not _records_gate_host_state(unmeasured_end)
+
+
+def test_parallel_contract_rejects_dropping_durations_from_either_side() -> None:
+    ci_text, make_text = CI_YML.read_text(), MAKEFILE.read_text()
+    assert not _parallel_contract(ci_text.replace("-rA --durations=0", "-rA", 1), make_text)
+    assert not _parallel_contract(ci_text, make_text.replace("-rA --durations=0", "-rA", 1))
+
+
+def test_generated_collection_is_excluded_from_both_leak_scans() -> None:
+    assert "pytest-collected.txt" in _ci_leak_exclude_paths(CI_YML.read_text())
+    assert "pytest-collected.txt" in _makefile_leak_exclude_paths(MAKEFILE.read_text())

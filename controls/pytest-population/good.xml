@@ -1,0 +1,4 @@
+<testsuites><testsuite tests="2" failures="0" errors="0" skipped="1">
+<testcase classname="tests.test_example" name="test_pass"/>
+<testcase classname="tests.test_example.TestExample" name="test_skip[value::with.dots/and/slashes]"><skipped type="pytest.skip" message="fixture skip"/></testcase>
+</testsuite></testsuites>

@@ -1,0 +1,25 @@
+{
+  "branch": "issue-315-provision-the-dedicated-docker-ci-woodpecker-agent",
+  "counts": {
+    "accepted": 0,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "1b40509ba97ba12de92e07a6b108496be8b2ace2",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "315",
+  "passes": 1,
+  "recorded_at": "2026-10-13T19:57:10Z",
+  "red_cases": {
+    "already_covered": 0,
+    "proposed": 0
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/13/rollout-2026-10-13T15-56-29-01a136d6-7efa-7d63-9f4c-8fb8ef14642b.jsonl",
+    "thread_id": "01a136d6-7efa-7d63-9f4c-8fb8ef14642b"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

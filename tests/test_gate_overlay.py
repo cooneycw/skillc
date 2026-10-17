@@ -28,6 +28,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from conftest import FAKE_DOCKER_DAEMON_TIMEOUT
 
 from skillc import docker_backend as d
 from skillc.gate_overlay import OverlayRefused, apply_flow_check_gate_overlay
@@ -61,7 +62,7 @@ def docker_state(tmp_path: Path) -> Path:
 
 def _backend(base: Path, docker_state: Path) -> d.DockerBackend:
     docker_bin = [sys.executable, str(FAKE_DOCKER), "--state", str(docker_state)]
-    return d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=docker_bin)
+    return d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=docker_bin, daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
 
 
 def _digest(data: bytes) -> str:

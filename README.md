@@ -108,6 +108,7 @@ skillc collection-run <subject> # #11/#106: one real agent attempt per skill col
 skillc pilot-run               # #12: the predeclared matched pilot, treatment vs baseline (run live: evals/matched-pilot/evidence/)
 skillc selection-probe         # #26: the three selection cases, or --detection-control (run live: evals/selection-probe/evidence/)
 skillc calibration-run <declaration> # #207: run an APPROVED two- or three-arm calibration declaration (#204, #231); evidence stays private
+skillc level3-campaign --runtime-supply-receipt <receipt> # #375: the frozen Level-3 production-path campaign, scripted subjects, no model; evidence stays private
 skillc uptake-study <declaration> --rewritten <dir> # #237: run an APPROVED two-arm uptake study (published vs a rewritten description); evidence stays private
 skillc pilot-report <run_dir>  # #12: rebuild a pilot's report from its private run, merging reviewed claims
 skillc configuration-compare --a <record.json> --b <record.json> --vary <field> # #13: compare two captured evidence records, refusing an unmatched configuration
@@ -284,12 +285,10 @@ uv run skillc selftest
 `main` is branch-protected: the `ci/woodpecker/pr/ci` check is required and
 must be up to date with `main` before merging (strict mode), and force-push
 and branch deletion are blocked. Before opening a PR, run
-`uv run skillc selftest && uv run pytest && uv run ruff check . && uv run mypy`
-and `uv run skillc leak-check . --exclude controls/leak-check/bad --exclude
-tests/test_leak.py --exclude ci/leak-check-control.sh --exclude
-tests/fixtures/leak_seeds` (the excludes skip this repo's own seeded-bad
-fixtures, which a bare scan would otherwise report as findings - see CI's
-`leak-check` step for the authoritative list); `uv run pytest
+`make verify`. Its test run uses up to eight parallel workers, checks the
+collected test identities against the result report, and proves the population
+check rejects a committed short report. `make test PYTEST_WORKERS=0` runs the
+same population serially; reports are kept under `reports/`. `uv run pytest
 tests/test_private_citations.py` guards tracked files against a private
 fleet message number or worker name (issue #100) - and a PR that
 changes `skillc/` also needs a new entry under `CHANGELOG.md`'s `[Unreleased]`

@@ -44,6 +44,10 @@ TREATMENT_ARM = "full-cpp"
 #: (pipeline 454): `confirm_stopped` read UNKNOWN, and "UNKNOWN never reaps"
 #: quarantined the verifier for the rest of the process. The fake daemon is
 #: local, so a generous bound costs nothing and says nothing about a real one.
+#: Deliberately ABOVE the suite-wide `conftest.FAKE_DOCKER_DAEMON_TIMEOUT`
+#: (30s, issue #385): this is the one fake-CLI path with a recorded overrun,
+#: and lowering its margin to the shared value would trade a known-loaded
+#: path for uniformity. `test_uptake_study.py` reuses it for the same runner.
 _FAKE_DAEMON_TIMEOUT = 120.0
 
 
@@ -590,17 +594,28 @@ def test_red_an_interrupted_runner_still_accounts_for_every_planned_attempt(
 # ------------------------------------------- three arms, B/N/P (#231, for #203)
 
 
+#: Attempts per arm for the two three-arm end-to-end runs below (#399). Each
+#: attempt is ~3.7s of real fake-docker work (about 66 fresh `fake_docker.py`
+#: processes - mostly one `docker cp` per installed task file - plus a ~1.4s
+#: grading exec), so 3 per arm made each test ~34s: a 3.5x margin under the
+#: suite-wide 120s timeout that a loaded CI host ate twice (pipelines 781,
+#: 785). 2 keeps more than one repeat per arm - the seeded order still
+#: interleaves and k/n still aggregates across repeats - at two thirds the
+#: cost. The limit is deliberately NOT raised: it stays the hang catcher.
+_THREE_ARM_ATTEMPTS = 2
+
+
 def _three_arm_declaration() -> calibration.CalibrationDeclaration:
     """The committed declaration plus a provided-skill arm: the same subject
     as the treatment, told to read `tdd` (the test collection's one skill)."""
-    data = _declaration_data(attempts=3)
+    data = _declaration_data(attempts=_THREE_ARM_ATTEMPTS)
     arms = data["arms"]
     assert isinstance(arms, list)
     arms.append({"name": "provided", "subject": dict(arms[0]["subject"]), "treatment": "told to read tdd",
                  "instruction": "Before you start, read the `tdd` skill.", "named_skills": ["tdd"]})
     names = [a["name"] for a in arms]
     data["arm_order"]["sequence"] = calibration.derive_arm_order(  # type: ignore[index]
-        data["arm_order"]["seed"], names, 3)  # type: ignore[index]
+        data["arm_order"]["seed"], names, _THREE_ARM_ATTEMPTS)  # type: ignore[index]
     return calibration.parse_declaration(data)
 
 
@@ -625,7 +640,7 @@ def test_three_arms_differ_only_by_install_and_the_provided_arm_s_instruction(
         solve_arms=(TREATMENT_ARM, calibration.BASELINE_ARM, "provided"),
     )
 
-    assert len(seen) == 9
+    assert len(seen) == 3 * _THREE_ARM_ATTEMPTS
     arm_of = {o.scheduled.attempt_id: o.scheduled.arm for o in outcomes}
     goal = (TASK / "goal.md").read_text(encoding="utf-8")
     for call in seen:
@@ -642,13 +657,13 @@ def test_three_arms_differ_only_by_install_and_the_provided_arm_s_instruction(
     )
     arms = report["arms"]
     assert isinstance(arms, dict)
-    assert (arms["provided"]["opened"], arms["provided"]["observed"], arms["provided"]["named_opened"]) == (3, 3, 3)
-    assert (arms[TREATMENT_ARM]["opened"], arms[TREATMENT_ARM]["observed"]) == (0, 3)
+    assert (arms["provided"]["opened"], arms["provided"]["observed"], arms["provided"]["named_opened"]) == (_THREE_ARM_ATTEMPTS,) * 3
+    assert (arms[TREATMENT_ARM]["opened"], arms[TREATMENT_ARM]["observed"]) == (0, _THREE_ARM_ATTEMPTS)
     assert "named_opened" not in arms[TREATMENT_ARM]
     for entry in _entries(report):
         assert entry["skill_opened"] is (entry["arm"] == "provided")
         assert ("named_skill_opened" in entry) is (entry["arm"] == "provided")
-    assert "opened=3/3 named_opened=3" in cr.paste_back(report)
+    assert f"opened={_THREE_ARM_ATTEMPTS}/{_THREE_ARM_ATTEMPTS} named_opened={_THREE_ARM_ATTEMPTS}" in cr.paste_back(report)
 
 
 def test_a_provided_arm_naming_a_skill_the_install_lacks_is_refused_before_any_store(
@@ -731,7 +746,7 @@ def _expanded_instruction_run_declaration(tmp_path: Path) -> calibration.Calibra
     """Baseline + S (explicit, names tdd) + E (the SAME body inlined) - the
     same treatment subject `_treatment` installs, so this dry run proves
     scheduling/accounting for the new lane without a second fixture."""
-    data = _declaration_data(attempts=3)
+    data = _declaration_data(attempts=_THREE_ARM_ATTEMPTS)
     data["lane"] = calibration.EXPANDED_INSTRUCTION_LANE
     arms = data["arms"]
     assert isinstance(arms, list)
@@ -746,7 +761,7 @@ def _expanded_instruction_run_declaration(tmp_path: Path) -> calibration.Calibra
                                "inventory": inventory}]
     data["arms"] = new_arms
     names = [a["name"] for a in new_arms if isinstance(a, dict)]
-    data["arm_order"] = {"seed": 7, "sequence": calibration.derive_arm_order(7, names, 3)}
+    data["arm_order"] = {"seed": 7, "sequence": calibration.derive_arm_order(7, names, _THREE_ARM_ATTEMPTS)}
     return calibration.parse_declaration(data)
 
 
@@ -773,7 +788,7 @@ def test_expanded_instruction_lane_dry_run_schedules_and_reconciles_all_three_ar
         solve_arms=(calibration.BASELINE_ARM, "explicit-skill", "expanded-instruction"),
     )
 
-    assert len(seen) == 9  # 3 arms x 3 attempts, baseline readiness included
+    assert len(seen) == 3 * _THREE_ARM_ATTEMPTS  # 3 arms x _THREE_ARM_ATTEMPTS, baseline readiness included
     arm_of = {o.scheduled.attempt_id: o.scheduled.arm for o in outcomes}
     goal = (TASK / "goal.md").read_text(encoding="utf-8")
     for call in seen:
@@ -799,7 +814,7 @@ def test_expanded_instruction_lane_dry_run_schedules_and_reconciles_all_three_ar
     # Every attempt reconciles: all-attempt accounting, not merely the ones
     # that happened to succeed.
     assert {a: v["scheduled"] for a, v in arms.items()} == {
-        calibration.BASELINE_ARM: 3, "explicit-skill": 3, "expanded-instruction": 3,
+        calibration.BASELINE_ARM: _THREE_ARM_ATTEMPTS, "explicit-skill": _THREE_ARM_ATTEMPTS, "expanded-instruction": _THREE_ARM_ATTEMPTS,
     }
     # E has `named_skills` absent by design (nothing to name - the content
     # is inline), so it carries no named_opened accounting; S does.

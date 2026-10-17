@@ -750,7 +750,7 @@ def test_grading_in_the_agents_own_backend_is_refused_before_any_attempt(tmp_pat
 
 def test_a_grading_backend_with_egress_is_refused(tmp_path: Path) -> None:
     experiment, runner, docker_bin = _real_runner_parts(tmp_path)
-    open_grader = d.DockerBackend(image="fake-image:1", base_dir=tmp_path / "work", docker_bin=docker_bin, network="bridge")
+    open_grader = d.DockerBackend(image="fake-image:1", base_dir=tmp_path / "work", docker_bin=docker_bin, daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT, network="bridge")
     with pytest.raises(sp.SelectionProbeRefused, match="network"):
         sp.run_planned_selection_probe(
             experiment, CASES, runner, base=tmp_path / "work", grader=GRADER, grading_backend=open_grader,

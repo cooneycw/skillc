@@ -98,3 +98,31 @@ def _no_real_credential_defaults(
 #: both sides: a delay under this bound still reports captured/confirmed,
 #: and a delay past it still reports UNKNOWN/inconclusive/quarantined.
 FAKE_DOCKER_DAEMON_TIMEOUT = 30.0
+
+#: Daemon budget for the REAL-Docker live tests (`tests/*_live.py`, #390). Not
+#: the fake-CLI margin above: this one answers a real daemon's stalls. On
+#: #315's dedicated runner a `docker run -d` with the live tests' arguments
+#: took 0.13-0.62 s in 26 of 27 starts and 7.61 s once, right after a slow
+#: fresh-tag image build (measured 2026-10-14). On the 5 s module default that
+#: stall failed two campaign-1 negative controls in setup, before their
+#: planted fault, so they proved nothing. Production is unaffected: every CLI
+#: path passes its own `daemon_timeout`. A daemon that never answers is still
+#: refused at this bound; `tests/test_live_docker_budget.py` checks both.
+LIVE_DOCKER_DAEMON_TIMEOUT = 30.0
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Keep shared real-Docker resources on one worker; retain canonical JUnit ids.
+
+    xdist's later collection hook appends the combined group name to worker
+    nodeids. Record that exact suffix so the population checker can reconcile
+    worker reports with independent serial collection without guessing at '@'.
+    """
+    for item in items:
+        if item.get_closest_marker("real_docker") is not None:
+            item.add_marker(pytest.mark.xdist_group("real_docker"))
+        groups = {str(mark.args[0] if mark.args else mark.kwargs.get("name", "default"))
+                  for mark in item.iter_markers("xdist_group")}
+        if groups:
+            item.user_properties.append(("skillc_xdist_group", "_".join(sorted(groups))))

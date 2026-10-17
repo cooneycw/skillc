@@ -380,6 +380,60 @@ def test_close_after_start_stops_the_listener_without_raising(tmp_path: Path) ->
     channel.close()
 
 
+# ------------------------------------- #394: socket lifetime beyond finalize
+
+
+def test_finalize_still_unlinks_the_socket_by_default(tmp_path: Path) -> None:
+    """Every caller that bind-mounts nothing keeps the pre-#394 behaviour."""
+    sock_path = tmp_path / "trigger.sock"
+    channel = DecideReplyChannel(sock_path, _decide_fixed({}), "a1")
+    channel.start()
+    channel.stop_and_finalize()
+    assert not sock_path.exists()
+
+
+def test_a_retained_socket_survives_finalize_and_is_released_by_close(tmp_path: Path) -> None:
+    """#394: with `retain_socket_path=True` the listener stops at finalize
+    but the FILE stays - it is a container's bind-mount source, and a
+    stopped container whose source is gone answers every `docker cp` with
+    "Could not find the file". `close()` is the one teardown call that
+    removes it."""
+    sock_path = tmp_path / "trigger.sock"
+    channel = DecideReplyChannel(sock_path, _decide_fixed({}), "a1", retain_socket_path=True)
+    channel.start()
+    _send(sock_path, {"op": "disruption_check", "client_seq": 1})
+    assert len(channel.log_or_finalize()) == 1
+    assert sock_path.exists()
+    probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        with pytest.raises(ConnectionRefusedError):
+            probe.connect(str(sock_path))  # retained, but nothing is listening
+    finally:
+        probe.close()
+    channel.close()
+    assert not sock_path.exists()
+    channel.close()  # still idempotent
+
+
+def test_release_never_removes_a_socket_another_channel_bound_at_the_same_path(tmp_path: Path) -> None:
+    """Once our listener is closed, a later channel may legitimately replace
+    our orphan at the same path (`_clear_stale_path`). Releasing ours must
+    not cut that live channel off - only the inode we bound is ours."""
+    sock_path = tmp_path / "trigger.sock"
+    first = DecideReplyChannel(sock_path, _decide_fixed({}), "a1", retain_socket_path=True)
+    first.start()
+    first.stop_and_finalize()
+    second = DecideReplyChannel(sock_path, _decide_fixed({}), "a2")
+    second.start()
+    try:
+        first.close()
+        assert sock_path.exists()
+        assert _send(sock_path, {"op": "disruption_check", "client_seq": 1})["ok"] is True
+    finally:
+        second.close()
+    assert not sock_path.exists()
+
+
 def test_start_refuses_a_path_too_close_to_the_af_unix_limit(tmp_path: Path) -> None:
     """The kernel's own `sun_path` bind (108 bytes on Linux) produces a
     bare, unexplained `OSError: AF_UNIX path too long` with no path and no
@@ -516,6 +570,108 @@ def test_stop_and_finalize_raises_if_a_handler_outlives_the_drain_timeout(tmp_pa
         client.join(timeout=5.0)
 
 
+# ------------------------- #367: a failed drain stays failed on every later read
+
+
+def _channel_with_a_wedged_handler(
+    sock_path: Path,
+) -> tuple[DecideReplyChannel, threading.Event, threading.Thread]:
+    """A channel whose only handler has provably ENTERED `decide()` and is
+    held there until the returned event is set - synchronised on events,
+    never on a sleep, so the drain timeout below is guaranteed to expire
+    with the handler still inside."""
+    entered = threading.Event()
+    release = threading.Event()
+
+    def decide(request: Mapping[str, object]) -> Mapping[str, object]:
+        entered.set()
+        release.wait(timeout=10.0)
+        return {"decision": "pass"}
+
+    channel = DecideReplyChannel(sock_path, decide, "a1", handler_drain_timeout=0.05)
+    channel.start()
+    client = threading.Thread(target=_send, args=(sock_path, {"op": "disruption_check", "client_seq": 1}))
+    client.start()
+    assert entered.wait(timeout=5.0), "handler never reached decide()"
+    return channel, release, client
+
+
+def test_a_failed_drain_is_never_later_read_as_a_finalized_log(tmp_path: Path) -> None:
+    """#367 negative control. The first `stop_and_finalize()` correctly
+    raises; before the fix it had already set the finalized flag, so a
+    later `log_or_finalize()` returned `[]` (and `trusted_log()` read
+    `no-controller-witness`) while the handler was still running, and the
+    SAME call returned one entry once the handler finished - a "finalized"
+    log that grew. Every evidence read must stay an explicit failure, both
+    while the handler is wedged and after it completes."""
+    channel, release, client = _channel_with_a_wedged_handler(tmp_path / "trigger.sock")
+    try:
+        with pytest.raises(RuntimeError, match="handler"):
+            channel.stop_and_finalize()
+        with pytest.raises(RuntimeError, match="handler") as before:
+            channel.log_or_finalize()
+        assert isinstance(before.value, RuntimeError)  # destroy() catches exactly this type
+        with pytest.raises(RuntimeError, match="handler"):
+            channel.trusted_log()
+    finally:
+        release.set()
+        client.join(timeout=5.0)
+    # the handler has now appended its decision - the failure must not heal into a log
+    with pytest.raises(RuntimeError, match="handler") as after:
+        channel.log_or_finalize()
+    assert isinstance(after.value, RuntimeError)
+    with pytest.raises(RuntimeError, match="handler"):
+        channel.trusted_log()
+
+
+def test_stop_and_finalize_after_a_failed_drain_still_raises_naming_the_failure(tmp_path: Path) -> None:
+    channel, release, client = _channel_with_a_wedged_handler(tmp_path / "trigger.sock")
+    try:
+        with pytest.raises(RuntimeError):
+            channel.stop_and_finalize()
+    finally:
+        release.set()
+        client.join(timeout=5.0)
+    with pytest.raises(RuntimeError, match="handler"):
+        channel.stop_and_finalize()
+
+
+def test_close_after_a_failed_drain_releases_the_socket_without_raising(tmp_path: Path) -> None:
+    sock_path = tmp_path / "trigger.sock"
+    channel, release, client = _channel_with_a_wedged_handler(sock_path)
+    try:
+        with pytest.raises(RuntimeError):
+            channel.stop_and_finalize()
+        channel.close()  # bounded cleanup: never raises, never waits on the wedged handler
+        assert not sock_path.exists()
+    finally:
+        release.set()
+        client.join(timeout=5.0)
+    channel.close()  # still idempotent
+
+
+def test_repeated_reads_after_a_successful_finalize_are_one_stable_snapshot(tmp_path: Path) -> None:
+    """#367 healthy control: a drain that SUCCEEDS returns the log, and
+    every later read returns the same entries - each as its own copy, so a
+    caller mutating one returned list cannot change what the next read
+    (or `trusted_log()`) sees."""
+    sock_path = tmp_path / "trigger.sock"
+    channel = DecideReplyChannel(sock_path, _decide_fixed({}), "a1")
+    channel.start()
+    _send(sock_path, {"op": "disruption_check", "client_seq": 1})
+    first = channel.stop_and_finalize()
+    assert len(first) == 1
+    first.clear()
+    second = channel.log_or_finalize()
+    assert len(second) == 1
+    second.append(second[0])
+    third = channel.log_or_finalize()
+    assert len(third) == 1
+    trusted = channel.trusted_log()
+    assert trusted.status == "witnessed"
+    assert len(trusted.decisions) == 1
+
+
 # ------------------------------------------------------------ resource bounds
 
 
@@ -541,52 +697,122 @@ def test_an_oversized_request_is_refused_without_a_reply(tmp_path: Path) -> None
     assert log == []
 
 
-def test_connections_past_max_concurrent_handlers_are_refused(tmp_path: Path) -> None:
-    """A subject opening more connections than declared capacity is
-    refused outright on the excess ones - never queued behind the
-    in-flight ones, and never allowed to spawn unbounded controller-side
-    threads. The admitted connection is unaffected."""
+def _assert_capacity_refusal(tmp_path: Path) -> None:
     sock_path = tmp_path / "trigger.sock"
+    admitted = threading.Event()
     released = threading.Event()
 
     def decide(request: Mapping[str, object]) -> Mapping[str, object]:
-        released.wait(timeout=5.0)
+        if request["client_seq"] == 1:
+            admitted.set()
+            released.wait(timeout=5.0)
         return {"decision": "pass"}
 
     channel = DecideReplyChannel(sock_path, decide, "a1", max_concurrent_handlers=1)
     channel.start()
+    first = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    second = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
-        first = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         first.settimeout(5.0)
         first.connect(str(sock_path))
         first.sendall(json.dumps({"op": "disruption_check", "client_seq": 1}).encode("utf-8") + b"\n")
-        time.sleep(0.05)  # let the first handler be admitted and block in decide()
+        assert admitted.wait(timeout=5.0), "first handler was not admitted"
 
-        second_data = b"\x00"  # sentinel - overwritten below if recv ever returns
-        second = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         second.settimeout(1.0)
         second.connect(str(sock_path))
-        second.sendall(json.dumps({"op": "disruption_check", "client_seq": 2}).encode("utf-8") + b"\n")
         try:
+            second.sendall(json.dumps({"op": "disruption_check", "client_seq": 2}).encode("utf-8") + b"\n")
             second_data = second.recv(65536)
-        except TimeoutError:
-            second_data = b""  # refused by a hang this bound prevents
-        except (ConnectionResetError, OSError):
-            # The over-capacity handler returns without reading the bytes
-            # already sent - closing a socket with unread buffered data
-            # produces an abrupt reset on the peer, same as a plain EOF
-            # for this test's purposes: no reply was ever sent.
+        except TimeoutError as exc:
+            raise AssertionError("excess connection remained open instead of being refused") from exc
+        except (BrokenPipeError, ConnectionResetError):
+            # Refusal may close before sendall, or reset unread bytes after
+            # sendall. Both are actual closure; a timeout is not refusal.
             second_data = b""
-        second.close()
+        assert second_data == b"", "excess connection sent a reply"
 
         released.set()
         first_data = first.recv(65536)
-        first.close()
     finally:
+        released.set()
+        first.close()
+        second.close()
         log = channel.stop_and_finalize()
-    assert second_data == b""  # the second connection got no reply
     assert json.loads(first_data.decode("utf-8").splitlines()[0]) == {"ok": True, "result": {"decision": "pass"}}
     assert len(log) == 1  # only the admitted connection's decision is logged
+    assert log[0].request["client_seq"] == 1
+
+
+def test_connections_past_max_concurrent_handlers_are_refused(tmp_path: Path) -> None:
+    """Excess connections close without queuing; the admitted one is unaffected."""
+    _assert_capacity_refusal(tmp_path)
+
+
+def test_capacity_refusal_can_close_before_the_client_sends(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    closed = threading.Event()
+    real_close = d._Server.close_request
+    real_send = socket.socket.sendall
+
+    def close_then_signal(self: d._Server, request: socket.socket) -> None:
+        real_close(self, request)
+        closed.set()
+
+    def send_after_close(self: socket.socket, data: bytes, flags: int = 0) -> None:
+        if b'"client_seq": 2' in data:
+            assert closed.wait(timeout=3.0), "excess connection was not closed"
+        real_send(self, data, flags)
+
+    monkeypatch.setattr(d._Server, "close_request", close_then_signal)
+    monkeypatch.setattr(socket.socket, "sendall", send_after_close)
+    _assert_capacity_refusal(tmp_path)
+
+
+def test_capacity_check_rejects_excess_admission(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    finalized: list[LoggedDecision] = []
+    real_finalize = DecideReplyChannel.stop_and_finalize
+
+    def ignore_capacity(self: DecideReplyChannel) -> bool:
+        with self._lock:
+            self._active_handlers += 1
+        return True
+
+    def retain_log(self: DecideReplyChannel) -> list[LoggedDecision]:
+        log = real_finalize(self)
+        finalized.extend(log)
+        return log
+
+    monkeypatch.setattr(DecideReplyChannel, "_handler_started", ignore_capacity)
+    monkeypatch.setattr(DecideReplyChannel, "stop_and_finalize", retain_log)
+    with pytest.raises(AssertionError, match="excess connection sent a reply"):
+        _assert_capacity_refusal(tmp_path)
+    assert len(finalized) == 2
+    assert {entry.request["client_seq"] for entry in finalized} == {1, 2}
+
+
+def test_capacity_check_rejects_a_queued_connection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    release_queue = threading.Event()
+    queued: list[threading.Thread] = []
+    real_admit = DecideReplyChannel._handler_started
+
+    def queue_excess(self: DecideReplyChannel) -> bool:
+        admitted = real_admit(self)
+        if not admitted:
+            queued.append(threading.current_thread())
+            release_queue.wait(timeout=5.0)
+        return admitted
+
+    monkeypatch.setattr(DecideReplyChannel, "_handler_started", queue_excess)
+    try:
+        with pytest.raises(AssertionError, match="excess connection remained open"):
+            _assert_capacity_refusal(tmp_path)
+    finally:
+        release_queue.set()
+        for handler in queued:
+            handler.join(timeout=5.0)
+            assert not handler.is_alive()
+    assert len(queued) == 1
 
 
 def test_an_idle_connection_is_closed_after_the_request_timeout(tmp_path: Path) -> None:
@@ -725,3 +951,21 @@ def test_mutating_the_original_nested_object_after_logging_does_not_rewrite_the_
     stored_detail = log[0].result["detail"]
     assert isinstance(stored_detail, dict)
     assert stored_detail["nested"] == [1, 2, 3]  # the stored entry is unaffected
+
+
+def test_release_never_removes_a_finalized_replacement_at_the_same_path(tmp_path: Path) -> None:
+    """Counter-model red case (#394): isolates the IDENTITY check from the
+    listener check. The replacement is itself finalized and retained, so
+    nothing listens on the path; only the bound file's identity tells it
+    apart from ours."""
+    sock_path = tmp_path / "trigger.sock"
+    first = DecideReplyChannel(sock_path, _decide_fixed({}), "a1", retain_socket_path=True)
+    first.start()
+    first.stop_and_finalize()
+    second = DecideReplyChannel(sock_path, _decide_fixed({}), "a2", retain_socket_path=True)
+    second.start()
+    second.stop_and_finalize()
+    first.close()
+    assert sock_path.exists(), "released a socket file this channel never bound"
+    second.close()
+    assert not sock_path.exists()

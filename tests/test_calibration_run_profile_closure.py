@@ -317,3 +317,164 @@ def test_red_case_a_gate_entrypoint_this_closure_never_installs_is_refused(
 
     with pytest.raises(p.Refused, match="gate_entrypoint '.codex/skills/does-not-exist.sh' is not installed"):
         cr.build_treatment(acquired, subject_profile=subject_profile, root=root)
+
+
+@needs_git
+@pytest.mark.parametrize(("with_profile", "fault", "runtime"), [
+    (True, None, None), (False, None, None), (True, "missing-profile", None),
+    (True, "invalid-profile", None), (True, "malformed-inventory", None),
+    (True, None, "selected"), (True, None, "relocated"),
+    (True, "missing-receipt", "selected"), (True, "bad-receipt", "selected"),
+    (True, "wrong-image", "selected"), (True, "changed-metadata", "selected"),
+    (True, "unrelated-receipt", None),
+])
+def test_calibration_cli_carries_the_declared_profile_to_the_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    with_profile: bool, fault: str | None, runtime: str | None,
+) -> None:
+    """Parse the real CLI and build a real closure; stop at agent dispatch.
+
+    Approval/image resolution and acquisition are supplied local fixtures.
+    Neither treatment construction nor calibration/collection forwarding is mocked.
+    """
+    from test_calibration_run import _declaration_data
+    from test_runtime_supply import RECEIPT
+
+    from skillc import (
+        agent_trial,
+        calibration,
+        cli,
+        docker_backend,
+        runtime_supply,
+        trial,
+        trial_bootstrap,
+    )
+
+    content_repo, revision = _build_content_repo(tmp_path)
+    root = tmp_path / "root"
+    entrypoint = ".codex/skills/gate-check/SKILL.md"
+    profile_name = "relocated/identical-profile" if runtime == "relocated" else "subject-profile"
+    dependencies = json.loads(json.dumps(PROFILE_DICT["dependencies"]))
+    if runtime:
+        dependencies[-1]["probes"] = [{"kind": "python-import", "modules": ["json"], "uv_project": "Work/kit"}]
+        # A synthetic supported pin exercises the actual classifier with real
+        # validated closures. It does not claim this fixture is CPP evidence.
+        policy = runtime_supply.supported_policy()
+        policy.update(subject_locator=SUBJECT_DICT["locator"], subject_revision=revision,
+                      gate_entrypoint=entrypoint, project="Work/kit")
+        # Receipt validation still uses its independent package policy; replace
+        # only the selector's policy lookup in this synthetic routing fixture.
+        real_selector = runtime_supply.requires_supply
+        digest = materialize.sha256_bytes(b"[project]\nname = 'kit'\n")
+
+        def select_fixture(**kwargs):
+            with monkeypatch.context() as local:
+                local.setattr(runtime_supply, "supported_policy", lambda: policy)
+                local.setattr(runtime_supply, "metadata", lambda ignored: {"Work/kit/pyproject.toml":
+                             "sha256:" + "0" * 64 if fault == "changed-metadata" else digest})
+                return real_selector(**kwargs)
+
+        monkeypatch.setattr(runtime_supply, "requires_supply", select_fixture)
+    _write_declaration(root / profile_name, revision, gate_entrypoint=entrypoint, dependencies=dependencies)
+    inventory = p.validate(p.Profile.load(root / profile_name / "profile.json"),
+                           p.GitTree(content_repo, revision))
+    evidence = root / profile_name / "evidence"
+    evidence.mkdir()
+    (evidence / "inventory.json").write_text(json.dumps(inventory))
+    subject = materialize.Subject.from_dict({**SUBJECT_DICT, "revision": revision})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: subject)
+    acquired = cc.acquire_collection("fixture", tmp_path / "acquisition", checkout=content_repo)
+    data = _declaration_data(attempts=1)
+    arms = data["arms"]
+    assert isinstance(arms, list)
+    declared_subject = next(arm["subject"] for arm in arms if isinstance(arm["subject"], dict))
+    declared_subject.update(name="fixture", locator=subject.locator, revision=revision)
+    if with_profile:
+        declared_subject["profile"] = profile_name
+    else:
+        declared_subject.pop("profile", None)
+    shared = data["shared"]
+    assert isinstance(shared, dict)
+    if runtime or fault == "unrelated-receipt":
+        shared["image"]["digest"] = json.loads(RECEIPT)["image_id"]
+    declaration = tmp_path / "declaration.json"
+    declaration.write_text(json.dumps(data))
+    monkeypatch.setattr(cr, "ROOT", root)
+    monkeypatch.setattr(calibration, "require_approved", lambda *args, **kwargs: None)
+    shared = data["shared"]
+    assert isinstance(shared, dict)
+    monkeypatch.setattr(trial_bootstrap, "pinned_cli_version", lambda key: shared["client"]["version"])
+    monkeypatch.setattr(demo, "resolve_image_digest", lambda *args: shared["image"]["digest"])
+    acquisition_paths: list[Path] = []
+
+    def acquire_fixture(name: str, run_dir: Path) -> cc.AcquiredCollection:
+        for suffix in ("checkout", "staging"):
+            path = run_dir / f"{name}-{suffix}"
+            path.mkdir()
+            acquisition_paths.append(path)
+        return acquired
+
+    monkeypatch.setattr(cc, "acquire_collection", acquire_fixture)
+    if fault == "missing-profile":
+        (root / profile_name / "profile.json").unlink()
+    elif fault == "invalid-profile":
+        (root / profile_name / "profile.json").write_text("{}")
+    elif fault == "malformed-inventory":
+        (evidence / "inventory.json").write_text("{broken")
+    seen: list[dict[str, object]] = []
+
+    def observe_attempt(**kwargs: object) -> dict[str, object]:
+        seen.append(kwargs)
+        experiment = kwargs["experiment"]
+        assert isinstance(experiment, trial.Experiment)
+        return trial.finalize(experiment, str(kwargs["attempt_id"]), disposition="unavailable",
+                              reason="CLI control stops before subject dispatch")
+
+    monkeypatch.setattr(agent_trial, "run_one_attempt", observe_attempt)
+    args = ["calibration-run", str(declaration), "--private-dir", str(tmp_path / "private")]
+    if (runtime or fault == "unrelated-receipt") and fault != "missing-receipt":
+        receipt = tmp_path / "runtime-receipt.json"
+        receipt_value = json.loads(RECEIPT)
+        if fault == "wrong-image":
+            receipt_value["image_id"] = "sha256:" + "f" * 64
+        receipt.write_bytes(b"{}" if fault == "bad-receipt" else json.dumps(receipt_value).encode())
+        args.extend(["--runtime-supply-receipt", str(receipt)])
+    code = cli.main(args)
+    assert len(acquisition_paths) == 2
+    assert all(not path.exists() for path in acquisition_paths)
+    if fault is not None:
+        assert code == 2
+        assert seen == []
+        assert "skillc:" in capsys.readouterr().err
+        return
+    assert code == 1
+    assert len(seen) == 2
+    treated = next(call for call in seen if call["extra_home_files"])
+    baseline = next(call for call in seen if not call["extra_home_files"])
+    for call in seen:
+        agent = call["backend"]
+        grading = call["grading_backend"]
+        assert isinstance(agent, docker_backend.DockerBackend)
+        assert isinstance(grading, docker_backend.DockerBackend)
+        assert agent.image == grading.image == shared["image"]["digest"]
+        assert grading.runtime_supply is None
+        if runtime:
+            assert agent.runtime_supply is not None
+            assert agent.runtime_supply.image_id == agent.image
+        else:
+            assert agent.runtime_supply is None
+    assert not baseline["verify_home_files"]
+    assert not baseline["preflight_tools"]
+    assert baseline["gate_entrypoint"] is None
+    if with_profile:
+        assert treated["gate_entrypoint"] == entrypoint
+        checked = treated["verify_home_files"]
+        tools = treated["preflight_tools"]
+        assert isinstance(checked, dict) and isinstance(tools, (tuple, list))
+        assert checked["Work/kit/pyproject.toml"] == materialize.sha256_bytes(
+            b"[project]\nname = 'kit'\n")
+        assert [tool["id"] for tool in tools] == ["tool-bash"]
+    else:
+        assert treated["gate_entrypoint"] is None
+        assert not treated["verify_home_files"]
+        assert not treated["preflight_tools"]

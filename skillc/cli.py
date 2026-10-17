@@ -1693,10 +1693,11 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
     import secrets
     from datetime import UTC, datetime
 
-    from . import calibration, demo, trial_bootstrap
+    from . import calibration, demo, trial, trial_bootstrap
     from . import calibration_run as cr
     from . import collection_conformance as cc
     from . import matched_pilot as mp
+    from . import runtime_supply as rs
 
     try:
         declaration = calibration.load_declaration(Path(args.declaration))
@@ -1754,8 +1755,25 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
             print(f"skillc: subject {subject_name!r} is (locator, revision, client) {found}, but the "
                   f"declaration names {wanted}; refusing", file=sys.stderr)
             return 2
-        treatment = cr.build_treatment(acquired)
-    except cr.CalibrationRefused as exc:
+        subject_profile = subject.get("profile")
+        assert subject_profile is None or isinstance(subject_profile, str)
+        treatment = cr.build_treatment(
+            acquired, subject_profile=subject_profile, root=cr.ROOT if subject_profile is not None else None,
+        )
+        needs_supply = rs.requires_supply(
+            locator=acquired.subject.locator, revision=acquired.subject.revision,
+            gate_entrypoint=treatment.gate_entrypoint, files=treatment.verify_home_files,
+            tools=treatment.preflight_tools,
+        )
+        receipt_path = args.runtime_supply_receipt
+        if needs_supply and not receipt_path:
+            raise rs.Refused("supported profile requires --runtime-supply-receipt")
+        if receipt_path and not needs_supply:
+            raise rs.Refused("runtime receipt supplied for an unrelated or absent profile")
+        supply = rs.RuntimeSupply.from_path(Path(receipt_path)) if receipt_path else None
+        if supply is not None and supply.image_id != image_digest:
+            raise rs.Refused("runtime receipt image differs from the approved resolved image")
+    except (cr.CalibrationRefused, profile.Refused, rs.Refused, OSError, json.JSONDecodeError, UnicodeError) as exc:
         print(f"skillc: {exc}", file=sys.stderr)
         return 2
     finally:
@@ -1768,6 +1786,7 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
             # By the resolved immutable digest, never the tag (pilot-run's rule).
             backends=lambda: cc.agent_backends(
                 image=image_digest, base=run_dir, docker_bin=docker_bin, daemon_timeout=args.timeout,
+                runtime_supply=supply,
             ),
             argv_for=lambda _scheduled: client_argv,
             credential_explicit_path=Path(args.credential) if args.credential else None,
@@ -1777,10 +1796,16 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
         print("skillc: interrupted; reporting every planned attempt from the private record", file=sys.stderr)
         interrupted = True
         experiment, outcomes = mp.read_outcomes(run_dir)
-    report = cr.build_report(
-        experiment, cr.reconcile(experiment, outcomes), declared_model=model, declared_effort=effort,
-        named_skills=cr.named_skills_by_arm(declaration),
-    )
+    try:
+        # build_report verifies the immutable ledger before reconciling a
+        # mutable checkpoint or selecting the launch-bound outcome endpoint.
+        report = cr.build_report(
+            experiment, outcomes, declared_model=model, declared_effort=effort,
+            named_skills=cr.named_skills_by_arm(declaration),
+        )
+    except (trial.Refused, ValueError, OSError) as exc:
+        print(f"skillc: cannot report calibration: {exc}", file=sys.stderr)
+        return 2
     (run_dir / cr.REPORT_FILENAME).write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8")
     try:
         demo.print_paste_back(demo.redact_known_host_paths(cr.paste_back(report), base=run_dir))
@@ -1788,6 +1813,110 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
         print(f"skillc: {exc}", file=sys.stderr)
         return 2
     return 130 if interrupted else _refuse_ineligible(report)
+
+
+def cmd_level3_campaign(args: argparse.Namespace) -> int:
+    """Issue #375: run the frozen Level-3 production-path campaign. Each row is
+    one real attempt through the profile treatment, closure delivery,
+    preflight, controller gate witness, capture and grading, with a scripted
+    actor in place of the model: no model is contacted, the agent container
+    runs on network `none`, and only a generated dummy credential is
+    delivered. Refuses (exit 2), before any container exists, a manifest whose
+    frozen identities no longer match the tree, a dirty checkout, a subject
+    other than the frozen one, or a profile that needs no runtime receipt.
+    Exits 1 when any row's graded outcome differs from its frozen expectation."""
+    import hashlib
+    import secrets
+    import subprocess
+    from datetime import UTC, datetime
+
+    from . import calibration_run as cr
+    from . import collection_conformance as cc
+    from . import demo
+    from . import level3_campaign as lc
+    from . import runtime_supply as rs
+
+    try:
+        manifest = lc.load_manifest(Path(args.manifest))
+        problems = lc.check_frozen(manifest, cr.ROOT)
+    except (lc.CampaignRefused, OSError, json.JSONDecodeError, KeyError) as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+    if problems:
+        for problem in problems:
+            print(f"skillc: frozen identity moved: {problem}", file=sys.stderr)
+        return 2
+    rows = list(manifest.rows)
+    if args.rows:
+        wanted = [r.strip() for r in args.rows.split(",") if r.strip()]
+        unknown = sorted(set(wanted) - {r.id for r in rows})
+        if unknown:
+            print(f"skillc: --rows names rows the manifest does not declare: {unknown}", file=sys.stderr)
+            return 2
+        rows = [r for r in rows if r.id in wanted]
+    git = ["git", "-C", str(cr.ROOT)]
+    try:
+        dirty = subprocess.run([*git, "status", "--porcelain"], capture_output=True, text=True, check=False)
+        head = subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True, check=False)
+    except OSError as exc:
+        print(f"skillc: cannot read the skillc checkout's git state ({exc}); the run binds its HEAD", file=sys.stderr)
+        return 2
+    if dirty.returncode != 0 or head.returncode != 0 or dirty.stdout.strip():
+        print("skillc: the skillc checkout must be a clean git tree; the run binds its HEAD", file=sys.stderr)
+        return 2
+
+    private_root = Path(args.private_dir).expanduser() if args.private_dir else lc.DEFAULT_PRIVATE_ROOT
+    run_dir = private_root / f"{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}-{secrets.token_hex(3)}"
+    run_dir.mkdir(parents=True, mode=0o700)
+    print(f"skillc: private run directory: {run_dir}", file=sys.stderr)
+    frozen_subject = manifest.subject
+    try:
+        acquired = cc.acquire_collection(str(frozen_subject["name"]), run_dir)
+        found = (acquired.subject.locator, acquired.subject.revision)
+        if found != (frozen_subject["locator"], frozen_subject["revision"]):
+            raise lc.CampaignRefused(f"acquired subject {found} is not the frozen one")
+        treatment = cr.build_treatment(acquired, subject_profile=str(frozen_subject["profile"]), root=cr.ROOT)
+        needs_supply = rs.requires_supply(
+            locator=acquired.subject.locator, revision=acquired.subject.revision,
+            gate_entrypoint=treatment.gate_entrypoint, files=treatment.verify_home_files,
+            tools=treatment.preflight_tools,
+        )
+        if not needs_supply:
+            raise lc.CampaignRefused("the frozen subject does not select the supported pinned runtime")
+        supply = rs.RuntimeSupply.from_path(Path(args.runtime_supply_receipt))
+    except (lc.CampaignRefused, demo.SubjectRefused, cr.CalibrationRefused, profile.Refused, rs.Refused,
+            OSError, json.JSONDecodeError, UnicodeError) as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        cc.discard_acquisition(run_dir, str(frozen_subject["name"]))
+
+    docker_bin = tuple(args.docker_bin.split()) if args.docker_bin else ("docker",)
+
+    def backends() -> tuple[cc.TrackingDockerBackend, cc.TrackingDockerBackend]:
+        return lc.campaign_backends(image=supply.image_id, base=run_dir, docker_bin=docker_bin,  # type: ignore[no-any-return]
+                                    daemon_timeout=args.timeout, runtime_supply=supply)
+
+    report_path = run_dir / "campaign-report.json"
+    bound = {"skillc_revision": head.stdout.strip(), "image_digest": supply.image_id,
+             "manifest_digest": "sha256:" + hashlib.sha256(Path(args.manifest).read_bytes()).hexdigest()}
+
+    def on_row(result: dict[str, object]) -> None:
+        print(f"skillc: {result['row']}: {result['verdict']} (disposition {result['disposition']}, "
+              f"{result['seconds']}s)", file=sys.stderr)
+        for diff in result["differences"]:  # type: ignore[attr-defined]
+            print(f"skillc:   {diff}", file=sys.stderr)
+
+    try:
+        report = lc.run_rows(manifest, root=cr.ROOT, run_dir=run_dir, treatment=treatment, backends=backends,
+                             image_digest=supply.image_id, rows=rows, on_row=on_row)
+    except (lc.CampaignRefused, OSError) as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+    report = {**report, **bound}
+    report_path.write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8")
+    print(f"skillc: {report['matched']}/{report['population']} rows matched; report: {report_path}", file=sys.stderr)
+    return 0 if report["matched"] == report["population"] else 1
 
 
 def cmd_uptake_study(args: argparse.Namespace) -> int:
@@ -2512,6 +2641,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_calibration_run.add_argument("--timeout", type=float, default=30, help="per-container-call timeout, seconds")
     p_calibration_run.add_argument("--credential", help="explicit path to the client credential file")
     p_calibration_run.add_argument(
+        "--runtime-supply-receipt", help="controller-selected receipt for the supported pinned runtime",
+    )
+    p_calibration_run.add_argument(
         "--client-argv", default=None,
         help="the client invocation, space-separated words, WITHOUT a model or effort (the declared ones are "
              "added; default: collection_conformance.DEFAULT_CLIENT_ARGVS for the declared client)",
@@ -2521,6 +2653,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="where the private run directory is created (default: ~/.local/share/skillc/calibration-runs)",
     )
     p_calibration_run.set_defaults(func=cmd_calibration_run)
+
+    p_level3_campaign = sub.add_parser(
+        "level3-campaign",
+        help="issue #375: run the frozen Level-3 production-path campaign with scripted subjects (no model is "
+             "contacted; the agent container runs on network none); evidence stays private",
+    )
+    p_level3_campaign.add_argument("--manifest", default="evals/level3/campaign-375/manifest.json",
+                                   help="the frozen campaign manifest")
+    p_level3_campaign.add_argument("--runtime-supply-receipt", required=True,
+                                   help="receipt of the pinned runtime image (docker/profile-trial/build.py)")
+    p_level3_campaign.add_argument("--rows", help="comma-separated row ids to run (default: every row)")
+    p_level3_campaign.add_argument("--docker-bin", help="docker executable (space-separated words; default: docker)")
+    p_level3_campaign.add_argument("--timeout", type=float, default=30, help="per-container-call timeout, seconds")
+    p_level3_campaign.add_argument("--private-dir", help="parent of the private run directory")
+    p_level3_campaign.set_defaults(func=cmd_level3_campaign)
 
     p_uptake = sub.add_parser(
         "uptake-study",

@@ -390,7 +390,7 @@ def test_no_real_agent_without_the_opt_in_aborts_the_whole_run(
     docker_state = tmp_path / "docker-state"
 
     def backends() -> tuple[object, object]:
-        make = lambda: d.DockerBackend(image="fake-image:1", base_dir=run_dir, docker_bin=_docker_bin(docker_state))
+        make = lambda: d.DockerBackend(image="fake-image:1", base_dir=run_dir, docker_bin=_docker_bin(docker_state), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
         return make(), make()
 
     with pytest.raises(RealAgentBlocked):

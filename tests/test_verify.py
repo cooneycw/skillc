@@ -30,7 +30,7 @@ import os
 import shutil
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -1066,3 +1066,155 @@ def test_ledger_recovery_waits_for_the_experiment_lock(
     finally:
         holder.wait(timeout=10)
     assert len(list(recovered.attempts())) == 3  # the interrupted retry was completed
+
+
+@pytest.mark.parametrize("receipt", [True, False])
+def test_controller_witness_uses_exact_frozen_files_in_both_grading_paths(
+    store: Path, base: Path, grading: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, receipt: bool,
+) -> None:
+    from contextlib import contextmanager
+
+    from test_gate_witness import _FakeBackend
+
+    from skillc.backend import ExecuteResult, Limits
+    from skillc.gate_witness import GateWitness
+    from skillc.materialize import tree_digest
+
+    experiment, attempt_id = _plan(store)
+    if receipt:
+        t.add_receipt(experiment, _receipt(experiment, attempt_id))
+    workspace = t.allocate_workspace(experiment, attempt_id, base, forbidden=[])
+    stop = t.run_attempt(experiment, attempt_id, [sys.executable, str(FAKE), "slug-from", str(REFERENCE)],
+                         cwd=workspace, timeout=20, grace=0.5)
+    assert stop["confirmed"] is True
+    (workspace / "observations").write_text('candidate forged witness: PASS')
+    (workspace / ".skillc-exec-pid-candidate").write_text("candidate-owned input")
+    (workspace / "script").write_text("echo candidate\n")
+    (workspace / "script").chmod(0o700)
+    (workspace / ".git").mkdir()
+    (workspace / ".git" / "HEAD").write_text("excluded from grading")
+    fake = _FakeBackend(results={("gate",): ExecuteResult("exited", 0)})
+    witness = GateWitness({"flow-check-summary": ("gate",)}, lambda: "sha256:earlier-tree",
+                          fake, object(), Limits(timeout=2), gate_exclusivity=False, exclusivity_basis="control")
+    witness.decide({"op": "run_gate", "gate": "flow-check-summary"})
+    record = witness.finalize(attempt_id)
+    original_record = record.to_json_bytes()
+    t.capture(experiment, attempt_id, workspace)
+    # The now-writable export is NOT what grading receives.
+    (workspace / "observations").write_text("changed after capture")
+    frozen_tree = tmp_path / "expected-frozen"
+    frozen_tree.mkdir()
+    for artifact in t.frozen_artifacts(experiment, attempt_id):
+        target = frozen_tree / str(artifact["path"])
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(experiment.object_path(str(artifact["digest"])).read_bytes())
+        target.chmod(0o755 if artifact["mode"] == "x" else 0o644)
+    expected_digest = tree_digest(frozen_tree)
+    t.cleanup_workspace(experiment, attempt_id)
+    assert t.finalize(experiment, attempt_id)["disposition"] == "captured"
+    seen: list[bytes] = []
+    original_grade = verify.grade_files
+    original_lock = t.experiment_lock
+    original_digest = verify.witness_capture.files_digest
+    held: list[bool] = []
+
+    @contextmanager
+    def observed_lock(root: Path) -> Iterator[None]:
+        with original_lock(root):
+            held.append(True)
+            try:
+                yield
+            finally:
+                held.pop()
+
+    def locked_digest(files: list[tuple[str, bytes, bool]]) -> str:
+        assert held, "frozen file identity was computed outside the grading lock"
+        return original_digest(files)
+
+    monkeypatch.setattr(t, "experiment_lock", observed_lock)
+    monkeypatch.setattr(verify.witness_capture, "files_digest", locked_digest)
+
+    def inspect_grade(*args: object, **kwargs: object) -> verify.Graded:
+        raw = kwargs.get("trusted_observation")
+        assert isinstance(raw, bytes)
+        seen.append(raw)
+        envelope = json.loads(raw)
+        assert envelope == {"witness": json.loads(original_record), "graded_tree_digest": expected_digest}
+        assert envelope["witness"]["gates"]["flow-check-summary"]["runs"][-1]["tree_digest_at_start"] \
+            == "sha256:earlier-tree"
+        return original_grade(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(verify, "grade_files", inspect_grade)
+    if receipt:
+        result, _ = verify._grade_and_store(experiment, attempt_id, GRADER, grading, gate_witness=record)
+    else:
+        result, _ = verify.grade_agent_attempt(experiment, attempt_id, GRADER, grading, _CONFIRMED,
+                                              gate_witness=record)
+    assert len(seen) == 1
+    verification = result["verification"]
+    assert isinstance(verification, dict)
+    assert verification["verdicts"]["deterministic"]["trusted_observation_digest"] == t.sha256_bytes(seen[0])
+    assert record.to_json_bytes() == original_record
+
+
+@pytest.mark.parametrize("receipt", [True, False])
+@pytest.mark.parametrize("fault", ["conflicting-bytes", "wrong-attempt"])
+def test_controller_witness_conflicts_refuse_before_grading(
+    store: Path, base: Path, grading: Path, monkeypatch: pytest.MonkeyPatch, receipt: bool, fault: str,
+) -> None:
+    from skillc.gate_witness import GateWitnessRecord
+
+    experiment, attempt_id = _captured(store, base, REFERENCE, receipt=receipt)
+    record = GateWitnessRecord("another-attempt" if fault == "wrong-attempt" else attempt_id, (), {})
+    kwargs = {"gate_witness": record}
+    if fault == "conflicting-bytes":
+        kwargs["trusted_observation"] = b"raw trusted service data"  # type: ignore[assignment]
+    monkeypatch.setattr(verify, "grade_files", lambda *a, **k: pytest.fail("conflict reached grader"))
+    with pytest.raises(verify.Refused, match="both|attempt"):
+        if receipt:
+            verify._grade_and_store(experiment, attempt_id, GRADER, grading, **kwargs)  # type: ignore[arg-type]
+        else:
+            verify.grade_agent_attempt(experiment, attempt_id, GRADER, grading, _CONFIRMED,
+                                       **kwargs)  # type: ignore[arg-type]
+    assert not list(experiment.root.glob("result-*.json"))
+
+
+@pytest.mark.parametrize("receipt", [True, False])
+def test_original_raw_trusted_bytes_still_reach_grading(
+    store: Path, base: Path, grading: Path, receipt: bool,
+) -> None:
+    experiment, attempt_id = _captured(store, base, REFERENCE, receipt=receipt)
+    raw = b'{"runtime_service": "controller-owned"}'
+    if receipt:
+        result, _ = verify._grade_and_store(experiment, attempt_id, GRADER, grading, trusted_observation=raw)
+    else:
+        result, _ = verify.grade_agent_attempt(experiment, attempt_id, GRADER, grading, _CONFIRMED,
+                                               trusted_observation=raw)
+    verification = result["verification"]
+    assert isinstance(verification, dict)
+    assert verification["verdicts"]["deterministic"]["trusted_observation_digest"] == t.sha256_bytes(raw)
+
+
+@pytest.mark.parametrize("receipt", [True, False])
+def test_subject_witness_artifact_never_supplies_the_trusted_channel(
+    store: Path, base: Path, grading: Path, receipt: bool,
+) -> None:
+    from skillc.gate_witness import GateWitnessRecord
+
+    experiment, attempt_id = _plan(store)
+    if receipt:
+        t.add_receipt(experiment, _receipt(experiment, attempt_id))
+    workspace = t.allocate_workspace(experiment, attempt_id, base, forbidden=[])
+    stop = t.run_attempt(experiment, attempt_id, [sys.executable, str(FAKE), "slug-from", str(REFERENCE)],
+                         cwd=workspace, timeout=20, grace=0.5)
+    assert stop["confirmed"] is True
+    forged = GateWitnessRecord(attempt_id, (), {}).to_json_bytes()
+    (workspace / "gate-witness.json").write_bytes(forged)
+    _freeze(experiment, attempt_id, workspace)
+    if receipt:
+        result, _ = verify._grade_and_store(experiment, attempt_id, GRADER, grading)
+    else:
+        result, _ = verify.grade_agent_attempt(experiment, attempt_id, GRADER, grading, _CONFIRMED)
+    verification = result["verification"]
+    assert isinstance(verification, dict)
+    assert verification["verdicts"]["deterministic"]["trusted_observation_digest"] is None

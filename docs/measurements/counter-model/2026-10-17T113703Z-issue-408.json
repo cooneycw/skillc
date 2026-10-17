@@ -1,0 +1,25 @@
+{
+  "branch": "issue-408-witnessed-gates-still-write-bytecode-when-the-subj",
+  "counts": {
+    "accepted": 0,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "d85b065bda08ad60ec88b15744c18967a6f44977",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "408",
+  "passes": 1,
+  "recorded_at": "2026-10-17T11:37:03Z",
+  "red_cases": {
+    "already_covered": 3,
+    "proposed": 4
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/17/rollout-2026-10-17T07-35-59-01a149a5-b7b9-76a1-9eb5-da3444e88ae1.jsonl",
+    "thread_id": "01a149a5-b7b9-76a1-9eb5-da3444e88ae1"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

@@ -13,10 +13,13 @@ this session. This proves the lifecycle state machine, argv composition and
 
 from __future__ import annotations
 
+import dataclasses
+import importlib.util
 import io
 import json
 import os
 import shutil
+import signal
 import socket as socket_module
 import stat
 import subprocess
@@ -25,14 +28,18 @@ import tarfile
 import tempfile
 import threading
 import time
+import types
 from collections.abc import Iterator, Mapping
 from pathlib import Path
+from typing import Any
 
 import pytest
+from conftest import FAKE_DOCKER_DAEMON_TIMEOUT
 
 from skillc import docker_backend as d
 from skillc import lifecycle as lc
 from skillc.backend import BackendUnavailable, Confirmation, ExecutionBackend, Limits
+from skillc.decide_reply_channel import DecideReplyChannel
 
 needs_setsid = pytest.mark.skipif(
     shutil.which("setsid") is None or shutil.which("sh") is None,
@@ -44,6 +51,61 @@ FAKE_DOCKER = Path(__file__).resolve().parent / "fixtures" / "docker-backend" / 
 
 def _docker_bin(state_dir: Path) -> list[str]:
     return [sys.executable, str(FAKE_DOCKER), "--state", str(state_dir)]
+
+
+def _slowed_docker_bin(state_dir: Path, tmp_path: Path, delays: Mapping[str, float]) -> list[str]:
+    """The fake CLI, delayed by a fixed number of seconds before the named
+    subcommands run: a slow daemon by construction rather than by host load
+    (issue #382). A loaded runner is what turned the timing-bound tests red
+    on CI, and load alone does not reproduce it on demand."""
+    if not delays:
+        return _docker_bin(state_dir)
+    wrapper = tmp_path / "slowed_docker.py"
+    wrapper.write_text(
+        "import runpy, sys, time\n"
+        f"time.sleep({dict(delays)!r}.get(sys.argv[3], 0.0))\n"
+        f"sys.argv = [{str(FAKE_DOCKER)!r}, *sys.argv[1:]]\n"
+        f"runpy.run_path({str(FAKE_DOCKER)!r}, run_name='__main__')\n",
+        encoding="utf-8",
+    )
+    return [sys.executable, str(wrapper), "--state", str(state_dir)]
+
+
+def _spy_on_drain_joins(monkeypatch: pytest.MonkeyPatch) -> list[float | None]:
+    """Record the `timeout` handed to each `_BoundedDrain` thread's `join()`,
+    in call order (issue #382). Joins of any other thread are not recorded.
+    Reads CPython's private `Thread._target`: if that ever stops working the
+    list stays empty, and `_assert_one_shared_deadline` refuses an empty list."""
+    timeouts: list[float | None] = []
+    real_join = threading.Thread.join
+
+    def join(thread: threading.Thread, timeout: float | None = None) -> None:
+        if isinstance(getattr(getattr(thread, "_target", None), "__self__", None), d._BoundedDrain):
+            timeouts.append(timeout)
+        real_join(thread, timeout)
+
+    monkeypatch.setattr(threading.Thread, "join", join)
+    return timeouts
+
+
+def _assert_one_shared_deadline(timeouts: list[float | None], bound: float) -> None:
+    """Both drains are held open past the join, so the first join waits out
+    the whole deadline. Against ONE shared deadline the second join is then
+    handed `max(0.0, deadline - now)`, which is 0.0: host load can only push
+    `now` later, never the timeout higher. Sequential joins, the regression
+    these tests exist to catch, hand the second join the full bound again.
+    No wall-clock ceiling is involved (issue #382)."""
+    assert len(timeouts) == 2, f"expected exactly the stdout and stderr drain joins, saw {timeouts!r}"
+    first, second = timeouts
+    # 0.0 is legitimate: scheduling may exhaust the deadline before the first
+    # join's own `max(0.0, ...)` is even evaluated (Codex review of #382).
+    assert first is not None and 0.0 <= first <= bound, (
+        f"the first drain join must be bounded by the one deadline ({bound}s), got {first!r}"
+    )
+    assert second is not None and second <= 0.1, (
+        f"the second drain join got timeout={second!r} after the first had already waited out the deadline - "
+        "it was given its own bound instead of the remainder of one shared deadline"
+    )
 
 
 @pytest.fixture
@@ -58,8 +120,17 @@ def docker_state(tmp_path: Path) -> Path:
     return tmp_path / "docker-state"
 
 
-def _backend(base: Path, docker_state: Path) -> d.DockerBackend:
-    return d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+def _backend(
+    base: Path, docker_state: Path, daemon_timeout: float = FAKE_DOCKER_DAEMON_TIMEOUT,
+) -> d.DockerBackend:
+    """A backend over the fake CLI, bounded by the TEST-only daemon budget
+    (issue #385) - production's 5s bounds a real daemon, and one fake process
+    spawn on a loaded host can exceed it. A test that needs the bound to FIRE
+    passes its own small `daemon_timeout`, so its claim and runtime do not
+    depend on this default."""
+    return d.DockerBackend(
+        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=daemon_timeout,
+    )
 
 
 def _sentinel(docker_state: Path, name: str) -> None:
@@ -123,7 +194,7 @@ def test_describe_states_disk_limit_is_unset_by_default(base: Path, docker_state
 
 def test_describe_states_the_configured_disk_limit(base: Path, docker_state: Path) -> None:
     backend = d.DockerBackend(
-        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), disk_limit="3g",
+        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT, disk_limit="3g",
     )
     description = backend.describe()
     assert any("size=3g" in claim for claim in description.isolation)
@@ -419,7 +490,7 @@ def test_prepare_raises_when_docker_run_itself_fails(base: Path, docker_state: P
 
 def test_prepare_raises_when_the_docker_binary_is_missing(base: Path) -> None:
     backend = d.DockerBackend(
-        image="fake-image:1", base_dir=base, docker_bin=["/nonexistent/docker-binary-xyz"],
+        image="fake-image:1", base_dir=base, docker_bin=["/nonexistent/docker-binary-xyz"], daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT,
     )
     with pytest.raises(BackendUnavailable):
         backend.prepare("a-lc-000000000003")
@@ -502,6 +573,173 @@ def test_install_accepts_raw_bytes_surface_values(
     backend.export(handle, dest)
     assert (dest / "probe.py").read_bytes() == b"print('hello')\n"
     backend.destroy(handle)
+
+
+def _observe_install_calls(
+    monkeypatch: pytest.MonkeyPatch, calls: list[tuple[list[str], bytes | None]], probe_fails: bool = False,
+) -> None:
+    real_run = subprocess.run
+
+    def observed_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        payload = kwargs.get("input")
+        calls.append((list(argv), payload if isinstance(payload, bytes) else None))
+        if probe_fails and _is_parent_probe(argv):
+            return subprocess.CompletedProcess(argv, 1, b"", b"probe exploded")
+        return real_run(argv, **kwargs)  # type: ignore[call-overload]
+
+    monkeypatch.setattr(subprocess, "run", observed_run)
+
+
+def _is_parent_probe(argv: list[str]) -> bool:
+    return "exec" in argv and any(a.startswith("i=0; for p do") for a in argv)
+
+
+def _tar_members(payload: bytes) -> list[tarfile.TarInfo]:
+    with tarfile.open(fileobj=io.BytesIO(payload)) as archive:
+        return archive.getmembers()
+
+
+def test_missing_parent_candidates_lists_every_ancestor_parents_first() -> None:
+    assert d._missing_parent_candidates(["top.py", "tests/unit/x.py", "tests/y.py", "ci/deep/gate.sh"]) == [
+        "ci", "tests", "ci/deep", "tests/unit",
+    ]
+    assert d._missing_parent_candidates(["flat.py", "other"]) == []
+
+
+def test_owned_tar_dirs_are_candidate_owned_directories_in_order() -> None:
+    members = _tar_members(d._owned_tar_dirs(["tests", "tests/unit"]))
+    assert [m.name for m in members] == ["tests", "tests/unit"]
+    for m in members:
+        assert m.isdir()
+        assert (m.uid, m.gid, m.mode) == (d.CANDIDATE_UID, d.CANDIDATE_GID, 0o755)
+
+
+def test_install_delivers_only_absent_nested_parents_as_owned_directories_first(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """#393: a one-file tar for `tests/unit/x.py` names no directory, so a
+    real `docker cp` creates `tests/` and `tests/unit/` owned by root and
+    the candidate cannot add a file there. The absent ancestors now go in
+    first, as candidate-owned directory entries - and ONLY the absent ones:
+    `pre/` already exists, and a directory entry landing on it would rewrite
+    its owner and mode on a real daemon. Fails on the pre-fix code (no
+    probe, no directory tar). The ownership itself is real-Docker evidence:
+    `tests/test_install_nested_dirs_live.py`."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-nested-parents-01")
+    assert isinstance(handle, d._Handle)
+    (docker_state / f"{handle.name}.fsroot" / "work" / "pre").mkdir(parents=True)
+    host_dir = tmp_path / "kit"
+    host_dir.mkdir()
+    (host_dir / "a.sh").write_text("true\n")
+    calls: list[tuple[list[str], bytes | None]] = []
+    try:
+        with monkeypatch.context() as patch:
+            _observe_install_calls(patch, calls)
+            readiness = backend.install(handle, {
+                "tests/unit/x.py": b"x", "pre/y.py": b"y", "tools/kit": host_dir, "flat.py": b"f",
+            })
+        assert readiness["entries"] == {
+            "tests/unit/x.py": "installed", "pre/y.py": "installed", "tools/kit": "installed", "flat.py": "installed",
+        }
+        assert list(readiness["entries"]) == ["tests/unit/x.py", "pre/y.py", "tools/kit", "flat.py"]
+        probes = [argv for argv, _ in calls if _is_parent_probe(argv)]
+        assert len(probes) == 1
+        probe = probes[0][len(backend.docker_bin):]
+        assert probe[:4] == ["exec", "-u", "0", "--"]
+        assert sorted(probe[-4:]) == ["/work/pre", "/work/tests", "/work/tests/unit", "/work/tools"]
+        copies = [payload for argv, payload in calls if "cp" in argv and payload is not None]
+        dirs = _tar_members(copies[0])
+        assert [m.name for m in dirs] == ["tests", "tools", "tests/unit"]
+        assert all(m.isdir() and m.uid == d.CANDIDATE_UID for m in dirs)
+        assert len(copies) == 1 + 4
+        dest = tmp_path / "export"
+        backend.export(handle, dest)
+        assert (dest / "tests/unit/x.py").read_bytes() == b"x"
+        assert (dest / "tools/kit/a.sh").is_file()
+    finally:
+        backend.destroy(handle)
+
+
+def test_install_of_a_flat_surface_makes_no_parent_probe(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-nested-parents-02")
+    assert isinstance(handle, d._Handle)
+    calls: list[tuple[list[str], bytes | None]] = []
+    try:
+        with monkeypatch.context() as patch:
+            _observe_install_calls(patch, calls)
+            backend.install(handle, {"a.py": b"a", "b.py": b"b", "gone/x.py": "/no/such/host/path"})
+        assert not [argv for argv, _ in calls if _is_parent_probe(argv)]
+        assert len([p for argv, p in calls if "cp" in argv and p is not None]) == 2
+    finally:
+        backend.destroy(handle)
+
+
+def test_install_refuses_before_copying_anything_when_the_parent_probe_fails(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unanswered probe is never guessed: "absent" would rewrite an
+    existing directory, "present" would leave a root-owned one."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-nested-parents-03")
+    assert isinstance(handle, d._Handle)
+    calls: list[tuple[list[str], bytes | None]] = []
+    try:
+        with monkeypatch.context() as patch:
+            _observe_install_calls(patch, calls, probe_fails=True)
+            with pytest.raises(BackendUnavailable, match="parent probe failed"):
+                backend.install(handle, {"tests/x.py": b"x"})
+        assert not [p for argv, p in calls if "cp" in argv and p is not None]
+    finally:
+        backend.destroy(handle)
+
+
+def test_install_refuses_when_the_parent_directory_copy_fails(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The directory tar is copied before any file; if it fails, no file is
+    copied into a parent the candidate would not own."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-nested-parents-05")
+    assert isinstance(handle, d._Handle)
+    real_run = subprocess.run
+    file_copies: list[bytes] = []
+
+    def failing_dir_copy(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        payload = kwargs.get("input")
+        if "cp" in argv and isinstance(payload, bytes):
+            if all(m.isdir() for m in _tar_members(payload)):
+                return subprocess.CompletedProcess(argv, 1, b"", b"no space left")
+            file_copies.append(payload)
+        return real_run(argv, **kwargs)  # type: ignore[call-overload]
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(subprocess, "run", failing_dir_copy)
+            with pytest.raises(BackendUnavailable, match="nested parent directories"):
+                backend.install(handle, {"tests/x.py": b"x"})
+        assert file_copies == []
+    finally:
+        backend.destroy(handle)
+
+
+@pytest.mark.parametrize("stdout", [b"zero\n", b"7\n", b"-1\n"])
+def test_absent_parents_refuses_an_unreadable_or_out_of_range_answer(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch, stdout: bytes,
+) -> None:
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-nested-parents-04")
+    assert isinstance(handle, d._Handle)
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(subprocess, "run", lambda argv, **kw: subprocess.CompletedProcess(argv, 0, stdout, b""))
+            with pytest.raises(BackendUnavailable, match="parent probe answered"):
+                backend._absent_parents(handle, "/work", ["tests", "tests/unit"])
+    finally:
+        backend.destroy(handle)
 
 
 def test_install_counts_a_non_path_surface_value_without_copying_it(
@@ -865,8 +1103,10 @@ def test_read_home_tree_finds_multiple_files_under_the_directory(base: Path, doc
 
 @needs_setsid
 @pytest.mark.skipif(shutil.which("cat") is None, reason="needs cat to block the detached grandchild on a FIFO")
+@pytest.mark.parametrize("delays", [{}, {"cp": 1.2}], ids=["nominal", "slow-cp"])
 def test_read_home_tree_joins_stdout_and_stderr_against_one_shared_deadline(
-    base: Path, docker_state: Path, tmp_path: Path,
+    base: Path, docker_state: Path, tmp_path: Path, delays: dict[str, float],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """issue #20 Nit Store: read_home_tree's own stdout/stderr drain joins
     had the identical sequential-join shape execute()'s just got fixed for
@@ -891,26 +1131,40 @@ def test_read_home_tree_joins_stdout_and_stderr_against_one_shared_deadline(
     so a still-open pipe under that size reads back EMPTY instead of
     partial) - a separate, pre-existing bug this test does not attempt to
     characterize or fix. `read_home_tree()` is expected to raise under that
-    bug; only the ELAPSED TIME is this test's own claim."""
-    daemon_timeout = 1.0
-    backend = d.DockerBackend(
-        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=daemon_timeout,
+    bug; only the JOIN SHAPE is this test's own claim.
+
+    Issue #382: this used to assert `elapsed < daemon_timeout + 0.8` with a
+    1.0s `daemon_timeout` on every fake-CLI call, and once failed in SETUP -
+    `deliver_home_file`'s `docker cp` exceeded 1.0s on a loaded host. It now
+    asserts the join shape directly (`_assert_one_shared_deadline`), which
+    host load cannot move, at the suite-default `daemon_timeout`. `slow-cp`
+    delays every fake `docker cp` by 1.2s, the setup failure by
+    construction; it failed the old test and passes this one."""
+    daemon_timeout = 5.0
+    # SETUP on the suite's fake-CLI budget (#412): on CI 806 the 1.2 s-slowed
+    # `docker cp` in deliver_home_file overran 5.0 s before the read under
+    # test ever ran. Only `read_home_tree` - the call whose join shape this
+    # test pins - keeps the 5.0 s bound.
+    setup = d.DockerBackend(
+        image="fake-image:1", base_dir=base, docker_bin=_slowed_docker_bin(docker_state, tmp_path, delays),
+        daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT,
     )
-    handle = backend.prepare("a-lc-000000000018b")
+    handle = setup.prepare("a-lc-000000000018b")
     assert isinstance(handle, d._Handle)
-    backend.deliver_home_file(handle, ".claude/projects/-work/x.jsonl", b"line\n")
+    setup.deliver_home_file(handle, ".claude/projects/-work/x.jsonl", b"line\n")
+    backend = dataclasses.replace(setup, daemon_timeout=daemon_timeout)
+    assert backend.daemon_timeout == 5.0 and setup.daemon_timeout == FAKE_DOCKER_DAEMON_TIMEOUT
     fifo = tmp_path / "hold-open.fifo"
     os.mkfifo(fifo)
     docker_state.mkdir(parents=True, exist_ok=True)
     sentinel = docker_state / f".cp-hold-open-{handle.name}"
     sentinel.write_text(str(fifo), encoding="utf-8")
-    started = time.monotonic()
+    joins = _spy_on_drain_joins(monkeypatch)
     try:
         try:
             backend.read_home_tree(handle, ".claude/projects")
         except tarfile.ReadError:
             pass  # issue #189, not this test's own claim - see the docstring above
-        elapsed = time.monotonic() - started
     finally:
         sentinel.unlink(missing_ok=True)
         try:
@@ -918,15 +1172,8 @@ def test_read_home_tree_joins_stdout_and_stderr_against_one_shared_deadline(
                 pass
         except OSError:
             pass
-    # ONE shared deadline (~1.3s measured) vs the pre-fix sequential joins
-    # (~2.3s measured) - 0.8s margin is tight enough to actually catch a
-    # regression back to sequential joins (mutation-checked: a bound of
-    # daemon_timeout + 2.0 here passed even with the joins reverted to
-    # sequential, which is not evidence at all), not merely wide enough to
-    # never fail.
-    bound = daemon_timeout + 0.8
-    assert elapsed < bound, f"read_home_tree() took {elapsed:.2f}s, expected under {bound:.2f}s"
-    backend.destroy(handle)
+    _assert_one_shared_deadline(joins, daemon_timeout)
+    setup.destroy(handle)
 
 
 def test_read_home_tree_refuses_past_the_file_count_bound(base: Path, docker_state: Path) -> None:
@@ -1043,7 +1290,10 @@ def test_a_directory_symlink_at_observations_makes_the_writeback_fail_visibly(
         "os.symlink('elsewhere', 'observations')\n"
         "print('real capture')\n"
     )
-    result = backend.execute(handle, [sys.executable, "-c", script], Limits(timeout=5))
+    # The suite's fake-CLI budget, not 5 s (#412): the subject exits at once
+    # (0.20-0.22 s measured), and this test's property is that the write-back
+    # failure is VISIBLE, not any timing. A 5 s limit read `timeout` on CI 806.
+    result = backend.execute(handle, [sys.executable, "-c", script], Limits(timeout=FAKE_DOCKER_DAEMON_TIMEOUT))
     assert result.reason == "exited"
     assert result.exit_code == 0
     assert result.observations_capture == "failed"
@@ -1145,8 +1395,10 @@ def test_execute_does_not_annotate_stderr_truncation_under_the_cap(base: Path, d
 
 @needs_setsid
 @pytest.mark.skipif(shutil.which("cat") is None, reason="needs cat to block the detached grandchild on a FIFO")
+@pytest.mark.parametrize("delays", [{}, {"exec": 1.5}], ids=["nominal", "slow-exec"])
 def test_execute_reports_stdout_incomplete_when_the_drain_never_reaches_eof(
-    base: Path, docker_state: Path, tmp_path: Path,
+    base: Path, docker_state: Path, tmp_path: Path, delays: dict[str, float],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Red case for issue #133 item 3: the pre-fix code read
     `stdout_drain.captured_bytes()` unconditionally after `stdout_thread.join(
@@ -1169,10 +1421,18 @@ def test_execute_reports_stdout_incomplete_when_the_drain_never_reaches_eof(
     and exits cleanly instead of leaking a process; it runs whether or not
     the assertions below it pass. Fails on the pre-fix code (pre-#164),
     which reported `stdout_truncated=False` here - indistinguishable from a
-    clean, complete, empty capture."""
-    grace, daemon_timeout = 1.0, 1.0
+    clean, complete, empty capture.
+
+    Issue #382: the joins' shared deadline used to be checked with an
+    absolute `elapsed < 3.5` ceiling, ~1s above the ~2.46s the fixed code
+    takes, and a loaded runner crossed it (push pipeline 457: 3.92s). The
+    join shape is now asserted directly (`_assert_one_shared_deadline`),
+    which host load cannot move. `slow-exec` delays the fake `docker exec`
+    by 1.5s; it failed the old ceiling and passes this assertion."""
+    grace, daemon_timeout = 0.5, 5.0
     backend = d.DockerBackend(
-        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=daemon_timeout,
+        image="fake-image:1", base_dir=base, docker_bin=_slowed_docker_bin(docker_state, tmp_path, delays),
+        daemon_timeout=daemon_timeout,
     )
     handle = backend.prepare("a-lc-000000000024b")
     assert isinstance(handle, d._Handle)
@@ -1180,31 +1440,16 @@ def test_execute_reports_stdout_incomplete_when_the_drain_never_reaches_eof(
     fifo = tmp_path / "hold-open.fifo"
     os.mkfifo(fifo)
     argv = ["sh", "-c", f"setsid sh -c 'exec cat {fifo}' </dev/null & true"]
-    # The nominal-worst-case-sum formula this bound used before overstated
-    # what the fixed path actually costs (kill_container and the
-    # observations docker-cp write-back both finish well under their own
-    # daemon_timeout on a healthy host) - a bound built from it was loose
-    # enough to pass even with the drain joins reverted to sequential
-    # (issue #20, mutation-checked: reverting them here, that formula's own
-    # 6.0s+ bound still passed at the reverted code's ~4.45s). Measured
-    # directly instead, repeatably: ~2.46s with the joins against ONE
-    # shared deadline (grace + daemon_timeout, not each thread against its
-    # own full bound sequentially), ~4.45s reverted to sequential. This
-    # bound sits between the two, mutation-checked to actually catch the
-    # regression.
-    bound = 3.5
-    started = time.monotonic()
+    joins = _spy_on_drain_joins(monkeypatch)
     try:
-        result = backend.execute(handle, argv, Limits(timeout=5, grace=grace))
-        elapsed = time.monotonic() - started
+        result = backend.execute(handle, argv, Limits(timeout=30, grace=grace))
         assert result.reason == "exited"
         assert result.stdout_incomplete is True
         assert result.stderr_incomplete is True
         assert result.stdout_truncated is False, "capped-and-discarded is a different fact from never-reached-EOF"
-        assert elapsed < bound, (
-            f"execute() took {elapsed:.2f}s, expected under {bound:.2f}s - it waited for the "
-            "detached grandchild instead of giving up, or the drain joins regressed to sequential"
-        )
+        # A bounded first join is "gave up instead of waiting for the
+        # detached grandchild"; a zero second join is "one shared deadline".
+        _assert_one_shared_deadline(joins, grace + daemon_timeout)
     finally:
         try:
             with open(fifo, "wb"):
@@ -1340,8 +1585,36 @@ def test_a_container_level_kill_does_not_reach_the_execd_subject_but_still_kills
     assert backend.confirm_absent(handle) is Confirmation.CONFIRMED
 
 
+def _alive(pid: int) -> bool:
+    """`os.kill(pid, 0)` alone reads a zombie as alive: a SIGKILLed process
+    keeps its pid until its PARENT reaps it. Same idiom as
+    `tests/test_verify.py`/`tests/test_trial.py`."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    # A zombie still answers kill(0); read its state instead.
+    try:
+        state = Path(f"/proc/{pid}/stat").read_text().split(")")[-1].split()[0]
+    except OSError:
+        return False
+    return state != "Z"
+
+
+def _dies_within(pid: int, seconds: float) -> bool:
+    """SIGKILL delivery is asynchronous: the target must still be scheduled
+    to exit. Poll to a deadline instead of reading one instant."""
+    deadline = time.monotonic() + seconds
+    while _alive(pid):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.01)
+    return True
+
+
+@pytest.mark.parametrize("parent_stopped", [False, True], ids=["parent-running", "parent-stopped"])
 def test_removing_a_container_without_a_preceding_kill_still_reaps_a_live_exec_session(
-    base: Path, docker_state: Path, tmp_path: Path,
+    base: Path, docker_state: Path, tmp_path: Path, parent_stopped: bool,
 ) -> None:
     """Separate test for the remove path (issue #158 fidelity fix, second
     pass): `DockerBackend` itself always issues a `docker kill` before
@@ -1353,7 +1626,7 @@ def test_removing_a_container_without_a_preceding_kill_still_reaps_a_live_exec_s
     kill entirely, to prove `rm -f` alone - with no preceding `kill` at all
     - still reaps a live exec'd session, exactly as real container removal
     does."""
-    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     handle = backend.prepare("a-lc-000000000031")
     assert isinstance(handle, d._Handle)
     backend.install(handle, {})
@@ -1370,14 +1643,63 @@ def test_removing_a_container_without_a_preceding_kill_still_reaps_a_live_exec_s
         pid = int(pidfile.read_text())
         os.kill(pid, 0)  # alive - never touched by any docker kill call in this test
 
+        if parent_stopped:
+            os.kill(exec_proc.pid, signal.SIGSTOP)
         backend.destroy(handle)  # rm -f, with no preceding docker kill at all
 
-        with pytest.raises(ProcessLookupError):
-            os.kill(pid, 0)
+        # Killed, not necessarily reaped: the subject is the fake `docker
+        # exec` process's child, so it stays a zombie until that parent's
+        # `proc.wait()` runs. Under CI load that lag made a bare
+        # `os.kill(pid, 0)` read the killed subject as alive (push pipelines
+        # 457 and 759). `parent-stopped` holds the parent so the zombie
+        # persists deterministically; a subject `rm -f` never signals still
+        # sleeps 20s and fails the 5s deadline.
+        assert _dies_within(pid, 5), f"subject {pid} survived container removal"
         assert backend.confirm_absent(handle) is Confirmation.CONFIRMED
     finally:
+        if parent_stopped:
+            os.kill(exec_proc.pid, signal.SIGCONT)
         exec_proc.kill()
         exec_proc.wait(timeout=5)
+
+
+def test_a_late_exec_cleanup_never_resurrects_a_removed_container(tmp_path: Path) -> None:
+    """Issue #382 (found on a serial run): the fake `docker exec`'s cleanup
+    (`_rewrite_state` clearing `exec_pid`) and `docker rm -f` (`cmd_rm`) are
+    separate OS processes. `cmd_rm` used to unlink the state file WITHOUT the
+    per-name lock, so a cleanup that had already read the file wrote it back
+    after the removal - resurrecting the container, which `confirm_absent()`
+    then honestly reported as NOT_CONFIRMED (the
+    `test_removing_a_container_without_a_preceding_kill_still_reaps_a_live_exec_session`
+    red). Reproduced deterministically by holding the cleanup open between
+    its read and its write while `rm -f` runs."""
+    spec = importlib.util.spec_from_file_location("fake_docker_under_test", FAKE_DOCKER)
+    assert spec is not None and spec.loader is not None
+    fake = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fake)
+    state_dir, name = tmp_path / "state", "skillc-a-resurrect"
+    state_dir.mkdir()
+    fake._write_state(state_dir, name, "running", "fake-image:1", {}, {}, "id-1")
+    fake._container_root(state_dir, name).mkdir(parents=True)
+    cleanup_has_read, release_cleanup = threading.Event(), threading.Event()
+
+    def clear_exec_pid_slowly(data: dict[str, object]) -> dict[str, object]:
+        cleanup_has_read.set()
+        release_cleanup.wait(timeout=5)
+        return {k: v for k, v in data.items() if k != "exec_pid"}
+
+    cleanup = threading.Thread(target=fake._rewrite_state, args=(state_dir, name, clear_exec_pid_slowly))
+    cleanup.start()
+    try:
+        assert cleanup_has_read.wait(timeout=5), "the cleanup never read the state file - the test proves nothing"
+        remover = threading.Thread(target=fake.cmd_rm, args=(state_dir, ["-f", name]))
+        remover.start()
+    finally:
+        release_cleanup.set()
+        cleanup.join(timeout=10)
+    remover.join(timeout=10)
+    assert not cleanup.is_alive() and not remover.is_alive()
+    assert not fake._state_file(state_dir, name).exists(), "a late exec cleanup resurrected the removed container"
 
 
 def test_execute_never_prefixes_the_argv_when_the_image_lacks_forwarding_support(
@@ -1430,8 +1752,14 @@ def test_execute_never_prefixes_the_argv_when_no_supervisor_is_actually_running(
     backend.destroy(handle)
 
 
+@pytest.mark.parametrize(
+    "delays,subject_delay,stall_first_poll",
+    [({}, 0.0, False), ({}, 1.0, False), ({"exec": 1.0}, 0.0, False), ({}, 0.0, True)],
+    ids=["nominal", "slow-subject", "slow-exec", "stalled-first-poll"],
+)
 def test_execute_forwards_term_through_a_capable_image_and_reports_exited_within_grace(
-    base: Path, docker_state: Path, tmp_path: Path,
+    base: Path, docker_state: Path, tmp_path: Path, delays: dict[str, float], subject_delay: float,
+    stall_first_poll: bool, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Red case 1 (issue #158): with the fake's "supervisor present and
     survives TERM" mode fully on (BOTH `.supervisor-NAME` - the binary - AND
@@ -1446,9 +1774,28 @@ def test_execute_forwards_term_through_a_capable_image_and_reports_exited_within
     supervisor to relay anything - never receives TERM at all (the
     companion red case
     `test_a_container_level_kill_does_not_reach_the_execd_subject_but_still_kills_it`,
-    above, is exactly that scenario without either sentinel)."""
+    above, is exactly that scenario without either sentinel).
+
+    Issue #382: the timeout (0.3s) used to fire whenever it fired, so on a
+    loaded runner TERM could arrive before the subject installed its
+    handler, or before the fake `docker exec` had registered it for
+    forwarding - either way the sentinel was never written (push pipeline
+    457). TERM is now held until both have happened. `execute()`'s wait loop
+    polls `cancel`; this test's `cancel` blocks until the subject is ready
+    and then returns False, so the stop is deferred, not changed - the run
+    still ends as `reason == "timeout"`. The loop checks its deadline BEFORE
+    `cancel`, so a controller descheduled past the deadline would skip the
+    gate (Codex review of #382): `docker_backend`'s clock is therefore held
+    still for the duration of `_launch_and_wait` until the gate opens, and
+    the real timeout runs from there. `slow-subject` delays the handler by
+    1s, `slow-exec` delays the fake exec's registration by 1s - both failed
+    the old test - and `stalled-first-poll` stalls 2.5s straight after the
+    deadline is computed, which skips the gate without the held clock.
+    `grace` (10s) and the suite-default `daemon_timeout` only bound how long
+    a slow host may take; nothing here passes faster for being given more."""
     backend = d.DockerBackend(
-        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=1.0,
+        image="fake-image:1", base_dir=base, docker_bin=_slowed_docker_bin(docker_state, tmp_path, delays),
+        daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT,
     )
     handle = backend.prepare("a-lc-000000000035")
     assert isinstance(handle, d._Handle)
@@ -1457,17 +1804,74 @@ def test_execute_forwards_term_through_a_capable_image_and_reports_exited_within
     (docker_state / f".supervisor-running-{handle.name}").touch()
 
     sentinel = tmp_path / "term-received"
+    ready = tmp_path / "subject-ready"
     script = (
-        "import signal, sys, time\n"
+        "import os, signal, sys, time\n"
+        f"time.sleep({subject_delay!r})\n"
         "def handler(signum, frame):\n"
         f"    open({str(sentinel)!r}, 'w').write('term')\n"
         "    sys.exit(0)\n"
         "signal.signal(signal.SIGTERM, handler)\n"
-        "time.sleep(20)\n"
+        f"open({str(ready)!r} + '.tmp', 'w').write(str(os.getpid()))\n"
+        f"os.replace({str(ready)!r} + '.tmp', {str(ready)!r})\n"
+        "time.sleep(60)\n"
     )
+    state_file = docker_state / f"{handle.name}.json"
+    gate = {"open": False, "gave_up": False}
+    gate_deadline = time.monotonic() + 30
+    real_monotonic = time.monotonic
+    clock: dict[str, float | None] = {"held_at": None}
+    held_reads = [0]
+
+    def monotonic() -> float:
+        held_at = clock["held_at"]
+        if held_at is None:
+            return real_monotonic()
+        held_reads[0] += 1
+        if stall_first_poll and held_reads[0] == 2:
+            time.sleep(2.5)  # descheduled between computing the deadline and checking it
+        return held_at
+
+    real_launch_and_wait = d.DockerBackend._launch_and_wait
+
+    def launch_and_wait_on_held_clock(self: d.DockerBackend, *args: Any, **kwargs: Any) -> Any:
+        clock["held_at"] = real_monotonic()
+        try:
+            return real_launch_and_wait(self, *args, **kwargs)
+        finally:
+            clock["held_at"] = None
+
+    monkeypatch.setattr(d, "time", types.SimpleNamespace(monotonic=monotonic, sleep=time.sleep))
+    monkeypatch.setattr(d.DockerBackend, "_launch_and_wait", launch_and_wait_on_held_clock)
+
+    def hold_term_until_forwardable() -> bool:
+        """Block until the handler is installed AND the fake has registered
+        this subject for forwarding, then never cancel."""
+        while not gate["open"]:
+            try:
+                pid = int(ready.read_text(encoding="utf-8"))
+                state = json.loads(state_file.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                state, pid = {}, None
+            if state.get("supervisor_registered") is True and state.get("exec_pid") == pid:
+                gate["open"] = True
+                clock["held_at"] = None  # release the clock: the real timeout runs from here
+            elif time.monotonic() >= gate_deadline:
+                gate["gave_up"] = True
+                return True  # stop the run; the assertion below names why
+            else:
+                time.sleep(0.01)
+        return False
+
     result = backend.execute(
-        handle, [sys.executable, "-c", script], Limits(timeout=0.3, grace=2.0),
+        handle, [sys.executable, "-c", script], Limits(timeout=0.3, grace=10.0),
+        cancel=hold_term_until_forwardable,
     )
+    assert not gate["gave_up"], (
+        "the subject never became forwardable within 30s - no installed handler, or never registered "
+        "with the supervisor; this is not the forwarding claim failing"
+    )
+    assert gate["open"], "the timeout fired before the readiness gate was ever consulted - TERM was not held"
     assert result.reason == "timeout"
     assert sentinel.exists(), "the subject should have received a real, forwarded TERM"
     assert result.signal == "SIGTERM"
@@ -1495,7 +1899,7 @@ def test_execute_reports_launch_failed_when_the_docker_binary_is_missing(
     handle = backend.prepare("a-lc-000000000011")
     backend.install(handle, {})
     broken = d.DockerBackend(
-        image="fake-image:1", base_dir=base, docker_bin=["/nonexistent/docker-binary-xyz"],
+        image="fake-image:1", base_dir=base, docker_bin=["/nonexistent/docker-binary-xyz"], daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT,
     )
     result = broken.execute(handle, ["true"], Limits(timeout=1))
     assert result.reason == "launch-failed"
@@ -1738,7 +2142,7 @@ def _trigger_backend(base: Path, docker_state: Path, trigger_socket_dir: Path) -
     def decide(request: Mapping[str, object]) -> Mapping[str, object]:
         return {"decision": "fail" if request.get("client_seq") == 3 else "pass"}
     return d.DockerBackend(
-        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), trigger_decide=decide,
+        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT, trigger_decide=decide,
         trigger_socket_dir=trigger_socket_dir,
     )
 
@@ -1841,6 +2245,63 @@ def test_destroy_closes_the_trigger_channel_even_when_the_caller_never_finalized
     backend.destroy(handle)  # no trigger_log() call first
     assert not sock_path.exists()
     assert backend.trigger_log(handle) == []  # bypass: never connected
+
+
+def test_the_trigger_socket_outlives_trigger_log_and_goes_only_after_the_container(
+    base: Path, docker_state: Path, trigger_socket_dir: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#394: the gate witness finalizes the channel (`trigger_log()`) right
+    after the confirmed stop and BEFORE the capture export. The socket is
+    the container's bind-mount source, and real Docker cannot `docker cp`
+    out of a stopped container whose source is gone - so finalizing must
+    leave the file, and `destroy()` must remove the container before it
+    removes the file. (The daemon behaviour itself is proven on real Docker
+    in `test_decide_reply_channel_live.py`; the fake CLI has no mounts.)"""
+    backend = _trigger_backend(base, docker_state, trigger_socket_dir)
+    handle = backend.prepare("a-lc-000000000394")
+    assert isinstance(handle, d._Handle)
+    sock_path = d.trigger_socket_host_path_for(backend.trigger_socket_dir, handle.name)
+    assert backend.trigger_log(handle) == []
+    assert sock_path.exists(), "finalizing the log removed the container's bind-mount source"
+
+    seen: dict[str, object] = {}
+    real_close = DecideReplyChannel.close
+
+    def spying_close(self: DecideReplyChannel) -> None:
+        seen["container_at_close"] = backend.confirm_absent(handle)
+        real_close(self)
+
+    monkeypatch.setattr(DecideReplyChannel, "close", spying_close)
+    backend.destroy(handle)
+    assert seen["container_at_close"] is Confirmation.CONFIRMED
+    assert not sock_path.exists()
+
+
+def test_a_failed_removal_keeps_the_trigger_socket_but_stops_the_listener(
+    base: Path, docker_state: Path, trigger_socket_dir: Path,
+) -> None:
+    """Counter-model finding (#394): when `docker rm -f` does not remove the
+    container, its bind source must survive (the container is still there
+    and still needs it), while the listener stops. A later `destroy()` that
+    does remove it then releases the file."""
+    backend = _trigger_backend(base, docker_state, trigger_socket_dir)
+    handle = backend.prepare("a-lc-000000000395")
+    assert isinstance(handle, d._Handle)
+    sock_path = d.trigger_socket_host_path_for(backend.trigger_socket_dir, handle.name)
+    _sentinel(docker_state, f".stuck-{handle.name}")
+    backend.destroy(handle)
+    assert backend.confirm_absent(handle) is Confirmation.NOT_CONFIRMED
+    assert sock_path.exists(), "released the bind source of a container that still exists"
+    probe = socket_module.socket(socket_module.AF_UNIX, socket_module.SOCK_STREAM)
+    try:
+        with pytest.raises(ConnectionRefusedError):
+            probe.connect(str(sock_path))
+    finally:
+        probe.close()
+    (docker_state / f".stuck-{handle.name}").unlink()
+    backend.destroy(handle)
+    assert backend.confirm_absent(handle) is Confirmation.CONFIRMED
+    assert not sock_path.exists()
 
 
 def test_confirm_stopped_is_unknown_on_an_unrecognized_inspect_error(
@@ -2098,6 +2559,428 @@ def test_clean_write_probe_result_direct() -> None:
     assert naive(137, b"") is False, "the naive version should disagree with the real function here"
 
 
+# ------------------------------------------------- #338: cwd TOCTOU confinement
+
+
+def _real_dir(docker_state: Path, handle: d._Handle, *container_parts: str) -> Path:
+    """The fake CLI's own `_in_container()` convention, duplicated here
+    (not imported - that fixture is invoked as a subprocess script, never
+    as a module) so a test can plant or swap a real directory BEFORE the
+    exec that should observe it, exactly at the path `_remap_absolute`
+    will resolve the matching container-side string to."""
+    return docker_state / f"{handle.name}.fsroot" / Path(*container_parts)
+
+
+def _confined_handle(base: Path, docker_state: Path, attempt_id: str) -> tuple[d.DockerBackend, d._Handle]:
+    backend = _backend(base, docker_state)
+    handle = backend.prepare(attempt_id)
+    assert isinstance(handle, d._Handle)
+    backend.install(handle, {})
+    return backend, handle
+
+
+def _observations(backend: d.DockerBackend, handle: d._Handle) -> str:
+    with tempfile.TemporaryDirectory() as tmp:
+        backend.export(handle, Path(tmp))
+        return (Path(tmp) / "observations").read_text()
+
+
+_SUB = f"{d.CONTAINER_WORKSPACE}/trial/sub"
+
+
+def _readlink_shim(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str) -> None:
+    """Puts a `readlink` first on the PATH the fake container inherits. The
+    confining wrapper runs `readlink` exactly once, AFTER it has opened the
+    cwd as fd 9 and BEFORE it checks or moves - so `body` runs at exactly
+    that point, deterministically, with no timing race: the place a subject
+    swapping the path mid-check would have to act."""
+    shim_dir = tmp_path / "shim-bin"
+    shim_dir.mkdir()
+    real = shutil.which("readlink")
+    assert real is not None
+    shim = shim_dir / "readlink"
+    shim.write_text(f'#!/bin/sh\n{body}\nexec {real} "$@"\n')
+    shim.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{shim_dir}{os.pathsep}{os.environ['PATH']}")
+
+
+def test_exec_in_attempt_confine_root_runs_the_gate_at_the_resolved_cwd(
+    base: Path, docker_state: Path,
+) -> None:
+    """The functional happy path: the gate's own `/proc/self/cwd` (what an
+    exec'd child really inherits) is the requested directory."""
+    backend, handle = _confined_handle(base, docker_state, "a-cwd-00000000001")
+    sub = _real_dir(docker_state, handle, "work", "trial", "sub")
+    sub.mkdir(parents=True)
+
+    result = backend.exec_in_attempt(
+        handle, ["sh", "-c", "readlink /proc/self/cwd"], Limits(timeout=5.0),
+        cwd=_SUB, confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert (result.reason, result.exit_code) == ("exited", 0)
+    assert _observations(backend, handle).strip() == str(sub.resolve())
+
+
+def test_exec_in_attempt_confine_root_moves_physically_not_to_the_proc_fd_string(
+    base: Path, docker_state: Path,
+) -> None:
+    """`cd -P`, not a logical `cd`: a logical `cd /proc/self/fd/9` leaves
+    `PWD=/proc/self/fd/9` exported to the gate (red against the parked
+    wrapper, which used a plain `cd`) - a path that names nothing once the
+    fd closes, and something else entirely inside any later process."""
+    backend, handle = _confined_handle(base, docker_state, "a-cwd-00000000012")
+    sub = _real_dir(docker_state, handle, "work", "trial", "sub")
+    sub.mkdir(parents=True)
+
+    result = backend.exec_in_attempt(
+        handle, ["printenv", "PWD"], Limits(timeout=5.0), cwd=_SUB, confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert (result.reason, result.exit_code) == ("exited", 0)
+    assert _observations(backend, handle).strip() == str(sub.resolve())
+
+
+def test_exec_in_attempt_confine_root_closes_the_fd_before_the_gate_runs(
+    base: Path, docker_state: Path,
+) -> None:
+    """The confinement fd must not leak into the gate: it lives on the
+    compound command's redirection and closes when that block ends."""
+    backend, handle = _confined_handle(base, docker_state, "a-cwd-00000000002")
+    _real_dir(docker_state, handle, "work", "trial", "sub").mkdir(parents=True)
+
+    result = backend.exec_in_attempt(
+        handle, ["sh", "-c", "test -e /proc/self/fd/9 && echo LEAKED || echo CLOSED"], Limits(timeout=5.0),
+        cwd=_SUB, confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert result.exit_code == 0
+    assert _observations(backend, handle).strip() == "CLOSED"
+
+
+def test_exec_in_attempt_confine_root_refuses_a_directory_swapped_for_an_outside_symlink(
+    base: Path, docker_state: Path,
+) -> None:
+    """The deterministic red case (#338 point 3): resolve-time said the
+    directory was inside; by exec time it is a symlink to a sibling OUTSIDE
+    the root. The wrapper's one open lands on the outside target and the
+    check against the open directory refuses it."""
+    backend, handle = _confined_handle(base, docker_state, "a-cwd-00000000003")
+    outside = _real_dir(docker_state, handle, "home", "candidate", "outside")
+    outside.mkdir(parents=True)
+    sub = _real_dir(docker_state, handle, "work", "trial", "sub")
+    sub.mkdir(parents=True)
+
+    shutil.rmtree(sub)
+    sub.symlink_to(outside, target_is_directory=True)
+
+    result = backend.exec_in_attempt(
+        handle, ["sh", "-c", "touch ran-here"], Limits(timeout=5.0), cwd=_SUB, confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert (result.reason, result.exit_code) == ("launch-failed", None)
+    assert result.error == d.CWD_CONFINEMENT_REFUSED_SENTINEL
+    assert not (outside / "ran-here").exists()
+
+
+def test_exec_in_attempt_confine_root_refuses_an_ancestor_swapped_for_an_outside_symlink(
+    base: Path, docker_state: Path,
+) -> None:
+    """The issue's other named shape: not the directory itself but an
+    ANCESTOR (`trial`) replaced by a symlink, with a same-named `sub`
+    waiting on the far side."""
+    backend, handle = _confined_handle(base, docker_state, "a-cwd-00000000006")
+    outside = _real_dir(docker_state, handle, "home", "candidate", "outside")
+    (outside / "sub").mkdir(parents=True)
+    trial = _real_dir(docker_state, handle, "work", "trial")
+    (trial / "sub").mkdir(parents=True)
+
+    shutil.rmtree(trial)
+    trial.symlink_to(outside, target_is_directory=True)
+
+    result = backend.exec_in_attempt(
+        handle, ["sh", "-c", "touch ran-here"], Limits(timeout=5.0), cwd=_SUB, confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert (result.reason, result.error) == ("launch-failed", d.CWD_CONFINEMENT_REFUSED_SENTINEL)
+    assert not (outside / "sub" / "ran-here").exists()
+
+
+def test_exec_in_attempt_confine_root_uses_the_opened_directory_not_the_name(
+    base: Path, docker_state: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Correction 1: once the wrapper has opened and checked a directory,
+    a swap of the NAME must not change where the gate runs. The shim swaps
+    `sub` for an outside symlink after the open and before the check and
+    the move; the gate must still land in the original directory (now
+    `sub.orig`), never at the swapped target. Red against any wrapper that
+    goes back to the name for the move (`cd "$1"`)."""
+    outside_marker = tmp_path / "outside-target"
+    outside_marker.mkdir()
+    sub_holder = tmp_path / "sub-path.txt"
+    _readlink_shim(
+        tmp_path, monkeypatch,
+        f'sub=$(cat {sub_holder})\n'
+        f'if [ ! -e "$sub.orig" ]; then mv "$sub" "$sub.orig" && ln -s {outside_marker} "$sub"; fi',
+    )
+    backend, handle = _confined_handle(base, docker_state, "a-cwd-00000000007")
+    sub = _real_dir(docker_state, handle, "work", "trial", "sub")
+    sub.mkdir(parents=True)
+    sub_holder.write_text(str(sub))
+
+    result = backend.exec_in_attempt(
+        handle, ["sh", "-c", "touch ran-here; readlink /proc/self/cwd"], Limits(timeout=5.0),
+        cwd=_SUB, confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert sub.is_symlink(), "the shim must actually have swapped the name, or this test proves nothing"
+    assert (result.reason, result.exit_code) == ("exited", 0)
+    assert not (outside_marker / "ran-here").exists()
+    assert (Path(f"{sub}.orig") / "ran-here").exists()
+    assert _observations(backend, handle).strip() == str(sub.parent.resolve() / "sub.orig")
+
+
+def test_exec_in_attempt_without_confine_root_follows_the_swapped_symlink(
+    base: Path, docker_state: Path,
+) -> None:
+    """The vulnerability itself, on the unchanged `cwd`-only path (`docker
+    exec -w`): the identical swap the refusal test above refuses is
+    silently FOLLOWED here, landing the gate outside the workspace root."""
+    backend, handle = _confined_handle(base, docker_state, "a-cwd-00000000004")
+    workspace_root = _real_dir(docker_state, handle, "work")
+    outside = _real_dir(docker_state, handle, "home", "candidate", "outside")
+    outside.mkdir(parents=True)
+    sub = workspace_root / "trial" / "sub"
+    sub.mkdir(parents=True)
+
+    shutil.rmtree(sub)
+    sub.symlink_to(outside, target_is_directory=True)
+
+    result = backend.exec_in_attempt(
+        handle, ["sh", "-c", "readlink -f /proc/self/cwd"], Limits(timeout=5.0), cwd=_SUB,
+    )
+    assert (result.reason, result.exit_code) == ("exited", 0)
+    reported_cwd = _observations(backend, handle).strip()
+    assert reported_cwd == str(outside.resolve())
+    assert not reported_cwd.startswith(str(workspace_root.resolve()))
+
+
+def test_exec_in_attempt_confine_root_refuses_a_sibling_named_root_plus_newline(
+    base: Path, docker_state: Path,
+) -> None:
+    """Command substitution strips trailing newlines, so a check that
+    compared `$(readlink ...)` directly would read a sibling directory
+    named "<root>\\n" as the root itself. The wrapper keeps the newline
+    (a trailing `.` sentinel), so that sibling - outside the root - is
+    refused."""
+    backend, handle = _confined_handle(base, docker_state, "a-cwd-00000000014")
+    _real_dir(docker_state, handle, "work", "trial").mkdir(parents=True)
+    sibling = _real_dir(docker_state, handle, "work", "trial\n")
+    sibling.mkdir()
+
+    result = backend.exec_in_attempt(
+        handle, ["sh", "-c", "touch ran-here"], Limits(timeout=5.0),
+        cwd=f"{d.CONTAINER_WORKSPACE}/trial\n", confine_root=f"{d.CONTAINER_WORKSPACE}/trial",
+    )
+    assert (result.reason, result.error) == ("launch-failed", d.CWD_CONFINEMENT_REFUSED_SENTINEL)
+    assert not (sibling / "ran-here").exists()
+
+
+@pytest.mark.parametrize("shape", ["missing", "regular-file"])
+def test_exec_in_attempt_confine_root_refuses_a_cwd_that_is_not_a_directory(
+    base: Path, docker_state: Path, shape: str,
+) -> None:
+    """Gone, or a regular file where a directory was: the open (missing) or
+    the physical `cd` (file) fails, and both refuse exactly like an
+    outside-root swap - with only the wrapper's record on stderr, dash's
+    own "cannot open" diagnostic never reaching the caller."""
+    backend, handle = _confined_handle(base, docker_state, "a-cwd-00000000005")
+    trial = _real_dir(docker_state, handle, "work", "trial")
+    trial.mkdir(parents=True)
+    if shape == "regular-file":
+        (trial / "sub").write_text("not a directory\n")
+
+    result = backend.exec_in_attempt(
+        handle, ["sh", "-c", "echo should-not-run"], Limits(timeout=5.0), cwd=_SUB, confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert (result.reason, result.exit_code) == ("launch-failed", None)
+    assert result.error == d.CWD_CONFINEMENT_REFUSED_SENTINEL
+
+
+def test_exec_in_attempt_confine_root_keeps_stdin_env_exit_and_output(
+    base: Path, docker_state: Path,
+) -> None:
+    """Correction 4, non-racing: confinement changes where the gate starts
+    and nothing else. stdin reaches it, `env` replaces its environment,
+    stdout is captured, its own non-zero exit and stderr are reported as
+    the gate's - with the wrapper's status record removed from that
+    stderr."""
+    backend, handle = _confined_handle(base, docker_state, "a-cwd-00000000008")
+    _real_dir(docker_state, handle, "work", "trial", "sub").mkdir(parents=True)
+
+    result = backend.exec_in_attempt(
+        handle,
+        ["sh", "-c", 'read line; printf "%s|%s|%s\\n" "$line" "$GATE_VAR" "${PATH:-unset}"; echo gate-err >&2; exit 7'],
+        Limits(timeout=5.0), stdin=b"from-stdin\n", cwd=_SUB, confine_root=d.CONTAINER_WORKSPACE,
+        env={"GATE_VAR": "declared", "PATH": "/usr/bin:/bin"},
+    )
+    assert (result.reason, result.exit_code) == ("exited", 7)
+    assert result.error == "gate-err"
+    assert _observations(backend, handle) == "from-stdin|declared|/usr/bin:/bin\n"
+
+
+@pytest.mark.parametrize("exit_code", [0, 3])
+def test_exec_in_attempt_reports_the_gates_raw_stderr_on_every_exit(
+    base: Path, docker_state: Path, exit_code: int,
+) -> None:
+    """#334: `stderr` is the gate's own bytes on every exit - whitespace and
+    trailing newline kept, the wrapper's status record removed - while
+    `error` stays the stripped nonzero-exit summary. Before the fix there
+    was no raw field, so a forwarder could only read `error`: None on exit
+    0, newline lost on exit 3."""
+    backend, handle = _confined_handle(base, docker_state, f"a-cwd-0000000002{exit_code}")
+    _real_dir(docker_state, handle, "work", "trial", "sub").mkdir(parents=True)
+
+    result = backend.exec_in_attempt(
+        handle, ["sh", "-c", f"printf '  progress\\nWARNING: skipped\\n' >&2; exit {exit_code}"],
+        Limits(timeout=5.0), cwd=_SUB, confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert (result.reason, result.exit_code) == ("exited", exit_code)
+    assert result.stderr == b"  progress\nWARNING: skipped\n"
+    assert result.stderr_truncated is False
+    assert result.error == (None if exit_code == 0 else "progress\nWARNING: skipped")
+
+    capped = backend.exec_in_attempt(
+        handle, ["sh", "-c", "printf 0123456789 >&2"], Limits(timeout=5.0, max_captured_stderr_bytes=4),
+        cwd=_SUB, confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert (capped.stderr, capped.stderr_truncated) == (b"0123", True)
+
+
+def test_exec_in_attempt_confine_root_gate_printing_a_refusal_is_still_the_gates_result(
+    base: Path, docker_state: Path,
+) -> None:
+    """Correction 2's red case: a gate that prints the refusal record AND
+    the refusal sentinel and exits 125 - the wrapper's own refusal code -
+    ran, and must be reported as having run. Red against the parked
+    implementation, which matched the sentinel anywhere in stderr and
+    returned `launch-failed` for this."""
+    backend, handle = _confined_handle(base, docker_state, "a-cwd-00000000009")
+    _real_dir(docker_state, handle, "work", "trial", "sub").mkdir(parents=True)
+    spoof = d.CWD_CONFINEMENT_REFUSED_RECORD.decode().strip()
+
+    result = backend.exec_in_attempt(
+        handle,
+        ["sh", "-c", f"echo {spoof} >&2; echo {d.CWD_CONFINEMENT_REFUSED_SENTINEL} >&2; touch ran; exit 125"],
+        Limits(timeout=5.0), cwd=_SUB, confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert (result.reason, result.exit_code) == ("exited", 125)
+    assert result.error == f"{spoof}\n{d.CWD_CONFINEMENT_REFUSED_SENTINEL}"
+    assert (_real_dir(docker_state, handle, "work", "trial", "sub") / "ran").exists()
+
+
+def test_exec_in_attempt_confine_root_status_survives_a_zero_stderr_cap(
+    base: Path, docker_state: Path,
+) -> None:
+    """The status record is captured apart from the gate's retained stderr,
+    so a cap of 0 cannot cost a refusal - and the gate's own capped stderr
+    still reports its truncation against the gate's bytes alone."""
+    backend, handle = _confined_handle(base, docker_state, "a-cwd-00000000010")
+    _real_dir(docker_state, handle, "work", "trial", "sub").mkdir(parents=True)
+
+    refused = backend.exec_in_attempt(
+        handle, ["true"], Limits(timeout=5.0, max_captured_stderr_bytes=0),
+        cwd=f"{d.CONTAINER_WORKSPACE}/missing", confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert (refused.reason, refused.error) == ("launch-failed", d.CWD_CONFINEMENT_REFUSED_SENTINEL)
+
+    capped = backend.exec_in_attempt(
+        handle, ["sh", "-c", "printf 0123456789 >&2; exit 3"], Limits(timeout=5.0, max_captured_stderr_bytes=4),
+        cwd=_SUB, confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert (capped.reason, capped.exit_code) == ("exited", 3)
+    assert capped.error == "0123 (truncated, 10 bytes total)"
+
+
+def test_exec_in_attempt_confine_root_missing_status_is_neither_refusal_nor_a_run(
+    base: Path, docker_state: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A wrapper that dies before writing any status record (here: killed
+    from inside its own check) leaves the call with no evidence either way
+    from the wrapper - reported as not started, but as MISSING status,
+    never as the refusal and never as a gate result."""
+    # Kill the OUTERMOST `sh` ancestor running the confining script - the
+    # wrapper itself, not a `$(...)` subshell copy of it, whichever way
+    # the shell happens to fork.
+    _readlink_shim(
+        tmp_path, monkeypatch,
+        'pid=$PPID; target=\n'
+        'while [ "$pid" -gt 1 ]; do\n'
+        '  if [ "$(cat /proc/$pid/comm)" = sh ] && tr "\\0" " " </proc/$pid/cmdline | grep -q skillc-cwd-confinement; then\n'
+        '    target=$pid\n'
+        '  fi\n'
+        '  pid=$(cut -d" " -f4 /proc/$pid/stat)\n'
+        'done\n'
+        'kill -9 "$target"',
+    )
+    backend, handle = _confined_handle(base, docker_state, "a-cwd-00000000011")
+    _real_dir(docker_state, handle, "work", "trial", "sub").mkdir(parents=True)
+
+    result = backend.exec_in_attempt(
+        handle, ["sh", "-c", "touch ran"], Limits(timeout=5.0), cwd=_SUB, confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert (result.reason, result.exit_code) == ("launch-failed", None)
+    assert result.error == d.CWD_CONFINEMENT_STATUS_MISSING
+    assert not (_real_dir(docker_state, handle, "work", "trial", "sub") / "ran").exists()
+
+
+def test_exec_in_attempt_timeout_under_confinement_still_confirms_the_stop(
+    base: Path, docker_state: Path,
+) -> None:
+    """Correction 4: a confined gate that hangs is still a timeout, its
+    in-container process still confirmed stopped - the status record does
+    not turn an interrupted run into anything else."""
+    backend, handle = _confined_handle(base, docker_state, "a-cwd-00000000013")
+    _real_dir(docker_state, handle, "work", "trial", "sub").mkdir(parents=True)
+
+    result = backend.exec_in_attempt(
+        handle, ["sleep", "30"], Limits(timeout=0.5, grace=1.0), cwd=_SUB, confine_root=d.CONTAINER_WORKSPACE,
+    )
+    assert result.reason == "timeout"
+    assert result.stop_confirmed is True
+
+
+def _status_of(payload: bytes, cap: int = 1_000_000) -> tuple[str, bytes, int]:
+    read_fd, write_fd = os.pipe()
+    drain = d._BoundedDrain(os.fdopen(read_fd, "rb"), cap, d.CWD_CONFINEMENT_RECORD_MAX)
+    os.write(write_fd, payload)
+    os.close(write_fd)
+    drain.run()
+    return d._confinement_status(drain), drain.captured_bytes(), drain.total_bytes
+
+
+@pytest.mark.parametrize(
+    ("payload", "status", "captured"),
+    [
+        (d.CWD_CONFINEMENT_READY_RECORD + b"gate-err\n", "ready", b"gate-err\n"),
+        (d.CWD_CONFINEMENT_REFUSED_RECORD, "refused", b""),
+        (b"", "missing", b""),
+        (b"skillc-cwd-confinement:rea", "invalid", b""),  # cut short at EOF
+        (b"Error response from daemon: boom\n" + d.CWD_CONFINEMENT_REFUSED_RECORD, "invalid",
+         d.CWD_CONFINEMENT_REFUSED_RECORD),  # something else came first
+        (b"x" * 200, "invalid", b"x" * (200 - d.CWD_CONFINEMENT_RECORD_MAX)),  # no newline within the bound
+        (d.CWD_CONFINEMENT_READY_RECORD[:-1] + b" \n", "invalid", b""),  # near miss is not a match
+    ],
+    ids=["ready", "refused", "empty", "partial", "other-text-first", "overlong", "near-miss"],
+)
+def test_confinement_status_reads_only_an_exact_bounded_leading_record(
+    payload: bytes, status: str, captured: bytes,
+) -> None:
+    got_status, got_captured, total = _status_of(payload)
+    assert got_status == status
+    assert got_captured == captured
+    assert total == len(captured), "the record is never counted as the gate's output"
+
+
+def test_bounded_drain_status_record_is_outside_the_retention_cap() -> None:
+    status, captured, total = _status_of(d.CWD_CONFINEMENT_READY_RECORD + b"abcdef", cap=2)
+    assert (status, captured, total) == ("ready", b"ab", 6)
+
+
 # ---------------------------------------------------- remove_file_in_attempt
 
 
@@ -2157,6 +3040,118 @@ def test_remove_file_in_attempt_on_a_path_that_never_existed_is_still_true(
         backend.destroy(handle)
 
 
+def test_a_fake_setup_call_slower_than_the_production_daemon_timeout_still_succeeds(
+    base: Path, docker_state: Path,
+) -> None:
+    """Regression for issue #385: the test above failed in SETUP on a loaded
+    host, its fake `docker run -d` timing out after production's 5s
+    `DAEMON_TIMEOUT` - a bound for a real daemon, not for a fake CLI that is
+    a fresh Python process per call. `_backend()` now builds every fake
+    backend with `conftest.FAKE_DOCKER_DAEMON_TIMEOUT`. The slow host is
+    reproduced by construction (`.delay-run`), never by load. Fails on the
+    pre-fix `_backend()` with `BackendUnavailable` from `prepare()`."""
+    delay = d.DAEMON_TIMEOUT + 1.0
+    assert delay < FAKE_DOCKER_DAEMON_TIMEOUT
+    docker_state.mkdir(parents=True, exist_ok=True)
+    (docker_state / ".delay-run").write_text(str(delay), encoding="utf-8")
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-rm-0000000000385")
+    backend.install(handle, {})
+    try:
+        assert backend.remove_file_in_attempt(handle, f"{d.CONTAINER_WORKSPACE}/never-existed") is True
+    finally:
+        backend.destroy(handle)
+
+
+#: Issue #416's tests make the fake daemon slower than prepare()'s bound by
+#: construction. 3.0s against 2.0s is a deliberately wide 1.5x ratio (#412's
+#: timing family): the bound must fire on the delayed subcommand, and the
+#: undelayed probe and image check must still finish inside it on a loaded host.
+_PREPARE_BOUND = 2.0
+_SLOWER_THAN_BOUND = 3.0
+
+
+def _slow(docker_state: Path, subcommand: str) -> None:
+    docker_state.mkdir(parents=True, exist_ok=True)
+    (docker_state / f".delay-{subcommand}").write_text(str(_SLOWER_THAN_BOUND), encoding="utf-8")
+
+
+def test_prepare_still_raises_backend_unavailable_when_the_cleanup_rm_also_times_out(
+    base: Path, docker_state: Path,
+) -> None:
+    """Regression for issue #416: `run -d` times out, then the best-effort
+    `rm -f` cleanup times out too. On the pre-fix code the cleanup's own
+    `TimeoutExpired` escaped prepare() raw instead of the `BackendUnavailable`
+    its contract promises. The match is on the run-failure text, so a probe
+    that times out first under load cannot pass this by the wrong route."""
+    _slow(docker_state, "run")
+    _slow(docker_state, "rm")
+    backend = _backend(base, docker_state, daemon_timeout=_PREPARE_BOUND)
+    attempt_id = "a-416-run-timeout-01"
+    with pytest.raises(BackendUnavailable, match="docker run failed to start") as caught:
+        backend.prepare(attempt_id)
+    message = str(caught.value)
+    assert f"cleanup 'docker rm -f {d._container_name(attempt_id)}' also failed" in message
+    assert "timed out" in message
+    cause = caught.value.__cause__
+    assert isinstance(cause, subprocess.TimeoutExpired)
+    assert "run" in cause.cmd  # the start failure stays the cause, not the cleanup's
+
+
+def test_prepare_still_raises_backend_unavailable_when_a_refused_run_is_followed_by_a_timed_out_rm(
+    base: Path, docker_state: Path,
+) -> None:
+    """#416's second path: `run -d` exits nonzero, and its cleanup times out."""
+    _sentinel(docker_state, ".refuse-run")
+    _slow(docker_state, "rm")
+    backend = _backend(base, docker_state, daemon_timeout=_PREPARE_BOUND)
+    attempt_id = "a-416-run-refused-01"
+    with pytest.raises(BackendUnavailable, match="container creation refused") as caught:
+        backend.prepare(attempt_id)
+    assert f"cleanup 'docker rm -f {d._container_name(attempt_id)}' also failed" in str(caught.value)
+
+
+@pytest.mark.parametrize("start_failure", ["run-timeout", "run-refused"])
+def test_a_cleanup_rm_that_exits_nonzero_is_reported_in_both_paths(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch, start_failure: str,
+) -> None:
+    """#416 (counter-model review): a cleanup that FAILS, not only one that
+    times out, must reach the message. Only the cleanup's `rm -f` is replaced
+    with a daemon error; every other call still goes to the fake CLI."""
+    if start_failure == "run-timeout":
+        _slow(docker_state, "run")
+    else:
+        _sentinel(docker_state, ".refuse-run")
+    real_run = subprocess.run
+
+    def daemon_refuses_rm(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        if list(argv[-3:-1]) == ["rm", "-f"]:
+            return subprocess.CompletedProcess(argv, 1, "", "Cannot connect to the Docker daemon\n")
+        return real_run(argv, **kwargs)  # type: ignore[call-overload,no-any-return]
+
+    monkeypatch.setattr(d.subprocess, "run", daemon_refuses_rm)
+    backend = _backend(base, docker_state, daemon_timeout=_PREPARE_BOUND)
+    attempt_id = f"a-416-rm-nonzero-{start_failure}"
+    with pytest.raises(BackendUnavailable, match="docker run failed to start") as caught:
+        backend.prepare(attempt_id)
+    message = str(caught.value)
+    assert f"cleanup 'docker rm -f {d._container_name(attempt_id)}' also failed: exit 1" in message
+    assert "Cannot connect to the Docker daemon" in message
+
+
+def test_a_cleanup_that_succeeds_adds_no_cleanup_note(base: Path, docker_state: Path) -> None:
+    """Control for #416: with only `run` slow, the cleanup succeeds and the
+    message carries no cleanup clause, so the two tests above are reading the
+    cleanup's failure, not text every failed prepare() would contain."""
+    _slow(docker_state, "run")
+    backend = _backend(base, docker_state, daemon_timeout=_PREPARE_BOUND)
+    with pytest.raises(BackendUnavailable, match="docker run failed to start") as caught:
+        backend.prepare("a-416-control-00001")
+    # The clause the fix adds, not the bare word: the message carries the run's
+    # argv, whose paths can contain "cleanup" (this branch's own worktree did).
+    assert "also failed" not in str(caught.value)
+
+
 def test_remove_file_in_attempt_is_false_when_the_attempt_is_not_running(
     base: Path, docker_state: Path,
 ) -> None:
@@ -2165,3 +3160,92 @@ def test_remove_file_in_attempt_is_false_when_the_attempt_is_not_running(
     backend.install(handle, {})
     backend.destroy(handle)
     assert backend.remove_file_in_attempt(handle, f"{d.CONTAINER_WORKSPACE}/x") is False
+
+
+@pytest.mark.parametrize("witness_io", [False, True])
+def test_retained_output_and_opted_witness_io_preserve_candidate_files(
+    base: Path, docker_state: Path, tmp_path: Path, witness_io: bool,
+) -> None:
+    from dataclasses import replace
+
+    backend = replace(_backend(base, docker_state), witness_io=witness_io)
+    handle = backend.prepare("witness-io-control")
+    try:
+        backend.install(handle, {})
+        gate = backend.exec_in_attempt(handle, [sys.executable, "-c",
+            "from pathlib import Path; Path('observations').write_text('candidate'); print('gate')"],
+            Limits(timeout=5))
+        primary = backend.execute(handle, [sys.executable, "-c", "print('primary')"], Limits(timeout=5))
+        assert primary.stdout == b"primary\n"
+        assert gate.stdout == b"gate\n"
+        dest = tmp_path / "witness-output"
+        backend.export(handle, dest)
+        assert (dest / "observations").read_text() == ("candidate" if witness_io else "primary\n")
+        assert bool(list(dest.glob(".skillc-exec-pid-*"))) is (not witness_io)
+        assert gate.observations_capture == (None if witness_io else "written")
+    finally:
+        backend.destroy(handle)
+
+
+@pytest.mark.parametrize("setup_fails", [False, True])
+def test_home_delivery_creates_parents_as_candidate_before_owned_leaf_copy(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch, setup_fails: bool,
+) -> None:
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("home-parent-control")
+    assert isinstance(handle, d._Handle)
+    home = docker_state / f"{handle.name}.fsroot" / "home" / "candidate"
+    existing = home / "Projects"
+    existing.mkdir(parents=True, exist_ok=True)
+    existing.chmod(0o751)
+    before = existing.stat()
+    calls: list[list[str]] = []
+    real_run = subprocess.run
+
+    def observed_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        calls.append(argv)
+        if "mkdir" in argv and setup_fails:
+            return subprocess.CompletedProcess(argv, 1, b"", b"permission denied")
+        if "cp" in argv:
+            payload = kwargs["input"]
+            assert isinstance(payload, bytes)
+            with tarfile.open(fileobj=io.BytesIO(payload)) as archive:
+                member, = archive.getmembers()
+                assert (member.uid, member.gid, member.mode) == (d.CANDIDATE_UID, d.CANDIDATE_GID, 0o600)
+        return real_run(argv, **kwargs)  # type: ignore[call-overload]
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(subprocess, "run", observed_run)
+            if setup_fails:
+                with pytest.raises(BackendUnavailable, match="parent"):
+                    backend.deliver_home_file(handle, "Projects/new/nested/pyproject.toml", b"private-data")
+                assert len(calls) == 1
+            else:
+                backend.deliver_home_file(handle, "Projects/new/nested/pyproject.toml", b"private-data")
+                assert (home / "Projects/new/nested/pyproject.toml").read_bytes() == b"private-data"
+                assert len(calls) == 2
+            assert calls[0][len(backend.docker_bin):] == [
+                "exec", "-u", d._container_user(), "--", handle.name,
+                "mkdir", "-p", "--", "/home/candidate/Projects/new/nested",
+            ]
+        after = existing.stat()
+        assert (after.st_uid, after.st_gid, stat.S_IMODE(after.st_mode)) == (
+            before.st_uid, before.st_gid, stat.S_IMODE(before.st_mode))
+    finally:
+        backend.destroy(handle)
+
+
+@pytest.mark.parametrize("path", ["", ".", "/absolute/file", "../escape/file", "nested/../file", "bad\0file"])
+def test_home_delivery_refuses_invalid_path_before_any_mutation(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch, path: str,
+) -> None:
+    backend = _backend(base, docker_state)
+    handle = d._Handle(attempt_id="path-control", name="unused", env={})
+
+    def must_not_run(*args: object, **kwargs: object) -> None:
+        raise AssertionError("invalid delivery path reached a container mutation")
+
+    monkeypatch.setattr(subprocess, "run", must_not_run)
+    with pytest.raises(BackendUnavailable, match="relative"):
+        backend.deliver_home_file(handle, path, b"private-data")

@@ -877,6 +877,20 @@ def _secret_name(rel: str) -> str | None:
     return None
 
 
+def _bytecode_cache(rel: str) -> str | None:
+    """#408: a `.pyc` directly under a `__pycache__/` directory. CPython reads one
+    only as a cache for its matching source and never imports it without that
+    source, so it is a build product of whatever last ran, not candidate work.
+    Never exported: neither digested nor delivered to grading, so a cache
+    written by a gate (or planted after one) cannot move a freshness digest or
+    load in place of its source (an unchecked-hash .pyc, PEP 552). A sourceless
+    `mod.pyc` beside the code IS importable, and stays captured."""
+    parts = rel.split("/")
+    if len(parts) >= 2 and parts[-2] == "__pycache__" and parts[-1].endswith(".pyc"):
+        return "a bytecode cache under __pycache__/; a build product, never exported"
+    return None
+
+
 def _secret_content(data: bytes) -> str | None:
     for label, pattern in SECRET_CONTENT:
         if pattern.search(data):
@@ -928,7 +942,7 @@ def _export(experiment: Experiment, output: Path, include: tuple[str, ...], limi
         if not stat.S_ISREG(info.st_mode):
             got.exclusions.append({"path": rel, "reason": "not a regular file"})
             continue
-        reason = _secret_name(rel)
+        reason = _secret_name(rel) or _bytecode_cache(rel)
         if reason:
             got.exclusions.append({"path": rel, "reason": reason})
             continue

@@ -29,14 +29,12 @@ EVALS_ROOT = Path(__file__).resolve().parent.parent / "evals"
 
 QUALIFY_SCRIPTS = sorted(EVALS_ROOT.rglob("qualify.py"))
 
-#: Needs real wall-clock time beyond the suite's global 120s per-test
-#: default (measured 2026-10-07: ~111s, a real `uv run` subprocess tree,
-#: not a hang) - a stated, explicit reason, per the orchestrator's own
-#: instruction, never a silent skip. Every other discovered script
-#: finishes in well under 15s.
+#: CI 735 (#371) exhausted 180s after certifying slugkit-pipeline's
+#: candidates and running its broken-grader controls, before its remaining
+#: pipeline-validity probes completed. Give this known expensive script a
+#: bounded 360s budget under parallel CI; preserve 180s for every other task.
 _SLOW_REASON = {
-    "slugkit-pipeline": "measured ~111s (real pipeline-validity controls, "
-                         "not a hang) - over the suite's 120s per-test default",
+    "slugkit-pipeline": "CI 735 exceeded 180s while executing real pipeline-validity controls",
 }
 
 
@@ -44,12 +42,16 @@ def _task_name(script: Path) -> str:
     return script.parent.name
 
 
-@pytest.mark.timeout(200)
-@pytest.mark.parametrize("script", QUALIFY_SCRIPTS, ids=_task_name)
-def test_qualify_script_certifies(script: Path) -> None:
+@pytest.mark.parametrize("script,timeout_seconds", [
+    pytest.param(script, 360 if _task_name(script) in _SLOW_REASON else 180,
+                 id=_task_name(script),
+                 marks=pytest.mark.timeout(380 if _task_name(script) in _SLOW_REASON else 200))
+    for script in QUALIFY_SCRIPTS
+])
+def test_qualify_script_certifies(script: Path, timeout_seconds: float) -> None:
     proc = subprocess.run(
         [sys.executable, str(script)], capture_output=True, text=True,
-        timeout=180, check=False, cwd=script.parent,
+        timeout=timeout_seconds, check=False, cwd=script.parent,
     )
     tail = "\n".join(proc.stdout.strip().splitlines()[-8:])
     name = _task_name(script)
@@ -59,6 +61,15 @@ def test_qualify_script_certifies(script: Path) -> None:
         f"stdout tail:\n{tail}\nstderr:\n{proc.stderr}"
     )
     assert "QUALIFY: ok" in proc.stdout, f"{name}: no 'QUALIFY: ok' in output:\n{tail}"
+
+
+@pytest.mark.timeout(5)
+def test_hung_qualify_script_is_rejected(tmp_path: Path) -> None:
+    """A larger budget still refuses a script that never completes."""
+    script = tmp_path / "qualify.py"
+    script.write_text("import time\nprint('QUALIFY: ok', flush=True)\ntime.sleep(60)\n", encoding="utf-8")
+    with pytest.raises(subprocess.TimeoutExpired):
+        test_qualify_script_certifies(script, timeout_seconds=0.1)
 
 
 def test_every_qualify_script_is_discovered_and_none_quietly_ignored() -> None:

@@ -29,23 +29,28 @@ second thing that could itself be wrong, not strengthen the claim.
 
 ONE TEST FUNCTION, SKILLC_GATE_SHIM_LIVE_BREAK SELECTS THE MODE - same
 shape as `test_gate_witness_live.py`'s own `SKILLC_GATE_WITNESS_LIVE_
-BREAK`. `xfail(strict=True, raises=_PropertyHeld)` on every non-`none`
-mode: a break that fails to actually break anything surfaces as XPASS,
-not a silent pass.
+BREAK`. `xfail(strict=True)` on every non-`none` mode, `raises=` looked
+up per mode: a break that fails to actually break anything surfaces as
+XPASS, not a silent pass.
 
-`_PropertyHeld` is a DEDICATED exception, NOT an `AssertionError`
-subclass (counter-model review on #266, adopted here per orchestrator
-direction, 2026-10-06): both properties below are asserted via a
-`_require()` helper that raises it, UNCONDITIONALLY and IDENTICALLY in
-every mode - never branched by `BREAK_MODE` to check "the break
-occurred" instead of "the real property held," which would XPASS by
-construction. Every other check in this file (the driver process
-completing, the result marker being readable) stays a plain `assert`
-(base `AssertionError`), which the `xfail` marker does NOT match - so an
-unrelated infra failure (a Docker flake during a break run) is reported
-as an ordinary hard FAILURE, never masked as "the break worked." An
-earlier draft of this file used `raises=AssertionError` for everything,
-which could not tell the two apart.
+`raises=` a PER-PROPERTY `_PropertyHeld` subtype, not one shared type
+(issue #341, counter-model review): an earlier draft of this file gave
+BOTH of the two properties below the same single `_PropertyHeld` type -
+dedicated and not an `AssertionError` subclass, but still too WIDE
+within a single run, since a neighboring property's own failure could
+satisfy either mode's marker. Fixed with separate output-integrity, working-directory,
+declared-environment and channel-failure exceptions, each
+asserted via a `_require()` helper that takes WHICH subtype to raise,
+UNCONDITIONALLY and IDENTICALLY in every mode - never branched by
+`BREAK_MODE` to check "the break occurred" instead of "the real
+property held," which would XPASS by construction. Every other check
+in this file (the driver process completing, the result marker being
+readable) stays a plain `assert` (base `AssertionError`), which no
+`_PropertyHeld` subtype's `xfail` marker matches - so an unrelated
+infra failure (a Docker flake during a break run) is reported as an
+ordinary hard FAILURE, never masked as "the break worked." An earlier
+draft of this file used `raises=AssertionError` for everything, which
+could not tell infra apart from property at all.
 
 TWO INDEPENDENT PROPERTIES, both forced identically in EVERY mode
 (counter-model review): (1) forwarding fidelity - both prescribed
@@ -110,10 +115,12 @@ import os
 import shutil
 import subprocess
 import tempfile
+import uuid
 from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
+from conftest import LIVE_DOCKER_DAEMON_TIMEOUT
 
 from skillc import docker_backend as d
 from skillc.backend import Limits
@@ -320,6 +327,29 @@ def _image_available(image: str) -> bool:
     return pull.returncode == 0
 
 
+def _prepare_candidate_dirs(backend: d.DockerBackend, handle: d._Handle) -> None:
+    """Gives the candidate the two directories the real trial image
+    (`docker/trial/Dockerfile`) already ships candidate-owned:
+    `CONTAINER_HOME`, where #334 delivers the subject script, and
+    `CONTAINER_WORKSPACE`, where the driver writes its result markers. A
+    bare `python:3.12-slim` has neither - `/home` is root-owned, and Docker
+    creates the `-w` workdir root-owned - so this runs AS ROOT (`exec -u 0`),
+    the same way production's `write_root_owned_file_in_attempt()` does,
+    then hands both to `CANDIDATE_UID:CANDIDATE_GID` (#355: this used to
+    `mkdir` as the container's own `--user`, the candidate, and failed with
+    `Permission denied` on every run against the default image). Fixture
+    setup only, run before anything the subject controls is installed; on
+    the trial image it is a no-op."""
+    owner = f"{d.CANDIDATE_UID}:{d.CANDIDATE_GID}"
+    setup = subprocess.run(
+        [*backend.docker_bin, "exec", "-u", "0", "--", handle.name,
+         "sh", "-c", 'mkdir -p "$1" "$2" && chown "$3" "$1" "$2"', "sh",
+         SUBJECT_ROOT, d.CONTAINER_WORKSPACE, owner],
+        capture_output=True, timeout=backend.daemon_timeout, check=False,
+    )
+    assert setup.returncode == 0, f"could not prepare the candidate's directories: {setup.stderr!r}"
+
+
 def _read_result_via_exec(backend: d.DockerBackend, handle: d._Handle, path: str) -> dict[str, object]:
     """Setup/infra read, not the property under test - a failure here
     (an unreadable marker, malformed JSON) is a plain `AssertionError`,
@@ -337,36 +367,91 @@ def _read_result_via_exec(backend: d.DockerBackend, handle: d._Handle, path: str
 
 
 class _PropertyHeld(Exception):
-    """Raised when the ONE property a given `BREAK_MODE` is supposed to
-    violate still held - the opposite of what `xfail(strict=True)` below
-    expects. This is the ONLY exception type that marker's own `raises=`
-    matches - never bare `AssertionError` - so an unrelated infra/setup
-    failure (an unreadable marker, a driver process that never completed)
-    raises plain `AssertionError` instead and is reported as an ordinary
-    hard FAILURE, never masked as "the break worked" (same pattern as
-    `tests/test_profile_install_cold_container_live.py`'s own fix,
-    counter-model review on #266, adopted here per orchestrator
-    direction: an earlier draft of THIS file used `raises=AssertionError`
-    with every check - setup and property alike - raising that same
-    type, so an unrelated Docker flake during any break run would have
-    been indistinguishable from the break firing correctly)."""
+    """Shared base for the two property-specific exceptions below (issue
+    #341: one subtype per independently-targeted property, so a
+    NEIGHBORING property's own failure cannot satisfy a break mode's own
+    `xfail(raises=...)` - counter-model review finding: an earlier draft
+    of this file gave both properties the same single type). Never
+    raised directly."""
 
 
-def _require(condition: bool, message: str) -> None:
-    """The forwarding-fidelity property under test for the current
-    `BREAK_MODE` - asserted UNCONDITIONALLY, the identical check for
-    `none` and every break mode alike (never branched by `BREAK_MODE`),
-    so it fails naturally when, and only when, a break actually changed
-    the real forwarded result - never because the test branched its own
-    expectation. Confirmed directly, no pytest or Docker needed:
-    `_require(True, ...)` returns; `_require(False, ...)` raises
-    `_PropertyHeld`, which is not a subclass of `AssertionError`."""
+class _OutputIntegrityPropertyHeld(_PropertyHeld):
+    """The shim synthesized a verdict instead of forwarding the real output."""
+
+
+class _WorkingDirectoryPropertyHeld(_PropertyHeld):
+    """The real gate observed the wrong working directory."""
+
+
+class _DeclaredEnvironmentPropertyHeld(_PropertyHeld):
+    """The real gate observed the wrong declared HOME."""
+
+
+class _ChannelFailurePropertyHeld(_PropertyHeld):
+    """Property 2's own targeted property: a genuinely unreachable
+    channel reports exit 125, forced identically in every mode.
+    `exits-zero-on-channel-failure`'s own target - invisible to property
+    1, since that mutation only touches FAILURE paths."""
+
+
+#: Issue #341: which subtype a given `BREAK_MODE` is expected to raise -
+#: looked up by the `xfail` marker below instead of one static type.
+#: `.get(BREAK_MODE, _PropertyHeld)` is irrelevant for `none` (the
+#: marker's `condition` is `False` there).
+_EXPECTED_PROPERTY_EXCEPTION: dict[str, type[Exception]] = {
+    "synthesizes-output": _OutputIntegrityPropertyHeld,
+    "drops-cwd": _WorkingDirectoryPropertyHeld,
+    "wrong-env": _DeclaredEnvironmentPropertyHeld,
+    "exits-zero-on-channel-failure": _ChannelFailurePropertyHeld,
+}
+
+
+def _require(condition: bool, message: str, exc_type: type[_PropertyHeld]) -> None:
     if not condition:
-        raise _PropertyHeld(message)
+        raise exc_type(message)
+
+
+def _check_forwarded_result(result: dict[str, object], argv_tail: list[str]) -> None:
+    """Identify each planted observation without consulting BREAK_MODE.
+
+    Only the known fabricated verdict counts as synthesized output. Other
+    malformed output, exit/argv/status drift and simultaneous independent
+    changes stay hard failures, rather than certifying a different break.
+    """
+    output = result["stdout"]
+    code = result["exit_code"]
+    assert isinstance(output, str) and type(code) is int, "malformed driver result"
+    _require(
+        not (output == "FLOW_FINISH_GATE: ok\n" and code == 0),
+        "the shim synthesized a verdict instead of forwarding the gate output", _OutputIntegrityPropertyHeld,
+    )
+    expected = _expected_output(argv_tail, _DECLARED_HOME)
+    lines = output.splitlines(keepends=True)
+    expected_lines = expected.splitlines(keepends=True)
+    assert len(lines) == 4, "unexpected gate output shape"
+    assert code == _expected_exit_code(argv_tail), "unexpected forwarded exit code"
+    assert lines[0] == expected_lines[0] and lines[3] == expected_lines[3], "unexpected argv or verdict output"
+    assert lines[1].startswith("CWD:") and lines[1].endswith("\n"), "malformed cwd observation"
+    assert lines[2].startswith("HOME:") and lines[2].endswith("\n"), "malformed HOME observation"
+    cwd_matches = lines[1] == expected_lines[1]
+    env_matches = lines[2] == expected_lines[2]
+    assert cwd_matches or env_matches, "multiple independent forwarding properties differ"
+    _require(cwd_matches, "the gate observed the wrong working directory", _WorkingDirectoryPropertyHeld)
+    _require(env_matches, "the gate observed the wrong declared HOME", _DeclaredEnvironmentPropertyHeld)
+    assert output == expected, "forwarded output was not byte-identical"
+
+
+def _check_channel_failure(exit_code: object) -> None:
+    assert type(exit_code) is int and exit_code in (0, _SHIM_EXIT_CHANNEL_FAILURE), "unexpected channel-failure result"
+    _require(
+        exit_code == _SHIM_EXIT_CHANNEL_FAILURE,
+        "an unreachable channel must report its dedicated failure exit", _ChannelFailurePropertyHeld,
+    )
 
 
 @pytest.mark.xfail(
-    condition=BREAK_MODE != "none", strict=True, raises=_PropertyHeld,
+    condition=BREAK_MODE != "none", strict=True,
+    raises=_EXPECTED_PROPERTY_EXCEPTION.get(BREAK_MODE, _PropertyHeld),
     reason=f"SKILLC_GATE_SHIM_LIVE_BREAK={BREAK_MODE} deliberately breaks one forwarding property",
 )
 def test_the_shim_forwards_the_controllers_real_result_against_a_real_daemon() -> None:
@@ -385,41 +470,39 @@ def test_the_shim_forwards_the_controllers_real_result_against_a_real_daemon() -
 
     backend = d.DockerBackend(
         image=LIVE_TEST_IMAGE, base_dir=base, network="none",
+        daemon_timeout=LIVE_DOCKER_DAEMON_TIMEOUT,
         trigger_decide=decide, trigger_socket_dir=trigger_dir,
     )
-    handle = backend.prepare("a-go-live-conformance-000000001")
-    assert isinstance(handle, d._Handle)
-    assert handle.trigger_channel is not None
-
-    # CONTAINER_HOME does not pre-exist on a bare python:3.12-slim (no
-    # "candidate" user/home is created outside the real trial image) -
-    # created here directly, matching the one explicit setup step a real
-    # deployment's own profile-closure delivery (#334) would already have
-    # performed before this overlay ever runs.
-    mkdir_home = subprocess.run(
-        [*backend.docker_bin, "exec", "--", handle.name, "mkdir", "-p", SUBJECT_ROOT],
-        capture_output=True, timeout=backend.daemon_timeout, check=False,
-    )
-    assert mkdir_home.returncode == 0, f"could not create {SUBJECT_ROOT!r}: {mkdir_home.stderr!r}"
-
-    stand_in = _stand_in_real_script()
-    backend.install(
-        handle, {SUBJECT_PATH: stand_in, SURFACE_EXECUTABLE_KEY: [SUBJECT_PATH]}, root=SUBJECT_ROOT,
-    )
-
-    if BREAK_MODE == "synthesizes-output":
-        shim_content = _broken_shim_synthesizes_output()
-    elif BREAK_MODE == "drops-cwd":
-        shim_content = _broken_shim_drops_cwd()
-    elif BREAK_MODE == "exits-zero-on-channel-failure":
-        shim_content = _broken_shim_exits_zero_on_channel_failure()
-    else:
-        # `none` and `wrong-env` both run the REAL, unmodified shim -
-        # `wrong-env`'s break is entirely on the witness's own
-        # `declared_env`, never on the shim itself.
-        shim_content = _REAL_SHIM_SOURCE
-
+    # A per-run suffix (#355): a fixed attempt id is a fixed container name,
+    # so a leaked container - or a concurrent run on the same host - made
+    # every later run fail on Docker's own name `Conflict` instead of on
+    # whatever actually went wrong.
+    handle = backend.prepare(f"a-go-live-conformance-{uuid.uuid4().hex[:12]}")
+    # EVERYTHING after `prepare()` sits inside the `try` (#355): a setup
+    # assert placed before it skipped the `finally` and leaked the container.
     try:
+        assert isinstance(handle, d._Handle)
+        assert handle.trigger_channel is not None
+
+        _prepare_candidate_dirs(backend, handle)
+
+        stand_in = _stand_in_real_script()
+        backend.install(
+            handle, {SUBJECT_PATH: stand_in, SURFACE_EXECUTABLE_KEY: [SUBJECT_PATH]}, root=SUBJECT_ROOT,
+        )
+
+        if BREAK_MODE == "synthesizes-output":
+            shim_content = _broken_shim_synthesizes_output()
+        elif BREAK_MODE == "drops-cwd":
+            shim_content = _broken_shim_drops_cwd()
+        elif BREAK_MODE == "exits-zero-on-channel-failure":
+            shim_content = _broken_shim_exits_zero_on_channel_failure()
+        else:
+            # `none` and `wrong-env` both run the REAL, unmodified shim -
+            # `wrong-env`'s break is entirely on the witness's own
+            # `declared_env`, never on the shim itself.
+            shim_content = _REAL_SHIM_SOURCE
+
         apply_flow_check_gate_overlay(
             backend, handle, subject_path=SUBJECT_PATH, harness_path=HARNESS_PATH,
             expected_real_digest=_digest(stand_in), expected_shim_digest=_digest(shim_content),
@@ -461,20 +544,18 @@ def test_the_shim_forwards_the_controllers_real_result_against_a_real_daemon() -
         ):
             result_path = f"{d.CONTAINER_WORKSPACE}/{result_name}"
             driver_src = _driver_script(result_path, None)
-            driver_outcome = backend.execute(
+            # `exec_in_attempt()`, never `execute()` (#355): `execute()` is
+            # one-shot per handle and stops the container before returning,
+            # so the marker read below - and every later driver run - hit
+            # a stopped container. `exec_in_attempt()` is the method built
+            # for several execs into one live attempt (#269).
+            driver_outcome = backend.exec_in_attempt(
                 handle, ["python3", "-c", driver_src, *argv_tail], Limits(timeout=30.0),
             )
             assert driver_outcome.reason == "exited", f"the driver process itself never completed for {gate!r}"
 
             result = _read_result_via_exec(backend, handle, result_path)
-            _require(
-                result["exit_code"] == _expected_exit_code(argv_tail),
-                f"{gate}: the shim's forwarded exit code did not match the controller's real result",
-            )
-            _require(
-                result["stdout"] == _expected_output(argv_tail, _DECLARED_HOME),
-                f"{gate}: the shim's forwarded stdout was not byte-identical to the controller's real result",
-            )
+            _check_forwarded_result(result, argv_tail)
 
         # Property 2: a genuinely unreachable channel. Forced UNCONDITIONALLY
         # in every mode, not only `exits-zero-on-channel-failure` (counter-
@@ -487,17 +568,13 @@ def test_the_shim_forwards_the_controllers_real_result_against_a_real_daemon() -
         channel_failure_driver_src = _driver_script(
             channel_failure_result_path, {"SKILLC_TRIGGER_SOCKET": "/does/not/exist/trigger.sock"},
         )
-        channel_failure_outcome = backend.execute(
+        channel_failure_outcome = backend.exec_in_attempt(
             handle,
             ["python3", "-c", channel_failure_driver_src, "--plan", "check", "--evidence", "flow-check"],
             Limits(timeout=30.0),
         )
         assert channel_failure_outcome.reason == "exited", "the driver process itself never completed for the channel-failure check"
         channel_failure_result = _read_result_via_exec(backend, handle, channel_failure_result_path)
-        _require(
-            channel_failure_result["exit_code"] == _SHIM_EXIT_CHANNEL_FAILURE,
-            "a genuinely unreachable channel must make the shim report exit "
-            f"{_SHIM_EXIT_CHANNEL_FAILURE}, never something else",
-        )
+        _check_channel_failure(channel_failure_result["exit_code"])
     finally:
         backend.destroy(handle)

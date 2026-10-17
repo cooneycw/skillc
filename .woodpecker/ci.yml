@@ -16,6 +16,12 @@ steps:
     image: python:3.12-slim
     depends_on: []
     commands:
+      # #412: the CI VM's own state, at the step's start and (EXIT trap, on
+      # pass or fail, exit status preserved) its end. /proc/loadavg, not
+      # `uptime`: python:3.12-slim has no procps, and a missing `uptime`
+      # would print "not found" inside a green echo. 806's reds could not be
+      # told apart from contention afterwards because nothing recorded this.
+      - echo "gate-host start nproc=$(nproc) loadavg=$(cat /proc/loadavg)"; trap 'echo "gate-host end nproc=$(nproc) loadavg=$(cat /proc/loadavg)"' EXIT
       # #307: git-dependent tests (now all of #275's git fixtures, plus the
       # pre-existing needs_git-marked tests in test_degrade/test_changelog_check/
       # test_provenance/test_profile/test_materialize) previously skipped here
@@ -34,9 +40,20 @@ steps:
       # a CI run - #134's `make verify` covers that sighting; see AGENTS.md.)
       # --junit-xml (#307): read by the git-tests-control step below, from
       # the shared workspace (steps do not share each other's /tmp).
-      - uv run --no-sync pytest -rA --junit-xml=pytest-report.xml
+      - uv run --no-sync pytest --collect-only -q > pytest-collected.txt
+      # --durations=0 (#412): every test's wall time survives to this log, so
+      # a timing red can be placed against its own deadline from CI alone.
+      - uv run --no-sync pytest -n auto --maxprocesses=8 --dist=loadgroup -rA --durations=0 --junit-xml=pytest-report.xml
       - uv run --no-sync ruff check .
       - uv run --no-sync mypy
+
+  # Independent collection plus a committed short-report negative control (#364).
+  - name: pytest-population-control
+    image: python:3.12-slim
+    depends_on: [gate]
+    commands:
+      - python3 ci/check_pytest_population.py pytest-collected.txt pytest-report.xml
+      - bash ci/pytest-population-control.sh
 
   # #307: proves the git-dependent population above actually RAN, not just
   # that `gate` exited 0 - a file whose whole git-gated subset re-skipped
@@ -105,7 +122,7 @@ steps:
       # script below (as $SKILLC_EXCLUDE_ARGS) - one definition, so the two
       # cannot silently drift apart (the control script's own default is a
       # fallback for a standalone run, not the source of truth here).
-      - export SKILLC_EXCLUDE_ARGS="--exclude controls/leak-check/bad --exclude tests/test_leak.py --exclude ci/leak-check-control.sh --exclude tests/fixtures/leak_seeds"
+      - export SKILLC_EXCLUDE_ARGS="--exclude controls/leak-check/bad --exclude tests/test_leak.py --exclude ci/leak-check-control.sh --exclude pytest-collected.txt --exclude tests/fixtures/leak_seeds"
       - uv run --no-sync skillc leak-check . $SKILLC_EXCLUDE_ARGS
       - uv run --no-sync bash ci/leak-check-control.sh
     environment:

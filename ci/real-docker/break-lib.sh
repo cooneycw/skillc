@@ -48,18 +48,31 @@ _BREAK_TRIALIMAGE_MODES="no-uv"
 #: tampered-closure delivers it with different bytes than the bound
 #: inventory's own digest expects. Both must make the real in-container
 #: preflight (`agent_trial._preflight_in_container`) refuse the attempt.
-_BREAK_CLOSURE_MODES="missing-closure tampered-closure"
+#: #360 runtime faults are planted only after normal runtime validation;
+#: consuming preflight must refuse the selected dependency with its specific
+#: cache-miss, cache-write, or project-venv permission diagnostic.
+#: shim-alters-output (#334) installs a gate shim that drops one byte of the
+#: forwarded stderr; the subject-vs-controller byte-identity check must fail.
+_BREAK_CLOSURE_MODES="missing-closure tampered-closure empty-runtime-cache runtime-cache-permissions project-venv-permissions shim-alters-output"
 
-# Resolves a --break argument to SEVEN lines on stdout: the NORMALIZED spec
+#: #338's cwd-confinement break mode - no bare form, same as witness.
+#: confine-root-omitted runs the identical swapped-cwd exec WITHOUT
+#: confine_root, so the real daemon's `-w` must follow the swap outside the
+#: workspace root - the negative control proving confine_root is what makes
+#: the intact run refuse it.
+_BREAK_CWD_MODES="confine-root-omitted"
+
+# Resolves a --break argument to EIGHT lines on stdout: the NORMALIZED spec
 # ("none", or "<family>:<mode>" - a bare legacy channel mode is normalized
 # to its "channel:<mode>" form here, so every caller downstream has exactly
 # one spelling to compare against "none"), the value to export as
 # SKILLC_LIVE_TEST_BREAK, the value to export as SKILLC_GATE_WITNESS_
 # LIVE_BREAK, the value to export as SKILLC_GATE_SHIM_LIVE_BREAK, the value
 # to export as SKILLC_COLDINSTALL_LIVE_BREAK, the value to export as
-# SKILLC_TRIAL_IMAGE_BREAK, and the value to export as SKILLC_CLOSURE_
-# PREFLIGHT_LIVE_BREAK - ALL SIX FAMILY VALUES ALWAYS PRESENT, exactly
-# one of them equal to the resolved mode and the other five the literal
+# SKILLC_TRIAL_IMAGE_BREAK, the value to export as SKILLC_CLOSURE_
+# PREFLIGHT_LIVE_BREAK, and the value to export as SKILLC_CWD_
+# CONFINEMENT_LIVE_BREAK - ALL SEVEN FAMILY VALUES ALWAYS PRESENT, exactly
+# one of them equal to the resolved mode and the other six the literal
 # string "none" (never empty, never left for the caller to infer from an
 # empty field).
 #
@@ -78,12 +91,12 @@ _BREAK_CLOSURE_MODES="missing-closure tampered-closure"
 # Prints a reason to STDERR and returns 2 for anything the closed table
 # below does not name - an unknown family, an unknown mode inside a known
 # family, or a bare spelling outside the three legacy channel modes
-# (including every witness/gateshim/coldinstall mode, none of which has a
+# (including every witness/gateshim/coldinstall/cwd mode, none of which has a
 # bare form) - nothing is printed to stdout on refusal.
 resolve_break_spec() {
     local spec="${1:-}" family mode m
     if [ "$spec" = "none" ]; then
-        printf 'none\nnone\nnone\nnone\nnone\nnone\nnone\n'
+        printf 'none\nnone\nnone\nnone\nnone\nnone\nnone\nnone\n'
         return 0
     fi
     case "$spec" in
@@ -100,7 +113,7 @@ resolve_break_spec() {
         channel)
             for m in $_BREAK_CHANNEL_MODES; do
                 if [ "$m" = "$mode" ]; then
-                    printf 'channel:%s\n%s\nnone\nnone\nnone\nnone\nnone\n' "$mode" "$mode"
+                    printf 'channel:%s\n%s\nnone\nnone\nnone\nnone\nnone\nnone\n' "$mode" "$mode"
                     return 0
                 fi
             done
@@ -110,7 +123,7 @@ resolve_break_spec() {
         witness)
             for m in $_BREAK_WITNESS_MODES; do
                 if [ "$m" = "$mode" ]; then
-                    printf 'witness:%s\nnone\n%s\nnone\nnone\nnone\nnone\n' "$mode" "$mode"
+                    printf 'witness:%s\nnone\n%s\nnone\nnone\nnone\nnone\nnone\n' "$mode" "$mode"
                     return 0
                 fi
             done
@@ -120,7 +133,7 @@ resolve_break_spec() {
         gateshim)
             for m in $_BREAK_GATESHIM_MODES; do
                 if [ "$m" = "$mode" ]; then
-                    printf 'gateshim:%s\nnone\nnone\n%s\nnone\nnone\nnone\n' "$mode" "$mode"
+                    printf 'gateshim:%s\nnone\nnone\n%s\nnone\nnone\nnone\nnone\n' "$mode" "$mode"
                     return 0
                 fi
             done
@@ -130,7 +143,7 @@ resolve_break_spec() {
         coldinstall)
             for m in $_BREAK_COLDINSTALL_MODES; do
                 if [ "$m" = "$mode" ]; then
-                    printf 'coldinstall:%s\nnone\nnone\nnone\n%s\nnone\nnone\n' "$mode" "$mode"
+                    printf 'coldinstall:%s\nnone\nnone\nnone\n%s\nnone\nnone\nnone\n' "$mode" "$mode"
                     return 0
                 fi
             done
@@ -140,7 +153,7 @@ resolve_break_spec() {
         trialimage)
             for m in $_BREAK_TRIALIMAGE_MODES; do
                 if [ "$m" = "$mode" ]; then
-                    printf 'trialimage:%s\nnone\nnone\nnone\nnone\n%s\nnone\n' "$mode" "$mode"
+                    printf 'trialimage:%s\nnone\nnone\nnone\nnone\n%s\nnone\nnone\n' "$mode" "$mode"
                     return 0
                 fi
             done
@@ -150,15 +163,25 @@ resolve_break_spec() {
         closure)
             for m in $_BREAK_CLOSURE_MODES; do
                 if [ "$m" = "$mode" ]; then
-                    printf 'closure:%s\nnone\nnone\nnone\nnone\nnone\n%s\n' "$mode" "$mode"
+                    printf 'closure:%s\nnone\nnone\nnone\nnone\nnone\n%s\nnone\n' "$mode" "$mode"
                     return 0
                 fi
             done
             echo "run-real-docker: unknown closure break mode '$mode' (must be one of: $_BREAK_CLOSURE_MODES)" >&2
             return 2
             ;;
+        cwd)
+            for m in $_BREAK_CWD_MODES; do
+                if [ "$m" = "$mode" ]; then
+                    printf 'cwd:%s\nnone\nnone\nnone\nnone\nnone\nnone\n%s\n' "$mode" "$mode"
+                    return 0
+                fi
+            done
+            echo "run-real-docker: unknown cwd break mode '$mode' (must be one of: $_BREAK_CWD_MODES)" >&2
+            return 2
+            ;;
         *)
-            echo "run-real-docker: unknown break family '$family' (must be 'channel', 'witness', 'gateshim', 'coldinstall', 'trialimage' or 'closure'), from spec '$spec'" >&2
+            echo "run-real-docker: unknown break family '$family' (must be 'channel', 'witness', 'gateshim', 'coldinstall', 'trialimage', 'closure' or 'cwd'), from spec '$spec'" >&2
             return 2
             ;;
     esac

@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "runtime_id": "cpp-codex-flow-check-86641e8",
+  "subject_revision": "86641e817711d8a7746270745a5dfa7cacf04b0c",
+  "pyproject_sha256": "bc42953d69269328dbe5041d3b7ef6423804492db20b8cf8a59a94c0ee9f3774",
+  "lock_sha256": "b8edbdd3e0036bc09c849cedee3c1231c468f0f0f9425090c8f2ec914108f3cf",
+  "uv_version": "0.9.7",
+  "required_env": {
+    "HOME": "/home/candidate",
+    "UV_CACHE_DIR": "/home/candidate/.cache/uv",
+    "UV_OFFLINE": "1",
+    "UV_LOCKED": "1",
+    "UV_PYTHON": "/usr/bin/python3",
+    "UV_PYTHON_DOWNLOADS": "never",
+    "UV_LINK_MODE": "copy"
+  }
+}

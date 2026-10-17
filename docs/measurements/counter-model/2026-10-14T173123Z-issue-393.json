@@ -1,0 +1,25 @@
+{
+  "branch": "issue-393-install-creates-fixture-subdirectories-as-root-the",
+  "counts": {
+    "accepted": 1,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "ca72314c05cb6967b57a67e4df4f8c2198c836c7",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "393",
+  "passes": 2,
+  "recorded_at": "2026-10-14T17:31:23Z",
+  "red_cases": {
+    "already_covered": 4,
+    "proposed": 5
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/14/rollout-2026-10-14T13-24-43-01a13b71-e7b1-7081-9d3f-f7b488b2194a.jsonl",
+    "thread_id": "01a13b71-e7b1-7081-9d3f-f7b488b2194a"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

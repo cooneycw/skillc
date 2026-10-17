@@ -287,6 +287,20 @@ refused outright too — this channel creates nothing but sockets at its own
 path, so anything else is either a different caller's mistake or an
 adversarial pre-creation, and guessing which is not this method's job.
 
+**(e) The socket file lives as long as the container, not the listener
+(#394).** `DockerBackend` constructs its channel with
+`retain_socket_path=True`. Finalizing the log (`trigger_log()`, which the gate
+witness calls straight after the confirmed stop) stops listening but leaves the
+file in place; `destroy()` removes the container first and the file after.
+The ordering is load-bearing: `docker cp` against a STOPPED container
+re-resolves its bind mounts, and with the source gone the daemon answers every
+path with `Could not find the file` - measured on the #315 runner (Docker
+29.8.2, containerd snapshotter), where it made every witnessed attempt's
+capture export fail. `release_socket_path()` removes only the file this channel
+bound (same device, inode and ctime, nothing listening, under the per-path
+lock), so it never deletes a later channel's socket at the same path. A
+channel constructed without the flag keeps the original unlink-on-finalize.
+
 ### 2g. Further hardening from cross-model review
 
 `/codex:code_review` (reviewing model `gpt-6.1-sol`, diff-only scope — this

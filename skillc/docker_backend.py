@@ -134,6 +134,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import IO
 
+from . import runtime_supply as rs
 from .backend import CANDIDATE_GID as _CANDIDATE_GID
 from .backend import CANDIDATE_UID as _CANDIDATE_UID
 from .backend import (
@@ -199,6 +200,30 @@ CONTAINER_HOME = "/home/candidate"
 #: exact path; `execute()` prefixes the subject argv with it only when the
 #: probe confirms it is actually there.
 SKILLC_WRAP_PATH = "/usr/local/bin/skillc-wrap"
+
+#: #338: the wrapper-owned status record `exec_in_attempt()`'s confining
+#: wrapper writes as the FIRST bytes of its stderr - `READY` immediately
+#: before it execs the real argv, `REFUSED` instead when the cwd check
+#: fails. Nothing else can write to that stderr before the record: the
+#: check's own diagnostics (dash's "cannot open ...", `readlink`'s, `cd`'s)
+#: go to /dev/null, and the gate has not been exec'd yet. The Python side
+#: reads only that LEADING record, through a slot separate from the gate's
+#: own retained stderr (`_BoundedDrain`'s `status_record_max`), so a gate
+#: that prints either line itself is just printing output, never status.
+CWD_CONFINEMENT_READY_RECORD = b"skillc-cwd-confinement:ready\n"
+CWD_CONFINEMENT_REFUSED_RECORD = b"skillc-cwd-confinement:refused\n"
+#: The bound on that leading record: a line longer than this, or no line
+#: at all, is an invalid status, never something read further into the
+#: stream looking for one.
+CWD_CONFINEMENT_RECORD_MAX = 64
+
+#: `ExecuteResult.error` for each way a confining exec can end without the
+#: gate having been exec'd: the check refused the cwd, or the status record
+#: was missing or malformed (the wrapper never reached its READY write, so
+#: the gate never ran - but nothing confirmed a refusal either).
+CWD_CONFINEMENT_REFUSED_SENTINEL = "skillc-cwd-confinement-refused"
+CWD_CONFINEMENT_STATUS_MISSING = "skillc-cwd-confinement-status-missing"
+CWD_CONFINEMENT_STATUS_INVALID = "skillc-cwd-confinement-status-invalid"
 
 #: Must match skillc-supervisor.py's own default (`$SKILLC_CONTROL_SOCKET`
 #: unset). `_forwarding_available` requires this socket to exist, not only
@@ -624,6 +649,34 @@ def _owned_tar_bytes(arcname: str, data: bytes, mode: int = 0o644) -> bytes:
     return buf.getvalue()
 
 
+def _owned_tar_dirs(arcnames: Sequence[str]) -> bytes:
+    """A tar stream of DIRECTORY entries only, each candidate-owned mode
+    0755, in the given order (parents first) - #393's missing-parent
+    delivery. Never pass a directory that already exists in the container:
+    extracting a directory entry over an existing one rewrites ITS owner and
+    mode (verified on a real daemon), which is why `install()` sends only
+    the parents its existence probe reported absent."""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+        for arcname in arcnames:
+            info = tarfile.TarInfo(name=arcname)
+            info.type = tarfile.DIRTYPE
+            info.mode = 0o755
+            tar.addfile(_owned_tarinfo(info))
+    return buf.getvalue()
+
+
+def _missing_parent_candidates(keys: Sequence[str]) -> list[str]:
+    """Every proper ancestor directory of every key, relative, parents
+    before children and each once: `tests/unit/x.py` -> `tests`,
+    `tests/unit`. A top-level key contributes nothing."""
+    ancestors: set[str] = set()
+    for key in keys:
+        parents = PurePosixPath(key).parents
+        ancestors.update(str(p) for p in parents if str(p) != ".")
+    return sorted(ancestors, key=lambda a: (a.count("/"), a))
+
+
 class _BoundedDrain:
     """Drains `pipe` (stdout or stderr - one instance each) to EOF on its own
     thread, so the subject can never block on a full pipe buffer - the
@@ -659,16 +712,47 @@ class _BoundedDrain:
     the portable way to reach the same one-syscall behavior without
     narrowing that type.)"""
 
-    def __init__(self, pipe: IO[bytes], cap: int) -> None:
+    def __init__(self, pipe: IO[bytes], cap: int, status_record_max: int = 0) -> None:
         self._pipe = pipe
         self._cap = cap
         self._chunks: list[bytes] = []
         self._captured_len = 0
         self.total_bytes = 0
         self.truncated = False
+        # #338: when `status_record_max` > 0, the stream's first line (at
+        # most that many bytes, newline included) is a wrapper-owned status
+        # record, taken into `status_record` and never into the retained
+        # capture, `total_bytes` or the cap - so a gate's own retention cap
+        # (even 0) can never cost the status, and the status can never be
+        # mistaken for, or displace, the gate's own output.
+        self._status_max = status_record_max
+        self._status_buf = b""
+        self.status_record: bytes | None = None
+        self.status_overflowed = False
+
+    def _take_status(self, chunk: bytes) -> bytes:
+        """Moves leading bytes into the status slot until a newline or the
+        bound; returns whatever of `chunk` is past the record."""
+        self._status_buf += chunk
+        newline = self._status_buf.find(b"\n", 0, self._status_max)
+        if newline >= 0:
+            self.status_record = self._status_buf[:newline + 1]
+            rest = self._status_buf[newline + 1:]
+        elif len(self._status_buf) >= self._status_max:
+            self.status_record = self._status_buf[:self._status_max]
+            self.status_overflowed = True
+            rest = self._status_buf[self._status_max:]
+        else:
+            return b""
+        self._status_buf = b""
+        return rest
 
     def run(self) -> None:
         while chunk := os.read(self._pipe.fileno(), 65536):
+            if self._status_max and self.status_record is None:
+                chunk = self._take_status(chunk)
+                if not chunk:
+                    continue
             self.total_bytes += len(chunk)
             if self._captured_len >= self._cap:
                 self.truncated = True
@@ -682,6 +766,25 @@ class _BoundedDrain:
 
     def captured_bytes(self) -> bytes:
         return b"".join(self._chunks)
+
+
+def _confinement_status(drain: _BoundedDrain) -> str:
+    """#338: `"ready"`, `"refused"`, `"missing"` or `"invalid"` for a
+    confining exec's stderr drain. Only an EXACT leading record counts:
+    an empty stream is `"missing"`; anything else - a partial line at EOF,
+    a line past `CWD_CONFINEMENT_RECORD_MAX`, a `docker exec` client error
+    that got there first, any other text - is `"invalid"`. Neither of
+    those two can be read as a refusal or as a started gate."""
+    record = drain.status_record
+    if record is None:
+        return "invalid" if drain._status_buf else "missing"
+    if drain.status_overflowed:
+        return "invalid"
+    if record == CWD_CONFINEMENT_READY_RECORD:
+        return "ready"
+    if record == CWD_CONFINEMENT_REFUSED_RECORD:
+        return "refused"
+    return "invalid"
 
 
 class HomeTreeTooLarge(Exception):
@@ -761,6 +864,10 @@ class DockerBackend:
     #: retrieves the finalized log. See `docs/specs/evaluation-facility/
     #: decide-reply-channel.md`.
     trigger_decide: DecideFn | None = field(default=None, repr=False)
+    #: Gate witnessing must not change the capture population through its own
+    #: observations/PID bookkeeping. Default probe write-back stays unchanged.
+    witness_io: bool = False
+    runtime_supply: rs.RuntimeSupply | None = field(default=None, repr=False)
     #: Host-side directory for #183's socket files - see
     #: `DEFAULT_TRIGGER_SOCKET_DIR`'s own comment for why this is NOT
     #: `base_dir`. `repr=False`: a host filesystem path, same reasoning as
@@ -904,24 +1011,39 @@ class DockerBackend:
             # socket with nothing ever going to mount it is exactly that.
             if channel is not None:
                 channel.close()
-            subprocess.run(
-                [*self.docker_bin, "rm", "-f", name],
-                capture_output=True, env=env, check=False, timeout=self.daemon_timeout,
-            )
+            cleanup_note = self._best_effort_rm(name, env)
             raise BackendUnavailable(
-                f"docker run failed to start a container for {attempt_id!r}: {exc}"
+                f"docker run failed to start a container for {attempt_id!r}: {exc}{cleanup_note}"
             ) from exc
         if started.returncode != 0:
             if channel is not None:
                 channel.close()
-            subprocess.run(
-                [*self.docker_bin, "rm", "-f", name],
-                capture_output=True, env=env, check=False, timeout=self.daemon_timeout,
-            )
+            cleanup_note = self._best_effort_rm(name, env)
             raise BackendUnavailable(
-                f"docker run failed to start a container for {attempt_id!r}: {started.stderr.strip()}"
+                f"docker run failed to start a container for {attempt_id!r}: {started.stderr.strip()}{cleanup_note}"
             )
         return _Handle(attempt_id=attempt_id, name=name, env=env, trigger_channel=channel)
+
+    def _best_effort_rm(self, name: str, env: Mapping[str, str]) -> str:
+        """prepare()'s failure-path cleanup: make sure no container is left
+        behind under `name`, bounded like every other daemon call. Returns ""
+        when the call completed, else a clause for the `BackendUnavailable`
+        message. Issue #416: the call used to be unguarded, so a cleanup that
+        HIT its bound raised `TimeoutExpired` out of prepare() in place of the
+        `BackendUnavailable` its contract promises - on exactly the slow daemon
+        the cleanup exists for. A nonzero exit is reported too, except "No such
+        container": `run` that failed before creating one is the ordinary case,
+        and a daemon that cannot remove a container it DID create is not."""
+        try:
+            removed = subprocess.run(
+                [*self.docker_bin, "rm", "-f", name],
+                capture_output=True, text=True, env=env, check=False, timeout=self.daemon_timeout,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return f"; cleanup 'docker rm -f {name}' also failed: {exc}"
+        if removed.returncode != 0 and "No such container" not in removed.stderr:
+            return f"; cleanup 'docker rm -f {name}' also failed: exit {removed.returncode}: {removed.stderr.strip()}"
+        return ""
 
     def _start_trigger_channel(
         self, name: str, attempt_id: str,
@@ -945,8 +1067,15 @@ class DockerBackend:
             return None, None
         trigger_socket_host_path = trigger_socket_host_path_for(self.trigger_socket_dir, name)
         _ensure_private_trigger_dir(trigger_socket_host_path.parent)
+        # retain_socket_path (#394): finalizing the log (`trigger_log()`,
+        # which the gate witness calls right after the confirmed stop) must
+        # not delete this container's bind-mount source - every later
+        # `docker cp` against the stopped container, the capture export
+        # included, would then fail. `destroy()` removes it after the
+        # container is gone.
         channel = DecideReplyChannel(
             trigger_socket_host_path, self.trigger_decide, attempt_id, socket_mode=TRIGGER_SOCKET_MODE,
+            retain_socket_path=True,
         )
         channel.start()
         return channel, trigger_socket_host_path
@@ -1053,6 +1182,20 @@ class DockerBackend:
         ownership be set to the fixed candidate identity regardless of what
         the host file is actually owned by.
 
+        NESTED PARENTS (#393): the tar stream for key `tests/x.py` names
+        the file but not `tests/`, and `docker cp` creates a missing parent
+        itself, owned by ROOT - the candidate could edit `x.py` but never
+        add a file beside it. So before any entry is copied, one read-only
+        probe (`_absent_parents`) asks which ancestors of the copied keys
+        do not exist yet, and exactly those are delivered first as
+        candidate-owned directory entries (`_owned_tar_dirs`). Only the
+        absent ones: a directory entry extracted over an EXISTING directory
+        rewrites its owner and mode, so existing directories are never
+        sent. This works whoever owns `root` (a plain image's `/work` is
+        root-owned, so creating the parents AS the candidate would not).
+        A probe that cannot answer raises `BackendUnavailable`; a surface
+        with no nested keys makes no probe.
+
         PER-ENTRY READINESS (issue #133 item 4): `discovery_canary` used to
         be all-or-nothing - VIOLATED only when NOTHING installed, so one
         missing entry among several was invisible whenever at least one
@@ -1097,6 +1240,7 @@ class DockerBackend:
         installed = 0
         executable_rels = surface.get(SURFACE_EXECUTABLE_KEY)
         executable_set = set(executable_rels) if isinstance(executable_rels, (list, tuple, set)) else set()
+        payloads: dict[str, bytes] = {}
         for key, value in declared.items():
             if isinstance(value, bytes):
                 # Raw in-memory content, no host file backing it - the
@@ -1118,6 +1262,16 @@ class DockerBackend:
             else:
                 entries[key] = "not-a-path"
                 continue
+            payloads[key] = payload
+
+        # NESTED PARENTS (#393) - see the method docstring. Only entries
+        # that will actually be copied contribute; a flat surface makes no
+        # probe and no extra copy.
+        missing_parents = self._absent_parents(handle, effective_root, _missing_parent_candidates(list(payloads)))
+        if missing_parents:
+            self._copy_into(handle, effective_root, _owned_tar_dirs(missing_parents), "nested parent directories")
+
+        for key, payload in payloads.items():
             try:
                 copied = subprocess.run(
                     [*self.docker_bin, "cp", "-", f"{handle.name}:{effective_root}"],
@@ -1140,6 +1294,7 @@ class DockerBackend:
         # certify readiness for something that was never materialized. Since
         # #133 item 4, a missing entry among several successes is no longer
         # invisible either - see the method docstring's "PER-ENTRY READINESS".
+        entries = {k: entries[k] for k in declared if k in entries}  # declared order, as before #393
         missing = [k for k in entries if entries[k] == "missing"]
         readiness: dict[str, object] = {
             "discovery_canary": "SATISFIED" if (declared and installed and not missing) else "VIOLATED",
@@ -1173,6 +1328,60 @@ class DockerBackend:
             if canary_copied is not None and canary_copied.returncode == 0:
                 readiness["canary_path"] = CANARY_RESULT_FILENAME
         return readiness
+
+    def _absent_parents(self, handle: _Handle, root: str, relatives: Sequence[str]) -> list[str]:
+        """Which of `relatives` (directories under `root`, parents first)
+        do NOT yet exist in the container - asked with ONE read-only exec,
+        as root so that a directory the candidate cannot traverse still
+        reads as present (and so is never rewritten). Anything already
+        present, including a symlink, is excluded. Raises
+        `BackendUnavailable` when the probe cannot answer: an unknown
+        answer must not be guessed either way - guessing "absent" would
+        rewrite an existing directory, guessing "present" would leave a
+        root-owned one (#393)."""
+        if not relatives:
+            return []
+        absolute = [str(PurePosixPath(root) / rel) for rel in relatives]
+        try:
+            probed = subprocess.run(
+                [*self.docker_bin, "exec", "-u", "0", "--", handle.name, "sh", "-c",
+                 'i=0; for p do if [ -e "$p" ] || [ -L "$p" ]; then echo "$i"; fi; i=$((i+1)); done', "sh",
+                 *absolute],
+                capture_output=True, env=handle.env, check=False, timeout=self.daemon_timeout,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise BackendUnavailable(f"install parent probe failed for {handle.attempt_id!r}: {exc}") from exc
+        if probed.returncode != 0:
+            raise BackendUnavailable(
+                f"install parent probe failed for {handle.attempt_id!r}: "
+                f"{probed.stderr.decode('utf-8', errors='replace').strip()}"
+            )
+        # Indices, never echoed paths: an index cannot be mangled by a path
+        # holding a newline, and means the same whatever the path looks like.
+        try:
+            present = {int(line) for line in probed.stdout.decode("ascii").split()}
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise BackendUnavailable(f"install parent probe answered unreadably for {handle.attempt_id!r}") from exc
+        if not present <= set(range(len(relatives))):
+            raise BackendUnavailable(f"install parent probe answered out of range for {handle.attempt_id!r}")
+        return [rel for i, rel in enumerate(relatives) if i not in present]
+
+    def _copy_into(self, handle: _Handle, root: str, payload: bytes, what: str) -> None:
+        """`docker cp - NAME:root` for one owned tar stream; raises
+        `BackendUnavailable` naming `what` on any failure."""
+        try:
+            copied = subprocess.run(
+                [*self.docker_bin, "cp", "-", f"{handle.name}:{root}"],
+                input=payload, capture_output=True, env=handle.env, check=False,
+                timeout=self.daemon_timeout,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise BackendUnavailable(f"docker cp failed installing {what} for {handle.attempt_id!r}: {exc}") from exc
+        if copied.returncode != 0:
+            raise BackendUnavailable(
+                f"docker cp failed installing {what} for {handle.attempt_id!r}: "
+                f"{copied.stderr.decode('utf-8', errors='replace').strip()}"
+            )
 
     def _workspace_baseline(self, handle: _Handle, root: str = CONTAINER_WORKSPACE) -> tuple[frozenset[str], bool]:
         """Every top-level entry already present under `root` (#332
@@ -1257,13 +1466,27 @@ class DockerBackend:
         scans exported content for credential material independently rather
         than relying on this placement alone.
 
-        `.claude` and `.codex` already exist under `CONTAINER_HOME`, owned
-        by the candidate identity (#78's image build) - this method never
-        creates a directory itself, only a leaf file inside one that must
-        already exist.
+        Missing parents are created as the candidate before tar delivery.
+        Existing owners/modes are preserved; an unwritable parent refuses,
+        never triggers privileged creation or a recursive ownership change.
         """
         assert isinstance(handle, _Handle)
-        payload = _owned_tar_bytes(container_relpath, data, mode=mode)
+        relative = PurePosixPath(container_relpath)
+        if (not container_relpath or relative.is_absolute() or not relative.parts
+                or ".." in relative.parts or "\0" in container_relpath):
+            raise BackendUnavailable("home delivery requires a nonescaping relative file path")
+        parent = str(PurePosixPath(CONTAINER_HOME) / relative.parent)
+        try:
+            prepared = subprocess.run(
+                [*self.docker_bin, "exec", "-u", _container_user(), "--", handle.name,
+                 "mkdir", "-p", "--", parent],
+                capture_output=True, env=handle.env, check=False, timeout=self.daemon_timeout,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise BackendUnavailable("home delivery parent setup failed") from exc
+        if prepared.returncode != 0:
+            raise BackendUnavailable("home delivery parent setup failed")
+        payload = _owned_tar_bytes(relative.as_posix(), data, mode=mode)
         try:
             copied = subprocess.run(
                 [*self.docker_bin, "cp", "-", f"{handle.name}:{CONTAINER_HOME}"],
@@ -1279,6 +1502,71 @@ class DockerBackend:
                 f"docker cp failed delivering {container_relpath!r} to home for {handle.attempt_id!r}: "
                 f"{copied.stderr.decode('utf-8', errors='replace').strip()}"
             )
+
+    def controller_output(self, handle: object, argv: Sequence[str], limits: Limits) -> bytes:
+        """Complete bounded output from the controller drain, never an artifact."""
+        result = self.exec_in_attempt(handle, argv, limits)
+        if (result.reason != "exited" or result.exit_code != 0 or result.stdout is None
+                or result.stdout_truncated or result.stdout_incomplete or result.stderr_incomplete):
+            raise rs.Refused("controller measurement failed or returned incomplete output")
+        return result.stdout
+
+    def runtime_environment(
+        self, handle: object, limits: Limits, verified_files: Mapping[str, str],
+    ) -> Mapping[str, str]:
+        """Measure selected runtime facts as candidate before any subject runs.
+
+        Raw environment stays private. The caller still verifies every installed
+        closure file through its ordinary preflight before dispatch.
+        """
+        assert isinstance(handle, _Handle)
+        if self.runtime_supply is None:
+            raise rs.Refused("no controller runtime supply selected")
+        if not self.witness_io:
+            raise rs.Refused("runtime measurement requires private controller output")
+        bounded = Limits(timeout=min(limits.timeout, self.daemon_timeout),
+                         max_captured_stdout_bytes=rs.MAX_JSON + 1)
+
+        def read(argv: Sequence[str]) -> bytes:
+            return self.controller_output(handle, argv, bounded)
+
+        env = rs.environment(read(["env", "-0"]))
+        descriptor_path = PurePosixPath(rs.DESCRIPTOR_PATH)
+        for path in (descriptor_path, *descriptor_path.parents):
+            if self.candidate_can_write_in_attempt(handle, str(path)) is not False:
+                raise rs.Refused("runtime descriptor or ancestor is writable or unmeasurable")
+        # Reject symlink ancestry, including a descriptor whose target's parents
+        # are outside the inspected chain. No subject runs during these reads.
+        descriptor = read(["/usr/bin/python3", "-c",
+            ("import pathlib,sys; p=pathlib.Path(sys.argv[1]); "
+             "assert not any(q.is_symlink() for q in (p,*p.parents)); "
+             "sys.stdout.buffer.write(p.open('rb').read(int(sys.argv[2])))"),
+            rs.DESCRIPTOR_PATH, str(rs.MAX_JSON + 1)])
+        actual_image = self.image_id(handle)
+        if actual_image is None:
+            raise rs.Refused("runtime image identity is unmeasurable")
+        declared = self.runtime_supply.descriptor(descriptor, actual_image=actual_image)
+        rs.validate_environment(env, declared)
+        measured_python = rs.load_json(read(["/usr/bin/python3", "-c",
+            ("import json,platform,sys; print(json.dumps(dict(executable=sys.executable, "
+             "version=platform.python_version(),cache_tag=sys.implementation.cache_tag, "
+             "platform=sys.platform,machine=platform.machine())))")]))
+        if measured_python != declared["python"]:
+            raise rs.Refused("actual Python identity differs from selected runtime")
+        policy = rs.supported_policy()
+        uv = read(["uv", "--version"]).decode("utf-8", errors="strict").split()
+        if len(uv) < 2 or uv[:2] != ["uv", policy["uv_version"]]:
+            raise rs.Refused("actual uv version differs from selected runtime")
+        if verified_files:
+            if any(verified_files.get(path) != digest for path, digest in rs.metadata(policy).items()):
+                raise rs.Refused("installed closure metadata does not match selected runtime")
+            project = f"{CONTAINER_HOME}/{policy['project']}"
+            if self.candidate_can_write_in_attempt(handle, project) is not True:
+                raise rs.Refused("selected project cannot create its candidate-owned venv")
+            read(["/usr/bin/python3", "-c",
+                  "import pathlib,sys; assert not pathlib.Path(sys.argv[1]).exists()",
+                  project + "/.venv"])
+        return env
 
     def read_home_file(self, handle: object, container_relpath: str) -> bytes:
         """Read back the current bytes at `container_relpath` (relative to
@@ -1448,6 +1736,7 @@ class DockerBackend:
         self, handle: _Handle, argv: Sequence[str], limits: Limits,
         cancel: Callable[[], bool] | None, stdin: bytes | None, *, prefix_wrap: bool,
         after_launch: Callable[[], None] | None = None, cwd: str | None = None,
+        stderr_status_record_max: int = 0,
     ) -> tuple[subprocess.Popen[bytes], _BoundedDrain, _BoundedDrain, threading.Thread, threading.Thread, str] | ExecuteResult:
         """Shared `docker exec` launch-drain-wait mechanics for `execute()`
         and `exec_in_attempt()` (#269) - everything up to, but NOT
@@ -1470,7 +1759,12 @@ class DockerBackend:
         `CONTAINER_WORKSPACE` working directory via `docker exec`'s own
         `-w` - `execute()` never passes this and keeps the default;
         `exec_in_attempt()`'s own docstring states the confinement a
-        caller must apply before passing one through here."""
+        caller must apply before passing one through here.
+
+        `stderr_status_record_max` (#338) is passed straight to the stderr
+        drain's `status_record_max` - only `exec_in_attempt()`'s confining
+        wrapper writes a leading status record, so every other caller
+        leaves it 0 and its stderr capture is unchanged."""
         exec_argv = [*self.docker_bin, "exec"]
         if stdin is not None:
             exec_argv.append("-i")
@@ -1498,7 +1792,7 @@ class DockerBackend:
         stdout_thread.start()
 
         assert proc.stderr is not None
-        stderr_drain = _BoundedDrain(proc.stderr, limits.max_captured_stderr_bytes)
+        stderr_drain = _BoundedDrain(proc.stderr, limits.max_captured_stderr_bytes, stderr_status_record_max)
         stderr_thread = threading.Thread(target=stderr_drain.run, daemon=True)
         stderr_thread.start()
 
@@ -1789,29 +2083,36 @@ class DockerBackend:
         # exception here, no field on the result, the subject's own object
         # left in place). `observations_capture` now names the checked
         # outcome instead of swallowing it.
-        try:
-            payload = _owned_tar_bytes("observations", stdout)
-            write_back = subprocess.run(
-                [*self.docker_bin, "cp", "-", f"{handle.name}:{CONTAINER_WORKSPACE}"],
-                input=payload, capture_output=True, env=handle.env, check=False,
-                timeout=self.daemon_timeout,
-            )
-            observations_capture = "written" if write_back.returncode == 0 else "failed"
-        except (OSError, subprocess.TimeoutExpired):
-            observations_capture = "failed"
+        observations_capture = None
+        if not self.witness_io:
+            try:
+                payload = _owned_tar_bytes("observations", stdout)
+                write_back = subprocess.run(
+                    [*self.docker_bin, "cp", "-", f"{handle.name}:{CONTAINER_WORKSPACE}"],
+                    input=payload, capture_output=True, env=handle.env, check=False,
+                    timeout=self.daemon_timeout,
+                )
+                observations_capture = "written" if write_back.returncode == 0 else "failed"
+            except (OSError, subprocess.TimeoutExpired):
+                observations_capture = "failed"
 
         return ExecuteResult(
             reason=reason, exit_code=code, error=error, signal=signal_name,
             stdout_truncated=stdout_drain.truncated, stdout_bytes=stdout_drain.total_bytes,
             stdout_incomplete=stdout_incomplete, stderr_incomplete=stderr_incomplete,
             term_forwarding=term_forwarding, observations_capture=observations_capture,
-            stop_confirmed=stop_confirmed,
+            stop_confirmed=stop_confirmed, stdout=stdout,
+            # #334: the raw stream on EVERY exit, beside the summary in
+            # `error` (nonzero exits only, stripped, annotated), so a gate's
+            # stderr can be forwarded byte-for-byte.
+            stderr=stderr, stderr_truncated=stderr_drain.truncated,
         )
 
     def exec_in_attempt(
         self, handle: object, argv: Sequence[str], limits: Limits,
         cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,
         cwd: str | None = None, env: Mapping[str, str] | None = None,
+        confine_root: str | None = None,
     ) -> ExecuteResult:
         """Run `argv` inside the attempt's ALREADY-RUNNING container via a
         bare `docker exec`, WITHOUT ever stopping or removing it - added for
@@ -1880,15 +2181,77 @@ class DockerBackend:
         rather than waiting on a client whose remote session may outlive
         it.
 
-        `cwd` (#332 follow-up) sets `docker exec -w`, native support rather
-        than a shell `cd` - this method does not validate it; a caller
-        exposing `cwd` to anything the subject influences must confine it
-        (realpath-resolve inside the container, e.g. via
-        `_resolve_realpath_in_attempt()`, and check the result against a
-        known root) BEFORE calling this, exactly as `gate_witness.py`'s
-        `_decide_run_gate()` does for a subject-forwarded gate cwd - an
-        unconfined cwd here would let a caller run the (still
-        controller-chosen) argv against an arbitrary path.
+        `cwd` alone (no `confine_root`) sets `docker exec -w`, native
+        support rather than a shell `cd` - this method does not validate
+        it, so a caller exposing `cwd` to anything the subject influences
+        must confine it first (realpath-resolve inside the container, e.g.
+        via `resolve_realpath_in_attempt()`, and check the result against a
+        known root). This path is unchanged since #332 and stays the right
+        one for a `cwd` the subject never influences at all.
+
+        `cwd` WITH `confine_root` (#338) is for exactly the case the
+        paragraph above warns about: a `cwd` the subject can influence.
+        `gate_witness.py`'s `_decide_run_gate()` already resolves and
+        root-checks a subject-forwarded cwd via `_confine_requested_cwd()`
+        before calling here - but that check and this call are two
+        SEPARATE `docker exec`s, separated by real wall-clock time (lock
+        acquisition, `tree_digest_fn()`), during which the subject (same
+        container, owns the whole workspace tree) can swap an ancestor of
+        the already-resolved path for a symlink pointing outside the root.
+        `docker exec -w` re-resolves the path STRING fresh at the moment
+        IT runs, with no binding to the directory `_confine_requested_cwd`
+        actually observed - so passing its resolved string straight
+        through as plain `cwd` would carry the gap forward unfixed.
+
+        So when `confine_root` is given, this method does NOT pass `cwd`
+        to `docker exec -w` at all. Instead the wrapped argv opens `cwd`
+        ONCE, as fd 9, and from then on uses only that fd, never the name:
+        the check reads the kernel's own path for the open directory
+        (`readlink /proc/self/fd/9` - deliberately NOT `readlink -f`, which
+        would take that answer and walk it again by name), compares it with
+        `confine_root` (equal, or strictly below it), and the move is a
+        physical `cd -P /proc/self/fd/9` - a chdir to the directory fd 9
+        holds, so `$PWD` and the gate's real cwd are that directory's real
+        path, never the `/proc/self/fd/9` string a logical `cd` would leave
+        behind. The fd lives on a compound command (`{ ...; } 9<"$1"`),
+        never a bare `exec 9<"$1"` (dash treats `exec`'s own redirection
+        failure as fatal to the whole non-interactive shell, so a missing
+        cwd could not be refused cleanly), and closes when that block ends,
+        so the gate never inherits it.
+
+        What this guarantees, and what it does not. The directory the gate
+        starts in IS the directory the check examined, and at the moment of
+        the check that directory's own path was `confine_root` or below it.
+        It does NOT guarantee the directory stays below `confine_root`: a
+        subject who can rename it (or an ancestor) can move the open
+        directory itself elsewhere - between the check and the `cd`, or at
+        any time while the gate runs - and the gate's cwd moves with it,
+        because a held directory follows the directory, not the path. In
+        this backend's actual shape the workspace is the container's own
+        writable layer, so such a move stays inside the same container;
+        closing it fully needs a tree the subject cannot rename, which is
+        a placement change, not something one exec can do.
+        `_confine_requested_cwd` itself is NOT redundant: it is a cheap,
+        non-load-bearing early rejection (a fast error for an obviously
+        wrong cwd, before any exec is built at all).
+
+        STATUS comes from the wrapper, never from the gate. The wrapper's
+        first stderr bytes are one fixed record (`CWD_CONFINEMENT_READY_
+        RECORD` immediately before it execs the real argv - and it execs
+        only if that write succeeded - or `CWD_CONFINEMENT_REFUSED_RECORD`
+        instead, then exit 125), and the stderr drain takes that leading
+        record into its own bounded slot, outside the gate's retained
+        stderr and its cap. So: READY means the result is the gate's own,
+        its stderr excluding the record and its exit code untouched -
+        including a gate that itself exits 125 or prints either record.
+        REFUSED (with exit 125) is `reason="launch-failed"`,
+        `error=CWD_CONFINEMENT_REFUSED_SENTINEL`. A missing or malformed
+        record is also `"launch-failed"` (the gate is exec'd only after
+        READY is written, so without it the gate never ran), with
+        `CWD_CONFINEMENT_STATUS_MISSING`/`_INVALID` as `error` - never the
+        refusal, and never a gate result. A timeout or cancel keeps its own
+        reason whatever the record says: those already mean "not a
+        complete run" and still need the in-container stop confirmation.
 
         `env`, when given, runs the wrapped argv under `env -i <env
         pairs>`, replacing the exec'd process's whole environment rather
@@ -1905,19 +2268,57 @@ class DockerBackend:
         if not reachable or absent or status != "running":
             return ExecuteResult(reason="attempt-not-running", exit_code=None)
 
-        marker_path = f"{CONTAINER_WORKSPACE}/.skillc-exec-pid-{uuid.uuid4().hex}"
+        marker_root = CONTAINER_HOME if self.witness_io else CONTAINER_WORKSPACE
+        marker_path = f"{marker_root}/.skillc-exec-pid-{uuid.uuid4().hex}"
+        confining = cwd is not None and confine_root is not None
+        # #338: open `$1` ONCE as fd 9, then use only the fd - see the
+        # docstring for the guarantee and its limit. `readlink` without
+        # `-f` is the kernel's own path for the open directory; `-f` would
+        # walk that string again by name. The trailing `.` keeps command
+        # substitution from stripping newlines out of the path itself, so
+        # a directory named "<root>\n" cannot compare equal to "<root>".
+        # The whole check's stderr goes to /dev/null - dash's own "cannot
+        # open" diagnostic included - so the status record below is the
+        # first thing on this exec's stderr, whatever happens.
+        confinement_check = (
+            "NL='\n'\n"
+            'if { {\n'
+            '  REAL=$(readlink /proc/self/fd/9 && echo .) &&\n'
+            '  case "$REAL" in\n'
+            '    "$2$NL.") ;;\n'
+            '    "$2"/*"$NL.") ;;\n'
+            '    *) false ;;\n'
+            '  esac &&\n'
+            '  cd -P /proc/self/fd/9\n'
+            '} 9<"$1"; } 2>/dev/null\n'
+            'then\n'
+            '  shift 2\n'
+            f"  printf '{CWD_CONFINEMENT_READY_RECORD.decode()[:-1]}\\n' >&2 || exit 125\n"
+            'else\n'
+            f"  printf '{CWD_CONFINEMENT_REFUSED_RECORD.decode()[:-1]}\\n' >&2\n"
+            '  exit 125\n'
+            'fi\n'
+        ) if confining else ""
         if env is not None:
             env_pairs = [f"{k}={v}" for k, v in env.items()]
-            wrapped_argv = ["sh", "-c", f'echo $$ > {marker_path}; exec env -i "$@"', "sh", *env_pairs, *argv]
+            script = f'{confinement_check}echo $$ > {marker_path}; exec env -i "$@"'
+            positional = [cwd, confine_root, *env_pairs, *argv] if confining else [*env_pairs, *argv]
         else:
-            wrapped_argv = ["sh", "-c", f'echo $$ > {marker_path}; exec "$@"', "sh", *argv]
+            script = f'{confinement_check}echo $$ > {marker_path}; exec "$@"'
+            positional = [cwd, confine_root, *argv] if confining else [*argv]
+        wrapped_argv = ["sh", "-c", script, "sh", *positional]
         in_container_pid: list[int | None] = [None]
 
         def _capture_pid() -> None:
             in_container_pid[0] = self._read_in_container_pid(handle, marker_path)
 
+        # Once `confining`, the outer `docker exec -w` stays at its default:
+        # passing `cwd` there too would be one more resolution of the path
+        # string, the thing this fix stops trusting.
         launched = self._launch_and_wait(
-            handle, wrapped_argv, limits, cancel, stdin, prefix_wrap=False, after_launch=_capture_pid, cwd=cwd,
+            handle, wrapped_argv, limits, cancel, stdin, prefix_wrap=False, after_launch=_capture_pid,
+            cwd=None if confining else cwd,
+            stderr_status_record_max=CWD_CONFINEMENT_RECORD_MAX if confining else 0,
         )
         if isinstance(launched, ExecuteResult):
             return launched  # launch-failed, built by _launch_and_wait itself
@@ -1951,9 +2352,26 @@ class DockerBackend:
         else:
             proc.wait()
 
-        return self._finish_result(
+        result = self._finish_result(
             handle, proc, stdout_drain, stderr_drain, stdout_thread, stderr_thread,
             limits, reason, signal_name=None, term_forwarding=None, stop_confirmed=stop_confirmed,
+        )
+        if not confining or result.reason != "exited":
+            return result
+        # #338: the wrapper's leading record, never the gate's output or its
+        # exit code, says whether the gate was exec'd at all.
+        status = _confinement_status(stderr_drain)
+        if status == "ready":
+            return result
+        if status == "refused" and result.exit_code == 125:
+            error = CWD_CONFINEMENT_REFUSED_SENTINEL
+        elif status == "missing":
+            error = CWD_CONFINEMENT_STATUS_MISSING
+        else:
+            error = CWD_CONFINEMENT_STATUS_INVALID
+        return ExecuteResult(
+            reason="launch-failed", exit_code=None, error=error,
+            stdout_incomplete=result.stdout_incomplete, stderr_incomplete=result.stderr_incomplete,
         )
 
     def resolve_realpath_in_attempt(self, handle: object, path: str, timeout: float = 2.0) -> str | None:
@@ -2298,10 +2716,18 @@ class DockerBackend:
         raises (`DecideReplyChannel.close()`'s own idempotent contract), so
         a caller that forgot to retrieve the log before tearing down still
         leaves no listening thread behind; it only loses the log it never
-        asked for."""
+        asked for.
+
+        The container goes FIRST, the channel's socket file second (#394):
+        the socket is this container's bind-mount source, and a stopped
+        container whose source has vanished answers every `docker cp` with
+        "Could not find the file", so the file must outlive the container,
+        not the listener (`_start_trigger_channel`'s `retain_socket_path`).
+        The listener always stops here; the file is released only once the
+        daemon CONFIRMS the container is gone. A failed or timed-out removal
+        leaves both, so the container stays readable for diagnosis and a
+        later `destroy()` (safe to repeat) or the reaper finishes the job."""
         assert isinstance(handle, _Handle)
-        if handle.trigger_channel is not None:
-            handle.trigger_channel.close()
         try:
             subprocess.run(
                 [*self.docker_bin, "rm", "-f", handle.name],
@@ -2309,6 +2735,15 @@ class DockerBackend:
             )
         except (OSError, subprocess.TimeoutExpired):
             pass  # best-effort; confirm_absent() independently verifies the outcome
+        channel = handle.trigger_channel
+        if channel is not None:
+            if self.confirm_absent(handle) is Confirmation.CONFIRMED:
+                channel.close()
+            else:
+                try:
+                    channel.log_or_finalize()  # stop listening; keep the bind source
+                except RuntimeError:
+                    pass  # best-effort, matching close(); the log read reports its own failure
 
     def confirm_absent(self, handle: object) -> Confirmation:
         """Step 9: ask the daemon whether this attempt's container is

@@ -66,25 +66,29 @@ silently worked anyway, say), that run reports `XPASS` as a failure, not a
 quiet green. That is what makes this an instrument with a committed
 negative control, not three assertions hoping to be exercised.
 
-`raises=_PropertyHeld` (issue #336, counter-model review on #266):
-`raises=AssertionError` was passed here originally, but that type is too
-WIDE - every check in this file, setup and property alike, raised plain
-`AssertionError`, so an unrelated infra failure during a break run (a
-real daemon flake, a setup assert firing for some other reason) would
-also satisfy the marker and be counted as the expected red for the wrong
-reason. `_PropertyHeld` is a dedicated exception, confirmed NOT an
-`AssertionError` subclass, raised ONLY by the three property checks
-(`result.exit_code == 0` for `omit-mount`; `reported["uid"] ==
-d.CANDIDATE_UID` for `wrong-uid`; `reported["decisions"]`/the controller
-log for `flip-decision`) via a `_require()` helper - each asserted
+`raises=_PropertyHeld` subtypes, ONE PER TARGETED PROPERTY (issue #341,
+counter-model review on #336's own fix): `raises=AssertionError` was
+passed here originally (too WIDE - every check, setup and property
+alike, raised plain `AssertionError`); #336 narrowed it to a single
+shared `_PropertyHeld`, which closed THAT gap but opened a different
+one - within one break-mode run, a NEIGHBORING property's own failure
+(not the targeted one) could ALSO satisfy the marker, since all three
+properties shared one type. Fixed by giving each its own subtype -
+`_ConnectivityPropertyHeld` (`omit-mount`: `result.exit_code == 0`),
+`_UidPropertyHeld` (`wrong-uid`: `reported["uid"] == d.CANDIDATE_UID`),
+`_DecisionPropertyHeld` (`flip-decision`: `reported["decisions"]`/the
+controller log, both from the SAME targeted property) - via a
+`_require()` helper that now takes WHICH subtype to raise, looked up
+per `BREAK_MODE` by the `xfail` marker itself (`_EXPECTED_PROPERTY_
+EXCEPTION`) rather than one static type. Each check is still asserted
 UNCONDITIONALLY and IDENTICALLY in every mode, never branched by
 `BREAK_MODE` (audited: this file never was branched this way, so no
-XPASS-by-construction fix was needed, only the exception type). Every
-other check (handle/channel preconditions, `result.reason == "exited"`,
-`confirm_stopped()`, `log is not None`) stays a plain `assert`, verified
-by reading `DockerBackend`'s own handling of `trigger_decide=None`
-rather than by running this file (no real daemon in this environment,
-same limitation stated throughout this docstring).
+XPASS-by-construction fix was ever needed, only the exception
+granularity). Every other check (handle/channel preconditions, `result.
+reason == "exited"`, `confirm_stopped()`, `log is not None`) stays a
+plain `assert`, verified by reading `DockerBackend`'s own handling of
+`trigger_decide=None` rather than by running this file (no real daemon
+in this environment, same limitation stated throughout this docstring).
 
 KNOWN LIMITATION, unverified against a real daemon: this classification
 assumes `omit-mount`'s real symptom surfaces through `result.exit_code`
@@ -110,10 +114,12 @@ import os
 import shutil
 import subprocess
 import tempfile
+import uuid
 from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
+from conftest import LIVE_DOCKER_DAEMON_TIMEOUT
 
 from skillc import docker_backend as d
 from skillc.backend import Confirmation, Limits
@@ -136,23 +142,74 @@ if BREAK_MODE not in _VALID_BREAK_MODES:
 
 
 class _PropertyHeld(Exception):
-    """Raised when the ONE property a given `BREAK_MODE` is supposed to
-    violate still held (issue #336, same pattern as skillc#266's
-    counter-model-review fix, commit 2c9c638). The only exception type
-    the `xfail` marker below matches - never bare `AssertionError` - so
-    an unrelated infra/setup failure raises plain `AssertionError`
-    instead and is reported as an ordinary hard FAILURE, never masked as
-    "the break worked"."""
+    """Shared base for every property-specific exception below (issue
+    #341: one subtype per independently-targeted property, so a
+    NEIGHBORING property's own failure cannot satisfy a break mode's own
+    `xfail(raises=...)` - counter-model review on #336's own fix, which
+    gave every property the same single type). Never raised directly;
+    kept importable/catchable generically for a caller that genuinely
+    wants "any property failed," which nothing here currently needs."""
 
 
-def _require(condition: bool, message: str) -> None:
+class _ConnectivityPropertyHeld(_PropertyHeld):
+    """`omit-mount`'s own targeted property: the subject could reach the
+    trigger socket at all."""
+
+
+class _UidPropertyHeld(_PropertyHeld):
+    """`wrong-uid`'s own targeted property: the container ran as the
+    declared candidate identity."""
+
+
+class _DecisionPropertyHeld(_PropertyHeld):
+    """`flip-decision`'s own targeted property: the channel's decisions
+    matched the fixed oracle - checked from both the subject's own
+    report and the controller's independent log, which share this one
+    subtype since both observe the SAME targeted property."""
+
+
+#: Issue #341: which subtype (or tuple of subtypes) a given `BREAK_MODE`
+#: is expected to raise - looked up by the `xfail` marker below instead
+#: of a single static type, so a neighboring property's own failure
+#: (which raises a DIFFERENT subtype) can no longer satisfy the wrong
+#: mode's marker. `.get(BREAK_MODE, _PropertyHeld)` is irrelevant for
+#: `none` (the marker's `condition` is `False` there, so `raises=` is
+#: never consulted).
+_EXPECTED_PROPERTY_EXCEPTION: dict[str, type[Exception]] = {
+    "omit-mount": _ConnectivityPropertyHeld,
+    "wrong-uid": _UidPropertyHeld,
+    "flip-decision": _DecisionPropertyHeld,
+}
+
+
+def _require(condition: bool, message: str, exc_type: type[_PropertyHeld]) -> None:
     """The property under test for the current `BREAK_MODE` - asserted
     UNCONDITIONALLY, identically for `none` and every break mode alike,
-    never branched by `BREAK_MODE`. Confirmed directly, no pytest or
-    Docker needed: `_require(True, ...)` returns; `_require(False, ...)`
-    raises `_PropertyHeld`, which is not a subclass of `AssertionError`."""
+    never branched by `BREAK_MODE`. `exc_type` names WHICH property this
+    particular check is (issue #341); callers must name it explicitly. Confirmed directly,
+    no pytest or Docker needed: `_require(True, ...)` returns;
+    `_require(False, ...)` raises `exc_type`, which is always a subclass
+    of `_PropertyHeld`, never of `AssertionError`."""
     if not condition:
-        raise _PropertyHeld(message)
+        raise exc_type(message)
+
+
+_MISSING_SOCKET_EXIT = 91
+
+
+def _check_connectivity(exit_code: int | None, reported: object) -> None:
+    assert type(exit_code) is int and exit_code in (0, _MISSING_SOCKET_EXIT), "unexpected channel client exit"
+    if exit_code == _MISSING_SOCKET_EXIT:
+        assert reported == {"channel_error": "socket-missing"}, "missing-socket observation absent or malformed"
+    _require(exit_code == 0, "the channel socket was missing", _ConnectivityPropertyHeld)
+
+
+def _check_uid(uid: object) -> None:
+    _require(uid == d.CANDIDATE_UID, "channel client identity differed", _UidPropertyHeld)
+
+
+def _check_decisions(decisions: object) -> None:
+    _require(decisions == _expected_decisions(), "channel decisions diverged", _DecisionPropertyHeld)
 
 
 def _image_available(image: str) -> bool:
@@ -200,6 +257,7 @@ def live_backend(monkeypatch: pytest.MonkeyPatch) -> d.DockerBackend:
     base = Path(tempfile.mkdtemp(prefix="sk-live-base-"))
     return d.DockerBackend(
         image=LIVE_TEST_IMAGE, base_dir=base, network="none",
+        daemon_timeout=LIVE_DOCKER_DAEMON_TIMEOUT,
         trigger_decide=None if BREAK_MODE == "omit-mount" else _decide,
         trigger_socket_dir=Path(tempfile.mkdtemp(prefix="sk-live-trig-")),
     )
@@ -207,13 +265,17 @@ def live_backend(monkeypatch: pytest.MonkeyPatch) -> d.DockerBackend:
 
 def _subject_script() -> str:
     return (
-        "import json, os, socket\n"
+        "import json, os, socket, sys\n"
         f"path = {d.TRIGGER_SOCKET_PATH!r}\n"
         "decisions = []\n"
         "for i in range(1, 6):\n"
         "    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n"
         "    s.settimeout(5.0)\n"
-        "    s.connect(path)\n"
+        "    try:\n"
+        "        s.connect(path)\n"
+        "    except FileNotFoundError:\n"
+        "        print(json.dumps({'channel_error': 'socket-missing'}))\n"
+        f"        sys.exit({_MISSING_SOCKET_EXIT})\n"
         "    s.sendall(json.dumps({'op': 'disruption_check', 'seq': i}).encode() + b'\\n')\n"
         "    s.shutdown(socket.SHUT_WR)\n"
         "    reply = s.recv(65536)\n"
@@ -224,7 +286,8 @@ def _subject_script() -> str:
 
 
 @pytest.mark.xfail(
-    condition=BREAK_MODE != "none", strict=True, raises=_PropertyHeld,
+    condition=BREAK_MODE != "none", strict=True,
+    raises=_EXPECTED_PROPERTY_EXCEPTION.get(BREAK_MODE, _PropertyHeld),
     reason=f"SKILLC_LIVE_TEST_BREAK={BREAK_MODE} deliberately breaks one property",
 )
 def test_the_channel_round_trips_correctly_against_a_real_daemon(live_backend: d.DockerBackend) -> None:
@@ -248,14 +311,16 @@ def test_the_channel_round_trips_correctly_against_a_real_daemon(live_backend: d
       `_expected_decisions()`, which never flips.
 
     `none` (the default): all three hold, and the test passes outright."""
-    handle = live_backend.prepare("a-live-conformance-000000001")
-    assert isinstance(handle, d._Handle)
-    if BREAK_MODE != "omit-mount":
-        assert handle.trigger_channel is not None
+    # Per-run suffix, and the setup asserts inside the `try` (#355): a fixed
+    # name plus an assert before the `try` leaked the container on failure,
+    # and the leak failed every later run on a name `Conflict`.
+    handle = live_backend.prepare(f"a-live-conformance-{uuid.uuid4().hex[:12]}")
     try:
+        assert isinstance(handle, d._Handle)
+        if BREAK_MODE != "omit-mount":
+            assert handle.trigger_channel is not None
         result = live_backend.execute(handle, ["python3", "-c", _subject_script()], Limits(timeout=15))
         assert result.reason == "exited", result.error
-        _require(result.exit_code == 0, result.error or "expected a clean exit")
         assert live_backend.confirm_stopped(handle) is Confirmation.CONFIRMED
         export_dir = Path(tempfile.mkdtemp(prefix="sk-live-export-"))
         live_backend.export(handle, export_dir)
@@ -266,10 +331,97 @@ def test_the_channel_round_trips_correctly_against_a_real_daemon(live_backend: d
     # `observations`, not returned inline (`ExecutionBackend.execute()`'s
     # own documented convention).
     reported = json.loads((export_dir / "observations").read_text(encoding="utf-8").strip().splitlines()[-1])
-    _require(reported["uid"] == d.CANDIDATE_UID, f"expected uid {d.CANDIDATE_UID}, got {reported['uid']}")
-    _require(reported["decisions"] == _expected_decisions(), f"subject-reported decisions diverged: {reported['decisions']}")
+    _check_connectivity(result.exit_code, reported)
+    _check_uid(reported["uid"])
+    _check_decisions(reported["decisions"])
     assert log is not None
-    _require(
-        [entry.result["decision"] for entry in log] == _expected_decisions(),
-        "the controller's own trigger log diverged from the expected decisions",
+    _check_decisions([entry.result["decision"] for entry in log])
+
+
+# ----------------------------------------- #394: a stopped attempt stays readable
+
+
+_WORKSPACE_PAYLOAD = b"installed before execute; must survive the stop\n"
+
+
+def _finalized_attempt(
+    backend: d.DockerBackend, label: str,
+) -> tuple[d._Handle, list[object]]:
+    """Run one attempt through the PRODUCTION order up to the reads that
+    follow a stop: install, execute, confirm the stop, then finalize the
+    channel (`trigger_log()`, which the gate witness calls from
+    `observe_before_teardown`) - and only THEN return, so the caller's
+    `export()` runs against a stopped container whose channel is already
+    finalized. The existing round-trip test above exports BEFORE
+    `trigger_log()`, which is why the #315 floor never saw #394."""
+    handle = backend.prepare(f"a-live-394-{label}-{uuid.uuid4().hex[:12]}")
+    assert isinstance(handle, d._Handle)
+    try:
+        assert handle.trigger_channel is not None
+        backend.install(handle, {"tests/seed.txt": _WORKSPACE_PAYLOAD})
+        result = backend.execute(handle, ["true"], Limits(timeout=15))
+        assert result.reason == "exited", result.error
+        assert backend.confirm_stopped(handle) is Confirmation.CONFIRMED
+        log = backend.trigger_log(handle)
+        assert log == []
+    except BaseException:
+        backend.destroy(handle)
+        raise
+    return handle, list(log)
+
+
+def test_a_stopped_attempt_is_still_exportable_after_its_channel_is_finalized() -> None:
+    """#394's regression control, in a file the #315 floor already counts.
+
+    Production order on a REAL daemon: a witnessed attempt's channel is
+    finalized (`trigger_log()`) after the stop is confirmed and BEFORE the
+    capture `export()`. Before the fix, finalizing unlinked the host-side
+    socket the container bind-mounts, and `docker cp` against a STOPPED
+    container re-resolves its bind mounts - with the source gone, the
+    daemon reports `Could not find the file /work/.` for every path, so no
+    witnessed attempt on the runner could ever be captured.
+
+    TWO LEGS, ONE TEST, so the green is evidence rather than an accident of
+    this daemon:
+
+    - control (negative): one stopped, finalized attempt is exported once
+      (it must succeed), then its socket source is removed by hand and the
+      export MUST fail with the daemon's not-found error. This is the known-bad input: it proves this daemon
+      has the hazard at all, so the main leg below is able to fail. If a
+      future Docker stops exhibiting it, this leg goes red on purpose - the
+      main leg would then pass whatever the code did.
+    - main: the unmodified production order. The export must succeed and
+      return the installed file. Fails on the pre-fix code (shown on the
+      #315 runner, see the PR)."""
+    if not _image_available(LIVE_TEST_IMAGE):
+        pytest.skip(f"image {LIVE_TEST_IMAGE!r} is not available locally and could not be pulled")
+    backend = d.DockerBackend(
+        image=LIVE_TEST_IMAGE, base_dir=Path(tempfile.mkdtemp(prefix="sk-live-394-base-")), network="none",
+        daemon_timeout=LIVE_DOCKER_DAEMON_TIMEOUT, trigger_decide=lambda _request: {"decision": "pass"},
+        trigger_socket_dir=Path(tempfile.mkdtemp(prefix="sk-live-394-trig-")),
     )
+
+    control, _ = _finalized_attempt(backend, "control")
+    try:
+        # Attribution (counter-model review): the SAME stopped, finalized
+        # container must export cleanly first, so the failure below can only
+        # come from removing its socket - not from a workspace that was never
+        # there.
+        before = Path(tempfile.mkdtemp(prefix="live394-precheck-"))
+        backend.export(control, before)
+        assert (before / "tests" / "seed.txt").read_bytes() == _WORKSPACE_PAYLOAD
+        d.trigger_socket_host_path_for(backend.trigger_socket_dir, control.name).unlink()
+        with pytest.raises(OSError, match="Could not find the file"):
+            backend.export(control, Path(tempfile.mkdtemp(prefix="sk-live-394-control-")))
+    finally:
+        backend.destroy(control)
+
+    handle, _ = _finalized_attempt(backend, "main")
+    try:
+        export_dir = Path(tempfile.mkdtemp(prefix="sk-live-394-export-"))
+        backend.export(handle, export_dir)
+        assert (export_dir / "tests" / "seed.txt").read_bytes() == _WORKSPACE_PAYLOAD
+    finally:
+        backend.destroy(handle)
+    assert backend.confirm_absent(handle) is Confirmation.CONFIRMED
+    assert not d.trigger_socket_host_path_for(backend.trigger_socket_dir, handle.name).exists()

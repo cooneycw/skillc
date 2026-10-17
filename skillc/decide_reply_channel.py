@@ -202,9 +202,28 @@ class DecideReplyChannel:
         self, socket_path: Path, decide: DecideFn, attempt_id: str, *,
         socket_mode: int = 0o600, handler_drain_timeout: float = 5.0,
         max_concurrent_handlers: int = 32, max_request_bytes: int = 64 * 1024,
-        request_timeout: float = 5.0,
+        request_timeout: float = 5.0, retain_socket_path: bool = False,
     ) -> None:
         self._socket_path = socket_path
+        #: #394: `True` makes `stop_and_finalize()` stop LISTENING but leave
+        #: the socket file in place; `release_socket_path()` (or `close()`)
+        #: removes it later. A caller that bind-mounts this path into a
+        #: container needs the file to exist for as long as the CONTAINER
+        #: does, not merely as long as the listener: `docker cp` against a
+        #: stopped container re-resolves its bind mounts, and with the
+        #: source gone the daemon reports every path as missing ("Could not
+        #: find the file /work/."), so nothing can be captured after the
+        #: channel is finalized. `False` (the default) keeps the original
+        #: unlink-on-finalize behaviour for every caller that mounts nothing.
+        self._retain_socket_path = retain_socket_path
+        #: `(st_dev, st_ino, st_ctime_ns)` of the socket file this channel
+        #: bound, so `release_socket_path()` removes OUR file and never a
+        #: later channel's socket at the same path (one whose
+        #: `_clear_stale_path()` replaced ours once our listener was
+        #: closed). The inode number alone is not enough: a filesystem
+        #: reuses a freed inode immediately, which this module's own unit
+        #: test hit on its first run.
+        self._bound_identity: tuple[int, int, int] | None = None
         self._decide = decide
         #: Carried into `TrustedLog.witnessed()` by this channel's own
         #: `trusted_log()` below, never re-supplied by a caller - this
@@ -232,7 +251,15 @@ class DecideReplyChannel:
         self._server: _Server | None = None
         self._thread: threading.Thread | None = None
         self._started = False
-        self._finalized = False
+        #: #367: ATTEMPTING shutdown and FINALIZING the log are different
+        #: facts. `_shutdown_attempted` is set before the drain (a second
+        #: shutdown must never run); `_finalized_log` only once the drain
+        #: succeeded; `_finalize_failure` keeps a failed drain's error so
+        #: every later read re-raises it rather than returning a log a
+        #: still-running handler may yet append to.
+        self._shutdown_attempted = False
+        self._finalized_log: list[LoggedDecision] | None = None
+        self._finalize_failure: RuntimeError | None = None
         #: Counts handler threads currently inside `_Handler.handle()` -
         #: `stop_and_finalize()` drains this to zero (bounded by
         #: `handler_drain_timeout`) before snapshotting the log, because
@@ -301,6 +328,10 @@ class DecideReplyChannel:
             server.channel = self
             try:
                 os.chmod(self._socket_path, self._socket_mode)
+                # Recorded under the same lock, before anyone else can
+                # replace the path (#394, `release_socket_path`).
+                st = self._socket_path.lstat()
+                self._bound_identity = (st.st_dev, st.st_ino, st.st_ctime_ns)
             except OSError:
                 # `_Server.__init__` already self-closes on a bind/listen
                 # failure (stdlib `TCPServer.__init__`'s own try/except),
@@ -413,12 +444,18 @@ class DecideReplyChannel:
         = True` means `server_close()` will not wait for them either (see
         `_active_handlers`'s own comment). Raises `RuntimeError` rather than
         returning a log that might still grow if the drain times out - a
-        silently short snapshot would read as complete when it is not."""
+        silently short snapshot would read as complete when it is not. That
+        failure is permanent (#367): every later read re-raises it, even
+        after the stuck handler eventually finishes."""
         if not self._started:
             raise RuntimeError("stop_and_finalize() called before start()")
-        if self._finalized:
+        if self._finalize_failure is not None:
+            raise RuntimeError(
+                f"this channel's finalization already failed: {self._finalize_failure}"
+            ) from self._finalize_failure
+        if self._shutdown_attempted:
             raise RuntimeError("this channel has already been finalized")
-        self._finalized = True
+        self._shutdown_attempted = True
         assert self._server is not None
         self._server.shutdown()
         self._server.server_close()
@@ -429,29 +466,83 @@ class DecideReplyChannel:
                 lambda: self._active_handlers == 0, timeout=self._handler_drain_timeout,
             )
         if not drained:
-            raise RuntimeError(
+            self._finalize_failure = RuntimeError(
                 f"stop_and_finalize(): {self._active_handlers} handler(s) still running past "
                 f"handler_drain_timeout={self._handler_drain_timeout}s - the log cannot be "
                 f"trusted as finalized while a decision may still be appended to it"
             )
+            raise self._finalize_failure
+        if not self._retain_socket_path:
+            self.release_socket_path()
+        with self._lock:
+            self._finalized_log = list(self._log)
+        return list(self._finalized_log)
+
+    def release_socket_path(self) -> None:
+        """Removes the socket file this channel bound - and only that file.
+        A no-op when nothing was bound or it is already gone, and a REFUSAL
+        (silently, best-effort) when the path now holds a different file:
+        with the listener closed, a later channel's `_clear_stale_path()`
+        may legitimately have replaced ours at the same path, and unlinking
+        it would cut that live attempt off. Never raises; the next bind at
+        this path clears a leftover orphan anyway (`_clear_stale_path`).
+
+        Called by `stop_and_finalize()` itself in the default mode; with
+        `retain_socket_path=True` (#394) the caller owns WHEN - after the
+        container that mounts this path is gone."""
+        if self._bound_identity is None:
+            return
+        identity, self._bound_identity = self._bound_identity, None
+        # Under the same per-path lock `start()` holds across its
+        # decide-and-bind, so a channel mid-start cannot be misread here.
+        lock_path = self._socket_path.with_name(self._socket_path.name + ".lock")
         try:
-            self._socket_path.unlink()
+            with open(lock_path, "wb") as lock_file:
+                fcntl.flock(lock_file, fcntl.LOCK_EX)
+                try:
+                    st = self._socket_path.lstat()
+                    if (st.st_dev, st.st_ino, st.st_ctime_ns) != identity or self._someone_is_listening():
+                        return
+                    self._socket_path.unlink()
+                finally:
+                    fcntl.flock(lock_file, fcntl.LOCK_UN)
         except OSError:
             pass
-        with self._lock:
-            return list(self._log)
+
+    def _someone_is_listening(self) -> bool:
+        """`True` when a live listener accepts at this path - which, after
+        this channel's own listener is closed, can only be someone else's."""
+        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            probe.settimeout(0.2)
+            probe.connect(str(self._socket_path))
+        except OSError:
+            return False
+        finally:
+            probe.close()
+        return True
 
     def log_or_finalize(self) -> list[LoggedDecision]:
         """Idempotent variant of `stop_and_finalize()`, for a caller that
         may need the log from more than one path - the documented
         confirm-then-finalize call, and a defensive teardown (e.g.
         `DockerBackend.destroy()`) that must not crash if the first already
-        ran. Returns the same finalized log on every call after the first,
-        rather than raising. Still raises if called before `start()` - that
-        remains a real misuse, not a case this method papers over."""
-        if self._finalized:
-            with self._lock:
-                return list(self._log)
+        ran. Returns the same finalized log on every call after the first
+        (a fresh copy of one frozen snapshot each time), rather than
+        raising. Still raises if called before `start()` - that remains a
+        real misuse, not a case this method papers over.
+
+        A FAILED finalization is not a finalized log (#367): after a drain
+        timeout this re-raises that `RuntimeError` on every call, however
+        long afterwards, so no reader can mistake a refused log for absence
+        or a partial one for complete. It stays a `RuntimeError` so a
+        best-effort caller (`DockerBackend.destroy()`) still catches it."""
+        if self._finalize_failure is not None:
+            raise RuntimeError(
+                f"this channel's finalization failed: {self._finalize_failure}"
+            ) from self._finalize_failure
+        if self._finalized_log is not None:
+            return list(self._finalized_log)
         return self.stop_and_finalize()
 
     def trusted_log(self) -> TrustedLog:
@@ -473,10 +564,17 @@ class DecideReplyChannel:
         and safe after `stop_and_finalize()` (no-op). For a caller that
         needs to guarantee the listening thread is gone without caring
         about the log itself (`DockerBackend.prepare()`'s own failure
-        path, `destroy()`'s best-effort contract)."""
-        if not self._started or self._finalized:
+        path, `destroy()`'s best-effort contract). Also releases a socket
+        file `retain_socket_path=True` kept past finalization (#394), so
+        it is the one teardown call such a caller needs. After a FAILED
+        finalization (#367) it only releases the socket - it never waits on
+        the stuck handler again and never raises; the log reads keep
+        reporting that failure."""
+        if not self._started:
             return
-        self.stop_and_finalize()
+        if not self._shutdown_attempted:
+            self.stop_and_finalize()
+        self.release_socket_path()
 
 
 @dataclass(frozen=True)

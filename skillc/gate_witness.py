@@ -75,26 +75,40 @@ hiding the gate's own exit code would break the workflow under test - a
 flow-check loop that cannot see a gate's failure cannot fix it and rerun.
 The subject gets back `exit_code`, `reason`, and stdout/stderr truncated to
 a declared byte cap - exactly what it would see running the gate itself.
+Stderr is the backend's raw `ExecuteResult.stderr` on every exit (#334): it
+used to be `error`, which is filled only for a nonzero exit and is stripped,
+so a passing gate's stderr never reached the subject and a failing gate's
+lost its trailing newline. A backend that reports no raw stderr still
+forwards `error`; that summary is not a byte-identity claim.
 What it does NOT get: the witness's own coverage state, any other gate's
 status, or any tree digest. The witness stays trustworthy regardless of
 what the reply contains, because the RECORD is controller-written and never
 derived from anything the subject sees or sends back.
 
-Stdlib only (`threading`, `time`, `tempfile`), per AGENTS.md.
+PER-STAGE OUTCOMES ARE READ AT RUN TIME, BY THE CONTROLLER (#376). A gate
+the caller names in `stage_capture` is an aggregate whose stages matter on
+their own: the controller applies that gate's reader to the stdout IT
+captured, the moment the run resolves, and stores the result on that run
+(`GateRunRecord.stages`). It is bound to that run's exit code and tree
+digest, and nothing later - a replay, a rerun, anything the subject sends -
+can rewrite it. A run that did not exit normally, or whose output was
+incomplete, records an `unavailable` capture, never an empty success. See
+`skillc/stage_capture.py` for the reader and its states.
+
+Stdlib only (`threading`, `time`, `json`), per AGENTS.md.
 """
 
 from __future__ import annotations
 
 import json
-import tempfile
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 from threading import Lock
 
 from .backend import ExecuteResult, ExecutionBackend, Limits
 from .decide_reply_channel import ChannelRefusal
+from .stage_capture import unavailable as _stages_unavailable
 
 #: Computes the CURRENT tree's content identity, called by this module
 #: immediately before each `exec_in_attempt()` call - never supplied by the subject.
@@ -104,6 +118,11 @@ from .decide_reply_channel import ChannelRefusal
 #: export()-backed version is a live-Docker question this module does not
 #: simulate).
 TreeDigestFn = Callable[[], str]
+
+#: Reads one resolved run's per-stage outcomes from the controller-captured
+#: stdout and exit code (#376); `skillc.stage_capture.capture_stages` is the
+#: production reader for the flow-check plan gate.
+StageReader = Callable[[bytes | None, int | None], Mapping[str, object]]
 
 #: Default cap on the stdout/stderr text returned to the subject in a
 #: `run_gate` reply - a flow-check loop needs enough to act on a failure,
@@ -138,6 +157,10 @@ class _Run:
     #: the in-container process was independently confirmed dead, `False`
     #: otherwise - never a guess either way.
     stop_confirmed: bool | None = None
+    #: #376: the per-stage capture for a gate named in `stage_capture`,
+    #: read from this run's own controller-held stdout when it resolved;
+    #: `None` for every other gate.
+    stages: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -151,9 +174,11 @@ class GateRunRecord:
     reason: str | None
     tree_digest_at_start: str
     stop_confirmed: bool | None
+    #: #376: present only for a stage-bearing gate's runs - see `_Run.stages`.
+    stages: Mapping[str, object] | None = None
 
     def to_json(self) -> dict[str, object]:
-        return {
+        data: dict[str, object] = {
             "requested_at": self.requested_at,
             "completed_at": self.completed_at,
             "exit_code": self.exit_code,
@@ -161,6 +186,9 @@ class GateRunRecord:
             "tree_digest_at_start": self.tree_digest_at_start,
             "stop_confirmed": self.stop_confirmed,
         }
+        if self.stages is not None:
+            data["stages"] = dict(self.stages)
+        return data
 
 
 @dataclass(frozen=True)
@@ -227,28 +255,11 @@ class GateWitnessRecord:
     def to_json_bytes(self) -> bytes:
         return json.dumps({
             "kind": "gate-witness",
-            "version": 2,
+            "version": 3,
             "attempt_id": self.attempt_id,
             "declared_gates": list(self.declared_gates),
             "gates": {gate: record.to_json() for gate, record in self.gates.items()},
         }).encode("utf-8")
-
-
-def _read_observations(backend: ExecutionBackend, handle: object, cap: int) -> str:
-    """Best-effort read of the gate's own captured stdout (`verify.py`'s
-    documented `observations` write-back convention, #76) - never raises:
-    an export or read failure here must not take down the gate's own
-    `run_gate` reply over a secondary capture concern."""
-    try:
-        with tempfile.TemporaryDirectory() as tmp:
-            dest = Path(tmp)
-            backend.export(handle, dest)
-            observations = dest / "observations"
-            if not observations.is_file():
-                return ""
-            return observations.read_text(encoding="utf-8", errors="replace")[:cap]
-    except OSError:
-        return ""
 
 
 class GateWitness:
@@ -286,6 +297,7 @@ class GateWitness:
         reply_byte_cap: int = DEFAULT_REPLY_BYTE_CAP,
         declared_env: Mapping[str, Mapping[str, str]] | None = None,
         workspace_root: str | None = None,
+        stage_capture: Mapping[str, StageReader] | None = None,
     ) -> None:
         if not declared_gates:
             raise ValueError(
@@ -309,6 +321,13 @@ class GateWitness:
             if unknown_env_gates:
                 raise ValueError(f"declared_env names undeclared gate(s): {sorted(unknown_env_gates)}")
         self._declared_env: dict[str, Mapping[str, str]] = dict(declared_env) if declared_env else {}
+        #: #376: per-gate stage readers, declared by the CALLER like the argv.
+        #: A typo'd gate name is refused eagerly, as for `declared_env`.
+        if stage_capture:
+            unknown_stage_gates = set(stage_capture) - set(self._declared_argv)
+            if unknown_stage_gates:
+                raise ValueError(f"stage_capture names undeclared gate(s): {sorted(unknown_stage_gates)}")
+        self._stage_capture: dict[str, StageReader] = dict(stage_capture) if stage_capture else {}
         #: #332: the one root a subject-forwarded `cwd` must resolve inside
         #: (after a REAL in-container `realpath`, never a string-prefix
         #: check on the unresolved input - a symlink could point outside
@@ -324,14 +343,7 @@ class GateWitness:
         self._exclusivity_basis = exclusivity_basis
         self._reply_byte_cap = reply_byte_cap
         self._lock = Lock()
-        #: Serializes the ACTUAL exec + observations-read critical section
-        #: across every gate (codex `code_review` correction) - `_lock`
-        #: alone let two different gates' `exec_in_attempt()` calls run
-        #: concurrently, both writing and reading the SAME shared
-        #: `observations` artifact the backend's write-back convention
-        #: uses, so one gate's reply could carry a neighbour's (or the
-        #: primary subject's) stdout. Claim-checking (`_in_flight`) stays
-        #: fast under `_lock`; only the slow exec itself is serialized here.
+        #: Snapshot and execution share one order across different gates.
         self._exec_lock = Lock()
         self._runs: dict[str, list[_Run]] = {gate: [] for gate in self._declared_argv}
         self._in_flight: dict[str, bool] = {gate: False for gate in self._declared_argv}
@@ -362,19 +374,35 @@ class GateWitness:
         raise ChannelRefusal(f"gate-witness: unknown op {op!r}")
 
     def _confine_requested_cwd(self, cwd: object) -> str | None:
-        """#332: the ONE place a subject-forwarded `cwd` is trusted or
-        refused. `None` (no cwd requested) passes through unchanged -
-        `exec_in_attempt()` then runs at its own default. Anything else
-        must resolve, via a REAL in-container `realpath` (never a
-        string-prefix check on the unresolved input - a symlink could
-        point outside the root), to this attempt's declared workspace
-        root or somewhere below it. Any failure to resolve, any
-        resolution outside that root, or a cwd requested when no root is
-        configured at all, is refused - never run, never silently
-        confined by guessing. Orchestrator's own named red cases
+        """#332, demoted by #338: no longer the security boundary for a
+        subject-forwarded `cwd` - only a cheap, non-load-bearing EARLY
+        rejection, so an obviously-wrong cwd fails fast with a clear
+        message before any exec is even built. `None` (no cwd requested)
+        passes through unchanged - `exec_in_attempt()` then runs at its own
+        default. Anything else must resolve, via a REAL in-container
+        `realpath` (never a string-prefix check on the unresolved input -
+        a symlink could point outside the root), to this attempt's
+        declared workspace root or somewhere below it. Any failure to
+        resolve, any resolution outside that root, or a cwd requested when
+        no root is configured at all, is refused here - never run, never
+        silently confined by guessing. Orchestrator's own named red cases
         (`cwd=/`, `cwd=../..`) are exactly what the suffix/prefix check
         below rejects: either resolves to something that is not this
-        root or a path strictly below it."""
+        root or a path strictly below it.
+
+        THE REAL GUARANTEE IS NOT HERE. This check and `exec_in_attempt()`'s
+        own call are two separate `docker exec`s with real wall-clock time
+        between them (lock acquisition, `tree_digest_fn()`) - long enough
+        for the subject, who owns the whole workspace tree, to swap an
+        ancestor of the resolved path for a symlink pointing outside the
+        root before the later exec ever runs. `_decide_run_gate()` below
+        passes `confine_root=self._workspace_root` to `exec_in_attempt()`
+        so THAT call opens the cwd once, checks the directory it opened,
+        and starts the gate in that same directory - see its own docstring
+        (#338), including what it does not guarantee (a subject that can
+        rename the opened directory can still move it after the check). This method staying unchanged in shape is deliberate: the
+        fix is bounded to `exec_in_attempt()`'s own cwd handling, not a
+        redesign of this witness."""
         if cwd is None:
             return None
         if self._workspace_root is None:
@@ -417,83 +445,94 @@ class GateWitness:
                 raise ChannelRefusal(f"run_gate: {gate!r} is already executing for this attempt")
             self._in_flight[gate] = True
         try:
-            # The digest call is OUTSIDE the lock but still able to leave
-            # `_in_flight` wedged true forever if it raises (codex
-            # `code_review` correction: the first draft computed this
-            # INSIDE the lock, with no cleanup on failure) - caught
-            # explicitly so a digest failure clears the claim exactly like
-            # an `exec_in_attempt()` failure does, rather than permanently
-            # refusing every later request for this gate.
-            tree_digest = self._tree_digest_fn()
-        except Exception:
-            with self._lock:
-                self._in_flight[gate] = False
-            raise
-        with self._lock:
-            run = _Run(requested_at=time.time(), tree_digest_at_start=tree_digest)
-            self._runs[gate].append(run)
-            backend_known_unsupported = self._backend_unsupported
-        if backend_known_unsupported:
-            # The backend already told us, for a PRIOR gate, that it cannot
-            # do this at all (codex `code_review` correction: the first
-            # draft kept calling a backend already known incapable). Still
-            # record a run - for transparency - without calling the
-            # backend or reading observations again.
-            result = ExecuteResult(reason="unsupported", exit_code=None)
-            stdout = ""
-        else:
-            # Serializes the ACTUAL exec + observations-read globally
-            # (`_exec_lock`, not `_lock`) - claim-checking above stays
-            # concurrent across different gates; only the slow exec and
-            # its shared-artifact read are serialized, closing the
-            # cross-gate/cross-primary `observations` race (codex
-            # `code_review` correction).
             with self._exec_lock:
-                try:
+                with self._lock:
+                    if self._workspace_integrity_unknown:
+                        raise ChannelRefusal(
+                            f"run_gate: {gate!r} refused - workspace-integrity-unknown "
+                            "(an earlier queued execution was not confirmed stopped)"
+                        )
+                # A gate waiting behind another gate must snapshot AFTER it,
+                # not measure the tree that existed when its request arrived.
+                tree_digest = self._tree_digest_fn()
+                with self._lock:
+                    run = _Run(requested_at=time.time(), tree_digest_at_start=tree_digest)
+                    self._runs[gate].append(run)
+                    unsupported = self._backend_unsupported
+                if unsupported:
+                    result = ExecuteResult(reason="unsupported", exit_code=None)
+                else:
                     result = self._backend.exec_in_attempt(
                         self._handle, list(self._declared_argv[gate]), self._limits,
                         cwd=gate_cwd, env=self._declared_env.get(gate),
+                        # #338's opened-directory boundary, never replaced by
+                        # the earlier realpath check or a subject status claim.
+                        confine_root=self._workspace_root,
                     )
-                except Exception:
-                    # An exception out of `exec_in_attempt()` itself is an
-                    # infrastructure fault the Protocol does not document as
-                    # a normal outcome (`attempt-not-running` and
-                    # `unsupported` already have their own `reason`,
-                    # returned normally) - never silently recorded as a
-                    # clean result. The run stays unresolved (`reason`
-                    # stays `None`); `finalize()` tells this apart from a
-                    # genuinely still-running call cut off by teardown via
-                    # `_in_flight` (cleared here, left `True` by teardown).
-                    with self._lock:
-                        self._in_flight[gate] = False
-                    raise
-                if result.reason == "unsupported":
-                    with self._lock:
+                output_bad = result.reason == "exited" and (
+                    result.stdout is None or result.stdout_truncated
+                    or result.stdout_incomplete or result.stderr_incomplete
+                    # #334: a capped raw stderr cannot be forwarded as whole.
+                    or result.stderr_truncated
+                )
+                stages = self._read_stages(gate, result, output_bad, gate_cwd)
+                with self._lock:
+                    if result.reason == "unsupported":
                         self.channel_unavailable = True
                         self._backend_unsupported = True
-                    stdout = ""
-                else:
-                    stdout = _read_observations(self._backend, self._handle, self._reply_byte_cap)
+                    if output_bad:
+                        self.channel_unavailable = True
                     if result.stop_confirmed is False:
-                        # Orchestrator ruling on finding 3: cannot confirm
-                        # the in-container process is dead - sticky,
-                        # attempt-wide, and NEVER retroactive (see the
-                        # flag's own docstring).
-                        with self._lock:
-                            self._workspace_integrity_unknown = True
-        with self._lock:
-            run.completed_at = time.time()
-            run.exit_code = result.exit_code
-            run.reason = result.reason
-            run.stop_confirmed = result.stop_confirmed
-            self._in_flight[gate] = False
-        return {
-            "accepted": True,
-            "exit_code": result.exit_code,
-            "reason": result.reason,
-            "stdout": stdout,
-            "stderr": (result.error or "")[: self._reply_byte_cap],
-        }
+                        self._workspace_integrity_unknown = True
+                    run.completed_at = time.time()
+                    run.exit_code = result.exit_code
+                    run.reason = result.reason
+                    run.stop_confirmed = result.stop_confirmed
+                    run.stages = stages
+                if output_bad:
+                    raise ChannelRefusal("gate-witness: controller output is missing or incomplete")
+                return {
+                    "accepted": True,
+                    "exit_code": result.exit_code,
+                    "reason": result.reason,
+                    "stdout": (result.stdout or b"")[:self._reply_byte_cap].decode("utf-8", errors="replace"),
+                    "stderr": (
+                        result.stderr[:self._reply_byte_cap].decode("utf-8", errors="replace")
+                        if result.stderr is not None else (result.error or "")[:self._reply_byte_cap]
+                    ),
+                }
+        finally:
+            # Includes a failed snapshot and backend exceptions; neither may
+            # wedge this gate's in-flight claim forever.
+            with self._lock:
+                self._in_flight[gate] = False
+
+    def _read_stages(self, gate: str, result: ExecuteResult, output_bad: bool,
+                     gate_cwd: str | None) -> Mapping[str, object] | None:
+        """#376: the run's stage capture, or `None` for a gate with no reader.
+        Only a normally exited run with complete output is read; anything
+        else, including a reader that raises, is an `unavailable` capture.
+
+        A captured result is BOUND to where it ran: `cwd` is the controller-
+        resolved directory (`None` when the subject requested none) and
+        `workspace_root` this attempt's root. Stage outcomes from a
+        neighbouring project under the workspace describe that project, not
+        the one a report is about, so a consumer compares the two (Codex
+        review of #376)."""
+        reader = self._stage_capture.get(gate)
+        if reader is None:
+            return None
+        if result.reason != "exited":
+            return _stages_unavailable(f"run did not exit normally (reason {result.reason!r})")
+        if output_bad:
+            return _stages_unavailable("controller output is missing or incomplete")
+        try:
+            capture = dict(reader(result.stdout, result.exit_code))
+        except Exception as exc:  # noqa: BLE001 - a reader defect is evidence of nothing
+            return _stages_unavailable(f"stage reader failed ({type(exc).__name__})")
+        capture["cwd"] = gate_cwd
+        capture["workspace_root"] = self._workspace_root
+        return capture
 
     def finalize(self, attempt_id: str) -> GateWitnessRecord:
         """Design doc §5's coverage derivation, over every declared gate -
@@ -521,6 +560,9 @@ class GateWitness:
                         exit_code=r.exit_code, reason=r.reason,
                         tree_digest_at_start=r.tree_digest_at_start,
                         stop_confirmed=r.stop_confirmed,
+                        stages=(r.stages if r.stages is not None
+                                else _stages_unavailable("run never resolved") if gate in self._stage_capture
+                                else None),
                     )
                     for r in runs
                 )

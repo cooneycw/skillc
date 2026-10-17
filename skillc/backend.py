@@ -74,7 +74,7 @@ backend's transport.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -216,7 +216,8 @@ class ExecuteResult:
     the subject pre-created `observations` as a directory, which makes the
     tar extraction fail with `IsADirectoryError` - a raised `OSError`, or a
     timeout). `None` means this backend does not report it at all (every
-    backend but `DockerBackend`) OR the write-back was never attempted
+    backend but `DockerBackend`), opted witness IO retains stdout only in the
+    controller, OR the write-back was never attempted
     because the subject's own process never ran (the `"launch-failed"`
     path, before any capture exists to write back) - `execute()`'s own
     comment at that return states which case applies, mirroring
@@ -249,6 +250,18 @@ class ExecuteResult:
     #: attempt-wide integrity loss: kyle's own lifecycle rule applies here
     #: too, a terminal state needs CONFIRMED absence, never an assumption.
     stop_confirmed: bool | None = None
+    #: Controller drain bytes, never read from a candidate artifact. None means
+    #: unavailable; callers must also check truncation and incomplete flags.
+    stdout: bytes | None = field(default=None, repr=False)
+    #: Controller drain bytes of the process's own stderr (#334), exactly as
+    #: read - never decoded, stripped, annotated or gated on the exit code,
+    #: unlike `error`, which is a human-facing summary filled only for a
+    #: nonzero exit. A forwarder that must reproduce the stream reads this,
+    #: never `error`. None means this backend does not report it; a reported
+    #: capture is whole only when `stderr_truncated` and `stderr_incomplete`
+    #: are both False.
+    stderr: bytes | None = field(default=None, repr=False)
+    stderr_truncated: bool = False
 
 
 @dataclass(frozen=True)
@@ -353,6 +366,7 @@ class ExecutionBackend(Protocol):
         self, handle: object, argv: Sequence[str], limits: Limits,
         cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,
         cwd: str | None = None, env: Mapping[str, str] | None = None,
+        confine_root: str | None = None,
     ) -> ExecuteResult:
         """Run `argv` inside the SAME running isolation `handle` already
         identifies, WITHOUT stopping or removing it - added for #269's
@@ -392,7 +406,27 @@ class ExecutionBackend(Protocol):
           byte-identity claim against a declared, reproducible environment.
           A backend that cannot honour either must say so through
           `describe()`'s `unobserved`, matching `stdin`'s own convention,
-          never silently ignore them."""
+          never silently ignore them.
+
+        `confine_root` (#338), given alongside `cwd`, closes the TOCTOU an
+        earlier `resolve_realpath_in_attempt()` check cannot: that check
+        and this call are two separate operations with real time between
+        them, during which a subject who owns the isolation's own tree can
+        swap an ancestor of the already-resolved `cwd` for something
+        outside this root. A backend honouring `confine_root` opens `cwd`
+        once, inside the SAME operation that then uses it, checks the
+        directory it actually opened against this root, and starts `argv`
+        in THAT directory - never re-resolving the name - refusing
+        (`reason="launch-failed"`) rather than silently falling back to an
+        unconfined `cwd` if it cannot. The guarantee is about identity at
+        the check, not ancestry forever: a subject that can rename the
+        opened directory can still move it out from under the root, and
+        the running `argv`'s cwd moves with it. Whether `argv` was started
+        must come from a status channel the backend owns, never from
+        anything `argv` itself can print. A backend that does not
+        implement this must say so through `describe()`'s `unobserved`,
+        exactly as for `cwd`/`env` above -
+        never silently ignore it and run `cwd` unconfined regardless."""
         ...
 
     def resolve_realpath_in_attempt(self, handle: object, path: str, timeout: float = 2.0) -> str | None:

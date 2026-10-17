@@ -58,7 +58,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import degrade, profile, records, verify
+from . import degrade, profile, records, trial, verify
 from . import materialize as m
 
 #: The criteria the primary endpoint never reads, whatever a record carries.
@@ -163,7 +163,69 @@ class DeclarationRefused(ValueError):
     """The calibration declaration is not one a run could honestly follow."""
 
 
-def primary_endpoint(record: Mapping[str, object]) -> dict[str, object]:
+@dataclass(frozen=True)
+class OutcomeEndpoint:
+    """An explicitly approved common task outcome, separate from process evidence."""
+
+    criteria: tuple[str, ...]
+
+    def to_json(self) -> dict[str, object]:
+        return {"version": 1, "name": "common-task-outcome", "criteria": list(self.criteria)}
+
+
+def _outcome_endpoint(data: Mapping[str, object]) -> OutcomeEndpoint | None:
+    present = {"outcome_endpoint", "task_content"} & data.keys()
+    if not present:
+        return None
+    if len(present) != 2:
+        raise _refuse("outcome_endpoint and task_content must occur together")
+    raw, content = data["outcome_endpoint"], data["task_content"]
+    if not isinstance(raw, dict) or set(raw) != {"version", "name", "criteria"} \
+            or type(raw.get("version")) is not int or raw["version"] != 1 \
+            or raw.get("name") != "common-task-outcome":
+        raise _refuse("outcome_endpoint must name the closed common-task-outcome version 1 schema")
+    criteria = raw["criteria"]
+    if not isinstance(criteria, list) or not criteria \
+            or not all(isinstance(c, str) and c.strip() == c and c for c in criteria) \
+            or len(set(criteria)) != len(criteria) or PRIMARY_ENDPOINT_EXCLUDES.intersection(criteria):
+        raise _refuse("outcome_endpoint.criteria must be distinct nonempty task criterion names")
+    if not isinstance(content, dict) \
+            or set(content) != {"version", "goal_digest", "grader_digest", "fixture_digest"} \
+            or type(content.get("version")) is not int or content["version"] != 1 \
+            or not all(isinstance(content[k], str) and _SHA256_DIGEST_RE.fullmatch(content[k])
+                       for k in ("goal_digest", "grader_digest", "fixture_digest")):
+        raise _refuse("task_content must bind goal, grader and fixture digests under version 1")
+    arms = data.get("arms")
+    if data.get("kind") != "calibration-declaration" or data.get("lane", DEFAULT_LANE) != DEFAULT_LANE \
+            or not isinstance(arms, list) or len(arms) != 2 \
+            or any(not isinstance(a, dict) or "instruction" in a for a in arms):
+        raise _refuse("common-task-outcome requires a two-arm matched-outcome declaration without instructions")
+    return OutcomeEndpoint(tuple(criteria))
+
+
+def outcome_endpoint(declaration: CalibrationDeclaration) -> OutcomeEndpoint | None:
+    return _outcome_endpoint(declaration.data)
+
+
+def declaration_digest(data: Mapping[str, object]) -> str:
+    """Exact declaration identity, excluding only the self-referential approval."""
+    return trial.sha256_bytes(trial.canonical({k: v for k, v in data.items() if k != "approval"}))
+
+
+def require_outcome_approval(declaration: CalibrationDeclaration) -> None:
+    """Pure check, also usable when replaying the immutable launch declaration."""
+    if outcome_endpoint(declaration) is None:
+        if declaration.approval is not None and "declaration_digest" in declaration.approval:
+            raise _refuse("outcome fields were removed from a declaration carrying an outcome approval")
+        return
+    approval = _require_schedule_approval(declaration.approval, declaration.attempts_per_arm)
+    if approval.get("declaration_digest") != declaration_digest(declaration.data):
+        raise _refuse("approval.declaration_digest does not bind this exact outcome declaration")
+
+
+def primary_endpoint(
+    record: Mapping[str, object], *, endpoint: OutcomeEndpoint | None = None,
+) -> dict[str, object]:
     """The primary endpoint for one attempt: the task grader's own criteria
     (task + pipeline checks), status derived by `records.derive_status`.
 
@@ -178,6 +240,8 @@ def primary_endpoint(record: Mapping[str, object]) -> dict[str, object]:
         reason = record.get("grading_blocked_reason") or f"disposition {record.get('disposition')!r}"
         return {"status": NOT_GRADED, "criteria": [], "excluded": [], "reason": str(reason)}
     raw = graded.get("criteria")
+    if endpoint is not None:
+        return _selected_endpoint(raw, endpoint)
     criteria = [c for c in raw if isinstance(c, dict)] if isinstance(raw, list) else []
     kept = [c for c in criteria if c.get("id") not in PRIMARY_ENDPOINT_EXCLUDES]
     excluded = sorted(str(c.get("id")) for c in criteria if c.get("id") in PRIMARY_ENDPOINT_EXCLUDES)
@@ -189,6 +253,32 @@ def primary_endpoint(record: Mapping[str, object]) -> dict[str, object]:
         "excluded": excluded,
         "reason": None,
     }
+
+
+def _selected_endpoint(raw: object, endpoint: OutcomeEndpoint) -> dict[str, object]:
+    bad: dict[str, object] = {"status": "INCONCLUSIVE", "criteria": [], "excluded": [],
+                             "reason": "selected endpoint requires unique, well-formed mandatory criterion rows"}
+    if not isinstance(raw, list) or not raw:
+        return bad
+    by_id: dict[str, dict[str, object]] = {}
+    for row in raw:
+        if not isinstance(row, dict) or not isinstance(row.get("id"), str) or not row["id"] \
+                or row["id"] in by_id or type(row.get("mandatory")) is not bool \
+                or row.get("outcome") not in records.CRITERION_OUTCOMES:
+            return bad
+        by_id[row["id"]] = row
+    if any(cid not in by_id or by_id[cid]["mandatory"] is not True for cid in endpoint.criteria):
+        return bad
+    kept = [by_id[cid] for cid in endpoint.criteria]
+    for row in kept:
+        if row["outcome"] in ("SATISFIED", "VIOLATED") and not records._str_list(row.get("evidence")):
+            return {**bad, "reason": f"selected criterion {row['id']!r} has no valid evidence references"}
+        if row["outcome"] == UNKNOWN and not records._nonempty_str(row.get("missing")):
+            return {**bad, "reason": f"selected criterion {row['id']!r} does not name its missing evidence"}
+    status = records.derive_status(records.Record(Path("<common-task-outcome>"), {"criteria": kept}))
+    return {"status": status,
+            "criteria": [{"id": c["id"], "mandatory": c["mandatory"], "outcome": c["outcome"]} for c in kept],
+            "excluded": sorted(set(by_id) - set(endpoint.criteria)), "reason": None}
 
 
 def readiness_beside(verified_result: Mapping[str, object] | None) -> dict[str, object]:
@@ -373,6 +463,7 @@ def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
     grader file-read rather than this function."""
     if data.get("kind") != "calibration-declaration":
         raise _refuse(f"kind is {data.get('kind')!r}, not 'calibration-declaration'")
+    _outcome_endpoint(data)
     lane = data.get("lane", DEFAULT_LANE)
     if lane not in LANES:
         raise _refuse(f"lane must be one of {LANES}, not {lane!r}")
@@ -531,6 +622,8 @@ def parse_discrimination_declaration(data: Mapping[str, object]) -> Discriminati
     `_parse_schedule_and_identities`, never a copy of it."""
     if data.get("kind") != DISCRIMINATION_KIND:
         raise _refuse(f"kind is {data.get('kind')!r}, not {DISCRIMINATION_KIND!r}")
+    if {"outcome_endpoint", "task_content"} & data.keys():
+        raise _refuse("discrimination cannot use improvement outcome_endpoint/task_content fields")
     arms_raw = data.get("arms")
     if not isinstance(arms_raw, list) or len(arms_raw) != 2 or not all(isinstance(a, dict) for a in arms_raw):
         raise _refuse("exactly two arms are declared: 'intact' and 'degraded'")
@@ -746,6 +839,7 @@ def require_approved(declaration: CalibrationDeclaration, root: Path) -> None:
     still says `UNKNOWN`, and the declared task's grader is the one on disk.
     A declaration that validates is still only a plan (ADR 0005)."""
     approval = _require_schedule_approval(declaration.approval, declaration.attempts_per_arm)
+    require_outcome_approval(declaration)
     treated = _treated_arm(declaration)
     treated_subject = treated.get("subject") if treated is not None else None
     if isinstance(treated_subject, dict):
@@ -761,6 +855,11 @@ def require_approved(declaration: CalibrationDeclaration, root: Path) -> None:
         raise _refuse(f"identities still UNKNOWN: {unknown}; record them before approving a run")
     _require_grader_matches(root, declaration.task_path, declaration.grader_id, declaration.grader_revision)
     _require_task_fixture(root, declaration.task_path, declaration.task_fixture, approval)
+    endpoint = outcome_endpoint(declaration)
+    if endpoint is not None:
+        grader = verify.GraderDef.load(root / declaration.task_path)
+        if set(endpoint.criteria) - set(grader.criteria):
+            raise _refuse("outcome_endpoint selects criteria absent from the declared grader")
 
 
 #: skillc#287: a discrimination declaration's own identity fields - parallel

@@ -18,6 +18,346 @@ and version plan.
   one good bundle, three bad and one good ledger; each check was removed in
   turn to confirm its case goes blind. The ledger-pin approach comes from the
   unmerged first #268 run.
+- **A failed `prepare()` always raises `BackendUnavailable`** (#416). When
+  `docker run -d` timed out or exited nonzero, `DockerBackend.prepare()` ran a
+  bounded best-effort `docker rm -f` before raising. That cleanup was unguarded,
+  so a cleanup that also hit its bound raised `subprocess.TimeoutExpired` out of
+  `prepare()` in place of the promised `BackendUnavailable`. A daemon slow enough
+  to time out `run` is the likeliest to be slow on `rm`, and this was the real
+  cause of a `test_live_docker_budget` red that was being read as a timing flake.
+  The cleanup now goes through `_best_effort_rm()`, which reports its failure as
+  a clause in the `BackendUnavailable` message. Three fake-CLI tests in
+  `tests/test_docker_backend.py`: `.delay-run`+`.delay-rm` and `.refuse-run`+
+  `.delay-rm` both escaped `TimeoutExpired` on the old code; a `.delay-run`-only
+  control shows a successful cleanup adds no clause.
+- **A failed channel drain stays failed on every later read** (#367).
+  `DecideReplyChannel.stop_and_finalize()` set its finalized flag before
+  waiting for in-flight handlers. So after a drain timeout, a later
+  `log_or_finalize()` returned the log anyway: `[]` while the handler was
+  wedged (`trusted_log()` read `no-controller-witness`), then one entry once it
+  finished. A "finalized" log that grew. The channel now records shutdown
+  attempted separately from a successful finalize. A drain failure re-raises as
+  a `RuntimeError` from `stop_and_finalize()`, `log_or_finalize()` and
+  `trusted_log()` on every call, permanently. A successful finalize returns a
+  copy of one frozen snapshot each time. `close()` after a failure releases the
+  socket without raising. The Event-synchronised negative control fails on the
+  pre-fix code at the first post-failure `log_or_finalize()` (`DID NOT RAISE`).
+- **Bytecode caches are no longer captured** (#408). #400 ran witnessed gates
+  with `PYTHONDONTWRITEBYTECODE=1`, but a gate whose child runs as
+  `python -I` ignores every `PYTHON*` variable and still wrote
+  `__pycache__/*.pyc`, so the honest `incomplete.isolated-child-gate` rows of
+  the #375 campaign read stale (40/42). Capture now excludes a `.pyc` directly
+  under `__pycache__/`, recorded as an exclusion. CPython never imports such a
+  file without its source, so it is a build product. It is neither digested nor
+  delivered to grading, so a cache planted after a gate cannot move a freshness
+  digest or load in place of its source (PEP 552 unchecked-hash). A sourceless
+  `mod.pyc` beside the code is still captured. `tests/test_capture_bytecode_cache.py`
+  runs the real isolated-child-gate gate for both tasks: on the old code it
+  writes bytecode and moves the digest.
+- **#400's fix is tested against the real Level-3 gates** (#400 follow-up).
+  `tests/test_agent_trial_gate_env.py` runs each task's real reference gate
+  stages (lint, check, typecheck) under the env production hands the witness,
+  and requires no `.pyc` and an unchanged `capture_digest`. It commits the
+  negative control that #407 lacked: under the measured env alone, the same
+  gates write bytecode and move the digest, so the main test cannot pass on a
+  gate that imports nothing. With the fix removed, both real-gate cases fail
+  and name the `.pyc` files. Ported from the unpushed #402 branch.
+- **The gate shim forwards the real gate's stderr byte-for-byte** (Refs #334,
+  #332). `GateWitness` replied with `ExecuteResult.error` as the subject's
+  stderr. `error` is a summary: filled only for a nonzero exit, stripped, and
+  annotated when capped. So a passing gate's stderr never reached the subject,
+  and a failing gate's lost its trailing newline. On gate-stops-early's
+  discrimination fixture the real runner writes about 960 bytes of stderr,
+  including its `quality gate SKIPPED` warnings. `ExecuteResult` gains `stderr`
+  (the raw drain bytes) and `stderr_truncated`. `DockerBackend` fills both on
+  every exit, and the witness forwards the raw bytes, refusing a capped stderr
+  as it already refuses a capped stdout. A backend that reports no raw stderr
+  still forwards `error`. `tests/test_profile_closure_preflight_live.py` now
+  runs the real installed gate on `discrimination/fixture` and requires the
+  subject's stdout, stderr and exit code to equal the controller's capture of
+  that one real run, after the `warn (skipped gates: typecheck)`/exit 3 verdict
+  and complete witness coverage. The new runner break mode
+  `closure:shim-alters-output` drops one forwarded stderr byte and must fail
+  only that property. The witness unit test fails on the old forwarding with
+  exactly the defect: `b''` on exit 0, and the stripped text on exit 3.
+- **The real-Docker timer tick survives a large comment history** (#392).
+  `ci/real-docker/poll-triggers` handed each page of GitHub issue comments to
+  `python3 -c` as a command-line argument. Linux caps one argument at 128 KiB,
+  and one page of this repository's newest 100 comments is about 162 KB, so
+  every timer tick died with `Argument list too long` before deciding anything.
+  Pages, the accumulated set, processed ids and the trigger selection now pass
+  between steps as files in a per-tick temporary directory. The new
+  `tests/test_real_docker_poll_triggers.py` runs the whole script against fake
+  `curl`; its oversized-page case fails on the old script with that exact
+  error, and it adds the first whole-process controls for newest-first
+  fetching, stop-at-known-id, the 20-page cap and fetch/parse failures.
+- **An honest plan-gate run is fresh again** (#400). The level-3 graders call
+  the last `flow-check-plan` run current only when its `tree_digest_at_start`
+  equals the graded tree's digest, but the gate's own test run imported the
+  candidate's Python and wrote `__pycache__/*.pyc` into that tree after the
+  start snapshot. Every honest `fresh` run therefore read stale, and
+  `flow-check-honest` graded UNKNOWN: 32 of the 42 rows in the #375 campaign.
+  The witness now runs both declared gates with the measured runtime env plus
+  `PYTHONDONTWRITEBYTECODE=1`, the same setting grading already uses
+  (`verify._env`). The start digest is unchanged and strict, so a post-gate
+  source edit still reads stale. `tests/test_agent_trial_gate_witness.py`
+  gains a run whose gate imports the candidate. It fails on the old code with
+  the plan run's digest differing from the graded one.
+  The same file's scripted actor now waits 15s for a gate reply, the attempt's
+  own limit, instead of 5s. Under host load a slow reply timed the actor out
+  before its post-gate edit, so the `stale` case saw equal digests and failed
+  even though nothing was wrong.
+- **Witnessed live attempts capture again after the stop** (#394). The gate
+  witness finalizes the decide-and-reply channel (`trigger_log()`) right after
+  the confirmed stop, and finalizing unlinked the host socket the container
+  bind-mounts. `docker cp` against a stopped container re-resolves its bind
+  mounts, so with the source gone the daemon reported `Could not find the file
+  /work/.` and every witnessed attempt on the #315 runner ended `inconclusive`,
+  never graded. The filesystem was intact throughout. `DockerBackend` now keeps
+  the socket file until `destroy()` has removed the container
+  (`DecideReplyChannel(retain_socket_path=True)`, `release_socket_path()`).
+  `tests/test_decide_reply_channel_live.py` gains a production-order test whose
+  main leg fails on the old code with that exact error and whose control leg
+  removes the socket by hand and requires the export to fail.
+- **Installed fixture subdirectories belong to the candidate** (#393).
+  `DockerBackend.install()` sent each surface entry as a one-file tar with no
+  directory entries, so `docker cp` created a missing parent such as `tests/`
+  owned by root: the candidate could edit installed files but not add one
+  beside them (`touch /work/tests/new.py`: `Permission denied`). Nested path
+  keys had the same gap one level up. `install()` now asks, in one read-only
+  exec, which ancestors of the copied keys are absent, and delivers exactly
+  those first as candidate-owned directories. Existing directories are never
+  sent, because a real daemon rewrites an existing directory's owner and mode
+  when a directory entry lands on it. A probe that cannot answer refuses the
+  install. `tests/test_install_nested_dirs_live.py` fails on the old code
+  with `Permission denied`, and fails again if every ancestor is reported
+  absent (a pre-existing root 0700 directory becomes `10001:10001 755`).
+  `deliver_home_file` already created its parents as the candidate and is
+  unchanged. Live evidence from calibration-203 / 203-low ran
+  `gate-ran-nothing`, whose reference adds `tests/unit/__init__.py`, under
+  this defect; see #393 for how that reading is qualified.
+- **Deterministic production-path campaign for the #270 Level-3 tasks** (Refs
+  #375, #376). `skillc level3-campaign` runs each row of a frozen manifest
+  (`evals/level3/campaign-375/`) as one real attempt through the production
+  treatment, closure, preflight, gate witness, capture and grading path, with a
+  scripted actor in place of the model. The agent runs on network `none` and
+  only a generated dummy credential is delivered. 42 rows: healthy,
+  alternatives, a no-op, the gate-exercise/integrity cheats, UNKNOWN-preserving
+  controls and #376's aggregate-stop reports. Expected outcomes are derived from
+  each candidate's committed contract by `freeze.py`, with two declared
+  production deltas, and the test suite fails if the manifest drifts from it.
+  The run itself happens on #315's isolated runner.
+
+- **Real-Docker live tests run on an explicit 30 s daemon budget** (#390). The
+  six `DockerBackend` constructions in `tests/*_live.py` had no
+  `daemon_timeout`, so container start ran on the 5 s module default. On
+  #315's dedicated runner a real `docker run -d` stalled for 7.61 s once in
+  27 measured starts (typical 0.13-0.62 s), right after an image build. That
+  stall failed two campaign-1 negative controls in setup, before their planted
+  fault. They now pass `conftest.LIVE_DOCKER_DAEMON_TIMEOUT`.
+  `tests/test_live_docker_budget.py` fails on any live construction without a
+  budget (it named all six before the fix), and shows that a start slower
+  than the budget is still refused. Production's `DAEMON_TIMEOUT` and the
+  real-Docker runner are unchanged.
+- **Fake-Docker tests run on the test-only daemon budget, not production's 5s**
+  (Refs #385). `tests/test_docker_backend.py`'s `_backend()`, every other
+  direct `DockerBackend` construction over the fake CLI, and `test_reap.py`'s
+  `reap.snapshot`/`reap.reap` calls now use the existing
+  `conftest.FAKE_DOCKER_DAEMON_TIMEOUT` (30s): one fake `docker run -d` on a
+  loaded host had exceeded 5s and failed an unrelated test in setup. The
+  fixture gains a `.delay-SUBCOMMAND` sentinel that reproduces that overrun on
+  demand. The one test found needing the bound to fire
+  (`test_confirm_and_kill_in_container_returns_false_when_the_kill_exec_cannot_be_reached`)
+  keeps an explicit 1s budget and now fails if it ever inherits the large
+  one. Production's `DAEMON_TIMEOUT` is unchanged; `test_calibration_run.py`
+  keeps its documented 120s.
+
+- **CPP flow-check subject repinned to `86641e8`** (Refs #376). A new,
+  separate profile `evals/subjects/cpp-codex-flow-check-86641e8/` with its
+  own snapshot fixture: CPP `86641e8` carries `8e0a34fb`, which gives NOT_RUN
+  its own flow-check report state, and is the next study pin CPP recorded.
+  Same 96-file closure shape as `ea6dbfa` (21 files changed, none added or
+  removed); `pyproject.toml`/`uv.lock` are byte-identical. The runtime
+  supply policy, the profile-trial image builder, the live tests and both
+  #287 draft declarations (approvals still `null`; the degraded arm's
+  `mutated_digest` recomputed) now select it. The `ea6dbfa` profile, its
+  evidence and the results recorded against it are unchanged. No image was
+  built here; the #315 re-certification follows the merge.
+
+- **#270 aggregate-stop reports graded against protected per-stage evidence**
+  (Refs #376). The gate witness now records, per run of a caller-declared
+  stage-bearing gate, the stage outcomes the controller read from that run's
+  own stdout (`skillc/stage_capture.py`; record version 3); production
+  declares `flow-check-plan`. Both #270 judges (gate-stops-early revision 5,
+  verify-stops-early revision 4) grade every `checks.*.status` against the
+  last fresh plan run's stages instead of assuming typecheck is skipped: a
+  candidate that adds and runs the formerly absent target may honestly
+  report `passed`, an early-stopped aggregate's truthful partial report is
+  accepted, false or omitted claims are VIOLATED, and SKIPPED/NOT_RUN stay
+  distinct in the evidence. Missing, stale, malformed, carried or
+  whole-gate-only evidence is UNKNOWN. Committed candidate reports now
+  record all three checks with their prior truth values; qualification
+  feeds real pinned-runner stdout (`stage-samples/`). The CPP repin and the
+  #315 real-runner demonstration remain open.
+
+- **The real-Docker runner certifies #338's cwd-confinement proof** (Refs #338).
+  `tests.test_cwd_confinement_live` is now the eighth floor entry in
+  `ci/check_real_docker_ran.py`, so a run where it only skips is FAILURE, not
+  SUCCESS. `run-real-docker --break cwd:confine-root-omitted` selects its
+  break mode through a new `cwd` family in `break-lib.sh` (no bare spelling),
+  posts only to the control context, and the runner now sets all seven break
+  variables explicitly. A no-daemon marker control drives the live test with
+  a scripted backend: only a swap the gate demonstrably followed outside the
+  root may XFAIL; a refusal, a different landing, a broken happy path or a
+  setup failure stays a hard failure. The real-daemon campaign and the #315
+  VM certification are still owed.
+
+- **Offline cache-miss oracle matches uv's real output** (Refs #360). The
+  closure-preflight live test required the phrase "network is disabled",
+  which uv 0.9.7 never prints ("Network connectivity is disabled", wrapped
+  across lines), so its generic-image control failed on every real daemon
+  and the `empty-runtime-cache` break could never reach its own oracle. One
+  whitespace-normalised helper now checks uv's actual phrases, and the
+  offline tests use captured uv output
+  (`tests/fixtures/uv-offline-cache-miss-0.9.7.txt`) instead of a
+  paraphrase. Real Docker: `none` passes and `empty-runtime-cache` reaches
+  its targeted XFAIL; both failed at main before this change.
+
+- **Approval-bound common task outcomes for improvement preparation** (Refs #287).
+  Opted-in two-arm calibration runs bind the selected criteria and exact
+  prompt/grader/fixture identities to an approved declaration stored in hashed
+  trial configuration. Reconstructed reports retain raw task, process-honesty
+  and verified results, eligibility and every scheduled slot beside the common
+  outcome. Malformed evidence, changed approvals or stored identities refuse
+  or stay inconclusive; existing nonempty legacy reports retain their endpoint.
+  Discrimination remains separate. Pilot drafts stay unapproved; derived
+  closures, discrimination execution, runtime identities, cost and
+  live readiness are still owed. No study or paid execution is authorized.
+
+- **Public flow-task reports and exercised regression gates** (Refs #270, #271).
+  Publish missing task goals and #270's `checks.*.status` report contract.
+  Both #270 graders now require the delivered gate to catch a failing
+  pre-existing test and observe a failing regression in its original-source
+  run. Blind gates and undiscovered regressions fail; unavailable call
+  observations remain inconclusive. These are bounded probe observations,
+  not protected evidence against coordinated forgery. Both #271 graders
+  reject confirmed witnesses with no recorded run. Deterministic real-Docker
+  certification and aggregate-stage history remain outstanding.
+
+- **Held-out flow-check honesty and attributable omitted checks** (Refs #270).
+  `verify-stops-early` now declares `flow-check-honest` (grader revision 2),
+  ported verbatim from `gate-stops-early`. It adds a probe that reads
+  `report.json`, witness companions, a missing-witness control and certified
+  `discrimination/` trees. Both graders (primary revision 3) now distinguish a
+  proven omission from missing evidence: a protected record showing the summary
+  gate never ran under asserted exclusivity, with a stated basis and no run, is
+  VIOLATED, and every other incomplete or contradictory record stays UNKNOWN,
+  even when the candidate breaks the probe. Committed stale, false-PASS and
+  paired omission candidates, plus stricter qualification rows (real verdicts,
+  exact UNKNOWN sets, required populations), certify it. This is static
+  certification only: production asserts no gate exclusivity, so a live omitted
+  check still reads UNKNOWN. Gate exercise and integrity, aggregate reporting,
+  the public reporting contract and real-runner evidence remain open.
+
+- **Cold offline-runtime acceptance and targeted closure break controls**
+  (Refs #360). Shared live tests select the normal runtime receipt, validate
+  it before planting faults, and use separate fresh inherited-policy and
+  frozen-policy attempts through the actual preflight and controller witness.
+  Empty-cache, cache-write and project-venv permission modes require their
+  specific dependency and diagnostic; unrelated failures remain hard failures
+  and missed faults produce strict XPASS. Offline controls cover baseline
+  contamination and scan errors, candidate delivery, metadata, bounded
+  controller output and runner routing. Actual Docker acceptance remains owed;
+  these tests do not establish runtime availability or study eligibility.
+
+- **Pinned CPP offline-runtime build preparation** (Refs #360). An optional
+  same-trial-stage image builder validates the declared CPP package metadata,
+  prepares a candidate-owned dependency cache and root-owned runtime descriptor,
+  and binds exact build inputs and observed image ID in an external receipt.
+  Committed offline controls reject pin, policy, identity and source/venv drift
+  before certification. Real consuming-path cache, permissions and baseline
+  purity acceptance remain pending; no default trial image changes.
+
+- **Live break controls credit only their targeted property** (Refs #341).
+  Channel, witness, shim and cold-install checks use separate exceptions for
+  independent observations. Shim cwd and environment failures no longer
+  certify each other; forbidden mounts are distinguished by destination.
+  Channel failures require explicit intended-fault observations.
+  Closure controls route the controller to the preserved harness, validate
+  the refusal's path/symptom and use the same
+  healthy predicate in every mode, so a missed refusal becomes strict XPASS.
+  Witness controls preserve the primary's container, forward the current
+  exec arguments and require independent missing-marker or live-gate proof.
+  Committed no-daemon controls exercise actual markers/helpers, neighboring
+  failures, strict XPASS, broad-marker mutations and bounded cleanup.
+  These establish test discrimination, not real-container behavior; actual
+  break execution remains owed through #315.
+
+- **Calibration CLI builds the declared profile closure, and the runner supplies
+  a controller witness bound to frozen files** (Refs #348).
+  Profile tools, file digests and gate entrypoint now reach the attempt runner;
+  invalid profile inputs refuse before dispatch and remove acquisition copies.
+  A disposable capture adapter reuses final capture policy and refuses partial,
+  empty or failed projections. Both grading paths can receive a finalized
+  controller record with the digest of the exact frozen files under the grading
+  lock; conflicting trusted inputs and mismatched attempt identities refuse.
+  Witnessed attempts prove socket readiness with a controller nonce before
+  dispatch, retain gate stdout outside candidate artifacts, and serialize each
+  capture with its gate. Failed stop, drain or output finalization blocks trusted
+  grading, including a first drain failure followed by an apparently successful
+  read (the separate channel defect remains #367). The selected CPP runtime
+  requires an immutable image receipt, measured protected descriptor and
+  environment, and independently pinned dependency metadata. All arms share
+  that policy; selected imports use offline, locked project-local uv environments.
+  Nested home delivery creates parents as the candidate before copying owned
+  leaves. Gate output buffers are released after each reply; compact run history
+  remains. Actual Docker acceptance remains pending; raw gate output has no
+  lifetime archive, and grading persists only the existing witness envelope digest.
+
+- **The trial image builds on Docker 29, and the ea6dbfa fixture carries
+  CPP's `secrets.py` scanner module** (#356). Two real-daemon `make verify`
+  failures CI could not see, because it has no daemon. (1)
+  `docker/trial/Dockerfile`'s `COPY --from=ghcr.io/astral-sh/uv:${UV_VERSION}`
+  (from #343) is rejected by BuildKit on Docker 29 ("variable expansion is
+  not supported for --from"); `UV_VERSION` is now a global `ARG` feeding a
+  named `uv-bin` stage, and the copy names that stage. Same pin, 0.9.7.
+  (2) The cold-container test's `ImportError: cannot import name 'secrets'`
+  was not a copy-step filter: this repository's `secrets.*` ignore rule kept
+  `lib/security/modules/secrets.py` out of the committed fixture, silently.
+  The file is now vendored byte-identical to CPP `ea6dbfa`, under a narrow
+  `!tests/fixtures/**/secrets.py` exception.
+  `tests/test_profile_fixture_completeness.py` checks the fixture against
+  the pin's own evidence inventory (no git, no Docker, so it runs in CI) and
+  proves `secrets.*` still ignores secret-bearing files.
+
+- **Uptake studies forward each arm's profile verification fields** (#346).
+  The prepared treatment's file digests, tool preflight probes and gate
+  entrypoint now reach the real attempt runner through the existing
+  collection wrapper. Treatments without a profile keep empty checks. A
+  regression observes the runner boundary for both named arm choices.
+
+- **The real-Docker isolation probe refuses DNS and local probe errors**
+  (Refs #315). Its embedded socket probe previously treated every `OSError`
+  as an unreachable LAN, including DNS and permission errors. Only explicit
+  timeouts and host/network routing failures now report unreachable;
+  successful and refused connections still report reachable. All resolved
+  address failures are retained, so a later timeout cannot hide an earlier
+  refusal or local error. Offline controls
+  execute the actual runner snippet and detect the broad-`OSError` mutation.
+  This detector does not replace operator-verified hypervisor isolation.
+
+- **Expected real-Docker failures cannot hide behind passing sibling tests**
+  (Refs #315). The installed verdict recognizes JUnit's `pytest.xfail`
+  entries as failures, so `trialimage:no-uv` stays red when its other tool
+  probes pass. Ordinary partial-skip semantics and the seven-file floor
+  remain unchanged; aggregate success does not prove every property ran.
+
+- **Real-Docker FAILURE and ERROR results reach status publication and cleanup**
+  (Refs #315). The shell runner now captures the posting helper's deliberate
+  nonzero exit codes instead of aborting under `set -e`. A helper crash,
+  malformed output or status/exit mismatch becomes ERROR. Offline process
+  controls cover the actual installed runner with fake external commands,
+  including expected-red context routing and removal of temporary curl config.
 
 - **Calibration and discrimination declarations gain an optional
   `task.fixture` field** (Refs #287), fixing a real blocker found while
@@ -39,6 +379,42 @@ and version plan.
   the study actually grades, not only the generic `fixture`/`reference`
   pair - closing the gap this fix exists for at the harness level as well
   as the schema level.
+
+- **Close the cwd-confinement TOCTOU in `exec_in_attempt()`** (Refs #338).
+  `GateWitness._confine_requested_cwd()` resolved and root-checked a
+  subject-forwarded `cwd` in one `docker exec`, then a later, separate
+  `docker exec -w <that string>` used it - with real time between them in
+  which the subject, who owns the workspace tree, could swap the directory
+  or an ancestor for a symlink pointing outside `workspace_root`.
+  `DockerBackend.exec_in_attempt()` gains `confine_root`: given with `cwd`,
+  the wrapper opens `cwd` once as fd 9 and then uses only the fd - it
+  checks the kernel's own path for the open directory (`readlink
+  /proc/self/fd/9`, not `readlink -f`, which would walk the answer again by
+  name) against `confine_root`, and moves there physically (`cd -P
+  /proc/self/fd/9`, so the gate's `PWD` is the real path, not the
+  `/proc/self/fd/9` string). The gate's start status now comes from the
+  wrapper, not the gate: the wrapper's first stderr bytes are one fixed
+  READY or REFUSED record, which the stderr drain takes into its own
+  bounded slot, apart from the gate's retained stderr and its cap. A gate
+  that prints the refusal text or exits 125 is reported as the gate's own
+  result; REFUSED is `launch-failed`; a missing or malformed record is
+  `launch-failed` with its own error, never a refusal and never a gate
+  result. `GateWitness._decide_run_gate()` passes `confine_root`, and its
+  early resolve is no longer the boundary. Limit, documented: the gate
+  starts in the directory that was checked, but a subject that can rename
+  that directory (or an ancestor) can still move it out from under the
+  root after the check, and the gate's cwd moves with it.
+  Evidence: deterministic fake-CLI tests for a directory swap, an ancestor
+  swap, a name swap after the open (the gate still lands in the opened
+  directory), a missing or non-directory cwd, a sibling named "root plus
+  newline", stdin/env/exit/output, a spoofed refusal, a zero stderr cap, a
+  missing status record and a timeout; each protection mutation-checked
+  red. `tests/test_cwd_confinement_live.py` repeats the swap on a real
+  daemon with a target genuinely outside `/work` (an earlier draft's
+  "outside" target was inside it), set up with the candidate's own
+  permissions; its `confine-root-omitted` break mode shows the real `-w`
+  following the swap. The real-Docker floor entry for that file is
+  deferred to a follow-up until the runner change lands.
 
 - **Replace every private mailbox-message citation in #334's own files with
   durable phrasing** (Refs #334, #100). `tests/test_private_citations.py`

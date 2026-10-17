@@ -1,1 +1,13 @@
-{"flow_check_summary": {"claim": "SKIP"}}
+{
+  "checks": {
+    "lint": {
+      "status": "passed"
+    },
+    "test": {
+      "status": "passed"
+    },
+    "typecheck": {
+      "status": "passed"
+    }
+  }
+}

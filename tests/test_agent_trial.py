@@ -21,6 +21,7 @@ import time
 from pathlib import Path
 
 import pytest
+from conftest import FAKE_DOCKER_DAEMON_TIMEOUT
 
 from skillc import agent_trial as at
 from skillc import docker_backend as d
@@ -56,7 +57,7 @@ def store(tmp_path: Path) -> Path:
 
 
 def _backend(base: Path, docker_state: Path) -> d.DockerBackend:
-    return d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+    return d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
 
 
 def _planned(store: Path) -> tuple[t.Experiment, str]:
@@ -329,7 +330,7 @@ def test_two_transcript_files_gives_unknown_never_pick_the_newest(
             if container_relpath == ".claude/.credentials.json":
                 super().deliver_home_file(handle, ".claude/projects/test/two.jsonl", b'{"type":"user","message":{"role":"user","content":"hi"}}\n')
 
-    two_file_backend = _TwoFileBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+    two_file_backend = _TwoFileBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
 
     record = at.run_one_attempt(
         backend=two_file_backend, experiment=experiment, attempt_id=attempt_id, client="claude",
@@ -722,7 +723,7 @@ def test_extra_home_files_are_delivered_alongside_the_credential_and_seed(
     the same `before_execute` hook that already delivers the credential and
     the client's own seed - never a second delivery mechanism."""
     backend = _HomeFileCapturingBackend(
-        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state),
+        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT,
     )
     experiment, attempt_id = _planned(store)
     cred_path = _fresh_credential(tmp_path, "codex")
@@ -748,7 +749,7 @@ def test_extra_home_files_default_omits_nothing_delivered_before(
     caller who never knew this parameter existed already got - no new file,
     no behavior change for #106's own existing callers."""
     backend = _HomeFileCapturingBackend(
-        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state),
+        image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT,
     )
     experiment, attempt_id = _planned(store)
     cred_path = _fresh_credential(tmp_path, "codex")
@@ -776,7 +777,11 @@ def test_the_overlay_fires_when_gate_entrypoint_is_declared_and_delivered(
     whenever `gate_entrypoint` is EXPLICITLY given - never inferred from
     `verify_home_files`' own membership. Two OTHER mechanisms are
     monkeypatched out, each independently tested elsewhere, so this test
-    isolates exactly the new wiring decision: `_preflight_in_container`'s
+    isolates exactly the overlay wiring decision. The mandatory witness
+    readiness round trip is explicitly stubbed in THIS wiring-only test because
+    fake Docker does not implement socket mounts. Actual callback/nonce/drain
+    behavior is exercised by test_agent_trial_gate_witness.py:
+ `_preflight_in_container`'s
     own digest-verification correctness is `tests/test_agent_trial_
     preflight.py`'s job (the fake docker CLI's own path-remapping
     simulation reports a sha256sum line prefixed with its HOST-side
@@ -786,6 +791,7 @@ def test_the_overlay_fires_when_gate_entrypoint_is_declared_and_delivered(
     `apply_flow_check_gate_overlay`'s own correctness is `tests/
     test_gate_overlay.py`'s job (mutation-checked there)."""
     monkeypatch.setattr(at, "_preflight_in_container", lambda *a, **k: None)
+    monkeypatch.setattr(at._WitnessSession, "bind_and_check", lambda *a, **k: None)
     calls: list[dict[str, object]] = []
 
     def fake_overlay(backend: object, handle: object, **kwargs: object) -> None:
@@ -793,7 +799,7 @@ def test_the_overlay_fires_when_gate_entrypoint_is_declared_and_delivered(
 
     monkeypatch.setattr(at.gate_overlay, "apply_flow_check_gate_overlay", fake_overlay)
 
-    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     experiment, attempt_id = _planned(store)
     cred_path = _fresh_credential(tmp_path, "codex")
     home = _mapped_home(docker_state, attempt_id)
@@ -842,7 +848,7 @@ def test_the_overlay_is_skipped_when_gate_entrypoint_is_not_declared(
 
     monkeypatch.setattr(at.gate_overlay, "apply_flow_check_gate_overlay", fake_overlay)
 
-    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     experiment, attempt_id = _planned(store)
     cred_path = _fresh_credential(tmp_path, "codex")
     home = _mapped_home(docker_state, attempt_id)
@@ -881,7 +887,7 @@ def test_red_case_gate_entrypoint_declared_but_not_delivered_is_refused(
 
     monkeypatch.setattr(at.gate_overlay, "apply_flow_check_gate_overlay", fake_overlay)
 
-    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     experiment, attempt_id = _planned(store)
     cred_path = _fresh_credential(tmp_path, "codex")
     home = _mapped_home(docker_state, attempt_id)
@@ -913,7 +919,7 @@ def test_the_overlay_is_skipped_when_the_closure_has_no_gate_script(
 
     monkeypatch.setattr(at.gate_overlay, "apply_flow_check_gate_overlay", fake_overlay)
 
-    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     experiment, attempt_id = _planned(store)
     cred_path = _fresh_credential(tmp_path, "codex")
     home = _mapped_home(docker_state, attempt_id)
@@ -1019,7 +1025,7 @@ def test_the_record_and_transcript_carry_no_credential_token(
     capture is non-empty is what rules that out)."""
     from skillc import leak
 
-    backend = _TranscriptCapturingBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+    backend = _TranscriptCapturingBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     experiment, attempt_id = _planned(store)
     cred_path = _fresh_credential(tmp_path, "claude")
     home = _mapped_home(docker_state, attempt_id)
@@ -1053,7 +1059,7 @@ def test_leak_check_catches_a_planted_credential_in_the_actual_transcript(
     used above must catch it, proving that check is not vacuous."""
     from skillc import leak
 
-    backend = _TranscriptCapturingBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state))
+    backend = _TranscriptCapturingBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state), daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
     experiment, attempt_id = _planned(store)
     cred_path = _fresh_credential(tmp_path, "claude")
     home = _mapped_home(docker_state, attempt_id)

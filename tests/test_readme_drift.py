@@ -44,8 +44,16 @@ def test_real_commands_matches_the_actual_parser() -> None:
     assert real == {
         "check", "selftest", "check-records", "materialize", "exposure", "rules", "leak-check", "demo",
         "collection-run", "pilot-run", "pilot-report", "selection-probe", "degrade-subject",
-        "configuration-compare", "calibration-run", "uptake-study", "profile",
+        "configuration-compare", "calibration-run", "uptake-study", "profile", "level3-campaign",
     }
+
+
+def test_a_command_name_with_a_digit_is_read_whole() -> None:
+    """#375: the documented-command pattern read `skillc level3-campaign` as
+    `level`, so a real digit-bearing command always looked undocumented."""
+    block = "<!-- commands:start -->\n```\nskillc level3-campaign --x  # y\n```\n<!-- commands:end -->\n"
+    assert rd.readme_commands(block) == {"level3-campaign"}
+    assert rd.command_drift(block, {"level3-campaign"}) == []
 
 
 def test_bad_readme_omits_a_real_command() -> None:

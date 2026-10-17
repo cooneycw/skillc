@@ -1,0 +1,25 @@
+{
+  "branch": "issue-338-gate-witness-cwd-confinement-has-a-realpath-then-e",
+  "counts": {
+    "accepted": 0,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "62487f9fdbb203b3031584932a0e91faba9b9321",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "338",
+  "passes": 1,
+  "recorded_at": "2026-10-13T20:54:03Z",
+  "red_cases": {
+    "already_covered": 4,
+    "proposed": 4
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/13/rollout-2026-10-13T16-52-42-01a13709-f7b0-7f81-9e63-e67db22d79c3.jsonl",
+    "thread_id": "01a13709-f7b0-7f81-9e63-e67db22d79c3"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

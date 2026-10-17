@@ -22,7 +22,9 @@ Verdicts, each distinct and never standing in for another:
 - FAILURE - every declared file contributed only SKIPPED testcases (the
             population was collected but never actually ran - Docker
             unreachable, or a skip condition fired on a machine that should
-            have Docker), OR at least one testcase failed/errored.
+            have Docker), OR at least one testcase failed/errored/xfails.
+            pytest encodes expected failures as skips; those still make a
+            control run red, even beside passing tests in the same file.
 - SUCCESS - every declared file contributed at least one EXECUTED (passed
             or failed) testcase, and none of them failed or errored.
 
@@ -58,6 +60,8 @@ DECLARED_REAL_DOCKER_FILES: tuple[str, ...] = (
     "tests.test_profile_install_cold_container_live",
     "tests.test_trial_image_tools_live",
     "tests.test_profile_closure_preflight_live",
+    "tests.test_cwd_confinement_live",
+    "tests.test_install_nested_dirs_live",
 )
 
 ERROR = "ERROR"
@@ -96,11 +100,13 @@ def verdict(report_path: str, declared_files: tuple[str, ...] = DECLARED_REAL_DO
             continue
         any_declared_testcase = True
         name = case.get("name", "")
-        if case.find("skipped") is not None:
+        skipped = case.find("skipped")
+        expected_failure = skipped is not None and skipped.get("type") == "pytest.xfail"
+        if skipped is not None and not expected_failure:
             skipped_by_file[declared] += 1
             continue
         executed_by_file[declared] += 1
-        if case.find("failure") is not None or case.find("error") is not None:
+        if expected_failure or case.find("failure") is not None or case.find("error") is not None:
             failed_ids.append(f"{classname}::{name}")
 
     if not any_declared_testcase:
@@ -126,7 +132,7 @@ def verdict(report_path: str, declared_files: tuple[str, ...] = DECLARED_REAL_DO
     if failed_ids:
         return Verdict(
             status=FAILURE,
-            reason=f"{len(failed_ids)} real-Docker testcase(s) failed or errored",
+            reason=f"{len(failed_ids)} real-Docker testcase(s) failed, errored or xfailed",
             executed_by_file=executed_by_file,
             failed_ids=tuple(failed_ids),
         )
