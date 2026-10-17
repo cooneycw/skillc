@@ -348,6 +348,14 @@ class _WitnessSession:
             raise ChannelRefusal("witness session is not ready for gates")
         return self.witness.decide(request)
 
+    def gate_environment(self) -> Mapping[str, str]:
+        """The measured runtime env plus `PYTHONDONTWRITEBYTECODE=1`, as
+        grading's own env sets it (`verify._env`). #400: a gate that imports
+        Python otherwise writes `__pycache__/*.pyc` into the tree it is judged
+        against, and every honest run's `tree_digest_at_start` reads stale.
+        The start digest stays strict: any other edit still differs."""
+        return MappingProxyType({**self.environment, "PYTHONDONTWRITEBYTECODE": "1"})
+
     def bind_and_check(self, backend: DockerBackend, handle: object) -> None:
         def snapshot() -> str:
             with tempfile.TemporaryDirectory(prefix="skillc-gate-export-") as directory:
@@ -360,7 +368,7 @@ class _WitnessSession:
         self.witness = GateWitness(
             declared_gates=gates, tree_digest_fn=snapshot, backend=backend, handle=handle, limits=self.limits,
             gate_exclusivity=False, exclusivity_basis="The channel observes prescribed shim calls; bypass is not excluded.",
-            declared_env={gate: self.environment for gate in gates}, workspace_root=CONTAINER_WORKSPACE,
+            declared_env={gate: self.gate_environment() for gate in gates}, workspace_root=CONTAINER_WORKSPACE,
             # #376: the plan run's per-stage outcomes, read from its own
             # controller-held stdout when it resolves - never replayed later.
             stage_capture={"flow-check-plan": stage_capture.capture_stages},
