@@ -43,6 +43,7 @@ from pathlib import Path
 from typing import Any
 
 from . import materialize as m
+from . import runtime_supply
 from .spec import FrontmatterError, parse_frontmatter
 
 PROFILE_SCHEMA = 1
@@ -1620,16 +1621,50 @@ def _gather_command_probe_host(probe: Mapping[str, Any]) -> CommandProbeOutcome:
         return CommandProbeOutcome(present=True, version_output=None)
 
 
+#: Issue #365: variables that select WHICH interpreter or environment an
+#: import resolves in, outside uv's own settings. `PYTHONPATH` is not here:
+#: `_isolated_probe_env` replaces it rather than dropping it.
+_PROBE_SELECTION_VARS = frozenset({"VIRTUAL_ENV", "PYTHONHOME"})
+
+
+def _isolated_probe_env(project_dir: Path) -> dict[str, str]:
+    """The environment a host `uv_project` import probe runs with (#365).
+
+    The ambient one used to pass straight through, so `UV_PROJECT_ENVIRONMENT`
+    pointing at another venv - a test runner's dev env, say - made uv import
+    there, and an ambient `PYTHONPATH` was appended after the project dir;
+    either satisfied an import the installed project could not. Every `UV_*`
+    outside `runtime_supply.ENV_KEYS` - the same uv settings the supported
+    runtime accepts, refusing the rest as undeclared overrides - is dropped,
+    as are `_PROBE_SELECTION_VARS`, and `PYTHONPATH` is the project dir ONLY.
+    PATH, HOME, proxies and certificates stay: uv needs them to find an
+    interpreter, its cache and its indexes, and none of them can redirect
+    where an import resolves. The working directory is the other channel and
+    is closed by the caller running the probe in the project dir. The user
+    site needs nothing here: uv's project
+    venv disables it (shown by
+    `test_365_a_user_site_module_does_not_satisfy_the_probe`)."""
+    env = {
+        key: value for key, value in os.environ.items()
+        if not (key.startswith("UV_") and key not in runtime_supply.ENV_KEYS)
+        and key not in _PROBE_SELECTION_VARS
+    }
+    env["PYTHONPATH"] = str(project_dir)
+    return env
+
+
 def _gather_python_import_probe_host(probe: Mapping[str, Any], home: Path | None) -> PythonImportProbeOutcome:
     """Mailbox 5944 fix 1: when the probe declares `uv_project`, the import
-    is checked the way the real runner checks it - `uv run --project
-    <home>/<uv_project>`, with `PYTHONPATH` prepended the same way
-    `flow-finish-gate.sh` prepends it - never the bare host interpreter,
-    which can diverge from the checkout's own isolated venv in either
-    direction."""
+    is checked inside that project's own environment - `uv run --project
+    <home>/<uv_project>` with the project dir on `PYTHONPATH` - never the
+    bare host interpreter, which can diverge from the checkout's own
+    isolated venv in either direction. Issue #365: the environment it runs
+    with is `_isolated_probe_env()`, not the ambient one, so the evidence
+    can only come from the declared project."""
     modules = probe.get("modules") or []
     script = "; ".join(f"import {mod}" for mod in modules)
     uv_project = probe.get("uv_project")
+    cwd: Path | None = None
     if uv_project is None:
         argv = [sys.executable, "-c", script]
         env = None
@@ -1638,7 +1673,7 @@ def _gather_python_import_probe_host(probe: Mapping[str, Any], home: Path | None
             return PythonImportProbeOutcome(
                 succeeded=False, error="uv_project probe needs an installation home to resolve against",
             )
-        project_dir = home / str(uv_project)
+        project_dir = (home / str(uv_project)).absolute()
         if not project_dir.is_dir():
             return PythonImportProbeOutcome(
                 succeeded=False, error=f"uv project directory not installed: {project_dir}",
@@ -1648,10 +1683,17 @@ def _gather_python_import_probe_host(probe: Mapping[str, Any], home: Path | None
             return PythonImportProbeOutcome(
                 succeeded=False, error="uv not found on PATH; cannot run the import through the checkout's own environment",
             )
-        env = {**os.environ, "PYTHONPATH": f"{project_dir}{os.pathsep}{os.environ.get('PYTHONPATH', '')}"}
-        argv = [uv_bin, "run", "--project", str(project_dir), "python", "-c", script]
+        env = _isolated_probe_env(project_dir)
+        # Absolute before the cwd change below: `shutil.which` returns a
+        # relative path for a relative PATH entry, which the new working
+        # directory would no longer resolve (#365 review).
+        argv = [os.path.abspath(uv_bin), "run", "--project", str(project_dir), "python", "-c", script]
+        # `python -c` searches its working directory first, and `uv run
+        # --project` does not change it: run in the project so the caller's
+        # directory can neither satisfy nor shadow the import (#365 review).
+        cwd = project_dir
     try:
-        run = subprocess.run(argv, capture_output=True, timeout=30, check=False, env=env)
+        run = subprocess.run(argv, capture_output=True, timeout=30, check=False, env=env, cwd=cwd)
         if run.returncode == 0:
             return PythonImportProbeOutcome(succeeded=True)
         return PythonImportProbeOutcome(succeeded=False, error=run.stderr.decode("utf-8", errors="replace")[:200])

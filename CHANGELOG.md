@@ -8,6 +8,32 @@ and version plan.
 
 ## [Unreleased]
 
+- **The host import probe only sees the declared project** (#365). A
+  `python-import` probe with `uv_project` ran `uv run --project <home>/<proj>`
+  with the operator's whole environment. With `UV_PROJECT_ENVIRONMENT` pointing
+  at another venv (a test runner's dev env, say), uv imported THERE, and the
+  ambient `PYTHONPATH` was appended after the project dir. Either way the probe
+  could report `satisfied` for a module the installed project does not have.
+  `profile._isolated_probe_env()` now drops every `UV_*` outside
+  `runtime_supply.ENV_KEYS` (the uv settings the supported runtime already
+  accepts), drops `VIRTUAL_ENV` and `PYTHONHOME`, and sets `PYTHONPATH` to the
+  project dir only. The probe also runs IN the project dir (made absolute): `python
+  -c` searches its working directory first, so a module in the caller's
+  directory used to satisfy the probe, or a broken one there to shadow the
+  project's. The user site needed nothing: uv's project venv disables it,
+  and a test shows a user-site module does not satisfy the probe while the same
+  placement does import under the base interpreter. The container-side probe is
+  unchanged.
+  **Behaviour change:** other `UV_*` settings such as `UV_INDEX_URL` or
+  `UV_EXTRA_INDEX_URL` no longer reach the probe's `uv run`. A probe whose
+  project needs a sync from a custom index can now report `violated` where it
+  passed before. That is deliberate: the probe fails closed rather than borrow
+  configuration the installed project does not declare. Likewise, an operator
+  who relied on an ambient `PYTHONPATH` reaching the probe will see `violated`.
+  Tests in `tests/test_profile_probes.py`: the `UV_PROJECT_ENVIRONMENT`,
+  `PYTHONPATH` and caller-directory reds reported `satisfied` on the old code,
+  and the caller-directory shadow reported `violated`. A control with the module
+  in the declared project passes before and after.
 - **A failed `prepare()` always raises `BackendUnavailable`** (#416). When
   `docker run -d` timed out or exited nonzero, `DockerBackend.prepare()` ran a
   bounded best-effort `docker rm -f` before raising. That cleanup was unguarded,
