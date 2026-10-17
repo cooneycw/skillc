@@ -8,6 +8,18 @@ and version plan.
 
 ## [Unreleased]
 
+- **A baseline trial's skill-evidence is refused as a contaminated baseline**
+  (#427, the records half of #424). A trial whose `subject.digest` is the
+  baseline (sha256 of zero bytes) installs no skills. A `skill-evidence` entry
+  crediting a skill there validated clean, because the receipt-based check
+  skips an attempt with no receipt and passes a receipt listing installed paths
+  under the baseline identity. `ledger-binding` now refuses every such entry,
+  naming the baseline and the skill path. `records.BASELINE_SUBJECT_DIGEST` is
+  the one definition and `matched_pilot.BASELINE_SUBJECT_DIGEST` aliases it. The
+  new bad control (`ledger-binding/bad/skill-evidence-baseline-trial`) passes
+  every rule on the pre-change code, and removing the rule leaves selftest
+  BLIND on it. No committed bundle carries skill-evidence on a baseline trial.
+
 - **A false "failed" claim is now a committed control for both #270 tasks**
   (#419, from #376 item 4). Every committed "reported failed" case was a
   genuine failure, so nothing showed that a report calling a PASSED stage
