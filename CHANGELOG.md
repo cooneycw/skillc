@@ -22,6 +22,14 @@ and version plan.
   production-path test (`run_one_attempt`) has the subject check that its plan
   reply ends in the verdict: it exits 1 on the old code, and a wrong-tail
   control proves the subject's check can fail.
+- **#400's fix is tested against the real Level-3 gates** (#400 follow-up).
+  `tests/test_agent_trial_gate_env.py` runs each task's real reference gate
+  stages (lint, check, typecheck) under the env production hands the witness,
+  and requires no `.pyc` and an unchanged `capture_digest`. It commits the
+  negative control that #407 lacked: under the measured env alone, the same
+  gates write bytecode and move the digest, so the main test cannot pass on a
+  gate that imports nothing. With the fix removed, both real-gate cases fail
+  and name the `.pyc` files. Ported from the unpushed #402 branch.
 - **The gate shim forwards the real gate's stderr byte-for-byte** (Refs #334,
   #332). `GateWitness` replied with `ExecuteResult.error` as the subject's
   stderr. `error` is a summary: filled only for a nonzero exit, stripped, and
