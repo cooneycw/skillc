@@ -128,7 +128,7 @@ def test_a_cell_off_by_one_attempt_is_detected():
 def test_the_measured_mean_is_the_attempt_weighted_mean_of_the_cells():
     """140,500 = (20x175k + 20x137k + 10x103k + 10x116k) / 60, by hand."""
     assert pct.MEASURED_MEAN_TOKENS_PER_ATTEMPT == 140_500
-    assert pct.MEASURED_UPPER_TOKENS_PER_ATTEMPT == 175_000
+    assert pct.LARGEST_CELL_MEAN_TOKENS_PER_ATTEMPT == 175_000
 
 
 def test_totals_scale_per_attempt_across_both_two_arm_declarations():

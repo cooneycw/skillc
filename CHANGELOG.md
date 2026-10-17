@@ -13,12 +13,14 @@ and version plan.
   statistics (exact one-sided Fisher, the P1-P6 pilot-to-main sizing simulation)
   and its mutation scan onto main. The power and cost table now sizes the two
   separate 2-arm pilot declarations: 40 attempts at n=10. Its token input is
-  MEASURED and cited (#237: mean 140,500 tokens per attempt, upper 175,000), with
+  MEASURED and cited (#237: mean 140,500 tokens per attempt; the 175,000 largest
+  cell mean is a scenario, not a bound), with
   a test tying every cited cell to #237's report. Wall time stays UNKNOWN until
   #375's final run, and there is no dollar figure. The degraded arm's mutation
   evidence is retaken at the ruled pin `86641e8`: the declared `mutated_digest`
-  reproduces, the positive control holds, and no agent-facing copy of the
-  removed instruction remains.
+  reproduces, and the rebuilt scan (all 97 installed files, verdicts
+  HOLDS/SURVIVES/NEEDS_REVIEW/UNKNOWN) reports HOLDS. The original scan reported
+  success on a missing tree, a pre-existing copy and an incomplete diagnose.
 
 - **The gate-witness tests' attempt limit is 60s, not 15s** (#437). Under
   `make verify`'s parallel load, `run_case`'s 15s whole-attempt limit (and the

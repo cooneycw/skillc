@@ -34,61 +34,120 @@ from pathlib import Path
 
 PHRASES = ("never a PASS", "skipped gates", "SKIP row")
 
-#: Classification, from #270's own PROVENANCE.md finding ("The #287
-#: case-pairing (discrimination) obligation" section) - confirmed directly
-#: against the measured hits, not reasoned about in the abstract. These
-#: files are the plumbing that PRODUCES the raw marker text the agent
-#: reads (shell/Python comments, and the literal verdict string flow-
-#: finish-gate.sh EMITS) - never a second, interpretive copy of the
-#: instruction telling the agent what to do with it.
+#: Files whose phrase hits are plumbing that PRODUCES the raw marker text the
+#: agent reads (shell/Python comments, and the literal verdict string
+#: flow-finish-gate.sh EMITS) - never a second, interpretive copy of the
+#: instruction. Classification from #270's PROVENANCE.md finding ("The #287
+#: case-pairing (discrimination) obligation" section), extended in #287 P1 to
+#: the same files installed as dependencies (`scripts/`, `lib/cicd/`). LIMIT:
+#: this exemption is per FILE, so it does not prove every occurrence inside an
+#: exempt file is non-interpretive.
 NON_AGENT_FACING_FILES = frozenset({
     "codex/skills/flow-check/lib/cicd/runner.py",
     "codex/skills/flow-check/lib/cicd/steps.py",
     "codex/skills/flow-check/scripts/flow-finish-gate.sh",
+    "lib/cicd/runner.py",
+    "lib/cicd/steps.py",
+    "scripts/flow-finish-gate.sh",
 })
 
 REFERENCE_MD = "codex/skills/flow-check/reference.md"
 
+#: Agent-facing lines that share a generic phrase with the removed sentence
+#: but were each REVIEWED as a different instruction (#287 P1, at 86641e8):
+#: (file, exact stripped line). Keyed on the exact text, so an edited line is
+#: no longer reviewed and comes back as NEEDS_REVIEW, never as a pass. These
+#: are the sibling routes #287's comment 6034325559 pre-registered as a risk.
+REVIEWED_UNRELATED = frozenset({
+    (REFERENCE_MD, "never a PASS, and never left out of the table. Its detail is the entry's"),
+    (REFERENCE_MD, "SKIP rows."),
+})
 
-def closure_sources(inventory_path: Path) -> list[str]:
+
+def _norm(text: str) -> str:
+    return " ".join(text.split())
+
+
+def closure_entries(inventory_path: Path) -> list[dict[str, object]]:
+    """Every installed file the inventory declares: each skill's files AND
+    each dependency's files (#287 P1: the scan covers the whole installed
+    closure). A file with inline `content` (a synthetic entry) is scanned from
+    that content; one with neither a source nor content is reported."""
     with open(inventory_path, encoding="utf-8") as f:
         inventory = json.load(f)
-    return [entry["source"] for skill in inventory["skills"] for entry in skill["files"]]
+    entries = [entry for skill in inventory["skills"] for entry in skill["files"]]
+    entries += [entry for dep in inventory.get("dependencies", []) for entry in dep.get("files", [])]
+    return entries
 
 
-def scan(root: Path, sources: list[str]) -> list[dict[str, object]]:
-    hits: list[dict[str, object]] = []
-    for rel in sources:
-        path = root / rel
+def closure_sources(inventory_path: Path) -> list[str]:
+    return [str(e["source"]) for e in closure_entries(inventory_path) if e.get("source")]
+
+
+def _read(root: Path, entry: dict[str, object]) -> tuple[str, str | None, str | None]:
+    """(label, text or None, coverage error or None)."""
+    source = entry.get("source")
+    if source:
+        path = root / str(source)
         if not path.is_file():
-            hits.append({"file": rel, "error": "missing"})
-            continue
+            return str(source), None, "missing"
         try:
-            text = path.read_text(encoding="utf-8")
+            return str(source), path.read_text(encoding="utf-8"), None
         except UnicodeDecodeError:
+            return str(source), None, "undecodable"
+    if isinstance(entry.get("content"), str):
+        return f"synthetic:{entry.get('destination')}", str(entry["content"]), None
+    return f"unnamed:{entry.get('destination')}", None, "no source and no inline content"
+
+
+def scan(root: Path, entries: list[dict[str, object]]) -> tuple[list[dict[str, object]], list[dict[str, str]],
+                                                                list[str]]:
+    """(phrase hits, coverage errors, labels of files carrying the FULL
+    removed sentence once whitespace is normalized)."""
+    hits: list[dict[str, object]] = []
+    errors: list[dict[str, str]] = []
+    full_copies: list[str] = []
+    for entry in entries:
+        label, text, error = _read(root, entry)
+        if error:
+            errors.append({"file": label, "error": error})
             continue
+        assert text is not None
+        if _REMOVED_NORM and _REMOVED_NORM in _norm(text):
+            full_copies.append(label)
         for lineno, line in enumerate(text.splitlines(), start=1):
             for phrase in PHRASES:
                 if phrase not in line:
                     continue
-                agent_facing = rel not in NON_AGENT_FACING_FILES
-                is_removed_sentence = rel == REFERENCE_MD and (
-                    ("skipped gates" in line and "SKIP row" in line) or line.strip() == "a WARN row - never a PASS."
+                agent_facing = label not in NON_AGENT_FACING_FILES
+                stripped = line.strip()
+                is_removed_sentence = label == REFERENCE_MD and (
+                    ("skipped gates" in line and "SKIP row" in line) or stripped == "a WARN row - never a PASS."
                 )
+                reviewed = (label, stripped) in REVIEWED_UNRELATED
                 hits.append({
-                    "file": rel, "line": lineno, "phrase": phrase, "text": line.strip(),
+                    "file": label, "line": lineno, "phrase": phrase, "text": stripped,
                     "agent_facing": agent_facing,
                     "classification": (
                         "removed sentence itself" if is_removed_sentence
-                        else "agent-facing, unrelated sentence (same file, different bullet)" if agent_facing
+                        else "agent-facing, reviewed as a different instruction" if agent_facing and reviewed
+                        else "agent-facing, UNREVIEWED" if agent_facing
                         else "non-agent-facing: implementation comment or the literal verdict string the "
                              "script EMITS, never an interpretive instruction the agent reads"
                     ),
                 })
-    return hits
+    return hits, errors, full_copies
+
+
+_REMOVED_NORM = ""
+
+
+def _diagnose_ok(report: object) -> bool:
+    return isinstance(report, dict) and report.get("complete") is True and report.get("problem_count") == 0
 
 
 def main(argv: list[str] | None = None) -> int:
+    global _REMOVED_NORM
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--inventory", required=True, type=Path)
     parser.add_argument("--intact-root", required=True, type=Path)
@@ -106,73 +165,69 @@ def main(argv: list[str] | None = None) -> int:
     ))
     parser.add_argument("--out", required=True, type=Path)
     args = parser.parse_args(argv)
+    _REMOVED_NORM = _norm(args.removed_text)
 
-    sources = closure_sources(args.inventory)
-    intact_hits = scan(args.intact_root, sources)
-    degraded_hits = scan(args.degraded_root, sources)
+    entries = closure_entries(args.inventory)
+    intact_hits, intact_errors, intact_copies = scan(args.intact_root, entries)
+    degraded_hits, degraded_errors, degraded_copies = scan(args.degraded_root, entries)
+    intact_diag = json.loads(args.intact_diagnose.read_text(encoding="utf-8"))
+    degraded_diag = json.loads(args.degraded_diagnose.read_text(encoding="utf-8"))
 
-    def unrelated_agent_facing(hits: list[dict[str, object]]) -> set[tuple[object, object, object]]:
-        """(file, phrase, text) for every agent-facing hit that is NOT the
-        removed sentence itself - keyed on TEXT, never line number, since
-        removing two lines shifts every later line number without adding
-        any new sentence. A pre-existing unrelated bullet (this task's own
-        "...three SKIP rows." sentence, a different bullet than the one
-        removed) sharing one of the three generic phrases is expected and
-        harmless; what the claim actually cares about is whether DEGRADED
-        introduces an agent-facing hit intact never had."""
-        return {
-            (h["file"], h["phrase"], h["text"]) for h in hits
-            if h.get("agent_facing") and h.get("classification") != "removed sentence itself" and "error" not in h
-        }
-
-    intact_unrelated = unrelated_agent_facing(intact_hits)
-    degraded_unrelated = unrelated_agent_facing(degraded_hits)
-    leftover = sorted(degraded_unrelated - intact_unrelated)
-    removed_sentence_gone = not any(h.get("classification") == "removed sentence itself" for h in degraded_hits)
-    positive_control_held = any(h.get("classification") == "removed sentence itself" for h in intact_hits)
+    positive_control_held = REFERENCE_MD in intact_copies
+    unreviewed = [h for h in degraded_hits if h["classification"] == "agent-facing, UNREVIEWED"]
+    # One verdict, four values, checked in order. Only HOLDS exits 0.
+    if intact_errors or degraded_errors or not positive_control_held \
+            or not (_diagnose_ok(intact_diag) and _diagnose_ok(degraded_diag)):
+        verdict = "UNKNOWN"      # coverage or the control failed: absence of evidence, not of the instruction
+    elif degraded_copies:
+        verdict = "SURVIVES"     # the full removed sentence is still installed somewhere
+    elif unreviewed:
+        verdict = "NEEDS_REVIEW"  # an unreviewed agent-facing line shares a phrase; not shown to survive
+    else:
+        verdict = "HOLDS"
 
     evidence = {
-        "evidence_schema": 1,
+        "evidence_schema": 2,
         "purpose": (
             "skillc#287 pilot discrimination declaration, mutation.diagnose_evidence for gate-stops-early's "
             f"degraded arm ({args.inventory.parent.parent.name}, flow-check skill, reference.md)."
         ),
         "removed_text": args.removed_text,
         "mutated_digest": args.mutated_digest,
-        "closure_file_count": len(sources),
+        "closure_file_count": len(entries),
         "closure_source": str(args.inventory),
         "diagnose": {
-            "intact": json.loads(args.intact_diagnose.read_text(encoding="utf-8")),
-            "degraded": json.loads(args.degraded_diagnose.read_text(encoding="utf-8")),
+            "intact": intact_diag,
+            "degraded": degraded_diag,
+            "both_complete_with_zero_problems": _diagnose_ok(intact_diag) and _diagnose_ok(degraded_diag),
             "conclusion": (
-                "Both reports are expected to show 0 problems and complete=true - removing one prose "
-                "sentence never breaks a declared reference, so a clean diagnose on EITHER side cannot by "
-                "itself show whether the removed instruction still appears elsewhere. That is what the "
-                "occurrence scan below is for; diagnose is included here as the first, necessary-but-"
-                "insufficient check, not skipped."
+                "Both reports must show 0 problems and complete=true. Removing one prose sentence never "
+                "breaks a declared reference, so a clean diagnose is necessary but cannot by itself show "
+                "whether the removed instruction still appears elsewhere: the occurrence scan answers that."
             ),
         },
         "occurrence_scan": {
             "phrases": list(PHRASES),
+            "coverage_errors": {"intact": intact_errors, "degraded": degraded_errors},
             "positive_control_held": positive_control_held,
+            "full_copies_of_removed_sentence": {"intact": intact_copies, "degraded": degraded_copies},
             "intact_hit_count": len(intact_hits),
             "intact_hits": intact_hits,
             "degraded_hit_count": len(degraded_hits),
             "degraded_hits": degraded_hits,
-            "removed_sentence_confirmed_absent_in_degraded": removed_sentence_gone,
-            "new_agent_facing_hits_in_degraded_not_present_in_intact": [
-                {"file": f, "phrase": p, "text": t} for f, p, t in leftover
-            ],
-            "claim_holds": positive_control_held and removed_sentence_gone and not leftover,
+            "unreviewed_agent_facing_in_degraded": unreviewed,
+            "verdict": verdict,
+            "claim_holds": verdict == "HOLDS",
         },
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(evidence, f, indent=1)
         f.write("\n")
-    print(f"wrote {args.out}: claim_holds={evidence['occurrence_scan']['claim_holds']}, "
-          f"intact={len(intact_hits)}, degraded={len(degraded_hits)}, leftover={len(leftover)}")
-    return 0 if evidence["occurrence_scan"]["claim_holds"] else 1
+    print(f"wrote {args.out}: verdict={verdict}, closure={len(entries)}, intact_hits={len(intact_hits)}, "
+          f"degraded_hits={len(degraded_hits)}, coverage_errors={len(intact_errors) + len(degraded_errors)}, "
+          f"degraded_full_copies={len(degraded_copies)}, unreviewed={len(unreviewed)}")
+    return 0 if verdict == "HOLDS" else 1
 
 
 if __name__ == "__main__":

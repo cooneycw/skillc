@@ -1,5 +1,5 @@
 """#287 acceptance item 1: computed (not quoted/approximated) one-sided
-Fisher's exact power limits, and the worst-case attempt and token totals for
+Fisher's exact power limits, and the worst-case attempt count and measured-mean token totals for
 the two separate 2-arm pilot declarations (discrimination: intact vs degraded;
 improvement: cpp vs baseline), at n per arm in {10, 15, 20, 30}.
 
@@ -57,9 +57,11 @@ N_PER_ARM = (10, 15, 20, 30)
 #: measured inputs; mark UNKNOWN rather than estimate). Source: #237's
 #: uptake-study run, `evals/uptake-study/report.md` results table (codex-cli
 #: 0.157.1, gpt-6-astra, effort high; 60 confirmed attempts). Only per-cell
-#: means are committed, so the per-attempt mean is the attempt-weighted mean
-#: of those cells, computed below, and the largest cell mean is carried as an
-#: upper bound. CAVEAT: #237 ran the level-1 slug-small-fix task, not
+#: means are committed (each rounded, "~NNNk"), so the per-attempt mean is
+#: the attempt-weighted mean of those cells, computed below. The LARGEST CELL
+#: MEAN is carried as a scenario, NOT an upper bound: a cell averaging 175k can
+#: contain larger attempts. A true per-attempt upper bound is UNKNOWN (no
+#: measured maxima are committed and no token limit is enforced). CAVEAT: #237 ran the level-1 slug-small-fix task, not
 #: gate-stops-early; it is the nearest measured figure for this client,
 #: model and effort, cited as exactly that.
 MEASURED_TOKEN_CELLS: tuple[tuple[str, int, int], ...] = (
@@ -72,7 +74,7 @@ MEASURED_TOKEN_CELLS: tuple[tuple[str, int, int], ...] = (
 MEASURED_TOKEN_SOURCE = "evals/uptake-study/report.md results table (#237, run 2026-10-04, 60 attempts)"
 MEASURED_MEAN_TOKENS_PER_ATTEMPT = round(
     sum(n * mean for _c, n, mean in MEASURED_TOKEN_CELLS) / sum(n for _c, n, _m in MEASURED_TOKEN_CELLS))
-MEASURED_UPPER_TOKENS_PER_ATTEMPT = max(mean for _c, _n, mean in MEASURED_TOKEN_CELLS)
+LARGEST_CELL_MEAN_TOKENS_PER_ATTEMPT = max(mean for _c, _n, mean in MEASURED_TOKEN_CELLS)
 
 #: Per-attempt wall time: UNKNOWN until #375's pre-registered final run posts
 #: its timings (orchestrator ruling: mark UNKNOWN rather than estimate).
@@ -133,7 +135,7 @@ def build_table() -> list[dict[str, object]]:
                 "p_at_next_worse_arm_pass": p_next,
                 "total_attempts_both_declarations": total_attempts,
                 "tokens_at_measured_mean": total_tokens(total_attempts, MEASURED_MEAN_TOKENS_PER_ATTEMPT),
-                "tokens_at_measured_upper": total_tokens(total_attempts, MEASURED_UPPER_TOKENS_PER_ATTEMPT),
+                "tokens_at_largest_cell_mean": total_tokens(total_attempts, LARGEST_CELL_MEAN_TOKENS_PER_ATTEMPT),
                 "wall_seconds": "UNKNOWN" if WALL_SECONDS_PER_ATTEMPT is None
                 else total_attempts * WALL_SECONDS_PER_ATTEMPT,
             }
@@ -143,16 +145,16 @@ def build_table() -> list[dict[str, object]]:
 
 def main() -> None:
     rows = build_table()
-    print(f"measured tokens/attempt: mean {MEASURED_MEAN_TOKENS_PER_ATTEMPT}, upper {MEASURED_UPPER_TOKENS_PER_ATTEMPT} "
+    print(f"measured tokens/attempt: mean {MEASURED_MEAN_TOKENS_PER_ATTEMPT}, largest-cell-mean scenario {LARGEST_CELL_MEAN_TOKENS_PER_ATTEMPT}, true upper bound UNKNOWN "
           f"({MEASURED_TOKEN_SOURCE}); wall time: {WALL_SECONDS_SOURCE}")
     print(f"{'n/arm':>6} {'best-case gap (n vs k)':>24} {'p(k)':>12} {'p(k+1)':>12} {'attempts':>9} "
-          f"{'tokens@mean':>13} {'tokens@upper':>13}")
+          f"{'tokens@mean':>13} {'tokens@largest-cell-mean':>25}")
     for row in rows:
         gap = f"{row['better_arm_passes']}/{row['n_per_arm']} vs {row['max_worse_arm_passes_below_p05']}/{row['n_per_arm']}"
         print(
             f"{row['n_per_arm']:>6} {gap:>24} {row['p_at_max_worse_arm_passes']:>12.6f} "
             f"{row['p_at_next_worse_arm_pass']:>12.6f} {row['total_attempts_both_declarations']:>9} "
-            f"{row['tokens_at_measured_mean']:>13} {row['tokens_at_measured_upper']:>13}"
+            f"{row['tokens_at_measured_mean']:>13} {row['tokens_at_largest_cell_mean']:>25}"
         )
 
     out = {
@@ -167,7 +169,8 @@ def main() -> None:
         "measured_token_cells": [list(c) for c in MEASURED_TOKEN_CELLS],
         "measured_token_source": MEASURED_TOKEN_SOURCE,
         "measured_mean_tokens_per_attempt": MEASURED_MEAN_TOKENS_PER_ATTEMPT,
-        "measured_upper_tokens_per_attempt": MEASURED_UPPER_TOKENS_PER_ATTEMPT,
+        "largest_cell_mean_tokens_per_attempt": LARGEST_CELL_MEAN_TOKENS_PER_ATTEMPT,
+        "upper_bound_tokens_per_attempt": "UNKNOWN",
         "wall_seconds_per_attempt": "UNKNOWN" if WALL_SECONDS_PER_ATTEMPT is None else WALL_SECONDS_PER_ATTEMPT,
         "wall_seconds_source": WALL_SECONDS_SOURCE,
         "declarations": DECLARATIONS,

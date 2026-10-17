@@ -22,7 +22,7 @@ The pin is CPP `86641e8` (orchestrator ruling,
 - **Power and cost table:** `power_cost_table.py`/`.json` now sizes the TWO
   separate 2-arm pilot declarations (40 attempts at n=10, never pooled). Token
   input is MEASURED and cited: #237's uptake-study report, 60 attempts, mean
-  140,500 tokens per attempt, largest cell 175,000. #237 ran a level-1 task, not
+  140,500 tokens per attempt; the largest cell mean, 175,000, is reported as a scenario, not an upper bound (a true per-attempt bound is UNKNOWN). #237 ran a level-1 task, not
   `gate-stops-early`, so this is the nearest measured figure for this client,
   model and effort, not an estimate for this task.
   `tests/test_calibration_287_power_table.py` ties each cited cell to the
@@ -31,13 +31,18 @@ The pin is CPP `86641e8` (orchestrator ruling,
   [comment 6021089903](https://github.com/cooneycw/skillc/issues/287#issuecomment-6021089903)).
 - **Mutation evidence, retaken at 86641e8:**
   `evidence/discrimination-mutation-diagnose.json` (built by
-  `evidence/scan_mutation_closure.py`). The removed sentence occurs exactly once
-  in `flow-check/reference.md`, and removing it reproduces the declared
-  `mutated_digest` `sha256:edb26e56…`. `skillc profile diagnose` reports 0
-  problems on both trees (necessary, not sufficient). The occurrence scan over
-  the profile's 37-file closure finds the sentence in the intact tree (positive
-  control, 15 hits). In the degraded tree, the remaining 12 hits are all
-  non-agent-facing plumbing, with 0 agent-facing leftovers, so the claim holds.
+  `evidence/scan_mutation_closure.py`), verdict **HOLDS**. The removed sentence
+  occurs exactly once in `flow-check/reference.md`, and removing it reproduces
+  the declared `mutated_digest` `sha256:edb26e56…`. Both `skillc profile
+  diagnose` reports must be complete with 0 problems (necessary, not
+  sufficient). The occurrence scan reads all 97 installed files the inventory
+  declares (skill files, dependencies, and the inline synthetic marker); any
+  missing or unreadable file makes the verdict UNKNOWN. The intact tree carries
+  the full sentence (positive control). No degraded file carries it, anywhere.
+  Every remaining agent-facing phrase hit is one of two reviewed sibling lines
+  (`REVIEWED_UNRELATED`, keyed on exact text), and the rest are exempt plumbing.
+  The scan's verdicts are HOLDS, SURVIVES, NEEDS_REVIEW and UNKNOWN, each with a
+  committed case in `tests/test_calibration_287_scan_mutation_closure.py`.
   The degraded snapshot was built with `degrade-subject --checkout`, which labels
   its source `snapshot:`. The declaration's derived label assumes the `git:`
   source, so the run-time mutation check (P2) must build from the pinned

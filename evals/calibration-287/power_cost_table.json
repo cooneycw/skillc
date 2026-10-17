@@ -25,7 +25,8 @@
   ],
   "measured_token_source": "evals/uptake-study/report.md results table (#237, run 2026-10-04, 60 attempts)",
   "measured_mean_tokens_per_attempt": 140500,
-  "measured_upper_tokens_per_attempt": 175000,
+  "largest_cell_mean_tokens_per_attempt": 175000,
+  "upper_bound_tokens_per_attempt": "UNKNOWN",
   "wall_seconds_per_attempt": "UNKNOWN",
   "wall_seconds_source": "UNKNOWN: pending #375's final-run timings",
   "declarations": 2,
@@ -39,7 +40,7 @@
       "p_at_next_worse_arm_pass": 0.10526315789473684,
       "total_attempts_both_declarations": 40,
       "tokens_at_measured_mean": 5620000,
-      "tokens_at_measured_upper": 7000000,
+      "tokens_at_largest_cell_mean": 7000000,
       "wall_seconds": "UNKNOWN"
     },
     {
@@ -50,7 +51,7 @@
       "p_at_next_worse_arm_pass": 0.11206896551724138,
       "total_attempts_both_declarations": 60,
       "tokens_at_measured_mean": 8430000,
-      "tokens_at_measured_upper": 10500000,
+      "tokens_at_largest_cell_mean": 10500000,
       "wall_seconds": "UNKNOWN"
     },
     {
@@ -61,7 +62,7 @@
       "p_at_next_worse_arm_pass": 0.05301455301455302,
       "total_attempts_both_declarations": 80,
       "tokens_at_measured_mean": 11240000,
-      "tokens_at_measured_upper": 14000000,
+      "tokens_at_largest_cell_mean": 14000000,
       "wall_seconds": "UNKNOWN"
     },
     {
@@ -72,7 +73,7 @@
       "p_at_next_worse_arm_pass": 0.056199821587867974,
       "total_attempts_both_declarations": 120,
       "tokens_at_measured_mean": 16860000,
-      "tokens_at_measured_upper": 21000000,
+      "tokens_at_largest_cell_mean": 21000000,
       "wall_seconds": "UNKNOWN"
     }
   ]
