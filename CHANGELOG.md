@@ -8,6 +8,19 @@ and version plan.
 
 ## [Unreleased]
 
+- **A profile narrower than its install builds again** (#432). #424's
+  cross-check in `calibration_run.build_treatment` required the profile
+  inventory's skill pins to EQUAL the pins of every installed skill. A real
+  CPP profile selects one skill (`flow-check`) while its subject installs the
+  whole collection (74 skills at 86641e8), so every profiled treatment was
+  refused, blocking the Level-3 campaigns and the #287 calibration arms. The
+  check is now per path and a subset: each inventory pin needs an installed
+  pin at the same path with equal `body_digest` and `description_digest`, and
+  a pin for an uninstalled path is refused. `Treatment.skill_digests` is
+  unchanged: every installed skill, pinned from its installed bytes.
+  `tests/test_calibration_run_real_profile.py` runs the real profile with its
+  full install when a local claude-power-pack checkout holds 86641e8, and
+  skips with the missing prerequisite named otherwise.
 - **The host import probe only sees the declared project** (#365). A
   `python-import` probe with `uv_project` ran `uv run --project <home>/<proj>`
   with the operator's whole environment. With `UV_PROJECT_ENVIRONMENT` pointing
