@@ -58,13 +58,27 @@ REFERENCE_MD = "codex/skills/flow-check/reference.md"
 
 #: Agent-facing lines that share a generic phrase with the removed sentence
 #: but were each REVIEWED as a different instruction (#287 P1, at 86641e8):
-#: (file, exact stripped line). Keyed on the exact text, so an edited line is
-#: no longer reviewed and comes back as NEEDS_REVIEW, never as a pass. These
-#: are the sibling routes #287's comment 6034325559 pre-registered as a risk.
+#: (file, exact stripped PRECEDING line, exact stripped line). Bound to the
+#: preceding line too, so a reviewed continuation line moved under a different
+#: instruction is no longer reviewed. An edited line, or one in a new context,
+#: comes back as NEEDS_REVIEW, never as a pass. These are the sibling routes
+#: #287's comment 6034325559 pre-registered as a risk.
 REVIEWED_UNRELATED = frozenset({
-    (REFERENCE_MD, "never a PASS, and never left out of the table. Its detail is the entry's"),
-    (REFERENCE_MD, "SKIP rows."),
+    (REFERENCE_MD, "not-run` rather than running at all. That step is its own **NOT_RUN** row -",
+     "never a PASS, and never left out of the table. Its detail is the entry's"),
+    (REFERENCE_MD, "- `FLOW_FINISH_GATE: skipped` (exit 4) - no runner and no Makefile gates: three",
+     "SKIP rows."),
 })
+
+#: The removed sentence's two specific instructions, matched across
+#: whitespace-normalized FILE text (so a clause wrapped over lines, or split
+#: from a reviewed continuation line, is still found). Either one surviving
+#: anywhere in an installed, non-exempt file is SURVIVES. The generic
+#: "never a PASS" is NOT a clause: it also ends reviewed sibling bullets.
+REMOVED_CLAUSES = (
+    "`skipped gates:` name is a SKIP row",
+    "`zero coverage:` or no-tests name is a WARN row",
+)
 
 
 def _norm(text: str) -> str:
@@ -106,21 +120,34 @@ def _read(root: Path, entry: dict[str, object]) -> tuple[str, str | None, str | 
     return f"unnamed:{entry.get('destination')}", None, "no source and no inline content", False
 
 
+def _is_removed_piece(line: str) -> bool:
+    """A line that is itself a piece of the removed sentence (at least three
+    words, contained in it once whitespace is normalized)."""
+    n = _norm(line)
+    return bool(_REMOVED_NORM) and len(n.split()) >= 3 and n in _REMOVED_NORM
+
+
 def scan(root: Path, entries: list[dict[str, object]]) -> tuple[list[dict[str, object]], list[dict[str, str]],
-                                                                list[str]]:
-    """(phrase hits, coverage errors, labels of files carrying the FULL
-    removed sentence once whitespace is normalized)."""
+                                                                list[str], list[dict[str, str]]]:
+    """(phrase hits, coverage errors, labels of files carrying the FULL removed
+    sentence, and every removed clause found in an installed non-exempt file),
+    all matched on whitespace-normalized text."""
     hits: list[dict[str, object]] = []
     errors: list[dict[str, str]] = []
     full_copies: list[str] = []
+    clauses: list[dict[str, str]] = []
     for entry in entries:
         label, text, error, verified = _read(root, entry)
         if error:
             errors.append({"file": label, "error": error})
             continue
         assert text is not None
-        if _REMOVED_NORM and _REMOVED_NORM in _norm(text):
+        normalized = _norm(text)
+        if _REMOVED_NORM and _REMOVED_NORM in normalized:
             full_copies.append(label)
+        if not (label in NON_AGENT_FACING_FILES and verified):
+            clauses += [{"file": label, "clause": c} for c in REMOVED_CLAUSES if _norm(c) in normalized]
+        prev = ""
         for lineno, line in enumerate(text.splitlines(), start=1):
             for phrase in PHRASES:
                 if phrase not in line:
@@ -128,10 +155,8 @@ def scan(root: Path, entries: list[dict[str, object]]) -> tuple[list[dict[str, o
                 exempt = label in NON_AGENT_FACING_FILES
                 agent_facing = not (exempt and verified)
                 stripped = line.strip()
-                is_removed_sentence = label == REFERENCE_MD and (
-                    ("skipped gates" in line and "SKIP row" in line) or stripped == "a WARN row - never a PASS."
-                )
-                reviewed = (label, stripped) in REVIEWED_UNRELATED
+                is_removed_sentence = _is_removed_piece(line)
+                reviewed = (label, prev, stripped) in REVIEWED_UNRELATED
                 hits.append({
                     "file": label, "line": lineno, "phrase": phrase, "text": stripped,
                     "agent_facing": agent_facing,
@@ -144,7 +169,9 @@ def scan(root: Path, entries: list[dict[str, object]]) -> tuple[list[dict[str, o
                              "script EMITS, never an interpretive instruction the agent reads"
                     ),
                 })
-    return hits, errors, full_copies
+            if line.strip():
+                prev = line.strip()
+    return hits, errors, full_copies, clauses
 
 
 _REMOVED_NORM = ""
@@ -176,22 +203,29 @@ def main(argv: list[str] | None = None) -> int:
     _REMOVED_NORM = _norm(args.removed_text)
 
     entries = closure_entries(args.inventory)
-    intact_hits, intact_errors, intact_copies = scan(args.intact_root, entries)
-    degraded_hits, degraded_errors, degraded_copies = scan(args.degraded_root, entries)
+    intact_hits, intact_errors, intact_copies, _intact_clauses = scan(args.intact_root, entries)
+    degraded_hits, degraded_errors, degraded_copies, degraded_clauses = scan(args.degraded_root, entries)
+    # The evidence is about the DECLARED mutation: the degraded reference file
+    # must hash to the declared digest, or the scan describes other bytes.
+    degraded_ref = args.degraded_root / REFERENCE_MD
+    measured_digest = ("sha256:" + hashlib.sha256(degraded_ref.read_bytes()).hexdigest()
+                       if degraded_ref.is_file() else None)
+    digest_matches = measured_digest == args.mutated_digest
     intact_diag = json.loads(args.intact_diagnose.read_text(encoding="utf-8"))
     degraded_diag = json.loads(args.degraded_diagnose.read_text(encoding="utf-8"))
 
     positive_control_held = REFERENCE_MD in intact_copies
     unreviewed = [h for h in degraded_hits if str(h["classification"]).endswith("UNREVIEWED")]
-    #: A degraded line that is still a FRAGMENT of the removed sentence (a
-    #: partial removal: dropping only the leading "A", or keeping one clause)
-    #: is the obligation surviving, not a clean removal.
+    #: A degraded line that is still a PIECE of the removed sentence (a partial
+    #: removal) is the obligation surviving, not a clean removal. A line that
+    #: merely shares phrases (even one negating the instruction) is not a
+    #: piece: it is unreviewed, so NEEDS_REVIEW.
     fragments = [h for h in degraded_hits if h["classification"] == "removed sentence itself"]
     # One verdict, four values, checked in order. Only HOLDS exits 0.
-    if intact_errors or degraded_errors or not positive_control_held \
+    if intact_errors or degraded_errors or not positive_control_held or not digest_matches \
             or not (_diagnose_ok(intact_diag) and _diagnose_ok(degraded_diag)):
         verdict = "UNKNOWN"      # coverage or the control failed: absence of evidence, not of the instruction
-    elif degraded_copies or fragments:
+    elif degraded_copies or degraded_clauses or fragments:
         verdict = "SURVIVES"     # the removed sentence, whole or in part, is still installed
     elif unreviewed:
         verdict = "NEEDS_REVIEW"  # an unreviewed agent-facing line shares a phrase; not shown to survive
@@ -206,6 +240,8 @@ def main(argv: list[str] | None = None) -> int:
         ),
         "removed_text": args.removed_text,
         "mutated_digest": args.mutated_digest,
+        "measured_degraded_reference_digest": measured_digest,
+        "mutated_digest_matches": digest_matches,
         "closure_file_count": len(entries),
         "closure_source": str(args.inventory),
         "diagnose": {
@@ -227,6 +263,7 @@ def main(argv: list[str] | None = None) -> int:
             "intact_hits": intact_hits,
             "degraded_hit_count": len(degraded_hits),
             "degraded_hits": degraded_hits,
+            "removed_clauses_in_degraded": degraded_clauses,
             "removed_sentence_fragments_in_degraded": fragments,
             "unreviewed_agent_facing_in_degraded": unreviewed,
             "verdict": verdict,

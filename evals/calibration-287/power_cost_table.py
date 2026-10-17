@@ -6,14 +6,15 @@ improvement: cpp vs baseline), at n per arm in {10, 15, 20, 30}.
 THE QUESTION THIS ANSWERS. For a fixed n per arm, if the better arm (intact,
 or CPP) passes every attempt (n/n - the most favorable observable outcome),
 what is the largest number of passes the worse arm (degraded, or baseline)
-can show and STILL let a one-sided Fisher's exact test reach p < 0.05? Below
-that count, the design cannot show significance even in the best case the
-data could hand it; above it, n is wasted margin. This is the number #287's
-acceptance item 1 ("size repeats from measured costs and the declared
-uncertainty target, not an invented large matrix") needs before any n is
-chosen, and it has to be computed, not read off a table, because this
-specific 2x2 shape (one margin pinned at its ceiling) is not what most
-Fisher's-exact tables are built for.
+can show and STILL let a one-sided Fisher's exact test reach p < 0.05? Worse-
+arm counts AT OR BELOW that cutoff reach significance (fewer passes only
+strengthen it); counts ABOVE it cannot, even with the better arm at ceiling.
+At n=10 the cutoff is 6: 10/10 vs 6/10 gives p = 0.043, 10/10 vs 7/10 gives
+p = 0.105. This is the number #287's acceptance item 1 ("size repeats from
+measured costs and the declared uncertainty target, not an invented large
+matrix") needs before any n is chosen, and it has to be computed, not read
+off a table, because this specific 2x2 shape (one margin pinned at its
+ceiling) is not what most Fisher's-exact tables are built for.
 
 THE DERIVATION. Fix n attempts per arm. Build the 2x2 table with the better
 arm's pass count pinned at its maximum, n (its fail count is then 0):

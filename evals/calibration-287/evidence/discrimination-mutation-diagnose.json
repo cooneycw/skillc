@@ -3,6 +3,8 @@
  "purpose": "skillc#287 pilot discrimination declaration, mutation.diagnose_evidence for gate-stops-early's degraded arm (cpp-codex-flow-check-86641e8, flow-check skill, reference.md).",
  "removed_text": "A\n  `skipped gates:` name is a SKIP row and a `zero coverage:` or no-tests name is\n  a WARN row - never a PASS.",
  "mutated_digest": "sha256:edb26e56feac59ec548bc44afbbfeec54d970e95110c4506fa4be0cd9e8436ea",
+ "measured_degraded_reference_digest": "sha256:edb26e56feac59ec548bc44afbbfeec54d970e95110c4506fa4be0cd9e8436ea",
+ "mutated_digest_matches": true,
  "closure_file_count": 97,
  "closure_source": "evals/subjects/cpp-codex-flow-check-86641e8/evidence/inventory.json",
  "diagnose": {
@@ -444,6 +446,7 @@
     "classification": "non-agent-facing: implementation comment or the literal verdict string the script EMITS, never an interpretive instruction the agent reads"
    }
   ],
+  "removed_clauses_in_degraded": [],
   "removed_sentence_fragments_in_degraded": [],
   "unreviewed_agent_facing_in_degraded": [],
   "verdict": "HOLDS",

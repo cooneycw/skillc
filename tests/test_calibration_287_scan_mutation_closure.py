@@ -31,11 +31,12 @@ SENTENCE = (
     "A\n  `skipped gates:` name is a SKIP row and a `zero coverage:` or no-tests name is\n"
     "  a WARN row - never a PASS."
 )
-REVIEWED = sorted(text for _f, text in smc.REVIEWED_UNRELATED)
-#: The reviewed sibling lines appear as bare lines, exactly as in the real
-#: reference.md (continuation lines of other bullets).
-INTACT_REF = "# flow-check\n\n- " + SENTENCE + "\n" + REVIEWED[0] + "\n" + REVIEWED[1] + "\n"
-DEGRADED_REF = "# flow-check\n\n- \n" + REVIEWED[0] + "\n" + REVIEWED[1] + "\n"
+#: The reviewed sibling lines, each under its recorded preceding line, exactly
+#: as in the real reference.md.
+REVIEWED_BLOCK = "".join(f"{prev}\n{line}\n" for _f, prev, line in sorted(smc.REVIEWED_UNRELATED))
+REVIEWED_LINE = min(smc.REVIEWED_UNRELATED)[2]
+INTACT_REF = "# flow-check\n\n- " + SENTENCE + "\n" + REVIEWED_BLOCK
+DEGRADED_REF = "# flow-check\n\n- \n" + REVIEWED_BLOCK
 OK_DIAG: dict[str, object] = {"complete": True, "problem_count": 0}
 #: The exempt helper's reviewed content; the inventory records its digest, as
 #: the real inventory does, so the exemption is bound to these exact bytes.
@@ -60,7 +61,7 @@ def _tree(root: Path, files: dict[str, str | bytes]) -> Path:
 def _run(tmp_path: Path, *, intact: dict[str, str | bytes] | None = None,
          degraded: dict[str, str | bytes] | None = None, deps: list[dict[str, object]] | None = None,
          skill_files: list[str] | None = None, degraded_diag: dict[str, object] = OK_DIAG,
-         make_degraded: bool = True) -> tuple[int, dict]:
+         make_degraded: bool = True, mutated_digest: str | None = None) -> tuple[int, dict]:
     skill_files = skill_files if skill_files is not None else [REF, GATE]
     inventory = {"skills": [{"files": [{"source": s, **({"digest": _digest(GATE_TEXT)} if s == GATE else {})}
                                        for s in skill_files]}],
@@ -75,9 +76,13 @@ def _run(tmp_path: Path, *, intact: dict[str, str | bytes] | None = None,
     (tmp_path / "i.json").write_text(json.dumps(OK_DIAG), encoding="utf-8")
     (tmp_path / "d.json").write_text(json.dumps(degraded_diag), encoding="utf-8")
     out = tmp_path / "out.json"
+    ref = degraded_root / REF
+    # By default the declared digest IS the degraded reference's, as it is for
+    # the real mutation; the mismatch case overrides it.
+    digest = mutated_digest or ("sha256:" + hashlib.sha256(ref.read_bytes()).hexdigest() if ref.is_file() else "sha256:0")
     code = smc.main(["--inventory", str(inv), "--intact-root", str(intact_root), "--degraded-root", str(degraded_root),
                      "--intact-diagnose", str(tmp_path / "i.json"), "--degraded-diagnose", str(tmp_path / "d.json"),
-                     "--out", str(out)])
+                     "--mutated-digest", digest, "--out", str(out)])
     return code, json.loads(out.read_text(encoding="utf-8"))
 
 
@@ -138,7 +143,7 @@ def test_needs_review_when_a_new_agent_facing_line_shares_a_phrase(tmp_path: Pat
 def test_an_edited_reviewed_line_is_needs_review_not_survival(tmp_path: Path) -> None:
     """Counter-model finding: a neighbouring edit must not read as the
     obligation surviving. It is unreviewed, so it is NEEDS_REVIEW."""
-    edited = DEGRADED_REF.replace(REVIEWED[1], REVIEWED[1] + " Name the failed test.")
+    edited = DEGRADED_REF.replace(REVIEWED_LINE, REVIEWED_LINE + " Name the failed test.")
     code, evidence = _run(tmp_path, degraded={REF: edited, GATE: GATE_TEXT})
     assert (code, _verdict(evidence)) == (1, "NEEDS_REVIEW")
 
@@ -193,3 +198,39 @@ def test_unknown_when_the_positive_control_fails(tmp_path: Path) -> None:
     find it, so no absence claim is made from the degraded side."""
     code, evidence = _run(tmp_path, intact={REF: DEGRADED_REF, GATE: GATE_TEXT})
     assert (code, _verdict(evidence)) == (1, "UNKNOWN")
+
+
+def test_unknown_when_the_degraded_reference_does_not_match_the_declared_digest(tmp_path: Path) -> None:
+    """Counter-model finding (pass 3): the evidence must describe the DECLARED
+    mutation's bytes, not whatever sits in the degraded tree."""
+    code, evidence = _run(tmp_path, mutated_digest="sha256:" + "0" * 64)
+    assert (code, _verdict(evidence)) == (1, "UNKNOWN")
+    assert evidence["mutated_digest_matches"] is False
+
+
+def test_survives_when_the_warn_clause_precedes_a_reviewed_line(tmp_path: Path) -> None:
+    """Counter-model finding (pass 3): line matching let the WARN instruction
+    survive next to a reviewed continuation line."""
+    survived = DEGRADED_REF.replace("- \n", "- A `zero coverage:` or no-tests name is a WARN row -\n")
+    code, evidence = _run(tmp_path, degraded={REF: survived, GATE: GATE_TEXT})
+    assert (code, _verdict(evidence)) == (1, "SURVIVES")
+
+
+def test_survives_when_a_clause_is_wrapped_across_lines(tmp_path: Path) -> None:
+    wrapped = DEGRADED_REF.replace("- \n", "- `skipped gates:` name is a\n  SKIP row in the table.\n")
+    code, evidence = _run(tmp_path, degraded={REF: wrapped, GATE: GATE_TEXT})
+    assert (code, _verdict(evidence)) == (1, "SURVIVES")
+
+
+def test_a_negated_co_occurrence_is_needs_review_not_survival(tmp_path: Path) -> None:
+    """Counter-model finding (pass 3): sharing both phrases is not the
+    instruction surviving, least of all when it contradicts it."""
+    negated = DEGRADED_REF.replace("- \n", "- The phrase `skipped gates:` does NOT mean a SKIP row.\n")
+    code, evidence = _run(tmp_path, degraded={REF: negated, GATE: GATE_TEXT})
+    assert (code, _verdict(evidence)) == (1, "NEEDS_REVIEW")
+
+
+def test_a_reviewed_line_under_a_different_instruction_needs_review(tmp_path: Path) -> None:
+    moved = DEGRADED_REF.replace("- \n", "- Some other instruction:\n" + REVIEWED_LINE + "\n")
+    code, evidence = _run(tmp_path, degraded={REF: moved, GATE: GATE_TEXT})
+    assert (code, _verdict(evidence)) == (1, "NEEDS_REVIEW")
