@@ -1,0 +1,28 @@
+{
+  "branch": "issue-287-p2-discrimination-run",
+  "counts": {
+    "accepted": 7,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "extra_passes_reason": "orchestrator skillc-400: P2's approval binding and launch-snapshot report checks are a gate that lets a PAID study through, and nothing downstream re-derives them; pass 2's fixes are in that gate's core. Re-recorded at c0ee20b, the rebase-replayed form of the reviewed 844d741 (git range-diff: patch-identical)",
+  "head": "c0ee20b",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "287",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 3,
+  "recorded_at": "2026-10-17T22:40:59Z",
+  "red_cases": {
+    "already_covered": 11,
+    "proposed": 11
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/17/rollout-2026-10-17T17-39-08-01a14bcd-e9b4-7c23-8c03-c31c31efd9d6.jsonl",
+    "thread_id": "01a14bcd-e9b4-7c23-8c03-c31c31efd9d6"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
