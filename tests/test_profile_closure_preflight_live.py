@@ -162,16 +162,22 @@ def _require(cls: type[_PropertyHeld], condition: bool, message: str) -> None:
         raise cls(message)
 
 
-def _build_trial_image(tag: str) -> rs.RuntimeSupply:
+def _build_trial_image(tag: str) -> tuple[rs.RuntimeSupply, Callable[[], None]]:
+    """Build through build.py; return the supply and a release that undoes
+    only what THIS build added (#414). The old teardown was `docker image rm
+    -f <image_id>`, which by ID ignores tags: a co-tenant that built the same
+    inputs has the same ID, and lost its image."""
     del tag  # Selection is the receipt's immutable ID, never a mutable tag.
     spec = importlib.util.spec_from_file_location("profile_runtime_builder", ROOT / "docker/profile-trial/build.py")
     assert spec is not None and spec.loader is not None
     builder = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(builder)
+    before = builder.image_inventory()
     with tempfile.TemporaryDirectory(prefix="sk-360-receipt-") as temp:
-        receipt = Path(temp) / "receipt.json"
-        builder.build_image(ROOT, receipt)
-        return rs.RuntimeSupply.from_path(receipt)
+        receipt_path = Path(temp) / "receipt.json"
+        receipt = builder.build_image(ROOT, receipt_path)
+        supply = rs.RuntimeSupply.from_path(receipt_path)
+    return supply, lambda: builder.release_build(receipt, before)
 
 
 _REFUSAL_SYMPTOMS = {
@@ -548,7 +554,7 @@ def test_a_treated_attempts_closure_is_verified_and_the_gate_reaches_the_real_ru
 
     shim_source = _altered_shim_source() if BREAK_MODE == "shim-alters-output" else _SHIM_SOURCE
     _generic_offline_control(home_files, preflight_tools)
-    supply = _build_trial_image(IMAGE_TAG)
+    supply, release_supply = _build_trial_image(IMAGE_TAG)
     base = Path(tempfile.mkdtemp(prefix="sk-334-live-base-"))
     trigger_dir = Path(tempfile.mkdtemp(prefix="sk-334-live-trig-"))
     witness_holder: list[GateWitness] = []
@@ -658,6 +664,6 @@ def test_a_treated_attempts_closure_is_verified_and_the_gate_reaches_the_real_ru
             finally:
                 backend.destroy(handle)
     finally:
-        subprocess.run(["docker", "image", "rm", "-f", supply.image_id], capture_output=True, check=False)
+        release_supply()
         shutil.rmtree(base)
         shutil.rmtree(trigger_dir)

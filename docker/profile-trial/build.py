@@ -437,6 +437,64 @@ def docker(argv: list[str]) -> str:
         raise SupplyError(f"docker {argv[0]} exited {exc.returncode}: {diagnostic}") from exc
 
 
+def image_tag(receipt: dict[str, Any]) -> str:
+    """The deterministic tag a build gives its image (#414). An untagged build
+    is dangling, and a host-wide `docker image prune` deletes it from under
+    every receipt that names it by ID. Derived from the receipt alone, so
+    rebuilding the same inputs re-tags the same name; 12 characters of the
+    commit, so it never collides with a hand-made 7-character tag."""
+    tag = f"skillc-profile-runtime:{receipt['runtime_id']}-{receipt['source_commit'][:12]}"
+    if receipt["target"] != "profile-runtime":
+        tag += f"-{receipt['target']}"
+    return tag
+
+
+def image_inventory(*, run: Callable[[list[str]], str] = docker) -> dict[str, Any]:
+    """Every image ID and tag on the daemon now - taken BEFORE a build, so
+    `release_build` can tell what that build added from what was already
+    there (#414)."""
+    ids: set[str] = set()
+    tags: dict[str, str] = {}
+    listing = run(["images", "-a", "--no-trunc", "--format", "{{.ID}}\t{{.Repository}}:{{.Tag}}"])
+    for line in listing.splitlines():
+        image_id, _, name = line.partition("\t")
+        if not image_id:
+            continue
+        ids.add(image_id)
+        if name and "<none>" not in name:
+            tags[name] = image_id
+    return {"ids": ids, "tags": tags}
+
+
+def release_build(
+    receipt: dict[str, Any], before: dict[str, Any], *, run: Callable[[list[str]], str] = docker,
+) -> None:
+    """Undo exactly what one `build_image` added (#414), and nothing else.
+
+    An image ID that existed before the build is never touched - a co-tenant
+    built the same inputs, and even removing our tag from it would delete the
+    image if that tag were its only one. A NEW image goes, without `-f` and
+    with `--no-prune`, so the daemon refuses if anything else references it
+    and keeps any untagged parent. `docker tag` moves an existing tag, so a tag
+    that pointed at another image before the build is put back first - even
+    when the build reused an image that already existed: a pre-existing tag
+    is never removed."""
+    image_id = receipt["image_id"]
+    tag = image_tag(receipt)
+    previous = before["tags"].get(tag)
+    # Restore first: a cached build can reuse an image that already existed
+    # and still move the tag onto it (#414 review).
+    if previous is not None and previous != image_id:
+        run(["tag", previous, tag])
+    if image_id in before["ids"]:
+        return
+    try:
+        # --no-prune: an untagged parent that was already there stays.
+        run(["image", "rm", "--no-prune", image_id])
+    except SupplyError:
+        pass  # still referenced elsewhere: not ours to force
+
+
 def build_image(
     repo: Path,
     receipt_path: Path,
@@ -500,6 +558,9 @@ def build_image(
         required = load_json(descriptor)["required_env"]
         if any(config_env.get(k) != v for k, v in required.items()):
             raise SupplyError("image configuration/descriptor environment mismatch")
+        # Tag before the receipt exists, so a receipt always implies its tag
+        # (#414); a failed tag raises and no receipt is written.
+        run(["tag", image_id, image_tag(receipt)])
         # Exclusive creation ensures a concurrent build cannot replace evidence.
         with receipt_path.open("xb") as output:
             output.write(json_bytes(receipt))
