@@ -1,7 +1,7 @@
 # Controller-owned issue and PR fixture service
 
 - Status: Implemented in `skillc/fixture_service.py` and
-  `docker/trial/skillc-gh-shim.py` (#276). The service and shim are proven
+  `docker/fixture-service/skillc-gh-shim.py` (#276). The service and shim are proven
   host-side over a real socket; wiring them into a live attempt (profile
   install of the shim, the Docker-backed remote) belongs to the first
   consumer, #434
@@ -22,7 +22,11 @@ so the subject could "prove" a PR it never opened.
 
 The service makes the CONTROLLER the only GitHub:
 
-- The trial profile installs `skillc-gh-shim.py` where `gh` would be. The shim
+- A trial profile installs `skillc-gh-shim.py` where `gh` would be. It lives
+  in `docker/fixture-service/`, outside `docker/trial/`, so it does not enter
+  the pinned flow-check build context
+  (`tests/test_fixture_service_runtime_pin.py`); how it reaches a trial is
+  #434's decision. The shim
   sends each invocation as one `op: "gh"` request over the attempt's one #183
   socket.
 - The service parses the request against a closed grammar, decides the answer,

@@ -32,7 +32,7 @@ from skillc.decide_reply_channel import DecideReplyChannel
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
 needs_jq = pytest.mark.skipif(fs.measure_jq()[0] is None, reason="jq 1.7.x is not installed")
 
-SHIM = Path(__file__).resolve().parent.parent / "docker" / "trial" / "skillc-gh-shim.py"
+SHIM = Path(__file__).resolve().parent.parent / "docker" / "fixture-service" / "skillc-gh-shim.py"
 GATE_KEYS = frozenset({"op", "gate", "cwd"})
 READY_KEYS = frozenset({"op", "nonce"})
 

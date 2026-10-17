@@ -22,7 +22,12 @@ EXIT 125 ON ANY CHANNEL FAILURE, the same convention as
 `flow-check-gate-shim.py`: never 0, and never a value the service itself
 returns, so a failure to reach the controller is never read as a gh answer.
 
-Deliberately stdlib-only, matching the other `docker/trial/` helpers.
+LIVES OUTSIDE `docker/trial/` ON PURPOSE (orchestrator ruling): the
+profile-trial build context covers every file under `docker/trial/`, so a
+file there moves the pinned flow-check runtime's `build_context_sha256` even
+while nothing uses it. How it is installed into a trial is #434's decision.
+
+Deliberately stdlib-only, matching the `docker/trial/` helpers.
 """
 
 from __future__ import annotations

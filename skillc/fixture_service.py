@@ -6,7 +6,7 @@ Builds on `skillc/decide_reply_channel.py` (#183) UNCHANGED, exactly as
 function and its own request vocabulary (`op: "gh"`), nothing else.
 
 THE CONTROLLER IS THE ONLY GITHUB. A trial subject has no network and no
-`gh`; the trial profile installs `docker/trial/skillc-gh-shim.py` where `gh`
+`gh`; the trial profile installs `docker/fixture-service/skillc-gh-shim.py` where `gh`
 would be. The shim forwards argv over the attempt's one socket, and this
 service - running in the controller's process - parses it against a CLOSED
 grammar, decides the answer, appends an event to its OWN record and only

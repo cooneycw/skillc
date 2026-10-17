@@ -12,7 +12,7 @@ and version plan.
   to GitHub throughout, and a trial has no network or `gh`. A file-backed fake
   inside the container would be subject-writable. `skillc/fixture_service.py`
   makes the controller the only GitHub. A `gh` shim
-  (`docker/trial/skillc-gh-shim.py`) forwards each call over the attempt's one
+  (`docker/fixture-service/skillc-gh-shim.py`) forwards each call over the attempt's one
   #183 socket. The service parses it against a closed grammar, records an event
   (its own sequence number, decision, effect, and state digests before and
   after) and only then replies.
@@ -45,6 +45,11 @@ and version plan.
     fails it. The pre-change checker passed that control.
   - Proven host-side over a real socket with the real shim. Live wiring is
     #434's.
+  - The shim lives in `docker/fixture-service/`, not `docker/trial/`, because
+    every `docker/trial/` file enters the pinned flow-check build context.
+    `tests/test_fixture_service_runtime_pin.py` pins that context and recipe
+    digest at #276's base, with a control in which the shim is placed back
+    under `docker/trial/` and the digest moves.
 
 - **A daemon-refused `execute()` reads as never started, not as a failed run**
   (#317). #304's entry guard is a check-then-act: the container can stop
