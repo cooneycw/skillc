@@ -8,6 +8,20 @@ and version plan.
 
 ## [Unreleased]
 
+- **A failing gate's verdict reaches the subject** (#404). `GateWitness` cut
+  each forwarded stream at a default 4,096 bytes, silently, and production used
+  that default. The real `flow-finish-gate.sh` prints its `FLOW_FINISH_GATE:`
+  verdict as its last line, after the runner's JSON report, so any run past
+  that size reached the subject with no verdict and no sign anything was cut.
+  Two small failing assertions already make 4,324 bytes. The default reply now
+  forwards each stream up to the capture bound the gate ran under
+  (`Limits.max_captured_stdout_bytes`/`max_captured_stderr_bytes`), and a
+  capture that hit that bound is still refused, never forwarded as a prefix.
+  The constant is gone; an explicit `reply_byte_cap=` remains for tests. The
+  witness test fails on the old default at exactly 4,096 bytes, and a
+  production-path test (`run_one_attempt`) has the subject check that its plan
+  reply ends in the verdict: it exits 1 on the old code, and a wrong-tail
+  control proves the subject's check can fail.
 - **A failed `prepare()` always raises `BackendUnavailable`** (#416). When
   `docker run -d` timed out or exited nonzero, `DockerBackend.prepare()` ran a
   bounded best-effort `docker rm -f` before raising. That cleanup was unguarded,

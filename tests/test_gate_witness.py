@@ -694,6 +694,55 @@ def test_the_reply_stdout_is_truncated_to_the_declared_byte_cap() -> None:
     assert reply["stdout"] == "x" * 10
 
 
+def test_a_default_reply_carries_a_failing_gates_verdict_past_4096_bytes() -> None:
+    """#404: the real gate prints its verdict LAST. Before the fix the
+    default reply was cut at 4,096 bytes, so a failing run of 4,324 bytes
+    (two small assertion failures) reached the subject without its
+    `FLOW_FINISH_GATE: fail` line and with nothing saying it was cut."""
+    stdout = b"{\n" + b'  "detail": "' + b"x" * 6000 + b'"\n}\n' + b"FLOW_FINISH_GATE: fail\n"
+    stderr = b"  [2/3] test: FAILED\n" * 300
+    assert len(stdout) > 4096 and len(stderr) > 4096
+    result = ExecuteResult(reason="exited", exit_code=1, stdout=stdout, stderr=stderr, error="summary")
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest,
+        backend=_FakeBackend(results={("lint",): result}), handle=None, limits=_limits(),
+        gate_exclusivity=False, exclusivity_basis="",
+    )
+    reply = witness.decide({"op": "run_gate", "gate": "lint"})
+    assert isinstance(reply["stdout"], str) and reply["stdout"].encode() == stdout
+    assert reply["stdout"].endswith("FLOW_FINISH_GATE: fail\n")
+    assert isinstance(reply["stderr"], str) and reply["stderr"].encode() == stderr
+
+
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
+def test_the_default_reply_bound_is_the_capture_bound_and_never_a_silent_cut(stream: str) -> None:
+    """The default forwards each stream up to the bound the gate was captured
+    under. A capture exactly at that bound is forwarded whole; one that hit
+    it (`*_truncated`) is refused as a channel failure, never cut."""
+    bound = 100
+    limits = Limits(timeout=5.0, max_captured_stdout_bytes=bound, max_captured_stderr_bytes=bound)
+    whole = b"y" * bound
+    at_bound = ExecuteResult(reason="exited", exit_code=0, stdout=whole if stream == "stdout" else b"ok\n",
+                             stderr=whole if stream == "stderr" else b"")
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest,
+        backend=_FakeBackend(results={("lint",): at_bound}), handle=None, limits=limits,
+        gate_exclusivity=False, exclusivity_basis="",
+    )
+    forwarded = witness.decide({"op": "run_gate", "gate": "lint"})[stream]
+    assert isinstance(forwarded, str) and forwarded.encode() == whole
+
+    capped = (dataclasses.replace(at_bound, stdout_truncated=True) if stream == "stdout"
+              else dataclasses.replace(at_bound, stderr_truncated=True))
+    witness = GateWitness(
+        declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest,
+        backend=_FakeBackend(results={("lint",): capped}), handle=None, limits=limits,
+        gate_exclusivity=False, exclusivity_basis="",
+    )
+    with pytest.raises(ChannelRefusal, match="output"):
+        witness.decide({"op": "run_gate", "gate": "lint"})
+
+
 def test_the_reply_stderr_comes_from_the_backends_error_field() -> None:
     backend = _FakeBackend(results={("lint",): ExecuteResult(reason="exited", exit_code=1, error="boom")})
     witness = GateWitness(
