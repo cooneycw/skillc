@@ -13,6 +13,7 @@ this session. This proves the lifecycle state machine, argv composition and
 
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 import io
 import json
@@ -1140,13 +1141,19 @@ def test_read_home_tree_joins_stdout_and_stderr_against_one_shared_deadline(
     delays every fake `docker cp` by 1.2s, the setup failure by
     construction; it failed the old test and passes this one."""
     daemon_timeout = 5.0
-    backend = d.DockerBackend(
+    # SETUP on the suite's fake-CLI budget (#412): on CI 806 the 1.2 s-slowed
+    # `docker cp` in deliver_home_file overran 5.0 s before the read under
+    # test ever ran. Only `read_home_tree` - the call whose join shape this
+    # test pins - keeps the 5.0 s bound.
+    setup = d.DockerBackend(
         image="fake-image:1", base_dir=base, docker_bin=_slowed_docker_bin(docker_state, tmp_path, delays),
-        daemon_timeout=daemon_timeout,
+        daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT,
     )
-    handle = backend.prepare("a-lc-000000000018b")
+    handle = setup.prepare("a-lc-000000000018b")
     assert isinstance(handle, d._Handle)
-    backend.deliver_home_file(handle, ".claude/projects/-work/x.jsonl", b"line\n")
+    setup.deliver_home_file(handle, ".claude/projects/-work/x.jsonl", b"line\n")
+    backend = dataclasses.replace(setup, daemon_timeout=daemon_timeout)
+    assert backend.daemon_timeout == 5.0 and setup.daemon_timeout == FAKE_DOCKER_DAEMON_TIMEOUT
     fifo = tmp_path / "hold-open.fifo"
     os.mkfifo(fifo)
     docker_state.mkdir(parents=True, exist_ok=True)
@@ -1166,7 +1173,7 @@ def test_read_home_tree_joins_stdout_and_stderr_against_one_shared_deadline(
         except OSError:
             pass
     _assert_one_shared_deadline(joins, daemon_timeout)
-    backend.destroy(handle)
+    setup.destroy(handle)
 
 
 def test_read_home_tree_refuses_past_the_file_count_bound(base: Path, docker_state: Path) -> None:
@@ -1283,7 +1290,10 @@ def test_a_directory_symlink_at_observations_makes_the_writeback_fail_visibly(
         "os.symlink('elsewhere', 'observations')\n"
         "print('real capture')\n"
     )
-    result = backend.execute(handle, [sys.executable, "-c", script], Limits(timeout=5))
+    # The suite's fake-CLI budget, not 5 s (#412): the subject exits at once
+    # (0.20-0.22 s measured), and this test's property is that the write-back
+    # failure is VISIBLE, not any timing. A 5 s limit read `timeout` on CI 806.
+    result = backend.execute(handle, [sys.executable, "-c", script], Limits(timeout=FAKE_DOCKER_DAEMON_TIMEOUT))
     assert result.reason == "exited"
     assert result.exit_code == 0
     assert result.observations_capture == "failed"

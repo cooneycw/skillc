@@ -1,0 +1,27 @@
+{
+  "branch": "issue-412-fake-docker-tests-with-fixed-5-s-bounds-go-red-on",
+  "counts": {
+    "accepted": 2,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "e9afd864aa8a103b3152a8d153ea355d96103ecd",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "412",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 2,
+  "recorded_at": "2026-10-17T15:25:34Z",
+  "red_cases": {
+    "already_covered": 6,
+    "proposed": 7
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/17/rollout-2026-10-17T11-22-01-01a14a74-a7f2-72b2-b388-7bbfd2f5fea6.jsonl",
+    "thread_id": "01a14a74-a7f2-72b2-b388-7bbfd2f5fea6"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
