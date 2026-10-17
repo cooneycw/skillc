@@ -19,6 +19,9 @@ collapse the population to zero and still read as "every task certified."
 
 from __future__ import annotations
 
+import ast
+import hashlib
+import random
 import subprocess
 import sys
 from pathlib import Path
@@ -42,25 +45,108 @@ def _task_name(script: Path) -> str:
     return script.parent.name
 
 
-@pytest.mark.parametrize("script,timeout_seconds", [
-    pytest.param(script, 360 if _task_name(script) in _SLOW_REASON else 180,
-                 id=_task_name(script),
+def _declared_parts(script: Path) -> list[str] | None:
+    """A split script's parts, derived from its own `CONTROLS` literal (#446),
+    or None for a script that runs whole. Read from source, never by running
+    it, so collection spawns nothing; `test_split_scripts_list_exactly_their_
+    declared_parts` checks the script's own `--list-parts` says the same."""
+    tree = ast.parse(script.read_text(encoding="utf-8"))
+    if not any(isinstance(n, ast.FunctionDef) and n.name == "parts" for n in tree.body):
+        return None
+    controls = next(n.value for n in tree.body if isinstance(n, ast.Assign)
+                    and any(isinstance(t, ast.Name) and t.id == "CONTROLS" for t in n.targets))
+    assert isinstance(controls, ast.Dict)
+    keys = [ast.literal_eval(k) for k in controls.keys if k is not None]
+    return ["certify", *(f"control:{k}" for k in keys), "validity"]
+
+
+SPLIT_SCRIPTS = {script: parts for script in QUALIFY_SCRIPTS if (parts := _declared_parts(script))}
+
+#: #446: run as one subprocess, gate-stops-early and verify-stops-early
+#: (about 30 candidates graded by the real judge and again by each of five
+#: broken-grader controls, then the validity checks) took 71-161 s in CI and
+#: hit the 180 s cap on main's push pipeline 869. Neither declares a whole-run
+#: budget (grader.json's 90 s / 60 s are per probe and judge call), so the
+#: cap is this test's. Each is split into independent parts, every part its
+#: own subprocess under the same cap. The order is shuffled with a fixed seed
+#: so a serial run never executes them in the order the full run does, and a
+#: part that relied on another having run first fails alone.
+_PART_ORDER_SEED = 446
+_PARAMS = [
+    *[(script, None) for script in QUALIFY_SCRIPTS if script not in SPLIT_SCRIPTS],
+    *[(script, part) for script, parts in SPLIT_SCRIPTS.items() for part in parts],
+]
+random.Random(_PART_ORDER_SEED).shuffle(_PARAMS)
+
+
+def _param_id(script: Path, part: str | None) -> str:
+    return _task_name(script) if part is None else f"{_task_name(script)}--{part}"
+
+
+def _task_tree_digest(task_dir: Path) -> str:
+    """Every file under the task directory except bytecode caches."""
+    digest = hashlib.sha256()
+    for path in sorted(task_dir.rglob("*")):
+        if path.is_file() and "__pycache__" not in path.parts:
+            digest.update(path.relative_to(task_dir).as_posix().encode() + b"\0" + path.read_bytes())
+    return digest.hexdigest()
+
+
+@pytest.mark.parametrize("script,part,timeout_seconds", [
+    pytest.param(script, part, 360 if _task_name(script) in _SLOW_REASON else 180,
+                 id=_param_id(script, part),
                  marks=pytest.mark.timeout(380 if _task_name(script) in _SLOW_REASON else 200))
-    for script in QUALIFY_SCRIPTS
+    for script, part in _PARAMS
 ])
-def test_qualify_script_certifies(script: Path, timeout_seconds: float) -> None:
+def test_qualify_script_certifies(script: Path, part: str | None, timeout_seconds: float) -> None:
+    before = _task_tree_digest(script.parent) if part is not None else ""
     proc = subprocess.run(
-        [sys.executable, str(script)], capture_output=True, text=True,
+        [sys.executable, str(script), *(["--part", part] if part is not None else [])],
+        capture_output=True, text=True,
         timeout=timeout_seconds, check=False, cwd=script.parent,
     )
     tail = "\n".join(proc.stdout.strip().splitlines()[-8:])
-    name = _task_name(script)
-    slow_note = f" ({_SLOW_REASON[name]})" if name in _SLOW_REASON else ""
+    name = _param_id(script, part)
+    slow_note = f" ({_SLOW_REASON[_task_name(script)]})" if _task_name(script) in _SLOW_REASON else ""
     assert proc.returncode == 0, (
         f"{name}: qualify.py exited {proc.returncode}{slow_note}\n"
         f"stdout tail:\n{tail}\nstderr:\n{proc.stderr}"
     )
-    assert "QUALIFY: ok" in proc.stdout, f"{name}: no 'QUALIFY: ok' in output:\n{tail}"
+    if part is None:
+        assert "QUALIFY: ok" in proc.stdout, f"{name}: no 'QUALIFY: ok' in output:\n{tail}"
+    else:
+        assert f"QUALIFY: ok part={part}" in proc.stdout.splitlines(), (
+            f"{name}: no 'QUALIFY: ok part={part}' line in output:\n{tail}")
+    if part is not None:
+        # Independence (#446): a part may not leave state in the task
+        # directory for another part to read.
+        assert _task_tree_digest(script.parent) == before, f"{name}: the part changed files in {script.parent}"
+
+
+def test_split_scripts_list_exactly_their_declared_parts() -> None:
+    """Membership guard (#446): splitting must not drop work. Each split
+    script's own `--list-parts` must be exactly certify, one part per
+    `CONTROLS` key, and validity - so a parts list that forgot a control, or
+    a control added without a part, fails here rather than going unrun."""
+    assert set(SPLIT_SCRIPTS) >= {
+        EVALS_ROOT / "level3" / "gate-stops-early" / "qualify.py",
+        EVALS_ROOT / "level3" / "verify-stops-early" / "qualify.py",
+    }, "a split script stopped being detected, so it would silently run whole again or not at all"
+    for script, declared in SPLIT_SCRIPTS.items():
+        proc = subprocess.run([sys.executable, str(script), "--list-parts"], capture_output=True,
+                              text=True, timeout=60, check=False, cwd=script.parent)
+        assert proc.returncode == 0, f"{script}: --list-parts exited {proc.returncode}: {proc.stderr}"
+        assert proc.stdout.split() == declared, (
+            f"{_task_name(script)}: --list-parts says {proc.stdout.split()}, CONTROLS declares {declared}")
+
+
+def test_part_order_is_not_the_full_run_order() -> None:
+    """The shuffle is what makes a serial run catch a part that depends on an
+    earlier one; pin that it actually reorders each split script's parts."""
+    for script, declared in SPLIT_SCRIPTS.items():
+        order = [part for s, part in _PARAMS if s == script and part is not None]
+        assert sorted(order) == sorted(declared) and order != declared, (
+            f"{_task_name(script)}: parts run in {order}")
 
 
 @pytest.mark.timeout(5)
@@ -69,7 +155,7 @@ def test_hung_qualify_script_is_rejected(tmp_path: Path) -> None:
     script = tmp_path / "qualify.py"
     script.write_text("import time\nprint('QUALIFY: ok', flush=True)\ntime.sleep(60)\n", encoding="utf-8")
     with pytest.raises(subprocess.TimeoutExpired):
-        test_qualify_script_certifies(script, timeout_seconds=0.1)
+        test_qualify_script_certifies(script, None, timeout_seconds=0.1)
 
 
 def test_every_qualify_script_is_discovered_and_none_quietly_ignored() -> None:
