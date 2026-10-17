@@ -231,7 +231,15 @@ class LocalGitRemote:
     remove."""
 
     def __init__(self, path: Path) -> None:
-        self.path = path
+        # One validated, absolute, lexically plain path - checked by the guard
+        # AND handed to every git call, so the two can never address
+        # different directories (counter-model review, pass 3: `link/..`
+        # collapses lexically but not in the kernel). Symlinked components
+        # are refused by the guard's own ancestor lstat walk.
+        raw = Path(path)
+        if not raw.is_absolute() or any(part in ("..", ".") for part in raw.parts) or "//" in str(path):
+            raise RemoteUntrusted(f"the remote path must be absolute with no '.' or '..' components: {path}")
+        self.path = raw
 
     def _check_ownership(self) -> None:
         """FAIL CLOSED unless nobody but this controller uid can write what
@@ -249,7 +257,7 @@ class LocalGitRemote:
         boundary for a remote the subject can write: such a remote is
         refused here before any git runs."""
         uid = os.getuid()
-        root = Path(os.path.abspath(self.path))
+        root = self.path
         child_uid = None
         for ancestor in [root, *root.parents][1:]:
             info = os.lstat(ancestor)
@@ -259,8 +267,21 @@ class LocalGitRemote:
             if info.st_mode & 0o022 and not (info.st_mode & stat.S_ISVTX and child_uid in (None, uid)):
                 raise RemoteUntrusted("an ancestor directory of the remote is writable by another uid")
             child_uid = info.st_uid
+        # The root itself first, never only as a walk result: an unlistable or
+        # missing root must not read as an empty, clean tree (pass 3).
+        try:
+            info = os.lstat(root)
+        except OSError as exc:
+            raise RemoteUntrusted(f"the remote root cannot be inspected: {exc}") from exc
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != uid or info.st_mode & 0o022:
+            raise RemoteUntrusted("the remote root is not a directory owned by this controller, or is "
+                                  "writable by another uid")
+
+        def refuse(exc: OSError) -> None:
+            raise RemoteUntrusted(f"the remote could not be fully inspected: {exc}")
+
         count = 0
-        for current, dirs, files in os.walk(root, followlinks=False):
+        for current, dirs, files in os.walk(root, followlinks=False, onerror=refuse):
             for name in [None, *dirs, *files]:
                 entry = Path(current) if name is None else Path(current) / name
                 info = os.lstat(entry)
@@ -274,6 +295,8 @@ class LocalGitRemote:
                                           "not this controller")
                 if info.st_mode & 0o022:
                     raise RemoteUntrusted(f"{entry.relative_to(root)} is writable by another uid")
+        if count == 0:
+            raise RemoteUntrusted("the remote inspection examined nothing")
 
     def _check_trusted(self, env: Mapping[str, str]) -> None:
         self._check_ownership()
@@ -763,12 +786,14 @@ class FixtureService:
                     live, self._state = self._state, snapshot
                     try:
                         reply, decision, effect = self._handle(command, context, body_files, at)
-                    except _GhError:
-                        # A stale "not found" IS the stale answer (counter-model
-                        # review): the fault is consumed. Only an unsupported
-                        # request, which never reached a stale answer, is not.
-                        event["fault"] = "stale-read"
-                        stale_fault["fired"], stale_fault["fired_at_seq"] = True, seq
+                    except _GhError as exc:
+                        # A stale "not found" IS the stale answer (pass 2): the
+                        # fault is consumed. A usage refusal is not an answer
+                        # from the snapshot and must not move the fault point
+                        # (pass 3), and neither is an unsupported request.
+                        if exc.reason == "not-found":
+                            event["fault"] = "stale-read"
+                            stale_fault["fired"], stale_fault["fired_at_seq"] = True, seq
                         raise
                     finally:
                         self._state = live

@@ -32,5 +32,9 @@ fail_case "malformed report" "$FIXTURES/malformed.xml"
 
 echo "git-tests-control: good-all-ran must PASS"
 python3 "$CHECK" "$FIXTURES/good-all-ran.xml"
+# #276 pass 3: a neighbour's skip whose reason merely CONTAINS a tool name
+# ("digital") must not change the verdict - tools match as whole words.
+echo "git-tests-control: good-unrelated-skip must PASS"
+python3 "$CHECK" "$FIXTURES/good-unrelated-skip.xml"
 
-echo "git-tests-control: ok - caught all four bad fixtures, passed the good one"
+echo "git-tests-control: ok - caught all four bad fixtures, passed both good ones"

@@ -199,7 +199,8 @@ requests never count, so a junk flood cannot move the scored point.
 - `{"kind": "stale-read", "after": OP, "read": READ_OP}`: once `after` has
   applied, the first `read` is answered from the state before it. Each fault
   keeps its own snapshot, so two faults never overwrite or consume each other.
-  The snapshot also freezes each open PR's remote-derived view (head, files,
+  A stale "not found" is a stale answer and consumes the fault. A usage
+  error, such as `--jq` without `--json`, does not. The snapshot also freezes each open PR's remote-derived view (head, files,
   commits, mergeable), so a stale answer is the old payload, never old state
   mixed with the live remote.
 
@@ -263,6 +264,14 @@ these cases:
   file or directory;
 - any entry is owned by another uid;
 - any entry is group- or other-writable.
+
+Further rules (counter-model review, pass 3):
+- The root itself is checked first, and any listing error fails the check.
+- An inspection that examined nothing fails, so an unlistable or missing tree
+  is never read as clean.
+- The remote path must be absolute, with no `.` or `..` component. It is the
+  one path both checked and handed to git, so `link/..` cannot check one
+  directory and run git in another.
 
 Checks use `lstat`, never following links. The controller's own git calls
 run under umask 022, so what it writes stays controller-only. This PR has no

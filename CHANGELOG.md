@@ -32,6 +32,14 @@ and version plan.
     with closed per-route key sets.
   - Remote ref rewrites are DETECTED as `remote_integrity: VIOLATED`, never
     reconciled. Prevention is #436.
+  - Running git as the controller against a remote the subject can write
+    would run subject-chosen code on the host, through a written `commondir`
+    or a config swapped between check and use. `LocalGitRemote` therefore
+    refuses, fail-closed and before any git runs, a remote with any of these:
+    an entry owned by another uid; an entry that is group- or other-writable;
+    a symlink; an unsafe ancestor; an unlistable root; a `..` path. A live
+    attempt's remote must run git inside its containment (#434 hard
+    acceptance).
   - CI installs jq. `ci/check_git_tests_ran.py` now maps each tool-dependent
     module to the tools it needs (git, jq), and a committed jq-skip bad control
     fails it. The pre-change checker passed that control.

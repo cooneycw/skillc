@@ -29,6 +29,7 @@ on its own.
 """
 from __future__ import annotations
 
+import re
 import sys
 import xml.etree.ElementTree as ET
 
@@ -68,7 +69,8 @@ def check(report_path: str) -> list[str]:
         if skipped is not None:
             message = (skipped.get("message") or "").lower()
             for tool in REQUIRED_TOOLS:
-                if tool in message:
+                # A whole word, so "digital" is not a git skip (#276 pass 3).
+                if re.search(rf"\b{re.escape(tool)}\b", message):
                     tool_skips[tool].append(f"{classname}::{case.get('name')}: {skipped.get('message')}")
             continue
         for name in TOOL_DEPENDENT_FILES:

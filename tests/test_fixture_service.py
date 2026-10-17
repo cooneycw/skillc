@@ -677,3 +677,46 @@ def test_the_service_refuses_a_subject_writable_remote_as_an_error_event(world: 
     event = last_event(service)
     assert event["decision"] == "error" and "RemoteUntrusted" in event["reason"]
     assert service.finalize("attempt-1").remote_integrity == "UNKNOWN"
+
+
+# --- counter-model review pass 3 regressions ---------------------------------------
+
+def test_an_unlistable_remote_root_is_refused_not_read_as_empty(world: World) -> None:
+    world.bare.chmod(0o311)  # traversable, not listable: os.walk alone yields nothing
+    try:
+        with pytest.raises(fs.RemoteUntrusted):
+            fs.LocalGitRemote(world.bare).resolve("refs/heads/main")
+    finally:
+        world.bare.chmod(0o755)
+
+
+def test_a_missing_remote_root_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(fs.RemoteUntrusted, match="cannot be inspected"):
+        fs.LocalGitRemote(tmp_path / "absent.git").resolve("refs/heads/main")
+
+
+def test_a_symlink_plus_dotdot_path_cannot_check_one_dir_and_run_git_in_another(world: World,
+                                                                              tmp_path: Path) -> None:
+    (tmp_path / "inner").mkdir()
+    (tmp_path / "link").symlink_to(tmp_path / "inner")
+    with pytest.raises(fs.RemoteUntrusted, match="no '.' or '..'"):
+        fs.LocalGitRemote(tmp_path / "link" / ".." / "remote.git")
+
+
+def test_a_usage_error_does_not_consume_a_stale_fault(world: World) -> None:
+    service = world.service(faults=[{"kind": "stale-read", "after": "issue.close", "read": "issue.view"}])
+    ask(service, "issue", "close", "1")
+    usage = ask(service, "issue", "view", "1", "--jq", ".state")  # --jq without --json
+    assert usage["exit_code"] == 1 and "without specifying `--json`" in usage["stderr"]
+    assert not service._faults[0]["fired"]
+    stale = json.loads(ask(service, "issue", "view", "1", "--json", "state")["stdout"])
+    assert stale == {"state": "OPEN"} and service._faults[0]["fired"]
+
+
+def test_an_unlistable_subdirectory_is_refused_not_skipped(world: World) -> None:
+    (world.bare / "objects").chmod(0o311)  # the walk cannot list it; it must not just skip it
+    try:
+        with pytest.raises(fs.RemoteUntrusted, match="could not be fully inspected"):
+            fs.LocalGitRemote(world.bare).resolve("refs/heads/main")
+    finally:
+        (world.bare / "objects").chmod(0o755)
