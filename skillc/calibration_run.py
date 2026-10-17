@@ -687,6 +687,36 @@ def require_textual_evidence(declaration: calibration.DiscriminationDeclaration,
     return evidence
 
 
+def _norm_text(text: str) -> str:
+    return " ".join(text.split())
+
+
+def require_no_delivered_survivor(treatment: Treatment, removed_text: str) -> None:
+    """Scan EVERY file the degraded treatment actually delivers (counter-model
+    finding, pass 3: the subject selects all skills, while P1's textual scan
+    covered only the profile's closure). Refuses when any delivered file still
+    carries the full removed sentence or any 3+-word piece of it (a line that is
+    itself contained in it), on whitespace-normalized text. A necessary textual
+    check on the real delivered population, never proof the obligation is gone."""
+    removed = _norm_text(removed_text)
+    found: list[str] = []
+    for path, data in sorted(treatment.home_files.items()):
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            continue  # binary content cannot carry the sentence as text
+        if removed and removed in _norm_text(text):
+            found.append(f"{path} (whole sentence)")
+            continue
+        for line in text.splitlines():
+            piece = _norm_text(line)
+            if len(piece.split()) >= 3 and piece in removed:
+                found.append(f"{path}: {piece!r}")
+                break
+    if found:
+        raise CalibrationRefused(f"the degraded install still delivers the removed sentence or a piece of it: {found}")
+
+
 def plan_discrimination(
     declaration: calibration.DiscriminationDeclaration, store: Path, *, root: Path,
     treatments: Mapping[str, Treatment], image_digest: str | None,
@@ -752,8 +782,11 @@ def run_discrimination(
     reconciliation are the real ones, so a rehearsal accounts for every slot a
     live run would. `total_seconds` overrides the declared cap (tests only)."""
     calibration.require_approved_discrimination(declaration, root)
+    if image_digest != _shared_str(declaration, "image", "digest"):
+        raise CalibrationRefused("the run's image digest differs from the approved declaration's")
     require_textual_evidence(declaration, root)
     degraded = degraded_treatment(intact, declaration)
+    require_no_delivered_survivor(degraded, str(declaration.mutation.get("removed_text")))
     treatments = {"intact": intact, "degraded": degraded}
     model, effort = declared_model(declaration)
     client_name, client_version = declared_client(declaration)
@@ -853,8 +886,29 @@ def stored_discrimination_declaration(experiment: trial.Experiment) -> calibrati
         calibration.require_discrimination_approval_record(declaration)
     except calibration.DeclarationRefused as exc:
         raise CalibrationRefused(f"stored discrimination declaration is not an approved one: {exc}") from exc
-    if tuple(s.arm for s in schedule_from_ledger(experiment)) != declaration.arm_order:
+    schedule = schedule_from_ledger(experiment)
+    if tuple(s.arm for s in schedule) != declaration.arm_order:
         raise CalibrationRefused("stored discrimination declaration and ledger schedule disagree")
+    # Every trial's runtime identities and configuration must be the stored
+    # declaration's (counter-model finding, pass 3), as the outcome report checks.
+    counts: dict[str, int] = {}
+    for position, ((planned, _attempt), scheduled) in enumerate(zip(experiment.attempts(), schedule, strict=True), 1):
+        counts[scheduled.arm] = counts.get(scheduled.arm, 0) + 1
+        binding = planned["config"]
+        assert isinstance(binding, dict)
+        config = json.loads(trial._read_object(experiment.root, str(binding["digest"])))
+        expected = {"arm": scheduled.arm, "repeat": counts[scheduled.arm], "position": position}
+        if any(config.get(k) != v or type(config.get(k)) is not type(v) for k, v in expected.items()) \
+                or scheduled.repeat != counts[scheduled.arm]:
+            raise CalibrationRefused("stored declaration and trial configuration schedule disagree")
+        grader = planned.get("grader")
+        if planned.get("case") != {"id": declaration.grader_id, "revision": declaration.grader_revision} \
+                or not isinstance(grader, dict) or grader.get("id") != declaration.grader_id \
+                or grader.get("revision") != declaration.grader_revision:
+            raise CalibrationRefused("stored declaration and ledger grader identity disagree")
+        if planned.get("client") != declaration.shared["client"] \
+                or planned.get("image") != {"digest": _shared_str(declaration, "image", "digest")}:
+            raise CalibrationRefused("stored declaration and ledger runtime identity disagree")
     return declaration
 
 

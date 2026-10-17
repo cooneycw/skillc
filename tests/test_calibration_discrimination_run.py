@@ -232,7 +232,8 @@ def test_a_mutated_identity_is_refused_before_any_store(tmp_path: Path) -> None:
     with pytest.raises(cr.CalibrationRefused, match="occurs 0 time"):
         cr.run_discrimination(_parse(_approved(tmp_path)), run_dir=run_dir,
                               intact=_intact(**{SURFACE: DEGRADED_REF, CLOSURE: DEGRADED_REF}),
-                              image_digest=None, backends=lambda: (None, None), argv_for=lambda _s: ["codex"],
+                              image_digest="sha256:" + "d" * 64, backends=lambda: (None, None),
+                              argv_for=lambda _s: ["codex"],
                               rehearse=True)
     assert not (run_dir / "store").exists()
 
@@ -338,4 +339,53 @@ def test_a_report_over_an_unapproved_stored_snapshot_is_refused(tmp_path: Path) 
     outcomes = [mp.AttemptOutcome(s, trial.finalize(experiment, s.attempt_id, disposition="unavailable", reason="t"), None)
                 for s in schedule]
     with pytest.raises(cr.CalibrationRefused, match="not an approved one"):
+        cr.build_discrimination_report(experiment, outcomes, declaration)
+
+
+
+def test_another_delivered_skill_still_carrying_the_sentence_is_refused(tmp_path: Path) -> None:
+    """Counter-model finding (pass 3): the subject installs every skill while
+    P1's scan covered only the profile closure; a copy of the removed sentence
+    in ANOTHER delivered skill must refuse the run."""
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    intact = _intact(**{".codex/skills/flow-auto/notes.md": b"Remember: " + REMOVED.encode()})
+    with pytest.raises(cr.CalibrationRefused, match="still delivers the removed sentence"):
+        cr.run_discrimination(_parse(_approved(tmp_path)), run_dir=run_dir, intact=intact,
+                              image_digest="sha256:" + "d" * 64, backends=lambda: (None, None),
+                              argv_for=lambda _s: ["codex"], rehearse=True)
+    assert not (run_dir / "store").exists()
+
+
+def test_a_wrapped_piece_in_another_delivered_skill_is_refused(tmp_path: Path) -> None:
+    intact = _intact(**{".codex/skills/flow-auto/notes.md": b"`skipped gates:` name is a SKIP row - never a PASS.\n"})
+    with pytest.raises(cr.CalibrationRefused, match="piece of it"):
+        cr.require_no_delivered_survivor(cr.degraded_treatment(intact, _parse(_approved(tmp_path))), REMOVED)
+
+
+def test_a_run_on_an_unapproved_image_is_refused_before_any_store(tmp_path: Path) -> None:
+    """Counter-model finding (pass 3): the runner accepted an image digest
+    other than the approved one."""
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    with pytest.raises(cr.CalibrationRefused, match="image digest differs"):
+        cr.run_discrimination(_parse(_approved(tmp_path)), run_dir=run_dir, intact=_intact(),
+                              image_digest="sha256:" + "9" * 64, backends=lambda: (None, None),
+                              argv_for=lambda _s: ["codex"], rehearse=True)
+    assert not (run_dir / "store").exists()
+
+
+def test_a_report_over_a_ledger_with_another_image_is_refused(tmp_path: Path) -> None:
+    """The report checks every trial's runtime identity against the stored,
+    approved declaration: an approved snapshot planned on another image."""
+    data = _approved(tmp_path, attempts=1)
+    declaration = _parse(data)
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    degraded = cr.degraded_treatment(_intact(), declaration)
+    experiment, schedule = cr.plan_discrimination(
+        declaration, store, root=ROOT, treatments={"intact": _intact(), "degraded": degraded},
+        image_digest="sha256:" + "9" * 64)
+    outcomes = [mp.AttemptOutcome(s, trial.finalize(experiment, s.attempt_id, disposition="unavailable", reason="t"), None)
+                for s in schedule]
+    with pytest.raises(cr.CalibrationRefused, match="runtime identity disagree"):
         cr.build_discrimination_report(experiment, outcomes, declaration)
