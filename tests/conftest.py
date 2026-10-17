@@ -126,3 +126,15 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
                   for mark in item.iter_markers("xdist_group")}
         if groups:
             item.user_properties.append(("skillc_xdist_group", "_".join(sorted(groups))))
+
+
+def stamp_approval(data: dict) -> dict:
+    """Bind a test declaration's approval to its exact content (#287 P2,
+    D-P2a): sets `approval.declaration_digest` to the declaration's own
+    digest, as a real approval must. Call it LAST, after every edit the test
+    means to approve; a field edited afterwards is then a genuine
+    changed-after-approval case. A null approval is left null."""
+    from skillc import calibration
+    if isinstance(data.get("approval"), dict):
+        data["approval"]["declaration_digest"] = calibration.declaration_digest(data)
+    return data

@@ -262,3 +262,29 @@ Accounting 2026-10-17 (sent to skillc-400): A1 partly, A2 partly/mostly not, A3 
 13. `CHANGELOG.md` - entry.
 
 Scope: medium, mostly transplant. Risk: #237's tokens were measured on a level-1 task, not gate-stops-early (cited as the nearest measured figure, not an estimate for this task). Note: the transplant and retake edits were made before this record was written.
+
+<!-- flow-run n=3 id=fb082cff81df403b940535b927e24ef9 -->
+## Run 3
+
+- Run-id:            fb082cff81df403b940535b927e24ef9
+- Run-start:         eead69306ff2f376736393e0b28c4689be529fde
+- Issue:             #287
+- Base SHA:          eead69306ff2f376736393e0b28c4689be529fde (stacked on the P1 branch)
+- Necessity verdict: Partially addressed
+- Approval:          granted
+- Approver:          skillc-400 (orchestrator, owner-delegated; P2 design approved 2026-10-17 with D-P2a, D-P2b and the P1-digest tie)
+- Recorded at:       2026-10-17T21:06:12Z
+
+### Section B evidence
+P2 mapping against main 53e87d0: calibration-run loads only calibration-declaration (cli.py:1703-1707); no run-time mutation check exists (calibration.py:148-153); discrimination approval binds only attempts_per_arm and mutated_digest; tolerance_non_evaluable_per_arm is never consumed; no --rehearse anywhere. Committed approved declarations: calibration-203, -203-c3, -203-low, -204 (none carries declaration_digest).
+
+### Section C - the approved plan
+1. `skillc/calibration.py` - approval.declaration_digest REQUIRED for both kinds, except the four committed historical approvals pinned by digest (LEGACY set); require_degraded_mutation (removed_text exactly once, degraded sha256 == mutated_digest).
+2. `skillc/calibration_run.py` - per-arm treatments; discrimination planning and running; degraded treatment derived in memory from the intact treatment (both copies, verify_home_files, git: label asserted); tolerance_non_evaluable_per_arm enforced in the report (over tolerance -> that arm UNKNOWN, naming the count); kind-aware report snapshot.
+3. `skillc/cli.py` - calibration-run dispatches on kind; --rehearse (real approval/plan/store/schedule/report path, deterministic in-process attempt function, slot/cap accounting).
+4. `tests/test_calibration_approval_binding.py` - legacy approvals still validate; any field changed after approval refused (client, model, effort, image, caps, seed); legacy edited -> refused.
+5. `tests/test_calibration_discrimination_run.py` - mutation check (count != 1, digest mismatch), degraded derivation, tie to P1's verified digest, tolerance boundary, rehearsal accounting and refusal controls (over-cap, unapproved, stale digest, mutated identity).
+6. `docs/specs/evaluation-facility/calibration.md` or the existing calibration spec - approval binding and discrimination run (if a spec documents calibration-run).
+7. `CHANGELOG.md` - entry.
+
+Scope: large (~300-400 lines plus tests). Risks: duplicate file copies in surface and closure; skill-relative vs container paths; BASELINE assumptions in shared code; rehearsal fixtures synthetic until P3.

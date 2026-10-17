@@ -149,8 +149,8 @@ DISCRIMINATION_ARMS = ("intact", "degraded")
 #: revision with exactly `removed_text` removed); this module checks only
 #: its FORMAT. Verifying it against the real intact file, and that
 #: `removed_text` occurs in it exactly once, are run-time preconditions of
-#: every live attempt (stated here, enforced at materialize/run time,
-#: beside the inventory re-validation precondition - not built yet).
+#: every live attempt, enforced by `require_degraded_mutation` (#287 P2)
+#: against the acquired intact bytes before any attempt is planned.
 MUTATION_KEYS = frozenset({"skill", "path", "removed_text", "diagnose_evidence", "mutated_digest"})
 
 #: `sha256:` + 64 lowercase hex characters - `materialize.tree_digest`'s own
@@ -212,11 +212,41 @@ def declaration_digest(data: Mapping[str, object]) -> str:
     return trial.sha256_bytes(trial.canonical({k: v for k, v in data.items() if k != "approval"}))
 
 
+#: #287 P2 (orchestrator ruling D-P2a): an approval binds the WHOLE
+#: declaration - `approval.declaration_digest` must equal
+#: `declaration_digest(data)` for every kind, so any field changed after
+#: approval (client, model, effort, image, caps, seed, ...) is refused.
+#: These four committed declarations were approved before that rule and carry
+#: no declaration_digest; each is pinned here by its OWN canonical digest so
+#: historical approved evidence keeps its meaning. The pin cannot be claimed
+#: by any other declaration: editing one of these four changes its digest, so
+#: it falls out of this set and must then carry a declaration_digest.
+LEGACY_APPROVED_DECLARATION_DIGESTS: Mapping[str, str] = {
+    "sha256:0e95ebda72858a3f5fb2c7874793182a01ffb665be65605e7e6db61d43804f4d": "evals/calibration-203/run-manifest.json",
+    "sha256:e7234cc190c0a814528327ae8aba035805a8d5ffe5bd094b53089166118834a2": "evals/calibration-203-c3/run-manifest.json",
+    "sha256:48319cf9b2d8020347ec2b9f6919cbf9ad5fbee80da41015db7f4f2f1acbf72f": "evals/calibration-203-low/run-manifest.json",
+    "sha256:1636bc7aaf5151253b845f41077b2da119732b755d70b3fd75f5104a7578c34d": "evals/calibration-204/run-manifest.json",
+}
+
+
+def _require_whole_declaration_approval(data: Mapping[str, object], approval: Mapping[str, object]) -> None:
+    """The approval must name this exact declaration (D-P2a), unless the
+    declaration is one of the pinned pre-rule approvals above."""
+    digest = declaration_digest(data)
+    if digest in LEGACY_APPROVED_DECLARATION_DIGESTS:
+        return
+    if approval.get("declaration_digest") != digest:
+        raise _refuse(f"approval.declaration_digest {approval.get('declaration_digest')!r} does not bind this "
+                      f"exact declaration ({digest}); any field changed after approval needs its own approval")
+
+
 def require_outcome_approval(declaration: CalibrationDeclaration) -> None:
     """Pure check, also usable when replaying the immutable launch declaration."""
     if outcome_endpoint(declaration) is None:
-        if declaration.approval is not None and "declaration_digest" in declaration.approval:
-            raise _refuse("outcome fields were removed from a declaration carrying an outcome approval")
+        # Removing outcome fields after approval changes the declaration's
+        # digest, so `_require_whole_declaration_approval` (D-P2a, run by every
+        # `require_approved*`) refuses it; a declaration_digest on a
+        # non-outcome approval is now the normal case, not a removal signal.
         return
     approval = _require_schedule_approval(declaration.approval, declaration.attempts_per_arm)
     if approval.get("declaration_digest") != declaration_digest(declaration.data):
@@ -687,6 +717,35 @@ def parse_discrimination_declaration(data: Mapping[str, object]) -> Discriminati
     )
 
 
+def require_degraded_mutation(intact_bytes: bytes, mutation: Mapping[str, object]) -> bytes:
+    """The run-time mutation check (#287 P2): the degraded file a discrimination
+    run installs is derived from the ACQUIRED intact file's bytes, and must be
+    the exact file the approval and P1's textual scan describe. `removed_text`
+    must occur EXACTLY once (zero means the declared mutation does not apply to
+    these bytes; more than one means removing "it" is ambiguous), and the bytes
+    with it removed must hash to `mutation.mutated_digest`. Returns those
+    degraded bytes; refuses otherwise.
+
+    This is what binds `mutation.skill`/`path` to real content: an approval's
+    `mutated_digest` alone names a digest, not which file produced it."""
+    removed = mutation.get("removed_text")
+    declared = mutation.get("mutated_digest")
+    if not isinstance(removed, str) or not removed or not isinstance(declared, str):
+        raise _refuse("mutation must name a non-empty removed_text and a mutated_digest")
+    needle = removed.encode("utf-8")
+    count = intact_bytes.count(needle)
+    if count != 1:
+        raise _refuse(f"mutation.removed_text occurs {count} time(s) in the acquired intact "
+                      f"{mutation.get('skill')}/{mutation.get('path')}, not exactly once; the declared "
+                      f"mutation does not describe these bytes")
+    degraded = intact_bytes.replace(needle, b"", 1)
+    measured = trial.sha256_bytes(degraded)
+    if measured != declared:
+        raise _refuse(f"the degraded {mutation.get('skill')}/{mutation.get('path')} hashes to {measured}, not "
+                      f"the declared mutated_digest {declared}; refusing a degraded arm other than the approved one")
+    return degraded
+
+
 def load_discrimination_declaration(path: Path) -> DiscriminationDeclaration:
     return parse_discrimination_declaration(json.loads(path.read_text(encoding="utf-8")))
 
@@ -860,6 +919,9 @@ def require_approved(declaration: CalibrationDeclaration, root: Path) -> None:
         grader = verify.GraderDef.load(root / declaration.task_path)
         if set(endpoint.criteria) - set(grader.criteria):
             raise _refuse("outcome_endpoint selects criteria absent from the declared grader")
+    # Last, as the backstop every narrower check above sits in front of: any
+    # field changed after approval that no specific check names still fails here.
+    _require_whole_declaration_approval(declaration.data, approval)
 
 
 #: skillc#287: a discrimination declaration's own identity fields - parallel
@@ -889,6 +951,18 @@ def _identity_at_discrimination(declaration: DiscriminationDeclaration, path: tu
     for key in path[1:]:
         node = node.get(key) if isinstance(node, dict) else None
     return node
+
+
+def require_discrimination_approval_record(declaration: DiscriminationDeclaration) -> None:
+    """The PURE part of discrimination approval - no disk reads - so a report
+    can re-check a stored launch snapshot without the current checkout's
+    grader, fixture or profile files changing the answer: who/when and the
+    schedule size, the approved mutated_digest, and (D-P2a) the whole
+    declaration digest."""
+    approval = _require_schedule_approval(declaration.approval, declaration.attempts_per_arm)
+    if approval.get("mutated_digest") != declaration.mutation.get("mutated_digest"):
+        raise _refuse("approval.mutated_digest does not match the declared mutation")
+    _require_whole_declaration_approval(declaration.data, approval)
 
 
 def require_approved_discrimination(declaration: DiscriminationDeclaration, root: Path) -> None:
@@ -922,6 +996,7 @@ def require_approved_discrimination(declaration: DiscriminationDeclaration, root
         raise _refuse(f"identities still UNKNOWN: {unknown}; record them before approving a run")
     _require_grader_matches(root, declaration.task_path, declaration.grader_id, declaration.grader_revision)
     _require_task_fixture(root, declaration.task_path, declaration.task_fixture, approval)
+    _require_whole_declaration_approval(declaration.data, approval)  # the backstop, as in require_approved
 
 
 def validate_expanded_instruction_lane(declaration: CalibrationDeclaration, root: Path) -> None:
