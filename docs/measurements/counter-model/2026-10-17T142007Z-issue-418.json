@@ -1,0 +1,25 @@
+{
+  "branch": "issue-418-retain-the-controller-s-trusted-observation-witnes",
+  "counts": {
+    "accepted": 4,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "be6a57f916ab03a4fa8a27fa094c89daee765ee5",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "418",
+  "passes": 2,
+  "recorded_at": "2026-10-17T14:20:07Z",
+  "red_cases": {
+    "already_covered": 8,
+    "proposed": 13
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/17/rollout-2026-10-17T10-17-19-01a14a39-69e1-7fe0-b266-94a99b7c7f8b.jsonl",
+    "thread_id": "01a14a39-69e1-7fe0-b266-94a99b7c7f8b"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
