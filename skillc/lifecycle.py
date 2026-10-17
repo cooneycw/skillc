@@ -244,6 +244,7 @@ def run_through_backend(
     before_execute: Callable[[ExecutionBackend, object], None] | None = None,
     nonce: str | None = None,
     transcript_for_capture: Callable[[], trial.TranscriptEvidence | None] | None = None,
+    imports_for_capture: Callable[[], Sequence[trial.Import]] | None = None,
 ) -> dict[str, object]:
     """Drive `attempt_id` through `backend` from prepare to teardown, and
     finalize it. Returns `trial.finalize`'s lifecycle record, plus
@@ -460,6 +461,7 @@ def run_through_backend(
                                 trial.capture(
                                     experiment, attempt_id,
                                     transcript=transcript_for_capture() if transcript_for_capture else None,
+                                    imports=tuple(imports_for_capture()) if imports_for_capture else (),
                                 )
                             except trial.Refused:
                                 pass  # capture() already recorded capture-failed; nothing more here

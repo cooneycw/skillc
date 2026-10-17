@@ -97,6 +97,7 @@ from . import (
     trial,
     verify,
 )
+from . import egress as eg
 from .backend import Limits
 from .docker_backend import ATTEMPT_LABEL_KEY, OWNER_LABEL_KEY, OWNER_LABEL_VALUE, DockerBackend
 from .runtime_supply import RuntimeSupply
@@ -104,18 +105,25 @@ from .runtime_supply import RuntimeSupply
 #: `_fixture_surface`'s own src-only convention (#267's deprecated shim below).
 _FIXTURE_SRC_DIRNAME = "src"
 
-#: The AGENT container's network. A hosted-model client must reach its
-#: provider, and `DockerBackend`'s own default (`"none"`) made every real
-#: attempt unable to: the first live `collection-run` delivered its prompt,
-#: then every request failed and codex exited 1 - `inconclusive`, never graded.
-#: Owner ruling, recorded on issue #11 (2026-09-27): "i'm fine for a container
-#: (controlled by what we place into it) to have network access. i'm not going
-#: to submit hostile repos". Only the agent container gets it - the GRADING
+#: The AGENT container's network policy (#442, reversing the owner's #11 ruling
+#: of open egress for agent containers). A hosted-model client must reach its
+#: provider - `DockerBackend`'s own `network="none"` made every real attempt
+#: unable to - but skillc's graders live in a PUBLIC repository, so an open
+#: agent container could fetch the grader it is judged by. The agent backend
+#: therefore runs with `egress=True`: a per-attempt `--internal` network, no
+#: DNS, and an allowlisting proxy to the measured provider hosts only
+#: (`egress.py`). Only the agent container gets even that - the GRADING
 #: container keeps `DockerBackend`'s `"none"` (`agent_backends` below).
-#: REVERSAL TRIGGER: revisit (a provider-only egress allowlist or proxy) the
-#: moment skillc is pointed at a subject, fixture or collection the operator
-#: did not choose and trust - the ruling's premise is no hostile inputs.
-AGENT_NETWORK = "bridge"
+#: Container egress covers CLIENT-SIDE fetches only; the server-side channels
+#: are closed by `DEFAULT_CLIENT_ARGVS` below and checked after every attempt
+#: by the transcript census (`agent_trial.server_side_line_types`).
+AGENT_NETWORK_POLICY = "egress:provider-only (#442)"
+
+
+def agent_network_label(backend: DockerBackend) -> str:
+    """What a report states as the agent's network: the egress policy when the
+    backend has one, else the raw network name (e.g. "none", "bridge")."""
+    return AGENT_NETWORK_POLICY if backend.egress else backend.network
 
 #: The real client invocation when the caller supplies none, per client key
 #: (`materialize.SurfaceSpec.client`).
@@ -132,8 +140,12 @@ AGENT_NETWORK = "bridge"
 #: session has no one to approve a tool use, and the liveness canary needs a
 #: confirmed tool write. The trial image runs as the non-root `candidate`
 #: user, which the flag requires.
+#:
+#: codex's server-side channels (web search, remote plugins/apps) are pinned off
+#: by `egress.CODEX_SERVER_SIDE_OFF` (#442, B2), and `agent_trial` refuses a live
+#: codex attempt whose argv lacks any of them.
 DEFAULT_CLIENT_ARGVS: dict[str, tuple[str, ...]] = {
-    "codex": ("codex", "exec", "--sandbox", "danger-full-access", "--skip-git-repo-check"),
+    "codex": ("codex", "exec", "--sandbox", "danger-full-access", "--skip-git-repo-check", *eg.CODEX_SERVER_SIDE_OFF),
     "claude": ("claude", "-p", "--dangerously-skip-permissions"),
 }
 DEFAULT_CLIENT_ARGV = DEFAULT_CLIENT_ARGVS["codex"]
@@ -186,11 +198,11 @@ def agent_backends(
     runtime_supply: RuntimeSupply | None = None,
 ) -> tuple[TrackingDockerBackend, TrackingDockerBackend]:
     """`(agent backend, grading backend)` for one collection run. The agent
-    backend runs on `AGENT_NETWORK` (see its comment for the ruling); the
+    backend runs with provider-only egress (`AGENT_NETWORK_POLICY`, #442); the
     grading backend is left on `DockerBackend`'s own default, deliberately
-    not passed a network, so the grader never gains egress by this ruling."""
+    not passed a network, so the grader never gains egress."""
     agent = TrackingDockerBackend(
-        image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=daemon_timeout, network=AGENT_NETWORK,
+        image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=daemon_timeout, egress=True,
         runtime_supply=runtime_supply,
     )
     grading = TrackingDockerBackend(image=image, base_dir=base, docker_bin=docker_bin, daemon_timeout=daemon_timeout)
@@ -816,7 +828,8 @@ def run_collection_agent_attempt(
         # a degraded tree must never be able to report the pin as what it
         # installed (issue #150-B2). Found as a real, blocking bug while
         # building #150-B2: this line previously read the pin unconditionally.
-        subject_name, acquired.source.revision, acquired.subject.client, record, agent_network=backend.network,
+        subject_name, acquired.source.revision, acquired.subject.client, record,
+        agent_network=agent_network_label(backend),
         workspace_cleaned=str(cleaned[-1].get("status")) if cleaned else None,
         discovery=discovery, discovery_reason=discovery_reason,
         image_digest=observed_image_digest if isinstance(observed_image_digest, str) else None,

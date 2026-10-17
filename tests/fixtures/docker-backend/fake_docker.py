@@ -230,7 +230,7 @@ SKILLC_CONTROL_SOCKET_PATH = "/run/skillc/control.sock"
 _FLAGS_WITH_VALUE = (
     "--network", "--user", "--hostname", "--memory", "--memory-swap",
     "--pids-limit", "--cpus", "--shm-size", "-w", "--storage-opt",
-    "--signal", "--mount",
+    "--signal", "--mount", "--dns",
 )
 
 
@@ -349,11 +349,18 @@ def _state_lock(state_dir: Path, name: str) -> Iterator[None]:
 
 def _write_state(
     state_dir: Path, name: str, status: str, image: str, env: dict[str, str], labels: dict[str, str],
-    container_id: str,
+    container_id: str, networks: list[str] | None = None, dns: list[str] | None = None,
 ) -> None:
+    previous = _state_file(state_dir, name)
+    kept: dict[str, object] = {}
+    if networks is None and previous.is_file():
+        # A status change (stop, kill) keeps the networks the container joined.
+        old = json.loads(previous.read_text(encoding="utf-8"))
+        kept = {"networks": old.get("networks", []), "dns": old.get("dns", [])}
     _atomic_write_json(
         _state_file(state_dir, name),
-        {"status": status, "image": image, "env": env, "labels": labels, "id": container_id},
+        {"status": status, "image": image, "env": env, "labels": labels, "id": container_id,
+         "networks": networks or [], "dns": dns or [], **kept},
     )
 
 
@@ -447,6 +454,13 @@ def cmd_inspect(state_dir: Path, rest: list[str]) -> int:
         print("Error: No such object: " + name, file=sys.stderr)
         return 1
     data = json.loads(path.read_text(encoding="utf-8"))
+    template = next((a for a in rest if a.startswith("{{(index .NetworkSettings.Networks ")), None)
+    if template is not None:
+        # #442: the container's address on one named network - empty when it
+        # has not joined it, as real docker prints for a missing key.
+        network = json.loads(template.split("Networks ", 1)[1].split(")", 1)[0])
+        print("10.99.0.2" if network in data.get("networks", []) else "")
+        return 0
     if "{{.Image}}" in rest:
         # The image id the container was CREATED from (#12): the same
         # deterministic fake digest `image inspect` prints for that image, so
@@ -911,6 +925,8 @@ def cmd_run(state_dir: Path, rest: list[str]) -> int:
     detached = False
     env: dict[str, str] = {}
     labels: dict[str, str] = {}
+    networks: list[str] = []
+    dns: list[str] = []
     i = 0
     while i < len(rest):
         arg = rest[i]
@@ -928,6 +944,12 @@ def cmd_run(state_dir: Path, rest: list[str]) -> int:
         elif arg == "--label":
             k, _, v = rest[i + 1].partition("=")
             labels[k] = v
+            i += 2
+        elif arg == "--network":
+            networks.append(rest[i + 1])
+            i += 2
+        elif arg == "--dns":
+            dns.append(rest[i + 1])
             i += 2
         elif arg in _FLAGS_WITH_VALUE:
             i += 2  # consume and ignore the value; not needed for the simulation
@@ -964,10 +986,25 @@ def cmd_run(state_dir: Path, rest: list[str]) -> int:
             _write_state(state_dir, name, "created", image, env, labels, container_id)
             print("Error response from daemon: OCI runtime create failed (fault injection)", file=sys.stderr)
             return 1
-        _write_state(state_dir, name, "running", image, env, labels, container_id)
+        _write_state(state_dir, name, "running", image, env, labels, container_id,
+                     networks=networks, dns=dns)
+        if labels.get("skillc.role") == "egress-proxy":
+            # #442: the proxy this fake never runs still leaves the log the
+            # real one would start with, plus one allowed CONNECT, so a reader
+            # of it has something to read. `.egress-log-unreadable` makes the
+            # later `cat` fail instead.
+            log = _in_container(state_dir, name, "/tmp/skillc-egress-proxy.log")
+            log.parent.mkdir(parents=True, exist_ok=True)
+            log.write_text(
+                json.dumps({"event": "start", "allowlist": json.loads(argv[-2]), "digest": argv[-1]}) + "\n"
+                + json.dumps({"t": 0, "method": "CONNECT", "target": "chatgpt.com:443", "decision": "allowed"}) + "\n",
+                encoding="utf-8",
+            )
+            if (state_dir / ".egress-log-unreadable").exists():
+                log.unlink()
         return 0
 
-    _write_state(state_dir, name, "running", image, env, labels, container_id)
+    _write_state(state_dir, name, "running", image, env, labels, container_id, networks=networks, dns=dns)
     try:
         proc = subprocess.run(argv, cwd=_in_container(state_dir, name, WORK_CONTAINER_PATH), env=env, check=False)
     except OSError as exc:
@@ -1028,9 +1065,62 @@ def cmd_events(state_dir: Path, rest: list[str]) -> int:
     return 0
 
 
+def _network_file(state_dir: Path, network: str) -> Path:
+    return state_dir / "networks" / f"{network}.json"
+
+
+def cmd_network(state_dir: Path, rest: list[str]) -> int:
+    """#442: `network create [--internal] [--label K=V ...] NAME`,
+    `network connect NAME CONTAINER`, `network rm NAME`. A network is a JSON
+    file under `networks/`. `.refuse-network-create` and
+    `.refuse-network-connect` make those calls fail outright."""
+    if not rest:
+        print("fake_docker: network requires a subcommand", file=sys.stderr)
+        return 2
+    verb, args = rest[0], rest[1:]
+    if verb == "create":
+        if (state_dir / ".refuse-network-create").exists():
+            print("Error response from daemon: network create refused (fault injection)", file=sys.stderr)
+            return 1
+        internal = "--internal" in args
+        labels = {args[i + 1].partition("=")[0]: args[i + 1].partition("=")[2]
+                  for i, a in enumerate(args) if a == "--label"}
+        name = args[-1]
+        target = _network_file(state_dir, name)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write_json(target, {"internal": internal, "labels": labels})
+        return 0
+    if verb == "connect":
+        if (state_dir / ".refuse-network-connect").exists():
+            print("Error response from daemon: network connect refused (fault injection)", file=sys.stderr)
+            return 1
+        network, container = args[0], args[1]
+        if not _network_file(state_dir, network).is_file():
+            print(f"Error response from daemon: network {network} not found", file=sys.stderr)
+            return 1
+        path = _state_file(state_dir, container)
+        if not path.is_file():
+            print("Error: No such container: " + container, file=sys.stderr)
+            return 1
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["networks"] = [*data.get("networks", []), network]
+        _atomic_write_json(path, data)
+        return 0
+    if verb == "rm":
+        target = _network_file(state_dir, args[0])
+        if not target.is_file():
+            print(f"Error response from daemon: network {args[0]} not found", file=sys.stderr)
+            return 1
+        target.unlink()
+        return 0
+    print(f"fake_docker: unimplemented network subcommand {verb!r}", file=sys.stderr)
+    return 2
+
+
 SUBCOMMANDS = {
     "run": cmd_run, "inspect": cmd_inspect, "rm": cmd_rm, "version": cmd_version,
     "kill": cmd_kill, "exec": cmd_exec, "cp": cmd_cp, "ps": cmd_ps, "events": cmd_events,
+    "network": cmd_network,
 }
 
 

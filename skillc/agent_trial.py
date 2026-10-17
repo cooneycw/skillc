@@ -102,6 +102,7 @@ from . import (
     verify,
     witness_capture,
 )
+from . import egress as eg
 from . import runtime_supply as rs
 from . import transcript_adapter as ta
 from .backend import BackendUnavailable, Confirmation, ExecutionBackend, Limits
@@ -283,6 +284,56 @@ CLIENT_SPECS: dict[str, ClientSpec] = {
         run_metadata=ta.codex_run_metadata,
     ),
 }
+
+
+class ServerSideChannelRefused(Exception):
+    """#442: a live codex attempt was about to run with a channel to the
+    outside that skillc does not control - a server-side tool left on (web
+    search, remote plugins/apps), or an open network with no provider-only
+    egress policy. Raised before any container exists, so nothing is spent."""
+
+
+#: #442: response-item and event types that are a SERVER-SIDE tool, which runs
+#: at the model provider and so never touches the container's network. Any of
+#: them in a live transcript means the attempt reached outside the controlled
+#: environment, and its result is not credited.
+_SERVER_SIDE_TYPE = re.compile(r"web_search|mcp_|image_generation|tool_search|remote_plugin|plugin|connector|app_call|"
+                               r"computer_call|browser")
+#: A tool CALL whose name points at a plugin, app or MCP server. A remote plugin
+#: can surface as an ordinary `function_call` with a namespaced name, which a
+#: count of line types cannot see.
+_SERVER_SIDE_NAME = re.compile(r"mcp__|@openai-curated|openai-curated-remote|^(apps?|plugins?|web|browser|image_gen)[._:]",
+                               re.IGNORECASE)
+_CALL_TYPES = frozenset({"function_call", "custom_tool_call", "local_shell_call", "mcp_tool_call"})
+
+
+def server_side_tool_uses(transcript: bytes | None, line_types: Mapping[str, object] | None) -> list[str]:
+    """#442: each server-side tool use the attempt's transcript shows, as
+    `<type>` or `<type>:<name>` (sorted, deduplicated). Reads the transcript
+    itself when there is one - types AND call names - and otherwise the
+    census line types. Empty means none was seen in what was read."""
+    found: set[str] = set()
+    for key in (line_types or {}):
+        if _SERVER_SIDE_TYPE.search(str(key).split("/", 1)[-1]):
+            found.add(str(key))
+    for line in (transcript or b"").decode("utf-8", "replace").splitlines():
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        payload = entry.get("payload") if isinstance(entry, dict) else None
+        if not isinstance(payload, dict):
+            continue
+        kind = str(payload.get("type"))
+        top = str(entry.get("type"))
+        if _SERVER_SIDE_TYPE.search(kind):
+            found.add(f"{top}/{kind}")
+        if kind in _CALL_TYPES:
+            names = [payload.get(k) for k in ("name", "server", "namespace")]
+            for name in names:
+                if isinstance(name, str) and _SERVER_SIDE_NAME.search(name):
+                    found.add(f"{top}/{kind}:{name}")
+    return sorted(found)
 
 
 class HomeFileVerificationRefused(Exception):
@@ -1835,6 +1886,22 @@ def run_one_attempt(
 
     if client not in CLIENT_SPECS:
         raise credential.CredentialRefused(f"unknown client {client!r}: expected one of {sorted(CLIENT_SPECS)}")
+    if client == "codex" and isinstance(backend, DockerBackend):
+        # #442 preflight, before any container exists: a live codex attempt
+        # runs only with provider-only egress AND every server-side channel
+        # pinned off in its own argv. A scripted subject on network "none"
+        # (the Level-3 campaigns) reaches nothing and is not checked here.
+        if backend.egress:
+            missing = eg.missing_server_side_flags(base_argv)
+            if missing:
+                raise ServerSideChannelRefused(
+                    "refusing a live codex attempt with a server-side channel left open: " + "; ".join(missing)
+                )
+        elif backend.network != "none":
+            raise ServerSideChannelRefused(
+                f"refusing a live codex attempt on network {backend.network!r} with no provider-only egress "
+                "policy (#442): the container could reach the public repository that holds the graders"
+            )
     spec = CLIENT_SPECS[client]
     resolved_workdir = workdir if workdir is not None else PurePosixPath("/work")
     resolved_mcp_servers: Mapping[str, MCPServerSpec] = mcp_servers if mcp_servers is not None else {}
@@ -1909,6 +1976,28 @@ def run_one_attempt(
                 witness_session.failure = witness_session.failure or "witness finalization failed"
             return observe_transcript(observed_backend, handle)
 
+    # #442: the attempt's egress proxy log, read while the proxy still runs
+    # (before teardown) and FIRST, so a failing transcript hook cannot lose it.
+    # It is captured as the `egress-proxy-log` stream of the attempt's manifest.
+    egress_imports: list[trial.Import] = []
+    if isinstance(backend, DockerBackend) and backend.egress:
+        observe_without_egress = observe_before_teardown
+
+        def observe_before_teardown(observed_backend: ExecutionBackend, handle: object) -> Mapping[str, object]:
+            summary: dict[str, object]
+            raw = observed_backend.egress_log(handle) if isinstance(observed_backend, DockerBackend) else None
+            if raw is None:
+                summary = {"status": "unread", "reason": "the egress proxy log could not be read before teardown"}
+            else:
+                log_path = base / f"{attempt_id}.{eg.PROXY_LOG_STREAM}.jsonl"
+                log_path.write_bytes(raw)
+                digest = trial.sha256_bytes(raw)
+                egress_imports.append(trial.Import(log_path, eg.PROXY_LOG_STREAM, "observed", digest))
+                summary = {"status": "read", "digest": digest, **eg.summarize_log(raw)}
+            observed = dict(observe_without_egress(observed_backend, handle))
+            observed["egress"] = summary
+            return observed
+
     def transcript_for_capture() -> trial.TranscriptEvidence:
         return stored_transcript.get("evidence") or trial.TranscriptEvidence(
             None, "the transcript observation hook did not complete; no transcript was read",
@@ -1918,6 +2007,7 @@ def run_one_attempt(
         backend, experiment, attempt_id, argv, surface, limits, base,
         before_execute=before_execute, observe_before_teardown=observe_before_teardown, nonce=nonce,
         transcript_for_capture=transcript_for_capture,
+        imports_for_capture=lambda: egress_imports,
     )
 
     graded: dict[str, object] | None = None
@@ -1939,6 +2029,13 @@ def run_one_attempt(
                 f"canary_satisfied={observation.get('canary_satisfied')!r} - "
                 "never graded without both confirmed against the real transcript"
             )
+        elif server_side := server_side_tool_uses(
+            transcript_for_capture().data, observation.get("transcript_line_types")  # type: ignore[arg-type]
+        ):
+            # #442: a tool that ran at the provider reached outside the
+            # controlled environment; the attempt stays in every account, but
+            # is never credited.
+            grading_blocked_reason = f"not credited: server-side tool observed ({', '.join(server_side)})"
         else:
             try:
                 if grading_backend is None:
