@@ -23,15 +23,21 @@ from pathlib import Path
 
 import pytest
 from conftest import FAKE_DOCKER_DAEMON_TIMEOUT
-from test_agent_trial import GRADER_ROOT, _docker_bin, _fake_argv, _fresh_credential, _mapped_home, _planned
+from test_agent_trial import (
+    GRADER_ROOT,
+    _docker_bin,
+    _fake_argv,
+    _fresh_credential,
+    _mapped_home,
+    _planned,
+)
 
 from skillc import agent_trial as at
-from skillc import calibration, matched_pilot
+from skillc import calibration, matched_pilot, verify
 from skillc import collection_conformance as cc
 from skillc import docker_backend as d
 from skillc import egress as eg
 from skillc import trial as t
-from skillc import verify
 from skillc.backend import BackendUnavailable, Limits
 
 

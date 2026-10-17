@@ -122,14 +122,14 @@ but #315 and the real campaign remain pending.
    - **Record both outcomes on this issue**, generically (no addresses) -
      this is the committed evidence that the detector actually detects
      something, on this specific host, not only in the unit tests.
-8. **#183/#269/#332/#266/#343/#334/#338 break-mode verification (R2):** `--break` takes
+8. **#183/#269/#332/#266/#343/#334/#338/#442 break-mode verification (R2):** `--break` takes
    `none` or `<family>:<mode>`, resolved from a closed table in
    `break-lib.sh` - an unknown family or mode is refused with exit 2
    before any checkout or docker operation. The three bare `channel`
    spellings below (no `channel:` prefix) also still work, kept for
    compatibility with runs recorded before family prefixes existed (#315
    follow-up); a bare `witness`, `gateshim`, `coldinstall`, `trialimage`,
-   `closure` or `cwd` mode has no such form and is refused.
+   `closure`, `cwd` or `egress` mode has no such form and is refused.
    ```
    run-real-docker <reviewed-tested-sha> --break none                           # expect SUCCESS
    run-real-docker <reviewed-tested-sha> --break channel:omit-mount             # expect FAILURE
@@ -155,11 +155,23 @@ but #315 and the real campaign remain pending.
    run-real-docker <reviewed-tested-sha> --break closure:project-venv-permissions  # expect FAILURE
    run-real-docker <reviewed-tested-sha> --break closure:shim-alters-output   # expect FAILURE
    run-real-docker <reviewed-tested-sha> --break cwd:confine-root-omitted     # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break egress:allow-all             # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break egress:bridge-network        # expect FAILURE
    ```
+
+   The `egress` controls (#442) run `tests/test_agent_egress_live.py` from
+   inside a container built exactly as a live agent's is (`DockerBackend(
+   egress=True)`: a per-attempt `--internal` network, no DNS, the allowlisting
+   proxy). `allow-all` widens that proxy to GitHub, so the denial property must
+   fail; `bridge-network` also attaches the agent to the default bridge, so the
+   "a proxy-ignoring client has no way out" property must fail. The provider
+   check passes in both. There is no DNS mode: an `--internal` network resolves
+   no external name even with `--dns` set (measured on this runner), so such a
+   break could never break anything.
    Break-mode runs post only to `skillc/real-docker-control`
    (never the certifying `skillc/real-docker` context) and are labelled
-   EXPECTED-RED. Record all twenty-four results on this issue (the
-   twenty-three break-mode commands above, plus the `none` run itself).
+   EXPECTED-RED. Record all twenty-six results on this issue (the
+   twenty-five break-mode commands above, plus the `none` run itself).
 
    The `cwd` control (#338) runs the same swapped-cwd exec without
    `confine_root`. Its expected red is a strict XFAIL that is reached only
@@ -191,10 +203,10 @@ while the manual evidence run is still being prepared.
 ### Retaining and interpreting campaign evidence
 
 Run the final merged floor and all declared break modes at one tested SHA,
-using one explicitly installed reviewed runner SHA. The floor is the ten
+using one explicitly installed reviewed runner SHA. The floor is the eleven
 files in `ci/check_real_docker_ran.py` (including #338's cwd-confinement
-file, #393's nested-directory ownership file and #414's runner-cleanup
-file); also include the merged #348 production path in the final inventory. Report
+file, #393's nested-directory ownership file, #414's runner-cleanup
+file and #442's provider-only egress file); also include the merged #348 production path in the final inventory. Report
 each issue's remaining acceptance separately; an aggregate green does not
 alone establish another issue's acceptance. #334's real-script byte identity
 and complete witness coverage are asserted by the `none` run of

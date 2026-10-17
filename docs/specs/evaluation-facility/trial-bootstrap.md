@@ -88,6 +88,73 @@ argument parsing before a trial even started - a generic-looking helper is
 not automatically client-agnostic, and this module states explicitly, per
 function, which claims are pinned-CLI-specific.
 
+## Egress: provider-only, and what it does not cover (#442)
+
+A live agent container reaches its model provider and nothing else. This
+reverses the owner's #11 ruling (open egress for agent containers) for the
+#288 study: skillc's graders, fixtures and expected outcomes live in a public
+repository, so an open container could fetch the grader it is judged by.
+
+`DockerBackend(egress=True)` (`skillc/egress.py`) gives each attempt:
+
+- its own Docker `--internal` network and nothing else. An internal network has
+  no gateway and no NAT, so a client that ignores proxy settings has no route
+  out at all (measured on the runner: "Network is unreachable");
+- no external name resolution. An internal network resolves no external name
+  even with `--dns` set (measured on the runner, Docker 29.8.2); `--dns 0.0.0.0`
+  is defence in depth;
+- a per-attempt proxy container, on that network and the default bridge, that
+  forwards `CONNECT host:443` only for `egress.ALLOWED_HOSTS` (`chatgpt.com`,
+  `auth.openai.com`) and logs every request. The agent gets the proxy's address
+  in its proxy environment. The log is captured into the attempt's artifact
+  manifest as the `egress-proxy-log` stream; its first line records the
+  allowlist and its digest.
+
+The allowlist is a measurement, re-taken whenever the pinned client changes:
+pinned codex 0.157.1 with ChatGPT auth, through a logging CONNECT proxy, with
+`strace -f -e trace=connect` on the whole process tree. Every connection went
+through the proxy and the client resolved no names itself. `ab.chatgpt.com` was
+denied and the run still succeeded; `*.oaiusercontent.com` was not contacted
+once plugins were disabled. `auth.openai.com` is allowed for token refresh by
+ruling (not exercised in the measurement).
+
+**Container egress covers CLIENT-SIDE fetches only.** A tool that runs at the
+model provider never touches the container's network, so no egress rule can
+stop it. Measured with the pinned client: by default `codex debug prompt-input`
+lists **16 OpenAI-curated remote plugins** to the model, among them `GitHub
+(github@openai-curated-remote)`; disabling any one of `apps`, `plugins` or
+`remote_plugin` removes all 16. Server-side web search is a separate channel.
+Both are closed in the client's own argv (`egress.CODEX_SERVER_SIDE_OFF`):
+`--strict-config -c web_search="disabled" --disable apps --disable plugins
+--disable remote_plugin`. `--strict-config` makes an unknown or renamed key an
+error rather than a silently ignored one.
+
+Two checks enforce it:
+
+- **Preflight, before any container exists**: `agent_trial.run_one_attempt`
+  refuses (`ServerSideChannelRefused`) a live codex attempt whose argv lacks any
+  of those flags or re-enables one later in the argv, and a live codex attempt
+  on an open network with no egress policy.
+- **After every attempt**: `agent_trial.server_side_tool_uses` reads the stored
+  transcript, both item types and call names (a remote plugin can surface as a
+  `function_call` with a namespaced name), plus the census line types. Any
+  server-side tool use blocks grading with `not credited: server-side tool
+  observed (<type>)`. The attempt stays in every account with that reason; it is
+  never dropped from a population or denominator.
+
+**Re-measure on every client bump.** A later client can add a server-side
+feature these flags do not name. Bumping the pinned codex means re-running both
+measurements (the egress hosts and `codex debug prompt-input`) before a live run.
+
+Not covered: Claude Code live attempts. Its server-side web search is not pinned
+off here, and #288 runs codex only.
+
+The real-Docker controls (`tests/test_agent_egress_live.py`, in the runner's
+floor) check from inside a live-configured container that the provider is
+reachable through the proxy, GitHub is refused by it, and a proxy-ignoring
+client has no route and no DNS. The `egress:allow-all` and
+`egress:bridge-network` break modes each make exactly one of those fail.
+
 ## A per-trial seed is bound to exactly one project and one CLI version
 
 `validate_seed_before_launch` requires `projects` to contain EXACTLY one

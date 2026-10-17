@@ -911,6 +911,10 @@ class DockerBackend:
     #: `network` is then not used for it (`egress.py`). Grading and scripted
     #: containers leave this False and keep `network` (default "none").
     egress: bool = False
+    #: The hosts the egress proxy forwards to. Production never sets this:
+    #: the default IS the measured allowlist. Only the real-Docker control's
+    #: `allow-all` break widens it, to prove the denial check can fail.
+    egress_hosts: tuple[str, ...] = eg.ALLOWED_HOSTS
     #: Host-side directory for #183's socket files - see
     #: `DEFAULT_TRIGGER_SOCKET_DIR`'s own comment for why this is NOT
     #: `base_dir`. `repr=False`: a host filesystem path, same reasoning as
@@ -925,7 +929,7 @@ class DockerBackend:
             isolation=(
                 "container (pid/mount/network namespaces)",
                 ("network: a per-attempt --internal network, no DNS; egress only through the "
-                 f"per-attempt proxy to {', '.join(eg.ALLOWED_HOSTS)}:443 (#442; client-side fetches only - "
+                 f"per-attempt proxy to {', '.join(self.egress_hosts)}:443 (#442; client-side fetches only - "
                  "server-side tools are closed by the client's declared flags and the transcript census)"
                  if self.egress else
                  f"network={self.network} by default" if self.network == "none"
@@ -1110,7 +1114,7 @@ class DockerBackend:
             created_network = True
             created_proxy = True  # `run -d` can create a container even when it fails to start
             self._egress_call(eg.proxy_run_argv(self.docker_bin, image=self.image, name=proxy, labels=labels,
-                                                container_user=_container_user()),
+                                                container_user=_container_user(), hosts=self.egress_hosts),
                               env, f"start egress proxy {proxy}")
             self._egress_call(eg.network_connect_argv(self.docker_bin, network, proxy), env,
                               f"connect {proxy} to {network}")
