@@ -59,7 +59,7 @@ def test_a_sourceless_pyc_and_other_cache_dir_files_are_still_captured(tmp_path:
     (root / "src" / "__pycache__" / "notes.txt").write_text("not bytecode\n", encoding="utf-8")
     (root / "__pycache__.pyc").write_bytes(b"a file, not a cache directory")
     got = _capture(root, tmp_path / "store")
-    assert sorted(a["path"] for a in got.artifacts) == [
+    assert sorted(str(a["path"]) for a in got.artifacts) == [
         "__pycache__.pyc", "src/__pycache__/notes.txt", "src/legacy.pyc", "src/mod.py"]
     assert got.exclusions == []
 
