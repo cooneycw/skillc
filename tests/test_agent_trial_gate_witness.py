@@ -222,7 +222,7 @@ def test_production_witness_envelope_is_retained_and_rederives_every_run(
     stored_results = list((tmp_path / "store").rglob(f"result-{graded['result_id']}.json"))
     assert len(stored_results) == 1
     experiment = trial.Experiment.open(stored_results[0].parent)
-    envelope = verify.read_trusted_observation(experiment, json.loads(stored_results[0].read_bytes()))
+    envelope = verify.read_witness_envelope(experiment, json.loads(stored_results[0].read_bytes()))
     assert envelope == trusted[0]
     assert envelope is not None and envelope["graded_tree_digest"] == trusted[0]["graded_tree_digest"]
     gates = envelope["witness"]["gates"]  # type: ignore[index]

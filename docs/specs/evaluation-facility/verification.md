@@ -255,13 +255,17 @@ lock: after the checks that the store did not change while candidate code ran,
 and before the result is written. A crash between the two therefore leaves an
 unreferenced object, never a result naming bytes the store does not hold.
 
-`read_trusted_observation(experiment, result)` returns the envelope a result
-was graded against. It returns `None` only when the result records no digest.
-It refuses when the object is absent, is a symlink, or no longer hashes to its
-name, and when the result's two recorded digests disagree. A missing envelope is
-never read as "no witness". From the envelope alone, a reader re-derives each
-witnessed gate run's `tree_digest_at_start`, exit code and stages, and the
-`graded_tree_digest`.
+`read_trusted_observation(experiment, result)` returns the exact bytes a
+result was graded against. A runtime fixture service's log need not be JSON.
+`read_witness_envelope` decodes a gate witness's `{"witness": ...,
+"graded_tree_digest": ...}` envelope from those bytes and refuses anything
+else. Both return `None` only when the result records no digest. They refuse
+when the object is absent, is a symlink, or no longer hashes to its name, when
+a recorded digest is malformed, and when the result's two recorded digests
+disagree. A missing envelope is never read as "no witness". From the envelope
+alone, a reader re-derives each witnessed gate run's `tree_digest_at_start`,
+exit code and stages, and the `graded_tree_digest`. If the stored bytes'
+digest is not the one grading recorded, no result is written.
 
 A regrade passes no trusted observation, so a regraded result records no digest
 and has no envelope. The original result keeps its envelope. The red case is

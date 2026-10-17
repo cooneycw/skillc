@@ -1382,35 +1382,53 @@ def _grade_and_store_held(experiment: trial.Experiment, attempt_id: str, grader:
     return result, graded
 
 
-def read_trusted_observation(experiment: trial.Experiment,
-                             result: Mapping[str, object]) -> dict[str, object] | None:
-    """The trusted observation a stored result was graded against (#418):
-    for a controller gate witness, `{"witness": ..., "graded_tree_digest": ...}`.
+def read_trusted_observation(experiment: trial.Experiment, result: Mapping[str, object]) -> bytes | None:
+    """The exact trusted-observation bytes a stored result was graded against
+    (#418), verified against the digest the result records.
 
     `None` only when the result records no trusted observation at all. A
     recorded digest whose object is absent, a symlink or no longer hashes to
-    that digest is refused, as is a result whose two recorded copies of the
-    digest disagree - a missing envelope is never read as "no witness"."""
+    that digest is refused, as is a malformed digest or a result whose two
+    recorded copies of the digest disagree - a missing envelope is never read
+    as "no witness". The bytes are returned as stored: a runtime fixture
+    service's log need not be JSON. `read_witness_envelope` decodes a gate
+    witness's envelope."""
     verification = result.get("verification")
     if not isinstance(verification, dict):
         raise Refused("result carries no verification block")
     containment = verification.get("containment")
     verdicts = verification.get("verdicts")
     deterministic = verdicts.get(GRADING_TIER) if isinstance(verdicts, dict) else None
-    recorded = {
+    recorded = [
         containment.get("trusted_observation_digest") if isinstance(containment, dict) else None,
         deterministic.get("trusted_observation_digest") if isinstance(deterministic, dict) else None,
-    }
-    if len(recorded) != 1:
-        raise Refused(f"result records inconsistent trusted observation digests: {sorted(map(str, recorded))}")
-    digest = recorded.pop()
+    ]
+    for digest in recorded:
+        if digest is not None and not isinstance(digest, str):
+            raise Refused(f"result records a malformed trusted observation digest: {digest!r}")
+    if recorded[0] != recorded[1]:
+        raise Refused(f"result records inconsistent trusted observation digests: {recorded!r}")
+    digest = recorded[0]
     if digest is None:
         return None
-    if not isinstance(digest, str):
-        raise Refused(f"result records a malformed trusted observation digest: {digest!r}")
-    envelope = json.loads(trial.read_object(experiment, digest))
-    if not isinstance(envelope, dict):
-        raise Refused(f"trusted observation {digest} is not a JSON object")
+    return trial.read_object(experiment, digest)
+
+
+def read_witness_envelope(experiment: trial.Experiment,
+                          result: Mapping[str, object]) -> dict[str, object] | None:
+    """A controller gate witness's envelope, `{"witness": ...,
+    "graded_tree_digest": ...}`, from `read_trusted_observation`'s verified
+    bytes (#418). `None` only when the result records no trusted observation;
+    bytes that are not a JSON object are refused, never guessed at."""
+    raw = read_trusted_observation(experiment, result)
+    if raw is None:
+        return None
+    try:
+        envelope = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise Refused(f"trusted observation is not a JSON witness envelope: {exc}") from exc
+    if not isinstance(envelope, dict) or set(envelope) != {"witness", "graded_tree_digest"}:
+        raise Refused("trusted observation is not a gate witness envelope")
     return envelope
 
 

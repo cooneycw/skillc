@@ -1230,7 +1230,7 @@ def test_a_witnessed_grade_retains_its_envelope_under_the_recorded_digest(
     assert experiment.object_path(digest).is_file(), "the store holds no envelope for the recorded digest"
     reopened = t.Experiment.open(experiment.root)
     stored = json.loads((reopened.root / f"result-{result['result_id']}.json").read_bytes())
-    envelope = verify.read_trusted_observation(reopened, stored)
+    envelope = verify.read_witness_envelope(reopened, stored)
     assert envelope == json.loads(seen[0])
     assert envelope is not None
     runs = envelope["witness"]["gates"]["flow-check-summary"]["runs"]  # type: ignore[index]
@@ -1238,7 +1238,8 @@ def test_a_witnessed_grade_retains_its_envelope_under_the_recorded_digest(
     assert envelope["graded_tree_digest"] == json.loads(seen[0])["graded_tree_digest"]
 
 
-@pytest.mark.parametrize("fault", ["tampered", "absent", "symlink", "inconsistent"])
+@pytest.mark.parametrize("fault", ["tampered", "absent", "symlink", "inconsistent",
+                                   "digest-int", "digest-list", "digest-dict"])
 def test_a_damaged_or_missing_envelope_is_refused_on_read(
     store: Path, base: Path, grading: Path, tmp_path: Path, fault: str,
 ) -> None:
@@ -1264,22 +1265,53 @@ def test_a_damaged_or_missing_envelope_is_refused_on_read(
         path.unlink()
         path.symlink_to(decoy)
         match = "missing"
-    else:
+    elif fault == "inconsistent":
         verification = result["verification"]
         assert isinstance(verification, dict)
         verification["containment"]["trusted_observation_digest"] = "sha256:" + "0" * 64
         match = "inconsistent"
+    else:
+        verification = result["verification"]
+        assert isinstance(verification, dict)
+        bad = {"digest-int": 17, "digest-list": [], "digest-dict": {}}[fault]
+        verification["verdicts"]["deterministic"]["trusted_observation_digest"] = bad
+        match = "malformed"
     with pytest.raises(verify.Refused, match=match):
         verify.read_trusted_observation(experiment, result)
 
 
-def test_raw_trusted_service_bytes_are_retained_too(store: Path, base: Path, grading: Path) -> None:
-    """Every recorded trusted-observation digest resolves, not only a gate witness's."""
+@pytest.mark.parametrize("raw", [b'{"runtime_service": "controller-owned"}', b"controller stopped\n", b"[1, 2]"],
+                         ids=["json-object", "plain-text", "json-array"])
+def test_raw_trusted_service_bytes_are_retained_too(store: Path, base: Path, grading: Path, raw: bytes) -> None:
+    """Every recorded trusted-observation digest resolves, not only a gate
+    witness's, and a service log comes back as its exact bytes, JSON or not
+    (counter-model finding). It is not a witness envelope, so decoding it as
+    one is refused rather than guessed at."""
     experiment, attempt_id = _captured(store, base, REFERENCE)
-    raw = b'{"runtime_service": "controller-owned"}'
     result, _ = verify._grade_and_store(experiment, attempt_id, GRADER, grading, trusted_observation=raw)
     assert t.read_object(experiment, str(_recorded_digest(result))) == raw
-    assert verify.read_trusted_observation(experiment, result) == json.loads(raw)
+    assert verify.read_trusted_observation(experiment, result) == raw
+    with pytest.raises(verify.Refused, match="witness envelope"):
+        verify.read_witness_envelope(experiment, result)
+
+
+def test_a_store_write_that_disagrees_with_the_graded_digest_writes_no_result(
+    store: Path, base: Path, grading: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The write-time guard: if the stored bytes' digest is not the one grading
+    recorded, nothing is published (counter-model red case)."""
+    experiment, attempt_id = _captured(store, base, REFERENCE)
+    original_grade = verify.grade_files
+
+    def misreporting_grade(*args: object, **kwargs: object) -> verify.Graded:
+        graded = original_grade(*args, **kwargs)  # type: ignore[arg-type]
+        graded.containment["trusted_observation_digest"] = "sha256:" + "f" * 64
+        return graded
+
+    monkeypatch.setattr(verify, "grade_files", misreporting_grade)
+    with pytest.raises(verify.Refused, match="does not match the digest grading recorded"):
+        verify._grade_and_store(experiment, attempt_id, GRADER, grading, gate_witness=_witness_record(attempt_id))
+    assert not list(experiment.root.glob("result-*.json"))
 
 
 def test_an_unwitnessed_grade_stores_no_envelope_and_reads_none(store: Path, base: Path, grading: Path) -> None:
@@ -1304,7 +1336,7 @@ def test_a_regrade_carries_no_witness_so_records_no_envelope(store: Path, base: 
     assert regraded["regrade_of"] == original["result_id"]
     assert _recorded_digest(regraded) is None
     assert verify.read_trusted_observation(experiment, regraded) is None
-    assert verify.read_trusted_observation(experiment, original) is not None
+    assert verify.read_witness_envelope(experiment, original) is not None
 
 
 @pytest.mark.parametrize("receipt", [True, False])

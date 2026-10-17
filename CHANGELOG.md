@@ -16,8 +16,10 @@ and version plan.
   42-row campaign's run directory held no object for any recorded digest.
   `verify` now stores every recorded trusted observation in the experiment's
   `objects/` under its digest, inside the grading lock and before the result,
-  and `read_trusted_observation` returns it, or refuses when it is absent,
-  tampered, a symlink, or the result's two digests disagree.
+  `read_trusted_observation` returns the exact verified bytes (a service log
+  need not be JSON), and `read_witness_envelope` decodes a gate witness's
+  envelope. Both refuse when the object is absent, tampered or a symlink, or
+  when a recorded digest is malformed or the two disagree.
   `trial.put_object`/`read_object` are public wrappers over the existing
   write-once, hash-checked object helpers. The retention test fails on the old
   code with "the store holds no envelope for the recorded digest". A
