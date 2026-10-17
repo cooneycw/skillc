@@ -39,7 +39,7 @@ import sys
 import tempfile
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from . import materialize as m
@@ -901,12 +901,10 @@ def _run_walk(profile: Profile, tree: Tree, problems: list[dict[str, Any]] | Non
     for entry in entries:
         skill_dir = f"{prefix}{entry.directory}"
         tree._refuse_links(skill_dir)  # a link inside a SELECTED skill is in the closure
-        body_text = tree.read(f"{skill_dir}/SKILL.md").decode("utf-8", errors="replace")
         try:
-            frontmatter, body = parse_frontmatter(body_text)
+            description_digest, body_digest = skill_md_digests(tree.read(f"{skill_dir}/SKILL.md"))
         except FrontmatterError as exc:  # pragma: no cover - inventory() already parsed it
             raise Refused(f"{entry.directory}/SKILL.md: {exc}") from exc
-        description = str(frontmatter.get("description", ""))
         skill_files = []
         for f in entry.files:
             repo_path = f"{skill_dir}/{f['path']}"
@@ -918,8 +916,8 @@ def _run_walk(profile: Profile, tree: Tree, problems: list[dict[str, Any]] | Non
         skills.append({
             "name": entry.name,
             "directory": entry.directory,
-            "description_digest": m.sha256_bytes(description.encode()),
-            "body_digest": m.sha256_bytes(body.encode()),
+            "description_digest": description_digest,
+            "body_digest": body_digest,
             "required_references": entry.required_refs,
             "checksums": entry.checksums,
             "files": skill_files,
@@ -1746,6 +1744,58 @@ def _verified_file_records(inventory: dict[str, Any], tree: Tree) -> Iterator[tu
         except OSError as exc:
             raise Refused(f"installation input unreadable: {destination}") from exc
         yield record, data
+
+
+def skill_md_digests(raw: bytes) -> tuple[str, str]:
+    """`(description_digest, body_digest)` of one `SKILL.md`, by the inventory's
+    own rule (#265): the frontmatter `description` and the body, each sha256'd.
+    The ONE definition, so a pin derived from installed bytes (#424) and one
+    read from an inventory cannot drift apart. Raises `FrontmatterError`."""
+    frontmatter, body = parse_frontmatter(raw.decode("utf-8", errors="replace"))
+    description = str(frontmatter.get("description", ""))
+    return m.sha256_bytes(description.encode()), m.sha256_bytes(body.encode())
+
+
+def skill_digest_pins(inventory: dict[str, Any]) -> list[dict[str, str]]:
+    """A `trial.skill_digests` value (#354) for every skill a validated
+    inventory selects: each skill's `SKILL.md` install destination, with the
+    `body_digest` and `description_digest` this inventory recorded for it.
+
+    The destination is the same home-relative path `install()` writes and an
+    installation receipt records, so `records.ledger_binding` can match a
+    `skill-evidence` entry's `skill.path` against it. Refused, never guessed,
+    when a skill has no `SKILL.md` file record or lacks either digest."""
+    pins: list[dict[str, str]] = []
+    for skill in inventory.get("skills", []):
+        name = skill.get("name") if isinstance(skill, dict) else None
+        if not isinstance(skill, dict):
+            raise Refused(f"inventory skill entry {skill!r} is not an object")
+        owned = [f for f in skill.get("files", []) if isinstance(f, dict) and f.get("owner") == f"skill:{name}"]
+        # The ENTRY point, not any SKILL.md that happens to end in the skill's
+        # directory name (counter-model review): `skills/x/examples/x/SKILL.md`
+        # also ends in `x/SKILL.md`. The entry's parent directory contains every
+        # file the skill owns; a nested example's parent cannot, because the
+        # real entry file itself lies outside it.
+        sources = [str(f.get("source", "")) for f in owned]
+        destinations = [
+            f.get("destination") for f in owned
+            if str(f.get("source", "")).endswith("/SKILL.md")
+            and PurePosixPath(str(f["source"])).parent.name == skill.get("directory")
+            and all(src.startswith(f"{PurePosixPath(str(f['source'])).parent}/") for src in sources)
+        ]
+        if len(destinations) != 1 or not isinstance(destinations[0], str):
+            raise Refused(f"inventory skill {name!r} has {len(destinations)} SKILL.md file records, not exactly one")
+        for key in ("body_digest", "description_digest"):
+            if not isinstance(skill.get(key), str) or not skill[key]:
+                raise Refused(f"inventory skill {name!r} has no {key}")
+        pins.append({
+            "path": destinations[0],
+            "body_digest": skill["body_digest"],
+            "description_digest": skill["description_digest"],
+        })
+    if not pins:
+        raise Refused("inventory selects no skills; there is nothing to pin")
+    return pins
 
 
 def installed_home_files(inventory: dict[str, Any], tree: Tree) -> dict[str, bytes]:

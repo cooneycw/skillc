@@ -73,7 +73,7 @@ FILE_MODE = 0o400
 #: Keys a plan may carry. Anything else is refused: an unread key is a setting its
 #: author believes is honoured.
 _PLAN_KEYS = {"experiment", "trials"}
-_TRIAL_KEYS = {"label", "case", "grader", "subject", "client", "image", "config", "attempts", "budget"}
+_TRIAL_KEYS = {"label", "case", "grader", "subject", "client", "image", "config", "attempts", "budget", "skill_digests"}
 _IDENTITIES = {
     "case": ("id", "revision"),
     "grader": ("id", "revision"),
@@ -490,6 +490,26 @@ def _put_object(root: Path, data: bytes) -> str:
     return digest
 
 
+def put_object(experiment: Experiment, data: bytes) -> str:
+    """Store `data` in the experiment's content-addressed `objects/` and return
+    its digest (#418). Write-once: an existing object must still hash to its
+    name, or this refuses."""
+    return _put_object(experiment.root, data)
+
+
+_OBJECT_DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+
+
+def read_object(experiment: Experiment, digest: str) -> bytes:
+    """The stored bytes named `digest`, refused when absent, a symlink, or no
+    longer hashing to that name (#418) - never a silent miss. `digest` must be
+    exactly `sha256:` and 64 lowercase hex digits, checked before any path is
+    built, so a recorded value can never name a file outside `objects/`."""
+    if not isinstance(digest, str) or not _OBJECT_DIGEST.fullmatch(digest):
+        raise Refused(f"not an object digest: {digest!r}")
+    return _read_object(experiment.root, digest)
+
+
 def _plan_pairs(ledger: dict[str, object]) -> Iterator[tuple[dict[str, object], dict[str, object]]]:
     trials = ledger.get("trials")
     for trial in trials if isinstance(trials, list) else []:
@@ -615,6 +635,16 @@ def plan(spec: dict[str, object], store: Path) -> Experiment:
             if not isinstance(trial["budget"], dict):
                 raise Refused(f"trial {trial_label!r}: budget is not an object")
             entry["budget"] = trial["budget"]
+        if "skill_digests" in trial:
+            # #354: the same shape check `records.trial_ledger` applies, so a
+            # plan accepted here is never one the ledger rule then refuses.
+            problems = list(records.skill_digest_pin_problems(trial["skill_digests"]))
+            if problems:
+                raise Refused(f"trial {trial_label!r}: {problems[0]}")
+            entry["skill_digests"] = [
+                {k: str(pin[k]) for k in records.SKILL_DIGEST_PIN_KEYS}
+                for pin in trial["skill_digests"]
+            ]
         planned.append(entry)
 
     ledger: dict[str, object] = {

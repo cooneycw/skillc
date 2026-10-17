@@ -21,11 +21,15 @@ from pathlib import Path
 
 import pytest
 
-from skillc import calibration, cli, demo, materialize, trial, verify
+from skillc import calibration, checks, cli, demo, materialize, records, trial, verify
 from skillc import calibration_run as cr
 from skillc import collection_conformance as cc
 from skillc import docker_backend as d
 from skillc import matched_pilot as mp
+
+#: #424: the planners refuse a treated arm planned unpinned; a fixed, well-formed pin.
+_TEST_PINS = ({"path": ".codex/skills/tdd/SKILL.md", "body_digest": "sha256:" + "b" * 64,
+               "description_digest": "sha256:" + "d" * 64},)
 
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / "evals" / "calibration-204" / "run-manifest.json"
@@ -199,7 +203,7 @@ def test_red_the_committed_declaration_with_its_approval_removed_refuses_before_
 
     with pytest.raises(calibration.DeclarationRefused, match="not approved"):
         cr.run_calibration(
-            declaration, run_dir=run_dir, treatment=cr.Treatment({}, "sha256:" + "ab" * 32, None),
+            declaration, run_dir=run_dir, treatment=cr.Treatment({}, "sha256:" + "ab" * 32, None, skill_digests=_TEST_PINS),
             image_digest=_IMAGE_DIGEST, backends=backends, argv_for=lambda _s: ["codex"],
         )
     assert asked == []
@@ -230,6 +234,7 @@ def test_the_planned_order_is_the_declared_sequence(tmp_path: Path) -> None:
     store = trial.open_store(tmp_path / "store", forbidden=[])
     experiment, schedule = cr.plan_calibration(
         declaration, store, root=ROOT, treatment_digest="sha256:" + "ab" * 32, image_digest=_IMAGE_DIGEST,
+        skill_digests=_TEST_PINS,
     )
     assert [s.arm for s in schedule] == list(declaration.arm_order)
     assert [s.arm for s in schedule] == [
@@ -414,6 +419,7 @@ def test_an_interrupted_run_still_reconciles_every_planned_attempt(tmp_path: Pat
     store = trial.open_store(tmp_path / "store", forbidden=[])
     experiment, schedule = cr.plan_calibration(
         declaration, store, root=ROOT, treatment_digest="sha256:" + "ab" * 32, image_digest=_IMAGE_DIGEST,
+        skill_digests=_TEST_PINS,
     )
     reconciled = cr.reconcile(experiment, [])
     assert [o.scheduled for o in reconciled] == schedule
@@ -451,7 +457,7 @@ def test_run_calibration_builds_the_surface_from_the_declared_fixture_not_a_hard
     with pytest.raises(cr.CalibrationRefused):
         cr.run_calibration(
             declaration, run_dir=Path("/nonexistent-never-created"),
-            treatment=cr.Treatment({}, "sha256:" + "ab" * 32, None), image_digest=_IMAGE_DIGEST,
+            treatment=cr.Treatment({}, "sha256:" + "ab" * 32, None, skill_digests=_TEST_PINS), image_digest=_IMAGE_DIGEST,
             backends=lambda: (None, None), argv_for=lambda _s: ["codex"],
         )
     assert seen == [ROOT / "evals" / "level3" / "slugkit-pipeline" / "wrong" / "pipeline-red"]
@@ -553,7 +559,7 @@ def test_a_task_whose_fixture_delivers_nothing_refuses_before_the_store(
     run_dir.mkdir()
     with pytest.raises(cr.CalibrationRefused, match="empty"):
         cr.run_calibration(
-            _declaration(), run_dir=run_dir, treatment=cr.Treatment({}, "sha256:" + "ab" * 32, None),
+            _declaration(), run_dir=run_dir, treatment=cr.Treatment({}, "sha256:" + "ab" * 32, None, skill_digests=_TEST_PINS),
             image_digest=_IMAGE_DIGEST, backends=lambda: pytest.fail("a container was requested"),
             argv_for=lambda _s: ["codex"],
         )
@@ -582,7 +588,7 @@ def test_red_an_interrupted_runner_still_accounts_for_every_planned_attempt(
     monkeypatch.setattr(cc, "run_level1_agent_attempt", fake_attempt)
     with pytest.raises(KeyboardInterrupt):
         cr.run_calibration(
-            declaration, run_dir=run_dir, treatment=cr.Treatment({}, "sha256:" + "ab" * 32, None),
+            declaration, run_dir=run_dir, treatment=cr.Treatment({}, "sha256:" + "ab" * 32, None, skill_digests=_TEST_PINS),
             image_digest=_IMAGE_DIGEST, backends=lambda: (None, None), argv_for=lambda _s: ["codex"],
         )
     experiment, recorded = mp.read_outcomes(run_dir)
@@ -895,3 +901,102 @@ def test_run_calibration_threads_closure_fields_for_the_treated_arm_only(
             assert call["preflight_tools"] == ({"id": "tool-sentinel", "probes": []},)
             assert call["gate_entrypoint"] == sentinel_entrypoint
     assert saw_baseline and saw_treated
+
+
+# ---------------------------------------------- #424: the planner pins skill digests
+
+PINNED_CONTROL = ROOT / "controls" / "ledger-binding" / "good" / "skill-evidence-pinned-current"
+
+
+def _planned_treated_trial(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+    treatment = _treatment(tmp_path, monkeypatch)
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    experiment, _ = cr.plan_calibration(
+        _declaration(), store, root=ROOT, treatment_digest=treatment.digest, image_digest=_IMAGE_DIGEST,
+        skill_digests=treatment.skill_digests,
+    )
+    trials = experiment.ledger["trials"]
+    assert isinstance(trials, list)
+    treated = [t for t in trials if t["subject"]["digest"] != mp.BASELINE_SUBJECT_DIGEST]
+    assert treated, "the planned schedule has no treated trial"
+    return treated[0]
+
+
+def _bundle_with(tmp_path: Path, pins: object, evidence_skill: dict[str, str]) -> records.Bundle:
+    """The committed #354 pinned-current bundle, re-pointed at THIS plan's
+    pins (or none) and at the given skill-evidence attribution."""
+    bundle_dir = tmp_path / "bundle"
+    shutil.copytree(PINNED_CONTROL, bundle_dir)
+    # The control installs `slug`; re-point every reference (ledger, receipt,
+    # evidence) at the attributed path, so the receipt's own installed-path
+    # check agrees and ledger-binding's PIN check is what decides.
+    for f in bundle_dir.glob("*.json"):
+        f.write_text(f.read_text().replace(".codex/skills/slug/SKILL.md", evidence_skill["path"]))
+    ledger = json.loads((bundle_dir / "ledger.json").read_text())
+    if pins is None:
+        ledger["trials"][0].pop("skill_digests", None)
+    else:
+        ledger["trials"][0]["skill_digests"] = pins
+    (bundle_dir / "ledger.json").write_text(json.dumps(ledger))
+    evidence = json.loads((bundle_dir / "skill-evidence.json").read_text())
+    evidence["skills"][0]["skill"] = evidence_skill
+    (bundle_dir / "skill-evidence.json").write_text(json.dumps(evidence))
+    return records.discover_bundles(bundle_dir)[0]
+
+
+def test_every_treated_trial_is_planned_with_the_installed_skills_digests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#424 RED on main: the planner created every trial unpinned, so #354's
+    stale-attribution check never applied to a calibration run's evidence."""
+    planned = _planned_treated_trial(tmp_path, monkeypatch)
+    assert planned.get("skill_digests"), f"the treated trial was planned unpinned: {sorted(planned)}"
+    pins = planned["skill_digests"]
+    assert isinstance(pins, list)
+    assert [p["path"] for p in pins] == [".codex/skills/tdd/SKILL.md"]
+
+
+def test_a_substituted_skill_on_a_planned_trial_is_refused_and_a_current_one_passes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End to end through `ledger-binding` (#354's rule) on the ledger THIS
+    planner wrote: the installed skill's own digests pass; a substituted body
+    is refused as stale."""
+    planned = _planned_treated_trial(tmp_path, monkeypatch)
+    pins = planned.get("skill_digests")
+    assert isinstance(pins, list) and pins, "nothing to bind against: the planner declared no pins"
+    current = dict(pins[0])
+    good = checks.run_bundle(_bundle_with(tmp_path / "good", pins, current), only="ledger-binding")
+    assert good == [], [f.detail for f in good]
+    substituted = {**current, "body_digest": "sha256:" + "0" * 64}
+    bad = checks.run_bundle(_bundle_with(tmp_path / "bad", pins, substituted), only="ledger-binding")
+    assert any("stale" in f.detail for f in bad), [f.detail for f in bad]
+
+
+def test_without_planned_pins_the_same_substitution_validates_clean(tmp_path: Path) -> None:
+    """Why the planner must pin: the identical substituted attribution on an
+    UNPINNED trial (what the planner emitted before #424) raises nothing."""
+    substituted = {"path": ".codex/skills/tdd/SKILL.md", "body_digest": "sha256:" + "0" * 64,
+                   "description_digest": "sha256:" + "1" * 64}
+    assert checks.run_bundle(_bundle_with(tmp_path, None, substituted), only="ledger-binding") == []
+
+
+def test_pins_hash_the_captured_install_bytes_not_a_second_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Counter-model review of #424: the pins must describe the bytes that are
+    DELIVERED. If the captured install differs from what a re-read of the
+    source would give, the pin follows the capture."""
+    real = cc._collection_home_files
+
+    def captured(source: object, files: object) -> dict[str, bytes]:
+        out = real(source, files)  # type: ignore[arg-type]
+        out[".codex/skills/tdd/SKILL.md"] = b"---\nname: tdd\ndescription: Captured.\n---\nCaptured body.\n"
+        return out
+
+    monkeypatch.setattr(cc, "_collection_home_files", captured)
+    treatment = _treatment(tmp_path, monkeypatch)
+    from skillc import profile
+    want = profile.skill_md_digests(treatment.home_files[".codex/skills/tdd/SKILL.md"])
+    pin = treatment.skill_digests[0]
+    assert (pin["description_digest"], pin["body_digest"]) == want

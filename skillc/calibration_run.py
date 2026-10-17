@@ -70,6 +70,7 @@ from . import agent_trial, calibration, demo, profile, trial, verify
 from . import collection_conformance as cc
 from . import matched_pilot as mp
 from . import materialize as m
+from .spec import FrontmatterError
 
 ROOT = mp.ROOT
 EXPERIMENT_LABEL = "calibration"
@@ -113,6 +114,11 @@ class Treatment:
     verify_home_files: Mapping[str, str] = field(default_factory=dict)
     preflight_tools: tuple[dict[str, object], ...] = ()
     gate_entrypoint: str | None = None
+    #: #424: a `trial.skill_digests` value - each installed skill's own
+    #: `SKILL.md` destination with the `body_digest`/`description_digest` of the
+    #: bytes this treatment INSTALLS. Empty only for a hand-built treatment; the
+    #: planners refuse a treated arm that carries none.
+    skill_digests: tuple[dict[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -126,6 +132,32 @@ class _ClosureResult:
     #: `None` if it declares none - carried straight through, never
     #: re-derived from `home_files`' own keys.
     gate_entrypoint: str | None
+    #: `profile.skill_digest_pins(inventory)` of the validated inventory (#424),
+    #: cross-checked against the pins derived from the installed bytes.
+    skill_pins: tuple[dict[str, str], ...] = ()
+
+
+def _installed_skill_pins(
+    acquired: cc.AcquiredCollection, home_files: Mapping[str, bytes],
+) -> tuple[dict[str, str], ...]:
+    """#424: one pin per selected skill, from the `SKILL.md` bytes this
+    treatment installs, at the destination it installs them to - the entry
+    point only (`rel == "SKILL.md"`), never a nested file of the same name.
+
+    Hashed from the CAPTURED `home_files` bytes - the ones actually delivered -
+    never a second read of the source (counter-model review: a file changed
+    between the two reads would pin bytes nobody installed)."""
+    pins = []
+    for f in acquired.files:
+        if f.rel != "SKILL.md":
+            continue
+        try:
+            description_digest, body_digest = profile.skill_md_digests(home_files[f.container_relpath])
+        except FrontmatterError as exc:
+            raise CalibrationRefused(f"{f.container_relpath}: {exc}") from exc
+        pins.append({"path": f.container_relpath, "body_digest": body_digest,
+                     "description_digest": description_digest})
+    return tuple(sorted(pins, key=lambda pin: pin["path"]))
 
 
 def _closure_home_files(acquired: cc.AcquiredCollection, subject_profile: str, root: Path) -> _ClosureResult:
@@ -183,7 +215,12 @@ def _closure_home_files(acquired: cc.AcquiredCollection, subject_profile: str, r
             f"whenever a gate_entrypoint is declared, and cannot be honoured for a file that was "
             f"never actually produced"
         )
-    return _ClosureResult(home_files=home_files, tools=tools, gate_entrypoint=gate_entrypoint)
+    try:
+        skill_pins = tuple(sorted(profile.skill_digest_pins(inventory), key=lambda pin: pin["path"]))
+    except profile.Refused as exc:
+        raise CalibrationRefused(f"profile {subject_profile!r}: {exc}") from exc
+    return _ClosureResult(home_files=home_files, tools=tools, gate_entrypoint=gate_entrypoint,
+                          skill_pins=skill_pins)
 
 
 def build_treatment(
@@ -210,6 +247,9 @@ def build_treatment(
     if (subject_profile is None) != (root is None):
         raise CalibrationRefused("subject_profile and root must be given together, or not at all")
     home_files: dict[str, bytes] = dict(cc._collection_home_files(acquired.source, acquired.files))
+    skill_digests = _installed_skill_pins(acquired, home_files)
+    if not skill_digests:
+        raise CalibrationRefused(f"subject {acquired.subject.locator!r} installs no SKILL.md to pin")
     verify_home_files: dict[str, str] = {}
     preflight_tools: tuple[dict[str, object], ...] = ()
     gate_entrypoint: str | None = None
@@ -241,9 +281,18 @@ def build_treatment(
         verify_home_files = {relpath: m.sha256_bytes(data) for relpath, data in closure_files.items()}
         preflight_tools = closure.tools
         gate_entrypoint = closure.gate_entrypoint
+        # Two derivations of the same fact - the installed bytes and the
+        # validated inventory - must agree, or the pins would describe skills
+        # this treatment does not install (#424).
+        if closure.skill_pins != skill_digests:
+            raise CalibrationRefused(
+                f"profile {subject_profile!r}'s inventory pins {list(closure.skill_pins)} disagree with "
+                f"the installed skills' own digests {list(skill_digests)}"
+            )
     return Treatment(
         home_files=home_files,
         digest=acquired.source.digest,
+        skill_digests=skill_digests,
         gate_entrypoint=gate_entrypoint,
         receipt_context=agent_trial.InstallationReceiptContext(
             declared=frozenset(f.skill for f in acquired.files),
@@ -318,9 +367,17 @@ def _outcome_task_inputs(
 def plan_calibration(
     declaration: calibration.CalibrationDeclaration, store: Path, *,
     root: Path, treatment_digest: str, image_digest: str | None,
+    skill_digests: Sequence[Mapping[str, str]] = (),
 ) -> tuple[trial.Experiment, list[mp.ScheduledAttempt]]:
     """Plan one trial per attempt through the real controller, in
-    `arm_order.sequence`. `repeat` is the arm's own 1-based attempt count."""
+    `arm_order.sequence`. `repeat` is the arm's own 1-based attempt count.
+
+    Every treated trial declares `skill_digests` (#424), so #354's
+    `ledger-binding` refuses stale or unpinned skill-evidence for it. A
+    treated arm with no pins is refused, never planned unpinned. The baseline
+    installs nothing and stays unpinned (its contamination rule is #427)."""
+    if not skill_digests and any(arm != calibration.BASELINE_ARM for arm in declaration.arm_order):
+        raise CalibrationRefused("a treated arm has no skill_digests to pin; refusing to plan it unpinned")
     if calibration.outcome_endpoint(declaration) is not None:
         declaration = calibration.parse_declaration(json.loads(trial.canonical(declaration.data)))
     client_name, client_version = declared_client(declaration)
@@ -352,6 +409,7 @@ def plan_calibration(
             "config": {"arm": arm, "repeat": counts[arm], "position": position,
                        **({"calibration_declaration": snapshot} if snapshot is not None else {})},
             "attempts": 1,
+            **({} if arm == calibration.BASELINE_ARM else {"skill_digests": [dict(pin) for pin in skill_digests]}),
         })
     try:
         experiment = trial.plan({"experiment": EXPERIMENT_LABEL, "trials": trials}, store)
@@ -465,6 +523,7 @@ def run_calibration(
     store = trial.open_store(run_dir / "store", forbidden=[])
     experiment, schedule = plan_calibration(
         declaration, store, root=root, treatment_digest=treatment.digest, image_digest=image_digest,
+        skill_digests=treatment.skill_digests,
     )
     outcomes: list[mp.AttemptOutcome] = []
     write_outcomes(run_dir, experiment, outcomes, declaration)

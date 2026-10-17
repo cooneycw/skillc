@@ -159,6 +159,22 @@ subject. Absent, or an explicit empty list, both mean this trial accepts none;
 `ledger-binding` refuses a `skill-evidence` entry whose source is well-formed
 but not in this list (see `skill-evidence`, below).
 
+`skill_digests` (#354): an OPTIONAL non-empty list of
+`{path, body_digest, description_digest}`, one per skill this trial plans to
+test, each a non-empty string, no `path` twice. It pins **which version** of
+each skill the trial is about: `path` is the skill's installed `SKILL.md` path
+(the same one `installation-receipt.installed[].path` and `skill-evidence`'s
+`skill.path` use) and the two digests are the ones #265's inventory recorded
+for it - `skillc.profile.skill_digest_pins(inventory)` derives the list, and
+`trial.plan` accepts it under the same shape check this rule applies. Absent
+means this trial pins nothing and `skill-evidence`'s digests stay shape-only.
+Present, `ledger-binding` refuses a `skill-evidence` entry whose skill is
+unpinned, which omits either digest, or whose digest differs from the pin
+(**stale**) - "stale" meaning disagreement with what the ledger planned, the
+owner's ruling for #268. The check reads only the ledger, never the
+inventory, so the inventory staying outside the bundle (Q3, below) no longer
+leaves the gap open for a trial that pins.
+
 `case.arm` and `case.paired_with` (#273): two OPTIONAL fields on the existing
 `case` identity, declaring whether this trial's case is the `intact` or
 `degraded` half of a discriminating design, and which counterpart case it
@@ -460,7 +476,7 @@ kinds) and carries one non-empty `skills` list:
 | Field | Content |
 |---|---|
 | `skill.path` | the installed path this entry is about. Must be one the attempt's own `installation-receipt` installed (`ledger-binding`, same cross-check `_skill_invocation_binding` already performs for `skill-invocations`) |
-| `skill.body_digest`, `skill.description_digest` | optional; expected to be copied from #265's `evidence/inventory.json` for this path. Checked here for presence/shape only - **not cross-checked against that inventory**, a different artifact family this rule does not read (boundary, Q3 below) |
+| `skill.body_digest`, `skill.description_digest` | optional; expected to be copied from #265's `evidence/inventory.json` for this path. Checked here for presence/shape only - **not cross-checked against that inventory**, a different artifact family this rule does not read (boundary, Q3 below). When the attempt's trial declares `skill_digests` (#354), `ledger-binding` requires both and refuses one that differs from the pin |
 | `invocation.lineage` | `root` or `child` |
 | `invocation.parent_path` | required when `lineage` is `child`; must name another entry's `skill.path` **in this same record**, and the chain of parent links it starts must terminate at a `root` - a cycle among otherwise-valid links (A's parent is B, B's parent is A) is refused the same way the `lineage` bundle rule already refuses a retry/regrade cycle. A `root` entry carries no `parent_path` |
 | `lifecycle.listed`, `lifecycle.read_observed`, `lifecycle.execution_observed` | each one of `CONFIRMED` / `NOT_CONFIRMED` / `UNKNOWN` - **a separate, closed vocabulary from `SATISFIED`/`VIOLATED`/`UNKNOWN`**, so a usage fact can never be misread as a compliance outcome. `CONFIRMED` requires an `evidence` reference (a digest already present in this attempt's own bundle); `UNKNOWN` requires a `reason` |
@@ -542,8 +558,11 @@ to name, and the cpp-eval review questions relayed 2026-10-06.
   key is given at all); they are **not** cross-checked against #265's
   inventory, because that inventory is outside the bundle this rule can see.
   A producer is expected to copy them from #265's inventory, but nothing
-  refuses a producer that does not. Closing that gap is further work, not
-  delivered here - named as a boundary, not silently assumed covered. A CPP
+  refuses a producer that does not. #354 closes the gap for any trial that
+  declares `trial.skill_digests` (trial-ledger, above): the expected digests
+  are pinned in the ledger at plan time and `ledger-binding` compares against
+  them, so the inventory still never needs to be read. A trial that pins
+  nothing keeps the shape-only behaviour described here. A CPP
   usage record's own `declared` block (R6: skill name from
   `CPP_SKILL_SOURCE`, never verified by CPP itself) is the kind of claim
   `external_evidence` does reconcile: a declared skill name with no
@@ -877,6 +896,10 @@ says so on every run.
   skill this attempt never had. `body_digest`/`description_digest` are **not**
   cross-checked here against #265's inventory - a named boundary, not an
   oversight (Q3, above);
+- if a `skill-evidence` record's trial declares `skill_digests` (#354), every
+  entry's `skill.path` is pinned there, and its `body_digest` and
+  `description_digest` are both present and equal to the pin. Otherwise the
+  entry is unpinned, names no version, or is stale;
 - if a `skill-evidence` entry's `criteria_owned` names a criterion `id`, that
   `id` exists on the attempt's own `verified-result`, and the entry's copied
   `outcome` agrees with that criterion's actual outcome there. A disagreement is
@@ -1057,7 +1080,7 @@ bundle cases as well, including against every record rule.
 | `producer-authority` | record | forged subject verdict; unchecked receipt; adapter-produced ledger |
 | `attempt-binding` | record | no attempt; malformed attempt ID; no trial |
 | `installation-receipt` | record | empty install; no readiness; subject without digest |
-| `trial-ledger` | record | no trials; a trial with no attempts; missing grader identity; malformed attempt ID; `case.observes_selection` present but not a boolean (#26); `external_evidence_sources` present but not a list, or containing a malformed `<namespace>/v<N>` label (#268); `case.arm` outside `intact`/`degraded`; `case.arm` with no well-formed `paired_with`, or one naming its own case; `paired_with` with no `case.arm` (#273) |
+| `trial-ledger` | record | no trials; a trial with no attempts; missing grader identity; malformed attempt ID; `case.observes_selection` present but not a boolean (#26); `external_evidence_sources` present but not a list, or containing a malformed `<namespace>/v<N>` label (#268); `skill_digests` present but not a non-empty list, an entry missing `path`/`body_digest`/`description_digest` or carrying another field, or a `path` pinned twice (#354); `case.arm` outside `intact`/`degraded`; `case.arm` with no well-formed `paired_with`, or one naming its own case; `paired_with` with no `case.arm` (#273) |
 | `artifact-digest` | record | an artifact without a digest; an empty manifest; a null `path`, `type` or `size` beside a valid digest (#130) |
 | `observation-coverage` | record | a silent required stream; an unknown origin; no `capture_failures`; a `skill-invocations` count that is not `UNKNOWN` under incomplete coverage, or not a real integer under complete coverage; complete coverage naming no skills; a duplicate skill path with conflicting counts (#39) |
 | `criterion-vocabulary` | record | an outcome outside the vocabulary; a non-boolean `mandatory` (`"true"` would drop a violation out of the derivation); a criterion with no `id` (#130) |
@@ -1068,7 +1091,7 @@ bundle cases as well, including against every record rule.
 | `agent-observation` | record | an unknown field; a missing field; an object in a scalar field or a census map; a `mandatory` flag that is a string, an integer or absent (each would drop a VIOLATED criterion out of the derivation); positive conclusions from zero or two transcript files; eligibility that disagrees with prompt delivery and the canary; a PASS its own criteria do not derive; both a grade and a blocked reason; an unobserved status without a reason (#106) |
 | `pilot-report` | record | empty attempts list; bad disposition or criterion outcome; no uncertainty; a negative intervention count; a cost/time split missing a key or whose parts do not sum to its total; a duplicate attempt ID (#12) |
 | `skill-evidence` | record | empty `skills` list; a `child` entry with no `parent_path`, naming a path absent from this record, or forming a cycle with no root (even where no single link self-references); a duplicate `skill.path`; a `lifecycle` value outside `CONFIRMED`/`NOT_CONFIRMED`/`UNKNOWN`; `CONFIRMED` with no evidence reference; `UNKNOWN` with no reason or with one anyway; `external_evidence.present: true` with no `artifact_ref` or a malformed `source` label; a `reconciliation` outside the four R9 states, or disagreeing with `present`; a non-`matched`/`absent` reconciliation with no reason (#268) |
-| `ledger-binding` | bundle | cross-trial receipt; stale receipt; attempt the ledger never issued; altered artifact; unplanned grader; a `skill-invocations` path the attempt's receipt never installed (#39); a trial declaring `case.observes_selection: true` whose manifest has no `skill-invocations` stream (#26/#39); a `pilot-report` that omits a scheduled attempt or names one the ledger never planned (#12); a `skill-evidence` path the attempt's receipt never installed; a `criteria_owned` outcome that disagrees with the attempt's own `verified-result` (forged status); an `external_evidence.artifact_ref` the attempt's manifest never captured; a well-formed `external_evidence.source` the attempt's trial does not list in its own `external_evidence_sources` (undeclared, #268) |
+| `ledger-binding` | bundle | cross-trial receipt; stale receipt; attempt the ledger never issued; altered artifact; unplanned grader; a `skill-invocations` path the attempt's receipt never installed (#39); a trial declaring `case.observes_selection: true` whose manifest has no `skill-invocations` stream (#26/#39); a `pilot-report` that omits a scheduled attempt or names one the ledger never planned (#12); a `skill-evidence` path the attempt's receipt never installed; a `criteria_owned` outcome that disagrees with the attempt's own `verified-result` (forged status); an `external_evidence.artifact_ref` the attempt's manifest never captured; a well-formed `external_evidence.source` the attempt's trial does not list in its own `external_evidence_sources` (undeclared, #268); under a trial declaring `skill_digests`, a `skill-evidence` entry whose skill is unpinned, which omits a digest, or whose digest differs from the pin (stale, #354) |
 | `unique-ids` | bundle | duplicate attempt ID; conflicting receipts; duplicate result ID; a second `skill-evidence` record for one attempt |
 | `attempt-accounting` | bundle | planned attempt with no lifecycle; captured with no result; graded without receipt; graded without manifest; captured but declared NOT_RUN; graded but not captured; manifest but not captured; receipt stand-in with no agent-observation, or claiming readiness (#139) |
 | `lineage` | bundle | retry reusing its own ID; regrade whose original was erased; regrade of different bytes |

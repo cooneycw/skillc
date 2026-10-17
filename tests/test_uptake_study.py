@@ -624,3 +624,37 @@ def test_red_a_non_string_target_is_refused_not_crashed(value: object) -> None:
     with pytest.raises(us.StudyRefused, match="same, non-empty target_skill"):
         us.parse_declaration(_mutate(("arms", 1, "target_skill"), value))
 
+
+
+# ---------------------------------------------- #424: each arm pins its own skill
+
+def test_each_arm_is_planned_with_its_own_installed_skill_digests(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#424 RED on main: the uptake planner created every trial unpinned. Each
+    arm now pins the description IT installs - published and rewritten differ
+    there and nowhere else - so evidence crediting the other arm's bytes is stale."""
+    declaration = us.parse_declaration(_data())
+    treatments = {"published": _treatment(tmp_path, monkeypatch, "published", "Run quality checks"),
+                  "rewritten": _treatment(tmp_path, monkeypatch, "rewritten", NEW)}
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    experiment, schedule = us.plan_study(
+        declaration, store, root=ROOT, image_digest=_IMAGE_DIGEST,
+        digests={arm: t.digest for arm, t in treatments.items()},
+        skill_digests={arm: t.skill_digests for arm, t in treatments.items()},
+    )
+    pub, rew = treatments["published"].skill_digests, treatments["rewritten"].skill_digests
+    assert [p["path"] for p in pub] == [p["path"] for p in rew] == [".codex/skills/flow-check/SKILL.md"]
+    assert pub[0]["description_digest"] != rew[0]["description_digest"]
+    assert pub[0]["body_digest"] == rew[0]["body_digest"]
+    trials = experiment.ledger["trials"]
+    assert isinstance(trials, list) and len(trials) == len(schedule)
+    for planned, scheduled in zip(trials, schedule, strict=True):
+        arm = scheduled.arm.split("__")[-1]
+        assert planned.get("skill_digests") == [dict(p) for p in treatments[arm].skill_digests], scheduled.arm
+
+
+def test_red_an_arm_with_no_skill_digests_is_refused_not_planned_unpinned(tmp_path: Path) -> None:
+    declaration = us.parse_declaration(_data())
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    with pytest.raises(us.StudyRefused, match="no skill_digests to pin"):
+        us.plan_study(declaration, store, root=ROOT, image_digest=_IMAGE_DIGEST,
+                      digests={"published": "sha256:" + "a" * 64, "rewritten": "sha256:" + "b" * 64})
