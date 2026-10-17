@@ -478,3 +478,47 @@ def test_calibration_cli_carries_the_declared_profile_to_the_attempt(
         assert treated["gate_entrypoint"] is None
         assert not treated["verify_home_files"]
         assert not treated["preflight_tools"]
+
+
+def _profiled_acquisition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[cc.AcquiredCollection, Path, str]:
+    content_repo, revision = _build_content_repo(tmp_path)
+    root = tmp_path / "root"
+    subject_profile = "subject-profile"
+    _write_declaration(root / subject_profile, revision)
+    subject = materialize.Subject.from_dict({**SUBJECT_DICT, "revision": revision})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: subject)
+    acquired = cc.acquire_collection("whatever", tmp_path / "base", checkout=content_repo)
+    committed = p.validate(p.Profile.load(root / subject_profile / "profile.json"), p.GitTree(content_repo, revision))
+    (root / subject_profile / "evidence").mkdir()
+    (root / subject_profile / "evidence" / "inventory.json").write_text(json.dumps(committed), encoding="utf-8")
+    return acquired, root, subject_profile
+
+
+@needs_git
+def test_a_profiled_treatment_pins_exactly_what_its_inventory_records(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#424: the pins derived from the installed SKILL.md bytes agree with
+    #354's inventory-derived pins - two routes, one answer."""
+    acquired, root, subject_profile = _profiled_acquisition(tmp_path, monkeypatch)
+    treatment = cr.build_treatment(acquired, subject_profile=subject_profile, root=root)
+    committed = json.loads((root / subject_profile / "evidence" / "inventory.json").read_text())
+    assert list(treatment.skill_digests) == sorted(p.skill_digest_pins(committed), key=lambda pin: pin["path"])
+    assert [pin["path"] for pin in treatment.skill_digests] == [".codex/skills/gate-check/SKILL.md"]
+
+
+@needs_git
+def test_red_case_inventory_pins_that_disagree_with_the_installed_bytes_are_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#424 cross-check: if the inventory would pin a different body than the
+    treatment installs, the pins would describe a skill nobody installed."""
+    acquired, root, subject_profile = _profiled_acquisition(tmp_path, monkeypatch)
+    real = p.skill_digest_pins
+
+    def drifted(inventory: dict[str, object]) -> list[dict[str, str]]:
+        return [{**pin, "body_digest": "sha256:" + "0" * 64} for pin in real(inventory)]  # type: ignore[arg-type]
+
+    monkeypatch.setattr(p, "skill_digest_pins", drifted)
+    with pytest.raises(cr.CalibrationRefused, match="disagree with the installed skills"):
+        cr.build_treatment(acquired, subject_profile=subject_profile, root=root)
