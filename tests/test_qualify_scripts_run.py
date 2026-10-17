@@ -22,6 +22,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import random
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -84,10 +85,12 @@ def _param_id(script: Path, part: str | None) -> str:
 
 
 def _task_tree_digest(task_dir: Path) -> str:
-    """Every file under the task directory except bytecode caches."""
+    """Every file under the task directory except compiled bytecode
+    (`__pycache__/*.pyc`); any other file, under `__pycache__` or not,
+    counts (#446 counter-model review)."""
     digest = hashlib.sha256()
     for path in sorted(task_dir.rglob("*")):
-        if path.is_file() and "__pycache__" not in path.parts:
+        if path.is_file() and not (path.parent.name == "__pycache__" and path.suffix == ".pyc"):
             digest.update(path.relative_to(task_dir).as_posix().encode() + b"\0" + path.read_bytes())
     return digest.hexdigest()
 
@@ -98,7 +101,15 @@ def _task_tree_digest(task_dir: Path) -> str:
                  marks=pytest.mark.timeout(380 if _task_name(script) in _SLOW_REASON else 200))
     for script, part in _PARAMS
 ])
-def test_qualify_script_certifies(script: Path, part: str | None, timeout_seconds: float) -> None:
+def test_qualify_script_certifies(script: Path, part: str | None, timeout_seconds: float,
+                                  tmp_path: Path) -> None:
+    if part is not None:
+        # Each part runs in its OWN copy of the task directory (#446 counter-
+        # model review): parts run concurrently under xdist, and a shared
+        # directory would let one part's write fail its neighbour's check.
+        task_copy = tmp_path / script.parent.name
+        shutil.copytree(script.parent, task_copy, ignore=shutil.ignore_patterns("__pycache__"))
+        script = task_copy / script.name
     before = _task_tree_digest(script.parent) if part is not None else ""
     proc = subprocess.run(
         [sys.executable, str(script), *(["--part", part] if part is not None else [])],
@@ -121,6 +132,22 @@ def test_qualify_script_certifies(script: Path, part: str | None, timeout_second
         # Independence (#446): a part may not leave state in the task
         # directory for another part to read.
         assert _task_tree_digest(script.parent) == before, f"{name}: the part changed files in {script.parent}"
+
+
+def test_task_tree_digest_ignores_only_bytecode(tmp_path: Path) -> None:
+    """The independence check's own controls: a state file a part leaves
+    behind changes the digest wherever it sits, `__pycache__` included;
+    compiled bytecode does not."""
+    (tmp_path / "qualify.py").write_text("print('x')\n", encoding="utf-8")
+    (tmp_path / "__pycache__").mkdir()
+    base = _task_tree_digest(tmp_path)
+    (tmp_path / "__pycache__" / "qualify.cpython-312.pyc").write_bytes(b"bytecode")
+    assert _task_tree_digest(tmp_path) == base
+    (tmp_path / "__pycache__" / "part-state.json").write_text("{}", encoding="utf-8")
+    hidden = _task_tree_digest(tmp_path)
+    assert hidden != base
+    (tmp_path / "part-state.json").write_text("{}", encoding="utf-8")
+    assert _task_tree_digest(tmp_path) != hidden
 
 
 def test_split_scripts_list_exactly_their_declared_parts() -> None:
@@ -155,7 +182,7 @@ def test_hung_qualify_script_is_rejected(tmp_path: Path) -> None:
     script = tmp_path / "qualify.py"
     script.write_text("import time\nprint('QUALIFY: ok', flush=True)\ntime.sleep(60)\n", encoding="utf-8")
     with pytest.raises(subprocess.TimeoutExpired):
-        test_qualify_script_certifies(script, None, timeout_seconds=0.1)
+        test_qualify_script_certifies(script, None, timeout_seconds=0.1, tmp_path=tmp_path)
 
 
 def test_every_qualify_script_is_discovered_and_none_quietly_ignored() -> None:
