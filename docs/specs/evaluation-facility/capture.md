@@ -123,6 +123,7 @@ and listed with path, type, size, digest and executable bit.
 | a directory in `SECRET_DIRS` (`.git`, `.ssh`, `.aws`, `.codex`, ...) - not entered | exclusion |
 | a name in `SECRET_NAMES` (`.env*`, `*.pem`, `id_rsa*`, `auth.json`, ...) | exclusion |
 | content matching `SECRET_CONTENT` (private key, AWS, GitHub, API, Slack tokens) | exclusion naming the pattern, never the value |
+| a `.pyc` directly under a `__pycache__/` directory: a bytecode cache, never imported without its source (#408) | exclusion: a build product; a sourceless `mod.pyc` beside the code is still exported |
 | a file outside the declared `include` scope | not listed |
 | a file over the per-file bound, or over the file-count or total bound | capture failure; coverage partial |
 
