@@ -200,7 +200,10 @@ def blob_id(data: bytes) -> str:
 
 
 def read_files(worktree: Path) -> dict[str, str]:
-    """Every regular file under `worktree` but `.git`, as {path: blob id},
+    """Every regular file under `worktree` but `.git`, as {path: "MODE BLOB"}
+    with git's mode (100644 or 100755) read from the file's own permission
+    bits - so a mode change is caught even under a subject-set
+    `core.filemode=false` (pass 2) -
     read from the filesystem itself (counter-model review, #434 pass 1: a
     subject can hide an edit from `git status` with `update-index
     --assume-unchanged` or `--skip-worktree`). A link or special file is
@@ -213,7 +216,11 @@ def read_files(worktree: Path) -> dict[str, str]:
             rel = path.relative_to(worktree).as_posix()
             if rel == ".git":
                 continue  # a linked worktree's .git pointer file
-            files[rel] = blob_id(path.read_bytes()) if path.is_file() and not path.is_symlink() else "not-a-file"
+            if path.is_file() and not path.is_symlink():
+                mode = "100755" if path.stat().st_mode & 0o111 else "100644"
+                files[rel] = f"{mode} {blob_id(path.read_bytes())}"
+            else:
+                files[rel] = "not-a-file"
     return files
 
 
@@ -226,7 +233,7 @@ def capture(git: GitFn, repo: Path, remote: Path, base_commit: str,
     - `commits`: every commit reachable from any of those refs, so a local
       commit parked on a side branch is still seen (pass 1), and a cited SHA
       prefix is resolved against everything that exists;
-    - `base_files`: the base commit's tree as {path: blob id} (`base_commit`
+    - `base_files`: the base commit's tree as {path: "MODE BLOB"} (`base_commit`
       comes from the CONTROLLER's build facts, never from the attempt);
     - `worktrees`: every worktree of the checkout - the checkout itself and
       any flow:auto Step 1 created - with its HEAD, its branch, its porcelain
@@ -265,7 +272,8 @@ def capture(git: GitFn, repo: Path, remote: Path, base_commit: str,
     base_files: dict[str, str] = {}
     for entry in filter(None, git(["ls-tree", "-r", "-z", "--full-tree", base_commit], remote).split("\0")):
         meta, path = entry.split("\t", 1)
-        base_files[path] = meta.split()[2]
+        mode, _kind, blob = meta.split()
+        base_files[path] = f"{mode} {blob}"
     commits = set(git(["rev-list", "--all"], repo).split())
     commits |= set(git(["rev-list", "--all"], remote).split())
     return {"remote_refs": refs_of(remote), "local_refs": refs_of(repo), "base_files": base_files,

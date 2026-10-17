@@ -39,6 +39,7 @@ Then:
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import json
 import os
@@ -54,6 +55,7 @@ sys.path.insert(0, str(HERE.parents[2]))
 
 from skillc import fixture_service, verify
 from skillc.backend import ExecuteResult, Limits
+from skillc.decide_reply_channel import ChannelRefusal
 from skillc.gate_witness import GateWitness
 
 _build_spec = importlib.util.spec_from_file_location("flow_auto_necessity_build", HERE / "fixture" / "build.py")
@@ -136,23 +138,30 @@ def _witness(kind: str) -> dict[str, Any] | None:
     - `no-runs` (default): the attempt requested no gate - the honest outcome
       of a flow:auto run that stops at its approval gate;
     - `passed-run` / `failed-run`: one witnessed finish-gate run exiting 0 / 1;
+    - `launch-failed`: one requested run that never started a process;
     - `exclusive-no-runs`: no run, under an asserted exclusivity, so the
       record PROVES nothing ran;
     - `none`: no witness record at all."""
     if kind == "none":
         return None
-    exit_code = {"passed-run": 0, "failed-run": 1}.get(kind)
+    exit_code = {"passed-run": 0, "failed-run": 1, "launch-failed": None}.get(kind, 0)
     verdict = b"FLOW_FINISH_GATE: ok\n" if exit_code == 0 else b"FLOW_FINISH_GATE: fail\n"
-    backend = _WitnessBackend(ExecuteResult(reason="exited", exit_code=exit_code if exit_code is not None else 0,
-                                            stdout=verdict, stderr=b""))
+    if kind == "launch-failed":
+        result = ExecuteResult(reason="launch-failed", exit_code=None, error="could not launch", stdout=b"", stderr=b"")
+    else:
+        result = ExecuteResult(reason="exited", exit_code=exit_code, stdout=verdict, stderr=b"")
+    backend = _WitnessBackend(result)
     exclusive = kind == "exclusive-no-runs"
     witness = GateWitness(declared_gates=_GATES, tree_digest_fn=lambda: "sha256:" + "0" * 64,
                           backend=backend, handle=None, limits=Limits(timeout=60),  # type: ignore[arg-type]
                           gate_exclusivity=exclusive,
                           exclusivity_basis=("the fixture installs the finish gate only behind the witnessed shim"
                                              if exclusive else "flow:auto reaches its finish gate only after approval"))
-    if exit_code is not None:
-        witness.decide({"op": "run_gate", "gate": "flow-auto-finish"})
+    if kind in ("passed-run", "failed-run", "launch-failed"):
+        # A launch that never started is refused on the channel, and the
+        # witness still records the run - that record is what this builds.
+        with contextlib.suppress(ChannelRefusal):
+            witness.decide({"op": "run_gate", "gate": "flow-auto-finish"})
     return json.loads(witness.finalize("qualify").to_json_bytes())
 
 
@@ -172,6 +181,15 @@ def _apply_git(root: Path, ops: list[dict[str, Any]]) -> None:
             _git(root / op["where"], "commit", "-q", "-am", op["message"])
         elif kind == "commit-empty":
             _git(root / op["where"], "commit", "-q", "--allow-empty", "-m", op["message"])
+        elif kind == "config":
+            _git(root / op["where"], "config", op["key"], op["value"])
+        elif kind == "detach":
+            _git(root / op["where"], "checkout", "-q", "--detach", op["commit"])
+        elif kind == "copy-from":
+            data = build.host_git(["show", f"{op['commit']}:{op['path']}"], root / op["where"])
+            (root / op["where"] / op["path"]).write_text(data + "\n", encoding="utf-8")
+        elif kind == "rm-cached":
+            _git(root / op["where"], "rm", "-q", "--cached", op["path"])
         elif kind == "chmod":
             (root / op["where"] / op["path"]).chmod(int(op["mode"], 8))
         elif kind == "assume-unchanged":

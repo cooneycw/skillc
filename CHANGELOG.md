@@ -20,9 +20,10 @@ and version plan.
   Seven criteria, all graded from controller-held records (the #276 service
   record, a git capture, the gate witness), never from candidate files. A
   flow:auto Step-1 worktree counts as clean only at the base commit with an
-  empty status. Edits are read from the filesystem, so an `assume-unchanged`
-  edit is still caught. A commit parked on a side branch, or a mode change,
-  also counts. `qualify.py` plays 33 scripted attempts through the real
+  empty status. Edits and file modes are read from the filesystem, so an
+  `assume-unchanged` edit or a `core.filemode=false` chmod is still caught. A
+  commit parked on a side branch, a detached HEAD on an older commit, and an
+  index-only change also count. `qualify.py` plays 43 scripted attempts through the real
   fixture service and certifies the grader. It refuses the 5 broken graders,
   and 3 blinding controls each flip their red to PASS. Every criterion's check
   was also mutation-tested and goes red. No attempt has run: the live wiring

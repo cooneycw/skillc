@@ -1,0 +1,17 @@
+{
+ "case": "clean",
+ "gh": [
+  [
+   "issue",
+   "view",
+   "1",
+   "--json",
+   "number,title,state,body,createdAt,labels,closedAt"
+  ],
+  [
+   "api",
+   "--paginate",
+   "repos/fixture/widget/pulls/2/files"
+  ]
+ ]
+}
