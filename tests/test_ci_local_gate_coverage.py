@@ -211,7 +211,7 @@ def _parallel_contract(ci_text: str, make_text: str) -> bool:
     make_collect = next((line for line in make_text.splitlines() if "--collect-only" in line), "")
     if not collect or not make_collect:
         return False
-    expected = ["-n", "auto", "--maxprocesses=8", "--dist=loadgroup", "-rA", "--junit-xml=REPORT"]
+    expected = ["-n", "auto", "--maxprocesses=8", "--dist=loadgroup", "-rA", "--durations=0", "--junit-xml=REPORT"]
     return (args(run) == args(make_run) == expected
             and "PYTEST_WORKERS ?= auto" in make_text
             and "PYTEST_ARGS ?=\n" in make_text
@@ -253,6 +253,44 @@ def test_parallel_contract_rejects_ci_only_selection_and_worker_overrides() -> N
         changed = ci_text.replace("pytest --collect-only -q", "pytest --collect-only -q " + option)
         changed = changed.replace("--junit-xml=pytest-report.xml", "--junit-xml=pytest-report.xml " + option)
         assert not _parallel_contract(changed, make_text)
+
+
+def _records_gate_host_state(ci_text: str) -> bool:
+    """#412: the gate step's FIRST command prints the CI VM's `nproc` and
+    `/proc/loadavg` and sets an EXIT trap that prints them again, so a timing red is
+    attributable to the machine's state from the CI log alone."""
+    gate = next(step for step in yaml.safe_load(ci_text)["steps"] if step["name"] == "gate")
+    first = gate["commands"][0]
+    start, sep, rest = first.partition("; trap '")
+    body, sep2, _ = rest.partition("' EXIT")
+    measured = ("$(nproc)", "$(cat /proc/loadavg)")
+    return (bool(sep and sep2) and "gate-host start" in start and all(m in start for m in measured)
+            and "gate-host end" in body and all(m in body for m in measured))
+
+
+def test_the_gate_records_the_ci_hosts_state_at_start_and_exit() -> None:
+    assert _records_gate_host_state(CI_YML.read_text())
+
+
+def test_gate_host_state_check_rejects_a_missing_trap_or_a_late_start_line() -> None:
+    ci_text = CI_YML.read_text()
+    first = next(s for s in yaml.safe_load(ci_text)["steps"] if s["name"] == "gate")["commands"][0]
+    no_trap = ci_text.replace(first, first.split("; trap", 1)[0])
+    assert no_trap != ci_text and not _records_gate_host_state(no_trap)
+    moved = ci_text.replace("      - " + first + "\n", "", 1).replace(
+        "      - pip install uv\n", "      - pip install uv\n      - " + first + "\n", 1)
+    assert moved != ci_text and not _records_gate_host_state(moved)
+    # Counter-model review: measurements present only in the START line must
+    # not satisfy the check - the trap body is checked on its own.
+    body = first.split("; trap '", 1)[1].split("' EXIT", 1)[0]
+    unmeasured_end = ci_text.replace(body, 'echo "gate-host end"', 1)
+    assert unmeasured_end != ci_text and not _records_gate_host_state(unmeasured_end)
+
+
+def test_parallel_contract_rejects_dropping_durations_from_either_side() -> None:
+    ci_text, make_text = CI_YML.read_text(), MAKEFILE.read_text()
+    assert not _parallel_contract(ci_text.replace("-rA --durations=0", "-rA", 1), make_text)
+    assert not _parallel_contract(ci_text, make_text.replace("-rA --durations=0", "-rA", 1))
 
 
 def test_generated_collection_is_excluded_from_both_leak_scans() -> None:
