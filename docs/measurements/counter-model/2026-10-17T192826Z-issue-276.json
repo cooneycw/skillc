@@ -1,0 +1,28 @@
+{
+  "branch": "issue-276-implement-a-bounded-controller-owned-issue-and-pr",
+  "counts": {
+    "accepted": 17,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "extra_passes_reason": "pass 2 found a host code-execution boundary (subject-written commondir / racy git config); the fix is a contract plus fail-closed guard that needs independent review",
+  "head": "ae74186442ceb8bf2d5a73783ae30af467956a0a",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "276",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 3,
+  "recorded_at": "2026-10-17T19:28:26Z",
+  "red_cases": {
+    "already_covered": 13,
+    "proposed": 17
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/17/rollout-2026-10-17T15-21-40-01a14b50-10f8-7020-8182-6753f13896a8.jsonl",
+    "thread_id": "01a14b50-10f8-7020-8182-6753f13896a8"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

@@ -23,6 +23,58 @@ and version plan.
   necessary but not sufficient textual check. The pre-registered discrimination
   pilot is the evidence that the degraded arm is degraded. The original scan reported
   success on a missing tree, a pre-existing copy and an incomplete diagnose.
+- **A controller-owned issue and PR fixture service** (#276). flow:auto talks
+  to GitHub throughout, and a trial has no network or `gh`. A file-backed fake
+  inside the container would be subject-writable. `skillc/fixture_service.py`
+  makes the controller the only GitHub. A `gh` shim
+  (`docker/fixture-service/skillc-gh-shim.py`) forwards each call over the attempt's one
+  #183 socket. The service parses it against a closed grammar, records an event
+  (its own sequence number, decision, effect, and state digests before and
+  after) and only then replies.
+  - The grammar is exactly the 59 calls the pinned CPP 86641e8 lane makes,
+    committed as an inventory with `source:line`.
+  - `--jq` runs through the controller's real jq 1.7.x, and only for the
+    allowlisted pinned filters. Anything else is recorded as unsupported, never
+    approximated.
+  - The squash merge is built and the ref is moved by the controller, so the
+    merge SHA is never subject-authored. Closing keywords close issues as merge
+    effects. One shared matcher, `closing_references()`, follows GitHub's
+    documented keyword grammar. A form the doc leaves unsettled, such as
+    `Fixes:#42`, is recorded as ambiguous and closes nothing.
+  - Scenario authority, duplicate create, invalid transitions and the wrong
+    repository are refused and recorded.
+  - Declared `lost-response` and `stale-read` faults fire on the first
+    admitted matching request, so a junk flood cannot move them.
+  - `dispatch()` multiplexes `gh` and the gate witness's ops on the one socket,
+    with closed per-route key sets.
+  - Remote ref rewrites are DETECTED as `remote_integrity: VIOLATED`, never
+    reconciled. Prevention is #436.
+  - Running git as the controller against a remote the subject can write
+    would run subject-chosen code on the host, through a written `commondir`
+    or a config swapped between check and use. `LocalGitRemote` therefore
+    refuses, fail-closed and before any git runs, a remote with any of these:
+    an entry owned by another uid; an entry that is group- or other-writable;
+    a symlink; an unsafe ancestor; an unlistable root; a `..` path. A live
+    attempt's remote must run git inside its containment (#434 hard
+    acceptance).
+  - CI installs jq. `ci/check_git_tests_ran.py` now maps each tool-dependent
+    module to the tools it needs (git, jq), and a committed jq-skip bad control
+    fails it. The pre-change checker passed that control.
+  - Proven host-side over a real socket with the real shim. Live wiring is
+    #434's.
+  - The shim lives in `docker/fixture-service/`, not `docker/trial/`, because
+    every `docker/trial/` file enters the pinned flow-check build context.
+    `tests/test_fixture_service_runtime_pin.py` pins that context and recipe
+    digest at #276's base, with a control in which the shim is placed back
+    under `docker/trial/` and the digest moves.
+
+- **Research: how to build #270's clean-project case, and where Kyle fits** (#431).
+  `docs/research/clean-project-case-2026-10.md` checks the benchmark literature for cases where the
+  right action is to change nothing (FixedBench, ImpossibleBench, BouncerBench, SkillsBench, the
+  SWE-bench family), with pins and licences. It recommends two sibling clean-project tasks that share
+  the must-act tasks' goal text and run on the existing `fresh` actor, so no frozen #375 identity
+  moves. It also ranks where Kyle could help skillc's evals, with the contamination risks. Research
+  only; nothing was run.
 
 - **The gate-witness tests' attempt limit is 60s, not 15s** (#437). Under
   `make verify`'s parallel load, `run_case`'s 15s whole-attempt limit (and the
