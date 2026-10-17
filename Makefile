@@ -42,7 +42,7 @@ PYTEST_REPORT_DIR ?= reports
 test: sync
 	mkdir -p $(PYTEST_REPORT_DIR)
 	uv run --no-sync pytest --collect-only -q $(PYTEST_ARGS) > $(PYTEST_REPORT_DIR)/pytest-collected.txt
-	uv run --no-sync pytest -n $(PYTEST_WORKERS) --maxprocesses=8 --dist=loadgroup -rA --junit-xml=$(PYTEST_REPORT_DIR)/pytest-report.xml $(PYTEST_ARGS) | tee $(PYTEST_REPORT_DIR)/pytest.log
+	uv run --no-sync pytest -n $(PYTEST_WORKERS) --maxprocesses=8 --dist=loadgroup -rA --durations=0 --junit-xml=$(PYTEST_REPORT_DIR)/pytest-report.xml $(PYTEST_ARGS) | tee $(PYTEST_REPORT_DIR)/pytest.log
 	python3 ci/check_pytest_population.py $(PYTEST_REPORT_DIR)/pytest-collected.txt $(PYTEST_REPORT_DIR)/pytest-report.xml
 
 lint: sync
