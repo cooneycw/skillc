@@ -1,42 +1,57 @@
 #!/usr/bin/env python3
-"""CI control (#307): fail if the git-dependent test population silently
-skipped. AGENTS.md states the CI image previously had neither git nor make,
-so every `needs_git`/module-level `pytestmark` test skipped there - this
-checker reads a pytest `--junit-xml` report and refuses to let that regress
-unnoticed, now that `gate` installs git.
+"""CI control (#307, widened to jq by #276): fail if a tool-dependent test
+population silently skipped. AGENTS.md states the CI image previously had
+neither git nor make, so every `needs_git`/module-level `pytestmark` test
+skipped there - this checker reads a pytest `--junit-xml` report and refuses
+to let that regress unnoticed, now that `gate` installs git and jq.
 
 Two independent signals, because either one alone can go blind on its own:
 
-- PRIMARY: any testcase, anywhere in the report, whose skip message mentions
-  "git" (case-insensitively) is a failure outright. This is what actually
-  catches the regression in a MIXED file (test_profile.py, test_materialize.py,
-  etc. carry both git-gated and ordinary tests side by side) - a file's other
-  tests keep passing even when its git-gated subset silently skips again, so
-  a per-file executed-count floor alone would not notice.
-- SECONDARY: each file in GIT_DEPENDENT_FILES must contribute at least one
+- PRIMARY: any testcase, anywhere in the report, whose skip message names a
+  REQUIRED_TOOLS entry (case-insensitively) is a failure outright. This is
+  what actually catches the regression in a MIXED file (test_profile.py,
+  test_materialize.py, etc. carry both git-gated and ordinary tests side by
+  side) - a file's other tests keep passing even when its gated subset
+  silently skips again, so a per-file executed-count floor alone would not
+  notice. Each skip reason names the tool that is actually missing (#276
+  ruling): a jq-gated test says "jq", never "git".
+- SECONDARY: each file in TOOL_DEPENDENT_FILES must contribute at least one
   EXECUTED (passed or failed; a skip does not count) testcase. This is the
   backstop for a file whose population vanished a DIFFERENT way (a collection
   error, the file renamed, every test in it skipped for a re-worded reason
-  that no longer mentions "git" - the primary signal's own blind spot).
+  that no longer names its tool - the primary signal's own blind spot).
 
 A missing or unparsable report is ALSO a failure - never read as "found no
-git skips, so nothing to report". Add a new entry to GIT_DEPENDENT_FILES
-whenever a new test module gains git-gated tests; that is a visible,
-one-line change here, not something this checker can infer on its own.
+tool skips, so nothing to report". Add a new entry to TOOL_DEPENDENT_FILES
+whenever a new test module gains tool-gated tests, naming the tools it needs;
+that is a visible, one-line change here, not something this checker can infer
+on its own.
 """
 from __future__ import annotations
 
 import sys
 import xml.etree.ElementTree as ET
 
-GIT_DEPENDENT_FILES = (
-    "tests.test_degrade",
-    "tests.test_changelog_check",
-    "tests.test_provenance",
-    "tests.test_git_fixture",
-    "tests.test_profile",
-    "tests.test_materialize",
-)
+#: The host tools the `gate` step installs, and whose absence a skip
+#: message would name.
+REQUIRED_TOOLS = ("git", "jq")
+
+#: Each tool-dependent test module, mapped to the tools its gated tests need.
+TOOL_DEPENDENT_FILES: dict[str, tuple[str, ...]] = {
+    "tests.test_degrade": ("git",),
+    "tests.test_changelog_check": ("git",),
+    "tests.test_provenance": ("git",),
+    "tests.test_git_fixture": ("git",),
+    "tests.test_profile": ("git",),
+    "tests.test_materialize": ("git",),
+    "tests.test_fixture_service": ("git", "jq"),
+    "tests.test_fixture_service_channel": ("git", "jq"),
+    "tests.test_fixture_service_inventory": ("jq",),
+}
+assert all(set(tools) <= set(REQUIRED_TOOLS) for tools in TOOL_DEPENDENT_FILES.values())
+
+#: Kept for readers of the #307 name; the population is TOOL_DEPENDENT_FILES.
+GIT_DEPENDENT_FILES = tuple(TOOL_DEPENDENT_FILES)
 
 
 def check(report_path: str) -> list[str]:
@@ -45,27 +60,29 @@ def check(report_path: str) -> list[str]:
     the caller decides how to report that, since it is a different kind
     of failure from a clean parse that finds something wrong."""
     tree = ET.parse(report_path)
-    executed_by_file = dict.fromkeys(GIT_DEPENDENT_FILES, 0)
-    git_mentioning_skips: list[str] = []
+    executed_by_file = dict.fromkeys(TOOL_DEPENDENT_FILES, 0)
+    tool_skips: dict[str, list[str]] = {tool: [] for tool in REQUIRED_TOOLS}
     for case in tree.iter("testcase"):
         classname = case.get("classname", "")
         skipped = case.find("skipped")
         if skipped is not None:
-            message = skipped.get("message") or ""
-            if "git" in message.lower():
-                git_mentioning_skips.append(f"{classname}::{case.get('name')}: {message}")
+            message = (skipped.get("message") or "").lower()
+            for tool in REQUIRED_TOOLS:
+                if tool in message:
+                    tool_skips[tool].append(f"{classname}::{case.get('name')}: {skipped.get('message')}")
             continue
-        for name in GIT_DEPENDENT_FILES:
+        for name in TOOL_DEPENDENT_FILES:
             if classname == name or classname.startswith(name + "."):
                 executed_by_file[name] += 1
     failures = [
         f"zero executed (non-skipped) test from {name} - its whole population may have skipped"
         for name, count in executed_by_file.items() if count == 0
     ]
-    if git_mentioning_skips:
-        shown = git_mentioning_skips[:5]
-        more = f" (+{len(git_mentioning_skips) - 5} more)" if len(git_mentioning_skips) > 5 else ""
-        failures.append(f"{len(git_mentioning_skips)} test(s) skipped for a git-mentioning reason: {shown}{more}")
+    for tool, skips in tool_skips.items():
+        if skips:
+            shown = skips[:5]
+            more = f" (+{len(skips) - 5} more)" if len(skips) > 5 else ""
+            failures.append(f"{len(skips)} test(s) skipped for a {tool}-mentioning reason: {shown}{more}")
     return failures
 
 
@@ -86,8 +103,8 @@ def main(argv: list[str]) -> int:
         for failure in failures:
             print(f"check-git-tests-ran: {failure}", file=sys.stderr)
         return 1
-    print(f"check-git-tests-ran: ok - every declared file executed at least one test, no git-mentioning skips "
-          f"({len(GIT_DEPENDENT_FILES)} files checked)")
+    print(f"check-git-tests-ran: ok - every declared file executed at least one test, no skip naming "
+          f"{'/'.join(REQUIRED_TOOLS)} ({len(TOOL_DEPENDENT_FILES)} files checked)")
     return 0
 
 

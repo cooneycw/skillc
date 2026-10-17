@@ -8,6 +8,36 @@ and version plan.
 
 ## [Unreleased]
 
+- **A controller-owned issue and PR fixture service** (#276). flow:auto talks
+  to GitHub throughout, and a trial has no network or `gh`. A file-backed fake
+  inside the container would be subject-writable. `skillc/fixture_service.py`
+  makes the controller the only GitHub. A `gh` shim
+  (`docker/trial/skillc-gh-shim.py`) forwards each call over the attempt's one
+  #183 socket. The service parses it against a closed grammar, records an event
+  (its own sequence number, decision, effect, and state digests before and
+  after) and only then replies.
+  - The grammar is exactly the 59 calls the pinned CPP 86641e8 lane makes,
+    committed as an inventory with `source:line`.
+  - `--jq` runs through the controller's real jq 1.7.x, and only for the
+    allowlisted pinned filters. Anything else is recorded as unsupported, never
+    approximated.
+  - The squash merge is built and the ref is moved by the controller, so the
+    merge SHA is never subject-authored. Closing keywords close issues as merge
+    effects.
+  - Scenario authority, duplicate create, invalid transitions and the wrong
+    repository are refused and recorded.
+  - Declared `lost-response` and `stale-read` faults fire on the first
+    admitted matching request, so a junk flood cannot move them.
+  - `dispatch()` multiplexes `gh` and the gate witness's ops on the one socket,
+    with closed per-route key sets.
+  - Remote ref rewrites are DETECTED as `remote_integrity: VIOLATED`, never
+    reconciled. Prevention is #436.
+  - CI installs jq. `ci/check_git_tests_ran.py` now maps each tool-dependent
+    module to the tools it needs (git, jq), and a committed jq-skip bad control
+    fails it. The pre-change checker passed that control.
+  - Proven host-side over a real socket with the real shim. Live wiring is
+    #434's.
+
 - **A daemon-refused `execute()` reads as never started, not as a failed run**
   (#317). #304's entry guard is a check-then-act: the container can stop
   between `_inspect()` and the real `docker exec`, and the daemon's refusal

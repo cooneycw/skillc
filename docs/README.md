@@ -22,6 +22,10 @@ task levels beyond Level 1 remain documentation only.
   `skillc/trial_bootstrap.py` and `docker/trial/` - the per-trial home, onboarding
   seed, MCP config, invocation and skill+tool liveness canary a live agent needs to
   actually start and work inside a Docker trial (#78).
+- [Issue and PR fixture service](specs/evaluation-facility/fixture-service.md):
+  `skillc/fixture_service.py` and `docker/trial/skillc-gh-shim.py` - a controller-owned
+  GitHub stand-in over #183's channel, with a closed gh grammar, real jq, a
+  controller-performed squash merge and an unforgeable event record (#276).
 - [Design review](specs/evaluation-facility/review.md): open decisions and questions
   to challenge before implementation.
 - [Delivery plan](../PLAN.md): staged milestones and their acceptance evidence.

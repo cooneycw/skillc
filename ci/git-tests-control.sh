@@ -18,10 +18,11 @@ fail_case() {
 }
 
 fail_case "partial-skip (a mixed file's git-gated subset skipped)" "$FIXTURES/bad-partial-skip.xml"
+fail_case "jq-skip (#276: every module still executes, but its jq-gated tests skipped for jq)" "$FIXTURES/bad-jq-skip.xml"
 fail_case "missing report" "$FIXTURES/does-not-exist.xml"
 fail_case "malformed report" "$FIXTURES/malformed.xml"
 
 echo "git-tests-control: good-all-ran must PASS"
 python3 "$CHECK" "$FIXTURES/good-all-ran.xml"
 
-echo "git-tests-control: ok - caught all three bad fixtures, passed the good one"
+echo "git-tests-control: ok - caught all four bad fixtures, passed the good one"
