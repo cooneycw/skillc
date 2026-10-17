@@ -261,7 +261,7 @@ def skill_digest_pin_problems(value: object) -> Iterator[str]:
             if not _nonempty_str(pin.get(key)):
                 yield f"skill_digests[{index}] has no {key}; a pin with a missing fingerprint cannot detect a stale one"
         path = pin.get("path")
-        if _nonempty_str(path):
+        if isinstance(path, str) and _nonempty_str(path):
             if path in seen:
                 yield f"skill_digests[{index}] pins {path!r} twice"
             seen.add(path)
