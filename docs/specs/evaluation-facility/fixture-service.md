@@ -102,7 +102,11 @@ squash message close the open issues they name, and those closures are
 recorded as part of the merge's effect. The keywords are `close`, `closes`,
 `closed`, `fix`, `fixes`, `fixed`, `resolve`, `resolves` and `resolved`, each
 followed by `#N`. These closure effects are what #277's "old closing
-reference" case reads. `--delete-branch` deletes the remote head ref.
+reference" case reads. `--delete-branch` deletes the remote head ref, conditioned on the merged head SHA.
+A failed deletion is recorded as `branch_delete_failed`, never as deleted.
+Every step that can fail happens before the compare-and-swap: the merge tree,
+the closing references (at most nine digits each) and the commit. Past it only
+bookkeeping remains.
 
 Without a strategy flag, the merge fails exactly as non-interactive gh does.
 `--admin` needs its own authority (`pr.merge.admin`).
@@ -125,7 +129,10 @@ reached the service becomes one event, which carries:
 - `seq`: the service's own counter. The subject never supplies it.
 - `attempt_id` and `repository`.
 - `op`, `argv`, `argv_digest` and `context`.
-- `decision`: one of `read`, `applied`, `refused`, `unsupported` or `malformed`.
+- `decision`: one of `read`, `applied`, `refused`, `unsupported`, `malformed`
+  or `error`. `error` is a handler failure, such as an untrusted or unreadable
+  remote. It is still an event: its state digests show what did change, and it
+  makes coverage incomplete.
 - `reason`.
 - `effect`: for an applied op, what changed (the PR number, head oid, merge
   commit, closed issues, comment id).
@@ -144,7 +151,7 @@ The record also carries:
 - `remote_integrity` and its `divergence` list;
 - `record_digest`, computed over all of the above.
 
-A request whose top-level shape is outside the closed schema is refused on the
+A request whose top-level shape (or a `body_files` value that is not strict base64) is outside the closed schema is refused on the
 channel. The schema keys are `op argv cwd context body_files`; an extra `seq`
 or `result` is outside it. When such a request reaches the service, it is
 recorded as `malformed`. A forged field therefore changes nothing, and it
@@ -158,7 +165,7 @@ leaves a trace.
 | `no-controller-witness` | Nothing well-formed arrived. A bypass is visible as absence, never as success |
 | `channel-unavailable` | The caller set `channel_unavailable`: nothing could have been witnessed |
 
-`coverage_complete` is false whenever any event was `unsupported`. The record
+`coverage_complete` is false whenever any event was `unsupported` or `error`. The record
 then cannot speak for what the subject tried, and a grader reads that portion
 as UNKNOWN.
 
@@ -190,7 +197,11 @@ requests never count, so a junk flood cannot move the scored point.
   the reply is replaced with gh's transport error, exit 1. The event keeps the
   real reply as `suppressed_reply`.
 - `{"kind": "stale-read", "after": OP, "read": READ_OP}`: once `after` has
-  applied, the first `read` is answered from the state before it.
+  applied, the first `read` is answered from the state before it. Each fault
+  keeps its own snapshot, so two faults never overwrite or consume each other.
+  The snapshot also freezes each open PR's remote-derived view (head, files,
+  commits, mergeable), so a stale answer is the old payload, never old state
+  mixed with the live remote.
 
 A declared fault that never fired reports `coverage: UNKNOWN`. A recovery case
 built on it cannot qualify.
@@ -221,8 +232,25 @@ merges. It records a divergence:
 - at `finalize()`, when the tip differs, when a recorded merge commit (declared
   or service-made) is no longer reachable from it, or when the branch is gone.
 
-Any divergence makes `remote_integrity: VIOLATED`, and an unreadable remote
-makes it `UNKNOWN`. A divergence is never reconciled, repaired or dropped. A
+Any divergence makes `remote_integrity: VIOLATED`. An unreadable remote, or
+a git command that failed rather than answered (any exit other than git's
+documented 0 or 1), makes it `UNKNOWN`, never VIOLATED.
+
+The remote's own metadata is not trusted to steer controller git commands.
+Every controller call runs with:
+- `core.hooksPath=/dev/null` and `core.fsmonitor=false`;
+- `GIT_NO_REPLACE_OBJECTS=1` and `GIT_ATTR_NOSYSTEM=1`;
+- no global or system config.
+
+Before each call, the remote is refused (`RemoteUntrusted`, recorded as an
+`error` event, integrity `UNKNOWN`) in either of two cases:
+- its `config` carries a key outside a short allowlist (repository format,
+  bare and filemode flags, object format, default branch, and the `receive.deny*`
+  settings);
+- it carries `info/grafts` or an alternates file.
+
+A merge driver, an include, a hooks path or a filter therefore cannot run or
+steer anything under the controller. A divergence is never reconciled, repaired or dropped. A
 direct push to `main` and a force-push over a recorded merge are both tested.
 Prevention, by routing push through the controller, is #436.
 

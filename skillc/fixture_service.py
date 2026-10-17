@@ -54,6 +54,7 @@ Stdlib only, per AGENTS.md.
 from __future__ import annotations
 
 import base64
+import binascii
 import copy
 import hashlib
 import json
@@ -137,7 +138,7 @@ JQ_VERSION_PATTERN = re.compile(r"^jq-1\.7(\.\d+)?$")
 
 SUBJECT_LOGIN = "fixture-subject"
 SERVICE_IDENTITY = ("Fixture Service", "service@fixture.invalid")
-_CLOSING = re.compile(r"\b(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s*:?\s+#(\d+)\b",
+_CLOSING = re.compile(r"\b(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s*:?\s+#(\d{1,9})\b",
                       re.IGNORECASE)
 _TRANSPORT_ERROR = ("error connecting to api.github.com\n"
                     "check your internet connection or https://githubstatus.com\n")
@@ -178,15 +179,35 @@ class GitRemote(Protocol):
     def merge_tree(self, base: str, head: str) -> str | None: ...
     def commit_tree(self, tree: str, parent: str, message: str, date: str) -> str: ...
     def update_ref(self, ref: str, new: str, old: str) -> bool: ...
-    def delete_ref(self, ref: str) -> None: ...
+    def delete_ref(self, ref: str, old: str) -> bool: ...
+
+
+class RemoteUntrusted(RuntimeError):
+    """The remote's own metadata could steer a controller git command (a
+    hook, a replacement or graft, an alternate object store, a config key
+    outside the allowlist). Nothing is run against it."""
 
 
 def _git_environment(home: str) -> dict[str, str]:
     # The same allowlist `git_fixture._environment` uses: no inherited
-    # GIT_DIR, config injection, SSH or credentials.
+    # GIT_DIR, config injection, SSH or credentials. Replacement refs and
+    # system attributes are switched off too (counter-model review): the
+    # remote is candidate-writable, so nothing it carries may change what
+    # history a controller command sees.
     return {"PATH": os.defpath, "LC_ALL": "C", "HOME": home, "XDG_CONFIG_HOME": home,
             "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1",
-            "GIT_TERMINAL_PROMPT": "0", "GIT_ALLOW_PROTOCOL": "file"}
+            "GIT_TERMINAL_PROMPT": "0", "GIT_ALLOW_PROTOCOL": "file",
+            "GIT_NO_REPLACE_OBJECTS": "1", "GIT_ATTR_NOSYSTEM": "1"}
+
+
+#: The only keys a remote's own `config` may carry. Anything else - a merge
+#: driver, `core.hooksPath`, `core.fsmonitor`, an include, a filter, a
+#: `remote.*` command - could run or steer something inside a controller git
+#: call, so the remote is refused rather than trusted.
+_TRUSTED_CONFIG_KEYS = re.compile(
+    r"^(core\.(repositoryformatversion|filemode|bare|logallrefupdates|ignorecase|precomposeunicode)"
+    r"|extensions\.objectformat|init\.defaultbranch|receive\.(denycurrentbranch|denynonfastforwards))$")
+_UNTRUSTED_PATHS = ("info/grafts", "objects/info/alternates", "objects/info/http-alternates")
 
 
 class LocalGitRemote:
@@ -198,27 +219,51 @@ class LocalGitRemote:
     def __init__(self, path: Path) -> None:
         self.path = path
 
+    def _check_trusted(self, env: Mapping[str, str]) -> None:
+        for name in _UNTRUSTED_PATHS:
+            if (self.path / name).exists():
+                raise RemoteUntrusted(f"the remote carries {name}")
+        proc = subprocess.run(["git", "config", "--file", str(self.path / "config"), "--no-includes",
+                               "--list", "--name-only", "-z"], env=dict(env), capture_output=True,
+                              timeout=30, check=False)
+        if proc.returncode != 0:
+            raise RemoteUntrusted("the remote's config could not be read")
+        for key in filter(None, proc.stdout.decode(errors="replace").split("\0")):
+            if not _TRUSTED_CONFIG_KEYS.match(key.lower()):
+                raise RemoteUntrusted(f"the remote's config carries {key!r}, outside the allowlist")
+
     def _git(self, *args: str, stdin: bytes | None = None, check: bool = True,
              extra_env: Mapping[str, str] | None = None) -> subprocess.CompletedProcess[bytes]:
         with tempfile.TemporaryDirectory(prefix="fixture-service-git-") as home:
             env = _git_environment(home)
+            self._check_trusted(env)
             if extra_env:
                 env.update(extra_env)
             return subprocess.run(
                 ["git", "-c", f"user.name={SERVICE_IDENTITY[0]}", "-c", f"user.email={SERVICE_IDENTITY[1]}",
-                 "-c", "commit.gpgsign=false", "--git-dir", str(self.path), *args],
+                 "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
+                 "--git-dir", str(self.path), *args],
                 input=stdin, env=env, capture_output=True, timeout=30, check=check)
+
+    @staticmethod
+    def _answer(proc: subprocess.CompletedProcess[bytes], what: str) -> bool:
+        """Exit 0 is yes, exit 1 is git's documented no; anything else is a
+        failure to look, never an answer (counter-model review)."""
+        if proc.returncode in (0, 1):
+            return proc.returncode == 0
+        raise RuntimeError(f"git {what} failed (exit {proc.returncode}): {proc.stderr.decode(errors='replace')}")
 
     def resolve(self, ref: str) -> str | None:
         proc = self._git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", check=False)
-        return proc.stdout.decode().strip() or None if proc.returncode == 0 else None
+        return (proc.stdout.decode().strip() or None) if self._answer(proc, "rev-parse") else None
 
     def is_ancestor(self, ancestor: str, descendant: str) -> bool:
-        return self._git("merge-base", "--is-ancestor", ancestor, descendant, check=False).returncode == 0
+        return self._answer(self._git("merge-base", "--is-ancestor", ancestor, descendant, check=False),
+                            "merge-base --is-ancestor")
 
     def merge_base(self, a: str, b: str) -> str | None:
         proc = self._git("merge-base", a, b, check=False)
-        return proc.stdout.decode().strip() or None if proc.returncode == 0 else None
+        return (proc.stdout.decode().strip() or None) if self._answer(proc, "merge-base") else None
 
     def diff_files(self, base: str, head: str) -> list[dict[str, Any]]:
         out = self._git("diff", "--numstat", "--no-renames", "-z", base, head).stdout.decode()
@@ -253,8 +298,8 @@ class LocalGitRemote:
     def update_ref(self, ref: str, new: str, old: str) -> bool:
         return self._git("update-ref", ref, new, old, check=False).returncode == 0
 
-    def delete_ref(self, ref: str) -> None:
-        self._git("update-ref", "-d", ref, check=False)
+    def delete_ref(self, ref: str, old: str) -> bool:
+        return self._git("update-ref", "-d", ref, old, check=False).returncode == 0
 
 
 def _canonical(value: Any) -> bytes:
@@ -446,6 +491,7 @@ class FixtureServiceRecord:
     coverage: str  # "witnessed" | "no-controller-witness" | "channel-unavailable"
     coverage_complete: bool
     unsupported_events: tuple[int, ...]
+    error_events: tuple[int, ...]
     events: tuple[Mapping[str, Any], ...]
     final_state: Mapping[str, Any]
     faults: tuple[Mapping[str, Any], ...]
@@ -457,7 +503,8 @@ class FixtureServiceRecord:
             "fixture_service_schema": SCHEMA_VERSION, "attempt_id": self.attempt_id,
             "repository": self.repository, "declaration_digest": self.declaration_digest,
             "jq": dict(self.jq), "coverage": self.coverage, "coverage_complete": self.coverage_complete,
-            "unsupported_events": list(self.unsupported_events), "events": [dict(e) for e in self.events],
+            "unsupported_events": list(self.unsupported_events), "error_events": list(self.error_events),
+            "events": [dict(e) for e in self.events],
             "final_state": dict(self.final_state), "faults": [dict(f) for f in self.faults],
             "remote_integrity": self.remote_integrity, "divergence": [dict(d) for d in self.divergence],
         }
@@ -589,7 +636,7 @@ class FixtureService:
                 self._faults.append({**raw, "fired": False, "fired_at_seq": None, "armed_at_seq": None})
             else:
                 raise DeclarationRefused(f"unsupported fault declaration: {raw!r}")
-        self._stale_snapshot: dict[str, Any] | None = None
+        self._pending_stale: dict[str, Any] | None = None
         self._divergence: list[dict[str, Any]] = []
 
     @staticmethod
@@ -632,12 +679,14 @@ class FixtureService:
                                    f"permissions to execute this operation ({command.op})\n")
                 stale = self._stale_for(command.op)
                 if stale is not None:
-                    live, self._state = self._state, stale
+                    stale_fault, snapshot = stale
+                    live, self._state = self._state, snapshot
                     try:
                         reply, decision, effect = self._handle(command, context, body_files, at)
                     finally:
                         self._state = live
                     event["fault"] = "stale-read"
+                    stale_fault["fired"], stale_fault["fired_at_seq"] = True, seq
                 else:
                     reply, decision, effect = self._handle(command, context, body_files, at)
                 event["reason"] = None
@@ -650,6 +699,13 @@ class FixtureService:
                 reply = {"exit_code": exc.exit_code, "stdout": exc.stdout, "stderr": exc.stderr}
                 decision, effect = exc.decision, None
                 event["reason"] = exc.reason
+            except Exception as exc:  # noqa: BLE001 - recorded, never lost (counter-model review)
+                # A failure inside a handler - an untrusted or unreadable
+                # remote, a bug - is still an event: its state digests show
+                # whatever DID change, and coverage reads incomplete.
+                reply = {"exit_code": 1, "stdout": "", "stderr": "skillc fixture service: internal error\n"}
+                decision, effect = "error", None
+                event["reason"] = f"{type(exc).__name__}: {exc}"
             event["decision"] = decision
             event["effect"] = effect
             if decision == "applied":
@@ -660,11 +716,6 @@ class FixtureService:
                     event["fault"] = "lost-response"
                     event["suppressed_reply"] = reply
                     reply = {"exit_code": 1, "stdout": "", "stderr": _TRANSPORT_ERROR}
-            if event["fault"] == "stale-read":
-                for fault in self._faults:
-                    if fault["kind"] == "stale-read" and fault["armed_at_seq"] is not None and not fault["fired"]:
-                        fault["fired"], fault["fired_at_seq"] = True, seq
-                        break
             event["state_after"] = _digest(_jsonable(self._state))
             event["reply"] = reply
             self._events.append(event)
@@ -688,6 +739,11 @@ class FixtureService:
         if not isinstance(files, dict) or not all(isinstance(k, str) and isinstance(v, str)
                                                   for k, v in files.items()):
             return "body_files must map paths to base64 strings"
+        for value in files.values():
+            try:
+                base64.b64decode(value, validate=True)
+            except (binascii.Error, ValueError):
+                return "body_files values must be valid base64"
         if "cwd" in request and not isinstance(request["cwd"], str):
             return "cwd must be a string"
         return None
@@ -695,18 +751,33 @@ class FixtureService:
     # -- faults -------------------------------------------------------------
 
     def _arm_stale(self, op: str, seq: int, before: str) -> None:
+        """Give each stale-read fault waiting on `op` its OWN snapshot, taken
+        before `op` applied (counter-model review: one shared snapshot let a
+        second fault overwrite the first)."""
         for fault in self._faults:
             if fault["kind"] == "stale-read" and fault["after"] == op and fault["armed_at_seq"] is None:
                 fault["armed_at_seq"] = seq
                 fault["snapshot_digest"] = before
-                self._stale_snapshot = self._pre_apply_snapshot
+                fault["_snapshot"] = copy.deepcopy(self._pending_stale)
 
-    def _stale_for(self, op: str) -> dict[str, Any] | None:
+    def _stale_for(self, op: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
         for fault in self._faults:
             if (fault["kind"] == "stale-read" and fault["read"] == op and fault["armed_at_seq"] is not None
-                    and not fault["fired"] and self._stale_snapshot is not None):
-                return copy.deepcopy(self._stale_snapshot)
+                    and not fault["fired"]):
+                return fault, copy.deepcopy(fault["_snapshot"])
         return None
+
+    def _freeze_for_stale(self, op: str) -> None:
+        """Before an op some stale-read fault waits on, capture the state AND
+        each open PR's remote-derived view, so a stale answer reproduces the
+        old payload instead of mixing old state with the live remote."""
+        self._pending_stale = None
+        if any(f["kind"] == "stale-read" and f["after"] == op and f["armed_at_seq"] is None for f in self._faults):
+            snapshot = copy.deepcopy(self._state)
+            for n, pr in snapshot["prs"].items():
+                if pr["state"] == "OPEN":
+                    pr["frozen_view"] = self._pr_json(self._state["prs"][n])
+            self._pending_stale = snapshot
 
     def _lost_response_for(self, op: str, effect: Mapping[str, Any] | None) -> dict[str, Any] | None:
         for fault in self._faults:
@@ -741,7 +812,8 @@ class FixtureService:
 
     def _handle(self, command: Command, context: Mapping[str, Any], body_files: Mapping[str, str],
                 at: str) -> tuple[dict[str, Any], str, dict[str, Any] | None]:
-        self._pre_apply_snapshot = copy.deepcopy(self._state)
+        if command.op not in READ_OPS:
+            self._freeze_for_stale(command.op)
         handler: Callable[..., tuple[dict[str, Any], str, dict[str, Any] | None]] = getattr(
             self, "_op_" + command.op.replace(".", "_"))
         return handler(command, context, body_files, at)
@@ -815,6 +887,8 @@ class FixtureService:
                 self._remote.resolve(f"refs/heads/{pr['base_ref']}"))
 
     def _pr_json(self, pr: Mapping[str, Any]) -> dict[str, Any]:
+        if "frozen_view" in pr:
+            return copy.deepcopy(pr["frozen_view"])
         files, commits, head_oid, mergeable = pr["files"], pr["commits"], pr["head_oid"], "UNKNOWN"
         if pr["state"] == "OPEN":
             head, base = self._pr_live(pr)
@@ -1097,7 +1171,11 @@ class FixtureService:
         subject = command.flags.get("subject") or f"{pr['title']} (#{n})"
         squash_body = self._body(command, body_files) or ""
         message = subject + ("\n\n" + squash_body if squash_body else "") + "\n"
+        closing = (sorted({int(m) for m in _CLOSING.findall(pr["body"] + "\n" + message)})
+                   if pr["base_ref"] == self._default else [])
         merge_commit = self._remote.commit_tree(tree, base, message, at.replace("Z", "+0000"))
+        # Everything that can fail is above this line: past the CAS only
+        # in-memory bookkeeping and the recorded branch deletion remain.
         if not self._remote.update_ref(base_ref, merge_commit, base):
             raise _GhError("base-moved", f"X Pull request {self.repository}#{n} could not be merged: "
                            "Base branch was modified. Review and try the merge again.\n")
@@ -1109,19 +1187,25 @@ class FixtureService:
         effect: dict[str, Any] = {"number": n, "merge_commit": merge_commit, "base_ref": pr["base_ref"],
                                   "base_oid": base, "head_oid": head, "subject": subject, "body": squash_body,
                                   "closed_issues": [], "deleted_branch": None}
-        if pr["base_ref"] == self._default:
-            for ref in sorted({int(m) for m in _CLOSING.findall(pr["body"] + "\n" + message)}):
+        if closing:
+            for ref in closing:
                 issue = self._state["issues"].get(ref)
                 if issue is not None and issue["state"] == "OPEN":
                     issue.update(state="CLOSED", closed_at=at, updated_at=at,
                                  closed_by={"kind": "pull_request", "number": n, "at": at})
                     effect["closed_issues"].append(ref)
+        stderr = f"✓ Squashed and merged pull request {self.repository}#{n} ({pr['title']})\n"
         if command.flags.get("delete-branch") and pr["head_ref"] != self._default:
-            self._remote.delete_ref(f"refs/heads/{pr['head_ref']}")
-            effect["deleted_branch"] = pr["head_ref"]
-        return ({"exit_code": 0, "stdout": "",
-                 "stderr": f"✓ Squashed and merged pull request {self.repository}#{n} ({pr['title']})\n"},
-                "applied", effect)
+            try:
+                deleted = self._remote.delete_ref(f"refs/heads/{pr['head_ref']}", head)
+            except Exception:  # noqa: BLE001 - the merge stands; the deletion is what failed
+                deleted = False
+            if deleted:
+                effect["deleted_branch"] = pr["head_ref"]
+            else:
+                effect["branch_delete_failed"] = pr["head_ref"]
+                stderr += f"failed to delete remote branch {pr['head_ref']}\n"
+        return {"exit_code": 0, "stdout": "", "stderr": stderr}, "applied", effect
 
     def _op_run_list(self, command: Command, *_: Any) -> tuple[dict[str, Any], str, dict[str, Any]]:
         # No CI is simulated: an empty run list, flagged in the effect so a
@@ -1171,11 +1255,14 @@ class FixtureService:
             else:
                 coverage = "witnessed"
             unsupported = tuple(e["seq"] for e in self._events if e["decision"] == "unsupported")
-            faults = tuple({**f, "coverage": "fired" if f["fired"] else "UNKNOWN"} for f in self._faults)
+            errors = tuple(e["seq"] for e in self._events if e["decision"] == "error")
+            faults = tuple({**{k: v for k, v in f.items() if k != "_snapshot"},
+                            "coverage": "fired" if f["fired"] else "UNKNOWN"} for f in self._faults)
             self._finalized = FixtureServiceRecord(
                 attempt_id=self.attempt_id, repository=self.repository,
                 declaration_digest=_digest(self._declaration), jq=dict(self._jq), coverage=coverage,
-                coverage_complete=not unsupported, unsupported_events=unsupported,
+                coverage_complete=not unsupported and not errors, unsupported_events=unsupported,
+                error_events=errors,
                 events=tuple(copy.deepcopy(self._events)), final_state=copy.deepcopy(_jsonable(self._state)),
                 faults=faults, remote_integrity=integrity, divergence=tuple(divergence),
             )
@@ -1207,6 +1294,7 @@ __all__ = [
     "FixtureServiceRecord",
     "GitRemote",
     "LocalGitRemote",
+    "RemoteUntrusted",
     "Unsupported",
     "dispatch",
     "measure_jq",

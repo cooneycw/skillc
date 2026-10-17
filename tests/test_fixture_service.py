@@ -452,3 +452,93 @@ def test_deterministic_record_for_identical_runs(tmp_path: Path) -> None:
         ask(service, "pr", "merge", "4", "--squash", origin="/srv/remote.git")
         digests.append(json.loads(service.finalize("attempt-1").to_json_bytes())["record_digest"])
     assert digests[0] == digests[1]
+
+
+# --- counter-model review regressions (each red on the pre-fix code) -------------
+
+def test_a_hook_in_the_subject_writable_remote_never_runs_under_the_controller(world: World,
+                                                                              tmp_path: Path) -> None:
+    marker = tmp_path / "hook-ran"
+    hook = world.bare / "hooks" / "reference-transaction"
+    hook.write_text(f"#!/bin/sh\ntouch {marker}\n")
+    hook.chmod(0o755)
+    service = world.service()
+    ask(service, "pr", "create", "--title", "a", "--body", "b")
+    assert ask(service, "pr", "merge", "4", "--squash")["exit_code"] == 0
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("key,value", [("merge.evil.driver", "touch /tmp/x"), ("core.hooksPath", "/tmp/h"),
+                                       ("include.path", "/tmp/c")])
+def test_a_remote_config_outside_the_allowlist_is_refused_and_integrity_unknown(world: World, key: str,
+                                                                               value: str) -> None:
+    service = world.service()
+    _git(world.bare, "config", key, value)
+    reply = ask(service, "pr", "create", "--title", "a", "--body", "b")
+    event = last_event(service)
+    assert reply["exit_code"] == 1 and event["decision"] == "error" and "RemoteUntrusted" in event["reason"]
+    record = service.finalize("attempt-1")
+    assert record.remote_integrity == "UNKNOWN" and record.coverage_complete is False
+
+
+def test_a_huge_closing_reference_cannot_commit_an_unrecorded_merge(world: World) -> None:
+    service = world.service(faults=[{"kind": "lost-response", "op": "pr.merge"}])
+    ask(service, "pr", "create", "--title", "a", "--body", "Closes #" + "9" * 4500)
+    reply = ask(service, "pr", "merge", "4", "--squash")
+    event = last_event(service)
+    assert event["op"] == "pr.merge" and event["decision"] == "applied" and event["fault"] == "lost-response"
+    assert event["effect"]["merge_commit"] == world.main() and "error connecting" in reply["stderr"]
+    assert service.finalize("attempt-1").remote_integrity == "SATISFIED"
+
+
+def test_two_stale_faults_each_keep_their_own_snapshot(world: World) -> None:
+    service = world.service(faults=[{"kind": "stale-read", "after": "issue.close", "read": "issue.view"},
+                                    {"kind": "stale-read", "after": "issue.comment", "read": "issue.list"}])
+    ask(service, "issue", "close", "1")
+    ask(service, "issue", "comment", "3", "--body", "note")
+    listed = json.loads(ask(service, "issue", "list", "--state", "all", "--json", "number,comments")["stdout"])
+    assert {i["number"]: len(i["comments"]) for i in listed}[3] == 0  # the list fault, from before the comment
+    viewed = json.loads(ask(service, "issue", "view", "1", "--json", "state")["stdout"])
+    assert viewed == {"state": "OPEN"}  # the view fault still fires, from before the close
+    record = service.finalize("attempt-1")
+    assert [f["fired_at_seq"] for f in record.faults] == [4, 3]
+
+
+def test_a_stale_pr_view_reproduces_the_old_remote_derived_payload(world: World) -> None:
+    service = world.service(faults=[{"kind": "stale-read", "after": "pr.merge", "read": "pr.view"}])
+    ask(service, "pr", "create", "--title", "a", "--body", "b")
+    before = json.loads(ask(service, "pr", "view", "4", "--json", "state,changedFiles,commits")["stdout"])
+    ask(service, "pr", "merge", "4", "--squash", "--delete-branch")
+    stale = json.loads(ask(service, "pr", "view", "4", "--json", "state,changedFiles,commits")["stdout"])
+    assert stale == before and stale["changedFiles"] == 1
+
+
+def test_a_failed_branch_deletion_is_recorded_as_failed(world: World) -> None:
+    service = world.service()
+    ask(service, "pr", "create", "--title", "a", "--body", "b")
+    (world.bare / "refs" / "heads" / "feature.lock").write_text("")
+    assert ask(service, "pr", "merge", "4", "--squash", "--delete-branch")["exit_code"] == 0
+    effect = last_event(service)["effect"]
+    assert effect["deleted_branch"] is None and effect["branch_delete_failed"] == "feature"
+    assert world.remote.resolve("refs/heads/feature") is not None
+
+
+def test_invalid_base64_body_file_is_a_recorded_malformed_request(world: World) -> None:
+    service = world.service()
+    with pytest.raises(ChannelRefusal):
+        ask(service, "issue", "comment", "1", "--body-file", "-", body_files={"-": "A"})
+    assert [e["decision"] for e in service._events] == ["malformed"]
+
+
+def test_a_git_failure_reads_unknown_never_violated(world: World, monkeypatch: pytest.MonkeyPatch) -> None:
+    service = world.service()
+    original = fs.LocalGitRemote._git
+
+    def broken(self: fs.LocalGitRemote, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        if args[:2] == ("merge-base", "--is-ancestor"):
+            return subprocess.CompletedProcess(list(args), 128, b"", b"fatal: bad object")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(fs.LocalGitRemote, "_git", broken)
+    record = service.finalize("attempt-1")
+    assert record.remote_integrity == "UNKNOWN"
