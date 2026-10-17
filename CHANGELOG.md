@@ -19,7 +19,9 @@ and version plan.
   SCRIPTED per-attempt floor (median 36 s). There is no dollar figure. The degraded arm's mutation
   evidence is retaken at the ruled pin `86641e8`: the declared `mutated_digest`
   reproduces, and the rebuilt scan (all 97 installed files, verdicts
-  HOLDS/SURVIVES/NEEDS_REVIEW/UNKNOWN) reports HOLDS. The original scan reported
+  NO_TEXTUAL_SURVIVOR/SURVIVES/NEEDS_REVIEW/UNKNOWN) reports NO_TEXTUAL_SURVIVOR, a
+  necessary but not sufficient textual check. The pre-registered discrimination
+  pilot is the evidence that the degraded arm is degraded. The original scan reported
   success on a missing tree, a pre-existing copy and an incomplete diagnose.
 
 - **The gate-witness tests' attempt limit is 60s, not 15s** (#437). Under

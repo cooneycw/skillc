@@ -4,7 +4,8 @@ occurrence-scan evidence builder for gate-stops-early's degraded-arm mutation
 
 The scan's verdict is read as evidence that the removed instruction is gone
 from what a degraded attempt receives, and nothing downstream re-derives it,
-so every verdict it can give has a committed case here: HOLDS, SURVIVES,
+so every verdict it can give has a committed case here: NO_TEXTUAL_SURVIVOR,
+SURVIVES,
 NEEDS_REVIEW and UNKNOWN. The UNKNOWN and SURVIVES cases are the counter-model
 review's findings on #287 P1: missing or unreadable evidence, an incomplete
 diagnose, a full copy that already existed in the intact tree, and a copy that
@@ -100,9 +101,9 @@ def test_closure_entries_include_every_skill_file_and_every_dependency_file(tmp_
     assert [e.get("source") for e in smc.closure_entries(inv)] == ["a.md", "b.md", "scripts/x.sh", None]
 
 
-def test_holds_when_the_sentence_is_cleanly_removed(tmp_path: Path) -> None:
+def test_no_textual_survivor_when_the_sentence_is_cleanly_removed(tmp_path: Path) -> None:
     code, evidence = _run(tmp_path)
-    assert (code, _verdict(evidence)) == (0, "HOLDS")
+    assert (code, _verdict(evidence)) == (0, "NO_TEXTUAL_SURVIVOR")
     assert evidence["occurrence_scan"]["positive_control_held"] is True
 
 
@@ -150,7 +151,7 @@ def test_an_edited_reviewed_line_is_needs_review_not_survival(tmp_path: Path) ->
 
 def test_a_phrase_in_an_unchanged_exempt_plumbing_file_does_not_count(tmp_path: Path) -> None:
     code, evidence = _run(tmp_path)
-    assert (code, _verdict(evidence)) == (0, "HOLDS")
+    assert (code, _verdict(evidence)) == (0, "NO_TEXTUAL_SURVIVOR")
     assert any(not h["agent_facing"] for h in evidence["occurrence_scan"]["degraded_hits"])
 
 
@@ -234,3 +235,12 @@ def test_a_reviewed_line_under_a_different_instruction_needs_review(tmp_path: Pa
     moved = DEGRADED_REF.replace("- \n", "- Some other instruction:\n" + REVIEWED_LINE + "\n")
     code, evidence = _run(tmp_path, degraded={REF: moved, GATE: GATE_TEXT})
     assert (code, _verdict(evidence)) == (1, "NEEDS_REVIEW")
+
+
+def test_the_success_verdict_carries_its_narrow_meaning(tmp_path: Path) -> None:
+    """Orchestrator ruling: the success verdict states it is a necessary,
+    not sufficient, textual check, so nobody reads it as degradation proven."""
+    _code, evidence = _run(tmp_path)
+    meaning = evidence["occurrence_scan"]["verdict_meaning"]
+    assert "NOT SUFFICIENT" in meaning and "NOT evidence that the obligation is absent" in meaning
+    assert "discrimination pilot" in meaning

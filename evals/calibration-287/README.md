@@ -34,18 +34,27 @@ The pin is CPP `86641e8` (orchestrator ruling,
   [comment 6021089903](https://github.com/cooneycw/skillc/issues/287#issuecomment-6021089903)).
 - **Mutation evidence, retaken at 86641e8:**
   `evidence/discrimination-mutation-diagnose.json` (built by
-  `evidence/scan_mutation_closure.py`), verdict **HOLDS**. The removed sentence
-  occurs exactly once in `flow-check/reference.md`, and removing it reproduces
-  the declared `mutated_digest` `sha256:edb26e56…`. Both `skillc profile
-  diagnose` reports must be complete with 0 problems (necessary, not
-  sufficient). The occurrence scan reads all 97 installed files the inventory
-  declares (skill files, dependencies, and the inline synthetic marker); any
-  missing or unreadable file makes the verdict UNKNOWN. The intact tree carries
-  the full sentence (positive control). No degraded file carries it, anywhere.
-  Every remaining agent-facing phrase hit is one of two reviewed sibling lines
-  (`REVIEWED_UNRELATED`, keyed on exact text), and the rest are exempt plumbing.
-  The scan's verdicts are HOLDS, SURVIVES, NEEDS_REVIEW and UNKNOWN, each with a
-  committed case in `tests/test_calibration_287_scan_mutation_closure.py`.
+  `evidence/scan_mutation_closure.py`), verdict **NO_TEXTUAL_SURVIVOR**.
+  - **What it measures, and only that:** the removed sentence occurs exactly
+    once in `flow-check/reference.md`, and the degraded file hashes to the
+    declared `mutated_digest` `sha256:edb26e56…` (verified, or the verdict is
+    UNKNOWN). Both `skillc profile diagnose` reports are complete with 0
+    problems. Across all 97 installed files the inventory declares (skill files,
+    dependencies, the inline synthetic marker), no full copy, neither of the two
+    removed clauses, and no 3+-word fragment of the removed sentence remains in
+    any non-exempt file, on whitespace-normalized text. Phrase hits outside that
+    are exempt plumbing (exempt only while its bytes match the inventory digest)
+    or two reviewed sibling lines, each bound to its preceding line.
+  - **What it does NOT show:** that the obligation is absent. A text scan cannot
+    rule out a paraphrase or another surface form; each of three counter-model
+    passes found a new one. NO_TEXTUAL_SURVIVOR is a necessary but NOT
+    sufficient check.
+  - **The evidence that the degraded arm is degraded** is the pre-registered
+    discrimination pilot (P1-P6: no main study if no difference is detectable),
+    per the risk note in [#287 comment 6034325559](https://github.com/cooneycw/skillc/issues/287#issuecomment-6034325559).
+  - The scan's verdicts are NO_TEXTUAL_SURVIVOR, SURVIVES, NEEDS_REVIEW and
+    UNKNOWN, each with a committed case in
+    `tests/test_calibration_287_scan_mutation_closure.py`.
   The degraded snapshot was built with `degrade-subject --checkout`, which labels
   its source `snapshot:`. The declaration's derived label assumes the `git:`
   source, so the run-time mutation check (P2) must build from the pinned

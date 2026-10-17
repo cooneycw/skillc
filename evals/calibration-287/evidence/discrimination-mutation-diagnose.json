@@ -449,7 +449,8 @@
   "removed_clauses_in_degraded": [],
   "removed_sentence_fragments_in_degraded": [],
   "unreviewed_agent_facing_in_degraded": [],
-  "verdict": "HOLDS",
-  "claim_holds": true
+  "verdict": "NO_TEXTUAL_SURVIVOR",
+  "verdict_meaning": "NO_TEXTUAL_SURVIVOR means only: at the verified mutated_digest, no full copy, no removed clause and no 3+-word fragment of the removed sentence was found in any installed non-exempt file, under these matching rules. It is a NECESSARY but NOT SUFFICIENT textual check, NOT evidence that the obligation is absent: a text scan cannot rule out a paraphrase or another surface form. The evidence that the degraded arm is degraded is the pre-registered discrimination pilot (P1-P6: no main study if no difference is detectable), per #287 comment 6034325559's risk note.",
+  "textual_check_passed": true
  }
 }

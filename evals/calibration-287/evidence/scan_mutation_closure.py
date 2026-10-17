@@ -176,6 +176,17 @@ def scan(root: Path, entries: list[dict[str, object]]) -> tuple[list[dict[str, o
 
 _REMOVED_NORM = ""
 
+#: What the success verdict does and does not mean (orchestrator ruling on
+#: #287 P1, 2026-10-17). Written into the evidence beside the verdict.
+VERDICT_MEANING = (
+    "NO_TEXTUAL_SURVIVOR means only: at the verified mutated_digest, no full copy, no removed clause and no "
+    "3+-word fragment of the removed sentence was found in any installed non-exempt file, under these matching "
+    "rules. It is a NECESSARY but NOT SUFFICIENT textual check, NOT evidence that the obligation is absent: a "
+    "text scan cannot rule out a paraphrase or another surface form. The evidence that the degraded arm is "
+    "degraded is the pre-registered discrimination pilot (P1-P6: no main study if no difference is "
+    "detectable), per #287 comment 6034325559's risk note."
+)
+
 
 def _diagnose_ok(report: object) -> bool:
     return isinstance(report, dict) and report.get("complete") is True and report.get("problem_count") == 0
@@ -221,7 +232,9 @@ def main(argv: list[str] | None = None) -> int:
     #: merely shares phrases (even one negating the instruction) is not a
     #: piece: it is unreviewed, so NEEDS_REVIEW.
     fragments = [h for h in degraded_hits if h["classification"] == "removed sentence itself"]
-    # One verdict, four values, checked in order. Only HOLDS exits 0.
+    # One verdict, four values, checked in order. Only NO_TEXTUAL_SURVIVOR
+    # exits 0, and it is a NECESSARY-but-NOT-SUFFICIENT textual check (see
+    # VERDICT_MEANING): it is never evidence that the obligation is absent.
     if intact_errors or degraded_errors or not positive_control_held or not digest_matches \
             or not (_diagnose_ok(intact_diag) and _diagnose_ok(degraded_diag)):
         verdict = "UNKNOWN"      # coverage or the control failed: absence of evidence, not of the instruction
@@ -230,7 +243,7 @@ def main(argv: list[str] | None = None) -> int:
     elif unreviewed:
         verdict = "NEEDS_REVIEW"  # an unreviewed agent-facing line shares a phrase; not shown to survive
     else:
-        verdict = "HOLDS"
+        verdict = "NO_TEXTUAL_SURVIVOR"  # see VERDICT_MEANING: textual, not semantic
 
     evidence = {
         "evidence_schema": 2,
@@ -267,7 +280,8 @@ def main(argv: list[str] | None = None) -> int:
             "removed_sentence_fragments_in_degraded": fragments,
             "unreviewed_agent_facing_in_degraded": unreviewed,
             "verdict": verdict,
-            "claim_holds": verdict == "HOLDS",
+            "verdict_meaning": VERDICT_MEANING,
+            "textual_check_passed": verdict == "NO_TEXTUAL_SURVIVOR",
         },
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -277,7 +291,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"wrote {args.out}: verdict={verdict}, closure={len(entries)}, intact_hits={len(intact_hits)}, "
           f"degraded_hits={len(degraded_hits)}, coverage_errors={len(intact_errors) + len(degraded_errors)}, "
           f"degraded_full_copies={len(degraded_copies)}, unreviewed={len(unreviewed)}")
-    return 0 if verdict == "HOLDS" else 1
+    return 0 if verdict == "NO_TEXTUAL_SURVIVOR" else 1
 
 
 if __name__ == "__main__":
