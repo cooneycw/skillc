@@ -1,0 +1,27 @@
+{
+  "branch": "issue-424-planners-never-declare-skill-digests-calibration-a",
+  "counts": {
+    "accepted": 1,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "1b62faa8aac5372c9e27205e624e8518646ad490",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "424",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 2,
+  "recorded_at": "2026-10-17T17:10:29Z",
+  "red_cases": {
+    "already_covered": 0,
+    "proposed": 0
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/17/rollout-2026-10-17T13-08-58-01a14ad6-934c-7683-a92c-be28a97400e4.jsonl",
+    "thread_id": "01a14ad6-934c-7683-a92c-be28a97400e4"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

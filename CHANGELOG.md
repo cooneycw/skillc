@@ -19,7 +19,43 @@ and version plan.
   new bad control (`ledger-binding/bad/skill-evidence-baseline-trial`) passes
   every rule on the pre-change code, and removing the rule leaves selftest
   BLIND on it. No committed bundle carries skill-evidence on a baseline trial.
-
+- **The host import probe only sees the declared project** (#365). A
+  `python-import` probe with `uv_project` ran `uv run --project <home>/<proj>`
+  with the operator's whole environment. With `UV_PROJECT_ENVIRONMENT` pointing
+  at another venv (a test runner's dev env, say), uv imported THERE, and the
+  ambient `PYTHONPATH` was appended after the project dir. Either way the probe
+  could report `satisfied` for a module the installed project does not have.
+  `profile._isolated_probe_env()` now drops every `UV_*` outside
+  `runtime_supply.ENV_KEYS` (the uv settings the supported runtime already
+  accepts), drops `VIRTUAL_ENV` and `PYTHONHOME`, and sets `PYTHONPATH` to the
+  project dir only. The probe also runs IN the project dir (made absolute): `python
+  -c` searches its working directory first, so a module in the caller's
+  directory used to satisfy the probe, or a broken one there to shadow the
+  project's. The user site needed nothing: uv's project venv disables it,
+  and a test shows a user-site module does not satisfy the probe while the same
+  placement does import under the base interpreter. The container-side probe is
+  unchanged.
+  **Behaviour change:** other `UV_*` settings such as `UV_INDEX_URL` or
+  `UV_EXTRA_INDEX_URL` no longer reach the probe's `uv run`. A probe whose
+  project needs a sync from a custom index can now report `violated` where it
+  passed before. That is deliberate: the probe fails closed rather than borrow
+  configuration the installed project does not declare. Likewise, an operator
+  who relied on an ambient `PYTHONPATH` reaching the probe will see `violated`.
+  Tests in `tests/test_profile_probes.py`: the `UV_PROJECT_ENVIRONMENT`,
+  `PYTHONPATH` and caller-directory reds reported `satisfied` on the old code,
+  and the caller-directory shadow reported `violated`. A control with the module
+  in the declared project passes before and after.
+- **Planned trials pin the skills they install** (#424, follow-up to #354).
+  #354's `skill_digests` lock never engaged: neither planner declared it, so
+  every calibration and uptake trial was planned unpinned and a substituted
+  skill's `skill-evidence` still validated clean. `build_treatment` now
+  derives each skill's pin from the `SKILL.md` bytes it installs (one shared
+  rule, `profile.skill_md_digests`) and, for a profiled treatment, refuses any
+  disagreement with the inventory's own pins. `plan_calibration` declares the
+  pins on every treated trial; `plan_study` declares each arm's own, so
+  `published` and `rewritten` pin different descriptions. A treated arm with
+  no pins is refused rather than planned unpinned. Baseline trials stay
+  unpinned; the baseline-contamination rule is #427.
 - **A false "failed" claim is now a committed control for both #270 tasks**
   (#419, from #376 item 4). Every committed "reported failed" case was a
   genuine failure, so nothing showed that a report calling a PASSED stage
