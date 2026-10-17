@@ -103,9 +103,27 @@ GitHub's default commit-list body is not modelled.
 
 On a merge into the default branch, closing keywords in the PR body or the
 squash message close the open issues they name, and those closures are
-recorded as part of the merge's effect. The keywords are `close`, `closes`,
-`closed`, `fix`, `fixes`, `fixed`, `resolve`, `resolves` and `resolved`, each
-followed by `#N`. These closure effects are what #277's "old closing
+recorded as part of the merge's effect.
+
+ONE matcher, `skillc.fixture_service.closing_references(text, repository)`,
+implements GitHub's documented grammar. #277's hygiene scan imports the same
+function. The source is GitHub Docs, "Linking a pull request to an issue"
+(<https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue>):
+
+- The keywords are `close`, `closes`, `closed`, `fix`, `fixes`, `fixed`,
+  `resolve`, `resolves` and `resolved`, matched in any case.
+- `KEYWORD #N` and `KEYWORD OWNER/REPOSITORY#N` both close.
+- A colon is allowed after the keyword: "Closes: #10, CLOSES #10, or CLOSES:
+  #10".
+- Each issue needs its own keyword. In `Closes #1, #2`, only #1 closes.
+- A reference to another repository is recorded as `foreign_closing_refs` and
+  changes nothing here.
+- GitHub matches the keyword wherever it appears in the text. A negated or
+  incidental phrase such as "does not fix #3" therefore closes, as GitHub
+  would. That is why CPP's gh-pr-merge.sh refuses such wording.
+- Stated limit: the doc does not settle a reference with no whitespace before
+  it (`Fixes:#42`, `Fixes#42`). Such a form is recorded as
+  `ambiguous_closing_refs` and closes nothing, rather than guessing. These closure effects are what #277's "old closing
 reference" case reads. `--delete-branch` deletes the remote head ref, conditioned on the merged head SHA.
 A failed deletion is recorded as `branch_delete_failed`, never as deleted.
 Every step that can fail happens before the compare-and-swap: the merge tree,

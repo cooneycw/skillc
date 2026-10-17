@@ -720,3 +720,45 @@ def test_an_unlistable_subdirectory_is_refused_not_skipped(world: World) -> None
             fs.LocalGitRemote(world.bare).resolve("refs/heads/main")
     finally:
         (world.bare / "objects").chmod(0o755)
+
+
+# --- the shared closing-keyword matcher (GitHub's documented grammar) -------------
+
+@pytest.mark.parametrize("text,closes", [
+    ("Closes #10", (10,)), ("closes #10", (10,)), ("CLOSES #10", (10,)), ("Closes: #10", (10,)),
+    ("CLOSES: #10", (10,)), ("fix #3", (3,)), ("fixes #3", (3,)), ("Fixed #3", (3,)),
+    ("resolve #4", (4,)), ("Resolves #4", (4,)), ("resolved: #4", (4,)), ("close #1", (1,)), ("closed #1", (1,)),
+    ("Closes fixture/widget#7", (7,)), ("Closes #1, closes #2", (1, 2)),
+])
+def test_every_documented_form_closes(text: str, closes: tuple[int, ...]) -> None:
+    assert fs.closing_references(text, REPO).closes == closes
+
+
+def test_the_documented_multiple_issue_rule_needs_a_keyword_per_issue() -> None:
+    assert fs.closing_references("Closes #1, #2", REPO).closes == (1,)
+
+
+def test_a_negated_or_incidental_form_closes_as_github_does() -> None:
+    assert fs.closing_references("This does not fix #3 yet", REPO).closes == (3,)
+    assert fs.closing_references("prefixes #3 and suffixes #4", REPO).closes == ()  # no keyword boundary
+
+
+def test_another_repository_is_foreign_and_closes_nothing_here() -> None:
+    refs = fs.closing_references("Fixes other/repo#9", REPO)
+    assert refs.closes == () and refs.foreign == ("other/repo#9",)
+
+
+@pytest.mark.parametrize("text", ["Fixes:#42", "Fixes#42", "closes:fixture/widget#5"])
+def test_forms_the_doc_does_not_settle_are_ambiguous_and_close_nothing(text: str) -> None:
+    refs = fs.closing_references(text, REPO)
+    assert refs.closes == () and refs.ambiguous == (text,)
+
+
+def test_merge_records_foreign_and_ambiguous_references(world: World) -> None:
+    service = world.service()
+    ask(service, "pr", "create", "--title", "a", "--body", "Fixes:#3 and Fixes other/repo#9")
+    ask(service, "pr", "merge", "4", "--squash")
+    effect = last_event(service)["effect"]
+    assert effect["closed_issues"] == [] and effect["ambiguous_closing_refs"] == ["Fixes:#3"]
+    assert effect["foreign_closing_refs"] == ["other/repo#9"]
+    assert service._state["issues"][3]["state"] == "OPEN"

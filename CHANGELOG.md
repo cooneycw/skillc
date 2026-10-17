@@ -23,7 +23,9 @@ and version plan.
     approximated.
   - The squash merge is built and the ref is moved by the controller, so the
     merge SHA is never subject-authored. Closing keywords close issues as merge
-    effects.
+    effects. One shared matcher, `closing_references()`, follows GitHub's
+    documented keyword grammar. A form the doc leaves unsettled, such as
+    `Fixes:#42`, is recorded as ambiguous and closes nothing.
   - Scenario authority, duplicate create, invalid transitions and the wrong
     repository are refused and recorded.
   - Declared `lost-response` and `stale-read` faults fire on the first

@@ -139,8 +139,45 @@ JQ_VERSION_PATTERN = re.compile(r"^jq-1\.7(\.\d+)?$")
 
 SUBJECT_LOGIN = "fixture-subject"
 SERVICE_IDENTITY = ("Fixture Service", "service@fixture.invalid")
-_CLOSING = re.compile(r"\b(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s*:?\s+#(\d{1,9})\b",
-                      re.IGNORECASE)
+#: GitHub's documented closing keywords, "Linking a pull request to an
+#: issue" (https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue):
+#: "KEYWORD #ISSUE-NUMBER" or "KEYWORD OWNER/REPOSITORY#ISSUE-NUMBER", and "the
+#: keywords can be followed by colons or in uppercase. For example: Closes:
+#: #10, CLOSES #10, or CLOSES: #10." Every form the doc names closes; a form it
+#: does not settle (no whitespace before the reference, as in "Fixes:#42" or
+#: "Fixes#42") is reported as AMBIGUOUS and closes nothing - a stated limit,
+#: never a guess. GitHub matches the keyword wherever it appears, so a negated
+#: or incidental phrase ("does not fix #3") closes exactly as GitHub's own
+#: parser would (the reason CPP's gh-pr-merge.sh refuses such text).
+_CLOSING_KEYWORD = r"\b(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)"
+_CLOSING = re.compile(_CLOSING_KEYWORD + r":?\s+(?:([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+))?#(\d{1,9})\b", re.IGNORECASE)
+_CLOSING_AMBIGUOUS = re.compile(_CLOSING_KEYWORD + r":?(?:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#(\d{1,9})\b",
+                                re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class ClosingReferences:
+    """What a text's closing keywords do, for ONE repository."""
+
+    closes: tuple[int, ...]  # issues in `repository` this text closes
+    foreign: tuple[str, ...]  # OWNER/REPO#N in another repository: no effect here
+    ambiguous: tuple[str, ...]  # forms the doc does not settle: close nothing
+
+
+def closing_references(text: str, repository: str) -> ClosingReferences:
+    """The ONE closing-keyword matcher (shared with #277's hygiene scan), as
+    GitHub's documented grammar applies it to `text` for `repository`. Only
+    meaningful for a PR into, or a commit landing on, the default branch."""
+    closes: set[int] = set()
+    foreign: set[str] = set()
+    for match in _CLOSING.finditer(text):
+        repo, number = match.group(1), int(match.group(2))
+        if repo is None or repo.lower() == repository.lower():
+            closes.add(number)
+        else:
+            foreign.add(f"{repo}#{number}")
+    ambiguous = sorted({m.group(0) for m in _CLOSING_AMBIGUOUS.finditer(text)})
+    return ClosingReferences(tuple(sorted(closes)), tuple(sorted(foreign)), tuple(ambiguous))
 _TRANSPORT_ERROR = ("error connecting to api.github.com\n"
                     "check your internet connection or https://githubstatus.com\n")
 _MAX_JQ_INPUT = 4 * 1024 * 1024
@@ -1285,8 +1322,9 @@ class FixtureService:
         subject = command.flags.get("subject") or f"{pr['title']} (#{n})"
         squash_body = self._body(command, body_files) or ""
         message = subject + ("\n\n" + squash_body if squash_body else "") + "\n"
-        closing = (sorted({int(m) for m in _CLOSING.findall(pr["body"] + "\n" + message)})
-                   if pr["base_ref"] == self._default else [])
+        refs = (closing_references(pr["body"] + "\n" + message, self.repository)
+                if pr["base_ref"] == self._default else ClosingReferences((), (), ()))
+        closing = list(refs.closes)
         merge_commit = self._remote.commit_tree(tree, base, message, at.replace("Z", "+0000"))
         # Everything that can fail is above this line: past the CAS only
         # in-memory bookkeeping and the recorded branch deletion remain.
@@ -1300,7 +1338,9 @@ class FixtureService:
             self._recorded_merges.append(merge_commit)
         effect: dict[str, Any] = {"number": n, "merge_commit": merge_commit, "base_ref": pr["base_ref"],
                                   "base_oid": base, "head_oid": head, "subject": subject, "body": squash_body,
-                                  "closed_issues": [], "deleted_branch": None}
+                                  "closed_issues": [], "deleted_branch": None,
+                                  "foreign_closing_refs": list(refs.foreign),
+                                  "ambiguous_closing_refs": list(refs.ambiguous)}
         if closing:
             for ref in closing:
                 issue = self._state["issues"].get(ref)
@@ -1402,6 +1442,7 @@ __all__ = [
     "OPS",
     "REQUEST_KEYS",
     "SCHEMA_VERSION",
+    "ClosingReferences",
     "Command",
     "DeclarationRefused",
     "FixtureService",
@@ -1410,6 +1451,7 @@ __all__ = [
     "LocalGitRemote",
     "RemoteUntrusted",
     "Unsupported",
+    "closing_references",
     "dispatch",
     "measure_jq",
     "parse_argv",
