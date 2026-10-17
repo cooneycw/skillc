@@ -191,9 +191,10 @@ while the manual evidence run is still being prepared.
 ### Retaining and interpreting campaign evidence
 
 Run the final merged floor and all declared break modes at one tested SHA,
-using one explicitly installed reviewed runner SHA. The floor is the nine
+using one explicitly installed reviewed runner SHA. The floor is the ten
 files in `ci/check_real_docker_ran.py` (including #338's cwd-confinement
-file and #393's nested-directory ownership file); also include the merged #348 production path in the final inventory. Report
+file, #393's nested-directory ownership file and #414's runner-cleanup
+file); also include the merged #348 production path in the final inventory. Report
 each issue's remaining acceptance separately; an aggregate green does not
 alone establish another issue's acceptance. #334's real-script byte identity
 and complete witness coverage are asserted by the `none` run of
@@ -216,7 +217,7 @@ not proof that the negative control worked. Preserve these results rather
 than overwriting them with a rerun. The `none` run must be SUCCESS on
 `skillc/real-docker`; break runs belong only on `skillc/real-docker-control`.
 Verify test-owned containers are removed, including after setup failures;
-the runner's final prune is not evidence that a test's own cleanup worked.
+the runner's final cleanup is not evidence that a test's own cleanup worked.
 
 Publish only leak-checked logical summaries and generic operator isolation
 attestation. No raw logs, VM identifiers, addresses, private paths or token
@@ -366,6 +367,32 @@ started); `poll-triggers` checks for exactly this code and does NOT persist
 that sha/comment as processed, so it is retried on the next tick. Exit
 codes 0/1/2 (SUCCESS/FAILURE/ERROR) all mean a run actually happened and
 reported something, and ARE persisted.
+
+## Cleanup scope (#414)
+
+A run removes only what it created. Right after it acquires the lock it
+snapshots every image and container ID (`cleanup-lib.sh`), and its final
+cleanup removes only dangling images labelled `org.skillc.image` and stopped
+containers labelled `skillc.managed=true` that are NOT in that snapshot,
+without `-f`. A label alone is not ownership: `build.py`'s images inherit
+`org.skillc.image`, and a campaign's DockerBackend containers carry
+`skillc.managed=true`. If the snapshot cannot be taken, the cleanup removes
+nothing. It used to run host-wide `docker container prune -f` and
+`docker image prune -f`, which deleted co-tenant campaigns' untagged,
+receipt-named images on every tick.
+
+`build.py` now tags its output `skillc-profile-runtime:<runtime_id>-<source
+commit, 12 chars>` (plus `-<target>` for non-default targets), so a built
+image is never dangling. Builds are NOT image-ID-reproducible here: two builds
+from identical inputs give different IDs (measured), so a rebuild at the same
+commit RE-POINTS that tag. The previously tagged image stays present (receipts
+name it by ID, so they still resolve) but becomes dangling, and only a run-scoped
+cleanup leaves it alone - it predates every later run's snapshot. `build.release_build()` undoes only what one build
+added: an image ID that existed before the build is never touched, and a tag
+the build moved - the rebuild case above - is pointed back at the image it named
+before. It runs only under run.lock; elsewhere a test keeps its tagged build. Tests that build through `build.py` use it
+instead of `docker image rm -f <id>`, which ignored tags and removed a
+co-tenant's identical build.
 
 ## Known simplifications (stated, not hidden)
 
