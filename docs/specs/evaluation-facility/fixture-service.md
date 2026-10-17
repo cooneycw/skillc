@@ -249,8 +249,17 @@ Before each call, the remote is refused (`RemoteUntrusted`, recorded as an
   settings);
 - it carries `info/grafts` or an alternates file.
 
-A merge driver, an include, a hooks path or a filter therefore cannot run or
-steer anything under the controller. A divergence is never reconciled, repaired or dropped. A
+This is defence in depth, NOT the boundary. A subject that can write the
+remote can swap its config between that check and the git command that reads
+it, so `LocalGitRemote` carries a contract: it is pointed only at a remote
+the subject cannot write (counter-model review, pass 2).
+
+A live attempt's remote is subject-writable by design. It must be reached
+through a `GitRemote` that runs git inside the attempt's own containment,
+which is #434's wiring. There, hostile metadata can only run code as the
+subject itself. The answers that remote gives are subject-influenced too,
+which is the detection-only bound above. #436 removes it by routing push
+through the controller. A divergence is never reconciled, repaired or dropped. A
 direct push to `main` and a force-push over a recorded merge are both tested.
 Prevention, by routing push through the controller, is #436.
 
@@ -290,6 +299,7 @@ invented citation. Issue and PR numbers share one sequence, as on GitHub.
 - Nothing in-container proves the shim is the only path. A subject that
   bypasses it shows up as missing requests (`no-controller-witness`) or as
   divergence, never as a recorded success.
-- `LocalGitRemote` reaches a remote by host path. The remote for a live
-  attempt runs the same calls through the attempt backend, and that wiring is
-  #434's.
+- `LocalGitRemote` reaches a remote by host path, as the controller, and
+  only a remote the subject cannot write may be given to it. The remote for a
+  live attempt runs the same calls inside the attempt's containment, and that
+  wiring is #434's.

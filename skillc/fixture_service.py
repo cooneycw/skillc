@@ -207,14 +207,27 @@ def _git_environment(home: str) -> dict[str, str]:
 _TRUSTED_CONFIG_KEYS = re.compile(
     r"^(core\.(repositoryformatversion|filemode|bare|logallrefupdates|ignorecase|precomposeunicode)"
     r"|extensions\.objectformat|init\.defaultbranch|receive\.(denycurrentbranch|denynonfastforwards))$")
-_UNTRUSTED_PATHS = ("info/grafts", "objects/info/alternates", "objects/info/http-alternates")
+_UNTRUSTED_PATHS = ("commondir", "info/grafts", "objects/info/alternates", "objects/info/http-alternates")
 
 
 class LocalGitRemote:
     """A `GitRemote` over a bare repository the controller can reach as a
-    path. The Docker-backed remote (the same calls run through the attempt
-    backend) is the consumer's wiring (#434); this class is what the host
-    tests and any host-side remote use."""
+    path, running git AS THE CONTROLLER.
+
+    CONTRACT: point it only at a remote the subject CANNOT write. Running
+    git against subject-writable metadata is running subject-chosen code as
+    the controller (a merge driver, a `commondir` redirection, a config
+    swapped in between any check and the command that reads it), and no
+    check here can close that window - a subject with write access can race
+    it (counter-model review, pass 2). `_check_trusted()` refuses the
+    configurations it can see and is defence in depth, NOT the boundary.
+
+    A subject-writable remote - the one a live attempt pushes to - must be
+    reached through a `GitRemote` that runs git INSIDE the attempt's own
+    containment (the consumer's wiring, #434), where such metadata can only
+    run code as the subject itself. What that remote answers is then
+    subject-influenced too, which is the detection-only bound #436 exists to
+    remove."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -296,14 +309,36 @@ class LocalGitRemote:
                          extra_env=env).stdout.decode().strip()
 
     def update_ref(self, ref: str, new: str, old: str) -> bool:
-        return self._git("update-ref", ref, new, old, check=False).returncode == 0
+        """`False` only when the CAS genuinely lost: the ref no longer holds
+        `old`. Any other failure (a lock, a permission) raises, so it is an
+        error event, never a `base-moved` answer (counter-model review)."""
+        proc = self._git("update-ref", ref, new, old, check=False)
+        if proc.returncode == 0:
+            return True
+        if self.resolve(ref) != old:
+            return False
+        raise RuntimeError(f"git update-ref failed with {ref} still at {old}: "
+                           f"{proc.stderr.decode(errors='replace')}")
 
     def delete_ref(self, ref: str, old: str) -> bool:
         return self._git("update-ref", "-d", ref, old, check=False).returncode == 0
 
 
 def _canonical(value: Any) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    # ensure_ascii keeps this total over every str JSON can carry, lone
+    # surrogates included (counter-model review), so no request can make
+    # the record unserializable.
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
+
+
+def _has_surrogate(value: object) -> bool:
+    if isinstance(value, str):
+        return any(0xD800 <= ord(c) <= 0xDFFF for c in value)
+    if isinstance(value, Mapping):
+        return any(_has_surrogate(k) or _has_surrogate(v) for k, v in value.items())
+    if isinstance(value, (list, tuple)):
+        return any(_has_surrogate(v) for v in value)
+    return False
 
 
 def _digest(value: Any) -> str:
@@ -683,6 +718,13 @@ class FixtureService:
                     live, self._state = self._state, snapshot
                     try:
                         reply, decision, effect = self._handle(command, context, body_files, at)
+                    except _GhError:
+                        # A stale "not found" IS the stale answer (counter-model
+                        # review): the fault is consumed. Only an unsupported
+                        # request, which never reached a stale answer, is not.
+                        event["fault"] = "stale-read"
+                        stale_fault["fired"], stale_fault["fired_at_seq"] = True, seq
+                        raise
                     finally:
                         self._state = live
                     event["fault"] = "stale-read"
@@ -746,6 +788,8 @@ class FixtureService:
                 return "body_files values must be valid base64"
         if "cwd" in request and not isinstance(request["cwd"], str):
             return "cwd must be a string"
+        if _has_surrogate(dict(request)):
+            return "request strings must be valid Unicode (a lone surrogate is not)"
         return None
 
     # -- faults -------------------------------------------------------------

@@ -542,3 +542,57 @@ def test_a_git_failure_reads_unknown_never_violated(world: World, monkeypatch: p
     monkeypatch.setattr(fs.LocalGitRemote, "_git", broken)
     record = service.finalize("attempt-1")
     assert record.remote_integrity == "UNKNOWN"
+
+
+# --- counter-model review pass 2 regressions --------------------------------------
+
+def test_a_commondir_redirection_is_refused(world: World, tmp_path: Path) -> None:
+    # A real common dir: git reads config, objects and refs from it, so the
+    # checked local config can stay harmless while this one is not.
+    elsewhere = tmp_path / "elsewhere"
+    shutil.copytree(world.bare, elsewhere)
+    _git(elsewhere, "config", "merge.evil.driver", "touch /tmp/x")
+    (world.bare / "commondir").write_text(str(elsewhere) + "\n")
+    with pytest.raises(fs.RemoteUntrusted, match="commondir"):
+        world.service()
+
+
+def test_a_lone_surrogate_cannot_make_the_record_unserializable(world: World) -> None:
+    service = world.service()
+    with pytest.raises(ChannelRefusal):
+        service.decide(json.loads('{"op": "gh", "argv": ["issue", "close", "1"], '
+                                  '"context": {"origin_url": "x", "branch": "\\ud800"}}'))
+    assert service._state["issues"][1]["state"] == "OPEN"
+    record = service.finalize("attempt-1")
+    assert [e["decision"] for e in record.events] == ["malformed"]
+    assert json.loads(record.to_json_bytes())["record_digest"].startswith("sha256:")
+
+
+def test_a_stale_not_found_is_the_stale_answer_and_consumes_the_fault(world: World) -> None:
+    service = world.service(faults=[{"kind": "stale-read", "after": "pr.create", "read": "pr.view"}])
+    ask(service, "pr", "create", "--title", "a", "--body", "b")
+    stale = ask(service, "pr", "view", "4", "--json", "state")
+    fresh = ask(service, "pr", "view", "4", "--json", "state")
+    assert stale["exit_code"] == 1 and "Could not resolve" in stale["stderr"]
+    assert json.loads(fresh["stdout"]) == {"state": "OPEN"}
+    record = service.finalize("attempt-1")
+    assert record.faults[0]["fired"] and record.events[1]["fault"] == "stale-read"
+
+
+def test_an_update_ref_failure_on_an_unmoved_base_is_an_error_not_base_moved(
+        world: World, monkeypatch: pytest.MonkeyPatch) -> None:
+    service = world.service()
+    ask(service, "pr", "create", "--title", "a", "--body", "b")
+    before = world.main()
+    original = fs.LocalGitRemote._git
+
+    def locked(self: fs.LocalGitRemote, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        if args[:1] == ("update-ref",) and len(args) == 4:
+            return subprocess.CompletedProcess(list(args), 128, b"", b"fatal: Unable to create lock: Permission denied")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(fs.LocalGitRemote, "_git", locked)
+    ask(service, "pr", "merge", "4", "--squash")
+    event = last_event(service)
+    assert event["decision"] == "error" and world.main() == before
+    assert service.finalize("attempt-1").coverage_complete is False
