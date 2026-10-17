@@ -40,7 +40,7 @@ def _missing_prerequisite() -> str | None:
     if not (CPP_CHECKOUT / ".git").exists():
         return f"no claude-power-pack checkout at {CPP_CHECKOUT} (set SKILLC_CPP_CHECKOUT)"
     found = subprocess.run(["git", "-C", str(CPP_CHECKOUT), "cat-file", "-e", f"{REVISION}^{{commit}}"],
-                           capture_output=True)
+                           capture_output=True, check=False)
     if found.returncode != 0:
         return f"the claude-power-pack checkout at {CPP_CHECKOUT} does not hold commit {REVISION}"
     return None
