@@ -1936,54 +1936,105 @@ def test_a_second_execute_against_an_already_stopped_handle_is_refused_not_fabri
     backend.destroy(handle)
 
 
-def test_execute_does_not_close_the_toctou_window_between_its_entry_check_and_the_real_exec(
-    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """DOCUMENTS the open boundary, rather than claiming a fix: the entry
-    guard above is a check-then-act, so the container can stop between
-    that `_inspect()` and the real `docker exec` a few lines later - this
-    simulates it deterministically by making the FIRST `_inspect()` call
-    (the entry guard) stop the container for real as a side effect before
-    returning its own (now-stale) "running" answer, so the `docker exec`
-    that follows hits the daemon's real rejection.
+def _marker_home(docker_state: Path, handle: d._Handle) -> Path:
+    """The fake's on-disk CONTAINER_HOME for `handle`, where execute()'s
+    #317 provenance marker lands."""
+    return docker_state / f"{handle.name}.fsroot" / d.CONTAINER_HOME.lstrip("/")
 
-    An earlier version of this fix tried to reclassify this case by
-    matching the daemon's own "is not running" text in the captured
-    stderr - `codex:code_review` found that text is read from the
-    SUBJECT's stderr, and a subject whose own legitimate output happens to
-    contain either phrase would have its real result silently discarded.
-    That reclassification was removed rather than shipped with a known
-    spoofing path. This test proves the window is genuinely still open
-    (the race defeats the guard and produces the daemon's rejection
-    unmodified) rather than merely asserting the docstring's claim."""
+
+def _ready(base: Path, docker_state: Path, attempt_id: str) -> tuple[d.DockerBackend, d._Handle]:
     backend = _backend(base, docker_state)
-    handle = backend.prepare("a-lc-000000000013")
+    handle = backend.prepare(attempt_id)
     assert isinstance(handle, d._Handle)
     backend.install(handle, {})
+    _marker_home(docker_state, handle).mkdir(parents=True, exist_ok=True)
+    return backend, handle
 
-    real_inspect = d.DockerBackend._inspect
-    calls = {"n": 0}
 
-    def racing_inspect(self: d.DockerBackend, h: d._Handle) -> tuple[bool, bool, str | None]:
-        calls["n"] += 1
-        result = real_inspect(self, h)
-        if calls["n"] == 1:
-            # Stop the container for real, between this entry check and the
-            # `docker exec` `execute()` is about to issue - but still hand
-            # back the STALE "running" answer this call already computed,
-            # exactly as a genuine race would.
-            self._kill_container(handle, "TERM")
-        return result
+_DAEMON_WORDING = "Error response from daemon: container is not running"
 
-    # `DockerBackend` is a frozen dataclass - `monkeypatch.setattr(backend,
-    # "_inspect", ...)` is refused by its own `__setattr__`. Patch the
-    # CLASS method instead; it is restored automatically at teardown.
-    monkeypatch.setattr(d.DockerBackend, "_inspect", racing_inspect)
+
+def test_execute_reports_a_daemon_refused_exec_as_attempt_not_running(base: Path, docker_state: Path) -> None:
+    """#317 red case: the container stops between execute()'s entry inspect
+    and the real exec (`.stop-before-exec-NAME`, deterministic), so the daemon
+    refuses the exec. Before the fix that refusal read as an ordinary nonzero
+    `exited`; now the confirmed-stopped container plus the absent marker, no
+    subject output involved, report it as never started."""
+    backend, handle = _ready(base, docker_state, "a-lc-000000000013")
+    _sentinel(docker_state, f".stop-before-exec-{handle.name}")
     result = backend.execute(handle, ["true"], Limits(timeout=5.0))
-    assert result.reason == "exited"
-    assert result.exit_code not in (0, None)
-    assert result.error is not None and "not running" in result.error.lower()
-    assert calls["n"] == 1  # only the entry guard - nothing re-checks after the race
+    assert (result.reason, result.exit_code) == ("attempt-not-running", None)
+    assert not list(_marker_home(docker_state, handle).glob(".skillc-exec-pid-*"))
+    backend.destroy(handle)
+
+
+@pytest.mark.parametrize("code", [0, 3])
+def test_execute_on_a_running_container_is_unchanged(base: Path, docker_state: Path, code: int) -> None:
+    backend, handle = _ready(base, docker_state, f"a-lc-00000000017{code}")
+    result = backend.execute(handle, ["sh", "-c", f"printf out; printf err >&2; exit {code}"], Limits(timeout=5.0))
+    assert (result.reason, result.exit_code) == ("exited", code)
+    assert (result.stdout, result.stderr) == (b"out", b"err")
+    assert len(list(_marker_home(docker_state, handle).glob(".skillc-exec-pid-*"))) == 1
+    backend.destroy(handle)
+
+
+def test_a_subject_printing_the_daemon_wording_after_its_container_stopped_keeps_its_result(
+    base: Path, docker_state: Path,
+) -> None:
+    """#317 negative control (the attack the stderr-matching fix fell to): the
+    subject really ran, printed the daemon's own rejection wording, exited 1,
+    and the container stopped before execute()'s re-check
+    (`.stop-after-exec-NAME`). Its marker exists, so its real result stands."""
+    backend, handle = _ready(base, docker_state, "a-lc-000000000180")
+    _sentinel(docker_state, f".stop-after-exec-{handle.name}")
+    result = backend.execute(handle, ["sh", "-c", f"echo '{_DAEMON_WORDING}' >&2; exit 1"], Limits(timeout=5.0))
+    assert (result.reason, result.exit_code) == ("exited", 1)
+    assert result.stderr == f"{_DAEMON_WORDING}\n".encode()
+    backend.destroy(handle)
+
+
+def test_a_subject_deleting_its_marker_on_a_running_container_keeps_its_result(
+    base: Path, docker_state: Path,
+) -> None:
+    """Deleting the marker alone never reclassifies: the container must also
+    be confirmed stopped, which a subject cannot do to its own container."""
+    backend, handle = _ready(base, docker_state, "a-lc-000000000181")
+    script = f"rm -f {d.CONTAINER_HOME}/.skillc-exec-pid-*; echo '{_DAEMON_WORDING}' >&2; exit 1"
+    result = backend.execute(handle, ["sh", "-c", script], Limits(timeout=5.0))
+    assert (result.reason, result.exit_code) == ("exited", 1)
+    backend.destroy(handle)
+
+
+def test_an_unwritable_marker_leaves_the_subjects_bytes_and_result_untouched(
+    base: Path, docker_state: Path,
+) -> None:
+    """Approver condition 1: the prelude's own failure must never reach the
+    subject's streams (#334 byte identity) - `{ echo $$ > M; } 2>/dev/null`,
+    not `echo $$ > M 2>/dev/null`, whose failed redirection prints first. With
+    no marker and a running container, the result is the real one."""
+    backend = _backend(base, docker_state)
+    handle = backend.prepare("a-lc-000000000182")
+    assert isinstance(handle, d._Handle)
+    backend.install(handle, {})
+    home = _marker_home(docker_state, handle)
+    home.parent.mkdir(parents=True, exist_ok=True)
+    home.write_text("not a directory")  # every marker create fails
+    result = backend.execute(handle, ["sh", "-c", "printf 'O\\n'; printf 'E\\n' >&2; exit 1"], Limits(timeout=5.0))
+    assert (result.reason, result.exit_code) == ("exited", 1)
+    assert (result.stdout, result.stderr) == (b"O\n", b"E\n")
+    backend.destroy(handle)
+
+
+def test_an_unreadable_marker_never_reclassifies(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fail closed: a refused exec whose marker read cannot answer keeps the
+    pre-#317 shape rather than guessing."""
+    backend, handle = _ready(base, docker_state, "a-lc-000000000183")
+    _sentinel(docker_state, f".stop-before-exec-{handle.name}")
+    monkeypatch.setattr(d.DockerBackend, "_exec_marker_state", lambda self, h, m: "unknown")
+    result = backend.execute(handle, ["true"], Limits(timeout=5.0))
+    assert result.reason == "exited" and result.exit_code not in (0, None)
     backend.destroy(handle)
 
 

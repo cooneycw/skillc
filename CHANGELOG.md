@@ -8,6 +8,25 @@ and version plan.
 
 ## [Unreleased]
 
+- **A daemon-refused `execute()` reads as never started, not as a failed run**
+  (#317). #304's entry guard is a check-then-act: the container can stop
+  between `_inspect()` and the real `docker exec`, and the daemon's refusal
+  then exited nonzero exactly like a subject that ran and failed, a fabricated
+  execution. `execute()` now runs its argv behind a silent prelude,
+  `sh -c '{ echo $$ > MARKER; } 2>/dev/null; exec "$@"'`, that writes a
+  per-call marker under `CONTAINER_HOME` the instant it starts in the
+  container. After a nonzero exit, and before its own kill, the result becomes
+  `attempt-not-running` only when a fresh inspect confirms the container is
+  stopped and our own `docker cp` reports the marker absent. No subject output
+  enters the decision, and every other answer keeps the real result. The
+  prelude writes nothing to either stream (#334). Its redirection is grouped,
+  so a failed marker create cannot print onto the subject's stderr. The fake
+  CLI gains `.stop-before-exec-NAME` (the race, deterministically) and
+  `.stop-after-exec-NAME` (a subject that ran, then its container stopped).
+  The red case fails on the old code with `('exited', 1)`; the controls (a
+  subject printing the daemon's own wording, a deleted marker on a running
+  container, an unwritable marker, an unreadable marker) each go red when
+  their guard is mutated away. Real-daemon proof is a follow-up.
 - **The witness envelope a result was graded against is retained** (#418).
   A witnessed grade sealed `{"witness": ..., "graded_tree_digest": ...}`,
   passed it to grading, and recorded only its digest. The bytes were never

@@ -655,6 +655,19 @@ def cmd_exec(state_dir: Path, rest: list[str]) -> int:
     if not path.is_file():
         print("Error: No such container: " + name, file=sys.stderr)
         return 1
+    # #317: `execute()` prefixes its argv with a marker prelude,
+    # `sh -c '{ echo $$ > MARKER; } 2>/dev/null; exec "$@"' sh [WRAP] ARGV`.
+    # `.stop-before-exec-NAME` (consumed) stops the container just before this
+    # exec's running check - the deterministic form of the race between
+    # execute()'s entry inspect and the real exec. It never fires on the
+    # forwarding probe. It fires on any other exec, prelude or not, so the
+    # same race can be staged against code that has no prelude at all.
+    marker_exec = len(argv) > 3 and argv[:2] == ["sh", "-c"] and ".skillc-exec-pid-" in argv[2] and argv[3] == "sh"
+    forwarding_probe = argv == ["sh", "-c", f"test -x {SKILLC_WRAP_PATH} && test -S {SKILLC_CONTROL_SOCKET_PATH}"]
+    stop_before = state_dir / f".stop-before-exec-{name}"
+    if not forwarding_probe and stop_before.exists():
+        stop_before.unlink()
+        _rewrite_state(state_dir, name, lambda d: {**d, "status": "exited"})
     data = json.loads(path.read_text(encoding="utf-8"))
     if data.get("status") != "running":
         print(f"Error: Container {name} is not running", file=sys.stderr)
@@ -692,6 +705,14 @@ def cmd_exec(state_dir: Path, rest: list[str]) -> int:
         if not argv:
             print("fake_docker: exec requires a subject argv after skillc-wrap", file=sys.stderr)
             return 2
+    elif marker_exec and len(argv) > 4 and argv[4] == SKILLC_WRAP_PATH:
+        # #317: the same skillc-wrap prefix, inside execute()'s marker
+        # prelude - the real prelude shell runs, the wrap is simulated.
+        wrapped = True
+        argv = [*argv[:4], *argv[5:]]
+        if len(argv) == 4:
+            print("fake_docker: exec requires a subject argv after skillc-wrap", file=sys.stderr)
+            return 2
 
     cwd = _in_container(state_dir, name, workdir)
     cwd.mkdir(parents=True, exist_ok=True)
@@ -724,6 +745,12 @@ def cmd_exec(state_dir: Path, rest: list[str]) -> int:
     )
     try:
         proc.wait()
+        if not forwarding_probe and (state_dir / f".stop-after-exec-{name}").exists():
+            # #317 negative control: the subject really ran (its marker is
+            # written), then the container stopped before execute()'s
+            # re-check - a real run that must never read as "never started".
+            (state_dir / f".stop-after-exec-{name}").unlink()
+            _rewrite_state(state_dir, name, lambda d: {**d, "status": "exited"})
     finally:
         if path.is_file():
             # Mutates whatever is CURRENTLY on disk, never the `data` this

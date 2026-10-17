@@ -549,6 +549,19 @@ def compose_run_argv(
 #: afterward through `docker cp`/`docker exec` (see the module docstring).
 _KEEPALIVE_ARGV: tuple[str, ...] = ("sleep", "infinity")
 
+#: #317: `execute()`'s provenance marker. Its prelude writes the wrapper
+#: shell's pid here the instant it starts INSIDE the container, before the
+#: subject runs; a daemon-rejected exec never starts that shell, so it can
+#: never leave the marker. Under CONTAINER_HOME, never /work: nothing captured
+#: or graded is read from the home root (captures export /work; home reads
+#: name `.claude/projects`, `.codex/sessions` or one delivered path).
+_EXEC_MARKER_PREFIX = ".skillc-exec-pid-"
+
+#: The docker CLI's own words for "that path is not in the container" from
+#: `docker cp NAME:PATH -` - real Docker, then the older/fake spelling. They
+#: come from our own cp call, never from the subject's output.
+_CP_PATH_ABSENT = ("Could not find the file", "No such container:path")
+
 #: The canary files' names, relative to `CONTAINER_WORKSPACE` inside the
 #: container - matching `tests/fixtures/backend-lifecycle/fake_client.py`'s
 #: own convention exactly, since a real subject built the same way would
@@ -1854,30 +1867,31 @@ class DockerBackend:
         (`test_execute_reports_launch_failed_when_the_docker_binary_is_missing`,
         caught by running it).
 
-        KNOWN, DOCUMENTED, NOT CLOSED: the entry check above is a
-        check-then-act - the container can stop in the gap between it and
-        the real `docker exec` a few lines later, and the daemon's own
-        rejection for that race lands as the identical "exited"/nonzero
-        shape a legitimate subject exit produces. An earlier version of
-        this fix tried to close it by reclassifying when the captured
-        stderr carried the daemon's own "is not running" / "no such
-        container" text - but a `codex:code_review` pass found that text is
-        NOT trustworthy evidence: it is read from the subject's own stderr,
-        and a subject that happens to print either phrase as part of its
-        own legitimate output (before exiting nonzero for its own reasons)
-        would have its real result silently discarded as
-        `attempt-not-running`, on a channel with no adversarial subject
-        anywhere else in mind. Closing it for real needs a signal
-        independent of subject-controlled output - e.g. the same
-        marker-write/PID-confirmation provenance `exec_in_attempt()`
-        already uses to confirm a kill - which is a bigger, separate change
-        than this refusal (tracked - see the module's own issue reference
-        once filed). Left open rather than guessed at; the window is
-        narrow (the gap between one inspect and one exec launch) and the
-        worst case this leaves is the pre-existing one `execute()` already
-        had: a fabricated "exited" on the rare race, never a SILENTLY
-        DISCARDED real one, which the rejected reclassification attempt
-        would have risked instead.
+        THE CHECK-THEN-ACT WINDOW IS CLOSED BY PROVENANCE, NOT BY OUTPUT (#317).
+        The entry check above can still race: the container can stop between
+        it and the real `docker exec`, and the daemon's refusal then exits
+        nonzero exactly like a subject that ran and failed. An earlier fix
+        matched the daemon's "is not running" wording in stderr and was
+        rejected (`codex:code_review`): that text is the SUBJECT's output, so a
+        subject printing it would have its real result discarded. Instead the
+        argv runs behind a silent prelude, `sh -c '{ echo $$ > MARKER; }
+        2>/dev/null; exec "$@"'`, which writes a per-call marker under
+        `CONTAINER_HOME` the instant the wrapper shell starts in the container.
+        A refused exec never starts that shell. After a nonzero exit, and
+        before this method's own kill, the result is reclassified as
+        `attempt-not-running` only when a fresh `_inspect()` confirms the
+        container exists and is not running AND our own `docker cp` reports
+        the marker absent. Neither input is subject output. Every other
+        answer keeps the real result, so a run that happened is never
+        discarded. The prelude writes nothing to either stream, and `exec`
+        keeps the pid, stdin, exit code and skillc-wrap prefix.
+
+        Its one boundary: a subject can delete its own marker. That alone
+        changes nothing while the container runs, and a subject cannot stop
+        its own container (PID 1 is `sleep infinity`, immune to in-container
+        signals). Only an EXTERNAL stop between the subject's exit and the
+        re-check (an OOM kill of PID 1, a daemon restart) plus a deleted
+        marker could still read as never started.
 
         Whether the subject exits on its own or is killed for timeout/
         cancellation, this attempt's container is always stopped before
@@ -1960,8 +1974,16 @@ class DockerBackend:
             # worth a closer look, not fixed here - out of #304's scope).
             return ExecuteResult(reason="attempt-not-running", exit_code=None)
         forwarding_available = self._forwarding_available(handle)
+        # #317: a silent prelude records that the exec really started in the
+        # container. `{ ...; } 2>/dev/null` (not `echo > M 2>/dev/null`, where
+        # the failed `> M` would complain before the 2> applies) keeps every
+        # byte of stdout/stderr the subject's own (#334). `exec` keeps the
+        # pid, stdin, exit code and the skillc-wrap prefix exactly as before.
+        marker_path = f"{CONTAINER_HOME}/{_EXEC_MARKER_PREFIX}{uuid.uuid4().hex}"
+        inner = [SKILLC_WRAP_PATH, *argv] if forwarding_available else list(argv)
+        wrapped_argv = ["sh", "-c", f'{{ echo $$ > {marker_path}; }} 2>/dev/null; exec "$@"', "sh", *inner]
         launched = self._launch_and_wait(
-            handle, argv, limits, cancel, stdin, prefix_wrap=forwarding_available,
+            handle, wrapped_argv, limits, cancel, stdin, prefix_wrap=False,
         )
         if isinstance(launched, ExecuteResult):
             # Launch itself failed (`OSError` from `Popen`) - `_launch_and_wait`
@@ -1975,10 +1997,14 @@ class DockerBackend:
         proc, stdout_drain, stderr_drain, stdout_thread, stderr_thread, reason = launched
 
         signal_name: str | None = None
+        never_started = False
         if reason != "exited":
             signal_name = self._stop(handle, proc, limits.grace)
         else:
             proc.wait()
+            # #317: decided BEFORE this method's own kill below, which would
+            # otherwise make every container read as stopped.
+            never_started = proc.returncode not in (0, None) and self._exec_never_started(handle, marker_path)
             self._kill_container(handle, "KILL")
 
         # term_forwarding names what the HOST observed, never what the
@@ -1996,10 +2022,48 @@ class DockerBackend:
         else:
             term_forwarding = "killed-at-escalation"
 
+        if never_started:
+            # #317: the daemon refused the exec (container confirmed stopped,
+            # no marker), so nothing ran. Join the drains and report it as
+            # #304 does, without writing an `observations` file into a
+            # workspace the subject never touched.
+            join_deadline = time.monotonic() + limits.grace + self.daemon_timeout
+            stdout_thread.join(timeout=max(0.0, join_deadline - time.monotonic()))
+            stderr_thread.join(timeout=max(0.0, join_deadline - time.monotonic()))
+            return ExecuteResult(reason="attempt-not-running", exit_code=None)
+
         return self._finish_result(
             handle, proc, stdout_drain, stderr_drain, stdout_thread, stderr_thread,
             limits, reason, signal_name=signal_name, term_forwarding=term_forwarding,
         )
+
+    def _exec_never_started(self, handle: _Handle, marker_path: str) -> bool:
+        """#317: True only when the daemon PROVABLY refused `execute()`'s exec:
+        the container still exists, is confirmed not running, and our own
+        `docker cp` reports the provenance marker absent. Every other answer
+        - unreachable daemon, a removed container, a marker present, a read
+        that cannot tell - is False, so a real run is never discarded. No
+        input here is the subject's output."""
+        reachable, absent, status = self._inspect(handle)
+        if not reachable or absent or status == "running":
+            return False
+        return self._exec_marker_state(handle, marker_path) == "absent"
+
+    def _exec_marker_state(self, handle: _Handle, marker_path: str) -> str:
+        """`present`, `absent` (the docker CLI's own path-not-found answer), or
+        `unknown`. Works on a stopped container: `docker cp` reads its
+        filesystem layer without needing it to run."""
+        try:
+            result = subprocess.run(
+                [*self.docker_bin, "cp", f"{handle.name}:{marker_path}", "-"],
+                capture_output=True, env=handle.env, check=False, timeout=self.daemon_timeout,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return "unknown"
+        if result.returncode == 0:
+            return "present" if result.stdout else "unknown"
+        error = result.stderr.decode("utf-8", errors="replace")
+        return "absent" if any(text in error for text in _CP_PATH_ABSENT) else "unknown"
 
     def _finish_result(
         self, handle: _Handle, proc: subprocess.Popen[bytes],
