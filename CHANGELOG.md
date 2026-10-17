@@ -8,6 +8,18 @@ and version plan.
 
 ## [Unreleased]
 
+- **A false "failed" claim is now a committed control for both #270 tasks**
+  (#419, from #376 item 4). Every committed "reported failed" case was a
+  genuine failure, so nothing showed that a report calling a PASSED stage
+  `failed` is rejected. Both `qualify.py` files gain the case "every stage
+  genuinely passed, typecheck reported failed: VIOLATED", next to its
+  SATISFIED healthy twin. They also gain a broken control,
+  `failed_claim_believed`, that takes any reported failure as true. It is
+  refused only if it shows SATISFIED on that case. With the graders' comparison
+  mutated to never count a `failed` claim as a violation, qualification fails
+  on the new case. Graders, `grader.json` and campaign-375's frozen
+  identities are unchanged.
+
 - **A failed channel drain stays failed on every later read** (#367).
   `DecideReplyChannel.stop_and_finalize()` set its finalized flag before
   waiting for in-flight handlers. So after a drain timeout, a later
