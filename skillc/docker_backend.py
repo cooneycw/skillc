@@ -119,6 +119,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import os
 import re
 import signal
@@ -240,6 +241,12 @@ CWD_CONFINEMENT_STATUS_INVALID = "skillc-cwd-confinement-status-invalid"
 #: `unavailable-in-image` until the SAME held change that starts the
 #: supervisor also makes the socket real.
 SKILLC_CONTROL_SOCKET_PATH = "/run/skillc/control.sock"
+
+#: The forwarding probe `_forwarding_available` runs on every `execute()` call,
+#: and the command text the daemon's exec events show for it (#317: the lower
+#: bound of the refused-exec decision's event window).
+_FORWARDING_PROBE_SCRIPT = f"test -x {SKILLC_WRAP_PATH} && test -S {SKILLC_CONTROL_SOCKET_PATH}"
+_FORWARDING_PROBE_COMMAND = f"sh -c {_FORWARDING_PROBE_SCRIPT}"
 
 #: Where #183's controller-owned decide-and-reply channel is bind-mounted
 #: into the container, when `DockerBackend.trigger_decide` is set (see that
@@ -549,18 +556,20 @@ def compose_run_argv(
 #: afterward through `docker cp`/`docker exec` (see the module docstring).
 _KEEPALIVE_ARGV: tuple[str, ...] = ("sleep", "infinity")
 
-#: #317: `execute()`'s provenance marker. Its prelude writes the wrapper
-#: shell's pid here the instant it starts INSIDE the container, before the
-#: subject runs; a daemon-rejected exec never starts that shell, so it can
-#: never leave the marker. Under CONTAINER_HOME, never /work: nothing captured
-#: or graded is read from the home root (captures export /work; home reads
-#: name `.claude/projects`, `.codex/sessions` or one delivered path).
-_EXEC_MARKER_PREFIX = ".skillc-exec-pid-"
+#: #317: the per-call token `execute()` passes as `$0` of a no-op prelude,
+#: `sh -c 'exec "$@"' TOKEN ARGV`. It writes nothing anywhere; it only makes
+#: this call's exec identifiable in the daemon's own event record, which the
+#: subject can neither write nor erase.
+_EXEC_TOKEN_PREFIX = "skillc-exec-"
 
-#: The docker CLI's own words for "that path is not in the container" from
-#: `docker cp NAME:PATH -` - real Docker, then the older/fake spelling. They
-#: come from our own cp call, never from the subject's output.
-_CP_PATH_ABSENT = ("Could not find the file", "No such container:path")
+#: Upper bound on the `docker events` answer read for one decision. Past it the
+#: answer is "unknown" and the real result stands.
+_EXEC_EVENTS_MAX_BYTES = 1024 * 1024
+
+#: Wall-clock nanoseconds for the event window, bound at import: the window is
+#: compared against the daemon's own `timeNano`, so it must stay real time even
+#: where a caller replaces this module's `time` for its own pacing.
+_wall_ns = time.time_ns
 
 #: The canary files' names, relative to `CONTAINER_WORKSPACE` inside the
 #: container - matching `tests/fixtures/backend-lifecycle/fake_client.py`'s
@@ -1154,7 +1163,7 @@ class DockerBackend:
         than risking a 127 on an ambiguous answer. This is the same
         fail-open posture `skillc-wrap` itself uses if it cannot reach the
         supervisor - absence of certainty is never treated as presence."""
-        probe = f"test -x {SKILLC_WRAP_PATH} && test -S {SKILLC_CONTROL_SOCKET_PATH}"
+        probe = _FORWARDING_PROBE_SCRIPT
         try:
             proc = subprocess.run(
                 [*self.docker_bin, "exec", "--", handle.name, "sh", "-c", probe],
@@ -1867,31 +1876,33 @@ class DockerBackend:
         (`test_execute_reports_launch_failed_when_the_docker_binary_is_missing`,
         caught by running it).
 
-        THE CHECK-THEN-ACT WINDOW IS CLOSED BY PROVENANCE, NOT BY OUTPUT (#317).
+        THE CHECK-THEN-ACT WINDOW IS CLOSED BY THE DAEMON'S OWN RECORD (#317).
         The entry check above can still race: the container can stop between
         it and the real `docker exec`, and the daemon's refusal then exits
-        nonzero exactly like a subject that ran and failed. An earlier fix
-        matched the daemon's "is not running" wording in stderr and was
-        rejected (`codex:code_review`): that text is the SUBJECT's output, so a
-        subject printing it would have its real result discarded. Instead the
-        argv runs behind a silent prelude, `sh -c '{ echo $$ > MARKER; }
-        2>/dev/null; exec "$@"'`, which writes a per-call marker under
-        `CONTAINER_HOME` the instant the wrapper shell starts in the container.
-        A refused exec never starts that shell. After a nonzero exit, and
-        before this method's own kill, the result is reclassified as
-        `attempt-not-running` only when a fresh `_inspect()` confirms the
-        container exists and is not running AND our own `docker cp` reports
-        the marker absent. Neither input is subject output. Every other
-        answer keeps the real result, so a run that happened is never
-        discarded. The prelude writes nothing to either stream, and `exec`
-        keeps the pid, stdin, exit code and skillc-wrap prefix.
+        nonzero exactly like a subject that ran and failed. Two earlier
+        designs were rejected in review. Matching the daemon's "is not
+        running" wording in stderr reads the SUBJECT's output. An in-container
+        marker file is subject-writable, and since the container runs with
+        `--init` a subject can kill its keepalive and stop the container
+        itself. Instead the argv runs behind a no-op prelude,
+        `sh -c 'exec "$@"' skillc-exec-<uuid> ARGV`, which writes nothing and
+        only puts a per-call token in the exec's command, so the daemon's
+        own `exec_create`/`exec_start` events can name this call. After a
+        nonzero exit, and before this method's own kill,
+        `_exec_never_started` reclassifies to `attempt-not-running` only when
+        ALL of these hold: the container is `exited`/`dead`; the
+        `docker events` answer parses within a byte bound; it holds THIS
+        call's forwarding-probe exec event (which runs on every call) after
+        the window start, with its command readable, AND the container's
+        `die` after it; and no exec in that window carries the token. No
+        input is the subject's.
 
-        Its one boundary: a subject can delete its own marker. That alone
-        changes nothing while the container runs, and a subject cannot stop
-        its own container (PID 1 is `sleep infinity`, immune to in-container
-        signals). Only an EXTERNAL stop between the subject's exit and the
-        re-check (an OOM kill of PID 1, a daemon restart) plus a deleted
-        marker could still read as never started.
+        THE CONSERVATIVE PROPERTY: a daemon whose events are dropped,
+        reformatted, unreadable or oversized fails one of the proofs, and the
+        real result stands. A mismatch with the real daemon can only FAIL to
+        reclassify, never misreclassify. #426 owes the real-daemon JSON;
+        until then the fake CLI's event shape is an assumption, held on the
+        safe side.
 
         Whether the subject exits on its own or is killed for timeout/
         cancellation, this attempt's container is always stopped before
@@ -1973,15 +1984,17 @@ class DockerBackend:
             # method may not assume it either (filed in the Nit Store as
             # worth a closer look, not fixed here - out of #304's scope).
             return ExecuteResult(reason="attempt-not-running", exit_code=None)
+        # #317: the lower bound of this call's event window, taken BEFORE the
+        # forwarding probe, so the probe's own exec event (which runs on every
+        # call) falls inside it.
+        window_start_ns = _wall_ns()
         forwarding_available = self._forwarding_available(handle)
-        # #317: a silent prelude records that the exec really started in the
-        # container. `{ ...; } 2>/dev/null` (not `echo > M 2>/dev/null`, where
-        # the failed `> M` would complain before the 2> applies) keeps every
-        # byte of stdout/stderr the subject's own (#334). `exec` keeps the
-        # pid, stdin, exit code and the skillc-wrap prefix exactly as before.
-        marker_path = f"{CONTAINER_HOME}/{_EXEC_MARKER_PREFIX}{uuid.uuid4().hex}"
+        # #317: a no-op prelude whose `$0` names this call. It writes nothing
+        # to the filesystem or either stream (#334); `exec` keeps the pid,
+        # stdin, exit code and the skillc-wrap prefix exactly as before.
+        token = f"{_EXEC_TOKEN_PREFIX}{uuid.uuid4().hex}"
         inner = [SKILLC_WRAP_PATH, *argv] if forwarding_available else list(argv)
-        wrapped_argv = ["sh", "-c", f'{{ echo $$ > {marker_path}; }} 2>/dev/null; exec "$@"', "sh", *inner]
+        wrapped_argv = ["sh", "-c", 'exec "$@"', token, *inner]
         launched = self._launch_and_wait(
             handle, wrapped_argv, limits, cancel, stdin, prefix_wrap=False,
         )
@@ -2004,7 +2017,8 @@ class DockerBackend:
             proc.wait()
             # #317: decided BEFORE this method's own kill below, which would
             # otherwise make every container read as stopped.
-            never_started = proc.returncode not in (0, None) and self._exec_never_started(handle, marker_path)
+            never_started = (proc.returncode not in (0, None)
+                             and self._exec_never_started(handle, token, window_start_ns))
             self._kill_container(handle, "KILL")
 
         # term_forwarding names what the HOST observed, never what the
@@ -2037,33 +2051,89 @@ class DockerBackend:
             limits, reason, signal_name=signal_name, term_forwarding=term_forwarding,
         )
 
-    def _exec_never_started(self, handle: _Handle, marker_path: str) -> bool:
-        """#317: True only when the daemon PROVABLY refused `execute()`'s exec:
-        the container still exists, is confirmed not running, and our own
-        `docker cp` reports the provenance marker absent. Every other answer
-        - unreachable daemon, a removed container, a marker present, a read
-        that cannot tell - is False, so a real run is never discarded. No
-        input here is the subject's output."""
-        reachable, absent, status = self._inspect(handle)
-        if not reachable or absent or status == "running":
-            return False
-        return self._exec_marker_state(handle, marker_path) == "absent"
+    def _exec_never_started(self, handle: _Handle, token: str, window_start_ns: int) -> bool:
+        """#317: True only when the daemon's own record PROVES `execute()`'s
+        exec never started. ALL of these must hold, or the real result stands:
 
-    def _exec_marker_state(self, handle: _Handle, marker_path: str) -> str:
-        """`present`, `absent` (the docker CLI's own path-not-found answer), or
-        `unknown`. Works on a stopped container: `docker cp` reads its
-        filesystem layer without needing it to run."""
+        1. the container exists and its status is `exited` or `dead` (not
+           running, paused or restarting);
+        2. the `docker events` answer for this container parses within
+           `_EXEC_EVENTS_MAX_BYTES`;
+        3. it holds THIS call's forwarding-probe exec event, timestamped at or
+           after `window_start_ns`, whose command parses and equals the probe's
+           exact command - proof that the buffer reaches back to just before
+           our launch and that this daemon's events expose the command;
+        4. it holds this container's `die` at or after that probe event -
+           proof the window runs through the stop;
+        5. no `exec_create`/`exec_start` in that window carries `token`.
+
+        Every input is the daemon's; none is the subject's output, files or
+        streams. A daemon whose events are dropped, reformatted or unreadable
+        fails 2-4 and keeps the real result: a mismatch can only fail to
+        reclassify, never misreclassify (#426 owes the real-daemon JSON)."""
+        reachable, absent, status = self._inspect(handle)
+        if not reachable or absent or status not in ("exited", "dead"):
+            return False
+        events = self._exec_events(handle, window_start_ns)
+        if events is None:
+            return False
+        probe_ns = [
+            ns for ns, kind, command in events
+            if kind in ("exec_create", "exec_start") and ns >= window_start_ns
+            and command == _FORWARDING_PROBE_COMMAND
+        ]
+        if not probe_ns:
+            return False
+        lower = min(probe_ns)
+        if not any(kind == "die" and ns >= lower for ns, kind, _ in events):
+            return False
+        return not any(
+            kind in ("exec_create", "exec_start") and ns >= lower and command is not None and token in command
+            for ns, kind, command in events
+        )
+
+    def _exec_events(self, handle: _Handle, since_ns: int) -> list[tuple[int, str, str | None]] | None:
+        """This container's daemon events since `since_ns` as
+        `(time_ns, kind, command)`, `command` being the text after `exec_*: `
+        in the action (None for other kinds). None when the query fails, times
+        out, exceeds the byte bound, or any line does not parse."""
+        since = f"{since_ns // 1_000_000_000}.{since_ns % 1_000_000_000:09d}"
+        until = f"{_wall_ns() // 1_000_000_000 + 1}"
         try:
-            result = subprocess.run(
-                [*self.docker_bin, "cp", f"{handle.name}:{marker_path}", "-"],
-                capture_output=True, env=handle.env, check=False, timeout=self.daemon_timeout,
+            proc = subprocess.Popen(
+                [*self.docker_bin, "events", "--since", since, "--until", until,
+                 "--filter", f"container={handle.name}", "--format", "{{json .}}"],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=handle.env,
             )
-        except (OSError, subprocess.TimeoutExpired):
-            return "unknown"
-        if result.returncode == 0:
-            return "present" if result.stdout else "unknown"
-        error = result.stderr.decode("utf-8", errors="replace")
-        return "absent" if any(text in error for text in _CP_PATH_ABSENT) else "unknown"
+        except OSError:
+            return None
+        assert proc.stdout is not None
+        try:
+            data = proc.stdout.read(_EXEC_EVENTS_MAX_BYTES + 1)
+            proc.wait(timeout=self.daemon_timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            return None
+        finally:
+            proc.stdout.close()
+        if proc.returncode != 0 or len(data) > _EXEC_EVENTS_MAX_BYTES:
+            return None
+        parsed: list[tuple[int, str, str | None]] = []
+        for line in data.decode("utf-8", errors="replace").splitlines():
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                return None
+            action = event.get("Action") if isinstance(event, dict) else None
+            time_ns = event.get("timeNano") if isinstance(event, dict) else None
+            if not isinstance(action, str) or not isinstance(time_ns, int):
+                return None
+            kind, sep, command = action.partition(": ")
+            parsed.append((time_ns, kind, command if sep and kind.startswith("exec_") else None))
+        return parsed
 
     def _finish_result(
         self, handle: _Handle, proc: subprocess.Popen[bytes],

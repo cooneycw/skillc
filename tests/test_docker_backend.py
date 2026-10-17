@@ -29,7 +29,7 @@ import tempfile
 import threading
 import time
 import types
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -1936,9 +1936,7 @@ def test_a_second_execute_against_an_already_stopped_handle_is_refused_not_fabri
     backend.destroy(handle)
 
 
-def _marker_home(docker_state: Path, handle: d._Handle) -> Path:
-    """The fake's on-disk CONTAINER_HOME for `handle`, where execute()'s
-    #317 provenance marker lands."""
+def _home(docker_state: Path, handle: d._Handle) -> Path:
     return docker_state / f"{handle.name}.fsroot" / d.CONTAINER_HOME.lstrip("/")
 
 
@@ -1947,24 +1945,35 @@ def _ready(base: Path, docker_state: Path, attempt_id: str) -> tuple[d.DockerBac
     handle = backend.prepare(attempt_id)
     assert isinstance(handle, d._Handle)
     backend.install(handle, {})
-    _marker_home(docker_state, handle).mkdir(parents=True, exist_ok=True)
     return backend, handle
 
 
 _DAEMON_WORDING = "Error response from daemon: container is not running"
+_Events = list[tuple[int, str, str | None]]
+
+
+def _edit_events(monkeypatch: pytest.MonkeyPatch, edit: Callable[[_Events, int], _Events | None]) -> None:
+    """Feed the decision a doctored copy of the fake daemon's REAL event answer
+    (buffer loss, format drift) - the edit receives the window start."""
+    real = d.DockerBackend._exec_events
+
+    def doctored(self: d.DockerBackend, handle: d._Handle, since_ns: int) -> _Events | None:
+        events = real(self, handle, since_ns)
+        return None if events is None else edit(events, since_ns)
+
+    monkeypatch.setattr(d.DockerBackend, "_exec_events", doctored)
 
 
 def test_execute_reports_a_daemon_refused_exec_as_attempt_not_running(base: Path, docker_state: Path) -> None:
     """#317 red case: the container stops between execute()'s entry inspect
     and the real exec (`.stop-before-exec-NAME`, deterministic), so the daemon
-    refuses the exec. Before the fix that refusal read as an ordinary nonzero
-    `exited`; now the confirmed-stopped container plus the absent marker, no
-    subject output involved, report it as never started."""
+    refuses it. Before the fix that read as an ordinary nonzero `exited`; now
+    the daemon's own record - this call's probe exec, then the die, and no
+    exec carrying this call's token - reports it as never started."""
     backend, handle = _ready(base, docker_state, "a-lc-000000000013")
     _sentinel(docker_state, f".stop-before-exec-{handle.name}")
     result = backend.execute(handle, ["true"], Limits(timeout=5.0))
     assert (result.reason, result.exit_code) == ("attempt-not-running", None)
-    assert not list(_marker_home(docker_state, handle).glob(".skillc-exec-pid-*"))
     backend.destroy(handle)
 
 
@@ -1974,67 +1983,91 @@ def test_execute_on_a_running_container_is_unchanged(base: Path, docker_state: P
     result = backend.execute(handle, ["sh", "-c", f"printf out; printf err >&2; exit {code}"], Limits(timeout=5.0))
     assert (result.reason, result.exit_code) == ("exited", code)
     assert (result.stdout, result.stderr) == (b"out", b"err")
-    assert len(list(_marker_home(docker_state, handle).glob(".skillc-exec-pid-*"))) == 1
     backend.destroy(handle)
 
 
-def test_a_subject_printing_the_daemon_wording_after_its_container_stopped_keeps_its_result(
+def test_a_subject_that_ran_and_then_stopped_its_container_keeps_its_result(
     base: Path, docker_state: Path,
 ) -> None:
-    """#317 negative control (the attack the stderr-matching fix fell to): the
-    subject really ran, printed the daemon's own rejection wording, exited 1,
-    and the container stopped before execute()'s re-check
-    (`.stop-after-exec-NAME`). Its marker exists, so its real result stands."""
+    """#317 negative control - the forgery the marker design fell to (the
+    container runs with --init, so a subject CAN stop it): the subject really
+    ran, printed the daemon's own rejection wording, deleted whatever it liked,
+    exited 1, and its container stopped before execute()'s re-check
+    (`.stop-after-exec-NAME`). The daemon recorded its exec, so it stands."""
     backend, handle = _ready(base, docker_state, "a-lc-000000000180")
     _sentinel(docker_state, f".stop-after-exec-{handle.name}")
-    result = backend.execute(handle, ["sh", "-c", f"echo '{_DAEMON_WORDING}' >&2; exit 1"], Limits(timeout=5.0))
+    script = f"rm -rf {d.CONTAINER_HOME}/* 2>/dev/null; echo '{_DAEMON_WORDING}' >&2; exit 1"
+    result = backend.execute(handle, ["sh", "-c", script], Limits(timeout=5.0))
     assert (result.reason, result.exit_code) == ("exited", 1)
     assert result.stderr == f"{_DAEMON_WORDING}\n".encode()
     backend.destroy(handle)
 
 
-def test_a_subject_deleting_its_marker_on_a_running_container_keeps_its_result(
+def test_the_prelude_leaves_the_subjects_bytes_untouched_even_with_an_unusable_home(
     base: Path, docker_state: Path,
 ) -> None:
-    """Deleting the marker alone never reclassifies: the container must also
-    be confirmed stopped, which a subject cannot do to its own container."""
-    backend, handle = _ready(base, docker_state, "a-lc-000000000181")
-    script = f"rm -f {d.CONTAINER_HOME}/.skillc-exec-pid-*; echo '{_DAEMON_WORDING}' >&2; exit 1"
-    result = backend.execute(handle, ["sh", "-c", script], Limits(timeout=5.0))
-    assert (result.reason, result.exit_code) == ("exited", 1)
-    backend.destroy(handle)
-
-
-def test_an_unwritable_marker_leaves_the_subjects_bytes_and_result_untouched(
-    base: Path, docker_state: Path,
-) -> None:
-    """Approver condition 1: the prelude's own failure must never reach the
-    subject's streams (#334 byte identity) - `{ echo $$ > M; } 2>/dev/null`,
-    not `echo $$ > M 2>/dev/null`, whose failed redirection prints first. With
-    no marker and a running container, the result is the real one."""
+    """Approver condition: nothing of the prelude reaches the subject's
+    streams (#334 byte identity), even where its home is not a directory."""
     backend = _backend(base, docker_state)
     handle = backend.prepare("a-lc-000000000182")
     assert isinstance(handle, d._Handle)
     backend.install(handle, {})
-    home = _marker_home(docker_state, handle)
+    home = _home(docker_state, handle)
     home.parent.mkdir(parents=True, exist_ok=True)
-    home.write_text("not a directory")  # every marker create fails
+    home.write_text("not a directory")
     result = backend.execute(handle, ["sh", "-c", "printf 'O\\n'; printf 'E\\n' >&2; exit 1"], Limits(timeout=5.0))
     assert (result.reason, result.exit_code) == ("exited", 1)
     assert (result.stdout, result.stderr) == (b"O\n", b"E\n")
     backend.destroy(handle)
 
 
-def test_an_unreadable_marker_never_reclassifies(
-    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+def _probe(command: str | None) -> bool:
+    return command == d._FORWARDING_PROBE_COMMAND
+
+
+@pytest.mark.parametrize("fault", ["query-fails", "probe-missing", "probe-older-only", "probe-unparseable",
+                                   "die-missing", "paused"])
+def test_a_refused_exec_without_complete_daemon_proof_keeps_the_real_result(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch, fault: str,
 ) -> None:
-    """Fail closed: a refused exec whose marker read cannot answer keeps the
-    pre-#317 shape rather than guessing."""
-    backend, handle = _ready(base, docker_state, "a-lc-000000000183")
+    """Conservative by construction: every way the daemon's answer can fail to
+    PROVE "never started" keeps the pre-#317 shape - a query failure, buffer
+    loss at the lower bound (this call's probe event gone, even with an older
+    probe event retained), format drift (the probe's command unreadable), the
+    die missing, or a status that is not exited/dead."""
+    backend, handle = _ready(base, docker_state, f"a-lc-00000000019{len(fault) % 10}")
     _sentinel(docker_state, f".stop-before-exec-{handle.name}")
-    monkeypatch.setattr(d.DockerBackend, "_exec_marker_state", lambda self, h, m: "unknown")
+    if fault == "query-fails":
+        monkeypatch.setattr(d.DockerBackend, "_exec_events", lambda self, h, since: None)
+    elif fault == "probe-missing":
+        _edit_events(monkeypatch, lambda ev, since: [e for e in ev if not _probe(e[2])])
+    elif fault == "probe-older-only":
+        _edit_events(monkeypatch, lambda ev, since: [(since - 10_000_000_000, "exec_start", d._FORWARDING_PROBE_COMMAND),
+                                                    *[e for e in ev if not _probe(e[2])]])
+    elif fault == "probe-unparseable":
+        _edit_events(monkeypatch, lambda ev, since: [(ns, k, None if _probe(c) else c) for ns, k, c in ev])
+    elif fault == "die-missing":
+        _edit_events(monkeypatch, lambda ev, since: [e for e in ev if e[1] != "die"])
+    else:
+        real_inspect = d.DockerBackend._inspect
+        calls = {"n": 0}
+
+        def paused(self: d.DockerBackend, h: d._Handle) -> tuple[bool, bool, str | None]:
+            calls["n"] += 1
+            return real_inspect(self, h) if calls["n"] == 1 else (True, False, "paused")
+
+        monkeypatch.setattr(d.DockerBackend, "_inspect", paused)
     result = backend.execute(handle, ["true"], Limits(timeout=5.0))
     assert result.reason == "exited" and result.exit_code not in (0, None)
+    backend.destroy(handle)
+
+
+def test_the_exec_events_answer_is_bounded(base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An events answer past the byte bound is "unknown", never buffered whole."""
+    backend, handle = _ready(base, docker_state, "a-lc-000000000184")
+    backend.execute(handle, ["true"], Limits(timeout=5.0))
+    monkeypatch.setattr(d, "_EXEC_EVENTS_MAX_BYTES", 10)
+    assert backend._exec_events(handle, 0) is None
     backend.destroy(handle)
 
 
