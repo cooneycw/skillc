@@ -8,6 +8,19 @@ and version plan.
 
 ## [Unreleased]
 
+- **A failed channel drain stays failed on every later read** (#367).
+  `DecideReplyChannel.stop_and_finalize()` set its finalized flag before
+  waiting for in-flight handlers. So after a drain timeout, a later
+  `log_or_finalize()` returned the log anyway: `[]` while the handler was
+  wedged (`trusted_log()` read `no-controller-witness`), then one entry once it
+  finished. A "finalized" log that grew. The channel now records shutdown
+  attempted separately from a successful finalize. A drain failure re-raises as
+  a `RuntimeError` from `stop_and_finalize()`, `log_or_finalize()` and
+  `trusted_log()` on every call, permanently. A successful finalize returns a
+  copy of one frozen snapshot each time. `close()` after a failure releases the
+  socket without raising. The Event-synchronised negative control fails on the
+  pre-fix code at the first post-failure `log_or_finalize()` (`DID NOT RAISE`).
+
 - **#400's fix is tested against the real Level-3 gates** (#400 follow-up).
   `tests/test_agent_trial_gate_env.py` runs each task's real reference gate
   stages (lint, check, typecheck) under the env production hands the witness,
