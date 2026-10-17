@@ -395,7 +395,17 @@ def _arm_label(case: str, arm: str) -> str:
 
 
 def plan_study(declaration: StudyDeclaration, store: Path, *, root: Path, digests: Mapping[str, str],
-               image_digest: str | None) -> tuple[trial.Experiment, list[mp.ScheduledAttempt]]:
+               image_digest: str | None, skill_digests: Mapping[str, Sequence[Mapping[str, str]]] | None = None,
+               ) -> tuple[trial.Experiment, list[mp.ScheduledAttempt]]:
+    """Every arm installs skills, so every trial declares its OWN arm's
+    `skill_digests` (#424): `published` and `rewritten` pin different
+    descriptions, and #354's `ledger-binding` refuses skill-evidence crediting
+    the other arm's bytes. An arm with no pins is refused, never planned
+    unpinned."""
+    pins = skill_digests or {}
+    unpinned = sorted(arm for arm in declaration.arms if not pins.get(arm))
+    if unpinned:
+        raise StudyRefused(f"arm(s) {unpinned} have no skill_digests to pin; refusing to plan them unpinned")
     client_name, client_version = (str(declaration.shared["client"]["name"]),  # type: ignore[index]
                                    str(declaration.shared["client"]["version"]))  # type: ignore[index]
     grader = verify.GraderDef.load(root / declaration.task_path)
@@ -412,6 +422,7 @@ def plan_study(declaration: StudyDeclaration, store: Path, *, root: Path, digest
             "image": {"digest": image_digest or UNKNOWN},
             "config": {"arm": _arm_label(case, arm), "repeat": counts[(case, arm)], "position": position},
             "attempts": 1,
+            "skill_digests": [dict(pin) for pin in pins[arm]],
         })
     try:
         experiment = trial.plan({"experiment": EXPERIMENT_LABEL, "trials": trials}, store)
@@ -464,7 +475,8 @@ def run_study(
 
     store = trial.open_store(run_dir / "store", forbidden=[])
     experiment, schedule = plan_study(declaration, store, root=root, image_digest=image_digest,
-                                      digests={arm: treatments[arm].digest for arm in declaration.arms})
+                                      digests={arm: treatments[arm].digest for arm in declaration.arms},
+                                      skill_digests={arm: treatments[arm].skill_digests for arm in declaration.arms})
     outcomes: list[mp.AttemptOutcome] = []
 
     def save() -> None:

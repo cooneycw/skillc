@@ -900,12 +900,10 @@ def _run_walk(profile: Profile, tree: Tree, problems: list[dict[str, Any]] | Non
     for entry in entries:
         skill_dir = f"{prefix}{entry.directory}"
         tree._refuse_links(skill_dir)  # a link inside a SELECTED skill is in the closure
-        body_text = tree.read(f"{skill_dir}/SKILL.md").decode("utf-8", errors="replace")
         try:
-            frontmatter, body = parse_frontmatter(body_text)
+            description_digest, body_digest = skill_md_digests(tree.read(f"{skill_dir}/SKILL.md"))
         except FrontmatterError as exc:  # pragma: no cover - inventory() already parsed it
             raise Refused(f"{entry.directory}/SKILL.md: {exc}") from exc
-        description = str(frontmatter.get("description", ""))
         skill_files = []
         for f in entry.files:
             repo_path = f"{skill_dir}/{f['path']}"
@@ -917,8 +915,8 @@ def _run_walk(profile: Profile, tree: Tree, problems: list[dict[str, Any]] | Non
         skills.append({
             "name": entry.name,
             "directory": entry.directory,
-            "description_digest": m.sha256_bytes(description.encode()),
-            "body_digest": m.sha256_bytes(body.encode()),
+            "description_digest": description_digest,
+            "body_digest": body_digest,
             "required_references": entry.required_refs,
             "checksums": entry.checksums,
             "files": skill_files,
@@ -1704,6 +1702,16 @@ def _verified_file_records(inventory: dict[str, Any], tree: Tree) -> Iterator[tu
         except OSError as exc:
             raise Refused(f"installation input unreadable: {destination}") from exc
         yield record, data
+
+
+def skill_md_digests(raw: bytes) -> tuple[str, str]:
+    """`(description_digest, body_digest)` of one `SKILL.md`, by the inventory's
+    own rule (#265): the frontmatter `description` and the body, each sha256'd.
+    The ONE definition, so a pin derived from installed bytes (#424) and one
+    read from an inventory cannot drift apart. Raises `FrontmatterError`."""
+    frontmatter, body = parse_frontmatter(raw.decode("utf-8", errors="replace"))
+    description = str(frontmatter.get("description", ""))
+    return m.sha256_bytes(description.encode()), m.sha256_bytes(body.encode())
 
 
 def skill_digest_pins(inventory: dict[str, Any]) -> list[dict[str, str]]:

@@ -8,6 +8,17 @@ and version plan.
 
 ## [Unreleased]
 
+- **Planned trials pin the skills they install** (#424, follow-up to #354).
+  #354's `skill_digests` lock never engaged: neither planner declared it, so
+  every calibration and uptake trial was planned unpinned and a substituted
+  skill's `skill-evidence` still validated clean. `build_treatment` now
+  derives each skill's pin from the `SKILL.md` bytes it installs (one shared
+  rule, `profile.skill_md_digests`) and, for a profiled treatment, refuses any
+  disagreement with the inventory's own pins. `plan_calibration` declares the
+  pins on every treated trial; `plan_study` declares each arm's own, so
+  `published` and `rewritten` pin different descriptions. A treated arm with
+  no pins is refused rather than planned unpinned. Baseline trials stay
+  unpinned; the baseline-contamination rule is #427.
 - **A false "failed" claim is now a committed control for both #270 tasks**
   (#419, from #376 item 4). Every committed "reported failed" case was a
   genuine failure, so nothing showed that a report calling a PASSED stage

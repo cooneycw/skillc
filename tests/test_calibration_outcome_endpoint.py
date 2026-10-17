@@ -15,6 +15,10 @@ from skillc import calibration_run as cr
 from skillc import collection_conformance as cc
 from skillc import matched_pilot as mp
 
+#: #424: the planners refuse a treated arm planned unpinned; a fixed, well-formed pin.
+_TEST_PINS = ({"path": ".codex/skills/tdd/SKILL.md", "body_digest": "sha256:" + "b" * 64,
+               "description_digest": "sha256:" + "d" * 64},)
+
 ROOT = Path(__file__).resolve().parents[1]
 TASK = "evals/level3/gate-stops-early"
 SELECTED = ["functional-windows-fix", "regression-fails-on-original", "gate-green"]
@@ -55,6 +59,7 @@ def _planned(tmp_path: Path, data: dict[str, Any] | None = None) -> tuple[trial.
     return cr.plan_calibration(
         declaration, trial.open_store(tmp_path / "store", forbidden=[]), root=ROOT,
         treatment_digest="sha256:" + "ab" * 32, image_digest="sha256:" + "cd" * 32,
+        skill_digests=_TEST_PINS,
     )
 
 
@@ -148,7 +153,7 @@ def _refuses_run(tmp_path: Path, declaration: calibration.CalibrationDeclaration
         pytest.fail("refused input requested a backend")
     with pytest.raises((calibration.DeclarationRefused, cr.CalibrationRefused), match=match):
         cr.run_calibration(declaration, run_dir=tmp_path / "run", root=root,
-                           treatment=cr.Treatment({}, "sha256:" + "ab" * 32, None),
+                           treatment=cr.Treatment({}, "sha256:" + "ab" * 32, None, skill_digests=_TEST_PINS),
                            image_digest="sha256:" + "cd" * 32, backends=forbidden, argv_for=lambda _s: [])
     assert not (tmp_path / "run").exists()
 
@@ -379,7 +384,7 @@ def test_runner_dispatches_bound_bytes_and_isolates_baseline(
     run.mkdir()
     experiment, outcomes = cr.run_calibration(
         calibration.parse_declaration(data), run_dir=run, root=copied_root,
-        treatment=cr.Treatment({"skill": b"body"}, "sha256:" + "ab" * 32, None),
+        treatment=cr.Treatment({"skill": b"body"}, "sha256:" + "ab" * 32, None, skill_digests=_TEST_PINS),
         image_digest="sha256:" + "cd" * 32, backends=lambda: (object(), object()), argv_for=lambda _s: [],
     )
     assert len(seen) == 2
@@ -424,7 +429,7 @@ def test_cli_reports_bound_endpoint_or_controlled_identity_refusal(
     monkeypatch.setattr(demo, "resolve_image_digest", lambda *_: data["shared"]["image"]["digest"])
     monkeypatch.setattr(cc, "acquire_collection", lambda *_: acquired)
     monkeypatch.setattr(cc, "discard_acquisition", lambda *_: None)
-    monkeypatch.setattr(cr, "build_treatment", lambda *_a, **_kw: cr.Treatment({}, "sha256:" + "ab" * 32, None))
+    monkeypatch.setattr(cr, "build_treatment", lambda *_a, **_kw: cr.Treatment({}, "sha256:" + "ab" * 32, None, skill_digests=_TEST_PINS))
     monkeypatch.setattr(cr, "run_calibration", lambda *_a, **_kw: (experiment, outcomes))
     private = tmp_path / "private"
     result = cli.main(["calibration-run", str(declaration_path), "--private-dir", str(private)])
@@ -464,7 +469,7 @@ def test_runtime_overrides_refuse_before_store(tmp_path: Path, override: str) ->
     with pytest.raises(cr.CalibrationRefused, match="image|total_seconds"):
         cr.run_calibration(
             calibration.parse_declaration(data), run_dir=tmp_path / "run", root=ROOT,
-            treatment=cr.Treatment({}, "sha256:" + "ab" * 32, None),
+            treatment=cr.Treatment({}, "sha256:" + "ab" * 32, None, skill_digests=_TEST_PINS),
             image_digest="sha256:" + ("ef" if override == "image" else "cd") * 32,
             total_seconds=1.0 if override == "cap" else None,
             backends=lambda: pytest.fail("unapproved runtime requested backend"), argv_for=lambda _s: [],
