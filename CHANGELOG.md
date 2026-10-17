@@ -4,7 +4,9 @@ All notable changes to skillc are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are the day the
 work landed on `main`, not the day a version is tagged - see
 [#72](https://github.com/cooneycw/skillc/issues/72) for the release checklist
-and version plan.
+and version plan. Since #439, new entries are written as fragments in
+`changelog.d/` and folded in here at release by `ci/changelog_assemble.py` -
+do not add to `[Unreleased]` by hand.
 
 ## [Unreleased]
 
