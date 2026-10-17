@@ -73,7 +73,7 @@ FILE_MODE = 0o400
 #: Keys a plan may carry. Anything else is refused: an unread key is a setting its
 #: author believes is honoured.
 _PLAN_KEYS = {"experiment", "trials"}
-_TRIAL_KEYS = {"label", "case", "grader", "subject", "client", "image", "config", "attempts", "budget"}
+_TRIAL_KEYS = {"label", "case", "grader", "subject", "client", "image", "config", "attempts", "budget", "skill_digests"}
 _IDENTITIES = {
     "case": ("id", "revision"),
     "grader": ("id", "revision"),
@@ -615,6 +615,16 @@ def plan(spec: dict[str, object], store: Path) -> Experiment:
             if not isinstance(trial["budget"], dict):
                 raise Refused(f"trial {trial_label!r}: budget is not an object")
             entry["budget"] = trial["budget"]
+        if "skill_digests" in trial:
+            # #354: the same shape check `records.trial_ledger` applies, so a
+            # plan accepted here is never one the ledger rule then refuses.
+            problems = list(records.skill_digest_pin_problems(trial["skill_digests"]))
+            if problems:
+                raise Refused(f"trial {trial_label!r}: {problems[0]}")
+            entry["skill_digests"] = [
+                {k: str(pin[k]) for k in records.SKILL_DIGEST_PIN_KEYS}
+                for pin in trial["skill_digests"]
+            ]
         planned.append(entry)
 
     ledger: dict[str, object] = {

@@ -1706,6 +1706,40 @@ def _verified_file_records(inventory: dict[str, Any], tree: Tree) -> Iterator[tu
         yield record, data
 
 
+def skill_digest_pins(inventory: dict[str, Any]) -> list[dict[str, str]]:
+    """A `trial.skill_digests` value (#354) for every skill a validated
+    inventory selects: each skill's `SKILL.md` install destination, with the
+    `body_digest` and `description_digest` this inventory recorded for it.
+
+    The destination is the same home-relative path `install()` writes and an
+    installation receipt records, so `records.ledger_binding` can match a
+    `skill-evidence` entry's `skill.path` against it. Refused, never guessed,
+    when a skill has no `SKILL.md` file record or lacks either digest."""
+    pins: list[dict[str, str]] = []
+    for skill in inventory.get("skills", []):
+        name = skill.get("name") if isinstance(skill, dict) else None
+        if not isinstance(skill, dict):
+            raise Refused(f"inventory skill entry {skill!r} is not an object")
+        destinations = [
+            f.get("destination") for f in skill.get("files", [])
+            if isinstance(f, dict) and f.get("owner") == f"skill:{name}"
+            and str(f.get("source", "")).endswith(f"{skill.get('directory')}/SKILL.md")
+        ]
+        if len(destinations) != 1 or not isinstance(destinations[0], str):
+            raise Refused(f"inventory skill {name!r} has {len(destinations)} SKILL.md file records, not exactly one")
+        for key in ("body_digest", "description_digest"):
+            if not isinstance(skill.get(key), str) or not skill[key]:
+                raise Refused(f"inventory skill {name!r} has no {key}")
+        pins.append({
+            "path": destinations[0],
+            "body_digest": skill["body_digest"],
+            "description_digest": skill["description_digest"],
+        })
+    if not pins:
+        raise Refused("inventory selects no skills; there is nothing to pin")
+    return pins
+
+
 def installed_home_files(inventory: dict[str, Any], tree: Tree) -> dict[str, bytes]:
     """The validated closure's install population as an in-memory
     `{destination: bytes}` mapping, digest-verified exactly as `install()`
