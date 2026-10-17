@@ -21,6 +21,17 @@ and version plan.
   `tests/test_calibration_run_real_profile.py` runs the real profile with its
   full install when a local claude-power-pack checkout holds 86641e8, and
   skips with the missing prerequisite named otherwise.
+- **A baseline trial's skill-evidence is refused as a contaminated baseline**
+  (#427, the records half of #424). A trial whose `subject.digest` is the
+  baseline (sha256 of zero bytes) installs no skills. A `skill-evidence` entry
+  crediting a skill there validated clean, because the receipt-based check
+  skips an attempt with no receipt and passes a receipt listing installed paths
+  under the baseline identity. `ledger-binding` now refuses every such entry,
+  naming the baseline and the skill path. `records.BASELINE_SUBJECT_DIGEST` is
+  the one definition and `matched_pilot.BASELINE_SUBJECT_DIGEST` aliases it. The
+  new bad control (`ledger-binding/bad/skill-evidence-baseline-trial`) passes
+  every rule on the pre-change code, and removing the rule leaves selftest
+  BLIND on it. No committed bundle carries skill-evidence on a baseline trial.
 - **A daemon-refused `execute()` reads as never started, not as a failed run**
   (#317). #304's entry guard is a check-then-act: the container can stop
   between `_inspect()` and the real `docker exec`, and the daemon's refusal

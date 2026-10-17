@@ -175,6 +175,18 @@ owner's ruling for #268. The check reads only the ledger, never the
 inventory, so the inventory staying outside the bundle (Q3, below) no longer
 leaves the gap open for a trial that pins.
 
+A **baseline** trial (#427) is one whose `subject.digest` is
+`records.BASELINE_SUBJECT_DIGEST`, the sha256 of zero bytes: the baseline arm
+installs nothing (`matched_pilot.BASELINE_SUBJECT_DIGEST` is an alias of it).
+It never pins skills, since #354 refuses an empty list. `ledger-binding`
+refuses EVERY `skill-evidence` entry on an attempt of a baseline trial, whatever
+its shape, naming the baseline and the credited path: a **contaminated
+baseline**, crediting a skill where none was installed, would shrink or invert a
+baseline-vs-intact effect. The rule reads the ledger's subject, not the
+receipt's, because the receipt-based not-installed check skips an attempt with
+no receipt and passes a receipt that lists installed paths under the baseline
+identity.
+
 `case.arm` and `case.paired_with` (#273): two OPTIONAL fields on the existing
 `case` identity, declaring whether this trial's case is the `intact` or
 `degraded` half of a discriminating design, and which counterpart case it
