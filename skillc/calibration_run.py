@@ -283,11 +283,25 @@ def build_treatment(
         gate_entrypoint = closure.gate_entrypoint
         # Two derivations of the same fact - the installed bytes and the
         # validated inventory - must agree, or the pins would describe skills
-        # this treatment does not install (#424).
-        if closure.skill_pins != skill_digests:
+        # this treatment does not install (#424). Per path, as a SUBSET (#432,
+        # orchestrator ruling): the inventory pins only the profile's selected
+        # skills, while the treatment installs - and pins, from its bytes -
+        # every skill of the subject's collection. Each inventory pin needs an
+        # installed pin at the same path with BOTH digests equal; installed
+        # skills the inventory does not name stay pinned from their bytes.
+        installed = {pin["path"]: pin for pin in skill_digests}
+        disagreements = []
+        for pin in closure.skill_pins:
+            have = installed.get(pin["path"])
+            if have is None:
+                disagreements.append(f"{pin['path']}: not installed by this treatment")
+                continue
+            disagreements.extend(f"{pin['path']}: {field} {pin[field]} (inventory) != {have[field]} (installed)"
+                                 for field in ("body_digest", "description_digest") if pin[field] != have[field])
+        if disagreements:
             raise CalibrationRefused(
-                f"profile {subject_profile!r}'s inventory pins {list(closure.skill_pins)} disagree with "
-                f"the installed skills' own digests {list(skill_digests)}"
+                f"profile {subject_profile!r}'s inventory pins disagree with the installed skills' own "
+                f"digests: {disagreements}"
             )
     return Treatment(
         home_files=home_files,

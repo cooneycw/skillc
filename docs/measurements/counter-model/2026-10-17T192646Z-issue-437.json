@@ -1,0 +1,27 @@
+{
+  "branch": "issue-437-run-case-s-15s-whole-attempt-limit-is-exceeded-und",
+  "counts": {
+    "accepted": 0,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "9bfbf82efa8a9687d8a1555910198ca091e7c2a9",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "437",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 1,
+  "recorded_at": "2026-10-17T19:26:46Z",
+  "red_cases": {
+    "already_covered": 0,
+    "proposed": 2
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/17/rollout-2026-10-17T15-26-03-01a14b54-1187-79a3-bfaa-7c12d744ad00.jsonl",
+    "thread_id": "01a14b54-1187-79a3-bfaa-7c12d744ad00"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

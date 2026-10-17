@@ -31,6 +31,7 @@ Stdlib only: this has to run in a slim CI image with no network (AGENTS.md).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections import Counter
@@ -238,6 +239,15 @@ EXTERNAL_EVIDENCE_SOURCE_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z
 #: time. The approach comes from the unmerged first #268 run (`case.attribution`
 #: pinning profile and contract digests), adapted to per-skill digests.
 SKILL_DIGEST_PIN_KEYS = ("path", "body_digest", "description_digest")
+
+#: A baseline trial's `subject.digest` (#427): the baseline arm installs
+#: nothing, so its subject is the empty surface - the sha256 of zero bytes,
+#: stated as exactly that (issue #10 lesson D13). Defined HERE, the one source
+#: of truth; `matched_pilot.BASELINE_SUBJECT_DIGEST` is an alias of it, so the
+#: identity `ledger_binding` keys on is the identity the planners write.
+#: `ledger_binding` refuses every `skill-evidence` entry on such a trial: a
+#: baseline that credits a skill is a contaminated baseline.
+BASELINE_SUBJECT_DIGEST = "sha256:" + hashlib.sha256(b"").hexdigest()
 
 
 def skill_digest_pin_problems(value: object) -> Iterator[str]:
@@ -1916,6 +1926,28 @@ def _skill_evidence_binding(
                         )
 
 
+def _baseline_skill_evidence_binding(record: Record, where: str, trial: Mapping[str, object]) -> Iterator[str]:
+    """`skill-evidence` on an attempt of a BASELINE trial (#427): the trial's
+    `subject.digest` is `BASELINE_SUBJECT_DIGEST`, so it installs no skills,
+    and any entry crediting one is a contaminated baseline - refused outright.
+    Keyed on the LEDGER's subject, never the receipt's: the receipt-based
+    not-installed check skips an attempt with no receipt, and passes a receipt
+    that lists installed paths under the baseline identity."""
+    subject = trial.get("subject")
+    digest = subject.get("digest") if isinstance(subject, dict) else None
+    if digest != BASELINE_SUBJECT_DIGEST:
+        return
+    skills = record.data.get("skills")
+    for index, entry in enumerate(skills if isinstance(skills, list) else []):
+        skill = entry.get("skill") if isinstance(entry, dict) else None
+        path = skill.get("path") if isinstance(skill, dict) else None
+        named = repr(path) if _nonempty_str(path) else "<unnamed>"
+        yield (
+            f"{where} skills[{index}]: credits {named} to an attempt of a baseline trial "
+            f"(subject {digest}), which installs no skills - a contaminated baseline"
+        )
+
+
 def _skill_digest_pin_binding(record: Record, where: str, pins: object) -> Iterator[str]:
     """`skill-evidence` against its trial's `skill_digests` (#354), when the
     trial declares any. A malformed declaration is `trial_ledger`'s finding;
@@ -2002,6 +2034,9 @@ def ledger_binding(bundle: Bundle) -> Iterator[str]:
       - a `skill-evidence` (#354) entry, under a trial that declares
         `skill_digests`, whose skill is unpinned, omits a digest, or carries
         a digest that differs from the pin (a **stale** attribution).
+      - a `skill-evidence` (#427) entry of ANY shape on an attempt whose
+        trial's `subject.digest` is `BASELINE_SUBJECT_DIGEST` (a
+        **contaminated baseline**: a skill credited where none was installed).
     """
     ledgers = bundle.of_kind(TRIAL_LEDGER)
     if len(ledgers) != 1:
@@ -2097,6 +2132,7 @@ def ledger_binding(bundle: Bundle) -> Iterator[str]:
             )
             if "skill_digests" in trial:
                 yield from _skill_digest_pin_binding(record, where, trial["skill_digests"])
+            yield from _baseline_skill_evidence_binding(record, where, trial)
         if record.kind == INSTALLATION_RECEIPT:
             for ident, keys in (("subject", ("digest",)), ("client", ("name", "version"))):
                 got = _ident(record.data.get(ident), *keys)

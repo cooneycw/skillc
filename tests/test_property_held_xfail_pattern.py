@@ -770,7 +770,7 @@ def _drive_closure(ns, refusal, monkeypatch, output_fault=None, subject_fault=No
         stdout=stdout + b" " * (subject_fault == "stdout"),
         stderr=None if subject_fault == "uncaptured" else stderr[:-1] if subject_fault == "stderr" else stderr,
     )
-    monkeypatch.setitem(test.__globals__, "_build_trial_image", lambda *args: supply)
+    monkeypatch.setitem(test.__globals__, "_build_trial_image", lambda *args: (supply, lambda: None))
     monkeypatch.setitem(test.__globals__, "_baseline_acceptance", lambda *args: None)
     for helper in ("_environment_controls", "_generic_offline_control", "_observe_delivery", "_check_metadata"):
         monkeypatch.setitem(test.__globals__, helper, lambda *args: None)

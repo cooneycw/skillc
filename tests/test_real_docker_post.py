@@ -112,9 +112,11 @@ def test_runner_posts_every_valid_verdict_and_cleans_up(
     assert ("EXPECTED-RED" in statuses[0]["description"]) == (break_spec != "none")
     assert len(posts) == 2  # commit status and configured comment
     assert all(not Path(str(event["config"])).exists() for event in posts)
-    assert {tuple(event["operation"]) for event in events if event["tool"] == "docker"} >= {
-        ("container", "prune"), ("image", "prune"),
-    }
+    operations = {tuple(event["operation"]) for event in events if event["tool"] == "docker"}
+    # #414: the run snapshots before and cleans only its own artifacts after -
+    # never a host-wide prune (cleanup-lib.sh, tests/test_real_docker_cleanup.py).
+    assert {("images", "-aq"), ("ps", "-aq"), ("images", "-q")} <= operations  # snapshot, then removal
+    assert not [op for op in operations if "prune" in op]
 
 
 @pytest.mark.parametrize("helper", [
@@ -135,7 +137,9 @@ def test_runner_reports_helper_crash_or_malformed_output_as_error(tmp_path: Path
     assert len(statuses) == 1, result.stderr
     assert statuses[0]["state"] == "error"
     assert statuses[0]["context"] == "skillc/real-docker-control"
-    assert any(event.get("operation") == ["container", "prune"] for event in events)
+    # Cleanup was still reached: its removal listing (`images -q`), distinct
+    # from the pre-run snapshot's `images -aq` (#414).
+    assert any(event.get("operation") == ["images", "-q"] for event in events)
 
 _FAIL_REPORT = (
     '<?xml version="1.0"?><testsuites><testsuite name="pytest">'

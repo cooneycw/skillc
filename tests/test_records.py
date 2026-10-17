@@ -1275,3 +1275,67 @@ def test_a_receipt_beside_the_stand_in_does_not_let_it_claim_readiness(tmp_path:
     assert bundle is not None
     [finding] = list(records.attempt_accounting(bundle))
     assert "not exactly one mandatory UNKNOWN" in finding
+
+
+# ------------------------------------------- #427: a contaminated baseline
+
+_LEDGER_BINDING = next(r for r in checks.BUNDLE_RULES if r.id == "ledger-binding")
+_BASELINE_BAD = CONTROLS / "ledger-binding" / "bad" / "skill-evidence-baseline-trial"
+
+
+def test_the_baseline_identity_has_one_source_and_the_planner_writes_it(tmp_path: Path) -> None:
+    """The rule keys on `records.BASELINE_SUBJECT_DIGEST`; it is only useful
+    if that is the identity a real planner writes on its baseline trials."""
+    import hashlib
+
+    from skillc import matched_pilot as mp
+    from skillc import trial
+
+    assert records.BASELINE_SUBJECT_DIGEST == "sha256:" + hashlib.sha256(b"").hexdigest()
+    assert mp.BASELINE_SUBJECT_DIGEST is records.BASELINE_SUBJECT_DIGEST
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    experiment, schedule = mp.plan_pilot(mp.load_declaration(), store, treatment_digest="sha256:" + "ab" * 32,
+                                         image_digest=None)
+    subject_of = {str(t["trial_id"]): t["subject"]["digest"] for t, _a in experiment.attempts()}  # type: ignore[index]
+    by_arm: dict[str, set[object]] = {}
+    for scheduled in schedule:
+        by_arm.setdefault(scheduled.arm, set()).add(subject_of[scheduled.trial_id])
+    assert by_arm[mp.BASELINE] == {records.BASELINE_SUBJECT_DIGEST}
+    assert records.BASELINE_SUBJECT_DIGEST not in by_arm[mp.TREATMENT]
+
+
+def test_skill_evidence_on_a_baseline_trial_is_refused_naming_the_baseline_and_the_skill() -> None:
+    """The committed bad control's receipt still lists the skill as installed,
+    so the receipt-based not-installed check passes it; only #427's rule,
+    keyed on the ledger's subject, can refuse it."""
+    findings = _findings(_LEDGER_BINDING, _BASELINE_BAD)
+    assert len(findings) == 1, [f.detail for f in findings]
+    detail = findings[0].detail
+    assert "contaminated baseline" in detail
+    assert records.BASELINE_SUBJECT_DIGEST in detail
+    assert "'.codex/skills/slug/SKILL.md'" in detail
+
+
+def test_a_baseline_attempt_with_no_receipt_is_still_refused(tmp_path: Path) -> None:
+    """The receipt-based check skips an attempt with no receipt at all; the
+    baseline rule must not."""
+    bundle = tmp_path / "bundle"
+    shutil.copytree(_BASELINE_BAD, bundle)
+    (bundle / "receipt.json").unlink()
+    details = [f.detail for f in _findings(_LEDGER_BINDING, bundle)]
+    assert any("contaminated baseline" in d for d in details), details
+
+
+def test_an_entry_with_no_usable_path_is_still_refused_on_a_baseline(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    shutil.copytree(_BASELINE_BAD, bundle)
+    evidence = json.loads((bundle / "skill-evidence.json").read_text(encoding="utf-8"))
+    evidence["skills"][0]["skill"].pop("path")
+    (bundle / "skill-evidence.json").write_text(json.dumps(evidence), encoding="utf-8")
+    details = [f.detail for f in _findings(_LEDGER_BINDING, bundle)]
+    assert any("<unnamed>" in d and "contaminated baseline" in d for d in details), details
+
+
+@pytest.mark.parametrize("good", ["baseline-trial-no-skill-evidence", "skill-evidence-pinned-current"])
+def test_a_clean_baseline_and_a_pinned_treated_trial_stay_valid(good: str) -> None:
+    assert _findings(_LEDGER_BINDING, CONTROLS / "ledger-binding" / "good" / good) == []
