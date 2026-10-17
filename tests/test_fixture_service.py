@@ -646,12 +646,25 @@ def test_a_remote_file_owned_by_another_uid_is_refused(world: World, monkeypatch
         fs.LocalGitRemote(world.bare).resolve("refs/heads/main")
 
 
-def test_a_remote_under_an_ancestor_owned_by_another_uid_is_refused(world: World,
+def test_a_remote_under_an_ancestor_owned_by_another_uid_is_refused(world: World, tmp_path: Path,
                                                                    monkeypatch: pytest.MonkeyPatch) -> None:
-    real_uid = os.getuid()
-    monkeypatch.setattr(fs.os, "getuid", lambda: real_uid + 1)
+    # Simulated with lstat, not getuid: CI runs as root, where every real
+    # ancestor is root-owned and therefore (correctly) accepted.
+    real_lstat = os.lstat
+    ancestor = os.path.abspath(tmp_path)
+
+    def lstat(path: Any, *args: Any, **kwargs: Any) -> os.stat_result:
+        info = real_lstat(path, *args, **kwargs)
+        if os.path.abspath(path) == ancestor:
+            fields = list(info)
+            fields[4] = os.getuid() + 1 if os.getuid() != 0 else 4242  # st_uid: neither us nor root
+            return os.stat_result(fields)
+        return info
+
+    monkeypatch.setattr(fs.os, "lstat", lstat)
     with pytest.raises(fs.RemoteUntrusted, match="ancestor directory of the remote is a link or not owned"):
         fs.LocalGitRemote(world.bare).resolve("refs/heads/main")
+
 
 
 def test_a_symlink_inside_the_remote_is_refused(world: World, tmp_path: Path) -> None:
@@ -681,13 +694,31 @@ def test_the_service_refuses_a_subject_writable_remote_as_an_error_event(world: 
 
 # --- counter-model review pass 3 regressions ---------------------------------------
 
-def test_an_unlistable_remote_root_is_refused_not_read_as_empty(world: World) -> None:
-    world.bare.chmod(0o311)  # traversable, not listable: os.walk alone yields nothing
-    try:
-        with pytest.raises(fs.RemoteUntrusted):
-            fs.LocalGitRemote(world.bare).resolve("refs/heads/main")
-    finally:
-        world.bare.chmod(0o755)
+def _unlistable(monkeypatch: pytest.MonkeyPatch, target: Path) -> None:
+    """Make `target` unlistable for os.walk. Simulated, not chmod: root (CI)
+    lists any directory whatever its mode."""
+    real_scandir = os.scandir
+
+    def scandir(path: Any = ".") -> Any:
+        if not isinstance(path, int) and os.path.abspath(path) == os.path.abspath(target):
+            raise PermissionError(13, "Permission denied", str(path))
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, "scandir", scandir)
+
+
+def test_an_unlistable_remote_root_is_refused_not_read_as_empty(world: World,
+                                                                monkeypatch: pytest.MonkeyPatch) -> None:
+    _unlistable(monkeypatch, world.bare)  # os.walk alone would yield nothing
+    with pytest.raises(fs.RemoteUntrusted, match="could not be fully inspected"):
+        fs.LocalGitRemote(world.bare).resolve("refs/heads/main")
+
+
+def test_an_inspection_that_examined_nothing_is_refused(world: World, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(fs.os, "walk", lambda *a, **k: iter(()))
+    with pytest.raises(fs.RemoteUntrusted, match="examined nothing"):
+        fs.LocalGitRemote(world.bare).resolve("refs/heads/main")
+
 
 
 def test_a_missing_remote_root_is_refused(tmp_path: Path) -> None:
@@ -713,17 +744,10 @@ def test_a_usage_error_does_not_consume_a_stale_fault(world: World) -> None:
     assert stale == {"state": "OPEN"} and service._faults[0]["fired"]
 
 
-def test_an_unlistable_subdirectory_is_refused_not_skipped(world: World) -> None:
-    (world.bare / "objects").chmod(0o311)  # the walk cannot list it; it must not just skip it
-    try:
-        with pytest.raises(fs.RemoteUntrusted, match="could not be fully inspected"):
-            fs.LocalGitRemote(world.bare).resolve("refs/heads/main")
-    finally:
-        (world.bare / "objects").chmod(0o755)
-
-
-# --- the shared closing-keyword matcher (GitHub's documented grammar) -------------
-
+def test_an_unlistable_subdirectory_is_refused_not_skipped(world: World, monkeypatch: pytest.MonkeyPatch) -> None:
+    _unlistable(monkeypatch, world.bare / "objects")  # it must not just be skipped
+    with pytest.raises(fs.RemoteUntrusted, match="could not be fully inspected"):
+        fs.LocalGitRemote(world.bare).resolve("refs/heads/main")
 @pytest.mark.parametrize("text,closes", [
     ("Closes #10", (10,)), ("closes #10", (10,)), ("CLOSES #10", (10,)), ("Closes: #10", (10,)),
     ("CLOSES: #10", (10,)), ("fix #3", (3,)), ("fixes #3", (3,)), ("Fixed #3", (3,)),
