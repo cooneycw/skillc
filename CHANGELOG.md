@@ -22,6 +22,42 @@ and version plan.
   production-path test (`run_one_attempt`) has the subject check that its plan
   reply ends in the verdict: it exits 1 on the old code, and a wrong-tail
   control proves the subject's check can fail.
+- **A failed `prepare()` always raises `BackendUnavailable`** (#416). When
+  `docker run -d` timed out or exited nonzero, `DockerBackend.prepare()` ran a
+  bounded best-effort `docker rm -f` before raising. That cleanup was unguarded,
+  so a cleanup that also hit its bound raised `subprocess.TimeoutExpired` out of
+  `prepare()` in place of the promised `BackendUnavailable`. A daemon slow enough
+  to time out `run` is the likeliest to be slow on `rm`, and this was the real
+  cause of a `test_live_docker_budget` red that was being read as a timing flake.
+  The cleanup now goes through `_best_effort_rm()`, which reports its failure as
+  a clause in the `BackendUnavailable` message. Three fake-CLI tests in
+  `tests/test_docker_backend.py`: `.delay-run`+`.delay-rm` and `.refuse-run`+
+  `.delay-rm` both escaped `TimeoutExpired` on the old code; a `.delay-run`-only
+  control shows a successful cleanup adds no clause.
+- **A failed channel drain stays failed on every later read** (#367).
+  `DecideReplyChannel.stop_and_finalize()` set its finalized flag before
+  waiting for in-flight handlers. So after a drain timeout, a later
+  `log_or_finalize()` returned the log anyway: `[]` while the handler was
+  wedged (`trusted_log()` read `no-controller-witness`), then one entry once it
+  finished. A "finalized" log that grew. The channel now records shutdown
+  attempted separately from a successful finalize. A drain failure re-raises as
+  a `RuntimeError` from `stop_and_finalize()`, `log_or_finalize()` and
+  `trusted_log()` on every call, permanently. A successful finalize returns a
+  copy of one frozen snapshot each time. `close()` after a failure releases the
+  socket without raising. The Event-synchronised negative control fails on the
+  pre-fix code at the first post-failure `log_or_finalize()` (`DID NOT RAISE`).
+- **Bytecode caches are no longer captured** (#408). #400 ran witnessed gates
+  with `PYTHONDONTWRITEBYTECODE=1`, but a gate whose child runs as
+  `python -I` ignores every `PYTHON*` variable and still wrote
+  `__pycache__/*.pyc`, so the honest `incomplete.isolated-child-gate` rows of
+  the #375 campaign read stale (40/42). Capture now excludes a `.pyc` directly
+  under `__pycache__/`, recorded as an exclusion. CPython never imports such a
+  file without its source, so it is a build product. It is neither digested nor
+  delivered to grading, so a cache planted after a gate cannot move a freshness
+  digest or load in place of its source (PEP 552 unchecked-hash). A sourceless
+  `mod.pyc` beside the code is still captured. `tests/test_capture_bytecode_cache.py`
+  runs the real isolated-child-gate gate for both tasks: on the old code it
+  writes bytecode and moves the digest.
 - **#400's fix is tested against the real Level-3 gates** (#400 follow-up).
   `tests/test_agent_trial_gate_env.py` runs each task's real reference gate
   stages (lint, check, typecheck) under the env production hands the witness,

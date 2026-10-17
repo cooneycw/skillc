@@ -129,12 +129,16 @@ def test_the_gate_env_overrides_an_empty_switch_and_fills_an_empty_env() -> None
 @pytest.mark.parametrize("task", ["gate-stops-early", "verify-stops-early"])
 def test_the_reference_gate_imports_the_project_so_the_control_can_see_bytecode(tmp_path: Path, task: str) -> None:
     """Negative control for the main test: under the measured env alone (what
-    production passed before #400's fix, #407) the same gate does write bytecode and moves
-    the digest. Without this, a gate that never imported anything would make
-    the main test pass on unfixed code."""
+    production passed before #400's fix, #407) the same gate does write
+    bytecode. Without this, a gate that never imported anything would make the
+    main test's no-.pyc assertion pass on unfixed code.
+
+    Since #408 capture never exports a `__pycache__/*.pyc`, so that bytecode no
+    longer moves the digest: the digest is the second, independent defence,
+    and `tests/test_capture_bytecode_cache.py` owns its red cases."""
     work = tmp_path / "work"
     _deliver(task, work)
     at_start = witness_capture.capture_digest(work)
     _run_gate(work, _measured(tmp_path))
-    assert list(work.rglob("*.pyc")), "the reference gate wrote no bytecode; the control above is blind"
-    assert witness_capture.capture_digest(work) != at_start
+    assert list(work.rglob("__pycache__/*.pyc")), "the reference gate wrote no bytecode; the control above is blind"
+    assert witness_capture.capture_digest(work) == at_start, "a bytecode cache moved the digest (#408)"
