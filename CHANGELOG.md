@@ -21,6 +21,26 @@ and version plan.
   `tests/test_calibration_run_real_profile.py` runs the real profile with its
   full install when a local claude-power-pack checkout holds 86641e8, and
   skips with the missing prerequisite named otherwise.
+- **A daemon-refused `execute()` reads as never started, not as a failed run**
+  (#317). #304's entry guard is a check-then-act: the container can stop
+  between `_inspect()` and the real `docker exec`, and the daemon's refusal
+  then exited nonzero exactly like a subject that ran and failed, a fabricated
+  execution. `execute()` now runs its argv behind a no-op prelude,
+  `sh -c 'exec "$@"' skillc-exec-<uuid> ARGV`, which writes nothing and only
+  names the call in the daemon's own exec events. After a nonzero exit it
+  becomes `attempt-not-running` only when all of these hold: the container is
+  `exited` or `dead`; the `docker events` answer parses within a byte bound and
+  one deadline, with every exec command readable; it holds this call's own
+  forwarding-probe exec (the probe now carries a per-call token too) and the
+  container's `die` after it; and no exec in the window carries the token. Every other answer keeps the
+  real result: a daemon whose events are dropped or reformatted can only fail
+  to reclassify, never misreclassify. Two designs were rejected in review on
+  the way: stderr wording (subject output), and an in-container marker (the
+  subject can delete it and stop its own `--init` container). The fake CLI
+  gains `events`, `.stop-before-exec-NAME` and `.stop-after-exec-NAME`. The
+  red case fails on the old code with `('exited', 1)`. Each proof's control
+  goes red when that proof is mutated away. Real-daemon proof: #426.
+
 - **The host import probe only sees the declared project** (#365). A
   `python-import` probe with `uv_project` ran `uv run --project <home>/<proj>`
   with the operator's whole environment. With `UV_PROJECT_ENVIRONMENT` pointing
