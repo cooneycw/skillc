@@ -53,6 +53,65 @@ and version plan.
     digest at #276's base, with a control in which the shim is placed back
     under `docker/trial/` and the digest moves.
 
+- **Research: how to build #270's clean-project case, and where Kyle fits** (#431).
+  `docs/research/clean-project-case-2026-10.md` checks the benchmark literature for cases where the
+  right action is to change nothing (FixedBench, ImpossibleBench, BouncerBench, SkillsBench, the
+  SWE-bench family), with pins and licences. It recommends two sibling clean-project tasks that share
+  the must-act tasks' goal text and run on the existing `fresh` actor, so no frozen #375 identity
+  moves. It also ranks where Kyle could help skillc's evals, with the contamination risks. Research
+  only; nothing was run.
+
+- **The gate-witness tests' attempt limit is 60s, not 15s** (#437). Under
+  `make verify`'s parallel load, `run_case`'s 15s whole-attempt limit (and the
+  scripted actor's equal socket wait, #407) could expire before an honest
+  attempt's later gate calls were witnessed. That gave a false red on
+  `test_actual_gate_history_binds_each_call_to_its_own_snapshot[rerun]` in
+  #432's gate. Both now share `RUN_CASE_TIMEOUT = 60`. The tests assert
+  witness history binding, never timing. Red: with a gate call delayed 20s,
+  `[rerun]` fails on the old bound (the witness drain is refused, so no
+  witness is graded) and passes on the new one. #407's slow-second-call
+  `[stale]` reproduction still reads stale.
+- **A profile narrower than its install builds again** (#432). #424's
+  cross-check in `calibration_run.build_treatment` required the profile
+  inventory's skill pins to EQUAL the pins of every installed skill. A real
+  CPP profile selects one skill (`flow-check`) while its subject installs the
+  whole collection (74 skills at 86641e8), so every profiled treatment was
+  refused, blocking the Level-3 campaigns and the #287 calibration arms. The
+  check is now per path and a subset: each inventory pin needs an installed
+  pin at the same path with equal `body_digest` and `description_digest`, and
+  a pin for an uninstalled path is refused. `Treatment.skill_digests` is
+  unchanged: every installed skill, pinned from its installed bytes.
+  `tests/test_calibration_run_real_profile.py` runs the real profile with its
+  full install when a local claude-power-pack checkout holds 86641e8, and
+  skips with the missing prerequisite named otherwise.
+- **The real-Docker runner no longer deletes other workloads' images** (#414).
+  `run-real-docker` ended every run with host-wide `docker container prune -f`
+  and `docker image prune -f`. `docker/profile-trial/build.py` built its
+  campaign image untagged and receipts named it only by ID, so the first runner
+  run after a build deleted the image from under every receipt; the #375
+  campaign refused 42/42 rows. Two changes (owner-delegated ruling, option 3):
+  `build.py` tags its output `skillc-profile-runtime:<runtime_id>-<commit[:12]>`
+  before writing the receipt, and the runner's cleanup (`ci/real-docker/
+  cleanup-lib.sh`) removes only dangling `org.skillc.image` images and stopped
+  `skillc.managed=true` containers created during its own run, by a pre-run
+  snapshot, never with `-f`. A label alone is not ownership, since campaign
+  images and containers carry the same labels. `build.release_build()` undoes
+  only what one build added, and replaces the closure live test's `docker image
+  rm -f <id>` teardown, which removed a co-tenant's identical build regardless
+  of tags. New real-Docker floor file `tests/test_real_docker_cleanup_live.py`
+  (floor 9 -> 10, runner population 14 -> 16 tests): a `build.py` image
+  survives the cleanup, and the runner's own dangling image is still removed.
+- **A baseline trial's skill-evidence is refused as a contaminated baseline**
+  (#427, the records half of #424). A trial whose `subject.digest` is the
+  baseline (sha256 of zero bytes) installs no skills. A `skill-evidence` entry
+  crediting a skill there validated clean, because the receipt-based check
+  skips an attempt with no receipt and passes a receipt listing installed paths
+  under the baseline identity. `ledger-binding` now refuses every such entry,
+  naming the baseline and the skill path. `records.BASELINE_SUBJECT_DIGEST` is
+  the one definition and `matched_pilot.BASELINE_SUBJECT_DIGEST` aliases it. The
+  new bad control (`ledger-binding/bad/skill-evidence-baseline-trial`) passes
+  every rule on the pre-change code, and removing the rule leaves selftest
+  BLIND on it. No committed bundle carries skill-evidence on a baseline trial.
 - **A daemon-refused `execute()` reads as never started, not as a failed run**
   (#317). #304's entry guard is a check-then-act: the container can stop
   between `_inspect()` and the real `docker exec`, and the daemon's refusal

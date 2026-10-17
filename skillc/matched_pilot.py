@@ -56,7 +56,6 @@ Stdlib only (AGENTS.md), plus this repository's own modules.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import re
@@ -85,7 +84,7 @@ BASELINE = "baseline"
 #: The baseline arm installs nothing, so its "subject" is the empty surface:
 #: this is the sha256 of zero bytes, stated as exactly that - not a
 #: placeholder shaped like a real subject digest (issue #10 lesson D13).
-BASELINE_SUBJECT_DIGEST = "sha256:" + hashlib.sha256(b"").hexdigest()
+BASELINE_SUBJECT_DIGEST = records.BASELINE_SUBJECT_DIGEST  # one source of truth (#427)
 
 #: Allowed values in a claims file (`build_report`'s `claims`).
 #: `asked-clarification`: the agent ended by asking a question instead of

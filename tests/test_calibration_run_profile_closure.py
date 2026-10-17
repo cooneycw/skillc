@@ -522,3 +522,90 @@ def test_red_case_inventory_pins_that_disagree_with_the_installed_bytes_are_refu
     monkeypatch.setattr(p, "skill_digest_pins", drifted)
     with pytest.raises(cr.CalibrationRefused, match="disagree with the installed skills"):
         cr.build_treatment(acquired, subject_profile=subject_profile, root=root)
+
+
+#: #432: a second skill the subject installs but the profile does not select -
+#: the shape of every real CPP profile, whose collection is wider than its
+#: selection (the 86641e8 profile selects 1 of 77).
+OTHER_SKILL_MD = "---\nname: other-check\ndescription: An unrelated skill\n---\nNot this profile's.\n"
+
+
+def _narrow_profile_acquisition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[cc.AcquiredCollection, Path, str]:
+    """A two-skill collection (subject `select: all`) under a profile that
+    selects one of them: the install is wider than the inventory's pins."""
+    repo = tmp_path / "content-repo"
+    for name, text in (("gate-check", SKILL_MD), ("other-check", OTHER_SKILL_MD)):
+        (repo / "pack" / "skills" / name).mkdir(parents=True)
+        (repo / "pack" / "skills" / name / "SKILL.md").write_text(text, encoding="utf-8")
+    (repo / "pyproject.toml").write_text("[project]\nname = 'kit'\n", encoding="utf-8")
+    _git(repo, "init", "-q")
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "fixture")
+    revision = _git(repo, "rev-parse", "HEAD")
+    root = tmp_path / "root"
+    subject_profile = "subject-profile"
+    _write_declaration(root / subject_profile, revision)
+    subject = materialize.Subject.from_dict({**SUBJECT_DICT, "revision": revision})
+    monkeypatch.setattr(demo, "load_demo_subject", lambda name: subject)
+    acquired = cc.acquire_collection("whatever", tmp_path / "base", checkout=repo)
+    committed = p.validate(p.Profile.load(root / subject_profile / "profile.json"), p.GitTree(repo, revision))
+    (root / subject_profile / "evidence").mkdir()
+    (root / subject_profile / "evidence" / "inventory.json").write_text(json.dumps(committed), encoding="utf-8")
+    return acquired, root, subject_profile
+
+
+@needs_git
+def test_a_profile_narrower_than_its_install_builds_and_pins_every_installed_skill(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#432 regression: the inventory pins only the selected skill, the
+    treatment installs both. Equality refused this; the per-path subset check
+    accepts it, and the ledger pins stay EVERY installed skill, from its bytes."""
+    acquired, root, subject_profile = _narrow_profile_acquisition(tmp_path, monkeypatch)
+    committed = json.loads((root / subject_profile / "evidence" / "inventory.json").read_text())
+    assert [pin["path"] for pin in p.skill_digest_pins(committed)] == [".codex/skills/gate-check/SKILL.md"]
+    treatment = cr.build_treatment(acquired, subject_profile=subject_profile, root=root)
+    assert [pin["path"] for pin in treatment.skill_digests] == [
+        ".codex/skills/gate-check/SKILL.md", ".codex/skills/other-check/SKILL.md"]
+    by_path = {pin["path"]: pin for pin in treatment.skill_digests}
+    for pin in p.skill_digest_pins(committed):
+        assert by_path[pin["path"]] == pin
+
+
+@needs_git
+@pytest.mark.parametrize("field, named", [
+    ("body_digest", "body_digest"),
+    ("description_digest", "description_digest"),
+])
+def test_red_case_a_narrow_profile_pin_whose_digest_differs_at_the_same_path_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str, named: str,
+) -> None:
+    """#432: the subset check compares digests PER PATH, both of them - a
+    membership-only check would let a drifted description through."""
+    acquired, root, subject_profile = _narrow_profile_acquisition(tmp_path, monkeypatch)
+    real = p.skill_digest_pins
+
+    def drifted(inventory: dict[str, object]) -> list[dict[str, str]]:
+        return [{**pin, field: "sha256:" + "0" * 64} for pin in real(inventory)]  # type: ignore[arg-type]
+
+    monkeypatch.setattr(p, "skill_digest_pins", drifted)
+    with pytest.raises(cr.CalibrationRefused, match=f"gate-check/SKILL.md.*{named}"):
+        cr.build_treatment(acquired, subject_profile=subject_profile, root=root)
+
+
+@needs_git
+def test_red_case_an_inventory_pin_for_a_skill_that_is_not_installed_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#432: a pin the treatment cannot honour - its path is not installed at
+    all - describes a skill nobody delivered."""
+    acquired, root, subject_profile = _narrow_profile_acquisition(tmp_path, monkeypatch)
+    real = p.skill_digest_pins
+
+    def phantom(inventory: dict[str, object]) -> list[dict[str, str]]:
+        pins = real(inventory)  # type: ignore[arg-type]
+        return [*pins, {**pins[0], "path": ".codex/skills/never-installed/SKILL.md"}]
+
+    monkeypatch.setattr(p, "skill_digest_pins", phantom)
+    with pytest.raises(cr.CalibrationRefused, match="never-installed/SKILL.md.*not installed"):
+        cr.build_treatment(acquired, subject_profile=subject_profile, root=root)

@@ -174,8 +174,10 @@ class FakeDocker:
         project_environment: str | None = None,
         user: str = "candidate",
         descriptor: bytes | None = None,
+        tag_fails: bool = False,
     ) -> None:
         self.calls: list[list[str]] = []
+        self.tag_fails = tag_fails
         self.image_id = _read("receipt.good.json")["image_id"]
         self.image_drift = image_drift
         self.env_drift = env_drift
@@ -226,6 +228,10 @@ class FakeDocker:
         if argv[0] == "rm":
             assert argv == ["rm", "a" * 64]
             return ""
+        if argv[0] == "tag":
+            if self.tag_fails:
+                raise build.SupplyError("docker tag exited 1: refused (fake)")
+            return ""
         raise AssertionError(f"unexpected Docker command: {argv}")
 
 
@@ -244,7 +250,9 @@ def test_build_binds_observed_identity_and_generated_context(tmp_path: Path, tar
         "metadata/pyproject.toml",
         "metadata/uv.lock",
     }
-    assert fake.calls[-1] == ["rm", "a" * 64]
+    # The descriptor container is removed, and tagging is the last step (#414).
+    assert ["rm", "a" * 64] in fake.calls
+    assert fake.calls[-1] == ["tag", fake.image_id, build.image_tag(receipt)]
     build.validate_receipt(receipt, fake.descriptor, fake.image_id, target=target)
     if target != "profile-runtime":
         with pytest.raises(build.SupplyError, match="target mismatch"):
@@ -276,6 +284,101 @@ def test_build_refuses_observed_drift_without_receipt(
     assert not output.exists()
     if any(call[0] == "create" for call in fake.calls):
         assert fake.calls[-1] == ["rm", "a" * 64]
+
+
+@pytest.mark.parametrize("target", build.TARGETS)
+def test_build_tags_its_image_deterministically_from_the_receipt(tmp_path: Path, target: str) -> None:
+    """#414 (a): an untagged build is DANGLING, and a host-wide `docker image
+    prune` deleted it under every receipt that referenced it. The build now
+    tags its image from the receipt's own fields before the receipt exists."""
+    fake = FakeDocker()
+    receipt = build.build_image(ROOT, tmp_path / "receipt.json", run=fake, target=target)
+    expected = f"skillc-profile-runtime:{receipt['runtime_id']}-{receipt['source_commit'][:12]}"
+    if target != "profile-runtime":
+        expected += f"-{target}"
+    assert build.image_tag(receipt) == expected
+    assert ["tag", receipt["image_id"], expected] in fake.calls
+    # The tag never moves the operator's hand-made 7-char workaround tag.
+    assert not expected.endswith(f"-{receipt['source_commit'][:7]}")
+
+
+def test_a_failed_tag_leaves_no_receipt(tmp_path: Path) -> None:
+    """A receipt must imply its tag: when tagging fails, no receipt is written."""
+    fake = FakeDocker(tag_fails=True)
+    output = tmp_path / "receipt.json"
+    with pytest.raises(build.SupplyError, match="docker tag"):
+        build.build_image(ROOT, output, run=fake)
+    assert not output.exists()
+
+
+class InventoryDocker:
+    """A fake for `image_inventory`/`release_build` (#414): a listing, then a
+    record of every tag and removal, so a test can see what was touched."""
+
+    def __init__(self, listing: str) -> None:
+        self.listing = listing
+        self.calls: list[list[str]] = []
+
+    def __call__(self, argv: list[str]) -> str:
+        self.calls.append(argv)
+        if argv[0] == "images":
+            return self.listing
+        if argv[0] in ("tag",) or argv[:2] == ["image", "rm"]:
+            return ""
+        raise AssertionError(f"unexpected Docker command: {argv}")
+
+
+_NEW_ID = "sha256:" + "1" * 64
+_OLD_ID = "sha256:" + "2" * 64
+
+
+def _receipt_for(image_id: str) -> dict[str, Any]:
+    return {**_read("receipt.good.json"), "image_id": image_id}
+
+
+def test_image_inventory_reads_every_id_and_tag() -> None:
+    fake = InventoryDocker(f"{_OLD_ID}\tskillc-profile-runtime:x\n{_NEW_ID}\t<none>:<none>\n")
+    inventory = build.image_inventory(run=fake)
+    assert inventory == {"ids": {_OLD_ID, _NEW_ID}, "tags": {"skillc-profile-runtime:x": _OLD_ID}}
+    assert fake.calls == [["images", "-a", "--no-trunc", "--format", "{{.ID}}\t{{.Repository}}:{{.Tag}}"]]
+
+
+def test_release_build_removes_a_new_image_it_built() -> None:
+    fake = InventoryDocker("")
+    build.release_build(_receipt_for(_NEW_ID), {"ids": set(), "tags": {}}, run=fake)
+    # Never `-f`, and `--no-prune` so an untagged parent that was already
+    # there is not deleted with it (#414 review).
+    assert fake.calls == [["image", "rm", "--no-prune", _NEW_ID]]
+
+
+def test_release_build_never_touches_an_image_that_existed_before_the_build() -> None:
+    """A co-tenant's identical build has the same ID: removing it, or even
+    our tag on it (its only tag would take the image with it), is never ours."""
+    fake = InventoryDocker("")
+    build.release_build(_receipt_for(_NEW_ID), {"ids": {_NEW_ID}, "tags": {}}, run=fake)
+    assert fake.calls == []
+
+
+def test_release_build_restores_a_pre_existing_tag_it_moved() -> None:
+    """`docker tag` MOVES an existing tag: the build pointed a tag another
+    image already carried at the new one. That tag is put back before the new
+    image goes, so a pre-existing tag is never removed."""
+    receipt = _receipt_for(_NEW_ID)
+    tag = build.image_tag(receipt)
+    fake = InventoryDocker("")
+    build.release_build(receipt, {"ids": {_OLD_ID}, "tags": {tag: _OLD_ID}}, run=fake)
+    assert fake.calls == [["tag", _OLD_ID, tag], ["image", "rm", "--no-prune", _NEW_ID]]
+
+
+def test_release_build_restores_a_tag_it_moved_onto_an_image_that_already_existed() -> None:
+    """#414 review: a cached build can REUSE an image that already existed and
+    still move the tag onto it. The tag goes back to the image it named before,
+    and the reused image, not ours, is not removed."""
+    receipt = _receipt_for(_NEW_ID)
+    tag = build.image_tag(receipt)
+    fake = InventoryDocker("")
+    build.release_build(receipt, {"ids": {_OLD_ID, _NEW_ID}, "tags": {tag: _OLD_ID}}, run=fake)
+    assert fake.calls == [["tag", _OLD_ID, tag]]
 
 
 def test_invalid_target_and_existing_receipt_do_not_call_docker(tmp_path: Path) -> None:
