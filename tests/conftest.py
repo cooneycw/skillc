@@ -29,6 +29,10 @@ from __future__ import annotations
 from collections.abc import Iterator
 from pathlib import Path
 
+import _timing_probe  # SCRATCH #412, never merged
+
+_timing_probe.install()
+
 import pytest
 
 from skillc import verify
