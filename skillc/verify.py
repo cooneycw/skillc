@@ -1152,9 +1152,10 @@ def grade_agent_attempt(experiment: trial.Experiment, attempt_id: str, grader: G
 
     `gate_witness` (#348), alternatively, is a finalized controller record,
     never candidate JSON. The common locked grading seam pairs it with the
-    exact frozen-file digest. Passing both forms is refused. The result stores
-    the trusted envelope digest, not its raw bytes; retaining those bytes for
-    later inspection remains the controller caller's responsibility.
+    exact frozen-file digest. Passing both forms is refused. The result records
+    the trusted envelope's digest, and the envelope bytes themselves are stored
+    under that digest in the experiment's `objects/` (#418), so
+    `read_trusted_observation` can return exactly what grading received.
 
     Returns the stored result and the task grade (`Graded`, without the
     verifier's readiness criterion), which is what the agent driver reports
@@ -1311,6 +1312,16 @@ def _grade_and_store_held(experiment: trial.Experiment, attempt_id: str, grader:
         raise Refused("the ledger changed while candidate code ran; no result is written")
     trial.frozen_artifacts(experiment, attempt_id)
 
+    # #418: retain the exact bytes grading received, under the digest the
+    # result records, BEFORE the result exists - a crash between the two
+    # leaves an unreferenced object, never a result naming bytes the store
+    # does not hold. After the integrity checks above, so this write cannot
+    # be read as the store changing while candidate code ran.
+    if trusted_observation is not None:
+        stored = trial.put_object(experiment, trusted_observation)
+        if stored != graded.containment.get("trusted_observation_digest"):
+            raise Refused("the stored trusted observation does not match the digest grading recorded")
+
     criteria = [*graded.criteria, readiness]
     status = _status(criteria)
 
@@ -1369,6 +1380,38 @@ def _grade_and_store_held(experiment: trial.Experiment, attempt_id: str, grader:
         result["regrade_of"] = regrade_of
     trial.add_result(experiment, result)
     return result, graded
+
+
+def read_trusted_observation(experiment: trial.Experiment,
+                             result: Mapping[str, object]) -> dict[str, object] | None:
+    """The trusted observation a stored result was graded against (#418):
+    for a controller gate witness, `{"witness": ..., "graded_tree_digest": ...}`.
+
+    `None` only when the result records no trusted observation at all. A
+    recorded digest whose object is absent, a symlink or no longer hashes to
+    that digest is refused, as is a result whose two recorded copies of the
+    digest disagree - a missing envelope is never read as "no witness"."""
+    verification = result.get("verification")
+    if not isinstance(verification, dict):
+        raise Refused("result carries no verification block")
+    containment = verification.get("containment")
+    verdicts = verification.get("verdicts")
+    deterministic = verdicts.get(GRADING_TIER) if isinstance(verdicts, dict) else None
+    recorded = {
+        containment.get("trusted_observation_digest") if isinstance(containment, dict) else None,
+        deterministic.get("trusted_observation_digest") if isinstance(deterministic, dict) else None,
+    }
+    if len(recorded) != 1:
+        raise Refused(f"result records inconsistent trusted observation digests: {sorted(map(str, recorded))}")
+    digest = recorded.pop()
+    if digest is None:
+        return None
+    if not isinstance(digest, str):
+        raise Refused(f"result records a malformed trusted observation digest: {digest!r}")
+    envelope = json.loads(trial.read_object(experiment, digest))
+    if not isinstance(envelope, dict):
+        raise Refused(f"trusted observation {digest} is not a JSON object")
+    return envelope
 
 
 def _read_frozen(experiment: trial.Experiment, digest: str) -> bytes:

@@ -490,6 +490,19 @@ def _put_object(root: Path, data: bytes) -> str:
     return digest
 
 
+def put_object(experiment: Experiment, data: bytes) -> str:
+    """Store `data` in the experiment's content-addressed `objects/` and return
+    its digest (#418). Write-once: an existing object must still hash to its
+    name, or this refuses."""
+    return _put_object(experiment.root, data)
+
+
+def read_object(experiment: Experiment, digest: str) -> bytes:
+    """The stored bytes named `digest`, refused when absent, a symlink, or no
+    longer hashing to that name (#418) - never a silent miss."""
+    return _read_object(experiment.root, digest)
+
+
 def _plan_pairs(ledger: dict[str, object]) -> Iterator[tuple[dict[str, object], dict[str, object]]]:
     trials = ledger.get("trials")
     for trial in trials if isinstance(trials, list) else []:

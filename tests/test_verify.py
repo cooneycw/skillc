@@ -37,6 +37,7 @@ import pytest
 
 from skillc import cli, verify
 from skillc import trial as t
+from skillc.gate_witness import GateWitnessRecord
 
 HERE = Path(__file__).resolve().parent
 FAKE = HERE / "fixtures" / "trial-subject" / "fake_subject.py"
@@ -1177,6 +1178,133 @@ def test_controller_witness_conflicts_refuse_before_grading(
             verify.grade_agent_attempt(experiment, attempt_id, GRADER, grading, _CONFIRMED,
                                        **kwargs)  # type: ignore[arg-type]
     assert not list(experiment.root.glob("result-*.json"))
+
+
+def _witness_record(attempt_id: str) -> GateWitnessRecord:
+    """A real finalized controller witness for `attempt_id`: one gate run,
+    recorded against an earlier tree digest the envelope must carry."""
+    from test_gate_witness import _FakeBackend
+
+    from skillc.backend import ExecuteResult, Limits
+    from skillc.gate_witness import GateWitness
+
+    fake = _FakeBackend(results={("gate",): ExecuteResult("exited", 0)})
+    witness = GateWitness({"flow-check-summary": ("gate",)}, lambda: "sha256:earlier-tree",
+                          fake, object(), Limits(timeout=2), gate_exclusivity=False, exclusivity_basis="control")
+    witness.decide({"op": "run_gate", "gate": "flow-check-summary"})
+    return witness.finalize(attempt_id)
+
+
+def _recorded_digest(result: dict[str, object]) -> object:
+    verification = result["verification"]
+    assert isinstance(verification, dict)
+    return verification["verdicts"]["deterministic"]["trusted_observation_digest"]
+
+
+@pytest.mark.parametrize("receipt", [True, False])
+def test_a_witnessed_grade_retains_its_envelope_under_the_recorded_digest(
+    store: Path, base: Path, grading: Path, monkeypatch: pytest.MonkeyPatch, receipt: bool,
+) -> None:
+    """#418 red case: before the fix the result recorded only the envelope's
+    digest, and the store held no object by that name. The envelope must be
+    retrievable from the store alone and equal what grading received."""
+    experiment, attempt_id = _captured(store, base, REFERENCE, receipt=receipt)
+    record = _witness_record(attempt_id)
+    seen: list[bytes] = []
+    original_grade = verify.grade_files
+
+    def capture_grade(*args: object, **kwargs: object) -> verify.Graded:
+        raw = kwargs.get("trusted_observation")
+        assert isinstance(raw, bytes)
+        seen.append(raw)
+        return original_grade(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(verify, "grade_files", capture_grade)
+    if receipt:
+        result, _ = verify._grade_and_store(experiment, attempt_id, GRADER, grading, gate_witness=record)
+    else:
+        result, _ = verify.grade_agent_attempt(experiment, attempt_id, GRADER, grading, _CONFIRMED,
+                                              gate_witness=record)
+    digest = _recorded_digest(result)
+    assert isinstance(digest, str) and len(seen) == 1 and digest == t.sha256_bytes(seen[0])
+    assert experiment.object_path(digest).is_file(), "the store holds no envelope for the recorded digest"
+    reopened = t.Experiment.open(experiment.root)
+    stored = json.loads((reopened.root / f"result-{result['result_id']}.json").read_bytes())
+    envelope = verify.read_trusted_observation(reopened, stored)
+    assert envelope == json.loads(seen[0])
+    assert envelope is not None
+    runs = envelope["witness"]["gates"]["flow-check-summary"]["runs"]  # type: ignore[index]
+    assert runs[-1]["tree_digest_at_start"] == "sha256:earlier-tree"
+    assert envelope["graded_tree_digest"] == json.loads(seen[0])["graded_tree_digest"]
+
+
+@pytest.mark.parametrize("fault", ["tampered", "absent", "symlink", "inconsistent"])
+def test_a_damaged_or_missing_envelope_is_refused_on_read(
+    store: Path, base: Path, grading: Path, tmp_path: Path, fault: str,
+) -> None:
+    """#418 negative controls: the reader never trusts, and never reads as
+    'no witness', an envelope that is not exactly the recorded bytes."""
+    experiment, attempt_id = _captured(store, base, REFERENCE)
+    result, _ = verify._grade_and_store(experiment, attempt_id, GRADER, grading,
+                                        gate_witness=_witness_record(attempt_id))
+    digest = _recorded_digest(result)
+    assert isinstance(digest, str)
+    path = experiment.object_path(digest)
+    assert verify.read_trusted_observation(experiment, result) is not None  # intact control
+    if fault == "tampered":
+        path.chmod(0o600)
+        path.write_bytes(path.read_bytes().replace(b"earlier-tree", b"forged-tree!"))
+        match = "modified"
+    elif fault == "absent":
+        path.unlink()
+        match = "missing"
+    elif fault == "symlink":
+        decoy = tmp_path / "decoy"
+        decoy.write_bytes(path.read_bytes())
+        path.unlink()
+        path.symlink_to(decoy)
+        match = "missing"
+    else:
+        verification = result["verification"]
+        assert isinstance(verification, dict)
+        verification["containment"]["trusted_observation_digest"] = "sha256:" + "0" * 64
+        match = "inconsistent"
+    with pytest.raises(verify.Refused, match=match):
+        verify.read_trusted_observation(experiment, result)
+
+
+def test_raw_trusted_service_bytes_are_retained_too(store: Path, base: Path, grading: Path) -> None:
+    """Every recorded trusted-observation digest resolves, not only a gate witness's."""
+    experiment, attempt_id = _captured(store, base, REFERENCE)
+    raw = b'{"runtime_service": "controller-owned"}'
+    result, _ = verify._grade_and_store(experiment, attempt_id, GRADER, grading, trusted_observation=raw)
+    assert t.read_object(experiment, str(_recorded_digest(result))) == raw
+    assert verify.read_trusted_observation(experiment, result) == json.loads(raw)
+
+
+def test_an_unwitnessed_grade_stores_no_envelope_and_reads_none(store: Path, base: Path, grading: Path) -> None:
+    experiment, attempt_id = _captured(store, base, REFERENCE)
+    objects_before = set((experiment.root / t.OBJECTS).iterdir())
+    result, _ = verify._grade_and_store(experiment, attempt_id, GRADER, grading)
+    assert _recorded_digest(result) is None
+    assert set((experiment.root / t.OBJECTS).iterdir()) == objects_before
+    assert verify.read_trusted_observation(experiment, result) is None
+
+
+def test_a_regrade_carries_no_witness_so_records_no_envelope(store: Path, base: Path, grading: Path) -> None:
+    """#418 condition: `regrade()` passes no trusted observation (the earlier
+    Nit Store gap), so a regraded witnessed result records no digest and has
+    no envelope to retain. Pinned here so a later change that lets regrades
+    carry a witness must also make its digest resolve. The original's
+    envelope stays readable."""
+    experiment, attempt_id = _captured(store, base, REFERENCE)
+    original, _ = verify._grade_and_store(experiment, attempt_id, GRADER, grading,
+                                          gate_witness=_witness_record(attempt_id))
+    regraded = verify.regrade(experiment, str(original["result_id"]), GRADER, grading)
+    assert regraded["regrade_of"] == original["result_id"]
+    assert _recorded_digest(regraded) is None
+    assert verify.read_trusted_observation(experiment, regraded) is None
+    assert verify.read_trusted_observation(experiment, original) is not None
 
 
 @pytest.mark.parametrize("receipt", [True, False])

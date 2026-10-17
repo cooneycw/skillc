@@ -244,6 +244,33 @@ The grader must still be the pinned one, so a deterministic grader repeats its
 outcomes. The test compares the two results' criteria. A new grader revision
 would need a new pin, which this build does not provide.
 
+**The trusted observation is retained (#418).** When an attempt is graded with
+a trusted observation - a controller gate witness, sealed as
+`{"witness": ..., "graded_tree_digest": ...}`, or a runtime fixture service's
+log - the result records its digest
+(`verification.containment.trusted_observation_digest`, repeated in
+`verification.verdicts.deterministic`). The bytes themselves are stored in the
+experiment's `objects/` under that digest, by the controller, inside the grading
+lock: after the checks that the store did not change while candidate code ran,
+and before the result is written. A crash between the two therefore leaves an
+unreferenced object, never a result naming bytes the store does not hold.
+
+`read_trusted_observation(experiment, result)` returns the envelope a result
+was graded against. It returns `None` only when the result records no digest.
+It refuses when the object is absent, is a symlink, or no longer hashes to its
+name, and when the result's two recorded digests disagree. A missing envelope is
+never read as "no witness". From the envelope alone, a reader re-derives each
+witnessed gate run's `tree_digest_at_start`, exit code and stages, and the
+`graded_tree_digest`.
+
+A regrade passes no trusted observation, so a regraded result records no digest
+and has no envelope. The original result keeps its envelope. The red case is
+`test_a_witnessed_grade_retains_its_envelope_under_the_recorded_digest`. The
+controls are `test_a_damaged_or_missing_envelope_is_refused_on_read` and
+`test_an_unwitnessed_grade_stores_no_envelope_and_reads_none`.
+`test_a_regrade_carries_no_witness_so_records_no_envelope` pins the regrade
+behaviour.
+
 ## The level-1 slug grader
 
 `evals/level1/slug-small-fix/` is split along these lines (revision 2):

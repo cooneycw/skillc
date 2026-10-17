@@ -8,6 +8,23 @@ and version plan.
 
 ## [Unreleased]
 
+- **The witness envelope a result was graded against is retained** (#418).
+  A witnessed grade sealed `{"witness": ..., "graded_tree_digest": ...}`,
+  passed it to grading, and recorded only its digest. The bytes were never
+  stored, so nothing in the evidence store could show which gate runs, tree
+  digests or stage outcomes decided `flow-check-honest`. On #315's runner, a
+  42-row campaign's run directory held no object for any recorded digest.
+  `verify` now stores every recorded trusted observation in the experiment's
+  `objects/` under its digest, inside the grading lock and before the result,
+  and `read_trusted_observation` returns it, or refuses when it is absent,
+  tampered, a symlink, or the result's two digests disagree.
+  `trial.put_object`/`read_object` are public wrappers over the existing
+  write-once, hash-checked object helpers. The retention test fails on the old
+  code with "the store holds no envelope for the recorded digest". A
+  production-path test re-derives each gate run's `tree_digest_at_start`,
+  stages and `graded_tree_digest` from the store alone. A regrade still carries
+  no witness, and a test pins that. Results stored before this change remain
+  digest-only.
 - **A failed channel drain stays failed on every later read** (#367).
   `DecideReplyChannel.stop_and_finalize()` set its finalized flag before
   waiting for in-flight handlers. So after a drain timeout, a later

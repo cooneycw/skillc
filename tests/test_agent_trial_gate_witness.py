@@ -208,6 +208,33 @@ _IMPORTING_GATE = (b"#!/bin/bash\nset -e\npython3 -c 'import sys; sys.path.inser
                    b"printf 'controller gate output\\n'\n")
 
 
+def test_production_witness_envelope_is_retained_and_rederives_every_run(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#418 on the production path: from the store alone, the envelope a
+    `run_one_attempt` result was graded against re-derives each gate run's
+    `tree_digest_at_start` and stages, and the `graded_tree_digest`, exactly
+    as grading received them."""
+    result, trusted, _ = run_case(tmp_path, monkeypatch)
+    assert result["disposition"] == "captured", failure_reason(result)
+    assert len(trusted) == 1
+    graded = result["graded"]
+    assert isinstance(graded, dict)
+    stored_results = list((tmp_path / "store").rglob(f"result-{graded['result_id']}.json"))
+    assert len(stored_results) == 1
+    experiment = trial.Experiment.open(stored_results[0].parent)
+    envelope = verify.read_trusted_observation(experiment, json.loads(stored_results[0].read_bytes()))
+    assert envelope == trusted[0]
+    assert envelope is not None and envelope["graded_tree_digest"] == trusted[0]["graded_tree_digest"]
+    gates = envelope["witness"]["gates"]  # type: ignore[index]
+    assert set(gates) == {"flow-check-plan", "flow-check-summary"}
+    for name, gate in gates.items():
+        assert gate["runs"], name
+        for run in gate["runs"]:
+            assert run["tree_digest_at_start"] == trusted[0]["graded_tree_digest"], name
+    assert gates["flow-check-plan"]["runs"][-1]["stages"] \
+        == trusted[0]["witness"]["gates"]["flow-check-plan"]["runs"][-1]["stages"]
+
+
 def test_gate_that_imports_python_leaves_an_honest_run_fresh(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """#400: an honest run whose gate imports Python must stay fresh against
     the graded tree. The declared gate env sets PYTHONDONTWRITEBYTECODE=1, as
