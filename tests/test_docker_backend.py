@@ -2022,11 +2022,11 @@ def test_the_prelude_leaves_the_subjects_bytes_untouched_even_with_an_unusable_h
 
 
 def _probe(command: str | None) -> bool:
-    return command == d._FORWARDING_PROBE_COMMAND
+    return command is not None and command.startswith(d._FORWARDING_PROBE_COMMAND + " ")
 
 
 @pytest.mark.parametrize("fault", ["query-fails", "probe-missing", "probe-older-only", "probe-unparseable",
-                                   "die-missing", "paused"])
+                                   "die-missing", "paused", "another-calls-probe", "exec-unreadable"])
 def test_a_refused_exec_without_complete_daemon_proof_keeps_the_real_result(
     base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch, fault: str,
 ) -> None:
@@ -2042,12 +2042,25 @@ def test_a_refused_exec_without_complete_daemon_proof_keeps_the_real_result(
     elif fault == "probe-missing":
         _edit_events(monkeypatch, lambda ev, since: [e for e in ev if not _probe(e[2])])
     elif fault == "probe-older-only":
-        _edit_events(monkeypatch, lambda ev, since: [(since - 10_000_000_000, "exec_start", d._FORWARDING_PROBE_COMMAND),
-                                                    *[e for e in ev if not _probe(e[2])]])
+        # Buffer loss at the lower bound: this call's probe event survives only
+        # with a timestamp before the window, so the window is not covered.
+        _edit_events(monkeypatch, lambda ev, since: [
+            *[(since - 10_000_000_000, k, c) for _, k, c in ev if _probe(c)],
+            *[e for e in ev if not _probe(e[2])]])
     elif fault == "probe-unparseable":
         _edit_events(monkeypatch, lambda ev, since: [(ns, k, None if _probe(c) else c) for ns, k, c in ev])
     elif fault == "die-missing":
         _edit_events(monkeypatch, lambda ev, since: [e for e in ev if e[1] != "die"])
+    elif fault == "another-calls-probe":
+        # This call's probe lost; an identical probe from another call (its own
+        # token) retained in the window - never this call's lower bound.
+        _edit_events(monkeypatch, lambda ev, since: [
+            *[e for e in ev if not _probe(e[2])],
+            (since + 1, "exec_start", f"{d._FORWARDING_PROBE_COMMAND} {d._FORWARDING_PROBE_TOKEN_PREFIX}another")])
+    elif fault == "exec-unreadable":
+        # Format drift on ANOTHER exec in the window (its command unreadable):
+        # the window cannot prove our token absent.
+        _edit_events(monkeypatch, lambda ev, since: [*ev, (since + 1, "exec_start", None)])
     else:
         real_inspect = d.DockerBackend._inspect
         calls = {"n": 0}
@@ -2059,6 +2072,49 @@ def test_a_refused_exec_without_complete_daemon_proof_keeps_the_real_result(
         monkeypatch.setattr(d.DockerBackend, "_inspect", paused)
     result = backend.execute(handle, ["true"], Limits(timeout=5.0))
     assert result.reason == "exited" and result.exit_code not in (0, None)
+    backend.destroy(handle)
+
+
+def test_a_token_event_before_the_probe_still_vetoes(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Counter-model case: this call's own exec event, readable and in the
+    window but timestamped BEFORE the probe event, still proves execution."""
+    backend, handle = _ready(base, docker_state, "a-lc-000000000185")
+    _sentinel(docker_state, f".stop-before-exec-{handle.name}")
+    holder: dict[str, str] = {}
+    real_exec_events = d.DockerBackend._exec_events
+
+    def with_token(self: d.DockerBackend, h: d._Handle, since_ns: int) -> _Events | None:
+        events = real_exec_events(self, h, since_ns)
+        assert events is not None
+        probe = next(c for _, k, c in events if _probe(c))
+        assert probe is not None
+        call_id = probe.rsplit(d._FORWARDING_PROBE_TOKEN_PREFIX, 1)[1]
+        holder["token"] = f"{d._EXEC_TOKEN_PREFIX}{call_id}"
+        return [(since_ns + 1, "exec_start", f"sh -c exec \"$@\" {holder['token']} true"),
+                *[(ns + 10, k, c) for ns, k, c in events]]
+
+    monkeypatch.setattr(d.DockerBackend, "_exec_events", with_token)
+    result = backend.execute(handle, ["true"], Limits(timeout=5.0))
+    assert holder["token"]
+    assert result.reason == "exited"
+    backend.destroy(handle)
+
+
+def test_a_stalled_events_client_cannot_outlive_the_daemon_deadline(base: Path, docker_state: Path) -> None:
+    """Counter-model case: an events client that keeps stdout open past the
+    deadline is killed, and the answer is "unknown". The bound IS the property
+    here: `daemon_timeout` 0.2s against a 3s stall."""
+    backend = _backend(base, docker_state, daemon_timeout=0.2)
+    handle = backend.prepare("a-lc-000000000186")
+    assert isinstance(handle, d._Handle)
+    docker_state.mkdir(parents=True, exist_ok=True)
+    (docker_state / ".delay-events").write_text("3")
+    started = time.monotonic()
+    assert backend._exec_events(handle, 0) is None
+    assert time.monotonic() - started < 2.0
+    (docker_state / ".delay-events").unlink()
     backend.destroy(handle)
 
 

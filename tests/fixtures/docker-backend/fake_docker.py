@@ -664,7 +664,11 @@ def cmd_exec(state_dir: Path, rest: list[str]) -> int:
     # forwarding probe. It fires on any other exec, prelude or not, so the
     # same race can be staged against code that has no prelude at all.
     prelude_exec = len(argv) > 3 and argv[:3] == ["sh", "-c", 'exec "$@"'] and argv[3].startswith("skillc-exec-")
-    forwarding_probe = argv == ["sh", "-c", f"test -x {SKILLC_WRAP_PATH} && test -S {SKILLC_CONTROL_SOCKET_PATH}"]
+    # #317: the probe may carry a per-call `$0` token after its script.
+    probe_script = ["sh", "-c", f"test -x {SKILLC_WRAP_PATH} && test -S {SKILLC_CONTROL_SOCKET_PATH}"]
+    forwarding_probe = argv[:3] == probe_script and (
+        len(argv) == 3 or (len(argv) == 4 and argv[3].startswith("skillc-probe-"))
+    )
     stop_before = state_dir / f".stop-before-exec-{name}"
     if not forwarding_probe and stop_before.exists():
         stop_before.unlink()
@@ -693,7 +697,7 @@ def cmd_exec(state_dir: Path, rest: list[str]) -> int:
     # `sh`/`test` - `_supervisor_capable` (the binary) and
     # `_supervisor_running` (the socket) - matching the two-part fact the
     # real probe checks, not conflating them into one.
-    if argv == ["sh", "-c", f"test -x {SKILLC_WRAP_PATH} && test -S {SKILLC_CONTROL_SOCKET_PATH}"]:
+    if forwarding_probe:
         capable = _supervisor_capable(state_dir, name) and _supervisor_running(state_dir, name)
         return 0 if capable else 1
 

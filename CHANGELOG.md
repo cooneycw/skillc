@@ -16,9 +16,10 @@ and version plan.
   `sh -c 'exec "$@"' skillc-exec-<uuid> ARGV`, which writes nothing and only
   names the call in the daemon's own exec events. After a nonzero exit it
   becomes `attempt-not-running` only when all of these hold: the container is
-  `exited` or `dead`; the bounded `docker events` answer parses; it holds this
-  call's forwarding-probe exec, with its command readable, and the container's
-  `die` after it; and no exec carries the token. Every other answer keeps the
+  `exited` or `dead`; the `docker events` answer parses within a byte bound and
+  one deadline, with every exec command readable; it holds this call's own
+  forwarding-probe exec (the probe now carries a per-call token too) and the
+  container's `die` after it; and no exec in the window carries the token. Every other answer keeps the
   real result: a daemon whose events are dropped or reformatted can only fail
   to reclassify, never misreclassify. Two designs were rejected in review on
   the way: stderr wording (subject output), and an in-container marker (the
