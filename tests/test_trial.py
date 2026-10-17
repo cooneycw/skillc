@@ -164,6 +164,16 @@ def test_the_resolved_configuration_is_stored_and_bound_by_digest(store: Path) -
     ({"experiment": "pilot", "trials": [{**_spec()["trials"][0],  # type: ignore[index]
                                          "case": {"id": "c", "revision": "1", "observes_selection": 1}}]},
      "must be a boolean"),
+    # The skill_digests pin (#354) is optional, but present must be well-formed.
+    ({"experiment": "pilot", "trials": [{**_spec()["trials"][0],  # type: ignore[index]
+                                         "skill_digests": []}]}, "non-empty list"),
+    ({"experiment": "pilot", "trials": [{**_spec()["trials"][0],  # type: ignore[index]
+                                         "skill_digests": [{"path": "a/SKILL.md", "body_digest": "sha256:b"}]}]},
+     "no description_digest"),
+    ({"experiment": "pilot", "trials": [{**_spec()["trials"][0],  # type: ignore[index]
+                                         "skill_digests": [{"path": "a/SKILL.md", "body_digest": "sha256:b",
+                                                            "description_digest": "sha256:d", "extra": 1}]}]},
+     "unknown field"),
 ])
 def test_a_loose_plan_is_refused(store: Path, spec: dict[str, object], why: str) -> None:
     with pytest.raises(t.Refused, match=why):
@@ -182,6 +192,19 @@ def test_an_observes_selection_pin_is_kept_in_the_ledger(store: Path) -> None:
     experiment = t.plan(_spec(case=case), store)
     [(trial, _attempt)] = list(experiment.attempts())
     assert trial["case"] == case
+
+
+def test_a_skill_digests_pin_is_kept_in_the_ledger(store: Path) -> None:
+    """#354: the controller copies the pins into the ledger trial, where
+    `records.ledger_binding` reads them; an unpinned plan carries no key."""
+    pins = [{"path": ".codex/skills/slug/SKILL.md", "body_digest": "sha256:b1", "description_digest": "sha256:d1"}]
+    spec = _spec()
+    spec["trials"][0]["skill_digests"] = pins  # type: ignore[index]
+    experiment = t.plan(spec, store)
+    [(trial, _attempt)] = list(experiment.attempts())
+    assert trial["skill_digests"] == pins
+    [(unpinned, _attempt)] = list(t.plan(_spec(), store).attempts())
+    assert "skill_digests" not in unpinned
 
 
 def test_observes_selection_absent_is_not_defaulted_to_false(store: Path) -> None:

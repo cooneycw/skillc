@@ -114,7 +114,8 @@ class VirtualMountBackend(TrackingDockerBackend):
 
 def run_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, mode: str = "fresh",
              fault: str | None = None, receipt: bool = False, gate: bool = True,
-             script: bytes = b"#!/bin/bash\nprintf 'controller gate output\\n'\n") -> tuple[dict, list, VirtualMountBackend]:
+             script: bytes = b"#!/bin/bash\nprintf 'controller gate output\\n'\n",
+             plan_reply_tail: str | None = None) -> tuple[dict, list, VirtualMountBackend]:
     base = tmp_path / "work"
     base.mkdir()
     experiment, attempt = _planned(trial.open_store(tmp_path / "store", forbidden=[]))
@@ -148,6 +149,9 @@ def run_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, mode: str = "fr
             "  sock.shutdown(socket.SHUT_WR)\n"
             "  reply=json.loads(sock.makefile('rb').readline())\n"
             "  assert reply['ok'] and reply['result']['reason']=='exited',reply\n"
+            # #404: what the subject itself received from the plan gate.
+            + (f"  assert gate!='flow-check-plan' or reply['result']['stdout'].endswith({plan_reply_tail!r}),"
+               "len(reply['result']['stdout'])\n" if plan_reply_tail is not None else "")
             + ("ask('flow-check-plan')\n" if gate else "")
             + ("ask('flow-check-summary')\n" if gate and mode != "omit" else "")
             + ("pathlib.Path('later.txt').write_text('changed')\n" if mode in ("stale", "rerun") else "")
@@ -206,6 +210,33 @@ def test_actual_runner_constructs_and_delivers_controller_witness(tmp_path: Path
 #: a failed import fail the gate rather than pass without exercising it.
 _IMPORTING_GATE = (b"#!/bin/bash\nset -e\npython3 -c 'import sys; sys.path.insert(0, \"src\"); import slugify'\n"
                    b"printf 'controller gate output\\n'\n")
+
+
+def test_production_witness_envelope_is_retained_and_rederives_every_run(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#418 on the production path: from the store alone, the envelope a
+    `run_one_attempt` result was graded against re-derives each gate run's
+    `tree_digest_at_start` and stages, and the `graded_tree_digest`, exactly
+    as grading received them."""
+    result, trusted, _ = run_case(tmp_path, monkeypatch)
+    assert result["disposition"] == "captured", failure_reason(result)
+    assert len(trusted) == 1
+    graded = result["graded"]
+    assert isinstance(graded, dict)
+    stored_results = list((tmp_path / "store").rglob(f"result-{graded['result_id']}.json"))
+    assert len(stored_results) == 1
+    experiment = trial.Experiment.open(stored_results[0].parent)
+    envelope = verify.read_witness_envelope(experiment, json.loads(stored_results[0].read_bytes()))
+    assert envelope == trusted[0]
+    assert envelope is not None and envelope["graded_tree_digest"] == trusted[0]["graded_tree_digest"]
+    gates = envelope["witness"]["gates"]  # type: ignore[index]
+    assert set(gates) == {"flow-check-plan", "flow-check-summary"}
+    for name, gate in gates.items():
+        assert gate["runs"], name
+        for run in gate["runs"]:
+            assert run["tree_digest_at_start"] == trusted[0]["graded_tree_digest"], name
+    assert gates["flow-check-plan"]["runs"][-1]["stages"] \
+        == trusted[0]["witness"]["gates"]["flow-check-plan"]["runs"][-1]["stages"]
 
 
 def test_gate_that_imports_python_leaves_an_honest_run_fresh(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -353,3 +384,28 @@ def test_readiness_translation_refuses_unexpected_invocations(
     monkeypatch.setattr(d.DockerBackend, "exec_in_attempt", must_not_execute)
     with pytest.raises(AssertionError, match="unexpected readiness invocation"):
         backend.exec_in_attempt(handle, argv, Limits(timeout=1))
+
+
+#: #404: a gate whose stdout passes 4,096 bytes and ends in its verdict, as a
+#: failing real run does (the runner's JSON report, then `FLOW_FINISH_GATE:`).
+_LONG_GATE = (b"#!/bin/bash\npython3 -c 'print(\"{\\n  \\\"detail\\\": \\\"\" + \"x\" * 6000 + \"\\\"\\n}\")'\n"
+              b"printf 'FLOW_FINISH_GATE: fail\\n'\n")
+
+
+@pytest.mark.parametrize("tail, subject_exit", [
+    ("FLOW_FINISH_GATE: fail\n", 0),
+    # Control: the subject's own check can fail. A tail the gate never
+    # printed must make it exit 1, or a pass above would prove nothing.
+    ("NOT-THE-VERDICT\n", 1),
+], ids=["verdict", "control-wrong-tail"])
+def test_production_reply_carries_a_long_gates_verdict_to_the_subject(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tail: str, subject_exit: int) -> None:
+    """#404 on the production path: `run_one_attempt` builds the witness
+    itself, so this fails if production ever passes a reply cap below the
+    capture bound. The subject asserts its own plan reply ends in the
+    verdict line and exits 1 if not; before the fix the reply ended 4,096
+    bytes into the report and the `verdict` case exited 1."""
+    result, trusted, _ = run_case(tmp_path, monkeypatch, script=_LONG_GATE, plan_reply_tail=tail)
+    assert result["disposition"] == "captured", failure_reason(result)
+    assert result["stop"]["exit_code"] == subject_exit, result["stop"]
+    assert len(trusted) == 1

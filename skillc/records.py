@@ -225,6 +225,47 @@ SKILL_EVIDENCE_UNMATCHED_REASONS = (
 #: data, like `subject.digest` - never in this module.
 EXTERNAL_EVIDENCE_SOURCE_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?/v[0-9]+$")
 
+#: `trial.skill_digests` (#354): the per-skill fingerprints a trial PLANNED to
+#: test, one `{path, body_digest, description_digest}` per skill, keyed by the
+#: same installed `path` a `skill-evidence` entry and the receipt use. Optional:
+#: a trial that declares none keeps `skill-evidence`'s digests at shape-only, as
+#: before. A trial that declares them makes `ledger_binding` refuse a
+#: `skill-evidence` entry whose skill is unpinned, which omits a digest (an
+#: attribution pinned to nothing cannot go stale), or whose digest differs from
+#: the pin (stale). The check compares records against the LEDGER, never against
+#: #265's `evidence/inventory.json`, which is a different artifact family;
+#: `profile.skill_digest_pins` derives the pins from that inventory at plan
+#: time. The approach comes from the unmerged first #268 run (`case.attribution`
+#: pinning profile and contract digests), adapted to per-skill digests.
+SKILL_DIGEST_PIN_KEYS = ("path", "body_digest", "description_digest")
+
+
+def skill_digest_pin_problems(value: object) -> Iterator[str]:
+    """Shape problems with a `trial.skill_digests` value (#354), shared by
+    `trial_ledger` and the controller's `trial.plan`, so a plan the controller
+    accepts is never one this rule then refuses."""
+    if not isinstance(value, list) or not value:
+        yield (
+            f"skill_digests must be a non-empty list of {{{', '.join(SKILL_DIGEST_PIN_KEYS)}}}, "
+            f"not {value!r}; omit it to pin nothing"
+        )
+        return
+    seen: set[str] = set()
+    for index, pin in enumerate(value):
+        if not isinstance(pin, dict):
+            yield f"skill_digests[{index}] is not an object"
+            continue
+        for key in sorted(set(pin) - set(SKILL_DIGEST_PIN_KEYS)):
+            yield f"skill_digests[{index}] carries unknown field {key!r}"
+        for key in SKILL_DIGEST_PIN_KEYS:
+            if not _nonempty_str(pin.get(key)):
+                yield f"skill_digests[{index}] has no {key}; a pin with a missing fingerprint cannot detect a stale one"
+        path = pin.get("path")
+        if isinstance(path, str) and _nonempty_str(path):
+            if path in seen:
+                yield f"skill_digests[{index}] pins {path!r} twice"
+            seen.add(path)
+
 #: `case.arm` (#273): whether this trial's case is the intact or degraded half
 #: of a discriminating design, declared by the controller's own plan - a
 #: property of the CASE/fixture, never of the treatment (`config.arm`,
@@ -690,6 +731,9 @@ def trial_ledger(record: Record) -> Iterator[str]:
                             f"trial {name!r}: external_evidence_sources[{s_index}] is {source!r}, "
                             f"not a well-formed '<namespace>/v<N>' label"
                         )
+        if "skill_digests" in trial:
+            for problem in skill_digest_pin_problems(trial["skill_digests"]):
+                yield f"trial {name!r}: {problem}"
         attempts = trial.get("attempts")
         if not isinstance(attempts, list) or not attempts:
             yield f"trial {name!r} plans no attempts; its expected population is empty"
@@ -1872,6 +1916,54 @@ def _skill_evidence_binding(
                         )
 
 
+def _skill_digest_pin_binding(record: Record, where: str, pins: object) -> Iterator[str]:
+    """`skill-evidence` against its trial's `skill_digests` (#354), when the
+    trial declares any. A malformed declaration is `trial_ledger`'s finding;
+    this checks only the well-formed pins it can read.
+
+    - a `skill.path` the trial pinned no digests for is **unpinned**: the
+      trial said which skills it meant to test, and this is not one of them;
+    - a pinned skill whose entry omits `body_digest` or `description_digest`
+      names no version at all, so it could never be found stale - refused;
+    - a digest that differs from the pin is **stale**: evidence about bytes
+      the trial did not plan to test.
+    """
+    if not isinstance(pins, list):
+        return
+    planned: dict[str, dict[str, object]] = {
+        p["path"]: p for p in pins
+        if isinstance(p, dict) and _nonempty_str(p.get("path"))
+    }
+    skills = record.data.get("skills")
+    for index, entry in enumerate(skills if isinstance(skills, list) else []):
+        if not isinstance(entry, dict) or not isinstance(entry.get("skill"), dict):
+            continue
+        skill = entry["skill"]
+        path = skill.get("path")
+        if not _nonempty_str(path):
+            continue
+        e_where = f"{where} skills[{index}]"
+        pin = planned.get(path)
+        if pin is None:
+            yield (
+                f"{e_where}: {path!r} has no pinned digests in this attempt's trial "
+                f"skill_digests - an unpinned skill"
+            )
+            continue
+        for key in ("body_digest", "description_digest"):
+            got = skill.get(key)
+            if not _nonempty_str(got):
+                yield (
+                    f"{e_where}: {path!r} omits skill.{key}, but its trial pins one - "
+                    f"an attribution that names no version cannot be checked for staleness"
+                )
+            elif got != pin.get(key):
+                yield (
+                    f"{e_where}: {path!r} skill.{key} {got!r} differs from the trial's "
+                    f"pinned {pin.get(key)!r} - a stale attribution"
+                )
+
+
 def ledger_binding(bundle: Bundle) -> Iterator[str]:
     """Every record is bound to an attempt the ledger planned, under that trial's
     identities, and a result graded bytes that were actually captured.
@@ -1907,6 +1999,9 @@ def ledger_binding(bundle: Bundle) -> Iterator[str]:
         same digest, or `no-correlating-attempt`, when the cited digest WAS
         captured by this attempt's own manifest - a mislabeled reason,
         never a free-text excuse standing in for a real check.
+      - a `skill-evidence` (#354) entry, under a trial that declares
+        `skill_digests`, whose skill is unpinned, omits a digest, or carries
+        a digest that differs from the pin (a **stale** attribution).
     """
     ledgers = bundle.of_kind(TRIAL_LEDGER)
     if len(ledgers) != 1:
@@ -2000,6 +2095,8 @@ def ledger_binding(bundle: Bundle) -> Iterator[str]:
                 digest_citation_count,
                 receipt_identity.get(record.attempt_id),
             )
+            if "skill_digests" in trial:
+                yield from _skill_digest_pin_binding(record, where, trial["skill_digests"])
         if record.kind == INSTALLATION_RECEIPT:
             for ident, keys in (("subject", ("digest",)), ("client", ("name", "version"))):
                 got = _ident(record.data.get(ident), *keys)
