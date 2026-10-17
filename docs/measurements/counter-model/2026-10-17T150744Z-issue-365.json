@@ -1,0 +1,27 @@
+{
+  "branch": "issue-365-profile-import-probe-can-satisfy-a-project-depende",
+  "counts": {
+    "accepted": 3,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "8466aa5cf019b2748983960790b95dc919de37f7",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "365",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 2,
+  "recorded_at": "2026-10-17T15:07:44Z",
+  "red_cases": {
+    "already_covered": 5,
+    "proposed": 7
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/17/rollout-2026-10-17T11-04-15-01a14a64-63c7-75c0-bb74-b10700d4bc93.jsonl",
+    "thread_id": "01a14a64-63c7-75c0-bb74-b10700d4bc93"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
