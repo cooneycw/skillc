@@ -1058,7 +1058,12 @@ class DockerBackend:
             egress_network, egress_proxy, proxy_ip = self._start_egress(name, attempt_id, env)
             egress_args = {"network": egress_network, "extra_env": eg.agent_proxy_env(proxy_ip),
                            "dns": eg.AGENT_DNS}
-        channel, trigger_socket_host_path = self._start_trigger_channel(name, attempt_id)
+        try:
+            channel, trigger_socket_host_path = self._start_trigger_channel(name, attempt_id)
+        except BaseException:
+            # #442: egress is already up; a refused channel must not strand it.
+            self._stop_egress(egress_proxy, egress_network, env)
+            raise
         argv = self._keepalive_run_argv(name, attempt_id, trigger_socket_host_path, **egress_args)  # type: ignore[arg-type]
         try:
             started = subprocess.run(
@@ -1107,11 +1112,14 @@ class DockerBackend:
         raises - a refused prepare() leaves no network and no proxy behind."""
         network, proxy = eg.network_name(name), eg.proxy_name(name)
         labels = {OWNER_LABEL_KEY: OWNER_LABEL_VALUE, ATTEMPT_LABEL_KEY: attempt_id}
+        # Marked BEFORE each call: a create that takes effect but whose answer is
+        # lost or late (a timeout) still leaves the object behind, so cleanup
+        # must try it. Removing something that was never made is harmless.
         created_network = created_proxy = False
         try:
+            created_network = True
             self._egress_call(eg.create_network_argv(self.docker_bin, network, labels), env,
                               f"create internal network {network}")
-            created_network = True
             created_proxy = True  # `run -d` can create a container even when it fails to start
             self._egress_call(eg.proxy_run_argv(self.docker_bin, image=self.image, name=proxy, labels=labels,
                                                 container_user=_container_user(), hosts=self.egress_hosts),
@@ -3030,4 +3038,31 @@ class DockerBackend:
         reachable, absent, _status = self._inspect(handle)
         if not reachable:
             return Confirmation.UNKNOWN
-        return Confirmation.CONFIRMED if absent else Confirmation.NOT_CONFIRMED
+        if not absent:
+            return Confirmation.NOT_CONFIRMED
+        # #442: the attempt's proxy and network are its resources too - a
+        # teardown that left either behind is not a confirmed one.
+        for kind, name in (("container", handle.egress_proxy), ("network", handle.egress_network)):
+            if name is None:
+                continue
+            gone = self._object_absent(kind, name, handle.env)
+            if gone is None:
+                return Confirmation.UNKNOWN
+            if not gone:
+                return Confirmation.NOT_CONFIRMED
+        return Confirmation.CONFIRMED
+
+    def _object_absent(self, kind: str, name: str, env: Mapping[str, str]) -> bool | None:
+        """#442: whether a container or network is gone. `None` when the daemon
+        could not be asked or answered with something other than "not found"."""
+        argv = [*self.docker_bin, "network", "inspect", name] if kind == "network" \
+            else [*self.docker_bin, "inspect", name]
+        try:
+            done = subprocess.run(argv, capture_output=True, text=True, env=env, check=False,
+                                  timeout=self.daemon_timeout)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if done.returncode == 0:
+            return False
+        err = done.stderr.lower()
+        return True if ("no such" in err or "not found" in err) else None

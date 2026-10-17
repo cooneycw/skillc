@@ -205,4 +205,12 @@ def test_a_client_that_ignores_the_proxy_has_no_way_out(attempt: tuple[d.DockerB
     if BREAK_MODE == "bridge-network":
         assert direct["result"] == "connected", "setup: bridge-network gave no direct route"
     _require(resolve["result"] == "error", _IsolationFailed, "github.com must not resolve inside the agent")
+    if direct["result"] == "error":
+        # Only "no route" is isolation. A refusal or a timeout means a route
+        # existed and the far end did not answer - an outage there would read
+        # as isolation here, so it is inconclusive, a hard failure.
+        error = str(direct.get("error"))
+        assert "Errno 101" in error or "Errno 113" in error or "unreachable" in error.lower(), \
+            "inconclusive: the direct connection failed for a reason other than no route"
+        assert "gaierror" in str(resolve.get("error")), "inconclusive: resolution failed for a non-DNS reason"
     _require(direct["result"] == "error", _IsolationFailed, "a direct connection to GitHub must have no route")

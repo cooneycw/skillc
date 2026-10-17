@@ -233,6 +233,7 @@ def summarize_log(raw: bytes) -> dict[str, object]:
     empty clean one."""
     allowed: dict[str, int] = {}
     denied: dict[str, int] = {}
+    upstream_failed: dict[str, int] = {}
     digest: str | None = None
     unparsed = 0
     for line in raw.decode("utf-8", "replace").splitlines():
@@ -244,10 +245,16 @@ def summarize_log(raw: bytes) -> dict[str, object]:
         if entry.get("event") == "start":
             digest = entry.get("digest")
             continue
-        bucket = allowed if entry.get("decision") == "allowed" else denied
+        decision = str(entry.get("decision"))
+        bucket = (allowed if decision == "allowed" else denied if decision == "denied"
+                  else upstream_failed if decision.startswith("upstream-failed") else None)
+        if bucket is None:
+            unparsed += 1
+            continue
         target = str(entry.get("target"))
         bucket[target] = bucket.get(target, 0) + 1
-    return {"allowlist_digest": digest, "allowed": allowed, "denied": denied, "unparsed_lines": unparsed}
+    return {"allowlist_digest": digest, "allowed": allowed, "denied": denied, "upstream_failed": upstream_failed,
+            "unparsed_lines": unparsed}
 
 
 #: The codex client's server-side channels, pinned OFF for every live attempt
@@ -268,31 +275,67 @@ CODEX_SERVER_SIDE_OFF: tuple[str, ...] = (
 )
 
 
+def _config_settings(argv: Sequence[str]) -> tuple[list[tuple[str, str]], list[str]]:
+    """Every config-affecting setting in argv ORDER, as `(kind, value)`:
+    `("config", "<key>=<value>")` for `-c X`/`--config X`/`--config=X`/`-cX`,
+    and `("enable"|"disable", feature)` for `--enable X`/`--disable X` and
+    their `=` forms. Also the spellings it could not read with certainty
+    (an option with no value), which the caller refuses rather than guesses."""
+    settings: list[tuple[str, str]] = []
+    unreadable: list[str] = []
+    args = list(argv)
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        for flag, kind in (("-c", "config"), ("--config", "config"), ("--enable", "enable"), ("--disable", "disable")):
+            if arg == flag:
+                if i + 1 >= len(args):
+                    unreadable.append(arg)
+                else:
+                    settings.append((kind, args[i + 1]))
+                    i += 1
+                break
+            if flag.startswith("--") and arg.startswith(flag + "="):
+                settings.append((kind, arg.split("=", 1)[1]))
+                break
+            if flag == "-c" and arg.startswith("-c") and not arg.startswith("--") and len(arg) > 2:
+                settings.append((kind, arg[2:]))
+                break
+        i += 1
+    return settings, unreadable
+
+
 def missing_server_side_flags(argv: Sequence[str]) -> list[str]:
     """What a live codex argv lacks of `CODEX_SERVER_SIDE_OFF`, or does to
     undo it, as one sentence each; empty only when every channel is pinned off
-    and nothing later in the argv turns one back on."""
-    args = list(argv)
+    and nothing later in the argv turns one back on. Settings are read in argv
+    ORDER, every spelling the client accepts (`-c X`, `-cX`, `--config X`,
+    `--config=X`, `--enable/--disable X` and their `=` forms), and the LAST
+    setting of each key wins, as in the client."""
     problems: list[str] = []
-    if "--strict-config" not in args:
+    if "--strict-config" not in argv:
         problems.append("--strict-config is missing (an unknown or renamed key would be silently ignored)")
-    configs = [args[i + 1] for i, a in enumerate(args[:-1]) if a in ("-c", "--config")]
-    configs += [a.split("=", 1)[1] for a in args if a.startswith("--config=")]
-    web = [c for c in configs if c.replace(" ", "").startswith("web_search=")]
-    if not web:
+    settings, unreadable = _config_settings(argv)
+    for flag in unreadable:
+        problems.append(f"{flag} has no value; the argv cannot be read with certainty")
+    web: str | None = None
+    features: dict[str, bool] = {}
+    for kind, value in settings:
+        if kind == "config":
+            key, _, raw = value.replace(" ", "").partition("=")
+            if key == "web_search":
+                web = f"{key}={raw}"
+            elif key.startswith("features."):
+                features[key.removeprefix("features.")] = raw.lower() == "true"
+        else:
+            features[value] = kind == "enable"
+    if web is None:
         problems.append('-c web_search="disabled" is missing (server-side web search stays at the client default)')
-    elif web[-1].replace(" ", "") != CODEX_WEB_SEARCH_OFF:
-        problems.append(f"web_search is set to {web[-1]!r}, not {CODEX_WEB_SEARCH_OFF!r} (the last setting wins)")
+    elif web != CODEX_WEB_SEARCH_OFF:
+        problems.append(f"web_search is set to {web!r}, not {CODEX_WEB_SEARCH_OFF!r} (the last setting wins)")
     for feature in CODEX_SERVER_SIDE_DISABLED_FEATURES:
-        last: str | None = None
-        for i, a in enumerate(args[:-1]):
-            if a in ("--disable", "--enable") and args[i + 1] == feature:
-                last = a
-        for c in configs:
-            if c.replace(" ", "") in (f"features.{feature}=true", f"features.{feature}=false"):
-                last = "--enable" if c.replace(" ", "").endswith("true") else "--disable"
-        if last is None:
+        if feature not in features:
             problems.append(f"--disable {feature} is missing (a server-side remote plugin channel stays open)")
-        elif last == "--enable":
+        elif features[feature]:
             problems.append(f"{feature} is re-enabled later in the argv (the last setting wins)")
     return problems

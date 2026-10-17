@@ -1079,9 +1079,12 @@ def _network_file(state_dir: Path, network: str) -> Path:
 
 def cmd_network(state_dir: Path, rest: list[str]) -> int:
     """#442: `network create [--internal] [--label K=V ...] NAME`,
-    `network connect NAME CONTAINER`, `network rm NAME`. A network is a JSON
-    file under `networks/`. `.refuse-network-create` and
-    `.refuse-network-connect` make those calls fail outright."""
+    `network connect NAME CONTAINER`, `network rm NAME`, `network inspect
+    NAME`. A network is a JSON file under `networks/`. `.refuse-network-create`,
+    `.refuse-network-connect` and `.refuse-network-rm` make those calls fail
+    outright; `.hang-network-create` (content: seconds) CREATES the network and
+    then sleeps before answering, so a caller's timeout fires after the create
+    took effect."""
     if not rest:
         print("fake_docker: network requires a subcommand", file=sys.stderr)
         return 2
@@ -1097,6 +1100,9 @@ def cmd_network(state_dir: Path, rest: list[str]) -> int:
         target = _network_file(state_dir, name)
         target.parent.mkdir(parents=True, exist_ok=True)
         _atomic_write_json(target, {"internal": internal, "labels": labels})
+        hang = state_dir / ".hang-network-create"
+        if hang.exists():
+            time.sleep(float(hang.read_text(encoding="utf-8").strip() or "2"))
         return 0
     if verb == "connect":
         if (state_dir / ".refuse-network-connect").exists():
@@ -1114,7 +1120,16 @@ def cmd_network(state_dir: Path, rest: list[str]) -> int:
         data["networks"] = [*data.get("networks", []), network]
         _atomic_write_json(path, data)
         return 0
+    if verb == "inspect":
+        if not _network_file(state_dir, args[0]).is_file():
+            print(f"Error response from daemon: network {args[0]} not found", file=sys.stderr)
+            return 1
+        print(_network_file(state_dir, args[0]).read_text(encoding="utf-8"))
+        return 0
     if verb == "rm":
+        if (state_dir / ".refuse-network-rm").exists():
+            print("Error response from daemon: network has active endpoints (fault injection)", file=sys.stderr)
+            return 1
         target = _network_file(state_dir, args[0])
         if not target.is_file():
             print(f"Error response from daemon: network {args[0]} not found", file=sys.stderr)

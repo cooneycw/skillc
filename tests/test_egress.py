@@ -268,12 +268,27 @@ def test_red_case_a_live_codex_argv_missing_one_server_side_flag_is_refused_befo
 
 @pytest.mark.parametrize("tail, named", [
     (["--enable", "apps"], "apps is re-enabled"),
+    (["--enable=plugins"], "plugins is re-enabled"),
     (["-c", 'web_search="live"'], "web_search is set to"),
+    (['-cweb_search="live"'], "web_search is set to"),  # attached short form (counter-model review)
+    (['--config=web_search="cached"'], "web_search is set to"),
     (["-c", "features.remote_plugin=true"], "remote_plugin is re-enabled"),
+    (["-c"], "has no value"),
 ])
 def test_red_case_a_later_flag_that_reopens_a_channel_is_refused(tail: list[str], named: str) -> None:
     problems = eg.missing_server_side_flags([*cc.DEFAULT_CLIENT_ARGVS["codex"], *tail])
     assert any(named in p for p in problems), problems
+
+
+def test_red_case_settings_are_read_in_argv_order_not_grouped_by_spelling() -> None:
+    """Counter-model review: an earlier `--config=web_search="disabled"` then a
+    later `-c web_search="live"` must read as live - the last setting wins,
+    whatever spelling each one used."""
+    argv = ["codex", "exec", "--strict-config", '--config=web_search="disabled"', "-c", 'web_search="live"',
+            "--disable", "apps", "--disable", "plugins", "--disable", "remote_plugin"]
+    problems = eg.missing_server_side_flags(argv)
+    assert any("web_search is set to" in p for p in problems), problems
+    assert eg.missing_server_side_flags([*argv[:4], *argv[6:]]) == [], "the green twin: disabled stays disabled"
 
 
 def test_red_case_a_live_codex_attempt_on_an_open_network_without_egress_is_refused(
@@ -307,6 +322,10 @@ if plant != "none":
 sys.exit(code)
 '''
 
+_LEAK_LINE = {"type": "response_item", "payload": {
+    "type": "message", "role": "assistant", "content": [{"type": "output_text",
+                                                          "text": "see /home/someone-else/notes.txt"}]}}
+
 _PLANTS = {
     "mcp-github": {"type": "response_item", "payload": {
         "type": "mcp_tool_call", "server": "github@openai-curated-remote", "name": "get_file_contents"}},
@@ -319,7 +338,14 @@ _PLANTS = {
 def _shim_argv(tmp_path: Path, plant: str, fake: list[str]) -> list[str]:
     shim = tmp_path / "server_side_shim.py"
     shim.write_text(_SHIM.format(pinned=list(eg.CODEX_SERVER_SIDE_OFF)), encoding="utf-8")
-    planted = "none" if plant == "none" else json.dumps(_PLANTS[plant])
+    if plant == "none":
+        planted = "none"
+    elif plant.endswith("+leak"):
+        # The plant AND a line the leak check refuses, so the transcript is
+        # never retained: the census must still see the plant (counter-model).
+        planted = json.dumps(_PLANTS[plant.removesuffix("+leak")]) + "\n" + json.dumps(_LEAK_LINE)
+    else:
+        planted = json.dumps(_PLANTS[plant])
     return [sys.executable, str(shim), planted, *eg.CODEX_SERVER_SIDE_OFF, *fake]
 
 
@@ -364,6 +390,7 @@ def test_green_control_a_clean_live_attempt_is_graded_and_its_proxy_log_is_captu
     ("mcp-github", "response_item/mcp_tool_call"),
     ("remote-plugin-call", "mcp__github__get_file_contents"),
     ("web-search", "response_item/web_search_call"),
+    ("remote-plugin-call+leak", "mcp__github__get_file_contents"),
 ])
 def test_red_control_a_server_side_tool_in_the_transcript_is_not_credited_and_stays_accounted(
     store: Path, base: Path, docker_state: Path, tmp_path: Path, plant: str, named: str,
@@ -395,3 +422,90 @@ def test_the_census_reads_call_names_not_only_line_types() -> None:
         "response_item/function_call:mcp__github__get_file_contents"]
     clean = json.dumps({"type": "response_item", "payload": {"type": "custom_tool_call", "name": "exec"}}).encode()
     assert at.server_side_tool_uses(clean, {"response_item/custom_tool_call": 1}) == []
+
+
+def test_a_retention_refused_transcript_is_still_inspected_by_the_census() -> None:
+    """The plant's twin without the census: the leak line really does stop
+    retention (so the +leak red case above tests the path it claims to)."""
+    from skillc import demo
+    assert demo.leak_check_text(json.dumps(_LEAK_LINE)), "the planted leak line must trip the leak check"
+
+
+def test_a_declared_local_mcp_server_is_not_server_side_but_an_undeclared_one_is() -> None:
+    """Counter-model review: an MCP server skillc itself configured runs in
+    the container; only an undeclared one (a remote plugin) is server-side."""
+    lines = b"\n".join(json.dumps(x).encode() for x in (
+        {"type": "response_item", "payload": {"type": "mcp_tool_call", "server": "local", "name": "read"}},
+        {"type": "response_item", "payload": {"type": "function_call", "name": "mcp__local__read_file"}},
+    ))
+    assert at.server_side_tool_uses(lines, None, frozenset({"local"})) == []
+    assert at.server_side_tool_uses(lines, None) == [
+        "response_item/function_call:mcp__local__read_file", "response_item/mcp_tool_call"]
+
+
+def test_red_case_an_attempt_whose_transcript_was_never_inspected_is_not_credited(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No census result is never a clean one."""
+    real = at._make_observe_before_teardown
+
+    def without_census(**kwargs: object) -> object:
+        hook = real(**kwargs)  # type: ignore[arg-type]
+
+        def dropped(backend: object, handle: object) -> dict[str, object]:
+            out = dict(hook(backend, handle))  # type: ignore[arg-type]
+            out.pop("server_side_tool_uses")
+            return out
+        return dropped
+
+    monkeypatch.setattr(at, "_make_observe_before_teardown", without_census)
+    record = _live_attempt(store, base, docker_state, tmp_path, "none")
+    assert record["grading_blocked_reason"] == "not credited: server-side tool inspection unavailable"
+
+
+def test_the_proxy_summary_keeps_upstream_failures_apart_from_denials() -> None:
+    log = b"\n".join(json.dumps(x).encode() for x in (
+        {"event": "start", "digest": "sha256:x"},
+        {"target": "chatgpt.com:443", "decision": "upstream-failed: TimeoutError"},
+        {"target": "github.com:443", "decision": "denied"},
+        {"target": "chatgpt.com:443", "decision": "allowed"},
+    ))
+    summary = eg.summarize_log(log)
+    assert summary["denied"] == {"github.com:443": 1}
+    assert summary["upstream_failed"] == {"chatgpt.com:443": 1}
+    assert summary["allowed"] == {"chatgpt.com:443": 1}
+
+
+def test_a_trigger_channel_failure_after_egress_leaves_nothing_behind(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def refused(self: object, name: str, attempt_id: str) -> object:
+        raise BackendUnavailable("trigger socket refused (fault injection)")
+
+    monkeypatch.setattr(d.DockerBackend, "_start_trigger_channel", refused)
+    with pytest.raises(BackendUnavailable, match="trigger socket refused"):
+        _egress_backend(base, docker_state).prepare("a-trigger-fail")
+    assert not list((docker_state / "networks").glob("*.json"))
+    assert not any(p.name.endswith("-proxy.json") for p in docker_state.glob("*.json"))
+
+
+def test_a_network_create_that_takes_effect_then_times_out_is_still_removed(base: Path, docker_state: Path) -> None:
+    docker_state.mkdir(parents=True, exist_ok=True)
+    (docker_state / ".hang-network-create").write_text("3")
+    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state),
+                              daemon_timeout=1.0, egress=True)
+    with pytest.raises(BackendUnavailable, match="create internal network"):
+        backend.prepare("a-net-hang")
+    time.sleep(2.5)  # let the fake finish answering, as a slow daemon would
+    assert not list((docker_state / "networks").glob("*.json")), "the network the timed-out create made was left"
+
+
+def test_teardown_is_not_confirmed_while_the_attempt_network_remains(base: Path, docker_state: Path) -> None:
+    backend = _egress_backend(base, docker_state)
+    handle = backend.prepare("a-net-stuck")
+    (docker_state / ".refuse-network-rm").write_text("")
+    backend.destroy(handle)
+    assert backend.confirm_absent(handle) is d.Confirmation.NOT_CONFIRMED
+    (docker_state / ".refuse-network-rm").unlink()
+    backend.destroy(handle)
+    assert backend.confirm_absent(handle) is d.Confirmation.CONFIRMED
