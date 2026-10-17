@@ -8,6 +8,14 @@ and version plan.
 
 ## [Unreleased]
 
+- **Research: how to build #270's clean-project case, and where Kyle fits** (#431).
+  `docs/research/clean-project-case-2026-10.md` checks the benchmark literature for cases where the
+  right action is to change nothing (FixedBench, ImpossibleBench, BouncerBench, SkillsBench, the
+  SWE-bench family), with pins and licences. It recommends two sibling clean-project tasks that share
+  the must-act tasks' goal text and run on the existing `fresh` actor, so no frozen #375 identity
+  moves. It also ranks where Kyle could help skillc's evals, with the contamination risks. Research
+  only; nothing was run.
+
 - **The gate-witness tests' attempt limit is 60s, not 15s** (#437). Under
   `make verify`'s parallel load, `run_case`'s 15s whole-attempt limit (and the
   scripted actor's equal socket wait, #407) could expire before an honest
