@@ -25,6 +25,37 @@ and version plan.
   of tags. New real-Docker floor file `tests/test_real_docker_cleanup_live.py`
   (floor 9 -> 10, runner population 14 -> 16 tests): a `build.py` image
   survives the cleanup, and the runner's own dangling image is still removed.
+- **A baseline trial's skill-evidence is refused as a contaminated baseline**
+  (#427, the records half of #424). A trial whose `subject.digest` is the
+  baseline (sha256 of zero bytes) installs no skills. A `skill-evidence` entry
+  crediting a skill there validated clean, because the receipt-based check
+  skips an attempt with no receipt and passes a receipt listing installed paths
+  under the baseline identity. `ledger-binding` now refuses every such entry,
+  naming the baseline and the skill path. `records.BASELINE_SUBJECT_DIGEST` is
+  the one definition and `matched_pilot.BASELINE_SUBJECT_DIGEST` aliases it. The
+  new bad control (`ledger-binding/bad/skill-evidence-baseline-trial`) passes
+  every rule on the pre-change code, and removing the rule leaves selftest
+  BLIND on it. No committed bundle carries skill-evidence on a baseline trial.
+- **A daemon-refused `execute()` reads as never started, not as a failed run**
+  (#317). #304's entry guard is a check-then-act: the container can stop
+  between `_inspect()` and the real `docker exec`, and the daemon's refusal
+  then exited nonzero exactly like a subject that ran and failed, a fabricated
+  execution. `execute()` now runs its argv behind a no-op prelude,
+  `sh -c 'exec "$@"' skillc-exec-<uuid> ARGV`, which writes nothing and only
+  names the call in the daemon's own exec events. After a nonzero exit it
+  becomes `attempt-not-running` only when all of these hold: the container is
+  `exited` or `dead`; the `docker events` answer parses within a byte bound and
+  one deadline, with every exec command readable; it holds this call's own
+  forwarding-probe exec (the probe now carries a per-call token too) and the
+  container's `die` after it; and no exec in the window carries the token. Every other answer keeps the
+  real result: a daemon whose events are dropped or reformatted can only fail
+  to reclassify, never misreclassify. Two designs were rejected in review on
+  the way: stderr wording (subject output), and an in-container marker (the
+  subject can delete it and stop its own `--init` container). The fake CLI
+  gains `events`, `.stop-before-exec-NAME` and `.stop-after-exec-NAME`. The
+  red case fails on the old code with `('exited', 1)`. Each proof's control
+  goes red when that proof is mutated away. Real-daemon proof: #426.
+
 - **The host import probe only sees the declared project** (#365). A
   `python-import` probe with `uv_project` ran `uv run --project <home>/<proj>`
   with the operator's whole environment. With `UV_PROJECT_ENVIRONMENT` pointing

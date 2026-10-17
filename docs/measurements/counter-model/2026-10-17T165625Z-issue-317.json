@@ -1,0 +1,25 @@
+{
+  "branch": "issue-317-close-dockerbackend-execute-s-check-then-act-windo",
+  "counts": {
+    "accepted": 5,
+    "deferred": 0,
+    "rejected": 1
+  },
+  "head": "83d5ec963a3aa3df6b1e9a7892948a71096da99b",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "317",
+  "passes": 2,
+  "recorded_at": "2026-10-17T16:56:25Z",
+  "red_cases": {
+    "already_covered": 6,
+    "proposed": 13
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/17/rollout-2026-10-17T12-52-32-01a14ac7-858d-7f02-9d01-d72f3c9c84ae.jsonl",
+    "thread_id": "01a14ac7-858d-7f02-9d01-d72f3c9c84ae"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
