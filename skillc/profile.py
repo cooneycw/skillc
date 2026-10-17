@@ -39,7 +39,7 @@ import sys
 import tempfile
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from . import materialize as m
@@ -1720,10 +1720,18 @@ def skill_digest_pins(inventory: dict[str, Any]) -> list[dict[str, str]]:
         name = skill.get("name") if isinstance(skill, dict) else None
         if not isinstance(skill, dict):
             raise Refused(f"inventory skill entry {skill!r} is not an object")
+        owned = [f for f in skill.get("files", []) if isinstance(f, dict) and f.get("owner") == f"skill:{name}"]
+        # The ENTRY point, not any SKILL.md that happens to end in the skill's
+        # directory name (counter-model review): `skills/x/examples/x/SKILL.md`
+        # also ends in `x/SKILL.md`. The entry's parent directory contains every
+        # file the skill owns; a nested example's parent cannot, because the
+        # real entry file itself lies outside it.
+        sources = [str(f.get("source", "")) for f in owned]
         destinations = [
-            f.get("destination") for f in skill.get("files", [])
-            if isinstance(f, dict) and f.get("owner") == f"skill:{name}"
-            and str(f.get("source", "")).endswith(f"{skill.get('directory')}/SKILL.md")
+            f.get("destination") for f in owned
+            if str(f.get("source", "")).endswith("/SKILL.md")
+            and PurePosixPath(str(f["source"])).parent.name == skill.get("directory")
+            and all(src.startswith(f"{PurePosixPath(str(f['source'])).parent}/") for src in sources)
         ]
         if len(destinations) != 1 or not isinstance(destinations[0], str):
             raise Refused(f"inventory skill {name!r} has {len(destinations)} SKILL.md file records, not exactly one")

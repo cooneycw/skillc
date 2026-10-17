@@ -220,6 +220,28 @@ def test_skill_digest_pins_refuse_an_inventory_missing_a_digest(tmp_path: Path) 
         p.skill_digest_pins(inv)
 
 
+def test_skill_digest_pins_pick_the_entry_point_not_a_nested_example(tmp_path: Path) -> None:
+    """Counter-model review of #354: a nested `examples/<dir>/SKILL.md` also
+    ends in `<dir>/SKILL.md`, so a suffix match refused a valid inventory with
+    "2 SKILL.md file records". The pin must stay on the real entry point."""
+    inv = _run(tmp_path, select="all")
+    want = p.skill_digest_pins(inv)
+    skill = inv["skills"][0]
+    entry = next(f for f in skill["files"] if f["destination"] == want[0]["path"])
+    parent = entry["source"].rsplit("/", 1)[0]
+    skill["files"].append({**entry, "source": f"{parent}/examples/{skill['directory']}/SKILL.md",
+                           "destination": entry["destination"].rsplit("/", 1)[0] + f"/examples/{skill['directory']}/SKILL.md"})
+    assert p.skill_digest_pins(inv) == want
+
+
+def test_skill_digest_pins_refuse_a_skill_with_no_entry_point(tmp_path: Path) -> None:
+    inv = _run(tmp_path, select="all")
+    skill = inv["skills"][0]
+    skill["files"] = [f for f in skill["files"] if not f["source"].endswith("/SKILL.md")]
+    with pytest.raises(p.Refused, match="0 SKILL.md file records"):
+        p.skill_digest_pins(inv)
+
+
 def test_skill_digest_pins_refuse_an_empty_inventory() -> None:
     with pytest.raises(p.Refused, match="nothing to pin"):
         p.skill_digest_pins({"skills": []})
