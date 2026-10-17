@@ -221,3 +221,16 @@ def test_run_real_docker_tells_its_pytest_that_it_holds_run_lock() -> None:
     script = (ROOT / "ci" / "real-docker" / "run-real-docker").read_text()
     pytest_block = script[script.index("env SKILLC_LIVE_TEST_BREAK="):script.index("uv run --no-sync pytest -m real_docker")]
     assert "SKILLC_REAL_DOCKER_RUN_LOCK_HELD=1" in pytest_block
+
+
+def test_the_closure_live_test_releases_its_build_only_under_run_lock() -> None:
+    """#414 third review pass: `release_build` is sound only with exclusion
+    from inventory through release. The closure live test runs in any gate
+    with a reachable daemon, so outside run-real-docker it must KEEP its build
+    (tagged, never dangling) rather than release it over a neighbour's."""
+    source = (ROOT / "tests" / "test_profile_closure_preflight_live.py").read_text()
+    helper = source[source.index("def _build_trial_image("):source.index("_REFUSAL_SYMPTOMS")]
+    gate = helper.index('os.environ.get("SKILLC_REAL_DOCKER_RUN_LOCK_HELD") != "1"')
+    keep = helper.index("return supply, lambda: None")
+    release = helper.index("builder.release_build(receipt, before)")
+    assert gate < keep < release, "the unlocked path must return before any release"

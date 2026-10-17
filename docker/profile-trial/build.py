@@ -478,7 +478,13 @@ def release_build(
     and keeps any untagged parent. `docker tag` moves an existing tag, so a tag
     that pointed at another image before the build is put back first - even
     when the build reused an image that already existed: a pre-existing tag
-    is never removed."""
+    is never removed.
+
+    PRECONDITION: the caller holds exclusion from `image_inventory` through
+    this call (run-real-docker's run.lock). Otherwise a neighbour can build the
+    same inputs in the window - same ID, same tag - and this would remove its
+    image; without exclusion, keep the build instead (tagged, it is never
+    dangling)."""
     image_id = receipt["image_id"]
     tag = image_tag(receipt)
     previous = before["tags"].get(tag)

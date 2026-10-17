@@ -177,6 +177,12 @@ def _build_trial_image(tag: str) -> tuple[rs.RuntimeSupply, Callable[[], None]]:
         receipt_path = Path(temp) / "receipt.json"
         receipt = builder.build_image(ROOT, receipt_path)
         supply = rs.RuntimeSupply.from_path(receipt_path)
+    # Release is sound only with exclusion from the inventory through the
+    # release: run-real-docker holds run.lock and says so. Anywhere else a
+    # neighbour may have built the same inputs (same ID, same tag) in the
+    # window, so the build is KEPT - tagged, it is never dangling (#414 review).
+    if os.environ.get("SKILLC_REAL_DOCKER_RUN_LOCK_HELD") != "1":
+        return supply, lambda: None
     return supply, lambda: builder.release_build(receipt, before)
 
 
