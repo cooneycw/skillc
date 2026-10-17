@@ -7,9 +7,41 @@ do not yet pass the runnable declaration contract.
 
 The two declarations are scoped transplants from parked
 `prep-287-pilot-declarations` tip `571d763`. That branch and its history remain
-unchanged. Its mutation evidence, statistical/cost scripts, main-study skeleton
-and tests are pending transplant/revalidation, not delivered here. An earlier
-three-arm proxy cost table is not the cost estimate for these two pilots.
+unchanged. Its mutation evidence, statistical/cost scripts and their tests were
+transplanted and revalidated by #287's P1 (below). Its main-study skeleton was
+not transplanted (superseded by the two declarations).
+
+## P1: sizing, cost inputs and mutation evidence at 86641e8
+
+The pin is CPP `86641e8` (orchestrator ruling,
+[#287](https://github.com/cooneycw/skillc/issues/287#issuecomment-6240635285)).
+
+- **Statistics:** `fisher_exact.py` (exact one-sided Fisher) and
+  `power_simulation.py` (the pilot-to-main sizing rule P1-P6, Jeffreys, fixed
+  seed) are unchanged from `571d763`.
+- **Power and cost table:** `power_cost_table.py`/`.json` now sizes the TWO
+  separate 2-arm pilot declarations (40 attempts at n=10, never pooled). Token
+  input is MEASURED and cited: #237's uptake-study report, 60 attempts, mean
+  140,500 tokens per attempt, largest cell 175,000. #237 ran a level-1 task, not
+  `gate-stops-early`, so this is the nearest measured figure for this client,
+  model and effort, not an estimate for this task.
+  `tests/test_calibration_287_power_table.py` ties each cited cell to the
+  report. **Wall time is UNKNOWN** until #375's final run posts timings. There
+  is no dollar figure: the cost cap is superseded (owner,
+  [comment 6021089903](https://github.com/cooneycw/skillc/issues/287#issuecomment-6021089903)).
+- **Mutation evidence, retaken at 86641e8:**
+  `evidence/discrimination-mutation-diagnose.json` (built by
+  `evidence/scan_mutation_closure.py`). The removed sentence occurs exactly once
+  in `flow-check/reference.md`, and removing it reproduces the declared
+  `mutated_digest` `sha256:edb26e56…`. `skillc profile diagnose` reports 0
+  problems on both trees (necessary, not sufficient). The occurrence scan over
+  the profile's 37-file closure finds the sentence in the intact tree (positive
+  control, 15 hits). In the degraded tree, the remaining 12 hits are all
+  non-agent-facing plumbing, with 0 agent-facing leftovers, so the claim holds.
+  The degraded snapshot was built with `degrade-subject --checkout`, which labels
+  its source `snapshot:`. The declaration's derived label assumes the `git:`
+  source, so the run-time mutation check (P2) must build from the pinned
+  revision.
 
 ## Two different questions
 

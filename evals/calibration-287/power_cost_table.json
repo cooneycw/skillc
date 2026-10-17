@@ -1,0 +1,79 @@
+{
+  "_comment": "Computed by evals/calibration-287/power_cost_table.py (run it to reproduce - math.comb is exact integer arithmetic, no approximation). alpha=0.05, one-sided Fisher's exact, better arm pinned at n/n (the most favorable observable outcome). Token inputs are MEASURED and cited; wall time is UNKNOWN until #375's final run posts timings; no dollar figure (cost cap superseded, #287 comment 6021089903).",
+  "alpha": 0.05,
+  "measured_token_cells": [
+    [
+      "intended-use/published",
+      20,
+      175000
+    ],
+    [
+      "intended-use/rewritten",
+      20,
+      137000
+    ],
+    [
+      "near-miss/published",
+      10,
+      103000
+    ],
+    [
+      "near-miss/rewritten",
+      10,
+      116000
+    ]
+  ],
+  "measured_token_source": "evals/uptake-study/report.md results table (#237, run 2026-10-04, 60 attempts)",
+  "measured_mean_tokens_per_attempt": 140500,
+  "measured_upper_tokens_per_attempt": 175000,
+  "wall_seconds_per_attempt": "UNKNOWN",
+  "wall_seconds_source": "UNKNOWN: pending #375's final-run timings",
+  "declarations": 2,
+  "arms_per_declaration": 2,
+  "rows": [
+    {
+      "n_per_arm": 10,
+      "better_arm_passes": 10,
+      "max_worse_arm_passes_below_p05": 6,
+      "p_at_max_worse_arm_passes": 0.043343653250773995,
+      "p_at_next_worse_arm_pass": 0.10526315789473684,
+      "total_attempts_both_declarations": 40,
+      "tokens_at_measured_mean": 5620000,
+      "tokens_at_measured_upper": 7000000,
+      "wall_seconds": "UNKNOWN"
+    },
+    {
+      "n_per_arm": 15,
+      "better_arm_passes": 15,
+      "max_worse_arm_passes_below_p05": 11,
+      "p_at_max_worse_arm_passes": 0.04980842911877394,
+      "p_at_next_worse_arm_pass": 0.11206896551724138,
+      "total_attempts_both_declarations": 60,
+      "tokens_at_measured_mean": 8430000,
+      "tokens_at_measured_upper": 10500000,
+      "wall_seconds": "UNKNOWN"
+    },
+    {
+      "n_per_arm": 20,
+      "better_arm_passes": 20,
+      "max_worse_arm_passes_below_p05": 15,
+      "p_at_max_worse_arm_passes": 0.02356202356202356,
+      "p_at_next_worse_arm_pass": 0.05301455301455302,
+      "total_attempts_both_declarations": 80,
+      "tokens_at_measured_mean": 11240000,
+      "tokens_at_measured_upper": 14000000,
+      "wall_seconds": "UNKNOWN"
+    },
+    {
+      "n_per_arm": 30,
+      "better_arm_passes": 30,
+      "max_worse_arm_passes_below_p05": 25,
+      "p_at_max_worse_arm_passes": 0.026092774308652988,
+      "p_at_next_worse_arm_pass": 0.056199821587867974,
+      "total_attempts_both_declarations": 120,
+      "tokens_at_measured_mean": 16860000,
+      "tokens_at_measured_upper": 21000000,
+      "wall_seconds": "UNKNOWN"
+    }
+  ]
+}
