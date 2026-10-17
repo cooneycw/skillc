@@ -729,10 +729,11 @@ def test_the_default_reply_bound_is_the_capture_bound_and_never_a_silent_cut(str
         backend=_FakeBackend(results={("lint",): at_bound}), handle=None, limits=limits,
         gate_exclusivity=False, exclusivity_basis="",
     )
-    reply = witness.decide({"op": "run_gate", "gate": "lint"})
-    assert isinstance(reply[stream], str) and reply[stream].encode() == whole
+    forwarded = witness.decide({"op": "run_gate", "gate": "lint"})[stream]
+    assert isinstance(forwarded, str) and forwarded.encode() == whole
 
-    capped = dataclasses.replace(at_bound, **{f"{stream}_truncated": True})
+    capped = (dataclasses.replace(at_bound, stdout_truncated=True) if stream == "stdout"
+              else dataclasses.replace(at_bound, stderr_truncated=True))
     witness = GateWitness(
         declared_gates={"lint": ["lint"]}, tree_digest_fn=_fixed_tree_digest,
         backend=_FakeBackend(results={("lint",): capped}), handle=None, limits=limits,
