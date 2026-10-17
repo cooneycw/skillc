@@ -22,6 +22,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
+from conftest import stamp_approval
 
 from skillc import calibration, verify
 from skillc import trial as t
@@ -174,7 +175,7 @@ def test_red_the_same_declaration_without_its_approval_is_refused() -> None:
 def _mutated(**changes: object) -> dict[str, object]:
     data = copy.deepcopy(_manifest())
     data.update(changes)
-    return data
+    return stamp_approval(data)
 
 
 def _arms(**treatment_extra: object) -> list[object]:
@@ -220,7 +221,7 @@ def test_a_total_cap_that_cannot_cover_the_schedule_is_refused() -> None:
 def _approved() -> dict[str, object]:
     data = _mutated(approval={"by": "owner", "at": "2026-10-01", "attempts_per_arm": 4})
     data["shared"]["image"]["digest"] = "sha256:" + "ab" * 32  # type: ignore[index]
-    return data
+    return stamp_approval(data)
 
 
 def test_an_approved_declaration_with_every_identity_recorded_is_authorized() -> None:
@@ -297,7 +298,7 @@ def test_an_approval_that_explicitly_names_the_matching_fixture_is_authorized() 
     data = _approved()
     data["task"]["fixture"] = "wrong/pipeline-red"  # type: ignore[index]
     data["approval"]["task_fixture"] = "wrong/pipeline-red"  # type: ignore[index]
-    calibration.require_approved(calibration.parse_declaration(data), ROOT)
+    calibration.require_approved(calibration.parse_declaration(stamp_approval(data)), ROOT)
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
@@ -354,7 +355,7 @@ def _at_n(n: int) -> dict[str, object]:
     data["shared"]["per_attempt_seconds"] = 1200  # type: ignore[index]
     data["shared"]["total_seconds"] = 1200 * n * len(names)  # type: ignore[index]
     data["approval"]["attempts_per_arm"] = n  # type: ignore[index]
-    return data
+    return stamp_approval(data)
 
 
 def test_an_attempts_per_arm_above_the_old_cap_now_validates_and_authorizes() -> None:
