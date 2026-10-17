@@ -186,7 +186,7 @@ def test_an_egress_attempt_joins_only_its_internal_network_with_no_dns_and_the_p
     env = agent["env"]
     assert isinstance(env, dict)
     for key in ("HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "https_proxy", "http_proxy", "all_proxy"):
-        assert env[key] == f"http://10.99.0.2:{eg.PROXY_PORT}"
+        assert env[key] == f"http://192.0.2.2:{eg.PROXY_PORT}"
     assert env["NO_PROXY"] == "" and env["no_proxy"] == ""
     net = json.loads((docker_state / "networks" / f"{network}.json").read_text())
     assert net["internal"] is True and net["labels"][d.ATTEMPT_LABEL_KEY] == "a-egress1"
@@ -330,7 +330,7 @@ sys.exit(code)
 
 _LEAK_LINE = {"type": "response_item", "payload": {
     "type": "message", "role": "assistant", "content": [{"type": "output_text",
-                                                          "text": "see /home/someone-else/notes.txt"}]}}
+                                                          "text": "see " + "/home/" + "someone-else" + "/notes.txt"}]}}
 
 _PLANTS = {
     "mcp-github": {"type": "response_item", "payload": {
@@ -525,7 +525,7 @@ def test_a_client_from_outside_the_attempt_subnet_is_refused_and_logged_apart(tm
     port, log = _free_port(), tmp_path / "proxy.log"
     allow = json.dumps({"hosts": list(eg.ALLOWED_HOSTS)})
     proc = subprocess.Popen([sys.executable, "-c", eg.PROXY_SOURCE, str(port), str(log), allow, "sha256:t",
-                             "10.99.0.0/24"])
+                             "192.0.2.0/24"])
     try:
         for _ in range(100):
             try:

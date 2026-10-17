@@ -459,7 +459,7 @@ def cmd_inspect(state_dir: Path, rest: list[str]) -> int:
         # #442: the container's address on one named network - empty when it
         # has not joined it, as real docker prints for a missing key.
         network = json.loads(template.split("Networks ", 1)[1].split(")", 1)[0])
-        print("10.99.0.2" if network in data.get("networks", []) else "")
+        print("192.0.2.2" if network in data.get("networks", []) else "")
         return 0
     if "{{.Image}}" in rest:
         # The image id the container was CREATED from (#12): the same
@@ -1126,7 +1126,7 @@ def cmd_network(state_dir: Path, rest: list[str]) -> int:
             print(f"Error response from daemon: network {name} not found", file=sys.stderr)
             return 1
         if "-f" in args:
-            print("10.99.0.0/24")  # the only template asked of a network: its subnet
+            print("192.0.2.0/24")  # the only template asked of a network: its subnet
         else:
             print(_network_file(state_dir, name).read_text(encoding="utf-8"))
         return 0
