@@ -8,6 +8,17 @@ and version plan.
 
 ## [Unreleased]
 
+- **A false "failed" claim is now a committed control for both #270 tasks**
+  (#419, from #376 item 4). Every committed "reported failed" case was a
+  genuine failure, so nothing showed that a report calling a PASSED stage
+  `failed` is rejected. Both `qualify.py` files gain the case "every stage
+  genuinely passed, typecheck reported failed: VIOLATED", next to its
+  SATISFIED healthy twin. They also gain a broken control,
+  `failed_claim_believed`, that takes any reported failure as true. It is
+  refused only if it shows SATISFIED on that case. With the graders' comparison
+  mutated to never count a `failed` claim as a violation, qualification fails
+  on the new case. Graders, `grader.json` and campaign-375's frozen
+  identities are unchanged.
 - **`skill-evidence` digests can be pinned, and a stale one is refused**
   (Closes #354, follow-up to #268). A trial may declare `skill_digests`, the
   `body_digest`/`description_digest` it plans to test for each skill path.
