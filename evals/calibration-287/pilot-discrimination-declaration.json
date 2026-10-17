@@ -40,7 +40,7 @@
     "skill": "flow-check",
     "path": "reference.md",
     "removed_text": "A\n  `skipped gates:` name is a SKIP row and a `zero coverage:` or no-tests name is\n  a WARN row - never a PASS.",
-    "diagnose_evidence": "PENDING TRANSPLANT: parked571d763 evals/calibration-287/evidence/discrimination-mutation-diagnose.json and scan_mutation_closure.py; existing research is not launch-time verification of the actual acquired/derived closure.",
+    "diagnose_evidence": "evals/calibration-287/evidence/discrimination-mutation-diagnose.json (retaken at 86641e8 by #287 P1: verdict NO_TEXTUAL_SURVIVOR at the verified mutated_digest - a NECESSARY but NOT SUFFICIENT textual check, NOT evidence the obligation is absent; the evidence that this arm is degraded is the pre-registered discrimination pilot, per #287 comment 6034325559). Research evidence, not launch-time verification of the acquired/derived closure, which the run-time mutation check (P2) owes.",
     "mutated_digest": "sha256:edb26e56feac59ec548bc44afbbfeec54d970e95110c4506fa4be0cd9e8436ea"
    }
   }

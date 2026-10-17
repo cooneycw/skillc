@@ -8,6 +8,21 @@ and version plan.
 
 ## [Unreleased]
 
+- **#287 P1: sizing, measured cost inputs and mutation evidence at CPP 86641e8**
+  (Refs #287). This transplants the parked `prep-287-pilot-declarations@571d763`
+  statistics (exact one-sided Fisher, the P1-P6 pilot-to-main sizing simulation)
+  and its mutation scan onto main. The power and cost table now sizes the two
+  separate 2-arm pilot declarations: 40 attempts at n=10. Its token input is
+  MEASURED and cited (#237: mean 140,500 tokens per attempt; the 175,000 largest
+  cell mean is a scenario, not a bound), with
+  a test tying every cited cell to #237's report. Live wall time stays UNKNOWN; #375's final run supplies a
+  SCRIPTED per-attempt floor (median 36 s). There is no dollar figure. The degraded arm's mutation
+  evidence is retaken at the ruled pin `86641e8`: the declared `mutated_digest`
+  reproduces, and the rebuilt scan (all 97 installed files, verdicts
+  NO_TEXTUAL_SURVIVOR/SURVIVES/NEEDS_REVIEW/UNKNOWN) reports NO_TEXTUAL_SURVIVOR, a
+  necessary but not sufficient textual check. The pre-registered discrimination
+  pilot is the evidence that the degraded arm is degraded. The original scan reported
+  success on a missing tree, a pre-existing copy and an incomplete diagnose.
 - **A controller-owned issue and PR fixture service** (#276). flow:auto talks
   to GitHub throughout, and a trial has no network or `gh`. A file-backed fake
   inside the container would be subject-writable. `skillc/fixture_service.py`

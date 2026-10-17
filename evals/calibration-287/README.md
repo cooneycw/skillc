@@ -7,9 +7,58 @@ do not yet pass the runnable declaration contract.
 
 The two declarations are scoped transplants from parked
 `prep-287-pilot-declarations` tip `571d763`. That branch and its history remain
-unchanged. Its mutation evidence, statistical/cost scripts, main-study skeleton
-and tests are pending transplant/revalidation, not delivered here. An earlier
-three-arm proxy cost table is not the cost estimate for these two pilots.
+unchanged. Its mutation evidence, statistical/cost scripts and their tests were
+transplanted and revalidated by #287's P1 (below). Its main-study skeleton was
+not transplanted (superseded by the two declarations).
+
+## P1: sizing, cost inputs and mutation evidence at 86641e8
+
+The pin is CPP `86641e8` (orchestrator ruling,
+[#287](https://github.com/cooneycw/skillc/issues/287#issuecomment-6240635285)).
+
+- **Statistics:** `fisher_exact.py` (exact one-sided Fisher) and
+  `power_simulation.py` (the pilot-to-main sizing rule P1-P6, Jeffreys, fixed
+  seed) are unchanged from `571d763`.
+- **Power and cost table:** `power_cost_table.py`/`.json` now sizes the TWO
+  separate 2-arm pilot declarations (40 attempts at n=10, never pooled). Token
+  input is MEASURED and cited: #237's uptake-study report, 60 attempts, mean
+  140,500 tokens per attempt; the largest cell mean, 175,000, is reported as a scenario, not an upper bound (a true per-attempt bound is UNKNOWN). #237 ran a level-1 task, not
+  `gate-stops-early`, so this is the nearest measured figure for this client,
+  model and effort, not an estimate for this task.
+  `tests/test_calibration_287_power_table.py` ties each cited cell to the
+  report. **Live wall time is UNKNOWN.** #375's pre-registered final run gives
+  SCRIPTED per-attempt seconds on these exact tasks (42 rows: min 32.6 s, median
+  36.15 s, max 79.9 s; `evidence/l375-final-scripted-timings.txt`), a floor that
+  excludes model time, used as exactly that. There
+  is no dollar figure: the cost cap is superseded (owner,
+  [comment 6021089903](https://github.com/cooneycw/skillc/issues/287#issuecomment-6021089903)).
+- **Mutation evidence, retaken at 86641e8:**
+  `evidence/discrimination-mutation-diagnose.json` (built by
+  `evidence/scan_mutation_closure.py`), verdict **NO_TEXTUAL_SURVIVOR**.
+  - **What it measures, and only that:** the removed sentence occurs exactly
+    once in `flow-check/reference.md`, and the degraded file hashes to the
+    declared `mutated_digest` `sha256:edb26e56…` (verified, or the verdict is
+    UNKNOWN). Both `skillc profile diagnose` reports are complete with 0
+    problems. Across all 97 installed files the inventory declares (skill files,
+    dependencies, the inline synthetic marker), no full copy, neither of the two
+    removed clauses, and no 3+-word fragment of the removed sentence remains in
+    any non-exempt file, on whitespace-normalized text. Phrase hits outside that
+    are exempt plumbing (exempt only while its bytes match the inventory digest)
+    or two reviewed sibling lines, each bound to its preceding line.
+  - **What it does NOT show:** that the obligation is absent. A text scan cannot
+    rule out a paraphrase or another surface form; each of three counter-model
+    passes found a new one. NO_TEXTUAL_SURVIVOR is a necessary but NOT
+    sufficient check.
+  - **The evidence that the degraded arm is degraded** is the pre-registered
+    discrimination pilot (P1-P6: no main study if no difference is detectable),
+    per the risk note in [#287 comment 6034325559](https://github.com/cooneycw/skillc/issues/287#issuecomment-6034325559).
+  - The scan's verdicts are NO_TEXTUAL_SURVIVOR, SURVIVES, NEEDS_REVIEW and
+    UNKNOWN, each with a committed case in
+    `tests/test_calibration_287_scan_mutation_closure.py`.
+  The degraded snapshot was built with `degrade-subject --checkout`, which labels
+  its source `snapshot:`. The declaration's derived label assumes the `git:`
+  source, so the run-time mutation check (P2) must build from the pinned
+  revision.
 
 ## Two different questions
 
