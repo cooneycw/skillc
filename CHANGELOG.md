@@ -18,6 +18,39 @@ and version plan.
   one good bundle, three bad and one good ledger; each check was removed in
   turn to confirm its case goes blind. The ledger-pin approach comes from the
   unmerged first #268 run.
+- **The witness envelope a result was graded against is retained** (#418).
+  A witnessed grade sealed `{"witness": ..., "graded_tree_digest": ...}`,
+  passed it to grading, and recorded only its digest. The bytes were never
+  stored, so nothing in the evidence store could show which gate runs, tree
+  digests or stage outcomes decided `flow-check-honest`. On #315's runner, a
+  42-row campaign's run directory held no object for any recorded digest.
+  `verify` now stores every recorded trusted observation in the experiment's
+  `objects/` under its digest, inside the grading lock and before the result,
+  `read_trusted_observation` returns the exact verified bytes (a service log
+  need not be JSON), and `read_witness_envelope` decodes a gate witness's
+  envelope. Both refuse when the object is absent, tampered or a symlink, or
+  when a recorded digest is malformed or the two disagree.
+  `trial.put_object`/`read_object` are public wrappers over the existing
+  write-once, hash-checked object helpers. The retention test fails on the old
+  code with "the store holds no envelope for the recorded digest". A
+  production-path test re-derives each gate run's `tree_digest_at_start`,
+  stages and `graded_tree_digest` from the store alone. A regrade still carries
+  no witness, and a test pins that. Results stored before this change remain
+  digest-only.
+- **A failing gate's verdict reaches the subject** (#404). `GateWitness` cut
+  each forwarded stream at a default 4,096 bytes, silently, and production used
+  that default. The real `flow-finish-gate.sh` prints its `FLOW_FINISH_GATE:`
+  verdict as its last line, after the runner's JSON report, so any run past
+  that size reached the subject with no verdict and no sign anything was cut.
+  Two small failing assertions already make 4,324 bytes. The default reply now
+  forwards each stream up to the capture bound the gate ran under
+  (`Limits.max_captured_stdout_bytes`/`max_captured_stderr_bytes`), and a
+  capture that hit that bound is still refused, never forwarded as a prefix.
+  The constant is gone; an explicit `reply_byte_cap=` remains for tests. The
+  witness test fails on the old default at exactly 4,096 bytes, and a
+  production-path test (`run_one_attempt`) has the subject check that its plan
+  reply ends in the verdict: it exits 1 on the old code, and a wrong-tail
+  control proves the subject's check can fail.
 - **A failed `prepare()` always raises `BackendUnavailable`** (#416). When
   `docker run -d` timed out or exited nonzero, `DockerBackend.prepare()` ran a
   bounded best-effort `docker rm -f` before raising. That cleanup was unguarded,
