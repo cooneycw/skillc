@@ -1011,24 +1011,39 @@ class DockerBackend:
             # socket with nothing ever going to mount it is exactly that.
             if channel is not None:
                 channel.close()
-            subprocess.run(
-                [*self.docker_bin, "rm", "-f", name],
-                capture_output=True, env=env, check=False, timeout=self.daemon_timeout,
-            )
+            cleanup_note = self._best_effort_rm(name, env)
             raise BackendUnavailable(
-                f"docker run failed to start a container for {attempt_id!r}: {exc}"
+                f"docker run failed to start a container for {attempt_id!r}: {exc}{cleanup_note}"
             ) from exc
         if started.returncode != 0:
             if channel is not None:
                 channel.close()
-            subprocess.run(
-                [*self.docker_bin, "rm", "-f", name],
-                capture_output=True, env=env, check=False, timeout=self.daemon_timeout,
-            )
+            cleanup_note = self._best_effort_rm(name, env)
             raise BackendUnavailable(
-                f"docker run failed to start a container for {attempt_id!r}: {started.stderr.strip()}"
+                f"docker run failed to start a container for {attempt_id!r}: {started.stderr.strip()}{cleanup_note}"
             )
         return _Handle(attempt_id=attempt_id, name=name, env=env, trigger_channel=channel)
+
+    def _best_effort_rm(self, name: str, env: Mapping[str, str]) -> str:
+        """prepare()'s failure-path cleanup: make sure no container is left
+        behind under `name`, bounded like every other daemon call. Returns ""
+        when the call completed, else a clause for the `BackendUnavailable`
+        message. Issue #416: the call used to be unguarded, so a cleanup that
+        HIT its bound raised `TimeoutExpired` out of prepare() in place of the
+        `BackendUnavailable` its contract promises - on exactly the slow daemon
+        the cleanup exists for. A nonzero exit is reported too, except "No such
+        container": `run` that failed before creating one is the ordinary case,
+        and a daemon that cannot remove a container it DID create is not."""
+        try:
+            removed = subprocess.run(
+                [*self.docker_bin, "rm", "-f", name],
+                capture_output=True, text=True, env=env, check=False, timeout=self.daemon_timeout,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return f"; cleanup 'docker rm -f {name}' also failed: {exc}"
+        if removed.returncode != 0 and "No such container" not in removed.stderr:
+            return f"; cleanup 'docker rm -f {name}' also failed: exit {removed.returncode}: {removed.stderr.strip()}"
+        return ""
 
     def _start_trigger_channel(
         self, name: str, attempt_id: str,

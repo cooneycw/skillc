@@ -3053,6 +3053,95 @@ def test_a_fake_setup_call_slower_than_the_production_daemon_timeout_still_succe
         backend.destroy(handle)
 
 
+#: Issue #416's tests make the fake daemon slower than prepare()'s bound by
+#: construction. 3.0s against 2.0s is a deliberately wide 1.5x ratio (#412's
+#: timing family): the bound must fire on the delayed subcommand, and the
+#: undelayed probe and image check must still finish inside it on a loaded host.
+_PREPARE_BOUND = 2.0
+_SLOWER_THAN_BOUND = 3.0
+
+
+def _slow(docker_state: Path, subcommand: str) -> None:
+    docker_state.mkdir(parents=True, exist_ok=True)
+    (docker_state / f".delay-{subcommand}").write_text(str(_SLOWER_THAN_BOUND), encoding="utf-8")
+
+
+def test_prepare_still_raises_backend_unavailable_when_the_cleanup_rm_also_times_out(
+    base: Path, docker_state: Path,
+) -> None:
+    """Regression for issue #416: `run -d` times out, then the best-effort
+    `rm -f` cleanup times out too. On the pre-fix code the cleanup's own
+    `TimeoutExpired` escaped prepare() raw instead of the `BackendUnavailable`
+    its contract promises. The match is on the run-failure text, so a probe
+    that times out first under load cannot pass this by the wrong route."""
+    _slow(docker_state, "run")
+    _slow(docker_state, "rm")
+    backend = _backend(base, docker_state, daemon_timeout=_PREPARE_BOUND)
+    attempt_id = "a-416-run-timeout-01"
+    with pytest.raises(BackendUnavailable, match="docker run failed to start") as caught:
+        backend.prepare(attempt_id)
+    message = str(caught.value)
+    assert f"cleanup 'docker rm -f {d._container_name(attempt_id)}' also failed" in message
+    assert "timed out" in message
+    cause = caught.value.__cause__
+    assert isinstance(cause, subprocess.TimeoutExpired)
+    assert "run" in cause.cmd  # the start failure stays the cause, not the cleanup's
+
+
+def test_prepare_still_raises_backend_unavailable_when_a_refused_run_is_followed_by_a_timed_out_rm(
+    base: Path, docker_state: Path,
+) -> None:
+    """#416's second path: `run -d` exits nonzero, and its cleanup times out."""
+    _sentinel(docker_state, ".refuse-run")
+    _slow(docker_state, "rm")
+    backend = _backend(base, docker_state, daemon_timeout=_PREPARE_BOUND)
+    attempt_id = "a-416-run-refused-01"
+    with pytest.raises(BackendUnavailable, match="container creation refused") as caught:
+        backend.prepare(attempt_id)
+    assert f"cleanup 'docker rm -f {d._container_name(attempt_id)}' also failed" in str(caught.value)
+
+
+@pytest.mark.parametrize("start_failure", ["run-timeout", "run-refused"])
+def test_a_cleanup_rm_that_exits_nonzero_is_reported_in_both_paths(
+    base: Path, docker_state: Path, monkeypatch: pytest.MonkeyPatch, start_failure: str,
+) -> None:
+    """#416 (counter-model review): a cleanup that FAILS, not only one that
+    times out, must reach the message. Only the cleanup's `rm -f` is replaced
+    with a daemon error; every other call still goes to the fake CLI."""
+    if start_failure == "run-timeout":
+        _slow(docker_state, "run")
+    else:
+        _sentinel(docker_state, ".refuse-run")
+    real_run = subprocess.run
+
+    def daemon_refuses_rm(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        if list(argv[-3:-1]) == ["rm", "-f"]:
+            return subprocess.CompletedProcess(argv, 1, "", "Cannot connect to the Docker daemon\n")
+        return real_run(argv, **kwargs)  # type: ignore[call-overload,no-any-return]
+
+    monkeypatch.setattr(d.subprocess, "run", daemon_refuses_rm)
+    backend = _backend(base, docker_state, daemon_timeout=_PREPARE_BOUND)
+    attempt_id = f"a-416-rm-nonzero-{start_failure}"
+    with pytest.raises(BackendUnavailable, match="docker run failed to start") as caught:
+        backend.prepare(attempt_id)
+    message = str(caught.value)
+    assert f"cleanup 'docker rm -f {d._container_name(attempt_id)}' also failed: exit 1" in message
+    assert "Cannot connect to the Docker daemon" in message
+
+
+def test_a_cleanup_that_succeeds_adds_no_cleanup_note(base: Path, docker_state: Path) -> None:
+    """Control for #416: with only `run` slow, the cleanup succeeds and the
+    message carries no cleanup clause, so the two tests above are reading the
+    cleanup's failure, not text every failed prepare() would contain."""
+    _slow(docker_state, "run")
+    backend = _backend(base, docker_state, daemon_timeout=_PREPARE_BOUND)
+    with pytest.raises(BackendUnavailable, match="docker run failed to start") as caught:
+        backend.prepare("a-416-control-00001")
+    # The clause the fix adds, not the bare word: the message carries the run's
+    # argv, whose paths can contain "cleanup" (this branch's own worktree did).
+    assert "also failed" not in str(caught.value)
+
+
 def test_remove_file_in_attempt_is_false_when_the_attempt_is_not_running(
     base: Path, docker_state: Path,
 ) -> None:
