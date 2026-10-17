@@ -268,3 +268,27 @@ def test_the_cli_dispatches_on_kind_and_refuses_an_unapproved_discrimination(
     assert code == 2
     assert "not approved" in capsys.readouterr().err
     assert not private.exists()
+
+
+
+@pytest.mark.parametrize("statuses", [["NOT_GRADED"], ["NOT_GRADED", "INCONCLUSIVE"]])
+def test_an_arm_with_no_evaluable_attempt_is_unknown_even_within_tolerance(statuses: list[str]) -> None:
+    """Counter-model finding: tolerance covering the whole arm read EVALUABLE
+    with nothing evaluable at all."""
+    out = cr.apply_tolerance(_report({"intact": statuses}), tolerance=len(statuses))
+    assert out["intact"]["verdict_status"] == "UNKNOWN"
+    assert out["intact"]["reason"] == "no evaluable attempt: nothing to compare"
+
+
+def test_a_report_with_a_changed_declaration_is_refused(tmp_path: Path) -> None:
+    """Counter-model finding: a report scored against a replacement
+    declaration (here, a raised tolerance) instead of the launch-bound one."""
+    data = _approved(tmp_path, attempts=2)
+    experiment, outcomes = _rehearse(tmp_path, data)
+    changed = copy.deepcopy(data)
+    changed["tolerance"]["non_evaluable_per_arm"] = 99
+    stamp_approval(changed)
+    with pytest.raises(cr.CalibrationRefused, match="differs from the one this run launched with"):
+        cr.build_discrimination_report(experiment, outcomes, _parse(changed), rehearsal=True)
+    report = cr.build_discrimination_report(experiment, outcomes, _parse(data), rehearsal=True)
+    assert report["declaration_digest"] == calibration.declaration_digest(data)

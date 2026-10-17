@@ -814,13 +814,35 @@ def apply_tolerance(report: Mapping[str, object], tolerance: int) -> dict[str, d
     out: dict[str, dict[str, object]] = {}
     for arm, counts in per_arm.items():
         over = counts["non_evaluable"] > tolerance
-        out[arm] = {
-            **counts, "tolerance_non_evaluable": tolerance,
-            "verdict_status": "UNKNOWN" if over else "EVALUABLE",
-            "reason": (f"{counts['non_evaluable']} non-evaluable attempt(s) exceed the declared tolerance of "
-                       f"{tolerance}" if over else None),
-        }
+        empty = counts["evaluable"] == 0  # an empty evaluable population is never a clean verdict
+        reason = (f"{counts['non_evaluable']} non-evaluable attempt(s) exceed the declared tolerance of {tolerance}"
+                  if over else "no evaluable attempt: nothing to compare" if empty else None)
+        out[arm] = {**counts, "tolerance_non_evaluable": tolerance,
+                    "verdict_status": "UNKNOWN" if over or empty else "EVALUABLE", "reason": reason}
     return out
+
+
+def stored_discrimination_declaration(experiment: trial.Experiment) -> calibration.DiscriminationDeclaration:
+    """The discrimination declaration the run LAUNCHED with, read from the
+    verified ledger: the same snapshot in every trial, whose arm order is the
+    ledger's schedule and whose approval still binds it. A report takes its
+    settings from here, never from its caller."""
+    snapshots = []
+    for planned, _attempt in experiment.attempts():
+        binding = planned["config"]
+        assert isinstance(binding, dict)
+        config = json.loads(trial._read_object(experiment.root, str(binding["digest"])))
+        snapshots.append(config.get("discrimination_declaration") if isinstance(config, dict) else None)
+    if not snapshots or not isinstance(snapshots[0], dict) \
+            or any(trial.canonical(s) != trial.canonical(snapshots[0]) for s in snapshots):
+        raise CalibrationRefused("missing, partial or mixed discrimination declaration snapshots in the ledger")
+    try:
+        declaration = calibration.parse_discrimination_declaration(snapshots[0])
+    except calibration.DeclarationRefused as exc:
+        raise CalibrationRefused(f"stored discrimination declaration does not parse: {exc}") from exc
+    if tuple(s.arm for s in schedule_from_ledger(experiment)) != declaration.arm_order:
+        raise CalibrationRefused("stored discrimination declaration and ledger schedule disagree")
+    return declaration
 
 
 def build_discrimination_report(
@@ -831,6 +853,12 @@ def build_discrimination_report(
     attempt) plus, per arm, `flow-check-honest` beside the endpoint and the
     tolerance verdict. Descriptive only: no Fisher test is run here (the pilot
     exists to size the main study)."""
+    experiment = trial.Experiment.open(experiment.root)
+    stored = stored_discrimination_declaration(experiment)
+    if calibration.declaration_digest(stored.data) != calibration.declaration_digest(declaration.data):
+        raise CalibrationRefused("the supplied declaration differs from the one this run launched with; a report "
+                                 "is scored only against the launch-bound declaration")
+    declaration = stored
     model, effort = declared_model(declaration)
     report = build_report(experiment, outcomes, declared_model=model, declared_effort=effort)
     for entry, outcome in zip(report["attempts"], reconcile(experiment, outcomes), strict=True):  # type: ignore[call-overload]
