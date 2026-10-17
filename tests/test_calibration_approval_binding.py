@@ -34,21 +34,43 @@ def test_every_pinned_legacy_digest_is_its_committed_declaration_exactly() -> No
         assert calibration.declaration_digest(json.loads((ROOT / path).read_text(encoding="utf-8"))) == digest, path
 
 
-def test_every_committed_approved_declaration_is_pinned_or_carries_a_digest() -> None:
-    """Population check: no committed approved declaration escapes the rule."""
-    for path in sorted(ROOT.glob("evals/**/*.json")):
+def _approved_declarations(paths: list[Path]) -> list[tuple[Path, dict[str, Any]]]:
+    out = []
+    for path in paths:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (ValueError, UnicodeDecodeError):
             continue
-        if not isinstance(data, dict) or data.get("kind") not in ("calibration-declaration",
-                                                                   calibration.DISCRIMINATION_KIND):
-            continue
-        approval = data.get("approval")
-        if approval is None:
-            continue
-        digest = calibration.declaration_digest(data)
-        assert digest in LEGACY or approval.get("declaration_digest") == digest, path
+        if isinstance(data, dict) and data.get("kind") in ("calibration-declaration", calibration.DISCRIMINATION_KIND) \
+                and data.get("approval") is not None:
+            out.append((path, data))
+    return out
+
+
+def _unbound(approved: list[tuple[Path, dict[str, Any]]]) -> list[Path]:
+    return [path for path, data in approved if calibration.declaration_digest(data) not in LEGACY
+            and data["approval"].get("declaration_digest") != calibration.declaration_digest(data)]
+
+
+def test_every_committed_approved_declaration_is_pinned_or_carries_a_digest() -> None:
+    """Population check: no committed approved declaration escapes the rule.
+    Floored so an empty discovery cannot pass (counter-model finding): the
+    four pinned historical approvals must each be found."""
+    approved = _approved_declarations(sorted(ROOT.glob("evals/**/*.json")))
+    found = {str(path.relative_to(ROOT)) for path, _data in approved}
+    assert set(LEGACY.values()) <= found, f"discovery missed pinned approvals: {set(LEGACY.values()) - found}"
+    assert _unbound(approved) == []
+
+
+def test_the_population_check_flags_an_unbound_approved_declaration(tmp_path: Path) -> None:
+    """Red case for the check above: a non-legacy approved declaration with
+    no matching declaration_digest is reported."""
+    data = json.loads((ROOT / "evals/calibration-204/run-manifest.json").read_text(encoding="utf-8"))
+    data["shared"]["model"] = "other-model"
+    path = tmp_path / "unbound.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    assert _unbound(_approved_declarations([path])) == [path]
+    assert _approved_declarations([]) == []  # an empty discovery yields nothing, which the floor above refuses
 
 
 @pytest.mark.parametrize("path", [p for p in LEGACY.values() if "203-c3" not in p])

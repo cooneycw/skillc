@@ -29,6 +29,8 @@ DEGRADED_REF = INTACT_REF.replace(REMOVED.encode(), b"", 1)
 MUTATED = trial.sha256_bytes(DEGRADED_REF)
 SURFACE = ".codex/skills/flow-check/reference.md"
 CLOSURE = "Projects/claude-power-pack/codex/skills/flow-check/reference.md"
+PROFILE = "evals/subjects/cpp-codex-flow-check-86641e8"
+PROFILE_INVENTORY_DIGEST = "sha256:4ee34823eb9f12c86d35f67d731b97a4c86dcd37ef77f9cada1ba78efe5f695a"
 PINS = ({"path": ".codex/skills/flow-check/SKILL.md", "body_digest": "sha256:" + "b" * 64,
          "description_digest": "sha256:" + "c" * 64},)
 
@@ -41,18 +43,23 @@ def _intact(**overrides: Any) -> cr.Treatment:
                         verify_home_files={CLOSURE: trial.sha256_bytes(files[CLOSURE])}, skill_digests=PINS)
 
 
-def _evidence(tmp_path: Path, *, verdict: str = "NO_TEXTUAL_SURVIVOR", digest: str = MUTATED) -> Path:
-    path = tmp_path / "diagnose.json"
+def _evidence(tmp_path: Path, *, verdict: str = "NO_TEXTUAL_SURVIVOR", digest: str = MUTATED,
+              removed: str = REMOVED, closure: str = f"{PROFILE}/evidence/inventory.json") -> Path:
+    path = tmp_path / f"diagnose-{abs(hash((verdict, digest, removed, closure)))}.json"
     path.write_text(json.dumps({"mutated_digest": digest, "measured_degraded_reference_digest": digest,
-                                "mutated_digest_matches": True, "occurrence_scan": {"verdict": verdict}}))
+                                "mutated_digest_matches": True, "removed_text": removed, "closure_source": closure,
+                                "occurrence_scan": {"verdict": verdict}}))
     return path
 
 
 def _approved(tmp_path: Path, *, attempts: int = 3, evidence: Path | None = None) -> dict[str, Any]:
     data = _declaration(attempts_per_arm=attempts, mutated_digest=MUTATED)
+    for arm in data["arms"]:
+        arm["subject"]["profile"] = PROFILE
     data["arms"][1]["mutation"]["removed_text"] = REMOVED
     data["arms"][1]["mutation"]["diagnose_evidence"] = f"{evidence or _evidence(tmp_path)} (synthetic test evidence)"
-    data["approval"] = {"by": "owner (test)", "at": "2026-10-17", "attempts_per_arm": attempts, "mutated_digest": MUTATED}
+    data["approval"] = {"by": "owner (test)", "at": "2026-10-17", "attempts_per_arm": attempts, "mutated_digest": MUTATED,
+                        "profile_inventory_digest": PROFILE_INVENTORY_DIGEST}
     return stamp_approval(data)
 
 
@@ -292,3 +299,43 @@ def test_a_report_with_a_changed_declaration_is_refused(tmp_path: Path) -> None:
         cr.build_discrimination_report(experiment, outcomes, _parse(changed), rehearsal=True)
     report = cr.build_discrimination_report(experiment, outcomes, _parse(data), rehearsal=True)
     assert report["declaration_digest"] == calibration.declaration_digest(data)
+
+
+
+def test_evidence_about_a_different_removed_sentence_is_refused(tmp_path: Path) -> None:
+    """Counter-model finding (pass 2): different removals can yield the same
+    degraded bytes; evidence about sentence A must not vouch for sentence B."""
+    declaration = _parse(_approved(tmp_path, evidence=_evidence(tmp_path, removed="some other sentence")))
+    with pytest.raises(cr.CalibrationRefused, match="different removed_text"):
+        cr.require_textual_evidence(declaration, ROOT)
+
+
+def test_evidence_from_another_closure_is_refused(tmp_path: Path) -> None:
+    declaration = _parse(_approved(tmp_path, evidence=_evidence(tmp_path, closure="evals/subjects/other/evidence/inventory.json")))
+    with pytest.raises(cr.CalibrationRefused, match="scanned closure"):
+        cr.require_textual_evidence(declaration, ROOT)
+
+
+def test_a_subject_without_a_profile_cannot_bind_the_scanned_closure(tmp_path: Path) -> None:
+    data = _approved(tmp_path)
+    for arm in data["arms"]:
+        del arm["subject"]["profile"]
+    del data["approval"]["profile_inventory_digest"]
+    stamp_approval(data)
+    with pytest.raises(cr.CalibrationRefused, match="declares no profile"):
+        cr.require_textual_evidence(_parse(data), ROOT)
+
+
+def test_a_report_over_an_unapproved_stored_snapshot_is_refused(tmp_path: Path) -> None:
+    """Counter-model finding (pass 2): planning does not check approval, so a
+    ledger planned from an unapproved declaration must not report clean."""
+    data = _approved(tmp_path, attempts=1)
+    data["approval"] = None
+    declaration = _parse(data)
+    store = trial.open_store(tmp_path / "store", forbidden=[])
+    experiment, schedule = cr.plan_discrimination(
+        declaration, store, root=ROOT, treatments={"intact": _intact(), "degraded": _intact()}, image_digest=None)
+    outcomes = [mp.AttemptOutcome(s, trial.finalize(experiment, s.attempt_id, disposition="unavailable", reason="t"), None)
+                for s in schedule]
+    with pytest.raises(cr.CalibrationRefused, match="not an approved one"):
+        cr.build_discrimination_report(experiment, outcomes, declaration)

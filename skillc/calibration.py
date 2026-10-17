@@ -953,6 +953,18 @@ def _identity_at_discrimination(declaration: DiscriminationDeclaration, path: tu
     return node
 
 
+def require_discrimination_approval_record(declaration: DiscriminationDeclaration) -> None:
+    """The PURE part of discrimination approval - no disk reads - so a report
+    can re-check a stored launch snapshot without the current checkout's
+    grader, fixture or profile files changing the answer: who/when and the
+    schedule size, the approved mutated_digest, and (D-P2a) the whole
+    declaration digest."""
+    approval = _require_schedule_approval(declaration.approval, declaration.attempts_per_arm)
+    if approval.get("mutated_digest") != declaration.mutation.get("mutated_digest"):
+        raise _refuse("approval.mutated_digest does not match the declared mutation")
+    _require_whole_declaration_approval(declaration.data, approval)
+
+
 def require_approved_discrimination(declaration: DiscriminationDeclaration, root: Path) -> None:
     """The discrimination-declaration counterpart to `require_approved`:
     the same approval/identity/grader-on-disk checks, against this kind's

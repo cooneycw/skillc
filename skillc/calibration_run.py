@@ -668,6 +668,16 @@ def require_textual_evidence(declaration: calibration.DiscriminationDeclaration,
         raise CalibrationRefused(f"{named[0]} is not readable JSON: {exc}") from exc
     scan = evidence.get("occurrence_scan") if isinstance(evidence, dict) else None
     declared = declaration.mutation.get("mutated_digest")
+    if not isinstance(evidence, dict) or evidence.get("removed_text") != declaration.mutation.get("removed_text"):
+        raise CalibrationRefused(f"{named[0]} scanned for a different removed_text than the declaration removes; "
+                                 f"evidence about one sentence cannot vouch for another")
+    profile_dir = declaration.intact_subject.get("profile")
+    if not isinstance(profile_dir, str) or not profile_dir:
+        raise CalibrationRefused("the intact subject declares no profile, so the closure the textual check scanned "
+                                 "cannot be bound to the closure this run installs")
+    if evidence.get("closure_source") != f"{profile_dir}/evidence/inventory.json":
+        raise CalibrationRefused(f"{named[0]} scanned closure {evidence.get('closure_source')!r}, not this run's "
+                                 f"{profile_dir}/evidence/inventory.json")
     if not isinstance(scan, dict) or scan.get("verdict") != "NO_TEXTUAL_SURVIVOR":
         raise CalibrationRefused(f"{named[0]}: the textual check did not report NO_TEXTUAL_SURVIVOR")
     if evidence.get("mutated_digest_matches") is not True \
@@ -838,8 +848,11 @@ def stored_discrimination_declaration(experiment: trial.Experiment) -> calibrati
         raise CalibrationRefused("missing, partial or mixed discrimination declaration snapshots in the ledger")
     try:
         declaration = calibration.parse_discrimination_declaration(snapshots[0])
+        # The stored launch snapshot must itself be approved (pure check: the
+        # current checkout's files cannot change a historical report's answer).
+        calibration.require_discrimination_approval_record(declaration)
     except calibration.DeclarationRefused as exc:
-        raise CalibrationRefused(f"stored discrimination declaration does not parse: {exc}") from exc
+        raise CalibrationRefused(f"stored discrimination declaration is not an approved one: {exc}") from exc
     if tuple(s.arm for s in schedule_from_ledger(experiment)) != declaration.arm_order:
         raise CalibrationRefused("stored discrimination declaration and ledger schedule disagree")
     return declaration
