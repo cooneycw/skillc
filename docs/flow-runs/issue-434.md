@@ -294,3 +294,33 @@ Risks:
 - The native stop is a gate nothing downstream re-derives: each trigger gets a committed red case.
 - Reusing calibration's private validators couples the two kinds; a test runs each reused check through this kind's parser.
 - The prompt is an identity: changing it after approval must be refused (whole-declaration digest).
+
+<!-- flow-run n=8 id=f314fd1681a446ffa9527f80a08b9d7b -->
+## Run 8
+
+- Run-id:            f314fd1681a446ffa9527f80a08b9d7b
+- Run-start:         2a2e287a74b3f40206720ea97ac749ba80718877
+- Issue:             #434
+- Base SHA:          2a2e287
+- Necessity verdict: Still needed
+- Approval:          granted
+- Approver:          skillc-400 (orchestrator, owner-delegated)
+- Recorded at:       2026-10-18T12:52:20Z
+
+### Section B evidence
+- Grader revision 2 merged as a25d73b (#465). Its pre-registered certifying run (#434 comment 6249786846) ran once on evals26 at a25d73b: 43/43 scored and guard rows MATCH, exit 0; retention verified (45/45 resolve and re-derive, 48/48 guard records, both controls refused).
+- Orchestrator ruling: RESULTS as "Refs #434", the body mapping each acceptance box to its evidence (box 1 PARTIAL: scripted actors, not a live agent).
+
+### Section C - the approved plan
+PR 3c of #434: revision 2's results only, docs. No code, manifest or grader change.
+
+1. `evals/level3/campaign-434/RESULTS-rev2.md` - revision 2's result: identities, per section, the observed rows with their live gate runs, the retention verification, what it does not establish (scripted actors).
+2. `evals/level3/campaign-434/report-rev2.json` - the leak-checked campaign report, as the run wrote it.
+3. `evals/level3/campaign-434/verification-rev2.json` - the read-only retention verification's output.
+4. `evals/level3/campaign-434/README.md` - the results line points at both revisions' results.
+5. `evals/level3/campaign-434/RESULTS.md` - a one-line pointer that revision 2's results supersede it for certification.
+
+Scope: 5 files, docs only. Small.
+
+Risks:
+- A committed report must carry no machine identity; it is leak-checked before commit.
