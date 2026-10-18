@@ -28,14 +28,20 @@ from __future__ import annotations
 
 import re
 
-from ci.check_real_docker_ran import ERROR, FAILURE, SUCCESS, Verdict
+from ci.check_real_docker_ran import ERROR, FAILURE, RUNNER_BEHIND, SUCCESS, Verdict
 
 #: Deliberately independent of `Verdict.reason` - see module docstring.
 _STATUS_SENTENCE = {
     SUCCESS: "every declared real-Docker file executed at least one test, no failures",
     FAILURE: "a real-Docker test failed, or the declared population collected but never executed",
     ERROR: "the real-Docker population could not be determined (not collected, or unreadable)",
+    RUNNER_BEHIND: ("every file this runner counts executed with no failures, but the commit under test "
+                    "declares floor file(s) this runner does not count - re-pin the runner, then re-seed "
+                    "state to the parent (#456)"),
 }
+
+#: #456: the operator's action, in the description itself.
+_REPIN_ACTION = "re-pin, then re-seed state to the parent"
 
 #: A pytest test id is `module.path.ClassName::test_name` - letters, digits,
 #: underscore, dot, colon, brackets (parametrize ids) and hyphen. Anything
@@ -57,6 +63,8 @@ def format_status_description(result: Verdict, *, sha: str, runner_sha: str) -> 
     """The GitHub commit-status `description` field (short; GitHub itself
     truncates past ~140 chars, so this stays well under that)."""
     counts = f"{sum(result.executed_by_file.values())} executed" if result.executed_by_file else "0 executed"
+    if result.status == RUNNER_BEHIND:
+        counts += f", {len(result.uncounted_files)} floor file(s) uncounted; {_REPIN_ACTION}"
     return f"{result.status}: {counts} (sha {sha[:12]}, runner {runner_sha[:12]})"
 
 
@@ -77,6 +85,14 @@ def format_comment_body(result: Verdict, *, sha: str, runner_sha: str) -> str:
             lines.append(f"  - `{name}`: {count}")
     if result.skipped_only_files:
         lines.append(f"- Collected but never executed: {', '.join(sorted(result.skipped_only_files))}")
+    for label, names in (("Declared by the commit, NOT counted by this runner (re-pin needed)",
+                          result.uncounted_files),
+                         ("Counted by this runner, no longer declared by the commit (informational)",
+                          result.dropped_by_commit)):
+        if names:
+            safe, dropped = _safe_ids(names)
+            lines.append(f"- {label}: {', '.join(f'`{n}`' for n in safe)}"
+                         + (f" ({dropped} omitted - did not match the allowed character set)" if dropped else ""))
     if result.failed_ids:
         safe, dropped = _safe_ids(result.failed_ids)
         shown = safe[:_MAX_FAILED_IDS_SHOWN]

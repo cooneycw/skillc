@@ -1,0 +1,51 @@
+{
+ "plants": [
+  {
+   "id": "lint-unused-import",
+   "file": "src/*/__init__.py",
+   "text": "\nimport os\n",
+   "precondition": {
+    "argv": [
+     "uv",
+     "run",
+     "--offline",
+     "--locked",
+     "ruff",
+     "check",
+     "{file}"
+    ]
+   }
+  },
+  {
+   "id": "test-failing-assertion",
+   "file": "tests/test_placeholder.py",
+   "text": "\n\ndef test_skillc_planted_failure():\n    \"\"\"Planted by the grader: must fail.\"\"\"\n    assert 1 == 2\n",
+   "precondition": {
+    "argv": [
+     "uv",
+     "run",
+     "--offline",
+     "--locked",
+     "pytest",
+     "-q",
+     "{file}"
+    ]
+   }
+  },
+  {
+   "id": "type-wrong-assignment",
+   "file": "src/*/__init__.py",
+   "text": "\n_skillc_planted: int = \"not an int\"\n",
+   "precondition": {
+    "argv": [
+     "uv",
+     "run",
+     "--offline",
+     "--locked",
+     "mypy",
+     "{file}"
+    ]
+   }
+  }
+ ]
+}

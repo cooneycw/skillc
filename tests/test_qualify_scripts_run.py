@@ -42,6 +42,14 @@ _SLOW_REASON = {
 }
 
 
+#: #281: scripts that certify through a REAL container runtime (a runtime
+#: receipt and a Docker daemon) cannot run as a bare subprocess in this suite.
+#: Each names the declared real-Docker floor file that runs it, and
+#: `test_runtime_qualified_scripts_are_run_by_a_floored_live_test` checks that
+#: claim, so the exclusion is visible and verified, never a quiet one.
+_RUNTIME_QUALIFIED = {"cicd-pipeline": "tests.test_level3_cicd_pipeline_live"}
+
+
 def _task_name(script: Path) -> str:
     return script.parent.name
 
@@ -85,7 +93,8 @@ def _shuffled_parts(script: Path, parts: list[str]) -> list[str]:
 
 
 _PARAMS = [
-    *[(script, None) for script in QUALIFY_SCRIPTS if script not in SPLIT_SCRIPTS],
+    *[(script, None) for script in QUALIFY_SCRIPTS
+      if script not in SPLIT_SCRIPTS and _task_name(script) not in _RUNTIME_QUALIFIED],
     *[(script, part) for script, parts in SPLIT_SCRIPTS.items() for part in _shuffled_parts(script, parts)],
 ]
 
@@ -210,3 +219,37 @@ def test_every_qualify_script_is_discovered_and_none_quietly_ignored() -> None:
         f"expected at least 13 qualify.py scripts (the count at the time this test was "
         f"written), found {len(QUALIFY_SCRIPTS)}: {[str(p) for p in QUALIFY_SCRIPTS]}"
     )
+
+
+def runtime_qualified_problems(table: dict[str, str], floor: tuple[str, ...],
+                               scripts: list[Path] = QUALIFY_SCRIPTS) -> list[str]:
+    """Why a runtime-qualified exclusion is not backed by a floored live run."""
+    problems = []
+    root = EVALS_ROOT.parent
+    for task, module in table.items():
+        matches = [script for script in scripts if _task_name(script) == task]
+        if len(matches) != 1:
+            problems.append(f"{task}: {len(matches)} discovered qualify.py, not exactly one")
+            continue
+        if module not in floor:
+            problems.append(f"{task}: {module} is not in the real-Docker floor")
+        path = root / Path(*module.split(".")).with_suffix(".py")
+        source = path.read_text(encoding="utf-8") if path.is_file() else ""
+        rel = matches[0].relative_to(root).as_posix()
+        if rel not in source or "qualify.main(" not in source:
+            problems.append(f"{task}: {module} does not run {rel}")
+    return problems
+
+
+def test_runtime_qualified_scripts_are_run_by_a_floored_live_test() -> None:
+    sys.path.insert(0, str(EVALS_ROOT.parent))
+    from ci.check_real_docker_ran import DECLARED_REAL_DOCKER_FILES
+
+    assert runtime_qualified_problems(_RUNTIME_QUALIFIED, DECLARED_REAL_DOCKER_FILES) == []
+    # Negative controls: each claim the exclusion rests on can fail.
+    off_floor = tuple(f for f in DECLARED_REAL_DOCKER_FILES if f != "tests.test_level3_cicd_pipeline_live")
+    assert runtime_qualified_problems(_RUNTIME_QUALIFIED, off_floor)
+    assert runtime_qualified_problems({"cicd-pipeline": "tests.test_cicd_profile_live"},
+                                      DECLARED_REAL_DOCKER_FILES)
+    assert runtime_qualified_problems({"no-such-task": "tests.test_level3_cicd_pipeline_live"},
+                                      DECLARED_REAL_DOCKER_FILES)

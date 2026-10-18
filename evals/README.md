@@ -11,6 +11,7 @@ The current roadmap is [PLAN.md](../PLAN.md), with the
 |---|---|---|
 | [slug small-fix](level1/slug-small-fix/README.md) | 1 - Basic execution | Grader certified by `qualify.py` against a fixture, reference, alternatives, wrong outputs and broken-grader controls (#5); no model trial run |
 | [slugkit pipeline](level3/slugkit-pipeline/README.md) | 3 - Installed path + local pipeline | Grader certified by `qualify.py`, plus a pipeline-validity gate: planted defects proven and rejected by the step that should catch them, a benign control accepted, malformed/unproven/crashed/timed-out/unlaunchable cases UNKNOWN (#204); no model trial run |
+| [cicd pipeline](level3/cicd-pipeline/README.md) | 3 - Installed path + executed CI | Grader certified by `qualify.py` through the cicd project runtime: CPP's real `/project:init` output (two declared CPP fixes; the unpatched output is the known-bad control), generated pipelines EXECUTED locally, planted lint/test/type faults rejected by their own stage, unknown commands UNKNOWN; full 26/26 under run-real-docker, a declared subset elsewhere (#281); no model trial run |
 
 ## Subjects
 

@@ -474,3 +474,48 @@ def test_a_receipt_serves_only_the_runtime_its_closure_selected() -> None:
         rs.require_kind(flow_check, rs.CICD_RUNTIME)
     with pytest.raises(rs.Refused, match="unrelated or absent"):
         rs.require_kind(cicd, None)
+
+
+# --- #281: the cicd project-tools runtime, one more layer ---------------------
+
+def project_receipt(**changes: object) -> dict[str, Any]:
+    base = cicd_receipt()
+    value = {key: base[key] for key in ("schema_version", "runtime_id", "subject_revision",
+                                        "pyproject_sha256", "lock_sha256", "descriptor_sha256")}
+    value.update(image_id="sha256:" + "9" * 64, recipe_sha256="a" * 64, source_commit="b" * 40,
+                 target="cicd-project-runtime", base_receipt=base, base_image_id=base["image_id"],
+                 project_lock_sha256="c" * 64, tool_versions={"ruff": "0.17.1", "pytest": "9.1.1", "mypy": "2.4.0"})
+    value.update(changes)
+    return value
+
+
+def test_a_project_receipt_layers_over_a_validated_cicd_receipt() -> None:
+    supply = rs.RuntimeSupply(encoded(project_receipt()))
+    assert supply.kind == rs.CICD_PROJECT_RUNTIME and supply.image_id == "sha256:" + "9" * 64
+    assert supply.descriptor(DESCRIPTOR, actual_image=supply.image_id) == json.loads(DESCRIPTOR)
+    rs.require_kind(supply, rs.CICD_PROJECT_RUNTIME)
+    for other in (rs.PROFILE_RUNTIME, rs.CICD_RUNTIME):
+        with pytest.raises(rs.Refused, match=f"closure selects {other}"):
+            rs.require_kind(supply, other)
+    # Never selected by a profile closure: selection is the task grader's.
+    assert rs.CICD_PROJECT_RUNTIME not in {rs.selected_runtime(**selection()), rs.selected_runtime(**cicd_selection())}
+
+
+@pytest.mark.parametrize(("key", "value"), [
+    ("image_id", "sha256:" + "6" * 64), ("image_id", json.loads(RECEIPT)["image_id"]), ("image_id", "tag:x"),
+    ("descriptor_sha256", "9" * 64), ("project_lock_sha256", "short"), ("recipe_sha256", "bad"),
+    ("tool_versions", {"ruff": "0.17.1", "pytest": "9.1.1"}), ("tool_versions", {"ruff": "latest", "pytest": "9", "mypy": "2"}),
+    ("base_image_id", "sha256:" + "f" * 64), ("base_receipt", json.loads(RECEIPT)), ("extra", 1),
+], ids=["is-cicd-base", "is-flow-check-base", "mutable", "descriptor", "lock", "recipe", "tools-missing",
+        "tools-malformed", "base-id", "base-is-flow-check", "unknown-key"])
+def test_cicd_project_receipt_closed_schema(key: str, value: object) -> None:
+    with pytest.raises(rs.Refused):
+        rs.RuntimeSupply(encoded(project_receipt(**{key: value})))
+
+
+@pytest.mark.parametrize("key", list(project_receipt()))
+def test_missing_cicd_project_receipt_field_refuses(key: str) -> None:
+    receipt = project_receipt()
+    del receipt[key]
+    with pytest.raises(rs.Refused):
+        rs.RuntimeSupply(encoded(receipt))

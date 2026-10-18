@@ -426,3 +426,10 @@ Local semantics, exactly (PROFILE.md has the full account):
 `tests/test_cicd_profile_live.py` is the real-Docker proof (floor entry, break
 family `cicdprofile:` - `no-curl`, `old-curl`, `service-down`, `no-probes`);
 `tests/test_cpp_codex_cicd_86641e8.py` holds the offline manifest controls.
+
+#281 builds on this runtime: `evals/level3/cicd-pipeline/` EXECUTES the
+pipelines CPP's cicd skills generate for a `/project:init` project, in the
+`cicd-project-runtime` (`docker/cicd-project-trial/`: the cicd runtime plus one
+warmed layer of the task project's pinned ruff/pytest/mypy), and certifies that
+each required stage runs and rejects its own planted fault. See that task's
+README for what local execution does and does not model.

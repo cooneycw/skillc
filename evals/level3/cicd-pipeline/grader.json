@@ -1,0 +1,14 @@
+{
+ "id": "cicd-pipeline",
+ "revision": "1",
+ "criteria": ["artifacts-present", "pipeline-covers-required-checks", "pipeline-green", "pipeline-honest", "behavior-preserved"],
+ "dimensions": {
+  "artifacts-present": "functional",
+  "pipeline-covers-required-checks": "constraint",
+  "pipeline-green": "integration",
+  "pipeline-honest": "constraint",
+  "behavior-preserved": "constraint"
+ },
+ "probe": {"file": "probe.py", "inputs": "inputs.json", "timeout": 1500},
+ "judge": {"file": "grade_cicd_pipeline.py", "timeout": 60}
+}
