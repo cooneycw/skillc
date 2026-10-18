@@ -1,0 +1,27 @@
+{
+  "branch": "issue-287-p3-complete-declarations",
+  "counts": {
+    "accepted": 5,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "c3be04a",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "287",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 2,
+  "recorded_at": "2026-10-18T00:48:19Z",
+  "red_cases": {
+    "already_covered": 11,
+    "proposed": 17
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/17/rollout-2026-10-17T20-37-50-01a14c71-8561-7e41-bd1b-90b96cbc2cb9.jsonl",
+    "thread_id": "01a14c71-8561-7e41-bd1b-90b96cbc2cb9"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

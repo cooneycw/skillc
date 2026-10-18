@@ -359,6 +359,10 @@ class CalibrationDeclaration:
     data: Mapping[str, object]
     lane: str = DEFAULT_LANE
     task_fixture: str = "fixture"
+    #: #287 P3 (C2): `tolerance.non_evaluable_per_arm`, REQUIRED for a
+    #: declaration with an outcome endpoint (its report applies it), and `None`
+    #: for a legacy declaration that declares none.
+    tolerance_non_evaluable_per_arm: int | None = None
 
 
 def _refuse(message: str) -> DeclarationRefused:
@@ -594,12 +598,179 @@ def parse_declaration(data: Mapping[str, object]) -> CalibrationDeclaration:
                       "without the instruction; alone it confounds value with the instruction")
 
     fields = _parse_schedule_and_identities(data, names)
+    tolerance = _parse_tolerance(data, required=_outcome_endpoint(data) is not None)
+    if "run_store" in data:
+        _validate_run_store(data.get("run_store"))
     return CalibrationDeclaration(
         arms=tuple(names), attempts_per_arm=fields.attempts_per_arm, arm_order=fields.sequence, seed=fields.seed,
         shared=fields.shared, task_path=fields.task_path, grader_id=fields.grader_id,
         grader_revision=fields.grader_revision, retain_transcripts=True, approval=fields.approval,
         data=dict(data), lane=str(lane), task_fixture=fields.task_fixture,
+        tolerance_non_evaluable_per_arm=tolerance,
     )
+
+
+def _parse_tolerance(data: Mapping[str, object], *, required: bool) -> int | None:
+    """`tolerance.non_evaluable_per_arm`: a positive integer fixed before any
+    attempt runs. Required where the report applies it (#287 P3, C2)."""
+    tolerance = data.get("tolerance")
+    value = tolerance.get("non_evaluable_per_arm") if isinstance(tolerance, dict) else None
+    if value is None and not required:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise _refuse("tolerance.non_evaluable_per_arm must be a positive integer, fixed before any attempt runs")
+    return value
+
+
+#: #287 P3 (C1): words that mark a drafted, not recorded, value. Refused at
+#: approval anywhere under `shared` or `arms`, exactly as `UNKNOWN` is: a
+#: placeholder is not an identity.
+PLACEHOLDER_MARKERS = ("PENDING", "PROPOSED", "UNKNOWN")
+_PLACEHOLDER = re.compile(r"\b(?:" + "|".join(PLACEHOLDER_MARKERS) + r")\b")
+#: The declaration's IDENTITY: what a run is launched with and bound to. A
+#: placeholder token anywhere in one of these leaves is refused (C1).
+IDENTITY_ROOTS = ("shared", "arms", "task", "task_content", "run_store", "attempts_per_arm", "tolerance",
+                  "arm_order", "skill_pins", "outcome_endpoint")
+#: Prose inside the identity roots: commentary, bound by the whole-declaration
+#: digest, never parsed as an identity (`_`-prefixed keys too). Never a
+#: REQUIRED_IDENTITY field (`tools`, `permissions` and `public_requirements` are
+#: identities; counter-model finding). The older exact-`UNKNOWN` rule
+#: (`_unknown_leaves`) still covers every leaf under `shared` and `arms`.
+PROSE_KEYS = frozenset({"provenance", "treatment", "verification", "rule", "removed_text"})
+
+
+def _placeholder_leaves(value: object, where: str) -> list[str]:
+    """Identity leaves holding a placeholder token (`PENDING`, `PROPOSED`,
+    `UNKNOWN`) as a whole word anywhere in the value: `gpt-6-astra (PENDING)`
+    is refused as surely as `PENDING`. Prose keys are skipped."""
+    if isinstance(value, str):
+        return [where] if _PLACEHOLDER.search(value) else []
+    if isinstance(value, dict):
+        return [p for k, v in value.items() if not (str(k).startswith("_") or k in PROSE_KEYS)
+                for p in _placeholder_leaves(v, f"{where}.{k}")]
+    if isinstance(value, list):
+        return [p for i, v in enumerate(value) for p in _placeholder_leaves(v, f"{where}[{i}]")]
+    return []
+
+
+def _require_no_placeholders(data: Mapping[str, object]) -> None:
+    found = [p for root in IDENTITY_ROOTS if root in data for p in _placeholder_leaves(data[root], root)]
+    if found:
+        raise _refuse(f"placeholder values still recorded at {found} ({'/'.join(PLACEHOLDER_MARKERS)}); "
+                      "record the real value before approving a run")
+
+
+def _require_agent_network(data: Mapping[str, object]) -> None:
+    """#287 P3 (C4): the declaration is bound to provider-only egress (#442):
+    `shared.agent_network` must name exactly the code's policy, allowlist
+    digest and codex server-side-off flags. A later change to any of them
+    needs a new approval (intended)."""
+    from . import collection_conformance as cc
+    from . import egress
+    shared = data.get("shared")
+    network = shared.get("agent_network") if isinstance(shared, dict) else None
+    if not isinstance(network, dict):
+        raise _refuse("shared.agent_network is required: this declaration must bind provider-only egress (#442)")
+    expected = {"policy": cc.AGENT_NETWORK_POLICY, "allowlist_digest": egress.allowlist_digest(),
+                "codex_server_side_off": list(egress.CODEX_SERVER_SIDE_OFF)}
+    wrong = [k for k, v in expected.items() if network.get(k) != v]
+    if wrong:
+        raise _refuse(f"shared.agent_network {wrong} differ from the enforced provider-only egress "
+                      f"{ {k: expected[k] for k in wrong} }")
+
+
+#: #287 P3 (C5): path prefixes a run store must never sit under - most of the
+#: #203-era live evidence was lost to run stores in /tmp scratchpads. A
+#: heuristic, stated as one: an absolute path outside these is accepted.
+_NON_DURABLE_PREFIXES = ("/tmp/", "/var/tmp/", "/dev/shm/")
+
+
+def _refuse_non_durable(value: str, path: str) -> None:
+    """Refuse a temp or scratchpad destination, checked on the path as written
+    AND on its real filesystem destination (a symlinked ancestor counts)."""
+    import os
+    tmpdir = os.environ.get("TMPDIR")
+    prefixes = _NON_DURABLE_PREFIXES + ((tmpdir.rstrip("/") + "/", os.path.realpath(tmpdir) + "/") if tmpdir else ())
+    prefixes += tuple(os.path.realpath(p) + "/" for p in _NON_DURABLE_PREFIXES)
+    for candidate in {path, os.path.realpath(path)} if path.startswith("/") else {path}:
+        if any((candidate.rstrip("/") + "/").startswith(p) for p in prefixes) or "/scratchpad" in candidate:
+            shown = repr(value) if candidate == value else f"{value!r} (resolves to {candidate!r})"
+            raise _refuse(f"run_store {shown} is not durable (a temp directory or a session scratchpad); "
+                          "evidence stored there is lost")
+
+
+def _require_normal_form(label: str, path: str) -> None:
+    """A path whose spelling is not its normal form (`..`, `.`, `//`) can name a
+    forbidden directory that no prefix check sees (counter-model finding)."""
+    import posixpath
+    if path.startswith("//") or posixpath.normpath(path) != (path.rstrip("/") or "/"):
+        raise _refuse(f"{label} {path!r} is not in normal form ('..', '.', or '//' components are refused)")
+
+
+def _validate_run_store(value: object) -> str:
+    """C5, the declared form: a literal leading `~/` (the running user's home;
+    the approval digest binds that string, so no host path is committed) or an
+    absolute path, in normal form. Checked at parse and approval, independent
+    of who parses."""
+    if not isinstance(value, str) or not value:
+        raise _refuse("run_store must name a durable directory")
+    if value.startswith("~"):
+        if not value.startswith("~/"):
+            raise _refuse(f"run_store {value!r}: only a leading '~/' (the running user's home) is accepted")
+        _require_normal_form("run_store", "/home" + value[1:])
+    elif not value.startswith("/"):
+        raise _refuse(f"run_store {value!r} must be an absolute path or start with '~/'")
+    else:
+        _require_normal_form("run_store", value)
+    _refuse_non_durable(value, value)
+    return value
+
+
+def resolve_run_store(value: object) -> Path:
+    """C5, at launch: the declared run store expanded against this run's HOME
+    (which must itself be absolute and in normal form), with the durability
+    refusals applied to the EXPANDED path and its real destination, so a `~/`
+    whose home is a temp directory is refused like `/tmp`."""
+    import os
+    declared = _validate_run_store(value)
+    expanded = declared
+    if declared.startswith("~/"):
+        home = os.environ.get("HOME", "")
+        if not home.startswith("/"):
+            raise _refuse(f"run_store {declared!r} cannot be expanded: HOME is not an absolute path")
+        _require_normal_form("HOME for run_store", home)
+        expanded = home.rstrip("/") + declared[1:]
+    _refuse_non_durable(declared, expanded)
+    return Path(expanded)
+
+
+_SHA256 = re.compile(r"sha256:[0-9a-f]{64}")
+
+
+def _require_image_identity(data: Mapping[str, object]) -> None:
+    """C3, declared: a new-kind declaration names its image by tag, image ID
+    and runtime receipt digest, all well formed. Without the receipt digest the
+    run-time binding would have nothing to check (counter-model finding)."""
+    shared = data.get("shared")
+    image = shared.get("image") if isinstance(shared, Mapping) else None
+    if not isinstance(image, Mapping):
+        raise _refuse("shared.image is required: name the image tag, digest and receipt_sha256")
+    tag = image.get("tag")
+    if not isinstance(tag, str) or not tag:
+        raise _refuse("shared.image.tag must name the image tag the run launches")
+    for key in ("digest", "receipt_sha256"):
+        if not isinstance(image.get(key), str) or not _SHA256.fullmatch(str(image.get(key))):
+            raise _refuse(f"shared.image.{key} must be a 'sha256:<64 hex>' digest")
+
+
+def _require_new_kind_bindings(data: Mapping[str, object]) -> None:
+    """C4 and C5 for a declaration that must carry them: every discrimination
+    declaration, and every calibration declaration with an outcome endpoint."""
+    _require_agent_network(data)
+    _require_image_identity(data)
+    if "run_store" not in data:
+        raise _refuse("run_store is required: name the durable directory this run's evidence is stored in")
+    _validate_run_store(data.get("run_store"))
 
 
 def load_declaration(path: Path) -> CalibrationDeclaration:
@@ -701,6 +872,8 @@ def parse_discrimination_declaration(data: Mapping[str, object]) -> Discriminati
         raise _refuse(f"arm 'degraded' subject.revision is {degraded_subject['revision']!r}, not the derived "
                       f"{expected_revision!r} - a hand-typed label is not a recorded mutation")
 
+    if "run_store" in data:
+        _validate_run_store(data.get("run_store"))
     tolerance = data.get("tolerance")
     non_evaluable = tolerance.get("non_evaluable_per_arm") if isinstance(tolerance, dict) else None
     if isinstance(non_evaluable, bool) or not isinstance(non_evaluable, int) or non_evaluable < 1:
@@ -912,6 +1085,9 @@ def require_approved(declaration: CalibrationDeclaration, root: Path) -> None:
         arms if isinstance(arms, list) else [], "arms")
     if unknown:
         raise _refuse(f"identities still UNKNOWN: {unknown}; record them before approving a run")
+    _require_no_placeholders(declaration.data)
+    if outcome_endpoint(declaration) is not None:
+        _require_new_kind_bindings(declaration.data)
     _require_grader_matches(root, declaration.task_path, declaration.grader_id, declaration.grader_revision)
     _require_task_fixture(root, declaration.task_path, declaration.task_fixture, approval)
     endpoint = outcome_endpoint(declaration)
@@ -994,6 +1170,8 @@ def require_approved_discrimination(declaration: DiscriminationDeclaration, root
         arms if isinstance(arms, list) else [], "arms")
     if unknown:
         raise _refuse(f"identities still UNKNOWN: {unknown}; record them before approving a run")
+    _require_no_placeholders(declaration.data)
+    _require_new_kind_bindings(declaration.data)
     _require_grader_matches(root, declaration.task_path, declaration.grader_id, declaration.grader_revision)
     _require_task_fixture(root, declaration.task_path, declaration.task_fixture, approval)
     _require_whole_declaration_approval(declaration.data, approval)  # the backstop, as in require_approved

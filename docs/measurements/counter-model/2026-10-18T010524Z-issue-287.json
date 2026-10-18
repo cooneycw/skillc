@@ -1,0 +1,28 @@
+{
+  "branch": "issue-287-p3-complete-declarations",
+  "counts": {
+    "accepted": 6,
+    "deferred": 0,
+    "rejected": 1
+  },
+  "extra_passes_reason": "orchestrator skillc-400: third pass scoped to c3be04a..86c6b7f because the pass-2 fixes change gates that authorize spend and one of them widened a check (C1)",
+  "head": "86c6b7f",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "287",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 3,
+  "recorded_at": "2026-10-18T01:05:24Z",
+  "red_cases": {
+    "already_covered": 12,
+    "proposed": 20
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/17/rollout-2026-10-17T20-57-12-01a14c83-40fe-71a0-b72b-49a25849ad6f.jsonl",
+    "thread_id": "01a14c83-40fe-71a0-b72b-49a25849ad6f"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

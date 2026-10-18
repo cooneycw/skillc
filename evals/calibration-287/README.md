@@ -2,8 +2,9 @@
 
 This slice prepares an explicitly approved common task-outcome endpoint for the
 improvement study. It neither authorizes a trial nor completes #287. Both pilot
-approvals remain null. Draft runtime identities/caps are visibly unresolved and
-do not yet pass the runnable declaration contract.
+approvals remain null. Since P3 (below) both declarations are complete and pass
+the runnable declaration contract under a test-only approval; no approval is
+committed.
 
 The two declarations are scoped transplants from parked
 `prep-287-pilot-declarations` tip `571d763`. That branch and its history remain
@@ -70,6 +71,90 @@ The pin is CPP `86641e8` (orchestrator ruling,
   its source `snapshot:`. The declaration's derived label assumes the `git:`
   source, so the run-time mutation check (P2) must build from the pinned
   revision.
+
+## P3: completed declarations and the checks that bind them
+
+Both declarations now name exact runtime identities. Each is bound by an
+enforced check with a committed red (`tests/test_calibration_p3_bindings.py`).
+
+| | discrimination | improvement |
+|---|---|---|
+| declaration digest | `sha256:40acebc5cfd04313a24639f5298698b52449699f8aa44ba6dca0e6e05dd2490e` | `sha256:6bc7581b1a72230951146aa2a96c5a8ec86a3e5104ebe6ca41cb61263b21a198` |
+| run_store | `~/skillc-evidence/calibration-287/pilot-discrimination` | `~/skillc-evidence/calibration-287/pilot-improvement` |
+
+Shared by both declarations:
+- **Client:** codex `0.157.1`, model `gpt-6-astra`, effort `high`.
+- **Caps:** 1200 s per attempt, 24000 s in total; 10 attempts per arm.
+- **Tolerance:** 1 non-evaluable attempt per arm.
+- **Task:** `gate-stops-early`, grader revision 5.
+- **Image:** #375's final-run image `skillc-375-final:88b3999-6343d33b`, ID
+  `sha256:6343d33b0b5757e41c4f7a2e7f463c38974a02873e52f69dfe4d220e4f13d5ea`,
+  runtime receipt `sha256:0eb308d3…62a6`. It is reused, never rebuilt (builds
+  are not ID-reproducible).
+- **Run host:** kyle19, the only host holding the ChatGPT credential. The image
+  moves there from evals26 by `docker save | docker load` under the same tag,
+  which preserves the image ID. The receipt is copied and its sha256 re-checked.
+  kyle19's gate never prunes images.
+
+### The checks (C1-C5)
+
+- **C1 - no placeholder identities.** A whole-word `PENDING`, `PROPOSED` or
+  `UNKNOWN` anywhere in an identity leaf is refused at approval. Identity leaves
+  cover the client, model, effort, image, digests, caps, task, arms and
+  run_store, including `tools`, `permissions` and `public_requirements`, so
+  `gpt-6-astra (PENDING)` is refused. Prose keys (`provenance`, an arm's
+  `treatment` text, `verification`, ...) are commentary, which the
+  whole-declaration digest binds. A value that is exactly `UNKNOWN` is still
+  refused everywhere under `shared`/`arms` by the older rule.
+- **C2 - tolerance is required.** A calibration declaration with an outcome
+  endpoint must carry `tolerance.non_evaluable_per_arm`, and its report applies
+  it. Legacy declarations without an endpoint need none.
+- **C3 - image binding.** The declaration must name a tag, an image ID and a
+  well-formed receipt digest. A missing or null receipt digest is refused. The
+  run is bound to three things together: the declared tag, the ID the daemon
+  resolves that tag to at launch, and the exact receipt bytes. A tag re-pointed
+  at another image is refused. The resolved-ID
+  comparison already existed on main (`skillc/cli.py:1759` at `41407f9`);
+  `calibration_run.require_image_binding` adds the tag and the receipt.
+- **C4 - provider-only egress (#442).** The declaration's `agent_network` must
+  equal the code's policy, allowlist digest and codex server-side-off argv. A
+  dispatched attempt is ineligible unless its egress proxy log was read and
+  recorded the declared allowlist digest. Such an attempt counts as
+  non-evaluable in the tolerance verdict, though its raw grade stays visible.
+  The run fails on any such attempt.
+- **C5 - durable run store.** `run_store` is either a literal leading `~/` or an
+  absolute path. The approval digest binds the literal, so no host path is
+  committed.
+  - **At parse:** `~user`, relative paths, paths not in normal form (`..`,
+    `.`, `//`), and literal temp or scratchpad paths are refused.
+  - **At launch, before any acquisition or container:** the `~/` is expanded
+    against HOME, which must itself be in normal form. The same refusals apply
+    to the EXPANDED path and to its real destination, so a symlinked ancestor
+    into `/tmp` is caught.
+  - The CLI writes there, refuses a different `--private-dir`, and records the
+    declared and expanded paths in the private report. Most #203-era live
+    evidence was lost to `/tmp` and session scratchpads.
+
+### Fixture drift since #372
+
+The improvement declaration's `task_content` was re-measured at P3. These are
+the current values:
+- `goal_digest` `sha256:250b82c4…`
+- `grader_digest` `sha256:332318a5…`
+- `fixture_digest` `sha256:3dc9df49…`
+
+Only one commit changed `evals/level3/gate-stops-early/discrimination/fixture`
+since #372: `9a37df6` (PR #380, Refs #376). It added `lint` and `test` entries
+to the fixture's `report.json`, which moved `fixture_digest` from
+`sha256:03d514e4…` to `sha256:3dc9df49…`. This is intended: grader revision 5
+records all three checks. The digest was checked at `9a37df6~1`, `9a37df6` and
+HEAD.
+
+### Not shown by P3
+
+A live attempt on this image is still owed. P4's deterministic rehearsal starts
+no container and so produces no egress proxy log. C4's per-attempt check is
+therefore shown here only on synthetic records.
 
 ## Two different questions
 
@@ -154,10 +239,10 @@ integration requirement. The merged gate exercise and regression-call controls
 strengthen task grading; they do not supply protected process evidence or
 real-runner certification. Revalidate exact task bytes before study approval.
 
-Still owed: exact approved runtime/skill pins; #315 runtime readiness; the derived
-full-tree closure and approval-bound manifest; the discrimination runner;
-actual-path 40-slot deterministic rehearsal; exact client/model/effort/image and
-runtime-supply receipt; current cost estimate; explicit exact study approvals.
+Still owed: #315 runtime readiness; the actual-path 40-slot deterministic
+rehearsal on kyle19 (P4); the approval package (P5); explicit exact study
+approvals. The runtime identities, receipt and discrimination runner were
+supplied by P2 and P3.
 Consume merged #348 profile forwarding/witness delivery rather than repairing
 that path again. #237's priority ruling and prior #203 approvals do not authorize
 this new study. No paid/model/Docker campaign, held-out tuning, or study verdict
