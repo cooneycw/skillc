@@ -2027,6 +2027,163 @@ def cmd_level3_campaign(args: argparse.Namespace) -> int:
     return 0 if report["matched"] == population else 1
 
 
+def cmd_level3_live(args: argparse.Namespace) -> int:
+    """Issue #434: run an APPROVED `level3-fixture-live-declaration`: the MODEL
+    runs CPP's real flow:auto on the fixture-service task, CLEAN and TWIN, with
+    provider-only egress (#442), the nested-codex guard and the native
+    containment stop. Refuses (exit 2), before any run directory or container
+    exists:
+    - an unapproved declaration, or one whose identities are not the repository's;
+    - an image whose tag, ID or receipt is not the declared one (C3);
+    - a run store other than the declared one (C5);
+    - a client other than the declared one;
+    - a subject other than the declared one;
+    - a dirty checkout.
+    A live run needs `SKILLC_ALLOW_REAL_AGENT=1`.
+
+    `--rehearse dry` and `--rehearse actor` spend nothing, and may run an
+    UNAPPROVED declaration (every other check still runs; the report says
+    `approved: false`):
+    - `dry` starts no container;
+    - `actor` runs the real live path with a scripted actor and a dummy credential.
+
+    Exits 1 on a containment stop, or when a live attempt did not run the
+    declared model."""
+    import secrets
+    import subprocess
+    from datetime import UTC, datetime
+
+    from . import calibration_run as cr
+    from . import collection_conformance as cc
+    from . import demo, trial_bootstrap
+    from . import fixture_live as fl
+    from . import level3_campaign as lc
+    from . import matched_pilot as mp
+    from . import runtime_supply as rs
+
+    rehearse = args.rehearse
+    try:
+        declaration = fl.load_declaration(Path(args.declaration))
+        fl.require_approved(declaration, cr.ROOT, approval_required=rehearse is None)
+    except (fl.LiveRefused, OSError, ValueError) as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+    approved = True
+    if rehearse is not None:
+        try:
+            fl.require_approved(declaration, cr.ROOT)
+        except fl.LiveRefused as exc:
+            approved = False
+            print(f"skillc: REHEARSAL of an UNAPPROVED declaration ({exc}); it spends nothing", file=sys.stderr)
+    shared = declaration.shared
+    client_version = str(shared["client"]["version"])
+    git = ["git", "-C", str(cr.ROOT)]
+    try:
+        dirty = subprocess.run([*git, "status", "--porcelain"], capture_output=True, text=True, check=False)
+        head = subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True, check=False)
+    except OSError as exc:
+        print(f"skillc: cannot read the skillc checkout's git state ({exc}); the run binds its HEAD", file=sys.stderr)
+        return 2
+    if dirty.returncode != 0 or head.returncode != 0 or dirty.stdout.strip():
+        print("skillc: the skillc checkout must be a clean git tree; the run binds its HEAD", file=sys.stderr)
+        return 2
+    docker_bin = tuple(args.docker_bin.split()) if args.docker_bin else ("docker",)
+    image_digest: str | None = str(shared["image"]["digest"])
+    bound_receipt: bytes | None = None
+    if rehearse == "dry":
+        print("skillc: DRY REHEARSAL - no container, client or model; the image and pinned-client checks are "
+              "skipped; every other step is the real path", file=sys.stderr)
+    else:
+        try:
+            pinned = trial_bootstrap.pinned_cli_version(fl.CLIENT)
+        except trial_bootstrap.PinnedVersionError as exc:
+            print(f"skillc: {exc}", file=sys.stderr)
+            return 2
+        if pinned != client_version:
+            print(f"skillc: the declaration names codex {client_version}, but the trial image pins {pinned}",
+                  file=sys.stderr)
+            return 2
+        image = args.image or str(shared["image"]["tag"])
+        image_digest = demo.resolve_image_digest(docker_bin, image, None, args.timeout)
+        try:  # C3: the declared tag, its daemon-resolved ID and the receipt bytes
+            bound_receipt = cr.require_image_binding(
+                declaration, image_arg=image, resolved_digest=image_digest,  # type: ignore[arg-type]
+                receipt_path=Path(args.runtime_supply_receipt) if args.runtime_supply_receipt else None)
+        except cr.CalibrationRefused as exc:
+            print(f"skillc: {exc}", file=sys.stderr)
+            return 2
+    try:
+        private_root = cr.private_root(declaration, args.private_dir)  # type: ignore[arg-type]  # C5
+    except cr.CalibrationRefused as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+    run_dir = private_root / f"{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}-{secrets.token_hex(3)}"
+    run_dir.mkdir(parents=True, mode=0o700)
+    print(f"skillc: private run directory: {run_dir}", file=sys.stderr)
+    subject = declaration.subject
+    try:
+        acquired = cc.acquire_collection(str(subject["name"]), run_dir)
+        found = (acquired.subject.locator, acquired.subject.revision, acquired.subject.client)
+        if found != (subject["locator"], subject["revision"], fl.CLIENT):
+            raise fl.LiveRefused(f"acquired subject {found} is not the declared one")
+        treatment = cr.build_treatment(acquired, subject_profile=str(subject["profile"]), root=cr.ROOT)
+        selected = rs.selected_runtime(
+            locator=acquired.subject.locator, revision=acquired.subject.revision,
+            gate_entrypoint=treatment.gate_entrypoint, files=treatment.verify_home_files,
+            tools=treatment.preflight_tools)
+        if selected != rs.PROFILE_RUNTIME:
+            raise fl.LiveRefused("the declared subject does not select the supported pinned runtime")
+        supply: rs.RuntimeSupply | None = None
+        if bound_receipt is not None:  # the bytes the binding checked, never a second read
+            supply = rs.RuntimeSupply(bound_receipt)
+            rs.require_kind(supply, selected)
+            if supply.image_id != image_digest:
+                raise rs.Refused("runtime receipt image differs from the declared resolved image")
+    except (fl.LiveRefused, demo.SubjectRefused, cr.CalibrationRefused, profile.Refused, rs.Refused, OSError,
+            json.JSONDecodeError, UnicodeError) as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        cc.discard_acquisition(run_dir, str(subject["name"]))
+
+    if rehearse == "actor":
+        credential: Path | None = lc.dummy_credential(run_dir / "codex-credential.dummy.json")
+    else:
+        credential = Path(args.credential) if args.credential else None
+
+    def backends() -> tuple[cc.TrackingDockerBackend, cc.TrackingDockerBackend]:
+        # By the resolved immutable digest, never the tag; the agent on provider-only egress (#442).
+        return cc.agent_backends(image=str(image_digest), base=run_dir, docker_bin=docker_bin,
+                                 daemon_timeout=args.timeout, runtime_supply=supply)
+
+    def on_outcome(outcome: mp.AttemptOutcome) -> None:
+        print(f"skillc: {outcome.scheduled.trial_id}: {outcome.record.get('disposition')} "
+              f"({mp.graded_status(outcome.record) or 'ungraded'})", file=sys.stderr)
+
+    try:
+        experiment, outcomes, stop = fl.run_live(
+            declaration, root=cr.ROOT, run_dir=run_dir, treatment=treatment, image_digest=image_digest,
+            backends=backends, client_argv=list(cc.DEFAULT_CLIENT_ARGVS[fl.CLIENT]),
+            credential_explicit_path=credential, rehearse=rehearse, on_outcome=on_outcome)
+    except (fl.LiveRefused, mp.ModelOverrideRefused) as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+    report = {**fl.build_report(declaration, experiment, outcomes, stop, rehearse=rehearse, approved=approved),
+              "skillc_revision": head.stdout.strip(), "image_digest": image_digest,
+              "run_store": {"declared": declaration.data["run_store"], "resolved": str(private_root)}}
+    report_path = run_dir / fl.REPORT_FILENAME
+    report_path.write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8")
+    for case, counts in report["cases"].items():  # type: ignore[attr-defined]
+        print(f"skillc: {case}: {counts}", file=sys.stderr)
+    if stop.trigger is not None:
+        print(f"skillc: CONTAINMENT STOP at {stop.at_attempt}: {stop.trigger}", file=sys.stderr)
+    print(f"skillc: report: {report_path}", file=sys.stderr)
+    if rehearse is not None:
+        accounted = len(outcomes) == len(declaration.order)
+        return 0 if accounted and stop.trigger is None else 1
+    return 0 if fl.succeeded(report) else 1
+
+
 def cmd_uptake_study(args: argparse.Namespace) -> int:
     """Issue #237: run an APPROVED two-arm uptake-study declaration. The
     `published` arm installs the declared subject as acquired; the
@@ -2782,6 +2939,27 @@ def build_parser() -> argparse.ArgumentParser:
     p_level3_campaign.add_argument("--timeout", type=float, default=30, help="per-container-call timeout, seconds")
     p_level3_campaign.add_argument("--private-dir", help="parent of the private run directory")
     p_level3_campaign.set_defaults(func=cmd_level3_campaign)
+
+    p_level3_live = sub.add_parser(
+        "level3-live",
+        help="issue #434: run an APPROVED level3-fixture-live-declaration (the model runs CPP's real flow:auto on "
+             "the fixture-service task, CLEAN and TWIN); evidence stays private (a real agent run, behind "
+             "SKILLC_ALLOW_REAL_AGENT=1)",
+    )
+    p_level3_live.add_argument("declaration", help="the level3-fixture-live-declaration JSON to run")
+    p_level3_live.add_argument("--image", help="trial image tag (default: the declared shared.image.tag)")
+    p_level3_live.add_argument("--runtime-supply-receipt",
+                               help="receipt of the pinned runtime image (required unless --rehearse dry)")
+    p_level3_live.add_argument("--credential", help="explicit path to the codex credential file")
+    p_level3_live.add_argument("--docker-bin", help="docker executable (space-separated words; default: docker)")
+    p_level3_live.add_argument("--timeout", type=float, default=60, help="per-container-call timeout, seconds")
+    p_level3_live.add_argument("--private-dir", help="must equal the declared run_store when given")
+    p_level3_live.add_argument(
+        "--rehearse", choices=["dry", "actor"], default=None,
+        help="spend nothing: 'dry' starts no container; 'actor' runs the real live path with a scripted actor "
+             "and a dummy credential. Either may run an unapproved declaration (the report says so)",
+    )
+    p_level3_live.set_defaults(func=cmd_level3_live)
 
     p_uptake = sub.add_parser(
         "uptake-study",
