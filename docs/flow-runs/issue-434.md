@@ -191,8 +191,37 @@ Risks:
 - A scripted actor does not run CPP's own Step-1 helpers: a production-path test of the harness, not of CPP's flow:auto behaviour.
 - The nested row's real-codex parent must be measured on evals26 before it is frozen.
 
-<!-- flow-run n=5 id=956eb1d666d34abc90f86cda690ceabd -->
+<!-- flow-run n=5 id=4bbb1b6e8d384179bcb4f4697c0af20f -->
 ## Run 5
+
+- Run-id:            4bbb1b6e8d384179bcb4f4697c0af20f
+- Run-start:         728f17342f43ae7a255acddd5711bda0dd4f5a4b
+- Issue:             #434
+- Base SHA:          728f173
+- Necessity verdict: Still needed
+- Approval:          granted
+- Approver:          skillc-400 (orchestrator, owner-delegated)
+- Recorded at:       2026-10-18T08:01:57Z
+
+### Section B evidence
+- The pre-registered revision-1 certifying run (#434 comment 6247128286) ran at 0aeb9c7 and was verified: 38/40 MATCH, 2 MISMATCH diagnosed (empty report.md: qualify passes "", production passes None).
+- The orchestrator ruled: record revision 1 as is in PR 3b; the qualify change and a revision-2 run follow.
+
+### Section C - the approved plan
+PR 3b of #434: revision 1's results only, docs. No code, manifest or grader change.
+
+1. `evals/level3/campaign-434/RESULTS.md` - revision 1's result: per section, the 2 MISMATCHes with their diagnosis, the guard rows, the observed rows with the diagnosed CPP finish-gate exit 3 (a fixture with no gate surface), the retention verification, limitation (c).
+2. `evals/level3/campaign-434/report.json` - the leak-checked campaign report, as the run wrote it.
+3. `evals/level3/campaign-434/verification.json` - the read-only retention verification's output.
+4. `evals/level3/campaign-434/README.md` - the results line points at RESULTS.md.
+
+Scope: 4 files, docs only. Small.
+
+Risks:
+- A committed report must carry no machine identity; it is leak-checked before commit.
+
+<!-- flow-run n=6 id=956eb1d666d34abc90f86cda690ceabd -->
+## Run 6
 
 - Run-id:            956eb1d666d34abc90f86cda690ceabd
 - Run-start:         728f17342f43ae7a255acddd5711bda0dd4f5a4b

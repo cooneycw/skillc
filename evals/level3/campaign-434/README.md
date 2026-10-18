@@ -14,9 +14,8 @@ agent runs on network `none` with a generated dummy credential.
 
 - Manifest: [manifest.json](manifest.json), derived by [freeze.py](freeze.py) (a test
   fails if they differ)
-- Results: none yet. The certifying run is pre-registered on #434 and runs at the merged
-  revision of this harness; its `RESULTS.md` and leak-checked `report.json` arrive in a
-  separate PR (#434 PR 3b)
+- Results: [RESULTS.md](RESULTS.md), manifest revision 1's pre-registered run (38/40 MATCH, the 2
+  MISMATCHes diagnosed), with [report.json](report.json) and [verification.json](verification.json)
 
 ## What the actor does
 
