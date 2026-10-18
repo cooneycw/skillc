@@ -144,7 +144,10 @@ class _Handler(socketserver.BaseRequestHandler):
         line = b"".join(chunks).split(b"\n", 1)[0]
         try:
             request = json.loads(line.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
+        except (UnicodeDecodeError, ValueError, RecursionError):
+            # ValueError covers JSONDecodeError AND the int-conversion limit (a
+            # 5,000-digit number); RecursionError is deep nesting. Each ends the
+            # request before decide, so each is a drop (counter-model, pass 3).
             channel._note_dropped()
             self._reply_refused("malformed request")
             return

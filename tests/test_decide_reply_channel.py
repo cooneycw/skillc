@@ -1003,10 +1003,14 @@ def test_admitted_requests_are_not_drops_even_when_decide_refuses_them(tmp_path:
     assert channel.dropped_connections() == 0
 
 
-@pytest.mark.parametrize("data", [b"not json at all\n", b"[1, 2, 3]\n", b"x" * 2048])
+@pytest.mark.parametrize("data", [b"not json at all\n", b"[1, 2, 3]\n", b"x" * 2048,
+                                  # counter-model review, pass 3: parser failures
+                                  # that are not JSONDecodeError
+                                  b'{"op": ' + b"9" * 5000 + b"}\n", b"[" * 20000 + b"]" * 20000 + b"\n"])
 def test_a_malformed_or_oversized_request_is_counted_as_dropped(tmp_path: Path, data: bytes) -> None:
     sock_path = tmp_path / "trigger.sock"
-    channel = DecideReplyChannel(sock_path, _decide_fixed({}), "a1", max_request_bytes=1024)
+    channel = DecideReplyChannel(sock_path, _decide_fixed({}), "a1",
+                                 max_request_bytes=1024 if len(data) <= 2048 else 64 * 1024)
     channel.start()
     try:
         _raw(sock_path, data)

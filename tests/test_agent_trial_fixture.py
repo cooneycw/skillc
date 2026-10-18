@@ -288,14 +288,15 @@ def test_a_fixture_attempt_with_a_widened_egress_allowlist_is_refused(tmp_path: 
     assert not list((tmp_path / "s").glob("*.json")) if (tmp_path / "s").exists() else True
 
 
+@pytest.mark.parametrize("dropped", ["not json", '{"op": ' + "9" * 5000 + "}"])
 def test_a_dropped_connection_after_the_top_level_launch_makes_the_count_unknown(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dropped: str) -> None:
     """Counter-model review, pass 2: a connection the channel closes before any
     route sees it (here a line that is not JSON; capacity and oversize drop
     the same way) may have been a guard decision, so the count cannot be zero."""
     candidate = TASK / "candidates" / "pass" / "clean-cites-commit-only"
     actions = json.loads((candidate / "actions.json").read_text())
-    requests: list[Any] = [TOP_LEVEL, "not json", *(_gh(argv) for argv in actions["gh"])]
+    requests: list[Any] = [TOP_LEVEL, dropped, *(_gh(argv) for argv in actions["gh"])]
     result, trusted = run_fixture_case(tmp_path, monkeypatch, case="clean", requests=requests,
                                        report=(candidate / "report.md").read_text())
     assert result["graded"] is None and trusted == []
