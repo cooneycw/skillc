@@ -79,6 +79,10 @@ _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 _HEADER_START = re.compile(r"^OpenAI Codex v\S+\s*$")
 _SEPARATOR = re.compile(r"^-{4,}\s*$")
 _SESSION_LINE = re.compile(r"^session id:\s*(\S+)\s*$")
+#: The header's own lines, measured on codex-cli 0.157.1 (an unknown key
+#: refuses the header: no turn rather than a guess).
+_HEADER_LINE = re.compile(
+    r"^(workdir|model|provider|approval|sandbox|reasoning effort|reasoning summaries|session id): .*$")
 #: What the pinned client prints before its header (measured): PATH-alias
 #: warnings and the stdin notice. Anything else before the header refuses it.
 _STARTUP = re.compile(r"^(WARNING: .*|Reading additional input from stdin\.\.\.|\s*)$")
@@ -139,6 +143,9 @@ def parse_turns(data: object, cases: Sequence[str]) -> CaseTurns:
                 raise TurnsRefused(f"case {case!r} turn {index}: text must be a non-empty string")
             if len(text) > MAX_TEXT_CHARS or "\x00" in text:
                 raise TurnsRefused(f"case {case!r} turn {index}: text is over {MAX_TEXT_CHARS} chars or holds NUL")
+            if text.lstrip().startswith("-"):
+                raise TurnsRefused(f"case {case!r} turn {index}: text may not start with '-' "
+                                   "(the client's argument parser would read it as a flag)")
             texts.append(text)
         parsed[case] = Turns(tuple(texts))
     return CaseTurns(parsed)
@@ -157,11 +164,23 @@ def session_id_from_header(stderr: bytes | None) -> str | None:
     # other output, could be the agent's (#279 counter-model review).
     if not all(_STARTUP.match(line) for line in lines[:start]):
         return None
-    separators = [i for i in range(start + 1, len(lines)) if _SEPARATOR.match(lines[i])]
-    if len(separators) < 2:
+    # A bounded grammar (#279 counter-model review, pass 2): the version line,
+    # a separator, ONLY the measured `key: value` header lines, then the
+    # closing separator. Any other line before it - a prompt echo, a command,
+    # a second version line - means the header never closed, and nothing
+    # after that point may supply the id.
+    if start + 1 >= len(lines) or not _SEPARATOR.match(lines[start + 1]):
         return None
-    found = [m.group(1) for line in lines[separators[0] + 1:separators[1]]
-             if (m := _SESSION_LINE.match(line))]
+    body: list[str] = []
+    for line in lines[start + 2:]:
+        if _SEPARATOR.match(line):
+            break
+        if not _HEADER_LINE.match(line):
+            return None
+        body.append(line)
+    else:
+        return None
+    found = [m.group(1) for line in body if (m := _SESSION_LINE.match(line))]
     if len(found) != 1 or not _UUID.match(found[0]):
         return None
     return found[0]
@@ -175,6 +194,8 @@ def resume_argv(client: str, base_argv: Sequence[str], session_id: str, text: st
         raise TurnsRefused(f"not a session id: {session_id!r}")
     if RESUME in base_argv:
         raise TurnsRefused("base_argv already holds 'resume': the turn-1 argv must be a fresh exec")
+    if text.lstrip().startswith("-"):
+        raise TurnsRefused("a turn text may not start with '-': the client would parse it as a flag")
     return (*base_argv, RESUME, session_id, text)
 
 

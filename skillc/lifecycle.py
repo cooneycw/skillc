@@ -239,6 +239,10 @@ def _ensure_spool_files(experiment: trial.Experiment, attempt_id: str) -> None:
             path.touch(mode=trial.FILE_MODE)
 
 
+#: `ExecuteResult` reasons meaning the exec never started at all.
+_NEVER_STARTED = frozenset({"launch-failed", "attempt-not-running"})
+
+
 def _run_turns(
     backend: ExecutionBackend, handle: object, experiment: trial.Experiment, attempt_id: str, argv: Sequence[str],
     limits: Limits, cancel: Callable[[], bool] | None,
@@ -251,8 +255,9 @@ def _run_turns(
     one wall budget (`limits.timeout` from the first exec), so turns never
     extend an attempt. `end_attempt` runs in a `finally`: an exception, or a
     controller crash between turns, still leaves no kept-running container -
-    `confirm_stopped()` then verifies it as for any attempt. Each delivered
-    turn is a `controller-turn` detail event; the returned result is the last
+    `confirm_stopped()` then verifies it as for any attempt. Each turn is a
+    pair of `controller-turn` detail events (dispatched, then ended with
+    `delivered` = it actually launched); the returned result is the last
     turn's, which the stop record describes."""
     assert isinstance(backend, TurnCapableBackend)
     started_at = time.monotonic()
@@ -278,11 +283,14 @@ def _run_turns(
                                   reason="the attempt's wall budget was spent before this turn")
                 break
             turn += 1
-            experiment.record(attempt_id, "controller-turn", index=turn, delivered=True)
+            experiment.record(attempt_id, "controller-turn", index=turn, dispatched=True)
             result = backend.execute_turn(handle, list(nxt), dataclasses.replace(limits, timeout=remaining), cancel)
             assert isinstance(result, ExecuteResult)
+            # Delivered only if the resume actually launched (#279 counter-
+            # model review, pass 2): a turn the backend never started is not
+            # an approval the agent received, nor a launch the guard expects.
             experiment.record(attempt_id, "controller-turn", index=turn, ended=result.reason,
-                              exit_code=result.exit_code)
+                              exit_code=result.exit_code, delivered=result.reason not in _NEVER_STARTED)
         return result
     finally:
         backend.end_attempt(handle)
