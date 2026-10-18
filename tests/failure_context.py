@@ -221,23 +221,31 @@ class _Sampler:
 _active_outer = [0]
 
 
-def _scrubber() -> Any:
+def _scrubber(home: str | None = None, names: set[str] | None = None) -> Any:
     """Home and user name, captured now: the suite's autouse fixtures patch
-    Path.home during every test, which is when reports are built."""
-    home = str(Path.home())
-    try:
-        import pwd
+    Path.home during every test, which is when reports are built. Names are
+    replaced on token boundaries, so a short name (`ci`) is scrubbed without
+    corrupting words that contain it (`circle`)."""
+    import re
 
-        user = pwd.getpwuid(os.getuid()).pw_name
-    except (ImportError, KeyError):
-        user = os.path.basename(home)
-    names = {n for n in (user, os.path.basename(home), os.environ.get("USER", "")) if len(n) >= 3}
+    home = home if home is not None else str(Path.home())
+    if names is None:
+        try:
+            import pwd
+
+            user = pwd.getpwuid(os.getuid()).pw_name
+        except (ImportError, KeyError):
+            user = os.path.basename(home)
+        names = {user, os.path.basename(home), os.environ.get("USER", "")}
+    patterns = [re.compile(rf"(?<![A-Za-z0-9_.]){re.escape(n)}(?![A-Za-z0-9_])")
+                for n in sorted(n for n in names if n)]
 
     def scrub(value: Any) -> Any:
         if isinstance(value, str):
-            value = value.replace(home, "~")
-            for name in names:
-                value = value.replace(name, "<user>")
+            if home and home != "/":
+                value = value.replace(home, "~")
+            for pattern in patterns:
+                value = pattern.sub("<user>", value)
             return value
         if isinstance(value, dict):
             return {k: scrub(v) for k, v in value.items()}
@@ -335,9 +343,12 @@ class FailureContext:
         """Controller side (or the only process without xdist): persist and summarise."""
         if not self.enabled or self.worker or not report.failed:
             return
-        for name, content in report.sections:
-            if name != SECTION:
-                continue
+        contents = [c for name, c in report.sections if name == SECTION]
+        if not contents:
+            # No worker attached one: the worker died before it could (a test
+            # that killed it, an OOM kill), and xdist built this report here.
+            contents = [json.dumps(self._controller_record(report))]
+        for content in contents:
             try:
                 record = self.scrub(json.loads(content))
             except ValueError:
@@ -349,6 +360,22 @@ class FailureContext:
                     fh.write(json.dumps(record, sort_keys=True) + "\n")
             except OSError as exc:
                 self.lines.append(self.scrub(f"FAILURE_CONTEXT: not written: {exc!r}"))
+
+    def _controller_record(self, report: pytest.TestReport) -> dict[str, Any]:
+        """Context taken on the CONTROLLER when it learned of the failure, for
+        a report no worker could annotate. Its history is the controller's."""
+        record: dict[str, Any] = {"nodeid": report.nodeid, "when": report.when,
+                                  "duration": round(report.duration or 0.0, 3),
+                                  "at": time.time(),
+                                  "source": "controller (no worker context: the worker died)"}
+        for name, fn in (("now", _now), ("neighbours", _neighbours)):
+            try:
+                record[name] = fn()
+            except Exception as exc:  # noqa: BLE001
+                record[name] = f"unavailable: {exc!r}"[:200]
+        record["history"] = list(self.sampler.buffer) if self.sampler else (
+            self.sampler_error or "unavailable")
+        return record
 
     @pytest.hookimpl
     def pytest_terminal_summary(self, terminalreporter: Any) -> None:
@@ -371,6 +398,16 @@ def _dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _census(nb: dict[str, Any]) -> str:
+    """The count, or the count marked partial with its coverage: an unreadable
+    population must not read as an observed zero."""
+    count = nb.get("pytest_processes")
+    if nb.get("census_partial"):
+        return (f"{count}(partial:{nb.get('census_inspected')}read,"
+                f"{nb.get('census_unreadable')}unreadable)")
+    return str(count)
+
+
 def _summary_line(record: dict[str, Any]) -> str:
     now, nb, dk = _dict(record.get("now")), _dict(record.get("neighbours")), _dict(record.get("docker"))
     cpu, io = _dict(now.get("psi_cpu")), _dict(now.get("psi_io"))
@@ -378,7 +415,7 @@ def _summary_line(record: dict[str, Any]) -> str:
     return (f"FAILURE_CONTEXT: {record['nodeid']} when={record.get('when')} load1={load[0]} "
             f"running={now.get('procs_running')} blocked={now.get('procs_blocked')} "
             f"psi_cpu10={cpu.get('some10')} psi_io10={io.get('some10')} "
-            f"pytest_procs={nb.get('pytest_processes')} "
+            f"pytest_procs={_census(nb)} "
             f"docker_ps={dk.get('containers', '-')} kyle={dk.get('kyle_containers', '-')}")
 
 

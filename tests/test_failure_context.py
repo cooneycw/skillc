@@ -268,3 +268,38 @@ def test_an_unreadable_census_is_partial_never_zero(monkeypatch):
     assert nb["census_scope"] == "same-uid"
     assert nb["census_unreadable"] > 0 and nb["census_partial"] is True
     assert nb["census_inspected"] == 0
+
+
+
+# ------------------------------------------------- review pass 2 (#462 PR 3)
+
+_CRASH = """
+import os
+
+def test_kills_its_worker():
+    os._exit(1)
+"""
+
+
+def test_a_test_that_kills_its_worker_still_gets_context(tmp_path):
+    output, records = _run(tmp_path, nested=False, body=_CRASH, extra_args=("-n", "2"))
+    assert "1 failed" in output, output[-1500:]
+    (record,) = records
+    assert record["nodeid"] == "test_inner.py::test_kills_its_worker"
+    assert record["source"].startswith("controller")
+    assert "FAILURE_CONTEXT: test_inner.py::test_kills_its_worker" in output
+
+
+def test_short_user_names_are_scrubbed_on_token_boundaries():
+    scrub = fc._scrubber(home="/home/ci", names={"ci", "x"})
+    assert scrub("user=ci cwd=/home/ci/repo") == "user=<user> cwd=~/repo"
+    assert scrub("circle ci-runner taxi x") == "circle <user>-runner taxi <user>"
+    assert scrub({"a": ["owner ci"]}) == {"a": ["owner <user>"]}
+
+
+def test_the_summary_marks_a_partial_census():
+    record = {"nodeid": "t", "neighbours": {"pytest_processes": 0, "census_partial": True,
+                                            "census_inspected": 0, "census_unreadable": 5}}
+    assert "pytest_procs=0(partial:0read,5unreadable)" in fc._summary_line(record)
+    whole = fc._summary_line({"nodeid": "t", "neighbours": {"pytest_processes": 3}})
+    assert "pytest_procs=3 " in whole
