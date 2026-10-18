@@ -261,6 +261,14 @@ def _run_turns(
         assert isinstance(result, ExecuteResult)
         turn = 1
         while result.reason == "exited" and result.exit_code == 0:
+            if cancel is not None and cancel():
+                # Checked BEFORE the next turn is asked for or launched: an
+                # operator stop between turns must never let an approval start
+                # (#279 counter-model review). The attempt reads as cancelled.
+                experiment.record(attempt_id, "controller-turn", index=turn + 1, delivered=False,
+                                  reason="cancelled between turns")
+                result = dataclasses.replace(result, reason="operator-cancelled")
+                break
             nxt = next_turn(backend, handle, turn, result)
             if nxt is None:
                 break

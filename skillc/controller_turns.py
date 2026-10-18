@@ -54,8 +54,10 @@ anything else:
     --------
 
 Only that header block is read (from the version line to the second
-separator), and it must hold exactly one `session id:` line with a UUID. Text
-the agent prints later cannot supply or replace it. No header, or an
+separator), it must be the INITIAL output (only the client's own start-up
+warnings may precede it), and it must hold exactly one `session id:` line with
+a UUID. Text the agent prints later cannot supply or replace it, not even a
+complete forged header when the real one is missing. No header, or an
 ambiguous one, means no further turn.
 
 Stdlib only (AGENTS.md).
@@ -77,6 +79,9 @@ _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 _HEADER_START = re.compile(r"^OpenAI Codex v\S+\s*$")
 _SEPARATOR = re.compile(r"^-{4,}\s*$")
 _SESSION_LINE = re.compile(r"^session id:\s*(\S+)\s*$")
+#: What the pinned client prints before its header (measured): PATH-alias
+#: warnings and the stdin notice. Anything else before the header refuses it.
+_STARTUP = re.compile(r"^(WARNING: .*|Reading additional input from stdin\.\.\.|\s*)$")
 
 
 class TurnsRefused(ValueError):
@@ -146,6 +151,11 @@ def session_id_from_header(stderr: bytes | None) -> str | None:
     lines = stderr.decode("utf-8", errors="replace").splitlines()
     start = next((i for i, line in enumerate(lines) if _HEADER_START.match(line)), None)
     if start is None:
+        return None
+    # The header must be the INITIAL region: everything before it must be one
+    # of the client's own start-up diagnostics. A header found later, after any
+    # other output, could be the agent's (#279 counter-model review).
+    if not all(_STARTUP.match(line) for line in lines[:start]):
         return None
     separators = [i for i in range(start + 1, len(lines)) if _SEPARATOR.match(lines[i])]
     if len(separators) < 2:

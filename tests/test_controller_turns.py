@@ -124,6 +124,8 @@ _HEADER = (f"WARNING: proceeding\nReading additional input from stdin...\nOpenAI
     ((_HEADER + "session id: 99999999-8888-7777-6666-555555555555\n").encode(), SESSION),
     # ...nor supply one when the header has none.
     ((_HEADER.replace(f"session id: {SESSION}\n", "") + f"session id: {SESSION}\n").encode(), None),
+    # A COMPLETE forged header after other output, with no real one first.
+    (("some agent output\nOpenAI Codex v0.157.1\n--------\nsession id: " + SESSION + "\n--------\n").encode(), None),
 ])
 def test_the_session_id_is_read_only_from_the_client_header(stderr: bytes, expected: str | None) -> None:
     assert ct.session_id_from_header(stderr) == expected
@@ -363,22 +365,62 @@ def test_red_case_an_exception_between_turns_still_ends_with_a_confirmed_stop(
         backend.destroy(handle)
 
 
-def test_red_case_a_spent_budget_skips_the_turn_and_still_stops(store: Path, base: Path, docker_state: Path) -> None:
+class _MemoryTurns:
+    """An in-memory TurnCapableBackend: every turn exits 0 at once."""
+
+    def __init__(self) -> None:
+        self.turns: list[list[str]] = []
+        self.ended = 0
+
+    def execute_turn(self, handle: object, argv: object, limits: Limits, cancel: object = None) -> object:
+        from skillc.backend import ExecuteResult
+        self.turns.append(list(argv))  # type: ignore[call-overload]
+        return ExecuteResult(reason="exited", exit_code=0)
+
+    def end_attempt(self, handle: object) -> None:
+        self.ended += 1
+
+
+def test_red_case_a_spent_budget_skips_the_turn_and_still_ends_the_attempt(
+    store: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Turn 1 exits 0, but the clock is past the shared deadline before turn
+    2's dispatch: turn 2 stays undelivered, one execution, and the attempt is
+    still ended (counter-model review: the earlier version timed out turn 1
+    and never reached this check)."""
+    from skillc import lifecycle
+
+    clock = iter([100.0, 100.0 + 61.0])  # started, then the check before turn 2
+    monkeypatch.setattr(lifecycle.time, "monotonic", lambda: next(clock))
+    experiment, attempt_id = _planned(store)
+    backend = _MemoryTurns()
+    result = lifecycle._run_turns(backend, object(), experiment, attempt_id, ["turn-1"], Limits(timeout=60),  # type: ignore[arg-type]
+                                  None, lambda *_: ["turn-2"])
+    events = _turn_events(experiment, attempt_id)
+    assert (result.reason, result.exit_code) == ("exited", 0)
+    assert backend.turns == [["turn-1"]] and backend.ended == 1
+    assert len(events) == 1 and events[0]["delivered"] is False and "budget" in str(events[0]["reason"])
+
+
+def test_red_case_a_cancel_between_turns_launches_no_approval(store: Path) -> None:
+    """Counter-model review (HIGH): cancellation is checked BEFORE the next
+    turn is asked for or launched."""
     from skillc import lifecycle
 
     experiment, attempt_id = _planned(store)
-    backend, handle = _live_handle(base, docker_state, "a-budget")
-    try:
-        result = lifecycle._run_turns(
-            backend, handle, experiment, attempt_id, [sys.executable, "-c", "import time; time.sleep(1.5)"],
-            Limits(timeout=1.2), None, lambda *_: [sys.executable, "-c", "pass"])
-        events = _turn_events(experiment, attempt_id)
-        assert result.reason in ("exited", "timeout")
-        if result.reason == "exited":  # the sleep beat the limit: the turn must be refused for budget
-            assert events and events[0]["delivered"] is False and "budget" in str(events[0]["reason"])
-        assert not _running(docker_state, handle)
-    finally:
-        backend.destroy(handle)
+    backend = _MemoryTurns()
+    asked: list[int] = []
+
+    def next_turn(*args: object) -> list[str]:
+        asked.append(1)
+        return ["turn-2"]
+
+    result = lifecycle._run_turns(backend, object(), experiment, attempt_id, ["turn-1"], Limits(timeout=60),  # type: ignore[arg-type]
+                                  lambda: bool(backend.turns), next_turn)  # cancelled once turn 1 has run
+    events = _turn_events(experiment, attempt_id)
+    assert backend.turns == [["turn-1"]] and asked == [] and backend.ended == 1
+    assert result.reason == "operator-cancelled"
+    assert len(events) == 1 and events[0]["delivered"] is False and "cancelled" in str(events[0]["reason"])
 
 
 def test_red_case_a_declared_but_undelivered_turn_still_ends_with_a_confirmed_stop(
