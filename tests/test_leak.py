@@ -11,6 +11,7 @@ proves the check is not simply refusing everything.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from pathlib import Path
@@ -654,8 +655,15 @@ def _kinds(text: str) -> set[str]:
     ("/tmp/claude-1000/", "claude-scratchpad"),
     ("see /tmp/claude-501/x", "claude-scratchpad"),
     # A real session id as a path segment.
-    ("scratchpad under /x/23a2ff01-2d6c-4f8b-9f56-8fbeb3a9cfb5/scratchpad/cap", "session-path-segment"),
+    ("scratchpad under /x/5b8e1c2a-9d3f-4e6b-a7c1-0f2d4e6a8b9c/scratchpad/cap", "session-path-segment"),
     ("tasks/0f3c9b1e-7d24-4e8a-9a51-3c6b2f1d8e70", "session-path-segment"),
+    # Counter-model review: case and serialized delimiters must not hide a form.
+    ("/x/7C1D2E3F-4A5B-4C6D-8E7F-9A0B1C2D3E4F/y", "session-path-segment"),
+    (json.dumps({"error": 'Cannot open "/tmp/claude-4242"'}), "claude-scratchpad"),
+    (json.dumps({"cwd": '"/x/-home-exampleuser"'}), "encoded-home-path"),
+    ("open `/tmp/claude-4242`", "claude-scratchpad"),
+    ("see `/x/7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f`.", "session-path-segment"),
+    ("(/tmp/claude-4242)", "claude-scratchpad"),
 ])
 def test_red_case_each_new_form_is_caught(text: str, kind: str) -> None:
     assert kind in _kinds(text)
@@ -666,10 +674,11 @@ def test_red_case_each_new_form_is_caught(text: str, kind: str) -> None:
     "the -home- marker alone",                        # no name after it
     "/tmp/claude-code-cache/x",                       # not a uid scratchpad
     "/tmp/claudette-1000/x",
-    "session id: 23a2ff01-2d6c-4f8b-9f56-8fbeb3a9cfb5",  # a UUID that is not a path segment
+    "session id: 5b8e1c2a-9d3f-4e6b-a7c1-0f2d4e6a8b9c",  # a UUID that is not a path segment
     "/x/22222222-2222-2222-2222-222222222222/y",      # synthetic repeated-digit test UUID
     "/x/00000000-0000-0000-0000-000000000000",
-    "rollout-2026-10-18T14-29-21-01a14f6a-cd7e-7851-8061-5cdeaaca5863.jsonl",  # inside a filename
+    "/x/AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA/y",     # synthetic, any case
+    "rollout-2026-10-18T14-29-21-3e9a7b1c-5d2f-4a8e-b6c0-1d3f5a7c9e2b.jsonl",  # inside a filename
 ])
 def test_a_benign_look_alike_is_not_flagged(text: str) -> None:
     assert not (_kinds(text) & {"encoded-home-path", "claude-scratchpad", "session-path-segment"})
@@ -677,7 +686,12 @@ def test_a_benign_look_alike_is_not_flagged(text: str) -> None:
 
 @pytest.mark.parametrize("name", ["planted-encoded-home", "planted-claude-scratchpad", "planted-session-segment"])
 def test_the_470_controls_discriminate(name: str) -> None:
-    bad = CONTROLS / "bad" / name
-    good = CONTROLS / "good" / name
-    assert leak.scan_path(bad, frozenset()).findings, f"{name}: the planted form was not caught"
-    assert not leak.scan_path(good, frozenset()).findings, f"{name}: the benign twin was flagged"
+    want = {"planted-encoded-home": "encoded-home-path", "planted-claude-scratchpad": "claude-scratchpad",
+            "planted-session-segment": "session-path-segment"}[name]
+    bad = leak.scan_path(CONTROLS / "bad" / name, frozenset())
+    good = leak.scan_path(CONTROLS / "good" / name, frozenset())
+    # Counts first: a missing fixture scans nothing, which must never read as
+    # "caught" or "clean" (counter-model review).
+    assert (bad.scanned, bad.skipped, good.scanned, good.skipped) == (1, 0, 1, 0), name
+    assert {f.kind for f in bad.findings} == {want}, f"{name}: the planted form was not caught as {want}"
+    assert good.findings == [], f"{name}: the benign twin was flagged"

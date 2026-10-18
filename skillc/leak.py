@@ -88,19 +88,21 @@ UID_GID_RE = re.compile(r"\b(?:uid|gid)=\d+")
 #: (`~/.claude/projects/-home-<name>-Projects`, and the scratchpad below):
 #: dashes stand in for slashes. It must start a token - no letter or digit
 #: right before the dash - so "take-home-pay" and "non-home-x" stay silent,
-#: and a name must follow, ending at a dash, a slash, a quote or a boundary.
-ENCODED_HOME_RE = re.compile(r"(?<![A-Za-z0-9])-(?:home|Users)-([A-Za-z0-9_.]+)(?=[-/\s'\"]|$)")
+#: and a name must follow, ending at a dash, a slash, whitespace, a quote (escaped
+#: or not), a backtick, closing punctuation or end of line.
+ENCODED_HOME_RE = re.compile(r"(?<![A-Za-z0-9])-(?:home|Users)-([A-Za-z0-9_.]+)(?=[-/\s'\"`\\)\]},;:>]|$)")
 
 #: #470: a Claude Code scratchpad root, `/tmp/claude-<uid>/`, carries the
 #: host's uid (and usually an encoded home path and a session id after it).
-CLAUDE_SCRATCHPAD_RE = re.compile(r"/tmp/claude-\d+(?=[/\s'\"]|$)")
+CLAUDE_SCRATCHPAD_RE = re.compile(r"/tmp/claude-\d+(?=[/\s'\"`\\)\]},;:>]|$)")
 
 #: #470: a UUID standing as a whole PATH SEGMENT - a session or task id in a
 #: path. A UUID elsewhere (a `session id:` value, inside a file name) is
 #: not a path leak and stays silent. A UUID whose 32 hex digits are all one
 #: character (`22222222-2222-...`) is synthetic test data; a real id never is.
 SESSION_SEGMENT_RE = re.compile(
-    r"(?<=/)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?=[/\s'\"]|$)")
+    r"(?<=/)([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
+    r"(?=[/\s'\"`\\)\]},;:.>]|$)")
 
 IPV4_RE = re.compile(r"\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b")
 
@@ -384,7 +386,7 @@ def scan_text(
         for match in CLAUDE_SCRATCHPAD_RE.finditer(line):
             yield lineno, "claude-scratchpad", f"Claude scratchpad path (host uid): {match.group(0)}"
         for match in SESSION_SEGMENT_RE.finditer(line):
-            if len(set(match.group(1).replace("-", ""))) == 1:
+            if len(set(match.group(1).lower().replace("-", ""))) == 1:
                 continue  # synthetic repeated-digit test UUID
             yield lineno, "session-path-segment", f"session-id-shaped path segment: {match.group(1)}"
         for match in UID_GID_RE.finditer(line):
