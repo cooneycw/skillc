@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from conftest import stamp_approval
 
 from skillc import calibration, verify
 
@@ -39,7 +40,7 @@ SUBJECT = {
 def _calibration_declaration(*, attempts_per_arm: int = 4, approval: dict[str, object] | None = None) -> dict[str, Any]:
     names = ["cpp", "baseline"]
     sequence = calibration.derive_arm_order(1, names, attempts_per_arm)
-    return {
+    return stamp_approval({
         "kind": "calibration-declaration",
         "arms": [
             {"name": "cpp", "subject": dict(SUBJECT), "treatment": "the validated profile closure installed"},
@@ -61,7 +62,7 @@ def _calibration_declaration(*, attempts_per_arm: int = 4, approval: dict[str, o
         "task": {"path": "evals/level3/slugkit-pipeline", "grader_id": GRADER.id, "grader_revision": GRADER.revision},
         "retain_transcripts": True,
         "approval": approval,
-    }
+    })
 
 
 def _approved_calibration_declaration(
@@ -120,7 +121,7 @@ def test_a_subject_with_no_profile_field_is_unaffected() -> None:
     data = _calibration_declaration(attempts_per_arm=attempts)
     del data["arms"][0]["subject"]["profile"]
     data["approval"] = {"by": "owner (cooneycw)", "at": "2026-10-07", "attempts_per_arm": attempts}
-    declaration = calibration.parse_declaration(data)
+    declaration = calibration.parse_declaration(stamp_approval(data))
     calibration.require_approved(declaration, ROOT)  # does not raise over the missing profile digest
 
 
@@ -134,7 +135,7 @@ def _discrimination_declaration(
     sequence = calibration.derive_arm_order(2, names, attempts_per_arm)
     intact_subject = dict(SUBJECT)
     degraded_revision = calibration._expected_degraded_revision(intact_subject)
-    return {
+    return stamp_approval({
         "kind": "discrimination-declaration",
         "arms": [
             {"name": "intact", "subject": dict(intact_subject)},
@@ -164,7 +165,7 @@ def _discrimination_declaration(
         "retain_transcripts": True,
         "tolerance": {"non_evaluable_per_arm": 1},
         "approval": approval,
-    }
+    })
 
 
 def _approved_discrimination_declaration(

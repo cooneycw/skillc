@@ -20,6 +20,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 
 import pytest
+from conftest import stamp_approval
 
 from skillc import calibration, checks, cli, demo, materialize, records, trial, verify
 from skillc import calibration_run as cr
@@ -89,7 +90,7 @@ def _declaration_data(*, attempts: int | None = None, approved: bool = True) -> 
         data["arm_order"]["sequence"] = calibration.derive_arm_order(data["arm_order"]["seed"], names, attempts)
         if isinstance(data["approval"], dict):
             data["approval"]["attempts_per_arm"] = attempts
-    return data
+    return stamp_approval(data)
 
 
 def _declaration(**kwargs: object) -> calibration.CalibrationDeclaration:
@@ -445,7 +446,7 @@ def test_run_calibration_builds_the_surface_from_the_declared_fixture_not_a_hard
     data = _declaration_data()
     data["task"]["fixture"] = "wrong/pipeline-red"  # type: ignore[index]
     data["approval"]["task_fixture"] = "wrong/pipeline-red"  # type: ignore[index]
-    declaration = calibration.parse_declaration(data)  # type: ignore[arg-type]
+    declaration = calibration.parse_declaration(stamp_approval(data))  # type: ignore[arg-type]
     assert (ROOT / declaration.task_path / "wrong" / "pipeline-red").is_dir()
     seen: list[Path] = []
 
@@ -622,7 +623,7 @@ def _three_arm_declaration() -> calibration.CalibrationDeclaration:
     names = [a["name"] for a in arms]
     data["arm_order"]["sequence"] = calibration.derive_arm_order(  # type: ignore[index]
         data["arm_order"]["seed"], names, _THREE_ARM_ATTEMPTS)  # type: ignore[index]
-    return calibration.parse_declaration(data)
+    return calibration.parse_declaration(stamp_approval(data))
 
 
 def test_three_arms_differ_only_by_install_and_the_provided_arm_s_instruction(
@@ -680,7 +681,7 @@ def test_a_provided_arm_naming_a_skill_the_install_lacks_is_refused_before_any_s
     data = json.loads(json.dumps(_three_arm_declaration().data))
     data["arms"][2]["named_skills"] = ["not-installed"]
     data["arms"][2]["instruction"] = "Before you start, read the `not-installed` skill."
-    declaration = calibration.parse_declaration(data)
+    declaration = calibration.parse_declaration(stamp_approval(data))
     treatment = _treatment(tmp_path, monkeypatch)
     run_dir = tmp_path / "run"
     run_dir.mkdir()
@@ -768,7 +769,7 @@ def _expanded_instruction_run_declaration(tmp_path: Path) -> calibration.Calibra
     data["arms"] = new_arms
     names = [a["name"] for a in new_arms if isinstance(a, dict)]
     data["arm_order"] = {"seed": 7, "sequence": calibration.derive_arm_order(7, names, _THREE_ARM_ATTEMPTS)}
-    return calibration.parse_declaration(data)
+    return calibration.parse_declaration(stamp_approval(data))
 
 
 def test_expanded_instruction_lane_dry_run_schedules_and_reconciles_all_three_arms(

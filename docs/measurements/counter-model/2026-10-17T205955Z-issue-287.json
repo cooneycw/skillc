@@ -1,0 +1,28 @@
+{
+  "branch": "issue-287-p1-power-cost-transplant",
+  "counts": {
+    "accepted": 11,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "extra_passes_reason": "orchestrator skillc-400: the mutation scan is a load-bearing instrument (its HOLDS verdict feeds the owner's #287 approval and nothing downstream re-derives it); the transplanted version was blind on 3 cases, and pass 2's fixes are in its core decision",
+  "head": "4a20993cd9897db1c77d68d9f05459d32eb6c78d",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "287",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 3,
+  "recorded_at": "2026-10-17T20:59:55Z",
+  "red_cases": {
+    "already_covered": 8,
+    "proposed": 8
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/17/rollout-2026-10-17T16-54-37-01a14ba5-2880-7e92-9aca-bb81441b8bd4.jsonl",
+    "thread_id": "01a14ba5-2880-7e92-9aca-bb81441b8bd4"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

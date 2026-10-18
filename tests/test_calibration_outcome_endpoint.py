@@ -460,7 +460,9 @@ def test_selected_satisfied_without_evidence_cannot_pass(tmp_path: Path, evidenc
 def test_removing_both_opt_in_fields_cannot_reuse_approval(tmp_path: Path) -> None:
     data = _data()
     del data["outcome_endpoint"], data["task_content"]
-    _refuses_run(tmp_path, calibration.parse_declaration(data), ROOT, "outcome fields")
+    # Still refused: since #287 P2 (D-P2a) the whole-declaration binding is
+    # what catches it - removing the fields changes the declaration's digest.
+    _refuses_run(tmp_path, calibration.parse_declaration(data), ROOT, "does not bind this exact declaration")
 
 
 @pytest.mark.parametrize("override", ["image", "cap"])
