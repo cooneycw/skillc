@@ -362,3 +362,20 @@ def test_both_readmes_name_the_current_declaration() -> None:
     for readme in (PILOT_DIR / "README.md", PILOT_DIR / "evidence" / "README.md"):
         text = readme.read_text(encoding="utf-8")
         assert f"Current declaration: [`{name}`]" in text, readme
+
+
+def test_a_do_nothing_attempt_lowers_the_pass_rate_never_leaves_the_denominator() -> None:
+    """#434 revision 2 (orchestrator ruling): an INCONCLUSIVE attempt is not
+    passed, and stays in the arm's scheduled denominator."""
+    from skillc import matched_pilot as mp
+
+    def rate(attempts: list[dict[str, object]]) -> float:
+        arms = mp.summarize({"attempts": attempts})["arms"]
+        assert isinstance(arms, dict)
+        arm = arms[mp.TREATMENT]
+        assert isinstance(arm, dict)
+        return int(str(arm["passed"])) / int(str(arm["scheduled"]))
+
+    passing = [{"arm": mp.TREATMENT, "repeat": i, "graded_status": "PASS", "disposition": "captured"} for i in range(3)]
+    do_nothing = {"arm": mp.TREATMENT, "repeat": 9, "graded_status": "INCONCLUSIVE", "disposition": "captured"}
+    assert rate([*passing, do_nothing]) < rate(passing)

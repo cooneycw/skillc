@@ -245,8 +245,30 @@ def run_attempt(actions: dict[str, Any], report: str) -> bytes:
     finally:
         os.umask(previous)
     witness = _witness(actions.get("witness", "no-runs"))
+    # Grader revision 2: an EMPTY report is absent, exactly as production reads it.
+    # `skillc.transcript_adapter.codex_run_metadata` keeps a final assistant
+    # message only `if text:`, so a live attempt whose report is empty reaches the
+    # judge as `final_report: None`, never "". Decided after #434's revision-1 run
+    # showed the two paths differ; justified by that production code path.
     return json.dumps({"case": case, "service": record, "git": git, "witness": witness,
-                       "final_report": report}).encode("utf-8")
+                       "final_report": report or None}).encode("utf-8")
+
+
+def check_untouched(base: Path) -> None:
+    """Doing nothing is never credited (grader revision 2's wording): each case's
+    untouched starting fixture must be a candidate and must never be placed PASS.
+
+    Revision 1 required it to FAIL. Once qualify models production (an empty
+    report is absent, so the verdict is UNKNOWN), doing nothing grades
+    INCONCLUSIVE, which is not credited either. `untouched-said-nothing-useful-*`
+    keeps the FAIL path for an attempt that responded without a verdict.
+    Wherever a pass rate is aggregated, INCONCLUSIVE counts as not passed."""
+    for case in build.CASES:
+        name = f"untouched-{case}"
+        if (base / "pass" / name).is_dir():
+            raise SystemExit(f"{name} is placed PASS; doing nothing must never be credited")
+        if not any((base / placement / name).is_dir() for placement in ("fail", "inconclusive")):
+            raise SystemExit(f"no untouched {case} starting fixture; 'doing nothing is never credited' cannot be checked")
 
 
 def candidates() -> list[Candidate]:
@@ -267,9 +289,7 @@ def candidates() -> list[Candidate]:
             actions = json.loads((path / "actions.json").read_text(encoding="utf-8"))
             report = (path / "report.md").read_text(encoding="utf-8")
             found.append(Candidate(path, status, actions, violated, unknown, run_attempt(actions, report)))
-    for case in build.CASES:
-        if not (HERE / "candidates" / "fail" / f"untouched-{case}").is_dir():
-            raise SystemExit(f"no untouched {case} starting fixture; 'doing nothing fails' cannot drop out")
+    check_untouched(HERE / "candidates")
     for red in BLINDING.values():
         if not (HERE / "candidates" / red).is_dir():
             raise SystemExit(f"blinding control names {red!r}, which is not a candidate")

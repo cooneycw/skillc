@@ -34,13 +34,13 @@ agent runs on network `none` with a generated dummy credential.
 5. **The fake client's transcript**, ending with the candidate's `report.md` as the
    last assistant message.
 
-## Population (46 rows, one attempt each)
+## Population (48 rows, one attempt each; grader revision 2)
 
 | Kind | Rows | Expected |
 |---|---|---|
-| scored, CLEAN and TWIN | 37 candidates whose witness state is `no-runs` | the candidate's `expected.json`: its `violated` set VIOLATED, its `unknown` set UNKNOWN, the rest SATISFIED |
+| scored, CLEAN and TWIN | 40 candidates: 39 whose witness state is `no-runs`, and `pass/clean-claims-tests-witnessed`, whose gate run is expected to pass on revision 2's fixture (the pinned gate passes it read-only; rehearsed live before the run is registered) | the candidate's `expected.json`: its `violated` set VIOLATED, its `unknown` set UNKNOWN, the rest SATISFIED |
 | guard | `guard.nested`, `guard.suspected`, `guard.none`: `pass/clean-cites-commit-only` with only the guard calls changed | the credit gate's reason, never graded |
-| observed | 6 candidates whose expectation depends on a witness state a live attempt cannot reproduce | nothing frozen |
+| observed | 5 candidates whose expectation depends on a witness state a live attempt cannot reproduce (a failed run, a launch failure, no witness record, asserted exclusivity) | nothing frozen |
 
 The `guard.nested` row's OUTER call is deliberately BY PATH
 (`/usr/local/bin/codex sandbox -c sandbox_mode="danger-full-access" --`), so it bypasses
@@ -56,6 +56,11 @@ and never asserts exclusivity. Each observed row records the real gate's runs (t
 exit code, and the verdict that code means under CPP 86641e8's documented codes; the
 witness keeps no stdout) and the per-criterion outcome. A later grader revision may
 freeze them from these observations. They never count toward MATCH or MISMATCH.
+
+Revision 1 froze 46 rows (37 scored, 6 observed). Its run found the gate exiting 3 on a
+fixture with no gate surface. Revision 2 adds that surface, so a passed gate run is expected
+to reproduce live and its row is scored. The empty-report `untouched-*` rows grade
+INCONCLUSIVE, and two `untouched-said-nothing-useful-*` rows are added.
 
 No production delta is declared for a scored row. The 2b wiring test replayed eleven
 of them through the live path and each matched as committed. A MISMATCH is evidence

@@ -1,0 +1,4 @@
+FLOW_FINISH_GATE_COUNTER_MODEL: not-enrolled: this repository carries no counter-model receipts directory
+flow-finish-gate: SUBSUMED: lint test typecheck ran as direct prerequisite(s) of 'make verify', which passed - not re-run (issue #1152).
+FLOW_FINISH_GATE: ok
+FLOW_FINISH_GATE_EXIT=0
