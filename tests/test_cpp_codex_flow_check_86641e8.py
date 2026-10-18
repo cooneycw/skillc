@@ -28,6 +28,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from skillc import calibration
 from skillc import profile as p
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -137,7 +138,11 @@ def test_every_live_selector_names_the_repinned_subject() -> None:
             assert arm["subject"]["name"] == RUNTIME_ID, (name, arm["name"])
             assert arm["subject"]["profile"] == f"evals/subjects/{RUNTIME_ID}", (name, arm["name"])
             assert arm["subject"]["revision"].endswith(PIN), (name, arm["name"])
-        assert declaration["approval"] is None, "a repin refreshes a draft; it never approves one"
+        # A repin refreshes a draft; it never approves one. Since the owner's
+        # approval (#287 P5, 2026-10-18) an approval may be present, but it binds
+        # the whole declaration, so a repin (which moves the digest) cannot keep it.
+        approval = declaration["approval"]
+        assert approval is None or approval["declaration_digest"] == calibration.declaration_digest(declaration), name
 
 
 def test_the_degraded_arm_digest_is_this_pins_reference_minus_the_removed_text() -> None:

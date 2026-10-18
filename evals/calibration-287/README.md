@@ -72,6 +72,18 @@ The pin is CPP `86641e8` (orchestrator ruling,
   source, so the run-time mutation check (P2) must build from the pinned
   revision.
 
+## Owner approval (2026-10-18)
+
+The owner approved both pilots with the words **"run 287 now"** (2026-10-18). They were replying, in the orchestrator's session, to the FINAL P5 approval package ([#287 comment](https://github.com/cooneycw/skillc/issues/287#issuecomment-6246337335)), which carried both approval sentences. skillc-400 (orchestrator, owner-delegated) relayed it as approval of both declarations at n=10 per arm.
+
+| | discrimination | improvement |
+|---|---|---|
+| approved digest | `sha256:40acebc5cfd04313a24639f5298698b52449699f8aa44ba6dca0e6e05dd2490e` | `sha256:6bc7581b1a72230951146aa2a96c5a8ec86a3e5104ebe6ca41cb61263b21a198` |
+
+Each file's `approval` block records `by`, `at`, `source` (quoting the words and the relay), `scope`, and the binding digests. The approval is excluded from the digest, so the stamp changed nothing the owner approved. `tests/test_calibration_p3_bindings.py` pins both digests, and refuses a copy with any declared field changed.
+
+An approval authorizes one run of each pilot, exactly as declared: 10 attempts per arm, the declared caps, on kyle19 with provider-only egress. It authorizes no re-run of a counted attempt and no main study. The run is #288.
+
 ## P3: completed declarations and the checks that bind them
 
 Both declarations now name exact runtime identities. Each is bound by an

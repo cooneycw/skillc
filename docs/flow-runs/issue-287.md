@@ -315,3 +315,26 @@ Both committed drafts refused by the parser (caps are text); placeholders pass a
 8. `CHANGELOG.md` - entry.
 
 Scope: ~200 src lines + tests. Risks: C4 couples declarations to code constants (a later allowlist change needs re-approval, intended); C5 path rules are heuristics. Review cap: 2 passes.
+
+<!-- flow-run n=5 id=698174db813946dc92ddff8e16e95c58 -->
+## Run 5
+
+- Run-id:            698174db813946dc92ddff8e16e95c58
+- Run-start:         a25d73b6e037d6b6a6aacf33afe2c87f9246c7cc
+- Issue:             #287
+- Base SHA:          a25d73b6e037d6b6a6aacf33afe2c87f9246c7cc
+- Necessity verdict: Not addressed (both declarations carry approval: null; the owner approved both on 2026-10-18)
+- Approval:          granted
+- Approver:          skillc-400 (orchestrator, owner-delegated), relaying the owner's words "run 287 now" (2026-10-18) in reply to the FINAL P5 package; P5 step 1 = the stamp PR
+- Recorded at:       2026-10-18T09:00:00Z
+
+### Section B evidence
+At main a25d73b both pilot declarations still have approval null and recompute to the P5 digests (40acebc5... discrimination, 6bc7581b... improvement). P5 section 6 names this PR and its fields; P4 proved the same approval shape authorizes (rehearsal-only stamps, deleted).
+
+### Section C - the approved plan
+1. `evals/calibration-287/pilot-discrimination-declaration.json` - stamp `approval` (by owner, at 2026-10-18, attempts_per_arm 10, profile_inventory_digest, mutated_digest, task_fixture, declaration_digest, source quoting "run 287 now" and the relay, scope).
+2. `evals/calibration-287/pilot-improvement-declaration.json` - the same, without mutated_digest.
+3. `tests/test_calibration_p3_bindings.py` - assert each committed file authorizes, its approval digest equals the P5 digest, and the approval binds; the old "committed drafts stay unapproved" test is replaced.
+4. `evals/calibration-287/README.md` - record the approval and its source.
+
+Scope: two JSON fields + tests + README. Risks: a stamped field that moves the digest (the tests pin the P5 digests); an approval wider than the owner's words (scope text names exactly the declared runs). Review: one counter-model pass.

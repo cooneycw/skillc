@@ -110,7 +110,16 @@
  "reported_beside": [
   "Raw task status and criteria; raw flow-check-honest outcome/evidence including absent-observer UNKNOWN; actual verified status/readiness; existing eligibility and uptake; all scheduled, unknown, inconclusive and not-graded counts by arm."
  ],
- "approval": null,
+ "approval": {
+  "by": "owner (cooneycw)",
+  "at": "2026-10-18",
+  "attempts_per_arm": 10,
+  "source": "owner instruction \"run 287 now\" (2026-10-18), given in the orchestrator's session in reply to the FINAL #287 P5 approval package (https://github.com/cooneycw/skillc/issues/287#issuecomment-6246337335), which carried this declaration's approval sentence at this digest; relayed by skillc-400 (orchestrator, owner-delegated) as approval of both pilots at n=10 per arm",
+  "scope": "one run of this pilot: the arms, identities, image and receipt, seed-derived schedule (10 attempts per arm) and caps (1200 s per attempt, 24000 s total) declared in this file, on kyle19 under the operator's codex subscription login with provider-only egress (#442); no re-run of a counted attempt, no main study, no dollar-metered spend",
+  "profile_inventory_digest": "sha256:4ee34823eb9f12c86d35f67d731b97a4c86dcd37ef77f9cada1ba78efe5f695a",
+  "task_fixture": "discrimination/fixture",
+  "declaration_digest": "sha256:6bc7581b1a72230951146aa2a96c5a8ec86a3e5104ebe6ca41cb61263b21a198"
+ },
  "outcome_endpoint": {
   "version": 1,
   "name": "common-task-outcome",
