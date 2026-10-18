@@ -98,8 +98,10 @@ Shared by both declarations:
 
 ### The checks (C1-C5)
 
-- **C1 - no placeholder identities.** Any `PENDING` or `PROPOSED` leaf is
-  refused at approval.
+- **C1 - no placeholder identities.** Any value under `shared` or `arms` that
+  begins with `PENDING` or `PROPOSED` is refused at approval. Prose that
+  mentions a marker mid-sentence is commentary, and the whole-declaration
+  digest binds it.
 - **C2 - tolerance is required.** A calibration declaration with an outcome
   endpoint must carry `tolerance.non_evaluable_per_arm`, and its report applies
   it. Legacy declarations without an endpoint need none.

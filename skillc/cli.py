@@ -1746,6 +1746,7 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
         return 2
     docker_bin = tuple(args.docker_bin.split()) if args.docker_bin else ("docker",)
     declared_digest = cr._shared_str(declaration, "image", "digest")
+    bound_receipt: bytes | None = None
     if rehearse:
         # A rehearsal starts no container, so the image and the pinned client
         # are not resolved; it plans against the DECLARED image digest and says so.
@@ -1768,7 +1769,7 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
         if isinstance(declared_image, dict) and "receipt_sha256" in declared_image:
             # #287 P3 (C3): the declared tag, its daemon-resolved ID, and the receipt bytes.
             try:
-                cr.require_image_binding(
+                bound_receipt = cr.require_image_binding(
                     declaration, image_arg=image, resolved_digest=image_digest,
                     receipt_path=Path(args.runtime_supply_receipt) if args.runtime_supply_receipt else None,
                 )
@@ -1818,7 +1819,10 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
             raise rs.Refused("supported profile requires --runtime-supply-receipt")
         if receipt_path and not needs_supply:
             raise rs.Refused("runtime receipt supplied for an unrelated or absent profile")
-        supply = rs.RuntimeSupply.from_path(Path(receipt_path)) if receipt_path else None
+        if bound_receipt is not None:  # #287 P3 (C3): the bytes the binding checked, not a second read
+            supply: rs.RuntimeSupply | None = rs.RuntimeSupply(bound_receipt)
+        else:
+            supply = rs.RuntimeSupply.from_path(Path(receipt_path)) if receipt_path else None
         if supply is not None and supply.image_id != image_digest:
             raise rs.Refused("runtime receipt image differs from the approved resolved image")
     except (cr.CalibrationRefused, profile.Refused, rs.Refused, OSError, json.JSONDecodeError, UnicodeError) as exc:

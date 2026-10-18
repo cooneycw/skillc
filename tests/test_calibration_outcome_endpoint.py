@@ -526,3 +526,55 @@ def test_unavailable_attempt_is_retained_and_not_model_ineligible(tmp_path: Path
     assert summary["scheduled"] == 1
     assert summary["primary"] == {"NOT_GRADED": 1}
     assert summary["process_honesty"] == {"NOT_GRADED": 1}
+
+
+def test_cli_runs_with_the_receipt_bytes_it_checked_not_a_second_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """#287 P3 (C3, counter-model finding): the receipt file replaced after the
+    binding check (here, during acquisition) must not reach the backends."""
+    from types import SimpleNamespace
+
+    from test_runtime_supply import RECEIPT
+
+    from skillc import cli, demo, trial_bootstrap
+    from skillc import runtime_supply as rs
+
+    data = _data()
+    image_id = json.loads(RECEIPT)["image_id"]
+    data["shared"]["image"]["digest"] = image_id
+    data["shared"]["image"]["receipt_sha256"] = trial.sha256_bytes(RECEIPT)
+    _approve(data)
+    declaration_path = tmp_path / "declaration.json"
+    declaration_path.write_text(json.dumps(data))
+    receipt = tmp_path / "receipt.json"
+    receipt.write_bytes(RECEIPT)
+    subject = next(arm["subject"] for arm in data["arms"] if arm["name"] != "baseline")
+    acquired = SimpleNamespace(subject=SimpleNamespace(locator=subject["locator"], revision=subject["revision"],
+                                                      client=data["shared"]["client"]["name"]))
+
+    def acquire(*_: object) -> object:
+        receipt.write_bytes(RECEIPT + b"\n")  # still a valid receipt; no longer the declared bytes
+        return acquired
+
+    seen: list[object] = []
+    monkeypatch.setattr(trial_bootstrap, "pinned_cli_version", lambda _: data["shared"]["client"]["version"])
+    monkeypatch.setattr(demo, "resolve_image_digest", lambda *_: image_id)
+    monkeypatch.setattr(cc, "acquire_collection", acquire)
+    monkeypatch.setattr(cc, "discard_acquisition", lambda *_: None)
+    monkeypatch.setattr(cr, "build_treatment", lambda *_a, **_kw: cr.Treatment({}, "sha256:" + "ab" * 32, None, skill_digests=_TEST_PINS))
+    monkeypatch.setattr(rs, "requires_supply", lambda **_: True)
+    monkeypatch.setattr(cr, "private_root", lambda *_: tmp_path / "private")
+    monkeypatch.setattr(cc, "agent_backends", lambda **kw: seen.append(kw["runtime_supply"]))
+
+    def run(*_a: object, **kw: Any) -> None:
+        kw["backends"]()
+        raise cr.CalibrationRefused("stop after dispatch")
+
+    monkeypatch.setattr(cr, "run_calibration", run)
+    result = cli.main(["calibration-run", str(declaration_path), "--image", data["shared"]["image"]["tag"],
+                       "--runtime-supply-receipt", str(receipt)])
+    assert "stop after dispatch" in capsys.readouterr().err
+    assert result == 2
+    assert len(seen) == 1 and isinstance(seen[0], rs.RuntimeSupply)
+    assert seen[0].receipt_bytes == RECEIPT

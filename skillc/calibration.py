@@ -629,8 +629,11 @@ PLACEHOLDER_MARKERS = ("PENDING", "PROPOSED")
 
 
 def _placeholder_leaves(value: object, where: str) -> list[str]:
+    """Leaves whose value IS a placeholder: it begins with a marker
+    (`PENDING`, `PROPOSED: x`). Prose that mentions a marker mid-sentence is
+    commentary, bound by the whole-declaration digest (counter-model finding)."""
     if isinstance(value, str):
-        return [where] if any(marker in value for marker in PLACEHOLDER_MARKERS) else []
+        return [where] if value.lstrip().startswith(PLACEHOLDER_MARKERS) else []
     if isinstance(value, dict):
         return [p for k, v in value.items() for p in _placeholder_leaves(v, f"{where}.{k}")]
     if isinstance(value, list):

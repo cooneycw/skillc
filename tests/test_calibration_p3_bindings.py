@@ -94,6 +94,18 @@ def test_c1_a_placeholder_inside_an_arm_subject_is_refused() -> None:
         _authorize(_approve(data))
 
 
+@pytest.mark.parametrize("prose", [
+    "Recorded image replaces the PROPOSED image in the earlier draft.",
+    "no longer PENDING: measured at P3",
+])
+def test_c1_prose_that_mentions_a_marker_is_not_a_placeholder(prose: str) -> None:
+    """Counter-model finding: commentary about an earlier placeholder is bound
+    by the whole-declaration digest, not refused as a placeholder."""
+    data = _draft(IMPROVEMENT)
+    data["shared"]["image"]["provenance"] = prose
+    _authorize(_approve(data))
+
+
 # ------------------------------------------------------------------- C2
 
 def test_c2_an_endpoint_declaration_without_a_tolerance_is_refused() -> None:

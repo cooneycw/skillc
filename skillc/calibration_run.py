@@ -597,12 +597,15 @@ def run_calibration(
 
 
 def require_image_binding(declaration: AnyDeclaration, *, image_arg: str, resolved_digest: str | None,
-                          receipt_path: Path | None) -> None:
+                          receipt_path: Path | None) -> bytes:
     """C3: the run's image is the DECLARED one three ways - the tag the
     operator passed is `shared.image.tag`, the daemon resolves it to
     `shared.image.digest` (a tag re-pointed at another image is refused), and
     the runtime-supply receipt file's bytes hash to `shared.image.receipt_sha256`.
-    A missing or malformed declared receipt digest is refused, never skipped."""
+    A missing or malformed declared receipt digest is refused, never skipped.
+    Returns the receipt bytes it checked: the run uses THOSE bytes, never a
+    second read of the path (counter-model finding: the file can change between
+    reads)."""
     image = declaration.shared.get("image")
     image = image if isinstance(image, dict) else {}
     tag, digest, receipt_sha = image.get("tag"), image.get("digest"), image.get("receipt_sha256")
@@ -616,10 +619,12 @@ def require_image_binding(declaration: AnyDeclaration, *, image_arg: str, resolv
     if receipt_path is None or not receipt_path.is_file():
         raise CalibrationRefused("the declaration names a runtime receipt (shared.image.receipt_sha256) but "
                                  "no receipt file was supplied")
-    measured = m.sha256_bytes(receipt_path.read_bytes())
+    receipt_bytes = receipt_path.read_bytes()
+    measured = m.sha256_bytes(receipt_bytes)
     if measured != receipt_sha:
         raise CalibrationRefused(f"runtime receipt {receipt_path} hashes to {measured}, not the declared "
                                  f"shared.image.receipt_sha256 {receipt_sha}")
+    return receipt_bytes
 
 
 def private_root(declaration: AnyDeclaration, private_dir: str | None) -> Path:
