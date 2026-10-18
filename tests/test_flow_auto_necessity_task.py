@@ -387,6 +387,11 @@ def test_cited_tokens_resolve_now_exactly_when_they_resolved_before(tmp_path: Pa
 
 # --- the fixture's gate surface -------------------------------------------------------
 
+#: CI's python:3.12-slim has no make (the test_level3_cicd_pipeline precedent); the
+#: lock-1 gate on kyle19 has it, so these run there.
+needs_make = pytest.mark.skipif(shutil.which("make") is None, reason="make is not installed")
+
+
 def _built(tmp_path: Path, case: str = "clean") -> Path:
     root = tmp_path / case
     root.mkdir()
@@ -405,6 +410,7 @@ def test_the_makefile_is_plain_explicit_rules_cpps_subsumption_can_query(tmp_pat
     assert "weaker than ruff" in makefile and "NO type checker" in makefile
 
 
+@needs_make
 @pytest.mark.parametrize("case", ["clean", "twin"])
 def test_make_verify_passes_on_each_base_tree_and_leaves_it_clean(tmp_path: Path, case: str) -> None:
     repo = _built(tmp_path, case)
@@ -414,6 +420,7 @@ def test_make_verify_passes_on_each_base_tree_and_leaves_it_clean(tmp_path: Path
                           check=True).stdout == ""
 
 
+@needs_make
 def test_a_broken_tree_fails_make_test(tmp_path: Path) -> None:
     """The earned failing path, at builder level: one real failing assertion."""
     repo = _built(tmp_path)
@@ -429,6 +436,7 @@ def _make(repo: Path, target: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["make", target], cwd=repo, capture_output=True, text=True, timeout=120, check=False)
 
 
+@needs_make
 def test_lint_fails_on_a_syntax_error(tmp_path: Path) -> None:
     repo = _built(tmp_path)
     (repo / "widget" / "core.py").write_text("def broken(\n")
@@ -436,6 +444,7 @@ def test_lint_fails_on_a_syntax_error(tmp_path: Path) -> None:
     assert done.returncode != 0 and "SyntaxError" in done.stderr
 
 
+@needs_make
 def test_lint_refuses_an_empty_population(tmp_path: Path) -> None:
     """A lint that found no module checked nothing; it must not read as a pass."""
     repo = _built(tmp_path)
@@ -445,6 +454,7 @@ def test_lint_refuses_an_empty_population(tmp_path: Path) -> None:
     assert done.returncode != 0 and "no Python files found" in done.stderr
 
 
+@needs_make
 @pytest.mark.parametrize("target", ["test", "verify"])
 def test_an_empty_test_suite_fails_test_and_verify(tmp_path: Path, target: str) -> None:
     """Python 3.11's `unittest discover` reports OK on zero tests; the recipe must not."""
@@ -454,6 +464,7 @@ def test_an_empty_test_suite_fails_test_and_verify(tmp_path: Path, target: str) 
     assert done.returncode != 0 and "no tests found" in done.stderr, done.stdout + done.stderr
 
 
+@needs_make
 def test_typecheck_fails_on_an_import_time_error(tmp_path: Path) -> None:
     repo = _built(tmp_path)
     init = repo / "widget" / "__init__.py"
