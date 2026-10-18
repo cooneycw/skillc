@@ -188,6 +188,14 @@ def _apply_git(root: Path, ops: list[dict[str, Any]]) -> None:
         elif kind == "copy-from":
             data = build.host_git(["show", f"{op['commit']}:{op['path']}"], root / op["where"])
             (root / op["where"] / op["path"]).write_text(data + "\n", encoding="utf-8")
+        elif kind == "remote-park-head":
+            # A commit only the bare remote's detached HEAD reaches.
+            remote = root / "remote.git"
+            tree = build.host_git(["rev-parse", "main^{tree}"], remote)
+            parent = build.host_git(["rev-parse", "main"], remote)
+            sha = build.host_git(["commit-tree", tree, "-p", parent, "-m", op["message"]], remote,
+                                 date="2026-10-17T12:40:00+0000")
+            build.host_git(["update-ref", "--no-deref", "HEAD", sha], remote)
         elif kind == "update-ref":
             _git(root / op["where"], "update-ref", op["ref"], op["to"])
         elif kind == "reset-hard":

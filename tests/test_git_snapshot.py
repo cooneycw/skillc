@@ -73,6 +73,9 @@ EXTRA_STATES: dict[str, dict[str, Any]] = {
         *STEP1, {"op": "commit-empty", "where": WT, "message": "hidden"},
         {"op": "update-ref", "where": WT, "ref": "refs/worktree/hidden", "to": "HEAD"},
         {"op": "reset-hard", "where": WT, "commit": "970ffd0266624752509568367994a399d74d12db"}]},
+    # Pass 2: a commit only the bare remote's detached HEAD reaches.
+    "commit-parked-on-remote-detached-head": {"case": "clean", "git": [
+        {"op": "remote-park-head", "message": "parked"}]},
     # Pass 1: an intent-to-add entry changes what git stages.
     "intent-to-add": {"case": "clean", "git": [
         {"op": "add-intent", "where": "repo", "path": "NOTES.md", "text": "later\n"}]},
@@ -565,3 +568,111 @@ def test_a_truncated_zlib_stream_is_unreadable(tmp_path: Path) -> None:
     path.write_bytes(zlib.compress(data)[:-4])  # the adler32 trailer removed, payload intact
     with pytest.raises(gs.Unreadable, match="complete zlib"):
         gs.GitDir(gs.SafeTree(tmp_path), "bare").object(sha)
+
+
+
+# --- counter-model review pass 2 regressions ------------------------------------
+
+def test_a_commit_parked_on_the_remotes_detached_head_is_violated(tmp_path: Path) -> None:
+    actions = EXTRA_STATES["commit-parked-on-remote-detached-head"]
+    with _played(actions) as (root, facts):
+        host = _host(root, facts)
+        snap = _snapshot(_export(root, tmp_path / "export"), root, facts)
+    assert _verdict("clean", host) == "VIOLATED" and _verdict("clean", snap) == "VIOLATED"
+
+
+def test_an_index_name_length_that_disagrees_with_the_name_is_unreadable() -> None:
+    import hashlib
+    import struct
+
+    data = bytearray(_index_v3([("abc", 0, 0)]))
+    flags_at = 12 + 60
+    flags = struct.unpack(">H", data[flags_at:flags_at + 2])[0]
+    data[flags_at:flags_at + 2] = struct.pack(">H", (flags & ~0x0FFF) | 5)  # says 5, the name is 3
+    body = bytes(data[:-20])
+    with pytest.raises(gs.Unreadable, match="flags say 5"):
+        gs.parse_index(body + hashlib.sha1(body).digest())
+
+
+def test_non_nul_index_padding_is_unreadable() -> None:
+    import hashlib
+
+    data = bytearray(_index_v3([("abc", 0, 0)]))
+    data[12 + 62 + 3 + 1] = 0x41  # the second padding byte after "abc\0"
+    body = bytes(data[:-20])
+    with pytest.raises(gs.Unreadable, match="padding"):
+        gs.parse_index(body + hashlib.sha1(body).digest())
+
+
+def test_duplicate_packed_refs_are_unreadable(exported: tuple[Path, Path, dict[str, Any]]) -> None:
+    export, root, facts = exported
+    packed = export / ".remote" / "widget.git" / "packed-refs"
+    packed.write_text(f"{'1' * 40} refs/heads/side\n{facts['base_commit']} refs/heads/side\n")
+    with pytest.raises(gs.Unreadable, match="twice"):
+        _snapshot(export, root, facts)
+
+
+@pytest.mark.parametrize("payload", [b"", b"tree " + b"0" * 40 + b"\n", b"author x\ncommitter y\n\nmsg"])
+def test_a_commit_without_a_commit_structure_is_unreadable(tmp_path: Path, payload: bytes) -> None:
+    sha = _write_object(tmp_path / "bare", "commit", payload)
+    git = gs.GitDir(gs.SafeTree(tmp_path), "bare")
+    with pytest.raises(gs.Unreadable):
+        git.parents(sha)
+    with pytest.raises(gs.Unreadable):
+        gs.SnapshotGitRemote(gs.SafeTree(tmp_path), "bare").resolve(sha)
+
+
+@pytest.mark.parametrize("kind", ["file", "directory"])
+def test_duplicate_tree_entries_are_unreadable(tmp_path: Path, kind: str) -> None:
+    bare = tmp_path / "bare"
+    blob_a, blob_b = _write_object(bare, "blob", b"a"), _write_object(bare, "blob", b"b")
+    if kind == "file":
+        payload = b"100644 same\0" + bytes.fromhex(blob_a) + b"100644 same\0" + bytes.fromhex(blob_b)
+    else:
+        sub_a = _write_object(bare, "tree", b"100644 x\0" + bytes.fromhex(blob_a))
+        sub_b = _write_object(bare, "tree", b"100644 y\0" + bytes.fromhex(blob_b))
+        payload = b"40000 dir\0" + bytes.fromhex(sub_a) + b"40000 dir\0" + bytes.fromhex(sub_b)
+    tree = _write_object(bare, "tree", payload)
+    with pytest.raises(gs.Unreadable, match="twice"):
+        gs.GitDir(gs.SafeTree(tmp_path), "bare").tree_files(tree)
+
+
+def test_a_deep_working_directory_is_unreadable_not_a_recursion_error(tmp_path: Path) -> None:
+    deep = tmp_path / "wt"
+    path = deep
+    for _ in range(gs.MAX_FS_DEPTH + 5):
+        path = path / "d"
+    path.mkdir(parents=True)
+    with pytest.raises(gs.Unreadable, match="deeper"):
+        gs.worktree_files(gs.SafeTree(tmp_path), "wt")
+
+
+def test_a_broad_directory_exhausts_the_entry_budget(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    wide = tmp_path / "wt"
+    wide.mkdir()
+    for i in range(50):
+        (wide / f"f{i}").write_text("x")
+    monkeypatch.setattr(gs, "MAX_FS_ENTRIES", 20)
+    with pytest.raises(gs.Unreadable, match="budget"):
+        gs.worktree_files(gs.SafeTree(tmp_path), "wt")
+
+
+def test_an_oversized_numeric_header_is_unreadable_not_a_value_error(tmp_path: Path) -> None:
+    import hashlib
+    import zlib
+
+    data = b"blob " + b"9" * 5000 + b"\0x"
+    sha = hashlib.sha1(data).hexdigest()
+    path = tmp_path / "bare" / "objects" / sha[:2] / sha[2:]
+    path.parent.mkdir(parents=True)
+    path.write_bytes(zlib.compress(data))
+    with pytest.raises(gs.Unreadable, match="malformed header"):
+        gs.GitDir(gs.SafeTree(tmp_path), "bare").object(sha)
+
+
+def test_a_nul_in_a_worktree_gitdir_is_unreadable_not_a_value_error(
+        exported: tuple[Path, Path, dict[str, Any]]) -> None:
+    export, root, facts = exported
+    (export / "repo" / ".git" / "worktrees" / WT / "gitdir").write_text(f"{root}/repo-x\0y/.git\n")
+    with pytest.raises(gs.Unreadable):
+        _snapshot(export, root, facts)

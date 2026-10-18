@@ -72,6 +72,11 @@ MAX_OBJECT_BYTES = 16 * 1024 * 1024
 MAX_WALK = 50_000
 MAX_TREE_ENTRIES = 200_000
 MAX_TREE_DEPTH = 64
+#: Shared filesystem budgets for one SafeTree (pass 2): directory depth,
+#: entries listed, bytes read - working-tree and ref walks included.
+MAX_FS_DEPTH = 64
+MAX_FS_ENTRIES = 200_000
+MAX_FS_BYTES = 512 * 1024 * 1024
 _SHA = re.compile(r"[0-9a-f]{40}")
 #: Extended index flags (index v3): intent-to-add and skip-worktree; any
 #: other extended bit is refused rather than ignored.
@@ -94,11 +99,17 @@ class SafeTree:
             raise Unreadable(f"the export root cannot be read: {exc}") from exc
         if not stat.S_ISDIR(info.st_mode):
             raise Unreadable("the export root is not a directory")
+        self.entries_listed = 0
+        self.bytes_read = 0
 
     def _parts(self, rel: str) -> list[str]:
+        if "\0" in rel:
+            raise Unreadable(f"a path holds a NUL byte: {rel[:80]!r}")
         parts = [p for p in PurePosixPath(rel).parts if p not in ("", ".")]
         if any(p == ".." or "/" in p for p in parts):
-            raise Unreadable(f"unsafe path {rel!r}")
+            raise Unreadable(f"unsafe path {rel[:80]!r}")
+        if len(parts) > MAX_FS_DEPTH + 8:
+            raise Unreadable(f"a path nests deeper than the depth cap: {rel[:80]!r}")
         return parts
 
     def _open_dir(self, parts: list[str]) -> int:
@@ -185,8 +196,11 @@ class SafeTree:
                     if not chunk:
                         break
                     total += len(chunk)
+                    self.bytes_read += len(chunk)
                     if total > limit:
                         raise Unreadable(f"{rel!r} grew past the {limit}-byte cap while read")
+                    if self.bytes_read > MAX_FS_BYTES:
+                        raise Unreadable("the snapshot read exceeds its total byte budget")
                     chunks.append(chunk)
                 return b"".join(chunks), info.st_mode
             except OSError as exc:
@@ -214,6 +228,9 @@ class SafeTree:
                     kind = ("file" if stat.S_ISREG(info.st_mode) else "dir" if stat.S_ISDIR(info.st_mode)
                             else "other")
                     out.append((entry.name, kind))
+                    self.entries_listed += 1
+                    if self.entries_listed > MAX_FS_ENTRIES:
+                        raise Unreadable("the snapshot lists more entries than its budget")
             return sorted(out)
         except OSError as exc:
             raise Unreadable(f"cannot list {rel!r}: {exc}") from exc
@@ -263,6 +280,8 @@ class GitDir:
                 sha, _, name = line.partition(" ")
                 if not _SHA.fullmatch(sha) or not name.startswith("refs/"):
                     raise Unreadable(f"{self.path}: malformed packed-refs line {line[:80]!r}")
+                if name in refs:
+                    raise Unreadable(f"{self.path}: packed-refs lists {name} twice")
                 refs[name] = sha
         loose: dict[str, str] = {}
         self._walk_refs(self.path, "refs", loose)
@@ -278,6 +297,8 @@ class GitDir:
         return {f"{gitdir}/{name}": self._resolve_value(name, value, common) for name, value in sorted(out.items())}
 
     def _walk_refs(self, base: str, rel: str, out: dict[str, str]) -> None:
+        if rel.count("/") > MAX_FS_DEPTH:
+            raise Unreadable(f"{base}: refs nest deeper than the depth cap")
         kind = self.tree.kind(_join(base, rel))
         if kind == "missing":
             return
@@ -343,34 +364,43 @@ class GitDir:
             raise Unreadable(f"object {sha[:10]} does not hash to its name")
         header, sep, payload = data.partition(b"\0")
         kind, _, size = _ascii(header, f"object {sha[:10]}'s header").partition(" ")
-        if not sep or kind not in ("commit", "tree", "blob", "tag") or not size.isdigit() \
+        if not sep or kind not in ("commit", "tree", "blob", "tag") or not size.isdigit() or len(size) > 20 \
                 or int(size) != len(payload):
             raise Unreadable(f"object {sha[:10]} has a malformed header")
         return kind, payload
 
-    def parents(self, sha: str) -> list[str]:
+    def _commit(self, sha: str) -> tuple[str, list[str]]:
+        """`(tree, parents)` of a STRUCTURALLY valid commit (pass 2): a tree
+        line first, then only parent lines, then author and committer lines
+        before the message. Anything else is Unreadable, never an empty
+        parent list."""
         kind, payload = self.object(sha)
         if kind != "commit":
             raise Unreadable(f"{sha[:10]} is a {kind}, not a commit")
-        out = []
-        for line in payload.split(b"\n"):
-            if not line:
-                break
-            if line.startswith(b"parent "):
-                parent = _ascii(line[7:], f"commit {sha[:10]}'s parent line")
-                if not _SHA.fullmatch(parent):
-                    raise Unreadable(f"commit {sha[:10]} has a malformed parent line")
-                out.append(parent)
-        return out
+        header, _sep, _message = payload.partition(b"\n\n")
+        lines = header.split(b"\n")
+        if not lines or not lines[0].startswith(b"tree "):
+            raise Unreadable(f"commit {sha[:10]} does not begin with a tree line")
+        tree = _ascii(lines[0][5:], f"commit {sha[:10]}'s tree line")
+        parents: list[str] = []
+        i = 1
+        while i < len(lines) and lines[i].startswith(b"parent "):
+            parent = _ascii(lines[i][7:], f"commit {sha[:10]}'s parent line")
+            if not _SHA.fullmatch(parent):
+                raise Unreadable(f"commit {sha[:10]} has a malformed parent line")
+            parents.append(parent)
+            i += 1
+        rest = lines[i:]
+        if not _SHA.fullmatch(tree) or len(rest) < 2 or not rest[0].startswith(b"author ") \
+                or not rest[1].startswith(b"committer ") or any(r.startswith(b"parent ") for r in rest):
+            raise Unreadable(f"commit {sha[:10]} lacks a well-formed tree/parent/author/committer header")
+        return tree, parents
+
+    def parents(self, sha: str) -> list[str]:
+        return self._commit(sha)[1]
 
     def tree_of(self, commit: str) -> str:
-        kind, payload = self.object(commit)
-        if kind != "commit" or not payload.startswith(b"tree ") or payload[45:46] != b"\n":
-            raise Unreadable(f"{commit[:10]} has no well-formed tree line")
-        tree = _ascii(payload[5:45], f"commit {commit[:10]}'s tree line")
-        if not _SHA.fullmatch(tree):
-            raise Unreadable(f"commit {commit[:10]} has a malformed tree id")
-        return tree
+        return self._commit(commit)[0]
 
     def tree_files(self, tree: str, prefix: str = "", depth: int = 0) -> dict[str, str]:
         """A tree object, recursively, as {path: "MODE BLOB"}, under the
@@ -382,6 +412,7 @@ class GitDir:
         if kind != "tree":
             raise Unreadable(f"{tree[:10]} is a {kind}, not a tree")
         files: dict[str, str] = {}
+        names: set[str] = set()
         i = 0
         while i < len(payload):
             space = payload.find(b" ", i)
@@ -393,8 +424,11 @@ class GitDir:
                 name = payload[space + 1:nul].decode("utf-8")
             except UnicodeDecodeError as exc:
                 raise Unreadable(f"tree {tree[:10]} has a non-UTF-8 name") from exc
-            if not name or "/" in name or name in (".", ".."):
+            if not name or "/" in name or "\0" in name or name in (".", ".."):
                 raise Unreadable(f"tree {tree[:10]} has an unsafe name {name!r}")
+            if name in names:
+                raise Unreadable(f"tree {tree[:10]} names {name!r} twice")
+            names.add(name)
             sha = payload[nul + 1:nul + 21].hex()
             i = nul + 21
             self._budget.tree_entries += 1
@@ -467,13 +501,18 @@ def _parse_index(data: bytes) -> dict[str, str]:
         nul = data.find(b"\0", offset + header, end)
         if nul == -1:
             raise Unreadable("an index entry name has no terminator")
+        name_length = flags & 0x0FFF
+        actual = nul - (offset + header)
+        if (name_length < 0x0FFF and actual != name_length) or (name_length == 0x0FFF and actual < 0x0FFF):
+            raise Unreadable(f"an index entry's name is {actual} bytes but its flags say {name_length}")
         try:
             name = data[offset + header:nul].decode("utf-8")
         except UnicodeDecodeError as exc:
             raise Unreadable("an index entry name is not UTF-8") from exc
-        offset += (nul - offset + 8) // 8 * 8  # the name, then 1-8 NUL bytes of padding
-        if offset > end:
-            raise Unreadable("the index ends inside an entry's padding")
+        padded = offset + (nul - offset + 8) // 8 * 8  # the name, then 1-8 NUL bytes of padding
+        if padded > end or data[nul:padded].strip(b"\0"):
+            raise Unreadable("an index entry's padding is truncated or not NUL")
+        offset = padded
         stage = (flags >> 12) & 0x3
         if (name, stage) in seen:
             raise Unreadable(f"the index lists {name!r} at stage {stage} twice")
@@ -505,6 +544,8 @@ def worktree_files(tree: SafeTree, root: str) -> dict[str, str]:
     files: dict[str, str] = {}
 
     def walk(rel: str) -> None:
+        if rel.count("/") >= MAX_FS_DEPTH:
+            raise Unreadable(f"{root}: the working tree nests deeper than the depth cap")
         for name, kind in tree.listdir(_join(root, rel)):
             child = _join(rel, name)
             if not rel and name == ".git":
@@ -602,6 +643,7 @@ class SnapshotGitRemote:
 
 __all__ = [
     "MAX_FILE_BYTES",
+    "MAX_FS_DEPTH",
     "GitDir",
     "SafeTree",
     "SnapshotGitRemote",

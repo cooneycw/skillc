@@ -330,7 +330,10 @@ def capture_snapshot(export_root: Path, facts: dict[str, Any], *, checkout: str 
     # walked too, as `rev-list --all` walks them (pass 1: a commit parked
     # there must not escape the history check).
     commits = common.reachable(list(local_refs.values()) + list(private.values()) + [w["head"] for w in worktrees])
-    commits |= bare.reachable(list(remote_refs.values()))
+    # The bare remote's own HEAD too (pass 2): a detached HEAD there can hold
+    # a commit no branch names, and `rev-list --all` walks it.
+    remote_head, _ = bare.head(refs=remote_refs)
+    commits |= bare.reachable([*remote_refs.values(), remote_head])
     return {"remote_refs": remote_refs, "local_refs": local_refs, "base_files": dict(facts["base_files"]),
             "worktrees": worktrees, "commits": sorted(commits)}
 
