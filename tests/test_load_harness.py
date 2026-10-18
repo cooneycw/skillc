@@ -158,7 +158,12 @@ def test_the_load_is_real_and_gone_after_the_phase(tmp_path):
 
 
 def _rep_marker(tmp_path: Path) -> str:
-    return f"rep-462-{tmp_path.name}"
+    # Unique per run, not only per test name: a rep leaked by one run must not
+    # match the next run's marker (#462, pipeline 930's cascade).
+    import hashlib
+
+    digest = hashlib.sha256(str(tmp_path).encode()).hexdigest()[:12]
+    return f"rep-462-{tmp_path.name}-{digest}"
 
 
 def _reps_alive(marker: str) -> list[int]:
@@ -173,13 +178,14 @@ def _reps_alive(marker: str) -> list[int]:
     return alive
 
 
-def _start_phase(tmp_path: Path) -> tuple[subprocess.Popen[str], int]:
+def _start_phase(tmp_path: Path, env: dict[str, str] | None = None
+                 ) -> tuple[subprocess.Popen[str], int]:
     marker = _rep_marker(tmp_path)
     proc = subprocess.Popen(
         [sys.executable, str(HARNESS), "phase", "--cpu", "2", "--target", "1",
          "--reps", "1", "--warmup-seconds", "10", "--out", str(tmp_path / "p.json"),
          "--", sys.executable, "-c", f"import time; time.sleep(60); {marker!r}"],
-        stderr=subprocess.PIPE, text=True,
+        stderr=subprocess.PIPE, text=True, env=env,
     )
     assert proc.stderr is not None
     for line in proc.stderr:
@@ -780,3 +786,19 @@ def test_slow_removals_stay_inside_the_sweep_budget(tmp_path, monkeypatch):
     load.stop()
     assert time.monotonic() - t0 < 5.0, "the sweep overran its 3 s budget"
     assert "did not settle" in load.cleanup_error
+
+
+
+@needs_proc
+def test_a_harness_killed_before_its_rep_registers_still_takes_the_rep_down(tmp_path):
+    """Pipeline 930: on a loaded host the rep's wrapper had not yet written its
+    registration when the harness died, and the supervisor's one read found
+    nothing. REG_DELAY holds the registration back so the window is certain."""
+    env = dict(os.environ, SKILLC_LOAD462_REG_DELAY="3")
+    proc, _pgid = _start_phase(tmp_path, env=env)
+    proc.kill()
+    proc.wait(timeout=10)
+    deadline = time.monotonic() + 5
+    while _marker_alive(_rep_marker(tmp_path)) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert _marker_alive(_rep_marker(tmp_path)) == [], "an unregistered rep outlived its harness"
