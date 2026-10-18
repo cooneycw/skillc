@@ -601,8 +601,8 @@ def require_image_binding(declaration: AnyDeclaration, *, image_arg: str, resolv
     """C3: the run's image is the DECLARED one three ways - the tag the
     operator passed is `shared.image.tag`, the daemon resolves it to
     `shared.image.digest` (a tag re-pointed at another image is refused), and
-    the runtime-supply receipt file's bytes hash to `shared.image.receipt_sha256`
-    when the declaration names one."""
+    the runtime-supply receipt file's bytes hash to `shared.image.receipt_sha256`.
+    A missing or malformed declared receipt digest is refused, never skipped."""
     image = declaration.shared.get("image")
     image = image if isinstance(image, dict) else {}
     tag, digest, receipt_sha = image.get("tag"), image.get("digest"), image.get("receipt_sha256")
@@ -611,14 +611,15 @@ def require_image_binding(declaration: AnyDeclaration, *, image_arg: str, resolv
     if resolved_digest != digest:
         raise CalibrationRefused(f"the declared tag {tag!r} resolves to {resolved_digest or 'nothing'}, not the "
                                  f"declared {digest}; a tag re-pointed at another image is refused")
-    if receipt_sha is not None:
-        if receipt_path is None or not receipt_path.is_file():
-            raise CalibrationRefused("the declaration names a runtime receipt (shared.image.receipt_sha256) but "
-                                     "no receipt file was supplied")
-        measured = m.sha256_bytes(receipt_path.read_bytes())
-        if measured != receipt_sha:
-            raise CalibrationRefused(f"runtime receipt {receipt_path} hashes to {measured}, not the declared "
-                                     f"shared.image.receipt_sha256 {receipt_sha}")
+    if not isinstance(receipt_sha, str) or not receipt_sha.startswith("sha256:"):
+        raise CalibrationRefused(f"shared.image.receipt_sha256 {receipt_sha!r} is not a declared receipt digest")
+    if receipt_path is None or not receipt_path.is_file():
+        raise CalibrationRefused("the declaration names a runtime receipt (shared.image.receipt_sha256) but "
+                                 "no receipt file was supplied")
+    measured = m.sha256_bytes(receipt_path.read_bytes())
+    if measured != receipt_sha:
+        raise CalibrationRefused(f"runtime receipt {receipt_path} hashes to {measured}, not the declared "
+                                 f"shared.image.receipt_sha256 {receipt_sha}")
 
 
 def private_root(declaration: AnyDeclaration, private_dir: str | None) -> Path:
@@ -929,7 +930,9 @@ def apply_tolerance(report: Mapping[str, object], tolerance: int) -> dict[str, d
         endpoint = entry.get("primary_endpoint")
         status = str(endpoint.get("status")) if isinstance(endpoint, dict) else calibration.NOT_GRADED
         counts = per_arm.setdefault(arm, {"evaluable": 0, "non_evaluable": 0})
-        counts["evaluable" if status in EVALUABLE_STATUSES else "non_evaluable"] += 1
+        # #287 P3 (C4): an attempt without the declared egress is not evidence, whatever its grade.
+        evaluable = status in EVALUABLE_STATUSES and entry.get("egress_eligible") is not False
+        counts["evaluable" if evaluable else "non_evaluable"] += 1
     out: dict[str, dict[str, object]] = {}
     for arm, counts in per_arm.items():
         over = counts["non_evaluable"] > tolerance
@@ -1009,10 +1012,10 @@ def build_discrimination_report(
     report["kind"] = DISCRIMINATION_REPORT_KIND
     report["declaration_digest"] = calibration.declaration_digest(declaration.data)
     report["mutated_digest"] = declaration.mutation.get("mutated_digest")
-    report["evaluability"] = apply_tolerance(report, declaration.tolerance_non_evaluable_per_arm)
     allowlist = declared_allowlist_digest(declaration)
     if allowlist is not None:
         _apply_egress(report, reconcile(experiment, outcomes), allowlist)
+    report["evaluability"] = apply_tolerance(report, declaration.tolerance_non_evaluable_per_arm)
     report["rehearsal"] = rehearsal
     return report
 
@@ -1235,11 +1238,11 @@ def build_report(
     }
     if declaration is not None:
         # #287 P3: the launch-bound declaration's tolerance (C2) and egress (C4).
-        if declaration.tolerance_non_evaluable_per_arm is not None:
-            report["evaluability"] = apply_tolerance(report, declaration.tolerance_non_evaluable_per_arm)
         allowlist = declared_allowlist_digest(declaration)
         if allowlist is not None:
             _apply_egress(report, outcomes, allowlist)
+        if declaration.tolerance_non_evaluable_per_arm is not None:
+            report["evaluability"] = apply_tolerance(report, declaration.tolerance_non_evaluable_per_arm)
     return report
 
 

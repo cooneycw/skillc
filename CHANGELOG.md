@@ -34,15 +34,17 @@ and version plan.
   - **C1:** a `PENDING`/`PROPOSED` identity is refused at approval.
   - **C2:** an outcome-endpoint declaration must carry
     `tolerance.non_evaluable_per_arm`, and its report applies it.
-  - **C3:** the run is bound to the declared tag, the ID the daemon resolves
-    it to, and the exact receipt bytes.
+  - **C3:** the declaration must name a well-formed receipt digest, and the
+    run is bound to the declared tag, the ID the daemon resolves it to, and
+    the exact receipt bytes.
   - **C4:** the declaration must match #442's provider-only egress policy.
     A dispatched attempt whose proxy log did not record the declared
-    allowlist digest is ineligible, and the run fails.
-  - **C5:** `run_store` is a literal `~/` or an absolute path with no `..`,
-    temp or scratchpad component. The `~/` is expanded against HOME at
-    launch, and the expanded path is checked again. The CLI stores the run
-    there.
+    allowlist digest is ineligible, counts as non-evaluable, and fails the
+    run.
+  - **C5:** `run_store` is a literal `~/` or an absolute path in normal
+    form, with no temp or scratchpad destination. The `~/` is expanded
+    against HOME at launch, and the expanded path and its real destination
+    are checked again. The CLI stores the run there.
 
 - **#287 P2: discrimination runs, whole-declaration approval, and rehearsal**
   (Refs #287).

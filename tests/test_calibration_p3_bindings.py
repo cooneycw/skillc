@@ -177,6 +177,32 @@ def test_c3_a_missing_receipt_is_refused(tmp_path: Path) -> None:
                                  receipt_path=None)
 
 
+@pytest.mark.parametrize("value", ["DELETE", None, "", "0eb308d3", "sha256:XYZ"])
+@pytest.mark.parametrize("path", [DISCRIMINATION, IMPROVEMENT], ids=["discrimination", "improvement"])
+def test_c3_a_new_kind_declaration_without_a_well_formed_receipt_digest_is_refused(path: Path, value: object) -> None:
+    """Counter-model finding: a deleted receipt digest fell back to the legacy
+    ID-only check, and a null one skipped the receipt check entirely."""
+    data = _draft(path)
+    if value == "DELETE":
+        del data["shared"]["image"]["receipt_sha256"]
+    else:
+        data["shared"]["image"]["receipt_sha256"] = value
+    with pytest.raises(calibration.DeclarationRefused, match="receipt_sha256"):
+        _authorize(_approve(data))
+
+
+@pytest.mark.parametrize("value", [None, ""])
+def test_c3_the_run_binding_refuses_a_null_declared_receipt(tmp_path: Path, value: object) -> None:
+    receipt, _digest = _receipt(tmp_path)
+    data = _draft(IMPROVEMENT)
+    data["shared"]["image"]["receipt_sha256"] = value
+    declaration = calibration.parse_declaration(data)
+    with pytest.raises(cr.CalibrationRefused, match="receipt"):
+        cr.require_image_binding(declaration, image_arg=declaration.shared["image"]["tag"],  # type: ignore[index]
+                                 resolved_digest=declaration.shared["image"]["digest"],  # type: ignore[index]
+                                 receipt_path=receipt)
+
+
 # ------------------------------------------------------------------- C4
 
 @pytest.mark.parametrize("field, value", [
@@ -233,6 +259,7 @@ def test_c4_the_declared_policy_is_the_code_s_policy() -> None:
     "/tmp/calibration-287", "/var/tmp/x", "relative/store",
     "/tmp/claude-1000/project/session/scratchpad/runs", "/srv/u/work/scratchpad/runs",
     "~other/skillc-evidence", "~", "~/../../tmp/x", "/srv/u/../../tmp/x", "~/work/scratchpad/runs",
+    "/./tmp/x", "/var//tmp/x", "/dev//shm/x", "//tmp/x", "~/./x", "~//x",
 ])
 @pytest.mark.parametrize("path", [DISCRIMINATION, IMPROVEMENT], ids=["discrimination", "improvement"])
 def test_c5_a_non_durable_run_store_is_refused(path: Path, store: str) -> None:
@@ -268,6 +295,8 @@ def test_c5_the_cli_writes_to_the_expanded_declared_store_and_refuses_another(
     ("/srv/ci-tmp/home", "/srv/ci-tmp"),              # HOME under $TMPDIR
     ("/srv/u/.claude/scratchpad", None),             # HOME inside a session scratchpad
     ("", None),                                       # HOME unset: nothing to expand against
+    ("/var/../tmp/home", None),                       # HOME spelled to hide /tmp
+    ("/srv//tmp-free/../../tmp/h", None),
 ])
 def test_c5_a_home_store_that_expands_somewhere_non_durable_is_refused_at_launch(
         monkeypatch: pytest.MonkeyPatch, home: str, tmpdir: str | None) -> None:
@@ -281,3 +310,17 @@ def test_c5_a_home_store_that_expands_somewhere_non_durable_is_refused_at_launch
     declaration = calibration.parse_declaration(_draft(IMPROVEMENT))
     with pytest.raises(cr.CalibrationRefused, match="run_store"):
         cr.private_root(declaration, None)
+
+
+def test_c5_a_store_whose_real_destination_is_a_temp_directory_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A symlinked ancestor can carry a durable-looking path into /tmp; the
+    check reads the real destination too (simulated: a non-temp symlink cannot
+    be created inside a test's temp directory)."""
+    import os
+    real = os.path.realpath
+    monkeypatch.setattr(os.path, "realpath", lambda p: "/tmp/evidence" if str(p).startswith("/srv/linked") else real(p))
+    monkeypatch.delenv("TMPDIR", raising=False)
+    data = _draft(IMPROVEMENT)
+    data["run_store"] = "/srv/linked/calibration-287"
+    with pytest.raises(calibration.DeclarationRefused, match="resolves to '/tmp/evidence'"):
+        _authorize(_approve(data))

@@ -84,6 +84,28 @@ def _report(experiment: trial.Experiment, outcomes: list[mp.AttemptOutcome]) -> 
     return cr.build_report(experiment, outcomes, declared_model="gpt-6-astra", declared_effort="high")
 
 
+@pytest.mark.parametrize("egress_summary, evaluable", [
+    (None, False),
+    ({"status": "read", "allowlist_digest": "sha256:" + "0" * 64}, False),
+    ({"status": "read", "allowlist_digest": egress.allowlist_digest()}, True),
+])
+def test_an_attempt_without_the_declared_egress_is_not_evaluable_in_the_report(
+        tmp_path: Path, egress_summary: object, evaluable: bool) -> None:
+    """#287 P3 (C4, counter-model finding): a PASS whose attempt lacks the
+    declared egress counts as non-evaluable, so an arm of only such attempts is
+    UNKNOWN in the persisted report, not EVALUABLE over an unsupported population."""
+    experiment, schedule = _planned(tmp_path)
+    outcomes = _outcomes(schedule)
+    for outcome in outcomes:
+        if egress_summary is not None:
+            outcome.record["observation"] = {"egress": egress_summary}
+    report = _report(experiment, outcomes)
+    for arm, summary in report["evaluability"].items():
+        assert summary["verdict_status"] == ("EVALUABLE" if evaluable else "UNKNOWN"), arm
+        assert summary["evaluable"] == (1 if evaluable else 0)
+    assert all(row["primary_endpoint"]["status"] == "PASS" for row in report["attempts"])  # raw grade kept
+
+
 def test_common_outcome_pass_preserves_baseline_unknown(tmp_path: Path) -> None:
     """Before the fix this reaches real build_report and baseline is INCONCLUSIVE."""
     experiment, schedule = _planned(tmp_path)
@@ -437,6 +459,7 @@ def test_cli_reports_bound_endpoint_or_controlled_identity_refusal(
     private = tmp_path / "private"
     # The declared run_store is durable by construction (C5, its own tests); pytest's tmp_path is not.
     monkeypatch.setattr(cr, "private_root", lambda *_: private)
+    monkeypatch.setattr(cr, "require_image_binding", lambda *_a, **_kw: None)  # C3 has its own tests
     result = cli.main(["calibration-run", str(declaration_path), "--private-dir", str(private)])
     captured = capsys.readouterr()
     assert result == (2 if damaged else 0)

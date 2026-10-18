@@ -671,36 +671,51 @@ _NON_DURABLE_PREFIXES = ("/tmp/", "/var/tmp/", "/dev/shm/")
 
 
 def _refuse_non_durable(value: str, path: str) -> None:
+    """Refuse a temp or scratchpad destination, checked on the path as written
+    AND on its real filesystem destination (a symlinked ancestor counts)."""
     import os
     tmpdir = os.environ.get("TMPDIR")
-    prefixes = _NON_DURABLE_PREFIXES + ((tmpdir.rstrip("/") + "/",) if tmpdir else ())
-    if any((path.rstrip("/") + "/").startswith(p) for p in prefixes) or "/scratchpad" in path:
-        shown = repr(value) if path == value else f"{value!r} (expanded {path!r})"
-        raise _refuse(f"run_store {shown} is not durable (a temp directory or a session scratchpad); "
-                      "evidence stored there is lost")
+    prefixes = _NON_DURABLE_PREFIXES + ((tmpdir.rstrip("/") + "/", os.path.realpath(tmpdir) + "/") if tmpdir else ())
+    prefixes += tuple(os.path.realpath(p) + "/" for p in _NON_DURABLE_PREFIXES)
+    for candidate in {path, os.path.realpath(path)} if path.startswith("/") else {path}:
+        if any((candidate.rstrip("/") + "/").startswith(p) for p in prefixes) or "/scratchpad" in candidate:
+            shown = repr(value) if candidate == value else f"{value!r} (resolves to {candidate!r})"
+            raise _refuse(f"run_store {shown} is not durable (a temp directory or a session scratchpad); "
+                          "evidence stored there is lost")
+
+
+def _require_normal_form(label: str, path: str) -> None:
+    """A path whose spelling is not its normal form (`..`, `.`, `//`) can name a
+    forbidden directory that no prefix check sees (counter-model finding)."""
+    import posixpath
+    if path.startswith("//") or posixpath.normpath(path) != (path.rstrip("/") or "/"):
+        raise _refuse(f"{label} {path!r} is not in normal form ('..', '.', or '//' components are refused)")
 
 
 def _validate_run_store(value: object) -> str:
     """C5, the declared form: a literal leading `~/` (the running user's home;
     the approval digest binds that string, so no host path is committed) or an
-    absolute path. Checked at parse and approval, independent of who parses."""
+    absolute path, in normal form. Checked at parse and approval, independent
+    of who parses."""
     if not isinstance(value, str) or not value:
         raise _refuse("run_store must name a durable directory")
     if value.startswith("~"):
         if not value.startswith("~/"):
             raise _refuse(f"run_store {value!r}: only a leading '~/' (the running user's home) is accepted")
+        _require_normal_form("run_store", "/home" + value[1:])
     elif not value.startswith("/"):
         raise _refuse(f"run_store {value!r} must be an absolute path or start with '~/'")
-    if ".." in value.split("/"):
-        raise _refuse(f"run_store {value!r} contains '..', which the durability checks cannot see through")
+    else:
+        _require_normal_form("run_store", value)
     _refuse_non_durable(value, value)
     return value
 
 
 def resolve_run_store(value: object) -> Path:
-    """C5, at launch: the declared run store expanded against this run's HOME,
-    with the durability refusals applied to the EXPANDED path, so a `~/` whose
-    home is a temp directory is refused like `/tmp`."""
+    """C5, at launch: the declared run store expanded against this run's HOME
+    (which must itself be absolute and in normal form), with the durability
+    refusals applied to the EXPANDED path and its real destination, so a `~/`
+    whose home is a temp directory is refused like `/tmp`."""
     import os
     declared = _validate_run_store(value)
     expanded = declared
@@ -708,15 +723,36 @@ def resolve_run_store(value: object) -> Path:
         home = os.environ.get("HOME", "")
         if not home.startswith("/"):
             raise _refuse(f"run_store {declared!r} cannot be expanded: HOME is not an absolute path")
+        _require_normal_form("HOME for run_store", home)
         expanded = home.rstrip("/") + declared[1:]
     _refuse_non_durable(declared, expanded)
     return Path(expanded)
+
+
+_SHA256 = re.compile(r"sha256:[0-9a-f]{64}")
+
+
+def _require_image_identity(data: Mapping[str, object]) -> None:
+    """C3, declared: a new-kind declaration names its image by tag, image ID
+    and runtime receipt digest, all well formed. Without the receipt digest the
+    run-time binding would have nothing to check (counter-model finding)."""
+    shared = data.get("shared")
+    image = shared.get("image") if isinstance(shared, Mapping) else None
+    if not isinstance(image, Mapping):
+        raise _refuse("shared.image is required: name the image tag, digest and receipt_sha256")
+    tag = image.get("tag")
+    if not isinstance(tag, str) or not tag:
+        raise _refuse("shared.image.tag must name the image tag the run launches")
+    for key in ("digest", "receipt_sha256"):
+        if not isinstance(image.get(key), str) or not _SHA256.fullmatch(str(image.get(key))):
+            raise _refuse(f"shared.image.{key} must be a 'sha256:<64 hex>' digest")
 
 
 def _require_new_kind_bindings(data: Mapping[str, object]) -> None:
     """C4 and C5 for a declaration that must carry them: every discrimination
     declaration, and every calibration declaration with an outcome endpoint."""
     _require_agent_network(data)
+    _require_image_identity(data)
     if "run_store" not in data:
         raise _refuse("run_store is required: name the durable directory this run's evidence is stored in")
     _validate_run_store(data.get("run_store"))

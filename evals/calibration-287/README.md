@@ -103,22 +103,28 @@ Shared by both declarations:
 - **C2 - tolerance is required.** A calibration declaration with an outcome
   endpoint must carry `tolerance.non_evaluable_per_arm`, and its report applies
   it. Legacy declarations without an endpoint need none.
-- **C3 - image binding.** The run is bound to three things together: the
-  declared tag, the ID the daemon resolves that tag to at launch, and the exact
-  receipt bytes. A tag re-pointed at another image is refused. The resolved-ID
+- **C3 - image binding.** The declaration must name a tag, an image ID and a
+  well-formed receipt digest. A missing or null receipt digest is refused. The
+  run is bound to three things together: the declared tag, the ID the daemon
+  resolves that tag to at launch, and the exact receipt bytes. A tag re-pointed
+  at another image is refused. The resolved-ID
   comparison already existed on main (`skillc/cli.py:1759` at `41407f9`);
   `calibration_run.require_image_binding` adds the tag and the receipt.
 - **C4 - provider-only egress (#442).** The declaration's `agent_network` must
   equal the code's policy, allowlist digest and codex server-side-off argv. A
   dispatched attempt is ineligible unless its egress proxy log was read and
-  recorded the declared allowlist digest. The run fails on any such attempt.
+  recorded the declared allowlist digest. Such an attempt counts as
+  non-evaluable in the tolerance verdict, though its raw grade stays visible.
+  The run fails on any such attempt.
 - **C5 - durable run store.** `run_store` is either a literal leading `~/` or an
   absolute path. The approval digest binds the literal, so no host path is
   committed.
-  - **At parse:** `~user`, relative paths, `..` components, and literal temp or
-    scratchpad paths are refused.
+  - **At parse:** `~user`, relative paths, paths not in normal form (`..`,
+    `.`, `//`), and literal temp or scratchpad paths are refused.
   - **At launch, before any acquisition or container:** the `~/` is expanded
-    against HOME, and the same refusals apply to the EXPANDED path.
+    against HOME, which must itself be in normal form. The same refusals apply
+    to the EXPANDED path and to its real destination, so a symlinked ancestor
+    into `/tmp` is caught.
   - The CLI writes there, refuses a different `--private-dir`, and records the
     declared and expanded paths in the private report. Most #203-era live
     evidence was lost to `/tmp` and session scratchpads.
