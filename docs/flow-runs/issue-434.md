@@ -57,3 +57,45 @@ Risks:
 - The FixedBench attribution goes in PROVENANCE.md (condition 3).
 - Permission-sensitive tests are run as root before CI (condition 4).
 - campaign-434 freezes this grader's identity once qualified (condition 2), and #375's harness_digest stays untouched.
+
+<!-- flow-run n=2 id=ed904f8260124411bfc4abfc085fe87e -->
+## Run 2
+
+- Run-id:            ed904f8260124411bfc4abfc085fe87e
+- Run-start:         0ca006891dfe6b10a003809d299bc15b0a357216
+- Issue:             #434
+- Base SHA:          0ca0068
+- Necessity verdict: Still needed
+- Approval:          granted
+- Approver:          skillc-400 (orchestrator, owner-delegated)
+- Recorded at:       2026-10-18T01:10:00Z
+
+### Section B evidence
+- PR 1 merged as 0ca0068 (#450); #442 egress merged as 41407f9 (#448).
+- No in-container or post-stop git reader exists on main: no GitRemote other than LocalGitRemote, which per its contract runs git as the controller on a controller-owned remote only.
+- Duplicate or superseding issues: none.
+
+### Section C - the approved plan
+PR 2a of #434 (orchestrator split: the pure, self-contained correctness surface). PR 2b, the wiring, is a later run.
+
+1. `skillc/git_snapshot.py` - A pure-Python, read-only git reader over an exported tree; it runs no git process. It reads:
+   - loose refs and packed-refs;
+   - per-worktree HEAD;
+   - loose commits (zlib), walking reachability;
+   - index v2/v3;
+   - file bytes and modes.
+   Reads use lstat, O_NOFOLLOW|O_NONBLOCK and size caps; anything unreadable is UNKNOWN. SnapshotGitRemote is a read-only GitRemote: resolve and is_ancestor answer, and writes raise. The docstring states the pack threshold (transfer.unpackLimit 100).
+2. `evals/level3/flow-auto-necessity/builder/build.py` - capture_snapshot(export_root, facts): the same shape as capture(), from controller-held base facts.
+3. `evals/level3/flow-auto-necessity/README.md` - Records the pack trigger. PR 3 counts UNKNOWN-by-unreadable separately; if any necessity or must-act attempt lands there, pack and delta support becomes a blocker before #434 results count.
+4. `tests/test_git_snapshot.py` - The reds:
+   - packed-only commit, index v4, symlinked ref, a FIFO in place of HEAD (bounded), oversize object: each UNKNOWN;
+   - SnapshotGitRemote writes raise.
+   The equivalence instrument: capture_snapshot(export copy) equals the host capture() for every PR 1 candidate state, plus states exercising a per-worktree HEAD, an index-only change, a mode change and a deleted file. Any state that cannot be exported is named, not skipped. Committed control: a wrong reader that ignores the index must be reported non-equivalent.
+5. `CHANGELOG.md` - An Unreleased entry.
+
+Scope: 5 files, about 700 to 1,000 lines with tests. Medium.
+
+Risks:
+- The reader is a correctness surface; the equivalence instrument against host git on controller-owned fixtures guards it.
+- Packed objects read as UNKNOWN (v1 bound, with the trigger recorded).
+- The index format has edge cases (extensions, v3 extended flags). Unknown extensions are skipped by signature, as git does; a malformed index is UNKNOWN.

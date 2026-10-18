@@ -155,8 +155,13 @@ def build(root: Path, case: str, *, remote_url: str | None = None) -> dict[str, 
     host_git(["clone", "-q", "--template=", str(remote), str(repo)], root)
     host_git(["remote", "set-url", "origin", remote_url or str(remote)], repo)
     _remove_tree(seed)
+    base_files: dict[str, str] = {}
+    for entry in filter(None, host_git(["ls-tree", "-r", "-z", "--full-tree", commits[-1]], repo).split("\0")):
+        meta, path = entry.split("\t", 1)
+        mode, _kind, blob = meta.split()
+        base_files[path] = f"{mode} {blob}"
     return {"case": case, "base_commit": commits[-1], "base_tree": host_git(["rev-parse", "HEAD^{tree}"], repo),
-            "commits": commits,
+            "base_files": base_files, "commits": commits,
             "fix_commit": commits[1] if case == "clean" else None,
             "remote_refs": {"refs/heads/main": commits[-1]}}
 
@@ -275,9 +280,63 @@ def capture(git: GitFn, repo: Path, remote: Path, base_commit: str,
         mode, _kind, blob = meta.split()
         base_files[path] = f"{mode} {blob}"
     commits = set(git(["rev-list", "--all"], repo).split())
+    # Run in EACH worktree too: from the main checkout, `rev-list --all` does
+    # not walk another worktree's private refs (refs/worktree, refs/bisect),
+    # so a commit parked there would escape (#434 PR 2a review).
+    for w in worktrees:
+        commits |= set(git(["rev-list", "--all"], base / w["path"]).split())
     commits |= set(git(["rev-list", "--all"], remote).split())
     return {"remote_refs": refs_of(remote), "local_refs": refs_of(repo), "base_files": base_files,
             "worktrees": sorted(worktrees, key=lambda w: w["path"]), "commits": sorted(commits)}
+
+
+def capture_snapshot(export_root: Path, facts: dict[str, Any], *, checkout: str = "repo",
+                     remote: str = ".remote/widget.git", container_root: str = "/work") -> dict[str, Any]:
+    """`capture()`'s shape, read from an EXPORTED copy of the attempt's /work
+    by `skillc.git_snapshot` - raw bytes interpreted in Python, no git
+    process (#434 PR 2a: after the attempt stops, the controller must never
+    run git on subject-written metadata). The base commit and base files
+    come from the CONTROLLER's build `facts`, never from the export.
+
+    `status` here is the snapshot's own view, at least as strict as git's:
+    every path where the index differs from HEAD's tree, the working file
+    differs from the index (content or mode, read from the file itself - so
+    `assume-unchanged` and `core.filemode=false` hide nothing), or a working
+    file is not in the index. Raises `git_snapshot.Unreadable` when any of it
+    cannot be read faithfully; the caller reports that as UNKNOWN."""
+    from skillc import git_snapshot as gs
+
+    tree = gs.SafeTree(export_root)
+    common = gs.GitDir(tree, f"{checkout}/.git")
+    bare = gs.GitDir(tree, remote)
+    common.check_plain()
+    bare.check_plain()
+    local_refs = common.refs()
+    remote_refs = bare.refs()
+    worktrees = []
+    private: dict[str, str] = {}
+    for w in gs.worktrees(common, checkout, container_root, local_refs):
+        files = gs.worktree_files(tree, w.path)
+        index_rel = f"{w.gitdir}/index"
+        # A missing index is git's empty index; a link or FIFO there is Unreadable.
+        index = gs.parse_index(tree.read(index_rel)[0]) if tree.optional(index_rel) else {}
+        if w.gitdir != common.path:
+            private.update(common.private_refs(w.gitdir))
+        head_files = common.tree_files(common.tree_of(w.head))
+        status = sorted({p for p in set(index) | set(head_files) if index.get(p) != head_files.get(p)}
+                        | {p for p in set(files) | set(index) if files.get(p) != index.get(p)})
+        worktrees.append({"path": w.path, "head": w.head, "branch": w.branch, "status": status, "files": files})
+    # A linked worktree's private refs (refs/worktree, refs/bisect, ...) are
+    # walked too, as `rev-list --all` walks them (pass 1: a commit parked
+    # there must not escape the history check).
+    commits = common.reachable(list(local_refs.values()) + list(private.values()) + [w["head"] for w in worktrees])
+    # The bare remote's own HEAD too (pass 2): a detached HEAD there can hold
+    # a commit no branch names, and `rev-list --all` walks it.
+    remote_head, _ = bare.head(refs=remote_refs)
+    commits |= bare.reachable([*remote_refs.values(), remote_head])
+    return {"remote_refs": remote_refs, "local_refs": local_refs, "base_files": dict(facts["base_files"]),
+            "worktrees": worktrees, "commits": sorted(commits)}
+
 
 if __name__ == "__main__":
     import json
