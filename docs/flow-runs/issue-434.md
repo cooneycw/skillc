@@ -110,7 +110,7 @@ Risks:
 - Necessity verdict: Still needed
 - Approval:          granted
 - Approver:          skillc-400 (orchestrator, owner-delegated)
-- Recorded at:       2026-10-18T04:20:00Z
+- Recorded at:       2026-10-18T03:16:15Z (the record's first commit, f8bc655; an earlier value here, 04:20:00Z, was an estimate and wrong)
 - Recorded late:     this run's record was written after implementation began. Run-start above is that later HEAD; the run's base is 612ad8a. The plan and each D3 ruling below were given before the code that depends on them (plan: approved with the 2a/2b split; D3 rulings 1 and 2, the eligibility reading, and the receipt correction (a), all by skillc-400 during the run).
 
 ### Section B evidence
