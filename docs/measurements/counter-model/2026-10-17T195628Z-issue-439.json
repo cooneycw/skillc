@@ -1,0 +1,27 @@
+{
+  "branch": "issue-439-changelog-fragments-stop-changelog-md-conflicts-wi",
+  "counts": {
+    "accepted": 4,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "f0fe0b4cb7eefd271281ef1397e17daafc254323",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "439",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 2,
+  "recorded_at": "2026-10-17T19:56:28Z",
+  "red_cases": {
+    "already_covered": 6,
+    "proposed": 7
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/17/rollout-2026-10-17T15-54-22-01a14b6d-fe47-7063-b8af-6a69ab732222.jsonl",
+    "thread_id": "01a14b6d-fe47-7063-b8af-6a69ab732222"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
