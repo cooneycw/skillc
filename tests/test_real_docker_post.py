@@ -43,8 +43,13 @@ if tool == "docker" and args[0] == "run":
 
 def _run_installed_runner(
     tmp_path: Path, status: str, break_spec: str, helper: str | None = None,
+    commit_floor_extra: tuple[str, ...] = (),
 ) -> tuple[subprocess.CompletedProcess[str], list[dict[str, Any]]]:
-    """Run the actual shell and posting modules; replace external I/O only."""
+    """Run the actual shell and posting modules; replace external I/O only.
+
+    The checkout carries the tested commit's own floor file (#456): the
+    runner's, plus `commit_floor_extra` - files the commit declares and the
+    installed runner does not."""
     installed = tmp_path / "installed"
     shutil.copytree(ROOT / "ci", installed / "ci")
     if helper is not None:
@@ -52,6 +57,12 @@ def _run_installed_runner(
     checkout = tmp_path / "checkout"
     (checkout / ".git").mkdir(parents=True)
     (checkout / "reports").mkdir()
+    (checkout / "ci").mkdir()
+    floor = (ROOT / "ci" / "check_real_docker_ran.py").read_text()
+    anchor = f'    "{c.DECLARED_REAL_DOCKER_FILES[-1]}",\n)'
+    assert anchor in floor
+    (checkout / "ci" / "check_real_docker_ran.py").write_text(
+        floor.replace(anchor, anchor[:-1] + "".join(f'    "{name}",\n' for name in commit_floor_extra) + ")"))
     if status != c.ERROR:
         cases = [f'<testcase classname="{name}" name="test_intact"/>' for name in c.DECLARED_REAL_DOCKER_FILES]
         if status == c.FAILURE:
@@ -90,6 +101,31 @@ def _run_installed_runner(
         cwd=tmp_path, env=env, text=True, capture_output=True, timeout=30, check=False,
     )
     return result, [json.loads(line) for line in events.read_text().splitlines()]
+
+
+def test_runner_posts_runner_behind_as_error_exit_4(tmp_path: Path) -> None:
+    """#456 wiring: an otherwise-green certifying run whose commit declares a
+    floor file the installed runner does not count posts `error` to the
+    certifying context, says to re-pin and re-seed, and exits 4 (not 3, so
+    poll-triggers marks the sha processed)."""
+    result, events = _run_installed_runner(tmp_path, c.SUCCESS, "none",
+                                           commit_floor_extra=("tests.test_brand_new_live",))
+    assert result.returncode == 4, result.stderr
+    statuses = [e["payload"] for e in events if e["tool"] == "curl" and "context" in e["payload"]]
+    assert len(statuses) == 1, result.stderr
+    assert statuses[0]["state"] == "error" and statuses[0]["context"] == "skillc/real-docker"
+    assert statuses[0]["description"].startswith("RUNNER_BEHIND: ")
+    assert "re-pin, then re-seed state to the parent" in statuses[0]["description"]
+    assert len(statuses[0]["description"]) <= 140
+    comment = next(e["payload"]["body"] for e in events if e["tool"] == "curl" and "body" in e["payload"])
+    assert "`tests.test_brand_new_live`" in comment
+
+
+def test_a_control_run_skips_the_commit_floor_check(tmp_path: Path) -> None:
+    """Break-mode runs keep today's logic: the same extra file changes nothing."""
+    result, _events = _run_installed_runner(tmp_path, c.FAILURE, "trialimage:no-uv",
+                                            commit_floor_extra=("tests.test_brand_new_live",))
+    assert result.returncode == 1, result.stderr
 
 
 @pytest.mark.parametrize(("status", "break_spec", "context", "exit_code"), [
@@ -157,11 +193,15 @@ _MALICIOUS_STUB = (
     "SUCCESS = 'SUCCESS'\n"
     "FAILURE = 'FAILURE'\n"
     "ERROR = 'ERROR'\n"
+    "RUNNER_BEHIND = 'RUNNER_BEHIND'\n"
+    "DECLARED_REAL_DOCKER_FILES = ()\n"
     "class Verdict:\n"
     "    def __init__(self, **kw): self.status = 'SUCCESS'; self.reason = 'lying'\n"
     "    executed_by_file = {}\n"
     "    failed_ids = ()\n"
     "    skipped_only_files = ()\n"
+    "    uncounted_files = ()\n"
+    "    dropped_by_commit = ()\n"
     "def verdict(*a, **kw): return Verdict()\n"
 )
 

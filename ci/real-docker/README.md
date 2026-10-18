@@ -58,6 +58,43 @@ reviewed and merged) and explicitly owner-requested shas are ever run
 automatically (see "Trigger mechanism" below) - the residual trust that
 matters is in WHICH commits run at all, not in what R1 covers.
 
+**The floor is the installed copy's, so a new floor file needs a re-pin
+(#456).** The verdict counts only the files in the INSTALLED copy's
+`DECLARED_REAL_DOCKER_FILES`. A live file that main adds later runs in the
+work checkout but is not counted until the runner is re-pinned. So on a
+certifying run (`--break none`) the installed `real_docker_post.py` also
+READS the tested commit's `ci/check_real_docker_ran.py`: by `ast`, never by
+importing it. If that commit declares a floor file the installed copy does
+not, an otherwise-green run posts **`RUNNER_BEHIND`** instead of SUCCESS:
+GitHub state `error`, exit 4, a description ending "re-pin, then re-seed state
+to the parent", and the uncounted files named in the comment. The commit's
+list can only ADD this signal. A commit that declares FEWER files changes
+nothing, because the installed floor still applies in full. A commit floor
+that cannot be read as one literal list of `tests.<module>` names is `ERROR`.
+Precedence: ERROR > FAILURE > RUNNER_BEHIND > SUCCESS. Control (break-mode)
+runs skip the check.
+
+### Re-pin (the trigger is any `RUNNER_BEHIND` status, i.e. any PR that adds to `DECLARED_REAL_DOCKER_FILES`)
+
+The sha that reported `RUNNER_BEHIND` (exit 4) is marked processed:
+`poll-triggers` retries only exit 3. So a re-pin alone does not re-certify it.
+
+1. `systemctl disable --now skillc-real-docker.timer` (disable, not just stop,
+   so a reboot cannot restart it mid-procedure).
+2. Confirm no `run-real-docker` or pytest is alive: match on process names
+   (`ps -eo comm`). A `pgrep -f` sent through `ssh '...'` matches its own
+   command line.
+3. In `$INSTALLED_ROOT`: `git fetch` and `git checkout --detach <reviewed main sha>`,
+   a sha at or after the commit that added the file.
+4. **Re-seed state to the parent:** set `state.json`'s `last_main_sha` to the
+   PARENT of the main head to certify. Edit it in place, so its owner and mode
+   are kept.
+5. `systemctl enable --now skillc-real-docker.timer`. It fires at once.
+6. Read the new GitHub status for that sha. Its description names
+   `runner <new sha12>`, and its `N executed` now includes the new file's tests.
+   Any campaign driver's expected total is recomputed from its live value plus
+   those tests.
+
 ## Setup (operator, over SSH on `<agent-host>`)
 
 Do not assume this VM exists because the runner code is merged. Before the
@@ -399,7 +436,7 @@ a timer-decided sha to be silently marked done without ever running.
 Exit code 3 means the lock was never acquired at all (the run never
 started); `poll-triggers` checks for exactly this code and does NOT persist
 that sha/comment as processed, so it is retried on the next tick. Exit
-codes 0/1/2 (SUCCESS/FAILURE/ERROR) all mean a run actually happened and
+codes 0/1/2/4 (SUCCESS/FAILURE/ERROR/RUNNER_BEHIND) all mean a run actually happened and
 reported something, and ARE persisted.
 
 ## Cleanup scope (#414)

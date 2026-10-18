@@ -71,15 +71,24 @@ DECLARED_REAL_DOCKER_FILES: tuple[str, ...] = (
 ERROR = "ERROR"
 FAILURE = "FAILURE"
 SUCCESS = "SUCCESS"
+#: #456: posted only by the installed runner (ci/real_docker_post.py), never
+#: by `verdict()` - the tested commit declares floor files this runner's own
+#: floor does not count, so a green would not cover them.
+RUNNER_BEHIND = "RUNNER_BEHIND"
 
 
 @dataclass(frozen=True)
 class Verdict:
-    status: str  # ERROR | FAILURE | SUCCESS
+    status: str  # ERROR | FAILURE | SUCCESS | RUNNER_BEHIND
     reason: str
     executed_by_file: dict[str, int] = field(default_factory=dict)
     failed_ids: tuple[str, ...] = ()
     skipped_only_files: tuple[str, ...] = ()
+    #: #456: floor files the tested commit declares and this runner does not.
+    uncounted_files: tuple[str, ...] = ()
+    #: #456: runner floor files the tested commit no longer declares -
+    #: informational only; the runner's floor still applies in full.
+    dropped_by_commit: tuple[str, ...] = ()
 
 
 def _matches(classname: str, declared: str) -> bool:
