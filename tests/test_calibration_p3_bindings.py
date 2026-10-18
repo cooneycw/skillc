@@ -71,9 +71,30 @@ def test_the_completed_drafts_authorize_under_a_test_approval(path: Path) -> Non
     _authorize(_approve(_draft(path)))
 
 
+#: The digests the owner approved (#287 P5, 2026-10-18, "run 287 now").
+OWNER_APPROVED = {DISCRIMINATION: "sha256:40acebc5cfd04313a24639f5298698b52449699f8aa44ba6dca0e6e05dd2490e",
+                  IMPROVEMENT: "sha256:6bc7581b1a72230951146aa2a96c5a8ec86a3e5104ebe6ca41cb61263b21a198"}
+
+
 @pytest.mark.parametrize("path", [DISCRIMINATION, IMPROVEMENT], ids=["discrimination", "improvement"])
-def test_the_committed_drafts_stay_unapproved(path: Path) -> None:
-    assert _draft(path)["approval"] is None
+def test_the_committed_declarations_carry_the_owners_approval_at_the_approved_digest(path: Path) -> None:
+    """The stamp changed nothing the owner approved: the content digest is the
+    P5 digest, the approval names it, and the committed file authorizes as is."""
+    data = _draft(path)
+    approval = data["approval"]
+    assert approval["by"] == "owner (cooneycw)" and approval["at"] == "2026-10-18"
+    assert "run 287 now" in approval["source"] and approval["attempts_per_arm"] == 10
+    assert calibration.declaration_digest(data) == approval["declaration_digest"] == OWNER_APPROVED[path]
+    _authorize(data)
+
+
+@pytest.mark.parametrize("field, value", [("model", "gpt-6"), ("reasoning_effort", "medium"), ("total_seconds", 48000)])
+@pytest.mark.parametrize("path", [DISCRIMINATION, IMPROVEMENT], ids=["discrimination", "improvement"])
+def test_the_owners_approval_does_not_survive_a_changed_field(path: Path, field: str, value: object) -> None:
+    data = _draft(path)
+    data["shared"][field] = value
+    with pytest.raises(calibration.DeclarationRefused):
+        _authorize(data)
 
 
 # ------------------------------------------------------------------- C1

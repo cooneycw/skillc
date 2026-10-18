@@ -1,10 +1,10 @@
 # #287 common outcome preparation
 
 This slice prepares an explicitly approved common task-outcome endpoint for the
-improvement study. It neither authorizes a trial nor completes #287. Both pilot
-approvals remain null. Since P3 (below) both declarations are complete and pass
-the runnable declaration contract under a test-only approval; no approval is
-committed.
+improvement study. Since P3 (below) both declarations are complete, and since
+2026-10-18 both carry the **owner's approval** (section "Owner approval"): each
+authorizes one run of its pilot as declared. Approval is not execution; the run
+and its report are #288.
 
 The two declarations are scoped transplants from parked
 `prep-287-pilot-declarations` tip `571d763`. That branch and its history remain
@@ -71,6 +71,18 @@ The pin is CPP `86641e8` (orchestrator ruling,
   its source `snapshot:`. The declaration's derived label assumes the `git:`
   source, so the run-time mutation check (P2) must build from the pinned
   revision.
+
+## Owner approval (2026-10-18)
+
+The owner approved both pilots with the words **"run 287 now"** (2026-10-18). They were replying, in the orchestrator's session, to the FINAL P5 approval package ([#287 comment](https://github.com/cooneycw/skillc/issues/287#issuecomment-6246337335)), which carried both approval sentences. skillc-400 (orchestrator, owner-delegated) relayed it as approval of both declarations at n=10 per arm.
+
+| | discrimination | improvement |
+|---|---|---|
+| approved digest | `sha256:40acebc5cfd04313a24639f5298698b52449699f8aa44ba6dca0e6e05dd2490e` | `sha256:6bc7581b1a72230951146aa2a96c5a8ec86a3e5104ebe6ca41cb61263b21a198` |
+
+Each file's `approval` block records `by`, `at`, `source` (quoting the words and the relay), `scope`, and the binding digests. The approval is excluded from the digest, so the stamp changed nothing the owner approved. `tests/test_calibration_p3_bindings.py` pins both digests, and refuses a copy with any declared field changed.
+
+An approval authorizes one run of each pilot, exactly as declared: 10 attempts per arm, the declared caps, on kyle19 with provider-only egress. It authorizes no re-run of a counted attempt and no main study. The run is #288.
 
 ## P3: completed declarations and the checks that bind them
 
@@ -239,10 +251,10 @@ integration requirement. The merged gate exercise and regression-call controls
 strengthen task grading; they do not supply protected process evidence or
 real-runner certification. Revalidate exact task bytes before study approval.
 
-Still owed: #315 runtime readiness; the actual-path 40-slot deterministic
-rehearsal on kyle19 (P4); the approval package (P5); explicit exact study
-approvals. The runtime identities, receipt and discrimination runner were
-supplied by P2 and P3.
+Historical note (pre-P4): this paragraph once listed the kyle19 rehearsal (P4),
+the approval package (P5) and the study approvals as owed. All three are done:
+P4 on 2026-10-18, P5's FINAL package, and the owner's approval of both pilots
+(2026-10-18). Still owed: the live run and report (#288).
 Consume merged #348 profile forwarding/witness delivery rather than repairing
 that path again. #237's priority ruling and prior #203 approvals do not authorize
 this new study. No paid/model/Docker campaign, held-out tuning, or study verdict
