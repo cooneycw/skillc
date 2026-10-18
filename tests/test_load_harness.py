@@ -214,10 +214,11 @@ def test_a_sigkilled_harness_still_takes_its_load_down(tmp_path):
 
 def _write_phase(path: Path, start: float, end: float, verdict: str,
                  outcomes: list[str], target: float = 48, nproc: int = 24,
-                 pinned_count: int = 0) -> str:
+                 pinned_count: int = 0, cpu: int | None = None) -> str:
     path.write_text(json.dumps({
         "started_at": start, "ended_at": end, "verdict": verdict,
         "target": target, "nproc": nproc, "pinned_count": pinned_count,
+        "cpu": int(target) if cpu is None else cpu,
         "reps": [{"outcome": o, "seconds": 1.0} for o in outcomes],
     }))
     return str(path)
@@ -343,6 +344,19 @@ elif args[0] == "rm" and mode == "rm-in-progress":
     save(d)
     print(f"Error response from daemon: removal of container {args[2]} is already in progress",
           file=sys.stderr)
+    sys.exit(1)
+elif args[0] == "rm" and mode == "rm-mixed":
+    # Alternate per container: the daemon is already removing one, the next
+    # genuinely fails. Both are gone afterwards, so only the reply tells.
+    errs = []
+    for c in args[2:]:
+        n = d.get("_rmn", 0)
+        d["_rmn"] = n + 1
+        d.pop(c, None)
+        errs.append(f"removal of container {c} is already in progress" if n % 2 == 0
+                    else f"cannot remove container {c}: device busy")
+    save(d)
+    print("\n".join("Error response from daemon: " + e for e in errs), file=sys.stderr)
     sys.exit(1)
 elif args[0] == "rm" and mode == "rm-fails":
     print("Error response from daemon: cannot remove container: device busy", file=sys.stderr)
@@ -714,3 +728,30 @@ def test_a_real_removal_failure_is_still_a_cleanup_failure(tmp_path, monkeypatch
     monkeypatch.setenv("FAKE_DOCKER_MODE", "rm-fails")
     load.stop()
     assert "device busy" in load.cleanup_error
+
+
+
+# ------------------------------------------------- PR 2 review pass 1 (#462)
+
+def test_the_2x_claim_needs_2x_attributable_spinners_not_just_a_host_count(tmp_path):
+    """8 spinners pinned to 8 cores is 1x there, however many runnable
+    processes elsewhere on the host lift the host-wide count to 16."""
+    out = tmp_path / "m.json"
+    for cpu, expected in ((8, False), (16, True)):
+        a = _write_phase(tmp_path / "a.json", 0, 100, "VALID", ["passed"],
+                         target=16, nproc=24, pinned_count=8, cpu=cpu)
+        lh.main(["summarize", "--member", "m", "--test-id", "t", "--label", "pre",
+                 "--out", str(out), a])
+        assert json.loads(out.read_text())["meets_2x_nproc"] is expected, cpu
+
+
+def test_a_genuine_error_is_kept_when_a_neighbour_reply_is_benign(tmp_path, monkeypatch):
+    state = _fake_docker(tmp_path, monkeypatch)
+    load = lh.Load(0, 0, time.time() + 60, docker=2)
+    deadline = time.monotonic() + 20
+    while len(_containers(state)) < 3 and time.monotonic() < deadline:
+        time.sleep(0.05)
+    monkeypatch.setenv("FAKE_DOCKER_MODE", "rm-mixed")
+    load.stop()
+    assert _containers(state) == {"foreign": "skillc.load462=someone-else"}
+    assert "device busy" in load.cleanup_error, "a benign neighbour reply hid a real failure"

@@ -204,17 +204,23 @@ def cleanup(cfg):
             ids = r.stdout.split()
             if ids:
                 empties = 0
-                try:
-                    rr = subprocess.run(["docker", "rm", "-f", *ids], capture_output=True,
-                                        text=True, timeout=t)
-                    # The daemon's own `--rm` can be removing it already, or
-                    # have just finished: not a failure, and the next listing
-                    # (which must settle empty) is what verifies it.
-                    benign = ("is already in progress", "No such container")
+                # One container per call, so each reply is judged on its own:
+                # the daemon's own `--rm` can be removing it already, or have
+                # just finished, which is not a failure (the next listing,
+                # which must settle empty, verifies it); any other reply is.
+                benign = ("is already in progress", "No such container")
+                stalled = False
+                for cid in ids:
+                    try:
+                        rr = subprocess.run(["docker", "rm", "-f", cid], capture_output=True,
+                                            text=True, timeout=t)
+                    except (OSError, subprocess.TimeoutExpired) as exc:
+                        errors.append(f"docker rm failed: {exc!r}")
+                        stalled = True
+                        break
                     if rr.returncode != 0 and not any(b in rr.stderr for b in benign):
                         errors.append(f"docker rm exit {rr.returncode}: {rr.stderr.strip()[:200]}")
-                except (OSError, subprocess.TimeoutExpired) as exc:
-                    errors.append(f"docker rm failed: {exc!r}")
+                if stalled:
                     break
             else:
                 empties += 1
@@ -717,9 +723,12 @@ def summarize(args: argparse.Namespace) -> int:
         "load_factors": sorted({round(ph["target"] / _cores(ph), 2) for ph in phases
                                 if _cores(ph)}),
         # Only phases that contributed a counted rep can carry the claim, and
-        # with none there is no claim at all.
+        # with none there is no claim at all. The runnable-count target can be
+        # met by processes on OTHER cores, so the claim also needs 2x the cores
+        # in this harness's own spinners (whose CPU time the phase verified).
         "meets_2x_nproc": bool(contributing) and all(
-            ph["target"] >= 2 * _cores(ph) for ph in contributing),
+            ph["target"] >= 2 * _cores(ph) and ph.get("cpu", 0) >= 2 * _cores(ph)
+            for ph in contributing),
         "invalid_phases": sum(ph["verdict"] != "VALID" for ph in phases),
         "pause_gaps_seconds": gaps,
         "pauses_ok": all(g >= MIN_PAUSE_SECONDS for g in gaps),
