@@ -1174,19 +1174,23 @@ class DockerBackend:
         deadline = time.monotonic() + self.egress_ready_seconds
         last = "no probe ran"
         while True:
+            # Every probe and pause is capped at what is left of the budget, so
+            # a hanging `docker exec` cannot carry the wait past it (#460
+            # counter-model review).
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise BackendUnavailable(f"egress proxy {proxy} did not accept connections within "
+                                         f"{self.egress_ready_seconds:g}s (last probe: {last})")
             try:
                 done = subprocess.run(eg.proxy_ready_argv(self.docker_bin, proxy), capture_output=True, text=True,
-                                      env=env, check=False, timeout=self.daemon_timeout)
+                                      env=env, check=False, timeout=min(self.daemon_timeout, remaining))
             except (OSError, subprocess.TimeoutExpired) as exc:
                 last = str(exc)
             else:
                 if done.returncode == 0:
                     return
                 last = (done.stderr.strip().splitlines() or [f"exit {done.returncode}"])[-1]
-            if time.monotonic() >= deadline:
-                raise BackendUnavailable(f"egress proxy {proxy} did not accept connections within "
-                                         f"{self.egress_ready_seconds:g}s (last probe: {last})")
-            time.sleep(0.2)
+            time.sleep(max(0.0, min(0.2, deadline - time.monotonic())))
 
     def _stop_egress(self, proxy: str | None, network: str | None, env: Mapping[str, str]) -> str:
         """Best-effort, bounded removal of #442's proxy container and network.

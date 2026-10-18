@@ -658,8 +658,8 @@ def test_red_case_a_proxy_that_never_listens_refuses_the_attempt_and_leaves_noth
     docker_state.mkdir(parents=True, exist_ok=True)
     (docker_state / ".proxy-never-ready").write_text("")
     backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state),
-                              daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT, egress=True, egress_ready_seconds=0.5)
-    with pytest.raises(BackendUnavailable, match=r"did not accept connections within 0\.5s .*Errno 111"):
+                              daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT, egress=True, egress_ready_seconds=3)
+    with pytest.raises(BackendUnavailable, match=r"did not accept connections within 3s .*Errno 111"):
         backend.prepare("a-never-ready")
     assert int((docker_state / ".proxy-ready-probes").read_text()) >= 2  # it polled, not one shot
     leftovers = list((docker_state / "networks").glob("*.json")) if (docker_state / "networks").is_dir() else []
@@ -695,6 +695,24 @@ def test_red_case_a_failed_egress_assertion_names_what_was_observed(
         assert fragment in text, (fragment, text)
     for fragment in absent:
         assert fragment not in text, (fragment, text)
+
+
+def test_red_case_a_hanging_readiness_probe_cannot_carry_the_wait_past_its_budget(
+    base: Path, docker_state: Path,
+) -> None:
+    """#460 counter-model review: each probe used to get the whole
+    `daemon_timeout`, so one stalled `docker exec` overran the readiness
+    budget - and a late success was then accepted. The wait must refuse
+    inside its own budget."""
+    docker_state.mkdir(parents=True, exist_ok=True)
+    (docker_state / ".proxy-ready-hang").write_text("10")
+    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state),
+                              daemon_timeout=30, egress=True, egress_ready_seconds=0.5)
+    started = time.monotonic()
+    with pytest.raises(BackendUnavailable, match=r"did not accept connections within 0\.5s .*timed out"):
+        backend.prepare("a-hanging-probe")
+    assert time.monotonic() - started < 8, "the readiness wait ran past its budget"
+    assert not any(p.name.endswith("-proxy.json") for p in docker_state.glob("*.json"))
 
 
 def test_the_pilot_bound_egress_identity_is_unchanged() -> None:

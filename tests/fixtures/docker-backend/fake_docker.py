@@ -727,12 +727,19 @@ def cmd_exec(state_dir: Path, rest: list[str]) -> int:
         return 0 if capable else 1
 
     # #460's readiness probe against an egress proxy (`egress.READY_SOURCE`).
-    # Ready at once, unless `.proxy-never-ready` exists; each probe is counted
+    # Ready at once, unless `.proxy-never-ready` exists (or `.proxy-ready-hang`
+    # stalls it first); each probe is counted
     # in `.proxy-ready-probes` so a test can see the wait actually ran.
     if len(exec_argv) >= 3 and exec_argv[:2] == ["python3", "-c"] and "socket.create_connection" in exec_argv[2] \
             and data.get("labels", {}).get("skillc.role") == "egress-proxy":
         probes = state_dir / ".proxy-ready-probes"
         probes.write_text(str(int(probes.read_text() or "0") + 1 if probes.exists() else 1), encoding="utf-8")
+        hang = state_dir / ".proxy-ready-hang"
+        if hang.exists():
+            # A probe that stalls, then reports ready: only a wait capped at
+            # its own budget stays bounded.
+            time.sleep(float(hang.read_text(encoding="utf-8").strip() or "10"))
+            return 0
         if (state_dir / ".proxy-never-ready").exists():
             print("ConnectionRefusedError: [Errno 111] Connection refused", file=sys.stderr)
             return 1
