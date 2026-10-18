@@ -1,0 +1,25 @@
+{
+  "branch": "issue-281-certify-generated-ci-artifacts-through-an-executab",
+  "counts": {
+    "accepted": 11,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "a46572ba611f44c5b97ce75d80a92f8367034925",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "281",
+  "passes": 2,
+  "recorded_at": "2026-10-18T02:58:17Z",
+  "red_cases": {
+    "already_covered": 8,
+    "proposed": 14
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/17/rollout-2026-10-17T22-42-17-01a14ce3-76f2-7eb3-be70-9435f6ce4399.jsonl",
+    "thread_id": "01a14ce3-76f2-7eb3-be70-9435f6ce4399"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
