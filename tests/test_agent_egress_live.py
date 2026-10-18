@@ -200,14 +200,20 @@ def test_provider_is_reachable_through_the_proxy(attempt: tuple[d.DockerBackend,
 
 #: Sleeps before `asyncio.run(serve())`, i.e. before the bind: a proxy slower
 #: to start than everything else in `prepare()`. #460's red case.
-_SLOW_START_DELAY_SECONDS = 5
+_SLOW_START_DELAY_SECONDS = 10
 _SLOW_START_ANCHOR = "\n    asyncio.run(serve())\n"
 
 
 def test_prepare_returns_only_once_the_proxy_listens(monkeypatch: pytest.MonkeyPatch) -> None:
     """#460: `prepare()` must not hand back an attempt whose proxy is not yet
     listening. Without a readiness wait, the first CONNECT is refused (Errno
-    111) - in a live attempt, an unusable start counted against tolerance."""
+    111) - in a live attempt, an unusable start counted against tolerance.
+
+    The probe asks for a name no mode ever allowlists, so the only possible
+    "ready" answer is the proxy's OWN 403: no provider, DNS or upstream is
+    involved, and an outage elsewhere cannot fail (or pass) this test. The
+    10 s delay outlasts the rest of prepare() by a wide margin (measured on
+    kyle19: the pre-fix probe fails about 2 s in)."""
     assert _image_available(LIVE_TEST_IMAGE), "the live test image could not be made available"
     assert eg.PROXY_SOURCE.count(_SLOW_START_ANCHOR) == 1, "setup: the slow-start anchor moved"
     monkeypatch.setattr(eg, "PROXY_SOURCE", eg.PROXY_SOURCE.replace(
@@ -218,9 +224,10 @@ def test_prepare_returns_only_once_the_proxy_listens(monkeypatch: pytest.MonkeyP
         handle = backend.prepare(f"a-egress-slow-{os.getpid()}")
         assert isinstance(handle, d._Handle)
         try:
-            result = _probe(handle, "https", "https://chatgpt.com/")
-            assert result["result"] == "http", \
-                f"the first request after prepare() did not reach the provider: {_observed(backend, handle, {'provider': result})}"
+            result = _probe(handle, "https", "https://never-allowlisted.invalid/")
+            answered = result["result"] == "error" and "403" in str(result.get("error"))
+            assert answered, ("the first request after prepare() got no answer from the proxy: "
+                              + _observed(backend, handle, {"never-allowlisted.invalid": result}))
         finally:
             backend.destroy(handle)
 
