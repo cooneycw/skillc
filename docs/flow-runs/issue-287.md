@@ -338,3 +338,28 @@ At main a25d73b both pilot declarations still have approval null and recompute t
 4. `evals/calibration-287/README.md` - record the approval and its source.
 
 Scope: two JSON fields + tests + README. Risks: a stamped field that moves the digest (the tests pin the P5 digests); an approval wider than the owner's words (scope text names exactly the declared runs). Review: one counter-model pass.
+
+<!-- flow-run n=6 id=fd7ad9531fde455699c93dea30d7398b -->
+## Run 6
+
+- Run-id:            fd7ad9531fde455699c93dea30d7398b
+- Run-start:         2a2e287a74b3f40206720ea97ac749ba80718877
+- Issue:             #287
+- Base SHA:          2a2e287a74b3f40206720ea97ac749ba80718877
+- Necessity verdict: Not addressed (no grader can read a bare flow-finish-gate run; the auto6 study needs one)
+- Approval:          granted
+- Approver:          skillc-400 (orchestrator, owner-delegated): option 1 (flow-auto Step-6 rules), new grader id gate-stops-early-auto6 rev 1, new closed-map shim, flow-check shim unchanged, criterion/qualify cells/order approved
+- Recorded at:       2026-10-18T15:30:00Z
+
+### Section B evidence
+Bare finish gate on the fixture (pinned 86641e8 snapshot): `FLOW_FINISH_GATE: warn (skipped gates: typecheck verify)`, exit 3; stages lint/test/security_scan success, typecheck/verify skipped. The flow-check shim refuses any argv but its two (exit 125), so a Step-6 bare call is unwitnessed today.
+
+### Section C - the approved plan
+1. `docker/trial/flow-auto-gate-shim.py` - new closed-map shim: only the bare call -> gate "flow-finish".
+2. `skillc/profile.py` - optional declared `gate_witness` (closed vocabulary flow-check | flow-finish), carried into the inventory.
+3. `skillc/calibration_run.py`, `skillc/collection_conformance.py`, `skillc/agent_trial.py` - carry `gate_witness` from the closure to the attempt; the witness session's gate map, stage capture and shim follow it (flow-check default unchanged; the #434 fixture route unchanged).
+4. `skillc/stage_capture.py` - plan "finish": verdict word, skipped-gates and zero-coverage lists, exit code.
+5. `evals/level3/gate-stops-early-auto6/` - grader id gate-stops-early-auto6 rev 1: grader.json, judge (gate-report-honest from the last fresh flow-finish run), probe/inputs/fixture copies, goal.md quoting flow-auto Step 6's gate invocation, qualify.py + real finish-plan stage samples + controls (honest/dishonest x ok/warn-skipped/fail, ran-nothing and stale UNKNOWN), PROVENANCE.md.
+6. Tests: shim map, profile field, stage capture (finish), witness selection, judge cells, the flow-check route unchanged.
+
+Scope: large (#376-sized). Risks: changing the flow-check path (guarded by unchanged-route tests); the finish plan's stage ids differing from check's (mapped explicitly). Review: counter-model, cap 2.

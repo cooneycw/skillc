@@ -1,0 +1,199 @@
+FLOW_FINISH_GATE_COUNTER_MODEL: not-enrolled: this repository carries no counter-model receipts directory
+flow-finish-gate: running deterministic gate (lib.cicd run --plan finish, CPP at <CPP_DIR>)
+{
+  "success": true,
+  "run_id": "finish-a8fe874b",
+  "plan": "finish",
+  "steps_completed": 5,
+  "steps_total": 5,
+  "tests": {
+    "test": {
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "errors": 0,
+      "xfailed": 0,
+      "xpassed": 0,
+      "executed": 2,
+      "framework": "unittest",
+      "invocations": 1,
+      "empty_invocations": 0,
+      "summary_streams": [
+        "stdout"
+      ]
+    }
+  },
+  "coverage": {
+    "lint": {
+      "state": "unknown",
+      "units": null,
+      "unit_name": "unit",
+      "tool": "unknown",
+      "scope": "stage",
+      "component": "",
+      "evidence": "",
+      "invocations": 0,
+      "empty_invocations": 0,
+      "streams": [
+        "stdout",
+        "stderr"
+      ]
+    },
+    "typecheck": {
+      "state": "unknown",
+      "units": null,
+      "unit_name": "unit",
+      "tool": "unknown",
+      "scope": "stage",
+      "component": "",
+      "evidence": "",
+      "invocations": 0,
+      "empty_invocations": 0,
+      "streams": [
+        "stdout",
+        "stderr"
+      ]
+    },
+    "security_scan": {
+      "state": "covered",
+      "units": 9,
+      "unit_name": "source file",
+      "tool": "security-gate",
+      "scope": "component",
+      "component": "secrets scan",
+      "evidence": "SECURITY_GATE: flow_finish PASS (blocked=0 warned=1; secrets-scanned=9 skipped-checks=0; blocks-on=CRITICAL warns-on=HIGH)",
+      "invocations": 1,
+      "empty_invocations": 0,
+      "streams": [
+        "stdout"
+      ]
+    },
+    "verify": {
+      "state": "unknown",
+      "units": null,
+      "unit_name": "unit",
+      "tool": "unknown",
+      "scope": "stage",
+      "component": "",
+      "evidence": "",
+      "invocations": 0,
+      "empty_invocations": 0,
+      "streams": [
+        "stdout",
+        "stderr"
+      ]
+    }
+  },
+  "gates": [
+    "lint",
+    "security_scan",
+    "test",
+    "typecheck",
+    "verify"
+  ],
+  "subsumed_gates": {},
+  "subsumption_refusals": [],
+  "dropped_gates": [],
+  "step_details": [
+    {
+      "id": "lint",
+      "status": "success",
+      "duration_seconds": 0.0,
+      "coverage": {
+        "state": "unknown",
+        "units": null,
+        "unit_name": "unit",
+        "tool": "unknown",
+        "scope": "stage",
+        "component": "",
+        "evidence": "",
+        "invocations": 0,
+        "empty_invocations": 0,
+        "streams": [
+          "stdout",
+          "stderr"
+        ]
+      }
+    },
+    {
+      "id": "test",
+      "status": "success",
+      "duration_seconds": 1.0,
+      "tests": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "errors": 0,
+        "xfailed": 0,
+        "xpassed": 0,
+        "executed": 2,
+        "framework": "unittest",
+        "invocations": 1,
+        "empty_invocations": 0,
+        "summary_streams": [
+          "stdout"
+        ]
+      }
+    },
+    {
+      "id": "typecheck",
+      "status": "success",
+      "duration_seconds": 0.0,
+      "coverage": {
+        "state": "unknown",
+        "units": null,
+        "unit_name": "unit",
+        "tool": "unknown",
+        "scope": "stage",
+        "component": "",
+        "evidence": "",
+        "invocations": 0,
+        "empty_invocations": 0,
+        "streams": [
+          "stdout",
+          "stderr"
+        ]
+      }
+    },
+    {
+      "id": "security_scan",
+      "status": "success",
+      "duration_seconds": 0.0,
+      "coverage": {
+        "state": "covered",
+        "units": 9,
+        "unit_name": "source file",
+        "tool": "security-gate",
+        "scope": "component",
+        "component": "secrets scan",
+        "evidence": "SECURITY_GATE: flow_finish PASS (blocked=0 warned=1; secrets-scanned=9 skipped-checks=0; blocks-on=CRITICAL warns-on=HIGH)",
+        "invocations": 1,
+        "empty_invocations": 0,
+        "streams": [
+          "stdout"
+        ]
+      }
+    },
+    {
+      "id": "verify",
+      "status": "success",
+      "duration_seconds": 0.0,
+      "coverage": {
+        "state": "unknown",
+        "units": null,
+        "unit_name": "unit",
+        "tool": "unknown",
+        "scope": "stage",
+        "component": "",
+        "evidence": "",
+        "invocations": 0,
+        "empty_invocations": 0,
+        "streams": [
+          "stdout",
+          "stderr"
+        ]
+      }
+    }
+  ]
+}
+FLOW_FINISH_GATE: ok

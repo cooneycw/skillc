@@ -686,6 +686,7 @@ def run_level1_agent_attempt(
     verify_home_files: Mapping[str, str] | None = None,
     preflight_tools: Sequence[Mapping[str, object]] | None = None,
     gate_entrypoint: str | None = None,
+    gate_witness: str | None = None,
 ) -> dict[str, object]:
     """One real (or, in tests, scripted-fake) codex attempt against a Level 1
     task (`task_root`, default `demo.GRADER_ROOT`), in skill-free canary mode,
@@ -726,6 +727,7 @@ def run_level1_agent_attempt(
         verify_home_files=verify_home_files,
         preflight_tools=preflight_tools,
         gate_entrypoint=gate_entrypoint,
+        gate_witness=gate_witness,
     )
 
 
