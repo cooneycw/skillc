@@ -1,0 +1,27 @@
+{
+  "branch": "issue-282-certify-baseline-aware-deployment-verification-on",
+  "counts": {
+    "accepted": 5,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "638de515d25596de5b466bd0c63b676789b5fe7a",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "282",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 2,
+  "recorded_at": "2026-10-18T02:03:00Z",
+  "red_cases": {
+    "already_covered": 21,
+    "proposed": 25
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/17/rollout-2026-10-17T21-58-49-01a14cbb-a9c1-7ea3-b17d-b79f00f71230.jsonl",
+    "thread_id": "01a14cbb-a9c1-7ea3-b17d-b79f00f71230"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
