@@ -358,8 +358,11 @@ egress reaches an allowed host and spends.
 - Every decision goes to a controller-held record (`skillc/codex_guard.py`).
   The count is `zero` only with a healthy channel and exactly one top-level
   launch; a second top-level launch is `suspected`.
-- Bound: a subject that calls the real binary by path, and also blocks the
-  socket, leaves no record. The count then reads `unknown`, never `zero`.
+- Bound: `zero` means no nested launch came THROUGH the guard, never that
+  none happened. A subject that calls the real codex.js or native binary by
+  absolute path never runs the guard, so that call leaves no record and the
+  count can still read `zero`. A guard request the channel refuses (a foreign
+  field included) marks the record unhealthy, so the count reads `unknown`.
 
 **Grading.** The credit gate refuses credit in these cases, and the attempt
 stays in every account:

@@ -101,6 +101,21 @@ class FixtureSession:
     def routes(self) -> dict[str, tuple[Callable[[Mapping[str, object]], Mapping[str, object]], frozenset[str]]]:
         return {"gh": (self._gh, fs.REQUEST_KEYS), "codex_guard": (self._guard, cg.REQUEST_KEYS)}
 
+    def watch(self, decide: Callable[[Mapping[str, object]], Mapping[str, object]]
+              ) -> Callable[[Mapping[str, object]], Mapping[str, object]]:
+        """The attempt's composed `decide`, with one addition: a `codex_guard`
+        request refused anywhere, `dispatch`'s own key check included, marks
+        the guard record unhealthy. A refused guard line is a decision the
+        record never holds, so the count must read unknown, never zero."""
+        def watched(request: Mapping[str, object]) -> Mapping[str, object]:
+            try:
+                return decide(request)
+            except ChannelRefusal:
+                if request.get("op") == "codex_guard":
+                    self.guard.channel_unavailable = True
+                raise
+        return watched
+
     def _gh(self, request: Mapping[str, object]) -> Mapping[str, object]:
         with self._lock:
             service = None if self._finishing else self.service

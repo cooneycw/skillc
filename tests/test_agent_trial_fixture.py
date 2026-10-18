@@ -210,19 +210,32 @@ def test_a_qualify_candidate_replayed_through_the_live_wiring_grades_as_committe
 
 def test_a_mixed_request_on_the_shared_socket_is_refused_and_no_route_sees_it(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A gh request carrying a witness field, and a codex_guard request carrying
-    a gh field: dispatch refuses both, and neither reaches its route."""
+    """A gh request carrying a witness field: dispatch refuses it, and the
+    service never sees it."""
     candidate = TASK / "candidates" / "pass" / "clean-cites-commit-only"
     actions = json.loads((candidate / "actions.json").read_text())
     mixed_gh = {**_gh(actions["gh"][0]), "nonce": "x"}
-    mixed_guard = {**TOP_LEVEL, "argv": ["pr", "list"]}
-    requests: list[dict[str, object]] = [TOP_LEVEL, mixed_gh, mixed_guard, *(_gh(argv) for argv in actions["gh"])]
+    requests: list[dict[str, object]] = [TOP_LEVEL, mixed_gh, *(_gh(argv) for argv in actions["gh"])]
     result, trusted = run_fixture_case(tmp_path, monkeypatch, case="clean", requests=requests,
                                        report=(candidate / "report.md").read_text())
     [envelope] = trusted
     assert [e["argv"] for e in envelope["service"]["events"]] == actions["gh"]
-    assert len(envelope["codex_guard"]["decisions"]) == 1
     assert _outcome(result)["status"] == "PASS"
+
+
+def test_a_refused_guard_request_makes_the_nested_count_unknown(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Counter-model review, pass 1: a guard line that dispatch refuses (a
+    foreign field) never reaches the record, so the record cannot read zero."""
+    candidate = TASK / "candidates" / "pass" / "clean-cites-commit-only"
+    actions = json.loads((candidate / "actions.json").read_text())
+    mixed_guard = {**TOP_LEVEL, "argv": ["pr", "list"]}
+    requests: list[dict[str, object]] = [TOP_LEVEL, mixed_guard, *(_gh(argv) for argv in actions["gh"])]
+    result, trusted = run_fixture_case(tmp_path, monkeypatch, case="clean", requests=requests,
+                                       report=(candidate / "report.md").read_text())
+    assert result["graded"] is None and trusted == []
+    assert result["grading_blocked_reason"] == "not credited: nested-codex count unknown"
+    assert result["fixture"]["codex_guard"]["top_level"] == 1
 
 
 @pytest.mark.parametrize("guard, reason", [

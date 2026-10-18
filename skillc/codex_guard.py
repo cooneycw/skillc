@@ -24,6 +24,13 @@ COUNTS, AND WHEN THEY MEAN SOMETHING (orchestrator ruling):
   - `unknown` otherwise: an unhealthy channel, or no top-level launch recorded
     at all, which means the guard's send failed or the guard never ran.
 
+WHAT ZERO DOES NOT SAY. A codex called by absolute path (the real codex.js
+or native binary) never runs the guard, so it sends nothing, and the count
+can read `zero` with it having happened. `zero` means no nested launch came
+through the guard. The attempt's composed decide also marks this record
+unhealthy when it refuses a guard request before it reaches `decide` here
+(`FixtureSession.watch`).
+
 A subject can send `refused-nested` lines against itself. That only hurts the
 subject, so they are counted as reported.
 

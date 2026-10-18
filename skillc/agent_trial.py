@@ -1973,11 +1973,11 @@ def run_one_attempt(
         trigger = witness_session.decide if witness_session else backend.trigger_decide
         if fixture_session is not None and witness_session is not None:
             # One socket, routed by op alone; a mixed request is refused.
-            trigger = fs.dispatch({
+            trigger = fixture_session.watch(fs.dispatch({
                 "witness_ready": (witness_session.decide, frozenset({"op", "nonce"})),
                 "run_gate": (witness_session.decide, frozenset({"op", "gate", "cwd"})),
                 **fixture_session.routes(),
-            })
+            }))
         try:
             backend = replace(backend, witness_io=True, trigger_decide=trigger)
         except (TypeError, ValueError) as exc:

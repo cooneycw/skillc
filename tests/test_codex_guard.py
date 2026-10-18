@@ -255,7 +255,8 @@ class _Recorder:
         self.server.close()
 
 
-def _guard_copy(tmp_path: Path, *, decision: str | None, real: Path, sock: Path) -> Path:
+def _guard_copy(tmp_path: Path, *, decision: str | None, real: Path, sock: Path,
+                self_bound: int | None = None) -> Path:
     """The guard with only its two constants, its interpreter and (on a host,
     where the real walk reaches an unreadable PID 1) its decision replaced.
     Each replacement must match exactly once."""
@@ -265,7 +266,8 @@ def _guard_copy(tmp_path: Path, *, decision: str | None, real: Path, sock: Path)
     for old, new in [("#!/usr/bin/python3 -IS", f"#!{sys.executable} -IS"),
                      ('CONFIG = "/opt/skillc-harness/codex-guard.json"', f"CONFIG = {str(config)!r}"),
                      ('TRIGGER_SOCKET_PATH = "/run/skillc/trigger.sock"', f"TRIGGER_SOCKET_PATH = {str(sock)!r}"),
-                     *([("decide(config, os.getppid())", repr(decision))] if decision else [])]:
+                     *([("decide(config, os.getppid())", repr(decision))] if decision else []),
+                     *([("_MAX_SELF_BYTES = 64 << 20", f"_MAX_SELF_BYTES = {self_bound}")] if self_bound else [])]:
         assert text.count(old) == 1, old
         text = text.replace(old, new)
     path = tmp_path / "codex"
@@ -476,3 +478,54 @@ def test_every_unverified_placement_is_refused(break_: str) -> None:
 def test_the_guard_source_is_executable_and_python_isolated() -> None:
     assert GUARD_SOURCE.read_text().splitlines()[0] == "#!/usr/bin/python3 -IS"
     assert GUARD_SOURCE.stat().st_mode & stat.S_IXUSR
+
+
+@pytest.mark.parametrize("oversized", ["argv", "environ"])
+def test_inputs_larger_than_the_read_bound_are_refused_never_truncated(
+        tmp_path: Path, recorder: tuple[_Recorder, Path], oversized: str) -> None:
+    """Counter-model review, pass 1: a bounded read that silently cut argv or
+    the environment forwarded a different call. Over the bound (lowered here
+    to 4 KiB; real argv cannot reach 64 MiB) is refused, exit 3, and the real
+    codex never runs."""
+    _, sock = recorder
+    real, out = _real_recorder(tmp_path)
+    copy = _guard_copy(tmp_path, decision="passed-top-level", real=real, sock=sock, self_bound=4096)
+    args = [f"arg{i:03d}-" + "x" * 90 for i in range(101)] if oversized == "argv" else ["exec"]
+    env = dict(ENV, **({f"V{i:03d}": "y" * 90 for i in range(101)} if oversized == "environ" else {}))
+    proc = subprocess.run([str(copy), *args], env=env, capture_output=True, timeout=30, check=False)
+    assert proc.returncode == 3 and not out.exists()
+    # The decision forced in this copy is passed-top-level: only the bound
+    # check can have turned it into a refusal.
+    assert proc.stderr.startswith(b"CODEX_REVIEW: unavailable")
+
+
+def test_control_inputs_under_the_bound_still_pass_through(
+        tmp_path: Path, recorder: tuple[_Recorder, Path]) -> None:
+    _, sock = recorder
+    real, out = _real_recorder(tmp_path)
+    copy = _guard_copy(tmp_path, decision="passed-top-level", real=real, sock=sock, self_bound=4096)
+    proc = subprocess.run([str(copy), "exec"], env=ENV, capture_output=True, timeout=30, check=False)
+    assert proc.returncode == 0 and out.exists()
+
+
+def test_a_proc_block_that_is_not_nul_terminated_is_refused(tmp_path: Path) -> None:
+    block = tmp_path / "cmdline"
+    block.write_bytes(b"python3\0-IS\0truncated")
+    with pytest.raises(guard._TooLarge):
+        guard._read_whole(str(block))
+    block.write_bytes(b"python3\0-IS\0whole\0")
+    assert guard._read_whole(str(block)) == b"python3\0-IS\0whole\0"
+
+
+def test_a_call_larger_than_one_mebibyte_passes_through_whole(
+        tmp_path: Path, recorder: tuple[_Recorder, Path]) -> None:
+    """The regression for the pass-1 finding at the REAL bound: 1.5 MiB of
+    argv (the kernel allows 2 MiB) used to be cut at the old 1 MiB read and
+    forwarded short. It must reach the real codex whole."""
+    _, sock = recorder
+    real, out = _real_recorder(tmp_path)
+    copy = _guard_copy(tmp_path, decision="passed-top-level", real=real, sock=sock)
+    args = [f"a{i:02d}" + "z" * (100 * 1024) for i in range(15)]
+    proc = subprocess.run([str(copy), *args], env=ENV, capture_output=True, timeout=60, check=False)
+    assert proc.returncode == 0, proc.stderr[-300:]
+    assert [bytes.fromhex(a) for a in json.loads(out.read_text())["argv"]] == [a.encode() for a in args]

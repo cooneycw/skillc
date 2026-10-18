@@ -21,8 +21,9 @@ stays untouched. Every bare `codex` therefore runs this script first:
 - Ancestry that cannot be read (a /proc read error, a pid that vanished
   mid-walk, a loop, too deep): FAIL CLOSED, exit 3, as ancestry-unknown. So
   are this call's own inputs when they cannot be read or reproduced exactly
-  (no readable config, cmdline or environ; a duplicate or malformed
-  environment entry): a pass-through could not then be byte for byte.
+  (no readable config, cmdline or environ; either larger than the read bound
+  or not NUL-terminated; a duplicate or malformed environment entry): a
+  pass-through could not then be byte for byte.
 
 AN ANCESTOR IS CODEX ONLY ON AN EXACT MATCH (orchestrator ruling, condition 1):
 its `/proc/<pid>/exe` realpath is the node binary AND its argv[1], resolved
@@ -43,11 +44,13 @@ launch still passes through. The controller then sees fewer decisions than
 happened, and reports its count as UNKNOWN instead of 0.
 
 THE DETECTION BOUND. A subject that calls the real codex.js or native binary
-by absolute path never runs this script. A subject that double-forks so its
-codex reparents to PID 1 (tini) runs it with no codex ancestor, so it passes,
-and the controller counts it as a SECOND top-level launch, reported as
-nested-suspected. A subject that also blocks the socket leaves no record at
-all, which the controller reads as an unhealthy count (UNKNOWN), never as 0.
+by absolute path never runs this script, so that call leaves NO record and
+the controller's count can still read zero: zero means "no nested launch
+came through the guard", never "none happened". A subject that double-forks
+so its codex reparents to PID 1 (tini) runs it with no codex ancestor, so it
+passes, and the controller counts it as a SECOND top-level launch, reported
+as nested-suspected. A send the controller never receives is likewise
+invisible; one it refuses marks the record unhealthy (UNKNOWN).
 
 Deliberately stdlib-only, like every other in-container helper. `-IS` keeps
 PYTHON* variables and site packages from steering the guard itself.
@@ -66,6 +69,13 @@ TRIGGER_SOCKET_PATH = "/run/skillc/trigger.sock"
 EXIT_UNAVAILABLE = 3
 _MAX_DEPTH = 256
 _SEND_TIMEOUT = 5.0
+#: This call's own argv and environment are read whole, up to this bound; more
+#: is refused, never truncated (a cut-off pass-through is not byte for byte).
+_MAX_SELF_BYTES = 64 << 20
+
+
+class _TooLarge(Exception):
+    """This call's own inputs exceed `_MAX_SELF_BYTES`."""
 
 
 class _Unknown(Exception):
@@ -75,6 +85,17 @@ class _Unknown(Exception):
 def _read(path: str) -> bytes:
     with open(path, "rb") as handle:
         return handle.read(1 << 20)
+
+
+def _read_whole(path: str) -> bytes:
+    """A NUL-terminated /proc block, read completely or refused."""
+    with open(path, "rb") as handle:
+        data = handle.read(_MAX_SELF_BYTES + 1)
+    if len(data) > _MAX_SELF_BYTES:
+        raise _TooLarge(path)
+    if data and not data.endswith(b"\0"):
+        raise _TooLarge(f"{path} is not NUL-terminated")
+    return data
 
 
 def _ppid(pid: int) -> int:
@@ -146,9 +167,9 @@ def _send(decision: str, argv: list[bytes]) -> None:
 
 def main() -> int:
     try:
-        cmdline = _read("/proc/self/cmdline").split(b"\0")[:-1]
-        environ = [e for e in _read("/proc/self/environ").split(b"\0") if e]
-    except OSError:
+        cmdline = _read_whole("/proc/self/cmdline").split(b"\0")[:-1]
+        environ = [e for e in _read_whole("/proc/self/environ").split(b"\0") if e]
+    except (OSError, _TooLarge):
         cmdline, environ = [], []
     # The kernel ran `python3 -IS <this script> <args...>`: the caller's own
     # arguments start after the script path.
