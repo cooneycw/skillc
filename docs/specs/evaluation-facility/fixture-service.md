@@ -376,6 +376,55 @@ final report (the transcript's last assistant message) and the guard record as
 A fixture attempt on #442's egress keeps the default allowlist; a widened one
 is refused before any container exists.
 
+## Controller turns: the Step-3 approval (#279)
+
+flow:auto pauses at Step 3 for a reviewer's approval and has no bypass. So an
+unattended attempt ends there with a plan. To reach Step 6, the controller
+sends a second user turn into the same client session (`skillc/controller_turns.py`).
+
+- **Declared per case, never by default.** The turns object is
+  `{"version": 1, "by_case": {<case>: [{"text": <literal>}, ...]}}`. It must
+  name every case, with 0 to 3 literal texts each. No text may start with `-`:
+  the client's argument parser reads options anywhere before `--`, so a text
+  like `--enable=apps` would reopen a channel. A case with no turns (CLEAN)
+  never receives one, even after a clean exit: an approval after "No longer
+  needed" would push the agent toward implementing. The controller never
+  interprets the agent's text. A turn is sent only after the previous one
+  EXITED with code 0.
+- **The resume argv, measured** on codex-cli 0.157.1 (offline, the #375 image).
+  It is `[*turn-1 argv, "resume", <session id>, <text>]`. Exec's flags before
+  `resume` take effect, `--sandbox` included. `--sandbox` after `resume` is
+  refused. The resume appends to the same rollout. Every resume argv passes
+  #442's server-side preflight before any container exists.
+- **The session id is controller-held.** It comes only from the client's own
+  stderr header, never from the agent-writable rollout. The header must be
+  the initial output, with only the client's measured start-up warnings
+  before it. It must hold only the measured `key: value` lines between its
+  two separators, with exactly one `session id:`. Text the agent prints later
+  cannot supply or replace it, and neither can a forged header or an unclosed
+  one. With no unambiguous id, there is no further turn.
+- **One container, one budget.** Each turn is `TurnCapableBackend.execute_turn`.
+  A turn that exits leaves the container running for the next. A timeout or
+  cancel stops it as before. `end_attempt` runs in a `finally`, so an
+  exception between turns still ends in a confirmed stop. All turns share the
+  attempt's one wall budget; a turn the budget cannot reach is recorded as
+  undelivered. So is a turn after an operator cancel: cancellation is checked
+  before each further turn. A turn counts as delivered only if the resume
+  actually launched; `launch-failed` and `attempt-not-running` are not.
+- **Background processes the agent started in an earlier turn keep running
+  between turns**, as they would during one long session. The attempt-level
+  stop at the end still confirms the whole container is gone, exactly as for a
+  single-turn attempt.
+- **The guard counts each turn.** Each resume is a fresh top-level `codex` launch.
+  #434's nested-codex guard expects `1 + delivered` top-level launches. More
+  is still `suspected`; fewer is `unknown`, because a delivered turn the guard
+  never saw did not come through it.
+- **The census, egress, guard, witness and snapshot run once, after the last
+  turn**, over the whole session. The attempt result's `controller_turns`
+  records what was declared and delivered, and why the turns stopped.
+
+Without turns, an attempt runs through one plain `execute()` exactly as before.
+
 ## The declaration
 
 ```json

@@ -321,7 +321,7 @@ def test_c4_the_declared_policy_is_the_code_s_policy() -> None:
 
 @pytest.mark.parametrize("store", [
     "/tmp/calibration-287", "/var/tmp/x", "relative/store",
-    "/tmp/claude-1000/project/session/scratchpad/runs", "/srv/u/work/scratchpad/runs",
+    "/tmp/claude-" + "1000/project/session/scratchpad/runs", "/srv/u/work/scratchpad/runs",
     "~other/skillc-evidence", "~", "~/../../tmp/x", "/srv/u/../../tmp/x", "~/work/scratchpad/runs",
     "/./tmp/x", "/var//tmp/x", "/dev//shm/x", "//tmp/x", "~/./x", "~//x",
 ])

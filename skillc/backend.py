@@ -291,6 +291,21 @@ class Limits:
 
 
 @runtime_checkable
+class TurnCapableBackend(Protocol):
+    """#279: a backend that can run one attempt as several turns in the SAME
+    still-running isolation. `execute_turn` is `execute` except that a turn
+    which exits leaves the isolation running; `end_attempt` then stops it, and
+    the caller must call it on every path (lifecycle does, in a `finally`).
+    A backend without this capability is refused controller turns."""
+
+    def execute_turn(
+        self, handle: object, argv: Sequence[str], limits: Limits, cancel: Callable[[], bool] | None = None,
+    ) -> ExecuteResult: ...
+
+    def end_attempt(self, handle: object) -> None: ...
+
+
+@runtime_checkable
 class ExecutionBackend(Protocol):
     """One attempt's execution, start to teardown, inside one isolation.
 

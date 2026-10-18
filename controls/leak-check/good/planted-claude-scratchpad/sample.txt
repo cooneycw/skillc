@@ -1,0 +1,2 @@
+error: cannot open <TREE>/scratch/state.json
+cache at /tmp/claude-code-cache/x

@@ -91,6 +91,7 @@ from types import MappingProxyType
 from typing import Any
 
 from . import codex_guard as cg
+from . import controller_turns as ct
 from . import (
     credential,
     demo,
@@ -108,7 +109,14 @@ from . import egress as eg
 from . import fixture_service as fs
 from . import runtime_supply as rs
 from . import transcript_adapter as ta
-from .backend import BackendUnavailable, Confirmation, ExecutionBackend, Limits
+from .backend import (
+    BackendUnavailable,
+    Confirmation,
+    ExecuteResult,
+    ExecutionBackend,
+    Limits,
+    TurnCapableBackend,
+)
 from .decide_reply_channel import ChannelRefusal
 from .docker_backend import (
     CANARY_RESULT_FILENAME,
@@ -1907,6 +1915,7 @@ def run_one_attempt(
     retain_transcript: bool = False,
     receipt_context: InstallationReceiptContext | None = None,
     fixture: AttemptFixture | None = None,
+    turns: ct.Turns | None = None,
 ) -> dict[str, object]:
     """Drive one real-agent attempt end to end and, only when the real
     transcript confirms both prompt delivery and the liveness canary, grade
@@ -1975,6 +1984,15 @@ def run_one_attempt(
     job (`selection_probe.py`'s own retention, not a general capability every
     caller inherits for free).
 
+    `turns` (#279): this case's controller-delivered turns, e.g. the Step-3
+    approval (`controller_turns`). After a turn EXITS with code 0, the next
+    declared text is sent as `[*turn-1 argv, "resume", <session id>, <text>]`
+    in the same container and wall budget. The session id comes only from
+    turn 1's own stderr header, and every resume argv passes #442's preflight
+    before any container exists. The guard then expects one top-level launch
+    per turn, and the result's `controller_turns` says what was delivered.
+    `None` or empty: one turn, exactly as before.
+
     `fixture` (#434): a fixture-service task's per-attempt facts. The
     attempt then also carries `fixture_attempt.FixtureSession`: the `gh` shim
     and the nested-codex guard placed root-owned before the agent starts, the
@@ -2040,6 +2058,11 @@ def run_one_attempt(
                 f"refusing a live codex attempt on network {backend.network!r} with no provider-only egress "
                 "policy (#442): the container could reach the public repository that holds the graders"
             )
+    declared_turns = turns.texts if turns is not None else ()
+    if declared_turns and client not in ct.CLIENTS:
+        raise ct.TurnsRefused(f"controller turns support {list(ct.CLIENTS)} only, not {client!r}")
+    if declared_turns and not isinstance(backend, TurnCapableBackend):
+        raise ct.TurnsRefused(f"{type(backend).__name__} cannot keep an attempt running between turns")
     spec = CLIENT_SPECS[client]
     resolved_workdir = workdir if workdir is not None else PurePosixPath("/work")
     resolved_mcp_servers: Mapping[str, MCPServerSpec] = mcp_servers if mcp_servers is not None else {}
@@ -2061,6 +2084,31 @@ def run_one_attempt(
         attempt_id, base_argv, supports_name=spec.supports_name_flag,
     )
     argv = (*invocation.argv, full_prompt)
+    for text in declared_turns:
+        # Every resume argv is checked before any container exists: the same
+        # #442 preflight as turn 1, on the exact shape that will run.
+        probe = ct.resume_argv(client, invocation.argv, "00000000-0000-0000-0000-000000000000", text)
+        if isinstance(backend, DockerBackend) and backend.egress and (missing := eg.missing_server_side_flags(probe)):
+            raise ServerSideChannelRefused("refusing a controller turn with a server-side channel left open: "
+                                           + "; ".join(missing))
+    turn_state: dict[str, object] = {"declared": len(declared_turns), "session_id_source": "client-stderr-header",
+                                     "session_id_found": None, "stopped": None}
+
+    def next_turn(
+        _backend: ExecutionBackend, _handle: object, done: int, previous: ExecuteResult,
+    ) -> Sequence[str] | None:
+        """#279: the argv of the turn after `done` turns, or `None`."""
+        if done == 1:
+            turn_state["session_id"] = ct.session_id_from_header(previous.stderr)
+            turn_state["session_id_found"] = turn_state["session_id"] is not None
+        if done > len(declared_turns):
+            turn_state["stopped"] = "every declared turn was delivered"
+            return None
+        session_id = turn_state.get("session_id")
+        if not isinstance(session_id, str):
+            turn_state["stopped"] = "no session id in turn 1's client header: no further turn"
+            return None
+        return ct.resume_argv(client, invocation.argv, session_id, declared_turns[done - 1])
 
     ctx = _AttemptContext(workdir=resolved_workdir, mcp_servers=resolved_mcp_servers, cli_version=resolved_cli_version)
     delivered_credential_bytes: dict[str, bytes] = {}
@@ -2155,7 +2203,13 @@ def run_one_attempt(
         before_execute=before_execute, observe_before_teardown=observe_before_teardown, nonce=nonce,
         transcript_for_capture=transcript_for_capture,
         imports_for_capture=lambda: egress_imports,
+        next_turn=next_turn if declared_turns else None,
     )
+    delivered = sum(1 for e in experiment.events(attempt_id)
+                    if e.get("event") == "controller-turn" and e.get("delivered") is True)
+    if fixture_session is not None:
+        # Each delivered turn is one more legitimate top-level launch (#279).
+        fixture_session.expected_top_level = ct.expected_top_level(delivered)
 
     # #434 (counter-model review, pass 2): the fixture's full evidence is
     # stored on EVERY path, before grading, so an attempt the credit gate
@@ -2295,6 +2349,13 @@ def run_one_attempt(
                              "git_unreadable": fixture_session.git_unreadable,
                              "codex_guard": fixture_session.guard_record()["nested"],
                              "evidence_digest": fixture_evidence}
+    if declared_turns:
+        result["controller_turns"] = {
+            "declared": len(declared_turns), "delivered": delivered,
+            "expected_top_level": ct.expected_top_level(delivered),
+            "session_id_source": turn_state["session_id_source"],
+            "session_id_found": turn_state["session_id_found"], "stopped": turn_state["stopped"],
+        }
     result["transcript_retention"] = transcript_retention(experiment, attempt_id, record.get("disposition"))
     # Persisted on EVERY path (#106): the observation used to exist only in
     # this returned dict, so a caller that printed it wrong - or not at all -

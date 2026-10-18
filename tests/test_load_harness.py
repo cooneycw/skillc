@@ -629,8 +629,36 @@ def test_no_spinners_is_invalid_even_when_the_host_count_qualifies(tmp_path):
 
 
 def test_a_window_shorter_than_the_minimum_is_invalid(tmp_path):
+    """A minimum no 6 s phase can reach, so the property holds whatever the
+    host's speed. (It used to rely on a 6 s phase leaving under 3 s of window,
+    which a slow rep overran on CI: push pipeline 933, #462.)"""
     rc, record, err = _phase(tmp_path, "--cpu", "0", "--target", "1", "--reps", "1",
                              "--max-seconds", "6", "--warmup-seconds", "10",
-                             *_fake_stat(tmp_path, 5))
+                             "--min-window-seconds", "1000", *_fake_stat(tmp_path, 5))
     assert rc == 1, err
     assert record["verdict"] == "INVALID"
+
+
+def test_a_phase_needs_no_procps(tmp_path):
+    """python:3.12-slim (CI) has no procps, so no `uptime`: the before/after
+    record comes from /proc. Run with a PATH holding only sh and python."""
+    import shutil
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    for tool in ("sh", Path(sys.executable).name):
+        found = shutil.which(tool) or sys.executable
+        (bindir / Path(tool).name).symlink_to(found)
+    out = tmp_path / "phase.json"
+    proc = subprocess.run(
+        [sys.executable, str(HARNESS), "phase", "--cpu", "0", "--target", "1", "--reps", "1",
+         "--warmup-seconds", "10", *_fake_stat(tmp_path, 5), "--out", str(out), "--",
+         sys.executable, "-c", "pass"],
+        capture_output=True, text=True, timeout=90, check=False,
+        env=dict(os.environ, PATH=str(bindir)),
+    )
+    record = json.loads(out.read_text())
+    assert proc.returncode == 0, proc.stderr
+    for key in ("uptime_before", "uptime_after"):
+        assert record[key].startswith("up "), record[key]
+        assert "load average:" in record[key]

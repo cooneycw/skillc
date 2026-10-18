@@ -259,3 +259,96 @@ Scope: about 14 paths plus the regenerated candidates. Large.
 Risks:
 - A stale SHA would silently break evidence-real or a git op; the no-stale-SHA test and qualify's re-certification guard it.
 - The pinned gate needs the CPP closure and uv; the gate-surface test skips loudly when they are absent, and the evals26 rehearsal measures it live.
+
+<!-- flow-run n=7 id=5ede447b893b4588960ce16880bdbf5f -->
+## Run 7
+
+- Run-id:            5ede447b893b4588960ce16880bdbf5f
+- Run-start:         2a2e287a74b3f40206720ea97ac749ba80718877
+- Issue:             #434
+- Base SHA:          2a2e287
+- Necessity verdict: Still needed
+- Approval:          granted
+- Approver:          skillc-400 (orchestrator, owner-delegated); the owner approved the plan 2026-10-18 (#434 comment 6250232333)
+- Recorded at:       2026-10-18T13:03:52Z
+
+### Section B evidence
+- Revision 2 certified at the scripted level (#434 comment 6249786846, 43/43). Box 1 stays PARTIAL: no live agent has run CPP's flow:auto on the fixture.
+- No live entry point exists for a fixture task: fixture_campaign swaps the client (actor_argv, dummy_credential, network none); calibration_run -> run_level1_agent_attempt has no fixture parameter.
+- The flow-auto profile already selects rs.PROFILE_RUNTIME (the scripted campaign used it), so no new runtime kind is needed.
+- Duplicate or superseding issues: none.
+
+### Section C - the approved plan
+#434 live-campaign wiring, build items (a)-(e); no spend, no declaration approved.
+
+1. `skillc/fixture_live.py` - the level3-fixture-live declaration (cases CLEAN/TWIN as arms; reuses calibration's C1-C5 validators, derive_arm_order and the whole-declaration approval digest; a pinned prompt; task, builder and base-tree identities), require_approved, the run (matched_pilot.run_schedule caps, native containment stop, per-attempt tokens), and the report.
+2. `skillc/cli.py` - `skillc level3-live <declaration>`: real-agent opt-in, C3 image binding, C5 run store, subject and profile checks, the runtime receipt, provider-only egress backends, and `--rehearse`.
+3. `tests/test_fixture_live.py` - C1-C5 and approval-binding reds, one red per containment-stop trigger, schedule order, the runtime selection, rehearsal accounting, the report's token record.
+4. `evals/level3/campaign-434-live/README.md` - what the campaign is, the sequence (measurement then campaign), the stated no-token-cap risk, how to run and rehearse.
+5. `evals/level3/campaign-434-live/measurement-declaration.json` - the DRAFT measurement declaration (1 CLEAN + 1 TWIN), unapproved.
+6. `changelog.d/434-live-wiring-2.md` - the release note.
+
+Scope: about 6 paths. Medium-large.
+
+Risks:
+- The native stop is a gate nothing downstream re-derives: each trigger gets a committed red case.
+- Reusing calibration's private validators couples the two kinds; a test runs each reused check through this kind's parser.
+- The prompt is an identity: changing it after approval must be refused (whole-declaration digest).
+
+<!-- flow-run n=8 id=f314fd1681a446ffa9527f80a08b9d7b -->
+## Run 8
+
+- Run-id:            f314fd1681a446ffa9527f80a08b9d7b
+- Run-start:         2a2e287a74b3f40206720ea97ac749ba80718877
+- Issue:             #434
+- Base SHA:          2a2e287
+- Necessity verdict: Still needed
+- Approval:          granted
+- Approver:          skillc-400 (orchestrator, owner-delegated)
+- Recorded at:       2026-10-18T12:52:20Z
+
+### Section B evidence
+- Grader revision 2 merged as a25d73b (#465). Its pre-registered certifying run (#434 comment 6249786846) ran once on evals26 at a25d73b: 43/43 scored and guard rows MATCH, exit 0; retention verified (45/45 resolve and re-derive, 48/48 guard records, both controls refused).
+- Orchestrator ruling: RESULTS as "Refs #434", the body mapping each acceptance box to its evidence (box 1 PARTIAL: scripted actors, not a live agent).
+
+### Section C - the approved plan
+PR 3c of #434: revision 2's results only, docs. No code, manifest or grader change.
+
+1. `evals/level3/campaign-434/RESULTS-rev2.md` - revision 2's result: identities, per section, the observed rows with their live gate runs, the retention verification, what it does not establish (scripted actors).
+2. `evals/level3/campaign-434/report-rev2.json` - the leak-checked campaign report, as the run wrote it.
+3. `evals/level3/campaign-434/verification-rev2.json` - the read-only retention verification's output.
+4. `evals/level3/campaign-434/README.md` - the results line points at both revisions' results.
+5. `evals/level3/campaign-434/RESULTS.md` - a one-line pointer that revision 2's results supersede it for certification.
+
+Scope: 5 files, docs only. Small.
+
+Risks:
+- A committed report must carry no machine identity; it is leak-checked before commit.
+
+<!-- flow-run n=9 id=47f08d11ff684bb693c4ac0eb14e7c84 -->
+## Run 9
+
+- Run-id:            47f08d11ff684bb693c4ac0eb14e7c84
+- Run-start:         c2090a8a64bf550c2bc765e7405512ed597c01bf
+- Issue:             #434
+- Base SHA:          c2090a8 (PR 3c's head; the plan record follows its Run 8)
+- Necessity verdict: Still needed
+- Approval:          granted
+- Approver:          skillc-400 (orchestrator, owner-delegated): prepare unstamped now; stamp only on the owner's relayed words
+- Recorded at:       2026-10-18T15:28:53Z
+
+### Section B evidence
+- The measurement approval package went to the orchestrator 2026-10-18, digest sha256:7eabd370b2d456293f41f39d74d91bac405cef9e31ec2b8fae80cba573e2956f, re-checked at a0edf35 (#469).
+- level3-live refuses a live run until the declaration carries an approval naming that digest and the profile inventory sha256:545e81be366ae0b81f257caf55c527ab27e0171448219c1f5d19c09edd2124f8.
+
+### Section C - the approved plan
+The #434 measurement's approval stamp, the #468 pattern. The stamp is added only after the owner's words are relayed.
+
+1. `evals/level3/campaign-434-live/measurement-declaration.json` - the approval block (by, at, source quoting the owner's words, attempts_per_case, profile_inventory_digest, declaration_digest); the digest is unchanged, as the approval is excluded from it.
+2. `tests/test_fixture_live.py` - the committed declaration authorizes as is at the packaged digest; the draft-is-unapproved test becomes this one.
+3. `evals/level3/campaign-434-live/README.md` - the status line: approved, by whom and when.
+
+Scope: 3 files, no code. Small.
+
+Risks:
+- A stamp on a digest other than the one the owner approved: the test pins the packaged digest literally.
