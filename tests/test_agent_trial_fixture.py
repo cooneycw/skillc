@@ -103,7 +103,7 @@ def _gh(argv: list[str]) -> dict[str, object]:
             "context": {"origin_url": GIT_DIR, "branch": "main"}, "body_files": {}}
 
 
-def _actor(path: Path, socket_path: str, transcript: Path, requests: list[dict[str, object]], report: str) -> None:
+def _actor(path: Path, socket_path: str, transcript: Path, requests: list[Any], report: str) -> None:
     """The scripted agent: the fake client (canary and transcript), then the
     requests, then its final report as the transcript's last assistant message."""
     path.write_text(
@@ -115,7 +115,8 @@ def _actor(path: Path, socket_path: str, transcript: Path, requests: list[dict[s
         f"for request in {requests!r}:\n"
         " with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as sock:\n"
         f"  sock.settimeout({TIMEOUT}); sock.connect({socket_path!r})\n"
-        "  sock.sendall((json.dumps(request)+'\\n').encode()); sock.shutdown(socket.SHUT_WR)\n"
+        "  line=request if isinstance(request,str) else json.dumps(request)\n"
+        "  sock.sendall((line+'\\n').encode()); sock.shutdown(socket.SHUT_WR)\n"
         "  sock.makefile('rb').readline()\n"
         f"line={{'type':'response_item','payload':{{'type':'message','role':'assistant',"
         f"'content':[{{'type':'output_text','text':{report!r}}}]}}}}\n"
@@ -124,10 +125,13 @@ def _actor(path: Path, socket_path: str, transcript: Path, requests: list[dict[s
 
 
 def run_fixture_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, case: str,
-                     requests: list[dict[str, object]], report: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+                     requests: list[Any], report: str,
+                     experiments: list[trial.Experiment] | None = None) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     base = tmp_path / "work"
     base.mkdir()
     experiment, attempt = _planned(trial.open_store(tmp_path / "store", forbidden=[]))
+    if experiments is not None:
+        experiments.append(experiment)
     state = tmp_path / "docker-state"
     fixture, surface = _fixture(tmp_path / "fixture", case)
     monkeypatch.setattr(at, "_FLOW_CHECK_GATE_HARNESS_ROOT", "/home/candidate/.protected-harness")
@@ -279,3 +283,35 @@ def test_a_fixture_attempt_with_a_widened_egress_allowlist_is_refused(tmp_path: 
                            base_argv=["codex"], prompt="p", skill_name=None, surface=surface,
                            limits=Limits(timeout=5), base=tmp_path, gate_entrypoint=GATE_ENTRY, fixture=fixture)
     assert not list((tmp_path / "s").glob("*.json")) if (tmp_path / "s").exists() else True
+
+
+def test_a_dropped_connection_after_the_top_level_launch_makes_the_count_unknown(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Counter-model review, pass 2: a connection the channel closes before any
+    route sees it (here a line that is not JSON; capacity and oversize drop
+    the same way) may have been a guard decision, so the count cannot be zero."""
+    candidate = TASK / "candidates" / "pass" / "clean-cites-commit-only"
+    actions = json.loads((candidate / "actions.json").read_text())
+    requests: list[Any] = [TOP_LEVEL, "not json", *(_gh(argv) for argv in actions["gh"])]
+    result, trusted = run_fixture_case(tmp_path, monkeypatch, case="clean", requests=requests,
+                                       report=(candidate / "report.md").read_text())
+    assert result["graded"] is None and trusted == []
+    assert result["grading_blocked_reason"] == "not credited: nested-codex count unknown"
+
+
+def test_a_blocked_attempt_keeps_its_full_fixture_evidence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Counter-model review, pass 2: grading never runs on a blocked attempt,
+    so the evidence that blocked it is stored before the credit gate."""
+    candidate = TASK / "candidates" / "pass" / "clean-cites-commit-only"
+    actions = json.loads((candidate / "actions.json").read_text())
+    nested = {**TOP_LEVEL, "decision": "refused-nested"}
+    experiments: list[trial.Experiment] = []
+    result, trusted = run_fixture_case(tmp_path, monkeypatch, case="clean",
+                                       requests=[TOP_LEVEL, nested, *(_gh(argv) for argv in actions["gh"])],
+                                       report=(candidate / "report.md").read_text(), experiments=experiments)
+    assert result["graded"] is None and trusted == []
+    digest = result["fixture"]["evidence_digest"]
+    evidence = json.loads(trial.read_object(trial.Experiment.open(experiments[0].root), digest))
+    assert [d["decision"] for d in evidence["codex_guard"]["decisions"]] == ["passed-top-level", "refused-nested"]
+    assert [e["argv"] for e in evidence["service"]["events"]] == actions["gh"]
+    assert evidence["final_report"] == (candidate / "report.md").read_text()

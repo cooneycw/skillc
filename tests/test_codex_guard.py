@@ -529,3 +529,22 @@ def test_a_call_larger_than_one_mebibyte_passes_through_whole(
     proc = subprocess.run([str(copy), *args], env=ENV, capture_output=True, timeout=60, check=False)
     assert proc.returncode == 0, proc.stderr[-300:]
     assert [bytes.fromhex(a) for a in json.loads(out.read_text())["argv"]] == [a.encode() for a in args]
+
+
+def test_an_empty_interior_environment_entry_is_refused_not_dropped(
+        tmp_path: Path, recorder: tuple[_Recorder, Path]) -> None:
+    """Counter-model review, pass 2: Linux accepts an empty entry in the
+    environment block; dropping it silently forwarded a different
+    environment. It is refused, and the real codex never runs."""
+    rec, sock = recorder
+    real, out = _real_recorder(tmp_path)
+    copy = _guard_copy(tmp_path, decision="passed-top-level", real=real, sock=sock)
+    raw = ("import ctypes\n"
+           "libc = ctypes.CDLL(None, use_errno=True)\n"
+           f"argv = (ctypes.c_char_p * 3)({os.fsencode(str(copy))!r}, b'exec', None)\n"
+           "envp = (ctypes.c_char_p * 4)(b'PATH=/usr/bin:/bin', b'', b'A=1', None)\n"
+           "libc.execve(argv[0], argv, envp)\n"
+           "raise SystemExit(f'execve failed: {ctypes.get_errno()}')\n")
+    proc = subprocess.run([sys.executable, "-c", raw], capture_output=True, timeout=30, check=False)
+    assert proc.returncode == 3 and not out.exists(), proc.stderr
+    assert [line["decision"] for line in rec.lines] == ["refused-ancestry-unknown"]

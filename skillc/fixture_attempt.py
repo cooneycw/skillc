@@ -78,6 +78,8 @@ class _FixtureBackend(Protocol):
 
     def trigger_log(self, handle: object) -> object: ...
 
+    def trigger_dropped(self, handle: object) -> int | None: ...
+
 
 @dataclass
 class FixtureSession:
@@ -153,6 +155,14 @@ class FixtureSession:
             channel_ok = backend.trigger_log(handle) is not None
         except Exception:  # noqa: BLE001 - a failed drain is an unhealthy channel, never a clean one
             channel_ok = False
+        try:
+            dropped = backend.trigger_dropped(handle)
+        except Exception:  # noqa: BLE001 - an unreadable count is incomplete coverage
+            dropped = None
+        if dropped is None or dropped > 0:
+            # A connection closed before any route saw it may have been a guard
+            # line (counter-model review, pass 2): the count cannot be zero.
+            self.guard.channel_unavailable = True
         if not channel_ok:
             self.guard.channel_unavailable = True
             if service is not None:

@@ -2118,6 +2118,15 @@ def run_one_attempt(
         imports_for_capture=lambda: egress_imports,
     )
 
+    # #434 (counter-model review, pass 2): the fixture's full evidence is
+    # stored on EVERY path, before grading, so an attempt the credit gate
+    # blocks keeps the decisions that blocked it. Grading's own envelope is
+    # stored separately, and only when grading runs.
+    fixture_evidence: str | None = None
+    if fixture_session is not None:
+        extras = _fixture_extras(fixture_session, stored_transcript)
+        fixture_evidence = trial.put_object(experiment, trial.canonical(extras)) if extras is not None else None
+
     graded: dict[str, object] | None = None
     grading_blocked_reason: str | None = None
     #: Wall-clock of the grading call alone (issue #12's setup/agent/grading
@@ -2245,7 +2254,8 @@ def run_one_attempt(
     if fixture_session is not None:
         result["fixture"] = {"case": fixture_session.fixture.case, "failure": fixture_session.failure,
                              "git_unreadable": fixture_session.git_unreadable,
-                             "codex_guard": fixture_session.guard_record()["nested"]}
+                             "codex_guard": fixture_session.guard_record()["nested"],
+                             "evidence_digest": fixture_evidence}
     result["transcript_retention"] = transcript_retention(experiment, attempt_id, record.get("disposition"))
     # Persisted on EVERY path (#106): the observation used to exist only in
     # this returned dict, so a caller that printed it wrong - or not at all -

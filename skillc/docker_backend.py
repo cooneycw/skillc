@@ -1251,6 +1251,14 @@ class DockerBackend:
         channel.start()
         return channel, trigger_socket_host_path
 
+    def trigger_dropped(self, handle: object) -> int | None:
+        """#434: how many connections this attempt's channel closed before its
+        `decide` saw a request; `None` when there is no channel at all."""
+        assert isinstance(handle, _Handle)
+        if handle.trigger_channel is None:
+            return None
+        return handle.trigger_channel.dropped_connections()
+
     def trigger_log(self, handle: object) -> list[LoggedDecision] | None:
         """#183: the finalized decide-and-reply log for this attempt.
         `None` means "this backend has no channel at all" (`trigger_decide`

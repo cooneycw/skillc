@@ -22,8 +22,8 @@ stays untouched. Every bare `codex` therefore runs this script first:
   mid-walk, a loop, too deep): FAIL CLOSED, exit 3, as ancestry-unknown. So
   are this call's own inputs when they cannot be read or reproduced exactly
   (no readable config, cmdline or environ; either larger than the read bound
-  or not NUL-terminated; a duplicate or malformed environment entry): a
-  pass-through could not then be byte for byte.
+  or not NUL-terminated; a duplicate, empty or nameless environment entry,
+  or one with no "="): a pass-through could not then be byte for byte.
 
 AN ANCESTOR IS CODEX ONLY ON AN EXACT MATCH (orchestrator ruling, condition 1):
 its `/proc/<pid>/exe` realpath is the node binary AND its argv[1], resolved
@@ -168,7 +168,11 @@ def _send(decision: str, argv: list[bytes]) -> None:
 def main() -> int:
     try:
         cmdline = _read_whole("/proc/self/cmdline").split(b"\0")[:-1]
-        environ = [e for e in _read_whole("/proc/self/environ").split(b"\0") if e]
+        # Only the block's terminal NUL is a separator with nothing after it;
+        # an interior empty entry is kept, so it is refused below rather than
+        # silently dropped from the pass-through (counter-model review, pass 2).
+        block = _read_whole("/proc/self/environ")
+        environ = block.split(b"\0")[:-1] if block else []
     except (OSError, _TooLarge):
         cmdline, environ = [], []
     # The kernel ran `python3 -IS <this script> <args...>`: the caller's own
@@ -180,7 +184,8 @@ def main() -> int:
     # (a duplicate name, an entry with no "=") would reach the real codex
     # changed. That call's inputs cannot be reproduced, so it is refused.
     names = [entry.partition(b"=")[0] for entry in environ]
-    exact = bool(environ) and all(b"=" in entry for entry in environ) and len(set(names)) == len(names)
+    exact = (bool(environ) and all(b"=" in entry for entry in environ) and all(names)
+             and len(set(names)) == len(names))
     if config is None or args is None or not exact:
         decision = "refused-ancestry-unknown"
     else:
