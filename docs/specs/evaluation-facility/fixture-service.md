@@ -2,9 +2,8 @@
 
 - Status: Implemented in `skillc/fixture_service.py` and
   `docker/fixture-service/skillc-gh-shim.py` (#276). The service and shim are proven
-  host-side over a real socket; wiring them into a live attempt (profile
-  install of the shim, the Docker-backed remote) belongs to the first
-  consumer, #434
+  host-side over a real socket. #434 wires them into a live attempt; see
+  [Live attempts](#live-attempts-434)
 - Builds on: [decide-reply-channel.md](decide-reply-channel.md) (#183),
   [gate-witness.md](gate-witness.md) (#269, the same pattern),
   [git-fixtures.md](git-fixtures.md) (#275)
@@ -308,6 +307,71 @@ which is the detection-only bound above. #436 removes it by routing push
 through the controller. A divergence is never reconciled, repaired or dropped. A
 direct push to `main` and a force-push over a recorded merge are both tested.
 Prevention, by routing push through the controller, is #436.
+
+## Live attempts (#434)
+
+`agent_trial.run_one_attempt(fixture=...)` runs a fixture-service task inside a
+live attempt. The task supplies an `AttemptFixture` (`skillc/fixture_attempt.py`):
+its case label, this declaration, the controller's build facts, and a `capture`
+that reads the post-stop git state from an exported copy.
+
+**Where every git call runs.** The controller never runs git on anything the
+subject can write:
+
+| When | What | How |
+|---|---|---|
+| before the attempt exists | build the repo and remote | the task's builder, host git, in a controller-owned directory |
+| during the attempt | the service's decisions (resolve, diff, merge, CAS) | `ExecGitRemote`: `exec_in_attempt` as the candidate, `confine_root=/work`, fixed `env -i` environment, hooks and fsmonitor off |
+| after the agent stops | finalize's divergence check, the source-unmodified capture | no git process: `git_snapshot` reads the exported bytes (`SnapshotGitRemote`, `finalize(remote=...)`) |
+
+`ExecGitRemote` refuses a backend without `witness_io`, because each exec
+would otherwise write `observations` and a pid marker into `/work`. It also
+refuses a stopped attempt and incomplete output. Its answers are
+subject-influenced, which is the detection-only bound above; grading reads
+only the post-stop snapshot.
+
+**One socket.** The gh route and the codex-guard route share the attempt's
+one #183 socket with the gate witness, through `dispatch`. Each route has a
+closed key set, so a mixed request is refused and reaches neither side.
+`gate_entrypoint` is therefore required, and the witness uses the fixture's
+own gate map and shim (`docker/fixture-service/flow-auto-gate-shim.py` for
+flow:auto, gate `flow-auto-finish`).
+
+**Overlays.** `skillc/fixture_overlay.py` places the gh shim at
+`/usr/local/bin/gh` and the nested-codex guard at `/usr/local/sbin/codex`,
+root-owned, after the surface is installed and before the agent starts. Each
+placement is verified:
+- the destination did not already exist;
+- the bytes read back match;
+- neither the file nor its directory is candidate-writable;
+- the attempt's measured PATH finds it first.
+
+**The nested-codex guard (D3).** A codex agent that reaches flow:auto's Step 6
+may start a second codex as its reviewer, which under #442's provider-only
+egress reaches an allowed host and spends.
+- The guard refuses a codex started under a codex ancestor with exit 3, the
+  unavailable contract. "Codex" is matched by exact exe and script identity,
+  never by name.
+- Unreadable ancestry fails closed.
+- The harness's own launch passes through with argv and environment
+  byte for byte.
+- Every decision goes to a controller-held record (`skillc/codex_guard.py`).
+  The count is `zero` only with a healthy channel and exactly one top-level
+  launch; a second top-level launch is `suspected`.
+- Bound: a subject that calls the real binary by path, and also blocks the
+  socket, leaves no record. The count then reads `unknown`, never `zero`.
+
+**Grading.** The credit gate refuses credit in these cases, and the attempt
+stays in every account:
+- a failed binding or finalization;
+- a missing service record;
+- a nested-codex count that is observed, suspected or unknown.
+Otherwise `verify` receives the case, the service record, the git capture, the
+final report (the transcript's last assistant message) and the guard record as
+`trusted_extras` beside the gate witness.
+
+A fixture attempt on #442's egress keeps the default allowlist; a widened one
+is refused before any container exists.
 
 ## The declaration
 
