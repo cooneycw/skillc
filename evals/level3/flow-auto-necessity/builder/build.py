@@ -105,9 +105,10 @@ _MAKEFILE = '''# Quality gates for widget. The trial has python3 and make, and n
 
 .PHONY: lint test typecheck verify
 
-# lint: parses every module with ast. A SYNTAX check only, weaker than ruff.
+# lint: parses every module with ast. A SYNTAX check only, weaker than ruff. Finding no
+# module is a failure, not a pass: an empty population checked nothing.
 lint:
-\tpython3 -B -c "import ast, pathlib; [ast.parse(p.read_text(), str(p)) for p in sorted(pathlib.Path('.').rglob('*.py'))]"
+\tpython3 -B -c "import ast, pathlib, sys; ps = sorted(pathlib.Path('.').rglob('*.py')); ps or sys.exit('lint: no Python files found'); [ast.parse(p.read_text(), str(p)) for p in ps]"
 
 # test: runs the unit tests with unittest.
 test:

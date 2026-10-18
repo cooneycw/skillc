@@ -61,7 +61,7 @@ STEP1 = [{"op": "worktree", "name": WT, "branch": "issue-1-widget-crashes-on-emp
 #: The orchestrator's extra states (condition 2), beyond PR 1's candidates.
 EXTRA_STATES: dict[str, dict[str, Any]] = {
     "linked-worktree-detached-head": {"case": "clean", "git": [
-        *STEP1, {"op": "detach", "where": WT, "commit": "88b8be293e51a38006dff708a88d744d8d5dff4a"}]},
+        *STEP1, {"op": "detach", "where": WT, "commit": "29345c6c3c9b71776f44b2d75654f8b1542d574e"}]},
     "index-only-in-linked-worktree": {"case": "clean", "git": [
         *STEP1, {"op": "rm-cached", "where": WT, "path": "README.md"}]},
     "mode-change-in-linked-worktree": {"case": "twin", "git": [
@@ -72,7 +72,7 @@ EXTRA_STATES: dict[str, dict[str, Any]] = {
     "commit-parked-on-worktree-private-ref": {"case": "clean", "git": [
         *STEP1, {"op": "commit-empty", "where": WT, "message": "hidden"},
         {"op": "update-ref", "where": WT, "ref": "refs/worktree/hidden", "to": "HEAD"},
-        {"op": "reset-hard", "where": WT, "commit": "1e7a7726f534c223330e2e597fd8741179adfc6f"}]},
+        {"op": "reset-hard", "where": WT, "commit": "0a1acc933bef88b486f917ea3794a72cc6dd08b8"}]},
     # Pass 2: a commit only the bare remote's detached HEAD reaches.
     "commit-parked-on-remote-detached-head": {"case": "clean", "git": [
         {"op": "remote-park-head", "message": "parked"}]},

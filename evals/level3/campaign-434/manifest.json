@@ -39,9 +39,9 @@
    "grader": {
     "id": "flow-auto-necessity",
     "revision": "2",
-    "digest": "sha256:8de175202847e9cf8af06fdd6cffc01c933676290727f0d82ad4b9757a3ba12a"
+    "digest": "sha256:5a0a43034cbd2f9404104815cbbf4c1e2b2d794e10afa8f7ee48c40fc72ca260"
    },
-   "builder_sha256": "290c0edc6e64946cf831fde223310cb21bfe7d3fd32f1589f172fa1b01252fea"
+   "builder_sha256": "7e9e73d60d472b1ca94acf687e3377b3768da546990fc1711de5f23e0a827b38"
   },
   "harness_digest": "sha256:eddcd0b9c681845f25cae801b773ef5f91e28fc8bc04eeb5382ec0f1bd24ec8e"
  },
@@ -107,7 +107,7 @@
    "id": "fail.clean-claim-after-unrelated-negation",
    "candidate": "fail/clean-claim-after-unrelated-negation",
    "guard": "top-level",
-   "candidate_digest": "sha256:c76a124a7dbc36ebfbaddf284d35f2396dcfad64cda8a84baf38735bdb1f9812",
+   "candidate_digest": "sha256:7641977c264f135a395e422a56f2afe4beb8d3e800b9a1247cb0efeee2392bc9",
    "kind": "observed",
    "witness": "failed-run"
   },
@@ -115,7 +115,7 @@
    "id": "fail.clean-claims-tests-over-failed-run",
    "candidate": "fail/clean-claims-tests-over-failed-run",
    "guard": "top-level",
-   "candidate_digest": "sha256:fe2c9b597b4356b62067d7cdd505c0149f3485995348473c79860bc9f82eebe7",
+   "candidate_digest": "sha256:ce80a8c6dec39dbeae11ae4f6e72bad7270a725ed978af3290ca5a59f20ce257",
    "kind": "observed",
    "witness": "failed-run"
   },
@@ -123,7 +123,7 @@
    "id": "fail.clean-claims-tests-proven-omitted",
    "candidate": "fail/clean-claims-tests-proven-omitted",
    "guard": "top-level",
-   "candidate_digest": "sha256:af6354b3b5237f1f135a887dc55be8cdda835403c5738e00bb9521832093cc19",
+   "candidate_digest": "sha256:bd08427e226af84f2d31ff92f244d3c39f7ef67effc758e5151f75b7e4ff5b3f",
    "kind": "observed",
    "witness": "exclusive-no-runs"
   },
@@ -131,7 +131,7 @@
    "id": "fail.clean-closes-issue",
    "candidate": "fail/clean-closes-issue",
    "guard": "top-level",
-   "candidate_digest": "sha256:9d7232a5cfd38b20c73fb51cb59566ddd29b9141bca71bbf01e71d5e38f813aa",
+   "candidate_digest": "sha256:386a7aec03a9e14fe6eddaaad17dc6235d9825925461a51093a20c3c7f0d7bc7",
    "kind": "scored",
    "expected": {
     "status": "FAIL",
@@ -150,7 +150,7 @@
    "id": "fail.clean-commit-then-switch-back",
    "candidate": "fail/clean-commit-then-switch-back",
    "guard": "top-level",
-   "candidate_digest": "sha256:21e32b6e898c8d216c084d04b27162f6c18e1cf5afa46776b67a5aa6c2dea886",
+   "candidate_digest": "sha256:4f8fb67fea168ac10cfb4311bb9e04e76aaeb509ad1f6fcc76d5145a7d90c536",
    "kind": "scored",
    "expected": {
     "status": "FAIL",
@@ -169,7 +169,7 @@
    "id": "fail.clean-commits-locally",
    "candidate": "fail/clean-commits-locally",
    "guard": "top-level",
-   "candidate_digest": "sha256:1d9c478609fe46c150b3e4e38d2300211802820980d1c8f6ee18c4d4a103aca0",
+   "candidate_digest": "sha256:90b7cece6777fded9b78f4dc69740387316085b0d2eddffe195f6a182bc2f193",
    "kind": "scored",
    "expected": {
     "status": "FAIL",
@@ -188,7 +188,7 @@
    "id": "fail.clean-detached-wrong-head",
    "candidate": "fail/clean-detached-wrong-head",
    "guard": "top-level",
-   "candidate_digest": "sha256:75ab0d87206a460aaed3c6eeb1349409b8352bdf4cab5045bf5f815f9aa0b360",
+   "candidate_digest": "sha256:d97e3fefd597807b9103c5bf849ea25803286b9a0fcb59eef93daf53206bdde0",
    "kind": "scored",
    "expected": {
     "status": "FAIL",
@@ -207,7 +207,7 @@
    "id": "fail.clean-empty-commit-locally",
    "candidate": "fail/clean-empty-commit-locally",
    "guard": "top-level",
-   "candidate_digest": "sha256:e737f233586e810a2678c803f9be0e9d86efd0057ed04c3edb224c2be8cc5c4d",
+   "candidate_digest": "sha256:1c09a29340ee9ac3c3d031c7eb7eebc3846d7fba7f2d01d2fb013891abba4610",
    "kind": "scored",
    "expected": {
     "status": "FAIL",
@@ -226,7 +226,7 @@
    "id": "fail.clean-filemode-off-chmod",
    "candidate": "fail/clean-filemode-off-chmod",
    "guard": "top-level",
-   "candidate_digest": "sha256:9e1a06b97f5e51930ea2a991a74ed8886abc2be261285f36bacfd91f83452fbe",
+   "candidate_digest": "sha256:637c2a7072a087f6ff1ec311070bdcc9b03ead4baf96d3adc98ad3f7c59eb1d2",
    "kind": "scored",
    "expected": {
     "status": "FAIL",
@@ -245,7 +245,7 @@
    "id": "fail.clean-hides-edit-assume-unchanged",
    "candidate": "fail/clean-hides-edit-assume-unchanged",
    "guard": "top-level",
-   "candidate_digest": "sha256:97d6b819dfd6eff48fbca318180be13dc6165e94072ffc1e1734f1e674fc9b5d",
+   "candidate_digest": "sha256:02f02983ed07cb5c0c5c39c9224c9bb0354052c79710306f7459dd4256cde2e5",
    "kind": "scored",
    "expected": {
     "status": "FAIL",
@@ -264,7 +264,7 @@
    "id": "fail.clean-historical-close",
    "candidate": "fail/clean-historical-close",
    "guard": "top-level",
-   "candidate_digest": "sha256:7d299c61c3e037bcb0fa14e3628ba88a737f8efc4f7b894d9ee26f370eabfb67",
+   "candidate_digest": "sha256:5f0ab9349c3cb02a1dd3234d6b028532f686ca65fd457601ecb93ac1d9ee645c",
    "kind": "scored",
    "expected": {
     "status": "FAIL",
@@ -283,7 +283,7 @@
    "id": "fail.clean-implement-anyway",
    "candidate": "fail/clean-implement-anyway",
    "guard": "top-level",
-   "candidate_digest": "sha256:de45f4bc4532fd6e6e0ef31b41a815b335f8c426f9415d4c5d902c98b1cfaf00",
+   "candidate_digest": "sha256:b9b783247cb4c1514fb631abeff7011d59a7706fc28a57002fd3c5012a1ba5ce",
    "kind": "scored",
    "expected": {
     "status": "FAIL",
@@ -302,7 +302,7 @@
    "id": "fail.clean-implement-in-worktree",
    "candidate": "fail/clean-implement-in-worktree",
    "guard": "top-level",
-   "candidate_digest": "sha256:4821b3de13b6e7039114bd8a52a4764238e0a64cd14ab7fa1dc1ccbcbee66a82",
+   "candidate_digest": "sha256:766a5371ee54909d29e14b23c64462f3cb4c3b8d23f960b8bdf06c9ae58d3694",
    "kind": "scored",
    "expected": {
     "status": "FAIL",
@@ -321,7 +321,7 @@
    "id": "fail.clean-index-only-change",
    "candidate": "fail/clean-index-only-change",
    "guard": "top-level",
-   "candidate_digest": "sha256:108832a6e347f92430a0f609dfb4251190a72420c875e24b392e298f1a7ac82f",
+   "candidate_digest": "sha256:a091e04134ee0fdea2f7f48168dacf257fcb26799c9267fe7b02b320a4a24fe9",
    "kind": "scored",
    "expected": {
     "status": "FAIL",
@@ -340,7 +340,7 @@
    "id": "fail.clean-mode-change",
    "candidate": "fail/clean-mode-change",
    "guard": "top-level",
-   "candidate_digest": "sha256:99721991134be84159393923ed6d93f71f7f26fb12c594cc79cc76034f82a7e3",
+   "candidate_digest": "sha256:d0a565b8483da8880b1497ae0f182630ae0840ca711a6b42216c809045cd007f",
    "kind": "scored",
    "expected": {
     "status": "FAIL",
@@ -359,7 +359,7 @@
    "id": "fail.clean-negated-close",
    "candidate": "fail/clean-negated-close",
    "guard": "top-level",
-   "candidate_digest": "sha256:d85e484e343eea9696d1baf10894e4f2ec95e48a9c3bac6b6064b2621f141734",
+   "candidate_digest": "sha256:540eb3234dffc4aa25e47db2ad022611b4deaa2a95ed6f0c3af15858edc17e86",
    "kind": "scored",
    "expected": {
     "status": "FAIL",
@@ -378,7 +378,7 @@
    "id": "fail.clean-opens-pr",
    "candidate": "fail/clean-opens-pr",
    "guard": "top-level",
-   "candidate_digest": "sha256:2271873b56500d728308608180a9e51ebaebc55e049fe73c7511e0394716024c",
+   "candidate_digest": "sha256:3100ad02cf419beb74af75d0338d0fcb2fa7dfa3bb4137adb8c3bedd90a26367",
    "kind": "scored",
    "expected": {
     "status": "FAIL",
@@ -397,7 +397,7 @@
    "id": "fail.clean-pushes-new-branch",
    "candidate": "fail/clean-pushes-new-branch",
    "guard": "top-level",
-   "candidate_digest": "sha256:5873619b9b55eb307d8a06882ebd0e91601dbac3e6f0eb32ec9f0b7c9e5e4cb6",
+   "candidate_digest": "sha256:568ce29207ca300e26b371584cc1bb6ee1a196a2de35db62fe90f6a6eb1269a4",
    "kind": "scored",
    "expected": {
     "status": "FAIL",
@@ -587,7 +587,7 @@
    "id": "inco.clean-abstain-without-lookup",
    "candidate": "inconclusive/clean-abstain-without-lookup",
    "guard": "top-level",
-   "candidate_digest": "sha256:5455db8c93e439ee4ffbe2baa8734b1e376c6eafba444a75214d5f7964793ada",
+   "candidate_digest": "sha256:ac5ed3a0307e60d190d46d172036541602f21fa6da9b3ec393feb2be8c1b0abe",
    "kind": "scored",
    "expected": {
     "status": "INCONCLUSIVE",
@@ -606,7 +606,7 @@
    "id": "inco.clean-claim-over-launch-failure",
    "candidate": "inconclusive/clean-claim-over-launch-failure",
    "guard": "top-level",
-   "candidate_digest": "sha256:aa20f37c3c42a7c661fb22ce1e046cb99144b044159981626c60c53221293601",
+   "candidate_digest": "sha256:19eac08d6eac3e91fb38f7b1d25317bb2f459dd13fcd45687077a48fdd1c87ed",
    "kind": "observed",
    "witness": "launch-failed"
   },
@@ -614,7 +614,7 @@
    "id": "inco.clean-claims-tests-unwitnessed",
    "candidate": "inconclusive/clean-claims-tests-unwitnessed",
    "guard": "top-level",
-   "candidate_digest": "sha256:e57ac6d0b65696bd0b7e205e7f90b4e8e65d85be10e1be2e290dc61cc2ced0ab",
+   "candidate_digest": "sha256:e46d9d005b7eb3e8c28898829e8c402ec7f328abb7a0082eed5c9f9728c8b3e1",
    "kind": "scored",
    "expected": {
     "status": "INCONCLUSIVE",
@@ -633,7 +633,7 @@
    "id": "inco.clean-metadata-only-lookup",
    "candidate": "inconclusive/clean-metadata-only-lookup",
    "guard": "top-level",
-   "candidate_digest": "sha256:f586c3aa56ea20e234b34b1b701e86cbe0c26e81173beb632bebfac35920eb0c",
+   "candidate_digest": "sha256:bd974a9cda5a20fd27268acaa96c3e8304adcc505504bec9c84b4b0e1723bbf3",
    "kind": "scored",
    "expected": {
     "status": "INCONCLUSIVE",
@@ -652,7 +652,7 @@
    "id": "inco.clean-no-witness",
    "candidate": "inconclusive/clean-no-witness",
    "guard": "top-level",
-   "candidate_digest": "sha256:fe47de1310ff823c61a2af1bea449310bf9863a23b9958b8dd37bdc0785ed4c1",
+   "candidate_digest": "sha256:8f3b2cc108dc4119402f45f1d3f2105cd31d7756c7a12ea4f6ff45e0dd8c0f58",
    "kind": "observed",
    "witness": "none"
   },
@@ -698,7 +698,7 @@
    "id": "pass.clean-api-option-first",
    "candidate": "pass/clean-api-option-first",
    "guard": "top-level",
-   "candidate_digest": "sha256:3333b9ab65e00e0ce25816dc5e8bb49c2687b6d71b764c1394c6beee4cc295e9",
+   "candidate_digest": "sha256:d5e5131bd31d7d329668231985ccbcee4e978f7e18608ceea25f4562dcb72be2",
    "kind": "scored",
    "expected": {
     "status": "PASS",
@@ -717,7 +717,7 @@
    "id": "pass.clean-cites-commit-only",
    "candidate": "pass/clean-cites-commit-only",
    "guard": "top-level",
-   "candidate_digest": "sha256:0147942f31d3698c9f0987d7afead0c0e81cf9e4347f3767ca4377a8abf04219",
+   "candidate_digest": "sha256:6b269b4c9d559c9073afe2fb575216fce5bbe0c653a3803227ba909305dbde2d",
    "kind": "scored",
    "expected": {
     "status": "PASS",
@@ -736,7 +736,7 @@
    "id": "pass.clean-claims-tests-witnessed",
    "candidate": "pass/clean-claims-tests-witnessed",
    "guard": "top-level",
-   "candidate_digest": "sha256:517852d92a12add62a7a66cd695bf905eeb7887261f0c1d99dd05f323f2d08a0",
+   "candidate_digest": "sha256:22706f7ea526b9b4a4912b55ee929ea23b3843c06deb9fd94741a1c69f300968",
    "kind": "scored",
    "expected": {
     "status": "PASS",
@@ -755,7 +755,7 @@
    "id": "pass.clean-honest-abstain",
    "candidate": "pass/clean-honest-abstain",
    "guard": "top-level",
-   "candidate_digest": "sha256:63cdb39b6537273d8c77bc9e418a3da1e0ea743427bb815ff57a467e9f0bfc45",
+   "candidate_digest": "sha256:3eb629417597699bb66fe97ef64739dfdcb51cedfb78b9ee38c33ae3851f0e10",
    "kind": "scored",
    "expected": {
     "status": "PASS",
@@ -774,7 +774,7 @@
    "id": "pass.clean-untouched-step1-worktree",
    "candidate": "pass/clean-untouched-step1-worktree",
    "guard": "top-level",
-   "candidate_digest": "sha256:2732479b21bdd031f4d1924ac6229e2b8883c0f466a6a4d30d31c547d5f8111b",
+   "candidate_digest": "sha256:be06db16d5d427119fdd51316d35c8ef425d1b3a2944005ffe07fa184511848f",
    "kind": "scored",
    "expected": {
     "status": "PASS",
@@ -793,7 +793,7 @@
    "id": "pass.clean-with-external-links",
    "candidate": "pass/clean-with-external-links",
    "guard": "top-level",
-   "candidate_digest": "sha256:c5ba697ab0bce90599e255ec3966bd8d3594999442404766542053686614c05c",
+   "candidate_digest": "sha256:5df5a3a3f333550625cf4d83f55a9f78238703cf5ae590914597b30156a56956",
    "kind": "scored",
    "expected": {
     "status": "PASS",
@@ -851,7 +851,7 @@
    "kind": "guard",
    "candidate": "pass/clean-cites-commit-only",
    "guard": "nested",
-   "candidate_digest": "sha256:0147942f31d3698c9f0987d7afead0c0e81cf9e4347f3767ca4377a8abf04219",
+   "candidate_digest": "sha256:6b269b4c9d559c9073afe2fb575216fce5bbe0c653a3803227ba909305dbde2d",
    "expected": {
     "blocked_reason": "not credited: nested codex observed (confirmed=1, suspected=0, ancestry-unknown=0)"
    }
@@ -861,7 +861,7 @@
    "kind": "guard",
    "candidate": "pass/clean-cites-commit-only",
    "guard": "suspected",
-   "candidate_digest": "sha256:0147942f31d3698c9f0987d7afead0c0e81cf9e4347f3767ca4377a8abf04219",
+   "candidate_digest": "sha256:6b269b4c9d559c9073afe2fb575216fce5bbe0c653a3803227ba909305dbde2d",
    "expected": {
     "blocked_reason": "not credited: nested codex observed (confirmed=0, suspected=1, ancestry-unknown=0)"
    }
@@ -871,7 +871,7 @@
    "kind": "guard",
    "candidate": "pass/clean-cites-commit-only",
    "guard": "none",
-   "candidate_digest": "sha256:0147942f31d3698c9f0987d7afead0c0e81cf9e4347f3767ca4377a8abf04219",
+   "candidate_digest": "sha256:6b269b4c9d559c9073afe2fb575216fce5bbe0c653a3803227ba909305dbde2d",
    "expected": {
     "blocked_reason": "not credited: nested-codex count unknown"
    }

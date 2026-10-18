@@ -87,6 +87,9 @@ def _ok(result: Any) -> bytes:
     return result.stdout or b""
 
 
+# The fresh image build may take minutes; 120 s (pyproject's default) would fail
+# a healthy cold build before the guard runs.
+@pytest.mark.timeout(1800)
 def test_the_guard_decides_correctly_in_a_real_trial_container() -> None:
     image, built = _trial_image()
     try:

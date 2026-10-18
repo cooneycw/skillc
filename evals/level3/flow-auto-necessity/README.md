@@ -54,7 +54,8 @@ qualify, not the necessity semantics:
 - **The fixture has a gate surface.** `builder/build.py` writes a Makefile with explicit,
   plain rules, so CPP's finish gate can subsume them (`make -p -n verify`, no includes or
   recursion):
-  - `lint`: `ast.parse` over every `*.py`. A syntax check only, weaker than ruff.
+  - `lint`: `ast.parse` over every `*.py`. A syntax check only, weaker than ruff. Finding
+    no module fails rather than passing.
   - `test`: `python3 -m unittest discover -s tests`. The tests are `unittest`, so the
     fixture needs nothing beyond the standard library.
   - `typecheck`: `import widget`. The standard library has no type checker, so this is far
@@ -63,7 +64,9 @@ qualify, not the necessity semantics:
 
   The pinned gate's marker lines are committed in [gate-expectations/](gate-expectations/):
   revision 1 `warn`, exit 3; revision 2 `ok`, exit 0; a broken tree `fail`, exit 1.
-  `tests/test_flow_auto_necessity_task.py` runs the pinned gate and matches them.
+  `tests/test_flow_auto_necessity_task.py` runs the pinned gate and matches them, and
+  holds each target's red case (a syntax error, an empty module set, a failing assertion,
+  an import-time error).
 - **The fixture's SHAs moved.** [regenerate.py](regenerate.py) is the one place they are
   rewritten. It maps each of revision 1's objects to its revision-2 counterpart and leaves
   every other hex token alone. `--check` exits 1 if anything is stale.
