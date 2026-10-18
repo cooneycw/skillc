@@ -280,6 +280,11 @@ def capture(git: GitFn, repo: Path, remote: Path, base_commit: str,
         mode, _kind, blob = meta.split()
         base_files[path] = f"{mode} {blob}"
     commits = set(git(["rev-list", "--all"], repo).split())
+    # Run in EACH worktree too: from the main checkout, `rev-list --all` does
+    # not walk another worktree's private refs (refs/worktree, refs/bisect),
+    # so a commit parked there would escape (#434 PR 2a review).
+    for w in worktrees:
+        commits |= set(git(["rev-list", "--all"], base / w["path"]).split())
     commits |= set(git(["rev-list", "--all"], remote).split())
     return {"remote_refs": refs_of(remote), "local_refs": refs_of(repo), "base_files": base_files,
             "worktrees": sorted(worktrees, key=lambda w: w["path"]), "commits": sorted(commits)}
@@ -309,15 +314,22 @@ def capture_snapshot(export_root: Path, facts: dict[str, Any], *, checkout: str 
     local_refs = common.refs()
     remote_refs = bare.refs()
     worktrees = []
+    private: dict[str, str] = {}
     for w in gs.worktrees(common, checkout, container_root, local_refs):
         files = gs.worktree_files(tree, w.path)
         index_rel = f"{w.gitdir}/index"
-        index = gs.parse_index(tree.read(index_rel)[0]) if tree.kind(index_rel) == "file" else {}
+        # A missing index is git's empty index; a link or FIFO there is Unreadable.
+        index = gs.parse_index(tree.read(index_rel)[0]) if tree.optional(index_rel) else {}
+        if w.gitdir != common.path:
+            private.update(common.private_refs(w.gitdir))
         head_files = common.tree_files(common.tree_of(w.head))
         status = sorted({p for p in set(index) | set(head_files) if index.get(p) != head_files.get(p)}
                         | {p for p in set(files) | set(index) if files.get(p) != index.get(p)})
         worktrees.append({"path": w.path, "head": w.head, "branch": w.branch, "status": status, "files": files})
-    commits = common.reachable(list(local_refs.values()) + [w["head"] for w in worktrees])
+    # A linked worktree's private refs (refs/worktree, refs/bisect, ...) are
+    # walked too, as `rev-list --all` walks them (pass 1: a commit parked
+    # there must not escape the history check).
+    commits = common.reachable(list(local_refs.values()) + list(private.values()) + [w["head"] for w in worktrees])
     commits |= bare.reachable(list(remote_refs.values()))
     return {"remote_refs": remote_refs, "local_refs": local_refs, "base_files": dict(facts["base_files"]),
             "worktrees": worktrees, "commits": sorted(commits)}

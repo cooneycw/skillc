@@ -67,6 +67,15 @@ EXTRA_STATES: dict[str, dict[str, Any]] = {
     "mode-change-in-linked-worktree": {"case": "twin", "git": [
         *STEP1, {"op": "chmod", "where": WT, "path": "pyproject.toml", "mode": "755"}]},
     "deleted-file": {"case": "clean", "git": [{"op": "delete", "where": "repo", "path": "README.md"}]},
+    # Pass 1: a commit parked on a linked worktree's PRIVATE ref, with the
+    # branch and files restored - rev-list --all still walks it.
+    "commit-parked-on-worktree-private-ref": {"case": "clean", "git": [
+        *STEP1, {"op": "commit-empty", "where": WT, "message": "hidden"},
+        {"op": "update-ref", "where": WT, "ref": "refs/worktree/hidden", "to": "HEAD"},
+        {"op": "reset-hard", "where": WT, "commit": "970ffd0266624752509568367994a399d74d12db"}]},
+    # Pass 1: an intent-to-add entry changes what git stages.
+    "intent-to-add": {"case": "clean", "git": [
+        {"op": "add-intent", "where": "repo", "path": "NOTES.md", "text": "later\n"}]},
 }
 
 
@@ -161,7 +170,7 @@ def test_the_snapshot_read_of_an_export_matches_host_git(state: str, tmp_path: P
 
 
 def test_every_state_was_compared_and_none_is_unexportable() -> None:
-    # 43 PR 1 candidates + 4 extra states; none is silently skipped.
+    # 43 PR 1 candidates + the extra states; none is silently skipped.
     assert len(_states()) == len(list((TASK / "candidates").glob("*/*"))) + len(EXTRA_STATES)
     assert len(list((TASK / "candidates").glob("*/*"))) == 43
 
@@ -255,8 +264,9 @@ def test_an_oversize_object_is_unreadable(exported: tuple[Path, Path, dict[str, 
         _snapshot(export, root, facts)
 
 
-@pytest.mark.parametrize("plant", ["alternates", "commondir", "gitdir"])
-def test_a_redirection_is_unreadable(exported: tuple[Path, Path, dict[str, Any]], plant: str) -> None:
+@pytest.mark.parametrize("plant,why", [("alternates", "redirects"), ("commondir", "commondir"),
+                                       ("gitdir", "outside")])
+def test_a_redirection_is_unreadable(exported: tuple[Path, Path, dict[str, Any]], plant: str, why: str) -> None:
     export, root, facts = exported
     git = export / "repo" / ".git"
     if plant == "alternates":
@@ -266,7 +276,7 @@ def test_a_redirection_is_unreadable(exported: tuple[Path, Path, dict[str, Any]]
         (git / "worktrees" / WT / "commondir").write_text("/elsewhere/.git\n")
     else:
         (git / "worktrees" / WT / "gitdir").write_text("/outside/the/root/.git\n")
-    with pytest.raises(gs.Unreadable):
+    with pytest.raises(gs.Unreadable, match=why):
         _snapshot(export, root, facts)
 
 
@@ -358,8 +368,7 @@ def test_a_conflicted_index_entry_never_reads_as_the_clean_path() -> None:
     blob = "a" * 40
     entries = gs.parse_index(_index_bytes([("widget/core.py", 0o100644, blob, 2),
                                            ("widget/core.py", 0o100644, blob, 3)]))
-    assert "widget/core.py" not in entries
-    assert set(entries) == {"widget/core.py@stage2", "widget/core.py@stage3"}
+    assert entries == {"widget/core.py": "unmerged stages=2,3"}
     clean = gs.parse_index(_index_bytes([("widget/core.py", 0o100644, blob, 0)]))
     assert clean == {"widget/core.py": f"100644 {blob}"}
 
@@ -390,4 +399,169 @@ def test_an_object_that_inflates_past_the_cap_is_unreadable(tmp_path: Path, monk
     assert obj.stat().st_size < 64 * 1024
     monkeypatch.setattr(gs, "MAX_OBJECT_BYTES", 64 * 1024)
     with pytest.raises(gs.Unreadable, match="inflates past the cap"):
+        gs.GitDir(gs.SafeTree(tmp_path), "bare").object(sha)
+
+
+
+# --- counter-model review pass 1 regressions ------------------------------------
+
+def test_a_named_ref_whose_object_is_gone_is_unreadable_and_finalize_is_unknown(
+        exported: tuple[Path, Path, dict[str, Any]]) -> None:
+    export, _root, facts = exported
+    tip = facts["base_commit"]
+    obj = export / ".remote" / "widget.git" / "objects" / tip[:2] / tip[2:]
+    obj.unlink()
+    remote = gs.SnapshotGitRemote(gs.SafeTree(export), ".remote/widget.git")
+    with pytest.raises(gs.Unreadable):
+        remote.resolve("refs/heads/main")
+    decl = build.declaration("clean", "/work/.remote/widget.git", facts)
+    with pytest.raises((gs.Unreadable, fs.DeclarationRefused)):
+        fs.FixtureService(decl, remote, "a")
+
+
+def test_a_symlinked_packed_refs_is_unreadable_not_absent(exported: tuple[Path, Path, dict[str, Any]],
+                                                          tmp_path: Path) -> None:
+    export, root, facts = exported
+    packed = export / "repo" / ".git" / "packed-refs"
+    elsewhere = tmp_path / "packed"
+    elsewhere.write_text(packed.read_text() if packed.exists() else "")
+    if packed.exists():
+        packed.unlink()
+    packed.symlink_to(elsewhere)
+    with pytest.raises(gs.Unreadable, match="not a regular file"):
+        _snapshot(export, root, facts)
+
+
+def test_a_symlinked_metadata_parent_is_unreadable_not_absent(exported: tuple[Path, Path, dict[str, Any]],
+                                                              tmp_path: Path) -> None:
+    """An alternates file behind a symlinked `objects/info` must not read as
+    'no alternates': an unopenable parent is never an absent path."""
+    export, root, facts = exported
+    info = export / ".remote" / "widget.git" / "objects" / "info"
+    hidden = tmp_path / "info"
+    hidden.mkdir()
+    (hidden / "alternates").write_text("/elsewhere/objects\n")
+    if info.exists():
+        shutil.rmtree(info)
+    info.symlink_to(hidden, target_is_directory=True)
+    with pytest.raises(gs.Unreadable):
+        _snapshot(export, root, facts)
+
+
+def test_a_commit_parked_on_a_worktree_private_ref_is_violated(tmp_path: Path) -> None:
+    actions = EXTRA_STATES["commit-parked-on-worktree-private-ref"]
+    with _played(actions) as (root, facts):
+        host = _host(root, facts)
+        snap = _snapshot(_export(root, tmp_path / "export"), root, facts)
+    assert _verdict("clean", host) == "VIOLATED" and _verdict("clean", snap) == "VIOLATED"
+
+
+@pytest.mark.parametrize("change,why", [("redirected-pointer", "not its registration"),
+                                        ("duplicate-registration", "already claimed")])
+def test_a_checkout_pointer_must_name_its_registration(exported: tuple[Path, Path, dict[str, Any]],
+                                                        change: str, why: str) -> None:
+    export, root, facts = exported
+    registry = export / "repo" / ".git" / "worktrees"
+    if change == "redirected-pointer":
+        (export / WT / ".git").write_text(f"gitdir: {root}/elsewhere/.git\n")
+    else:
+        shutil.copytree(registry / WT, registry / f"{WT}-again")
+    with pytest.raises(gs.Unreadable, match=why):
+        _snapshot(export, root, facts)
+
+
+def _index_v3(entries: list[tuple[str, int, int]], extensions: bytes = b"") -> bytes:
+    """A version 3 index from (path, stage, extended flags), plus raw extension bytes."""
+    import hashlib
+    import struct
+
+    body = b"DIRC" + struct.pack(">II", 3, len(entries))
+    for path, stage, ext in entries:
+        name = path.encode()
+        flags = (stage << 12) | min(len(name), 0xFFF) | (0x4000 if ext else 0)
+        fixed = struct.pack(">10I", 0, 0, 0, 0, 0, 0, 0o100644, 0, 0, 0) + bytes.fromhex("b" * 40)
+        fixed += struct.pack(">H", flags) + (struct.pack(">H", ext) if ext else b"")
+        entry = fixed + name
+        entry += b"\0" * (8 - len(entry) % 8)
+        body += entry
+    body += extensions
+    return body + hashlib.sha1(body).digest()
+
+
+def test_intent_to_add_is_its_own_state() -> None:
+    assert gs.parse_index(_index_v3([("NOTES.md", 0, 0x2000)])) == {"NOTES.md": "intent-to-add 100644 " + "b" * 40}
+    with pytest.raises(gs.Unreadable, match="unknown extended"):
+        gs.parse_index(_index_v3([("NOTES.md", 0, 0x1000)]))
+
+
+def test_a_mandatory_index_extension_is_unreadable_and_an_optional_one_is_skipped() -> None:
+    import struct
+
+    optional = b"TREE" + struct.pack(">I", 2) + b"\0\0"
+    assert gs.parse_index(_index_v3([("a", 0, 0)], optional)) == {"a": "100644 " + "b" * 40}
+    mandatory = b"link" + struct.pack(">I", 20) + b"\0" * 20
+    with pytest.raises(gs.Unreadable, match="mandatory"):
+        gs.parse_index(_index_v3([("a", 0, 0)], mandatory))
+    overrun = b"TREE" + struct.pack(">I", 999)
+    with pytest.raises(gs.Unreadable, match="runs past"):
+        gs.parse_index(_index_v3([("a", 0, 0)], overrun))
+
+
+def test_stage_keys_cannot_collide_with_real_paths_and_duplicates_are_refused() -> None:
+    entries = gs.parse_index(_index_v3([("file", 2, 0), ("file@stage2", 0, 0)]))
+    assert entries["file"].startswith("unmerged") and entries["file@stage2"] == "100644 " + "b" * 40
+    with pytest.raises(gs.Unreadable, match="twice"):
+        gs.parse_index(_index_v3([("a", 0, 0), ("a", 0, 0)]))
+
+
+def test_a_checksummed_index_with_an_unterminated_name_is_unreadable() -> None:
+    import hashlib
+    import struct
+
+    body = b"DIRC" + struct.pack(">II", 2, 1) + b"\0" * 60 + struct.pack(">H", 4) + b"name"
+    with pytest.raises(gs.Unreadable):
+        gs.parse_index(body + hashlib.sha1(body).digest())
+
+
+def _write_object(bare: Path, kind: str, payload: bytes) -> str:
+    import hashlib
+    import zlib
+
+    data = kind.encode() + b" %d\0" % len(payload) + payload
+    sha = hashlib.sha1(data).hexdigest()
+    path = bare / "objects" / sha[:2] / sha[2:]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(zlib.compress(data))
+    return sha
+
+
+def test_a_branching_tree_dag_is_bounded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    bare = tmp_path / "bare"
+    blob = _write_object(bare, "blob", b"x")
+    tree = _write_object(bare, "tree", b"100644 f\0" + bytes.fromhex(blob))
+    for _ in range(18):  # 2**18 expanded entries from 19 small objects
+        sub = bytes.fromhex(tree)
+        tree = _write_object(bare, "tree", b"40000 a\0" + sub + b"40000 b\0" + sub)
+    monkeypatch.setattr(gs, "MAX_TREE_ENTRIES", 10_000)
+    with pytest.raises(gs.Unreadable, match="budget"):
+        gs.GitDir(gs.SafeTree(tmp_path), "bare").tree_files(tree)
+
+
+def test_a_hash_valid_malformed_tree_is_unreadable(tmp_path: Path) -> None:
+    bare = tmp_path / "bare"
+    tree = _write_object(bare, "tree", b"100644 no-terminator")
+    with pytest.raises(gs.Unreadable, match="malformed"):
+        gs.GitDir(gs.SafeTree(tmp_path), "bare").tree_files(tree)
+
+
+def test_a_truncated_zlib_stream_is_unreadable(tmp_path: Path) -> None:
+    import hashlib
+    import zlib
+
+    data = b"blob 5\0hello"
+    sha = hashlib.sha1(data).hexdigest()
+    path = tmp_path / "bare" / "objects" / sha[:2] / sha[2:]
+    path.parent.mkdir(parents=True)
+    path.write_bytes(zlib.compress(data)[:-4])  # the adler32 trailer removed, payload intact
+    with pytest.raises(gs.Unreadable, match="complete zlib"):
         gs.GitDir(gs.SafeTree(tmp_path), "bare").object(sha)

@@ -188,6 +188,13 @@ def _apply_git(root: Path, ops: list[dict[str, Any]]) -> None:
         elif kind == "copy-from":
             data = build.host_git(["show", f"{op['commit']}:{op['path']}"], root / op["where"])
             (root / op["where"] / op["path"]).write_text(data + "\n", encoding="utf-8")
+        elif kind == "update-ref":
+            _git(root / op["where"], "update-ref", op["ref"], op["to"])
+        elif kind == "reset-hard":
+            _git(root / op["where"], "reset", "-q", "--hard", op["commit"])
+        elif kind == "add-intent":
+            (root / op["where"] / op["path"]).write_text(op["text"], encoding="utf-8")
+            _git(root / op["where"], "add", "-N", op["path"])
         elif kind == "rm-cached":
             _git(root / op["where"], "rm", "-q", "--cached", op["path"])
         elif kind == "chmod":
