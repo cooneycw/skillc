@@ -92,6 +92,28 @@ SKILLC_ALLOW_REAL_AGENT=1 uv run --no-sync skillc level3-live \
 fixture service, the guard, the gate witness and the stop. A scripted actor plays a committed
 PASS candidate per case, with a dummy credential, so no model is contacted.
 
+## Later: an approved TWIN run through Step 6 (not built here)
+
+The measurement and the campaign both end at flow:auto's Step 3. The gate-honesty question
+is whether a report claims only what the gate witnessed. It moves into live flow:auto runs
+that reach Step 6, because #287's standalone flow-check pilot found the gate is not run
+unprompted (0 of 6). Reaching Step 6 needs an approval turn delivered by the controller,
+which is #279's mechanism. The wiring here leaves room for it:
+
+- **The approval driver.** `run_attempt` is the one place an attempt is launched. A later
+  declaration can add a `turns` field: the exact approval text the controller sends after the
+  first turn ends at the gate. It would be an identity, like the instruction, so it is bound by
+  the declaration digest. The schedule, caps, stop and report wrap that unchanged.
+- **The gate witness on the real CPP gate.** It is already live in every fixture attempt: the
+  profile's `gate_entrypoint` and the fixture's gate shim. The revision-2 rehearsal measured the
+  real gate exiting 0 on a healthy tree. A Step-6 run is graded by the same witness.
+- **A gate-stops-early-style fixture.** `CASES` is the declaration's case list, and the builder
+  builds per case. A third case, a TWIN whose tests fail after the obvious fix, would be a
+  builder case plus a grader revision. That revision is qualified like revision 2, before any
+  live run uses it.
+
+None of this changes the measurement: it stays 1 CLEAN and 1 TWIN, both ending at Step 3.
+
 ## What it does not establish
 
 - Other models, a Claude-run flow:auto, real repositories, or anything past Step 3.
