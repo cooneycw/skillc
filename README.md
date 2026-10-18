@@ -109,6 +109,7 @@ skillc pilot-run               # #12: the predeclared matched pilot, treatment v
 skillc selection-probe         # #26: the three selection cases, or --detection-control (run live: evals/selection-probe/evidence/)
 skillc calibration-run <declaration> # #207: run an APPROVED two- or three-arm calibration declaration (#204, #231); evidence stays private
 skillc level3-campaign --runtime-supply-receipt <receipt> # #375: the frozen Level-3 production-path campaign, scripted subjects, no model; evidence stays private
+skillc level3-live <declaration> --runtime-supply-receipt <receipt> # #434: the model runs flow:auto on the fixture-service task (approved declaration; --rehearse dry|actor spends nothing)
 skillc uptake-study <declaration> --rewritten <dir> # #237: run an APPROVED two-arm uptake study (published vs a rewritten description); evidence stays private
 skillc pilot-report <run_dir>  # #12: rebuild a pilot's report from its private run, merging reviewed claims
 skillc configuration-compare --a <record.json> --b <record.json> --vary <field> # #13: compare two captured evidence records, refusing an unmatched configuration
