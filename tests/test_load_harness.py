@@ -336,11 +336,17 @@ elif args[0] == "ps":
     if d["_ps"] == 2:
         d.update(d.pop("_pending", {}))
     save(d)
+elif args[0] == "rm" and mode == "rm-slow":
+    time.sleep(0.5)
+    for c in args[2:]:
+        d.pop(c, None)
+    save(d)
 elif args[0] == "rm" and mode == "rm-in-progress":
     # The daemon is already removing it (`--rm`): it says so, exits 1, and
     # the container is gone a moment later.
     for c in args[2:]:
         d.pop(c, None)
+    d["_benign"] = d.get("_benign", 0) + 1
     save(d)
     print(f"Error response from daemon: removal of container {args[2]} is already in progress",
           file=sys.stderr)
@@ -713,8 +719,10 @@ def test_a_removal_already_in_progress_is_not_a_cleanup_failure(tmp_path, monkey
     deadline = time.monotonic() + 20
     while len(_containers(state)) < 2 and time.monotonic() < deadline:
         time.sleep(0.05)
+    assert len(_containers(state)) >= 2, "no owned container to remove: the test proves nothing"
     monkeypatch.setenv("FAKE_DOCKER_MODE", "rm-in-progress")
     load.stop()
+    assert json.loads(state.read_text()).get("_benign", 0) >= 1, "no benign reply was exercised"
     assert load.cleanup_error == ""
     assert _containers(state) == {"foreign": "skillc.load462=someone-else"}
 
@@ -755,3 +763,20 @@ def test_a_genuine_error_is_kept_when_a_neighbour_reply_is_benign(tmp_path, monk
     load.stop()
     assert _containers(state) == {"foreign": "skillc.load462=someone-else"}
     assert "device busy" in load.cleanup_error, "a benign neighbour reply hid a real failure"
+
+
+
+def test_slow_removals_stay_inside_the_sweep_budget(tmp_path, monkeypatch):
+    """Each removal gets at most what is left of the sweep's budget; many slow
+    ones end the sweep at the budget with a failure, never past it."""
+    state = _fake_docker(tmp_path, monkeypatch)
+    load = lh.Load(0, 0, time.time() + 60, docker=2, docker_sweep_budget=3.0)
+    deadline = time.monotonic() + 20
+    while len(_containers(state)) < 12 and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert len(_containers(state)) >= 12, "too few owned containers for the budget to bind"
+    monkeypatch.setenv("FAKE_DOCKER_MODE", "rm-slow")
+    t0 = time.monotonic()
+    load.stop()
+    assert time.monotonic() - t0 < 5.0, "the sweep overran its 3 s budget"
+    assert "did not settle" in load.cleanup_error

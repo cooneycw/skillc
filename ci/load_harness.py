@@ -186,7 +186,7 @@ def cleanup(cfg):
         # for a settle window and needs 3 consecutive empty listings after it.
         # A create the daemon completes later than that is the residual.
         settle_until = time.monotonic() + cfg.get("docker_settle", 3.0)
-        give_up = time.monotonic() + 4 * t + 10
+        give_up = time.monotonic() + (cfg.get("docker_sweep_budget") or 4 * t + 10)
         empties = 0
         while True:
             if time.monotonic() > give_up:
@@ -211,10 +211,22 @@ def cleanup(cfg):
                 benign = ("is already in progress", "No such container")
                 stalled = False
                 for cid in ids:
+                    # Each removal gets at most what is left of the budget.
+                    left = give_up - time.monotonic()
+                    if left <= 0:
+                        errors.append("docker sweep did not settle")
+                        stalled = True
+                        break
                     try:
                         rr = subprocess.run(["docker", "rm", "-f", cid], capture_output=True,
-                                            text=True, timeout=t)
-                    except (OSError, subprocess.TimeoutExpired) as exc:
+                                            text=True, timeout=min(t, left))
+                    except subprocess.TimeoutExpired as exc:
+                        # Cut short by the budget: the sweep did not settle.
+                        errors.append("docker sweep did not settle" if left < t
+                                      else f"docker rm failed: {exc!r}")
+                        stalled = True
+                        break
+                    except OSError as exc:
                         errors.append(f"docker rm failed: {exc!r}")
                         stalled = True
                         break
@@ -321,7 +333,8 @@ class Load:
 
     def __init__(self, cpu: int, churn: int, deadline: float, *, docker: int = 0,
                  io: int = 0, image: str = "alpine:3", cpus: str = "",
-                 spin_mode: str = "busy", docker_timeout: float = 30.0) -> None:
+                 spin_mode: str = "busy", docker_timeout: float = 30.0,
+                 docker_sweep_budget: float | None = None) -> None:
         self.proc: subprocess.Popen[bytes] | None = None
         run_id = f"{os.getpid()}-{time.time_ns()}"
         self.cfg: dict[str, Any] = {
@@ -331,6 +344,7 @@ class Load:
             "iodir": tempfile.mkdtemp(prefix="load462-io-") if io else "",
             "rep_pgid_file": tempfile.mkstemp(prefix="load462-rep-")[1],
             "spin_mode": spin_mode, "docker_timeout": docker_timeout,
+            "docker_sweep_budget": docker_sweep_budget,
             "cleanup_src": _CLEANUP_SRC,
         }
         #: Empty when cleanup was verified; otherwise what could not be.
