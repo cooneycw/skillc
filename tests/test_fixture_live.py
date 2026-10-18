@@ -239,7 +239,7 @@ def test_a_containment_stop_finalizes_every_later_attempt_not_run(tmp_path: Path
     entry = report["attempts"][0]
     assert entry["tokens"] == {"total_tokens": 1000, "input_tokens": 900} and entry["source_unmodified"] == "SATISFIED"
     first_case = outcomes[0].scheduled.arm
-    assert report["cases"][first_case]["tokens_total_known"] >= 1000  # type: ignore[index]
+    assert report["cases"][first_case]["tokens_total_known"] >= 1000
 
 
 def test_a_live_run_cannot_override_the_total_cap(tmp_path: Path) -> None:
@@ -266,5 +266,5 @@ def test_report_tokens_are_unknown_when_the_rollout_has_none(tmp_path: Path) -> 
     record = _clean_record(**{"observation.run_metadata": {}})
     outcomes = [mp.AttemptOutcome(s, record, 10.0) for s in schedule]
     report = fl.build_report(declaration, experiment, outcomes, fl.Stop(), rehearse=None, approved=True)
-    assert {e["tokens"] for e in report["attempts"]} == {fl.UNKNOWN}  # type: ignore[union-attr]
-    assert report["cases"]["clean"]["tokens_unknown_attempts"] == 1  # type: ignore[index]
+    assert {e["tokens"] for e in report["attempts"]} == {fl.UNKNOWN}
+    assert report["cases"]["clean"]["tokens_unknown_attempts"] == 1

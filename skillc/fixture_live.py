@@ -451,7 +451,7 @@ def _criteria(record: Mapping[str, Any]) -> dict[str, str]:
 
 def build_report(declaration: LiveDeclaration, experiment: trial.Experiment,
                  outcomes: Sequence[mp.AttemptOutcome], stop: Stop, *, rehearse: str | None,
-                 approved: bool) -> dict[str, object]:
+                 approved: bool) -> dict[str, Any]:
     """One entry per scheduled attempt, in schedule order, and per-case counts.
     Tokens come from each attempt's own rollout; an unread one is UNKNOWN."""
     model, effort = str(declaration.shared["model"]), str(declaration.shared["reasoning_effort"])

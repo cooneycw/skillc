@@ -2173,7 +2173,7 @@ def cmd_level3_live(args: argparse.Namespace) -> int:
               "run_store": {"declared": declaration.data["run_store"], "resolved": str(private_root)}}
     report_path = run_dir / fl.REPORT_FILENAME
     report_path.write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8")
-    for case, counts in report["cases"].items():  # type: ignore[attr-defined]
+    for case, counts in report["cases"].items():
         print(f"skillc: {case}: {counts}", file=sys.stderr)
     if stop.trigger is not None:
         print(f"skillc: CONTAINMENT STOP at {stop.at_attempt}: {stop.trigger}", file=sys.stderr)
