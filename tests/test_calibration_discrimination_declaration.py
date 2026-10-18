@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from conftest import stamp_approval
+from conftest import p3_bindings, stamp_approval
 
 from skillc import calibration, degrade, verify
 from skillc import materialize as m
@@ -50,7 +50,7 @@ OTHER_MUTATED_DIGEST = "sha256:" + "b" * 64
 def _declaration(*, attempts_per_arm: int = 10, seed: int = 20261006, approval: dict[str, object] | None = None,
                   mutated_digest: str = MUTATED_DIGEST) -> dict[str, Any]:
     sequence = calibration.derive_arm_order(seed, list(calibration.DISCRIMINATION_ARMS), attempts_per_arm)
-    return stamp_approval({
+    return stamp_approval(p3_bindings({
         "kind": "discrimination-declaration",
         "arms": [
             {"name": "intact", "subject": dict(INTACT_SUBJECT)},
@@ -83,7 +83,7 @@ def _declaration(*, attempts_per_arm: int = 10, seed: int = 20261006, approval: 
         "retain_transcripts": True,
         "tolerance": {"non_evaluable_per_arm": 1},
         "approval": approval,
-    })
+    }))
 
 
 def _approved(*, attempts_per_arm: int = 10, mutated_digest: str = MUTATED_DIGEST) -> dict[str, Any]:

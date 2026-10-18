@@ -969,3 +969,74 @@ def test_release_never_removes_a_finalized_replacement_at_the_same_path(tmp_path
     assert sock_path.exists(), "released a socket file this channel never bound"
     second.close()
     assert not sock_path.exists()
+
+
+# --- #434 PR 2b: connections dropped before decide are counted -----------------------
+
+def _raw(sock_path: Path, data: bytes) -> None:
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        s.settimeout(5.0)
+        s.connect(str(sock_path))
+        try:
+            s.sendall(data)
+            s.shutdown(socket.SHUT_WR)
+            while s.recv(65536):
+                pass
+        except OSError:
+            pass  # a dropped connection may be reset: that is the case under test
+    finally:
+        s.close()
+
+
+def test_admitted_requests_are_not_drops_even_when_decide_refuses_them(tmp_path: Path) -> None:
+    """The counter's other verdict: a decided request and a request decide
+    itself refuses both reached decide, so neither is a drop."""
+    sock_path = tmp_path / "trigger.sock"
+    channel = DecideReplyChannel(sock_path, _decide_fixed({}), "a1")
+    channel.start()
+    try:
+        assert _send(sock_path, {"op": "disruption_check", "client_seq": 1})["ok"] is True
+        assert _send(sock_path, {"op": "other"})["ok"] is False
+    finally:
+        channel.stop_and_finalize()
+    assert channel.dropped_connections() == 0
+
+
+@pytest.mark.parametrize("data", [b"not json at all\n", b"[1, 2, 3]\n", b"x" * 2048,
+                                  # counter-model review, pass 3: parser failures
+                                  # that are not JSONDecodeError
+                                  b'{"op": ' + b"9" * 5000 + b"}\n", b"[" * 20000 + b"]" * 20000 + b"\n"])
+def test_a_malformed_or_oversized_request_is_counted_as_dropped(tmp_path: Path, data: bytes) -> None:
+    sock_path = tmp_path / "trigger.sock"
+    channel = DecideReplyChannel(sock_path, _decide_fixed({}), "a1",
+                                 max_request_bytes=1024 if len(data) <= 2048 else 64 * 1024)
+    channel.start()
+    try:
+        _raw(sock_path, data)
+    finally:
+        log = channel.stop_and_finalize()
+    assert log == [] and channel.dropped_connections() == 1
+
+
+def test_a_connection_refused_for_capacity_is_counted_as_dropped(tmp_path: Path) -> None:
+    sock_path = tmp_path / "trigger.sock"
+    entered, release = threading.Event(), threading.Event()
+
+    def decide(request: Mapping[str, object]) -> Mapping[str, object]:
+        entered.set()
+        release.wait(10)
+        return {"decision": "pass"}
+
+    channel = DecideReplyChannel(sock_path, decide, "a1", max_concurrent_handlers=1)
+    channel.start()
+    holder = threading.Thread(target=_send, args=(sock_path, {"op": "x"}), daemon=True)
+    try:
+        holder.start()
+        assert entered.wait(10)
+        _raw(sock_path, b'{"op": "lost"}\n')
+    finally:
+        release.set()
+        holder.join(10)
+        channel.stop_and_finalize()
+    assert channel.dropped_connections() == 1

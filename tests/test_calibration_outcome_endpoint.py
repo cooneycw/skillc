@@ -9,8 +9,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from conftest import p3_bindings
 
-from skillc import calibration, trial, verify
+from skillc import calibration, egress, trial, verify
 from skillc import calibration_run as cr
 from skillc import collection_conformance as cc
 from skillc import matched_pilot as mp
@@ -43,6 +44,7 @@ def _data() -> dict[str, Any]:
             [path, executable, trial.sha256_bytes(body)] for path, body, executable in files
         ])),
     }
+    p3_bindings(data)
     data["approval"] = {"by": "test-only", "at": "2026-10-12", "attempts_per_arm": 1, "task_fixture": "discrimination/fixture"}
     _approve(data)
     return data
@@ -80,6 +82,28 @@ def _outcomes(schedule: list[mp.ScheduledAttempt]) -> list[mp.AttemptOutcome]:
 
 def _report(experiment: trial.Experiment, outcomes: list[mp.AttemptOutcome]) -> dict[str, Any]:
     return cr.build_report(experiment, outcomes, declared_model="gpt-6-astra", declared_effort="high")
+
+
+@pytest.mark.parametrize("egress_summary, evaluable", [
+    (None, False),
+    ({"status": "read", "allowlist_digest": "sha256:" + "0" * 64}, False),
+    ({"status": "read", "allowlist_digest": egress.allowlist_digest()}, True),
+])
+def test_an_attempt_without_the_declared_egress_is_not_evaluable_in_the_report(
+        tmp_path: Path, egress_summary: object, evaluable: bool) -> None:
+    """#287 P3 (C4, counter-model finding): a PASS whose attempt lacks the
+    declared egress counts as non-evaluable, so an arm of only such attempts is
+    UNKNOWN in the persisted report, not EVALUABLE over an unsupported population."""
+    experiment, schedule = _planned(tmp_path)
+    outcomes = _outcomes(schedule)
+    for outcome in outcomes:
+        if egress_summary is not None:
+            outcome.record["observation"] = {"egress": egress_summary}
+    report = _report(experiment, outcomes)
+    for arm, summary in report["evaluability"].items():
+        assert summary["verdict_status"] == ("EVALUABLE" if evaluable else "UNKNOWN"), arm
+        assert summary["evaluable"] == (1 if evaluable else 0)
+    assert all(row["primary_endpoint"]["status"] == "PASS" for row in report["attempts"])  # raw grade kept
 
 
 def test_common_outcome_pass_preserves_baseline_unknown(tmp_path: Path) -> None:
@@ -414,7 +438,8 @@ def test_cli_reports_bound_endpoint_or_controlled_identity_refusal(
     outcomes = _outcomes(schedule)
     for outcome in outcomes:
         outcome.record["observation"] = {"run_metadata": {"model": data["shared"]["model"],
-                                                          "reasoning_effort": "high"}}
+                                                          "reasoning_effort": "high"},
+                                         "egress": {"status": "read", "allowlist_digest": egress.allowlist_digest()}}
     if damaged:
         planned, _ = next(experiment.attempts())
         binding = planned["config"]
@@ -432,6 +457,9 @@ def test_cli_reports_bound_endpoint_or_controlled_identity_refusal(
     monkeypatch.setattr(cr, "build_treatment", lambda *_a, **_kw: cr.Treatment({}, "sha256:" + "ab" * 32, None, skill_digests=_TEST_PINS))
     monkeypatch.setattr(cr, "run_calibration", lambda *_a, **_kw: (experiment, outcomes))
     private = tmp_path / "private"
+    # The declared run_store is durable by construction (C5, its own tests); pytest's tmp_path is not.
+    monkeypatch.setattr(cr, "private_root", lambda *_: private)
+    monkeypatch.setattr(cr, "require_image_binding", lambda *_a, **_kw: None)  # C3 has its own tests
     result = cli.main(["calibration-run", str(declaration_path), "--private-dir", str(private)])
     captured = capsys.readouterr()
     assert result == (2 if damaged else 0)
@@ -498,3 +526,55 @@ def test_unavailable_attempt_is_retained_and_not_model_ineligible(tmp_path: Path
     assert summary["scheduled"] == 1
     assert summary["primary"] == {"NOT_GRADED": 1}
     assert summary["process_honesty"] == {"NOT_GRADED": 1}
+
+
+def test_cli_runs_with_the_receipt_bytes_it_checked_not_a_second_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """#287 P3 (C3, counter-model finding): the receipt file replaced after the
+    binding check (here, during acquisition) must not reach the backends."""
+    from types import SimpleNamespace
+
+    from test_runtime_supply import RECEIPT
+
+    from skillc import cli, demo, trial_bootstrap
+    from skillc import runtime_supply as rs
+
+    data = _data()
+    image_id = json.loads(RECEIPT)["image_id"]
+    data["shared"]["image"]["digest"] = image_id
+    data["shared"]["image"]["receipt_sha256"] = trial.sha256_bytes(RECEIPT)
+    _approve(data)
+    declaration_path = tmp_path / "declaration.json"
+    declaration_path.write_text(json.dumps(data))
+    receipt = tmp_path / "receipt.json"
+    receipt.write_bytes(RECEIPT)
+    subject = next(arm["subject"] for arm in data["arms"] if arm["name"] != "baseline")
+    acquired = SimpleNamespace(subject=SimpleNamespace(locator=subject["locator"], revision=subject["revision"],
+                                                      client=data["shared"]["client"]["name"]))
+
+    def acquire(*_: object) -> object:
+        receipt.write_bytes(RECEIPT + b"\n")  # still a valid receipt; no longer the declared bytes
+        return acquired
+
+    seen: list[object] = []
+    monkeypatch.setattr(trial_bootstrap, "pinned_cli_version", lambda _: data["shared"]["client"]["version"])
+    monkeypatch.setattr(demo, "resolve_image_digest", lambda *_: image_id)
+    monkeypatch.setattr(cc, "acquire_collection", acquire)
+    monkeypatch.setattr(cc, "discard_acquisition", lambda *_: None)
+    monkeypatch.setattr(cr, "build_treatment", lambda *_a, **_kw: cr.Treatment({}, "sha256:" + "ab" * 32, None, skill_digests=_TEST_PINS))
+    monkeypatch.setattr(rs, "selected_runtime", lambda **_: rs.PROFILE_RUNTIME)
+    monkeypatch.setattr(cr, "private_root", lambda *_: tmp_path / "private")
+    monkeypatch.setattr(cc, "agent_backends", lambda **kw: seen.append(kw["runtime_supply"]))
+
+    def run(*_a: object, **kw: Any) -> None:
+        kw["backends"]()
+        raise cr.CalibrationRefused("stop after dispatch")
+
+    monkeypatch.setattr(cr, "run_calibration", run)
+    result = cli.main(["calibration-run", str(declaration_path), "--image", data["shared"]["image"]["tag"],
+                       "--runtime-supply-receipt", str(receipt)])
+    assert "stop after dispatch" in capsys.readouterr().err
+    assert result == 2
+    assert len(seen) == 1 and isinstance(seen[0], rs.RuntimeSupply)
+    assert seen[0].receipt_bytes == RECEIPT

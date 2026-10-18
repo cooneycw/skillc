@@ -55,7 +55,10 @@ files = ["skillc", "tests", "ci"]
 # tell apart. Excluded as fixture data, not code this repo type-checks.
 # tests/fixtures/profile-cpp-codex-cicd-86641e8/ (#280) is the same kind of pinned
 # CPP snapshot: upstream code, typed to CPP's own config and imports, not ours.
+# tests/fixtures/profile-cpp-codex-flow-auto-86641e8/ (#434) likewise: both selected
+# skills bundle a `lib/vendor.py`, one module name twice.
 exclude = ['^evals/level1/[^/]+/(fixture|reference|alternatives|wrong)/',
            '^tests/fixtures/profile-cpp-codex-flow-check-ea6dbfa/',
            '^tests/fixtures/profile-cpp-codex-flow-check-86641e8/',
-           '^tests/fixtures/profile-cpp-codex-cicd-86641e8/']
+           '^tests/fixtures/profile-cpp-codex-cicd-86641e8/',
+           '^tests/fixtures/profile-cpp-codex-flow-auto-86641e8/']

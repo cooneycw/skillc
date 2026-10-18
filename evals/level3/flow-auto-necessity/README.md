@@ -33,3 +33,14 @@ or a large push packs objects, and the read becomes UNKNOWN ("not loose").
 PR 3's campaign report MUST count UNKNOWN-by-unreadable attempts separately from
 other UNKNOWNs. **If any necessity or must-act attempt lands there, pack and
 delta support becomes a blocker before #434's results count.**
+
+## Running it live (#434 PR 2b)
+
+`agent_trial.run_one_attempt(fixture=AttemptFixture(...))` runs this task inside a
+live attempt. The builder bakes the container's paths (`remote_url=/work/.remote/widget.git`),
+and `repo/` and `.remote/widget.git` are delivered as the attempt's surface. The
+service answers from inside the attempt, and grading reads `capture_snapshot` over
+the exported `/work`. The subject is `evals/subjects/cpp-codex-flow-auto-86641e8/`.
+`tests/test_agent_trial_fixture.py` replays eleven of the candidates above through
+the live wiring; each grades exactly as committed. See the fixture-service spec's
+"Live attempts" section for where every git call runs.

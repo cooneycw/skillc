@@ -1,6 +1,5 @@
 {
  "kind": "calibration-declaration",
- "status": "DRAFT - endpoint preparation only; not runnable or authorized",
  "issue": 287,
  "lane": "matched-outcome",
  "declared_at": "2026-10-06",
@@ -20,8 +19,8 @@
   "path": "evals/level3/gate-stops-early",
   "fixture": "discrimination/fixture",
   "grader_id": "gate-stops-early",
-  "grader_revision": "4",
-  "_comment": "Measured from merged task contract at 1ff273e: primary revision 4, held-out revision 3. The shared primary prompt includes the public checks.*.status vocabulary. Revalidate exact task bytes before study approval."
+  "grader_revision": "5",
+  "_comment": "Grader revision 5 (the #376 revision on main); task bytes re-measured for #287 P3."
  },
  "arms": [
   {
@@ -42,20 +41,38 @@
  ],
  "shared": {
   "client": {
-   "name": "PENDING - operator pilot-spend authorization has not yet named a client",
-   "version": "PENDING"
+   "name": "codex",
+   "version": "0.157.1"
   },
-  "model": "PENDING - pending the operator's pilot-spend authorization (ADR 0005 rule 6: filing or drafting this declaration does not itself authorize a run); #204/#150 used codex client, model gpt-6-astra, cited only as precedent",
-  "reasoning_effort": "PENDING",
+  "model": "gpt-6-astra",
+  "reasoning_effort": "high",
   "tools": "the client's defaults inside the trial container; no MCP servers (matches every prior calibration run)",
   "permissions": "the same non-interactive sandbox/approval settings for every attempt, whichever client is chosen",
   "public_requirements": "evals/level3/gate-stops-early/goal.md, current committed bytes delivered identically to both arms; final merged public-report contract refresh required before approval.",
   "image": {
-   "tag": "skillc-trial:latest",
-   "digest": "PENDING - exact approved runtime-supply image digest and matching receipt, never inferred from a tag or predecessor trial image"
+   "tag": "skillc-375-final:88b3999-6343d33b",
+   "digest": "sha256:6343d33b0b5757e41c4f7a2e7f463c38974a02873e52f69dfe4d220e4f13d5ea",
+   "receipt_sha256": "sha256:0eb308d321e58642a5c8f63dd3432e88eb498ce55a47f20c9ca92d50de2062a6",
+   "provenance": "#375's pre-registered final-run runtime image: built once at skillc 88b3999 for runtime cpp-codex-flow-check-86641e8, tagged uniquely, never rebuilt (builds are not ID-reproducible). The run host is kyle19 (the only host holding the ChatGPT credential): the image is moved from evals26 by docker save | docker load under the SAME tag (save/load preserves the image ID), and the receipt (/var/lib/skillc-real-docker/campaign375/receipt-375-final.json on evals26) is copied beside run_store and its sha256 re-verified"
   },
-  "per_attempt_seconds": "PENDING - sized from skillc#270's own observed attempt duration once it exists",
-  "total_seconds": "PENDING - attempts_per_arm * 2 arms * per_attempt_seconds, once both are known"
+  "per_attempt_seconds": 1200,
+  "total_seconds": 24000,
+  "agent_network": {
+   "policy": "egress:provider-only (#442)",
+   "allowlist_digest": "sha256:d03bacbfc942f772fe5915c324161b8434aa188e934e3bc6a94cb13b1adc9e2b",
+   "codex_server_side_off": [
+    "--strict-config",
+    "-c",
+    "web_search=\"disabled\"",
+    "--disable",
+    "apps",
+    "--disable",
+    "plugins",
+    "--disable",
+    "remote_plugin"
+   ],
+   "verification": "calibration-run refuses before any container unless the backend's network label and the proxy allowlist digest equal these; each attempt's egress-proxy-log is captured and its allowlist_digest must equal this one or the attempt is NOT_GRADED (#287 P3)"
+  }
  },
  "attempts_per_arm": 10,
  "arm_order": {
@@ -94,16 +111,6 @@
   "Raw task status and criteria; raw flow-check-honest outcome/evidence including absent-observer UNKNOWN; actual verified status/readiness; existing eligibility and uptake; all scheduled, unknown, inconclusive and not-graded counts by arm."
  ],
  "approval": null,
- "owed_before_run": [
-  "Preparation only: exact study approval, final model/client/effort/image/caps and measured cost remain pending; approval stays null.",
-  "Task identities refreshed from merged 1ff273e. Revalidate prompt, grader and fixture bytes against the frozen declaration before exact study approval; any change requires refreshed binding.",
-  "Public status vocabulary passed/failed/not run may change discrimination; direction and magnitude remain unmeasured. Preserve UNKNOWN and INCONCLUSIVE counts by arm, including finer unclassifiable-claim accounting once supplied by the accepted contract.",
-  "Consume merged #348 profile forwarding/runtime witness; finish #354 skill-pin API and #315 runtime readiness. No baseline CPP installation or invented witness.",
-  "Run the real discrimination runner and derived full-tree closure preparation with separately bound manifests/receipts; these are not implemented by this endpoint slice.",
-  "Rehearse both independent 20-attempt schedules through their actual entry paths with deterministic clients and reconcile all 40 slots. No pooled intact attempts, no pilot verdict.",
-  "Supporting mutation/arithmetic/cost scripts and evidence from parked prep-287-pilot-declarations tip571d763 are pending transplant and revalidation; they are not delivered by these three scoped-transplant documents.",
-  "Exact approval.declaration_digest binds canonical JSON excluding approval, including measured task_content and all declared identities/schedule/caps. Changing any bound input requires refreshed approval."
- ],
  "outcome_endpoint": {
   "version": 1,
   "name": "common-task-outcome",
@@ -116,7 +123,34 @@
  "task_content": {
   "version": 1,
   "goal_digest": "sha256:250b82c4e9ebd2cb5afc88e3a4f1dfaa19075b22142b87444efe3f33cff1bb9e",
-  "grader_digest": "sha256:d0dfd3a75b9e4db9be85543a2188e9946fc09c8fba39e5d9bf64945063253364",
-  "fixture_digest": "sha256:03d514e48b1806a218aaef43a9982dc17271e69679728bc2ac1106d090139e5f"
- }
+  "grader_digest": "sha256:332318a553fdb7cfcd518d1baf0bef9a04895c7941a3ddd9307669bca15b21bc",
+  "fixture_digest": "sha256:3dc9df492cb2a75698598dfa1c19bb94537d7d16d7b85b9a2feb6af550930d8c"
+ },
+ "run_store": "~/skillc-evidence/calibration-287/pilot-improvement",
+ "retention": {
+  "transcripts": "retained (retain_transcripts: true)",
+  "witness_envelopes": "every graded attempt's trusted-observation (witness) envelope is retained under its recorded digest and verifiable on read (#418); a run whose envelopes cannot be re-derived from the store is not reportable",
+  "store": "the declared run_store on kyle19, absolute, outside any repository or worktree, never /tmp or a session scratchpad (most #203-era live evidence was lost that way)"
+ },
+ "attempt_policy": {
+  "retry": "none: every scheduled attempt runs once; a counted attempt is never re-run",
+  "infrastructure_failure": "finalized unavailable or inconclusive with its reason; non-evaluable, counted against tolerance.non_evaluable_per_arm; never silently retried",
+  "stop": "only the declared caps (per_attempt_seconds, total_seconds) or an operator interrupt, both reported; no optional stopping on results",
+  "cap_cut": "attempts the total cap prevents from starting are finalized not-run and reported"
+ },
+ "measures": {
+  "outcome": "the primary endpoint (task grader status) per attempt",
+  "workflow": "flow-check-honest beside the endpoint (process honesty) per attempt",
+  "selection": "skill_opened per attempt (confirmed skill invocations), as k/n",
+  "convenience": "tokens and wall/agent seconds per attempt",
+  "reliability": "dispositions, model eligibility and per-arm evaluability under the tolerance",
+  "null_results": "UNKNOWN, NOT_GRADED and not-run attempts are reported, never dropped"
+ },
+ "subject_drift": {
+  "reading": "#384 Reading 1 (2026-10-14): pin 86641e8 vs CPP main 63e0698 classified CONTRACT (plus structural): main's flow-check invokes the bundled scripts/flow-finish-gate.sh instead of ~/.claude/scripts/flow-finish-gate.sh (CPP #1408), and the bundled lib/cicd went from 29 files to 3",
+  "ruling": "measured AT the pin (orchestrator D2); results are labelled 'flow-check as of CPP 86641e8'; repinning is out of scope"
+ },
+ "scope_label": "#288 narrow first measurement: one property (aggregate-stop reporting), on the small #270/#271 Level-3 fixture tasks, not CPP's integrated workflows",
+ "prior_rulings": "the owner ruling to run #237 before resuming #203 difficulty search, and prior #203 approvals, do NOT authorize this study; only an explicit approval of this exact declaration does",
+ "skill_pins": "the intact arm carries trial.skill_digests pins from the bytes it installs (#424); the baseline installs nothing, carries no pins, and any skill-evidence on it is refused as a contaminated baseline (#427)"
 }

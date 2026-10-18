@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from conftest import stamp_approval
+from conftest import p3_bindings, stamp_approval
 
 from skillc import calibration, verify
 
@@ -135,7 +135,7 @@ def _discrimination_declaration(
     sequence = calibration.derive_arm_order(2, names, attempts_per_arm)
     intact_subject = dict(SUBJECT)
     degraded_revision = calibration._expected_degraded_revision(intact_subject)
-    return stamp_approval({
+    return stamp_approval(p3_bindings({
         "kind": "discrimination-declaration",
         "arms": [
             {"name": "intact", "subject": dict(intact_subject)},
@@ -165,7 +165,7 @@ def _discrimination_declaration(
         "retain_transcripts": True,
         "tolerance": {"non_evaluable_per_arm": 1},
         "approval": approval,
-    })
+    }))
 
 
 def _approved_discrimination_declaration(
