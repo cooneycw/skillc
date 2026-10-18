@@ -115,12 +115,15 @@ def summarize(attempt_id: str, decisions: list[dict[str, Any]], channel_unavaila
         status = "unknown"
     else:
         status = "zero"
+    nested: dict[str, Any] = {"status": status, "top_level": top, "confirmed": confirmed, "suspected": suspected,
+                              "ancestry_unknown": ancestry_unknown}
+    if expected_top_level != 1:
+        # Only a multi-turn attempt (#279) records it, so a single-turn
+        # attempt's stored record is byte-identical to before.
+        nested["expected_top_level"] = expected_top_level
     return {
         "kind": "codex-guard", "attempt_id": attempt_id, "decisions": decisions,
-        "channel_unavailable": channel_unavailable,
-        "nested": {"status": status, "top_level": top, "expected_top_level": expected_top_level,
-                   "confirmed": confirmed, "suspected": suspected,
-                   "ancestry_unknown": ancestry_unknown},
+        "channel_unavailable": channel_unavailable, "nested": nested,
     }
 
 

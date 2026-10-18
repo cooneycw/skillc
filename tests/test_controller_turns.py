@@ -148,7 +148,8 @@ def test_red_case_the_guard_expects_one_top_level_launch_per_turn(
 ) -> None:
     nested = cg.summarize("a-1", _top_levels(top), False, expected_top_level=ct.expected_top_level(delivered))["nested"]
     assert (nested["status"], nested["suspected"]) == (status, suspected)
-    assert nested["expected_top_level"] == 1 + delivered
+    assert nested.get("expected_top_level", 1) == 1 + delivered
+    assert ("expected_top_level" in nested) is (delivered > 0)  # absent for a single turn: byte-identical
 
 
 def test_the_fixture_session_judges_its_guard_against_the_delivered_turns() -> None:
