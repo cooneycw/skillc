@@ -52,7 +52,7 @@
   "reasoning_effort": "high",
   "tools": "the client's defaults inside the trial container; no MCP servers (matches every prior calibration run)",
   "permissions": "the same non-interactive sandbox/approval settings for every attempt",
-  "public_requirements": "evals/level3/gate-stops-early/goal.md, current committed bytes delivered identically to both arms; final merged public-report contract refresh required before approval.",
+  "public_requirements": "evals/level3/gate-stops-early-step6/goal.md, current committed bytes delivered identically to both arms; final merged public-report contract refresh required before approval.",
   "image": {
    "tag": "skillc-375-final:88b3999-6343d33b",
    "digest": "sha256:6343d33b0b5757e41c4f7a2e7f463c38974a02873e52f69dfe4d220e4f13d5ea",
@@ -117,17 +117,7 @@
   "skill-evidence (skillc#268) per attempt, binding it to the skills/paths actually read and executed",
   "case-pairing (skillc#273, merged a2b2861) binding each intact attempt to its reciprocal degraded attempt on this case"
  ],
- "approval": {
-  "by": "owner (cooneycw)",
-  "at": "2026-10-18",
-  "attempts_per_arm": 1,
-  "source": "owner pre-approval \"you can run it (approving in advance)\" (2026-10-18) of a pre-check of the step-6 redesign, relayed by skillc-400 (orchestrator, owner-delegated) with its bounds: <= 2 attempts, the same lane (codex 0.157.1 / gpt-6-astra / high), the gate-stops-early fixture and grader revision, image 6343d33b and receipt; the pre-check uses 1 attempt per arm (intact and degraded) under the owner's \"<= 2 attempts\" approval, per the orchestrator's ruling, because no single-arm declaration kind exists",
-  "scope": "one run of this pre-check as declared: 1 attempt per arm, seed 20261018 order, caps 1200 s per attempt and 2400 s total, on kyle19 under the operator's codex subscription login with provider-only egress (#442); no re-run, no other run",
-  "profile_inventory_digest": "sha256:4ee34823eb9f12c86d35f67d731b97a4c86dcd37ef77f9cada1ba78efe5f695a",
-  "mutated_digest": "sha256:edb26e56feac59ec548bc44afbbfeec54d970e95110c4506fa4be0cd9e8436ea",
-  "task_fixture": "discrimination/fixture",
-  "declaration_digest": "sha256:ab45fef07f6c9ab5cda4c3f4638ccce32a012e2a99b9f0d0fe8bafdd0bcd107d"
- },
+ "approval": null,
  "primary_endpoint": "Separate discrimination obligation: retain flow-check-honest in the task endpoint for intact versus degraded. Do not reuse the improvement subset. Actual discrimination execution/endpoint binding remains to be implemented and separately approved.",
  "run_store": "~/skillc-evidence/calibration-287/precheck-step6",
  "retention": {

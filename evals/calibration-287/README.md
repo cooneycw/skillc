@@ -80,8 +80,8 @@ That provenance also records the nuance that CPP `86641e8`'s flow-auto Step 6 ru
 
 | Declaration | Arms | Caps | Approval |
 |---|---|---|---|
-| `precheck-step6-declaration.json` (`sha256:ab45fef0…`) | 1 intact + 1 degraded | 1200 s / 2400 s | stamped: the owner's pre-approval of at most 2 attempts, "you can run it (approving in advance)", at 1 per arm per the orchestrator's ruling (no single-arm kind exists) |
-| `pilot-discrimination-step6-declaration.json` (`sha256:27aefafe…`) | 10 + 10, seed 20261006 | 1200 s / 24000 s | the owner's "approving full test now", **conditional on the pre-check**. Committed unapproved; stamped only after the condition passes |
+| `precheck-step6-declaration.json` (`sha256:45bbf3da…`) | 1 intact + 1 degraded | 1200 s / 2400 s | the owner's pre-approval of at most 2 attempts, "you can run it (approving in advance)", at 1 per arm per the orchestrator's ruling (no single-arm kind exists). Committed unapproved while the redesign is on hold; stamped at this digest on the orchestrator's go |
+| `pilot-discrimination-step6-declaration.json` (`sha256:6fcf156c…`) | 10 + 10, seed 20261006 | 1200 s / 24000 s | the owner's "approving full test now", **conditional on the pre-check**. Committed unapproved; stamped only after the condition passes |
 
 **Pre-check condition:** BOTH attempts are captured, each with a witnessed flow-check-plan run **and** a flow-check-summary run, and each grades `flow-check-honest` **not** UNKNOWN. A plan-only run fails it. Otherwise the full pilot does not run.
 
