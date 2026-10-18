@@ -1,0 +1,28 @@
+{
+  "branch": "issue-287-auto6-grader",
+  "counts": {
+    "accepted": 5,
+    "deferred": 2,
+    "rejected": 1
+  },
+  "extra_passes_reason": "orchestrator skillc-400: third pass scoped to the gate-green change and the <TREE> sample normalization (both unreviewed after pass 2) because they change the grader's composite PASS and the committed samples",
+  "head": "1b3c766",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "287",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 3,
+  "recorded_at": "2026-10-18T15:35:50Z",
+  "red_cases": {
+    "already_covered": 22,
+    "proposed": 30
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/18/rollout-2026-10-18T11-31-06-01a14fa3-5293-76f1-b6c4-577fda947422.jsonl",
+    "thread_id": "01a14fa3-5293-76f1-b6c4-577fda947422"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
