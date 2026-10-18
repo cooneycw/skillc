@@ -38,3 +38,24 @@ none - skillc/egress.py and tests/test_agent_egress_live.py are byte-identical b
 8. `docs/flow-runs/issue-460.md` - this record
 
 Scope: about 8 files, 1 PR. Risks: the loopback policy change (safe: only in-container processes are loopback peers), about 0.2-1 s more per prepare(), and the live file going from 4 to 5 tests.
+
+<!-- flow-run n=2 id=a6db5a6c9d69429189cbfc0954ff2fa3 -->
+## Run 2
+
+- Run-id:            a6db5a6c9d69429189cbfc0954ff2fa3
+- Run-start:         bdc94434d1062a438aa31b143d5f06cf3592cdf1
+- Issue:             #460 (follow-up; Refs #460 #462)
+- Base SHA:          bdc9443
+- Necessity verdict: Still needed
+- Approval:          granted
+- Approver:          skillc-400 (orchestrator, owner-delegated), "APPROVED", 2026-10-18
+- Recorded at:       2026-10-18T09:10:00Z
+
+### Section B evidence
+#434 rev 2's gate, at load ~18: tests/test_egress.py::test_red_case_the_start_line_is_written_only_once_the_proxy_listens raised IndexError (empty log read right after a successful connect); it passed 3 of 3 alone. Nothing on main fixes it.
+
+### Section C - the approved plan
+1. `tests/test_egress.py` - event-based `_wait_for_start_line`; the start-line test asserts the real invariant (a start line implies listening); the loopback-probe test waits for the start line before probing; reds (a) delay between bind and write, (b) pre-#460 start-before-bind still fails
+2. `docs/flow-runs/issue-460.md` - this run's record
+
+Scope: tests only, about 2 files. Risk: none to product code.
