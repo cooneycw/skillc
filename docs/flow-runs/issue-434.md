@@ -324,3 +324,31 @@ Scope: 5 files, docs only. Small.
 
 Risks:
 - A committed report must carry no machine identity; it is leak-checked before commit.
+
+<!-- flow-run n=9 id=47f08d11ff684bb693c4ac0eb14e7c84 -->
+## Run 9
+
+- Run-id:            47f08d11ff684bb693c4ac0eb14e7c84
+- Run-start:         c2090a8a64bf550c2bc765e7405512ed597c01bf
+- Issue:             #434
+- Base SHA:          c2090a8 (PR 3c's head; the plan record follows its Run 8)
+- Necessity verdict: Still needed
+- Approval:          granted
+- Approver:          skillc-400 (orchestrator, owner-delegated): prepare unstamped now; stamp only on the owner's relayed words
+- Recorded at:       2026-10-18T15:28:53Z
+
+### Section B evidence
+- The measurement approval package went to the orchestrator 2026-10-18, digest sha256:7eabd370b2d456293f41f39d74d91bac405cef9e31ec2b8fae80cba573e2956f, re-checked at a0edf35 (#469).
+- level3-live refuses a live run until the declaration carries an approval naming that digest and the profile inventory sha256:545e81be366ae0b81f257caf55c527ab27e0171448219c1f5d19c09edd2124f8.
+
+### Section C - the approved plan
+The #434 measurement's approval stamp, the #468 pattern. The stamp is added only after the owner's words are relayed.
+
+1. `evals/level3/campaign-434-live/measurement-declaration.json` - the approval block (by, at, source quoting the owner's words, attempts_per_case, profile_inventory_digest, declaration_digest); the digest is unchanged, as the approval is excluded from it.
+2. `tests/test_fixture_live.py` - the committed declaration authorizes as is at the packaged digest; the draft-is-unapproved test becomes this one.
+3. `evals/level3/campaign-434-live/README.md` - the status line: approved, by whom and when.
+
+Scope: 3 files, no code. Small.
+
+Risks:
+- A stamp on a digest other than the one the owner approved: the test pins the packaged digest literally.

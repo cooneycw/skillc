@@ -57,6 +57,15 @@ def test_the_committed_draft_parses_and_its_identities_are_the_repositorys() -> 
     assert declaration.shared["model"] == "gpt-6-astra" and declaration.shared["client"]["version"] == "0.157.1"
 
 
+#: The digest of the measurement approval package sent for the owner's decision
+#: (2026-10-18, re-checked at a0edf35). A stamp must name exactly this.
+PACKAGED_DIGEST = "sha256:7eabd370b2d456293f41f39d74d91bac405cef9e31ec2b8fae80cba573e2956f"
+
+
+def test_the_committed_declaration_is_the_packaged_one() -> None:
+    assert fl.load_declaration(DRAFT).digest == PACKAGED_DIGEST
+
+
 def test_the_committed_draft_is_not_approved() -> None:
     """It is a DRAFT: nothing may spend on it until the owner approves its digest."""
     with pytest.raises(fl.LiveRefused, match="no approval record"):
