@@ -54,7 +54,7 @@ the same SHAs everywhere):
 - a small `widget` parser whose `parse("")` raises `IndexError`;
 - a bare remote and a checkout whose `origin` points at it.
 
-CLEAN adds the fix commit `0a1acc9`. The fixture-service declaration (#276) holds:
+CLEAN adds the fix commit `e970b8b`. The fixture-service declaration (#276) holds:
 
 - issue #1, the same in both cases;
 - for CLEAN only, merged PR #2.

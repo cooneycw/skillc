@@ -110,9 +110,10 @@ _MAKEFILE = '''# Quality gates for widget. The trial has python3 and make, and n
 lint:
 \tpython3 -B -c "import ast, pathlib, sys; ps = sorted(pathlib.Path('.').rglob('*.py')); ps or sys.exit('lint: no Python files found'); [ast.parse(p.read_text(), str(p)) for p in ps]"
 
-# test: runs the unit tests with unittest.
+# test: runs the unit tests with unittest. Discovering no test, or running only skipped
+# ones, is a failure: Python 3.11's `unittest discover` reports OK on an empty suite.
 test:
-\tpython3 -B -m unittest discover -s tests -q
+\tpython3 -B -c "import sys, unittest; s = unittest.defaultTestLoader.discover('tests'); s.countTestCases() or sys.exit('test: no tests found'); r = unittest.TextTestRunner().run(s); sys.exit(0 if r.wasSuccessful() and r.testsRun > len(r.skipped) else 1)"
 
 # typecheck: standard-library Python has NO type checker. This only imports the
 # package, which catches import-time errors; it is far weaker than mypy.

@@ -81,12 +81,12 @@ TIMEOUT_SECONDS = 60
 #: The fixture's own facts, fixed by `builder/build.py`'s pinned dates and
 #: identity (tests/test_flow_auto_necessity_task.py checks they still match).
 FIX_PR = 2
-FIX_COMMIT = "0a1acc933bef88b486f917ea3794a72cc6dd08b8"
-_INITIAL = "29345c6c3c9b71776f44b2d75654f8b1542d574e"
+FIX_COMMIT = "e970b8b55d26c5c3076b7b0e20e35193087690ad"
+_INITIAL = "60bacc9a8cbddd9d3b5b3fba5b1f84bc0396d079"
 BASE = {
-    "clean": {"commit": FIX_COMMIT, "tree": "a3d833393c1a56eb801ec1f6b7e3b46e445366fb",
+    "clean": {"commit": FIX_COMMIT, "tree": "b234ef84ae13d652251735231b89ccd11c51f424",
               "history": frozenset({_INITIAL, FIX_COMMIT})},
-    "twin": {"commit": _INITIAL, "tree": "7048a65866da462eda95143ecaed847e6cbacf58",
+    "twin": {"commit": _INITIAL, "tree": "512b0f910cae5f7434be6bb63ccc657cfb124a63",
              "history": frozenset({_INITIAL})},
 }
 REPOSITORY = "fixture/widget"
