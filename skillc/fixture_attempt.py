@@ -94,6 +94,9 @@ class FixtureSession:
     git: dict[str, Any] | None = None
     git_unreadable: str | None = None
     failure: str | None = None
+    #: #279: the first turn plus each delivered controller turn; the guard's
+    #: nested verdict is judged against it. Set by `run_one_attempt`.
+    expected_top_level: int = 1
     _finishing: bool = False
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
@@ -187,7 +190,8 @@ class FixtureSession:
         self.guard.finalize()
 
     def guard_record(self) -> dict[str, Any]:
-        return cg.summarize(self.attempt_id, list(self.guard.decisions), self.guard.channel_unavailable)
+        return cg.summarize(self.attempt_id, list(self.guard.decisions), self.guard.channel_unavailable,
+                            expected_top_level=self.expected_top_level)
 
     def extras(self, final_report: str | None) -> dict[str, object]:
         return {"case": self.fixture.case, "service": self.record, "git": self.git,

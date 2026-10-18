@@ -97,9 +97,10 @@ class VirtualMountBackend(TrackingDockerBackend):
         return super().candidate_can_write_in_attempt(handle, path, timeout)
 
     def execute(self, handle: object, argv: Sequence[str], limits: Limits,
-                cancel: Callable[[], bool] | None = None, stdin: bytes | None = None) -> ExecuteResult:
+                cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,
+                keep_running: bool = False) -> ExecuteResult:
         self.executed.append(handle)
-        return super().execute(handle, argv, limits, cancel, stdin)
+        return super().execute(handle, argv, limits, cancel, stdin, keep_running)
 
     def trigger_log(self, handle: object) -> list | None:
         self.drained.append(handle)

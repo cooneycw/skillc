@@ -463,7 +463,8 @@ def _locked(fn: Callable[Concatenate[Experiment, _P], _R]) -> Callable[Concatena
 #: capture recorded after a real `allocate_workspace` call on the same attempt would be
 #: picked up as the workspace record and crash with KeyError (confirmed) or, for a
 #: path/nonce-shaped forgery, silently misdirect cleanup.
-_DETAIL_EVENTS = ("workspace", "git-fixture-captured", "backend-teardown", "backend-identity")
+_DETAIL_EVENTS = ("workspace", "git-fixture-captured", "backend-teardown", "backend-identity",
+                  "controller-turn")
 
 
 def _read_object(root: Path, digest: str) -> bytes:

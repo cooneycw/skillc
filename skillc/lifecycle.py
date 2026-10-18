@@ -99,17 +99,26 @@ Stdlib only (AGENTS.md).
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import os
 import re
 import secrets
 import shutil
 import tempfile
+import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from . import trial
-from .backend import BackendUnavailable, Confirmation, ExecuteResult, ExecutionBackend, Limits
+from .backend import (
+    BackendUnavailable,
+    Confirmation,
+    ExecuteResult,
+    ExecutionBackend,
+    Limits,
+    TurnCapableBackend,
+)
 
 #: The key `surface` carries the per-attempt liveness nonce under, passed to
 #: `install()`. Never sent in the prompt or any other input the subject reads
@@ -230,6 +239,63 @@ def _ensure_spool_files(experiment: trial.Experiment, attempt_id: str) -> None:
             path.touch(mode=trial.FILE_MODE)
 
 
+#: `ExecuteResult` reasons meaning the exec never started at all.
+_NEVER_STARTED = frozenset({"launch-failed", "attempt-not-running"})
+
+
+def _run_turns(
+    backend: ExecutionBackend, handle: object, experiment: trial.Experiment, attempt_id: str, argv: Sequence[str],
+    limits: Limits, cancel: Callable[[], bool] | None,
+    next_turn: Callable[[ExecutionBackend, object, int, ExecuteResult], Sequence[str] | None],
+) -> ExecuteResult:
+    """#279: one attempt as controller-delivered turns, each in the SAME
+    still-running container (`TurnCapableBackend.execute_turn`). A further turn
+    is asked for only after the previous one EXITED with code 0; `next_turn`
+    returns its argv, or `None` for no more. Every turn shares the attempt's
+    one wall budget (`limits.timeout` from the first exec), so turns never
+    extend an attempt. `end_attempt` runs in a `finally`: an exception, or a
+    controller crash between turns, still leaves no kept-running container -
+    `confirm_stopped()` then verifies it as for any attempt. Each turn is a
+    pair of `controller-turn` detail events (dispatched, then ended with
+    `delivered` = it actually launched); the returned result is the last
+    turn's, which the stop record describes."""
+    assert isinstance(backend, TurnCapableBackend)
+    started_at = time.monotonic()
+    try:
+        result = backend.execute_turn(handle, argv, limits, cancel)
+        assert isinstance(result, ExecuteResult)
+        turn = 1
+        while result.reason == "exited" and result.exit_code == 0:
+            if cancel is not None and cancel():
+                # Checked BEFORE the next turn is asked for or launched: an
+                # operator stop between turns must never let an approval start
+                # (#279 counter-model review). The attempt reads as cancelled.
+                experiment.record(attempt_id, "controller-turn", index=turn + 1, delivered=False,
+                                  reason="cancelled between turns")
+                result = dataclasses.replace(result, reason="operator-cancelled")
+                break
+            nxt = next_turn(backend, handle, turn, result)
+            if nxt is None:
+                break
+            remaining = limits.timeout - (time.monotonic() - started_at)
+            if remaining <= 0:
+                experiment.record(attempt_id, "controller-turn", index=turn + 1, delivered=False,
+                                  reason="the attempt's wall budget was spent before this turn")
+                break
+            turn += 1
+            experiment.record(attempt_id, "controller-turn", index=turn, dispatched=True)
+            result = backend.execute_turn(handle, list(nxt), dataclasses.replace(limits, timeout=remaining), cancel)
+            assert isinstance(result, ExecuteResult)
+            # Delivered only if the resume actually launched (#279 counter-
+            # model review, pass 2): a turn the backend never started is not
+            # an approval the agent received, nor a launch the guard expects.
+            experiment.record(attempt_id, "controller-turn", index=turn, ended=result.reason,
+                              exit_code=result.exit_code, delivered=result.reason not in _NEVER_STARTED)
+        return result
+    finally:
+        backend.end_attempt(handle)
+
+
 def run_through_backend(
     backend: ExecutionBackend,
     experiment: trial.Experiment,
@@ -245,6 +311,7 @@ def run_through_backend(
     nonce: str | None = None,
     transcript_for_capture: Callable[[], trial.TranscriptEvidence | None] | None = None,
     imports_for_capture: Callable[[], Sequence[trial.Import]] | None = None,
+    next_turn: Callable[[ExecutionBackend, object, int, ExecuteResult], Sequence[str] | None] | None = None,
 ) -> dict[str, object]:
     """Drive `attempt_id` through `backend` from prepare to teardown, and
     finalize it. Returns `trial.finalize`'s lifecycle record, plus
@@ -399,7 +466,10 @@ def run_through_backend(
 
                 experiment.record(attempt_id, "dispatched")
                 experiment.record(attempt_id, "started")
-                result = backend.execute(handle, argv, limits, cancel)
+                if next_turn is None:
+                    result = backend.execute(handle, argv, limits, cancel)
+                else:
+                    result = _run_turns(backend, handle, experiment, attempt_id, argv, limits, cancel, next_turn)
                 assert isinstance(result, ExecuteResult)
                 if result.reason != "exited":
                     experiment.record(attempt_id, "stop-requested", reason=result.reason)

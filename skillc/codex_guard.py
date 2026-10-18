@@ -13,13 +13,16 @@ COUNTS, AND WHEN THEY MEAN SOMETHING (orchestrator ruling):
   ancestor.
 - `ancestry_unknown`: `refused-ancestry-unknown`, a call the guard could not
   place, refused rather than passed.
-- `suspected`: top-level launches beyond the first. The harness launches the
-  agent exactly once, so a second `passed-top-level` is a codex started with
-  no codex ancestor, which is what a double-fork reparent to PID 1 looks like.
-  It is reported as suspected, not confirmed.
+- `suspected`: top-level launches beyond the EXPECTED count. The harness
+  launches the agent once, plus once per controller turn it delivers (#279:
+  each approval is a fresh top-level `codex exec ... resume`), so it expects
+  `controller_turns.expected_top_level(delivered)` launches. Any more is a
+  codex started with no codex ancestor, which is what a double-fork reparent
+  to PID 1 looks like. It is reported as suspected, not confirmed.
 - `status`:
-  - `zero` only with a healthy channel AND exactly one `passed-top-level` AND
-    nothing refused;
+  - `zero` only with a healthy channel AND exactly the expected number of
+    `passed-top-level` AND nothing refused. FEWER than expected is `unknown`:
+    a delivered turn the guard never saw did not come through it;
   - `observed` when any of the three counts is above zero;
   - `unknown` otherwise: an unhealthy channel, or no top-level launch recorded
     at all, which means the guard's send failed or the guard never ran.
@@ -100,22 +103,27 @@ class CodexGuardSession:
             return summarize(self.attempt_id, list(self.decisions), self.channel_unavailable)
 
 
-def summarize(attempt_id: str, decisions: list[dict[str, Any]], channel_unavailable: bool) -> dict[str, Any]:
+def summarize(attempt_id: str, decisions: list[dict[str, Any]], channel_unavailable: bool,
+              expected_top_level: int = 1) -> dict[str, Any]:
     top = sum(1 for d in decisions if d["decision"] == "passed-top-level")
     confirmed = sum(1 for d in decisions if d["decision"] == "refused-nested")
     ancestry_unknown = sum(1 for d in decisions if d["decision"] == "refused-ancestry-unknown")
-    suspected = max(0, top - 1)
+    suspected = max(0, top - expected_top_level)
     if confirmed or ancestry_unknown or suspected:
         status = "observed"
-    elif channel_unavailable or top != 1:
+    elif channel_unavailable or top != expected_top_level:
         status = "unknown"
     else:
         status = "zero"
+    nested: dict[str, Any] = {"status": status, "top_level": top, "confirmed": confirmed, "suspected": suspected,
+                              "ancestry_unknown": ancestry_unknown}
+    if expected_top_level != 1:
+        # Only a multi-turn attempt (#279) records it, so a single-turn
+        # attempt's stored record is byte-identical to before.
+        nested["expected_top_level"] = expected_top_level
     return {
         "kind": "codex-guard", "attempt_id": attempt_id, "decisions": decisions,
-        "channel_unavailable": channel_unavailable,
-        "nested": {"status": status, "top_level": top, "confirmed": confirmed, "suspected": suspected,
-                   "ancestry_unknown": ancestry_unknown},
+        "channel_unavailable": channel_unavailable, "nested": nested,
     }
 
 
