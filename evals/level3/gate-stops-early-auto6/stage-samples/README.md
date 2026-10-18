@@ -7,7 +7,7 @@ cd <tree> && git init -q . && \
   FLOW_GATE_CPP_DIR=<CPP_DIR> bash <CPP_DIR>/scripts/flow-finish-gate.sh
 ```
 
-`samples.json` names each tree, its exit code and the sha256 of the committed bytes. The only edit is the absolute snapshot path, replaced by `<CPP_DIR>`. `qualify.py` refuses a sample whose bytes no longer match its digest, and feeds each one to a real `GateWitness` whose `flow-finish` gate is read by `skillc.stage_capture.capture_stages(plan="finish")`.
+`samples.json` names each tree, its exit code and the sha256 of the committed bytes. Two edits only: the absolute snapshot path is replaced by `<CPP_DIR>`, and the capture tree's absolute path (which carried the capturing session's scratch location) by `<TREE>`. `qualify.py` refuses a sample whose bytes no longer match its digest, and feeds each one to a real `GateWitness` whose `flow-finish` gate is read by `skillc.stage_capture.capture_stages(plan="finish")`.
 
 | Sample | Verdict | Exit |
 |---|---|---|
