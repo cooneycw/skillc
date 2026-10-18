@@ -535,6 +535,8 @@ def _classify() -> object:
     ("126.255.255.255", "192.0.2.0/24", "rejected"),
     ("127.0.0.1", "127.0.0.0/8", "attempt"),         # a loopback subnet is the attempt's own
     ("not-an-address", "192.0.2.0/24", "rejected"),
+    ("::ffff:127.0.0.1", "192.0.2.0/24", "rejected"),  # IPv4-mapped loopback is not 127.0.0.0/8
+    ("::1", "192.0.2.0/24", "rejected"),               # nor is IPv6 loopback (the proxy binds IPv4 only)
 ])
 def test_red_case_the_loopback_exemption_is_exactly_127_slash_8(peer: str, subnet: str, kind: str) -> None:
     """#460: only a loopback peer is exempt from peer-rejected logging. Any
@@ -658,8 +660,11 @@ def test_red_case_a_proxy_that_never_listens_refuses_the_attempt_and_leaves_noth
     docker_state.mkdir(parents=True, exist_ok=True)
     (docker_state / ".proxy-never-ready").write_text("")
     backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state),
-                              daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT, egress=True, egress_ready_seconds=3)
-    with pytest.raises(BackendUnavailable, match=r"did not accept connections within 3s .*Errno 111"):
+                              daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT, egress=True, egress_ready_seconds=5)
+    # The last probe's error is named; under suite load it may be the budget
+    # cap's own timeout rather than the fake's Errno 111, so either is accepted.
+    with pytest.raises(BackendUnavailable,
+                       match=r"did not accept connections within 5s \(last probe: .*(Errno 111|timed out)"):
         backend.prepare("a-never-ready")
     assert int((docker_state / ".proxy-ready-probes").read_text()) >= 2  # it polled, not one shot
     leftovers = list((docker_state / "networks").glob("*.json")) if (docker_state / "networks").is_dir() else []

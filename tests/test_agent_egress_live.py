@@ -239,12 +239,12 @@ def test_the_proxy_denies_github(attempt: tuple[d.DockerBackend, d._Handle]) -> 
     targets = ("https://github.com/", "https://raw.githubusercontent.com/cooneycw/skillc/main/README.md")
     results = {target: _probe(handle, "https", target) for target in targets}
     refused = [t for t, r in results.items() if r["result"] == "error" and "403" in str(r.get("error"))]
+    seen = _observed(backend, handle, results)  # before ANY assertion: destroy() takes the log with it (#460)
     if BREAK_MODE == "allow-all":
         # The break itself, shown first as a hard assertion: GitHub really
         # answered through the widened proxy. Only then can the xfail below
         # come from the property failing for this reason.
-        assert all(r["result"] == "http" for r in results.values()), "setup: allow-all did not reach GitHub"
-    seen = _observed(backend, handle, results)  # before _require: destroy() takes the log with it
+        assert all(r["result"] == "http" for r in results.values()), f"setup: allow-all did not reach GitHub - observed: {seen}"
     _require(sorted(refused) == sorted(targets), _DenialFailed,
              f"the proxy must refuse github.com and raw.githubusercontent.com with 403 - observed: {seen}")
     log = backend.egress_log(handle)
@@ -259,11 +259,11 @@ def test_the_proxy_denies_github(attempt: tuple[d.DockerBackend, d._Handle]) -> 
 def test_a_client_that_ignores_the_proxy_cannot_resolve_names(attempt: tuple[d.DockerBackend, d._Handle]) -> None:
     backend, handle = attempt
     resolve = _probe(handle, "resolve", "github.com", use_proxy=False)
+    seen = _observed(backend, handle, {"resolve github.com": resolve})  # before ANY assertion (#460)
     if BREAK_MODE == "dns-hosts":
-        assert resolve["result"] == "resolved", "setup: dns-hosts did not make github.com resolve"
+        assert resolve["result"] == "resolved", f"setup: dns-hosts did not make github.com resolve - observed: {seen}"
     if resolve["result"] == "error":
-        assert resolve.get("error") == "gaierror", "inconclusive: resolution failed for a non-DNS reason"
-    seen = _observed(backend, handle, {"resolve github.com": resolve})
+        assert resolve.get("error") == "gaierror", f"inconclusive: resolution failed for a non-DNS reason - observed: {seen}"
     _require(resolve["result"] == "error", _ResolutionFailed,
              f"github.com must not resolve inside the agent - observed: {seen}")
 
@@ -273,15 +273,15 @@ def test_a_client_that_ignores_the_proxy_cannot_resolve_names(attempt: tuple[d.D
 def test_a_client_that_ignores_the_proxy_has_no_route_out(attempt: tuple[d.DockerBackend, d._Handle]) -> None:
     backend, handle = attempt
     direct = _probe(handle, "direct", GITHUB_ADDRESS, use_proxy=False)
+    seen = _observed(backend, handle, {"direct to a GitHub address": direct})  # before ANY assertion (#460)
     if BREAK_MODE == "bridge-network":
-        assert direct["result"] == "connected", "setup: bridge-network gave no direct route"
+        assert direct["result"] == "connected", f"setup: bridge-network gave no direct route - observed: {seen}"
     if direct["result"] == "error":
         # Only "no route" is isolation. A refusal or a timeout means a route
         # existed and the far end did not answer - an outage there would read
         # as isolation here, so it is inconclusive, a hard failure.
         error = str(direct.get("error"))
         assert "Errno 101" in error or "Errno 113" in error or "unreachable" in error.lower(), \
-            "inconclusive: the direct connection failed for a reason other than no route"
-    seen = _observed(backend, handle, {"direct to a GitHub address": direct})
+            f"inconclusive: the direct connection failed for a reason other than no route - observed: {seen}"
     _require(direct["result"] == "error", _IsolationFailed,
              f"a direct connection to GitHub must have no route - observed: {seen}")
