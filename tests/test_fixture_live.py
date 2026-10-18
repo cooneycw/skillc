@@ -131,6 +131,8 @@ def _clean_record(**changes: Any) -> dict[str, Any]:
     record: dict[str, Any] = {
         "disposition": "captured",
         "observation": {"server_side_tool_uses": [],
+                        "transcript_response_items_inspected": 4,
+                        "transcript_line_types": {"response_item/message": 4, "session_meta": 1},
                         "egress": {"status": "read", "allowlist_digest": ALLOWLIST, "unparsed_lines": 0,
                                    "allowed": {"chatgpt.com:443": 12, "auth.openai.com:443": 1}, "denied": {}},
                         "run_metadata": {"model": "gpt-6-astra", "reasoning_effort": "high",
@@ -160,6 +162,9 @@ def test_a_clean_dispatched_attempt_triggers_no_stop() -> None:
 @pytest.mark.parametrize(("change", "match"), [
     ({"observation.server_side_tool_uses": ["web_search_call"]}, "server-side tool use observed"),
     ({"observation.server_side_tool_uses": _DELETE}, "census is unavailable"),
+    ({"observation.transcript_response_items_inspected": 0}, "census is incomplete"),
+    ({"observation.transcript_line_types": {"<unparseable>": 1, "response_item/message": 3}}, "census is incomplete"),
+    ({"observation.transcript_census_error": "ValueError: x"}, "census is incomplete"),
     ({"observation.egress": {"status": "unread", "reason": "gone"}}, "egress proxy log was not read"),
     ({"observation.egress.allowlist_digest": "sha256:" + "1" * 64}, "the proxy recorded allowlist"),
     ({"observation.egress.allowed": {"chatgpt.com:443": 3, "github.com:443": 1}}, "outside #442's allowlist"),
@@ -299,3 +304,41 @@ def test_rehearsal_success_is_mode_specific() -> None:
     assert not fl.rehearsal_succeeded(unavailable, scheduled=2, mode="actor")
     assert fl.rehearsal_succeeded(captured, scheduled=2, mode="actor")
     assert not fl.rehearsal_succeeded(captured, scheduled=2, mode="dry")
+
+
+def _record_from_raw(raw: bytes) -> dict[str, Any]:
+    """A clean record whose census comes from `raw` through the production parser."""
+    from skillc import agent_trial as at
+    census = at.transcript_census("codex", raw.decode("utf-8", errors="replace"))
+    census["server_side_tool_uses"] = at.server_side_tool_uses(raw, census.get("transcript_line_types"))  # type: ignore[arg-type]
+    record = _clean_record()
+    for key in ("transcript_response_items_inspected", "transcript_line_types"):
+        record["observation"].pop(key)
+    record["observation"].update(census)
+    return record
+
+
+_SESSION = json.dumps({"type": "session_meta", "payload": {"cli_version": "0.157.1"}})
+_MESSAGE = json.dumps({"type": "response_item", "payload": {"type": "message", "role": "assistant",
+                                                            "content": [{"type": "output_text", "text": "done"}]}})
+
+
+@pytest.mark.parametrize(("raw", "stops"), [
+    ((_SESSION + "\n" + _MESSAGE + "\n").encode(), False),  # the green case
+    (b"", True),  # an empty transcript inspects nothing
+    ((_SESSION + "\n" + _MESSAGE + '\n{"type":"response_item","payload":{"type":"web_search_call"').encode(), True),
+])
+def test_the_census_must_cover_the_transcript_through_the_production_parser(raw: bytes, stops: bool) -> None:
+    trigger = fl.containment_trigger(_record_from_raw(raw), allowlist_digest=ALLOWLIST)
+    assert (trigger is not None) is stops, trigger
+
+
+def test_a_rehearsal_is_identifiable_in_the_ledger_before_any_report(tmp_path: Path) -> None:
+    declaration = fl.load_declaration(DRAFT)
+    experiment, _, _ = fl.run_live(declaration, root=ROOT, run_dir=tmp_path, treatment=_treatment(),
+                                   image_digest=None, backends=lambda: (None, None), client_argv=["codex", "exec"],
+                                   credential_explicit_path=None, rehearse="dry")
+    ledger = json.loads((experiment.root / trial.LEDGER).read_text())
+    assert ledger["experiment_id"].startswith(f"{fl.EXPERIMENT_LABEL}-rehearsal-dry-")
+    configs = [json.loads(trial.read_object(experiment, t["config"]["digest"])) for t in ledger["trials"]]
+    assert {(c["mode"], c["approved"]) for c in configs} == {("dry", False)}

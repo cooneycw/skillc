@@ -275,8 +275,16 @@ def prompt(declaration: LiveDeclaration, root: Path) -> str:
 
 
 def plan_live(declaration: LiveDeclaration, store: Path, *, root: Path, treatment: cr.Treatment,
-              image_digest: str | None) -> tuple[trial.Experiment, list[mp.ScheduledAttempt]]:
-    """One trial per attempt through the real controller, in the declared case order."""
+              image_digest: str | None, mode: str = "live",
+              approved: bool = True) -> tuple[trial.Experiment, list[mp.ScheduledAttempt]]:
+    """One trial per attempt through the real controller, in the declared case
+    order. The run's `mode` (`live`, or a rehearsal) and whether its
+    declaration was approved are written into the LEDGER at plan time, before
+    any dispatch, so a rehearsal's retained evidence is identifiable as
+    scripted even if the run is interrupted before its report (counter-model
+    review, pass 2)."""
+    if mode != "live" and mode not in REHEARSALS:
+        raise LiveRefused(f"mode must be 'live' or one of {REHEARSALS}")
     if not treatment.skill_digests:
         raise LiveRefused("the treatment has no skill_digests to pin; refusing to plan it unpinned")
     grader = verify.GraderDef.load(root / TASK_PATH)
@@ -292,11 +300,12 @@ def plan_live(declaration: LiveDeclaration, store: Path, *, root: Path, treatmen
             "client": {"name": CLIENT, "version": str(shared["client"]["version"])},
             "image": {"digest": image_digest or UNKNOWN},
             "config": {"case": case, "repeat": counts[case], "position": position,
-                       "declaration_digest": declaration.digest},
+                       "declaration_digest": declaration.digest, "mode": mode, "approved": approved},
             "attempts": 1, "skill_digests": [dict(pin) for pin in treatment.skill_digests],
         })
     try:
-        experiment = trial.plan({"experiment": EXPERIMENT_LABEL, "trials": trials}, store)
+        label = EXPERIMENT_LABEL if mode == "live" else f"{EXPERIMENT_LABEL}-rehearsal-{mode}"
+        experiment = trial.plan({"experiment": label, "trials": trials}, store)
     except trial.Refused as exc:
         raise LiveRefused(f"the controller refused the schedule: {exc}") from exc
     pairs = list(experiment.attempts())
@@ -331,6 +340,18 @@ def containment_trigger(record: Mapping[str, Any], *, allowlist_digest: str) -> 
         return "the server-side tool census is unavailable for a dispatched attempt"
     if uses:
         return f"server-side tool use observed ({', '.join(map(str, uses))})"
+    # An empty list is a clean census only with affirmative coverage: response
+    # items were inspected, the census raised nothing, and no transcript line
+    # was skipped as unparseable (a truncated server-side call parses as
+    # nothing). Counter-model review, pass 2.
+    inspected = obs.get("transcript_response_items_inspected")
+    line_types = obs.get("transcript_line_types")
+    skipped = ({k: v for k, v in line_types.items() if k in ("<unparseable>", "<non-object>")}
+               if isinstance(line_types, Mapping) else None)
+    if (obs.get("transcript_census_error") or isinstance(inspected, bool) or not isinstance(inspected, int)
+            or inspected < 1 or skipped is None or skipped):
+        return (f"the server-side tool census is incomplete (response items inspected {inspected!r}, "
+                f"skipped lines {skipped!r}, error {obs.get('transcript_census_error')!r})")
     summary = obs.get("egress")
     if not isinstance(summary, Mapping) or summary.get("status") != "read":
         reason = summary.get("reason") if isinstance(summary, Mapping) else "no egress evidence"
@@ -391,6 +412,12 @@ def run_live(declaration: LiveDeclaration, *, root: Path, run_dir: Path, treatme
     if rehearse is not None and rehearse not in REHEARSALS:
         raise LiveRefused(f"rehearse must be one of {REHEARSALS}")
     require_approved(declaration, root, approval_required=rehearse is None)
+    approved = True
+    if rehearse is not None:
+        try:
+            require_approved(declaration, root)
+        except LiveRefused:
+            approved = False
     if rehearse is None and total_seconds is not None:
         raise LiveRefused("a live run cannot override the declared total_seconds cap")
     shared = declaration.shared
@@ -403,7 +430,8 @@ def run_live(declaration: LiveDeclaration, *, root: Path, run_dir: Path, treatme
     total = float(shared["total_seconds"]) if total_seconds is None else total_seconds
 
     store = trial.open_store(run_dir / "store", forbidden=[])
-    experiment, schedule = plan_live(declaration, store, root=root, treatment=treatment, image_digest=image_digest)
+    experiment, schedule = plan_live(declaration, store, root=root, treatment=treatment, image_digest=image_digest,
+                                     mode=rehearse or "live", approved=approved)
     stop = Stop()
     outcomes: list[mp.AttemptOutcome] = []
 
