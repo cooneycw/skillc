@@ -262,6 +262,17 @@ _CICD_PROFILE_SKIP_CASE = (
     '<skipped message="no reachable Docker daemon in this environment"/></testcase>'
 )
 
+#: #282: the baseline-aware deploy-verification proof's own floor entry.
+_CICD_DEPLOY_VERIFY_PASS_CASE = (
+    '<testcase classname="tests.test_cicd_deploy_verify_live" '
+    'name="test_deploy_verification_compares_against_a_pre_deploy_baseline" time="60.0"></testcase>'
+)
+_CICD_DEPLOY_VERIFY_SKIP_CASE = (
+    '<testcase classname="tests.test_cicd_deploy_verify_live" '
+    'name="test_deploy_verification_compares_against_a_pre_deploy_baseline" time="0.02">'
+    '<skipped message="no reachable Docker daemon in this environment"/></testcase>'
+)
+
 _FLOOR = (
     "tests.test_decide_reply_channel_live",
     "tests.test_trial_image_build_live",
@@ -275,6 +286,7 @@ _FLOOR = (
     "tests.test_real_docker_cleanup_live",
     "tests.test_agent_egress_live",
     "tests.test_cicd_profile_live",
+    "tests.test_cicd_deploy_verify_live",
 )
 
 
@@ -290,7 +302,7 @@ def test_the_other_eight_floor_files_pass_but_gate_witness_all_skipped_is_failur
     extend this test's fixtures is caught here (as a missing-testcase ERROR,
     not a silent FAILURE/SUCCESS misread) rather than passing by accident."""
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current twelve-file floor - update it if the floor changes"
+        "this test assumes the current thirteen-file floor - update it if the floor changes"
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         path = _write(
@@ -299,7 +311,7 @@ def test_the_other_eight_floor_files_pass_but_gate_witness_all_skipped_is_failur
                 _PASS_CASE, _IMAGE_BUILD_PASS_CASE, _GATE_OVERLAY_PASS_CASE,
                 _GATE_WITNESS_SKIP_CASE, _COLDINSTALL_PASS_CASE,
                 _IMAGE_TOOLS_PASS_CASE, _CLOSURE_PREFLIGHT_PASS_CASE,
-                _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE,
+                _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE,
             ),
         )
         result = c.verdict(path)  # module default: all eleven files
@@ -338,7 +350,7 @@ def test_the_other_eight_floor_files_pass_but_coldinstall_all_skipped_is_failure
     must give FAILURE, never SUCCESS - a skip counts as failure for a
     floor file, by design."""
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current twelve-file floor - update it if the floor changes"
+        "this test assumes the current thirteen-file floor - update it if the floor changes"
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         path = _write(
@@ -347,7 +359,7 @@ def test_the_other_eight_floor_files_pass_but_coldinstall_all_skipped_is_failure
                 _PASS_CASE, _IMAGE_BUILD_PASS_CASE, _GATE_WITNESS_PASS_CASE,
                 _GATE_OVERLAY_PASS_CASE, _COLDINSTALL_SKIP_CASE,
                 _IMAGE_TOOLS_PASS_CASE, _CLOSURE_PREFLIGHT_PASS_CASE,
-                _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE,
+                _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE,
             ),
         )
         result = c.verdict(path)  # module default: all eleven files
@@ -360,7 +372,7 @@ def test_the_other_eight_floor_files_pass_but_trial_image_tools_all_skipped_is_f
     other declared file executes and passes; only the trial-image
     tool-probe file goes silent (no reachable Docker daemon)."""
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current twelve-file floor - update it if the floor changes"
+        "this test assumes the current thirteen-file floor - update it if the floor changes"
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         path = _write(
@@ -369,7 +381,7 @@ def test_the_other_eight_floor_files_pass_but_trial_image_tools_all_skipped_is_f
                 _PASS_CASE, _IMAGE_BUILD_PASS_CASE, _GATE_WITNESS_PASS_CASE,
                 _GATE_OVERLAY_PASS_CASE, _COLDINSTALL_PASS_CASE,
                 _IMAGE_TOOLS_SKIP_CASE, _CLOSURE_PREFLIGHT_PASS_CASE,
-                _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE,
+                _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE,
             ),
         )
         result = c.verdict(path)  # module default: all eleven files
@@ -382,7 +394,7 @@ def test_the_other_eight_floor_files_pass_but_closure_preflight_all_skipped_is_f
     this test module's own fixtures just added - every other declared
     file executes and passes; only the new entry goes silent."""
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current twelve-file floor - update it if the floor changes"
+        "this test assumes the current thirteen-file floor - update it if the floor changes"
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         path = _write(
@@ -391,7 +403,7 @@ def test_the_other_eight_floor_files_pass_but_closure_preflight_all_skipped_is_f
                 _PASS_CASE, _IMAGE_BUILD_PASS_CASE, _GATE_WITNESS_PASS_CASE,
                 _GATE_OVERLAY_PASS_CASE, _COLDINSTALL_PASS_CASE,
                 _IMAGE_TOOLS_PASS_CASE, _CLOSURE_PREFLIGHT_SKIP_CASE,
-                _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE,
+                _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE,
             ),
         )
         result = c.verdict(path)  # module default: all eleven files
@@ -405,7 +417,7 @@ def test_the_other_eight_floor_files_pass_but_cwd_confinement_all_skipped_is_fai
     daemon). Before this entry joined the floor, this exact report read
     SUCCESS - the file was tagged `real_docker` but never certified."""
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current twelve-file floor - update it if the floor changes"
+        "this test assumes the current thirteen-file floor - update it if the floor changes"
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         path = _write(
@@ -414,7 +426,7 @@ def test_the_other_eight_floor_files_pass_but_cwd_confinement_all_skipped_is_fai
                 _PASS_CASE, _IMAGE_BUILD_PASS_CASE, _GATE_WITNESS_PASS_CASE,
                 _GATE_OVERLAY_PASS_CASE, _COLDINSTALL_PASS_CASE,
                 _IMAGE_TOOLS_PASS_CASE, _CLOSURE_PREFLIGHT_PASS_CASE,
-                _CWD_CONFINEMENT_SKIP_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE,
+                _CWD_CONFINEMENT_SKIP_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE,
             ),
         )
         result = c.verdict(path)  # module default: all eleven files
@@ -428,7 +440,7 @@ def test_the_other_eight_floor_files_pass_but_nested_dirs_all_skipped_is_failure
     joined the floor, this exact report read SUCCESS (counter-model review:
     the file was tagged `real_docker` but never certified)."""
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current twelve-file floor - update it if the floor changes"
+        "this test assumes the current thirteen-file floor - update it if the floor changes"
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         path = _write(
@@ -437,7 +449,7 @@ def test_the_other_eight_floor_files_pass_but_nested_dirs_all_skipped_is_failure
                 _PASS_CASE, _IMAGE_BUILD_PASS_CASE, _GATE_WITNESS_PASS_CASE,
                 _GATE_OVERLAY_PASS_CASE, _COLDINSTALL_PASS_CASE,
                 _IMAGE_TOOLS_PASS_CASE, _CLOSURE_PREFLIGHT_PASS_CASE,
-                _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_SKIP_CASE, _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE,
+                _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_SKIP_CASE, _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE,
             ),
         )
         result = c.verdict(path)  # module default: all eleven files
@@ -453,7 +465,7 @@ def test_the_other_eight_floor_files_pass_but_nested_dirs_all_skipped_is_failure
                 '<testcase classname="tests.test_install_nested_dirs_live" '
                 'name="test_the_candidate_can_create_files_in_installed_nested_directories" time="1.0">'
                 '<failure message="Permission denied"/></testcase>',
-                _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE,
+                _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE,
             ),
         )
         assert c.verdict(failing).status == c.FAILURE
@@ -463,7 +475,7 @@ def test_the_other_eight_floor_files_pass_but_nested_dirs_all_skipped_is_failure
                 _PASS_CASE, _IMAGE_BUILD_PASS_CASE, _GATE_WITNESS_PASS_CASE,
                 _GATE_OVERLAY_PASS_CASE, _COLDINSTALL_PASS_CASE,
                 _IMAGE_TOOLS_PASS_CASE, _CLOSURE_PREFLIGHT_PASS_CASE,
-                _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE,
+                _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE,
             ),
         )
         assert c.verdict(passing).status == c.SUCCESS
@@ -511,13 +523,13 @@ def test_the_other_nine_floor_files_pass_but_cleanup_live_all_skipped_is_failure
     verdict is FAILURE, never a green the new proof did not earn."""
     import tempfile
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current twelve-file floor - update it if the floor changes"
+        "this test assumes the current thirteen-file floor - update it if the floor changes"
     with tempfile.TemporaryDirectory() as td:
         suite = (
             _PASS_CASE, _IMAGE_BUILD_PASS_CASE, _GATE_WITNESS_PASS_CASE,
             _GATE_OVERLAY_PASS_CASE, _COLDINSTALL_PASS_CASE,
             _IMAGE_TOOLS_PASS_CASE, _CLOSURE_PREFLIGHT_PASS_CASE,
-            _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE,
+            _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE,
         )
         skipped = c.verdict(_write(Path(td), "skipped.xml", _suite(*suite, _CLEANUP_LIVE_SKIP_CASE)))
         assert skipped.status == c.FAILURE
@@ -532,13 +544,13 @@ def test_the_other_ten_floor_files_pass_but_egress_live_all_skipped_is_failure()
     FAILURE, never a green the egress proof did not earn."""
     import tempfile
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current twelve-file floor - update it if the floor changes"
+        "this test assumes the current thirteen-file floor - update it if the floor changes"
     with tempfile.TemporaryDirectory() as td:
         suite = (
             _PASS_CASE, _IMAGE_BUILD_PASS_CASE, _GATE_WITNESS_PASS_CASE,
             _GATE_OVERLAY_PASS_CASE, _COLDINSTALL_PASS_CASE,
             _IMAGE_TOOLS_PASS_CASE, _CLOSURE_PREFLIGHT_PASS_CASE,
-            _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE,
+            _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE,
         )
         skipped = c.verdict(_write(Path(td), "skipped.xml", _suite(*suite, _EGRESS_LIVE_SKIP_CASE)))
         assert skipped.status == c.FAILURE
@@ -546,12 +558,12 @@ def test_the_other_ten_floor_files_pass_but_egress_live_all_skipped_is_failure()
         assert c.verdict(_write(Path(td), "passing.xml", _suite(*suite, _EGRESS_LIVE_PASS_CASE))).status == c.SUCCESS
 
 
-def test_the_other_eleven_floor_files_pass_but_cicd_profile_all_skipped_is_failure() -> None:
+def test_the_other_twelve_floor_files_pass_but_cicd_profile_all_skipped_is_failure() -> None:
     """#280's own red case: every other declared file executes and passes;
     only the local CI/CD profile proof goes silent. Without its floor entry
     this exact report reads SUCCESS."""
     assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
-        "this test assumes the current twelve-file floor - update it if the floor changes"
+        "this test assumes the current thirteen-file floor - update it if the floor changes"
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         cases = (
@@ -561,11 +573,37 @@ def test_the_other_eleven_floor_files_pass_but_cicd_profile_all_skipped_is_failu
             _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE,
             _EGRESS_LIVE_PASS_CASE,
         )
-        silent = _write(Path(td), "silent.xml", _suite(*cases, _CICD_PROFILE_SKIP_CASE))
+        silent = _write(Path(td), "silent.xml", _suite(*cases, _CICD_PROFILE_SKIP_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE))
         result = c.verdict(silent)
         assert result.status == c.FAILURE
         assert result.skipped_only_files == ("tests.test_cicd_profile_live",)
         # The same report judged against the floor WITHOUT this entry: SUCCESS.
+        without = tuple(f for f in _FLOOR if f != "tests.test_cicd_profile_live")
+        assert c.verdict(silent, without).status == c.SUCCESS
+        ran = _write(Path(td), "ran.xml", _suite(*cases, _CICD_PROFILE_PASS_CASE, _CICD_DEPLOY_VERIFY_PASS_CASE))
+        assert c.verdict(ran).status == c.SUCCESS
+
+
+def test_the_other_twelve_floor_files_pass_but_cicd_deploy_verify_all_skipped_is_failure() -> None:
+    """#282's own red case: every other declared file executes and passes;
+    only the deploy-verification proof goes silent. Without its floor entry
+    this exact report reads SUCCESS."""
+    assert c.DECLARED_REAL_DOCKER_FILES == _FLOOR, \
+        "this test assumes the current thirteen-file floor - update it if the floor changes"
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        cases = (
+            _PASS_CASE, _IMAGE_BUILD_PASS_CASE, _GATE_WITNESS_PASS_CASE,
+            _GATE_OVERLAY_PASS_CASE, _COLDINSTALL_PASS_CASE,
+            _IMAGE_TOOLS_PASS_CASE, _CLOSURE_PREFLIGHT_PASS_CASE,
+            _CWD_CONFINEMENT_PASS_CASE, _NESTED_DIRS_PASS_CASE, _CLEANUP_LIVE_PASS_CASE,
+            _EGRESS_LIVE_PASS_CASE, _CICD_PROFILE_PASS_CASE,
+        )
+        silent = _write(Path(td), "silent.xml", _suite(*cases, _CICD_DEPLOY_VERIFY_SKIP_CASE))
+        result = c.verdict(silent)
+        assert result.status == c.FAILURE
+        assert result.skipped_only_files == ("tests.test_cicd_deploy_verify_live",)
+        # The same report judged against the floor WITHOUT this entry: SUCCESS.
         assert c.verdict(silent, _FLOOR[:-1]).status == c.SUCCESS
-        ran = _write(Path(td), "ran.xml", _suite(*cases, _CICD_PROFILE_PASS_CASE))
+        ran = _write(Path(td), "ran.xml", _suite(*cases, _CICD_DEPLOY_VERIFY_PASS_CASE))
         assert c.verdict(ran).status == c.SUCCESS

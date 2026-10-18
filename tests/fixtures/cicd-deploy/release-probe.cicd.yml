@@ -1,0 +1,30 @@
+# skillc#282's CERTIFIED configuration, CPP's real schema at 86641e8
+# (lib/cicd/config.py HealthConfig). The "release identity" endpoint expects
+# the INTENDED release, filled in for @INTENDED@ before the baseline is taken,
+# so a deploy whose new release never started cannot verify as PROCEED. CPP's
+# verify has no release identity of its own (claude-power-pack#1479).
+# Latency is ignored: timing inside a shared container is not deterministic.
+health:
+  endpoints:
+    - url: http://127.0.0.1:18080/health
+      name: service health
+      expected_status: 200
+      expected_body: '"status": "ok"'
+      timeout: 5
+    - url: http://127.0.0.1:18080/version
+      name: release identity
+      expected_status: 200
+      expected_body: '"release": "@INTENDED@"'
+      timeout: 5
+  smoke_tests:
+    - name: calc answers 5
+      command: curl -fsS http://127.0.0.1:18080/calc
+      expected_output: '"result": 5'
+    - name: metrics
+      command: curl -fsS http://127.0.0.1:18080/metrics
+      expected_exit: 0
+  deploy_verification:
+    enabled: true
+    baseline_file: .claude/deploy-baseline.json
+    on_latency_regression: ignore
+    require_baseline: @REQUIRE_BASELINE@
