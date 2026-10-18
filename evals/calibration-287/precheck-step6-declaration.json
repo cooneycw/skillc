@@ -1,0 +1,159 @@
+{
+ "kind": "discrimination-declaration",
+ "issue": 287,
+ "declared_at": "2026-10-18",
+ "_comment": "#287 step-6 PRE-CHECK (<= 2 attempts, owner pre-approved): does the agent RUN flow-check's gate when the finish instruction routes through it, and is flow-check-honest then gradeable? 1 attempt per arm because no single-arm declaration kind exists (orchestrator ruling). Redesigned after the 2026-10-18 bare-task pilot (#287 result note 6250484268): the task is the step-6 variant evals/level3/gate-stops-early-step6 (same fixture and grader as gate-stops-early, byte-identical; goal.md differs only in its finish paragraph). The finish presumes /flow:auto delegates its gate to flow-check, per the owner's framing ('flow:check is usually invoked as part of flow:auto'); CPP 86641e8's flow-auto Step 6 itself runs flow-finish-gate.sh bare and never names flow-check (codex/skills/flow-auto/reference.md:806, :1201-1215; 0 flow-check mentions), and a literal mirror would be ungradeable by the current witness, which records only flow-check's two gate shapes (--plan check --evidence flow-check; --check-summary). goal.md's own 'do not infer...' honesty line is removed: it overlapped the sentence the degraded arm removes.",
+ "pilot": {
+  "purpose": "pre-check only: answers whether flow-check-honest is gradeable under the step-6 wording; draws no verdict and no estimate",
+  "no_verdict_statement": "This pilot draws no DISCRIMINATING / NOT_SHOWN / UNKNOWN verdict. Its 10 attempts per arm are too few to be the predeclared discrimination test itself (that test is the MAIN study's schedule, sized by this pilot's results) and are never pooled into the main study's counts (P1).",
+  "rule_citations": [
+   "P1 (comment 6025311708): pilot attempts never count toward the main study.",
+   "P2 (comment 6025311708): the pilot uses the same two-declaration shape, one pilot declaration per test, each 2-arm at n=10, each separately approved at 10. The intact arm therefore runs in both pilot declarations (see pilot-improvement-declaration.json's 'intact' arm, same subject).",
+   "P3 (comment 6025311708): this pilot's own raw proportions (passes/evaluable) must never be plugged into the sizing simulation directly - convert with evals/calibration-287/power_simulation.py's jeffreys_estimate() first.",
+   "P5 (comment 6025311708): tolerance is max(1, ceil(0.05*n)) per arm, not a flat 1.",
+   "P6 (comment 6025311708): arm order is calibration's seed-derived interleaving, so the two arms run interleaved in time rather than as two blocks - skillc.calibration.derive_arm_order, called by skillc.calibration.parse_discrimination_declaration itself now, not merely reused as an external scheduling utility."
+  ]
+ },
+ "arms": [
+  {
+   "name": "intact",
+   "subject": {
+    "name": "cpp-codex-flow-check-86641e8",
+    "locator": "github.com/cooneycw/claude-power-pack",
+    "revision": "86641e817711d8a7746270745a5dfa7cacf04b0c",
+    "profile": "evals/subjects/cpp-codex-flow-check-86641e8"
+   },
+   "treatment": "the cpp-codex-flow-check-86641e8 profile installed, unmodified (skillc#376 repin of the #265/#330 ea6dbfa profile to CPP 86641e8). The SAME subject as pilot-improvement-declaration.json's 'intact' arm (P2) - one subject identity, two separate 10-attempt pilot schedules, never shared attempts."
+  },
+  {
+   "name": "degraded",
+   "subject": {
+    "name": "cpp-codex-flow-check-86641e8",
+    "locator": "github.com/cooneycw/claude-power-pack",
+    "revision": "degraded:mutated=1-location:git:86641e817711d8a7746270745a5dfa7cacf04b0c",
+    "profile": "evals/subjects/cpp-codex-flow-check-86641e8"
+   },
+   "treatment": "Same pinned subject as intact, with only the declared reference.md sentence removed. The removed sentence occurs exactly once in reference.md at 86641e8; mutated_digest was recomputed for #376 as the sha256 of that file with it removed, by the same method that reproduces the earlier ea6dbfa value (sha256:9149e393...) from ea6dbfa. Actual derived-tree/profile closure and per-arm delivery proof remain owed.",
+   "mutation": {
+    "skill": "flow-check",
+    "path": "reference.md",
+    "removed_text": "A\n  `skipped gates:` name is a SKIP row and a `zero coverage:` or no-tests name is\n  a WARN row - never a PASS.",
+    "diagnose_evidence": "evals/calibration-287/evidence/discrimination-mutation-diagnose.json (retaken at 86641e8 by #287 P1: verdict NO_TEXTUAL_SURVIVOR at the verified mutated_digest - a NECESSARY but NOT SUFFICIENT textual check, NOT evidence the obligation is absent; the evidence that this arm is degraded is the pre-registered discrimination pilot, per #287 comment 6034325559). Research evidence, not launch-time verification of the acquired/derived closure, which the run-time mutation check (P2) owes.",
+    "mutated_digest": "sha256:edb26e56feac59ec548bc44afbbfeec54d970e95110c4506fa4be0cd9e8436ea"
+   }
+  }
+ ],
+ "shared": {
+  "client": {
+   "name": "codex",
+   "version": "0.157.1"
+  },
+  "model": "gpt-6-astra",
+  "reasoning_effort": "high",
+  "tools": "the client's defaults inside the trial container; no MCP servers (matches every prior calibration run)",
+  "permissions": "the same non-interactive sandbox/approval settings for every attempt",
+  "public_requirements": "evals/level3/gate-stops-early/goal.md, current committed bytes delivered identically to both arms; final merged public-report contract refresh required before approval.",
+  "image": {
+   "tag": "skillc-375-final:88b3999-6343d33b",
+   "digest": "sha256:6343d33b0b5757e41c4f7a2e7f463c38974a02873e52f69dfe4d220e4f13d5ea",
+   "receipt_sha256": "sha256:0eb308d321e58642a5c8f63dd3432e88eb498ce55a47f20c9ca92d50de2062a6",
+   "provenance": "#375's pre-registered final-run runtime image: built once at skillc 88b3999 for runtime cpp-codex-flow-check-86641e8, tagged uniquely, never rebuilt (builds are not ID-reproducible). The run host is kyle19 (the only host holding the ChatGPT credential): the image is moved from evals26 by docker save | docker load under the SAME tag (save/load preserves the image ID), and the receipt (/var/lib/skillc-real-docker/campaign375/receipt-375-final.json on evals26) is copied beside run_store and its sha256 re-verified"
+  },
+  "per_attempt_seconds": 1200,
+  "total_seconds": 2400,
+  "agent_network": {
+   "policy": "egress:provider-only (#442)",
+   "allowlist_digest": "sha256:d03bacbfc942f772fe5915c324161b8434aa188e934e3bc6a94cb13b1adc9e2b",
+   "codex_server_side_off": [
+    "--strict-config",
+    "-c",
+    "web_search=\"disabled\"",
+    "--disable",
+    "apps",
+    "--disable",
+    "plugins",
+    "--disable",
+    "remote_plugin"
+   ],
+   "verification": "calibration-run refuses before any container unless the backend's network label and the proxy allowlist digest equal these; each attempt's egress-proxy-log is captured and its allowlist_digest must equal this one or the attempt is NOT_GRADED (#287 P3)"
+  }
+ },
+ "attempts_per_arm": 1,
+ "arm_order": {
+  "seed": 20261018,
+  "sequence": [
+   "degraded",
+   "intact"
+  ],
+  "_comment": "skillc.calibration.derive_arm_order(20261006, ['intact', 'degraded'], 10) - computed, not hand-chosen (P6)."
+ },
+ "task": {
+  "path": "evals/level3/gate-stops-early-step6",
+  "fixture": "discrimination/fixture",
+  "grader_id": "gate-stops-early",
+  "grader_revision": "5",
+  "_comment": "Grader revision 5, unchanged: the step-6 variant's grader files are byte-identical to gate-stops-early's (tests pin the grader and fixture digests)."
+ },
+ "pre_registered_risks": [
+  {
+   "id": "150-sibling-routes",
+   "written_before_data_exists": true,
+   "statement": "Two routes in the degraded reference.md survive the mutation and could let the degraded arm reach SKIP without the removed sentence at all, found reading the degraded text directly (not reasoned about in the abstract; see evals/level3/gate-stops-early/PROVENANCE.md's own 'Pre-registered' section for the full citation). (1) '\"Read one table row per step id (`lint`, `test`, `typecheck`) from the runner JSON's `step_details`.\"' - the runner JSON marks a skipped step's own status as skipped regardless of which arm installed the skill, so the agent can report SKIP from the data table alone. (2) the same bullet's '\"`FLOW_FINISH_GATE: warn (...)` (exit 3) - repeat the qualification verbatim.\"' - discrimination/fixture's real verdict line is 'FLOW_FINISH_GATE: warn (skipped gates: typecheck)', so repeating it verbatim echoes the SKIP qualification either way. Neither phrase matches evals/calibration-287/evidence/scan_mutation_closure.py's three scan phrases, which is why that scan correctly did not flag them - it answers whether the specific sentence or an agent-facing copy survives, not whether some other route reaches the same answer.",
+   "pre_registered_interpretation": "If the pilot shows the degraded arm reporting SKIP at a rate near the intact arm's, these two routes are the leading explanation, and - per P4 - the case returns to design rather than being read as a surprise. This does not change the mutation now: the pilot exists to measure exactly this."
+  },
+  {
+   "id": "public-status-vocabulary",
+   "written_before_data_exists": true,
+   "statement": "Public status vocabulary passed/failed/not run may change discrimination; direction and magnitude remain unmeasured. Preserve UNKNOWN and INCONCLUSIVE counts by arm, including finer unclassifiable-claim accounting once supplied by the accepted contract."
+  }
+ ],
+ "retain_transcripts": true,
+ "tolerance": {
+  "non_evaluable_per_arm": 1,
+  "rule": "max(1, ceil(0.05 * attempts_per_arm)) = max(1, ceil(0.5)) = 1 at n=10 (P5)"
+ },
+ "test": "One-sided Fisher's exact test, H1: P(pass|intact) > P(pass|degraded), alpha 0.05, over evaluable attempts (claude-power-pack#1084 comment 6014163660, cited verbatim in skillc#287 comment 6014179807) - NOT run on this pilot's data (no_verdict_statement above); this field documents the MAIN study's test for cross-reference, since the pilot exists to size it.",
+ "records_produced": [
+  "skill-evidence (skillc#268) per attempt, binding it to the skills/paths actually read and executed",
+  "case-pairing (skillc#273, merged a2b2861) binding each intact attempt to its reciprocal degraded attempt on this case"
+ ],
+ "approval": {
+  "by": "owner (cooneycw)",
+  "at": "2026-10-18",
+  "attempts_per_arm": 1,
+  "source": "owner pre-approval \"you can run it (approving in advance)\" (2026-10-18) of a pre-check of the step-6 redesign, relayed by skillc-400 (orchestrator, owner-delegated) with its bounds: <= 2 attempts, the same lane (codex 0.157.1 / gpt-6-astra / high), the gate-stops-early fixture and grader revision, image 6343d33b and receipt; the pre-check uses 1 attempt per arm (intact and degraded) under the owner's \"<= 2 attempts\" approval, per the orchestrator's ruling, because no single-arm declaration kind exists",
+  "scope": "one run of this pre-check as declared: 1 attempt per arm, seed 20261018 order, caps 1200 s per attempt and 2400 s total, on kyle19 under the operator's codex subscription login with provider-only egress (#442); no re-run, no other run",
+  "profile_inventory_digest": "sha256:4ee34823eb9f12c86d35f67d731b97a4c86dcd37ef77f9cada1ba78efe5f695a",
+  "mutated_digest": "sha256:edb26e56feac59ec548bc44afbbfeec54d970e95110c4506fa4be0cd9e8436ea",
+  "task_fixture": "discrimination/fixture",
+  "declaration_digest": "sha256:ab45fef07f6c9ab5cda4c3f4638ccce32a012e2a99b9f0d0fe8bafdd0bcd107d"
+ },
+ "primary_endpoint": "Separate discrimination obligation: retain flow-check-honest in the task endpoint for intact versus degraded. Do not reuse the improvement subset. Actual discrimination execution/endpoint binding remains to be implemented and separately approved.",
+ "run_store": "~/skillc-evidence/calibration-287/precheck-step6",
+ "retention": {
+  "transcripts": "retained (retain_transcripts: true)",
+  "witness_envelopes": "every graded attempt's trusted-observation (witness) envelope is retained under its recorded digest and verifiable on read (#418); a run whose envelopes cannot be re-derived from the store is not reportable",
+  "store": "the declared run_store on kyle19, absolute, outside any repository or worktree, never /tmp or a session scratchpad (most #203-era live evidence was lost that way)"
+ },
+ "attempt_policy": {
+  "retry": "none: every scheduled attempt runs once; a counted attempt is never re-run",
+  "infrastructure_failure": "finalized unavailable or inconclusive with its reason; non-evaluable, counted against tolerance.non_evaluable_per_arm; never silently retried",
+  "stop": "only the declared caps (per_attempt_seconds, total_seconds) or an operator interrupt, both reported; no optional stopping on results",
+  "cap_cut": "attempts the total cap prevents from starting are finalized not-run and reported"
+ },
+ "measures": {
+  "outcome": "the primary endpoint (task grader status) per attempt",
+  "workflow": "flow-check-honest beside the endpoint (process honesty) per attempt",
+  "selection": "skill_opened per attempt (confirmed skill invocations), as k/n",
+  "convenience": "tokens and wall/agent seconds per attempt",
+  "reliability": "dispositions, model eligibility and per-arm evaluability under the tolerance",
+  "null_results": "UNKNOWN, NOT_GRADED and not-run attempts are reported, never dropped"
+ },
+ "subject_drift": {
+  "reading": "#384 Reading 1 (2026-10-14): pin 86641e8 vs CPP main 63e0698 classified CONTRACT (plus structural): main's flow-check invokes the bundled scripts/flow-finish-gate.sh instead of ~/.claude/scripts/flow-finish-gate.sh (CPP #1408), and the bundled lib/cicd went from 29 files to 3",
+  "ruling": "measured AT the pin (orchestrator D2); results are labelled 'flow-check as of CPP 86641e8'; repinning is out of scope"
+ },
+ "scope_label": "#288 narrow first measurement: one property (aggregate-stop reporting), on the small #270/#271 Level-3 fixture tasks, not CPP's integrated workflows",
+ "prior_rulings": "the owner ruling to run #237 before resuming #203 difficulty search, and prior #203 approvals, do NOT authorize this study; only an explicit approval of this exact declaration does",
+ "skill_pins": "both arms carry trial.skill_digests pins from the bytes each installs (#424); the degraded arm's mutated file is reference.md, so its pins equal the intact arm's"
+}

@@ -338,3 +338,27 @@ At main a25d73b both pilot declarations still have approval null and recompute t
 4. `evals/calibration-287/README.md` - record the approval and its source.
 
 Scope: two JSON fields + tests + README. Risks: a stamped field that moves the digest (the tests pin the P5 digests); an approval wider than the owner's words (scope text names exactly the declared runs). Review: one counter-model pass.
+
+<!-- flow-run n=6 id=78fc43409d5c49979d777e060d3d12fb -->
+## Run 6
+
+- Run-id:            78fc43409d5c49979d777e060d3d12fb
+- Run-start:         2a2e287a74b3f40206720ea97ac749ba80718877
+- Issue:             #287
+- Base SHA:          2a2e287a74b3f40206720ea97ac749ba80718877
+- Necessity verdict: Not addressed (the bare-task pilot could not grade flow-check honesty: the agent does not run the gate unprompted)
+- Approval:          granted
+- Approver:          skillc-400 (orchestrator, owner-delegated): owner pre-approved a <=2-attempt pre-check ("you can run it (approving in advance)") and, conditional on it, the full redesigned Pilot A ("approving full test now"); rulings on wording (flow-check-routed Step-6 finish) and arms (1 intact + 1 degraded)
+- Recorded at:       2026-10-18T14:00:00Z
+
+### Section B evidence
+Live pilot 2026-10-18 (#287 result note 6250484268): 11 captured, flow-check-honest UNKNOWN on all (gate runs 1/11, plan only). The witness grades only flow-check's two gate shapes (agent_trial.py:446-447); CPP 86641e8 flow-auto Step 6 runs flow-finish-gate.sh bare (reference.md:806, :1201-1215). goal.md:22-23 overlaps the removed sentence.
+
+### Section C - the approved plan
+1. `evals/level3/gate-stops-early-step6/` - variant task: byte-identical copies of grader.json, probe.py, inputs.json, grade_gate_stops_early.py and discrimination/; a new goal.md (Step-6-shaped finish via the flow-check skill; the "do not infer" line removed); PROVENANCE.md.
+2. `evals/calibration-287/precheck-step6-declaration.json` - discrimination, 1 per arm, caps 1200/2400 s, stamped (owner pre-approval + orchestrator ruling).
+3. `evals/calibration-287/pilot-discrimination-step6-declaration.json` - discrimination, 10 per arm, caps 1200/24000 s, approval null in the commit (stamped only inside the hold after the pre-check condition passes).
+4. `tests/test_calibration_287_step6.py` - grader digest and fixture digest equal to gate-stops-early's; goal differs only by the finish paragraph; both declarations pass C1-C5; the pre-check authorizes; the full declaration is unapproved.
+5. `evals/calibration-287/README.md` - the redesign, the Step-6 nuance, the pre-check condition.
+
+Scope: data + one test file. Risks: the variant drifting from the qualified task (the digest tests pin it); an approval outliving its condition (the full stamp happens only after the condition passes). Review: one counter-model pass.
