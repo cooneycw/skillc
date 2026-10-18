@@ -313,15 +313,12 @@ mode = os.environ.get("FAKE_DOCKER_MODE", "")
 if args[0] == "run":
     label = args[args.index("--label") + 1]
     if mode == "delayed-create":
-        # The daemon finishes a create the (already dead) client asked for.
-        if os.fork() == 0:
-            os.setsid()
-            time.sleep(1.5)
-            d = load()
-            d[f"late{os.getpid()}"] = label
-            save(d)
-            os._exit(0)
-        os._exit(0)
+        # The daemon has accepted a create the client will not see finish:
+        # it becomes visible only after the sweep's SECOND empty listing
+        # (an event, not a clock, so the test means the same under any load).
+        d.setdefault("_pending", {})[f"late{os.getpid()}"] = label
+        save(d)
+        sys.exit(0)
     d[f"c{os.getpid()}-{time.time_ns()}"] = label
     save(d)
     time.sleep(0.2)
@@ -331,7 +328,12 @@ elif args[0] == "ps" and mode == "ps-hangs":
     time.sleep(3600)
 elif args[0] == "ps":
     want = args[args.index("--filter") + 1].removeprefix("label=")
-    print("\n".join(c for c, label in d.items() if label == want))
+    print("\n".join(c for c, label in d.items()
+                    if not c.startswith("_") and label == want))
+    d["_ps"] = d.get("_ps", 0) + 1
+    if d["_ps"] == 2:
+        d.update(d.pop("_pending", {}))
+    save(d)
 elif args[0] == "rm":
     for c in args[2:]:
         d.pop(c, None)
@@ -352,6 +354,11 @@ def _fake_docker(tmp_path: Path, monkeypatch) -> Path:
     return state
 
 
+def _containers(state: Path) -> dict[str, str]:
+    """The fake daemon's containers, without its bookkeeping keys."""
+    return {k: v for k, v in json.loads(state.read_text()).items() if not k.startswith("_")}
+
+
 def test_docker_churn_removes_exactly_its_own_labelled_containers(tmp_path, monkeypatch):
     state = _fake_docker(tmp_path, monkeypatch)
     load = lh.Load(0, 0, time.time() + 60, docker=2)
@@ -362,7 +369,7 @@ def test_docker_churn_removes_exactly_its_own_labelled_containers(tmp_path, monk
         assert any(v == load.cfg["label"] for v in json.loads(state.read_text()).values())
     finally:
         load.stop()
-    assert json.loads(state.read_text()) == {"foreign": "skillc.load462=someone-else"}
+    assert _containers(state) == {"foreign": "skillc.load462=someone-else"}
 
 
 def test_io_churn_writes_inside_its_directory_and_removes_it(tmp_path):
@@ -388,7 +395,7 @@ def test_the_supervisor_cleans_up_when_its_deadline_passes(tmp_path, monkeypatch
     iodir = Path(load.cfg["iodir"])
     assert load.proc is not None
     load.proc.wait(timeout=30)
-    assert json.loads(state.read_text()) == {"foreign": "skillc.load462=someone-else"}
+    assert _containers(state) == {"foreign": "skillc.load462=someone-else"}
     assert not iodir.exists()
     load.proc = None
 
@@ -550,10 +557,14 @@ def test_a_container_created_after_the_client_died_is_still_removed(tmp_path, mo
     state = _fake_docker(tmp_path, monkeypatch)
     monkeypatch.setenv("FAKE_DOCKER_MODE", "delayed-create")
     load = lh.Load(0, 0, time.time() + 60, docker=1)
-    time.sleep(0.3)
+    deadline = time.monotonic() + 20
+    while "_pending" not in json.loads(state.read_text()) and time.monotonic() < deadline:
+        time.sleep(0.05)
     load.stop()
-    time.sleep(2.5)  # past every delayed create the fake can make
-    assert json.loads(state.read_text()) == {"foreign": "skillc.load462=someone-else"}
+    final = json.loads(state.read_text())
+    assert final.get("_ps", 0) >= 2, "the sweep never listed past the late create"
+    assert "_pending" not in final
+    assert _containers(state) == {"foreign": "skillc.load462=someone-else"}
 
 
 @needs_proc
