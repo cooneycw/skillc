@@ -1,0 +1,1149 @@
+{
+ "inventory_schema": 1,
+ "profile": "cpp-codex-cicd",
+ "profile_digest": "sha256:40f8b5ad1156bd52e953286712a2492a7b7230e19de4d26006cdd481e7e721f9",
+ "subject": {
+  "declaration_digest": "sha256:50c3aaa0547ab7cb53e4e3dad24c36a8a0649574fbb6803e8cc262339a3ee71f",
+  "locator": "github.com/cooneycw/claude-power-pack",
+  "revision": "86641e817711d8a7746270745a5dfa7cacf04b0c",
+  "source_kind": "git",
+  "surface": "codex-skills",
+  "client": {
+   "name": "codex",
+   "version": "0.157.1"
+  }
+ },
+ "treatment": "targeted",
+ "treatment_question": "product",
+ "selection": [
+  "cicd-check",
+  "cicd-health",
+  "cicd-init",
+  "cicd-pipeline",
+  "cicd-smoke",
+  "cicd-verify"
+ ],
+ "skills": [
+  {
+   "name": "cicd-check",
+   "directory": "cicd-check",
+   "description_digest": "sha256:b21b3e955835c8f27c4fc8ee8e2c5a737dfacee4d686dcc0331522f3cc8e9841",
+   "body_digest": "sha256:496b91dd6f0fa06e2eafc2a413cb34e5fc2e83650288e23b6046fb5ca5d4d479",
+   "required_references": [
+    "reference.md"
+   ],
+   "checksums": "absent",
+   "files": [
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "codex/skills/cicd-check/SKILL.md",
+     "destination": ".codex/skills/cicd-check/SKILL.md",
+     "mode": "100644",
+     "size": 813,
+     "digest": "sha256:9f03b29534d1ef982363d7f17020a3964403f565abdaf4f766650ee6e0ccaae2",
+     "git_blob": "c61ba4bf547c550ab1fb9537a93016f87cf51f13",
+     "owner": "skill:cicd-check"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "codex/skills/cicd-check/reference.md",
+     "destination": ".codex/skills/cicd-check/reference.md",
+     "mode": "100644",
+     "size": 2838,
+     "digest": "sha256:25b7c61c56e7c3a6bc7232ca5bcf63bb6155a125f3bcbb56ee47650ddc06b1bd",
+     "git_blob": "7c8fd155bf44bad9900ab00b02ca972a4e8d97f3",
+     "owner": "skill:cicd-check"
+    }
+   ]
+  },
+  {
+   "name": "cicd-health",
+   "directory": "cicd-health",
+   "description_digest": "sha256:7b138a931e83c61f158cadb7d0905b3c5b2063b67635ca6d8e6be6c158129a08",
+   "body_digest": "sha256:24b28ebce0261d4fd3a08a87ec8bfbdc0e35ca4f79099a5950dd63507121deba",
+   "required_references": [
+    "reference.md"
+   ],
+   "checksums": "absent",
+   "files": [
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "codex/skills/cicd-health/SKILL.md",
+     "destination": ".codex/skills/cicd-health/SKILL.md",
+     "mode": "100644",
+     "size": 947,
+     "digest": "sha256:abec01f6c9cb5e287b249b7ddd8bbaa727289ef6edd991a7c16b3991b531ca97",
+     "git_blob": "3ddd966604e2d420d20f6a38c7bf1f26f8d7bdfa",
+     "owner": "skill:cicd-health"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "codex/skills/cicd-health/reference.md",
+     "destination": ".codex/skills/cicd-health/reference.md",
+     "mode": "100644",
+     "size": 3326,
+     "digest": "sha256:6d9a4384d3331df720d57f731c06c374b6784bf83c51924449668c44018d7884",
+     "git_blob": "51903755c83cdc03191975679ab06a1c0de6b7d3",
+     "owner": "skill:cicd-health"
+    }
+   ]
+  },
+  {
+   "name": "cicd-init",
+   "directory": "cicd-init",
+   "description_digest": "sha256:9be7dd773334fa547c78783ecc705437498e9b95f598813626ac3505e9a2f8c8",
+   "body_digest": "sha256:0451fddc12e370ecc99cbf16779ed18c382d936529e21f17625fd19fb8c9b4f5",
+   "required_references": [
+    "reference.md"
+   ],
+   "checksums": "absent",
+   "files": [
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "codex/skills/cicd-init/SKILL.md",
+     "destination": ".codex/skills/cicd-init/SKILL.md",
+     "mode": "100644",
+     "size": 982,
+     "digest": "sha256:a256dcb5003f969e1553226bae95aca1d38b20634f06329aac3958e41dd93603",
+     "git_blob": "e1ad9605687aa4acc62c83c98a846bdaa84077fc",
+     "owner": "skill:cicd-init"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "codex/skills/cicd-init/reference.md",
+     "destination": ".codex/skills/cicd-init/reference.md",
+     "mode": "100644",
+     "size": 4049,
+     "digest": "sha256:e9125f00ab0184e32c74243b12704377673649b6e77207709f2e378c98354104",
+     "git_blob": "bc2a94d452ebefdafe27592ae35b7f2d3fd7c886",
+     "owner": "skill:cicd-init"
+    }
+   ]
+  },
+  {
+   "name": "cicd-pipeline",
+   "directory": "cicd-pipeline",
+   "description_digest": "sha256:966d8e73ea7f560a5715fc83a1352216057e3c107e68e6a9b353edfbe6c88ae6",
+   "body_digest": "sha256:86aa93e10da1068f4950ea51e87adb8dc41c664e8f5a8f244815f249928f5539",
+   "required_references": [],
+   "checksums": "absent",
+   "files": [
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "codex/skills/cicd-pipeline/SKILL.md",
+     "destination": ".codex/skills/cicd-pipeline/SKILL.md",
+     "mode": "100644",
+     "size": 3155,
+     "digest": "sha256:46138799cde526d063eaafaac179b1bce7609b0db077e77b3c9d93dee9ca91fa",
+     "git_blob": "12fbbfc2773b718679365109a987ed4b23b66ea3",
+     "owner": "skill:cicd-pipeline"
+    }
+   ]
+  },
+  {
+   "name": "cicd-smoke",
+   "directory": "cicd-smoke",
+   "description_digest": "sha256:8b36f0492bd66e6f7aa247e576bebc9e2d657915fc082d66da080648f0a99677",
+   "body_digest": "sha256:30aa9f4728c45c787dca6b5e8087216d44d959bbd8074edcaefccef40d20d958",
+   "required_references": [
+    "reference.md"
+   ],
+   "checksums": "absent",
+   "files": [
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "codex/skills/cicd-smoke/SKILL.md",
+     "destination": ".codex/skills/cicd-smoke/SKILL.md",
+     "mode": "100644",
+     "size": 813,
+     "digest": "sha256:50e3b7a569474f17bb6361f3bf24ba1d3f92c0d8ee05dfe52292a329372f90b4",
+     "git_blob": "127626043abe535e8fa8f8e2cee3a8717d5d1871",
+     "owner": "skill:cicd-smoke"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "codex/skills/cicd-smoke/reference.md",
+     "destination": ".codex/skills/cicd-smoke/reference.md",
+     "mode": "100644",
+     "size": 4079,
+     "digest": "sha256:276c1824100e864920780876d99e0d4e7cbbc35c9777478889c45558ccc76cfb",
+     "git_blob": "a2be208e23b3cc59365b147927f0fc0b499bf668",
+     "owner": "skill:cicd-smoke"
+    }
+   ]
+  },
+  {
+   "name": "cicd-verify",
+   "directory": "cicd-verify",
+   "description_digest": "sha256:0a7eb0b3387969d614f06ec90a5cf02d972f4660dd79222dcc4bf2c67356ec93",
+   "body_digest": "sha256:f0c2914540a778cbcff742010c46ee345f56425b65817ecadc6b4fa9dd61ffb1",
+   "required_references": [
+    "reference.md"
+   ],
+   "checksums": "absent",
+   "files": [
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "codex/skills/cicd-verify/SKILL.md",
+     "destination": ".codex/skills/cicd-verify/SKILL.md",
+     "mode": "100644",
+     "size": 874,
+     "digest": "sha256:2b1971591ff29a83459286605a8835c9ee3da071b8116c1da67e4f3b1b3d4f21",
+     "git_blob": "bbdf0c3976aa2f03d42425663b4a4257493e64a5",
+     "owner": "skill:cicd-verify"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "codex/skills/cicd-verify/reference.md",
+     "destination": ".codex/skills/cicd-verify/reference.md",
+     "mode": "100644",
+     "size": 6293,
+     "digest": "sha256:43c01d1ea504708c7cee316b56247e8683fa2678d63f644d19896b0dd1be8e5c",
+     "git_blob": "a777a011ea733bb4bd06ddde5a893b9e385e3bb3",
+     "owner": "skill:cicd-verify"
+    }
+   ]
+  }
+ ],
+ "dependencies": [
+  {
+   "id": "checkout-libraries",
+   "kind": "library",
+   "scope": "treatment",
+   "role": "the CPP checkout's lib.cicd package every cicd skill runs as `uv run --project \"$CPP_DIR\" python -m lib.cicd <command>` with PYTHONPATH=$CPP_DIR (cicd-check/reference.md:48, cicd-health/reference.md:57, cicd-smoke/reference.md:58, cicd-verify/reference.md:79,96, cicd-init/reference.md:34,52, cicd-pipeline/SKILL.md:36,42,53)",
+   "destination": "Projects/claude-power-pack",
+   "version": null,
+   "supply": null,
+   "traversed": false,
+   "no_traverse_reason": "Python packages: their dependencies are imports resolved by the interpreter, not path text a reference pattern can read. At this pin lib/cicd and lib/security import only themselves and PyPI packages (see tool-pypi-runtime). Whether they import cleanly in a disposable home is #266's installed-path proof.",
+   "referenced_by": [
+    "codex/skills/cicd-check/reference.md",
+    "codex/skills/cicd-health/reference.md",
+    "codex/skills/cicd-init/reference.md",
+    "codex/skills/cicd-pipeline/SKILL.md",
+    "codex/skills/cicd-smoke/reference.md",
+    "codex/skills/cicd-verify/reference.md"
+   ],
+   "unreferenced_reason": null,
+   "files": [
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "lib/cicd/__init__.py",
+     "destination": "Projects/claude-power-pack/lib/cicd/__init__.py",
+     "mode": "100644",
+     "size": 10016,
+     "digest": "sha256:00f0f4c6f99b2d58fe5b031f1ec18037b1149bbe7046e61d0fda28bef5e8bd6e",
+     "git_blob": "dd278d889cd5aaf3d1921ea79d8680575a5bbaae",
+     "owner": "checkout-libraries"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "lib/cicd/__main__.py",
+     "destination": "Projects/claude-power-pack/lib/cicd/__main__.py",
+     "mode": "100644",
+     "size": 338,
+     "digest": "sha256:6420d4552d8216e24146f6b07e0c451da5e5ab4fb9cb6ff3368d618a2c333d73",
+     "git_blob": "e3bf71046b598b050c6d02e5186dedcee6600f96",
+     "owner": "checkout-libraries"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "lib/cicd/bootstrap.py",
+     "destination": "Projects/claude-power-pack/lib/cicd/bootstrap.py",
+     "mode": "100644",
+     "size": 9161,
+     "digest": "sha256:4a061eebfbc0da70b6f72dfffdd98d013eef7b05967f40e021765d46b35efcf7",
+     "git_blob": "fe968602004761c632324e53d46e3bc8814505c2",
+     "owner": "checkout-libraries"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "lib/cicd/cli.py",
+     "destination": "Projects/claude-power-pack/lib/cicd/cli.py",
+     "mode": "100644",
+     "size": 35558,
+     "digest": "sha256:c1b39f952e314a868cbaaeb7fee0c385d1c4661b69eab45bb17769113edb5796",
+     "git_blob": "525c19e63104947c818e7b5fae9d616a7ed3f787",
+     "owner": "checkout-libraries"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "lib/cicd/config.py",
+     "destination": "Projects/claude-power-pack/lib/cicd/config.py",
+     "mode": "100644",
+     "size": 26318,
+     "digest": "sha256:2d287c35e8317bd103b1e2377f34cf6739dccad6da6e03d34f2ec3294eab7d1f",
+     "git_blob": "1423777312077171c7588d5be8451c8fdb451d00",
+     "owner": "checkout-libraries"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "lib/cicd/container.py",
+     "destination": "Projects/claude-power-pack/lib/cicd/container.py",
+     "mode": "100644",
+     "size": 14421,
+     "digest": "sha256:2ecb3c0f40cc9954e29441f8a5edad446edab31af9d0f69429416ffb026cf5e3",
+     "git_blob": "0199110a57fb21b1dc80fbf6cb84e0cbff1b247f",
+     "owner": "checkout-libraries"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "lib/cicd/coverage.py",
+     "destination": "Projects/claude-power-pack/lib/cicd/coverage.py",
+     "mode": "100644",
+     "size": 18043,
+     "digest": "sha256:5d050770229da151d8dccb3e2bd1c949f9f7e503dc4a15487df6a01221369211",
+     "git_blob": "c07c384d9bf1f160fca46b333c288f817ec056d1",
+     "owner": "checkout-libraries"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "lib/cicd/deploy/__init__.py",
+     "destination": "Projects/claude-power-pack/lib/cicd/deploy/__init__.py",
+     "mode": "100644",
+     "size": 1206,
+     "digest": "sha256:fc9e5249db0bf07ee4356dd8e951d7bfde35d380cb22239de1a3f18269ebd3db",
+     "git_blob": "b37911fe710dd36d0d678f1729f338c2a4f4ae21",
+     "owner": "checkout-libraries"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "lib/cicd/deploy/docker_compose.py",
+     "destination": "Projects/claude-power-pack/lib/cicd/deploy/docker_compose.py",
+     "mode": "100644",
+     "size": 9546,
+     "digest": "sha256:dddd154f8fcb6e1a37261a3dc602dd175db0b69009da4e7f453aed738fc1757f",
+     "git_blob": "b0d334429b00801de4bdac9014dc0903994eb5d9",
+     "owner": "checkout-libraries"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "lib/cicd/deploy/guardrails.py",
+     "destination": "Projects/claude-power-pack/lib/cicd/deploy/guardrails.py",
+     "mode": "100644",
+     "size": 13349,
+     "digest": "sha256:72b29f31cae36e66739f4d85fc80c1e31cdb40688220fefe7d15e2523a88d61d",
+     "git_blob": "8768a43fff60bd07c3ada3170da34834546fbba6",
+     "owner": "checkout-libraries"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "lib/cicd/deploy/strategy.py",
+     "destination": "Projects/claude-power-pack/lib/cicd/deploy/strategy.py",
+     "mode": "100644",
+     "size": 11927,
+     "digest": "sha256:df28ff1da583e8a806dce26e285f40923bc769e76b6eb4316e53a45adba58756",
+     "git_blob": "41e0293abe11820a1f93065a7e3a863aa9e59293",
+     "owner": "checkout-libraries"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "lib/cicd/detector.py",
+     "destination": "Projects/claude-power-pack/lib/cicd/detector.py",
+     "mode": "100644",
+     "size": 17696,
+     "digest": "sha256:e09256f2091e89b4d25fad4a3399ea9244b20b1ded2a0e0898da58535c08d7e4",
+     "git_blob": "32a5283b0fa8e02a4501f5df35f9eccc4c1d02db",
+     "owner": "checkout-libraries"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "lib/cicd/evidence.py",
+     "destination": "Projects/claude-power-pack/lib/cicd/evidence.py",
+     "mode": "100644",
+     "size": 41114,
+     "digest": "sha256:10660b57b208c14be0f0d87a4e58a5b4f0a1af22790238478c3066ab762545aa",
+     "git_blob": "384f77d39f9ca5822bfd9e8a6980c99ee3606ace",
+     "owner": "checkout-libraries"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "lib/cicd/failure_patterns.py",
+     "destination": "Projects/claude-power-pack/lib/cicd/failure_patterns.py",
+     "mode": "100644",
+     "size": 10752,
+     "digest": "sha256:cad24fca2a855f08900eb1a1af69d8a5d3bcfa51407d92ef991e9c1bbbbad656",
+     "git_blob": "c08c2fdaa6d5e3d44354d70b4222adffbc0e9197",
+     "owner": "checkout-libraries"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "lib/cicd/health.py",
+     "destination": "Projects/claude-power-pack/lib/cicd/health.py",
+     "mode": "100644",
+     "size": 12330,
+     "digest": "sha256:ad6a94126c84ea075a5acd34465dd5900643ac6f39ff4fbd4c865f13898c01f9",
+     "git_blob": "c5a946d3e97219ab248d72aa18810dcf3b3575d6",
+     "owner": "checkout-libraries"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "lib/cicd/infrastructure.py",
+     "destination": "Projects/claude-power-pack/lib/cicd/infrastructure.py",
+     "mode": "100644",
+     "size": 23949,
+     "digest": "sha256:73fb8bfb989f5ce7ca3ead97577f91196a62457e154d60f38659b0240f984823",
+     "git_blob": "5d80a46ee5eba0510a8e0a06e74816de39cfb58a",
+     "owner": "checkout-libraries"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "lib/cicd/makefile.py",
+     "destination": "Projects/claude-power-pack/lib/cicd/makefile.py",
+     "mode": "100644",
+     "size": 15022,
+     "digest": "sha256:d8fbe3ac0af99a72794232b20784c413d020c97510e753ea39cba8e4190b0d5d",
+     "git_blob": "00dcd6741745249aa85da9244b46c565caaa0262",
+     "owner": "checkout-libraries"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "lib/cicd/makefile_declaration.py",
+     "destination": "Projects/claude-power-pack/lib/cicd/makefile_declaration.py",
+     "mode": "100644",
+     "size": 13116,
+     "digest": "sha256:2094cf58730e7bba868e6be299c82823482470e0c663051ad6d99b61f3141302",
+     "git_blob": "0a2d6d92d737b04469e0195857678c3745fb6d3d",
+     "owner": "checkout-libraries"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "lib/cicd/manifest.py",
+     "destination": "Projects/claude-power-pack/lib/cicd/manifest.py",
+     "mode": "100644",
+     "size": 24342,
+     "digest": "sha256:8cdf9bb04db0fd4dff996f0c8d943ab450f4e3952603b7fd466ecd588ab5b5d1",
+     "git_blob": "67ac912be22251bacaff9c4dbc1cf67188092824",
+     "owner": "checkout-libraries"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "lib/cicd/manifest_path.py",
+     "destination": "Projects/claude-power-pack/lib/cicd/manifest_path.py",
+     "mode": "100644",
+     "size": 442,
+     "digest": "sha256:744bd33ccbbc9e75587ffdf4156a3dbc78efce0e870f41b56de20423b3a57389",
+     "git_blob": "4c71eb3c85c43f86fe412247fad08f5713ccfc78",
+     "owner": "checkout-libraries"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "lib/cicd/models.py",
+     "destination": "Projects/claude-power-pack/lib/cicd/models.py",
+     "mode": "100644",
+     "size": 18925,
+     "digest": "sha256:71a7714e6a259c51d4a6e0969284138f2bb2c5243268fd4a718745b82e2c4633",
+     "git_blob": "8fe638aec927a2bfcec37570a5bee4bb724c75f8",
+     "owner": "checkout-libraries"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "lib/cicd/mypy_scope.py",
+     "destination": "Projects/claude-power-pack/lib/cicd/mypy_scope.py",
+     "mode": "100644",
+     "size": 3205,
+     "digest": "sha256:301ccbe539017e5d0303194f07fe877a1dec43230a64ec1bfe5943dab71736fa",
+     "git_blob": "550a14a9c637a2d1fcb42183e2fad7415473ef8a",
+     "owner": "checkout-libraries"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "lib/cicd/outcomes.py",
+     "destination": "Projects/claude-power-pack/lib/cicd/outcomes.py",
+     "mode": "100644",
+     "size": 20746,
+     "digest": "sha256:296d6283ded0fec19cd6eeeb3015fa04492cffb79692f246a78a31b87b3cce23",
+     "git_blob": "8f1ecb809077fcb4bd15b99d8e8bbf9f8dbd6fdf",
+     "owner": "checkout-libraries"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "lib/cicd/pipeline.py",
+     "destination": "Projects/claude-power-pack/lib/cicd/pipeline.py",
+     "mode": "100644",
+     "size": 18885,
+     "digest": "sha256:b5e4ffefd62f059eaf79be927a4b15d1d1ee82ec2f0b1be7e0f603f140caf31e",
+     "git_blob": "a2e77402eafbb0df5b274d167efdd9ea3606ab87",
+     "owner": "checkout-libraries"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "lib/cicd/pyproject.toml",
+     "destination": "Projects/claude-power-pack/lib/cicd/pyproject.toml",
+     "mode": "100644",
+     "size": 469,
+     "digest": "sha256:11d3a8f1865bbc7d928f774496659619c6c35d4f7fbc678fe018d14743dc9d11",
+     "git_blob": "b2dd9ab48f8f48a4995b6a8a2e4d14d004e2485b",
+     "owner": "checkout-libraries"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "lib/cicd/runner.py",
+     "destination": "Projects/claude-power-pack/lib/cicd/runner.py",
+     "mode": "100644",
+     "size": 100413,
+     "digest": "sha256:b51cc7193b667e37ac563b07b9efadf143cfcb00dc370e085e0773515b07cb07",
+     "git_blob": "58667776effad95468d3f9245c61173e2a37cb1f",
+     "owner": "checkout-libraries"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "lib/cicd/smoke.py",
+     "destination": "Projects/claude-power-pack/lib/cicd/smoke.py",
+     "mode": "100644",
+     "size": 3400,
+     "digest": "sha256:172c385af59ff5bc3bccf7e5e7cfc0be198f0b6553d04da24b96e1c7c61440b5",
+     "git_blob": "65fa554acc17f130446b80f0496f7d22615502f8",
+     "owner": "checkout-libraries"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "lib/cicd/state.py",
+     "destination": "Projects/claude-power-pack/lib/cicd/state.py",
+     "mode": "100644",
+     "size": 27778,
+     "digest": "sha256:8aaf1597d8a95fac57b650b03f83010e23dda94dbb185c0402fc7ac4ccfc59f5",
+     "git_blob": "6bcfef9b928cf61e8886dbe3851a8f262fe91cde",
+     "owner": "checkout-libraries"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "lib/cicd/steps.py",
+     "destination": "Projects/claude-power-pack/lib/cicd/steps.py",
+     "mode": "100644",
+     "size": 86886,
+     "digest": "sha256:d82cb77c5c16251c404a39b19ed54618229f39f6a57ec7068891cf1c9efe90f5",
+     "git_blob": "836baa6dbadf04fd12cbbfe4574bda5f598a875b",
+     "owner": "checkout-libraries"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "lib/cicd/verify.py",
+     "destination": "Projects/claude-power-pack/lib/cicd/verify.py",
+     "mode": "100644",
+     "size": 15349,
+     "digest": "sha256:be40a53831a0b99c8338647d34059cc94a578b2c26c524991bcdcd6947b1bd24",
+     "git_blob": "2e9592aa5934084699e5a62bd59a6879f66dc95c",
+     "owner": "checkout-libraries"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "pyproject.toml",
+     "destination": "Projects/claude-power-pack/pyproject.toml",
+     "mode": "100644",
+     "size": 7755,
+     "digest": "sha256:bc42953d69269328dbe5041d3b7ef6423804492db20b8cf8a59a94c0ee9f3774",
+     "git_blob": "d4b507a7aeb4973738183841779569708b011319",
+     "owner": "checkout-libraries"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "uv.lock",
+     "destination": "Projects/claude-power-pack/uv.lock",
+     "mode": "100644",
+     "size": 111920,
+     "digest": "sha256:b8edbdd3e0036bc09c849cedee3c1231c468f0f0f9425090c8f2ec914108f3cf",
+     "git_blob": "5acc3c14388066478fe0c102fef684e77fbd8d71",
+     "owner": "checkout-libraries"
+    }
+   ],
+   "digest": "sha256:5ac9bcebf2171f8d805727c3c004ba35edd8e14d052d7a37ffa2eaa05d564a80",
+   "probes": []
+  },
+  {
+   "id": "checkout-detection-marker",
+   "kind": "synthetic",
+   "scope": "treatment",
+   "role": "Existence-only checkout detection marker",
+   "destination": "Projects/claude-power-pack",
+   "version": null,
+   "supply": null,
+   "traversed": false,
+   "no_traverse_reason": null,
+   "referenced_by": [],
+   "unreferenced_reason": "scripts/flow-finish-gate.sh:347 tests directory and CLAUDE.md existence only.",
+   "files": [
+    {
+     "source": null,
+     "destination": "Projects/claude-power-pack/CLAUDE.md",
+     "origin": "synthetic",
+     "content": "# Synthetic checkout marker only - not agent instructions.\n# See skillc#303.\n",
+     "mode": "100644",
+     "size": 77,
+     "digest": "sha256:25cc21d90ab757433f80b56ec1e7992ed354f2fff80b8aa56eda25b50b4c024a",
+     "git_blob": "4ec2f2cb75d7107b167fd3a4fb7a49daabe464c6",
+     "owner": "checkout-detection-marker",
+     "shadow_path": "CLAUDE.md",
+     "replaces_pinned_digest": "sha256:6cc76f94f45090ecbc407ff4e49f1dc0236b823cb22c0f1242cc568122d5651d",
+     "replacement_reason": "The pinned CLAUDE.md is CPP agent instructions. Separately confirmed by the operator: Codex project-doc discovery reads AGENTS.md from cwd, not CLAUDE.md. scripts/flow-finish-gate.sh:347 only tests existence, so a minimal marker preserves detection without installing instructions content."
+    }
+   ],
+   "digest": "sha256:f88f4f4118d733c5b3e39af33a7377287b5c2e1d7b42055370490ddee1710722",
+   "probes": []
+  },
+  {
+   "id": "checkout-templates",
+   "kind": "library",
+   "scope": "treatment",
+   "role": "Makefile templates cicd-init copies from and cicd-check points at (cicd-init/reference.md:81, cicd-check/reference.md:36), and the cicd.yml template cicd-init generates its configuration from (cicd-init/reference.md:104 names it as a bare relative path no reference pattern reads; its health/smoke shape is the one lib.cicd ignores, claude-power-pack#1476)",
+   "destination": "Projects/claude-power-pack",
+   "version": null,
+   "supply": null,
+   "traversed": true,
+   "no_traverse_reason": null,
+   "referenced_by": [
+    "codex/skills/cicd-check/reference.md",
+    "codex/skills/cicd-init/reference.md"
+   ],
+   "unreferenced_reason": null,
+   "files": [
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "templates/Makefile.example",
+     "destination": "Projects/claude-power-pack/templates/Makefile.example",
+     "mode": "100644",
+     "size": 1228,
+     "digest": "sha256:775f9cc9e9fa2cb0954de31b01d4e178ea7f11864322c99ab28ff6ac00fbf6b7",
+     "git_blob": "82dc5555553f59b4a7a0e093443826c7b6ea2a64",
+     "owner": "checkout-templates"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "templates/cicd.yml.example",
+     "destination": "Projects/claude-power-pack/templates/cicd.yml.example",
+     "mode": "100644",
+     "size": 4973,
+     "digest": "sha256:b47a096c68f8d147ad3857cba00c8405267ea385ff1d96c785763aef0d5ced24",
+     "git_blob": "58b61c7b351d6ac8e69e486cbf64cdd571b29ef6",
+     "owner": "checkout-templates"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "templates/makefiles/django-uv.mk",
+     "destination": "Projects/claude-power-pack/templates/makefiles/django-uv.mk",
+     "mode": "100644",
+     "size": 1943,
+     "digest": "sha256:25d2dd72d950079153c56fc80917a19509872ac15446bda1e533ece8e195c963",
+     "git_blob": "71d6afff9c52a07ec19ae594540d25c75a895d02",
+     "owner": "checkout-templates"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "templates/makefiles/go.mk",
+     "destination": "Projects/claude-power-pack/templates/makefiles/go.mk",
+     "mode": "100644",
+     "size": 1337,
+     "digest": "sha256:a4e1026e32b9bf57eadb9f7c0087ce12a540b7ce36fde275a1649f59d506714a",
+     "git_blob": "797ed735b44dd5de32681b303b6f962dedf67320",
+     "owner": "checkout-templates"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "templates/makefiles/multi.mk",
+     "destination": "Projects/claude-power-pack/templates/makefiles/multi.mk",
+     "mode": "100644",
+     "size": 2025,
+     "digest": "sha256:d4a8f09fd0cbb1d64c59c4f115ca8490db19bbeff0d349eee8fb786e0fd8e80c",
+     "git_blob": "2784dbc3a3e84eb502b9d4ed409d28fa458b6098",
+     "owner": "checkout-templates"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "templates/makefiles/node-npm.mk",
+     "destination": "Projects/claude-power-pack/templates/makefiles/node-npm.mk",
+     "mode": "100644",
+     "size": 1323,
+     "digest": "sha256:5056a07046ed7443f244a8d8fee6ede2bc65a44b6cc43c95fe8a10a39eb7cbe6",
+     "git_blob": "0b3971ec5f8f5ac61965684cdad8b350a4784d8d",
+     "owner": "checkout-templates"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "templates/makefiles/node-yarn.mk",
+     "destination": "Projects/claude-power-pack/templates/makefiles/node-yarn.mk",
+     "mode": "100644",
+     "size": 1341,
+     "digest": "sha256:21b3c7edc5f59906a625c74dd51cd396de6d4c9c4f4b46250fde97ee1c6e8bb9",
+     "git_blob": "f658ada04e31728a2a369c64a3bd81503f64b4ad",
+     "owner": "checkout-templates"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "templates/makefiles/powershell.mk",
+     "destination": "Projects/claude-power-pack/templates/makefiles/powershell.mk",
+     "mode": "100644",
+     "size": 1405,
+     "digest": "sha256:3a4ac2940cefe1f91bd17ec2b0cbf51f8ae6dc5bf29900c63912a79b7cc0fb3d",
+     "git_blob": "5f449b98b74e2a4fb32bd42f1a8591276cb73115",
+     "owner": "checkout-templates"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "templates/makefiles/python-pip.mk",
+     "destination": "Projects/claude-power-pack/templates/makefiles/python-pip.mk",
+     "mode": "100644",
+     "size": 1804,
+     "digest": "sha256:3d3435aece5e3768c5ee3da7c67c940534eaac32b0f0ce7a54da17df64b4bb58",
+     "git_blob": "7ce972b1871962cfa2a31bdc858c3cec1a0ce455",
+     "owner": "checkout-templates"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "templates/makefiles/python-uv.mk",
+     "destination": "Projects/claude-power-pack/templates/makefiles/python-uv.mk",
+     "mode": "100644",
+     "size": 1265,
+     "digest": "sha256:2326b856c408d4c68ae07545868bdf13c35130f252f7b87c83eba0e7cb9c7994",
+     "git_blob": "46c554266d7b43225f022d1ca7449bf80b6395cd",
+     "owner": "checkout-templates"
+    },
+    {
+     "origin": "pinned",
+     "replaces_pinned_digest": null,
+     "source": "templates/makefiles/rust.mk",
+     "destination": "Projects/claude-power-pack/templates/makefiles/rust.mk",
+     "mode": "100644",
+     "size": 1212,
+     "digest": "sha256:32a806303befe957a2e4c28427e9ed47c18a0c06efbf8b2001a2d256de0203a2",
+     "git_blob": "676689ec94363a6d5f633970fc191ec9e9a6aab1",
+     "owner": "checkout-templates"
+    }
+   ],
+   "digest": "sha256:88ade4e738a49720feba8ff7a9531ba21e7777b816d422e90a431dc04756a780",
+   "probes": []
+  },
+  {
+   "id": "tool-python",
+   "kind": "tool",
+   "scope": "common",
+   "role": "interpreter for lib.cicd / lib.security and the bundled .py helpers",
+   "destination": null,
+   "version": ">=3.11 (pyproject.toml requires-python at the pin)",
+   "supply": "the trial image; not carried by the subject",
+   "traversed": null,
+   "no_traverse_reason": null,
+   "referenced_by": [],
+   "unreferenced_reason": "invoked as a command word (`python -m lib.security`, reference.md:100), which no path pattern reads",
+   "files": [],
+   "digest": null,
+   "probes": [
+    {
+     "kind": "command",
+     "name": "python3",
+     "version_args": [
+      "--version"
+     ],
+     "constraint": ">=3.11"
+    }
+   ]
+  },
+  {
+   "id": "tool-uv",
+   "kind": "tool",
+   "scope": "common",
+   "role": "runs the checkout's packages (`uv run --project`)",
+   "destination": null,
+   "version": "unpinned by the subject; #266 pins it in the image",
+   "supply": "the trial image; not carried by the subject",
+   "traversed": null,
+   "no_traverse_reason": null,
+   "referenced_by": [],
+   "unreferenced_reason": "invoked as a command word (`uv run --project`, reference.md:100; flow-finish-gate.sh:355), which no path pattern reads",
+   "files": [],
+   "digest": null,
+   "probes": [
+    {
+     "kind": "command",
+     "name": "uv",
+     "version_args": [
+      "--version"
+     ],
+     "constraint": null
+    }
+   ]
+  },
+  {
+   "id": "tool-pypi-runtime",
+   "kind": "tool",
+   "scope": "common",
+   "role": "PyPI runtime dependencies of lib.cicd (pydantic, pyyaml), resolved by uv from uv.lock",
+   "destination": null,
+   "version": "pydantic>=2.0, pyyaml>=6.0 as locked in uv.lock at the pin",
+   "supply": "EXTERNAL: uv resolves these from a package index on first run. Trials have no network (spec.md section 4), so #266 must pre-supply a filled cache or report the gate step unavailable",
+   "traversed": null,
+   "no_traverse_reason": null,
+   "referenced_by": [],
+   "unreferenced_reason": "a package-manager resolution, not a path in any file of the closure",
+   "files": [],
+   "digest": null,
+   "probes": [
+    {
+     "kind": "python-import",
+     "modules": [
+      "pydantic",
+      "yaml"
+     ],
+     "uv_project": "Projects/claude-power-pack"
+    }
+   ]
+  },
+  {
+   "id": "tool-make-git-bash",
+   "kind": "tool",
+   "scope": "common",
+   "role": "make (Makefile targets), git (check-ignored-additions.sh), bash (every shell helper)",
+   "destination": null,
+   "version": "unpinned by the subject; any POSIX-conforming version the image carries",
+   "supply": "the trial image; not carried by the subject",
+   "traversed": null,
+   "no_traverse_reason": null,
+   "referenced_by": [],
+   "unreferenced_reason": "invoked as command words (`make lint`, `git status`, `#!/usr/bin/env bash`), which no path pattern reads",
+   "files": [],
+   "digest": null,
+   "probes": [
+    {
+     "kind": "command",
+     "name": "make",
+     "version_args": [
+      "--version"
+     ],
+     "constraint": null
+    },
+    {
+     "kind": "command",
+     "name": "git",
+     "version_args": [
+      "--version"
+     ],
+     "constraint": null
+    },
+    {
+     "kind": "command",
+     "name": "bash",
+     "version_args": [
+      "--version"
+     ],
+     "constraint": null
+    }
+   ]
+  },
+  {
+   "id": "tool-curl",
+   "kind": "tool",
+   "scope": "common",
+   "role": "lib.cicd's HTTP health probe shells out to curl (lib/cicd/health.py:54-71: `shutil.which(\"curl\")`, else the check FAILs with \"curl not found in PATH\" - a tooling failure indistinguishable in a verdict from a service failure)",
+   "destination": null,
+   "version": ">=7.0, measured and recorded in the cicd-runtime receipt",
+   "supply": "the cicd-runtime image layer (docker/cicd-trial/); the shared trial image does not carry curl",
+   "traversed": null,
+   "no_traverse_reason": null,
+   "referenced_by": [],
+   "unreferenced_reason": "invoked by lib.cicd as a subprocess command word, which no path pattern reads",
+   "files": [],
+   "digest": null,
+   "probes": [
+    {
+     "kind": "command",
+     "name": "curl",
+     "version_args": [
+      "--version"
+     ],
+     "constraint": ">=7.0"
+    }
+   ]
+  }
+ ],
+ "references": [
+  {
+   "reference": "$CPP_DIR/templates/Makefile.example",
+   "in": "codex/skills/cicd-check/reference.md",
+   "pattern": "checkout-root",
+   "class": "variable-rooted",
+   "status": "satisfied",
+   "dependency": "checkout-templates",
+   "resolves_to": "Projects/claude-power-pack/templates/Makefile.example"
+  },
+  {
+   "reference": "/opt/claude-power-pack",
+   "in": "codex/skills/cicd-check/reference.md",
+   "pattern": "absolute-system-path",
+   "class": "absolute",
+   "status": "unsupported",
+   "reason": "absolute alternative checkout location outside any home (cicd-{check,health,init,smoke}/reference.md:13, cicd-verify/reference.md:19); the profile supplies ~/Projects/claude-power-pack, which every cicd skill's probe order tries first"
+  },
+  {
+   "reference": "~/.claude-power-pack",
+   "in": "codex/skills/cicd-check/reference.md",
+   "pattern": "home-path",
+   "class": "home-relative",
+   "status": "unsupported",
+   "reason": "third alternative checkout location (cicd-{check,health,init,smoke}/reference.md:13, cicd-verify/reference.md:19); not supplied, because the first probe already succeeds"
+  },
+  {
+   "reference": "~/Projects/claude-power-pack",
+   "in": "codex/skills/cicd-check/reference.md",
+   "pattern": "home-path",
+   "class": "home-relative",
+   "status": "satisfied",
+   "dependency": "checkout-libraries",
+   "resolves_to": "Projects/claude-power-pack"
+  },
+  {
+   "reference": "/opt/claude-power-pack",
+   "in": "codex/skills/cicd-health/reference.md",
+   "pattern": "absolute-system-path",
+   "class": "absolute",
+   "status": "unsupported",
+   "reason": "absolute alternative checkout location outside any home (cicd-{check,health,init,smoke}/reference.md:13, cicd-verify/reference.md:19); the profile supplies ~/Projects/claude-power-pack, which every cicd skill's probe order tries first"
+  },
+  {
+   "reference": "~/.claude-power-pack",
+   "in": "codex/skills/cicd-health/reference.md",
+   "pattern": "home-path",
+   "class": "home-relative",
+   "status": "unsupported",
+   "reason": "third alternative checkout location (cicd-{check,health,init,smoke}/reference.md:13, cicd-verify/reference.md:19); not supplied, because the first probe already succeeds"
+  },
+  {
+   "reference": "~/Projects/claude-power-pack",
+   "in": "codex/skills/cicd-health/reference.md",
+   "pattern": "home-path",
+   "class": "home-relative",
+   "status": "satisfied",
+   "dependency": "checkout-libraries",
+   "resolves_to": "Projects/claude-power-pack"
+  },
+  {
+   "reference": "$CPP_DIR/templates/makefiles",
+   "in": "codex/skills/cicd-init/reference.md",
+   "pattern": "checkout-root",
+   "class": "variable-rooted",
+   "status": "satisfied",
+   "dependency": "checkout-templates",
+   "resolves_to": "Projects/claude-power-pack/templates/makefiles"
+  },
+  {
+   "reference": "/opt/claude-power-pack",
+   "in": "codex/skills/cicd-init/reference.md",
+   "pattern": "absolute-system-path",
+   "class": "absolute",
+   "status": "unsupported",
+   "reason": "absolute alternative checkout location outside any home (cicd-{check,health,init,smoke}/reference.md:13, cicd-verify/reference.md:19); the profile supplies ~/Projects/claude-power-pack, which every cicd skill's probe order tries first"
+  },
+  {
+   "reference": "~/.claude-power-pack",
+   "in": "codex/skills/cicd-init/reference.md",
+   "pattern": "home-path",
+   "class": "home-relative",
+   "status": "unsupported",
+   "reason": "third alternative checkout location (cicd-{check,health,init,smoke}/reference.md:13, cicd-verify/reference.md:19); not supplied, because the first probe already succeeds"
+  },
+  {
+   "reference": "~/Projects/claude-power-pack",
+   "in": "codex/skills/cicd-init/reference.md",
+   "pattern": "home-path",
+   "class": "home-relative",
+   "status": "satisfied",
+   "dependency": "checkout-libraries",
+   "resolves_to": "Projects/claude-power-pack"
+  },
+  {
+   "reference": "$HOME/Projects/claude-power-pack",
+   "in": "codex/skills/cicd-pipeline/SKILL.md",
+   "pattern": "home-path",
+   "class": "home-relative",
+   "status": "satisfied",
+   "dependency": "checkout-libraries",
+   "resolves_to": "Projects/claude-power-pack"
+  },
+  {
+   "reference": "/opt/claude-power-pack",
+   "in": "codex/skills/cicd-smoke/reference.md",
+   "pattern": "absolute-system-path",
+   "class": "absolute",
+   "status": "unsupported",
+   "reason": "absolute alternative checkout location outside any home (cicd-{check,health,init,smoke}/reference.md:13, cicd-verify/reference.md:19); the profile supplies ~/Projects/claude-power-pack, which every cicd skill's probe order tries first"
+  },
+  {
+   "reference": "~/.claude-power-pack",
+   "in": "codex/skills/cicd-smoke/reference.md",
+   "pattern": "home-path",
+   "class": "home-relative",
+   "status": "unsupported",
+   "reason": "third alternative checkout location (cicd-{check,health,init,smoke}/reference.md:13, cicd-verify/reference.md:19); not supplied, because the first probe already succeeds"
+  },
+  {
+   "reference": "~/Projects/claude-power-pack",
+   "in": "codex/skills/cicd-smoke/reference.md",
+   "pattern": "home-path",
+   "class": "home-relative",
+   "status": "satisfied",
+   "dependency": "checkout-libraries",
+   "resolves_to": "Projects/claude-power-pack"
+  },
+  {
+   "reference": "/opt/claude-power-pack",
+   "in": "codex/skills/cicd-verify/reference.md",
+   "pattern": "absolute-system-path",
+   "class": "absolute",
+   "status": "unsupported",
+   "reason": "absolute alternative checkout location outside any home (cicd-{check,health,init,smoke}/reference.md:13, cicd-verify/reference.md:19); the profile supplies ~/Projects/claude-power-pack, which every cicd skill's probe order tries first"
+  },
+  {
+   "reference": "~/.claude-power-pack",
+   "in": "codex/skills/cicd-verify/reference.md",
+   "pattern": "home-path",
+   "class": "home-relative",
+   "status": "unsupported",
+   "reason": "third alternative checkout location (cicd-{check,health,init,smoke}/reference.md:13, cicd-verify/reference.md:19); not supplied, because the first probe already succeeds"
+  },
+  {
+   "reference": "~/Projects/claude-power-pack",
+   "in": "codex/skills/cicd-verify/reference.md",
+   "pattern": "home-path",
+   "class": "home-relative",
+   "status": "satisfied",
+   "dependency": "checkout-libraries",
+   "resolves_to": "Projects/claude-power-pack"
+  },
+  {
+   "reference": "/usr/local/bin",
+   "in": "templates/makefiles/go.mk",
+   "pattern": "absolute-system-path",
+   "class": "absolute",
+   "status": "unsupported",
+   "reason": "not a runtime reference: templates/makefiles/go.mk:44 and rust.mk:41 echo an example `scp ... prod:/usr/local/bin/` deploy hint for a remote host; a printed string in a template for Go/Rust projects, never a path on the trial's own host"
+  },
+  {
+   "reference": "/usr/local/bin",
+   "in": "templates/makefiles/rust.mk",
+   "pattern": "absolute-system-path",
+   "class": "absolute",
+   "status": "unsupported",
+   "reason": "not a runtime reference: templates/makefiles/go.mk:44 and rust.mk:41 echo an example `scp ... prod:/usr/local/bin/` deploy hint for a remote host; a printed string in a template for Go/Rust projects, never a path on the trial's own host"
+  }
+ ],
+ "unsupported": [
+  {
+   "reference": "/opt/claude-power-pack",
+   "reason": "absolute alternative checkout location outside any home (cicd-{check,health,init,smoke}/reference.md:13, cicd-verify/reference.md:19); the profile supplies ~/Projects/claude-power-pack, which every cicd skill's probe order tries first"
+  },
+  {
+   "reference": "/usr/local/bin",
+   "reason": "not a runtime reference: templates/makefiles/go.mk:44 and rust.mk:41 echo an example `scp ... prod:/usr/local/bin/` deploy hint for a remote host; a printed string in a template for Go/Rust projects, never a path on the trial's own host"
+  },
+  {
+   "reference": "~/.claude-power-pack",
+   "reason": "third alternative checkout location (cicd-{check,health,init,smoke}/reference.md:13, cicd-verify/reference.md:19); not supplied, because the first probe already succeeds"
+  }
+ ],
+ "mirrors": [],
+ "generated_from": [],
+ "helper_parity": {
+  "common": [
+   "tool-curl",
+   "tool-make-git-bash",
+   "tool-pypi-runtime",
+   "tool-python",
+   "tool-uv"
+  ],
+  "treatment": [
+   "checkout-detection-marker",
+   "checkout-libraries",
+   "checkout-templates"
+  ],
+  "bundled": []
+ },
+ "declared_empty_kinds": [
+  "startup-context",
+  "helper"
+ ],
+ "client_profiles": {
+  "codex": {
+   "status": "declared",
+   "reason": "the subject's own surface (codex-skills)"
+  },
+  "claude-code": {
+   "status": "unsupported",
+   "reason": "Claude Code commands, plugin and native skills are a different surface with different helpers (CLAUDE_PLUGIN_ROOT); a Codex inventory does not establish Claude parity"
+  },
+  "browser": {
+   "status": "unsupported",
+   "reason": "the cicd skills need no browser; the browser/MCP capability profile is #283's to prove"
+  },
+  "security-scanner": {
+   "status": "unsupported",
+   "reason": "external scanners are #285's profile"
+  },
+  "services": {
+   "status": "unsupported",
+   "reason": "only loopback services the trial itself starts inside its own container are in scope; GitHub, hosted CI, Docker, cloud deploy targets, MCP servers and network are not provided to trials (spec.md section 4)"
+  }
+ },
+ "gate_entrypoint": null,
+ "installed_surface": {
+  "files": 55,
+  "digest": "sha256:844d2543e872ee01a0e789f725fe833578b38f7562f29bf22740da48e57685d1"
+ },
+ "establishes": "a declared, closed dependency inventory at this source revision",
+ "does_not_establish": [
+  "installation into any home",
+  "that any helper, library or tool runs",
+  "client availability, invocation or task outcome",
+  "parity for any client profile other than the declared one"
+ ]
+}

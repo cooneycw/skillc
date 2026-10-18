@@ -85,6 +85,11 @@ def test_fixed_resource_loader_refuses_bad_policy(tmp_path: Path, monkeypatch: p
             rs.RuntimeSupply(RECEIPT)
     # Unrelated no-gate classification needs no policy, even if package data is bad.
     assert not rs.requires_supply(locator="unrelated", revision="a" * 40, gate_entrypoint=None, files={}, tools=[])
+    assert rs.selected_runtime(locator="unrelated", revision="a" * 40, gate_entrypoint=None, files={}, tools=[]) is None
+    if fault is not None:
+        # Control: a closure that DOES carry the cicd facts consults the policy.
+        with pytest.raises(rs.Refused):
+            rs.selected_runtime(**cicd_selection())
 
 
 def test_policy_path_cannot_come_from_cwd_or_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -135,7 +140,8 @@ def test_installed_wheel_uses_its_policy_resource_and_refuses_its_loss(tmp_path:
                              env=env, check=False, capture_output=True, timeout=10)
     assert refused.returncode != 0 and b"controller runtime policy is missing" in refused.stderr
     unrelated = subprocess.run([str(python), "-I", "-c",
-        "from skillc import runtime_supply as r; assert not r.requires_supply(locator='x',revision='x',gate_entrypoint=None,files={},tools=[])"],
+        ("from skillc import runtime_supply as r; assert not r.requires_supply(locator='x',revision='x',gate_entrypoint=None,files={},tools=[]); "
+         "assert r.selected_runtime(locator='x',revision='x',gate_entrypoint=None,files={},tools=[]) is None")],
         cwd=other_cwd, env=env, check=False, capture_output=True, timeout=10)
     assert unrelated.returncode == 0, unrelated.stderr
 
@@ -321,3 +327,150 @@ def test_supported_family_never_downgrades_changed_runtime_facts(fault: str) -> 
         facts["tools"][0]["probes"][0]["uv_project"] = "Other/project"
     with pytest.raises(rs.Refused):
         rs.requires_supply(**facts)
+
+
+# --- #280: the named cicd runtime beside the unchanged flow-check one -------
+
+CURL_TOOL = {"probes": [{"kind": "command", "name": "curl", "version_args": ["--version"]}]}
+
+
+def cicd_selection() -> dict[str, Any]:
+    facts = selection()
+    facts["gate_entrypoint"] = None
+    facts["tools"] = [*facts["tools"], CURL_TOOL]
+    return facts
+
+
+def cicd_receipt(**changes: object) -> dict[str, Any]:
+    base = json.loads(RECEIPT)
+    value = {key: base[key] for key in ("schema_version", "runtime_id", "subject_revision",
+                                        "pyproject_sha256", "lock_sha256", "descriptor_sha256")}
+    value.update(image_id="sha256:" + "6" * 64, recipe_sha256="7" * 64, source_commit="8" * 40,
+                 target="cicd-runtime", base_receipt=base, base_image_id=base["image_id"],
+                 curl_version="7.88.1")
+    value.update(changes)
+    return value
+
+
+def test_flow_check_closures_select_the_same_runtime_as_before() -> None:
+    """Every flow-check case `requires_supply` decides gets the same answer
+    through `selected_runtime`: True is `profile-runtime`, False is None."""
+    facts = selection()
+    assert rs.requires_supply(**facts) and rs.selected_runtime(**facts) == rs.PROFILE_RUNTIME
+    for key in ("locator", "revision", "gate_entrypoint"):
+        unrelated = {**facts, key: "unrelated"}
+        assert not rs.requires_supply(**unrelated)
+        assert rs.selected_runtime(**unrelated) is None
+    gateless = {**facts, "gate_entrypoint": None}
+    assert not rs.requires_supply(**gateless) and rs.selected_runtime(**gateless) is None
+    assert rs.selected_runtime(locator="unrelated", revision="a" * 40, gate_entrypoint=None,
+                               files={}, tools=[]) is None
+
+
+@pytest.mark.parametrize("fault", ["missing-lock", "changed-project", "changed-probe"])
+def test_every_flow_check_refusal_still_fires_through_selected_runtime(fault: str) -> None:
+    facts = selection()
+    if fault == "missing-lock":
+        del facts["files"]["Projects/claude-power-pack/uv.lock"]
+    elif fault == "changed-project":
+        facts["files"]["Projects/claude-power-pack/pyproject.toml"] = "sha256:" + "f" * 64
+    else:
+        facts["tools"][0]["probes"][0]["uv_project"] = "Other/project"
+    with pytest.raises(rs.Refused):
+        rs.selected_runtime(**facts)
+
+
+def test_a_gateless_pinned_closure_with_curl_selects_the_cicd_runtime() -> None:
+    facts = cicd_selection()
+    assert not rs.requires_supply(**facts)
+    assert rs.selected_runtime(**facts) == rs.CICD_RUNTIME
+
+
+@pytest.mark.parametrize("variant", ["no-curl", "no-project-probe", "other-locator", "other-revision"])
+def test_a_closure_missing_any_cicd_fact_selects_nothing(variant: str) -> None:
+    facts = cicd_selection()
+    if variant == "no-curl":
+        facts["tools"] = facts["tools"][:1]
+    elif variant == "no-project-probe":
+        facts["tools"] = [CURL_TOOL]
+    elif variant == "other-locator":
+        facts["locator"] = "github.com/someone/else"
+    else:
+        facts["revision"] = "a" * 40
+    assert rs.selected_runtime(**facts) is None
+
+
+def test_a_closure_naming_an_unsupported_gate_never_selects_the_cicd_runtime() -> None:
+    """M-a: without the gate guard this closure - a gate the policy does not
+    support, plus every cicd fact - would select the cicd runtime."""
+    facts = {**cicd_selection(), "gate_entrypoint": ".claude/scripts/other-gate.sh"}
+    assert rs.selected_runtime(**facts) is None
+
+
+@pytest.mark.parametrize("fault", ["missing-lock", "changed-project"])
+def test_the_cicd_runtime_refuses_changed_pinned_metadata(fault: str) -> None:
+    """M-c: the cicd runtime's PyPI cache is the flow-check pin's; a closure
+    whose metadata moved must be refused, never handed that cache."""
+    facts = cicd_selection()
+    if fault == "missing-lock":
+        del facts["files"]["Projects/claude-power-pack/uv.lock"]
+    else:
+        facts["files"]["Projects/claude-power-pack/pyproject.toml"] = "sha256:" + "f" * 64
+    with pytest.raises(rs.Refused, match="cicd runtime metadata"):
+        rs.selected_runtime(**facts)
+
+
+def test_a_cicd_receipt_is_the_layered_image_over_its_validated_base() -> None:
+    supply = rs.RuntimeSupply(encoded(cicd_receipt()))
+    assert supply.kind == rs.CICD_RUNTIME
+    assert supply.image_id == "sha256:" + "6" * 64
+    # The descriptor is the base's, byte for byte, bound to the LAYERED image.
+    assert supply.descriptor(DESCRIPTOR, actual_image=supply.image_id) == json.loads(DESCRIPTOR)
+    with pytest.raises(rs.Refused):
+        supply.descriptor(DESCRIPTOR, actual_image=json.loads(RECEIPT)["image_id"])
+    assert rs.RuntimeSupply(RECEIPT).kind == rs.PROFILE_RUNTIME
+
+
+@pytest.mark.parametrize(("key", "value"), [
+    ("runtime_id", "other"), ("lock_sha256", "a" * 64), ("image_id", "tag:mutable"),
+    ("image_id", json.loads(RECEIPT)["image_id"]), ("descriptor_sha256", "9" * 64),
+    ("recipe_sha256", "bad"), ("source_commit", "short"), ("curl_version", "latest"),
+    ("curl_version", 7), ("base_image_id", "sha256:" + "9" * 64), ("base_receipt", "not-an-object"),
+    ("extra", "unknown"),
+])
+def test_cicd_receipt_closed_schema(key: str, value: object) -> None:
+    with pytest.raises(rs.Refused):
+        rs.RuntimeSupply(encoded(cicd_receipt(**{key: value})))
+
+
+@pytest.mark.parametrize("key", list(cicd_receipt()))
+def test_missing_cicd_receipt_field_refuses(key: str) -> None:
+    receipt = cicd_receipt()
+    del receipt[key]
+    with pytest.raises(rs.Refused):
+        rs.RuntimeSupply(encoded(receipt))
+
+
+@pytest.mark.parametrize(("key", "value"), [
+    ("target", "profile-runtime-empty-cache"), ("target", "cicd-runtime"), ("image_id", "tag:mutable"),
+    ("subject_revision", "a" * 40), ("extra", "unknown"),
+])
+def test_a_cicd_receipt_over_an_invalid_base_refuses(key: str, value: object) -> None:
+    base = json.loads(RECEIPT)
+    base[key] = value
+    with pytest.raises(rs.Refused):
+        rs.RuntimeSupply(encoded(cicd_receipt(base_receipt=base, base_image_id=base["image_id"])))
+
+
+def test_a_receipt_serves_only_the_runtime_its_closure_selected() -> None:
+    """M-b: each kind is refused for the other runtime, and for none."""
+    flow_check = rs.RuntimeSupply(RECEIPT)
+    cicd = rs.RuntimeSupply(encoded(cicd_receipt()))
+    rs.require_kind(flow_check, rs.PROFILE_RUNTIME)
+    rs.require_kind(cicd, rs.CICD_RUNTIME)
+    with pytest.raises(rs.Refused, match="closure selects profile-runtime"):
+        rs.require_kind(cicd, rs.PROFILE_RUNTIME)
+    with pytest.raises(rs.Refused, match="closure selects cicd-runtime"):
+        rs.require_kind(flow_check, rs.CICD_RUNTIME)
+    with pytest.raises(rs.Refused, match="unrelated or absent"):
+        rs.require_kind(cicd, None)

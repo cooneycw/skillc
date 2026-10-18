@@ -1785,17 +1785,19 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
         treatment = cr.build_treatment(
             acquired, subject_profile=subject_profile, root=cr.ROOT if subject_profile is not None else None,
         )
-        needs_supply = rs.requires_supply(
+        selected = rs.selected_runtime(
             locator=acquired.subject.locator, revision=acquired.subject.revision,
             gate_entrypoint=treatment.gate_entrypoint, files=treatment.verify_home_files,
             tools=treatment.preflight_tools,
         )
         receipt_path = args.runtime_supply_receipt
-        if needs_supply and not receipt_path and not rehearse:
+        if selected and not receipt_path and not rehearse:
             raise rs.Refused("supported profile requires --runtime-supply-receipt")
-        if receipt_path and not needs_supply:
+        if receipt_path and not selected:
             raise rs.Refused("runtime receipt supplied for an unrelated or absent profile")
         supply = rs.RuntimeSupply.from_path(Path(receipt_path)) if receipt_path else None
+        if supply is not None:
+            rs.require_kind(supply, selected)
         if supply is not None and supply.image_id != image_digest:
             raise rs.Refused("runtime receipt image differs from the approved resolved image")
     except (cr.CalibrationRefused, profile.Refused, rs.Refused, OSError, json.JSONDecodeError, UnicodeError) as exc:
@@ -1926,14 +1928,16 @@ def cmd_level3_campaign(args: argparse.Namespace) -> int:
         if found != (frozen_subject["locator"], frozen_subject["revision"]):
             raise lc.CampaignRefused(f"acquired subject {found} is not the frozen one")
         treatment = cr.build_treatment(acquired, subject_profile=str(frozen_subject["profile"]), root=cr.ROOT)
-        needs_supply = rs.requires_supply(
+        selected = rs.selected_runtime(
             locator=acquired.subject.locator, revision=acquired.subject.revision,
             gate_entrypoint=treatment.gate_entrypoint, files=treatment.verify_home_files,
             tools=treatment.preflight_tools,
         )
-        if not needs_supply:
+        # The Level 3 campaign runs the flow-check gate; the cicd runtime has none.
+        if selected != rs.PROFILE_RUNTIME:
             raise lc.CampaignRefused("the frozen subject does not select the supported pinned runtime")
         supply = rs.RuntimeSupply.from_path(Path(args.runtime_supply_receipt))
+        rs.require_kind(supply, selected)
     except (lc.CampaignRefused, demo.SubjectRefused, cr.CalibrationRefused, profile.Refused, rs.Refused,
             OSError, json.JSONDecodeError, UnicodeError) as exc:
         print(f"skillc: {exc}", file=sys.stderr)

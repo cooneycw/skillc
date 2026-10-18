@@ -72,7 +72,17 @@ _BREAK_CWD_MODES="confine-root-omitted"
 #: --dns set (measured on the runner), so it could never break anything.
 _BREAK_EGRESS_MODES="allow-all bridge-network dns-hosts"
 
-# Resolves a --break argument to NINE lines on stdout: the NORMALIZED spec
+#: #280's local CI/CD profile break modes - no bare form, same as witness.
+#: no-curl removes curl and old-curl replaces it with a 6.1.0 stub after
+#: runtime validation, so the in-container preflight must refuse tool-curl;
+#: service-down never starts the loopback health service, so the
+#: healthy-deploy property (health passes, verify PROCEEDs) must fail;
+#: no-probes ships templates/cicd.yml.example's shape (claude-power-pack
+#: #1476), so the configured-probes property must fail; broken-build makes
+#: the project's build recipe `false`, so the build-artifact property must fail.
+_BREAK_CICDPROFILE_MODES="no-curl old-curl service-down no-probes broken-build"
+
+# Resolves a --break argument to TEN lines on stdout: the NORMALIZED spec
 # ("none", or "<family>:<mode>" - a bare legacy channel mode is normalized
 # to its "channel:<mode>" form here, so every caller downstream has exactly
 # one spelling to compare against "none"), the value to export as
@@ -81,9 +91,10 @@ _BREAK_EGRESS_MODES="allow-all bridge-network dns-hosts"
 # to export as SKILLC_COLDINSTALL_LIVE_BREAK, the value to export as
 # SKILLC_TRIAL_IMAGE_BREAK, the value to export as SKILLC_CLOSURE_
 # PREFLIGHT_LIVE_BREAK, the value to export as SKILLC_CWD_
-# CONFINEMENT_LIVE_BREAK, and the value to export as SKILLC_EGRESS_LIVE_BREAK
-# - ALL EIGHT FAMILY VALUES ALWAYS PRESENT, exactly
-# one of them equal to the resolved mode and the other seven the literal
+# CONFINEMENT_LIVE_BREAK, the value to export as SKILLC_EGRESS_LIVE_BREAK,
+# and (#280) the value to export as SKILLC_CICD_PROFILE_LIVE_BREAK
+# - ALL NINE FAMILY VALUES ALWAYS PRESENT, exactly
+# one of them equal to the resolved mode and the other eight the literal
 # string "none" (never empty, never left for the caller to infer from an
 # empty field).
 #
@@ -107,7 +118,7 @@ _BREAK_EGRESS_MODES="allow-all bridge-network dns-hosts"
 resolve_break_spec() {
     local spec="${1:-}" family mode m
     if [ "$spec" = "none" ]; then
-        printf 'none\nnone\nnone\nnone\nnone\nnone\nnone\nnone\nnone\n'
+        printf 'none\nnone\nnone\nnone\nnone\nnone\nnone\nnone\nnone\nnone\n'
         return 0
     fi
     case "$spec" in
@@ -124,7 +135,7 @@ resolve_break_spec() {
         channel)
             for m in $_BREAK_CHANNEL_MODES; do
                 if [ "$m" = "$mode" ]; then
-                    printf 'channel:%s\n%s\nnone\nnone\nnone\nnone\nnone\nnone\nnone\n' "$mode" "$mode"
+                    printf 'channel:%s\n%s\nnone\nnone\nnone\nnone\nnone\nnone\nnone\nnone\n' "$mode" "$mode"
                     return 0
                 fi
             done
@@ -134,7 +145,7 @@ resolve_break_spec() {
         witness)
             for m in $_BREAK_WITNESS_MODES; do
                 if [ "$m" = "$mode" ]; then
-                    printf 'witness:%s\nnone\n%s\nnone\nnone\nnone\nnone\nnone\nnone\n' "$mode" "$mode"
+                    printf 'witness:%s\nnone\n%s\nnone\nnone\nnone\nnone\nnone\nnone\nnone\n' "$mode" "$mode"
                     return 0
                 fi
             done
@@ -144,7 +155,7 @@ resolve_break_spec() {
         gateshim)
             for m in $_BREAK_GATESHIM_MODES; do
                 if [ "$m" = "$mode" ]; then
-                    printf 'gateshim:%s\nnone\nnone\n%s\nnone\nnone\nnone\nnone\nnone\n' "$mode" "$mode"
+                    printf 'gateshim:%s\nnone\nnone\n%s\nnone\nnone\nnone\nnone\nnone\nnone\n' "$mode" "$mode"
                     return 0
                 fi
             done
@@ -154,7 +165,7 @@ resolve_break_spec() {
         coldinstall)
             for m in $_BREAK_COLDINSTALL_MODES; do
                 if [ "$m" = "$mode" ]; then
-                    printf 'coldinstall:%s\nnone\nnone\nnone\n%s\nnone\nnone\nnone\nnone\n' "$mode" "$mode"
+                    printf 'coldinstall:%s\nnone\nnone\nnone\n%s\nnone\nnone\nnone\nnone\nnone\n' "$mode" "$mode"
                     return 0
                 fi
             done
@@ -164,7 +175,7 @@ resolve_break_spec() {
         trialimage)
             for m in $_BREAK_TRIALIMAGE_MODES; do
                 if [ "$m" = "$mode" ]; then
-                    printf 'trialimage:%s\nnone\nnone\nnone\nnone\n%s\nnone\nnone\nnone\n' "$mode" "$mode"
+                    printf 'trialimage:%s\nnone\nnone\nnone\nnone\n%s\nnone\nnone\nnone\nnone\n' "$mode" "$mode"
                     return 0
                 fi
             done
@@ -174,7 +185,7 @@ resolve_break_spec() {
         closure)
             for m in $_BREAK_CLOSURE_MODES; do
                 if [ "$m" = "$mode" ]; then
-                    printf 'closure:%s\nnone\nnone\nnone\nnone\nnone\n%s\nnone\nnone\n' "$mode" "$mode"
+                    printf 'closure:%s\nnone\nnone\nnone\nnone\nnone\n%s\nnone\nnone\nnone\n' "$mode" "$mode"
                     return 0
                 fi
             done
@@ -184,7 +195,7 @@ resolve_break_spec() {
         cwd)
             for m in $_BREAK_CWD_MODES; do
                 if [ "$m" = "$mode" ]; then
-                    printf 'cwd:%s\nnone\nnone\nnone\nnone\nnone\nnone\n%s\nnone\n' "$mode" "$mode"
+                    printf 'cwd:%s\nnone\nnone\nnone\nnone\nnone\nnone\n%s\nnone\nnone\n' "$mode" "$mode"
                     return 0
                 fi
             done
@@ -194,15 +205,25 @@ resolve_break_spec() {
         egress)
             for m in $_BREAK_EGRESS_MODES; do
                 if [ "$m" = "$mode" ]; then
-                    printf 'egress:%s\nnone\nnone\nnone\nnone\nnone\nnone\nnone\n%s\n' "$mode" "$mode"
+                    printf 'egress:%s\nnone\nnone\nnone\nnone\nnone\nnone\nnone\n%s\nnone\n' "$mode" "$mode"
                     return 0
                 fi
             done
             echo "run-real-docker: unknown egress break mode '$mode' (must be one of: $_BREAK_EGRESS_MODES)" >&2
             return 2
             ;;
+        cicdprofile)
+            for m in $_BREAK_CICDPROFILE_MODES; do
+                if [ "$m" = "$mode" ]; then
+                    printf 'cicdprofile:%s\nnone\nnone\nnone\nnone\nnone\nnone\nnone\nnone\n%s\n' "$mode" "$mode"
+                    return 0
+                fi
+            done
+            echo "run-real-docker: unknown cicdprofile break mode '$mode' (must be one of: $_BREAK_CICDPROFILE_MODES)" >&2
+            return 2
+            ;;
         *)
-            echo "run-real-docker: unknown break family '$family' (must be 'channel', 'witness', 'gateshim', 'coldinstall', 'trialimage', 'closure', 'cwd' or 'egress'), from spec '$spec'" >&2
+            echo "run-real-docker: unknown break family '$family' (must be 'channel', 'witness', 'gateshim', 'coldinstall', 'trialimage', 'closure', 'cwd', 'egress' or 'cicdprofile'), from spec '$spec'" >&2
             return 2
             ;;
     esac
