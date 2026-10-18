@@ -63,7 +63,7 @@ cleanup() {
         kill -TERM "$HARNESS_PID" 2>/dev/null || true
         wait "$HARNESS_PID" 2>/dev/null || true
     fi
-    echo "load-repro: exit $(date -Is) $(uptime)" >&2
+    echo "load-repro: exit $(date -Is) load $(cat /proc/loadavg)" >&2
 }
 trap cleanup EXIT
 trap 'exit 143' TERM INT HUP
@@ -88,7 +88,7 @@ while :; do
     [ "$have" -ge "$REPS" ] && break
     [ "$phase_n" -ge "$MAX_PHASES" ] && { echo "load-repro: stopped at $MAX_PHASES phases with $have of $REPS reps" >&2; break; }
     if [ "$phase_n" -gt 0 ]; then
-        echo "load-repro: pause ${PAUSE_SECONDS}s $(uptime)" >&2
+        echo "load-repro: pause ${PAUSE_SECONDS}s load $(cat /proc/loadavg)" >&2
         sleep "$PAUSE_SECONDS"
     fi
     phase_n=$((phase_n + 1))

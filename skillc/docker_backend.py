@@ -2042,6 +2042,7 @@ class DockerBackend:
     def execute(
         self, handle: object, argv: Sequence[str], limits: Limits,
         cancel: Callable[[], bool] | None = None, stdin: bytes | None = None,
+        keep_running: bool = False,
     ) -> ExecuteResult:
         """Step 5: run `argv` inside the already-running container via
         `docker exec -w CONTAINER_WORKSPACE`, honoring `limits.timeout` and
@@ -2209,7 +2210,8 @@ class DockerBackend:
             # otherwise make every container read as stopped.
             never_started = (proc.returncode not in (0, None)
                              and self._exec_never_started(handle, call_id, window_start_ns))
-            self._kill_container(handle, "KILL")
+            if not keep_running:
+                self._kill_container(handle, "KILL")
 
         # term_forwarding names what the HOST observed, never what the
         # container reports about itself (ExecuteResult's own docstring).
@@ -2930,6 +2932,23 @@ class DockerBackend:
                 return True
             time.sleep(0.02)
         return False
+
+    def execute_turn(
+        self, handle: object, argv: Sequence[str], limits: Limits, cancel: Callable[[], bool] | None = None,
+    ) -> ExecuteResult:
+        """#279: one turn of a multi-turn attempt - `execute()`, except that a
+        turn which EXITS leaves the container running for the next turn. A
+        timeout or cancel still stops it exactly as `execute()` does. Whoever
+        calls this owns ending the attempt with `end_attempt()` (lifecycle does,
+        in a `finally`), and the attempt's last turn uses plain `execute()`."""
+        return self.execute(handle, argv, limits, cancel, keep_running=True)
+
+    def end_attempt(self, handle: object) -> None:
+        """#279: stop a container a kept-running turn left up - the same KILL
+        `execute()` sends after a clean exit. Best-effort like that kill;
+        `confirm_stopped()` independently verifies the outcome."""
+        assert isinstance(handle, _Handle)
+        self._kill_container(handle, "KILL")
 
     def _kill_container(self, handle: _Handle, sig: str) -> None:
         """`docker kill --signal SIG` against this attempt's own container,

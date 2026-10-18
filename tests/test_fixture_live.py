@@ -57,10 +57,30 @@ def test_the_committed_draft_parses_and_its_identities_are_the_repositorys() -> 
     assert declaration.shared["model"] == "gpt-6-astra" and declaration.shared["client"]["version"] == "0.157.1"
 
 
-def test_the_committed_draft_is_not_approved() -> None:
-    """It is a DRAFT: nothing may spend on it until the owner approves its digest."""
-    with pytest.raises(fl.LiveRefused, match="no approval record"):
-        fl.require_approved(fl.load_declaration(DRAFT), ROOT)
+#: The digest of the measurement approval package sent for the owner's decision
+#: (2026-10-18, re-checked at a0edf35). A stamp must name exactly this.
+PACKAGED_DIGEST = "sha256:7eabd370b2d456293f41f39d74d91bac405cef9e31ec2b8fae80cba573e2956f"
+
+
+def test_the_committed_declaration_is_the_packaged_one() -> None:
+    assert fl.load_declaration(DRAFT).digest == PACKAGED_DIGEST
+
+
+def test_the_committed_declaration_carries_the_owners_approval_at_the_packaged_digest() -> None:
+    """The stamp changed nothing the owner approved: the content digest is the
+    packaged digest, the approval names it, and the committed file authorizes as is."""
+    declaration = fl.load_declaration(DRAFT)
+    approval = declaration.approval
+    assert approval is not None and approval["by"] == "owner (cooneycw)"
+    assert declaration.digest == approval["declaration_digest"] == PACKAGED_DIGEST
+    fl.require_approved(declaration, ROOT)
+
+
+def test_the_owners_approval_does_not_survive_a_changed_field() -> None:
+    data = _draft()
+    data["shared"]["total_seconds"] = 7200
+    with pytest.raises(fl.LiveRefused, match="does not bind this exact declaration"):
+        fl.require_approved(fl.parse_declaration(data), ROOT)
 
 
 @pytest.mark.parametrize(("mutate", "match"), [
@@ -211,8 +231,10 @@ def test_a_dry_rehearsal_accounts_for_every_slot_and_reports_unapproved(tmp_path
 
 
 def test_a_live_run_needs_an_approved_declaration(tmp_path: Path) -> None:
+    unapproved = _draft()
+    unapproved.pop("approval", None)
     with pytest.raises(fl.LiveRefused, match="no approval record"):
-        fl.run_live(fl.load_declaration(DRAFT), root=ROOT, run_dir=tmp_path, treatment=_treatment(),
+        fl.run_live(fl.parse_declaration(unapproved), root=ROOT, run_dir=tmp_path, treatment=_treatment(),
                     image_digest=None, backends=lambda: (None, None), client_argv=["codex", "exec"],
                     credential_explicit_path=None)
     assert not (tmp_path / "store").exists()  # ADR 0005: nothing before authorization
@@ -334,7 +356,9 @@ def test_the_census_must_cover_the_transcript_through_the_production_parser(raw:
 
 
 def test_a_rehearsal_is_identifiable_in_the_ledger_before_any_report(tmp_path: Path) -> None:
-    declaration = fl.load_declaration(DRAFT)
+    unapproved = _draft()
+    unapproved.pop("approval", None)
+    declaration = fl.parse_declaration(unapproved)
     experiment, _, _ = fl.run_live(declaration, root=ROOT, run_dir=tmp_path, treatment=_treatment(),
                                    image_digest=None, backends=lambda: (None, None), client_argv=["codex", "exec"],
                                    credential_explicit_path=None, rehearse="dry")
