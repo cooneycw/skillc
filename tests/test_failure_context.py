@@ -291,8 +291,8 @@ def test_a_test_that_kills_its_worker_still_gets_context(tmp_path):
 
 
 def test_short_user_names_are_scrubbed_on_token_boundaries():
-    scrub = fc._scrubber(home="/home/ci", names={"ci", "x"})
-    assert scrub("user=ci cwd=/home/ci/repo") == "user=<user> cwd=~/repo"
+    scrub = fc._scrubber(home="/var/lib/ci", names={"ci", "x"})
+    assert scrub("user=ci cwd=/var/lib/ci/repo") == "user=<user> cwd=~/repo"
     assert scrub("circle ci-runner taxi x") == "circle <user>-runner taxi <user>"
     assert scrub({"a": ["owner ci"]}) == {"a": ["owner <user>"]}
 
