@@ -179,9 +179,9 @@ def run_gate(tree: str) -> dict:
 
 def run_make_check(tree: str) -> dict:
     """#287 auto6 (Codex review): the project gate goal.md names, `make check`,
-    on a copy of the delivered tree. `missing` means no Makefile at all."""
-    if not os.path.isfile(os.path.join(tree, "Makefile")):
-        return {"missing": True, "exit": None, "timed_out": False, "error": None, "last_line": ""}
+    on a copy of the delivered tree. Whatever makefile name make itself
+    recognizes is honoured (Codex pass 3); a tree with none simply fails, so
+    `missing` is never set here."""
     try:
         proc = subprocess.run(["make", "check"], cwd=tree, capture_output=True, text=True,
                               timeout=GATE_TIMEOUT, check=False)
