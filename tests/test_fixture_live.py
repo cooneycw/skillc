@@ -342,3 +342,61 @@ def test_a_rehearsal_is_identifiable_in_the_ledger_before_any_report(tmp_path: P
     assert ledger["experiment_id"].startswith(f"{fl.EXPERIMENT_LABEL}-rehearsal-dry-")
     configs = [json.loads(trial.read_object(experiment, t["config"]["digest"])) for t in ledger["trials"]]
     assert {(c["mode"], c["approved"]) for c in configs} == {("dry", False)}
+
+
+def _one_case(n: int) -> dict[str, Any]:
+    out = copy.deepcopy(_draft())
+    out["cases"] = ["clean"]
+    out["attempts_per_case"] = n
+    out["case_order"]["sequence"] = calibration.derive_arm_order(out["case_order"]["seed"], ["clean"], n)
+    out["shared"]["total_seconds"] = out["shared"]["per_attempt_seconds"] * n
+    return out
+
+
+def test_a_trigger_on_attempt_1_of_3_halts_the_schedule_not_just_the_attempt(tmp_path: Path,
+                                                                             monkeypatch: pytest.MonkeyPatch) -> None:
+    """The failure #287 met with an external watcher: the attempt ended, the
+    schedule went on. Here attempts 2 and 3 are never dispatched."""
+    declaration = fl.parse_declaration(_approve(_one_case(3)))
+    from skillc import agent_trial
+    calls: list[str] = []
+
+    def fake_attempt(**kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs["attempt_id"])
+        return _clean_record(**{"fixture.codex_guard": {"status": "observed", "confirmed": 1, "suspected": 0}})
+
+    monkeypatch.setattr(agent_trial, "run_one_attempt", fake_attempt)
+    _, outcomes, stop = fl.run_live(
+        declaration, root=ROOT, run_dir=tmp_path, treatment=_treatment(), image_digest=None,
+        backends=lambda: (None, None), client_argv=list(cc.DEFAULT_CLIENT_ARGVS["codex"]),
+        credential_explicit_path=None)
+    assert calls == [outcomes[0].scheduled.attempt_id]  # dispatched once
+    assert [o.record["disposition"] for o in outcomes] == ["captured", "not-run", "not-run"]
+    assert stop.at_attempt == outcomes[0].scheduled.attempt_id and "nested codex" in str(stop.trigger)
+
+
+def test_an_operator_interrupt_halts_the_schedule_and_accounts_for_every_slot(tmp_path: Path,
+                                                                            monkeypatch: pytest.MonkeyPatch) -> None:
+    declaration = fl.parse_declaration(_approve(_one_case(3)))
+    from skillc import agent_trial
+    calls: list[str] = []
+
+    def interrupted(**kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs["attempt_id"])
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(agent_trial, "run_one_attempt", interrupted)
+    _, outcomes, stop = fl.run_live(
+        declaration, root=ROOT, run_dir=tmp_path, treatment=_treatment(), image_digest=None,
+        backends=lambda: (None, None), client_argv=list(cc.DEFAULT_CLIENT_ARGVS["codex"]),
+        credential_explicit_path=None)
+    assert len(calls) == 1 and len(outcomes) == 3 and stop.trigger == "operator interrupt"
+    assert all(o.record["disposition"] in ("not-run", "inconclusive", "unavailable") for o in outcomes)
+
+
+def test_editing_the_instruction_changes_the_declaration_digest() -> None:
+    """The prompt's instruction is an identity: any edit moves the digest an approval binds."""
+    data = _draft()
+    before = fl.parse_declaration(data).digest
+    data["task"]["instruction"] = data["task"]["instruction"].replace("/work/repo", "/work/other")
+    assert fl.parse_declaration(data).digest != before

@@ -472,7 +472,16 @@ def run_live(declaration: LiveDeclaration, *, root: Path, run_dir: Path, treatme
                               "on_outcome": record_outcome}
     if clock is not None:
         kwargs["clock"] = clock
-    mp.run_schedule(experiment, schedule, run_attempt, **kwargs)
+    try:
+        mp.run_schedule(experiment, schedule, run_attempt, **kwargs)
+    except KeyboardInterrupt:
+        # An operator's interrupt STOPS THE SCHEDULE: no later attempt is
+        # dispatched, and every planned attempt is still accounted for (the
+        # interrupted one and the rest finalized from the ledger). It is
+        # recorded as the stop's trigger, never read as a clean finish.
+        if stop.trigger is None:
+            stop.trigger, stop.at_attempt = "operator interrupt", None
+        outcomes[:] = mp.reconcile(experiment, outcomes, schedule)
     return experiment, outcomes, stop
 
 
