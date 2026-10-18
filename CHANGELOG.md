@@ -8,6 +8,30 @@ and version plan.
 
 ## [Unreleased]
 
+- **A pure-Python reader of an exported attempt's git state** (#434, PR 2a).
+  A live attempt's repository and remote are subject-writable, so after the
+  attempt stops the controller must not run git on them, even on an exported
+  copy: subject config, hooks, replace refs or grafts would run or steer code
+  on the host.
+  - `skillc/git_snapshot.py` reads the raw bytes instead and starts no git
+    process: refs and packed-refs, each worktree's HEAD, loose objects
+    (hash-checked, size-capped), index v2/v3 (checksummed, with merge stages
+    kept) and file bytes and modes.
+  - It opens every path component with `O_NOFOLLOW` and files with
+    `O_NONBLOCK`, so a planted FIFO cannot block it.
+  - Anything it cannot read faithfully raises `Unreadable`, which reads as
+    UNKNOWN: a packed object, index v4, a symlink, FIFO or oversize file,
+    alternates, a redirected `commondir`, or a `gitdir` outside the root.
+  - `SnapshotGitRemote` serves it as a read-only `GitRemote` for the fixture
+    service's finalize; every write raises.
+  - `builder/build.py`'s `capture_snapshot` gives PR 1's capture shape. An
+    equivalence instrument checks it against host git on all 43 PR 1
+    candidate states plus 4 extra ones (a linked worktree's HEAD, an
+    index-only change, a mode change, a deleted file). A reader that ignores
+    the index is caught as non-equivalent.
+  - Each of 15 reader mutations goes red.
+  - The pack trigger for PR 3 is recorded in the task README.
+
 - **A flow:auto necessity task: an already-fixed issue, and its must-act twin**
   (#434, PR 1 of 3, carrying #270 item 2). `evals/level3/flow-auto-necessity/`
   runs `/flow:auto 1` in two fixtures with identical issue text, following
