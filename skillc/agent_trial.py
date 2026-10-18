@@ -445,17 +445,16 @@ class _WitnessSession:
         if self.gate_args is None:
             gates = {"flow-check-plan": ["bash", harness, "--plan", "check", "--evidence", "flow-check"],
                      "flow-check-summary": ["bash", harness, "--check-summary"]}
-            # #376: the plan run's per-stage outcomes, read from its own
-            # controller-held stdout when it resolves - never replayed later.
-            stages = {"flow-check-plan": stage_capture.capture_stages}
         else:
             gates = {gate: ["bash", harness, *args] for gate, args in self.gate_args.items()}
-            stages = {}
         self.witness = GateWitness(
             declared_gates=gates, tree_digest_fn=snapshot, backend=backend, handle=handle, limits=self.limits,
             gate_exclusivity=False, exclusivity_basis="The channel observes prescribed shim calls; bypass is not excluded.",
             declared_env={gate: self.gate_environment() for gate in gates}, workspace_root=CONTAINER_WORKSPACE,
-            stage_capture=stages,
+            # #376: the plan run's per-stage outcomes, read from its own
+            # controller-held stdout when it resolves - never replayed later.
+            # A fixture's own gate map (#434) declares no stage-bearing gate.
+            stage_capture={"flow-check-plan": stage_capture.capture_stages} if self.gate_args is None else {},
         )
         script = (
             "import json,socket,sys; "
