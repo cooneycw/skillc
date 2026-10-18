@@ -29,9 +29,15 @@ from __future__ import annotations
 from collections.abc import Iterator
 from pathlib import Path
 
+import failure_context as _failure_context
 import pytest
 
 from skillc import verify
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """#462: record the machine context of every real failure (see the module)."""
+    _failure_context.register(config)
 
 
 @pytest.fixture(autouse=True)
