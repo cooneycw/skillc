@@ -128,45 +128,33 @@ while os.getppid() == parent and time.time() < deadline:
 # Parent gone or deadline passed: the harness cannot clean up, so do it here.
 # The running rep's group first (it has no other owner now), then the
 # children (no new containers can start), then the side effects.
-# The running rep, by two independent marks: the group it registered in its
-# file, and the exact token every process launched for it inherits in its
-# environment. The token needs no registration, so a harness that died before
-# its rep could register (a loaded host; pipeline 930) still loses it. Rescan
-# until two consecutive scans find nothing, bounded at 5 s.
-token = ("SKILLC_LOAD462_REP_FILE=" + cfg["rep_pgid_file"]).encode() + b"\0"
-def rep_targets():
-    found = []
+# The running rep, by two marks that only THIS run's reps carry (either is
+# enough):
+# - the group it registered in its file;
+# - the exact `SKILLC_LOAD462_REP_FILE=<this run's file>` ENTRY in its
+#   environment, which needs no registration (a harness that died before its
+#   rep could register: a loaded host, pipeline 930).
+# Nothing else identifies a process as ours: not its argv, which a parent,
+# its siblings and its xdist workers can share. Each candidate is pinned by a
+# pidfd BEFORE its ownership is checked and is signalled through that pidfd,
+# so a reused pid cannot be hit. Rescan until two consecutive scans find
+# nothing, bounded at 5 s. Residual: a rep forked but not yet exec'd carries
+# neither mark yet; it needs a cgroup.
+exec(cfg["owner_src"])
+quiet, give_up = 0, time.time() + 5
+while time.time() < give_up:
     try:
         rep = int(open(cfg["rep_pgid_file"]).read() or 0)
     except (OSError, ValueError):
         rep = 0
-    me, group_live = os.getpid(), False
+    hits = 0
     for e in os.listdir("/proc"):
-        if e.isdigit() and int(e) != me:
-            try:
-                with open(f"/proc/{e}/stat") as fh:
-                    fields = fh.read().rsplit(")", 1)[1].split()
-                if fields[0] == "Z":
-                    continue  # already dead: nothing to kill, only to reap
-                if rep and int(fields[2]) == rep:
-                    group_live = True
-                with open(f"/proc/{e}/environ", "rb") as fh:
-                    if token in fh.read() + b"\0":
-                        found.append(("pid", int(e)))
-            except (OSError, IndexError, ValueError):
-                pass
-    if group_live:
-        found.append(("group", rep))
-    return found
-quiet, give_up = 0, time.time() + 5
-while quiet < 2 and time.time() < give_up:
-    targets = rep_targets()
-    for kind, n in targets:
-        try:
-            (os.killpg if kind == "group" else os.kill)(n, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            pass
-    quiet = 0 if targets else quiet + 1
+        if e.isdigit() and int(e) != os.getpid():
+            if kill_owned(int(e), lambda p: rep_owned(p, cfg, rep)):
+                hits += 1
+    quiet = 0 if hits else quiet + 1
+    if quiet >= 2:
+        break
     time.sleep(0.1)
 def members():
     me, found = os.getpid(), []
@@ -283,6 +271,54 @@ def cleanup(cfg):
             pass
     return errors
 """
+_OWNER_SRC = r"""
+def entry_in(environ, entry):
+    # An exact KEY=value entry: never a substring of another key or value.
+    return entry in environ.split(b"\0")
+
+
+def rep_owned(pid, cfg, rep):
+    # True only if `pid` belongs to this run's rep, read from /proc now.
+    import os
+    try:
+        with open(f"/proc/{pid}/stat") as fh:
+            fields = fh.read().rsplit(")", 1)[1].split()
+        if fields[0] == "Z":
+            return False  # already dead: nothing to kill, only to reap
+        if rep and int(fields[2]) == rep:
+            return True
+        entry = ("SKILLC_LOAD462_REP_FILE=" + cfg["rep_pgid_file"]).encode()
+        with open(f"/proc/{pid}/environ", "rb") as fh:
+            if entry_in(fh.read(), entry):
+                return True
+    except (OSError, IndexError, ValueError):
+        return False
+    return False
+
+
+def kill_owned(pid, owned):
+    # Pin the process with a pidfd, THEN check ownership, then signal the
+    # pidfd: a pid reused after the pin is a different process, and the
+    # signal fails rather than reaching it.
+    import os, signal
+    try:
+        fd = os.pidfd_open(pid)
+    except OSError:
+        return False
+    try:
+        if not owned(pid):
+            return False
+        signal.pidfd_send_signal(fd, signal.SIGKILL)
+        return True
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
+"""
+_owner_ns: dict[str, Any] = {}
+exec(_OWNER_SRC, _owner_ns)  # noqa: S102 - the same source runs in the supervisor
+entry_in = _owner_ns["entry_in"]
+
 _cleanup_ns: dict[str, Any] = {}
 exec(_CLEANUP_SRC, _cleanup_ns)  # noqa: S102 - the same source runs in the supervisor
 cleanup_side_effects = _cleanup_ns["cleanup"]
@@ -378,7 +414,7 @@ class Load:
             "rep_pgid_file": tempfile.mkstemp(prefix="load462-rep-")[1],
             "spin_mode": spin_mode, "docker_timeout": docker_timeout,
             "docker_sweep_budget": docker_sweep_budget,
-            "cleanup_src": _CLEANUP_SRC,
+            "cleanup_src": _CLEANUP_SRC, "owner_src": _OWNER_SRC,
         }
         #: Empty when cleanup was verified; otherwise what could not be.
         self.cleanup_error = ""

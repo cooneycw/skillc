@@ -205,6 +205,8 @@ def test_sigterm_kills_the_load_group_and_the_running_rep(tmp_path):
     proc, pgid = _start_phase(tmp_path)
     proc.send_signal(signal.SIGTERM)
     proc.wait(timeout=10)
+    assert proc.stderr is not None
+    proc.stderr.close()
     assert _wait_gone(pgid, 2.0) == []
     assert _reps_alive(_rep_marker(tmp_path)) == [], "the running rep outlived the harness"
 
@@ -215,6 +217,8 @@ def test_a_sigkilled_harness_still_takes_its_load_down(tmp_path):
     proc, pgid = _start_phase(tmp_path)
     proc.kill()
     proc.wait(timeout=10)
+    assert proc.stderr is not None
+    proc.stderr.close()
     assert _wait_gone(pgid, 5.0) == []
 
 
@@ -489,6 +493,8 @@ def test_a_sigkilled_harness_does_not_leave_its_running_rep(tmp_path):
     proc, _pgid = _start_phase(tmp_path)
     proc.kill()
     proc.wait(timeout=10)
+    assert proc.stderr is not None
+    proc.stderr.close()
     deadline = time.monotonic() + 5
     while _marker_alive(_rep_marker(tmp_path)) and time.monotonic() < deadline:
         time.sleep(0.1)
@@ -798,7 +804,74 @@ def test_a_harness_killed_before_its_rep_registers_still_takes_the_rep_down(tmp_
     proc, _pgid = _start_phase(tmp_path, env=env)
     proc.kill()
     proc.wait(timeout=10)
+    assert proc.stderr is not None
+    proc.stderr.close()
     deadline = time.monotonic() + 5
     while _marker_alive(_rep_marker(tmp_path)) and time.monotonic() < deadline:
         time.sleep(0.1)
     assert _marker_alive(_rep_marker(tmp_path)) == [], "an unregistered rep outlived its harness"
+
+
+
+# ------------------------------------------------- kill-path review (#462 PR 2)
+
+def test_the_ownership_token_is_an_exact_environment_entry():
+    entry = b"SKILLC_LOAD462_REP_FILE=/tmp/run-A"
+    assert lh.entry_in(b"PATH=/bin\0" + entry + b"\0HOME=/x\0", entry)
+    for environ in (
+        b"SKILLC_LOAD462_REP_FILE=/tmp/run-B\0",           # another run
+        b"OTHER_SKILLC_LOAD462_REP_FILE=/tmp/run-A\0",     # a prefixed key
+        b"OTHER=SKILLC_LOAD462_REP_FILE=/tmp/run-A\0",     # an embedded value
+        b"SKILLC_LOAD462_REP_FILE=/tmp/run-A-x\0",         # a longer value
+    ):
+        assert not lh.entry_in(environ, entry), environ
+
+
+_DEADLINE_SCENARIO = r"""
+import json, os, signal, subprocess, sys, time
+sys.path.insert(0, sys.argv[1])
+from ci import load_harness as lh
+
+def alive(pid):
+    try:
+        with open(f"/proc/{pid}/stat") as fh:
+            return fh.read().rsplit(")", 1)[1].split()[0] != "Z"
+    except OSError:
+        return False
+
+load = lh.Load(0, 0, time.time() + 2)        # deadline in 2 s; this parent stays alive
+own = dict(os.environ, SKILLC_LOAD462_REP_FILE=load.cfg["rep_pgid_file"])
+other = dict(os.environ, SKILLC_LOAD462_REP_FILE=load.cfg["rep_pgid_file"] + "-another-run")
+sleeper = [sys.executable, "-c", "import time; time.sleep(30)"]
+mine = subprocess.Popen(sleeper, env=own)
+foreign = subprocess.Popen(sleeper, env=other)
+sibling = os.fork()                          # same argv as this parent, exactly
+if sibling == 0:
+    time.sleep(30)
+    os._exit(0)
+load.proc.wait(timeout=30)                   # the supervisor's deadline backstop ran
+time.sleep(0.5)
+print(json.dumps({"mine": alive(mine.pid), "foreign": alive(foreign.pid),
+                  "sibling": alive(sibling)}))
+for p in (mine.pid, foreign.pid, sibling):
+    try:
+        os.kill(p, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+load.proc = None
+"""
+
+
+@needs_proc
+def test_a_deadline_backstop_kills_only_this_runs_reps(tmp_path):
+    """The supervisor at its DEADLINE, with its parent alive and a sibling
+    sharing the parent's exact argv: only a process carrying THIS run's token
+    may die. Run in a disposable parent, so a backstop that kills its parent
+    shows up as a dead scenario instead of a dead test runner."""
+    proc = subprocess.run(
+        [sys.executable, "-c", _DEADLINE_SCENARIO, str(HARNESS.parent.parent)],
+        capture_output=True, text=True, timeout=120, check=False,
+    )
+    assert proc.returncode == 0, f"the scenario's parent died: rc={proc.returncode} {proc.stderr}"
+    result = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert result == {"mine": False, "foreign": True, "sibling": True}, result
