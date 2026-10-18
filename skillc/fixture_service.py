@@ -220,6 +220,13 @@ class GitRemote(Protocol):
     def delete_ref(self, ref: str, old: str) -> bool: ...
 
 
+class FinalizeRemote(Protocol):
+    """What `FixtureService.finalize` asks of a remote: reads only (#434)."""
+
+    def resolve(self, ref: str) -> str | None: ...
+    def is_ancestor(self, ancestor: str, descendant: str) -> bool: ...
+
+
 class RemoteUntrusted(RuntimeError):
     """The remote's own metadata could steer a controller git command (a
     hook, a replacement or graft, an alternate object store, a config key
@@ -1373,17 +1380,23 @@ class FixtureService:
 
     # -- finalize -------------------------------------------------------------
 
-    def finalize(self, attempt_id: str) -> FixtureServiceRecord:
-        """The controller's record. Idempotent; refuses a different attempt."""
+    def finalize(self, attempt_id: str, *, remote: FinalizeRemote | None = None) -> FixtureServiceRecord:
+        """The controller's record. Idempotent; refuses a different attempt.
+
+        `remote` (#434) answers the finalize-time divergence check in place of
+        the service's own remote. A live attempt's in-containment remote cannot
+        exec once the attempt has stopped, so its finalize reads a read-only
+        `git_snapshot.SnapshotGitRemote` over the exported copy instead."""
         if attempt_id != self.attempt_id:
             raise ValueError(f"this service belongs to attempt {self.attempt_id!r}, not {attempt_id!r}")
+        checked: FinalizeRemote = remote if remote is not None else self._remote
         with self._lock:
             if self._finalized is not None:
                 return self._finalized
             divergence = list(self._divergence)
             integrity = "SATISFIED"
             try:
-                tip = self._remote.resolve(f"refs/heads/{self._default}")
+                tip = checked.resolve(f"refs/heads/{self._default}")
                 if tip is None:
                     divergence.append({"kind": "default-branch-missing", "ref": f"refs/heads/{self._default}",
                                        "expected": self._expected_tip, "actual": None})
@@ -1393,7 +1406,7 @@ class FixtureService:
                                            "ref": f"refs/heads/{self._default}", "expected": self._expected_tip,
                                            "actual": tip, "detected_at": "finalize"})
                     for commit in self._recorded_merges:
-                        if not self._remote.is_ancestor(commit, tip):
+                        if not checked.is_ancestor(commit, tip):
                             divergence.append({"kind": "recorded-merge-not-reachable", "commit": commit,
                                                "ref": f"refs/heads/{self._default}", "actual": tip})
             except Exception as exc:  # noqa: BLE001 - an unreadable remote is UNKNOWN, never SATISFIED
@@ -1445,6 +1458,7 @@ __all__ = [
     "ClosingReferences",
     "Command",
     "DeclarationRefused",
+    "FinalizeRemote",
     "FixtureService",
     "FixtureServiceRecord",
     "GitRemote",

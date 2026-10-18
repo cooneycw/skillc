@@ -111,6 +111,7 @@ class _Handler(socketserver.BaseRequestHandler):
             # caller reading an abrupt close as "malformed"/refused either
             # way is the same observable outcome as every other refusal
             # path here.
+            channel._note_dropped()
             return
         try:
             self._handle_admitted(channel)
@@ -132,19 +133,26 @@ class _Handler(socketserver.BaseRequestHandler):
                     # over-capacity case: an unbounded line is refused,
                     # never buffered further to find out how long it
                     # actually is.
+                    channel._note_dropped()
                     return
                 chunks.append(chunk)
                 if b"\n" in chunk:
                     break
         except OSError:
+            channel._note_dropped()
             return  # a read deadline or a reset connection - refused, not a crash
         line = b"".join(chunks).split(b"\n", 1)[0]
         try:
             request = json.loads(line.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
+        except (UnicodeDecodeError, ValueError, RecursionError):
+            # ValueError covers JSONDecodeError AND the int-conversion limit (a
+            # 5,000-digit number); RecursionError is deep nesting. Each ends the
+            # request before decide, so each is a drop (counter-model, pass 3).
+            channel._note_dropped()
             self._reply_refused("malformed request")
             return
         if not isinstance(request, dict):
+            channel._note_dropped()
             self._reply_refused("malformed request")
             return
         try:
@@ -247,6 +255,12 @@ class DecideReplyChannel:
         self._request_timeout = request_timeout
         self._lock = threading.Lock()
         self._log: list[LoggedDecision] = []
+        #: #434: connections closed before `decide` saw a request (over
+        #: capacity, oversize, a read error, malformed). A caller that must
+        #: know every request of some kind reached its route (the nested-codex
+        #: guard's count) cannot tell what a dropped one was, so it reads any
+        #: drop as incomplete coverage.
+        self._dropped = 0
         self._next_seq = 1
         self._server: _Server | None = None
         self._thread: threading.Thread | None = None
@@ -402,6 +416,15 @@ class DecideReplyChannel:
                 return False
             self._active_handlers += 1
             return True
+
+    def _note_dropped(self) -> None:
+        with self._lock:
+            self._dropped += 1
+
+    def dropped_connections(self) -> int:
+        """How many connections were closed before `decide` saw a request."""
+        with self._lock:
+            return self._dropped
 
     def _handler_finished(self) -> None:
         with self._handlers_idle:

@@ -109,6 +109,10 @@ EXCLUDED_PREFIXES = (
     "tests/test_leak.py",
     "tests/test_private_citations.py",
     ".github/PULL_REQUEST_TEMPLATE.md",
+    # #434: a byte-for-byte upstream CPP snapshot (provenance in its README).
+    # CPP's own flow-plan-record text cites a worker by its fleet name, and the
+    # snapshot cannot be edited without breaking its closure digests.
+    "tests/fixtures/profile-cpp-codex-flow-auto-86641e8/",
 )
 
 #: This repository holds several hundred files today. A count far below this
@@ -384,3 +388,13 @@ def test_the_exclusions_cover_exactly_the_stated_scope() -> None:
     assert not _is_excluded("tests/test_leak.py.bak")
     assert not _is_excluded("tests/test_leak.py_extra")
     assert not _is_excluded("skillc/cost_estimate.py")
+
+
+
+def test_the_upstream_snapshot_exemption_is_exact() -> None:
+    """#434: only the one snapshot directory is exempt - a sibling sharing its
+    prefix, and this repository's own tests beside it, are still scanned."""
+    assert _is_excluded("tests/fixtures/profile-cpp-codex-flow-auto-86641e8/scripts/flow-plan-record.py")
+    assert not _is_excluded("tests/fixtures/profile-cpp-codex-flow-auto-86641e8x/scripts/flow-plan-record.py")
+    assert not _is_excluded("tests/fixtures/profile-cpp-codex-flow-check-86641e8/scripts/flow-plan-record.py")
+    assert not _is_excluded("tests/test_cpp_codex_flow_auto_86641e8.py")

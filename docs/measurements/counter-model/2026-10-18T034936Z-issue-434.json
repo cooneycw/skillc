@@ -1,0 +1,26 @@
+{
+  "branch": "issue-434-flow-auto-clean-project-case-an-already-fixed-issu-2",
+  "counts": {
+    "accepted": 6,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "extra_passes_reason": "orchestrator exception (skillc-400): pass 3 scoped to the pass-2 fix diff, which touched shared hot paths (decide_reply_channel, docker_backend, agent_trial evidence persistence)",
+  "head": "6969c31920eb33d775189ef1a3caa2d17e6ce3df",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "434",
+  "passes": 3,
+  "recorded_at": "2026-10-18T03:49:36Z",
+  "red_cases": {
+    "already_covered": 22,
+    "proposed": 27
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/17/rollout-2026-10-17T23-44-43-01a14d1c-9e8b-7623-8554-d071b7cb369e.jsonl",
+    "thread_id": "01a14d1c-9e8b-7623-8554-d071b7cb369e"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}
