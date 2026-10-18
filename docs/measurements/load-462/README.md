@@ -1,5 +1,13 @@
 # Load measurements for #462
 
+**Rule for contributors.** Anything that starts spinners runs ONLY inside a
+lock-1 hold, or under a hard CPU cap such as
+`systemd-run --user --scope -p CPUQuota=200% <command>`, never bare on a
+shared host. That covers `ci/load-repro.sh`, `ci/load_harness.py phase`,
+`tests/test_load_harness.py` and any mutation run against them. Two runs during
+#462 leaked spinner groups (a mutant that disabled cleanup), and the cap is
+what bounds that failure.
+
 Each file is the output of `ci/load-repro.sh` (summarised by `ci/load_harness.py
 summarize`), named `<member>-<load>-<sha12>-<pre|post>.json`:
 

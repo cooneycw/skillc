@@ -31,7 +31,10 @@ Host impact (bounded, by approval on #462):
 - `uptime` is recorded (and printed) before and after each phase.
 
 Run only inside a lock-1 hold: the load pegs every core, so another session's
-suite would both suffer it and be measured into the result.
+suite would both suffer it and be measured into the result. That includes this
+file's own tests and any mutation run against it. Outside a hold, run them only
+under a hard CPU cap, e.g. `systemd-run --user --scope -p CPUQuota=200% ...`,
+never bare on a shared host (docs/measurements/load-462/README.md).
 
 Usage:
   load_harness.py phase --cpu N --churn M --target T --reps K --max-seconds S \
