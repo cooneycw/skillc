@@ -119,22 +119,35 @@ Risks:
 - Duplicate or superseding issues: none.
 
 ### Section C - the approved plan
-PR 2b of #434: the wiring. The plan as approved (file list from the PR 2 plan, D3 per its rulings).
+PR 2b of #434: the wiring. The plan as approved (the PR 2 plan's file list, D3 per its rulings).
 
 1. `skillc/exec_git_remote.py` - ExecGitRemote: the service's git inside the attempt via exec_in_attempt, as the candidate, confine_root /work, a fixed env -i environment, hooks and fsmonitor off. Refused: no witness_io, a stopped attempt, incomplete output.
 2. `skillc/fixture_service.py` - `finalize(remote=...)` so the post-stop check reads a SnapshotGitRemote; a read-only FinalizeRemote protocol.
 3. `skillc/fixture_attempt.py` - AttemptFixture and FixtureSession: routes on the one socket, bind (overlays, service) before the agent, finish (export, snapshot, finalize, capture) after the stop, trusted extras.
-4. `skillc/agent_trial.py` - `run_one_attempt(fixture=...)`: dispatch composition, the witness's gate map and shim from the fixture, the credit gate (fixture failure, missing record, nested-codex count), trusted_extras to verify; a widened egress allowlist refused.
+4. `skillc/agent_trial.py` - `run_one_attempt(fixture=...)`: dispatch composition, the witness's gate map and shim from the fixture, the credit gate (fixture failure, missing record, nested-codex count), trusted_extras to verify; a widened egress allowlist refused (#442's defaults, no widening).
 5. `skillc/verify.py` - `trusted_extras` beside a gate witness; a colliding key, or extras without a witness, refused.
-6. `skillc/fixture_overlay.py` - the gh shim at /usr/local/bin/gh and the codex guard at /usr/local/sbin/codex (ruling A), root-owned and verified: not pre-planted, bytes read back, file and directory candidate-unwritable, first on the measured PATH.
+6. `skillc/fixture_overlay.py` - the gh shim at /usr/local/bin/gh and the codex guard at /usr/local/sbin/codex (D3 ruling A), root-owned and verified: not pre-planted, bytes read back, file and directory candidate-unwritable, first on the measured PATH.
 7. `docker/fixture-service/flow-auto-gate-shim.py` - the bare `flow-finish-gate.sh` call maps to gate `flow-auto-finish`; anything else exits 125. docker/trial untouched.
-8. D3 (ruling 1, option 2; ruling 2, B with the nested-suspected count): `docker/fixture-service/skillc-codex-guard.py` (exact ancestor identity, fail-closed ancestry, byte-for-byte pass-through) and `skillc/codex_guard.py` (the controller-held record and its credit block). The CPP contract is measured: ruling (a) on the receipt correction.
-9. `evals/subjects/cpp-codex-flow-auto-86641e8/` (profile.json, subject.json, PROFILE.md, evidence/inventory.json) and `tests/fixtures/profile-cpp-codex-flow-auto-86641e8/` (the closure snapshot, with README provenance and the upstream MIT LICENSE); `pyproject.toml` excludes the snapshot from mypy like its siblings.
-10. Egress: #442's defaults, no widening (the fixture attempt refuses a widened allowlist).
-11. Tests: `tests/test_exec_git_remote.py`, `tests/test_codex_guard.py`, `tests/test_codex_guard_live.py`, `tests/test_flow_auto_gate_shim.py`, `tests/test_agent_trial_fixture.py`, `tests/test_cpp_codex_flow_auto_86641e8.py`, and new tests appended to `tests/test_verify.py` (existing tests unmodified).
-12. Docs: `docs/specs/evaluation-facility/fixture-service.md` (Live attempts), `evals/level3/flow-auto-necessity/README.md`, `changelog.d/434-live-wiring.md`.
+8. `docker/fixture-service/skillc-codex-guard.py` - D3 (ruling 1 option 2; ruling 2 B): exact ancestor identity, fail-closed ancestry, byte-for-byte pass-through, each decision sent to the controller.
+9. `skillc/codex_guard.py` - D3: the controller-held guard record (zero / observed / unknown, nested-suspected) and its credit block.
+10. `evals/subjects/cpp-codex-flow-auto-86641e8/profile.json` - flow-auto plus flow-eli5 at CPP 86641e8, closed.
+11. `evals/subjects/cpp-codex-flow-auto-86641e8/subject.json` - the pin.
+12. `evals/subjects/cpp-codex-flow-auto-86641e8/PROFILE.md` - the profile explained, including the measured receipt facts (ruling (a)).
+13. `evals/subjects/cpp-codex-flow-auto-86641e8/evidence/inventory.json` - the validated inventory.
+14. `tests/fixtures/profile-cpp-codex-flow-auto-86641e8/` - the closure snapshot, with README provenance and the upstream MIT LICENSE.
+15. `pyproject.toml` - excludes the snapshot from mypy, like its siblings.
+16. `tests/test_exec_git_remote.py` - equivalence with LocalGitRemote and its control; refusals; no host process.
+17. `tests/test_codex_guard.py` - the record's counts, the ancestry walk, pass-through byte for byte and its control, the overlay's refusals.
+18. `tests/test_codex_guard_live.py` - the guard in a real trial container with a real nested codex.
+19. `tests/test_flow_auto_gate_shim.py` - forwarding, and 125 for any other argv or a channel failure.
+20. `tests/test_agent_trial_fixture.py` - eleven PR 1 candidates replayed through the live wiring; the mixed-request, credit-gate, gate-entrypoint and egress reds.
+21. `tests/test_cpp_codex_flow_auto_86641e8.py` - the profile against its snapshot; the measured CPP receipt contract (ruling (a)) with its scrubbed-env red.
+22. `tests/test_verify.py` - new trusted_extras tests appended; existing tests unmodified.
+23. `docs/specs/evaluation-facility/fixture-service.md` - the Live attempts section.
+24. `evals/level3/flow-auto-necessity/README.md` - running the task live.
+25. `changelog.d/434-live-wiring.md` - the release note.
 
-Scope: 24 files plus the 119-file snapshot. Large.
+Scope: 24 files plus the 119-file snapshot directory. Large.
 
 Risks:
 - agent_trial and verify are shared hot paths: every existing test must stay green, unmodified.
