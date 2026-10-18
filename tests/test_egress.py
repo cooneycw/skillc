@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import os
 import socket
 import subprocess
 import sys
@@ -598,23 +599,44 @@ def _non_loopback_address() -> str | None:
     return None if ipaddress.ip_address(address).is_loopback else address
 
 
-def test_a_loopback_probe_from_outside_the_subnet_is_answered_and_not_logged(tmp_path: Path) -> None:
-    """#460: the backend's readiness probe connects from loopback, inside the
-    proxy's container. It must leave no log line, or every attempt would carry
-    a peer-rejected record."""
+def _loopback_probe_log(source: str, tmp_path: Path) -> bytes:
+    """Run `source`, send one loopback probe from outside the attempt subnet,
+    and return the log once the proxy has HANDLED it: the client holds the
+    connection until the server closes it, so a handler that logs before
+    closing has always written by then (#460 follow-up, counter-model)."""
     log = tmp_path / "proxy.log"
-    proc, port = _start_proxy(eg.PROXY_SOURCE, log, "192.0.2.0/24")
+    proc, port = _start_proxy(source, log, "192.0.2.0/24")
     try:
-        _wait_for_start_line(log)  # the probe below must find a started proxy, not race its start record
+        _wait_for_start_line(log)
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as s:
+            assert s.recv(1) == b"", "the proxy answered a loopback probe instead of closing it"
         done = subprocess.run([sys.executable, "-c", eg.READY_SOURCE, str(port)], capture_output=True, check=False,
                               timeout=10)
         assert done.returncode == 0, done.stderr
     finally:
         proc.terminate()
         proc.wait(timeout=5)
-    summary = eg.summarize_log(log.read_bytes())
+    return log.read_bytes()
+
+
+def test_a_loopback_probe_from_outside_the_subnet_is_answered_and_not_logged(tmp_path: Path) -> None:
+    """#460: the backend's readiness probe connects from loopback, inside the
+    proxy's container. It must leave no log line, or every attempt would carry
+    a peer-rejected record."""
+    log = _loopback_probe_log(eg.PROXY_SOURCE, tmp_path)
+    summary = eg.summarize_log(log)
     assert summary["peer_rejected"] == 0 and summary["allowed"] == {} and summary["denied"] == {}
-    assert [json.loads(line)["event"] for line in log.read_text().splitlines()] == ["start"]
+    assert [json.loads(line)["event"] for line in log.decode().splitlines()] == ["start"]
+
+
+def test_red_case_a_proxy_that_logs_its_loopback_probe_is_caught(tmp_path: Path) -> None:
+    """Control for the test above: a proxy that records the loopback probe as
+    peer-rejected before closing must be seen doing so."""
+    probe_return = '    return "probe" if address in LOOPBACK else "rejected"\n'
+    assert eg.PROXY_SOURCE.count(probe_return) == 1, "setup: the classify anchor moved"
+    logging = eg.PROXY_SOURCE.replace(probe_return, '    return "rejected"\n')
+    summary = eg.summarize_log(_loopback_probe_log(logging, tmp_path))
+    assert summary["peer_rejected"] == 2  # the held probe and READY_SOURCE's
 
 
 def test_a_client_from_outside_the_attempt_subnet_is_refused_and_logged_apart(tmp_path: Path) -> None:
@@ -649,59 +671,86 @@ def test_a_client_from_outside_the_attempt_subnet_is_refused_and_logged_apart(tm
     assert isinstance(rejected, int) and rejected >= 1
 
 
-_SLOW_BIND_ANCHOR = "\n    asyncio.run(serve())\n"
 _BIND_LINE = '        server = await asyncio.start_server(handle, "0.0.0.0", port)\n'
 _START_WRITE = '        log.write(json.dumps({"event": "start", "allowlist": allow, "digest": sys.argv[4]}) + "\\n")\n'
 _LOG_OPEN = '    log = open(log_path, "a", buffering=1)\n'
+#: Injected into a proxy source under test: the child stops right after its
+#: start write, says so (AT), and waits to be released (GO).
+_HOLD_DEF = (
+    "import os as _hold_os\n"
+    "def _hold():\n"
+    "    open(_hold_os.environ['SKILLC_TEST_AT'], 'w').close()\n"
+    "    while not _hold_os.path.exists(_hold_os.environ['SKILLC_TEST_GO']):\n"
+    "        time.sleep(0.01)\n"
+)
 
 
-def _slow_to_bind(source: str) -> str:
-    assert source.count(_SLOW_BIND_ANCHOR) == 1, "setup: the slow-bind anchor moved"
-    return source.replace(_SLOW_BIND_ANCHOR, "\n    time.sleep(2)\n    asyncio.run(serve())\n")
+def _held_after_start_write(source: str, write: str = _START_WRITE) -> str:
+    assert source.count(write) == 1, "setup: the start write moved"
+    indent = write[: len(write) - len(write.lstrip())]
+    return _HOLD_DEF + source.replace(write, write + indent + "_hold()\n")
 
 
-def _assert_start_line_implies_listening(source: str, log: Path) -> None:
-    """The invariant #460 established: a `start` record means the port accepts.
-    (Its converse - an accepting port means the record already exists - does
-    NOT hold, and is not asserted: the handshake completes at `listen()`,
-    before the write.) While the proxy sleeps before binding, the port refuses
-    and no start line exists; once the start line appears, the port accepts."""
-    proc, port = _start_proxy(_slow_to_bind(source), log, "192.0.2.0/24")
+def _assert_start_line_implies_listening(source: str, tmp_path: Path, write: str = _START_WRITE) -> None:
+    """The invariant #460 established: when the `start` record is written,
+    the port already accepts. Checked AT the write, not by polling after it -
+    a barrier holds the proxy right after its start write while the port is
+    probed, so no scheduling delay can let a later bind hide an early write
+    (#460 follow-up, counter-model review). Its converse - an accepting port
+    means the record already exists - does not hold and is not asserted."""
+    log, at, go = tmp_path / "proxy.log", tmp_path / "at-start-write", tmp_path / "go"
+    port = _free_port()
+    allow = json.dumps({"hosts": list(eg.ALLOWED_HOSTS)})
+    proc = subprocess.Popen([sys.executable, "-c", _held_after_start_write(source, write), str(port), str(log), allow,
+                             "sha256:t", "192.0.2.0/24"],
+                            env={**os.environ, "SKILLC_TEST_AT": str(at), "SKILLC_TEST_GO": str(go)})
     try:
-        time.sleep(0.8)
-        assert not _start_line_logged(log), "start logged before the bind"
-        with pytest.raises(OSError):
-            socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
-        _wait_for_start_line(log)
-        socket.create_connection(("127.0.0.1", port), timeout=2).close()
+        deadline = time.monotonic() + 20
+        while not at.exists():
+            assert proc.poll() is None, "setup: the proxy exited before its start write"
+            assert time.monotonic() < deadline, "setup: the proxy never reached its start write"
+            time.sleep(0.01)
+        assert _start_line_logged(log), "setup: held after the start write, yet no start record"
+        try:
+            socket.create_connection(("127.0.0.1", port), timeout=2).close()
+        except OSError as exc:
+            raise AssertionError(f"start logged before the bind: the port refused at the start write ({exc})") from exc
     finally:
+        go.touch()
         proc.terminate()
         proc.wait(timeout=5)
 
 
 def test_red_case_the_start_line_is_written_only_once_the_proxy_listens(tmp_path: Path) -> None:
-    """#460: a proxy slow to bind must not log "start" before it can accept,
-    or the start line would claim a readiness the port does not have."""
-    _assert_start_line_implies_listening(eg.PROXY_SOURCE, tmp_path / "proxy.log")
+    """#460: the start line must not claim a readiness the port does not have."""
+    _assert_start_line_implies_listening(eg.PROXY_SOURCE, tmp_path)
 
 
 def test_the_start_line_check_tolerates_a_write_that_lags_the_bind(tmp_path: Path) -> None:
-    """#460 follow-up red (a): the shipped write comes a moment AFTER the bind,
-    and under load that moment is long. A check that read the log on the
-    first successful connect raised IndexError here (#434 rev 2's gate, load
-    ~18); the event-based check must not."""
+    """#460 follow-up red (a): the shipped write comes a moment after the bind,
+    and under load that moment is long. Reading the log on the first
+    successful connect raised IndexError here (#434 rev 2's gate, load ~18);
+    a lagging write is still correct and must pass."""
     assert eg.PROXY_SOURCE.count(_BIND_LINE) == 1, "setup: the bind anchor moved"
     lagging = eg.PROXY_SOURCE.replace(_BIND_LINE, _BIND_LINE + "        time.sleep(1)\n")
-    _assert_start_line_implies_listening(lagging, tmp_path / "proxy.log")
+    _assert_start_line_implies_listening(lagging, tmp_path)
 
 
-def test_red_case_the_start_line_check_still_fails_a_start_logged_before_the_bind(tmp_path: Path) -> None:
-    """#460 follow-up red (b), the teeth check: the pre-#460 shape (start
-    written as soon as the log opens, before any bind) must still FAIL."""
+@pytest.mark.parametrize("where", ["after-log-open", "just-before-start-server"])
+def test_red_case_the_start_line_check_fails_a_start_logged_before_the_bind(tmp_path: Path, where: str) -> None:
+    """#460 follow-up red (b), the teeth: a start record written anywhere
+    before the bind must FAIL - the pre-#460 shape (right after the log opens)
+    and the closest one (immediately before `start_server`)."""
     assert eg.PROXY_SOURCE.count(_START_WRITE) == 1 and eg.PROXY_SOURCE.count(_LOG_OPEN) == 1, "setup: anchors moved"
-    early = eg.PROXY_SOURCE.replace(_START_WRITE, "").replace(_LOG_OPEN, _LOG_OPEN + _START_WRITE.replace("        ", "    ", 1))
+    moved = eg.PROXY_SOURCE.replace(_START_WRITE, "")
+    if where == "after-log-open":
+        write = _START_WRITE.replace("        ", "    ", 1)
+        early = moved.replace(_LOG_OPEN, _LOG_OPEN + write)
+    else:
+        write = _START_WRITE
+        early = moved.replace(_BIND_LINE, write + _BIND_LINE)
     with pytest.raises(AssertionError, match="start logged before the bind"):
-        _assert_start_line_implies_listening(early, tmp_path / "proxy.log")
+        _assert_start_line_implies_listening(early, tmp_path, write)
 
 
 def test_prepare_waits_for_the_proxy_to_accept_connections(base: Path, docker_state: Path) -> None:
