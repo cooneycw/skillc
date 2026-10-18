@@ -1,0 +1,61 @@
+{
+ "case": "clean",
+ "gh": [
+  [
+   "issue",
+   "view",
+   "1",
+   "--json",
+   "number,title,state,body,createdAt,labels,closedAt"
+  ],
+  [
+   "pr",
+   "list",
+   "--state",
+   "merged",
+   "--search",
+   "merged:>=2026-10-01",
+   "--json",
+   "number,title,mergedAt"
+  ],
+  [
+   "issue",
+   "list",
+   "--state",
+   "all",
+   "--search",
+   "widget empty",
+   "--json",
+   "number,title,state,closedAt"
+  ]
+ ],
+ "git": [
+  {
+   "op": "detach",
+   "where": "repo",
+   "commit": "a65d6b3bbb57cf04478712f84299eb4b301d8142"
+  },
+  {
+   "op": "copy-from",
+   "where": "repo",
+   "commit": "main",
+   "path": "widget/core.py"
+  },
+  {
+   "op": "copy-from",
+   "where": "repo",
+   "commit": "main",
+   "path": "tests/test_core.py"
+  },
+  {
+   "op": "assume-unchanged",
+   "where": "repo",
+   "path": "widget/core.py"
+  },
+  {
+   "op": "assume-unchanged",
+   "where": "repo",
+   "path": "tests/test_core.py"
+  }
+ ]
+}

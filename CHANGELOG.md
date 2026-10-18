@@ -8,6 +8,27 @@ and version plan.
 
 ## [Unreleased]
 
+- **A flow:auto necessity task: an already-fixed issue, and its must-act twin**
+  (#434, PR 1 of 3, carrying #270 item 2). `evals/level3/flow-auto-necessity/`
+  runs `/flow:auto 1` in two fixtures with identical issue text, following
+  FixedBench (Gloaguen et al., arXiv 2605.07769, CC BY 4.0, idea only):
+  - CLEAN: the fix is merged as PR #2. The agent must say "No longer needed",
+    cite the real PR or commit, recommend closing #1, and change nothing.
+  - TWIN: no fix. The agent must say "Still needed" with a plan, and implement
+    nothing before approval.
+
+  Seven criteria, all graded from controller-held records (the #276 service
+  record, a git capture, the gate witness), never from candidate files. A
+  flow:auto Step-1 worktree counts as clean only at the base commit with an
+  empty status. Edits and file modes are read from the filesystem, so an
+  `assume-unchanged` edit or a `core.filemode=false` chmod is still caught. A
+  commit parked on a side branch, a detached HEAD on an older commit, and an
+  index-only change also count. `qualify.py` plays 43 scripted attempts through the real
+  fixture service and certifies the grader. It refuses the 5 broken graders,
+  and 3 blinding controls each flip their red to PASS. Every criterion's check
+  was also mutation-tested and goes red. No attempt has run: the live wiring
+  is PR 2 (after #442), and the campaign is PR 3.
+
 - **Live agent containers reach only their model provider** (#442). Live
   attempts ran on Docker's default bridge with open egress (#11), and skillc's
   graders are public. `DockerBackend(egress=True)` now gives each live attempt
