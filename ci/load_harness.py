@@ -207,7 +207,11 @@ def cleanup(cfg):
                 try:
                     rr = subprocess.run(["docker", "rm", "-f", *ids], capture_output=True,
                                         text=True, timeout=t)
-                    if rr.returncode != 0:
+                    # The daemon's own `--rm` can be removing it already, or
+                    # have just finished: not a failure, and the next listing
+                    # (which must settle empty) is what verifies it.
+                    benign = ("is already in progress", "No such container")
+                    if rr.returncode != 0 and not any(b in rr.stderr for b in benign):
                         errors.append(f"docker rm exit {rr.returncode}: {rr.stderr.strip()[:200]}")
                 except (OSError, subprocess.TimeoutExpired) as exc:
                     errors.append(f"docker rm failed: {exc!r}")
@@ -685,6 +689,12 @@ def reps_needed(p: float) -> int:
     return max(20, math.ceil(math.log(0.01) / math.log(1 - p)))
 
 
+def _cores(ph: dict[str, Any]) -> int:
+    """The cores the load and the tests could use: the pinned set when the
+    phase was pinned, else the host. Older records have no pinned_count."""
+    return int(ph.get("pinned_count") or ph["nproc"])
+
+
 def summarize(args: argparse.Namespace) -> int:
     phases = [json.loads(Path(p).read_text()) for p in args.phases]
     phases.sort(key=lambda ph: ph["started_at"])
@@ -702,13 +712,14 @@ def summarize(args: argparse.Namespace) -> int:
         "member": args.member, "test_id": args.test_id, "label": args.label,
         "sha": args.sha,
         "phases": len(phases),
-        # What the evidence may claim: every counted phase held at least 2x nproc.
-        "load_factors": sorted({round(ph["target"] / ph["nproc"], 2) for ph in phases
-                                if ph.get("nproc")}),
+        # What the evidence may claim: every counted phase held at least 2x the
+        # cores it could use (the pinned set under --cpus, else the host).
+        "load_factors": sorted({round(ph["target"] / _cores(ph), 2) for ph in phases
+                                if _cores(ph)}),
         # Only phases that contributed a counted rep can carry the claim, and
         # with none there is no claim at all.
         "meets_2x_nproc": bool(contributing) and all(
-            ph["target"] >= 2 * ph["nproc"] for ph in contributing),
+            ph["target"] >= 2 * _cores(ph) for ph in contributing),
         "invalid_phases": sum(ph["verdict"] != "VALID" for ph in phases),
         "pause_gaps_seconds": gaps,
         "pauses_ok": all(g >= MIN_PAUSE_SECONDS for g in gaps),

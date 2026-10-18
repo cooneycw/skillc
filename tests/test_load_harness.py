@@ -213,10 +213,11 @@ def test_a_sigkilled_harness_still_takes_its_load_down(tmp_path):
 
 
 def _write_phase(path: Path, start: float, end: float, verdict: str,
-                 outcomes: list[str], target: float = 48, nproc: int = 24) -> str:
+                 outcomes: list[str], target: float = 48, nproc: int = 24,
+                 pinned_count: int = 0) -> str:
     path.write_text(json.dumps({
         "started_at": start, "ended_at": end, "verdict": verdict,
-        "target": target, "nproc": nproc,
+        "target": target, "nproc": nproc, "pinned_count": pinned_count,
         "reps": [{"outcome": o, "seconds": 1.0} for o in outcomes],
     }))
     return str(path)
@@ -334,6 +335,18 @@ elif args[0] == "ps":
     if d["_ps"] == 2:
         d.update(d.pop("_pending", {}))
     save(d)
+elif args[0] == "rm" and mode == "rm-in-progress":
+    # The daemon is already removing it (`--rm`): it says so, exits 1, and
+    # the container is gone a moment later.
+    for c in args[2:]:
+        d.pop(c, None)
+    save(d)
+    print(f"Error response from daemon: removal of container {args[2]} is already in progress",
+          file=sys.stderr)
+    sys.exit(1)
+elif args[0] == "rm" and mode == "rm-fails":
+    print("Error response from daemon: cannot remove container: device busy", file=sys.stderr)
+    sys.exit(1)
 elif args[0] == "rm":
     for c in args[2:]:
         d.pop(c, None)
@@ -662,3 +675,42 @@ def test_a_phase_needs_no_procps(tmp_path):
     for key in ("uptime_before", "uptime_after"):
         assert record[key].startswith("up "), record[key]
         assert "load average:" in record[key]
+
+
+# ------------------------------------------------- Hold B false negatives (#462 PR 2)
+
+def test_a_pinned_phase_is_measured_against_its_pinned_cores(tmp_path):
+    """Hold B pinned 16 spinners to 8 of 24 cores: that is 2x the cores the
+    load and the tests could use, and the claim must say so."""
+    out = tmp_path / "m.json"
+    for target, expected in ((16, True), (15, False)):
+        a = _write_phase(tmp_path / "a.json", 0, 100, "VALID", ["passed"],
+                         target=target, nproc=24, pinned_count=8)
+        lh.main(["summarize", "--member", "m", "--test-id", "t", "--label", "pre",
+                 "--out", str(out), a])
+        m = json.loads(out.read_text())
+        assert m["meets_2x_nproc"] is expected, target
+        assert m["load_factors"] == [round(target / 8, 2)]
+
+
+def test_a_removal_already_in_progress_is_not_a_cleanup_failure(tmp_path, monkeypatch):
+    state = _fake_docker(tmp_path, monkeypatch)
+    load = lh.Load(0, 0, time.time() + 60, docker=1)
+    deadline = time.monotonic() + 20
+    while len(_containers(state)) < 2 and time.monotonic() < deadline:
+        time.sleep(0.05)
+    monkeypatch.setenv("FAKE_DOCKER_MODE", "rm-in-progress")
+    load.stop()
+    assert load.cleanup_error == ""
+    assert _containers(state) == {"foreign": "skillc.load462=someone-else"}
+
+
+def test_a_real_removal_failure_is_still_a_cleanup_failure(tmp_path, monkeypatch):
+    state = _fake_docker(tmp_path, monkeypatch)
+    load = lh.Load(0, 0, time.time() + 60, docker=1, docker_timeout=2.0)
+    deadline = time.monotonic() + 20
+    while len(_containers(state)) < 2 and time.monotonic() < deadline:
+        time.sleep(0.05)
+    monkeypatch.setenv("FAKE_DOCKER_MODE", "rm-fails")
+    load.stop()
+    assert "device busy" in load.cleanup_error
