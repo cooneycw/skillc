@@ -311,9 +311,11 @@ def plan_live(declaration: LiveDeclaration, store: Path, *, root: Path, treatmen
 
 # ------------------------------------------------------------ the containment stop
 
-def _host(target: str) -> str:
-    host, _, _ = target.rpartition(":")
-    return (host or target).lower().rstrip(".")
+def _within_allowlist(target: str) -> bool:
+    """The proxy's own policy, checked independently: `host:443` for an exactly
+    listed host. A port other than 443, or no port, is outside it."""
+    host, sep, port = target.rpartition(":")
+    return bool(sep) and port == "443" and host.lower().rstrip(".") in eg.ALLOWED_HOSTS
 
 
 def containment_trigger(record: Mapping[str, Any], *, allowlist_digest: str) -> str | None:
@@ -336,7 +338,12 @@ def containment_trigger(record: Mapping[str, Any], *, allowlist_digest: str) -> 
     if summary.get("allowlist_digest") != allowlist_digest:
         return f"the proxy recorded allowlist {summary.get('allowlist_digest')!r}, not the declared {allowlist_digest}"
     allowed = summary.get("allowed")
-    outside = sorted(t for t in (allowed if isinstance(allowed, Mapping) else {}) if _host(str(t)) not in eg.ALLOWED_HOSTS)
+    if not isinstance(allowed, Mapping) or summary.get("unparsed_lines") != 0:
+        # A log read but not wholly parsed is an incomplete connection census,
+        # never an empty one (counter-model review).
+        return (f"the egress connection census is incomplete (unparsed_lines={summary.get('unparsed_lines')!r}, "
+                f"allowed is {type(allowed).__name__})")
+    outside = sorted(str(t) for t in allowed if not _within_allowlist(str(t)))
     if outside:
         return f"an allowed connection outside #442's allowlist ({', '.join(outside)})"
     fixture = record.get("fixture")
@@ -509,8 +516,27 @@ def build_report(declaration: LiveDeclaration, experiment: trial.Experiment,
     }
 
 
-def succeeded(report: Mapping[str, Any]) -> bool:
-    """No containment stop, and every dispatched attempt ran the declared model."""
-    attempts = report.get("attempts") or []
-    return (not report["containment_stop"]["stopped"]
-            and all(a.get("model_eligible") in (True, "n/a") for a in attempts if isinstance(a, Mapping)))
+def succeeded(report: Mapping[str, Any], *, scheduled: int) -> bool:
+    """A live run: every scheduled attempt accounted for, no containment stop,
+    every dispatched attempt ran the declared model, and every case has at
+    least one dispatched attempt and stays within its non-evaluable tolerance.
+    A run where nothing ran is not a success (counter-model review)."""
+    attempts = [a for a in report.get("attempts") or [] if isinstance(a, Mapping)]
+    dispatched = [a for a in attempts if a.get("disposition") in mp.DISPATCHED]
+    cases = report.get("cases") or {}
+    return (len(attempts) == scheduled and not report["containment_stop"]["stopped"]
+            and all(a.get("model_eligible") is True for a in dispatched)
+            and all(any(a.get("case") == c for a in dispatched) for c in cases)
+            and all(counts.get("within_tolerance") is True for counts in cases.values()))
+
+
+def rehearsal_succeeded(report: Mapping[str, Any], *, scheduled: int, mode: str) -> bool:
+    """`dry`: every slot accounted `unavailable` by design. `actor`: every slot
+    captured and graded PASS, since each case's actor plays a committed PASS
+    candidate; anything else means the live path did not work end to end."""
+    attempts = [a for a in report.get("attempts") or [] if isinstance(a, Mapping)]
+    if len(attempts) != scheduled or report["containment_stop"]["stopped"]:
+        return False
+    if mode == "dry":
+        return all(a.get("disposition") == "unavailable" for a in attempts)
+    return all(a.get("disposition") == "captured" and a.get("graded_status") == "PASS" for a in attempts)

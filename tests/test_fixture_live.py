@@ -131,7 +131,7 @@ def _clean_record(**changes: Any) -> dict[str, Any]:
     record: dict[str, Any] = {
         "disposition": "captured",
         "observation": {"server_side_tool_uses": [],
-                        "egress": {"status": "read", "allowlist_digest": ALLOWLIST,
+                        "egress": {"status": "read", "allowlist_digest": ALLOWLIST, "unparsed_lines": 0,
                                    "allowed": {"chatgpt.com:443": 12, "auth.openai.com:443": 1}, "denied": {}},
                         "run_metadata": {"model": "gpt-6-astra", "reasoning_effort": "high",
                                          "token_usage": {"total_tokens": 1000, "input_tokens": 900}}},
@@ -163,6 +163,10 @@ def test_a_clean_dispatched_attempt_triggers_no_stop() -> None:
     ({"observation.egress": {"status": "unread", "reason": "gone"}}, "egress proxy log was not read"),
     ({"observation.egress.allowlist_digest": "sha256:" + "1" * 64}, "the proxy recorded allowlist"),
     ({"observation.egress.allowed": {"chatgpt.com:443": 3, "github.com:443": 1}}, "outside #442's allowlist"),
+    ({"observation.egress.allowed": {"chatgpt.com:80": 1}}, "outside #442's allowlist"),
+    ({"observation.egress.allowed": {"chatgpt.com": 1}}, "outside #442's allowlist"),
+    ({"observation.egress.unparsed_lines": 1}, "census is incomplete"),
+    ({"observation.egress.allowed": _DELETE}, "census is incomplete"),
     ({"fixture.codex_guard": {"status": "observed", "confirmed": 1, "suspected": 0}}, "nested codex observed"),
     ({"fixture.codex_guard": {"status": "unknown"}}, "nested-codex count is unknown"),
     ({"fixture": _DELETE}, "nested-codex count is unknown"),
@@ -235,7 +239,7 @@ def test_a_containment_stop_finalizes_every_later_attempt_not_run(tmp_path: Path
     assert eg.missing_server_side_flags(argv) == []
     assert seen[0]["prompt"] == fl.prompt(declaration, ROOT) and seen[0]["fixture"] is not None
     report = fl.build_report(declaration, experiment, outcomes, stop, rehearse=None, approved=True)
-    assert report["containment_stop"]["stopped"] is True and not fl.succeeded(report)
+    assert report["containment_stop"]["stopped"] is True and not fl.succeeded(report, scheduled=4)
     entry = report["attempts"][0]
     assert entry["tokens"] == {"total_tokens": 1000, "input_tokens": 900} and entry["source_unmodified"] == "SATISFIED"
     first_case = outcomes[0].scheduled.arm
@@ -268,3 +272,30 @@ def test_report_tokens_are_unknown_when_the_rollout_has_none(tmp_path: Path) -> 
     report = fl.build_report(declaration, experiment, outcomes, fl.Stop(), rehearse=None, approved=True)
     assert {e["tokens"] for e in report["attempts"]} == {fl.UNKNOWN}
     assert report["cases"]["clean"]["tokens_unknown_attempts"] == 1
+
+
+def _report(dispositions: list[tuple[str, str]], *, stopped: bool = False, tolerance_ok: bool = True) -> dict[str, Any]:
+    attempts = [{"case": c, "disposition": d, "model_eligible": True if d in mp.DISPATCHED else "n/a",
+                 "graded_status": "PASS" if d == "captured" else "UNKNOWN"} for c, d in dispositions]
+    return {"attempts": attempts, "containment_stop": {"stopped": stopped},
+            "cases": {c: {"within_tolerance": tolerance_ok} for c in {c for c, _ in dispositions}}}
+
+
+def test_live_success_needs_attempts_that_ran() -> None:
+    good = [("clean", "captured"), ("twin", "captured")]
+    assert fl.succeeded(_report(good), scheduled=2)
+    assert not fl.succeeded({"attempts": [], "containment_stop": {"stopped": False}, "cases": {}}, scheduled=2)
+    assert not fl.succeeded(_report([("clean", "unavailable"), ("twin", "unavailable")]), scheduled=2)
+    assert not fl.succeeded(_report([("clean", "captured"), ("twin", "unavailable")]), scheduled=2)
+    assert not fl.succeeded(_report(good, tolerance_ok=False), scheduled=2)
+    assert not fl.succeeded(_report(good, stopped=True), scheduled=2)
+    assert not fl.succeeded(_report(good[:1]), scheduled=2)
+
+
+def test_rehearsal_success_is_mode_specific() -> None:
+    unavailable = _report([("clean", "unavailable"), ("twin", "unavailable")])
+    captured = _report([("clean", "captured"), ("twin", "captured")])
+    assert fl.rehearsal_succeeded(unavailable, scheduled=2, mode="dry")
+    assert not fl.rehearsal_succeeded(unavailable, scheduled=2, mode="actor")
+    assert fl.rehearsal_succeeded(captured, scheduled=2, mode="actor")
+    assert not fl.rehearsal_succeeded(captured, scheduled=2, mode="dry")

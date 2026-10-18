@@ -2179,9 +2179,8 @@ def cmd_level3_live(args: argparse.Namespace) -> int:
         print(f"skillc: CONTAINMENT STOP at {stop.at_attempt}: {stop.trigger}", file=sys.stderr)
     print(f"skillc: report: {report_path}", file=sys.stderr)
     if rehearse is not None:
-        accounted = len(outcomes) == len(declaration.order)
-        return 0 if accounted and stop.trigger is None else 1
-    return 0 if fl.succeeded(report) else 1
+        return 0 if fl.rehearsal_succeeded(report, scheduled=len(declaration.order), mode=rehearse) else 1
+    return 0 if fl.succeeded(report, scheduled=len(declaration.order)) else 1
 
 
 def cmd_uptake_study(args: argparse.Namespace) -> int:
