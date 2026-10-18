@@ -84,25 +84,31 @@ HOME_PATH_RE = re.compile(r"/(?:home|Users)/([A-Za-z0-9_.-]+)")
 
 UID_GID_RE = re.compile(r"\b(?:uid|gid)=\d+")
 
+#: #470: where a path token ENDS - a separator (`/`, `\\`), whitespace, a quote (escaped or not), a backtick, closing punctuation,
+#: end of line, or a period that ends a sentence (followed by whitespace or end
+#: of line). A period continuing a name (`<uuid>.json`, `claude-1.cache`) is
+#: NOT an end, so a UUID-named file is not a whole-segment session id.
+_END = r"(?=[/\\\s'\"`)\]},;:>]|\.(?:\s|$)|$)"
+
 #: #470: the ENCODED home form Claude Code uses in its own directory names
 #: (`~/.claude/projects/-home-<name>-Projects`, and the scratchpad below):
 #: dashes stand in for slashes. It must start a token - no letter or digit
 #: right before the dash - so "take-home-pay" and "non-home-x" stay silent,
 #: and a name must follow, ending at a dash, a slash, whitespace, a quote (escaped
 #: or not), a backtick, closing punctuation or end of line.
-ENCODED_HOME_RE = re.compile(r"(?<![A-Za-z0-9])-(?:home|Users)-([A-Za-z0-9_.]+)(?=[-/\s'\"`\\)\]},;:>]|$)")
+ENCODED_HOME_RE = re.compile(
+    r"(?<![A-Za-z0-9])-(?:home|Users)-([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*)(?:(?=-)|" + _END + ")")
 
 #: #470: a Claude Code scratchpad root, `/tmp/claude-<uid>/`, carries the
 #: host's uid (and usually an encoded home path and a session id after it).
-CLAUDE_SCRATCHPAD_RE = re.compile(r"/tmp/claude-\d+(?=[/\s'\"`\\)\]},;:>]|$)")
+CLAUDE_SCRATCHPAD_RE = re.compile(r"/tmp/claude-\d+" + _END)
 
 #: #470: a UUID standing as a whole PATH SEGMENT - a session or task id in a
 #: path. A UUID elsewhere (a `session id:` value, inside a file name) is
 #: not a path leak and stays silent. A UUID whose 32 hex digits are all one
 #: character (`22222222-2222-...`) is synthetic test data; a real id never is.
 SESSION_SEGMENT_RE = re.compile(
-    r"(?<=/)([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
-    r"(?=[/\s'\"`\\)\]},;:.>]|$)")
+    r"(?<=[/\\])([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})" + _END)
 
 IPV4_RE = re.compile(r"\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b")
 

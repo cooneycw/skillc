@@ -664,6 +664,12 @@ def _kinds(text: str) -> set[str]:
     ("open `/tmp/claude-4242`", "claude-scratchpad"),
     ("see `/x/7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f`.", "session-path-segment"),
     ("(/tmp/claude-4242)", "claude-scratchpad"),
+    # Counter-model review, pass 2: Windows separators and sentence-final roots.
+    ("tasks\\7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f", "session-path-segment"),
+    ("C:\\work\\7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f\\scratchpad", "session-path-segment"),
+    (json.dumps({"p": "C:\\work\\7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"}), "session-path-segment"),
+    ("See /tmp/claude-4242.", "claude-scratchpad"),
+    ("it lives in /x/7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f.", "session-path-segment"),
 ])
 def test_red_case_each_new_form_is_caught(text: str, kind: str) -> None:
     assert kind in _kinds(text)
@@ -678,6 +684,11 @@ def test_red_case_each_new_form_is_caught(text: str, kind: str) -> None:
     "/x/22222222-2222-2222-2222-222222222222/y",      # synthetic repeated-digit test UUID
     "/x/00000000-0000-0000-0000-000000000000",
     "/x/AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA/y",     # synthetic, any case
+    "/x/7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f.json",   # a UUID-named FILE, not a whole segment
+    "/x/7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f.backup/y",
+    "/x/7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f-old/y",  # a UUID-prefixed directory name
+    "/tmp/claude-4242.cache/x",
+    "/tmp/claude-1000-tools/x",
     "rollout-2026-10-18T14-29-21-3e9a7b1c-5d2f-4a8e-b6c0-1d3f5a7c9e2b.jsonl",  # inside a filename
 ])
 def test_a_benign_look_alike_is_not_flagged(text: str) -> None:
