@@ -2941,8 +2941,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_level3_live = sub.add_parser(
         "level3-live",
-        help="issue #434: run an APPROVED level3-fixture-live-declaration (the model runs CPP's real flow:auto on "
-             "the fixture-service task, CLEAN and TWIN); evidence stays private (a real agent run, behind "
+        help="issue #434: run an APPROVED level3-fixture-live-declaration (the model runs the declared subject's "
+             "workflow on the fixture-service task, CLEAN and TWIN); evidence stays private (a real agent run, behind "
              "SKILLC_ALLOW_REAL_AGENT=1)",
     )
     p_level3_live.add_argument("declaration", help="the level3-fixture-live-declaration JSON to run")
