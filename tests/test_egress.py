@@ -563,6 +563,30 @@ def _wait_listening(port: int, host: str = "127.0.0.1") -> None:
     raise AssertionError("setup: the proxy never listened")
 
 
+def _start_line_logged(log: Path) -> bool:
+    if not log.exists():
+        return False
+    for line in log.read_text().splitlines():
+        try:
+            if json.loads(line).get("event") == "start":
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _wait_for_start_line(log: Path, seconds: float = 20.0) -> None:
+    """Event-based (#460 follow-up): poll the log until the proxy's `start`
+    record exists. A successful connect does NOT mean it exists yet - the
+    kernel completes the handshake at `listen()`, inside `start_server`,
+    before `serve()` writes the line - so never read the log on that cue."""
+    deadline = time.monotonic() + seconds
+    while not _start_line_logged(log):
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"the proxy wrote no start line within {seconds:g}s")
+        time.sleep(0.05)
+
+
 def _non_loopback_address() -> str | None:
     """This host's own non-loopback IPv4, found without sending a packet."""
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
@@ -581,7 +605,7 @@ def test_a_loopback_probe_from_outside_the_subnet_is_answered_and_not_logged(tmp
     log = tmp_path / "proxy.log"
     proc, port = _start_proxy(eg.PROXY_SOURCE, log, "192.0.2.0/24")
     try:
-        _wait_listening(port)
+        _wait_for_start_line(log)  # the probe below must find a started proxy, not race its start record
         done = subprocess.run([sys.executable, "-c", eg.READY_SOURCE, str(port)], capture_output=True, check=False,
                               timeout=10)
         assert done.returncode == 0, done.stderr
@@ -625,24 +649,59 @@ def test_a_client_from_outside_the_attempt_subnet_is_refused_and_logged_apart(tm
     assert isinstance(rejected, int) and rejected >= 1
 
 
-def test_red_case_the_start_line_is_written_only_once_the_proxy_listens(tmp_path: Path) -> None:
-    """#460: a proxy slow to bind must not log "start" before it can accept,
-    or the start line would claim a readiness the port does not have."""
-    anchor = "\n    asyncio.run(serve())\n"
-    assert eg.PROXY_SOURCE.count(anchor) == 1
-    slow = eg.PROXY_SOURCE.replace(anchor, "\n    time.sleep(2)\n    asyncio.run(serve())\n")
-    log = tmp_path / "proxy.log"
-    proc, port = _start_proxy(slow, log, "192.0.2.0/24")
+_SLOW_BIND_ANCHOR = "\n    asyncio.run(serve())\n"
+_BIND_LINE = '        server = await asyncio.start_server(handle, "0.0.0.0", port)\n'
+_START_WRITE = '        log.write(json.dumps({"event": "start", "allowlist": allow, "digest": sys.argv[4]}) + "\\n")\n'
+_LOG_OPEN = '    log = open(log_path, "a", buffering=1)\n'
+
+
+def _slow_to_bind(source: str) -> str:
+    assert source.count(_SLOW_BIND_ANCHOR) == 1, "setup: the slow-bind anchor moved"
+    return source.replace(_SLOW_BIND_ANCHOR, "\n    time.sleep(2)\n    asyncio.run(serve())\n")
+
+
+def _assert_start_line_implies_listening(source: str, log: Path) -> None:
+    """The invariant #460 established: a `start` record means the port accepts.
+    (Its converse - an accepting port means the record already exists - does
+    NOT hold, and is not asserted: the handshake completes at `listen()`,
+    before the write.) While the proxy sleeps before binding, the port refuses
+    and no start line exists; once the start line appears, the port accepts."""
+    proc, port = _start_proxy(_slow_to_bind(source), log, "192.0.2.0/24")
     try:
         time.sleep(0.8)
+        assert not _start_line_logged(log), "start logged before the bind"
         with pytest.raises(OSError):
             socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
-        assert "start" not in (log.read_text() if log.exists() else ""), "start logged before the bind"
-        _wait_listening(port)
-        assert json.loads(log.read_text().splitlines()[0])["event"] == "start"
+        _wait_for_start_line(log)
+        socket.create_connection(("127.0.0.1", port), timeout=2).close()
     finally:
         proc.terminate()
         proc.wait(timeout=5)
+
+
+def test_red_case_the_start_line_is_written_only_once_the_proxy_listens(tmp_path: Path) -> None:
+    """#460: a proxy slow to bind must not log "start" before it can accept,
+    or the start line would claim a readiness the port does not have."""
+    _assert_start_line_implies_listening(eg.PROXY_SOURCE, tmp_path / "proxy.log")
+
+
+def test_the_start_line_check_tolerates_a_write_that_lags_the_bind(tmp_path: Path) -> None:
+    """#460 follow-up red (a): the shipped write comes a moment AFTER the bind,
+    and under load that moment is long. A check that read the log on the
+    first successful connect raised IndexError here (#434 rev 2's gate, load
+    ~18); the event-based check must not."""
+    assert eg.PROXY_SOURCE.count(_BIND_LINE) == 1, "setup: the bind anchor moved"
+    lagging = eg.PROXY_SOURCE.replace(_BIND_LINE, _BIND_LINE + "        time.sleep(1)\n")
+    _assert_start_line_implies_listening(lagging, tmp_path / "proxy.log")
+
+
+def test_red_case_the_start_line_check_still_fails_a_start_logged_before_the_bind(tmp_path: Path) -> None:
+    """#460 follow-up red (b), the teeth check: the pre-#460 shape (start
+    written as soon as the log opens, before any bind) must still FAIL."""
+    assert eg.PROXY_SOURCE.count(_START_WRITE) == 1 and eg.PROXY_SOURCE.count(_LOG_OPEN) == 1, "setup: anchors moved"
+    early = eg.PROXY_SOURCE.replace(_START_WRITE, "").replace(_LOG_OPEN, _LOG_OPEN + _START_WRITE.replace("        ", "    ", 1))
+    with pytest.raises(AssertionError, match="start logged before the bind"):
+        _assert_start_line_implies_listening(early, tmp_path / "proxy.log")
 
 
 def test_prepare_waits_for_the_proxy_to_accept_connections(base: Path, docker_state: Path) -> None:
