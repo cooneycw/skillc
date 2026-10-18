@@ -37,7 +37,7 @@ from skillc import verify
 
 def pytest_configure(config: pytest.Config) -> None:
     """#462: record the machine context of every real failure (see the module)."""
-    config.pluginmanager.register(_failure_context, "skillc-failure-context")
+    _failure_context.register(config)
 
 
 @pytest.fixture(autouse=True)
