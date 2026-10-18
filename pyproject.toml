@@ -53,6 +53,9 @@ files = ["skillc", "tests", "ci"]
 # real subject's source tree does) - two files both named `lib/cicd/__init__.py`,
 # which mypy's module-name inference (not skillc's own closure walker) cannot
 # tell apart. Excluded as fixture data, not code this repo type-checks.
+# tests/fixtures/profile-cpp-codex-cicd-86641e8/ (#280) is the same kind of pinned
+# CPP snapshot: upstream code, typed to CPP's own config and imports, not ours.
 exclude = ['^evals/level1/[^/]+/(fixture|reference|alternatives|wrong)/',
            '^tests/fixtures/profile-cpp-codex-flow-check-ea6dbfa/',
-           '^tests/fixtures/profile-cpp-codex-flow-check-86641e8/']
+           '^tests/fixtures/profile-cpp-codex-flow-check-86641e8/',
+           '^tests/fixtures/profile-cpp-codex-cicd-86641e8/']

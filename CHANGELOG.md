@@ -4,7 +4,9 @@ All notable changes to skillc are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are the day the
 work landed on `main`, not the day a version is tagged - see
 [#72](https://github.com/cooneycw/skillc/issues/72) for the release checklist
-and version plan.
+and version plan. Since #439, new entries are written as fragments in
+`changelog.d/` and folded in here at release by `ci/changelog_assemble.py` -
+do not add to `[Unreleased]` by hand.
 
 ## [Unreleased]
 
@@ -40,6 +42,29 @@ and version plan.
     the index is caught as non-equivalent.
   - Each of 36 reader mutations goes red.
   - The pack trigger for PR 3 is recorded in the task README.
+
+- **The local CI/CD capability profile for one Python project** (#280).
+  `evals/subjects/cpp-codex-cicd-86641e8/` declares CPP's six cicd skills
+  (`init`, `check`, `health`, `smoke`, `verify`, `pipeline`) at the
+  flow-check study pin, over a snapshot `scripts/freeze_cpp_fixture.py`
+  reproduces from git's object store. The skills need curl, which the
+  shared trial image lacks. `runtime_supply.selected_runtime` therefore
+  adds a `cicd-runtime` beside `profile-runtime` (its selection and
+  refusals unchanged), and `docker/cicd-trial/` builds it as ONE curl layer
+  on a validated flow-check receipt. It refuses an image that is not its
+  base plus one layer with the base's configuration and descriptor. A
+  receipt serves only the runtime its closure selected. `docker/trial`,
+  `docker/profile-trial` and their receipts are byte-identical; the
+  flow-check build inputs are pinned to their pre-#280 hashes with a
+  one-byte negative control. `tests/test_cicd_profile_live.py` (floor entry,
+  break family `cicdprofile:`) runs every command as the INSTALLED skill
+  documents it, in a cold `--network none` container. It covers detect,
+  check, `run --plan check`, health and smoke against a loopback service,
+  `verify` PROCEED then ROLLBACK, zero probes as REVIEW, and provider YAML
+  parsed (never executed) with its make targets equal to the local plan's.
+  CPP's own template drift found on the way: claude-power-pack#1476. The
+  profiles spec now says what the code has done since #334: a missing
+  declared tool is `violated`, not `unknown`.
 
 - **A flow:auto necessity task: an already-fixed issue, and its must-act twin**
   (#434, PR 1 of 3, carrying #270 item 2). `evals/level3/flow-auto-necessity/`

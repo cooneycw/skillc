@@ -77,6 +77,7 @@ TRIALIMAGE_BREAK_VALUE="$(echo "$BREAK_RESOLVED" | sed -n '6p')"
 CLOSURE_BREAK_VALUE="$(echo "$BREAK_RESOLVED" | sed -n '7p')"
 CWD_BREAK_VALUE="$(echo "$BREAK_RESOLVED" | sed -n '8p')"
 EGRESS_BREAK_VALUE="$(echo "$BREAK_RESOLVED" | sed -n '9p')"
+CICDPROFILE_BREAK_VALUE="$(echo "$BREAK_RESOLVED" | sed -n '10p')"
 
 # VM-local configuration - never committed, never defaulted to a real path.
 # See ci/real-docker/README.md "Setup" for how the operator populates this.
@@ -311,6 +312,7 @@ fi
         SKILLC_CLOSURE_PREFLIGHT_LIVE_BREAK="$CLOSURE_BREAK_VALUE" \
         SKILLC_CWD_CONFINEMENT_LIVE_BREAK="$CWD_BREAK_VALUE" \
         SKILLC_EGRESS_LIVE_BREAK="$EGRESS_BREAK_VALUE" \
+        SKILLC_CICD_PROFILE_LIVE_BREAK="$CICDPROFILE_BREAK_VALUE" \
         SKILLC_REAL_DOCKER_RUN_LOCK_HELD=1 \
         uv run --no-sync pytest -m real_docker --junit-xml="$REPORT_PATH"
 ) || true  # a test failure is EXPECTED input to the verdict step below

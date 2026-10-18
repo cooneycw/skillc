@@ -127,7 +127,8 @@ gate ran):
 - `skillc leak-check .` with CI's exact `--exclude` set, then
   `ci/leak-check-control.sh` (the `leak-check` step)
 - `python3 ci/changelog_check.py origin/main`, after fetching it (the
-  `changelog-check` step)
+  `changelog-check` step): a PR touching `skillc/` adds `changelog.d/<issue>.md`
+  rather than editing `CHANGELOG.md`'s `[Unreleased]` (#439, `changelog.d/README.md`)
 - `python3 ci/readme_drift.py` (the `readme-drift` step)
 - `gitleaks dir . --config .gitleaks.toml --redact --no-banner`, then
   `ci/secret-scan-control.sh` (the `secret-scan` step) - **skipped locally**,
