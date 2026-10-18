@@ -1,0 +1,1 @@
+error: cannot open /tmp/claude-4242/scratch/state.json

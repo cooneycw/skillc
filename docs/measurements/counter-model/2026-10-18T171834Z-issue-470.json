@@ -1,0 +1,27 @@
+{
+  "branch": "issue-470-leak-check-misses-encoded-home-paths-and-claude-sc",
+  "counts": {
+    "accepted": 7,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "986283bb410010feda84f3bf984d9f1dfa592a22",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "470",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 2,
+  "recorded_at": "2026-10-18T17:18:34Z",
+  "red_cases": {
+    "already_covered": 6,
+    "proposed": 12
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/18/rollout-2026-10-18T13-15-56-01a15003-4fee-7802-9f3a-08da2aefc030.jsonl",
+    "thread_id": "01a15003-4fee-7802-9f3a-08da2aefc030"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

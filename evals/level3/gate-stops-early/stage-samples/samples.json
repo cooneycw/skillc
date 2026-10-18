@@ -16,7 +16,7 @@
  },
  "test-failed": {
   "exit_code": 1,
-  "sha256": "17378a83521f38fa92e38d6ca5c88b086382c0a2a1b0b349322cdbbdf543750d",
+  "sha256": "ec1f1c5db0738c28b02876327321ca33eb13fa507ec1eeac03304130bea2b1c5",
   "tree": "reference/ plus a failing test"
  },
  "typecheck-failed": {
