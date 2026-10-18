@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
-"""CI gate (#73): a PR touching `skillc/` must add an `Unreleased` CHANGELOG
-entry, or say why not.
+"""CI gate (#73, #439): a PR touching `skillc/` must add a changelog
+FRAGMENT, `changelog.d/<issue>.md` (or `changelog.d/<issue>-<slug>.md`), or
+say why not.
+
+#439: the gate used to require a new line in CHANGELOG.md's single
+`## [Unreleased]` section. Every PR then edited the same top lines, so after
+each merge every queued branch conflicted there, and resolving by "keep both
+sides" (or `merge=union`) can silently splice two bullets that share a first or
+last line. A fragment is a file only its own PR writes, so it cannot conflict
+or splice; `ci/changelog_assemble.py` folds the fragments into CHANGELOG.md at
+release. An edit to the Unreleased section no longer satisfies this gate.
 
 The check is pure and testable without git (`missing_changelog_entry` below;
 `tests/test_changelog_check.py` holds the committed red/good cases per ADR
@@ -35,8 +44,13 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+from collections.abc import Mapping
 
 ESCAPE_TRAILER = "changelog-exempt"
+FRAGMENT_DIR = "changelog.d"
+#: `changelog.d/<issue>.md`, or `<issue>-<slug>.md` for a second PR on the
+#: same issue. `changelog.d/README.md` (the rule itself) never matches.
+FRAGMENT_RE = re.compile(r"^changelog\.d/([0-9]+)(-[a-z0-9-]+)?\.md$")
 
 _UNRELEASED_RE = re.compile(r"^## \[Unreleased\]\s*\n(.*?)(?=^## \[|\Z)", re.MULTILINE | re.DOTALL)
 _TRAILER_LINE_RE = re.compile(rf"^{ESCAPE_TRAILER}\s*:\s*(.+)$", re.IGNORECASE)
@@ -63,40 +77,74 @@ def has_escape_trailer(commit_message: str) -> bool:
     return any(_TRAILER_LINE_RE.match(line.strip()) for line in last.splitlines())
 
 
-def _added_lines(base_section: str, head_section: str) -> set[str]:
-    base_lines = {line.strip() for line in base_section.splitlines() if line.strip()}
-    head_lines = {line.strip() for line in head_section.splitlines() if line.strip()}
+def is_fragment(path: str) -> bool:
+    return FRAGMENT_RE.fullmatch(path) is not None
+
+
+def fragment_problem(text: str) -> str | None:
+    """None for a usable fragment: EXACTLY one Markdown bullet - a `- ` first
+    line, then every non-blank line indented by two spaces (blank lines
+    between indented paragraphs are fine; several existing entries use them).
+    The whole shape is checked, not just the first line: a fragment that
+    slipped a `## [x.y.z]` heading or a second top-level bullet past the gate
+    would be folded above the existing Unreleased entries at release (#439
+    counter-model review). Surrounding blank lines are ignored."""
+    lines = text.strip("\n").splitlines()
+    if not any(line.strip() for line in lines):
+        return "is empty"
+    # Exactly "- " then text: a wider marker ("-   x") moves the item's content
+    # column to 4, so a two-space-indented "## [x.y.z]" would escape the list
+    # and become a real section heading; a bare "- " is no note at all (#439
+    # counter-model review, pass 2). With a 2-column marker, the two-space
+    # continuation rule below is exactly CommonMark's.
+    if not re.match(r"- \S", lines[0]):
+        return f"must start with '- ' followed directly by the note, not {lines[0][:40]!r}"
+    for number, line in enumerate(lines[1:], start=2):
+        if line.strip() and not line.startswith("  "):
+            return f"line {number} is not a two-space continuation of the one bullet: {line[:40]!r}"
+    return None
+
+
+def _new_lines(base: str, head: str) -> set[str]:
+    base_lines = {line.strip() for line in base.splitlines() if line.strip()}
+    head_lines = {line.strip() for line in head.splitlines() if line.strip()}
     return head_lines - base_lines
 
 
 def missing_changelog_entry(
     changed_files: list[str],
-    base_changelog: str | None,
-    head_changelog: str | None,
+    base_fragments: Mapping[str, str],
+    head_fragments: Mapping[str, str],
     head_commit_message: str,
 ) -> str | None:
     """None when compliant; otherwise a detail string naming the violation.
 
-    `base_changelog` is the merge-base's CHANGELOG.md content, or None if it
-    does not exist there (a repository's first PR touching skillc/).
-    `head_changelog` is this branch's own, or None if it was deleted.
+    `head_fragments` maps each changed fragment path that exists on this
+    branch to its content; `base_fragments` maps the same paths to their
+    merge-base content where one existed (a new fragment is absent there).
+    A fragment counts when it is well formed and carries a non-blank line its
+    merge-base version did not - a deletion or reformat is not an entry.
     """
     if not touches_skillc(changed_files):
         return None
     if has_escape_trailer(head_commit_message):
         return None
-    if head_changelog is None:
-        return "skillc/ changed but CHANGELOG.md does not exist on this branch"
-    head_section = unreleased_section(head_changelog)
-    if not head_section:
-        return "skillc/ changed but CHANGELOG.md's [Unreleased] section is empty"
-    base_section = unreleased_section(base_changelog) if base_changelog is not None else ""
-    if not _added_lines(base_section, head_section):
-        return (
-            "skillc/ changed but CHANGELOG.md's [Unreleased] section gained no "
-            "new line since the merge-base - a deletion or reformat is not an entry"
-        )
-    return None
+    problems: list[str] = []
+    for path in sorted(head_fragments):
+        if not is_fragment(path):
+            continue
+        problem = fragment_problem(head_fragments[path])
+        if problem:
+            problems.append(f"{path} {problem}")
+            continue
+        if _new_lines(base_fragments.get(path, ""), head_fragments[path]):
+            return None
+    if problems:
+        return "skillc/ changed but its changelog fragment is malformed: " + "; ".join(problems)
+    return (
+        f"skillc/ changed but no {FRAGMENT_DIR}/<issue>.md fragment was added or extended - "
+        f"an edit to CHANGELOG.md's [Unreleased] section no longer counts (#439)"
+    )
 
 
 def _git(*args: str) -> str:
@@ -138,17 +186,27 @@ def main(argv: list[str] | None = None) -> int:
     changed_files = [
         line for line in _git("diff", "--name-only", merge_base, "HEAD").splitlines() if line
     ]
-    base_changelog = _show(merge_base, "CHANGELOG.md")
-    head_changelog = _show("HEAD", "CHANGELOG.md")
+    base_fragments: dict[str, str] = {}
+    head_fragments: dict[str, str] = {}
+    for path in changed_files:
+        if not is_fragment(path):
+            continue
+        head = _show("HEAD", path)
+        if head is None:
+            continue  # deleted on this branch: not an entry
+        head_fragments[path] = head
+        base_text = _show(merge_base, path)
+        if base_text is not None:
+            base_fragments[path] = base_text
     head_commit_message = _git("log", "-1", "--format=%B", "HEAD")
 
-    problem = missing_changelog_entry(changed_files, base_changelog, head_changelog, head_commit_message)
+    problem = missing_changelog_entry(changed_files, base_fragments, head_fragments, head_commit_message)
     if problem:
         print(f"changelog-check: FAIL - {problem}", file=sys.stderr)
         print(
-            f"changelog-check: add an entry under CHANGELOG.md's [Unreleased] "
-            f"section, or add a '{ESCAPE_TRAILER.title()}: <reason>' trailer "
-            f"to your last commit",
+            f"changelog-check: add {FRAGMENT_DIR}/<issue>.md with one '- ' bullet "
+            f"(see {FRAGMENT_DIR}/README.md), or add a '{ESCAPE_TRAILER.title()}: <reason>' "
+            f"trailer to your last commit",
             file=sys.stderr,
         )
         return 1

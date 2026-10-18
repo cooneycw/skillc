@@ -130,7 +130,7 @@ steps:
     environment:
       UV_PROJECT_ENVIRONMENT: /tmp/skillc-venv
 
-  # A PR touching skillc/ must add an Unreleased CHANGELOG.md entry, or carry
+  # A PR touching skillc/ must add a changelog.d/<issue>.md fragment (#439), or carry
   # a Changelog-exempt: <reason> trailer on its HEAD commit (#73). Two-dot
   # diff against origin/main (never three-dot): it compares tree snapshots
   # directly and needs no merge-base, which a shallow clone may not have.
