@@ -61,7 +61,7 @@ STEP1 = [{"op": "worktree", "name": WT, "branch": "issue-1-widget-crashes-on-emp
 #: The orchestrator's extra states (condition 2), beyond PR 1's candidates.
 EXTRA_STATES: dict[str, dict[str, Any]] = {
     "linked-worktree-detached-head": {"case": "clean", "git": [
-        *STEP1, {"op": "detach", "where": WT, "commit": "a65d6b3bbb57cf04478712f84299eb4b301d8142"}]},
+        *STEP1, {"op": "detach", "where": WT, "commit": "60bacc9a8cbddd9d3b5b3fba5b1f84bc0396d079"}]},
     "index-only-in-linked-worktree": {"case": "clean", "git": [
         *STEP1, {"op": "rm-cached", "where": WT, "path": "README.md"}]},
     "mode-change-in-linked-worktree": {"case": "twin", "git": [
@@ -72,7 +72,7 @@ EXTRA_STATES: dict[str, dict[str, Any]] = {
     "commit-parked-on-worktree-private-ref": {"case": "clean", "git": [
         *STEP1, {"op": "commit-empty", "where": WT, "message": "hidden"},
         {"op": "update-ref", "where": WT, "ref": "refs/worktree/hidden", "to": "HEAD"},
-        {"op": "reset-hard", "where": WT, "commit": "970ffd0266624752509568367994a399d74d12db"}]},
+        {"op": "reset-hard", "where": WT, "commit": "e970b8b55d26c5c3076b7b0e20e35193087690ad"}]},
     # Pass 2: a commit only the bare remote's detached HEAD reaches.
     "commit-parked-on-remote-detached-head": {"case": "clean", "git": [
         {"op": "remote-park-head", "message": "parked"}]},
@@ -173,9 +173,10 @@ def test_the_snapshot_read_of_an_export_matches_host_git(state: str, tmp_path: P
 
 
 def test_every_state_was_compared_and_none_is_unexportable() -> None:
-    # 43 PR 1 candidates + the extra states; none is silently skipped.
+    # 45 candidates (PR 1's 43, plus revision 2's two untouched-said-nothing-useful) + the extra states;
+    # none is silently skipped.
     assert len(_states()) == len(list((TASK / "candidates").glob("*/*"))) + len(EXTRA_STATES)
-    assert len(list((TASK / "candidates").glob("*/*"))) == 43
+    assert len(list((TASK / "candidates").glob("*/*"))) == 45
 
 
 def test_the_instrument_reports_a_reader_that_ignores_the_index(tmp_path: Path,

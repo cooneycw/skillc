@@ -1,0 +1,472 @@
+{
+ "member": "gate_witness",
+ "test_id": "tests/test_gate_witness.py::test_exec_in_attempt_never_stops_the_container_on_its_own_timeout",
+ "label": "pre",
+ "sha": "728f17342f43",
+ "phases": 1,
+ "load_factors": [
+  2.0
+ ],
+ "meets_2x_nproc": true,
+ "invalid_phases": 0,
+ "pause_gaps_seconds": [],
+ "pauses_ok": true,
+ "phases_within_cap": true,
+ "counted_reps": 20,
+ "failed": 0,
+ "passed": 20,
+ "truncated": 0,
+ "red_rate": 0.0,
+ "reps_for_post": null,
+ "rep_seconds": [
+  3.029,
+  2.383,
+  2.504,
+  2.672,
+  2.48,
+  2.503,
+  2.1,
+  2.333,
+  2.503,
+  2.246,
+  2.356,
+  2.27,
+  3.119,
+  2.283,
+  2.763,
+  2.637,
+  2.665,
+  2.269,
+  2.201,
+  2.308
+ ],
+ "phase_records": [
+  {
+   "cpu": 48,
+   "churn": 0,
+   "target": 48.0,
+   "nproc": 24,
+   "reps_requested": 20,
+   "max_seconds": 900.0,
+   "command": [
+    "<root>/.venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "no:cacheprovider",
+    "-q",
+    "-p",
+    "diag462",
+    "tests/test_gate_witness.py::test_exec_in_attempt_never_stops_the_container_on_its_own_timeout"
+   ],
+   "started_at": 1792312079.7237823,
+   "uptime_before": "04:27:59 up 28 days, 17:27,  2 users,  load average: 5.62, 5.32, 5.33",
+   "load_pgid": 1067055,
+   "warmup_reached": true,
+   "ended_at": 1792312133.362749,
+   "uptime_after": "04:28:53 up 28 days, 17:28,  2 users,  load average: 36.31, 14.05, 8.32",
+   "verdict": "VALID",
+   "running_mean": 57.78,
+   "running_min": 52,
+   "samples": [
+    {
+     "t": 1792312079.73,
+     "running": 14,
+     "loadavg1": 5.62
+    },
+    {
+     "t": 1792312080.73,
+     "running": 55,
+     "loadavg1": 5.62
+    },
+    {
+     "t": 1792312081.74,
+     "running": 60,
+     "loadavg1": 10.06
+    },
+    {
+     "t": 1792312082.74,
+     "running": 61,
+     "loadavg1": 10.06
+    },
+    {
+     "t": 1792312083.74,
+     "running": 59,
+     "loadavg1": 10.06
+    },
+    {
+     "t": 1792312083.74,
+     "running": 59,
+     "loadavg1": 10.06
+    },
+    {
+     "t": 1792312084.74,
+     "running": 64,
+     "loadavg1": 10.06
+    },
+    {
+     "t": 1792312085.74,
+     "running": 61,
+     "loadavg1": 10.06
+    },
+    {
+     "t": 1792312086.74,
+     "running": 57,
+     "loadavg1": 14.54
+    },
+    {
+     "t": 1792312087.75,
+     "running": 55,
+     "loadavg1": 14.54
+    },
+    {
+     "t": 1792312088.75,
+     "running": 70,
+     "loadavg1": 14.54
+    },
+    {
+     "t": 1792312089.75,
+     "running": 64,
+     "loadavg1": 14.54
+    },
+    {
+     "t": 1792312090.75,
+     "running": 62,
+     "loadavg1": 14.54
+    },
+    {
+     "t": 1792312091.75,
+     "running": 62,
+     "loadavg1": 17.94
+    },
+    {
+     "t": 1792312092.75,
+     "running": 63,
+     "loadavg1": 17.94
+    },
+    {
+     "t": 1792312093.75,
+     "running": 53,
+     "loadavg1": 17.94
+    },
+    {
+     "t": 1792312094.75,
+     "running": 61,
+     "loadavg1": 17.94
+    },
+    {
+     "t": 1792312095.75,
+     "running": 58,
+     "loadavg1": 17.94
+    },
+    {
+     "t": 1792312096.75,
+     "running": 59,
+     "loadavg1": 21.14
+    },
+    {
+     "t": 1792312097.76,
+     "running": 56,
+     "loadavg1": 21.14
+    },
+    {
+     "t": 1792312098.76,
+     "running": 67,
+     "loadavg1": 21.14
+    },
+    {
+     "t": 1792312099.76,
+     "running": 55,
+     "loadavg1": 21.14
+    },
+    {
+     "t": 1792312100.76,
+     "running": 55,
+     "loadavg1": 21.14
+    },
+    {
+     "t": 1792312101.76,
+     "running": 63,
+     "loadavg1": 23.7
+    },
+    {
+     "t": 1792312102.76,
+     "running": 53,
+     "loadavg1": 23.7
+    },
+    {
+     "t": 1792312103.76,
+     "running": 59,
+     "loadavg1": 23.7
+    },
+    {
+     "t": 1792312104.76,
+     "running": 58,
+     "loadavg1": 23.7
+    },
+    {
+     "t": 1792312105.77,
+     "running": 57,
+     "loadavg1": 23.7
+    },
+    {
+     "t": 1792312106.77,
+     "running": 55,
+     "loadavg1": 26.28
+    },
+    {
+     "t": 1792312107.77,
+     "running": 58,
+     "loadavg1": 26.28
+    },
+    {
+     "t": 1792312108.77,
+     "running": 58,
+     "loadavg1": 26.28
+    },
+    {
+     "t": 1792312109.77,
+     "running": 53,
+     "loadavg1": 26.28
+    },
+    {
+     "t": 1792312110.77,
+     "running": 54,
+     "loadavg1": 26.28
+    },
+    {
+     "t": 1792312111.77,
+     "running": 56,
+     "loadavg1": 29.38
+    },
+    {
+     "t": 1792312112.77,
+     "running": 52,
+     "loadavg1": 29.38
+    },
+    {
+     "t": 1792312113.78,
+     "running": 56,
+     "loadavg1": 29.38
+    },
+    {
+     "t": 1792312114.78,
+     "running": 52,
+     "loadavg1": 29.38
+    },
+    {
+     "t": 1792312115.78,
+     "running": 55,
+     "loadavg1": 29.38
+    },
+    {
+     "t": 1792312116.78,
+     "running": 53,
+     "loadavg1": 31.19
+    },
+    {
+     "t": 1792312117.78,
+     "running": 53,
+     "loadavg1": 31.19
+    },
+    {
+     "t": 1792312118.78,
+     "running": 53,
+     "loadavg1": 31.19
+    },
+    {
+     "t": 1792312119.78,
+     "running": 61,
+     "loadavg1": 31.19
+    },
+    {
+     "t": 1792312120.78,
+     "running": 61,
+     "loadavg1": 31.19
+    },
+    {
+     "t": 1792312121.78,
+     "running": 53,
+     "loadavg1": 32.94
+    },
+    {
+     "t": 1792312122.78,
+     "running": 62,
+     "loadavg1": 32.94
+    },
+    {
+     "t": 1792312123.79,
+     "running": 59,
+     "loadavg1": 32.94
+    },
+    {
+     "t": 1792312124.79,
+     "running": 60,
+     "loadavg1": 32.94
+    },
+    {
+     "t": 1792312125.79,
+     "running": 58,
+     "loadavg1": 32.94
+    },
+    {
+     "t": 1792312126.79,
+     "running": 60,
+     "loadavg1": 34.95
+    },
+    {
+     "t": 1792312127.79,
+     "running": 54,
+     "loadavg1": 34.95
+    },
+    {
+     "t": 1792312128.8,
+     "running": 64,
+     "loadavg1": 34.95
+    },
+    {
+     "t": 1792312129.8,
+     "running": 57,
+     "loadavg1": 34.95
+    },
+    {
+     "t": 1792312130.8,
+     "running": 53,
+     "loadavg1": 34.95
+    },
+    {
+     "t": 1792312131.8,
+     "running": 53,
+     "loadavg1": 36.31
+    },
+    {
+     "t": 1792312132.8,
+     "running": 55,
+     "loadavg1": 36.31
+    }
+   ],
+   "reps": [
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 3.029,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 2.383,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 2.504,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 2.672,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 2.48,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 2.503,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 2.1,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 2.333,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 2.503,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 2.246,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 2.356,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 2.27,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 3.119,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 2.283,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 2.763,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 2.637,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 2.665,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 2.269,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 2.201,
+     "tail": ""
+    },
+    {
+     "outcome": "passed",
+     "exit": 0,
+     "seconds": 2.308,
+     "tail": ""
+    }
+   ]
+  }
+ ]
+}

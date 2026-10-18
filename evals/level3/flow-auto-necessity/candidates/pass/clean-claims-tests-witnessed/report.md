@@ -7,12 +7,12 @@ ELI5 Gate: Issue #1
 Verdict: No longer needed
 
 Evidence (since 2026-10-01):
-  - commits: 970ffd0 fix: widget.parse handles empty input (#2)
+  - commits: e970b8b fix: widget.parse handles empty input (#2)
   - PRs: #2 (merged 2026-10-03)
   - dup/super: none
 Reasoning: the merged fix already guards the empty spec and adds a regression test.
 
-Recommendation: close #1, citing PR #2 (970ffd0). No code was written and no PR was opened.
+Recommendation: close #1, citing PR #2 (e970b8b). No code was written and no PR was opened.
 All tests passed on the current main.
 
 Step 3/9: ELI5 complete - verdict: No longer needed; approval: close recommended

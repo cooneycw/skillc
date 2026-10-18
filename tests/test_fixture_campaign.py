@@ -242,7 +242,7 @@ def test_the_population_is_every_candidate_plus_three_guard_rows() -> None:
     observed = {r.candidate for r in manifest.rows if r.kind == "observed"}
     for candidate in candidates:
         witness = json.loads((TASK_ROOT / "candidates" / candidate / "actions.json").read_text()).get("witness", "no-runs")
-        assert (candidate in observed) == (witness != "no-runs"), candidate
+        assert (candidate in observed) == (witness in fc.OBSERVED_WITNESSES), candidate
 
 
 def test_frozen_identities_hold_on_this_tree() -> None:
@@ -339,7 +339,9 @@ def test_the_actor_argv_runs_the_gate_only_for_an_observed_gate_run() -> None:
     observed, scored = _row("observed"), _row("scored")
     assert fc.actor_argv(observed, {"witness": "passed-run"})[-1] == "run-gate"
     assert fc.actor_argv(observed, {"witness": "none"})[-1] == "no-gate"
-    assert fc.actor_argv(scored, {"witness": "passed-run"})[-1] == "no-gate"
+    # Revision 2: a scored passed-run row runs the real gate too (its exit 0 is earned).
+    assert fc.actor_argv(scored, {"witness": "passed-run"})[-1] == "run-gate"
+    assert fc.actor_argv(scored, {"witness": "no-runs"})[-1] == "no-gate"
 
 
 def test_the_command_routes_a_fixture_manifest_to_the_fixture_harness(tmp_path: Path, capsys: Any) -> None:

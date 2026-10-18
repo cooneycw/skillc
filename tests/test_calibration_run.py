@@ -1001,3 +1001,18 @@ def test_pins_hash_the_captured_install_bytes_not_a_second_read(
     want = profile.skill_md_digests(treatment.home_files[".codex/skills/tdd/SKILL.md"])
     pin = treatment.skill_digests[0]
     assert (pin["description_digest"], pin["body_digest"]) == want
+
+
+def test_a_do_nothing_attempt_lowers_the_pass_rate_never_leaves_the_denominator() -> None:
+    """#434 revision 2 (orchestrator ruling): doing nothing grades INCONCLUSIVE
+    on the flow-auto-necessity task, so an aggregate must count it as NOT passed.
+    The same population with one more do-nothing attempt has a LOWER pass rate."""
+    def rate(entries: list[dict[str, object]]) -> float:
+        arm = cr.summarize_arms(entries)["treated"]
+        primary = arm["primary"]
+        assert isinstance(primary, dict)
+        return primary.get("PASS", 0) / int(str(arm["scheduled"]))
+
+    passing: list[dict[str, object]] = [{"arm": "treated", "primary_endpoint": {"status": "PASS"}} for _ in range(3)]
+    do_nothing: dict[str, object] = {"arm": "treated", "primary_endpoint": {"status": "INCONCLUSIVE"}}
+    assert rate([*passing, do_nothing]) < rate(passing)

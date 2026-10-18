@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""CI control (#307, widened to jq by #276): fail if a tool-dependent test
+"""CI control (#307, widened to jq by #276 and to make by #434): fail if a tool-dependent test
 population silently skipped. AGENTS.md states the CI image previously had
 neither git nor make, so every `needs_git`/module-level `pytestmark` test
 skipped there - this checker reads a pytest `--junit-xml` report and refuses
-to let that regress unnoticed, now that `gate` installs git and jq.
+to let that regress unnoticed, now that `gate` installs git, jq and make.
 
 Two independent signals, because either one alone can go blind on its own:
 
@@ -35,7 +35,7 @@ import xml.etree.ElementTree as ET
 
 #: The host tools the `gate` step installs, and whose absence a skip
 #: message would name.
-REQUIRED_TOOLS = ("git", "jq")
+REQUIRED_TOOLS = ("git", "jq", "make")
 
 #: Each tool-dependent test module, mapped to the tools its gated tests need.
 TOOL_DEPENDENT_FILES: dict[str, tuple[str, ...]] = {
@@ -48,6 +48,11 @@ TOOL_DEPENDENT_FILES: dict[str, tuple[str, ...]] = {
     "tests.test_fixture_service": ("git", "jq"),
     "tests.test_fixture_service_channel": ("git", "jq"),
     "tests.test_fixture_service_inventory": ("jq",),
+    # #434 revision 2: the fixture gate surface's controls (make verify per case, and the
+    # lint/test/typecheck/empty-suite reds) are load-bearing for the grader revision.
+    "tests.test_flow_auto_necessity_task": ("make",),
+    "tests.test_makefile_pipefail_control": ("make",),
+    "tests.test_level3_cicd_pipeline": ("make",),
 }
 assert all(set(tools) <= set(REQUIRED_TOOLS) for tools in TOOL_DEPENDENT_FILES.values())
 
