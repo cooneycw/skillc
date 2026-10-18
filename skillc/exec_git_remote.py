@@ -67,7 +67,8 @@ class RemoteUnavailable(RuntimeError):
 
 
 class _ExecBackend(Protocol):
-    witness_io: bool
+    @property
+    def witness_io(self) -> bool: ...
 
     def exec_in_attempt(self, handle: object, argv: Sequence[str], limits: Limits,
                         cancel: Any = None, stdin: bytes | None = None, cwd: str | None = None,

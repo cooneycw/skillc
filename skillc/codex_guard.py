@@ -1,0 +1,127 @@
+"""The controller's record of the nested-codex guard (#434 PR 2b, D3).
+
+`docker/fixture-service/skillc-codex-guard.py` runs inside the attempt, AS the
+candidate, in front of every bare `codex`. It sends each decision here over the
+attempt's one trigger socket as one `codex_guard` request, and this session
+keeps it. The record lives in the controller, so nothing in the container can
+edit it (orchestrator ruling on D3 condition 4: a file the guard could append
+to, the subject could edit too).
+
+COUNTS, AND WHEN THEY MEAN SOMETHING (orchestrator ruling):
+
+- `confirmed`: `refused-nested` decisions, where the guard found a codex
+  ancestor.
+- `ancestry_unknown`: `refused-ancestry-unknown`, a call the guard could not
+  place, refused rather than passed.
+- `suspected`: top-level launches beyond the first. The harness launches the
+  agent exactly once, so a second `passed-top-level` is a codex started with
+  no codex ancestor, which is what a double-fork reparent to PID 1 looks like.
+  It is reported as suspected, not confirmed.
+- `status`:
+  - `zero` only with a healthy channel AND exactly one `passed-top-level` AND
+    nothing refused;
+  - `observed` when any of the three counts is above zero;
+  - `unknown` otherwise: an unhealthy channel, or no top-level launch recorded
+    at all, which means the guard's send failed or the guard never ran.
+
+A subject can send `refused-nested` lines against itself. That only hurts the
+subject, so they are counted as reported.
+
+The request is closed: exactly `{op, decision, argv_digest}`, a decision from
+the fixed set, and a sha256 digest. Anything else is refused, and so is a
+request after finalization or beyond `MAX_DECISIONS`. Every refusal marks the
+record's channel unavailable, so a malformed or flooding sender can only push
+the count to `unknown`.
+
+Stdlib only (AGENTS.md).
+"""
+
+from __future__ import annotations
+
+import re
+import threading
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from typing import Any
+
+from .decide_reply_channel import ChannelRefusal
+
+DECISIONS = ("passed-top-level", "refused-nested", "refused-ancestry-unknown")
+REQUEST_KEYS = frozenset({"op", "decision", "argv_digest"})
+MAX_DECISIONS = 1000
+_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+@dataclass
+class CodexGuardSession:
+    """One attempt's guard record, decided and recorded before each reply."""
+
+    attempt_id: str
+    decisions: list[dict[str, Any]] = field(default_factory=list)
+    channel_unavailable: bool = False
+    finalized: bool = False
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    def decide(self, request: Mapping[str, object]) -> Mapping[str, object]:
+        with self._lock:
+            problem = self._problem(request)
+            if problem is not None:
+                self.channel_unavailable = True
+                raise ChannelRefusal(f"codex_guard: {problem}")
+            self.decisions.append({"seq": len(self.decisions) + 1, "decision": request["decision"],
+                                   "argv_digest": request["argv_digest"]})
+            return {"recorded": len(self.decisions)}
+
+    def _problem(self, request: Mapping[str, object]) -> str | None:
+        if self.finalized:
+            return "the record is finalized"
+        if set(request) != REQUEST_KEYS or request.get("op") != "codex_guard":
+            return f"fields must be exactly {sorted(REQUEST_KEYS)}"
+        if request.get("decision") not in DECISIONS:
+            return f"unknown decision {request.get('decision')!r}"
+        digest = request.get("argv_digest")
+        if not isinstance(digest, str) or not _DIGEST.match(digest):
+            return "argv_digest is not a sha256 digest"
+        if len(self.decisions) >= MAX_DECISIONS:
+            return f"more than {MAX_DECISIONS} decisions"
+        return None
+
+    def finalize(self) -> dict[str, Any]:
+        """The record, once; later requests are refused."""
+        with self._lock:
+            self.finalized = True
+            return summarize(self.attempt_id, list(self.decisions), self.channel_unavailable)
+
+
+def summarize(attempt_id: str, decisions: list[dict[str, Any]], channel_unavailable: bool) -> dict[str, Any]:
+    top = sum(1 for d in decisions if d["decision"] == "passed-top-level")
+    confirmed = sum(1 for d in decisions if d["decision"] == "refused-nested")
+    ancestry_unknown = sum(1 for d in decisions if d["decision"] == "refused-ancestry-unknown")
+    suspected = max(0, top - 1)
+    if confirmed or ancestry_unknown or suspected:
+        status = "observed"
+    elif channel_unavailable or top != 1:
+        status = "unknown"
+    else:
+        status = "zero"
+    return {
+        "kind": "codex-guard", "attempt_id": attempt_id, "decisions": decisions,
+        "channel_unavailable": channel_unavailable,
+        "nested": {"status": status, "top_level": top, "confirmed": confirmed, "suspected": suspected,
+                   "ancestry_unknown": ancestry_unknown},
+    }
+
+
+def credit_block(record: Mapping[str, Any] | None) -> str | None:
+    """The credit gate's reason, or `None` when the attempt may be credited
+    (orchestrator ruling: enforced where #442 enforces a server-side tool, never
+    in the frozen judge). A missing record is unknown, never zero."""
+    nested = record.get("nested") if isinstance(record, Mapping) else None
+    if not isinstance(nested, Mapping) or nested.get("status") not in ("zero", "observed", "unknown"):
+        return "not credited: nested-codex count unknown (no guard record)"
+    if nested["status"] == "observed":
+        return (f"not credited: nested codex observed (confirmed={nested.get('confirmed')}, "
+                f"suspected={nested.get('suspected')}, ancestry-unknown={nested.get('ancestry_unknown')})")
+    if nested["status"] == "unknown":
+        return "not credited: nested-codex count unknown"
+    return None
