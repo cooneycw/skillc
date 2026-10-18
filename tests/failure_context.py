@@ -286,12 +286,14 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]):  
     report.sections.append((SECTION, json.dumps(record, sort_keys=True)))
 
 
+def _dict(value: Any) -> dict[str, Any]:
+    """A section that was captured, or {} for one recorded `unavailable`."""
+    return value if isinstance(value, dict) else {}
+
+
 def _summary_line(record: dict[str, Any]) -> str:
-    now = record.get("now") if isinstance(record.get("now"), dict) else {}
-    nb = record.get("neighbours") if isinstance(record.get("neighbours"), dict) else {}
-    cpu = now.get("psi_cpu") if isinstance(now.get("psi_cpu"), dict) else {}
-    io = now.get("psi_io") if isinstance(now.get("psi_io"), dict) else {}
-    dk = record.get("docker") if isinstance(record.get("docker"), dict) else {}
+    now, nb, dk = _dict(record.get("now")), _dict(record.get("neighbours")), _dict(record.get("docker"))
+    cpu, io = _dict(now.get("psi_cpu")), _dict(now.get("psi_io"))
     load = now.get("loadavg") or [None]
     return (f"FAILURE_CONTEXT: {record['nodeid']} load1={load[0]} "
             f"running={now.get('procs_running')} blocked={now.get('procs_blocked')} "
