@@ -143,3 +143,22 @@ def stamp_approval(data: dict) -> dict:
     if isinstance(data.get("approval"), dict):
         data["approval"]["declaration_digest"] = calibration.declaration_digest(data)
     return data
+
+
+def p3_bindings(data: dict) -> dict:
+    """Give a test declaration the fields #287 P3 requires of a new-kind
+    declaration (every discrimination declaration, and a calibration
+    declaration with an outcome endpoint): the code's own provider-only egress
+    policy (C4), a durable `run_store` (C5), a tolerance (C2) and a runtime
+    receipt digest (C3; synthetic unless the test supplies one). Call it
+    before `stamp_approval`."""
+    from skillc import collection_conformance, egress
+    data["shared"]["agent_network"] = {
+        "policy": collection_conformance.AGENT_NETWORK_POLICY,
+        "allowlist_digest": egress.allowlist_digest(),
+        "codex_server_side_off": list(egress.CODEX_SERVER_SIDE_OFF),
+    }
+    data["shared"]["image"].setdefault("receipt_sha256", "sha256:" + "e" * 64)
+    data["run_store"] = "~/skillc-evidence/test"
+    data.setdefault("tolerance", {"non_evaluable_per_arm": 1})
+    return data

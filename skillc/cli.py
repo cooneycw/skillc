@@ -1601,6 +1601,14 @@ def _refuse_ineligible(report: dict[str, object]) -> int:
     model check with nothing to check is not a pass."""
     from . import matched_pilot as mp
 
+    attempts = report.get("attempts")
+    egress_bad = [str(e.get("attempt_id")) for e in (attempts if isinstance(attempts, list) else [])
+                  if isinstance(e, dict) and e.get("egress_eligible") is False]
+    if egress_bad:
+        # #287 P3 (C4): a dispatched attempt without the declared provider-only egress fails the run.
+        print(f"skillc: {len(egress_bad)} attempt(s) lack evidence of the declared provider-only egress and are "
+              f"excluded: {', '.join(egress_bad)}", file=sys.stderr)
+        return 1
     ineligible = mp.ineligible_attempts(report)
     if not ineligible:
         if not mp.eligible_attempts(report):
@@ -1738,6 +1746,7 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
         return 2
     docker_bin = tuple(args.docker_bin.split()) if args.docker_bin else ("docker",)
     declared_digest = cr._shared_str(declaration, "image", "digest")
+    bound_receipt: bytes | None = None
     if rehearse:
         # A rehearsal starts no container, so the image and the pinned client
         # are not resolved; it plans against the DECLARED image digest and says so.
@@ -1756,12 +1765,27 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
             return 2
         image = args.image or demo.DEFAULT_IMAGE
         image_digest = demo.resolve_image_digest(docker_bin, image, None, args.timeout)
-        if image_digest != declared_digest:
+        declared_image = declaration.shared.get("image")
+        if isinstance(declared_image, dict) and "receipt_sha256" in declared_image:
+            # #287 P3 (C3): the declared tag, its daemon-resolved ID, and the receipt bytes.
+            try:
+                bound_receipt = cr.require_image_binding(
+                    declaration, image_arg=image, resolved_digest=image_digest,
+                    receipt_path=Path(args.runtime_supply_receipt) if args.runtime_supply_receipt else None,
+                )
+            except cr.CalibrationRefused as exc:
+                print(f"skillc: {exc}", file=sys.stderr)
+                return 2
+        elif image_digest != declared_digest:
             print(f"skillc: image {image!r} resolves to {image_digest or 'nothing'}, but the declaration names "
                   f"{declared_digest}; refusing a run on an image other than the declared one", file=sys.stderr)
             return 2
 
-    private_root = Path(args.private_dir).expanduser() if args.private_dir else cr.DEFAULT_PRIVATE_ROOT
+    try:
+        private_root = cr.private_root(declaration, args.private_dir)  # #287 P3 (C5): the declared run store
+    except cr.CalibrationRefused as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     run_dir = private_root / f"{stamp}-{secrets.token_hex(3)}"
     run_dir.mkdir(parents=True, mode=0o700)
@@ -1795,7 +1819,10 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
             raise rs.Refused("supported profile requires --runtime-supply-receipt")
         if receipt_path and not selected:
             raise rs.Refused("runtime receipt supplied for an unrelated or absent profile")
-        supply = rs.RuntimeSupply.from_path(Path(receipt_path)) if receipt_path else None
+        if bound_receipt is not None:  # #287 P3 (C3): the bytes the binding checked, not a second read
+            supply: rs.RuntimeSupply | None = rs.RuntimeSupply(bound_receipt)
+        else:
+            supply = rs.RuntimeSupply.from_path(Path(receipt_path)) if receipt_path else None
         if supply is not None:
             rs.require_kind(supply, selected)
         if supply is not None and supply.image_id != image_digest:
@@ -1850,6 +1877,9 @@ def cmd_calibration_run(args: argparse.Namespace) -> int:
     except (trial.Refused, ValueError, OSError) as exc:
         print(f"skillc: cannot report calibration: {exc}", file=sys.stderr)
         return 2
+    if "run_store" in declaration.data:
+        # #287 P3 (C5): the declared literal and the path it expanded to, in the private report only.
+        report["run_store"] = {"declared": declaration.data["run_store"], "resolved": str(private_root)}
     (run_dir / cr.REPORT_FILENAME).write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8")
     try:
         demo.print_paste_back(demo.redact_known_host_paths(cr.paste_back(report), base=run_dir))
