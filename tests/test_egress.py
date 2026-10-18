@@ -528,7 +528,7 @@ def _classify() -> object:
 @pytest.mark.parametrize("peer, subnet, kind", [
     ("192.0.2.7", "192.0.2.0/24", "attempt"),        # the attempt's own agent
     ("198.51.100.9", "192.0.2.0/24", "rejected"),    # a neighbour on the shared bridge
-    ("172.17.0.5", "192.0.2.0/24", "rejected"),      # (TEST-NET / docker-default shapes)
+    ("203.0.113.5", "192.0.2.0/24", "rejected"),     # another outside network (TEST-NET-3)
     ("127.0.0.1", "192.0.2.0/24", "probe"),          # #460's readiness probe, unlogged
     ("127.8.9.10", "192.0.2.0/24", "probe"),         # all of 127.0.0.0/8, and no more
     ("128.0.0.1", "192.0.2.0/24", "rejected"),       # just past it
