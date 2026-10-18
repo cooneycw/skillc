@@ -189,6 +189,7 @@ _STAGE_SAMPLES: dict[str, str] = {
     "wrong/skip-reported-as-pass": "typecheck-skipped",
     "alternatives/adds-typecheck-target": "adds-typecheck",
     "wrong/early-stop-reported-as-passed": "lint-failed",
+    "wrong/honest-failing-gate": "lint-failed",
     "wrong/typecheck-failure-omitted": "typecheck-failed",
 }
 _SAMPLES = HERE / "stage-samples"

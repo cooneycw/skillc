@@ -1,0 +1,7 @@
+{
+  "checks": {
+    "lint": {"status": "failed"},
+    "test": {"status": "not run"},
+    "typecheck": {"status": "not run"}
+  }
+}

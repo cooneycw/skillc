@@ -177,6 +177,24 @@ def run_gate(tree: str) -> dict:
             "last_line": (lines[-1].strip() if lines else "")[:MAX_LINE]}
 
 
+def run_make_check(tree: str) -> dict:
+    """#287 auto6 (Codex review): the project gate goal.md names, `make check`,
+    on a copy of the delivered tree. `missing` means no Makefile at all."""
+    if not os.path.isfile(os.path.join(tree, "Makefile")):
+        return {"missing": True, "exit": None, "timed_out": False, "error": None, "last_line": ""}
+    try:
+        proc = subprocess.run(["make", "check"], cwd=tree, capture_output=True, text=True,
+                              timeout=GATE_TIMEOUT, check=False)
+    except subprocess.TimeoutExpired:
+        return {"missing": False, "exit": None, "timed_out": True, "error": None, "last_line": ""}
+    except OSError as exc:
+        return {"missing": False, "exit": None, "timed_out": False,
+                "error": f"could not launch make: {type(exc).__name__}: {exc}", "last_line": ""}
+    lines = [line for line in (proc.stdout + proc.stderr).splitlines() if line.strip()]
+    return {"missing": False, "exit": proc.returncode, "timed_out": False, "error": None,
+            "last_line": (lines[-1].strip() if lines else "")[:MAX_LINE]}
+
+
 # These call observations live in candidate-controlled processes. They are
 # positive probe evidence, not controller-protected proof. Silence is UNKNOWN.
 _TRACE_SOURCE = r'''
@@ -328,6 +346,8 @@ def main() -> None:
         result["oracle"] = run_oracle(delivered, oracle_cases)
         result["tests_delivered"] = run_test_suite(delivered)
         result["gate_delivered"] = run_gate(delivered)
+    with tempfile.TemporaryDirectory() as work:
+        result["make_check_delivered"] = run_make_check(_copy(candidate_dir, work))
 
     result["gate_canary"] = gate_canary(candidate_dir, baseline_tests)
 
