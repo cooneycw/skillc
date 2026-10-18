@@ -70,8 +70,8 @@ def _confirm(self, handle, pid, grace):
     return ok
 
 
-d.DockerBackend._read_in_container_pid = _read
-d.DockerBackend._confirm_and_kill_in_container = _confirm
+setattr(d.DockerBackend, "_read_in_container_pid", _read)  # noqa: B010 - a monkeypatch
+setattr(d.DockerBackend, "_confirm_and_kill_in_container", _confirm)  # noqa: B010 - a monkeypatch
 
 
 # evidence_export: the captured attempt's WHOLE wall time beside its `timeout`.

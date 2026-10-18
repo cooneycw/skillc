@@ -309,11 +309,26 @@ def save(d):
     os.replace(tmp, state)
 args = sys.argv[1:]
 d = load()
+mode = os.environ.get("FAKE_DOCKER_MODE", "")
 if args[0] == "run":
     label = args[args.index("--label") + 1]
+    if mode == "delayed-create":
+        # The daemon finishes a create the (already dead) client asked for.
+        if os.fork() == 0:
+            os.setsid()
+            time.sleep(1.5)
+            d = load()
+            d[f"late{os.getpid()}"] = label
+            save(d)
+            os._exit(0)
+        os._exit(0)
     d[f"c{os.getpid()}-{time.time_ns()}"] = label
     save(d)
     time.sleep(0.2)
+elif args[0] == "ps" and mode == "ps-fails":
+    sys.exit(1)
+elif args[0] == "ps" and mode == "ps-hangs":
+    time.sleep(3600)
 elif args[0] == "ps":
     want = args[args.index("--filter") + 1].removeprefix("label=")
     print("\n".join(c for c, label in d.items() if label == want))
@@ -419,8 +434,8 @@ def test_a_pinned_core_with_a_spinner_is_valid(tmp_path):
 
 # ------------------------------------------------- review pass 1 (#462)
 
-def _marker_alive(marker: str, exclude: set[int] = frozenset()) -> list[int]:
-    return [p for p in _reps_alive(marker) if p not in exclude]
+def _marker_alive(marker: str) -> list[int]:
+    return _reps_alive(marker)
 
 
 @needs_proc
@@ -507,3 +522,104 @@ def test_summarize_with_nothing_counted_fails_and_claims_nothing(tmp_path):
     assert rc != 0, "an empty measured population must not exit 0"
     assert m["counted_reps"] == 0
     assert m["meets_2x_nproc"] is False
+
+
+
+# ------------------------------------------------- review pass 2 (#462)
+
+def test_a_failing_docker_listing_is_a_cleanup_failure_not_an_empty_one(tmp_path, monkeypatch):
+    _fake_docker(tmp_path, monkeypatch)
+    load = lh.Load(0, 0, time.time() + 60, docker=1)
+    time.sleep(0.5)
+    monkeypatch.setenv("FAKE_DOCKER_MODE", "ps-fails")
+    load.stop()
+    assert load.cleanup_error, "a failed `docker ps` was read as no containers"
+
+
+def test_a_hanging_docker_listing_is_bounded(tmp_path, monkeypatch):
+    _fake_docker(tmp_path, monkeypatch)
+    monkeypatch.setenv("FAKE_DOCKER_MODE", "ps-hangs")
+    load = lh.Load(0, 0, time.time() + 60, docker=1, docker_timeout=1.0)
+    t0 = time.monotonic()
+    load.stop()
+    assert time.monotonic() - t0 < 30
+    assert load.cleanup_error
+
+
+def test_a_container_created_after_the_client_died_is_still_removed(tmp_path, monkeypatch):
+    state = _fake_docker(tmp_path, monkeypatch)
+    monkeypatch.setenv("FAKE_DOCKER_MODE", "delayed-create")
+    load = lh.Load(0, 0, time.time() + 60, docker=1)
+    time.sleep(0.3)
+    load.stop()
+    time.sleep(2.5)  # past every delayed create the fake can make
+    assert json.loads(state.read_text()) == {"foreign": "skillc.load462=someone-else"}
+
+
+@needs_proc
+def test_a_rep_descendant_in_its_own_session_does_not_outlive_the_rep(tmp_path):
+    """`FakeBackend.execute()` starts its client with start_new_session=True,
+    so a rep's descendant can leave the rep's process group. With two reps,
+    the second one looks for the first one's descendant: it must already be
+    gone when the NEXT rep starts, not only when the phase ends."""
+    marker = f"detached-462-{tmp_path.name}"
+    seen = tmp_path / "seen-by-rep-2"
+    # The marker is assembled at run time, so only the detached child's argv
+    # carries it whole (the reps' own argv hold its two halves).
+    head, tail = marker[:8], marker[8:]
+    script = f"""
+import pathlib, subprocess, sys
+mark = {head!r} + {tail!r}
+seen = pathlib.Path({str(seen)!r})
+if seen.with_suffix(".rep1").exists():
+    alive = []
+    for e in pathlib.Path("/proc").iterdir():
+        if e.name.isdigit():
+            try:
+                if mark.encode() in (e / "cmdline").read_bytes():
+                    alive.append(e.name)
+            except OSError:
+                pass
+    seen.write_text(str(len(alive)))
+else:
+    seen.with_suffix(".rep1").write_text("")
+    subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30); " + repr(mark)],
+                     start_new_session=True, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL)
+"""
+    rc, _record, err = _phase(
+        tmp_path, "--cpu", "1", "--target", "1", "--reps", "2", "--warmup-seconds", "15",
+        cmd=(sys.executable, "-c", script),
+    )
+    assert rc == 0, err
+    assert seen.read_text() == "0", "the first rep's detached descendant was alive at rep 2"
+    assert _marker_alive(marker) == []
+
+
+@needs_proc
+def test_the_rep_is_registered_before_its_command_runs(tmp_path):
+    probe = tmp_path / "seen"
+    script = ("import os, pathlib; "
+              "f = pathlib.Path(os.environ['SKILLC_LOAD462_REP_FILE']).read_text(); "
+              f"pathlib.Path({str(probe)!r}).write_text(f + ' ' + str(os.getpgid(0)))")
+    rc, _record, err = _phase(tmp_path, "--cpu", "1", "--target", "1", "--reps", "1",
+                              "--warmup-seconds", "15", cmd=(sys.executable, "-c", script))
+    assert rc == 0, err
+    registered, own = probe.read_text().split()
+    assert registered == own
+
+
+@needs_proc
+def test_no_spinners_is_invalid_even_when_the_host_count_qualifies(tmp_path):
+    rc, record, err = _phase(tmp_path, "--cpu", "0", "--target", "1", "--reps", "1",
+                             "--warmup-seconds", "8")
+    assert rc == 1, err
+    assert record["verdict"] == "INVALID" and record["reps"] == []
+
+
+def test_a_window_shorter_than_the_minimum_is_invalid(tmp_path):
+    rc, record, err = _phase(tmp_path, "--cpu", "0", "--target", "1", "--reps", "1",
+                             "--max-seconds", "6", "--warmup-seconds", "10",
+                             *_fake_stat(tmp_path, 5))
+    assert rc == 1, err
+    assert record["verdict"] == "INVALID"

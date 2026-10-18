@@ -125,12 +125,36 @@ while os.getppid() == parent and time.time() < deadline:
 # Parent gone or deadline passed: the harness cannot clean up, so do it here.
 # The running rep's group first (it has no other owner now), then the
 # children (no new containers can start), then the side effects.
+time.sleep(0.3)  # a rep mid-launch registers itself before its command runs
 try:
     rep = int(open(cfg["rep_pgid_file"]).read() or 0)
     if rep:
         os.killpg(rep, signal.SIGKILL)
 except (OSError, ValueError):
     pass
+def members():
+    me, found = os.getpid(), []
+    for e in os.listdir("/proc"):
+        if e.isdigit() and int(e) != me:
+            try:
+                with open(f"/proc/{e}/stat") as fh:
+                    fields = fh.read().rsplit(")", 1)[1].split()
+                # A zombie is already dead: it cannot be killed, only reaped.
+                if fields[0] != "Z" and int(fields[2]) == me:
+                    found.append(int(e))
+            except (OSError, ValueError, IndexError):
+                pass
+    return found
+for _ in range(50):
+    alive = members()
+    if not alive:
+        break
+    for pid in alive:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    time.sleep(0.1)
 for pid in children:
     try:
         os.kill(pid, signal.SIGKILL)
@@ -149,29 +173,57 @@ os.killpg(0, signal.SIGKILL)
 
 _CLEANUP_SRC = r"""
 def cleanup(cfg):
+    # Returns the list of cleanup failures; empty means verified clean.
     import os, shutil, subprocess, time
+    errors = []
+    t = cfg.get("docker_timeout", 30.0)
     if cfg["docker"]:
-        # A killed client may leave a container its daemon finishes creating
-        # after the first listing, so list until two consecutive passes are empty.
-        empty = 0
-        for _ in range(20):
-            ids = subprocess.run(["docker", "ps", "-aq", "--filter", "label=" + cfg["label"]],
-                                 capture_output=True, text=True).stdout.split()
+        # Called only after every docker client is dead. A daemon may still
+        # finish a create a dead client asked for, so the sweep keeps listing
+        # for a settle window and needs 3 consecutive empty listings after it.
+        # A create the daemon completes later than that is the residual.
+        settle_until = time.monotonic() + cfg.get("docker_settle", 3.0)
+        give_up = time.monotonic() + 4 * t + 10
+        empties = 0
+        while True:
+            if time.monotonic() > give_up:
+                errors.append("docker sweep did not settle")
+                break
+            listing = ["docker", "ps", "-aq", "--filter", "label=" + cfg["label"]]
+            try:
+                r = subprocess.run(listing, capture_output=True, text=True, timeout=t)
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                errors.append(f"docker ps failed: {exc!r}")
+                break
+            if r.returncode != 0:
+                errors.append(f"docker ps exit {r.returncode}: {r.stderr.strip()[:200]}")
+                break
+            ids = r.stdout.split()
             if ids:
-                empty = 0
-                subprocess.run(["docker", "rm", "-f", *ids], capture_output=True)
+                empties = 0
+                try:
+                    rr = subprocess.run(["docker", "rm", "-f", *ids], capture_output=True,
+                                        text=True, timeout=t)
+                    if rr.returncode != 0:
+                        errors.append(f"docker rm exit {rr.returncode}: {rr.stderr.strip()[:200]}")
+                except (OSError, subprocess.TimeoutExpired) as exc:
+                    errors.append(f"docker rm failed: {exc!r}")
+                    break
             else:
-                empty += 1
-                if empty >= 2:
+                empties += 1
+                if empties >= 3 and time.monotonic() >= settle_until:
                     break
             time.sleep(0.5)
     if cfg["iodir"]:
         shutil.rmtree(cfg["iodir"], ignore_errors=True)
+        if os.path.exists(cfg["iodir"]):
+            errors.append(f"io dir not removed: {cfg['iodir']}")
     if cfg.get("rep_pgid_file"):
         try:
             os.unlink(cfg["rep_pgid_file"])
         except OSError:
             pass
+    return errors
 """
 _cleanup_ns: dict[str, Any] = {}
 exec(_CLEANUP_SRC, _cleanup_ns)  # noqa: S102 - the same source runs in the supervisor
@@ -254,7 +306,7 @@ class Load:
 
     def __init__(self, cpu: int, churn: int, deadline: float, *, docker: int = 0,
                  io: int = 0, image: str = "alpine:3", cpus: str = "",
-                 spin_mode: str = "busy") -> None:
+                 spin_mode: str = "busy", docker_timeout: float = 30.0) -> None:
         self.proc: subprocess.Popen[bytes] | None = None
         run_id = f"{os.getpid()}-{time.time_ns()}"
         self.cfg: dict[str, Any] = {
@@ -263,8 +315,11 @@ class Load:
             "label": f"skillc.load462={run_id}",
             "iodir": tempfile.mkdtemp(prefix="load462-io-") if io else "",
             "rep_pgid_file": tempfile.mkstemp(prefix="load462-rep-")[1],
-            "spin_mode": spin_mode, "cleanup_src": _CLEANUP_SRC,
+            "spin_mode": spin_mode, "docker_timeout": docker_timeout,
+            "cleanup_src": _CLEANUP_SRC,
         }
+        #: Empty when cleanup was verified; otherwise what could not be.
+        self.cleanup_error = ""
         # Always started, even with no workers: it is also the backstop that
         # kills the running rep if this process is SIGKILLed.
         self.proc = subprocess.Popen(
@@ -272,9 +327,9 @@ class Load:
             start_new_session=True,
         )
 
-    def track_rep(self, pgid: int | None) -> None:
-        """Tell the supervisor which rep group to kill if this process dies."""
-        Path(self.cfg["rep_pgid_file"]).write_text(str(pgid or ""))
+    def clear_rep(self) -> None:
+        """The rep registered itself (see `run_rep`); this forgets it."""
+        Path(self.cfg["rep_pgid_file"]).write_text("")
 
     def cpu_seconds(self) -> float:
         """utime + stime of every live process in the load group."""
@@ -304,7 +359,7 @@ class Load:
                 pass
             self.proc.wait()
             self.proc = None
-        cleanup_side_effects(self.cfg)
+        self.cleanup_error = "; ".join(cleanup_side_effects(self.cfg))
 
 
 def scrub(text: str) -> str:
@@ -329,39 +384,109 @@ def _kill_group(pgid: int) -> None:
         pass
 
 
+_PR_SET_CHILD_SUBREAPER = 36
+
+
+def _set_subreaper(on: bool) -> bool:
+    """Become (or stop being) the reaper of orphaned descendants, so a rep's
+    descendant that left the rep's session is reparented HERE instead of to
+    init, where it could still be found. Linux only; False elsewhere."""
+    try:
+        import ctypes
+
+        libc = ctypes.CDLL(None, use_errno=True)
+        return libc.prctl(_PR_SET_CHILD_SUBREAPER, int(on), 0, 0, 0) == 0
+    except (OSError, AttributeError):
+        return False
+
+
+def _descendants(root: int) -> list[tuple[int, int]]:
+    """(pid, pgid) of every live descendant of `root`, from /proc."""
+    children: dict[int, list[tuple[int, int]]] = {}
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            fields = (entry / "stat").read_text().rsplit(")", 1)[1].split()
+        except (OSError, IndexError):
+            continue
+        children.setdefault(int(fields[1]), []).append((int(entry.name), int(fields[2])))
+    found, stack = [], [root]
+    while stack:
+        for pid, pgid in children.get(stack.pop(), []):
+            found.append((pid, pgid))
+            stack.append(pid)
+    return found
+
+
+def sweep_descendants(keep_pgids: set[int]) -> int:
+    """Kill and reap every descendant of this process outside `keep_pgids`
+    (the load's own group). Returns how many were killed."""
+    killed = 0
+    for _ in range(10):
+        stray = [pid for pid, pgid in _descendants(os.getpid()) if pgid not in keep_pgids]
+        if not stray:
+            break
+        for pid in stray:
+            try:
+                os.kill(pid, signal.SIGKILL)
+                killed += 1
+            except ProcessLookupError:
+                pass
+        time.sleep(0.05)
+        for pid in stray:
+            try:
+                os.waitpid(pid, os.WNOHANG)  # reaped here only if it is now our child
+            except ChildProcessError:
+                pass
+    return killed
+
+
+#: Each rep registers its own process group with the load supervisor BEFORE
+#: its command runs, so there is no launch-to-registration window in which a
+#: SIGKILLed harness would leave it unowned.
+_REP_WRAPPER = 'echo $$ > "$SKILLC_LOAD462_REP_FILE" || exit 125; exec "$@"'
+
+
 def run_rep(cmd: list[str], remaining: float, load: Load) -> dict[str, Any]:
     """One rep in its own process group, killed as a group at the phase cap,
-    and swept as a group when it ends, so a descendant it left behind does not
-    outlive it. The load supervisor knows the group, so a SIGKILLed harness
-    does not orphan it either. (A descendant that starts its own session
-    escapes both; the tests here do not.)
+    and swept when it ends: its group, and (the harness being a subreaper)
+    any descendant that left the group or the session. The load supervisor
+    knows the group, so a SIGKILLed harness does not orphan the rep either.
+    Residual: after a SIGKILL of the harness, a descendant that left the
+    rep's SESSION is out of reach (that needs a cgroup).
 
     The rep sees the load's process group as SKILLC_LOAD_PGID, so a probe can
     confirm the load it ran under was alive.
     """
     start = time.monotonic()
-    env = dict(os.environ, SKILLC_LOAD_PGID=str(load.pgid or ""))
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+    env = dict(os.environ, SKILLC_LOAD_PGID=str(load.pgid or ""),
+               SKILLC_LOAD462_REP_FILE=load.cfg["rep_pgid_file"])
+    keep = {load.pgid} if load.pgid else set()
+    proc = subprocess.Popen(["sh", "-c", _REP_WRAPPER, "sh", *cmd],
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             text=True, start_new_session=True, env=env)
-    load.track_rep(proc.pid)
     try:
-        out, _ = proc.communicate(timeout=max(remaining, 0.1))
-        outcome = "passed" if proc.returncode == 0 else "failed"
-    except subprocess.TimeoutExpired:
-        os.killpg(proc.pid, signal.SIGKILL)
-        out, _ = proc.communicate()
-        outcome = "truncated"
-    except BaseException:
-        # A signal (SystemExit) or anything else: the rep's own group dies
-        # with the harness instead of outliving it.
+        try:
+            out, _ = proc.communicate(timeout=max(remaining, 0.1))
+            outcome = "passed" if proc.returncode == 0 else "failed"
+        except subprocess.TimeoutExpired:
+            # Sweep BEFORE draining: a descendant that left the group could
+            # be holding the output pipe open, and the drain would never end.
+            _kill_group(proc.pid)
+            sweep_descendants(keep)
+            out, _ = proc.communicate()
+            outcome = "truncated"
+    finally:
+        # Every path, a signal (SystemExit) included: the rep's group, then
+        # anything it left behind, then forget it.
         _kill_group(proc.pid)
-        proc.wait()
-        load.track_rep(None)
-        raise
-    _kill_group(proc.pid)
-    load.track_rep(None)
+        if proc.returncode is None:
+            proc.wait()
+        swept = sweep_descendants(keep)
+        load.clear_rep()
     return {"outcome": outcome, "exit": proc.returncode,
-            "seconds": round(time.monotonic() - start, 3),
+            "seconds": round(time.monotonic() - start, 3), "swept": swept,
             "tail": _tail(out or "") if outcome != "passed" else ""}
 
 
@@ -416,6 +541,11 @@ def phase(args: argparse.Namespace) -> int:
 
     previous = {sig: signal.signal(sig, _raise)
                 for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)}
+    record["subreaper"] = _set_subreaper(True)
+    # No spinners means no load this harness can attribute, whatever the host
+    # count says. Only a synthetic sensor (a test's fake /proc/stat) may run
+    # without them, to exercise the verdict logic.
+    no_load = args.cpu < 1 and args.stat_path == "/proc/stat"
     t0 = time.monotonic()
     # ONE deadline bounds warm-up and reps alike: the phase cap is the load cap.
     phase_deadline = t0 + args.max_seconds
@@ -437,7 +567,7 @@ def phase(args: argparse.Namespace) -> int:
         warm: list[int] = []
         reached = False
         warm_deadline = min(t0 + args.warmup_seconds, phase_deadline)
-        while time.monotonic() < warm_deadline:
+        while time.monotonic() < warm_deadline and not no_load:
             warm.append(sample())
             if len(warm) >= WARMUP_WINDOW and \
                     loaded(warm[-WARMUP_WINDOW:], busy[-WARMUP_WINDOW:]):
@@ -491,6 +621,9 @@ def phase(args: argparse.Namespace) -> int:
         if load is not None:
             load.stop()
             load_stopped = time.monotonic()
+            record["cleanup_error"] = load.cleanup_error or None
+        sweep_descendants(set())
+        _set_subreaper(False)
         for sig, handler in previous.items():
             signal.signal(sig, handler)
     verdict, mean = load_verdict(measured, args.target) if record["warmup_reached"] \
@@ -504,6 +637,12 @@ def phase(args: argparse.Namespace) -> int:
     covered = len(measured) >= max(1, int(0.5 * span / SAMPLE_INTERVAL))
     if sampler_error or (record["warmup_reached"] and not covered):
         verdict = "INVALID"
+    # A window cut short by the phase deadline is too thin to judge.
+    if record["warmup_reached"] and span < MIN_WINDOW_SECONDS:
+        verdict = "INVALID"
+    if no_load:
+        verdict = "INVALID"
+        record["invalid_reason"] = "no attributable load: --cpu 0"
     # Attribution: the spinners themselves consumed their share of the cores.
     share = None
     if args.cpu and span > 0:
@@ -523,6 +662,8 @@ def phase(args: argparse.Namespace) -> int:
         "samples": samples, "reps": reps,
     })
     print(f"load_harness: after: {record['uptime_after']}", file=sys.stderr)
+    if record.get("cleanup_error"):
+        print(f"LOAD_CLEANUP_ERROR: {record['cleanup_error']}", file=sys.stderr)
     print(f"LOAD_PHASE: {verdict} running_mean={mean:.1f} target={args.target} "
           f"reps={len(reps)} failed={sum(r['outcome'] == 'failed' for r in reps)}",
           file=sys.stderr)
@@ -577,6 +718,7 @@ def summarize(args: argparse.Namespace) -> int:
         "red_rate": rate,
         "reps_for_post": reps_needed(rate) if rate else None,
         "rep_seconds": [r["seconds"] for r in counted],
+        "cleanup_errors": [ph["cleanup_error"] for ph in phases if ph.get("cleanup_error")],
         "phase_records": phases,
     }
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
@@ -588,6 +730,10 @@ def summarize(args: argparse.Namespace) -> int:
         print("LOAD_SUMMARY: EMPTY - no rep ran under a VALID load; nothing is evidence",
               file=sys.stderr)
         return 3
+    if summary["cleanup_errors"]:
+        print("LOAD_SUMMARY: CLEANUP - the load's side effects were not verified removed",
+              file=sys.stderr)
+        return 5
     return 0
 
 
