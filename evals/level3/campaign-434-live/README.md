@@ -17,7 +17,7 @@ not approve any spend.** Each declaration below needs the owner's approval of it
 
 ## Sequence
 
-1. **Measurement**: [measurement-declaration.json](measurement-declaration.json), a DRAFT.
+1. **Measurement**: [measurement-declaration.json](measurement-declaration.json), APPROVED by the owner on 2026-10-18 at digest `sha256:7eabd370b2d456293f41f39d74d91bac405cef9e31ec2b8fae80cba573e2956f`.
    It runs 1 CLEAN and 1 TWIN, at 1800 s per attempt and 3600 s in total. It measures:
    - tokens and wall time per attempt;
    - whether a TWIN attempt under `codex exec` ends its turn at flow:auto's Step-3 approval gate;

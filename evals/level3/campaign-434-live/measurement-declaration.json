@@ -76,5 +76,14 @@
  "containment_stop": {
   "_comment": "native (skillc/fixture_live.py containment_trigger): after each dispatched attempt, a server-side tool use or an unavailable census, an unread egress log / wrong allowlist digest / allowed connection outside #442's allowlist, or a nested-codex launch / unknown count finalizes every later attempt not-run."
  },
- "token_cap": "no token cap exists in the stack: only wall time is capped (per attempt and in total); each attempt's tokens are recorded from its own rollout"
+ "token_cap": "no token cap exists in the stack: only wall time is capped (per attempt and in total); each attempt's tokens are recorded from its own rollout",
+ "approval": {
+  "by": "owner (cooneycw)",
+  "at": "2026-10-18",
+  "source": "the owner's words, 'you can run 434' (2026-10-18), replying to the #434 measurement approval package; relayed by skillc-400 (orchestrator, owner-delegated)",
+  "scope": "one run of 2 attempts (1 CLEAN, 1 TWIN) as declared, at the declared caps, on kyle19 with provider-only egress; no re-run, no extra attempt, no campaign",
+  "attempts_per_case": 1,
+  "profile_inventory_digest": "sha256:545e81be366ae0b81f257caf55c527ab27e0171448219c1f5d19c09edd2124f8",
+  "declaration_digest": "sha256:7eabd370b2d456293f41f39d74d91bac405cef9e31ec2b8fae80cba573e2956f"
+ }
 }
