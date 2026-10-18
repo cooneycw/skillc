@@ -1,0 +1,5 @@
+FLOW_FINISH_GATE_COUNTER_MODEL: not-enrolled: this repository carries no counter-model receipts directory
+flow-finish-gate: SUBSUMPTION REFUSED: make could not be asked what `verify` runs (absent, unparseable, or no explicit rule), so nothing is subsumed and every gate runs (issue #1192).
+WARNING: quality gates did NOT run: lint test typecheck verify (no Makefile target and no configured tool at the repository root). This gate proved nothing about those checks - do not read as 'safe to merge' (issue #628).
+FLOW_FINISH_GATE: warn (skipped gates: lint test typecheck verify)
+FLOW_FINISH_GATE_EXIT=3

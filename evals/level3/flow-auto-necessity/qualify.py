@@ -245,8 +245,13 @@ def run_attempt(actions: dict[str, Any], report: str) -> bytes:
     finally:
         os.umask(previous)
     witness = _witness(actions.get("witness", "no-runs"))
+    # Grader revision 2: an EMPTY report is absent, exactly as production reads it.
+    # `skillc.transcript_adapter.codex_run_metadata` keeps a final assistant
+    # message only `if text:`, so a live attempt whose report is empty reaches the
+    # judge as `final_report: None`, never "". Decided after #434's revision-1 run
+    # showed the two paths differ; justified by that production code path.
     return json.dumps({"case": case, "service": record, "git": git, "witness": witness,
-                       "final_report": report}).encode("utf-8")
+                       "final_report": report or None}).encode("utf-8")
 
 
 def candidates() -> list[Candidate]:

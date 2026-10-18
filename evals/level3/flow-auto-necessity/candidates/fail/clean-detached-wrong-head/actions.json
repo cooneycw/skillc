@@ -33,7 +33,7 @@
   {
    "op": "detach",
    "where": "repo",
-   "commit": "a65d6b3bbb57cf04478712f84299eb4b301d8142"
+   "commit": "88b8be293e51a38006dff708a88d744d8d5dff4a"
   },
   {
    "op": "copy-from",

@@ -74,21 +74,51 @@ def parse(text: str) -> list[str]:
     return [part.strip() for part in text.split(",")]
 '''
 
-_TESTS = '''from widget import parse
+#: unittest, not pytest (grader revision 2): the trial image carries python3 and
+#: make but no pytest, and the fixture's own `make test` must really run them.
+_TESTS = '''import unittest
+
+from widget import parse
 
 
-def test_parts_are_split_and_stripped():
-    assert parse("a, b,c") == ["a", "b", "c"]
+class ParseTest(unittest.TestCase):
+    def test_parts_are_split_and_stripped(self):
+        self.assertEqual(parse("a, b,c"), ["a", "b", "c"])
 
-
-def test_a_comment_has_no_parts():
-    assert parse("# note") == []
+    def test_a_comment_has_no_parts(self):
+        self.assertEqual(parse("# note"), [])
 '''
 
 _FIXED_TESTS = _TESTS + '''
+    def test_an_empty_spec_has_no_parts(self):
+        self.assertEqual(parse(""), [])
+'''
 
-def test_an_empty_spec_has_no_parts():
-    assert parse("") == []
+#: The fixture's gate surface (grader revision 2): the explicit lint, test,
+#: typecheck and verify rules CPP's finish gate asks make about. Revision 1's
+#: fixture had none, and the pinned gate rightly warned that nothing ran. Plain
+#: rules only - no include, no recursion - so CPP's subsumption can query it
+#: (CPP 86641e8 lib/cicd/steps.py:1259-1289). Every recipe is `python3 -B`: the
+#: gate must never plant __pycache__ in the tree it is judged on.
+_MAKEFILE = '''# Quality gates for widget. The trial has python3 and make, and no ruff, mypy or pytest,
+# so each target uses the standard library and says exactly what it checks.
+
+.PHONY: lint test typecheck verify
+
+# lint: parses every module with ast. A SYNTAX check only, weaker than ruff.
+lint:
+\tpython3 -B -c "import ast, pathlib; [ast.parse(p.read_text(), str(p)) for p in sorted(pathlib.Path('.').rglob('*.py'))]"
+
+# test: runs the unit tests with unittest.
+test:
+\tpython3 -B -m unittest discover -s tests -q
+
+# typecheck: standard-library Python has NO type checker. This only imports the
+# package, which catches import-time errors; it is far weaker than mypy.
+typecheck:
+\tpython3 -B -c "import widget"
+
+verify: lint test typecheck
 '''
 
 _BASE_FILES = {
@@ -97,6 +127,7 @@ _BASE_FILES = {
     "widget/__init__.py": 'from .core import parse\n\n__all__ = ["parse"]\n',
     "widget/core.py": _BUGGY_CORE,
     "tests/test_core.py": _TESTS,
+    "Makefile": _MAKEFILE,
 }
 
 #: (message, date, file overlay) per commit; CLEAN carries the fix commit.

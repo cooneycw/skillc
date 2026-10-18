@@ -324,7 +324,7 @@ def test_a_blocked_attempt_keeps_its_full_fixture_evidence(tmp_path: Path, monke
 @pytest.mark.parametrize("tamper, integrity, kind", [
     # The subject moves the remote's default branch behind the service.
     (["git", "--git-dir", ".remote/widget.git", "update-ref", "refs/heads/main",
-      "a65d6b3bbb57cf04478712f84299eb4b301d8142"], "VIOLATED", "default-branch-moved-outside-service"),
+      "88b8be293e51a38006dff708a88d744d8d5dff4a"], "VIOLATED", "default-branch-moved-outside-service"),
     # The subject packs the remote: the post-stop reader cannot read it.
     (["git", "--git-dir", ".remote/widget.git", "gc", "-q", "--prune=now"], "UNKNOWN", "remote-unreadable"),
 ])
