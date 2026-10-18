@@ -636,7 +636,10 @@ def test_red_case_a_proxy_that_logs_its_loopback_probe_is_caught(tmp_path: Path)
     assert eg.PROXY_SOURCE.count(probe_return) == 1, "setup: the classify anchor moved"
     logging = eg.PROXY_SOURCE.replace(probe_return, '    return "rejected"\n')
     summary = eg.summarize_log(_loopback_probe_log(logging, tmp_path))
-    assert summary["peer_rejected"] == 2  # the held probe and READY_SOURCE's
+    rejected = summary["peer_rejected"]
+    # At least the held probe: its handler is synchronised (the client waits
+    # for the close). READY_SOURCE's is not, so it may or may not be counted.
+    assert isinstance(rejected, int) and rejected >= 1
 
 
 def test_a_client_from_outside_the_attempt_subnet_is_refused_and_logged_apart(tmp_path: Path) -> None:
