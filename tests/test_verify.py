@@ -1399,3 +1399,53 @@ def test_subject_witness_artifact_never_supplies_the_trusted_channel(
     verification = result["verification"]
     assert isinstance(verification, dict)
     assert verification["verdicts"]["deterministic"]["trusted_observation_digest"] is None
+
+
+# --- #434 PR 2b: trusted_extras beside a gate witness --------------------------------
+
+def test_trusted_extras_ride_beside_the_witness_in_the_graded_envelope(
+    store: Path, base: Path, grading: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The judge receives the extras, and the stored envelope is exactly what
+    it received. A bare-witness reader refuses the extended envelope."""
+    experiment, attempt_id = _captured(store, base, REFERENCE, receipt=False)
+    record = _witness_record(attempt_id)
+    seen: list[bytes] = []
+    original_grade = verify.grade_files
+
+    def capture_grade(*args: object, **kwargs: object) -> verify.Graded:
+        raw = kwargs.get("trusted_observation")
+        assert isinstance(raw, bytes)
+        seen.append(raw)
+        return original_grade(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(verify, "grade_files", capture_grade)
+    extras = {"case": "clean", "service": {"events": []}, "final_report": "Verdict: No longer needed"}
+    result, _ = verify.grade_agent_attempt(experiment, attempt_id, GRADER, grading, _CONFIRMED,
+                                          gate_witness=record, trusted_extras=extras)
+    envelope = json.loads(seen[0])
+    assert {k: envelope[k] for k in extras} == extras
+    assert envelope["witness"]["kind"] == "gate-witness" and isinstance(envelope["graded_tree_digest"], str)
+    reopened = t.Experiment.open(experiment.root)
+    stored = json.loads((reopened.root / f"result-{result['result_id']}.json").read_bytes())
+    assert verify.read_trusted_observation(reopened, stored) == seen[0]
+    with pytest.raises(verify.Refused):
+        verify.read_witness_envelope(reopened, stored)
+
+
+@pytest.mark.parametrize("key", sorted(verify.WITNESS_ENVELOPE_KEYS))
+def test_trusted_extras_may_not_replace_the_witness_envelope_keys(
+    store: Path, base: Path, grading: Path, key: str,
+) -> None:
+    experiment, attempt_id = _captured(store, base, REFERENCE, receipt=False)
+    with pytest.raises(verify.Refused, match="replace the witness envelope"):
+        verify.grade_agent_attempt(experiment, attempt_id, GRADER, grading, _CONFIRMED,
+                                   gate_witness=_witness_record(attempt_id), trusted_extras={key: "forged"})
+    assert not list(experiment.root.glob("result-*.json"))
+
+
+def test_trusted_extras_without_a_gate_witness_are_refused(store: Path, base: Path, grading: Path) -> None:
+    experiment, attempt_id = _captured(store, base, REFERENCE, receipt=False)
+    with pytest.raises(verify.Refused, match="no.*supplied|none was supplied"):
+        verify.grade_agent_attempt(experiment, attempt_id, GRADER, grading, _CONFIRMED,
+                                   trusted_extras={"case": "clean"})

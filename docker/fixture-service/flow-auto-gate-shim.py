@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""Witnesses the subject's own `flow-finish-gate.sh` call in a flow:auto
+attempt (#434 PR 2b) - the flow-auto variant of `docker/trial/flow-check-gate-
+shim.py`, which it follows in everything but its closed map.
+
+Installed by `gate_overlay.apply_flow_check_gate_overlay()` at the path the
+pinned flow-auto `reference.md` invokes (`~/.claude/scripts/flow-finish-
+gate.sh`, BARE: Step 6 item 2 and the post-merge re-gate), after the real
+helper is moved to a root-owned harness copy. It forwards the invocation to
+the controller over #183's decide-and-reply channel as one `run_gate` request
+naming a PRE-DECLARED gate, the controller runs the REAL helper inside the same
+attempt, and this script writes back the real stdout, stderr and exit code.
+
+ONE INVOCATION IS WITNESSED, because `reference.md` (CPP 86641e8) prescribes
+exactly one shape:
+
+    flow-finish-gate.sh          -> "flow-auto-finish"
+
+Any other argv is refused, exit 125, before the channel is reached. A subject
+that reaches the plugin-root or checkout copy instead bypasses this witness
+and reads as `not-observed`, never as a defect here.
+
+EXIT 125 ON ANY CHANNEL FAILURE, never a value the real helper uses
+(0, 1, 2, 3, 4, 127).
+
+LIVES OUTSIDE `docker/trial/` ON PURPOSE (orchestrator ruling): every file
+there moves the pinned flow-check runtime's `build_context_sha256`.
+
+Deliberately stdlib-only.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import socket
+import sys
+
+TRIGGER_SOCKET_PATH = os.environ.get("SKILLC_TRIGGER_SOCKET", "/run/skillc/trigger.sock")
+_REQUEST_TIMEOUT = 600.0  # a real quality-gate run can take minutes
+
+#: The CLOSED map from a prescribed argv to its declared gate name.
+_DECLARED_INVOCATIONS: dict[tuple[str, ...], str] = {
+    (): "flow-auto-finish",
+}
+
+EXIT_CHANNEL_FAILURE = 125
+
+
+class _ChannelError(Exception):
+    """Any failure to reach the channel, or a reply this script cannot read."""
+
+
+def _ask(gate: str) -> dict[str, object]:
+    request = json.dumps({"op": "run_gate", "gate": gate, "cwd": os.getcwd()}) + "\n"
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(_REQUEST_TIMEOUT)
+            sock.connect(TRIGGER_SOCKET_PATH)
+            sock.sendall(request.encode("utf-8"))
+            sock.shutdown(socket.SHUT_WR)
+            chunks = []
+            while True:
+                chunk = sock.recv(65536)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+    except OSError as exc:
+        raise _ChannelError(f"could not reach the channel: {exc}") from exc
+    line = b"".join(chunks).decode("utf-8", errors="replace").strip()
+    try:
+        reply = json.loads(line)
+    except json.JSONDecodeError as exc:
+        raise _ChannelError(f"reply is not JSON: {exc}") from exc
+    if not isinstance(reply, dict) or reply.get("ok") is not True:
+        raise _ChannelError(f"the channel refused this request: {reply!r}")
+    result = reply.get("result")
+    if not isinstance(result, dict):
+        raise _ChannelError(f"reply's 'result' is not a mapping: {reply!r}")
+    return result
+
+
+def main(argv: list[str]) -> int:
+    gate = _DECLARED_INVOCATIONS.get(tuple(argv[1:]))
+    if gate is None:
+        print("flow-auto-gate-shim: this invocation is not the prescribed flow-auto gate call - "
+              "refusing rather than guessing", file=sys.stderr)
+        return EXIT_CHANNEL_FAILURE
+    try:
+        result = _ask(gate)
+    except _ChannelError as exc:
+        print(f"flow-auto-gate-shim: channel error: {exc}", file=sys.stderr)
+        return EXIT_CHANNEL_FAILURE
+    exit_code = result.get("exit_code")
+    if not isinstance(exit_code, int):
+        print(f"flow-auto-gate-shim: the controller did not report a real exit code "
+              f"(reason={result.get('reason')!r}) - treating as a channel failure", file=sys.stderr)
+        return EXIT_CHANNEL_FAILURE
+    stdout = result.get("stdout")
+    if isinstance(stdout, str):
+        sys.stdout.write(stdout)
+    stderr = result.get("stderr")
+    if isinstance(stderr, str):
+        sys.stderr.write(stderr)
+    return exit_code
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

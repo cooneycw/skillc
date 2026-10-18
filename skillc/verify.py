@@ -1137,7 +1137,8 @@ def grade_agent_attempt(experiment: trial.Experiment, attempt_id: str, grader: G
                         observation: Mapping[str, object], backend: ExecutionBackend | None = None,
                         forbidden: list[Path] | None = None,
                         trusted_observation: bytes | None = None,
-                     gate_witness: GateWitnessRecord | None = None) -> tuple[dict[str, object], Graded]:
+                     gate_witness: GateWitnessRecord | None = None,
+                        trusted_extras: Mapping[str, object] | None = None) -> tuple[dict[str, object], Graded]:
     """Grade one captured agent-trial attempt and store its `verified-result`
     (#139), exactly as `grade` does - the same pin, capture, snapshot, ledger
     and frozen-digest checks - except that the controller's transcript
@@ -1158,13 +1159,22 @@ def grade_agent_attempt(experiment: trial.Experiment, attempt_id: str, grader: G
     under that digest in the experiment's `objects/` (#418), so
     `read_trusted_observation` can return exactly what grading received.
 
+    `trusted_extras` (#434), given with `gate_witness` only, is more
+    controller-held evidence for the same envelope: the fixture-service record,
+    the post-stop git capture, the case label, the final report and the
+    nested-codex guard record. Each key is merged beside `witness` and
+    `graded_tree_digest`, never over them: a colliding key is refused. The
+    envelope is then no longer a bare witness envelope, so
+    `read_witness_envelope` refuses it; `read_trusted_observation` returns it.
+
     Returns the stored result and the task grade (`Graded`, without the
     verifier's readiness criterion), which is what the agent driver reports
     as the attempt's own grade."""
     _eligible_observation(attempt_id, observation)
     return _grade_and_store(experiment, attempt_id, grader, base, forbidden, backend=backend,
                             readiness_source=AGENT_OBSERVATION_READINESS,
-                            trusted_observation=trusted_observation, gate_witness=gate_witness)
+                            trusted_observation=trusted_observation, gate_witness=gate_witness,
+                            trusted_extras=trusted_extras)
 
 
 def grade(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base: Path,
@@ -1222,7 +1232,8 @@ def _grade_and_store(experiment: trial.Experiment, attempt_id: str, grader: Grad
                      judges: Mapping[str, judge_seam.Judge] | None = None, goal_text: str = "",
                      readiness_source: str = records.INSTALLATION_RECEIPT,
                      trusted_observation: bytes | None = None,
-                     gate_witness: GateWitnessRecord | None = None) -> tuple[dict[str, object], Graded]:
+                     gate_witness: GateWitnessRecord | None = None,
+                     trusted_extras: Mapping[str, object] | None = None) -> tuple[dict[str, object], Graded]:
     """Holds the experiment lock (#12) from the first read to the stored
     result, so a sibling attempt's capture, finalize or stored result waits
     for this grade instead of reading to its snapshot as tampering.
@@ -1235,7 +1246,8 @@ def _grade_and_store(experiment: trial.Experiment, attempt_id: str, grader: Grad
     with trial.experiment_lock(experiment.root):
         current = trial.Experiment.open(experiment.root)
         return _grade_and_store_held(current, attempt_id, grader, base, forbidden, regrade_of,
-                                     backend, judges, goal_text, readiness_source, trusted_observation, gate_witness)
+                                     backend, judges, goal_text, readiness_source, trusted_observation, gate_witness,
+                                     trusted_extras)
 
 
 def _grade_and_store_held(experiment: trial.Experiment, attempt_id: str, grader: GraderDef, base: Path,
@@ -1244,12 +1256,19 @@ def _grade_and_store_held(experiment: trial.Experiment, attempt_id: str, grader:
                           judges: Mapping[str, judge_seam.Judge] | None, goal_text: str,
                           readiness_source: str,
                           trusted_observation: bytes | None = None,
-                          gate_witness: GateWitnessRecord | None = None) -> tuple[dict[str, object], Graded]:
+                          gate_witness: GateWitnessRecord | None = None,
+                          trusted_extras: Mapping[str, object] | None = None) -> tuple[dict[str, object], Graded]:
     if gate_witness is not None:
         if trusted_observation is not None:
             raise Refused("cannot supply both trusted_observation and gate_witness")
         if not isinstance(gate_witness, GateWitnessRecord) or gate_witness.attempt_id != attempt_id:
             raise Refused("controller gate witness does not belong to this attempt")
+    if trusted_extras is not None:
+        if gate_witness is None:
+            raise Refused("trusted_extras extend a gate witness envelope; none was supplied")
+        colliding = sorted(set(trusted_extras) & WITNESS_ENVELOPE_KEYS)
+        if colliding:
+            raise Refused(f"trusted_extras would replace the witness envelope's own {colliding}")
     if judges:
         unknown_tiers = set(judges) - set(judge_seam.JUDGE_TIERS)
         if unknown_tiers:
@@ -1293,6 +1312,7 @@ def _grade_and_store_held(experiment: trial.Experiment, attempt_id: str, grader:
         # The lock is held and files came from validated frozen blobs. Never
         # use the export or assign this final identity to an earlier gate run.
         trusted_observation = trial.canonical({
+            **(trusted_extras or {}),
             "witness": json.loads(gate_witness.to_json_bytes()),
             "graded_tree_digest": witness_capture.files_digest(files),
         })
@@ -1381,6 +1401,11 @@ def _grade_and_store_held(experiment: trial.Experiment, attempt_id: str, grader:
         result["regrade_of"] = regrade_of
     trial.add_result(experiment, result)
     return result, graded
+
+
+#: The keys a gate witness envelope always carries; `trusted_extras` may not
+#: name either.
+WITNESS_ENVELOPE_KEYS = frozenset({"witness", "graded_tree_digest"})
 
 
 def read_trusted_observation(experiment: trial.Experiment, result: Mapping[str, object]) -> bytes | None:

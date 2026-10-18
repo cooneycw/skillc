@@ -220,6 +220,13 @@ class GitRemote(Protocol):
     def delete_ref(self, ref: str, old: str) -> bool: ...
 
 
+class FinalizeRemote(Protocol):
+    """What `FixtureService.finalize` asks of a remote: reads only (#434)."""
+
+    def resolve(self, ref: str) -> str | None: ...
+    def is_ancestor(self, ancestor: str, descendant: str) -> bool: ...
+
+
 class RemoteUntrusted(RuntimeError):
     """The remote's own metadata could steer a controller git command (a
     hook, a replacement or graft, an alternate object store, a config key
@@ -1373,7 +1380,7 @@ class FixtureService:
 
     # -- finalize -------------------------------------------------------------
 
-    def finalize(self, attempt_id: str, *, remote: GitRemote | None = None) -> FixtureServiceRecord:
+    def finalize(self, attempt_id: str, *, remote: FinalizeRemote | None = None) -> FixtureServiceRecord:
         """The controller's record. Idempotent; refuses a different attempt.
 
         `remote` (#434) answers the finalize-time divergence check in place of
@@ -1382,7 +1389,7 @@ class FixtureService:
         `git_snapshot.SnapshotGitRemote` over the exported copy instead."""
         if attempt_id != self.attempt_id:
             raise ValueError(f"this service belongs to attempt {self.attempt_id!r}, not {attempt_id!r}")
-        checked = remote if remote is not None else self._remote
+        checked: FinalizeRemote = remote if remote is not None else self._remote
         with self._lock:
             if self._finalized is not None:
                 return self._finalized
@@ -1451,6 +1458,7 @@ __all__ = [
     "ClosingReferences",
     "Command",
     "DeclarationRefused",
+    "FinalizeRemote",
     "FixtureService",
     "FixtureServiceRecord",
     "GitRemote",

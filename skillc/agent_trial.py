@@ -89,6 +89,7 @@ from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Any
 
+from . import codex_guard as cg
 from . import (
     credential,
     demo,
@@ -103,6 +104,7 @@ from . import (
     witness_capture,
 )
 from . import egress as eg
+from . import fixture_service as fs
 from . import runtime_supply as rs
 from . import transcript_adapter as ta
 from .backend import BackendUnavailable, Confirmation, ExecutionBackend, Limits
@@ -114,6 +116,7 @@ from .docker_backend import (
     TRIGGER_SOCKET_PATH,
     DockerBackend,
 )
+from .fixture_attempt import AttemptFixture, FixtureSession
 from .gate_witness import GateWitness, GateWitnessRecord
 from .lifecycle import run_through_backend
 from .trial_bootstrap import CanaryNotSatisfied, MCPServerSpec, PromptDeliveryError
@@ -400,6 +403,9 @@ class _WitnessSession:
 
     attempt_id: str
     limits: Limits
+    #: #434: a fixture task's own gate map (name -> argv after the harness
+    #: path). `None` keeps the flow-check gates every earlier caller uses.
+    gate_args: Mapping[str, Sequence[str]] | None = None
     witness: GateWitness | None = field(default=None, repr=False)
     record: GateWitnessRecord | None = field(default=None, repr=False)
     environment: Mapping[str, str] = field(default_factory=dict, repr=False)
@@ -436,15 +442,20 @@ class _WitnessSession:
                 return witness_capture.capture_digest(Path(directory))
 
         harness = f"{_FLOW_CHECK_GATE_HARNESS_ROOT}/{_FLOW_CHECK_GATE_HARNESS_PATH}"
-        gates = {"flow-check-plan": ["bash", harness, "--plan", "check", "--evidence", "flow-check"],
-                 "flow-check-summary": ["bash", harness, "--check-summary"]}
+        if self.gate_args is None:
+            gates = {"flow-check-plan": ["bash", harness, "--plan", "check", "--evidence", "flow-check"],
+                     "flow-check-summary": ["bash", harness, "--check-summary"]}
+            # #376: the plan run's per-stage outcomes, read from its own
+            # controller-held stdout when it resolves - never replayed later.
+            stages = {"flow-check-plan": stage_capture.capture_stages}
+        else:
+            gates = {gate: ["bash", harness, *args] for gate, args in self.gate_args.items()}
+            stages = {}
         self.witness = GateWitness(
             declared_gates=gates, tree_digest_fn=snapshot, backend=backend, handle=handle, limits=self.limits,
             gate_exclusivity=False, exclusivity_basis="The channel observes prescribed shim calls; bypass is not excluded.",
             declared_env={gate: self.gate_environment() for gate in gates}, workspace_root=CONTAINER_WORKSPACE,
-            # #376: the plan run's per-stage outcomes, read from its own
-            # controller-held stdout when it resolves - never replayed later.
-            stage_capture={"flow-check-plan": stage_capture.capture_stages},
+            stage_capture=stages,
         )
         script = (
             "import json,socket,sys; "
@@ -741,6 +752,7 @@ def _make_before_execute(
     preflight_tools: Sequence[Mapping[str, object]] | None = None, limits: Limits | None = None,
     gate_entrypoint: str | None = None,
     runtime_ready: Callable[[DockerBackend, object], None] | None = None,
+    gate_shim_source: Path = _FLOW_CHECK_GATE_SHIM_SOURCE,
 ) -> Callable[[ExecutionBackend, object], None]:
     """`delivered_credential_bytes` is an OUT-parameter (a single-entry dict
     the caller reads afterward) - `observe_before_teardown` needs these
@@ -837,7 +849,7 @@ def _make_before_execute(
                     f"declared, and this attempt cannot honour it"
                 )
             assert real_digest.startswith("sha256:")
-            shim_content = _FLOW_CHECK_GATE_SHIM_SOURCE.read_bytes()
+            shim_content = gate_shim_source.read_bytes()
             gate_overlay.apply_flow_check_gate_overlay(
                 backend, handle,
                 subject_root=CONTAINER_HOME,
@@ -1807,6 +1819,30 @@ def _build_discovery_receipt(
     }
 
 
+def _fixture_credit_block(session: FixtureSession) -> str | None:
+    """#434's credit-gate reasons, or `None` when the fixture's evidence lets
+    the attempt be graded at all (the judge still decides each criterion)."""
+    if session.failure is not None:
+        return f"not credited: {session.failure}"
+    if session.record is None:
+        return "not credited: the fixture service record was never finalized"
+    return cg.credit_block(session.guard_record())
+
+
+def _fixture_extras(session: FixtureSession | None,
+                    stored_transcript: Mapping[str, trial.TranscriptEvidence]) -> dict[str, object] | None:
+    """The controller-held evidence beside the gate witness: the final report
+    is the agent's last message as the stored transcript recorded it."""
+    if session is None:
+        return None
+    evidence = stored_transcript.get("evidence")
+    report: str | None = None
+    if evidence is not None and evidence.data is not None:
+        message = ta.codex_run_metadata(evidence.data.decode("utf-8", errors="replace")).get("final_agent_message")
+        report = message if isinstance(message, str) else None
+    return session.extras(report)
+
+
 def run_one_attempt(
     *,
     backend: DockerBackend,
@@ -1832,6 +1868,7 @@ def run_one_attempt(
     gate_entrypoint: str | None = None,
     retain_transcript: bool = False,
     receipt_context: InstallationReceiptContext | None = None,
+    fixture: AttemptFixture | None = None,
 ) -> dict[str, object]:
     """Drive one real-agent attempt end to end and, only when the real
     transcript confirms both prompt delivery and the liveness canary, grade
@@ -1898,8 +1935,33 @@ def run_one_attempt(
     which that function's own docstring already states carries no transcript
     text - leak-checking and persisting what this returns is the CALLER's
     job (`selection_probe.py`'s own retention, not a general capability every
-    caller inherits for free)."""
-    witness_session = _WitnessSession(attempt_id, limits) if gate_entrypoint is not None else None
+    caller inherits for free).
+
+    `fixture` (#434): a fixture-service task's per-attempt facts. The
+    attempt then also carries `fixture_attempt.FixtureSession`: the `gh` shim
+    and the nested-codex guard placed root-owned before the agent starts, the
+    service over an in-attempt `ExecGitRemote`, and, after the stop, the
+    service finalized and the git state captured from the EXPORTED bytes
+    (`git_snapshot`, no git process). Its routes share the one socket with the
+    gate witness through `fixture_service.dispatch`, so `gate_entrypoint` is
+    required and the witness uses the fixture's own gate map and shim. A
+    fixture attempt on #442's egress keeps its default allowlist; a widened
+    one is refused before any container exists. The credit gate adds the
+    fixture's own reasons (a failed binding or finalization, a missing service
+    record, a nested-codex count that is not zero), and grading receives the
+    controller-held evidence as `verify`'s `trusted_extras`. `None` (the
+    default) changes nothing for any other caller."""
+    fixture_session = FixtureSession(fixture, attempt_id) if fixture is not None else None
+    if fixture is not None:
+        if gate_entrypoint is None:
+            raise HomeFileVerificationRefused("a fixture attempt witnesses its gate; gate_entrypoint is required")
+        if isinstance(backend, DockerBackend) and backend.egress and tuple(backend.egress_hosts) != eg.ALLOWED_HOSTS:
+            raise ServerSideChannelRefused(
+                "refusing a fixture attempt whose egress allowlist differs from #442's defaults "
+                f"({', '.join(backend.egress_hosts)}): a necessity attempt is never widened"
+            )
+    witness_session = (_WitnessSession(attempt_id, limits, gate_args=fixture.gates if fixture else None)
+                       if gate_entrypoint is not None else None)
     selected_supply = backend.runtime_supply if isinstance(backend, DockerBackend) else None
     if witness_session is not None or selected_supply is not None:
         if not isinstance(backend, DockerBackend):
@@ -1908,9 +1970,16 @@ def run_one_attempt(
             raise ValueError("grading_backend must be a SEPARATE instance from the original agent backend")
         if witness_session is not None and backend.trigger_decide is not None:
             raise HomeFileVerificationRefused("witnessing conflicts with an existing trigger callback")
+        trigger = witness_session.decide if witness_session else backend.trigger_decide
+        if fixture_session is not None and witness_session is not None:
+            # One socket, routed by op alone; a mixed request is refused.
+            trigger = fs.dispatch({
+                "witness_ready": (witness_session.decide, frozenset({"op", "nonce"})),
+                "run_gate": (witness_session.decide, frozenset({"op", "gate", "cwd"})),
+                **fixture_session.routes(),
+            })
         try:
-            backend = replace(backend, witness_io=True,
-                              trigger_decide=witness_session.decide if witness_session else backend.trigger_decide)
+            backend = replace(backend, witness_io=True, trigger_decide=trigger)
         except (TypeError, ValueError) as exc:
             raise HomeFileVerificationRefused("backend cannot preserve its type while enabling witness IO") from exc
 
@@ -1975,6 +2044,7 @@ def run_one_attempt(
         verify_home_files=verify_home_files, preflight_tools=preflight_tools, limits=limits,
         gate_entrypoint=gate_entrypoint,
         runtime_ready=runtime_ready if witness_session is not None or selected_supply is not None else None,
+        gate_shim_source=fixture.gate_shim_source if fixture is not None else _FLOW_CHECK_GATE_SHIM_SOURCE,
     )
     if witness_session is not None:
         install_and_verify = before_execute
@@ -1983,6 +2053,8 @@ def run_one_attempt(
             install_and_verify(ready_backend, handle)
             assert isinstance(ready_backend, DockerBackend)
             witness_session.bind_and_check(ready_backend, handle)
+            if fixture_session is not None:
+                fixture_session.bind(ready_backend, handle, witness_session.environment)
 
     retained_transcript: dict[str, object] | None = {} if retain_transcript else None
     # #202: the transcript goes into the attempt's OWN store for every caller,
@@ -2005,6 +2077,11 @@ def run_one_attempt(
                 witness_session.finish(observed_backend, handle, experiment)
             except Exception:  # noqa: BLE001 - preserve transcript; grading checks this latched failure
                 witness_session.failure = witness_session.failure or "witness finalization failed"
+            if fixture_session is not None:
+                try:
+                    fixture_session.finish(observed_backend, handle)
+                except Exception as exc:  # noqa: BLE001 - the credit gate checks this latched failure
+                    fixture_session.failure = fixture_session.failure or f"fixture finalization failed: {exc}"
             return observe_transcript(observed_backend, handle)
 
     # #442: the attempt's egress proxy log, read while the proxy still runs
@@ -2069,6 +2146,10 @@ def run_one_attempt(
             # controlled environment; the attempt stays in every account, but
             # is never credited.
             grading_blocked_reason = f"not credited: server-side tool observed ({', '.join(server_side)})"
+        elif fixture_session is not None and (fixture_block := _fixture_credit_block(fixture_session)):
+            # #434: the same posture for the fixture's own evidence and for a
+            # nested codex (D3 ruling): in every account, never credited.
+            grading_blocked_reason = fixture_block
         else:
             try:
                 if grading_backend is None:
@@ -2118,6 +2199,7 @@ def run_one_attempt(
                     stored, graded_result = verify._grade_and_store(
                         experiment, attempt_id, grader, base, backend=grading_backend,
                         gate_witness=witness_session.record if witness_session else None,
+                        trusted_extras=_fixture_extras(fixture_session, stored_transcript),
                     )
                 else:
                     # The observation stands in for the installation receipt
@@ -2127,6 +2209,7 @@ def run_one_attempt(
                     stored, graded_result = verify.grade_agent_attempt(
                         experiment, attempt_id, grader, base, observation, backend=grading_backend,
                         gate_witness=witness_session.record if witness_session else None,
+                        trusted_extras=_fixture_extras(fixture_session, stored_transcript),
                     )
             except Exception as exc:
                 # The attempt ran and was observed; a grading failure (a
@@ -2159,6 +2242,10 @@ def run_one_attempt(
     }
     if retained_transcript:
         result["retained_transcript"] = retained_transcript
+    if fixture_session is not None:
+        result["fixture"] = {"case": fixture_session.fixture.case, "failure": fixture_session.failure,
+                             "git_unreadable": fixture_session.git_unreadable,
+                             "codex_guard": fixture_session.guard_record()["nested"]}
     result["transcript_retention"] = transcript_retention(experiment, attempt_id, record.get("disposition"))
     # Persisted on EVERY path (#106): the observation used to exist only in
     # this returned dict, so a caller that printed it wrong - or not at all -
