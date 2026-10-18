@@ -43,7 +43,7 @@ if tool == "docker" and args[0] == "run":
 
 def _run_installed_runner(
     tmp_path: Path, status: str, break_spec: str, helper: str | None = None,
-    commit_floor_extra: tuple[str, ...] = (),
+    commit_floor_extra: tuple[str, ...] = (), omit_commit_floor: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], list[dict[str, Any]]]:
     """Run the actual shell and posting modules; replace external I/O only.
 
@@ -61,8 +61,9 @@ def _run_installed_runner(
     floor = (ROOT / "ci" / "check_real_docker_ran.py").read_text()
     anchor = f'    "{c.DECLARED_REAL_DOCKER_FILES[-1]}",\n)'
     assert anchor in floor
-    (checkout / "ci" / "check_real_docker_ran.py").write_text(
-        floor.replace(anchor, anchor[:-1] + "".join(f'    "{name}",\n' for name in commit_floor_extra) + ")"))
+    if not omit_commit_floor:
+        (checkout / "ci" / "check_real_docker_ran.py").write_text(
+            floor.replace(anchor, anchor[:-1] + "".join(f'    "{name}",\n' for name in commit_floor_extra) + ")"))
     if status != c.ERROR:
         cases = [f'<testcase classname="{name}" name="test_intact"/>' for name in c.DECLARED_REAL_DOCKER_FILES]
         if status == c.FAILURE:
@@ -121,11 +122,14 @@ def test_runner_posts_runner_behind_as_error_exit_4(tmp_path: Path) -> None:
     assert "`tests.test_brand_new_live`" in comment
 
 
-def test_a_control_run_skips_the_commit_floor_check(tmp_path: Path) -> None:
-    """Break-mode runs keep today's logic: the same extra file changes nothing."""
-    result, _events = _run_installed_runner(tmp_path, c.FAILURE, "trialimage:no-uv",
-                                            commit_floor_extra=("tests.test_brand_new_live",))
-    assert result.returncode == 1, result.stderr
+@pytest.mark.parametrize(("break_spec", "exit_code"), [("trialimage:no-uv", 1), ("none", 2)])
+def test_only_a_certifying_run_reads_the_commit_floor(tmp_path: Path, break_spec: str, exit_code: int) -> None:
+    """The checkout has NO floor file. A control run never reads it, so its
+    FAILURE stands (exit 1); a certifying run reads it and fails closed as
+    ERROR (exit 2). Passing the checkout to a control run would turn the
+    first case into the second (#456 counter-model review)."""
+    result, _events = _run_installed_runner(tmp_path, c.FAILURE, break_spec, omit_commit_floor=True)
+    assert result.returncode == exit_code, result.stderr
 
 
 @pytest.mark.parametrize(("status", "break_spec", "context", "exit_code"), [
@@ -162,6 +166,9 @@ def test_runner_posts_every_valid_verdict_and_cleans_up(
     "print('SUCCESS\\nlooks green\\n---\\nbody'); raise SystemExit(1)\n",
     "print('SUCCESS\\nlooks green')\n",
     "print('SUCCESS\\n\\n---\\nbody')\n",
+    # #456: a RUNNER_BEHIND status word with any exit but 4 is a protocol mismatch.
+    "print('RUNNER_BEHIND\\nbehind\\n---\\nbody'); raise SystemExit(0)\n",
+    "print('SUCCESS\\nlooks green\\n---\\nbody'); raise SystemExit(4)\n",
 ])
 def test_runner_reports_helper_crash_or_malformed_output_as_error(tmp_path: Path, helper: str) -> None:
     result, events = _run_installed_runner(tmp_path, c.SUCCESS, "trialimage:no-uv", helper)

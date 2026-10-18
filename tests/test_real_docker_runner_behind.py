@@ -110,6 +110,14 @@ def test_control_using_the_commit_list_as_the_floor_would_be_weakened(tmp_path: 
     'DECLARED_REAL_DOCKER_FILES = ("tests.test_a_live", "/etc/passwd")\n',        # malformed entry
     'DECLARED_REAL_DOCKER_FILES = ("`danger`",)\n',
     "DECLARED_REAL_DOCKER_FILES = (\n",                            # syntax error
+    # Counter-model review: a later write would change the floor the reader reports.
+    _floor_file(RUNNER_FLOOR) + 'DECLARED_REAL_DOCKER_FILES += ("tests.test_brand_new_live",)\n',
+    _floor_file(RUNNER_FLOOR) + 'if True:\n    DECLARED_REAL_DOCKER_FILES = ("tests.test_a_live",)\n',
+    _floor_file(RUNNER_FLOOR) + 'def f():\n    global DECLARED_REAL_DOCKER_FILES\n'
+                                '    DECLARED_REAL_DOCKER_FILES = ()\n',
+    _floor_file(RUNNER_FLOOR) + "del DECLARED_REAL_DOCKER_FILES\n",
+    'DECLARED_REAL_DOCKER_FILES = ["tests.test_a_live"]\n',     # a list could be mutated later
+    'DECLARED_REAL_DOCKER_FILES = ("tests.test_a\nlive",)\n',  # newline in an entry
 ])
 def test_an_unreadable_commit_floor_fails_closed(tmp_path: Path, body: str | None) -> None:
     checkout = tmp_path / "checkout"

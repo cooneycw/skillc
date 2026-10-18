@@ -96,12 +96,18 @@ def read_commit_floor(checkout: str | Path) -> tuple[str, ...]:
             continue
         if any(isinstance(t, ast.Name) and t.id == FLOOR_NAME for t in targets):
             values.append(value)
-    if len(values) != 1:
-        raise CommitFloorUnreadable(f"{FLOOR_FILE} assigns {FLOOR_NAME} {len(values)} times, not once")
+    # Every write anywhere in the module - `+=`, a reassignment under an `if`,
+    # a `del` - not only the top-level one: a later write would change the
+    # floor this reader reports (#456 counter-model review).
+    stores = [n for n in ast.walk(tree) if isinstance(n, ast.Name) and n.id == FLOOR_NAME
+              and isinstance(n.ctx, ast.Store | ast.Del)]
+    if len(values) != 1 or len(stores) != 1:
+        raise CommitFloorUnreadable(f"{FLOOR_FILE} writes {FLOOR_NAME} {len(stores)} times, not once at top level")
     value = values[0]
-    if not isinstance(value, ast.Tuple | ast.List) or not all(
+    # A tuple, never a list: nothing can mutate it after the one assignment.
+    if not isinstance(value, ast.Tuple) or not all(
             isinstance(e, ast.Constant) and isinstance(e.value, str) for e in value.elts):
-        raise CommitFloorUnreadable(f"{FLOOR_NAME} is not one literal list of strings")
+        raise CommitFloorUnreadable(f"{FLOOR_NAME} is not one literal tuple of strings")
     floor = tuple(e.value for e in value.elts if isinstance(e, ast.Constant) and isinstance(e.value, str))
     if not all(_FLOOR_ENTRY.fullmatch(name) for name in floor) or len(set(floor)) != len(floor):
         raise CommitFloorUnreadable(f"{FLOOR_NAME} holds a malformed or repeated entry")
