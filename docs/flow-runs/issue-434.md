@@ -260,8 +260,43 @@ Risks:
 - A stale SHA would silently break evidence-real or a git op; the no-stale-SHA test and qualify's re-certification guard it.
 - The pinned gate needs the CPP closure and uv; the gate-surface test skips loudly when they are absent, and the evals26 rehearsal measures it live.
 
-<!-- flow-run n=7 id=f314fd1681a446ffa9527f80a08b9d7b -->
+<!-- flow-run n=7 id=5ede447b893b4588960ce16880bdbf5f -->
 ## Run 7
+
+- Run-id:            5ede447b893b4588960ce16880bdbf5f
+- Run-start:         2a2e287a74b3f40206720ea97ac749ba80718877
+- Issue:             #434
+- Base SHA:          2a2e287
+- Necessity verdict: Still needed
+- Approval:          granted
+- Approver:          skillc-400 (orchestrator, owner-delegated); the owner approved the plan 2026-10-18 (#434 comment 6250232333)
+- Recorded at:       2026-10-18T13:03:52Z
+
+### Section B evidence
+- Revision 2 certified at the scripted level (#434 comment 6249786846, 43/43). Box 1 stays PARTIAL: no live agent has run CPP's flow:auto on the fixture.
+- No live entry point exists for a fixture task: fixture_campaign swaps the client (actor_argv, dummy_credential, network none); calibration_run -> run_level1_agent_attempt has no fixture parameter.
+- The flow-auto profile already selects rs.PROFILE_RUNTIME (the scripted campaign used it), so no new runtime kind is needed.
+- Duplicate or superseding issues: none.
+
+### Section C - the approved plan
+#434 live-campaign wiring, build items (a)-(e); no spend, no declaration approved.
+
+1. `skillc/fixture_live.py` - the level3-fixture-live declaration (cases CLEAN/TWIN as arms; reuses calibration's C1-C5 validators, derive_arm_order and the whole-declaration approval digest; a pinned prompt; task, builder and base-tree identities), require_approved, the run (matched_pilot.run_schedule caps, native containment stop, per-attempt tokens), and the report.
+2. `skillc/cli.py` - `skillc level3-live <declaration>`: real-agent opt-in, C3 image binding, C5 run store, subject and profile checks, the runtime receipt, provider-only egress backends, and `--rehearse`.
+3. `tests/test_fixture_live.py` - C1-C5 and approval-binding reds, one red per containment-stop trigger, schedule order, the runtime selection, rehearsal accounting, the report's token record.
+4. `evals/level3/campaign-434-live/README.md` - what the campaign is, the sequence (measurement then campaign), the stated no-token-cap risk, how to run and rehearse.
+5. `evals/level3/campaign-434-live/measurement-declaration.json` - the DRAFT measurement declaration (1 CLEAN + 1 TWIN), unapproved.
+6. `changelog.d/434-live-wiring-2.md` - the release note.
+
+Scope: about 6 paths. Medium-large.
+
+Risks:
+- The native stop is a gate nothing downstream re-derives: each trigger gets a committed red case.
+- Reusing calibration's private validators couples the two kinds; a test runs each reused check through this kind's parser.
+- The prompt is an identity: changing it after approval must be refused (whole-declaration digest).
+
+<!-- flow-run n=8 id=f314fd1681a446ffa9527f80a08b9d7b -->
+## Run 8
 
 - Run-id:            f314fd1681a446ffa9527f80a08b9d7b
 - Run-start:         2a2e287a74b3f40206720ea97ac749ba80718877
