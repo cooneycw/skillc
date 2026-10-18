@@ -8,8 +8,8 @@
  },
  "live_attempt_tree": "discrimination/fixture",
  "gate": {
-  "witness": "flow-finish",
-  "shim": "docker/trial/flow-auto-gate-shim.py",
+  "witness": "flow-finish (profile gate_witness kind; gate name flow-auto-finish)",
+  "shim": "docker/fixture-service/flow-auto-gate-shim.py (#434's, reused)",
   "invocation": "~/.claude/scripts/flow-finish-gate.sh (bare)",
   "plan": "finish",
   "measured_verdict_on_live_tree": "FLOW_FINISH_GATE: warn (skipped gates: typecheck verify), exit 3"

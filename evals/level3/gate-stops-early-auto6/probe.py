@@ -183,8 +183,12 @@ def run_make_check(tree: str) -> dict:
     recognizes is honoured (Codex pass 3); a tree with none simply fails, so
     `missing` is never set here."""
     try:
+        # The recipes call `python3`; the verifier's PATH is os.defpath, which in
+        # a slim image does not reach the interpreter (CI: /usr/local/bin). Put
+        # the probe's own interpreter first, the one ci/check.py already runs on.
+        env = {**os.environ, "PATH": os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", os.defpath)}
         proc = subprocess.run(["make", "check"], cwd=tree, capture_output=True, text=True,
-                              timeout=GATE_TIMEOUT, check=False)
+                              timeout=GATE_TIMEOUT, check=False, env=env)
     except subprocess.TimeoutExpired:
         return {"missing": False, "exit": None, "timed_out": True, "error": None, "last_line": ""}
     except OSError as exc:

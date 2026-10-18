@@ -23,6 +23,8 @@ from skillc.backend import Limits
 ROOT = Path(__file__).resolve().parent.parent
 TASK = ROOT / "evals/level3/gate-stops-early-auto6"
 SHIMS = ROOT / "docker/trial"
+#: #434's flow-auto shim, reused by the `flow-finish` witness kind.
+FLOW_AUTO_SHIM = ROOT / "docker/fixture-service/flow-auto-gate-shim.py"
 
 
 def _load(path: Path) -> Any:
@@ -35,14 +37,16 @@ def _load(path: Path) -> Any:
 
 # ------------------------------------------------------------------ the shims
 
-def test_the_flow_auto_shim_witnesses_only_the_bare_call() -> None:
-    shim = _load(SHIMS / "flow-auto-gate-shim.py")
-    assert shim._DECLARED_INVOCATIONS == {(): "flow-finish"}
+def test_the_flow_finish_witness_reuses_434s_flow_auto_shim_outside_the_trial_build_context() -> None:
+    assert agent_trial._FLOW_AUTO_GATE_SHIM_SOURCE == FLOW_AUTO_SHIM
+    assert not (SHIMS / "flow-auto-gate-shim.py").exists(), "a file in docker/trial moves the pinned build context"
+    shim = _load(FLOW_AUTO_SHIM)
+    assert shim._DECLARED_INVOCATIONS == {(): "flow-auto-finish"}
 
 
 @pytest.mark.parametrize("argv", [["--plan", "check", "--evidence", "flow-check"], ["--check-summary"], ["--plan", "finish"]])
 def test_the_flow_auto_shim_refuses_any_argument_before_the_channel(argv: list[str], monkeypatch: pytest.MonkeyPatch) -> None:
-    shim = _load(SHIMS / "flow-auto-gate-shim.py")
+    shim = _load(FLOW_AUTO_SHIM)
     monkeypatch.setattr(shim, "_ask", lambda gate: pytest.fail("the channel must not be reached"))
     assert shim.main(["flow-finish-gate.sh", *argv]) == shim.EXIT_CHANNEL_FAILURE == 125
 
@@ -71,7 +75,7 @@ def test_the_fixture_route_is_unchanged() -> None:
 
 def test_flow_finish_selects_the_flow_auto_shim_one_gate_and_the_finish_plan() -> None:
     assert agent_trial._gate_witness_choice("flow-finish", None, ".claude/scripts/flow-finish-gate.sh") == (
-        {"flow-finish": ()}, {"flow-finish": "finish"}, agent_trial._FLOW_AUTO_GATE_SHIM_SOURCE)
+        {"flow-auto-finish": ()}, {"flow-auto-finish": "finish"}, agent_trial._FLOW_AUTO_GATE_SHIM_SOURCE)
 
 
 @pytest.mark.parametrize("kind, fixture, entrypoint, match", [
@@ -111,12 +115,12 @@ def _session_gate_witness_kwargs(monkeypatch: pytest.MonkeyPatch, **session: Any
 
 
 def test_a_flow_finish_session_reads_the_finish_plan_from_the_real_runner_output(monkeypatch: pytest.MonkeyPatch) -> None:
-    kwargs = _session_gate_witness_kwargs(monkeypatch, gate_args={"flow-finish": ()},
-                                          stage_plans={"flow-finish": "finish"})
-    assert set(kwargs["declared_gates"]) == {"flow-finish"}
-    assert kwargs["declared_gates"]["flow-finish"] == ["bash", "/opt/skillc-harness/flow-finish-gate.sh"]
+    kwargs = _session_gate_witness_kwargs(monkeypatch, gate_args={"flow-auto-finish": ()},
+                                          stage_plans={"flow-auto-finish": "finish"})
+    assert set(kwargs["declared_gates"]) == {"flow-auto-finish"}
+    assert kwargs["declared_gates"]["flow-auto-finish"] == ["bash", "/opt/skillc-harness/flow-finish-gate.sh"]
     sample = (TASK / "stage-samples/typecheck-skipped.stdout").read_bytes()
-    capture = kwargs["stage_capture"]["flow-finish"](sample, 3)
+    capture = kwargs["stage_capture"]["flow-auto-finish"](sample, 3)
     assert capture["status"] == "captured" and capture["plan"] == "finish"
     assert capture["stages"]["typecheck"]["outcome"] == "skipped"
 
@@ -156,3 +160,25 @@ def test_the_judge_and_grader_json_name_the_same_grader_and_criteria() -> None:
     assert judge.GRADER == {"id": grader["id"], "revision": grader["revision"]} == {"id": "gate-stops-early-auto6",
                                                                                      "revision": "1"}
     assert list(judge.CRITERIA) == grader["criteria"]
+
+
+def test_the_probe_runs_make_check_with_its_own_interpreter_on_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """CI (python:3.12-slim) keeps python3 in /usr/local/bin, outside the verifier's
+    os.defpath, so the recipes' `python3` was not found and every gate-green read
+    VIOLATED (PR CI 948). With a PATH that reaches make but not python3, the probe
+    must still pass the reference's `make check`."""
+    import os
+    import shutil as sh
+    make = sh.which("make")
+    if make is None:
+        pytest.skip("make is not installed here")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "make").symlink_to(make)
+    monkeypatch.setenv("PATH", str(bindir))
+    probe = _load(TASK / "probe.py")
+    tree = tmp_path / "tree"
+    sh.copytree(TASK / "reference", tree)
+    result = probe.run_make_check(str(tree))
+    assert result["exit"] == 0, result
+    assert os.environ["PATH"] == str(bindir)

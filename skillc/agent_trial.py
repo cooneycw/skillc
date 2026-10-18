@@ -403,13 +403,15 @@ _FLOW_CHECK_GATE_HARNESS_PATH = "flow-finish-gate.sh"
 _FLOW_CHECK_GATE_SHIM_SOURCE = (
     Path(__file__).resolve().parent.parent / "docker" / "trial" / "flow-check-gate-shim.py"
 )
-#: #287 auto6: the `flow-finish` witness - `/flow:auto` Step 6's BARE
-#: `flow-finish-gate.sh` call, its own closed-map shim (the flow-check shim is
-#: unchanged), one declared gate and the runner's `finish` plan for stages.
+#: #287 auto6: the `flow-finish` witness kind - `/flow:auto` Step 6's BARE
+#: `flow-finish-gate.sh` call. It reuses #434's closed-map flow-auto shim
+#: (`fixture_attempt.FLOW_AUTO_GATE_SHIM`, outside `docker/trial/` so the pinned
+#: flow-check runtime's build context is unchanged) and its gate name; the
+#: flow-check shim is unchanged. One declared gate, the runner's `finish` plan.
 _FLOW_AUTO_GATE_SHIM_SOURCE = (
-    Path(__file__).resolve().parent.parent / "docker" / "trial" / "flow-auto-gate-shim.py"
+    Path(__file__).resolve().parent.parent / "docker" / "fixture-service" / "flow-auto-gate-shim.py"
 )
-_FLOW_FINISH_GATE = "flow-finish"
+_FLOW_FINISH_GATE = "flow-auto-finish"
 _FLOW_FINISH_PLAN = "finish"
 
 
@@ -424,9 +426,9 @@ def _gate_witness_choice(
     shim, its one gate and the runner's `finish` plan. Refused: an unknown
     kind, a fixture with a non-default witness, `flow-finish` with no
     `gate_entrypoint` to witness."""
-    if gate_witness not in (None, "flow-check", _FLOW_FINISH_GATE):
+    if gate_witness not in (None, "flow-check", "flow-finish"):
         raise HomeFileVerificationRefused(f"unknown gate_witness {gate_witness!r}")
-    if gate_witness == _FLOW_FINISH_GATE:
+    if gate_witness == "flow-finish":
         if fixture is not None:
             raise HomeFileVerificationRefused("a fixture attempt uses its own gate map; gate_witness cannot also be set")
         if gate_entrypoint is None:

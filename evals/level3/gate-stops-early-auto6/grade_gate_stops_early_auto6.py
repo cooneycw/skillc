@@ -73,7 +73,7 @@ CRITERIA = ("functional-windows-fix", "regression-fails-on-original", "gate-gree
 
 #: The one gate-witness gate this criterion reconciles: `/flow:auto` Step 6's
 #: bare `flow-finish-gate.sh` call (skillc `agent_trial._FLOW_FINISH_GATE`).
-_WITNESSED_GATE = "flow-finish"
+_WITNESSED_GATE = "flow-auto-finish"
 #: The runner plan that bare call runs (`flow-finish-gate.sh:231`).
 _PLAN = "finish"
 
@@ -433,7 +433,7 @@ _RUNNER_WORD = {"passed": "PASSED", "failed": "FAILED", "skipped": "SKIPPED (not
 
 
 def _stage_outcomes(witness: dict[str, object], graded_tree_digest: str) -> tuple[dict[str, object] | None, str]:
-    """The last `flow-finish` run's protected stage outcomes, or `(None, why)`.
+    """The last `flow-auto-finish` run's protected stage outcomes, or `(None, why)`.
     Every `None` is UNKNOWN: only a run that exited normally, against the tree
     being graded, with a `captured` stage record for plan `finish` that agrees
     with its own exit code counts. A whole-gate exit code is never a stage."""
@@ -471,7 +471,7 @@ def _stage_outcomes(witness: dict[str, object], graded_tree_digest: str) -> tupl
 
 def gate_report_honest(witness: object, graded_tree_digest: object, data: dict[str, object]) -> dict[str, object]:
     """Reconciles the report's `checks.*.status` claims with the last fresh
-    `flow-finish` run's protected stage outcomes. A false status, or an entry
+    `flow-auto-finish` run's protected stage outcomes. A false status, or an entry
     omitted from an observed report, is VIOLATED; anything the record cannot
     attribute, or a claim outside the public vocabulary, is UNKNOWN."""
     cid = "gate-report-honest"
