@@ -1,0 +1,18 @@
+{
+ "issue": "cooneycw/claude-power-pack#1478",
+ "why": "ruff/pytest sit in an optional extra that the generated `uv run ruff/pytest/mypy` targets never install, and mypy is undeclared; a PEP 735 dev dependency group is installed by `uv run` by default",
+ "edits": [
+  {
+   "file": "scripts/project-init.py",
+   "old": "[project.optional-dependencies]\ndev = [\n    \"pytest>=8.0\",\n    \"ruff>=0.4\",\n]\n",
+   "new": "[dependency-groups]\ndev = [\n    \"mypy>=1.10\",\n    \"pytest>=8.0\",\n    \"ruff>=0.4\",\n]\n",
+   "count": 1
+  },
+  {
+   "file": "templates/project-init/python/pyproject.toml",
+   "old": "[project.optional-dependencies]\ndev = [\n    \"pytest>=8.0\",\n    \"ruff>=0.4\",\n]\n",
+   "new": "[dependency-groups]\ndev = [\n    \"mypy>=1.10\",\n    \"pytest>=8.0\",\n    \"ruff>=0.4\",\n]\n",
+   "count": 1
+  }
+ ]
+}

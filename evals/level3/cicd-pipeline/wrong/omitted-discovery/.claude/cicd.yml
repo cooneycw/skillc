@@ -1,0 +1,130 @@
+# .claude/cicd.yml — CI/CD configuration for Claude Power Pack
+#
+# This file configures the /cicd commands and Makefile generation.
+# Place in your project's .claude/ directory.
+#
+# Detection is automatic — this file is optional and only needed
+# to override defaults or add custom configuration.
+
+# -------------------------------------------------------------------
+# Framework & Package Manager
+# -------------------------------------------------------------------
+# Auto-detected from project files (pyproject.toml, package.json, etc.)
+# Override here if detection is wrong.
+
+# framework: python          # python | node | go | rust | multi
+# package_manager: uv        # uv | pip | poetry | npm | yarn | pnpm | cargo | go
+
+# -------------------------------------------------------------------
+# Build Configuration
+# -------------------------------------------------------------------
+build:
+  # Targets that /flow:finish requires (fail the gate if missing)
+  required_targets:
+    - lint
+    - test
+
+  # Targets that /flow:doctor recommends (warn if missing)
+  recommended_targets:
+    - format
+    - typecheck
+    - build
+    - deploy
+    - clean
+    - verify
+
+# -------------------------------------------------------------------
+# Deployment
+# -------------------------------------------------------------------
+deploy:
+  # Default target for /flow:deploy (if not specified on CLI)
+  default_target: deploy
+
+  # Per-target metadata
+  targets:
+    deploy:
+      description: "Deploy to production"
+      requires_confirmation: true
+    deploy-staging:
+      description: "Deploy to staging"
+      requires_confirmation: false
+
+# -------------------------------------------------------------------
+# Health Checks (used by /cicd:health)
+# -------------------------------------------------------------------
+# health:
+#   url: https://your-app.com/health
+#   timeout: 30
+#   expected_status: 200
+#   expected_body: '"status":"ok"'
+
+# -------------------------------------------------------------------
+# Smoke Tests (used by /cicd:smoke)
+# -------------------------------------------------------------------
+# smoke:
+#   tests:
+#     - name: "Homepage loads"
+#       url: https://your-app.com/
+#       expected_status: 200
+#     - name: "API responds"
+#       url: https://your-app.com/api/health
+#       expected_status: 200
+#       expected_body: '"ok"'
+
+# -------------------------------------------------------------------
+# Deploy Verification (used by /cicd:verify, /flow:deploy, /flow:auto)
+# -------------------------------------------------------------------
+# Capture the health.endpoints / health.smoke_tests above as a baseline
+# BEFORE a deploy, re-run them AFTER, diff the two, and emit an actionable
+# verdict: proceed / review / rollback. Catches a deploy that made things
+# worse than before - which raw health/smoke checks cannot.
+#
+# health:
+#   deploy_verification:
+#     enabled: true                     # let /flow:deploy + /flow:auto auto-capture/verify
+#     baseline_file: .claude/deploy-baseline.json
+#     latency_regression_pct: 50        # flag a probe > 50% slower than baseline...
+#     latency_floor_ms: 100             # ...but only if it is also over 100ms (noise floor)
+#     on_latency_regression: review     # review | rollback | ignore
+#     require_baseline: false           # true => no baseline downgrades PROCEED to REVIEW
+
+# -------------------------------------------------------------------
+# Pipeline Configuration (used by /cicd:pipeline)
+# -------------------------------------------------------------------
+# pipeline:
+#   provider: github-actions   # github-actions | woodpecker | both
+#   branches:
+#     main: [lint, test, typecheck, build, deploy]
+#     pr: [lint, test, typecheck]
+#   matrix:
+#     python-version: ["3.11", "3.12"]
+#
+#   # --- Secrets ---
+#   # Use AWS Secrets Manager for deploy-time and shared runtime secrets.
+#   # This is the required path for centralized secret management.
+#   secrets_source: aws-secrets-manager   # platform | aws-secrets-manager
+#   aws_region: us-east-1                 # AWS region for Secrets Manager
+#   aws_secret_name: my-project/deploy    # Secret name in AWS SM
+#
+#   # For GitHub Actions: store AWS_ROLE_ARN as a GitHub secret (OIDC).
+#   # For Woodpecker: store aws_access_key_id and aws_secret_access_key
+#   #   as Woodpecker secrets (bootstrap credentials only).
+#   # All other deploy/runtime secrets are fetched from AWS SM at deploy time.
+#
+#   # Legacy: platform-injected secrets (not recommended for deploy).
+#   # secrets_needed: [DEPLOY_KEY]
+#
+#   woodpecker:
+#     local: true              # Use 'woodpecker exec' for local runs
+
+# -------------------------------------------------------------------
+# Container Configuration (used by /cicd:container)
+# -------------------------------------------------------------------
+# container:
+#   base_image: python:3.12-slim
+#   port: 8000
+#   entrypoint: "uvicorn app:app --host 0.0.0.0 --port 8000"
+
+# Set by the cicd-pipeline skill's step 1 (skillc#281 fixture).
+pipeline:
+  provider: both

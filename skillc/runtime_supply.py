@@ -27,6 +27,10 @@ DESCRIPTOR_KEYS = IDENTITY_KEYS | {"uv_version", "python", "required_env"}
 #: layer (docker/cicd-trial/), with the base receipt embedded whole.
 PROFILE_RUNTIME = "profile-runtime"
 CICD_RUNTIME = "cicd-runtime"
+#: #281: the cicd runtime plus one warmed uv cache for a task project's own
+#: pinned dev tools (ruff, pytest, mypy). Selected by a task's grader, never by
+#: a profile closure, so `selected_runtime` never returns it.
+CICD_PROJECT_RUNTIME = "cicd-project-runtime"
 CICD_RECEIPT_KEYS = IDENTITY_KEYS | {"image_id", "descriptor_sha256", "recipe_sha256", "source_commit",
                                     "target", "base_receipt", "base_image_id", "curl_version"}
 
@@ -161,10 +165,53 @@ def _cicd_receipt(value: dict[str, Any]) -> dict[str, Any]:
     return value
 
 
+CICD_PROJECT_RECEIPT_KEYS = IDENTITY_KEYS | {"image_id", "descriptor_sha256", "recipe_sha256", "source_commit",
+                                            "target", "base_receipt", "base_image_id", "project_lock_sha256",
+                                            "tool_versions"}
+PROJECT_TOOLS = ("ruff", "pytest", "mypy")
+
+
+def _cicd_project_receipt(value: dict[str, Any]) -> dict[str, Any]:
+    """A warmed project-tools layer on one validated cicd receipt (#281).
+
+    The embedded base passes the unchanged cicd validator (which in turn
+    re-validates its own flow-check base), the descriptor is inherited
+    byte-for-byte, and the receipt binds the exact project lock it warmed and
+    the tool versions that lock pins.
+    """
+    _keys(value, CICD_PROJECT_RECEIPT_KEYS, "cicd project receipt")
+    _identity(value, supported_policy())
+    if value["target"] != CICD_PROJECT_RUNTIME:
+        raise Refused("cicd project receipt target is not the cicd project runtime")
+    base = value["base_receipt"]
+    if not isinstance(base, dict):
+        raise Refused("cicd project receipt base is not a receipt object")
+    base = _cicd_receipt(base)
+    if value["base_image_id"] != base["image_id"]:
+        raise Refused("cicd project receipt base image differs from its embedded base receipt")
+    if not isinstance(value["image_id"], str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", value["image_id"]):
+        raise Refused("runtime receipt image must be immutable")
+    if value["image_id"] in (base["image_id"], base["base_image_id"]):
+        raise Refused("cicd project receipt names a base image, not the layered one")
+    if value["descriptor_sha256"] != base["descriptor_sha256"]:
+        raise Refused("cicd project receipt descriptor differs from its base runtime")
+    if not _hex(value["source_commit"], 40) or not _hex(value["recipe_sha256"], 64):
+        raise Refused("cicd project receipt source commit or recipe is malformed")
+    if not _hex(value["project_lock_sha256"], 64):
+        raise Refused("cicd project receipt project lock digest is malformed")
+    tools = value["tool_versions"]
+    if not isinstance(tools, dict) or set(tools) != set(PROJECT_TOOLS) or any(
+            not isinstance(v, str) or not re.fullmatch(r"[0-9]+(\.[0-9]+)+", v) for v in tools.values()):
+        raise Refused("cicd project receipt tool versions are missing or malformed")
+    return value
+
+
 def _any_receipt(raw: bytes) -> dict[str, Any]:
     value = load_json(raw)
     if value.get("target") == CICD_RUNTIME:
         return _cicd_receipt(value)
+    if value.get("target") == CICD_PROJECT_RUNTIME:
+        return _cicd_project_receipt(value)
     return _profile_receipt(value)
 
 
