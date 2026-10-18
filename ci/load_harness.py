@@ -128,13 +128,34 @@ while os.getppid() == parent and time.time() < deadline:
 # Parent gone or deadline passed: the harness cannot clean up, so do it here.
 # The running rep's group first (it has no other owner now), then the
 # children (no new containers can start), then the side effects.
-time.sleep(0.3)  # a rep mid-launch registers itself before its command runs
-try:
-    rep = int(open(cfg["rep_pgid_file"]).read() or 0)
-    if rep:
-        os.killpg(rep, signal.SIGKILL)
-except (OSError, ValueError):
-    pass
+# The running rep, by two marks that only THIS run's reps carry (either is
+# enough):
+# - the group it registered in its file;
+# - the exact `SKILLC_LOAD462_REP_FILE=<this run's file>` ENTRY in its
+#   environment, which needs no registration (a harness that died before its
+#   rep could register: a loaded host, pipeline 930).
+# Nothing else identifies a process as ours: not its argv, which a parent,
+# its siblings and its xdist workers can share. Each candidate is pinned by a
+# pidfd BEFORE its ownership is checked and is signalled through that pidfd,
+# so a reused pid cannot be hit. Rescan until two consecutive scans find
+# nothing, bounded at 5 s. Residual: a rep forked but not yet exec'd carries
+# neither mark yet; it needs a cgroup.
+exec(cfg["owner_src"])
+quiet, give_up = 0, time.time() + 5
+while time.time() < give_up:
+    try:
+        rep = int(open(cfg["rep_pgid_file"]).read() or 0)
+    except (OSError, ValueError):
+        rep = 0
+    hits = 0
+    for e in os.listdir("/proc"):
+        if e.isdigit() and int(e) != os.getpid():
+            if kill_owned(int(e), lambda p: rep_owned(p, cfg, rep)):
+                hits += 1
+    quiet = 0 if hits else quiet + 1
+    if quiet >= 2:
+        break
+    time.sleep(0.1)
 def members():
     me, found = os.getpid(), []
     for e in os.listdir("/proc"):
@@ -186,7 +207,7 @@ def cleanup(cfg):
         # for a settle window and needs 3 consecutive empty listings after it.
         # A create the daemon completes later than that is the residual.
         settle_until = time.monotonic() + cfg.get("docker_settle", 3.0)
-        give_up = time.monotonic() + 4 * t + 10
+        give_up = time.monotonic() + (cfg.get("docker_sweep_budget") or 4 * t + 10)
         empties = 0
         while True:
             if time.monotonic() > give_up:
@@ -204,13 +225,35 @@ def cleanup(cfg):
             ids = r.stdout.split()
             if ids:
                 empties = 0
-                try:
-                    rr = subprocess.run(["docker", "rm", "-f", *ids], capture_output=True,
-                                        text=True, timeout=t)
-                    if rr.returncode != 0:
+                # One container per call, so each reply is judged on its own:
+                # the daemon's own `--rm` can be removing it already, or have
+                # just finished, which is not a failure (the next listing,
+                # which must settle empty, verifies it); any other reply is.
+                benign = ("is already in progress", "No such container")
+                stalled = False
+                for cid in ids:
+                    # Each removal gets at most what is left of the budget.
+                    left = give_up - time.monotonic()
+                    if left <= 0:
+                        errors.append("docker sweep did not settle")
+                        stalled = True
+                        break
+                    try:
+                        rr = subprocess.run(["docker", "rm", "-f", cid], capture_output=True,
+                                            text=True, timeout=min(t, left))
+                    except subprocess.TimeoutExpired as exc:
+                        # Cut short by the budget: the sweep did not settle.
+                        errors.append("docker sweep did not settle" if left < t
+                                      else f"docker rm failed: {exc!r}")
+                        stalled = True
+                        break
+                    except OSError as exc:
+                        errors.append(f"docker rm failed: {exc!r}")
+                        stalled = True
+                        break
+                    if rr.returncode != 0 and not any(b in rr.stderr for b in benign):
                         errors.append(f"docker rm exit {rr.returncode}: {rr.stderr.strip()[:200]}")
-                except (OSError, subprocess.TimeoutExpired) as exc:
-                    errors.append(f"docker rm failed: {exc!r}")
+                if stalled:
                     break
             else:
                 empties += 1
@@ -228,6 +271,54 @@ def cleanup(cfg):
             pass
     return errors
 """
+_OWNER_SRC = r"""
+def entry_in(environ, entry):
+    # An exact KEY=value entry: never a substring of another key or value.
+    return entry in environ.split(b"\0")
+
+
+def rep_owned(pid, cfg, rep):
+    # True only if `pid` belongs to this run's rep, read from /proc now.
+    import os
+    try:
+        with open(f"/proc/{pid}/stat") as fh:
+            fields = fh.read().rsplit(")", 1)[1].split()
+        if fields[0] == "Z":
+            return False  # already dead: nothing to kill, only to reap
+        if rep and int(fields[2]) == rep:
+            return True
+        entry = ("SKILLC_LOAD462_REP_FILE=" + cfg["rep_pgid_file"]).encode()
+        with open(f"/proc/{pid}/environ", "rb") as fh:
+            if entry_in(fh.read(), entry):
+                return True
+    except (OSError, IndexError, ValueError):
+        return False
+    return False
+
+
+def kill_owned(pid, owned):
+    # Pin the process with a pidfd, THEN check ownership, then signal the
+    # pidfd: a pid reused after the pin is a different process, and the
+    # signal fails rather than reaching it.
+    import os, signal
+    try:
+        fd = os.pidfd_open(pid)
+    except OSError:
+        return False
+    try:
+        if not owned(pid):
+            return False
+        signal.pidfd_send_signal(fd, signal.SIGKILL)
+        return True
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
+"""
+_owner_ns: dict[str, Any] = {}
+exec(_OWNER_SRC, _owner_ns)  # noqa: S102 - the same source runs in the supervisor
+entry_in = _owner_ns["entry_in"]
+
 _cleanup_ns: dict[str, Any] = {}
 exec(_CLEANUP_SRC, _cleanup_ns)  # noqa: S102 - the same source runs in the supervisor
 cleanup_side_effects = _cleanup_ns["cleanup"]
@@ -311,7 +402,8 @@ class Load:
 
     def __init__(self, cpu: int, churn: int, deadline: float, *, docker: int = 0,
                  io: int = 0, image: str = "alpine:3", cpus: str = "",
-                 spin_mode: str = "busy", docker_timeout: float = 30.0) -> None:
+                 spin_mode: str = "busy", docker_timeout: float = 30.0,
+                 docker_sweep_budget: float | None = None) -> None:
         self.proc: subprocess.Popen[bytes] | None = None
         run_id = f"{os.getpid()}-{time.time_ns()}"
         self.cfg: dict[str, Any] = {
@@ -321,7 +413,8 @@ class Load:
             "iodir": tempfile.mkdtemp(prefix="load462-io-") if io else "",
             "rep_pgid_file": tempfile.mkstemp(prefix="load462-rep-")[1],
             "spin_mode": spin_mode, "docker_timeout": docker_timeout,
-            "cleanup_src": _CLEANUP_SRC,
+            "docker_sweep_budget": docker_sweep_budget,
+            "cleanup_src": _CLEANUP_SRC, "owner_src": _OWNER_SRC,
         }
         #: Empty when cleanup was verified; otherwise what could not be.
         self.cleanup_error = ""
@@ -450,7 +543,10 @@ def sweep_descendants(keep_pgids: set[int]) -> int:
 #: Each rep registers its own process group with the load supervisor BEFORE
 #: its command runs, so there is no launch-to-registration window in which a
 #: SIGKILLed harness would leave it unowned.
-_REP_WRAPPER = 'echo $$ > "$SKILLC_LOAD462_REP_FILE" || exit 125; exec "$@"'
+#: SKILLC_LOAD462_REG_DELAY is a TEST-ONLY knob: it holds the registration
+#: back, which reproduces a loaded host's scheduling delay deterministically.
+_REP_WRAPPER = ('[ -n "$SKILLC_LOAD462_REG_DELAY" ] && sleep "$SKILLC_LOAD462_REG_DELAY"; '
+                'echo $$ > "$SKILLC_LOAD462_REP_FILE" || exit 125; exec "$@"')
 
 
 def run_rep(cmd: list[str], remaining: float, load: Load) -> dict[str, Any]:
@@ -685,6 +781,12 @@ def reps_needed(p: float) -> int:
     return max(20, math.ceil(math.log(0.01) / math.log(1 - p)))
 
 
+def _cores(ph: dict[str, Any]) -> int:
+    """The cores the load and the tests could use: the pinned set when the
+    phase was pinned, else the host. Older records have no pinned_count."""
+    return int(ph.get("pinned_count") or ph["nproc"])
+
+
 def summarize(args: argparse.Namespace) -> int:
     phases = [json.loads(Path(p).read_text()) for p in args.phases]
     phases.sort(key=lambda ph: ph["started_at"])
@@ -702,13 +804,17 @@ def summarize(args: argparse.Namespace) -> int:
         "member": args.member, "test_id": args.test_id, "label": args.label,
         "sha": args.sha,
         "phases": len(phases),
-        # What the evidence may claim: every counted phase held at least 2x nproc.
-        "load_factors": sorted({round(ph["target"] / ph["nproc"], 2) for ph in phases
-                                if ph.get("nproc")}),
+        # What the evidence may claim: every counted phase held at least 2x the
+        # cores it could use (the pinned set under --cpus, else the host).
+        "load_factors": sorted({round(ph["target"] / _cores(ph), 2) for ph in phases
+                                if _cores(ph)}),
         # Only phases that contributed a counted rep can carry the claim, and
-        # with none there is no claim at all.
+        # with none there is no claim at all. The runnable-count target can be
+        # met by processes on OTHER cores, so the claim also needs 2x the cores
+        # in this harness's own spinners (whose CPU time the phase verified).
         "meets_2x_nproc": bool(contributing) and all(
-            ph["target"] >= 2 * ph["nproc"] for ph in contributing),
+            ph["target"] >= 2 * _cores(ph) and ph.get("cpu", 0) >= 2 * _cores(ph)
+            for ph in contributing),
         "invalid_phases": sum(ph["verdict"] != "VALID" for ph in phases),
         "pause_gaps_seconds": gaps,
         "pauses_ok": all(g >= MIN_PAUSE_SECONDS for g in gaps),

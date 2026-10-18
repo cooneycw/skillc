@@ -158,7 +158,12 @@ def test_the_load_is_real_and_gone_after_the_phase(tmp_path):
 
 
 def _rep_marker(tmp_path: Path) -> str:
-    return f"rep-462-{tmp_path.name}"
+    # Unique per run, not only per test name: a rep leaked by one run must not
+    # match the next run's marker (#462, pipeline 930's cascade).
+    import hashlib
+
+    digest = hashlib.sha256(str(tmp_path).encode()).hexdigest()[:12]
+    return f"rep-462-{tmp_path.name}-{digest}"
 
 
 def _reps_alive(marker: str) -> list[int]:
@@ -173,13 +178,14 @@ def _reps_alive(marker: str) -> list[int]:
     return alive
 
 
-def _start_phase(tmp_path: Path) -> tuple[subprocess.Popen[str], int]:
+def _start_phase(tmp_path: Path, env: dict[str, str] | None = None
+                 ) -> tuple[subprocess.Popen[str], int]:
     marker = _rep_marker(tmp_path)
     proc = subprocess.Popen(
         [sys.executable, str(HARNESS), "phase", "--cpu", "2", "--target", "1",
          "--reps", "1", "--warmup-seconds", "10", "--out", str(tmp_path / "p.json"),
          "--", sys.executable, "-c", f"import time; time.sleep(60); {marker!r}"],
-        stderr=subprocess.PIPE, text=True,
+        stderr=subprocess.PIPE, text=True, env=env,
     )
     assert proc.stderr is not None
     for line in proc.stderr:
@@ -199,6 +205,8 @@ def test_sigterm_kills_the_load_group_and_the_running_rep(tmp_path):
     proc, pgid = _start_phase(tmp_path)
     proc.send_signal(signal.SIGTERM)
     proc.wait(timeout=10)
+    assert proc.stderr is not None
+    proc.stderr.close()
     assert _wait_gone(pgid, 2.0) == []
     assert _reps_alive(_rep_marker(tmp_path)) == [], "the running rep outlived the harness"
 
@@ -209,14 +217,18 @@ def test_a_sigkilled_harness_still_takes_its_load_down(tmp_path):
     proc, pgid = _start_phase(tmp_path)
     proc.kill()
     proc.wait(timeout=10)
+    assert proc.stderr is not None
+    proc.stderr.close()
     assert _wait_gone(pgid, 5.0) == []
 
 
 def _write_phase(path: Path, start: float, end: float, verdict: str,
-                 outcomes: list[str], target: float = 48, nproc: int = 24) -> str:
+                 outcomes: list[str], target: float = 48, nproc: int = 24,
+                 pinned_count: int = 0, cpu: int | None = None) -> str:
     path.write_text(json.dumps({
         "started_at": start, "ended_at": end, "verdict": verdict,
-        "target": target, "nproc": nproc,
+        "target": target, "nproc": nproc, "pinned_count": pinned_count,
+        "cpu": int(target) if cpu is None else cpu,
         "reps": [{"outcome": o, "seconds": 1.0} for o in outcomes],
     }))
     return str(path)
@@ -334,6 +346,37 @@ elif args[0] == "ps":
     if d["_ps"] == 2:
         d.update(d.pop("_pending", {}))
     save(d)
+elif args[0] == "rm" and mode == "rm-slow":
+    time.sleep(0.5)
+    for c in args[2:]:
+        d.pop(c, None)
+    save(d)
+elif args[0] == "rm" and mode == "rm-in-progress":
+    # The daemon is already removing it (`--rm`): it says so, exits 1, and
+    # the container is gone a moment later.
+    for c in args[2:]:
+        d.pop(c, None)
+    d["_benign"] = d.get("_benign", 0) + 1
+    save(d)
+    print(f"Error response from daemon: removal of container {args[2]} is already in progress",
+          file=sys.stderr)
+    sys.exit(1)
+elif args[0] == "rm" and mode == "rm-mixed":
+    # Alternate per container: the daemon is already removing one, the next
+    # genuinely fails. Both are gone afterwards, so only the reply tells.
+    errs = []
+    for c in args[2:]:
+        n = d.get("_rmn", 0)
+        d["_rmn"] = n + 1
+        d.pop(c, None)
+        errs.append(f"removal of container {c} is already in progress" if n % 2 == 0
+                    else f"cannot remove container {c}: device busy")
+    save(d)
+    print("\n".join("Error response from daemon: " + e for e in errs), file=sys.stderr)
+    sys.exit(1)
+elif args[0] == "rm" and mode == "rm-fails":
+    print("Error response from daemon: cannot remove container: device busy", file=sys.stderr)
+    sys.exit(1)
 elif args[0] == "rm":
     for c in args[2:]:
         d.pop(c, None)
@@ -450,6 +493,8 @@ def test_a_sigkilled_harness_does_not_leave_its_running_rep(tmp_path):
     proc, _pgid = _start_phase(tmp_path)
     proc.kill()
     proc.wait(timeout=10)
+    assert proc.stderr is not None
+    proc.stderr.close()
     deadline = time.monotonic() + 5
     while _marker_alive(_rep_marker(tmp_path)) and time.monotonic() < deadline:
         time.sleep(0.1)
@@ -662,3 +707,171 @@ def test_a_phase_needs_no_procps(tmp_path):
     for key in ("uptime_before", "uptime_after"):
         assert record[key].startswith("up "), record[key]
         assert "load average:" in record[key]
+
+
+# ------------------------------------------------- Hold B false negatives (#462 PR 2)
+
+def test_a_pinned_phase_is_measured_against_its_pinned_cores(tmp_path):
+    """Hold B pinned 16 spinners to 8 of 24 cores: that is 2x the cores the
+    load and the tests could use, and the claim must say so."""
+    out = tmp_path / "m.json"
+    for target, expected in ((16, True), (15, False)):
+        a = _write_phase(tmp_path / "a.json", 0, 100, "VALID", ["passed"],
+                         target=target, nproc=24, pinned_count=8)
+        lh.main(["summarize", "--member", "m", "--test-id", "t", "--label", "pre",
+                 "--out", str(out), a])
+        m = json.loads(out.read_text())
+        assert m["meets_2x_nproc"] is expected, target
+        assert m["load_factors"] == [round(target / 8, 2)]
+
+
+def test_a_removal_already_in_progress_is_not_a_cleanup_failure(tmp_path, monkeypatch):
+    state = _fake_docker(tmp_path, monkeypatch)
+    load = lh.Load(0, 0, time.time() + 60, docker=1)
+    deadline = time.monotonic() + 20
+    while len(_containers(state)) < 2 and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert len(_containers(state)) >= 2, "no owned container to remove: the test proves nothing"
+    monkeypatch.setenv("FAKE_DOCKER_MODE", "rm-in-progress")
+    load.stop()
+    assert json.loads(state.read_text()).get("_benign", 0) >= 1, "no benign reply was exercised"
+    assert load.cleanup_error == ""
+    assert _containers(state) == {"foreign": "skillc.load462=someone-else"}
+
+
+def test_a_real_removal_failure_is_still_a_cleanup_failure(tmp_path, monkeypatch):
+    state = _fake_docker(tmp_path, monkeypatch)
+    load = lh.Load(0, 0, time.time() + 60, docker=1, docker_timeout=2.0)
+    deadline = time.monotonic() + 20
+    while len(_containers(state)) < 2 and time.monotonic() < deadline:
+        time.sleep(0.05)
+    monkeypatch.setenv("FAKE_DOCKER_MODE", "rm-fails")
+    load.stop()
+    assert "device busy" in load.cleanup_error
+
+
+
+# ------------------------------------------------- PR 2 review pass 1 (#462)
+
+def test_the_2x_claim_needs_2x_attributable_spinners_not_just_a_host_count(tmp_path):
+    """8 spinners pinned to 8 cores is 1x there, however many runnable
+    processes elsewhere on the host lift the host-wide count to 16."""
+    out = tmp_path / "m.json"
+    for cpu, expected in ((8, False), (16, True)):
+        a = _write_phase(tmp_path / "a.json", 0, 100, "VALID", ["passed"],
+                         target=16, nproc=24, pinned_count=8, cpu=cpu)
+        lh.main(["summarize", "--member", "m", "--test-id", "t", "--label", "pre",
+                 "--out", str(out), a])
+        assert json.loads(out.read_text())["meets_2x_nproc"] is expected, cpu
+
+
+def test_a_genuine_error_is_kept_when_a_neighbour_reply_is_benign(tmp_path, monkeypatch):
+    state = _fake_docker(tmp_path, monkeypatch)
+    load = lh.Load(0, 0, time.time() + 60, docker=2)
+    deadline = time.monotonic() + 20
+    while len(_containers(state)) < 3 and time.monotonic() < deadline:
+        time.sleep(0.05)
+    monkeypatch.setenv("FAKE_DOCKER_MODE", "rm-mixed")
+    load.stop()
+    assert _containers(state) == {"foreign": "skillc.load462=someone-else"}
+    assert "device busy" in load.cleanup_error, "a benign neighbour reply hid a real failure"
+
+
+
+def test_slow_removals_stay_inside_the_sweep_budget(tmp_path, monkeypatch):
+    """Each removal gets at most what is left of the sweep's budget; many slow
+    ones end the sweep at the budget with a failure, never past it."""
+    state = _fake_docker(tmp_path, monkeypatch)
+    load = lh.Load(0, 0, time.time() + 60, docker=2, docker_sweep_budget=3.0)
+    deadline = time.monotonic() + 20
+    while len(_containers(state)) < 12 and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert len(_containers(state)) >= 12, "too few owned containers for the budget to bind"
+    monkeypatch.setenv("FAKE_DOCKER_MODE", "rm-slow")
+    t0 = time.monotonic()
+    load.stop()
+    assert time.monotonic() - t0 < 5.0, "the sweep overran its 3 s budget"
+    assert "did not settle" in load.cleanup_error
+
+
+
+@needs_proc
+def test_a_harness_killed_before_its_rep_registers_still_takes_the_rep_down(tmp_path):
+    """Pipeline 930: on a loaded host the rep's wrapper had not yet written its
+    registration when the harness died, and the supervisor's one read found
+    nothing. REG_DELAY holds the registration back so the window is certain."""
+    env = dict(os.environ, SKILLC_LOAD462_REG_DELAY="3")
+    proc, _pgid = _start_phase(tmp_path, env=env)
+    proc.kill()
+    proc.wait(timeout=10)
+    assert proc.stderr is not None
+    proc.stderr.close()
+    deadline = time.monotonic() + 5
+    while _marker_alive(_rep_marker(tmp_path)) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert _marker_alive(_rep_marker(tmp_path)) == [], "an unregistered rep outlived its harness"
+
+
+
+# ------------------------------------------------- kill-path review (#462 PR 2)
+
+def test_the_ownership_token_is_an_exact_environment_entry():
+    entry = b"SKILLC_LOAD462_REP_FILE=/tmp/run-A"
+    assert lh.entry_in(b"PATH=/bin\0" + entry + b"\0HOME=/x\0", entry)
+    for environ in (
+        b"SKILLC_LOAD462_REP_FILE=/tmp/run-B\0",           # another run
+        b"OTHER_SKILLC_LOAD462_REP_FILE=/tmp/run-A\0",     # a prefixed key
+        b"OTHER=SKILLC_LOAD462_REP_FILE=/tmp/run-A\0",     # an embedded value
+        b"SKILLC_LOAD462_REP_FILE=/tmp/run-A-x\0",         # a longer value
+    ):
+        assert not lh.entry_in(environ, entry), environ
+
+
+_DEADLINE_SCENARIO = r"""
+import json, os, signal, subprocess, sys, time
+sys.path.insert(0, sys.argv[1])
+from ci import load_harness as lh
+
+def alive(pid):
+    try:
+        with open(f"/proc/{pid}/stat") as fh:
+            return fh.read().rsplit(")", 1)[1].split()[0] != "Z"
+    except OSError:
+        return False
+
+load = lh.Load(0, 0, time.time() + 2)        # deadline in 2 s; this parent stays alive
+own = dict(os.environ, SKILLC_LOAD462_REP_FILE=load.cfg["rep_pgid_file"])
+other = dict(os.environ, SKILLC_LOAD462_REP_FILE=load.cfg["rep_pgid_file"] + "-another-run")
+sleeper = [sys.executable, "-c", "import time; time.sleep(30)"]
+mine = subprocess.Popen(sleeper, env=own)
+foreign = subprocess.Popen(sleeper, env=other)
+sibling = os.fork()                          # same argv as this parent, exactly
+if sibling == 0:
+    time.sleep(30)
+    os._exit(0)
+load.proc.wait(timeout=30)                   # the supervisor's deadline backstop ran
+time.sleep(0.5)
+print(json.dumps({"mine": alive(mine.pid), "foreign": alive(foreign.pid),
+                  "sibling": alive(sibling)}))
+for p in (mine.pid, foreign.pid, sibling):
+    try:
+        os.kill(p, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+load.proc = None
+"""
+
+
+@needs_proc
+def test_a_deadline_backstop_kills_only_this_runs_reps(tmp_path):
+    """The supervisor at its DEADLINE, with its parent alive and a sibling
+    sharing the parent's exact argv: only a process carrying THIS run's token
+    may die. Run in a disposable parent, so a backstop that kills its parent
+    shows up as a dead scenario instead of a dead test runner."""
+    proc = subprocess.run(
+        [sys.executable, "-c", _DEADLINE_SCENARIO, str(HARNESS.parent.parent)],
+        capture_output=True, text=True, timeout=120, check=False,
+    )
+    assert proc.returncode == 0, f"the scenario's parent died: rc={proc.returncode} {proc.stderr}"
+    result = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert result == {"mine": False, "foreign": True, "sibling": True}, result

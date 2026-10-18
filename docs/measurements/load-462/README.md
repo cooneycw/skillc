@@ -11,8 +11,9 @@ what bounds that failure.
 Each file is the output of `ci/load-repro.sh` (summarised by `ci/load_harness.py
 summarize`), named `<member>-<load>-<sha12>-<pre|post>.json`:
 
-- `<load>` is `x2` (2x nproc CPU spinners, no churn) or `x4` (4x nproc spinners
-  plus 8 interpreter-start churn loops).
+- `<load>` is `x2` (2x nproc CPU spinners, no churn), `x4` (4x nproc spinners
+  plus 8 interpreter-start churn loops), or `x2pin` (Hold B: pinned to CPUs
+  0-7, 16 spinners, 2 Docker plus 2 fsync I/O churn loops).
 - `<sha12>` is the commit the test ran at. `pre` is unfixed main; `post` is the fix.
 - `.diag.jsonl` files beside them come from `-p ci.load_diag462`: the
   gate_witness pid-read and kill-confirmation timings, and the evidence_export
@@ -42,3 +43,39 @@ The evidence_export diagnosis in the issue ("a 5 s whole-attempt limit") is
 falsified: `timeout=5` is the agent exec's `Limits(timeout=...)` only. Whole
 attempts ran 12.8 s at the median and up to 32.4 s under load, and all 230
 were `captured`.
+
+## Hold B (kyleci emulation), kyle19 pinned to CPUs 0-7, main a0edf35af648, 2026-10-18
+
+The 8-core CI host where gate_witness failed was emulated by pinning the
+harness, the load and every rep to CPUs 0-7, with 16 spinners (2x the pinned
+cores), 2 Docker-daemon churn loops and 2 fsync I/O churn loops.
+
+All 7 phases were VALID:
+- the pinned cores were 1.0 busy;
+- the spinners were attributed 0.79-0.99 of their cores;
+- the `procs_running` mean was 22-30 against a target of 16.
+
+| Member | Hold B | Both holds |
+|---|---|---|
+| gate_witness | 0 of 20 (pid read max 0.34 s; 0 `stop_confirmed=False`) | 0 of 60 |
+| evidence_export (the issue's named test) | 0 of 20 (attempts max 11.9 s, all captured) | 0 of 60 |
+| evidence_export (whole file, `-n 8`) | 0 of 3 (attempts max 15.3 s, all captured) | 0 of 13 |
+| docker_backend (stalled `docker run`) | 0 of 20 | 0 of 60 |
+| trial_image_tools_live | 0 of 20 | 0 of 60 |
+| demo | 0 of 20 | 0 of 60 |
+| docker_backend reap `[parent-stopped]` | 0 of 20 | 0 of 20 (added after Hold A) |
+
+These summaries were recomputed by the fixed `summarize` from the raw phase
+records, which are unchanged. Hold B ran a harness that judged `meets_2x_nproc`
+against the 24 host cores, so it read False there.
+
+Each `cleanup_errors` entry is the daemon's own `--rm` racing the sweep
+("removal of container ... is already in progress"). The fixed harness treats
+that response as benign. After the hold, no `skillc.load462` container
+remained. The raw records keep the error text as it was produced, so
+`summarize` still exits 5 on them.
+
+**Reading:** the synthetic-load hypothesis is falsified for these six members.
+The reds are real and still recur in gates, but CPU, Docker or I/O contention
+as modelled here does not produce them. See
+https://github.com/cooneycw/skillc/issues/462#issuecomment-6251986114.
