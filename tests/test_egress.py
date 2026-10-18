@@ -13,6 +13,7 @@ runner's job (`tests/test_agent_egress_live.py`).
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import socket
 import subprocess
@@ -23,6 +24,7 @@ from pathlib import Path
 
 import pytest
 from conftest import FAKE_DOCKER_DAEMON_TIMEOUT
+from egress_diagnostics import describe_observation
 from test_agent_trial import (
     GRADER_ROOT,
     _docker_bin,
@@ -517,26 +519,98 @@ def test_teardown_is_not_confirmed_while_the_attempt_network_remains(base: Path,
     assert backend.confirm_absent(handle) is d.Confirmation.CONFIRMED
 
 
+def _classify() -> object:
+    namespace: dict[str, object] = {}
+    exec(compile(eg.PROXY_SOURCE, "<proxy>", "exec"), namespace)  # noqa: S102 - the shipped policy itself
+    return namespace["classify_peer"]
+
+
+@pytest.mark.parametrize("peer, subnet, kind", [
+    ("192.0.2.7", "192.0.2.0/24", "attempt"),        # the attempt's own agent
+    ("198.51.100.9", "192.0.2.0/24", "rejected"),    # a neighbour on the shared bridge
+    ("172.17.0.5", "192.0.2.0/24", "rejected"),      # (TEST-NET / docker-default shapes)
+    ("127.0.0.1", "192.0.2.0/24", "probe"),          # #460's readiness probe, unlogged
+    ("127.8.9.10", "192.0.2.0/24", "probe"),         # all of 127.0.0.0/8, and no more
+    ("128.0.0.1", "192.0.2.0/24", "rejected"),       # just past it
+    ("126.255.255.255", "192.0.2.0/24", "rejected"),
+    ("127.0.0.1", "127.0.0.0/8", "attempt"),         # a loopback subnet is the attempt's own
+    ("not-an-address", "192.0.2.0/24", "rejected"),
+])
+def test_red_case_the_loopback_exemption_is_exactly_127_slash_8(peer: str, subnet: str, kind: str) -> None:
+    """#460: only a loopback peer is exempt from peer-rejected logging. Any
+    other client outside the attempt subnet is still rejected and logged."""
+    classify = _classify()
+    assert callable(classify)
+    assert classify(peer, ipaddress.ip_network(subnet)) == kind
+
+
+def _start_proxy(source: str, log: Path, subnet: str) -> tuple[subprocess.Popen[bytes], int]:
+    port = _free_port()
+    allow = json.dumps({"hosts": list(eg.ALLOWED_HOSTS)})
+    proc = subprocess.Popen([sys.executable, "-c", source, str(port), str(log), allow, "sha256:t", subnet])
+    return proc, port
+
+
+def _wait_listening(port: int, host: str = "127.0.0.1") -> None:
+    for _ in range(200):
+        try:
+            socket.create_connection((host, port), timeout=0.2).close()
+            return
+        except OSError:
+            time.sleep(0.05)
+    raise AssertionError("setup: the proxy never listened")
+
+
+def _non_loopback_address() -> str | None:
+    """This host's own non-loopback IPv4, found without sending a packet."""
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+        try:
+            probe.connect(("192.0.2.1", 9))
+        except OSError:
+            return None
+        address = str(probe.getsockname()[0])
+    return None if ipaddress.ip_address(address).is_loopback else address
+
+
+def test_a_loopback_probe_from_outside_the_subnet_is_answered_and_not_logged(tmp_path: Path) -> None:
+    """#460: the backend's readiness probe connects from loopback, inside the
+    proxy's container. It must leave no log line, or every attempt would carry
+    a peer-rejected record."""
+    log = tmp_path / "proxy.log"
+    proc, port = _start_proxy(eg.PROXY_SOURCE, log, "192.0.2.0/24")
+    try:
+        _wait_listening(port)
+        done = subprocess.run([sys.executable, "-c", eg.READY_SOURCE, str(port)], capture_output=True, check=False,
+                              timeout=10)
+        assert done.returncode == 0, done.stderr
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)
+    summary = eg.summarize_log(log.read_bytes())
+    assert summary["peer_rejected"] == 0 and summary["allowed"] == {} and summary["denied"] == {}
+    assert [json.loads(line)["event"] for line in log.read_text().splitlines()] == ["start"]
+
+
 def test_a_client_from_outside_the_attempt_subnet_is_refused_and_logged_apart(tmp_path: Path) -> None:
     """Counter-model review: the proxy sits on the shared bridge too, so a
-    neighbouring container could reach it. A peer outside the attempt
-    network's subnet is refused before any request is read, and logged as a
-    rejected peer - never counted as this attempt's allowed or denied traffic."""
-    port, log = _free_port(), tmp_path / "proxy.log"
-    allow = json.dumps({"hosts": list(eg.ALLOWED_HOSTS)})
-    proc = subprocess.Popen([sys.executable, "-c", eg.PROXY_SOURCE, str(port), str(log), allow, "sha256:t",
-                             "192.0.2.0/24"])
+    neighbouring container could reach it. A NON-loopback peer outside the
+    attempt network's subnet is refused before any request is read, and logged
+    as a rejected peer - never counted as this attempt's allowed or denied
+    traffic. (#460: a loopback peer is the readiness probe and is exempt.)"""
+    address = _non_loopback_address()
+    if address is None:
+        pytest.skip("this host has no non-loopback IPv4 address to connect from; the classification itself "
+                    "is pinned by test_red_case_the_loopback_exemption_is_exactly_127_slash_8")
+    log = tmp_path / "proxy.log"
+    proc, port = _start_proxy(eg.PROXY_SOURCE, log, "192.0.2.0/24")
     try:
-        for _ in range(100):
-            try:
-                socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
-                break
-            except OSError:
-                time.sleep(0.05)
+        _wait_listening(port)
         # Closed unread: an empty read, or a reset for the unread request -
         # either way no answer, and never a 200 tunnel.
         try:
-            answer = _connect(port, "chatgpt.com:443")
+            with socket.create_connection((address, port), timeout=5) as s:
+                s.sendall(b"CONNECT chatgpt.com:443 HTTP/1.1\r\nHost: chatgpt.com:443\r\n\r\n")
+                answer = s.recv(200)
         except ConnectionResetError:
             answer = b""
         assert answer == b"", "a neighbour must get no answer at all"
@@ -547,6 +621,90 @@ def test_a_client_from_outside_the_attempt_subnet_is_refused_and_logged_apart(tm
     assert summary["allowed"] == {} and summary["denied"] == {}
     rejected = summary["peer_rejected"]
     assert isinstance(rejected, int) and rejected >= 1
+
+
+def test_red_case_the_start_line_is_written_only_once_the_proxy_listens(tmp_path: Path) -> None:
+    """#460: a proxy slow to bind must not log "start" before it can accept,
+    or the start line would claim a readiness the port does not have."""
+    anchor = "\n    asyncio.run(serve())\n"
+    assert eg.PROXY_SOURCE.count(anchor) == 1
+    slow = eg.PROXY_SOURCE.replace(anchor, "\n    time.sleep(2)\n    asyncio.run(serve())\n")
+    log = tmp_path / "proxy.log"
+    proc, port = _start_proxy(slow, log, "192.0.2.0/24")
+    try:
+        time.sleep(0.8)
+        with pytest.raises(OSError):
+            socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
+        assert "start" not in (log.read_text() if log.exists() else ""), "start logged before the bind"
+        _wait_listening(port)
+        assert json.loads(log.read_text().splitlines()[0])["event"] == "start"
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)
+
+
+def test_prepare_waits_for_the_proxy_to_accept_connections(base: Path, docker_state: Path) -> None:
+    backend = _egress_backend(base, docker_state)
+    handle = backend.prepare("a-ready")
+    try:
+        assert int((docker_state / ".proxy-ready-probes").read_text()) >= 1
+    finally:
+        backend.destroy(handle)
+
+
+def test_red_case_a_proxy_that_never_listens_refuses_the_attempt_and_leaves_nothing(
+    base: Path, docker_state: Path,
+) -> None:
+    docker_state.mkdir(parents=True, exist_ok=True)
+    (docker_state / ".proxy-never-ready").write_text("")
+    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state),
+                              daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT, egress=True, egress_ready_seconds=0.5)
+    with pytest.raises(BackendUnavailable, match=r"did not accept connections within 0\.5s .*Errno 111"):
+        backend.prepare("a-never-ready")
+    assert int((docker_state / ".proxy-ready-probes").read_text()) >= 2  # it polled, not one shot
+    leftovers = list((docker_state / "networks").glob("*.json")) if (docker_state / "networks").is_dir() else []
+    assert leftovers == []
+    assert not any(p.name.endswith("-proxy.json") for p in docker_state.glob("*.json"))
+
+
+_LOG_START = json.dumps({"event": "start", "allowlist": {}, "digest": "sha256:t"}) + "\n"
+
+
+@pytest.mark.parametrize("results, log, named, absent", [
+    # the startup race: refused before any CONNECT is logged
+    ({"github.com": {"result": "error", "error": "URLError: <urlopen error [Errno 111] Connection refused>"}},
+     _LOG_START.encode(), ["Errno 111", "start line present", "denied={}"], []),
+    # the only leak path: an origin answered through (or around) the proxy
+    ({"github.com": {"result": "http", "status": 200}},
+     (_LOG_START + json.dumps({"t": 1, "method": "CONNECT", "target": "github.com:443", "decision": "allowed"})
+      + "\n").encode(), ["REACHED an origin, HTTP 200", "allowed={'github.com:443': 1}"], []),
+    # an address in an error is redacted (the file's leak-safety rule)
+    ({"direct": {"result": "error", "error": "OSError: [Errno 101] unreachable 140.82.112.3:443"}},
+     b"", ["Errno 101", "<ipv4>", "start line ABSENT"], ["140.82.112.3"]),
+    ({"provider": {"result": "error", "error": "TimeoutError: timed out"}}, None,
+     ["timed out", "proxy log: unreadable"], []),
+])
+def test_red_case_a_failed_egress_assertion_names_what_was_observed(
+    results: dict[str, dict[str, object]], log: bytes | None, named: list[str], absent: list[str],
+) -> None:
+    """#460: a deny/resolve/isolation failure must say WHICH of a reached
+    origin, a startup race, a timeout or an unreadable log it was - the
+    generic message alone made the evals26 failure unclassifiable."""
+    text = describe_observation(results, log)
+    for fragment in named:
+        assert fragment in text, (fragment, text)
+    for fragment in absent:
+        assert fragment not in text, (fragment, text)
+
+
+def test_the_pilot_bound_egress_identity_is_unchanged() -> None:
+    """#460 boundary (orchestrator): #287's declarations bind this digest, the
+    server-side argv and the network label. Changing any of them would
+    invalidate both pilot approvals."""
+    assert eg.allowlist_digest() == "sha256:d03bacbfc942f772fe5915c324161b8434aa188e934e3bc6a94cb13b1adc9e2b"
+    assert eg.CODEX_SERVER_SIDE_OFF == ("--strict-config", "-c", 'web_search="disabled"', "--disable", "apps",
+                                        "--disable", "plugins", "--disable", "remote_plugin")
+    assert cc.AGENT_NETWORK_POLICY == "egress:provider-only (#442)"
 
 
 @pytest.mark.parametrize("payload, flagged", [

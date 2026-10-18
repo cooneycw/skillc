@@ -86,9 +86,27 @@ def allowlist_digest(hosts: Sequence[str] = ALLOWED_HOSTS) -> str:
 #: allowlist digest, the attempt network's subnet. A client from outside that
 #: subnet - a neighbouring container on the shared bridge - is refused and
 #: logged as `peer-rejected`, never counted as this attempt's traffic.
+#: The one exception is a loopback peer outside that subnet: the backend's
+#: readiness probe (#460), closed unlogged - only a process inside the proxy
+#: container can be one. The start line is written only once the port is bound.
 #: `decide()` is the whole policy and is exercised in-process by the tests.
 PROXY_SOURCE = r'''
 import asyncio, ipaddress, json, sys, time
+
+LOOPBACK = ipaddress.ip_network("127.0.0.0/8")
+
+def classify_peer(peer, peers):
+    """'attempt' inside the attempt subnet; 'probe' for any other loopback
+    peer - the backend's readiness probe (#460), and only a process inside
+    this container can be one - closed unlogged; 'rejected' for everything
+    else, logged as peer-rejected. The exemption is exactly 127.0.0.0/8."""
+    try:
+        address = ipaddress.ip_address(peer)
+    except ValueError:
+        return "rejected"
+    if address in peers:
+        return "attempt"
+    return "probe" if address in LOOPBACK else "rejected"
 
 def decide(target, hosts):
     """CONNECT host:443 for an exactly-listed host; everything else refused."""
@@ -118,7 +136,6 @@ def main():
     peers = ipaddress.ip_network(sys.argv[5])
     hosts = frozenset(h.lower() for h in allow["hosts"])
     log = open(log_path, "a", buffering=1)
-    log.write(json.dumps({"event": "start", "allowlist": allow, "digest": sys.argv[4]}) + "\n")
 
     def record(method, target, decision):
         log.write(json.dumps({"t": round(time.time(), 3), "method": method, "target": target,
@@ -126,11 +143,12 @@ def main():
 
     async def handle(cr, cw):
         peer = (cw.get_extra_info("peername") or ("",))[0]
-        try:
-            from_attempt = ipaddress.ip_address(peer) in peers
-        except ValueError:
-            from_attempt = False
-        if not from_attempt:
+        kind = classify_peer(peer, peers)
+        if kind == "probe":
+            # The accept alone answers it; not this attempt's traffic, not logged.
+            cw.close()
+            return
+        if kind == "rejected":
             record("-", "peer:" + str(peer), "peer-rejected")
             cw.close()
             return
@@ -162,6 +180,8 @@ def main():
 
     async def serve():
         server = await asyncio.start_server(handle, "0.0.0.0", port)
+        # Written only once bound (#460): the start line means "listening".
+        log.write(json.dumps({"event": "start", "allowlist": allow, "digest": sys.argv[4]}) + "\n")
         async with server:
             await server.serve_forever()
 
@@ -170,6 +190,15 @@ def main():
 if __name__ == "__main__":
     main()
 '''
+
+
+#: #460: run INSIDE the proxy container (`docker exec`), so the only peer the
+#: proxy sees is loopback - closed unlogged (`LOOPBACK` above). Exit 0 means the
+#: proxy accepts connections. argv: port.
+READY_SOURCE = (
+    "import socket, sys\n"
+    "socket.create_connection(('127.0.0.1', int(sys.argv[1])), timeout=2).close()\n"
+)
 
 
 def network_name(container_name: str) -> str:
@@ -236,6 +265,11 @@ def agent_proxy_env(proxy_ip: str) -> dict[str, str]:
     env["NO_PROXY"] = ""
     env["no_proxy"] = ""
     return env
+
+
+def proxy_ready_argv(docker_bin: Sequence[str], container: str) -> list[str]:
+    """#460: one readiness probe - exit 0 once the proxy accepts connections."""
+    return [*docker_bin, "exec", container, "python3", "-c", READY_SOURCE, str(PROXY_PORT)]
 
 
 def proxy_log_argv(docker_bin: Sequence[str], container: str) -> list[str]:

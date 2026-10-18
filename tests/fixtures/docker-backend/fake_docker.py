@@ -726,6 +726,18 @@ def cmd_exec(state_dir: Path, rest: list[str]) -> int:
         capable = _supervisor_capable(state_dir, name) and _supervisor_running(state_dir, name)
         return 0 if capable else 1
 
+    # #460's readiness probe against an egress proxy (`egress.READY_SOURCE`).
+    # Ready at once, unless `.proxy-never-ready` exists; each probe is counted
+    # in `.proxy-ready-probes` so a test can see the wait actually ran.
+    if len(exec_argv) >= 3 and exec_argv[:2] == ["python3", "-c"] and "socket.create_connection" in exec_argv[2] \
+            and data.get("labels", {}).get("skillc.role") == "egress-proxy":
+        probes = state_dir / ".proxy-ready-probes"
+        probes.write_text(str(int(probes.read_text() or "0") + 1 if probes.exists() else 1), encoding="utf-8")
+        if (state_dir / ".proxy-never-ready").exists():
+            print("ConnectionRefusedError: [Errno 111] Connection refused", file=sys.stderr)
+            return 1
+        return 0
+
     # A "wrapped" exec (docker_backend.py prefixed the subject argv with
     # SKILLC_WRAP_PATH because the probe above said yes): simulate
     # skillc-wrap registering the subject's pgid with the supervisor, then
