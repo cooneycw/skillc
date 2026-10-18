@@ -354,3 +354,35 @@ def test_the_command_routes_a_fixture_manifest_to_the_fixture_harness(tmp_path: 
     code = cli.main(["level3-campaign", "--manifest", str(path), "--runtime-supply-receipt", str(tmp_path / "r.json")])
     assert code == 2
     assert "the fixture-campaign actor or fake client changed" in capsys.readouterr().err
+
+
+# --- counter-model review, PR 3 pass 1 ---------------------------------------------
+
+@pytest.mark.parametrize("runtime", [{}, "drop-one"])
+def test_an_empty_or_partial_runtime_identity_is_refused(tmp_path: Path, runtime: Any) -> None:
+    """An empty runtime block made check_frozen compare nothing."""
+    data = json.loads(MANIFEST.read_text())
+    data["frozen"]["runtime"] = {} if runtime == {} else dict(list(data["frozen"]["runtime"].items())[1:])
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(data))
+    with pytest.raises(fc.CampaignRefused, match="frozen.runtime"):
+        fc.load_manifest(path)
+
+
+def test_an_observation_only_selection_certifies_nothing(tmp_path: Path, capsys: Any) -> None:
+    """`--rows <observed>` used to read 0/0 matched and exit 0."""
+    from skillc import cli
+    manifest = fc.load_manifest(MANIFEST)
+    observed = [r for r in manifest.rows if r.kind == "observed"]
+    assert fc.certifying_selection(observed) and fc.certifying_selection(list(manifest.rows)) is None
+    code = cli.main(["level3-campaign", "--manifest", str(MANIFEST), "--rows", observed[0].id,
+                     "--runtime-supply-receipt", str(tmp_path / "r.json")])
+    assert code == 2 and "certifies nothing" in capsys.readouterr().err
+
+
+def test_an_unreadable_scored_row_fails_the_run_even_when_it_matched() -> None:
+    """The pack trigger used to leave the exit code at success."""
+    matched = [_result("t1", "scored", "twin", "MATCH")]
+    assert fc.succeeded(fc.report(matched, experiment_id="e", image_digest="i", treatment_digest="t"))
+    unreadable = [_result("t1", "scored", "twin", "MATCH", unreadable="remote: not loose")]
+    assert not fc.succeeded(fc.report(unreadable, experiment_id="e", image_digest="i", treatment_digest="t"))

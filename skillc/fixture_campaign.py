@@ -67,6 +67,8 @@ SCHEMA = 1
 TASK = "flow-auto-necessity"
 ROW_KINDS = frozenset({"scored", "guard", "observed"})
 GUARD_MODES = frozenset({"top-level", "nested", "suspected", "none"})
+#: The runtime-policy identity a manifest freezes, every key of it.
+RUNTIME_KEYS = frozenset({"runtime_id", "subject_revision", "pyproject_sha256", "lock_sha256"})
 HOME_DIR = ".skillc-fixture-campaign"
 TRANSCRIPT_RELPATH = ".codex/sessions/2026/01/01/rollout-skillc-fixture-campaign.jsonl"
 GIT_DIR = "/work/.remote/widget.git"
@@ -244,6 +246,10 @@ def load_manifest(path: Path) -> Manifest:
     for key in ("subject", "client", "caps", "task", "runtime"):
         _need(frozen.get(key), dict, f"frozen.{key}")
     _need(frozen.get("harness_digest"), str, "frozen.harness_digest")
+    if set(frozen["runtime"]) != RUNTIME_KEYS:
+        # An empty or partial runtime block would make check_frozen compare
+        # nothing and report no problem (counter-model review, PR 3 pass 1).
+        raise CampaignRefused(f"frozen.runtime must name exactly {sorted(RUNTIME_KEYS)}")
     rows: list[Row] = []
     seen: set[str] = set()
     for raw in _need(data.get("rows"), list, "rows"):
@@ -555,6 +561,21 @@ def _gate_runs(experiment: trial.Experiment, outcome: Mapping[str, Any]) -> list
         runs.append({"exit_code": code, "reason": run.get("reason"),
                      "verdict_by_exit_code": GATE_EXIT_VERDICTS.get(code) if isinstance(code, int) else None})
     return runs
+
+
+def certifying_selection(rows: Sequence[Row]) -> str | None:
+    """Why `rows` cannot certify anything, or None. Observed rows are never
+    scored, so a selection of only those would read 0/0 as success
+    (counter-model review, PR 3 pass 1)."""
+    if not any(r.kind in ("scored", "guard") for r in rows):
+        return "the selected rows hold no scored or guard row: an observation-only run certifies nothing"
+    return None
+
+
+def succeeded(report: Mapping[str, Any]) -> bool:
+    """The command's verdict: every scored and guard row matched, AND no scored
+    row was unreadable (the pack trigger blocks #434's results)."""
+    return report["matched"] == report["scored_population"] and not report["unreadable"]["scored_rows"]
 
 
 def report(results: Sequence[Mapping[str, Any]], *, experiment_id: str, image_digest: str,

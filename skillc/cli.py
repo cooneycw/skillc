@@ -1946,6 +1946,9 @@ def cmd_level3_campaign(args: argparse.Namespace) -> int:
             print(f"skillc: --rows names rows the manifest does not declare: {unknown}", file=sys.stderr)
             return 2
         rows = [r for r in rows if r.id in wanted]
+    if fixture and (why := fc.certifying_selection(rows)):
+        print(f"skillc: {why}", file=sys.stderr)
+        return 2
     git = ["git", "-C", str(cr.ROOT)]
     try:
         dirty = subprocess.run([*git, "status", "--porcelain"], capture_output=True, text=True, check=False)
@@ -2016,6 +2019,11 @@ def cmd_level3_campaign(args: argparse.Namespace) -> int:
     # An observed row (#434) never counts toward MATCH or MISMATCH.
     population = report["scored_population"] if fixture else report["population"]
     print(f"skillc: {report['matched']}/{population} rows matched; report: {report_path}", file=sys.stderr)
+    if fixture:
+        if report["unreadable"]["scored_rows"]:
+            print(f"skillc: BLOCKED - scored row(s) {report['unreadable']['scored_rows']} were unreadable: "
+                  f"{report['unreadable']['trigger']}", file=sys.stderr)
+        return 0 if fc.succeeded(report) else 1
     return 0 if report["matched"] == population else 1
 
 
