@@ -289,3 +289,221 @@ def test_scrub_removes_the_root_the_home_and_the_user(monkeypatch, tmp_path):
     out = lh.scrub(text)
     assert out == "<root>/.venv/bin/python ~/x /tmp/pytest-of-<user>/pytest-1/t0"
     assert "someuser" not in out
+
+
+# ------------------------------------------------- Hold B: pinning and churn
+
+_FAKE_DOCKER = r'''#!/usr/bin/env python3
+"""A fake docker for the churn tests: `run` leaves a labelled container behind
+(as a killed client can), `ps -aq --filter label=X` lists them, `rm -f` removes."""
+import json, os, sys, time
+state = os.environ["FAKE_DOCKER_STATE"]
+def load():
+    try:
+        return json.load(open(state))
+    except (OSError, ValueError):
+        return {}
+def save(d):
+    tmp = state + f".{os.getpid()}"
+    json.dump(d, open(tmp, "w"))
+    os.replace(tmp, state)
+args = sys.argv[1:]
+d = load()
+if args[0] == "run":
+    label = args[args.index("--label") + 1]
+    d[f"c{os.getpid()}-{time.time_ns()}"] = label
+    save(d)
+    time.sleep(0.2)
+elif args[0] == "ps":
+    want = args[args.index("--filter") + 1].removeprefix("label=")
+    print("\n".join(c for c, label in d.items() if label == want))
+elif args[0] == "rm":
+    for c in args[2:]:
+        d.pop(c, None)
+    save(d)
+'''
+
+
+def _fake_docker(tmp_path: Path, monkeypatch) -> Path:
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    docker = bindir / "docker"
+    docker.write_text(_FAKE_DOCKER.replace("/usr/bin/env python3", sys.executable))
+    docker.chmod(0o755)
+    state = tmp_path / "docker-state.json"
+    state.write_text(json.dumps({"foreign": "skillc.load462=someone-else"}))
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("FAKE_DOCKER_STATE", str(state))
+    return state
+
+
+def test_docker_churn_removes_exactly_its_own_labelled_containers(tmp_path, monkeypatch):
+    state = _fake_docker(tmp_path, monkeypatch)
+    load = lh.Load(0, 0, time.time() + 60, docker=2)
+    try:
+        deadline = time.monotonic() + 20
+        while len(json.loads(state.read_text())) < 3 and time.monotonic() < deadline:
+            time.sleep(0.1)
+        assert any(v == load.cfg["label"] for v in json.loads(state.read_text()).values())
+    finally:
+        load.stop()
+    assert json.loads(state.read_text()) == {"foreign": "skillc.load462=someone-else"}
+
+
+def test_io_churn_writes_inside_its_directory_and_removes_it(tmp_path):
+    load = lh.Load(0, 0, time.time() + 60, io=1)
+    iodir = Path(load.cfg["iodir"])
+    try:
+        deadline = time.monotonic() + 20
+        seen = False
+        while not seen and time.monotonic() < deadline:
+            seen = any(iodir.iterdir()) if iodir.exists() else False
+            time.sleep(0.01)
+        assert seen, "the I/O churner never wrote"
+    finally:
+        load.stop()
+    assert not iodir.exists()
+
+
+def test_the_supervisor_cleans_up_when_its_deadline_passes(tmp_path, monkeypatch):
+    """No stop() call: the supervisor's own backstop must remove the
+    containers and the I/O directory, not only kill its group."""
+    state = _fake_docker(tmp_path, monkeypatch)
+    load = lh.Load(0, 0, time.time() + 2, docker=1, io=1)
+    iodir = Path(load.cfg["iodir"])
+    assert load.proc is not None
+    load.proc.wait(timeout=30)
+    assert json.loads(state.read_text()) == {"foreign": "skillc.load462=someone-else"}
+    assert not iodir.exists()
+    load.proc = None
+
+
+def test_read_cpu_times_sums_only_the_pinned_cores(tmp_path):
+    stat = tmp_path / "stat"
+    stat.write_text(
+        "cpu 99 0 0 99 0 0 0 0\n"
+        "cpu0 10 0 0 90 0 0 0 0\n"
+        "cpu1 50 0 0 40 10 0 0 0\n"
+        "cpu2 100 0 0 0 0 0 0 0\n"
+    )
+    assert lh.read_cpu_times(stat, {0, 1}) == (60, 200)
+    assert lh.parse_cpus("0-1,4") == {0, 1, 4}
+    assert lh.busy_verdict([], 0.9) == (False, 0.0)
+    # Summed, not averaged: 1 of 2 jiffies then 99 of 100 is 100/102 busy.
+    assert lh.busy_verdict([(1, 2), (99, 100)], 0.9) == (True, 100 / 102)
+    assert lh.busy_verdict([(80, 100), (5, 100)], 0.9)[0] is False
+
+
+def _one_core() -> str:
+    return str(max(os.sched_getaffinity(0)))
+
+
+@needs_proc
+def test_a_pinned_core_without_a_spinner_is_invalid(tmp_path):
+    """The pinned control's red: the host-wide runnable count is met (target
+    1), but the pinned core is not busy, so the phase must not count."""
+    rc, record, err = _phase(tmp_path, "--cpu", "0", "--target", "1", "--reps", "1",
+                             "--cpus", _one_core(), "--warmup-seconds", "8")
+    assert rc == 1, err
+    assert record["verdict"] == "INVALID" and record["reps"] == []
+
+
+@needs_proc
+def test_a_pinned_core_with_a_spinner_is_valid(tmp_path):
+    rc, record, err = _phase(tmp_path, "--cpu", "1", "--target", "1", "--reps", "1",
+                             "--cpus", _one_core(), "--warmup-seconds", "15")
+    assert rc == 0, err
+    assert record["verdict"] == "VALID"
+    assert record["pinned_busy_mean"] >= 0.9
+
+
+# ------------------------------------------------- review pass 1 (#462)
+
+def _marker_alive(marker: str, exclude: set[int] = frozenset()) -> list[int]:
+    return [p for p in _reps_alive(marker) if p not in exclude]
+
+
+@needs_proc
+def test_a_sigkilled_harness_does_not_leave_its_running_rep(tmp_path):
+    proc, _pgid = _start_phase(tmp_path)
+    proc.kill()
+    proc.wait(timeout=10)
+    deadline = time.monotonic() + 5
+    while _marker_alive(_rep_marker(tmp_path)) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert _marker_alive(_rep_marker(tmp_path)) == [], "the rep outlived a SIGKILLed harness"
+
+
+@needs_proc
+def test_a_rep_that_exits_leaves_no_descendant_behind(tmp_path):
+    marker = f"desc-462-{tmp_path.name}"
+    child = f'import time; time.sleep(30); "{marker}"'
+    rc, _record, err = _phase(
+        tmp_path, "--cpu", "0", "--target", "1", "--reps", "1", "--warmup-seconds", "10",
+        *_fake_stat(tmp_path, 5),
+        cmd=("sh", "-c", f"({sys.executable} -c '{child}' >/dev/null 2>&1 &); exit 0"),
+    )
+    assert rc == 0, err
+    assert _marker_alive(marker) == [], "a descendant of a finished rep is still running"
+
+
+def test_a_sampler_failure_invalidates_the_phase(tmp_path):
+    opts = _fake_stat(tmp_path, 50)
+    stat = Path(opts[1])
+    rc, record, err = _phase(
+        tmp_path, "--cpu", "0", "--target", "50", "--reps", "1", "--warmup-seconds", "10",
+        *opts,
+        cmd=(sys.executable, "-c", f"import os, time; os.remove({str(stat)!r}); time.sleep(3)"),
+    )
+    assert rc == 1, err
+    assert record["verdict"] == "INVALID"
+    assert "sampler_error" in record
+
+
+@needs_proc
+def test_sleeping_workers_are_not_load(tmp_path):
+    """The attributable control: the same group, the same membership, but the
+    workers sleep. The host-wide count is met (target 1); the load's own CPU
+    time is not, so the phase must not count."""
+    rc, record, err = _phase(tmp_path, "--cpu", "2", "--spin-mode", "sleep", "--target", "1",
+                             "--reps", "1", "--warmup-seconds", "8")
+    assert rc == 1, err
+    assert record["verdict"] == "INVALID"
+
+
+@needs_proc
+def test_busy_workers_are_attributed_their_cpu_time(tmp_path):
+    rc, record, err = _phase(tmp_path, "--cpu", "2", "--target", "1", "--reps", "1",
+                             "--warmup-seconds", "15",
+                             cmd=(sys.executable, "-c", "import time; time.sleep(2)"))
+    assert rc == 0, err
+    assert record["load_cpu_share"] >= lh.MIN_LOAD_CPU_SHARE
+
+
+def test_warm_up_never_outlasts_the_phase_cap(tmp_path):
+    t0 = time.monotonic()
+    rc, record, _ = _phase(tmp_path, "--cpu", "0", "--target", "50", "--reps", "1",
+                           "--max-seconds", "3", "--warmup-seconds", "60",
+                           *_fake_stat(tmp_path, 1))
+    assert rc == 1 and record["verdict"] == "INVALID"
+    assert time.monotonic() - t0 < 20
+
+
+def test_summarize_holds_phases_to_the_load_cap(tmp_path):
+    a = _write_phase(tmp_path / "a.json", 0, lh.PHASE_CAP_SECONDS + 50, "VALID", ["passed"])
+    out = tmp_path / "m.json"
+    lh.main(["summarize", "--member", "m", "--test-id", "t", "--label", "pre",
+             "--out", str(out), a])
+    assert json.loads(out.read_text())["phases_within_cap"] is False
+
+
+def test_summarize_with_nothing_counted_fails_and_claims_nothing(tmp_path):
+    a = _write_phase(tmp_path / "a.json", 0, 100, "INVALID", ["passed"])
+    b = _write_phase(tmp_path / "b.json", 300, 400, "VALID", [])
+    out = tmp_path / "m.json"
+    rc = lh.main(["summarize", "--member", "m", "--test-id", "t", "--label", "pre",
+                  "--out", str(out), a, b])
+    m = json.loads(out.read_text())
+    assert rc != 0, "an empty measured population must not exit 0"
+    assert m["counted_reps"] == 0
+    assert m["meets_2x_nproc"] is False

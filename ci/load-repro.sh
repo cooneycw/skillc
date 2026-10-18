@@ -10,6 +10,14 @@
 # reach its target is INVALID and its reps do not count; after LOAD_MAX_PHASES
 # (default 6) phases the run stops with whatever it counted.
 #
+# Exit 0 only when REPS reps were counted; 3 when none were, 4 when fewer.
+#
+# Optional load modes (all bounded by the same phase cap, pauses and traps):
+#   LOAD_CPUS=0-7          pin the harness, load and reps to these CPUs; CPU
+#                          defaults to 2x their count, and the pinned cores
+#                          must be busy for a phase to count
+#   LOAD_DOCKER_CHURN=N    N loops of labelled `docker run --rm alpine:3 true`
+#   LOAD_IO_CHURN=N        N loops writing 4 MiB with fsync
 # Writes docs/measurements/load-462/MEMBER-<sha12>-LABEL.json via
 # `load_harness.py summarize`. Run ONLY inside a lock-1 hold.
 set -euo pipefail
@@ -21,6 +29,13 @@ fi
 MEMBER=$1 TEST_ID=$2 REPS=$3 LABEL=$4
 shift 4
 NPROC=$(nproc)
+CPUS=${LOAD_CPUS:-}
+if [ -n "$CPUS" ]; then
+    NPROC=$(python3 -c "import sys; n=0
+for part in sys.argv[1].split(','):
+    lo, _, hi = part.partition('-'); n += int(hi or lo) - int(lo) + 1
+print(n)" "$CPUS")
+fi
 CPU=$((2 * NPROC)) CHURN=0
 if [ $# -gt 0 ] && [ "$1" != "--" ]; then CPU=$1; shift; fi
 if [ $# -gt 0 ] && [ "$1" != "--" ]; then CHURN=$1; shift; fi
@@ -66,7 +81,7 @@ print(n)
 EOF
 }
 
-echo "load-repro: $MEMBER $LABEL $TEST_ID reps=$REPS cpu=$CPU churn=$CHURN target=$TARGET sha=$SHA12" >&2
+echo "load-repro: $MEMBER $LABEL $TEST_ID reps=$REPS cpu=$CPU churn=$CHURN target=$TARGET cpus=${CPUS:-all} docker=${LOAD_DOCKER_CHURN:-0} io=${LOAD_IO_CHURN:-0} sha=$SHA12" >&2
 phase_n=0
 while :; do
     have=$(counted)
@@ -78,6 +93,8 @@ while :; do
     fi
     phase_n=$((phase_n + 1))
     "$PY" "$HARNESS" phase --cpu "$CPU" --churn "$CHURN" --target "$TARGET" \
+        ${CPUS:+--cpus "$CPUS"} --docker-churn "${LOAD_DOCKER_CHURN:-0}" \
+        --io-churn "${LOAD_IO_CHURN:-0}" \
         --reps $((REPS - have)) --max-seconds "$PHASE_SECONDS" \
         --out "$WORK/phase-$phase_n.json" -- \
         "$PY" -m pytest -p no:cacheprovider -q "$@" "$TEST_ID" &
@@ -87,6 +104,15 @@ while :; do
 done
 
 mkdir -p "$(dirname "$OUT")"
+rc=0
 "$PY" "$HARNESS" summarize --member "$MEMBER" --test-id "$TEST_ID" --label "$LABEL" \
-    --sha "$SHA12" --out "$OUT" "$WORK"/phase-*.json
+    --sha "$SHA12" --out "$OUT" "$WORK"/phase-*.json || rc=$?
+have=$(counted)
 rm -rf "$WORK"
+# Exit status reports the POPULATION, never the tests' own pass/fail (that is
+# in the file): 3 = nothing counted, 4 = fewer reps counted than requested.
+if [ "$rc" -ne 0 ]; then exit "$rc"; fi
+if [ "$have" -lt "$REPS" ]; then
+    echo "load-repro: INCOMPLETE $have of $REPS reps counted" >&2
+    exit 4
+fi
