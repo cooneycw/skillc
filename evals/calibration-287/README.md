@@ -1,10 +1,10 @@
 # #287 common outcome preparation
 
 This slice prepares an explicitly approved common task-outcome endpoint for the
-improvement study. It neither authorizes a trial nor completes #287. Both pilot
-approvals remain null. Since P3 (below) both declarations are complete and pass
-the runnable declaration contract under a test-only approval; no approval is
-committed.
+improvement study. Since P3 (below) both declarations are complete, and since
+2026-10-18 both carry the **owner's approval** (section "Owner approval"): each
+authorizes one run of its pilot as declared. Approval is not execution; the run
+and its report are #288.
 
 The two declarations are scoped transplants from parked
 `prep-287-pilot-declarations` tip `571d763`. That branch and its history remain
@@ -251,10 +251,10 @@ integration requirement. The merged gate exercise and regression-call controls
 strengthen task grading; they do not supply protected process evidence or
 real-runner certification. Revalidate exact task bytes before study approval.
 
-Still owed: #315 runtime readiness; the actual-path 40-slot deterministic
-rehearsal on kyle19 (P4); the approval package (P5); explicit exact study
-approvals. The runtime identities, receipt and discrimination runner were
-supplied by P2 and P3.
+Historical note (pre-P4): this paragraph once listed the kyle19 rehearsal (P4),
+the approval package (P5) and the study approvals as owed. All three are done:
+P4 on 2026-10-18, P5's FINAL package, and the owner's approval of both pilots
+(2026-10-18). Still owed: the live run and report (#288).
 Consume merged #348 profile forwarding/witness delivery rather than repairing
 that path again. #237's priority ruling and prior #203 approvals do not authorize
 this new study. No paid/model/Docker campaign, held-out tuning, or study verdict
