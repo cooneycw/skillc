@@ -99,3 +99,44 @@ Risks:
 - The reader is a correctness surface; the equivalence instrument against host git on controller-owned fixtures guards it.
 - Packed objects read as UNKNOWN (v1 bound, with the trigger recorded).
 - The index format has edge cases (extensions, v3 extended flags). Unknown extensions are skipped by signature, as git does; a malformed index is UNKNOWN.
+
+<!-- flow-run n=3 id=7423168599a34b1e92d3cd094bd32969 -->
+## Run 3
+
+- Run-id:            7423168599a34b1e92d3cd094bd32969
+- Run-start:         aea514dcbe63e492b4518a1c7f6cc4daf2aa64d5
+- Issue:             #434
+- Base SHA:          612ad8a (PR 2a merged as #453)
+- Necessity verdict: Still needed
+- Approval:          granted
+- Approver:          skillc-400 (orchestrator, owner-delegated)
+- Recorded at:       2026-10-18T04:20:00Z
+- Recorded late:     this run's record was written after implementation began. Run-start above is that later HEAD; the run's base is 612ad8a. The plan and each D3 ruling below were given before the code that depends on them (plan: approved with the 2a/2b split; D3 rulings 1 and 2, the eligibility reading, and the receipt correction (a), all by skillc-400 during the run).
+
+### Section B evidence
+- PR 2a merged as 612ad8a (#453): the post-stop reader exists. Still missing on main: an in-attempt GitRemote; a dispatch shared by the witness and the service on the one socket (agent_trial.py refused a second trigger callback); verify accepted only the witness as trusted; no gh in the image; no flow-auto profile.
+- D3 launch path measured (skillc-trial:latest, offline, uid 10001, codex-cli 0.157.1): the agent's codex IS /usr/local/bin/codex via PATH (skillc-wrap execvp), so a wrapper there would refuse the agent itself.
+- Duplicate or superseding issues: none.
+
+### Section C - the approved plan
+PR 2b of #434: the wiring. The plan as approved (file list from the PR 2 plan, D3 per its rulings).
+
+1. `skillc/exec_git_remote.py` - ExecGitRemote: the service's git inside the attempt via exec_in_attempt, as the candidate, confine_root /work, a fixed env -i environment, hooks and fsmonitor off. Refused: no witness_io, a stopped attempt, incomplete output.
+2. `skillc/fixture_service.py` - `finalize(remote=...)` so the post-stop check reads a SnapshotGitRemote; a read-only FinalizeRemote protocol.
+3. `skillc/fixture_attempt.py` - AttemptFixture and FixtureSession: routes on the one socket, bind (overlays, service) before the agent, finish (export, snapshot, finalize, capture) after the stop, trusted extras.
+4. `skillc/agent_trial.py` - `run_one_attempt(fixture=...)`: dispatch composition, the witness's gate map and shim from the fixture, the credit gate (fixture failure, missing record, nested-codex count), trusted_extras to verify; a widened egress allowlist refused.
+5. `skillc/verify.py` - `trusted_extras` beside a gate witness; a colliding key, or extras without a witness, refused.
+6. `skillc/fixture_overlay.py` - the gh shim at /usr/local/bin/gh and the codex guard at /usr/local/sbin/codex (ruling A), root-owned and verified: not pre-planted, bytes read back, file and directory candidate-unwritable, first on the measured PATH.
+7. `docker/fixture-service/flow-auto-gate-shim.py` - the bare `flow-finish-gate.sh` call maps to gate `flow-auto-finish`; anything else exits 125. docker/trial untouched.
+8. D3 (ruling 1, option 2; ruling 2, B with the nested-suspected count): `docker/fixture-service/skillc-codex-guard.py` (exact ancestor identity, fail-closed ancestry, byte-for-byte pass-through) and `skillc/codex_guard.py` (the controller-held record and its credit block). The CPP contract is measured: ruling (a) on the receipt correction.
+9. `evals/subjects/cpp-codex-flow-auto-86641e8/` (profile.json, subject.json, PROFILE.md, evidence/inventory.json) and `tests/fixtures/profile-cpp-codex-flow-auto-86641e8/` (the closure snapshot, with README provenance and the upstream MIT LICENSE); `pyproject.toml` excludes the snapshot from mypy like its siblings.
+10. Egress: #442's defaults, no widening (the fixture attempt refuses a widened allowlist).
+11. Tests: `tests/test_exec_git_remote.py`, `tests/test_codex_guard.py`, `tests/test_codex_guard_live.py`, `tests/test_flow_auto_gate_shim.py`, `tests/test_agent_trial_fixture.py`, `tests/test_cpp_codex_flow_auto_86641e8.py`, and new tests appended to `tests/test_verify.py` (existing tests unmodified).
+12. Docs: `docs/specs/evaluation-facility/fixture-service.md` (Live attempts), `evals/level3/flow-auto-necessity/README.md`, `changelog.d/434-live-wiring.md`.
+
+Scope: 24 files plus the 119-file snapshot. Large.
+
+Risks:
+- agent_trial and verify are shared hot paths: every existing test must stay green, unmodified.
+- The guard's detection bound: a subject that calls the real binary by path and blocks the socket leaves no record; the count is then unknown, never zero.
+- ExecGitRemote's answers are subject-influenced (#436's bound); grading reads only the post-stop snapshot.
