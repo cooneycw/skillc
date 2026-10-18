@@ -1,0 +1,16 @@
+# skillc#282's known-gap configuration: ONE health endpoint and nothing that
+# names the served release - the shape #280's fixture and most projects use.
+# Under it CPP's verify cannot tell a deploy whose restart never happened from
+# a good one (claude-power-pack#1479). The live test asserts this is still
+# health-only before it reads anything into the verdict.
+health:
+  endpoints:
+    - url: http://127.0.0.1:18080/health
+      name: service health
+      expected_status: 200
+      expected_body: '"status": "ok"'
+      timeout: 5
+  deploy_verification:
+    enabled: true
+    baseline_file: .claude/deploy-baseline.json
+    on_latency_regression: ignore

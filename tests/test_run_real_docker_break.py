@@ -59,7 +59,15 @@ def _run_runner(*args: str) -> subprocess.CompletedProcess[str]:
 def test_none_resolves_to_none_for_all_families() -> None:
     result = _resolve("none")
     assert result.returncode == 0
-    assert result.stdout.splitlines() == ["none", "none", "none", "none", "none", "none", "none", "none", "none", "none"]
+    assert result.stdout.splitlines() == ["none"] * 11
+
+
+@pytest.mark.parametrize("mode", ["regression-unprobed", "baseline-after-deploy", "restart-skipped"])
+def test_namespaced_cicdverify_modes_set_only_the_cicdverify_value(mode: str) -> None:
+    """#282: the eleventh line is SKILLC_CICD_DEPLOY_VERIFY_LIVE_BREAK's value."""
+    result = _resolve(f"cicdverify:{mode}")
+    assert result.returncode == 0
+    assert result.stdout.splitlines() == [f"cicdverify:{mode}", *["none"] * 9, mode]
 
 
 @pytest.mark.parametrize("mode", ["omit-mount", "wrong-uid", "flip-decision"])
@@ -67,7 +75,7 @@ def test_namespaced_channel_modes_set_only_the_channel_value(mode: str) -> None:
     result = _resolve(f"channel:{mode}")
     assert result.returncode == 0
     assert result.stdout.splitlines() == [
-        f"channel:{mode}", mode, "none", "none", "none", "none", "none", "none", "none", "none",
+        f"channel:{mode}", mode, "none", "none", "none", "none", "none", "none", "none", "none", "none",
     ]
 
 
@@ -76,7 +84,7 @@ def test_namespaced_witness_modes_set_only_the_witness_value(mode: str) -> None:
     result = _resolve(f"witness:{mode}")
     assert result.returncode == 0
     assert result.stdout.splitlines() == [
-        f"witness:{mode}", "none", mode, "none", "none", "none", "none", "none", "none", "none",
+        f"witness:{mode}", "none", mode, "none", "none", "none", "none", "none", "none", "none", "none",
     ]
 
 
@@ -87,7 +95,7 @@ def test_namespaced_gateshim_modes_set_only_the_gateshim_value(mode: str) -> Non
     result = _resolve(f"gateshim:{mode}")
     assert result.returncode == 0
     assert result.stdout.splitlines() == [
-        f"gateshim:{mode}", "none", "none", mode, "none", "none", "none", "none", "none", "none",
+        f"gateshim:{mode}", "none", "none", mode, "none", "none", "none", "none", "none", "none", "none",
     ]
 
 
@@ -96,7 +104,7 @@ def test_namespaced_coldinstall_modes_set_only_the_coldinstall_value(mode: str) 
     result = _resolve(f"coldinstall:{mode}")
     assert result.returncode == 0
     assert result.stdout.splitlines() == [
-        f"coldinstall:{mode}", "none", "none", "none", mode, "none", "none", "none", "none", "none",
+        f"coldinstall:{mode}", "none", "none", "none", mode, "none", "none", "none", "none", "none", "none",
     ]
 
 
@@ -105,7 +113,7 @@ def test_namespaced_trialimage_modes_set_only_the_trialimage_value(mode: str) ->
     result = _resolve(f"trialimage:{mode}")
     assert result.returncode == 0
     assert result.stdout.splitlines() == [
-        f"trialimage:{mode}", "none", "none", "none", "none", mode, "none", "none", "none", "none",
+        f"trialimage:{mode}", "none", "none", "none", "none", mode, "none", "none", "none", "none", "none",
     ]
 
 
@@ -117,7 +125,7 @@ def test_namespaced_closure_modes_set_only_the_closure_value(mode: str) -> None:
     result = _resolve(f"closure:{mode}")
     assert result.returncode == 0
     assert result.stdout.splitlines() == [
-        f"closure:{mode}", "none", "none", "none", "none", "none", mode, "none", "none", "none",
+        f"closure:{mode}", "none", "none", "none", "none", "none", mode, "none", "none", "none", "none",
     ]
 
 
@@ -127,7 +135,7 @@ def test_namespaced_cwd_modes_set_only_the_cwd_value(mode: str) -> None:
     result = _resolve(f"cwd:{mode}")
     assert result.returncode == 0
     assert result.stdout.splitlines() == [
-        f"cwd:{mode}", "none", "none", "none", "none", "none", "none", mode, "none", "none",
+        f"cwd:{mode}", "none", "none", "none", "none", "none", "none", mode, "none", "none", "none",
     ]
 
 
@@ -137,7 +145,7 @@ def test_namespaced_egress_modes_set_only_the_egress_value(mode: str) -> None:
     result = _resolve(f"egress:{mode}")
     assert result.returncode == 0
     assert result.stdout.splitlines() == [
-        f"egress:{mode}", "none", "none", "none", "none", "none", "none", "none", mode, "none",
+        f"egress:{mode}", "none", "none", "none", "none", "none", "none", "none", mode, "none", "none",
     ]
 
 
@@ -163,7 +171,7 @@ def test_namespaced_cicdprofile_modes_set_only_the_cicdprofile_value(mode: str) 
     result = _resolve(f"cicdprofile:{mode}")
     assert result.returncode == 0
     assert result.stdout.splitlines() == [
-        f"cicdprofile:{mode}", "none", "none", "none", "none", "none", "none", "none", "none", mode,
+        f"cicdprofile:{mode}", "none", "none", "none", "none", "none", "none", "none", "none", mode, "none",
     ]
 
 
@@ -178,7 +186,7 @@ def test_bare_legacy_channel_modes_are_still_accepted_and_normalized(mode: str) 
     result = _resolve(mode)
     assert result.returncode == 0
     assert result.stdout.splitlines() == [
-        f"channel:{mode}", mode, "none", "none", "none", "none", "none", "none", "none", "none",
+        f"channel:{mode}", mode, "none", "none", "none", "none", "none", "none", "none", "none", "none",
     ]
 
 
@@ -289,6 +297,20 @@ def test_an_unknown_mode_in_the_cicdprofile_family_is_refused() -> None:
     assert "unknown cicdprofile break mode 'bogus'" in result.stderr
 
 
+def test_a_bare_cicdverify_mode_is_refused_not_silently_accepted() -> None:
+    """#282: no bare form, so a bare spelling is a channel-mode refusal."""
+    result = _resolve("restart-skipped")
+    assert result.returncode == 2
+    assert "unknown channel break mode 'restart-skipped'" in result.stderr
+    assert result.stdout == ""
+
+
+def test_an_unknown_mode_in_the_cicdverify_family_is_refused() -> None:
+    result = _resolve("cicdverify:bogus")
+    assert result.returncode == 2
+    assert "unknown cicdverify break mode 'bogus'" in result.stderr
+
+
 def test_an_unknown_family_is_refused() -> None:
     result = _resolve("bogus:foo")
     assert result.returncode == 2
@@ -377,6 +399,9 @@ def test_none_resolves_to_the_certifying_context() -> None:
         "cicdprofile:service-down",
         "cicdprofile:no-probes",
         "cicdprofile:broken-build",
+        "cicdverify:regression-unprobed",
+        "cicdverify:baseline-after-deploy",
+        "cicdverify:restart-skipped",
     ],
 )
 def test_every_break_mode_resolves_to_the_control_context_never_the_certifying_one(normalized_spec: str) -> None:
@@ -467,3 +492,4 @@ def test_the_real_runner_always_sets_all_seven_break_variables_explicitly() -> N
     assert 'SKILLC_CWD_CONFINEMENT_LIVE_BREAK="$CWD_BREAK_VALUE"' in text
     assert 'SKILLC_EGRESS_LIVE_BREAK="$EGRESS_BREAK_VALUE"' in text
     assert 'SKILLC_CICD_PROFILE_LIVE_BREAK="$CICDPROFILE_BREAK_VALUE"' in text
+    assert 'SKILLC_CICD_DEPLOY_VERIFY_LIVE_BREAK="$CICDVERIFY_BREAK_VALUE"' in text

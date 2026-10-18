@@ -122,14 +122,14 @@ but #315 and the real campaign remain pending.
    - **Record both outcomes on this issue**, generically (no addresses) -
      this is the committed evidence that the detector actually detects
      something, on this specific host, not only in the unit tests.
-8. **#183/#269/#332/#266/#343/#334/#338/#442/#280 break-mode verification (R2):** `--break` takes
+8. **#183/#269/#332/#266/#343/#334/#338/#442/#280/#282 break-mode verification (R2):** `--break` takes
    `none` or `<family>:<mode>`, resolved from a closed table in
    `break-lib.sh` - an unknown family or mode is refused with exit 2
    before any checkout or docker operation. The three bare `channel`
    spellings below (no `channel:` prefix) also still work, kept for
    compatibility with runs recorded before family prefixes existed (#315
    follow-up); a bare `witness`, `gateshim`, `coldinstall`, `trialimage`,
-   `closure`, `cwd`, `egress` or `cicdprofile` mode has no such form and is refused.
+   `closure`, `cwd`, `egress`, `cicdprofile` or `cicdverify` mode has no such form and is refused.
    ```
    run-real-docker <reviewed-tested-sha> --break none                           # expect SUCCESS
    run-real-docker <reviewed-tested-sha> --break channel:omit-mount             # expect FAILURE
@@ -163,6 +163,9 @@ but #315 and the real campaign remain pending.
    run-real-docker <reviewed-tested-sha> --break cicdprofile:service-down     # expect FAILURE
    run-real-docker <reviewed-tested-sha> --break cicdprofile:no-probes        # expect FAILURE
    run-real-docker <reviewed-tested-sha> --break cicdprofile:broken-build     # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break cicdverify:regression-unprobed   # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break cicdverify:baseline-after-deploy # expect FAILURE
+   run-real-docker <reviewed-tested-sha> --break cicdverify:restart-skipped       # expect FAILURE
    ```
 
    The `egress` controls (#442) run `tests/test_agent_egress_live.py` from
