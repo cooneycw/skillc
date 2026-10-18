@@ -111,7 +111,14 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from . import trial
-from .backend import BackendUnavailable, Confirmation, ExecuteResult, ExecutionBackend, Limits
+from .backend import (
+    BackendUnavailable,
+    Confirmation,
+    ExecuteResult,
+    ExecutionBackend,
+    Limits,
+    TurnCapableBackend,
+)
 
 #: The key `surface` carries the per-attempt liveness nonce under, passed to
 #: `install()`. Never sent in the prompt or any other input the subject reads
@@ -232,35 +239,45 @@ def _ensure_spool_files(experiment: trial.Experiment, attempt_id: str) -> None:
             path.touch(mode=trial.FILE_MODE)
 
 
-def _further_turns(
-    backend: ExecutionBackend, handle: object, experiment: trial.Experiment, attempt_id: str, limits: Limits,
-    cancel: Callable[[], bool] | None,
-    next_turn: Callable[[ExecutionBackend, object, int, ExecuteResult], Sequence[str] | None] | None,
-    result: ExecuteResult, started_at: float,
+def _run_turns(
+    backend: ExecutionBackend, handle: object, experiment: trial.Experiment, attempt_id: str, argv: Sequence[str],
+    limits: Limits, cancel: Callable[[], bool] | None,
+    next_turn: Callable[[ExecutionBackend, object, int, ExecuteResult], Sequence[str] | None],
 ) -> ExecuteResult:
-    """#279: controller-delivered turns, each a further exec in the SAME
-    still-running container. A turn is asked for only after the previous one
-    EXITED with code 0; `next_turn` returns its argv, or `None` for no more.
-    Every turn shares the attempt's one wall budget (`limits.timeout` from the
-    first exec), so turns never extend an attempt. Each delivered turn is a
-    `controller-turn` detail event; the returned result is the last turn's,
-    which the stop record then describes."""
-    turn = 1
-    while next_turn is not None and result.reason == "exited" and result.exit_code == 0:
-        argv = next_turn(backend, handle, turn, result)
-        if argv is None:
-            break
-        remaining = limits.timeout - (time.monotonic() - started_at)
-        if remaining <= 0:
-            experiment.record(attempt_id, "controller-turn", index=turn + 1, delivered=False,
-                              reason="the attempt's wall budget was spent before this turn")
-            break
-        turn += 1
-        experiment.record(attempt_id, "controller-turn", index=turn, delivered=True)
-        result = backend.execute(handle, list(argv), dataclasses.replace(limits, timeout=remaining), cancel)
+    """#279: one attempt as controller-delivered turns, each in the SAME
+    still-running container (`TurnCapableBackend.execute_turn`). A further turn
+    is asked for only after the previous one EXITED with code 0; `next_turn`
+    returns its argv, or `None` for no more. Every turn shares the attempt's
+    one wall budget (`limits.timeout` from the first exec), so turns never
+    extend an attempt. `end_attempt` runs in a `finally`: an exception, or a
+    controller crash between turns, still leaves no kept-running container -
+    `confirm_stopped()` then verifies it as for any attempt. Each delivered
+    turn is a `controller-turn` detail event; the returned result is the last
+    turn's, which the stop record describes."""
+    assert isinstance(backend, TurnCapableBackend)
+    started_at = time.monotonic()
+    try:
+        result = backend.execute_turn(handle, argv, limits, cancel)
         assert isinstance(result, ExecuteResult)
-        experiment.record(attempt_id, "controller-turn", index=turn, ended=result.reason, exit_code=result.exit_code)
-    return result
+        turn = 1
+        while result.reason == "exited" and result.exit_code == 0:
+            nxt = next_turn(backend, handle, turn, result)
+            if nxt is None:
+                break
+            remaining = limits.timeout - (time.monotonic() - started_at)
+            if remaining <= 0:
+                experiment.record(attempt_id, "controller-turn", index=turn + 1, delivered=False,
+                                  reason="the attempt's wall budget was spent before this turn")
+                break
+            turn += 1
+            experiment.record(attempt_id, "controller-turn", index=turn, delivered=True)
+            result = backend.execute_turn(handle, list(nxt), dataclasses.replace(limits, timeout=remaining), cancel)
+            assert isinstance(result, ExecuteResult)
+            experiment.record(attempt_id, "controller-turn", index=turn, ended=result.reason,
+                              exit_code=result.exit_code)
+        return result
+    finally:
+        backend.end_attempt(handle)
 
 
 def run_through_backend(
@@ -433,11 +450,11 @@ def run_through_backend(
 
                 experiment.record(attempt_id, "dispatched")
                 experiment.record(attempt_id, "started")
-                started_at = time.monotonic()
-                result = backend.execute(handle, argv, limits, cancel)
+                if next_turn is None:
+                    result = backend.execute(handle, argv, limits, cancel)
+                else:
+                    result = _run_turns(backend, handle, experiment, attempt_id, argv, limits, cancel, next_turn)
                 assert isinstance(result, ExecuteResult)
-                result = _further_turns(backend, handle, experiment, attempt_id, limits, cancel,
-                                        next_turn, result, started_at)
                 if result.reason != "exited":
                     experiment.record(attempt_id, "stop-requested", reason=result.reason)
 

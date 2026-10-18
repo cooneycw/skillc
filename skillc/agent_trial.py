@@ -108,7 +108,14 @@ from . import egress as eg
 from . import fixture_service as fs
 from . import runtime_supply as rs
 from . import transcript_adapter as ta
-from .backend import BackendUnavailable, Confirmation, ExecuteResult, ExecutionBackend, Limits
+from .backend import (
+    BackendUnavailable,
+    Confirmation,
+    ExecuteResult,
+    ExecutionBackend,
+    Limits,
+    TurnCapableBackend,
+)
 from .decide_reply_channel import ChannelRefusal
 from .docker_backend import (
     CANARY_RESULT_FILENAME,
@@ -2014,6 +2021,8 @@ def run_one_attempt(
     declared_turns = turns.texts if turns is not None else ()
     if declared_turns and client not in ct.CLIENTS:
         raise ct.TurnsRefused(f"controller turns support {list(ct.CLIENTS)} only, not {client!r}")
+    if declared_turns and not isinstance(backend, TurnCapableBackend):
+        raise ct.TurnsRefused(f"{type(backend).__name__} cannot keep an attempt running between turns")
     spec = CLIENT_SPECS[client]
     resolved_workdir = workdir if workdir is not None else PurePosixPath("/work")
     resolved_mcp_servers: Mapping[str, MCPServerSpec] = mcp_servers if mcp_servers is not None else {}

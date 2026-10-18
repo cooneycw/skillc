@@ -7,7 +7,8 @@ way it reads the real one. A RESUME (the last three arguments are `resume <id>
 <text>`) "proceeds past Step 3": it records the turn and appends an assistant
 line to the same transcript, as the real client appends to the same rollout.
 
-Every turn is appended to `<home>/turns-log.jsonl`, which the tests read: the
+Every turn is appended to `--log` (a host path that outlives the container's
+teardown), which the tests read: the
 plan (turn 1, ending at Step 3) and each delivered turn, with the text
 received. A turn whose text is not the approval stops there, as an agent left
 without an approval would.
@@ -58,7 +59,7 @@ def main(argv: list[str]) -> int:
     opts = {own[i]: own[i + 1] for i in range(0, len(own), 2)}
     session_id = opts["--session-id"]
     home = Path(opts["--home"])
-    log = home / "turns-log.jsonl"
+    log = Path(opts["--log"])
 
     def note(entry: dict[str, object]) -> None:
         with log.open("a", encoding="utf-8") as handle:

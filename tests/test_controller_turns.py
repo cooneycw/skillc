@@ -52,7 +52,7 @@ def store(tmp_path: Path) -> Path:
 # ------------------------------------------------------------------ the schema
 
 
-def _turns(by_case: dict[str, list[dict[str, str]]]) -> dict[str, object]:
+def _turns(by_case: dict[str, object]) -> dict[str, object]:
     return {"version": 1, "by_case": by_case}
 
 
@@ -171,7 +171,9 @@ def _attempt(store: Path, base: Path, docker_state: Path, tmp_path: Path, *, tur
     experiment, attempt_id = _planned(store)
     home = _mapped_home(docker_state, attempt_id)
     relpath = ".codex/sessions/2026/01/01/rollout-turns.jsonl"
-    own = ["--session-id", SESSION, "--home", str(home), "--transcript-relpath", relpath, "--header", header,
+    log = tmp_path / f"turns-log-{attempt_id}.jsonl"
+    own = ["--session-id", SESSION, "--home", str(home), "--log", str(log), "--transcript-relpath", relpath,
+           "--header", header,
            "--turn1-sleep", str(turn1_sleep)]
     if turn1_exit is not None:
         own += ["--turn1-exit", str(turn1_exit)]
@@ -182,7 +184,6 @@ def _attempt(store: Path, base: Path, docker_state: Path, tmp_path: Path, *, tur
         prompt="Fix the slug helper.", skill_name="demo-skill", surface={}, limits=Limits(timeout=timeout),
         base=base, credential_explicit_path=_fresh_credential(tmp_path, "codex"), turns=turns,
     )
-    log = home / "turns-log.jsonl"
     entries = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
     return record, entries, experiment, attempt_id
 
@@ -287,3 +288,121 @@ def test_red_case_controller_turns_are_refused_for_a_client_with_no_measured_res
         at.run_one_attempt(backend=backend, experiment=experiment, attempt_id=attempt_id, client="claude",
                            base_argv=["claude", "-p"], prompt="p", skill_name=None, surface={},
                            limits=Limits(timeout=5), base=base, turns=ct.Turns((APPROVAL,)))
+
+
+# ------------------------------ the container lifetime across turns (option A)
+
+
+def _live_handle(base: Path, docker_state: Path, name: str) -> tuple[d.DockerBackend, object]:
+    backend = d.DockerBackend(image="fake-image:1", base_dir=base, docker_bin=_docker_bin(docker_state),
+                              daemon_timeout=FAKE_DOCKER_DAEMON_TIMEOUT)
+    return backend, backend.prepare(name)
+
+
+def _running(docker_state: Path, handle: object) -> bool:
+    assert isinstance(handle, d._Handle)
+    return bool(json.loads((docker_state / f"{handle.name}.json").read_text()).get("status") == "running")
+
+
+def test_a_kept_running_turn_leaves_the_container_up_and_end_attempt_stops_it(base: Path, docker_state: Path) -> None:
+    backend, handle = _live_handle(base, docker_state, "a-keep")
+    try:
+        result = backend.execute_turn(handle, [sys.executable, "-c", "pass"], Limits(timeout=10))
+        assert (result.reason, result.exit_code) == ("exited", 0)
+        assert _running(docker_state, handle), "a kept-running turn must leave the container up"
+        backend.end_attempt(handle)
+        assert backend.confirm_stopped(handle).name == "CONFIRMED"
+    finally:
+        backend.destroy(handle)
+
+
+def test_red_case_plain_execute_still_stops_the_container_after_a_clean_exit(base: Path, docker_state: Path) -> None:
+    """Today's single-turn semantics (#304/#317) are unchanged."""
+    backend, handle = _live_handle(base, docker_state, "a-plain")
+    try:
+        backend.execute(handle, [sys.executable, "-c", "pass"], Limits(timeout=10))
+        assert not _running(docker_state, handle)
+    finally:
+        backend.destroy(handle)
+
+
+def test_red_case_a_kept_running_turn_that_times_out_still_stops_the_container(
+    base: Path, docker_state: Path,
+) -> None:
+    backend, handle = _live_handle(base, docker_state, "a-keep-timeout")
+    try:
+        result = backend.execute_turn(handle, [sys.executable, "-c", "import time; time.sleep(30)"],
+                                      Limits(timeout=1, grace=1))
+        assert result.reason == "timeout"
+        assert not _running(docker_state, handle)
+    finally:
+        backend.destroy(handle)
+
+
+def test_red_case_an_exception_between_turns_still_ends_with_a_confirmed_stop(
+    store: Path, base: Path, docker_state: Path,
+) -> None:
+    """`end_attempt` is in a `finally`: a controller failure after a kept-
+    running turn, before the next, leaves no container running."""
+    from skillc import lifecycle
+
+    experiment, attempt_id = _planned(store)
+    backend, handle = _live_handle(base, docker_state, "a-crash")
+
+    def crash(*_: object) -> None:
+        raise RuntimeError("controller crashed between turns")
+
+    try:
+        with pytest.raises(RuntimeError, match="between turns"):
+            lifecycle._run_turns(backend, handle, experiment, attempt_id, [sys.executable, "-c", "pass"],
+                                 Limits(timeout=10), None, crash)
+        assert not _running(docker_state, handle)
+        assert backend.confirm_stopped(handle).name == "CONFIRMED"
+    finally:
+        backend.destroy(handle)
+
+
+def test_red_case_a_spent_budget_skips_the_turn_and_still_stops(store: Path, base: Path, docker_state: Path) -> None:
+    from skillc import lifecycle
+
+    experiment, attempt_id = _planned(store)
+    backend, handle = _live_handle(base, docker_state, "a-budget")
+    try:
+        result = lifecycle._run_turns(
+            backend, handle, experiment, attempt_id, [sys.executable, "-c", "import time; time.sleep(1.5)"],
+            Limits(timeout=1.2), None, lambda *_: [sys.executable, "-c", "pass"])
+        events = _turn_events(experiment, attempt_id)
+        assert result.reason in ("exited", "timeout")
+        if result.reason == "exited":  # the sleep beat the limit: the turn must be refused for budget
+            assert events and events[0]["delivered"] is False and "budget" in str(events[0]["reason"])
+        assert not _running(docker_state, handle)
+    finally:
+        backend.destroy(handle)
+
+
+def test_red_case_a_declared_but_undelivered_turn_still_ends_with_a_confirmed_stop(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path,
+) -> None:
+    _record, _entries, experiment, attempt_id = _attempt(store, base, docker_state, tmp_path,
+                                                         turns=ct.Turns((APPROVAL,)), header="absent")
+    names = [e.get("event") for e in experiment.events(attempt_id)]
+    assert "stop-confirmed" in names and "stop-unconfirmed" not in names
+
+
+def test_red_case_without_turns_the_attempt_runs_through_plain_execute_once(
+    store: Path, base: Path, docker_state: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Today's single-turn path is byte-identical: one plain `execute()`, no
+    `keep_running`, no `execute_turn`, no `end_attempt`."""
+    calls: list[tuple[str, object]] = []
+    real_execute = d.DockerBackend.execute
+
+    def execute(self: d.DockerBackend, handle: object, argv: object, limits: Limits, cancel: object = None,
+                stdin: object = None, keep_running: bool = False) -> object:
+        calls.append(("execute", keep_running))
+        return real_execute(self, handle, argv, limits, cancel, stdin, keep_running)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(d.DockerBackend, "execute", execute)
+    monkeypatch.setattr(d.DockerBackend, "end_attempt", lambda *_: calls.append(("end_attempt", None)))
+    _attempt(store, base, docker_state, tmp_path, turns=None)
+    assert calls == [("execute", False)]
