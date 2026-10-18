@@ -78,16 +78,23 @@ def read_verify(exit_code: int | None, stdout: str | None) -> VerifyReading:
         # CPP REVIEWs a run with no probes; a PROCEED or ROLLBACK over an empty
         # population contradicts it and is not an observation (#282 review).
         return _unknown(f"verify reported {verdict} over zero probes")
-    snapshot = data.get("snapshot")
-    probes = snapshot.get("probes") if isinstance(snapshot, dict) else None
-    if not isinstance(probes, list) or len(probes) != len(diffs):
-        return _unknown("verify's probe diffs do not match the probes its snapshot ran")
+    ran = _probe_outcomes((data.get("snapshot") or {}).get("probes") if isinstance(data.get("snapshot"), dict)
+                          else None)
+    if ran is None:
+        return _unknown("verify's snapshot does not say which probes ran and how each came out")
     classes: dict[str, str] = {}
     for diff in diffs:
-        if not isinstance(diff, dict) or not all(isinstance(diff.get(k), str)
-                                                 for k in ("kind", "name", "classification")):
+        if (not isinstance(diff, dict) or not all(isinstance(diff.get(k), str) for k in ("kind", "name", "classification"))
+                or not isinstance(diff.get("current_passed"), bool)):
             return _unknown(f"verify reported an unreadable probe diff: {diff!r}")
-        classes[f"{diff['kind']}:{diff['name']}"] = diff["classification"]
+        key = f"{diff['kind']}:{diff['name']}"
+        if key in classes or ran.get(key) is not diff["current_passed"]:
+            # A diff for a probe that did not run, twice, or with another outcome
+            # than the run observed is not evidence (#282 counter-model review).
+            return _unknown(f"verify's diff for {key!r} does not match a probe its snapshot ran")
+        classes[key] = diff["classification"]
+    if set(classes) != set(ran):
+        return _unknown(f"verify ran probes it did not diff: {sorted(set(ran) - set(classes))}")
     has_baseline = data.get("has_baseline")
     reasons = data.get("reasons") or []
     return VerifyReading(
@@ -96,6 +103,23 @@ def read_verify(exit_code: int | None, stdout: str | None) -> VerifyReading:
         classes=classes,
         reasons=tuple(str(r) for r in reasons) if isinstance(reasons, list) else (),
     )
+
+
+def _probe_outcomes(probes: object) -> dict[str, bool] | None:
+    """`<kind>:<name>` -> passed for every probe a snapshot ran, or None when
+    any entry is unreadable or repeated."""
+    if not isinstance(probes, list):
+        return None
+    out: dict[str, bool] = {}
+    for probe in probes:
+        if (not isinstance(probe, dict) or not isinstance(probe.get("kind"), str)
+                or not isinstance(probe.get("name"), str) or not isinstance(probe.get("passed"), bool)):
+            return None
+        key = f"{probe['kind']}:{probe['name']}"
+        if key in out:
+            return None
+        out[key] = probe["passed"]
+    return out
 
 
 @dataclass(frozen=True)

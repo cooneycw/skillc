@@ -25,7 +25,9 @@ fi
 nohup python3 service.py </dev/null >service.log 2>&1 &
 echo $! > service.pid
 for _ in $(seq 100); do
-    if curl -fsS http://127.0.0.1:18080/health >/dev/null 2>&1; then echo "deploy: serving $rel"; exit 0; fi
+    # --max-time: a listener that accepts but never answers must not stall the
+    # poll, so the whole readiness wait stays bounded (100 x 0.6 s).
+    if curl -fsS --max-time 0.5 http://127.0.0.1:18080/health >/dev/null 2>&1; then echo "deploy: serving $rel"; exit 0; fi
     sleep 0.1
 done
 echo "deploy: service never answered" >&2

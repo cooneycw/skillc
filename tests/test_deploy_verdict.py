@@ -11,6 +11,10 @@ import pytest
 
 from skillc import deploy_verdict as dv
 
+_DEFAULT_DIFFS: list[dict[str, object]] = [
+    {"name": "calc answers 5", "kind": "smoke", "classification": "regression",
+     "baseline_passed": True, "current_passed": False, "baseline_ms": 3.0, "current_ms": 3.1, "detail": ""}]
+
 
 def _verify_json(verdict: str, *, diffs: list[dict[str, object]] | None = None,
                  has_baseline: bool = True, reasons: list[str] | None = None) -> str:
@@ -18,11 +22,15 @@ def _verify_json(verdict: str, *, diffs: list[dict[str, object]] | None = None,
     return json.dumps({
         "verdict": verdict, "reasons": reasons or [], "exit_code": 1 if verdict == "rollback" else 0,
         "has_baseline": has_baseline,
-        "diffs": diffs if diffs is not None else [
-            {"name": "calc answers 5", "kind": "smoke", "classification": "regression",
-             "baseline_passed": True, "current_passed": False, "baseline_ms": 3.0, "current_ms": 3.1, "detail": ""}],
-        "snapshot": {"probes": [{}] * (1 if diffs is None else len(diffs))}, "baseline": None,
+        "diffs": diffs if diffs is not None else _DEFAULT_DIFFS,
+        "snapshot": {"probes": _ran(diffs if diffs is not None else _DEFAULT_DIFFS)}, "baseline": None,
     }, indent=2)
+
+
+def _ran(diffs: list[dict[str, object]]) -> list[dict[str, object]]:
+    """The snapshot probes those diffs describe: same identity, same outcome."""
+    return [{"name": d.get("name"), "kind": d.get("kind"), "passed": d.get("current_passed"),
+             "elapsed_ms": 1.0, "detail": ""} for d in diffs]
 
 
 def test_a_rollback_reads_with_its_probe_classes() -> None:
@@ -57,7 +65,7 @@ def test_zero_probes_reviews() -> None:
     (0, _verify_json("rollback"), "contradicts"),               # CPP exits 1 for ROLLBACK
     (1, _verify_json("proceed", diffs=[]), "contradicts"),
     (2, _verify_json("review", diffs=[]), "contradicts"),       # a crash is not a verdict
-    (0, _verify_json("proceed", diffs=[{"name": "x"}]), "unreadable probe diff"),
+    (0, _verify_json("proceed", diffs=[{"name": "x"}]), "does not say which probes ran"),
     # #282 counter-model review: no evidence is not a PROCEED.
     (0, json.dumps({"verdict": "proceed"}), "no probe list"),
     (0, _verify_json("proceed", diffs=[]), "zero probes"),
@@ -66,9 +74,24 @@ def test_zero_probes_reviews() -> None:
     (0, json.dumps({"verdict": "proceed", "diffs": True}), "no probe list"),
     (0, json.dumps({"verdict": "proceed", "diffs": {"a": 1}}), "no probe list"),
     (0, json.dumps({"verdict": "proceed", "diffs": "abc"}), "no probe list"),
-    (0, json.dumps({"verdict": "proceed", "diffs": [_OK_DIFF]}), "do not match"),       # no snapshot
+    (0, json.dumps({"verdict": "proceed", "diffs": [_OK_DIFF]}), "does not say which probes ran"),  # no snapshot
     (0, json.dumps({"verdict": "proceed", "diffs": [_OK_DIFF],
-                    "snapshot": {"probes": [{}, {}]}}), "do not match"),               # 2 ran, 1 diffed
+                    "snapshot": {"probes": [{}, {}]}}), "does not say which probes ran"),
+    # Second review: the diffs must describe probes the snapshot actually ran.
+    (0, json.dumps({"verdict": "proceed", "diffs": [_OK_DIFF], "snapshot": {"probes": [None]}}),
+     "does not say which probes ran"),
+    (0, json.dumps({"verdict": "proceed", "diffs": [_OK_DIFF], "snapshot": {"probes": [
+        {"name": "calc answers 5", "kind": "smoke", "passed": False}]}}), "does not match a probe"),  # unrelated
+    (0, json.dumps({"verdict": "proceed", "diffs": [_OK_DIFF], "snapshot": {"probes": [
+        {"name": "service health", "kind": "health", "passed": False}]}}), "does not match a probe"),  # outcome
+    (0, json.dumps({"verdict": "proceed", "diffs": [_OK_DIFF, _OK_DIFF], "snapshot": {"probes": _ran([_OK_DIFF])}}),
+     "does not match a probe"),                                                       # duplicate diff
+    (0, json.dumps({"verdict": "proceed", "diffs": [_OK_DIFF], "snapshot": {"probes": _ran([_OK_DIFF]) * 2}}),
+     "does not say which probes ran"),                                                # duplicate probe
+    (0, json.dumps({"verdict": "proceed", "diffs": [_OK_DIFF], "snapshot": {"probes": _ran([_OK_DIFF]) + [
+        {"name": "metrics", "kind": "smoke", "passed": True}]}}), "did not diff"),   # ran but not diffed
+    (0, json.dumps({"verdict": "proceed", "diffs": [dict(_OK_DIFF, current_passed=None)],
+                    "snapshot": {"probes": _ran([_OK_DIFF])}}), "unreadable probe diff"),
 ])
 def test_no_established_verdict_is_unknown(code: int | None, stdout: str, why: str) -> None:
     got = dv.read_verify(code, stdout)
