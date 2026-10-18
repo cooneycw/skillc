@@ -384,7 +384,9 @@ sends a second user turn into the same client session (`skillc/controller_turns.
 
 - **Declared per case, never by default.** The turns object is
   `{"version": 1, "by_case": {<case>: [{"text": <literal>}, ...]}}`. It must
-  name every case, with 0 to 3 literal texts each. A case with no turns (CLEAN)
+  name every case, with 0 to 3 literal texts each. No text may start with `-`:
+  the client's argument parser reads options anywhere before `--`, so a text
+  like `--enable=apps` would reopen a channel. A case with no turns (CLEAN)
   never receives one, even after a clean exit: an approval after "No longer
   needed" would push the agent toward implementing. The controller never
   interprets the agent's text. A turn is sent only after the previous one
@@ -395,16 +397,20 @@ sends a second user turn into the same client session (`skillc/controller_turns.
   refused. The resume appends to the same rollout. Every resume argv passes
   #442's server-side preflight before any container exists.
 - **The session id is controller-held.** It comes only from the client's own
-  stderr header (the `session id:` line between the version line and the
-  second separator), never from the agent-writable rollout. Text the agent
-  prints later cannot supply or replace it. With no unambiguous id, there is
-  no further turn.
+  stderr header, never from the agent-writable rollout. The header must be
+  the initial output, with only the client's measured start-up warnings
+  before it. It must hold only the measured `key: value` lines between its
+  two separators, with exactly one `session id:`. Text the agent prints later
+  cannot supply or replace it, and neither can a forged header or an unclosed
+  one. With no unambiguous id, there is no further turn.
 - **One container, one budget.** Each turn is `TurnCapableBackend.execute_turn`.
   A turn that exits leaves the container running for the next. A timeout or
   cancel stops it as before. `end_attempt` runs in a `finally`, so an
   exception between turns still ends in a confirmed stop. All turns share the
   attempt's one wall budget; a turn the budget cannot reach is recorded as
-  undelivered.
+  undelivered. So is a turn after an operator cancel: cancellation is checked
+  before each further turn. A turn counts as delivered only if the resume
+  actually launched; `launch-failed` and `attempt-not-running` are not.
 - **Background processes the agent started in an earlier turn keep running
   between turns**, as they would during one long session. The attempt-level
   stop at the end still confirms the whole container is gone, exactly as for a
