@@ -388,3 +388,16 @@ def test_an_unreadable_scored_row_fails_the_run_even_when_it_matched() -> None:
     assert fc.succeeded(fc.report(matched, experiment_id="e", image_digest="i", treatment_digest="t"))
     unreadable = [_result("t1", "scored", "twin", "MATCH", unreadable="remote: not loose")]
     assert not fc.succeeded(fc.report(unreadable, experiment_id="e", image_digest="i", treatment_digest="t"))
+
+
+def test_the_campaign_kwargs_bind_to_run_one_attempt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`fixture_live.run_attempt` passes `attempt_kwargs(...)` straight to
+    `agent_trial.run_one_attempt(**kwargs)`, and its own test stubs that call, so
+    a key the real function does not accept (e.g. #287 auto6's `gate_witness`)
+    would only fail live. Bind the produced dict to the real signature."""
+    import inspect
+
+    i = _inputs(tmp_path)
+    ours = fc.attempt_kwargs(**i, fixture="FIXTURE")  # type: ignore[arg-type]
+    assert "gate_witness" in ours and ours["gate_witness"] is None
+    inspect.signature(agent_trial.run_one_attempt).bind(**ours)
