@@ -66,10 +66,21 @@ def test_the_committed_declaration_is_the_packaged_one() -> None:
     assert fl.load_declaration(DRAFT).digest == PACKAGED_DIGEST
 
 
-def test_the_committed_draft_is_not_approved() -> None:
-    """It is a DRAFT: nothing may spend on it until the owner approves its digest."""
-    with pytest.raises(fl.LiveRefused, match="no approval record"):
-        fl.require_approved(fl.load_declaration(DRAFT), ROOT)
+def test_the_committed_declaration_carries_the_owners_approval_at_the_packaged_digest() -> None:
+    """The stamp changed nothing the owner approved: the content digest is the
+    packaged digest, the approval names it, and the committed file authorizes as is."""
+    declaration = fl.load_declaration(DRAFT)
+    approval = declaration.approval
+    assert approval is not None and approval["by"] == "owner (cooneycw)"
+    assert declaration.digest == approval["declaration_digest"] == PACKAGED_DIGEST
+    fl.require_approved(declaration, ROOT)
+
+
+def test_the_owners_approval_does_not_survive_a_changed_field() -> None:
+    data = _draft()
+    data["shared"]["total_seconds"] = 7200
+    with pytest.raises(fl.LiveRefused, match="does not bind this exact declaration"):
+        fl.require_approved(fl.parse_declaration(data), ROOT)
 
 
 @pytest.mark.parametrize(("mutate", "match"), [
