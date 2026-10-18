@@ -34,7 +34,7 @@ def test_the_seeded_bundle_discriminates() -> None:
     # separate concern from the original four classes, just a fifth one.
     assert kinds == {
         "home-path", "uid-gid", "private-ip", "denylisted-hostname", "credential-token", "account-id",
-        "account-usage", "response-id",
+        "account-usage", "response-id", "encoded-home-path", "claude-scratchpad", "session-path-segment",
     }, kinds
 
     good = leak.scan_path(CONTROLS / "good", denylist)
@@ -636,3 +636,48 @@ def test_with_no_such_host_account_the_container_identity_is_exempt(monkeypatch:
     monkeypatch.setattr(leak, "_host_has_account", lambda name: False)
     assert list(leak.scan_text("uid=10001(candidate) gid=10001(candidate) /home/user/x", frozenset())) == []
 
+
+
+# --- #470: the encoded home form, Claude scratchpads and session-id segments
+
+def _kinds(text: str) -> set[str]:
+    return {kind for _line, kind, _detail in leak.scan_text(text, frozenset())}
+
+
+@pytest.mark.parametrize("text, kind", [
+    # Claude Code encodes a home directory with dashes for slashes.
+    ('File "/tmp/claude-1000/-home-exampleuser-Projects/x/scratchpad/ci/check.py"', "encoded-home-path"),
+    ("~/.claude/projects/-home-exampleuser-Projects/memory", "encoded-home-path"),
+    ("-Users-exampleuser-code", "encoded-home-path"),
+    ('cwd: "-home-exampleuser"', "encoded-home-path"),
+    # The scratchpad root carries the host uid.
+    ("/tmp/claude-1000/", "claude-scratchpad"),
+    ("see /tmp/claude-501/x", "claude-scratchpad"),
+    # A real session id as a path segment.
+    ("scratchpad under /x/23a2ff01-2d6c-4f8b-9f56-8fbeb3a9cfb5/scratchpad/cap", "session-path-segment"),
+    ("tasks/0f3c9b1e-7d24-4e8a-9a51-3c6b2f1d8e70", "session-path-segment"),
+])
+def test_red_case_each_new_form_is_caught(text: str, kind: str) -> None:
+    assert kind in _kinds(text)
+
+
+@pytest.mark.parametrize("text", [
+    "take-home-pay and a non-home-network",          # "-home-" inside an unrelated word
+    "the -home- marker alone",                        # no name after it
+    "/tmp/claude-code-cache/x",                       # not a uid scratchpad
+    "/tmp/claudette-1000/x",
+    "session id: 23a2ff01-2d6c-4f8b-9f56-8fbeb3a9cfb5",  # a UUID that is not a path segment
+    "/x/22222222-2222-2222-2222-222222222222/y",      # synthetic repeated-digit test UUID
+    "/x/00000000-0000-0000-0000-000000000000",
+    "rollout-2026-10-18T14-29-21-01a14f6a-cd7e-7851-8061-5cdeaaca5863.jsonl",  # inside a filename
+])
+def test_a_benign_look_alike_is_not_flagged(text: str) -> None:
+    assert not (_kinds(text) & {"encoded-home-path", "claude-scratchpad", "session-path-segment"})
+
+
+@pytest.mark.parametrize("name", ["planted-encoded-home", "planted-claude-scratchpad", "planted-session-segment"])
+def test_the_470_controls_discriminate(name: str) -> None:
+    bad = CONTROLS / "bad" / name
+    good = CONTROLS / "good" / name
+    assert leak.scan_path(bad, frozenset()).findings, f"{name}: the planted form was not caught"
+    assert not leak.scan_path(good, frozenset()).findings, f"{name}: the benign twin was flagged"
