@@ -67,7 +67,17 @@ The harness witnesses it through `docker/fixture-service/flow-auto-gate-shim.py`
 `codex/skills` at `86641e8` ships no code-review skill. A codex-driven
 flow:auto that reaches Step 6 therefore improvises its counter-model review, as
 a raw `codex exec` or a `command -v codex` probe. In a trial, the nested-codex
-guard makes that call unavailable: exit 3. The pinned `counter-model-receipt.py`
-reads the result as `skipped` / `reviewer-unavailable`
-(`tests/test_cpp_codex_flow_auto_86641e8.py`). Reported to CPP's nit store
-(claude-power-pack#864).
+guard makes that call unavailable: exit 3.
+
+Measured against the pinned `counter-model-receipt.py`
+(`tests/test_cpp_codex_flow_auto_86641e8.py`), in a trial's environment with no
+Claude session:
+
+- `parse` reads the refusal as `unparseable`, which §1c records as `skipped` /
+  `reviewer-unavailable`;
+- `write` cannot record that skip. It derives the implementer from
+  `CLAUDE_CODE_SESSION_ID`, which a codex trial does not have, and it refuses
+  the codex form (`--implementer-exec-log`) for a skip. So a nested refusal
+  leaves NO counter-model receipt, against the skill's own §1d.
+
+Both facets are reported to CPP's nit store (claude-power-pack#864).
