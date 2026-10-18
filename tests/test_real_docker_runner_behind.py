@@ -117,6 +117,13 @@ def test_control_using_the_commit_list_as_the_floor_would_be_weakened(tmp_path: 
                                 '    DECLARED_REAL_DOCKER_FILES = ()\n',
     _floor_file(RUNNER_FLOOR) + "del DECLARED_REAL_DOCKER_FILES\n",
     'DECLARED_REAL_DOCKER_FILES = ["tests.test_a_live"]\n',     # a list could be mutated later
+    # Second review: bindings that are not a Name(Store).
+    _floor_file(RUNNER_FLOOR) + "from new_floors import DECLARED_REAL_DOCKER_FILES\n",
+    _floor_file(RUNNER_FLOOR) + "import new_floors as DECLARED_REAL_DOCKER_FILES\n",
+    _floor_file(RUNNER_FLOOR) + "def DECLARED_REAL_DOCKER_FILES(): pass\n",
+    _floor_file(RUNNER_FLOOR) + "for DECLARED_REAL_DOCKER_FILES in [()]: pass\n",
+    _floor_file(RUNNER_FLOOR) + "try:\n    pass\nexcept Exception as DECLARED_REAL_DOCKER_FILES:\n    pass\n",
+    _floor_file(RUNNER_FLOOR) + "[(DECLARED_REAL_DOCKER_FILES := ()) for _ in [0]]\n",
     'DECLARED_REAL_DOCKER_FILES = ("tests.test_a\nlive",)\n',  # newline in an entry
 ])
 def test_an_unreadable_commit_floor_fails_closed(tmp_path: Path, body: str | None) -> None:
@@ -126,6 +133,16 @@ def test_an_unreadable_commit_floor_fails_closed(tmp_path: Path, body: str | Non
         _checkout(tmp_path, body)
     result = p.compute(_report(tmp_path), sha=SHA, runner_sha=RUNNER_SHA, checkout=str(checkout))
     assert result.status == c.ERROR and "cannot read the tested commit's floor" in result.reason
+
+
+def test_a_same_named_local_is_not_the_floor(tmp_path: Path) -> None:
+    """Second review: a function-local or class attribute of the same name
+    does not change the module floor, so it must not read as unreadable."""
+    body = (_floor_file((*RUNNER_FLOOR, NEW))
+            + "def helper():\n    DECLARED_REAL_DOCKER_FILES = ()\n    return DECLARED_REAL_DOCKER_FILES\n"
+            + "class K:\n    DECLARED_REAL_DOCKER_FILES = ()\n"
+            + "x = [DECLARED_REAL_DOCKER_FILES for DECLARED_REAL_DOCKER_FILES in [()]]\n")
+    assert p.read_commit_floor(_checkout(tmp_path, body)) == (*RUNNER_FLOOR, NEW)
 
 
 def test_the_reader_never_executes_the_commit(tmp_path: Path) -> None:

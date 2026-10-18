@@ -76,6 +76,54 @@ class CommitFloorUnreadable(ValueError):
     """The tested commit's floor could not be read as one literal list."""
 
 
+def _module_bindings(tree: ast.Module) -> int:
+    """How many times the module-level FLOOR_NAME is bound or deleted.
+    `global`/`nonlocal` of the name anywhere counts as unbounded (any
+    function could rebind it), so it reads as more than one binding."""
+    if any(isinstance(n, ast.Global | ast.Nonlocal) and FLOOR_NAME in n.names for n in ast.walk(tree)):
+        return 2
+    count = 0
+
+    def binds(name: str | None) -> None:
+        nonlocal count
+        count += name == FLOOR_NAME
+
+    def visit(node: ast.AST, module_scope: bool) -> None:
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            if module_scope:
+                binds(node.name)
+            # Evaluated in the enclosing scope; only the body is a new scope.
+            outer: list[ast.AST] = list(node.decorator_list)
+            if isinstance(node, ast.ClassDef):
+                outer += [*node.bases, *node.keywords]
+            else:
+                outer += [*node.args.defaults, *(d for d in node.args.kw_defaults if d is not None)]
+            for child in outer:
+                visit(child, module_scope)
+            for child in node.body:
+                visit(child, False)
+            return
+        if isinstance(node, ast.Lambda):
+            return
+        if module_scope:
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del):
+                binds(node.id)
+            elif isinstance(node, ast.alias):
+                binds(node.asname or node.name.split(".")[0])
+            elif isinstance(node, ast.ExceptHandler | ast.MatchAs | ast.MatchStar):
+                binds(node.name)
+            elif isinstance(node, ast.MatchMapping):
+                binds(node.rest)
+        for child in ast.iter_child_nodes(node):
+            # A comprehension's own targets are local to it; a walrus inside
+            # one still binds the enclosing scope, and is a Name(Store) there.
+            visit(child, module_scope and not (isinstance(node, ast.comprehension) and child is node.target))
+        return
+
+    visit(tree, True)
+    return count
+
+
 def read_commit_floor(checkout: str | Path) -> tuple[str, ...]:
     """The tested commit's `DECLARED_REAL_DOCKER_FILES`, parsed - never
     imported or executed - from its `ci/check_real_docker_ran.py`."""
@@ -96,13 +144,14 @@ def read_commit_floor(checkout: str | Path) -> tuple[str, ...]:
             continue
         if any(isinstance(t, ast.Name) and t.id == FLOOR_NAME for t in targets):
             values.append(value)
-    # Every write anywhere in the module - `+=`, a reassignment under an `if`,
-    # a `del` - not only the top-level one: a later write would change the
-    # floor this reader reports (#456 counter-model review).
-    stores = [n for n in ast.walk(tree) if isinstance(n, ast.Name) and n.id == FLOOR_NAME
-              and isinstance(n.ctx, ast.Store | ast.Del)]
-    if len(values) != 1 or len(stores) != 1:
-        raise CommitFloorUnreadable(f"{FLOOR_FILE} writes {FLOOR_NAME} {len(stores)} times, not once at top level")
+    # Every binding of the MODULE-level name - `+=`, a reassignment under an
+    # `if`, a `del`, an import, a def - not only the top-level assignment: a
+    # later one would change the floor this reader reports. A same-named
+    # local inside a function is not the floor and is not counted (#456
+    # counter-model review, both passes).
+    bindings = _module_bindings(tree)
+    if len(values) != 1 or bindings != 1:
+        raise CommitFloorUnreadable(f"{FLOOR_FILE} binds {FLOOR_NAME} {bindings} times, not once at top level")
     value = values[0]
     # A tuple, never a list: nothing can mutate it after the one assignment.
     if not isinstance(value, ast.Tuple) or not all(
