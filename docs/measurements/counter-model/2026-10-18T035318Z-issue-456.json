@@ -1,0 +1,27 @@
+{
+  "branch": "issue-456-certifying-runner-counts-the-runner-pin-s-floor-so",
+  "counts": {
+    "accepted": 4,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "9f96d8b14963e90a531ba0e03b59d5da5f2e19e5",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "456",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 2,
+  "recorded_at": "2026-10-18T03:53:18Z",
+  "red_cases": {
+    "already_covered": 11,
+    "proposed": 14
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/17/rollout-2026-10-17T23-50-10-01a14d21-996b-79b1-bff0-17cada1cb066.jsonl",
+    "thread_id": "01a14d21-996b-79b1-bff0-17cada1cb066"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

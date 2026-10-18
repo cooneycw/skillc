@@ -323,8 +323,13 @@ fi
 
 cd "$INSTALLED_ROOT"  # never the checkout, for the posting step below
 POST_EXIT=0
+# #456: a certifying run also hands over the checkout, so the INSTALLED helper
+# can read (never import) the tested commit's floor and report RUNNER_BEHIND
+# when that commit declares a live file this runner's floor does not count.
+FLOOR_CHECKOUT=""
+[ "$BREAK_MODE" = "none" ] && FLOOR_CHECKOUT="$WORK_CHECKOUT"
 POST_OUTPUT="$(PYTHONPATH="$INSTALLED_ROOT" python3 "$INSTALLED_ROOT/ci/real_docker_post.py" \
-    "$REPORT_PATH" "$SHA" "$RUNNER_SHA")" || POST_EXIT=$?
+    "$REPORT_PATH" "$SHA" "$RUNNER_SHA" "$FLOOR_CHECKOUT")" || POST_EXIT=$?
 POSTED_STATUS="$(echo "$POST_OUTPUT" | sed -n '1p')"
 DESCRIPTION="$(echo "$POST_OUTPUT" | sed -n '2p')"
 BODY="$(echo "$POST_OUTPUT" | sed -n '/^---$/,$p' | tail -n +2)"
@@ -334,7 +339,7 @@ BODY="$(echo "$POST_OUTPUT" | sed -n '/^---$/,$p' | tail -n +2)"
 # or a malformed/mismatched status must never default to a green result.
 POST_VALID=false
 case "$POST_EXIT:$POSTED_STATUS" in
-    0:SUCCESS|1:FAILURE|2:ERROR)
+    0:SUCCESS|1:FAILURE|2:ERROR|4:RUNNER_BEHIND)
         if [ -n "$DESCRIPTION" ] && [ -n "$BODY" ] && \
                 [ "$(echo "$POST_OUTPUT" | sed -n '3p')" = "---" ]; then
             POST_VALID=true
@@ -351,6 +356,7 @@ fi
 GH_STATE="success"
 [ "$POSTED_STATUS" = "FAILURE" ] && GH_STATE="failure"
 [ "$POSTED_STATUS" = "ERROR" ] && GH_STATE="error"
+[ "$POSTED_STATUS" = "RUNNER_BEHIND" ] && GH_STATE="error"  # #456: no test failed; the instrument is stale
 
 # R2: a break-mode run NEVER posts to the certifying context - control
 # context only, explicitly labelled expected-red. context_for_break_mode
@@ -376,11 +382,14 @@ remove_runner_artifacts "$SNAPSHOT_FILE"
 
 echo "run-real-docker: $POSTED_STATUS (break=$BREAK_MODE, sha=${SHA:0:12}, runner=${RUNNER_SHA:0:12})"
 # Exit codes: 0 SUCCESS, 1 FAILURE, 2 ERROR (a run that started and reported
-# one of these three), 3 the lock could not be acquired within
+# one of these three), 4 RUNNER_BEHIND (#456: started and reported; the sha IS
+# marked processed, so after the re-pin re-seed state to its parent), 3 the
+# lock could not be acquired within
 # LOCK_WAIT_SECONDS - this run never started at all (S1: poll-triggers
 # checks specifically for 3 and does not mark the sha/comment processed).
 case "$POSTED_STATUS" in
     SUCCESS) exit 0 ;;
     FAILURE) exit 1 ;;
+    RUNNER_BEHIND) exit 4 ;;
     *) exit 2 ;;
 esac
