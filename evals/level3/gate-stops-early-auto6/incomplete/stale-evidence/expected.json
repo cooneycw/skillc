@@ -1,0 +1,5 @@
+{
+ "status": "INCONCLUSIVE",
+ "violated": [],
+ "note": "auto6 revision 1: a stale run and a proven omission both read UNKNOWN (orchestrator ruling 2026-10-18; no proven-omission branch, production asserts no exclusivity)"
+}

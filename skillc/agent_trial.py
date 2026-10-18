@@ -76,6 +76,7 @@ Stdlib only (AGENTS.md), plus this repository's own modules.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import re
@@ -394,7 +395,38 @@ _FLOW_CHECK_GATE_HARNESS_PATH = "flow-finish-gate.sh"
 _FLOW_CHECK_GATE_SHIM_SOURCE = (
     Path(__file__).resolve().parent.parent / "docker" / "trial" / "flow-check-gate-shim.py"
 )
+#: #287 auto6: the `flow-finish` witness - `/flow:auto` Step 6's BARE
+#: `flow-finish-gate.sh` call, its own closed-map shim (the flow-check shim is
+#: unchanged), one declared gate and the runner's `finish` plan for stages.
+_FLOW_AUTO_GATE_SHIM_SOURCE = (
+    Path(__file__).resolve().parent.parent / "docker" / "trial" / "flow-auto-gate-shim.py"
+)
+_FLOW_FINISH_GATE = "flow-finish"
+_FLOW_FINISH_PLAN = "finish"
 
+
+
+def _gate_witness_choice(
+    gate_witness: str | None, fixture: AttemptFixture | None, gate_entrypoint: str | None,
+) -> tuple[Mapping[str, Sequence[str]] | None, Mapping[str, str] | None, Path]:
+    """#287 auto6: `(gate_args, stage_plans, shim source)` for an attempt's
+    witness. The fixture route (#434) and the default flow-check witness
+    (`gate_witness` absent or `flow-check`) are exactly what they were; only
+    `flow-finish` - `/flow:auto` Step 6's bare call - selects the flow-auto
+    shim, its one gate and the runner's `finish` plan. Refused: an unknown
+    kind, a fixture with a non-default witness, `flow-finish` with no
+    `gate_entrypoint` to witness."""
+    if gate_witness not in (None, "flow-check", _FLOW_FINISH_GATE):
+        raise HomeFileVerificationRefused(f"unknown gate_witness {gate_witness!r}")
+    if gate_witness == _FLOW_FINISH_GATE:
+        if fixture is not None:
+            raise HomeFileVerificationRefused("a fixture attempt uses its own gate map; gate_witness cannot also be set")
+        if gate_entrypoint is None:
+            raise HomeFileVerificationRefused("gate_witness 'flow-finish' needs a declared gate_entrypoint to witness")
+        return {_FLOW_FINISH_GATE: ()}, {_FLOW_FINISH_GATE: _FLOW_FINISH_PLAN}, _FLOW_AUTO_GATE_SHIM_SOURCE
+    if fixture is not None:
+        return fixture.gates, None, fixture.gate_shim_source
+    return None, None, _FLOW_CHECK_GATE_SHIM_SOURCE
 
 
 @dataclass
@@ -406,6 +438,10 @@ class _WitnessSession:
     #: #434: a fixture task's own gate map (name -> argv after the harness
     #: path). `None` keeps the flow-check gates every earlier caller uses.
     gate_args: Mapping[str, Sequence[str]] | None = None
+    #: #287 auto6: with `gate_args`, the runner plan whose stages each named
+    #: gate's run carries (`stage_capture.capture_stages(plan=...)`). `None`
+    #: or absent keeps a `gate_args` map stage-less, as the fixture route is.
+    stage_plans: Mapping[str, str] | None = None
     witness: GateWitness | None = field(default=None, repr=False)
     record: GateWitnessRecord | None = field(default=None, repr=False)
     environment: Mapping[str, str] = field(default_factory=dict, repr=False)
@@ -454,7 +490,9 @@ class _WitnessSession:
             # #376: the plan run's per-stage outcomes, read from its own
             # controller-held stdout when it resolves - never replayed later.
             # A fixture's own gate map (#434) declares no stage-bearing gate.
-            stage_capture={"flow-check-plan": stage_capture.capture_stages} if self.gate_args is None else {},
+            stage_capture={"flow-check-plan": stage_capture.capture_stages} if self.gate_args is None else {
+                gate: functools.partial(stage_capture.capture_stages, plan=plan)
+                for gate, plan in (self.stage_plans or {}).items()},
         )
         script = (
             "import json,socket,sys; "
@@ -1865,6 +1903,7 @@ def run_one_attempt(
     verify_home_files: Mapping[str, str] | None = None,
     preflight_tools: Sequence[Mapping[str, object]] | None = None,
     gate_entrypoint: str | None = None,
+    gate_witness: str | None = None,
     retain_transcript: bool = False,
     receipt_context: InstallationReceiptContext | None = None,
     fixture: AttemptFixture | None = None,
@@ -1959,7 +1998,8 @@ def run_one_attempt(
                 "refusing a fixture attempt whose egress allowlist differs from #442's defaults "
                 f"({', '.join(backend.egress_hosts)}): a necessity attempt is never widened"
             )
-    witness_session = (_WitnessSession(attempt_id, limits, gate_args=fixture.gates if fixture else None)
+    gate_args, stage_plans, gate_shim_source = _gate_witness_choice(gate_witness, fixture, gate_entrypoint)
+    witness_session = (_WitnessSession(attempt_id, limits, gate_args=gate_args, stage_plans=stage_plans)
                        if gate_entrypoint is not None else None)
     selected_supply = backend.runtime_supply if isinstance(backend, DockerBackend) else None
     if witness_session is not None or selected_supply is not None:
@@ -2043,7 +2083,7 @@ def run_one_attempt(
         verify_home_files=verify_home_files, preflight_tools=preflight_tools, limits=limits,
         gate_entrypoint=gate_entrypoint,
         runtime_ready=runtime_ready if witness_session is not None or selected_supply is not None else None,
-        gate_shim_source=fixture.gate_shim_source if fixture is not None else _FLOW_CHECK_GATE_SHIM_SOURCE,
+        gate_shim_source=gate_shim_source,
     )
     if witness_session is not None:
         install_and_verify = before_execute

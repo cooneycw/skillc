@@ -76,8 +76,15 @@ _PROFILE_KEYS = {
     "profile_schema", "name", "subject", "select", "treatment_question",
     "allowed_destinations", "reference_patterns", "dependencies", "unsupported",
     "mirrors", "generated_from", "declared_empty_kinds", "client_profiles", "notes",
-    "gate_entrypoint",
+    "gate_entrypoint", "gate_witness",
 }
+
+#: #287 auto6: which harness witness a declared `gate_entrypoint` gets. The
+#: profile names a KIND, never a shim path or an argv (those stay harness
+#: constants in `agent_trial`). `flow-check` is the default when the key is
+#: absent: flow-check's two prescribed calls. `flow-finish` is `/flow:auto`
+#: Step 6's bare call, plan `finish`.
+GATE_WITNESSES = ("flow-check", "flow-finish")
 _DEP_KEYS = {
     "id", "kind", "scope", "source_root", "paths", "destination", "satisfies",
     "traverse", "no_traverse_reason", "unreferenced_reason", "version", "supply",
@@ -198,6 +205,9 @@ class Profile:
     #: whose closure silently drops this path (a regression, a renamed
     #: destination) must be REFUSED, not silently un-witnessed.
     gate_entrypoint: str | None
+    #: #287 auto6: `None` (absent) means the default `flow-check` witness;
+    #: only ever set alongside a `gate_entrypoint`.
+    gate_witness: str | None
     raw: dict[str, object] = field(compare=False, repr=False)
 
     @property
@@ -340,13 +350,20 @@ class Profile:
             gate_entrypoint = posixpath.normpath(gate_entrypoint_raw)
             if m._escapes(gate_entrypoint) or gate_entrypoint in ("", "."):
                 raise Refused(f"gate_entrypoint {gate_entrypoint_raw!r} is not a safe relative path")
+        gate_witness = data.get("gate_witness")
+        if gate_witness is not None:
+            if gate_witness not in GATE_WITNESSES:
+                raise Refused(f"gate_witness must be one of {GATE_WITNESSES}, got {gate_witness!r}")
+            if gate_entrypoint is None:
+                raise Refused("gate_witness names a witness for a gate_entrypoint this profile does not declare")
 
         return cls(
             name=name, subject=subject, subject_path=subject_path, select=select,
             treatment_question=str(question), allowed_destinations=tuple(allowed),
             patterns=tuple(patterns), dependencies=deps, unsupported=unsupported,
             mirrors=mirrors, generated_from=generated_from, declared_empty_kinds=empty,
-            client_profiles=profiles, gate_entrypoint=gate_entrypoint, raw=data,
+            client_profiles=profiles, gate_entrypoint=gate_entrypoint,
+            gate_witness=gate_witness if isinstance(gate_witness, str) else None, raw=data,
         )
 
 
@@ -1103,6 +1120,9 @@ def _run_walk(profile: Profile, tree: Tree, problems: list[dict[str, Any]] | Non
         "declared_empty_kinds": list(profile.declared_empty_kinds),
         "client_profiles": profile.client_profiles,
         "gate_entrypoint": profile.gate_entrypoint,
+        # Only when declared, so every existing inventory (and the approvals
+        # bound to its digest) is unchanged.
+        **({"gate_witness": profile.gate_witness} if profile.gate_witness is not None else {}),
         "installed_surface": {
             "files": len(installed),
             "digest": m.sha256_bytes("".join(

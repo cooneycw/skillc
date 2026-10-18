@@ -668,6 +668,33 @@ def test_gate_entrypoint_cannot_escape(tmp_path: Path) -> None:
         _profile(tmp_path, gate_entrypoint="../../etc/passwd")
 
 
+# ------------------------------------------------------------- gate_witness (#287 auto6)
+
+
+def test_an_absent_gate_witness_adds_no_inventory_key(tmp_path: Path) -> None:
+    """Absent means the default flow-check witness, and the inventory carries
+    no key at all - so every existing inventory digest (and the approvals
+    bound to it) is unchanged."""
+    inv = _run(tmp_path, gate_entrypoint=".helpers/run-gate.sh")
+    assert "gate_witness" not in inv
+    assert _profile(tmp_path, gate_entrypoint=".helpers/run-gate.sh").gate_witness is None
+
+
+def test_a_declared_flow_finish_witness_is_carried_into_the_inventory(tmp_path: Path) -> None:
+    inv = _run(tmp_path, gate_entrypoint=".helpers/run-gate.sh", gate_witness="flow-finish")
+    assert inv["gate_witness"] == "flow-finish"
+
+
+def test_an_unknown_gate_witness_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(p.Refused, match="gate_witness must be one of"):
+        _profile(tmp_path, gate_entrypoint=".helpers/run-gate.sh", gate_witness="make-check")
+
+
+def test_a_gate_witness_without_a_gate_entrypoint_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(p.Refused, match="does not declare"):
+        _profile(tmp_path, gate_witness="flow-finish")
+
+
 def test_diagnose_reports_an_unsatisfiable_gate_entrypoint_as_a_problem(tmp_path: Path) -> None:
     """`diagnose()`'s own non-strict mode (#295) must record the same
     defect as a problem, never silently drop it just because it continues

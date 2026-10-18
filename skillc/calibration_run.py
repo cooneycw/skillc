@@ -115,6 +115,10 @@ class Treatment:
     verify_home_files: Mapping[str, str] = field(default_factory=dict)
     preflight_tools: tuple[dict[str, object], ...] = ()
     gate_entrypoint: str | None = None
+    #: #287 auto6: the profile's declared `gate_witness` kind (`None` = the
+    #: default flow-check witness), carried straight through like
+    #: `gate_entrypoint`.
+    gate_witness: str | None = None
     #: #424: a `trial.skill_digests` value - each installed skill's own
     #: `SKILL.md` destination with the `body_digest`/`description_digest` of the
     #: bytes this treatment INSTALLS. Empty only for a hand-built treatment; the
@@ -133,6 +137,8 @@ class _ClosureResult:
     #: `None` if it declares none - carried straight through, never
     #: re-derived from `home_files`' own keys.
     gate_entrypoint: str | None
+    #: #287 auto6: the inventory's declared `gate_witness`, absent = `None`.
+    gate_witness: str | None = None
     #: `profile.skill_digest_pins(inventory)` of the validated inventory (#424),
     #: cross-checked against the pins derived from the installed bytes.
     skill_pins: tuple[dict[str, str], ...] = ()
@@ -220,8 +226,10 @@ def _closure_home_files(acquired: cc.AcquiredCollection, subject_profile: str, r
         skill_pins = tuple(sorted(profile.skill_digest_pins(inventory), key=lambda pin: pin["path"]))
     except profile.Refused as exc:
         raise CalibrationRefused(f"profile {subject_profile!r}: {exc}") from exc
+    gate_witness = inventory.get("gate_witness")
+    assert gate_witness is None or isinstance(gate_witness, str)
     return _ClosureResult(home_files=home_files, tools=tools, gate_entrypoint=gate_entrypoint,
-                          skill_pins=skill_pins)
+                          gate_witness=gate_witness, skill_pins=skill_pins)
 
 
 def build_treatment(
@@ -254,6 +262,7 @@ def build_treatment(
     verify_home_files: dict[str, str] = {}
     preflight_tools: tuple[dict[str, object], ...] = ()
     gate_entrypoint: str | None = None
+    gate_witness: str | None = None
     if subject_profile is not None:
         assert root is not None
         closure = _closure_home_files(acquired, subject_profile, root)
@@ -282,6 +291,7 @@ def build_treatment(
         verify_home_files = {relpath: m.sha256_bytes(data) for relpath, data in closure_files.items()}
         preflight_tools = closure.tools
         gate_entrypoint = closure.gate_entrypoint
+        gate_witness = closure.gate_witness
         # Two derivations of the same fact - the installed bytes and the
         # validated inventory - must agree, or the pins would describe skills
         # this treatment does not install (#424). Per path, as a SUBSET (#432,
@@ -309,6 +319,7 @@ def build_treatment(
         digest=acquired.source.digest,
         skill_digests=skill_digests,
         gate_entrypoint=gate_entrypoint,
+        gate_witness=gate_witness,
         receipt_context=agent_trial.InstallationReceiptContext(
             declared=frozenset(f.skill for f in acquired.files),
             tree_digest=acquired.source.digest,
@@ -570,6 +581,7 @@ def run_calibration(
             verify_home_files=treatment.verify_home_files if treated else None,
             preflight_tools=treatment.preflight_tools if treated else None,
             gate_entrypoint=treatment.gate_entrypoint if treated else None,
+            gate_witness=treatment.gate_witness if treated else None,
         )
 
     def on_outcome(outcome: mp.AttemptOutcome) -> None:
@@ -728,7 +740,8 @@ def degraded_treatment(intact: Treatment, declaration: calibration.Discriminatio
         )
     return Treatment(home_files=home_files, digest=tree, receipt_context=context,
                      verify_home_files=verify_home_files, preflight_tools=intact.preflight_tools,
-                     gate_entrypoint=intact.gate_entrypoint, skill_digests=intact.skill_digests)
+                     gate_entrypoint=intact.gate_entrypoint, gate_witness=intact.gate_witness,
+                     skill_digests=intact.skill_digests)
 
 
 def require_textual_evidence(declaration: calibration.DiscriminationDeclaration, root: Path) -> dict[str, object]:
@@ -901,7 +914,7 @@ def run_discrimination(
             task_root=task_root, surface=surface, prompt=goal, timeout=budget,
             credential_explicit_path=credential_explicit_path, receipt_context=chosen.receipt_context,
             verify_home_files=chosen.verify_home_files, preflight_tools=chosen.preflight_tools,
-            gate_entrypoint=chosen.gate_entrypoint,
+            gate_entrypoint=chosen.gate_entrypoint, gate_witness=chosen.gate_witness,
         )
 
     def on_outcome(outcome: mp.AttemptOutcome) -> None:
