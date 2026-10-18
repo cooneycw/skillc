@@ -625,24 +625,34 @@ def _parse_tolerance(data: Mapping[str, object], *, required: bool) -> int | Non
 #: #287 P3 (C1): words that mark a drafted, not recorded, value. Refused at
 #: approval anywhere under `shared` or `arms`, exactly as `UNKNOWN` is: a
 #: placeholder is not an identity.
-PLACEHOLDER_MARKERS = ("PENDING", "PROPOSED")
+PLACEHOLDER_MARKERS = ("PENDING", "PROPOSED", "UNKNOWN")
+_PLACEHOLDER = re.compile(r"\b(?:" + "|".join(PLACEHOLDER_MARKERS) + r")\b")
+#: The declaration's IDENTITY: what a run is launched with and bound to. A
+#: placeholder token anywhere in one of these leaves is refused (C1).
+IDENTITY_ROOTS = ("shared", "arms", "task", "task_content", "run_store", "attempts_per_arm", "tolerance",
+                  "arm_order", "skill_pins", "outcome_endpoint")
+#: Prose inside the identity roots: commentary, bound by the whole-declaration
+#: digest, never parsed as an identity (`_`-prefixed keys too).
+PROSE_KEYS = frozenset({"provenance", "tools", "permissions", "public_requirements", "treatment",
+                        "verification", "rule", "removed_text"})
 
 
 def _placeholder_leaves(value: object, where: str) -> list[str]:
-    """Leaves whose value IS a placeholder: it begins with a marker
-    (`PENDING`, `PROPOSED: x`). Prose that mentions a marker mid-sentence is
-    commentary, bound by the whole-declaration digest (counter-model finding)."""
+    """Identity leaves holding a placeholder token (`PENDING`, `PROPOSED`,
+    `UNKNOWN`) as a whole word anywhere in the value: `gpt-6-astra (PENDING)`
+    is refused as surely as `PENDING`. Prose keys are skipped."""
     if isinstance(value, str):
-        return [where] if value.lstrip().startswith(PLACEHOLDER_MARKERS) else []
+        return [where] if _PLACEHOLDER.search(value) else []
     if isinstance(value, dict):
-        return [p for k, v in value.items() for p in _placeholder_leaves(v, f"{where}.{k}")]
+        return [p for k, v in value.items() if not (str(k).startswith("_") or k in PROSE_KEYS)
+                for p in _placeholder_leaves(v, f"{where}.{k}")]
     if isinstance(value, list):
         return [p for i, v in enumerate(value) for p in _placeholder_leaves(v, f"{where}[{i}]")]
     return []
 
 
 def _require_no_placeholders(data: Mapping[str, object]) -> None:
-    found = _placeholder_leaves(data.get("shared"), "shared") + _placeholder_leaves(data.get("arms"), "arms")
+    found = [p for root in IDENTITY_ROOTS if root in data for p in _placeholder_leaves(data[root], root)]
     if found:
         raise _refuse(f"placeholder values still recorded at {found} ({'/'.join(PLACEHOLDER_MARKERS)}); "
                       "record the real value before approving a run")

@@ -98,10 +98,12 @@ Shared by both declarations:
 
 ### The checks (C1-C5)
 
-- **C1 - no placeholder identities.** Any value under `shared` or `arms` that
-  begins with `PENDING` or `PROPOSED` is refused at approval. Prose that
-  mentions a marker mid-sentence is commentary, and the whole-declaration
-  digest binds it.
+- **C1 - no placeholder identities.** A whole-word `PENDING`, `PROPOSED` or
+  `UNKNOWN` anywhere in an identity leaf is refused at approval. Identity leaves
+  cover the client, model, effort, image, digests, caps, task, arms and
+  run_store, so `gpt-6-astra (PENDING)` is refused. Prose keys (`provenance`,
+  `tools`, `permissions`, `treatment`, ...) are commentary, which the
+  whole-declaration digest binds.
 - **C2 - tolerance is required.** A calibration declaration with an outcome
   endpoint must carry `tolerance.non_evaluable_per_arm`, and its report applies
   it. Legacy declarations without an endpoint need none.

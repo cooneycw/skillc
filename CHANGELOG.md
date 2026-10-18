@@ -31,8 +31,8 @@ and version plan.
   #375's image `skillc-375-final:88b3999-6343d33b` with its runtime receipt,
   caps, grader revision 5, and a durable `run_store` on kyle19. Neither is
   approved. Each new check refuses before any container:
-  - **C1:** a value beginning with `PENDING`/`PROPOSED` is refused at
-    approval.
+  - **C1:** a whole-word `PENDING`/`PROPOSED`/`UNKNOWN` anywhere in an
+    identity leaf is refused at approval; prose keys are exempt.
   - **C2:** an outcome-endpoint declaration must carry
     `tolerance.non_evaluable_per_arm`, and its report applies it.
   - **C3:** the declaration must name a well-formed receipt digest, and the

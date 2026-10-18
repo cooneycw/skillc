@@ -78,31 +78,49 @@ def test_the_committed_drafts_stay_unapproved(path: Path) -> None:
 
 # ------------------------------------------------------------------- C1
 
-@pytest.mark.parametrize("marker", ["PENDING", "PROPOSED: gpt-6-astra"])
-@pytest.mark.parametrize("path", [DISCRIMINATION, IMPROVEMENT], ids=["discrimination", "improvement"])
-def test_c1_a_placeholder_identity_is_refused(path: Path, marker: str) -> None:
-    data = _draft(path)
-    data["shared"]["model"] = marker
-    with pytest.raises(calibration.DeclarationRefused, match="placeholder"):
-        _authorize(_approve(data))
-
-
-def test_c1_a_placeholder_inside_an_arm_subject_is_refused() -> None:
-    data = _draft(IMPROVEMENT)
-    data["shared"]["image"]["provenance"] = "PENDING rebuild"
-    with pytest.raises(calibration.DeclarationRefused, match="placeholder"):
-        _authorize(_approve(data))
-
-
-@pytest.mark.parametrize("prose", [
-    "Recorded image replaces the PROPOSED image in the earlier draft.",
-    "no longer PENDING: measured at P3",
+@pytest.mark.parametrize("field, value", [
+    ("model", "PENDING"),
+    ("model", "PROPOSED: gpt-6-astra"),
+    ("model", "gpt-6-astra (PENDING)"),
+    ("client.version", "codex 0.157.1 PROPOSED"),
+    ("image.tag", "skillc-375-final:UNKNOWN"),
+    ("image.digest", "sha256:PENDING"),
 ])
-def test_c1_prose_that_mentions_a_marker_is_not_a_placeholder(prose: str) -> None:
+@pytest.mark.parametrize("path", [DISCRIMINATION, IMPROVEMENT], ids=["discrimination", "improvement"])
+def test_c1_a_placeholder_token_in_an_identity_leaf_is_refused(path: Path, field: str, value: str) -> None:
+    data = _draft(path)
+    target = data["shared"]
+    *parents, leaf = field.split(".")
+    for key in parents:
+        target = target[key]
+    target[leaf] = value
+    with pytest.raises(calibration.DeclarationRefused, match="placeholder"):
+        _authorize(_approve(data))
+
+
+@pytest.mark.parametrize("root, edit", [
+    ("arm subject", lambda d: d["arms"][0]["subject"].__setitem__("revision", "PENDING rebuild")),
+    ("task", lambda d: d["task"].__setitem__("grader_revision", "PROPOSED")),
+    ("run_store", lambda d: d.__setitem__("run_store", "~/skillc-evidence/PENDING")),
+])
+def test_c1_a_placeholder_outside_shared_is_refused(root: str, edit: Any) -> None:
+    data = _draft(IMPROVEMENT)
+    edit(data)
+    with pytest.raises(calibration.DeclarationRefused, match="placeholder"):
+        _authorize(_approve(data))
+
+
+@pytest.mark.parametrize("field, prose", [
+    ("provenance", "Recorded image replaces the PROPOSED image in the earlier draft."),
+    ("provenance", "PENDING in the parked draft; measured at P3"),
+    ("tools", "the client's defaults; the UNKNOWN-tool policy is #442's"),
+])
+def test_c1_prose_that_mentions_a_marker_is_not_a_placeholder(field: str, prose: str) -> None:
     """Counter-model finding: commentary about an earlier placeholder is bound
     by the whole-declaration digest, not refused as a placeholder."""
     data = _draft(IMPROVEMENT)
-    data["shared"]["image"]["provenance"] = prose
+    target = data["shared"]["image"] if field == "provenance" else data["shared"]
+    target[field] = prose
     _authorize(_approve(data))
 
 
