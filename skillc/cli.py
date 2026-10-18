@@ -1910,18 +1910,28 @@ def cmd_level3_campaign(args: argparse.Namespace) -> int:
     import hashlib
     import secrets
     import subprocess
+    import types
     from datetime import UTC, datetime
 
     from . import calibration_run as cr
     from . import collection_conformance as cc
     from . import demo
+    from . import fixture_campaign as fc
     from . import level3_campaign as lc
     from . import runtime_supply as rs
 
+    # #434: a fixture-task manifest runs through the fixture harness; every
+    # other manifest is #375's, unchanged.
     try:
-        manifest = lc.load_manifest(Path(args.manifest))
-        problems = lc.check_frozen(manifest, cr.ROOT)
-    except (lc.CampaignRefused, OSError, json.JSONDecodeError, KeyError) as exc:
+        fixture = json.loads(Path(args.manifest).read_text(encoding="utf-8")).get("kind") == fc.KIND
+    except (OSError, json.JSONDecodeError, AttributeError) as exc:
+        print(f"skillc: {exc}", file=sys.stderr)
+        return 2
+    harness: types.ModuleType = fc if fixture else lc
+    try:
+        manifest = harness.load_manifest(Path(args.manifest))
+        problems = harness.check_frozen(manifest, cr.ROOT)
+    except (lc.CampaignRefused, fc.CampaignRefused, OSError, json.JSONDecodeError, KeyError) as exc:
         print(f"skillc: {exc}", file=sys.stderr)
         return 2
     if problems:
@@ -1936,6 +1946,9 @@ def cmd_level3_campaign(args: argparse.Namespace) -> int:
             print(f"skillc: --rows names rows the manifest does not declare: {unknown}", file=sys.stderr)
             return 2
         rows = [r for r in rows if r.id in wanted]
+    if fixture and (why := fc.certifying_selection(rows)):
+        print(f"skillc: {why}", file=sys.stderr)
+        return 2
     git = ["git", "-C", str(cr.ROOT)]
     try:
         dirty = subprocess.run([*git, "status", "--porcelain"], capture_output=True, text=True, check=False)
@@ -1956,7 +1969,7 @@ def cmd_level3_campaign(args: argparse.Namespace) -> int:
         acquired = cc.acquire_collection(str(frozen_subject["name"]), run_dir)
         found = (acquired.subject.locator, acquired.subject.revision)
         if found != (frozen_subject["locator"], frozen_subject["revision"]):
-            raise lc.CampaignRefused(f"acquired subject {found} is not the frozen one")
+            raise harness.CampaignRefused(f"acquired subject {found} is not the frozen one")
         treatment = cr.build_treatment(acquired, subject_profile=str(frozen_subject["profile"]), root=cr.ROOT)
         selected = rs.selected_runtime(
             locator=acquired.subject.locator, revision=acquired.subject.revision,
@@ -1965,11 +1978,11 @@ def cmd_level3_campaign(args: argparse.Namespace) -> int:
         )
         # The Level 3 campaign runs the flow-check gate; the cicd runtime has none.
         if selected != rs.PROFILE_RUNTIME:
-            raise lc.CampaignRefused("the frozen subject does not select the supported pinned runtime")
+            raise harness.CampaignRefused("the frozen subject does not select the supported pinned runtime")
         supply = rs.RuntimeSupply.from_path(Path(args.runtime_supply_receipt))
         rs.require_kind(supply, selected)
-    except (lc.CampaignRefused, demo.SubjectRefused, cr.CalibrationRefused, profile.Refused, rs.Refused,
-            OSError, json.JSONDecodeError, UnicodeError) as exc:
+    except (lc.CampaignRefused, fc.CampaignRefused, demo.SubjectRefused, cr.CalibrationRefused, profile.Refused,
+            rs.Refused, OSError, json.JSONDecodeError, UnicodeError) as exc:
         print(f"skillc: {exc}", file=sys.stderr)
         return 2
     finally:
@@ -1992,15 +2005,26 @@ def cmd_level3_campaign(args: argparse.Namespace) -> int:
             print(f"skillc:   {diff}", file=sys.stderr)
 
     try:
-        report = lc.run_rows(manifest, root=cr.ROOT, run_dir=run_dir, treatment=treatment, backends=backends,
-                             image_digest=supply.image_id, rows=rows, on_row=on_row)
-    except (lc.CampaignRefused, OSError) as exc:
+        if fixture:
+            report = fc.run_rows(manifest, root=cr.ROOT, run_dir=run_dir, treatment=treatment, backends=backends,
+                                 image_digest=supply.image_id, rows=rows, on_row=on_row)
+        else:
+            report = lc.run_rows(manifest, root=cr.ROOT, run_dir=run_dir, treatment=treatment, backends=backends,
+                                 image_digest=supply.image_id, rows=rows, on_row=on_row)
+    except (lc.CampaignRefused, fc.CampaignRefused, OSError) as exc:
         print(f"skillc: {exc}", file=sys.stderr)
         return 2
     report = {**report, **bound}
     report_path.write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8")
-    print(f"skillc: {report['matched']}/{report['population']} rows matched; report: {report_path}", file=sys.stderr)
-    return 0 if report["matched"] == report["population"] else 1
+    # An observed row (#434) never counts toward MATCH or MISMATCH.
+    population = report["scored_population"] if fixture else report["population"]
+    print(f"skillc: {report['matched']}/{population} rows matched; report: {report_path}", file=sys.stderr)
+    if fixture:
+        if report["unreadable"]["scored_rows"]:
+            print(f"skillc: BLOCKED - scored row(s) {report['unreadable']['scored_rows']} were unreadable: "
+                  f"{report['unreadable']['trigger']}", file=sys.stderr)
+        return 0 if fc.succeeded(report) else 1
+    return 0 if report["matched"] == population else 1
 
 
 def cmd_uptake_study(args: argparse.Namespace) -> int:

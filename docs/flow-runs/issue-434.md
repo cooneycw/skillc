@@ -153,3 +153,40 @@ Risks:
 - agent_trial and verify are shared hot paths: every existing test must stay green, unmodified.
 - The guard's detection bound: a subject that calls the real binary by path and blocks the socket leaves no record; the count is then unknown, never zero.
 - ExecGitRemote's answers are subject-influenced (#436's bound); grading reads only the post-stop snapshot.
+
+<!-- flow-run n=4 id=49508ec0c006401ab25568770e931bba -->
+## Run 4
+
+- Run-id:            49508ec0c006401ab25568770e931bba
+- Run-start:         082f55dc89f0735f869a5fee15dd52c5d877407f
+- Issue:             #434
+- Base SHA:          082f55d (PR 2b merged as #457)
+- Necessity verdict: Still needed
+- Approval:          granted
+- Approver:          skillc-400 (orchestrator, owner-delegated)
+- Recorded at:       2026-10-18T05:06:03Z
+
+### Section B evidence
+- 2b merged as 082f55d (#457). No live row of the flow-auto-necessity task has run; level3_campaign.run_rows hard-codes surface=task_surface(task_root/"fixture") and task_identity reads fixture/, which this task does not have.
+- #375's campaign binds harness_digest() = ACTOR_SOURCE + the fake client; editing either would move #375's frozen manifest.
+- Duplicate or superseding issues: none.
+
+### Section C - the approved plan
+PR 3 of #434: the deterministic campaign on evals26, scripted, network none, a dummy credential. Guard option (C): the actor's first act is a bare `codex --version` through the real guard; the report states the top-level process is the actor. The 4 gate-result candidates run as OBSERVED (unscored) rows.
+
+1. `skillc/level3_campaign.py` - two hooks with today's defaults: run_rows(surface_for=...) and a task_identity fallback to a builder digest for a task with no fixture/; ACTOR_SOURCE and harness_digest() untouched.
+2. `skillc/fixture_campaign.py` - FLOW_AUTO_ACTOR_SOURCE with its own harness digest (plays actions.json in the container: git ops as qualify's vocabulary, gh through the real shim, the guard calls, report.md as the final assistant message); surface_for (build the case with container paths, the AttemptFixture); the report (CLEAN/TWIN side by side, guard rows, observed rows, the pack count with its trigger).
+3. `skillc/cli.py` - level3-campaign routes a fixture-task manifest to the fixture harness.
+4. `evals/level3/campaign-434/manifest.json` - frozen subject, client, caps, runtime, task identity (PR 1's grader frozen), the flow-auto harness digest, 39 scored rows, 3 guard rows, 4 observed rows.
+5. `evals/level3/campaign-434/RESULTS.md` - results, with limitation (c) and the actor-is-the-top-level statement.
+6. `evals/level3/campaign-434/report.json` - the leak-checked campaign report; no transcripts.
+7. `tests/test_fixture_campaign.py` - the actor's op interpreter equivalent to qualify._apply_git (with a perturbed-op control), manifest refusals, report grouping and counts, the runtime-digest equality.
+8. `tests/test_level3_campaign.py` - appended: #375's committed manifest still passes check_frozen with harness_digest unchanged, and the surface hook's default is today's.
+9. `changelog.d/434-campaign.md` - the release note.
+
+Scope: 9 files. Medium-large.
+
+Risks:
+- The actor's op interpreter could drift from qualify's; the equivalence instrument guards it.
+- A scripted actor does not run CPP's own Step-1 helpers: a production-path test of the harness, not of CPP's flow:auto behaviour.
+- The nested row's real-codex parent must be measured on evals26 before it is frozen.
