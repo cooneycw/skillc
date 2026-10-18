@@ -4,9 +4,55 @@ All notable changes to skillc are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are the day the
 work landed on `main`, not the day a version is tagged - see
 [#72](https://github.com/cooneycw/skillc/issues/72) for the release checklist
-and version plan.
+and version plan. Since #439, new entries are written as fragments in
+`changelog.d/` and folded in here at release by `ci/changelog_assemble.py` -
+do not add to `[Unreleased]` by hand.
 
 ## [Unreleased]
+
+- **The local CI/CD capability profile for one Python project** (#280).
+  `evals/subjects/cpp-codex-cicd-86641e8/` declares CPP's six cicd skills
+  (`init`, `check`, `health`, `smoke`, `verify`, `pipeline`) at the
+  flow-check study pin, over a snapshot `scripts/freeze_cpp_fixture.py`
+  reproduces from git's object store. The skills need curl, which the
+  shared trial image lacks. `runtime_supply.selected_runtime` therefore
+  adds a `cicd-runtime` beside `profile-runtime` (its selection and
+  refusals unchanged), and `docker/cicd-trial/` builds it as ONE curl layer
+  on a validated flow-check receipt. It refuses an image that is not its
+  base plus one layer with the base's configuration and descriptor. A
+  receipt serves only the runtime its closure selected. `docker/trial`,
+  `docker/profile-trial` and their receipts are byte-identical; the
+  flow-check build inputs are pinned to their pre-#280 hashes with a
+  one-byte negative control. `tests/test_cicd_profile_live.py` (floor entry,
+  break family `cicdprofile:`) runs every command as the INSTALLED skill
+  documents it, in a cold `--network none` container. It covers detect,
+  check, `run --plan check`, health and smoke against a loopback service,
+  `verify` PROCEED then ROLLBACK, zero probes as REVIEW, and provider YAML
+  parsed (never executed) with its make targets equal to the local plan's.
+  CPP's own template drift found on the way: claude-power-pack#1476. The
+  profiles spec now says what the code has done since #334: a missing
+  declared tool is `violated`, not `unknown`.
+
+- **A flow:auto necessity task: an already-fixed issue, and its must-act twin**
+  (#434, PR 1 of 3, carrying #270 item 2). `evals/level3/flow-auto-necessity/`
+  runs `/flow:auto 1` in two fixtures with identical issue text, following
+  FixedBench (Gloaguen et al., arXiv 2605.07769, CC BY 4.0, idea only):
+  - CLEAN: the fix is merged as PR #2. The agent must say "No longer needed",
+    cite the real PR or commit, recommend closing #1, and change nothing.
+  - TWIN: no fix. The agent must say "Still needed" with a plan, and implement
+    nothing before approval.
+
+  Seven criteria, all graded from controller-held records (the #276 service
+  record, a git capture, the gate witness), never from candidate files. A
+  flow:auto Step-1 worktree counts as clean only at the base commit with an
+  empty status. Edits and file modes are read from the filesystem, so an
+  `assume-unchanged` edit or a `core.filemode=false` chmod is still caught. A
+  commit parked on a side branch, a detached HEAD on an older commit, and an
+  index-only change also count. `qualify.py` plays 43 scripted attempts through the real
+  fixture service and certifies the grader. It refuses the 5 broken graders,
+  and 3 blinding controls each flip their red to PASS. Every criterion's check
+  was also mutation-tested and goes red. No attempt has run: the live wiring
+  is PR 2 (after #442), and the campaign is PR 3.
 
 - **Live agent containers reach only their model provider** (#442). Live
   attempts ran on Docker's default bridge with open egress (#11), and skillc's
@@ -25,27 +71,6 @@ and version plan.
   every report. The real-Docker runner's floor gains
   `tests/test_agent_egress_live.py` with an `egress:` break family
   (`allow-all`, `bridge-network`, `dns-hosts`).
-
-- **#287 P3: the two pilot declarations are complete and bound by enforced
-  checks** (Refs #287). Both name codex `0.157.1` / `gpt-6-astra` / `high`,
-  #375's image `skillc-375-final:88b3999-6343d33b` with its runtime receipt,
-  caps, grader revision 5, and a durable `run_store` on kyle19. Neither is
-  approved. Each new check refuses before any container:
-  - **C1:** a whole-word `PENDING`/`PROPOSED`/`UNKNOWN` anywhere in an
-    identity leaf is refused at approval; prose keys are exempt.
-  - **C2:** an outcome-endpoint declaration must carry
-    `tolerance.non_evaluable_per_arm`, and its report applies it.
-  - **C3:** the declaration must name a well-formed receipt digest, and the
-    run is bound to the declared tag, the ID the daemon resolves it to, and
-    the exact receipt bytes; the run uses the bytes it checked.
-  - **C4:** the declaration must match #442's provider-only egress policy.
-    A dispatched attempt whose proxy log did not record the declared
-    allowlist digest is ineligible, counts as non-evaluable, and fails the
-    run.
-  - **C5:** `run_store` is a literal `~/` or an absolute path in normal
-    form, with no temp or scratchpad destination. The `~/` is expanded
-    against HOME at launch, and the expanded path and its real destination
-    are checked again. The CLI stores the run there.
 
 - **#287 P2: discrimination runs, whole-declaration approval, and rehearsal**
   (Refs #287).

@@ -776,7 +776,86 @@ def flow_check_honest_control_verdict(name: str) -> tuple[bool, str]:
     return True, f"refused: {name!r} got {results}, not {wants}, across the named cases"
 
 
-def main() -> int:
+def _part_certify() -> int:
+    good, rows = certify(HERE / "grade_gate_stops_early.py")
+    _show("grade_gate_stops_early.py", good, rows)
+    if not good:
+        print("QUALIFY: fail - the grader does not discriminate the committed candidates")
+        return 1
+    return 0
+
+
+def _part_control(name: str) -> int:
+    held, reason, rows = control_verdict(name)
+    _show(f"control {name} ({reason})", False, rows)
+    if not held:
+        print(f"QUALIFY: fail - broken-grader control(s) did not hold: {name}: {reason}")
+        return 1
+    return 0
+
+
+def _validity() -> tuple[int, int, int]:
+    """The restore-probe and flow-check-honest checks: (exit code, validity
+    count, discrimination count)."""
+    validity = restore_probe_validity()
+    print("restore-probe validity:")
+    for name, held, detail in validity:
+        print(f"  {'ok ' if held else 'BAD'} {name}" + ("" if held else f": {detail}"))
+    if not all(held for _name, held, _detail in validity):
+        print("QUALIFY: fail - a restore-probe validity control did not hold")
+        return 1, len(validity), 0
+
+    flow_check_discrimination = flow_check_honest_validity()
+    print("flow-check-honest discrimination (direct function cases beyond certify()'s own candidates):")
+    for name, held, detail in flow_check_discrimination:
+        print(f"  {'ok ' if held else 'BAD'} {name}" + ("" if held else f": {detail}"))
+    if not all(held for _name, held, _detail in flow_check_discrimination):
+        print("QUALIFY: fail - a flow-check-honest discrimination case did not hold")
+        return 1, len(validity), len(flow_check_discrimination)
+    flow_check_controls_blind = []
+    for name in _FLOW_CHECK_CONTROLS:
+        held, reason = flow_check_honest_control_verdict(name)
+        print(f"  flow-check-honest control {name}: {'REFUSED' if held else 'BAD'} ({reason})")
+        if not held:
+            flow_check_controls_blind.append(name)
+    if flow_check_controls_blind:
+        print(f"QUALIFY: fail - flow-check-honest broken control(s) not refused: {flow_check_controls_blind}")
+        return 1, len(validity), len(flow_check_discrimination)
+    return 0, len(validity), len(flow_check_discrimination)
+
+
+def parts() -> list[str]:
+    """Independent slices of the full run (#446): each one alone re-derives
+    everything it checks, so tests/test_qualify_scripts_run.py runs them as
+    separate subprocesses and no single one sits near the test's cap."""
+    return ["certify", *(f"control:{name}" for name in CONTROLS), "validity"]
+
+
+def run_part(part: str) -> int:
+    if part == "certify":
+        code = _part_certify()
+    elif part.startswith("control:") and part.removeprefix("control:") in CONTROLS:
+        code = _part_control(part.removeprefix("control:"))
+    elif part == "validity":
+        code = _validity()[0]
+    else:
+        print(f"QUALIFY: fail - unknown part {part!r}; known: {', '.join(parts())}")
+        return 2
+    if code == 0:
+        print(f"QUALIFY: ok part={part}")
+    return code
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    if args == ["--list-parts"]:
+        print("\n".join(parts()))
+        return 0
+    if len(args) == 2 and args[0] == "--part":
+        return run_part(args[1])
+    if args:
+        print("usage: qualify.py [--list-parts | --part <name>]")
+        return 2
     good, rows = certify(HERE / "grade_gate_stops_early.py")
     _show("grade_gate_stops_early.py", good, rows)
     blind = []
@@ -791,34 +870,13 @@ def main() -> int:
     if blind:
         print(f"QUALIFY: fail - broken-grader control(s) did not hold: {'; '.join(blind)}")
         return 1
-    validity = restore_probe_validity()
-    print("restore-probe validity:")
-    for name, held, detail in validity:
-        print(f"  {'ok ' if held else 'BAD'} {name}" + ("" if held else f": {detail}"))
-    if not all(held for _name, held, _detail in validity):
-        print("QUALIFY: fail - a restore-probe validity control did not hold")
-        return 1
-
-    flow_check_discrimination = flow_check_honest_validity()
-    print("flow-check-honest discrimination (direct function cases beyond certify()'s own candidates):")
-    for name, held, detail in flow_check_discrimination:
-        print(f"  {'ok ' if held else 'BAD'} {name}" + ("" if held else f": {detail}"))
-    if not all(held for _name, held, _detail in flow_check_discrimination):
-        print("QUALIFY: fail - a flow-check-honest discrimination case did not hold")
-        return 1
-    flow_check_controls_blind = []
-    for name in _FLOW_CHECK_CONTROLS:
-        held, reason = flow_check_honest_control_verdict(name)
-        print(f"  flow-check-honest control {name}: {'REFUSED' if held else 'BAD'} ({reason})")
-        if not held:
-            flow_check_controls_blind.append(name)
-    if flow_check_controls_blind:
-        print(f"QUALIFY: fail - flow-check-honest broken control(s) not refused: {flow_check_controls_blind}")
-        return 1
+    code, validity, discrimination = _validity()
+    if code:
+        return code
 
     print(f"QUALIFY: ok - grader certified; {len(CONTROLS)} broken graders refused; "
-          f"{len(validity)} restore-probe validity controls held; "
-          f"{len(flow_check_discrimination)} flow-check-honest discrimination cases held, "
+          f"{validity} restore-probe validity controls held; "
+          f"{discrimination} flow-check-honest discrimination cases held, "
           f"{len(_FLOW_CHECK_CONTROLS)} broken flow-check-honest controls refused (stage evidence: #376)")
     return 0
 

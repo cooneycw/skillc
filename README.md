@@ -291,8 +291,9 @@ check rejects a committed short report. `make test PYTEST_WORKERS=0` runs the
 same population serially; reports are kept under `reports/`. `uv run pytest
 tests/test_private_citations.py` guards tracked files against a private
 fleet message number or worker name (issue #100) - and a PR that
-changes `skillc/` also needs a new entry under `CHANGELOG.md`'s `[Unreleased]`
-section, or a `Changelog-exempt: <reason>` trailer on its last commit. See
+changes `skillc/` also needs a changelog fragment, `changelog.d/<issue>.md`
+(see `changelog.d/README.md`; do not edit `CHANGELOG.md`'s `[Unreleased]`,
+#439), or a `Changelog-exempt: <reason>` trailer on its last commit. See
 #73's CI steps (`changelog-check`, `readme-drift`) for what else is checked
 automatically.
 

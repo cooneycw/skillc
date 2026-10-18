@@ -563,7 +563,7 @@ def test_cli_runs_with_the_receipt_bytes_it_checked_not_a_second_read(
     monkeypatch.setattr(cc, "acquire_collection", acquire)
     monkeypatch.setattr(cc, "discard_acquisition", lambda *_: None)
     monkeypatch.setattr(cr, "build_treatment", lambda *_a, **_kw: cr.Treatment({}, "sha256:" + "ab" * 32, None, skill_digests=_TEST_PINS))
-    monkeypatch.setattr(rs, "requires_supply", lambda **_: True)
+    monkeypatch.setattr(rs, "selected_runtime", lambda **_: rs.PROFILE_RUNTIME)
     monkeypatch.setattr(cr, "private_root", lambda *_: tmp_path / "private")
     monkeypatch.setattr(cc, "agent_backends", lambda **kw: seen.append(kw["runtime_supply"]))
 

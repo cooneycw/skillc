@@ -1,0 +1,250 @@
+{
+ "profile_schema": 1,
+ "name": "cpp-codex-cicd",
+ "subject": "./subject.json",
+ "select": [
+  "cicd-init",
+  "cicd-check",
+  "cicd-health",
+  "cicd-smoke",
+  "cicd-verify",
+  "cicd-pipeline"
+ ],
+ "treatment_question": "product",
+ "allowed_destinations": [
+  ".codex/skills",
+  "Projects/claude-power-pack"
+ ],
+ "reference_patterns": [
+  {
+   "name": "home-path",
+   "class": "home-relative",
+   "pattern": "(?:~|\\$HOME|\\$\\{HOME\\})/[A-Za-z0-9._/-]*[A-Za-z0-9_-]",
+   "meaning": "a path under the user's home; inside a trial that is the disposable home"
+  },
+  {
+   "name": "plugin-root",
+   "class": "variable-rooted",
+   "pattern": "\\$\\{?CLAUDE_PLUGIN_ROOT(?::-)?\\}?/[A-Za-z0-9._/-]*[A-Za-z0-9_-]",
+   "meaning": "the Claude Code plugin's bundle directory, another client's surface"
+  },
+  {
+   "name": "checkout-root",
+   "class": "variable-rooted",
+   "pattern": "\\$\\{?CPP_DIR\\}?/[A-Za-z0-9._/-]*[A-Za-z0-9_-]",
+   "meaning": "a file inside the subject's own checkout, located by the procedure's probe order"
+  },
+  {
+   "name": "absolute-system-path",
+   "class": "absolute",
+   "pattern": "(?<![\\w.~}$/-])/(?:opt|usr/local|srv|home)/[A-Za-z0-9._/-]*[A-Za-z0-9_-]",
+   "meaning": "an absolute install location outside any home; never satisfiable by a disposable home"
+  }
+ ],
+ "dependencies": [
+  {
+   "id": "checkout-libraries",
+   "kind": "library",
+   "scope": "treatment",
+   "role": "the CPP checkout's lib.cicd package every cicd skill runs as `uv run --project \"$CPP_DIR\" python -m lib.cicd <command>` with PYTHONPATH=$CPP_DIR (cicd-check/reference.md:48, cicd-health/reference.md:57, cicd-smoke/reference.md:58, cicd-verify/reference.md:79,96, cicd-init/reference.md:34,52, cicd-pipeline/SKILL.md:36,42,53)",
+   "source_root": ".",
+   "paths": [
+    "pyproject.toml",
+    "uv.lock",
+    "lib/cicd"
+   ],
+   "destination": "Projects/claude-power-pack",
+   "traverse": false,
+   "no_traverse_reason": "Python packages: their dependencies are imports resolved by the interpreter, not path text a reference pattern can read. At this pin lib/cicd and lib/security import only themselves and PyPI packages (see tool-pypi-runtime). Whether they import cleanly in a disposable home is #266's installed-path proof.",
+   "satisfies": [
+    {
+     "reference": "~/Projects/claude-power-pack",
+     "path": null
+    },
+    {
+     "reference": "$HOME/Projects/claude-power-pack",
+     "path": null
+    }
+   ]
+  },
+  {
+   "id": "checkout-detection-marker",
+   "kind": "synthetic",
+   "scope": "treatment",
+   "role": "Existence-only checkout detection marker",
+   "source_root": ".",
+   "paths": [
+    "CLAUDE.md"
+   ],
+   "destination": "Projects/claude-power-pack",
+   "content": "# Synthetic checkout marker only - not agent instructions.\n# See skillc#303.\n",
+   "unreferenced_reason": "scripts/flow-finish-gate.sh:347 tests directory and CLAUDE.md existence only.",
+   "replaces_pinned": true,
+   "replacement_reason": "The pinned CLAUDE.md is CPP agent instructions. Separately confirmed by the operator: Codex project-doc discovery reads AGENTS.md from cwd, not CLAUDE.md. scripts/flow-finish-gate.sh:347 only tests existence, so a minimal marker preserves detection without installing instructions content."
+  },
+  {
+   "id": "checkout-templates",
+   "kind": "library",
+   "scope": "treatment",
+   "role": "Makefile templates cicd-init copies from and cicd-check points at (cicd-init/reference.md:81, cicd-check/reference.md:36), and the cicd.yml template cicd-init generates its configuration from (cicd-init/reference.md:104 names it as a bare relative path no reference pattern reads; its health/smoke shape is the one lib.cicd ignores, claude-power-pack#1476)",
+   "source_root": ".",
+   "paths": [
+    "templates/Makefile.example",
+    "templates/cicd.yml.example",
+    "templates/makefiles"
+   ],
+   "destination": "Projects/claude-power-pack",
+   "satisfies": [
+    {
+     "reference": "$CPP_DIR/templates/Makefile.example",
+     "path": "templates/Makefile.example"
+    },
+    {
+     "reference": "$CPP_DIR/templates/makefiles",
+     "path": "templates/makefiles"
+    }
+   ]
+  },
+  {
+   "id": "tool-python",
+   "kind": "tool",
+   "scope": "common",
+   "role": "interpreter for lib.cicd / lib.security and the bundled .py helpers",
+   "version": ">=3.11 (pyproject.toml requires-python at the pin)",
+   "supply": "the trial image; not carried by the subject",
+   "unreferenced_reason": "invoked as a command word (`python -m lib.security`, reference.md:100), which no path pattern reads",
+   "probes": [
+    {
+     "kind": "command",
+     "name": "python3",
+     "version_args": [
+      "--version"
+     ],
+     "constraint": ">=3.11"
+    }
+   ]
+  },
+  {
+   "id": "tool-uv",
+   "kind": "tool",
+   "scope": "common",
+   "role": "runs the checkout's packages (`uv run --project`)",
+   "version": "unpinned by the subject; #266 pins it in the image",
+   "supply": "the trial image; not carried by the subject",
+   "unreferenced_reason": "invoked as a command word (`uv run --project`, reference.md:100; flow-finish-gate.sh:355), which no path pattern reads",
+   "probes": [
+    {
+     "kind": "command",
+     "name": "uv",
+     "version_args": [
+      "--version"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tool-pypi-runtime",
+   "kind": "tool",
+   "scope": "common",
+   "role": "PyPI runtime dependencies of lib.cicd (pydantic, pyyaml), resolved by uv from uv.lock",
+   "version": "pydantic>=2.0, pyyaml>=6.0 as locked in uv.lock at the pin",
+   "supply": "EXTERNAL: uv resolves these from a package index on first run. Trials have no network (spec.md section 4), so #266 must pre-supply a filled cache or report the gate step unavailable",
+   "unreferenced_reason": "a package-manager resolution, not a path in any file of the closure",
+   "probes": [
+    {
+     "kind": "python-import",
+     "modules": [
+      "pydantic",
+      "yaml"
+     ],
+     "uv_project": "Projects/claude-power-pack"
+    }
+   ]
+  },
+  {
+   "id": "tool-make-git-bash",
+   "kind": "tool",
+   "scope": "common",
+   "role": "make (Makefile targets), git (check-ignored-additions.sh), bash (every shell helper)",
+   "version": "unpinned by the subject; any POSIX-conforming version the image carries",
+   "supply": "the trial image; not carried by the subject",
+   "unreferenced_reason": "invoked as command words (`make lint`, `git status`, `#!/usr/bin/env bash`), which no path pattern reads",
+   "probes": [
+    {
+     "kind": "command",
+     "name": "make"
+    },
+    {
+     "kind": "command",
+     "name": "git"
+    },
+    {
+     "kind": "command",
+     "name": "bash"
+    }
+   ]
+  },
+  {
+   "id": "tool-curl",
+   "kind": "tool",
+   "scope": "common",
+   "role": "lib.cicd's HTTP health probe shells out to curl (lib/cicd/health.py:54-71: `shutil.which(\"curl\")`, else the check FAILs with \"curl not found in PATH\" - a tooling failure indistinguishable in a verdict from a service failure)",
+   "version": ">=7.0, measured and recorded in the cicd-runtime receipt",
+   "supply": "the cicd-runtime image layer (docker/cicd-trial/); the shared trial image does not carry curl",
+   "unreferenced_reason": "invoked by lib.cicd as a subprocess command word, which no path pattern reads",
+   "probes": [
+    {
+     "kind": "command",
+     "name": "curl",
+     "version_args": [
+      "--version"
+     ],
+     "constraint": ">=7.0"
+    }
+   ]
+  }
+ ],
+ "unsupported": [
+  {
+   "reference": "/opt/claude-power-pack",
+   "reason": "absolute alternative checkout location outside any home (cicd-{check,health,init,smoke}/reference.md:13, cicd-verify/reference.md:19); the profile supplies ~/Projects/claude-power-pack, which every cicd skill's probe order tries first"
+  },
+  {
+   "reference": "~/.claude-power-pack",
+   "reason": "third alternative checkout location (cicd-{check,health,init,smoke}/reference.md:13, cicd-verify/reference.md:19); not supplied, because the first probe already succeeds"
+  },
+  {
+   "reference": "/usr/local/bin",
+   "reason": "not a runtime reference: templates/makefiles/go.mk:44 and rust.mk:41 echo an example `scp ... prod:/usr/local/bin/` deploy hint for a remote host; a printed string in a template for Go/Rust projects, never a path on the trial's own host"
+  }
+ ],
+ "mirrors": [],
+ "generated_from": [],
+ "declared_empty_kinds": [
+  "startup-context",
+  "helper"
+ ],
+ "client_profiles": {
+  "codex": {
+   "status": "declared",
+   "reason": "the subject's own surface (codex-skills)"
+  },
+  "claude-code": {
+   "status": "unsupported",
+   "reason": "Claude Code commands, plugin and native skills are a different surface with different helpers (CLAUDE_PLUGIN_ROOT); a Codex inventory does not establish Claude parity"
+  },
+  "browser": {
+   "status": "unsupported",
+   "reason": "the cicd skills need no browser; the browser/MCP capability profile is #283's to prove"
+  },
+  "security-scanner": {
+   "status": "unsupported",
+   "reason": "external scanners are #285's profile"
+  },
+  "services": {
+   "status": "unsupported",
+   "reason": "only loopback services the trial itself starts inside its own container are in scope; GitHub, hosted CI, Docker, cloud deploy targets, MCP servers and network are not provided to trials (spec.md section 4)"
+  }
+ },
+ "notes": "skillc#280: the local CI/CD capability profile for one Python project, at the same claude-power-pack pin (86641e8) as cpp-codex-flow-check-86641e8 and sharing its offline PyPI runtime (pydantic, pyyaml from the same pyproject/uv.lock). A SEPARATE profile with its own inventory; the flow-check profile, its evidence and every receipt bound to it are untouched. It selects the six cicd skills CPP's project:init and cicd:init flows rely on for one Python project (init, check, health, smoke, verify, pipeline); cicd-container, cicd-woodpecker and the infra-* skills need Docker, a Woodpecker server or a cloud account and are out of this profile's scope. No gate_entrypoint: these skills run lib.cicd directly, so runtime selection is the separate cicd-runtime (skillc/runtime_supply.py selected_runtime), an image that adds exactly one curl layer to the validated flow-check profile-runtime image (docker/cicd-trial/). Local semantics are PROFILE.md's: loopback HTTP only, provider pipelines are generated text (never executed here), CPP_OFFLINE=1. The project fixture's .claude/cicd.yml uses lib/cicd/config.py's real schema, not templates/cicd.yml.example's (claude-power-pack#1476). startup-context and helper are declared empty: CPP's Codex installer writes only skill directories at this pin, and the cicd skills call no installed helper script."
+}
