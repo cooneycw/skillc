@@ -1,0 +1,27 @@
+{
+  "branch": "issue-460-egress-proxy-has-no-readiness-wait-and-deny-test-f",
+  "counts": {
+    "accepted": 3,
+    "deferred": 0,
+    "rejected": 0
+  },
+  "head": "686dbfe4302012e98316da69c366af09fecb49f1",
+  "implementer": "claude/claude-opus-5-5",
+  "issue": "460",
+  "local_credentials": "absent",
+  "network": "blocked",
+  "passes": 2,
+  "recorded_at": "2026-10-18T06:37:52Z",
+  "red_cases": {
+    "already_covered": 12,
+    "proposed": 15
+  },
+  "reviewer": "codex/gpt-6-astra",
+  "reviewer_evidence": {
+    "rollout": "2026/10/18/rollout-2026-10-18T02-25-03-01a14daf-66d8-7211-b754-1d0db6884b23.jsonl",
+    "thread_id": "01a14daf-66d8-7211-b754-1d0db6884b23"
+  },
+  "schema": 1,
+  "scope": "full",
+  "status": "ran"
+}

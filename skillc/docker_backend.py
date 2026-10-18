@@ -916,6 +916,10 @@ class DockerBackend:
     #: the default IS the measured allowlist. Only the real-Docker control's
     #: `allow-all` break widens it, to prove the denial check can fail.
     egress_hosts: tuple[str, ...] = eg.ALLOWED_HOSTS
+    #: #460: how long `prepare()` waits for the egress proxy to accept
+    #: connections before refusing the attempt. Without the wait, a proxy slower
+    #: to start than the agent container refuses the agent's first CONNECTs.
+    egress_ready_seconds: float = 30.0
     #: Host-side directory for #183's socket files - see
     #: `DEFAULT_TRIGGER_SOCKET_DIR`'s own comment for why this is NOT
     #: `base_dir`. `repr=False`: a host filesystem path, same reasoning as
@@ -1150,6 +1154,7 @@ class DockerBackend:
                                         f"read {proxy}'s address on {network}").strip()
             if not re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", address):
                 raise BackendUnavailable(f"egress proxy {proxy} has no IPv4 address on {network}: {address!r}")
+            self._await_proxy_ready(proxy, env)
         except BackendUnavailable as exc:
             note = self._stop_egress(proxy if created_proxy else None, network if created_network else None, env)
             raise BackendUnavailable(f"{exc}{note}") from exc
@@ -1159,6 +1164,33 @@ class DockerBackend:
             self._stop_egress(proxy if created_proxy else None, network if created_network else None, env)
             raise
         return network, proxy, address
+
+    def _await_proxy_ready(self, proxy: str, env: Mapping[str, str]) -> None:
+        """#460: return only once the proxy accepts TCP connections, probed from
+        inside its own container (a loopback peer, which the proxy does not
+        log). Refuses with `BackendUnavailable` after `egress_ready_seconds`,
+        naming the last probe's error; `_start_egress` then removes the proxy
+        and network as for any other setup failure."""
+        deadline = time.monotonic() + self.egress_ready_seconds
+        last = "no probe ran"
+        while True:
+            # Every probe and pause is capped at what is left of the budget, so
+            # a hanging `docker exec` cannot carry the wait past it (#460
+            # counter-model review).
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise BackendUnavailable(f"egress proxy {proxy} did not accept connections within "
+                                         f"{self.egress_ready_seconds:g}s (last probe: {last})")
+            try:
+                done = subprocess.run(eg.proxy_ready_argv(self.docker_bin, proxy), capture_output=True, text=True,
+                                      env=env, check=False, timeout=min(self.daemon_timeout, remaining))
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                last = str(exc)
+            else:
+                if done.returncode == 0:
+                    return
+                last = (done.stderr.strip().splitlines() or [f"exit {done.returncode}"])[-1]
+            time.sleep(max(0.0, min(0.2, deadline - time.monotonic())))
 
     def _stop_egress(self, proxy: str | None, network: str | None, env: Mapping[str, str]) -> str:
         """Best-effort, bounded removal of #442's proxy container and network.

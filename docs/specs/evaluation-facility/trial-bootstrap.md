@@ -158,6 +158,20 @@ of those fail. The proxy serves only clients from the attempt network's own
 subnet, so a neighbouring container on the shared bridge cannot add to an
 attempt's log.
 
+**Readiness (#460).** `prepare()` returns only once the proxy accepts TCP
+connections. The backend probes it from inside the proxy's own container
+(`egress.READY_SOURCE` via `docker exec`), polling until
+`DockerBackend.egress_ready_seconds` runs out (30 s by default). On expiry it
+refuses the attempt with `BackendUnavailable` and removes the proxy and the
+network. Before #460, a proxy slower to start than the agent container
+refused the agent's first CONNECTs (`Errno 111`). The proxy's `start` log line
+is written only after the port is bound, so it means "listening". The probe
+is a loopback peer, and **only a process inside the proxy container can be a
+loopback peer**. So a loopback client outside the attempt subnet is closed
+without a log record. The exemption is exactly `127.0.0.0/8`: every other
+client outside the subnet is still logged `peer-rejected`. The allowlist, its
+digest, the server-side codex flags and the network label are unchanged.
+
 ## A per-trial seed is bound to exactly one project and one CLI version
 
 `validate_seed_before_launch` requires `projects` to contain EXACTLY one

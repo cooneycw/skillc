@@ -54,6 +54,7 @@ from pathlib import Path
 
 import pytest
 from conftest import LIVE_DOCKER_DAEMON_TIMEOUT
+from egress_diagnostics import describe_observation
 
 from skillc import docker_backend as d
 from skillc import egress as eg
@@ -183,12 +184,52 @@ def _probe(handle: d._Handle, kind: str, target: str, *, use_proxy: bool = True)
     return result
 
 
+def _observed(backend: d.DockerBackend, handle: d._Handle, results: dict[str, dict[str, object]]) -> str:
+    """#460: what was actually seen, for a failure message. Read BEFORE any
+    `_require`, because `destroy()` removes the proxy and its log."""
+    return describe_observation(results, backend.egress_log(handle))
+
+
 def test_provider_is_reachable_through_the_proxy(attempt: tuple[d.DockerBackend, d._Handle]) -> None:
     backend, handle = attempt
     result = _probe(handle, "https", "https://chatgpt.com/")
     assert result["result"] == "http", f"the provider was not reachable through the proxy: {result.get('error')}"
     log = backend.egress_log(handle)
     assert log is not None and "chatgpt.com:443" in eg.summarize_log(log)["allowed"]  # type: ignore[operator]
+
+
+#: Sleeps before `asyncio.run(serve())`, i.e. before the bind: a proxy slower
+#: to start than everything else in `prepare()`. #460's red case.
+_SLOW_START_DELAY_SECONDS = 10
+_SLOW_START_ANCHOR = "\n    asyncio.run(serve())\n"
+
+
+def test_prepare_returns_only_once_the_proxy_listens(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#460: `prepare()` must not hand back an attempt whose proxy is not yet
+    listening. Without a readiness wait, the first CONNECT is refused (Errno
+    111) - in a live attempt, an unusable start counted against tolerance.
+
+    The probe asks for a name no mode ever allowlists, so the only possible
+    "ready" answer is the proxy's OWN 403: no provider, DNS or upstream is
+    involved, and an outage elsewhere cannot fail (or pass) this test. The
+    10 s delay outlasts the rest of prepare() by a wide margin (measured on
+    kyle19: the pre-fix probe fails about 2 s in)."""
+    assert _image_available(LIVE_TEST_IMAGE), "the live test image could not be made available"
+    assert eg.PROXY_SOURCE.count(_SLOW_START_ANCHOR) == 1, "setup: the slow-start anchor moved"
+    monkeypatch.setattr(eg, "PROXY_SOURCE", eg.PROXY_SOURCE.replace(
+        _SLOW_START_ANCHOR, f"\n    time.sleep({_SLOW_START_DELAY_SECONDS})\n    asyncio.run(serve())\n"))
+    with tempfile.TemporaryDirectory() as tmp:
+        backend = d.DockerBackend(image=LIVE_TEST_IMAGE, base_dir=Path(tmp), egress=True,
+                                  daemon_timeout=LIVE_DOCKER_DAEMON_TIMEOUT)
+        handle = backend.prepare(f"a-egress-slow-{os.getpid()}")
+        assert isinstance(handle, d._Handle)
+        try:
+            result = _probe(handle, "https", "https://never-allowlisted.invalid/")
+            answered = result["result"] == "error" and "403" in str(result.get("error"))
+            assert answered, ("the first request after prepare() got no answer from the proxy: "
+                              + _observed(backend, handle, {"never-allowlisted.invalid": result}))
+        finally:
+            backend.destroy(handle)
 
 
 @pytest.mark.xfail(BREAK_MODE == "allow-all", raises=_DenialFailed, strict=True,
@@ -198,13 +239,14 @@ def test_the_proxy_denies_github(attempt: tuple[d.DockerBackend, d._Handle]) -> 
     targets = ("https://github.com/", "https://raw.githubusercontent.com/cooneycw/skillc/main/README.md")
     results = {target: _probe(handle, "https", target) for target in targets}
     refused = [t for t, r in results.items() if r["result"] == "error" and "403" in str(r.get("error"))]
+    seen = _observed(backend, handle, results)  # before ANY assertion: destroy() takes the log with it (#460)
     if BREAK_MODE == "allow-all":
         # The break itself, shown first as a hard assertion: GitHub really
         # answered through the widened proxy. Only then can the xfail below
         # come from the property failing for this reason.
-        assert all(r["result"] == "http" for r in results.values()), "setup: allow-all did not reach GitHub"
+        assert all(r["result"] == "http" for r in results.values()), f"setup: allow-all did not reach GitHub - observed: {seen}"
     _require(sorted(refused) == sorted(targets), _DenialFailed,
-             "the proxy must refuse github.com and raw.githubusercontent.com with 403")
+             f"the proxy must refuse github.com and raw.githubusercontent.com with 403 - observed: {seen}")
     log = backend.egress_log(handle)
     assert log is not None
     denied = eg.summarize_log(log)["denied"]
@@ -215,27 +257,31 @@ def test_the_proxy_denies_github(attempt: tuple[d.DockerBackend, d._Handle]) -> 
 @pytest.mark.xfail(BREAK_MODE == "dns-hosts", raises=_ResolutionFailed, strict=True,
                    reason="dns-hosts maps github.com in the container, so resolution must succeed")
 def test_a_client_that_ignores_the_proxy_cannot_resolve_names(attempt: tuple[d.DockerBackend, d._Handle]) -> None:
-    _backend, handle = attempt
+    backend, handle = attempt
     resolve = _probe(handle, "resolve", "github.com", use_proxy=False)
+    seen = _observed(backend, handle, {"resolve github.com": resolve})  # before ANY assertion (#460)
     if BREAK_MODE == "dns-hosts":
-        assert resolve["result"] == "resolved", "setup: dns-hosts did not make github.com resolve"
+        assert resolve["result"] == "resolved", f"setup: dns-hosts did not make github.com resolve - observed: {seen}"
     if resolve["result"] == "error":
-        assert resolve.get("error") == "gaierror", "inconclusive: resolution failed for a non-DNS reason"
-    _require(resolve["result"] == "error", _ResolutionFailed, "github.com must not resolve inside the agent")
+        assert resolve.get("error") == "gaierror", f"inconclusive: resolution failed for a non-DNS reason - observed: {seen}"
+    _require(resolve["result"] == "error", _ResolutionFailed,
+             f"github.com must not resolve inside the agent - observed: {seen}")
 
 
 @pytest.mark.xfail(BREAK_MODE == "bridge-network", raises=_IsolationFailed, strict=True,
                    reason="bridge-network gives the agent a direct route, so isolation must fail")
 def test_a_client_that_ignores_the_proxy_has_no_route_out(attempt: tuple[d.DockerBackend, d._Handle]) -> None:
-    _backend, handle = attempt
+    backend, handle = attempt
     direct = _probe(handle, "direct", GITHUB_ADDRESS, use_proxy=False)
+    seen = _observed(backend, handle, {"direct to a GitHub address": direct})  # before ANY assertion (#460)
     if BREAK_MODE == "bridge-network":
-        assert direct["result"] == "connected", "setup: bridge-network gave no direct route"
+        assert direct["result"] == "connected", f"setup: bridge-network gave no direct route - observed: {seen}"
     if direct["result"] == "error":
         # Only "no route" is isolation. A refusal or a timeout means a route
         # existed and the far end did not answer - an outage there would read
         # as isolation here, so it is inconclusive, a hard failure.
         error = str(direct.get("error"))
         assert "Errno 101" in error or "Errno 113" in error or "unreachable" in error.lower(), \
-            "inconclusive: the direct connection failed for a reason other than no route"
-    _require(direct["result"] == "error", _IsolationFailed, "a direct connection to GitHub must have no route")
+            f"inconclusive: the direct connection failed for a reason other than no route - observed: {seen}"
+    _require(direct["result"] == "error", _IsolationFailed,
+             f"a direct connection to GitHub must have no route - observed: {seen}")
