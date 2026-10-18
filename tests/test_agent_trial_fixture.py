@@ -53,7 +53,7 @@ TASK = Path(__file__).resolve().parent.parent / "evals" / "level3" / "flow-auto-
 GIT_DIR = "/work/.remote/widget.git"
 GATE_ENTRY = ".claude/scripts/flow-finish-gate.sh"
 GATE_SCRIPT = b"#!/bin/bash\nprintf 'FLOW_FINISH_GATE: ok\\n'\n"
-TOP_LEVEL = {"op": "codex_guard", "decision": "passed-top-level", "argv_digest": "sha256:" + "0" * 64}
+TOP_LEVEL: dict[str, object] = {"op": "codex_guard", "decision": "passed-top-level", "argv_digest": "sha256:" + "0" * 64}
 TIMEOUT = 60
 
 #: PR 1 candidates whose whole attempt is gh requests plus a report.
@@ -132,8 +132,17 @@ def run_fixture_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, case: s
     fixture, surface = _fixture(tmp_path / "fixture", case)
     monkeypatch.setattr(at, "_FLOW_CHECK_GATE_HARNESS_ROOT", "/home/candidate/.protected-harness")
     placed: list[str] = []
-    monkeypatch.setattr(fo, "install_gh_shim", lambda b, h, e: placed.append("gh") or fo.PlacedFile(fo.GH_PATH, "-"))
-    monkeypatch.setattr(fo, "install_codex_guard", lambda b, h, e: placed.append("codex") or {})
+
+    def gh_shim(backend: object, handle: object, env: object) -> fo.PlacedFile:
+        placed.append("gh")
+        return fo.PlacedFile(fo.GH_PATH, "-")
+
+    def codex_guard(backend: object, handle: object, env: object) -> dict[str, object]:
+        placed.append("codex")
+        return {}
+
+    monkeypatch.setattr(fo, "install_gh_shim", gh_shim)
+    monkeypatch.setattr(fo, "install_codex_guard", codex_guard)
     trusted: list[dict[str, Any]] = []
     real_grade = verify.grade_files
 
@@ -185,7 +194,7 @@ def test_a_qualify_candidate_replayed_through_the_live_wiring_grades_as_committe
     assert not actions.get("git") and actions.get("witness", "no-runs") == "no-runs"
     expected = json.loads((candidate / "expected.json").read_text())
     report = (candidate / "report.md").read_text()
-    requests = [TOP_LEVEL, *(_gh(argv) for argv in actions.get("gh", []))]
+    requests: list[dict[str, object]] = [TOP_LEVEL, *(_gh(argv) for argv in actions.get("gh", []))]
     result, trusted = run_fixture_case(tmp_path, monkeypatch, case=actions["case"], requests=requests,
                                        report=report)
     assert _outcome(result) == {"status": expected["status"], "violated": sorted(expected["violated"]),
@@ -207,7 +216,7 @@ def test_a_mixed_request_on_the_shared_socket_is_refused_and_no_route_sees_it(
     actions = json.loads((candidate / "actions.json").read_text())
     mixed_gh = {**_gh(actions["gh"][0]), "nonce": "x"}
     mixed_guard = {**TOP_LEVEL, "argv": ["pr", "list"]}
-    requests = [TOP_LEVEL, mixed_gh, mixed_guard, *(_gh(argv) for argv in actions["gh"])]
+    requests: list[dict[str, object]] = [TOP_LEVEL, mixed_gh, mixed_guard, *(_gh(argv) for argv in actions["gh"])]
     result, trusted = run_fixture_case(tmp_path, monkeypatch, case="clean", requests=requests,
                                        report=(candidate / "report.md").read_text())
     [envelope] = trusted
