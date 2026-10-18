@@ -27,6 +27,7 @@ fail_case() {
 
 fail_case "partial-skip (a mixed file's git-gated subset skipped)" "$FIXTURES/bad-partial-skip.xml" "skipped for a git-mentioning reason"
 fail_case "jq-skip (#276: every module still executes, but its jq-gated tests skipped for jq)" "$FIXTURES/bad-jq-skip.xml" "skipped for a jq-mentioning reason"
+fail_case "make-skip (#434: every module still executes, but a make-gated test skipped for make)" "$FIXTURES/bad-make-skip.xml" "skipped for a make-mentioning reason"
 fail_case "missing report" "$FIXTURES/does-not-exist.xml"
 fail_case "malformed report" "$FIXTURES/malformed.xml"
 
@@ -37,4 +38,4 @@ python3 "$CHECK" "$FIXTURES/good-all-ran.xml"
 echo "git-tests-control: good-unrelated-skip must PASS"
 python3 "$CHECK" "$FIXTURES/good-unrelated-skip.xml"
 
-echo "git-tests-control: ok - caught all four bad fixtures, passed both good ones"
+echo "git-tests-control: ok - caught all five bad fixtures, passed both good ones"

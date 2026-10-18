@@ -15,3 +15,5 @@
     observed, 3 guard). The witnessed gate's passed run is now scored.
   - `tests/test_codex_guard_live.py` builds its own trial image unless
     `SKILLC_TRIAL_IMAGE` is set, and is declared a real-Docker file.
+  - PR CI's gate step installs `make`, so the fixture's gate-surface controls run there.
+    `git-tests-control` now refuses a make-named skip, with a `bad-make-skip` fixture.

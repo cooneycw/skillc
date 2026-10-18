@@ -494,8 +494,8 @@ def _pinned_gate(tmp_path: Path, repo: Path) -> list[str]:
     return [line for line in done.stdout.splitlines() if _GATE_LINES.match(line)]
 
 
-@pytest.mark.skipif(shutil.which("uv") is None or shutil.which("make") is None,
-                    reason="the pinned CPP gate needs uv and make; the evals26 rehearsal measures it live")
+@pytest.mark.skipif(shutil.which("uv") is None, reason="the pinned CPP gate needs uv; the evals26 rehearsal measures it live")
+@needs_make
 @pytest.mark.parametrize("tree", ["new", "broken", "old"])
 def test_the_pinned_gate_prints_the_committed_verdict(tmp_path: Path, tree: str) -> None:
     """Orchestrator condition 4: the real pinned gate's verdicts, as committed.
