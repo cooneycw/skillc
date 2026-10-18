@@ -37,3 +37,7 @@ outcome on your final tree:
 
 Each `status` is exactly one of `passed`, `failed` or `not run`. You may add
 a `note` to explain an entry.
+
+After writing `report.json`, run the gate once more, the same bare way, as your
+final step, so its last run covers your final tree (the report included). Do not
+change any file after that final run.

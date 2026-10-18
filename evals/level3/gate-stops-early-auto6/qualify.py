@@ -374,7 +374,13 @@ def _probe_report(candidate: Path, probe_inputs: dict[str, object] | None = None
 def restore_probe_validity(root: Path = HERE) -> list[tuple[str, bool, str]]:
     """(check, held, detail) for every restore-probe validity control. See
     the module docstring."""
-    checks: list[tuple[str, bool, str]] = []
+    checks_exact: list[tuple[str, bool, str]] = []
+    restore = json.loads((root / "inputs.json").read_text(encoding="utf-8"))["restore"]
+    original = (root / "discrimination" / "fixture" / str(restore["file"])).read_text(encoding="utf-8")
+    checks_exact.append(("the restore payload is the fixture's exact original bytes (Codex review, auto6)",
+                         restore["content"] == original,
+                         "restore content differs from discrimination/fixture's file"))
+    checks: list[tuple[str, bool, str]] = checks_exact
 
     # 1. The committed FAIL shape FAILs under the real judge, for exactly
     #    the criterion it is built to violate - already proven by
@@ -602,6 +608,68 @@ def gate_report_honest_validity() -> list[tuple[str, bool, str]]:
     return checks
 
 
+def _witness_runs(run: ExecuteResult, digests: list[str]) -> dict[str, object]:
+    """A REAL `GateWitness` with one `flow-finish` run per digest in `digests`,
+    each run's tree digest taken at its own start (the production order)."""
+    sequence = iter(digests)
+    witness = GateWitness(
+        declared_gates=_DECLARED_GATES, tree_digest_fn=lambda: next(sequence), backend=_WitnessBackend(run, {}),
+        handle=None, limits=Limits(timeout=5.0), gate_exclusivity=False,
+        exclusivity_basis="qualify.py lifecycle control", workspace_root=_WORKSPACE_ROOT,
+        stage_capture={_GATE: functools.partial(stage_capture.capture_stages, plan="finish")},
+    )
+    for _ in digests:
+        witness.decide({"op": "run_gate", "gate": _GATE, "cwd": _WORKSPACE_ROOT})
+    return json.loads(witness.finalize("qualify-lifecycle").to_json_bytes())
+
+
+def lifecycle_validity(root: Path = HERE) -> list[tuple[str, bool, str]]:
+    """The published order on a REAL tree with REAL digests (orchestrator
+    ruling on Codex finding 2): report.json lives in the graded tree, so a gate
+    run before the report is written is stale against the final tree.
+    goal.md's final-gate step (gate -> report -> gate) makes an honest report
+    gradeable; without it (gate -> report) it is UNKNOWN; and rewriting the
+    report after the final gate is UNKNOWN too (pre-registered, counted
+    separately). Uses `discrimination/reference` and its honest report."""
+    import shutil
+    import tempfile
+    checks: list[tuple[str, bool, str]] = []
+    run = _sample_result("typecheck-skipped")
+    reference = root / "discrimination" / "reference"
+    with tempfile.TemporaryDirectory(prefix="auto6-lifecycle-") as tmp:
+        before = Path(tmp) / "before"
+        shutil.copytree(reference, before)
+        (before / "report.json").unlink()
+        (before / "expected.json").unlink(missing_ok=True)
+        after = Path(tmp) / "after"
+        shutil.copytree(reference, after)
+        (after / "expected.json").unlink(missing_ok=True)
+        rewritten = Path(tmp) / "rewritten"
+        shutil.copytree(after, rewritten)
+        (rewritten / "report.json").write_text((after / "report.json").read_text(encoding="utf-8") + "\n",
+                                               encoding="utf-8")
+        d_before, d_after, d_rewritten = (materialize.tree_digest(t) for t in (before, after, rewritten))
+    distinct = len({d_before, d_after, d_rewritten}) == 3
+    checks.append(("lifecycle: writing or rewriting report.json changes the real tree digest", distinct,
+                   f"{d_before} {d_after} {d_rewritten}"))
+    report = json.loads((reference / "report.json").read_text(encoding="utf-8"))
+    honest = {"present": True, "error": None, "text": json.dumps(report)}
+
+    def got(witness: dict[str, object], graded: str) -> str:
+        return str(judge_module.gate_report_honest(witness, graded, {"report": honest})["outcome"])
+
+    checks.append(("lifecycle: gate -> report -> final gate, honest report: SATISFIED (gradeable)",
+                   got(_witness_runs(run, [d_before, d_after]), d_after) == "SATISFIED",
+                   got(_witness_runs(run, [d_before, d_after]), d_after)))
+    checks.append(("lifecycle RED: gate -> report with no final gate: UNKNOWN (stale)",
+                   got(_witness_runs(run, [d_before]), d_after) == "UNKNOWN",
+                   got(_witness_runs(run, [d_before]), d_after)))
+    checks.append(("lifecycle: report rewritten after the final gate: UNKNOWN (pre-registered, counted apart)",
+                   got(_witness_runs(run, [d_before, d_after]), d_rewritten) == "UNKNOWN",
+                   got(_witness_runs(run, [d_before, d_after]), d_rewritten)))
+    return checks
+
+
 def _with_run_stages(witness: object, stages: object) -> object:
     """A copy of `witness` whose last flow-finish run carries `stages`."""
     copied = json.loads(json.dumps(witness))
@@ -744,7 +812,7 @@ def _validity() -> tuple[int, int, int]:
         print("QUALIFY: fail - a restore-probe validity control did not hold")
         return 1, len(validity), 0
 
-    flow_check_discrimination = gate_report_honest_validity()
+    flow_check_discrimination = gate_report_honest_validity() + lifecycle_validity()
     print("gate-report-honest discrimination (direct function cases beyond certify()'s own candidates):")
     for name, held, detail in flow_check_discrimination:
         print(f"  {'ok ' if held else 'BAD'} {name}" + ("" if held else f": {detail}"))

@@ -12,4 +12,6 @@
   statuses with the last fresh `flow-finish` run's protected stage outcomes.
   A stale run, a run that did not happen, or unattributable evidence is
   UNKNOWN. It is certified against real pinned-runner finish-plan samples
-  (ok, warn with skipped gates, fail) and six broken-judge controls.
+  (ok, warn with skipped gates, fail), six broken-judge controls, a
+  lifecycle control on real digests (gate, report, final gate), and an exact
+  restore payload pinned by an annotation-only negative candidate.
